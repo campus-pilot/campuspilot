@@ -17,14 +17,15 @@
     "db:studio": "turbo run db:studio -F @campuspilot/db --",
     "db:generate": "turbo run db:generate -F @campuspilot/db --",
     "db:migrate": "turbo run db:migrate -F @campuspilot/db --",
-    "db:start": "docker compose up -d postgres",
-    "db:watch": "docker compose up postgres",
-    "db:stop": "docker compose stop postgres",
-    "db:down": "docker compose down postgres",
-    "docker:build": "docker compose build",
-    "docker:up": "docker compose up -d --build",
-    "docker:down": "docker compose down",
-    "docker:logs": "docker compose logs -f"
+    "db:start": "docker compose -f docker/dev/compose.yml up -d postgres",
+    "db:watch": "docker compose -f docker/dev/compose.yml up postgres",
+    "db:stop": "docker compose -f docker/dev/compose.yml stop postgres",
+    "db:down": "docker compose -f docker/dev/compose.yml down",
+    "docker:build": "docker compose -f docker/dev/compose.yml build",
+    "docker:up": "docker compose -f docker/dev/compose.yml up -d",
+    "docker:rebuild": "docker compose -f docker/dev/compose.yml up -d --build --force-recreate",
+    "docker:down": "docker compose -f docker/dev/compose.yml down",
+    "docker:logs": "docker compose -f docker/dev/compose.yml logs -f"
   },
   "dependencies": {
     "@campuspilot/env": "workspace:*",

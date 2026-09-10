@@ -1,0 +1,70 @@
+name: campuspilot
+
+services:
+  postgres:
+    image: postgres:18
+    container_name: campuspilot-postgres
+    environment:
+      POSTGRES_DB: campuspilot
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+    ports:
+      - "5432:5432"
+    volumes:
+      - campuspilot_postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  restate:
+    image: docker.restate.dev/restatedev/restate:latest
+    container_name: campuspilot-restate
+    command: ["--node-name=restate-1"]
+    ports:
+      - "8080:8080"
+      - "9070:9070"
+      - "5122:5122"
+    volumes:
+      - ./restate_data:/restate-data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  gotenberg:
+    image: gotenberg/gotenberg:8
+    container_name: campuspilot-gotenberg
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
+  redis:
+    image: redis:8-alpine
+    container_name: campuspilot-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - campuspilot_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  opa:
+    image: openpolicyagent/opa:latest
+    container_name: campuspilot-opa
+    command:
+      - run
+      - --server
+      - --addr=0.0.0.0:8181
+    ports:
+      - "8181:8181"
+    restart: unless-stopped
+
+volumes:
+  campuspilot_postgres_data:
+  campuspilot_redis_data:

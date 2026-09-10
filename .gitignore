@@ -14,6 +14,7 @@ out
 apps/web/src/routeTree.gen.ts
 local.db
 local.db-*
+docker/dev/restate_data/
 
 # Environment variables
 .env
