@@ -1,0 +1,3 @@
+{
+  "extends": "@campuspilot/config/tsconfig.base.json"
+}
