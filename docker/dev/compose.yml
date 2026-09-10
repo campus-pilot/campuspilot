@@ -2,7 +2,7 @@ name: campuspilot
 
 services:
   postgres:
-    image: postgres:18
+    image: postgres:18.6
     container_name: campuspilot-postgres
     environment:
       POSTGRES_DB: campuspilot
@@ -20,7 +20,7 @@ services:
     restart: unless-stopped
 
   restate:
-    image: docker.restate.dev/restatedev/restate:latest
+    image: docker.restate.dev/restatedev/restate:1.7.9
     container_name: campuspilot-restate
     command: ["--node-name=restate-1"]
     ports:
@@ -34,14 +34,14 @@ services:
     restart: unless-stopped
 
   gotenberg:
-    image: gotenberg/gotenberg:8
+    image: gotenberg/gotenberg:8.36.0
     container_name: campuspilot-gotenberg
     ports:
       - "8781:3000"
     restart: unless-stopped
 
   redis:
-    image: redis:8-alpine
+    image: redis:8.10.1-alpine
     container_name: campuspilot-redis
     ports:
       - "6379:6379"
@@ -55,7 +55,7 @@ services:
     restart: unless-stopped
 
   opa:
-    image: openpolicyagent/opa:latest
+    image: openpolicyagent/opa:1.20.2
     container_name: campuspilot-opa
     command:
       - run

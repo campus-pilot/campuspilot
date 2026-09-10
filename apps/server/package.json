@@ -14,6 +14,7 @@
     "@campuspilot/auth": "workspace:*",
     "@campuspilot/db": "workspace:*",
     "@campuspilot/env": "workspace:*",
+    "@campuspilot/logger": "workspace:*",
     "@hono/node-server": "^2.0.12",
     "@orpc/openapi": "catalog:",
     "@orpc/server": "catalog:",

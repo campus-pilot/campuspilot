@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 export const AUTH_ENV_SHAPE = {
+  SYSTEM_ADMIN_EMAIL: z.email().transform((email) => email.toLowerCase()),
   BETTER_AUTH_SECRET: z.string().min(32),
   BETTER_AUTH_URL: z.url(),
 

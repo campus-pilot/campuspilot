@@ -10,7 +10,7 @@ export const env = createEnv({
     ...AUTH_ENV_SHAPE,
     PUBLIC_APP_URL: z.url(),
 
-    CORS_ORIGIN: z.url(),
+    CORS_ORIGIN: z.string().min(1),
     NODE_ENV: z
       .enum(['development', 'production', 'test'])
       .default('development'),

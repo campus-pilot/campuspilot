@@ -90,12 +90,21 @@ importers:
 
   apps/admin:
     dependencies:
+      '@campuspilot/auth':
+        specifier: workspace:*
+        version: link:../../packages/auth
       '@campuspilot/components':
         specifier: workspace:*
         version: link:../../packages/components
+      '@campuspilot/env':
+        specifier: workspace:*
+        version: link:../../packages/env
       '@campuspilot/ui':
         specifier: workspace:*
         version: link:../../packages/ui
+      better-auth:
+        specifier: 'catalog:'
+        version: 1.7.1(drizzle-kit@0.31.10)(drizzle-orm@0.45.2(@types/pg@8.23.1)(kysely@0.29.5)(pg@8.23.0))(next@16.3.4(@babel/core@7.29.7)(@types/node@26.5.1)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(pg@8.23.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(vitest@4.1.4(@types/node@26.5.1)(vite@8.3.0(@types/node@26.5.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)))
       lucide-react:
         specifier: 'catalog:'
         version: 1.44.0(react@19.3.0)
@@ -188,6 +197,9 @@ importers:
       '@campuspilot/env':
         specifier: workspace:*
         version: link:../../packages/env
+      '@campuspilot/logger':
+        specifier: workspace:*
+        version: link:../../packages/logger
       '@hono/node-server':
         specifier: ^2.0.12
         version: 2.1.1(hono@4.13.7)
@@ -202,7 +214,7 @@ importers:
         version: 1.15.0(@orpc/contract@1.15.0)(@orpc/server@1.15.0)(zod@4.6.1)
       better-auth:
         specifier: 'catalog:'
-        version: 1.7.1(drizzle-kit@0.31.10)(drizzle-orm@0.45.2(@types/pg@8.23.1)(kysely@0.29.5)(pg@8.23.0))(next@16.3.4(@types/node@26.5.1)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(pg@8.23.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(vitest@4.1.4(@types/node@26.5.1)(vite@8.3.0(@types/node@26.5.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)))
+        version: 1.7.1(drizzle-kit@0.31.10)(drizzle-orm@0.45.2(@types/pg@8.23.1)(kysely@0.29.5)(pg@8.23.0))(next@16.3.4(@babel/core@7.29.7)(@types/node@26.5.1)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(pg@8.23.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(vitest@4.1.4(@types/node@26.5.1)(vite@8.3.0(@types/node@26.5.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)))
       dotenv:
         specifier: 'catalog:'
         version: 17.4.2
@@ -272,7 +284,7 @@ importers:
         version: 5.102.8(react@19.3.0)
       better-auth:
         specifier: 'catalog:'
-        version: 1.7.1(drizzle-kit@0.31.10)(drizzle-orm@0.45.2(@types/pg@8.23.1)(kysely@0.29.5)(pg@8.23.0))(next@16.3.4(@types/node@26.5.1)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(pg@8.23.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(vitest@4.1.4(@types/node@26.5.1)(vite@8.3.0(@types/node@26.5.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)))
+        version: 1.7.1(drizzle-kit@0.31.10)(drizzle-orm@0.45.2(@types/pg@8.23.1)(kysely@0.29.5)(pg@8.23.0))(next@16.3.4(@babel/core@7.29.7)(@types/node@26.5.1)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(pg@8.23.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(vitest@4.1.4(@types/node@26.5.1)(vite@8.3.0(@types/node@26.5.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)))
       dotenv:
         specifier: 'catalog:'
         version: 17.4.2
@@ -391,10 +403,13 @@ importers:
         version: link:../redis
       better-auth:
         specifier: 'catalog:'
-        version: 1.7.1(drizzle-kit@0.31.10)(drizzle-orm@0.45.2(@types/pg@8.23.1)(kysely@0.29.5)(pg@8.23.0))(next@16.3.4(@types/node@26.5.1)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(pg@8.23.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(vitest@4.1.4(@types/node@26.5.1)(vite@8.3.0(@types/node@26.5.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)))
+        version: 1.7.1(drizzle-kit@0.31.10)(drizzle-orm@0.45.2(@types/pg@8.23.1)(kysely@0.29.5)(pg@8.23.0))(next@16.3.4(@babel/core@7.29.7)(@types/node@26.5.1)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(pg@8.23.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(vitest@4.1.4(@types/node@26.5.1)(vite@8.3.0(@types/node@26.5.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)))
       dotenv:
         specifier: 'catalog:'
         version: 17.4.2
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@types/pg@8.23.1)(kysely@0.29.5)(pg@8.23.0)
       zod:
         specifier: 'catalog:'
         version: 4.6.1
@@ -441,6 +456,9 @@ importers:
       '@campuspilot/env':
         specifier: workspace:*
         version: link:../env
+      '@campuspilot/logger':
+        specifier: workspace:*
+        version: link:../logger
       dotenv:
         specifier: 'catalog:'
         version: 17.4.2
@@ -517,6 +535,22 @@ importers:
         specifier: 4.1.4
         version: 4.1.4(@types/node@22.20.2)(vite@8.3.0(@types/node@22.20.2)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13))
 
+  packages/opa:
+    dependencies:
+      '@campuspilot/env':
+        specifier: workspace:*
+        version: link:../env
+    devDependencies:
+      '@campuspilot/config':
+        specifier: workspace:*
+        version: link:../config
+      '@typescript/native':
+        specifier: npm:typescript@^7.0.2
+        version: typescript@7.0.2
+      typescript:
+        specifier: npm:@typescript/typescript6@^6.0.2
+        version: '@typescript/typescript6@6.0.2'
+
   packages/redis:
     dependencies:
       '@campuspilot/env':
@@ -528,6 +562,25 @@ importers:
       ioredis:
         specifier: ^5.11.1
         version: 5.11.1
+    devDependencies:
+      '@campuspilot/config':
+        specifier: workspace:*
+        version: link:../config
+      '@typescript/native':
+        specifier: npm:typescript@^7.0.2
+        version: typescript@7.0.2
+      typescript:
+        specifier: npm:@typescript/typescript6@^6.0.2
+        version: '@typescript/typescript6@6.0.2'
+
+  packages/restate:
+    dependencies:
+      '@campuspilot/env':
+        specifier: workspace:*
+        version: link:../env
+      '@restatedev/restate-sdk-clients':
+        specifier: ^1.17.0
+        version: 1.17.0
     devDependencies:
       '@campuspilot/config':
         specifier: workspace:*
@@ -1955,6 +2008,12 @@ packages:
 
   '@remix-run/node-fetch-server@0.14.1':
     resolution: {integrity: sha512-pKenF5ysIN5lDCnCyvoUxDhKP0tfnGagvGbZh01xxHG6DJXSIXWVC9NpLSDGjxcxd1CKdCOKuZFleXBF3pChIg==}
+
+  '@restatedev/restate-sdk-clients@1.17.0':
+    resolution: {integrity: sha512-5gz4x9PP/KV5HD/8VUZTVQaX/YsGocOkZ8dLX1q7Pb+Km9sU4wMytciFCJ9SlyH33o0s5iRcpFNR0Soaz+B42g==}
+
+  '@restatedev/restate-sdk-core@1.17.0':
+    resolution: {integrity: sha512-439ONo+YDoG4YBZnQ0wXaWkJDdOqDJ0AjqOwUAYZolxoC5JoaHqWzEFWkeRXiSNpsOc1+ODRUUGupDQ7qxcvJg==}
 
   '@rolldown/binding-android-arm-eabi@1.2.8':
     resolution: {integrity: sha512-tN5aztYkKCte4i5SIrrz5yK/HMjEuCqCSCJa418jOV8tZ1cBY3YF2otxB1ktPxzsLA1BeTqwapK0bfjxNvHJVw==}
@@ -5308,7 +5367,7 @@ snapshots:
     dependencies:
       '@better-auth/core': 1.7.1(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.1)(better-call@1.4.0(zod@4.6.1))(jose@6.2.12)(kysely@0.29.5)(nanostores@1.5.3)
       '@better-auth/utils': 0.4.2
-      better-auth: 1.7.1(drizzle-kit@0.31.10)(drizzle-orm@0.45.2(@types/pg@8.23.1)(kysely@0.29.5)(pg@8.23.0))(next@16.3.4(@types/node@26.5.1)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(pg@8.23.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(vitest@4.1.4(@types/node@26.5.1)(vite@8.3.0(@types/node@26.5.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)))
+      better-auth: 1.7.1(drizzle-kit@0.31.10)(drizzle-orm@0.45.2(@types/pg@8.23.1)(kysely@0.29.5)(pg@8.23.0))(next@16.3.4(@babel/core@7.29.7)(@types/node@26.5.1)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(pg@8.23.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(vitest@4.1.4(@types/node@26.5.1)(vite@8.3.0(@types/node@26.5.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)))
       better-call: 1.4.0(zod@4.6.1)
       zod: 4.6.1
 
@@ -6231,6 +6290,12 @@ snapshots:
 
   '@remix-run/node-fetch-server@0.14.1': {}
 
+  '@restatedev/restate-sdk-clients@1.17.0':
+    dependencies:
+      '@restatedev/restate-sdk-core': 1.17.0
+
+  '@restatedev/restate-sdk-core@1.17.0': {}
+
   '@rolldown/binding-android-arm-eabi@1.2.8':
     optional: true
 
@@ -6776,7 +6841,7 @@ snapshots:
     dependencies:
       safe-buffer: 5.1.2
 
-  better-auth@1.7.1(drizzle-kit@0.31.10)(drizzle-orm@0.45.2(@types/pg@8.23.1)(kysely@0.29.5)(pg@8.23.0))(next@16.3.4(@types/node@26.5.1)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(pg@8.23.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(vitest@4.1.4(@types/node@26.5.1)(vite@8.3.0(@types/node@26.5.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13))):
+  better-auth@1.7.1(drizzle-kit@0.31.10)(drizzle-orm@0.45.2(@types/pg@8.23.1)(kysely@0.29.5)(pg@8.23.0))(next@16.3.4(@babel/core@7.29.7)(@types/node@26.5.1)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(pg@8.23.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(vitest@4.1.4(@types/node@26.5.1)(vite@8.3.0(@types/node@26.5.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13))):
     dependencies:
       '@better-auth/core': 1.7.1(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.1)(better-call@1.4.0(zod@4.6.1))(jose@6.2.12)(kysely@0.29.5)(nanostores@1.5.3)
       '@better-auth/drizzle-adapter': 1.7.1(@better-auth/core@1.7.1(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.1)(better-call@1.4.0(zod@4.6.1))(jose@6.2.12)(kysely@0.29.5)(nanostores@1.5.3))(@better-auth/utils@0.4.2)(drizzle-orm@0.45.2(@types/pg@8.23.1)(kysely@0.29.5)(pg@8.23.0))

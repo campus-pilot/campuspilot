@@ -3,6 +3,8 @@ import * as schema from '@campuspilot/db/schema/auth';
 import { env } from '@campuspilot/env/server';
 import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
+import { admin } from 'better-auth/plugins';
+import { eq } from 'drizzle-orm';
 
 import { getRedisClient } from '@campuspilot/redis/client';
 import { log } from './log';
@@ -14,6 +16,9 @@ const redis = getRedisClient();
 
 export function createAuth() {
   const db = createDb();
+
+  const roleForEmail = (email: string) =>
+    email.toLowerCase() === env.SYSTEM_ADMIN_EMAIL ? 'admin' : 'user';
 
   return betterAuth({
     logger: {
@@ -45,11 +50,14 @@ export function createAuth() {
       schema: schema,
     }),
 
-    trustedOrigins: [env.CORS_ORIGIN],
+    trustedOrigins: env.CORS_ORIGIN.split(','),
+
+    // Roles are derived exclusively from SYSTEM_ADMIN_EMAIL. The admin
+    // plugin's role mutation endpoint would create a second source of truth.
+    disabledPaths: ['/admin/set-role'],
 
     emailAndPassword: {
       enabled: true,
-      disableSignUp: true,
       minPasswordLength: 8,
     },
     socialProviders: {
@@ -90,6 +98,37 @@ export function createAuth() {
         setupStatus: { type: 'json', required: false, input: false },
       },
     },
+    databaseHooks: {
+      user: {
+        create: {
+          before: async (user) => ({
+            data: { ...user, role: roleForEmail(user.email) },
+          }),
+        },
+      },
+      session: {
+        create: {
+          before: async (session) => {
+            const signedInUser = await db.query.user.findFirst({
+              columns: { email: true, role: true },
+              where: eq(schema.user.id, session.userId),
+            });
+
+            if (signedInUser) {
+              const role = roleForEmail(signedInUser.email);
+              if (signedInUser.role !== role) {
+                await db
+                  .update(schema.user)
+                  .set({ role })
+                  .where(eq(schema.user.id, session.userId));
+              }
+            }
+
+            return { data: session };
+          },
+        },
+      },
+    },
     session: {
       // For some use cases we query db for retrieving session data,
       // ref: revokeOrganizationScopedSessions @gos1/auth/src/revoke-sessions.ts
@@ -110,6 +149,7 @@ export function createAuth() {
     }),
 
     plugins: [
+      admin({ defaultRole: 'user', adminRoles: ['admin'] }),
       apiKey({
         references: 'user',
         defaultPrefix: 'cp_',

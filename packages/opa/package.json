@@ -1,0 +1,22 @@
+{
+  "name": "@campuspilot/opa",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "check-types": "tsc --noEmit",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix"
+  },
+  "dependencies": {
+    "@campuspilot/env": "workspace:*"
+  },
+  "devDependencies": {
+    "@campuspilot/config": "workspace:*",
+    "@typescript/native": "npm:typescript@^7.0.2",
+    "typescript": "npm:@typescript/typescript6@^6.0.2"
+  }
+}

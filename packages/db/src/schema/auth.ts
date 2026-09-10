@@ -7,6 +7,7 @@ import {
   integer,
   jsonb,
   index,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 
 export const user = pgTable("user", {
@@ -21,6 +22,10 @@ export const user = pgTable("user", {
     .$onUpdate(() => /* @__PURE__ */ new Date())
     .notNull(),
   setupStatus: jsonb("setup_status"),
+  role: text("role").default("user"),
+  banned: boolean("banned").default(false),
+  banReason: text("ban_reason"),
+  banExpires: timestamp("ban_expires"),
 });
 
 export const session = pgTable(
@@ -40,6 +45,7 @@ export const session = pgTable(
       .references(() => user.id, { onDelete: "cascade" }),
     authMethod: text("auth_method"),
     apiKeyId: text("api_key_id"),
+    impersonatedBy: text("impersonated_by"),
   },
   (table) => [index("session_userId_idx").on(table.userId)],
 );
@@ -48,6 +54,7 @@ export const account = pgTable(
   "account",
   {
     id: text("id").primaryKey(),
+    issuer: text("issuer").notNull(),
     accountId: text("account_id").notNull(),
     providerId: text("provider_id").notNull(),
     userId: text("user_id")
@@ -65,7 +72,13 @@ export const account = pgTable(
       .$onUpdate(() => /* @__PURE__ */ new Date())
       .notNull(),
   },
-  (table) => [index("account_userId_idx").on(table.userId)],
+  (table) => [
+    uniqueIndex("account_issuer_accountId_uidx").on(
+      table.issuer,
+      table.accountId,
+    ),
+    index("account_userId_idx").on(table.userId),
+  ],
 );
 
 export const verification = pgTable(

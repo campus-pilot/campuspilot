@@ -9,15 +9,18 @@ import { RPCHandler } from '@orpc/server/fetch';
 import { ZodToJsonSchemaConverter } from '@orpc/zod/zod4';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { logger } from 'hono/logger';
 
-const app = new Hono();
+import { logger as rootLogger } from '@campuspilot/logger';
+import { pinoLogger, type LoggerVariables } from '@campuspilot/logger/hono';
 
-app.use(logger());
+import { log } from './log';
+const app = new Hono<{ Variables: LoggerVariables }>();
+
+app.use(pinoLogger());
 app.use(
   '/*',
   cors({
-    origin: env.CORS_ORIGIN,
+    origin: env.CORS_ORIGIN.split(','),
     allowMethods: ['GET', 'POST', 'OPTIONS'],
     allowHeaders: ['Content-Type', 'Authorization'],
     credentials: true,
@@ -75,14 +78,61 @@ app.get('/', (c) => {
   return c.text('OK');
 });
 
-import { serve } from '@hono/node-server';
+app.onError((err, c) => {
+  (c.var.logger ?? rootLogger).error(
+    { err, path: c.req.path, method: c.req.method },
+    'hono.unhandled',
+  );
+  return c.text('Internal Server Error', 500);
+});
 
-serve(
-  {
-    fetch: app.fetch,
-    port: 3000,
-  },
-  (info) => {
-    console.log(`Server is running on http://localhost:${info.port}`);
-  },
-);
+import { serve } from '@hono/node-server';
+import { runMigrations } from '@campuspilot/db/migrate';
+
+async function phase<T>(name: string, fn: () => Promise<T>): Promise<T> {
+  const start = performance.now();
+  log.info({ phase: name }, 'boot.phase.start');
+  try {
+    const result = await fn();
+    const durationMs = Math.round(performance.now() - start);
+    log.info({ phase: name, durationMs }, 'boot.phase.ok');
+    return result;
+  } catch (err) {
+    const durationMs = Math.round(performance.now() - start);
+    log.error({ phase: name, durationMs, err }, 'boot.phase.fail');
+    throw err;
+  }
+}
+
+async function main() {
+  await phase('db.migrate', () => runMigrations());
+  // await phase('auth.seed', () => seedIamDatabase());
+
+  const server = serve(
+    {
+      fetch: app.fetch,
+      port: 3000,
+    },
+    (info) => {
+      log.info(
+        { port: info.port, url: `http://localhost:${info.port}` },
+        'boot.server.listening',
+      );
+    },
+  );
+
+  const shutdown = (signal: string) => {
+    log.info({ signal }, 'boot.shutdown.start');
+    server.close((err) => {
+      if (err) log.error({ err }, 'boot.shutdown.error');
+      else log.info('boot.shutdown.ok');
+    });
+  };
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
+}
+
+main().catch((err) => {
+  log.fatal({ err }, 'boot.failed');
+  process.exit(1);
+});

@@ -1,6 +1,6 @@
 import type { Context, MiddlewareHandler } from "hono";
 import type { Logger } from "pino";
-import { logger as rootLogger } from "./index.node";
+import { logger as rootLogger } from "@campuspilot/logger";
 
 export type LoggerVariables = {
   requestId: string;
