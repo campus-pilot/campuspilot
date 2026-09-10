@@ -9,7 +9,9 @@
       "default": "./src/*.ts"
     }
   },
-  "scripts": {},
+  "scripts": {
+    "test": "vitest run"
+  },
   "dependencies": {
     "@better-auth/api-key": "^1.7.1",
     "@better-auth/redis-storage": "^1.7.1",
@@ -24,6 +26,7 @@
   },
   "devDependencies": {
     "@campuspilot/config": "workspace:*",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "vitest": "4.1.4"
   }
 }

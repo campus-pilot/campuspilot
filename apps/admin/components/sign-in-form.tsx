@@ -1,7 +1,13 @@
 'use client';
 
 import { useEffect, useState, type FormEvent } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
+import {
+  AUTH_REDIRECT_QUERY_PARAM,
+  buildAuthCallbackURL,
+  buildSignInRedirectPath,
+  sanitizeAuthRedirectPath,
+} from '@campuspilot/auth/redirects';
 import { ThemeToggle } from '@campuspilot/components/theme-toggle';
 import { Button } from '@campuspilot/ui/components/button';
 import {
@@ -18,16 +24,22 @@ import { AuthLoading } from './auth-loading';
 
 export function SignInForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { data: session, isPending } = authClient.useSession();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string>();
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const redirectPath = sanitizeAuthRedirectPath(
+    searchParams.get(AUTH_REDIRECT_QUERY_PARAM),
+  );
 
   useEffect(() => {
     if (isPending || !session) return;
-    router.replace(session.user.role === 'admin' ? '/' : '/unauthorized');
-  }, [isPending, router, session]);
+    router.replace(
+      session.user.role === 'admin' ? redirectPath : '/unauthorized',
+    );
+  }, [isPending, redirectPath, router, session]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -42,7 +54,29 @@ export function SignInForm() {
       return;
     }
 
-    router.replace('/');
+    router.replace(redirectPath);
+  }
+
+  async function signInWithGoogle() {
+    setError(undefined);
+    setIsSubmitting(true);
+
+    const result = await authClient.signIn.social({
+      provider: 'google',
+      callbackURL: buildAuthCallbackURL(
+        window.location.origin,
+        redirectPath,
+      ),
+      errorCallbackURL: buildAuthCallbackURL(
+        window.location.origin,
+        buildSignInRedirectPath(redirectPath),
+      ),
+    });
+
+    setIsSubmitting(false);
+    if (result.error) {
+      setError(result.error.message ?? 'Unable to sign in with Google.');
+    }
   }
 
   if (isPending || session) return <AuthLoading />;
@@ -95,7 +129,8 @@ export function SignInForm() {
             <Button
               type="button"
               variant="outline"
-              onClick={() => authClient.signIn.social({ provider: 'google' })}
+              disabled={isSubmitting}
+              onClick={signInWithGoogle}
             >
               Continue with Google
             </Button>
