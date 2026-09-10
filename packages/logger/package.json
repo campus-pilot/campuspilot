@@ -1,0 +1,40 @@
+{
+  "name": "@campuspilot/logger",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "browser": "./src/index.browser.ts",
+      "default": "./src/index.node.ts"
+    },
+    "./hono": "./src/hono.ts"
+  },
+  "scripts": {
+    "check-types": "tsc --noEmit",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@campuspilot/env": "workspace:*",
+    "pino": "^10.1.0"
+  },
+  "peerDependencies": {
+    "hono": "^4.0.0"
+  },
+  "peerDependenciesMeta": {
+    "hono": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@campuspilot/config": "workspace:*",
+    "@types/node": "^22.13.14",
+    "@typescript/native": "npm:typescript@^7.0.2",
+    "hono": "^4.12.27",
+    "typescript": "npm:@typescript/typescript6@^6.0.2",
+    "vitest": "4.1.4"
+  }
+}

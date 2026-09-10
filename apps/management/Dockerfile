@@ -3,6 +3,14 @@ RUN npm install --global pnpm@10.33.0
 WORKDIR /app
 
 COPY . .
+
+#  Decalre  multiple env as like this in future and once we use multi env remove this line of comment
+# ARG FOO BAR BAZ
+# ENV FOO BAR BAZ
+
+ARG NEXT_PUBLIC_SERVER_URL 
+ENV NEXT_PUBLIC_SERVER_URL
+
 RUN --mount=type=cache,target=/pnpm-store pnpm install --frozen-lockfile --store-dir /pnpm-store
 RUN pnpm --filter management build
 

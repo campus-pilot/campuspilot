@@ -11,7 +11,7 @@ import {
 import { Skeleton } from "@campuspilot/ui/components/skeleton";
 import { Link, useNavigate } from "react-router";
 
-import { authClient } from "@/lib/auth-client";
+import { authClient } from "@campuspilot/auth/client";
 
 export default function UserMenu() {
   const navigate = useNavigate();

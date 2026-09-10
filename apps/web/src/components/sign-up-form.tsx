@@ -6,7 +6,7 @@ import { useNavigate } from "react-router";
 import { toast } from "sonner";
 import z from "zod";
 
-import { authClient } from "@/lib/auth-client";
+import { authClient } from "@campuspilot/auth/client";
 
 import Loader from "./loader";
 

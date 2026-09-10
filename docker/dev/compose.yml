@@ -37,7 +37,7 @@ services:
     image: gotenberg/gotenberg:8
     container_name: campuspilot-gotenberg
     ports:
-      - "3000:3000"
+      - "8781:3000"
     restart: unless-stopped
 
   redis:

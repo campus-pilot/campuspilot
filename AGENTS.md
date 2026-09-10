@@ -1,6 +1,6 @@
 # Monorepo
 
-We are using Turborepo with NPM (not pnpm) on Node 24.
+We are using Turborepo with pnpm on Node 24.
 
 ## Apps
 
@@ -33,3 +33,7 @@ The Shadcn components living in `@campuspilot/ui` are based on `Base UI` NOT Rad
 Any reusable components / layouts should live in @campuspilot/components, in these components data are passed as props and mutation must sent via callbacks. There should be no api call within @campuspilot/components
 
 For reusable compopnents / layouts that need api calls they should be placed in apps/-the app-/src(if src)/components folder
+
+# USING ENV
+
+use env directly from `@campuspilot/env` never use `import.meta` or `process.env`

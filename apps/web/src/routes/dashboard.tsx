@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 
-import { authClient } from "@/lib/auth-client";
+import { authClient } from "@campuspilot/auth/client";
 import { orpc } from "@/utils/orpc";
 
 export default function Dashboard() {

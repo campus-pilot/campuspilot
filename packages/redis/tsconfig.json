@@ -1,0 +1,11 @@
+{
+  "extends": "@campuspilot/config/tsconfig.base.json",
+  "compilerOptions": {
+    "paths": {
+      "@campuspilot/redis/*": ["./src/*"],
+      "@campuspilot/env/*": ["../env/src/*"]
+    }
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules"]
+}

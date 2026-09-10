@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@campuspilot/api": "workspace:*",
+    "@campuspilot/auth": "workspace:*",
     "@campuspilot/components": "workspace:*",
     "@campuspilot/env": "workspace:*",
     "@campuspilot/ui": "workspace:*",

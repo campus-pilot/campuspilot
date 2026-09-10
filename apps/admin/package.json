@@ -4,8 +4,8 @@
   "type": "module",
   "scripts": {
     "build": "next build",
-    "dev": "next dev --port 3002",
-    "start": "serve out --listen 3002",
+    "dev": "next dev --port 3003",
+    "start": "serve out --listen 3003",
     "check-types": "tsc --noEmit"
   },
   "dependencies": {
