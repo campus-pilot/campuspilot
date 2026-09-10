@@ -10,6 +10,7 @@
     "rootDirs": [".", "./.react-router/types"],
     "paths": {
       "@/*": ["./src/*"],
+      "@campuspilot/components/*": ["../../packages/components/src/*"],
       "@campuspilot/ui/*": ["../../packages/ui/src/*"]
     },
     "esModuleInterop": true,

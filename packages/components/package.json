@@ -18,7 +18,8 @@
     "check-types": "tsc --noEmit"
   },
   "dependencies": {
-    "@campuspilot/ui": "workspace:*"
+    "@campuspilot/ui": "workspace:*",
+    "react": "catalog:"
   },
   "devDependencies": {
     "@campuspilot/config": "workspace:*",

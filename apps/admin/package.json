@@ -1,0 +1,28 @@
+{
+  "name": "admin",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "next build",
+    "dev": "next dev --port 3002",
+    "start": "serve out --listen 3002",
+    "check-types": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@campuspilot/components": "workspace:*",
+    "@campuspilot/ui": "workspace:*",
+    "lucide-react": "catalog:",
+    "next": "^16.1.6",
+    "react": "catalog:",
+    "react-dom": "catalog:"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/node": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "serve": "^14.2.5",
+    "tailwindcss": "catalog:",
+    "typescript": "catalog:"
+  }
+}

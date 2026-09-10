@@ -6,7 +6,7 @@ import { useRender } from '@base-ui/react/use-render';
 import { cva, type VariantProps } from 'class-variance-authority';
 import { cn } from 'cn';
 
-import { useIsMobile } from '@campuspilot/ui/hooks/use-toast';
+import { useIsMobile } from '@campuspilot/ui/hooks/use-mobile';
 import { Button } from '@campuspilot/ui/components/button';
 import { Input } from '@campuspilot/ui/components/input';
 import { Separator } from '@campuspilot/ui/components/separator';

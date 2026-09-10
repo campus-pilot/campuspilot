@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@campuspilot/api": "workspace:*",
+    "@campuspilot/components": "workspace:*",
     "@campuspilot/env": "workspace:*",
     "@campuspilot/ui": "workspace:*",
     "@orpc/client": "catalog:",
@@ -24,7 +25,6 @@
     "dotenv": "catalog:",
     "isbot": "^5.2.1",
     "lucide-react": "catalog:",
-    "next-themes": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",
     "react-router": "^8.3.0",

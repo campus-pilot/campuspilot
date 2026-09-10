@@ -9,7 +9,9 @@
     "check-types": "tsc --noEmit"
   },
   "dependencies": {
+    "@campuspilot/components": "workspace:*",
     "@campuspilot/ui": "workspace:*",
+    "lucide-react": "catalog:",
     "next": "^16.1.6",
     "react": "catalog:",
     "react-dom": "catalog:"

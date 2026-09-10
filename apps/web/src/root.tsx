@@ -1,4 +1,5 @@
 import { Toaster } from "@campuspilot/ui/components/sonner";
+import { ThemeProvider } from "@campuspilot/components/theme-provider";
 import { QueryClientProvider } from "@tanstack/react-query";
 
 import "./index.css";
@@ -14,7 +15,6 @@ import {
 
 import type { Route } from "./+types/root";
 import Header from "./components/header";
-import { ThemeProvider } from "./components/theme-provider";
 import { queryClient } from "./utils/orpc";
 
 export const links: Route.LinksFunction = () => [
@@ -28,7 +28,7 @@ export const links: Route.LinksFunction = () => [
 
 export function Layout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -49,9 +49,9 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <ThemeProvider
         attribute="class"
-        defaultTheme="dark"
+        defaultTheme="system"
+        enableSystem
         disableTransitionOnChange
-        storageKey="vite-ui-theme"
       >
         <div className="grid grid-rows-[auto_1fr] h-svh">
           <Header />

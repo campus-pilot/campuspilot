@@ -90,9 +90,15 @@ importers:
 
   apps/management:
     dependencies:
+      '@campuspilot/components':
+        specifier: workspace:*
+        version: link:../../packages/components
       '@campuspilot/ui':
         specifier: workspace:*
         version: link:../../packages/ui
+      lucide-react:
+        specifier: 'catalog:'
+        version: 1.44.0(react@19.3.0)
       next:
         specifier: ^16.1.6
         version: 16.3.4(@babel/core@7.29.7)(@types/node@26.5.1)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
@@ -185,6 +191,9 @@ importers:
       '@campuspilot/api':
         specifier: workspace:*
         version: link:../../packages/api
+      '@campuspilot/components':
+        specifier: workspace:*
+        version: link:../../packages/components
       '@campuspilot/env':
         specifier: workspace:*
         version: link:../../packages/env
@@ -227,9 +236,6 @@ importers:
       lucide-react:
         specifier: 'catalog:'
         version: 1.44.0(react@19.3.0)
-      next-themes:
-        specifier: 'catalog:'
-        version: 0.4.6(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       react:
         specifier: 'catalog:'
         version: 19.3.0
@@ -347,6 +353,9 @@ importers:
       '@campuspilot/ui':
         specifier: workspace:*
         version: link:../ui
+      react:
+        specifier: 'catalog:'
+        version: 19.3.0
     devDependencies:
       '@campuspilot/config':
         specifier: workspace:*

@@ -7,10 +7,14 @@ import {
   CardHeader,
   CardTitle,
 } from "@campuspilot/ui/components/card";
+import { ThemeToggle } from "@campuspilot/components/theme-toggle";
 
 export default function ManagementApp() {
   return (
-    <main className="grid min-h-screen place-items-center bg-muted/40 p-8">
+    <main className="relative grid min-h-screen place-items-center bg-muted/40 p-8">
+      <div className="absolute right-4 top-4">
+        <ThemeToggle />
+      </div>
       <Card className="w-full max-w-2xl">
         <CardHeader>
           <p className="text-xs font-semibold uppercase tracking-[0.14em] text-primary">
