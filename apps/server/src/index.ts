@@ -1,4 +1,5 @@
 import { createContext } from '@campuspilot/api/context';
+import { handleSchoolLogoUpload } from '@campuspilot/api/routers/system-admin/school/school';
 import { appRouter } from '@campuspilot/api/routers/index';
 import { auth } from '@campuspilot/auth/server';
 import { env } from '@campuspilot/env/server';
@@ -46,6 +47,11 @@ app.post('/api/account/set-password', async (c) => {
       error instanceof Error ? error.message : 'Unable to set password.';
     return c.json({ message }, 400);
   }
+});
+
+app.post('/api/system-admin/schools/:schoolId/logo', async (c) => {
+  const context = await createContext({ context: c });
+  return handleSchoolLogoUpload(c.req.raw, context, c.req.param('schoolId'));
 });
 
 export const apiHandler = new OpenAPIHandler(appRouter, {

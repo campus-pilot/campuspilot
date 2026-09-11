@@ -12,7 +12,6 @@ import { Button } from '@campuspilot/ui/components/button';
 import {
   Building2,
   CalendarDays,
-  Check,
   Command,
   CreditCard,
   GraduationCap,
@@ -23,6 +22,7 @@ import {
 } from 'lucide-react';
 import { authClient } from '@/lib/auth-client';
 import { AdminAccountDialog } from './admin-account-dialog';
+import { SchoolSwitcher } from './school-switcher';
 
 const navigation: AppShellNavigationGroup[] = [
   {
@@ -90,21 +90,6 @@ function breadcrumbsFor(pathname: string): AppShellBreadcrumb[] {
   ];
 }
 
-function AdminSidebarHeader() {
-  return (
-    <Button variant="ghost" className="h-auto w-full justify-start rounded-xl p-1">
-      <span className="grid size-8 place-items-center rounded-xl bg-foreground text-background">
-        <Building2 className="size-4" />
-      </span>
-      <span className="min-w-0 text-left">
-        <span className="block truncate text-sm font-semibold">CampusPilot</span>
-        <span className="block truncate text-[10px] text-muted-foreground">Administration</span>
-      </span>
-      <Check className="ml-auto size-4" />
-    </Button>
-  );
-}
-
 function AdminSearch() {
   return (
     <Button variant="ghost" className="justify-start rounded-lg px-2">
@@ -140,7 +125,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
       currentPath={pathname}
       navigation={navigation}
       breadcrumbs={breadcrumbsFor(pathname)}
-      sidebarHeader={<AdminSidebarHeader />}
+      sidebarHeader={<SchoolSwitcher />}
       search={<AdminSearch />}
       user={user}
       navbarActions={

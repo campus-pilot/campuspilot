@@ -1,6 +1,7 @@
-import { ORPCError, os } from "@orpc/server";
+import { os } from "@orpc/server";
 
 import type { Context } from "./context";
+import { rpcError } from "./errors";
 
 export const o = os.$context<Context>();
 
@@ -8,7 +9,7 @@ export const publicProcedure = o;
 
 const requireAuth = o.middleware(async ({ context, next }) => {
   if (!context.session?.user) {
-    throw new ORPCError("UNAUTHORIZED");
+    throw rpcError.unauthorized();
   }
   return next({
     context: {
@@ -18,3 +19,17 @@ const requireAuth = o.middleware(async ({ context, next }) => {
 });
 
 export const protectedProcedure = publicProcedure.use(requireAuth);
+
+const requireSystemAdmin = o.middleware(async ({ context, next }) => {
+  if (!context.session?.user) throw rpcError.unauthorized();
+  if (context.session.user.role !== "admin") throw rpcError.forbidden();
+
+  return next({
+    context: {
+      db: context.db,
+      session: context.session,
+    },
+  });
+});
+
+export const systemAdminProcedure = publicProcedure.use(requireSystemAdmin);

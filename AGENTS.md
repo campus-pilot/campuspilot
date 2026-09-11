@@ -38,6 +38,8 @@ Prefer flex + gap instead of space-x/space-y if possible.
 
 The Shadcn components living in `@campuspilot/ui` are based on `Base UI` NOT Radix.
 
+Base UI compound components must preserve their required context hierarchy. Never use grouped parts such as `DropdownMenuLabel`/`Menu.GroupLabel` outside `DropdownMenuGroup`/`Menu.Group`, or radio menu items outside `DropdownMenuRadioGroup`/`Menu.RadioGroup`. Check the underlying Base UI composition requirements whenever adding a compound component part.
+
 Any reusable components / layouts should live in @campuspilot/components, in these components data are passed as props and mutation must sent via callbacks. There should be no api call within @campuspilot/components
 
 For reusable compopnents / layouts that need api calls they should be placed in apps/-the app-/src(if src)/components folder

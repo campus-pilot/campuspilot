@@ -1,6 +1,11 @@
 'use client';
 
-import { Fragment, type ComponentType, type ReactNode, type SVGProps } from 'react';
+import {
+  Fragment,
+  type ComponentType,
+  type ReactNode,
+  type SVGProps,
+} from 'react';
 import {
   BookOpen,
   CircleUserRound,
@@ -148,21 +153,22 @@ function NavigationItem({
   const hasActiveChild = item.items?.some((child) =>
     pathMatches(child.href, currentPath),
   );
-  const isActive = pathMatches(item.href, currentPath) || Boolean(hasActiveChild);
+  const isActive =
+    pathMatches(item.href, currentPath) || Boolean(hasActiveChild);
   const Icon = item.icon;
 
   return (
     <SidebarMenuItem>
       <SidebarMenuButton
+        asChild
         isActive={isActive}
         className="rounded-lg"
-        render={
-          <AppLink href={item.href} renderLink={renderLink}>
-            <Icon />
-            <span>{item.label}</span>
-          </AppLink>
-        }
-      />
+      >
+        <AppLink href={item.href} renderLink={renderLink}>
+          <Icon />
+          <span>{item.label}</span>
+        </AppLink>
+      </SidebarMenuButton>
       {item.items?.length ? (
         <SidebarMenuSub>
           {item.items.map((child) => {
@@ -170,15 +176,15 @@ function NavigationItem({
             return (
               <SidebarMenuSubItem key={child.id}>
                 <SidebarMenuSubButton
+                  asChild
                   isActive={pathMatches(child.href, currentPath)}
                   className="rounded-lg"
-                  render={
-                    <AppLink href={child.href} renderLink={renderLink}>
-                      <ChildIcon />
-                      <span>{child.label}</span>
-                    </AppLink>
-                  }
-                />
+                >
+                  <AppLink href={child.href} renderLink={renderLink}>
+                    <ChildIcon />
+                    <span>{child.label}</span>
+                  </AppLink>
+                </SidebarMenuSubButton>
               </SidebarMenuSubItem>
             );
           })}
@@ -197,25 +203,23 @@ function UserMenu({
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger
-        render={
-          <Button
-            variant="ghost"
-            className="h-auto w-full justify-start rounded-lg px-2 py-1.5"
-          />
-        }
-      >
-        <Avatar size="sm">
-          {user.avatarUrl ? <AvatarImage src={user.avatarUrl} alt="" /> : null}
-          <AvatarFallback>{initials(user.name)}</AvatarFallback>
-        </Avatar>
-        <span className="min-w-0 flex-1 text-left">
-          <span className="block truncate font-medium">{user.name}</span>
-          <span className="block truncate text-[10px] font-normal text-muted-foreground">
-            {user.secondaryLabel}
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          className="h-auto w-full justify-start rounded-lg px-2 py-1.5"
+        >
+          <Avatar size="sm">
+            {user.avatarUrl ? <AvatarImage src={user.avatarUrl} alt="" /> : null}
+            <AvatarFallback>{initials(user.name)}</AvatarFallback>
+          </Avatar>
+          <span className="min-w-0 flex-1 text-left">
+            <span className="block truncate font-medium">{user.name}</span>
+            <span className="block truncate text-[10px] font-normal text-muted-foreground">
+              {user.secondaryLabel}
+            </span>
           </span>
-        </span>
-        <MoreHorizontal />
+          <MoreHorizontal />
+        </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent side="top" align="start" className="w-60 rounded-xl">
         <DropdownMenuGroup>
@@ -239,9 +243,15 @@ function UserMenu({
             Theme
           </DropdownMenuSubTrigger>
           <DropdownMenuSubContent>
-            <DropdownMenuItem onClick={() => setTheme('light')}>Light</DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setTheme('dark')}>Dark</DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setTheme('system')}>System</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setTheme('light')}>
+              Light
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setTheme('dark')}>
+              Dark
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setTheme('system')}>
+              System
+            </DropdownMenuItem>
           </DropdownMenuSubContent>
         </DropdownMenuSub>
         <DropdownMenuSeparator />
@@ -269,7 +279,9 @@ export function AppShell({
   renderLink,
 }: AppShellProps) {
   return (
-    <SidebarProvider style={{ '--sidebar-width': '16.5rem' } as React.CSSProperties}>
+    <SidebarProvider
+      style={{ '--sidebar-width': '16.5rem' } as React.CSSProperties}
+    >
       <Sidebar variant="inset" className="p-2 pr-0">
         <SidebarHeader className="p-3">{sidebarHeader}</SidebarHeader>
         <SidebarContent>
@@ -296,16 +308,15 @@ export function AppShell({
         <SidebarFooter className="gap-1 p-3">
           {search}
           <Button
-            nativeButton={false}
+            asChild
             variant="ghost"
             className="justify-start rounded-lg px-2"
-            render={
-              <AppLink href={docsHref} renderLink={renderLink}>
-                <BookOpen />
-                Docs
-              </AppLink>
-            }
-          />
+          >
+            <AppLink href={docsHref} renderLink={renderLink}>
+              <BookOpen />
+              Docs
+            </AppLink>
+          </Button>
           <Separator className="my-2" />
           <UserMenu
             user={user}
@@ -323,28 +334,39 @@ export function AppShell({
                 const isLast = index === breadcrumbs.length - 1;
                 return (
                   <Fragment key={breadcrumb.id}>
-                    <BreadcrumbItem className={isLast ? undefined : 'hidden sm:flex'}>
+                    <BreadcrumbItem
+                      className={isLast ? undefined : 'hidden sm:flex'}
+                    >
                       {breadcrumb.href && !isLast ? (
-                        <BreadcrumbLink
-                          render={
-                            <AppLink href={breadcrumb.href} renderLink={renderLink}>
-                              {breadcrumb.label}
-                            </AppLink>
-                          }
-                        />
+                        <BreadcrumbLink asChild>
+                          <AppLink
+                            href={breadcrumb.href}
+                            renderLink={renderLink}
+                          >
+                            {breadcrumb.label}
+                          </AppLink>
+                        </BreadcrumbLink>
                       ) : (
                         <BreadcrumbPage>{breadcrumb.label}</BreadcrumbPage>
                       )}
                     </BreadcrumbItem>
-                    {!isLast ? <BreadcrumbSeparator className="hidden sm:block" /> : null}
+                    {!isLast ? (
+                      <BreadcrumbSeparator className="hidden sm:block" />
+                    ) : null}
                   </Fragment>
                 );
               })}
             </BreadcrumbList>
           </Breadcrumb>
-          {navbarActions ? <div className="ml-auto flex items-center gap-1.5">{navbarActions}</div> : null}
+          {navbarActions ? (
+            <div className="ml-auto flex items-center gap-1.5">
+              {navbarActions}
+            </div>
+          ) : null}
         </header>
-        <main className="flex-1 overflow-auto p-4 sm:p-6 lg:p-8">{children}</main>
+        <main className="flex-1 overflow-auto p-4 sm:p-6 lg:p-8">
+          {children}
+        </main>
       </SidebarInset>
     </SidebarProvider>
   );

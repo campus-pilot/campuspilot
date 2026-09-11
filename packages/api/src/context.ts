@@ -1,4 +1,5 @@
 import { auth } from '@campuspilot/auth/server';
+import { db } from '@campuspilot/db';
 import type { Context as HonoContext } from 'hono';
 
 export type CreateContextOptions = {
@@ -10,7 +11,7 @@ export async function createContext({ context }: CreateContextOptions) {
     headers: context.req.raw.headers,
   });
   return {
-    auth: null,
+    db,
     session,
   };
 }

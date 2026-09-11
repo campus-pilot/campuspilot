@@ -451,16 +451,14 @@ function ApiKeyRow({
         </p>
       </div>
       <AlertDialog>
-        <AlertDialogTrigger
-          render={
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label="Delete API key"
-            />
-          }
-        >
-          <Trash2 />
+        <AlertDialogTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Delete API key"
+          >
+            <Trash2 />
+          </Button>
         </AlertDialogTrigger>
         <AlertDialogContent>
           <AlertDialogHeader>

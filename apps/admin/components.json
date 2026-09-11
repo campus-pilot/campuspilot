@@ -1,16 +1,17 @@
 {
   "$schema": "https://ui.shadcn.com/schema.json",
-  "style": "base-lyra",
+  "style": "radix-mira",
   "rsc": true,
   "tsx": true,
   "tailwind": {
     "config": "",
     "css": "../../packages/ui/src/styles/globals.css",
-    "baseColor": "neutral",
+    "baseColor": "zinc",
     "cssVariables": true,
     "prefix": ""
   },
   "iconLibrary": "lucide",
+  "rtl": false,
   "aliases": {
     "components": "@/components",
     "utils": "@campuspilot/ui/lib/utils",

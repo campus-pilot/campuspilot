@@ -12,14 +12,20 @@ COPY . .
 RUN --mount=type=cache,target=/pnpm-store pnpm install --frozen-lockfile --store-dir /pnpm-store
 RUN pnpm --filter admin build
 
-FROM nginx:1.29-alpine AS runner
+FROM node:24-slim AS runner
 
-COPY apps/admin/nginx.conf /etc/nginx/conf.d/default.conf
-COPY --from=builder /app/apps/admin/out /usr/share/nginx/html
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV HOSTNAME=0.0.0.0
+ENV PORT=3002
+
+COPY --from=builder /app/apps/admin/.next/standalone ./
+COPY --from=builder /app/apps/admin/.next/static ./apps/admin/.next/static
 
 EXPOSE 3002
 
 HEALTHCHECK --interval=10s --timeout=5s --retries=5 \
-  CMD wget --quiet --tries=1 --spider http://localhost:3002/ || exit 1
+  CMD node -e "fetch('http://localhost:3002/').then(response => { if (!response.ok) process.exit(1) }).catch(() => process.exit(1))"
 
-CMD ["nginx", "-g", "daemon off;"]
+CMD ["node", "apps/admin/server.js"]

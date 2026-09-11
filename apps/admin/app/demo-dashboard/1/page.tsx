@@ -156,34 +156,33 @@ export default function DashboardOne() {
             </span>
           </Button>
           <Button
-            nativeButton={false}
-            render={<a href="/docs" />}
+            asChild
             variant="ghost"
             className="justify-start rounded-lg px-2"
           >
-            <BookOpen />
-            Documentation
+            <a href="/docs">
+              <BookOpen />
+              Documentation
+            </a>
           </Button>
           <Separator className="my-2" />
           <Popover>
-            <PopoverTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  className="h-auto w-full justify-start rounded-lg px-2 py-1.5"
-                />
-              }
-            >
-              <Avatar size="sm">
-                <AvatarFallback>AS</AvatarFallback>
-              </Avatar>
-              <span className="min-w-0 flex-1 text-left">
-                <span className="block truncate font-medium">Aarav Sharma</span>
-                <span className="block truncate text-[10px] font-normal text-muted-foreground">
-                  Admin
+            <PopoverTrigger asChild>
+              <Button
+                variant="ghost"
+                className="h-auto w-full justify-start rounded-lg px-2 py-1.5"
+              >
+                <Avatar size="sm">
+                  <AvatarFallback>AS</AvatarFallback>
+                </Avatar>
+                <span className="min-w-0 flex-1 text-left">
+                  <span className="block truncate font-medium">Aarav Sharma</span>
+                  <span className="block truncate text-[10px] font-normal text-muted-foreground">
+                    Admin
+                  </span>
                 </span>
-              </span>
-              <MoreHorizontal className="size-4" />
+                <MoreHorizontal className="size-4" />
+              </Button>
             </PopoverTrigger>
             <PopoverContent
               side="top"

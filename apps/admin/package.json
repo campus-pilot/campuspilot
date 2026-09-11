@@ -5,7 +5,7 @@
   "scripts": {
     "build": "next build",
     "dev": "next dev --port 3003",
-    "start": "serve out --listen 3003",
+    "start": "next start --port 3002",
     "check-types": "tsc --noEmit"
   },
   "dependencies": {
@@ -31,7 +31,6 @@
     "@types/node": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
-    "serve": "^14.2.5",
     "tailwindcss": "catalog:",
     "typescript": "catalog:"
   }

@@ -71,28 +71,26 @@ export default function DashboardTwo() {
       <Sidebar variant="inset" className="p-2 pr-0">
         <SidebarHeader className="p-3">
           <Popover>
-            <PopoverTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  className="h-auto w-full justify-between rounded-xl p-1"
-                />
-              }
-            >
-              <span className="flex items-center gap-2.5">
-                <span className="grid size-8 place-items-center rounded-xl bg-foreground text-background">
-                  <Building2 className="size-4" />
-                </span>
-                <span className="text-left">
-                  <span className="block text-sm font-semibold">
-                    Riverdale School
+            <PopoverTrigger asChild>
+              <Button
+                variant="ghost"
+                className="h-auto w-full justify-between rounded-xl p-1"
+              >
+                <span className="flex items-center gap-2.5">
+                  <span className="grid size-8 place-items-center rounded-xl bg-foreground text-background">
+                    <Building2 className="size-4" />
                   </span>
-                  <span className="block text-[10px] text-muted-foreground">
-                    Main campus
+                  <span className="text-left">
+                    <span className="block text-sm font-semibold">
+                      Riverdale School
+                    </span>
+                    <span className="block text-[10px] text-muted-foreground">
+                      Main campus
+                    </span>
                   </span>
                 </span>
-              </span>
-              <ChevronDown />
+                <ChevronDown />
+              </Button>
             </PopoverTrigger>
             <PopoverContent align="start" className="w-60 rounded-xl">
               <p className="px-2 font-medium">Switch organization</p>
@@ -186,34 +184,33 @@ export default function DashboardTwo() {
             </span>
           </Button>
           <Button
-            nativeButton={false}
-            render={<a href="/docs" />}
+            asChild
             variant="ghost"
             className="justify-start rounded-lg px-2"
           >
-            <BookOpen />
-            Docs
+            <a href="/docs">
+              <BookOpen />
+              Docs
+            </a>
           </Button>
           <Separator className="my-2" />
           <Popover>
-            <PopoverTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  className="h-auto w-full justify-start rounded-lg px-2 py-1.5"
-                />
-              }
-            >
-              <Avatar size="sm">
-                <AvatarFallback>NK</AvatarFallback>
-              </Avatar>
-              <span className="min-w-0 flex-1 text-left">
-                <span className="block truncate font-medium">Nisha Kapoor</span>
-                <span className="block text-[10px] font-normal text-muted-foreground">
-                  School owner
+            <PopoverTrigger asChild>
+              <Button
+                variant="ghost"
+                className="h-auto w-full justify-start rounded-lg px-2 py-1.5"
+              >
+                <Avatar size="sm">
+                  <AvatarFallback>NK</AvatarFallback>
+                </Avatar>
+                <span className="min-w-0 flex-1 text-left">
+                  <span className="block truncate font-medium">Nisha Kapoor</span>
+                  <span className="block text-[10px] font-normal text-muted-foreground">
+                    School owner
+                  </span>
                 </span>
-              </span>
-              <MoreHorizontal />
+                <MoreHorizontal />
+              </Button>
             </PopoverTrigger>
             <PopoverContent
               side="top"
