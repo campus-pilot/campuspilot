@@ -29,6 +29,25 @@ app.use(
 
 app.on(['POST', 'GET'], '/api/auth/*', (c) => auth.handler(c.req.raw));
 
+app.post('/api/account/set-password', async (c) => {
+  const body = (await c.req.json()) as { newPassword?: unknown };
+  if (typeof body.newPassword !== 'string') {
+    return c.json({ message: 'A new password is required.' }, 400);
+  }
+
+  try {
+    const result = await auth.api.setPassword({
+      body: { newPassword: body.newPassword },
+      headers: c.req.raw.headers,
+    });
+    return c.json(result);
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : 'Unable to set password.';
+    return c.json({ message }, 400);
+  }
+});
+
 export const apiHandler = new OpenAPIHandler(appRouter, {
   plugins: [
     new OpenAPIReferencePlugin({

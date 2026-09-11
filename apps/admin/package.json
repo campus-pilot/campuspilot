@@ -9,15 +9,22 @@
     "check-types": "tsc --noEmit"
   },
   "dependencies": {
+    "@better-auth/api-key": "^1.7.1",
+    "@campuspilot/api": "workspace:*",
     "@campuspilot/auth": "workspace:*",
     "@campuspilot/components": "workspace:*",
     "@campuspilot/env": "workspace:*",
     "@campuspilot/ui": "workspace:*",
+    "@orpc/client": "catalog:",
+    "@orpc/tanstack-query": "^1.14.12",
+    "@tanstack/react-form": "^1.33.2",
+    "@tanstack/react-query": "^5.101.4",
     "better-auth": "catalog:",
     "lucide-react": "catalog:",
     "next": "^16.1.6",
     "react": "catalog:",
-    "react-dom": "catalog:"
+    "react-dom": "catalog:",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.3",

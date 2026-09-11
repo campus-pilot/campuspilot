@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@campuspilot/ui": "workspace:*",
+    "lucide-react": "catalog:",
     "react": "catalog:"
   },
   "devDependencies": {

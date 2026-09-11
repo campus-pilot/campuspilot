@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 import { ThemeProvider } from '@campuspilot/components/theme-provider';
 import { TooltipProvider } from '@campuspilot/ui/components/tooltip';
+import { QueryProvider } from '@/components/query-provider';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -15,14 +16,16 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body>
-        <ThemeProvider
-          attribute="class"
-          defaultTheme="system"
-          enableSystem
-          disableTransitionOnChange
-        >
-          <TooltipProvider>{children}</TooltipProvider>
-        </ThemeProvider>
+        <QueryProvider>
+          <ThemeProvider
+            attribute="class"
+            defaultTheme="system"
+            enableSystem
+            disableTransitionOnChange
+          >
+            <TooltipProvider>{children}</TooltipProvider>
+          </ThemeProvider>
+        </QueryProvider>
       </body>
     </html>
   );

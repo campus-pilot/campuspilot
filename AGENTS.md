@@ -16,6 +16,14 @@ Don't opt for band-aids without explicit consent. Always yield to the user befor
 
 Never infer one fact from another that merely correlates with it today. Model each fact as its own explicit field, even when they currently coincide.
 
+Do not use `useEffect` unless the user has explicitly approved it. Prefer derived values, event handlers, keyed component lifecycles, TanStack Query, or framework-native data loading as appropriate. If an effect is genuinely required, explain why and ask for approval before adding it.
+
+## Forms and user input
+
+Use TanStack Form's `useForm` for every form and user-input workflow. Do not manage input values or form submission state with standalone `useState` calls.
+
+Define validation with Zod through the form's `validators` option. Surface field validation errors next to their inputs and derive submit availability and progress from `form.Subscribe`.
+
 # Components
 
 Componets must be small and should server exactly one purpose
