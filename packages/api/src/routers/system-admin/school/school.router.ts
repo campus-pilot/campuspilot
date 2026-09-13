@@ -1,11 +1,17 @@
 import { schoolTable } from "@campuspilot/db/schema/school";
-import { asc, eq } from "drizzle-orm";
-import { z } from "zod";
+import { and, asc, count, desc, eq, ilike, or } from "drizzle-orm";
 
 import { toRpcError, rpcError } from "../../../errors";
 import { systemAdminProcedure } from "../../../index";
 import {
+  createNextPageCursor,
+  createPaginatedResult,
+  resolvePaginationInput,
+} from "../../../paginations";
+import {
   addSchoolInputSchema,
+  listSchoolsInputSchema,
+  listSchoolsOutputSchema,
   schoolDtoSchema,
   schoolIdInputSchema,
   toSchoolDto,
@@ -13,15 +19,57 @@ import {
 } from "./school.dto";
 
 export const schoolRouter = {
-  getSchools: systemAdminProcedure
-    .output(z.array(schoolDtoSchema))
-    .handler(async ({ context }) => {
+  listSchools: systemAdminProcedure
+    .input(listSchoolsInputSchema)
+    .output(listSchoolsOutputSchema)
+    .handler(async ({ context, input }) => {
       try {
-        const schools = await context.db
-          .select()
-          .from(schoolTable)
-          .orderBy(asc(schoolTable.name));
-        return schools.map(toSchoolDto);
+        const { currentPage, pageSize, offset } = resolvePaginationInput(input);
+        const searchCondition = input.searchQuery
+          ? or(
+              ilike(schoolTable.name, `%${input.searchQuery}%`),
+              ilike(schoolTable.slug, `%${input.searchQuery}%`),
+              ilike(schoolTable.location, `%${input.searchQuery}%`),
+              ilike(schoolTable.registrationNo, `%${input.searchQuery}%`),
+            )
+          : undefined;
+        const onboardingCondition =
+          input.filters?.hasCompletedOnboarding === undefined
+            ? undefined
+            : eq(
+                schoolTable.hasCompletedOnboarding,
+                input.filters.hasCompletedOnboarding,
+              );
+        const where = and(searchCondition, onboardingCondition);
+        const orderByColumn = {
+          name: schoolTable.name,
+          location: schoolTable.location,
+          createdAt: schoolTable.createdAt,
+          updatedAt: schoolTable.updatedAt,
+        }[input.orderBy.field];
+        const orderDirection = input.orderBy.direction === "asc" ? asc : desc;
+
+        const [schools, totalRows] = await Promise.all([
+          context.db
+            .select()
+            .from(schoolTable)
+            .where(where)
+            .orderBy(orderDirection(orderByColumn), orderDirection(schoolTable.id))
+            .limit(pageSize)
+            .offset(offset),
+          context.db.select({ totalItems: count() }).from(schoolTable).where(where),
+        ]);
+        const totalItems = totalRows[0]?.totalItems ?? 0;
+        const totalPages = Math.ceil(totalItems / pageSize);
+
+        return createPaginatedResult({
+          items: schools.map(toSchoolDto),
+          nextCursor: createNextPageCursor(currentPage, totalPages),
+          currentPage,
+          totalPages,
+          totalItems,
+          pageSize,
+        });
       } catch (error) {
         throw toRpcError(error);
       }

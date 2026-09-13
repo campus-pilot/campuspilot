@@ -62,7 +62,9 @@ export function AddSchoolDialog({
           registrationNo: value.registrationNo || undefined,
         });
         if (value.logo) await uploadSchoolLogo(school.id, value.logo);
-        await queryClient.invalidateQueries({ queryKey: orpc.systemAdmin.getSchools.queryKey() });
+        await queryClient.invalidateQueries({
+          queryKey: orpc.systemAdmin.listSchools.queryKey({ input: {} }),
+        });
         form.reset();
         onOpenChange(false);
         router.push(`/school/${school.id}`);
