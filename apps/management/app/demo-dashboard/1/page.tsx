@@ -96,13 +96,15 @@ export default function DashboardOne() {
         </SidebarContent>
         <SidebarFooter className="gap-1 p-3">
           <Button variant="ghost" className="justify-start rounded-lg px-2"><Search />Search<span className="ml-auto flex items-center gap-1 text-[10px] text-muted-foreground"><Command className="size-3" />K</span></Button>
-          <Button nativeButton={false} render={<a href="/docs" />} variant="ghost" className="justify-start rounded-lg px-2"><BookOpen />Documentation</Button>
+          <Button asChild variant="ghost" className="justify-start rounded-lg px-2"><a href="/docs"><BookOpen />Documentation</a></Button>
           <Separator className="my-2" />
           <Popover>
-            <PopoverTrigger render={<Button variant="ghost" className="h-auto w-full justify-start rounded-lg px-2 py-1.5" />}>
-              <Avatar size="sm"><AvatarFallback>AS</AvatarFallback></Avatar>
-              <span className="min-w-0 flex-1 text-left"><span className="block truncate font-medium">Aarav Sharma</span><span className="block truncate text-[10px] font-normal text-muted-foreground">Admin</span></span>
-              <MoreHorizontal className="size-4" />
+            <PopoverTrigger asChild>
+              <Button variant="ghost" className="h-auto w-full justify-start rounded-lg px-2 py-1.5">
+                <Avatar size="sm"><AvatarFallback>AS</AvatarFallback></Avatar>
+                <span className="min-w-0 flex-1 text-left"><span className="block truncate font-medium">Aarav Sharma</span><span className="block truncate text-[10px] font-normal text-muted-foreground">Admin</span></span>
+                <MoreHorizontal className="size-4" />
+              </Button>
             </PopoverTrigger>
             <PopoverContent side="top" align="start" className="w-60 rounded-xl p-2">
               <div className="px-2 py-1.5"><p className="font-medium">Aarav Sharma</p><p className="text-muted-foreground">aarav@northstar.edu</p></div><Separator />

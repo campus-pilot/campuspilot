@@ -20,8 +20,10 @@ export default function DashboardTwo() {
       <Sidebar variant="inset" className="p-2 pr-0">
         <SidebarHeader className="p-3">
           <Popover>
-            <PopoverTrigger render={<Button variant="ghost" className="h-auto w-full justify-between rounded-xl p-1" />}>
-              <span className="flex items-center gap-2.5"><span className="grid size-8 place-items-center rounded-xl bg-foreground text-background"><Building2 className="size-4" /></span><span className="text-left"><span className="block text-sm font-semibold">Riverdale School</span><span className="block text-[10px] text-muted-foreground">Main campus</span></span></span><ChevronDown />
+            <PopoverTrigger asChild>
+              <Button variant="ghost" className="h-auto w-full justify-between rounded-xl p-1">
+                <span className="flex items-center gap-2.5"><span className="grid size-8 place-items-center rounded-xl bg-foreground text-background"><Building2 className="size-4" /></span><span className="text-left"><span className="block text-sm font-semibold">Riverdale School</span><span className="block text-[10px] text-muted-foreground">Main campus</span></span></span><ChevronDown />
+              </Button>
             </PopoverTrigger>
             <PopoverContent align="start" className="w-60 rounded-xl"><p className="px-2 font-medium">Switch organization</p><Button variant="ghost" className="w-full justify-start rounded-lg"><Building2 />Riverdale School<Check className="ml-auto" /></Button><Button variant="ghost" className="w-full justify-start rounded-lg"><Plus />Add organization</Button></PopoverContent>
           </Popover>
@@ -43,9 +45,9 @@ export default function DashboardTwo() {
         </SidebarContent>
         <SidebarFooter className="gap-1 p-3">
           <Button variant="ghost" className="justify-start rounded-lg px-2"><Search />Search<span className="ml-auto flex items-center gap-1 text-[10px] text-muted-foreground"><Command className="size-3" />K</span></Button>
-          <Button nativeButton={false} render={<a href="/docs" />} variant="ghost" className="justify-start rounded-lg px-2"><BookOpen />Docs</Button>
+          <Button asChild variant="ghost" className="justify-start rounded-lg px-2"><a href="/docs"><BookOpen />Docs</a></Button>
           <Separator className="my-2" />
-          <Popover><PopoverTrigger render={<Button variant="ghost" className="h-auto w-full justify-start rounded-lg px-2 py-1.5" />}><Avatar size="sm"><AvatarFallback>NK</AvatarFallback></Avatar><span className="min-w-0 flex-1 text-left"><span className="block truncate font-medium">Nisha Kapoor</span><span className="block text-[10px] font-normal text-muted-foreground">School owner</span></span><MoreHorizontal /></PopoverTrigger><PopoverContent side="top" align="start" className="w-60 rounded-xl"><div className="px-2 py-1"><p className="font-medium">Nisha Kapoor</p><p className="text-muted-foreground">nisha@riverdale.edu</p></div><Separator /><Button variant="ghost" className="w-full justify-start rounded-lg"><CircleUserRound />Manage account</Button><Button variant="ghost" className="w-full justify-start rounded-lg"><Moon />Theme<span className="ml-auto text-muted-foreground">Light</span></Button><Separator /><Button variant="ghost" className="w-full justify-start rounded-lg text-destructive hover:text-destructive"><LogOut />Log out</Button></PopoverContent></Popover>
+          <Popover><PopoverTrigger asChild><Button variant="ghost" className="h-auto w-full justify-start rounded-lg px-2 py-1.5"><Avatar size="sm"><AvatarFallback>NK</AvatarFallback></Avatar><span className="min-w-0 flex-1 text-left"><span className="block truncate font-medium">Nisha Kapoor</span><span className="block text-[10px] font-normal text-muted-foreground">School owner</span></span><MoreHorizontal /></Button></PopoverTrigger><PopoverContent side="top" align="start" className="w-60 rounded-xl"><div className="px-2 py-1"><p className="font-medium">Nisha Kapoor</p><p className="text-muted-foreground">nisha@riverdale.edu</p></div><Separator /><Button variant="ghost" className="w-full justify-start rounded-lg"><CircleUserRound />Manage account</Button><Button variant="ghost" className="w-full justify-start rounded-lg"><Moon />Theme<span className="ml-auto text-muted-foreground">Light</span></Button><Separator /><Button variant="ghost" className="w-full justify-start rounded-lg text-destructive hover:text-destructive"><LogOut />Log out</Button></PopoverContent></Popover>
         </SidebarFooter>
       </Sidebar>
 

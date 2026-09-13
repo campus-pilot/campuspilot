@@ -1,5 +1,5 @@
 import { createContext } from '@campuspilot/api/context';
-import { handleSchoolLogoUpload } from '@campuspilot/api/routers/system-admin/school/school';
+import { handleSchoolLogoUpload } from '@campuspilot/api/routers/system-admin/school/school.http';
 import { appRouter } from '@campuspilot/api/routers/index';
 import { auth } from '@campuspilot/auth/server';
 import { env } from '@campuspilot/env/server';
