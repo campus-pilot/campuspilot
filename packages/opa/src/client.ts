@@ -1,4 +1,5 @@
 import { env } from '@campuspilot/env/server';
+import type { ZodType } from 'zod';
 
 export interface OpaDecision<TResult> {
   decision_id?: string;
@@ -32,6 +33,7 @@ export class OpaClient {
   async query<TInput, TResult>(
     policyPath: string,
     input: TInput,
+    options?: { signal?: AbortSignal },
   ): Promise<OpaDecision<TResult>> {
     const path = policyPath
       .split('/')
@@ -42,6 +44,7 @@ export class OpaClient {
       body: JSON.stringify({ input }),
       headers: { 'content-type': 'application/json' },
       method: 'POST',
+      signal: options?.signal,
     });
 
     if (!response.ok) {
@@ -49,6 +52,21 @@ export class OpaClient {
     }
 
     return (await response.json()) as OpaDecision<TResult>;
+  }
+
+  /**
+   * Parses both the OPA envelope and its result at the trust boundary. Use this
+   * for authorization decisions so a missing or malformed result fails closed.
+   */
+  async queryValidated<TInput, TResult>(
+    policyPath: string,
+    input: TInput,
+    resultSchema: ZodType<TResult>,
+    options?: { signal?: AbortSignal },
+  ): Promise<TResult> {
+    const decision = await this.query<TInput, unknown>(policyPath, input, options);
+
+    return resultSchema.parse(decision.result);
   }
 }
 

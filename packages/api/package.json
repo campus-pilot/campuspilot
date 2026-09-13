@@ -15,6 +15,7 @@
     "@campuspilot/auth": "workspace:*",
     "@campuspilot/db": "workspace:*",
     "@campuspilot/env": "workspace:*",
+    "@campuspilot/opa": "workspace:*",
     "@campuspilot/s3": "workspace:*",
     "@orpc/client": "catalog:",
     "@orpc/openapi": "catalog:",

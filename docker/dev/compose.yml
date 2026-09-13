@@ -80,8 +80,11 @@ services:
       - run
       - --server
       - --addr=0.0.0.0:8181
+      - /policies
     ports:
       - "8181:8181"
+    volumes:
+      - ../../packages/opa/src/policies:/policies:ro
     restart: unless-stopped
 
 volumes:

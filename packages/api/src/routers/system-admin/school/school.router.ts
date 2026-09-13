@@ -1,13 +1,15 @@
 import { schoolTable } from "@campuspilot/db/schema/school";
+import { systemActions } from "@campuspilot/opa/actions/system";
 import { and, asc, count, desc, eq, ilike, or } from "drizzle-orm";
 
 import { toRpcError, rpcError } from "../../../errors";
-import { systemAdminProcedure } from "../../../index";
+import { protectedProcedure } from "../../../index";
 import {
   createNextPageCursor,
   createPaginatedResult,
   resolvePaginationInput,
 } from "../../../paginations";
+import { requireSystemPermission } from "../../../permissions/system";
 import {
   addSchoolInputSchema,
   listSchoolsInputSchema,
@@ -19,8 +21,9 @@ import {
 } from "./school.dto";
 
 export const schoolRouter = {
-  listSchools: systemAdminProcedure
+  listSchools: protectedProcedure
     .input(listSchoolsInputSchema)
+    .use(requireSystemPermission(systemActions.listSchools))
     .output(listSchoolsOutputSchema)
     .handler(async ({ context, input }) => {
       try {
@@ -75,8 +78,9 @@ export const schoolRouter = {
       }
     }),
 
-  getSchool: systemAdminProcedure
+  getSchool: protectedProcedure
     .input(schoolIdInputSchema)
+    .use(requireSystemPermission(systemActions.readSchool))
     .output(schoolDtoSchema)
     .handler(async ({ context, input }) => {
       try {
@@ -92,8 +96,9 @@ export const schoolRouter = {
       }
     }),
 
-  addSchool: systemAdminProcedure
+  addSchool: protectedProcedure
     .input(addSchoolInputSchema)
+    .use(requireSystemPermission(systemActions.createSchool))
     .output(schoolDtoSchema)
     .handler(async ({ context, input }) => {
       try {
@@ -105,8 +110,9 @@ export const schoolRouter = {
       }
     }),
 
-  updateSchool: systemAdminProcedure
+  updateSchool: protectedProcedure
     .input(updateSchoolInputSchema)
+    .use(requireSystemPermission(systemActions.updateSchool))
     .output(schoolDtoSchema)
     .handler(async ({ context, input }) => {
       const { id, ...changes } = input;
@@ -123,8 +129,9 @@ export const schoolRouter = {
       }
     }),
 
-  deleteSchool: systemAdminProcedure
+  deleteSchool: protectedProcedure
     .input(schoolIdInputSchema)
+    .use(requireSystemPermission(systemActions.deleteSchool))
     .output(schoolDtoSchema)
     .handler(async ({ context, input }) => {
       try {

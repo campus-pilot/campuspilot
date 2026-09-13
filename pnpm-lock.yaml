@@ -376,6 +376,9 @@ importers:
       '@campuspilot/env':
         specifier: workspace:*
         version: link:../env
+      '@campuspilot/opa':
+        specifier: workspace:*
+        version: link:../opa
       '@campuspilot/s3':
         specifier: workspace:*
         version: link:../s3
@@ -585,9 +588,15 @@ importers:
 
   packages/opa:
     dependencies:
+      '@campuspilot/db':
+        specifier: workspace:*
+        version: link:../db
       '@campuspilot/env':
         specifier: workspace:*
         version: link:../env
+      zod:
+        specifier: 'catalog:'
+        version: 4.6.1
     devDependencies:
       '@campuspilot/config':
         specifier: workspace:*

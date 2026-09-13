@@ -13,23 +13,10 @@ const requireAuth = o.middleware(async ({ context, next }) => {
   }
   return next({
     context: {
-      session: context.session,
-    },
-  });
-});
-
-export const protectedProcedure = publicProcedure.use(requireAuth);
-
-const requireSystemAdmin = o.middleware(async ({ context, next }) => {
-  if (!context.session?.user) throw rpcError.unauthorized();
-  if (context.session.user.role !== "admin") throw rpcError.forbidden();
-
-  return next({
-    context: {
       db: context.db,
       session: context.session,
     },
   });
 });
 
-export const systemAdminProcedure = publicProcedure.use(requireSystemAdmin);
+export const protectedProcedure = publicProcedure.use(requireAuth);

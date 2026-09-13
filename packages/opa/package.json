@@ -12,7 +12,9 @@
     "lint:fix": "eslint . --fix"
   },
   "dependencies": {
-    "@campuspilot/env": "workspace:*"
+    "@campuspilot/db": "workspace:*",
+    "@campuspilot/env": "workspace:*",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@campuspilot/config": "workspace:*",

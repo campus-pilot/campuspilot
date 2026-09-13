@@ -1,6 +1,7 @@
 import { PutObjectCommand } from '@aws-sdk/client-s3';
 import { schoolTable } from '@campuspilot/db/schema/school';
 import { env } from '@campuspilot/env/server';
+import { systemActions } from '@campuspilot/opa/actions/system';
 import { getS3Client } from '@campuspilot/s3/client';
 import Busboy from 'busboy';
 import { eq } from 'drizzle-orm';
@@ -8,6 +9,7 @@ import { Readable } from 'node:stream';
 
 import type { Context } from '../../../context';
 import { rpcError, rpcErrorResponse } from '../../../errors';
+import { assertPermission } from '../../../permissions/authorization';
 import {
   MAX_SCHOOL_LOGO_BYTES,
   SCHOOL_LOGO_FIELD_NAME,
@@ -139,9 +141,11 @@ export async function handleSchoolLogoUpload(
   schoolId: string,
 ): Promise<Response> {
   try {
-    if (!context.session?.user) throw rpcError.unauthorized();
-    if (context.session.user.role !== 'admin') throw rpcError.forbidden();
     if (!schoolId) throw rpcError.badRequest('A school id is required.');
+    await assertPermission(context, {
+      action: systemActions.updateSchoolLogo,
+      resource: { level: 'system' },
+    });
 
     const [existingSchool] = await context.db
       .select({ id: schoolTable.id })

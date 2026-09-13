@@ -1,4 +1,4 @@
-import { createDb } from '@campuspilot/db';
+import { createDb, type DatabaseExecutor } from '@campuspilot/db';
 import * as schema from '@campuspilot/db/schema/auth';
 import { env } from '@campuspilot/env/server';
 import { betterAuth } from 'better-auth';
@@ -14,8 +14,7 @@ import { apiKey } from '@better-auth/api-key';
 
 const redis = getRedisClient();
 
-export function createAuth() {
-  const db = createDb();
+export function createAuth(db: DatabaseExecutor = createDb()) {
 
   const roleForEmail = (email: string) =>
     email.toLowerCase() === env.SYSTEM_ADMIN_EMAIL ? 'admin' : 'user';
@@ -52,9 +51,10 @@ export function createAuth() {
 
     trustedOrigins: env.CORS_ORIGIN.split(','),
 
-    // Roles are derived exclusively from SYSTEM_ADMIN_EMAIL. The admin
-    // plugin's role mutation endpoint would create a second source of truth.
-    disabledPaths: ['/admin/set-role'],
+    // System roles are derived exclusively from SYSTEM_ADMIN_EMAIL, while
+    // provisioning is exposed through the school-scoped oRPC mutation. Keep
+    // the underlying admin endpoints unreachable from public HTTP clients.
+    disabledPaths: ['/admin/create-user', '/admin/set-role'],
 
     emailAndPassword: {
       enabled: true,

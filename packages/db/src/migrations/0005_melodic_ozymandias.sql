@@ -1,0 +1,1 @@
+ALTER TABLE "school_user_role" ADD COLUMN "meta" jsonb;
