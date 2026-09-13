@@ -22,9 +22,17 @@ export async function assertPermission(
   const authenticatedUser = context.session?.user;
   if (!authenticatedUser) throw rpcError.unauthorized();
 
+  // early exist if the resource level is system, since system-level actions do not require school role assignments
+  if (
+    request.resource.level === 'system' &&
+    authenticatedUser.role !== 'admin'
+  ) {
+    throw rpcError.forbidden();
+  }
+
   const roleAssignments =
     request.resource.level === 'system'
-      ? []
+      ? [] // no need to fetch school roles for system-level actions, there are present in session
       : await context.db
           .select({
             role: schoolUserRoleTable.role,
