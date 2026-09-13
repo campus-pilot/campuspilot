@@ -64,22 +64,30 @@ import { useTheme } from './theme-provider';
 export type AppShellIcon = ComponentType<SVGProps<SVGSVGElement>>;
 
 export type AppShellNavigationItem = {
+  type: 'item';
   id: string;
   label: string;
   href: string;
   icon: AppShellIcon;
+  match?: 'exact' | 'prefix';
   items?: AppShellNavigationItem[];
 };
 
 export type AppShellNavigationGroup = {
+  type: 'group';
   id: string;
   label: string;
   items: AppShellNavigationItem[];
 };
 
+export type AppShellNavigationEntry =
+  | AppShellNavigationGroup
+  | AppShellNavigationItem;
+
 export type AppShellBreadcrumb = {
   id: string;
-  label: string;
+  label: ReactNode;
+  icon?: AppShellIcon;
   href?: string;
 };
 
@@ -93,12 +101,13 @@ export type AppShellLinkProps = {
   href: string;
   children: ReactNode;
   className?: string;
+  ariaCurrent?: 'page';
 };
 
 type AppShellProps = {
   children: ReactNode;
   currentPath: string;
-  navigation: AppShellNavigationGroup[];
+  navigation: AppShellNavigationEntry[];
   breadcrumbs: AppShellBreadcrumb[];
   sidebarHeader: ReactNode;
   search: ReactNode;
@@ -110,10 +119,12 @@ type AppShellProps = {
   renderLink?: (props: AppShellLinkProps) => ReactNode;
 };
 
-function pathMatches(href: string, currentPath: string) {
-  return href === '/'
-    ? currentPath === href
-    : currentPath === href || currentPath.startsWith(`${href}/`);
+function pathMatches(item: AppShellNavigationItem, currentPath: string) {
+  if (item.match === 'exact' || item.href === '/') {
+    return currentPath === item.href;
+  }
+
+  return currentPath === item.href || currentPath.startsWith(`${item.href}/`);
 }
 
 function initials(name: string) {
@@ -130,12 +141,13 @@ function AppLink({
   href,
   children,
   className,
+  ariaCurrent,
   renderLink,
 }: AppShellLinkProps & Pick<AppShellProps, 'renderLink'>) {
   return renderLink ? (
-    renderLink({ href, children, className })
+    renderLink({ href, children, className, ariaCurrent })
   ) : (
-    <a href={href} className={className}>
+    <a href={href} className={className} aria-current={ariaCurrent}>
       {children}
     </a>
   );
@@ -151,10 +163,10 @@ function NavigationItem({
   renderLink?: AppShellProps['renderLink'];
 }) {
   const hasActiveChild = item.items?.some((child) =>
-    pathMatches(child.href, currentPath),
+    pathMatches(child, currentPath),
   );
-  const isActive =
-    pathMatches(item.href, currentPath) || Boolean(hasActiveChild);
+  const isDirectlyActive = currentPath === item.href;
+  const isActive = pathMatches(item, currentPath) || Boolean(hasActiveChild);
   const Icon = item.icon;
 
   return (
@@ -164,7 +176,11 @@ function NavigationItem({
         isActive={isActive}
         className="rounded-lg"
       >
-        <AppLink href={item.href} renderLink={renderLink}>
+        <AppLink
+          href={item.href}
+          ariaCurrent={isDirectlyActive ? 'page' : undefined}
+          renderLink={renderLink}
+        >
           <Icon />
           <span>{item.label}</span>
         </AppLink>
@@ -173,14 +189,19 @@ function NavigationItem({
         <SidebarMenuSub>
           {item.items.map((child) => {
             const ChildIcon = child.icon;
+            const isChildDirectlyActive = currentPath === child.href;
             return (
               <SidebarMenuSubItem key={child.id}>
                 <SidebarMenuSubButton
                   asChild
-                  isActive={pathMatches(child.href, currentPath)}
+                  isActive={pathMatches(child, currentPath)}
                   className="rounded-lg"
                 >
-                  <AppLink href={child.href} renderLink={renderLink}>
+                  <AppLink
+                    href={child.href}
+                    ariaCurrent={isChildDirectlyActive ? 'page' : undefined}
+                    renderLink={renderLink}
+                  >
                     <ChildIcon />
                     <span>{child.label}</span>
                   </AppLink>
@@ -285,25 +306,42 @@ export function AppShell({
       <Sidebar variant="inset" className="p-2 pr-0">
         <SidebarHeader className="p-3">{sidebarHeader}</SidebarHeader>
         <SidebarContent>
-          {navigation.map((group) => (
-            <SidebarGroup key={group.id}>
-              <SidebarGroupLabel className="text-[10px] uppercase tracking-widest">
-                {group.label}
-              </SidebarGroupLabel>
-              <SidebarGroupContent>
-                <SidebarMenu className="gap-0.5">
-                  {group.items.map((item) => (
+          {navigation.map((entry) =>
+            entry.type === 'group' ? (
+              <SidebarGroup key={entry.id}>
+                <SidebarGroupLabel className="text-[10px] uppercase tracking-widest">
+                  {entry.label}
+                </SidebarGroupLabel>
+                <SidebarGroupContent>
+                  <SidebarMenu className="gap-0.5">
+                    {entry.items.map((item) => (
+                      <NavigationItem
+                        key={item.id}
+                        item={item}
+                        currentPath={currentPath}
+                        renderLink={renderLink}
+                      />
+                    ))}
+                  </SidebarMenu>
+                </SidebarGroupContent>
+              </SidebarGroup>
+            ) : (
+              <SidebarGroup
+                key={entry.id}
+                className="mt-8 group-data-[collapsible=icon]:mt-0"
+              >
+                <SidebarGroupContent>
+                  <SidebarMenu>
                     <NavigationItem
-                      key={item.id}
-                      item={item}
+                      item={entry}
                       currentPath={currentPath}
                       renderLink={renderLink}
                     />
-                  ))}
-                </SidebarMenu>
-              </SidebarGroupContent>
-            </SidebarGroup>
-          ))}
+                  </SidebarMenu>
+                </SidebarGroupContent>
+              </SidebarGroup>
+            ),
+          )}
         </SidebarContent>
         <SidebarFooter className="gap-1 p-3">
           {search}
@@ -332,6 +370,13 @@ export function AppShell({
             <BreadcrumbList>
               {breadcrumbs.map((breadcrumb, index) => {
                 const isLast = index === breadcrumbs.length - 1;
+                const Icon = breadcrumb.icon;
+                const content = (
+                  <span className="flex items-center gap-1.5">
+                    {Icon ? <Icon className="size-3.5 shrink-0" /> : null}
+                    <span>{breadcrumb.label}</span>
+                  </span>
+                );
                 return (
                   <Fragment key={breadcrumb.id}>
                     <BreadcrumbItem
@@ -343,11 +388,11 @@ export function AppShell({
                             href={breadcrumb.href}
                             renderLink={renderLink}
                           >
-                            {breadcrumb.label}
+                            {content}
                           </AppLink>
                         </BreadcrumbLink>
                       ) : (
-                        <BreadcrumbPage>{breadcrumb.label}</BreadcrumbPage>
+                        <BreadcrumbPage>{content}</BreadcrumbPage>
                       )}
                     </BreadcrumbItem>
                     {!isLast ? (

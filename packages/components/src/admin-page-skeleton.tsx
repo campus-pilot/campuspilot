@@ -1,11 +1,6 @@
-import type { Metadata } from 'next';
 import { Skeleton } from '@campuspilot/ui/components/skeleton';
 
-export const metadata: Metadata = {
-  title: 'Dashboard | CampusPilot Admin',
-};
-
-export default function DashboardPage() {
+export function AdminPageSkeleton() {
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6">
       <div className="flex flex-col gap-2">

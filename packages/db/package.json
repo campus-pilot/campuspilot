@@ -17,6 +17,7 @@
     "@campuspilot/logger": "workspace:*",
     "dotenv": "catalog:",
     "drizzle-orm": "^0.45.2",
+    "nanoid": "^6.0.1",
     "pg": "^8.22.0",
     "zod": "catalog:"
   },
