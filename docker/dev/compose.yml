@@ -9,11 +9,11 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
     ports:
-      - "5432:5432"
+      - '5432:5432'
     volumes:
       - campuspilot_postgres_data:/var/lib/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
       interval: 10s
       timeout: 5s
       retries: 5
@@ -22,56 +22,73 @@ services:
   restate:
     image: docker.restate.dev/restatedev/restate:1.7.9
     container_name: campuspilot-restate
-    command: ["--node-name=restate-1"]
+    command: ['--node-name=restate-1']
     ports:
-      - "8080:8080"
-      - "9070:9070"
-      - "5122:5122"
+      - '8080:8080'
+      - '9070:9070'
+      - '5122:5122'
     volumes:
       - ./restate_data:/restate-data
     extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - 'host.docker.internal:host-gateway'
     restart: unless-stopped
 
   gotenberg:
     image: gotenberg/gotenberg:8.36.0
     container_name: campuspilot-gotenberg
     ports:
-      - "8781:3000"
+      - '8781:3000'
     restart: unless-stopped
 
   redis:
     image: redis:8.10.1-alpine
     container_name: campuspilot-redis
     ports:
-      - "6379:6379"
+      - '6379:6379'
     volumes:
       - campuspilot_redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ['CMD', 'redis-cli', 'ping']
       interval: 10s
       timeout: 5s
       retries: 5
     restart: unless-stopped
 
   minio:
-    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    image: minio/minio:latest
     container_name: campuspilot-minio
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - '9000:9000'
+      - '9001:9001'
     volumes:
       - campuspilot_minio_data:/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: ['CMD', 'curl', '-f', 'http://localhost:9000/minio/health/live']
       interval: 10s
       timeout: 5s
       retries: 5
     restart: unless-stopped
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: campuspilot-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      S3_BUCKET: ${S3_BUCKET:-campuspilot}
+    entrypoint: ['/bin/sh', '-c']
+    command:
+      - >
+        mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}" &&
+        mc mb --ignore-existing "local/$${S3_BUCKET}"
+    restart: 'no'
 
   opa:
     image: openpolicyagent/opa:1.20.2
@@ -82,7 +99,7 @@ services:
       - --addr=0.0.0.0:8181
       - /policies
     ports:
-      - "8181:8181"
+      - '8181:8181'
     volumes:
       - ../../packages/opa/src/policies:/policies:ro
     restart: unless-stopped

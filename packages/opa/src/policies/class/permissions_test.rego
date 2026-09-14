@@ -9,17 +9,17 @@ test_teacher_can_add_student_to_any_assigned_class if {
     "action": "class.student.add",
     "subject": {
       "userId": "user-1",
-      "systemRole": "user",
       "roleAssignments": [
-        {"role": "exam_coordinator", "meta": null},
+        {"role": "school.exam_coordinator", "scope": {"kind": "school", "schoolId": "school-1"}, "meta": null},
         {
-          "role": "teacher",
+          "role": "school.teacher",
+          "scope": {"kind": "school", "schoolId": "school-1"},
           "meta": {"classIds": ["class-1", "class-2"]},
         },
       ],
     },
     "resource": {
-      "level": "class",
+      "kind": "class",
       "schoolId": "school-1",
       "classId": "class-2",
     },
@@ -31,15 +31,31 @@ test_teacher_cannot_access_an_unassigned_class if {
     "action": "class.student.add",
     "subject": {
       "userId": "user-1",
-      "systemRole": "user",
       "roleAssignments": [
-        {"role": "teacher", "meta": {"classIds": ["class-1"]}},
+        {"role": "school.teacher", "scope": {"kind": "school", "schoolId": "school-1"}, "meta": {"classIds": ["class-1"]}},
       ],
     },
     "resource": {
-      "level": "class",
+      "kind": "class",
       "schoolId": "school-1",
       "classId": "class-2",
+    },
+  }
+}
+
+test_teacher_cannot_use_an_assignment_from_another_school if {
+  not authorization.allow with input as {
+    "action": "class.student.add",
+    "subject": {
+      "userId": "user-1",
+      "roleAssignments": [
+        {"role": "school.teacher", "scope": {"kind": "school", "schoolId": "school-1"}, "meta": {"classIds": ["class-1"]}},
+      ],
+    },
+    "resource": {
+      "kind": "class",
+      "schoolId": "school-2",
+      "classId": "class-1",
     },
   }
 }
@@ -49,11 +65,10 @@ test_teacher_without_class_metadata_is_denied if {
     "action": "class.student.add",
     "subject": {
       "userId": "user-1",
-      "systemRole": "user",
-      "roleAssignments": [{"role": "teacher", "meta": null}],
+      "roleAssignments": [{"role": "school.teacher", "scope": {"kind": "school", "schoolId": "school-1"}, "meta": null}],
     },
     "resource": {
-      "level": "class",
+      "kind": "class",
       "schoolId": "school-1",
       "classId": "class-1",
     },
@@ -65,13 +80,12 @@ test_teacher_with_null_class_ids_is_denied if {
     "action": "class.student.add",
     "subject": {
       "userId": "user-1",
-      "systemRole": "user",
       "roleAssignments": [
-        {"role": "teacher", "meta": {"classIds": null}},
+        {"role": "school.teacher", "scope": {"kind": "school", "schoolId": "school-1"}, "meta": {"classIds": null}},
       ],
     },
     "resource": {
-      "level": "class",
+      "kind": "class",
       "schoolId": "school-1",
       "classId": "class-1",
     },
@@ -83,13 +97,12 @@ test_teacher_with_no_classes_is_denied if {
     "action": "class.student.add",
     "subject": {
       "userId": "user-1",
-      "systemRole": "user",
       "roleAssignments": [
-        {"role": "teacher", "meta": {"classIds": []}},
+        {"role": "school.teacher", "scope": {"kind": "school", "schoolId": "school-1"}, "meta": {"classIds": []}},
       ],
     },
     "resource": {
-      "level": "class",
+      "kind": "class",
       "schoolId": "school-1",
       "classId": "class-1",
     },

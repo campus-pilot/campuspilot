@@ -1,22 +1,207 @@
 import { createAuth } from "@campuspilot/auth/server";
+import type { DatabaseExecutor } from "@campuspilot/db";
 import { user } from "@campuspilot/db/schema/auth";
+import { schoolMemberTable } from "@campuspilot/db/schema/school-member";
 import { schoolTable } from "@campuspilot/db/schema/school";
 import { schoolUserRoleTable } from "@campuspilot/db/schema/school-user-role";
-import { schoolActions } from "@campuspilot/opa/actions/school";
-import { and, asc, eq, notInArray, sql } from "drizzle-orm";
+import { SCHOOL_ACTIONS } from "@campuspilot/opa/policies/school";
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  ilike,
+  inArray,
+  or,
+} from "drizzle-orm";
 
 import { rpcError, toRpcError } from "../../../errors";
 import { protectedProcedure } from "../../../index";
+import {
+  createNextPageCursor,
+  createPaginatedResult,
+  resolvePaginationInput,
+} from "../../../paginations";
 import { requireSchoolPermission } from "../../../permissions/school";
 import {
   inviteSchoolMemberInputSchema,
+  listSchoolMembersInputSchema,
+  listSchoolMembersOutputSchema,
   schoolMemberDtoSchema,
+  schoolMemberIdInputSchema,
+  updateSchoolMemberRolesInputSchema,
+  type SchoolMemberDto,
 } from "./member.dto";
 
+/**
+ * Reads the explicit membership and all role assignments within one school.
+ * Membership existence and its added timestamp do not depend on role history.
+ */
+async function findSchoolMember(
+  db: DatabaseExecutor,
+  schoolId: string,
+  userId: string,
+): Promise<SchoolMemberDto | null> {
+  const [member] = await db
+    .select({
+      userId: user.id,
+      name: user.name,
+      email: user.email,
+      image: user.image,
+      addedAt: schoolMemberTable.addedAt,
+    })
+    .from(schoolMemberTable)
+    .innerJoin(user, eq(schoolMemberTable.userId, user.id))
+    .where(
+      and(
+        eq(schoolMemberTable.schoolId, schoolId),
+        eq(schoolMemberTable.userId, userId),
+      ),
+    )
+    .limit(1);
+
+  if (!member) return null;
+
+  const roles = await db
+    .select({
+      role: schoolUserRoleTable.role,
+      meta: schoolUserRoleTable.meta,
+    })
+    .from(schoolUserRoleTable)
+    .where(
+      and(
+        eq(schoolUserRoleTable.schoolId, schoolId),
+        eq(schoolUserRoleTable.userId, userId),
+      ),
+    )
+    .orderBy(asc(schoolUserRoleTable.role));
+
+  return schoolMemberDtoSchema.parse({ schoolId, ...member, roles });
+}
+
 export const schoolMemberRouter = {
+  listMembers: protectedProcedure
+    .input(listSchoolMembersInputSchema)
+    .use(requireSchoolPermission(SCHOOL_ACTIONS.LIST_MEMBERS))
+    .output(listSchoolMembersOutputSchema)
+    .handler(async ({ context, input }) => {
+      try {
+        const { currentPage, pageSize, offset } = resolvePaginationInput(input);
+        const searchCondition = input.searchQuery
+          ? or(
+              ilike(user.name, `%${input.searchQuery}%`),
+              ilike(user.email, `%${input.searchQuery}%`),
+            )
+          : undefined;
+        const where = and(
+          eq(schoolMemberTable.schoolId, input.schoolId),
+          searchCondition,
+        );
+        const orderByColumn = {
+          name: user.name,
+          email: user.email,
+          addedAt: schoolMemberTable.addedAt,
+        }[input.orderBy.field];
+        const orderDirection = input.orderBy.direction === "asc" ? asc : desc;
+
+        const [members, totalRows] = await Promise.all([
+          context.db
+            .select({
+              userId: user.id,
+              name: user.name,
+              email: user.email,
+              image: user.image,
+              addedAt: schoolMemberTable.addedAt,
+            })
+            .from(schoolMemberTable)
+            .innerJoin(user, eq(schoolMemberTable.userId, user.id))
+            .where(where)
+            .orderBy(orderDirection(orderByColumn), orderDirection(user.id))
+            .limit(pageSize)
+            .offset(offset),
+          context.db
+            .select({ totalItems: count() })
+            .from(schoolMemberTable)
+            .innerJoin(user, eq(schoolMemberTable.userId, user.id))
+            .where(where),
+        ]);
+
+        const memberIds = members.map(({ userId }) => userId);
+        const roleRows =
+          memberIds.length === 0
+            ? []
+            : await context.db
+                .select({
+                  userId: schoolUserRoleTable.userId,
+                  role: schoolUserRoleTable.role,
+                  meta: schoolUserRoleTable.meta,
+                })
+                .from(schoolUserRoleTable)
+                .where(
+                  and(
+                    eq(schoolUserRoleTable.schoolId, input.schoolId),
+                    inArray(schoolUserRoleTable.userId, memberIds),
+                  ),
+                )
+                .orderBy(
+                  asc(schoolUserRoleTable.userId),
+                  asc(schoolUserRoleTable.role),
+                );
+        const rolesByUserId = new Map<
+          string,
+          Array<(typeof roleRows)[number]>
+        >();
+        for (const assignment of roleRows) {
+          const assignments = rolesByUserId.get(assignment.userId) ?? [];
+          assignments.push(assignment);
+          rolesByUserId.set(assignment.userId, assignments);
+        }
+
+        const totalItems = totalRows[0]?.totalItems ?? 0;
+        const totalPages = Math.ceil(totalItems / pageSize);
+        return createPaginatedResult({
+          items: members.map((member) =>
+            schoolMemberDtoSchema.parse({
+              schoolId: input.schoolId,
+              ...member,
+              roles: (rolesByUserId.get(member.userId) ?? []).map(
+                ({ role, meta }) => ({ role, meta }),
+              ),
+            }),
+          ),
+          nextCursor: createNextPageCursor(currentPage, totalPages),
+          currentPage,
+          totalPages,
+          totalItems,
+          pageSize,
+        });
+      } catch (error) {
+        throw toRpcError(error);
+      }
+    }),
+
+  getMember: protectedProcedure
+    .input(schoolMemberIdInputSchema)
+    .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_MEMBER))
+    .output(schoolMemberDtoSchema)
+    .handler(async ({ context, input }) => {
+      try {
+        const member = await findSchoolMember(
+          context.db,
+          input.schoolId,
+          input.userId,
+        );
+        if (!member) throw rpcError.notFound("School member");
+        return member;
+      } catch (error) {
+        throw toRpcError(error);
+      }
+    }),
+
   inviteMember: protectedProcedure
     .input(inviteSchoolMemberInputSchema)
-    .use(requireSchoolPermission(schoolActions.inviteMember))
+    .use(requireSchoolPermission(SCHOOL_ACTIONS.INVITE_MEMBER))
     .output(schoolMemberDtoSchema)
     .handler(async ({ context, input }) => {
       try {
@@ -33,75 +218,124 @@ export const schoolMemberRouter = {
             where: eq(user.email, input.email),
           });
 
-          if (!invitedUser) {
-            // This auth instance uses the active transaction as its adapter,
-            // keeping user provisioning and every role assignment atomic.
+          if (invitedUser) {
+            const existingMember = await findSchoolMember(
+              transaction,
+              input.schoolId,
+              invitedUser.id,
+            );
+            if (existingMember) {
+              throw rpcError.conflict("That user is already a member of this school.");
+            }
+          } else {
+            // The Better Auth admin plugin provisions the user inside the same
+            // transaction; there is intentionally no invitation lifecycle.
             const transactionalAuth = createAuth(transaction);
             const created = await transactionalAuth.api.createUser({
-              body: {
-                email: input.email,
-                name: input.name,
-              },
+              // Better Auth requires the column, but the invited person owns
+              // their display name and supplies it during account setup.
+              body: { email: input.email, name: "" },
             });
             invitedUser = created.user;
           }
 
-          const requestedRoles = input.roles.map(({ role }) => role);
-          // The roles array is the complete desired role set for this school.
-          // Removing omitted rows prevents sequential calls from accumulating
-          // roles that the latest request did not explicitly include.
+          await transaction.insert(schoolMemberTable).values({
+            schoolId: input.schoolId,
+            userId: invitedUser.id,
+          });
+          await transaction.insert(schoolUserRoleTable).values(
+            input.roles.map(({ role, meta }) => ({
+              schoolId: input.schoolId,
+              userId: invitedUser.id,
+              role,
+              meta,
+            })),
+          );
+
+          const member = await findSchoolMember(
+            transaction,
+            input.schoolId,
+            invitedUser.id,
+          );
+          if (!member) throw rpcError.internal();
+          return member;
+        });
+      } catch (error) {
+        throw toRpcError(error);
+      }
+    }),
+
+  updateMemberRoles: protectedProcedure
+    .input(updateSchoolMemberRolesInputSchema)
+    .use(requireSchoolPermission(SCHOOL_ACTIONS.UPDATE_MEMBER_ROLES))
+    .output(schoolMemberDtoSchema)
+    .handler(async ({ context, input }) => {
+      try {
+        return await context.db.transaction(async (transaction) => {
+          const existingMember = await findSchoolMember(
+            transaction,
+            input.schoolId,
+            input.userId,
+          );
+          if (!existingMember) throw rpcError.notFound("School member");
+
+          // The supplied array is the complete desired assignment set. This
+          // keeps omitted roles from lingering after an update.
           await transaction
             .delete(schoolUserRoleTable)
             .where(
               and(
                 eq(schoolUserRoleTable.schoolId, input.schoolId),
-                eq(schoolUserRoleTable.userId, invitedUser.id),
-                notInArray(schoolUserRoleTable.role, requestedRoles),
+                eq(schoolUserRoleTable.userId, input.userId),
               ),
             );
+          await transaction.insert(schoolUserRoleTable).values(
+            input.roles.map(({ role, meta }) => ({
+              schoolId: input.schoolId,
+              userId: input.userId,
+              role,
+              meta,
+            })),
+          );
 
+          const member = await findSchoolMember(
+            transaction,
+            input.schoolId,
+            input.userId,
+          );
+          if (!member) throw rpcError.internal();
+          return member;
+        });
+      } catch (error) {
+        throw toRpcError(error);
+      }
+    }),
+
+  removeMember: protectedProcedure
+    .input(schoolMemberIdInputSchema)
+    .use(requireSchoolPermission(SCHOOL_ACTIONS.REMOVE_MEMBER))
+    .output(schoolMemberDtoSchema)
+    .handler(async ({ context, input }) => {
+      try {
+        return await context.db.transaction(async (transaction) => {
+          const member = await findSchoolMember(
+            transaction,
+            input.schoolId,
+            input.userId,
+          );
+          if (!member) throw rpcError.notFound("School member");
+
+          // The composite foreign key cascades only the school's role rows. The
+          // global auth user remains because they may belong to other schools.
           await transaction
-            .insert(schoolUserRoleTable)
-            .values(
-              input.roles.map(({ role, meta }) => ({
-                schoolId: input.schoolId,
-                userId: invitedUser.id,
-                role,
-                meta,
-              })),
-            )
-            // Conflict updates keep role-specific metadata aligned with the
-            // complete assignment supplied by this request.
-            .onConflictDoUpdate({
-              target: [
-                schoolUserRoleTable.schoolId,
-                schoolUserRoleTable.userId,
-                schoolUserRoleTable.role,
-              ],
-              set: { meta: sql`excluded.meta` },
-            });
-
-          const assignedRoles = await transaction
-            .select({
-              role: schoolUserRoleTable.role,
-              meta: schoolUserRoleTable.meta,
-            })
-            .from(schoolUserRoleTable)
+            .delete(schoolMemberTable)
             .where(
               and(
-                eq(schoolUserRoleTable.schoolId, input.schoolId),
-                eq(schoolUserRoleTable.userId, invitedUser.id),
+                eq(schoolMemberTable.schoolId, input.schoolId),
+                eq(schoolMemberTable.userId, input.userId),
               ),
-            )
-            .orderBy(asc(schoolUserRoleTable.role));
-
-          return schoolMemberDtoSchema.parse({
-            schoolId: input.schoolId,
-            userId: invitedUser.id,
-            name: invitedUser.name,
-            email: invitedUser.email,
-            roles: assignedRoles,
-          });
+            );
+          return member;
         });
       } catch (error) {
         throw toRpcError(error);

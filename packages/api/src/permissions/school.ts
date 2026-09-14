@@ -1,4 +1,4 @@
-import type { SchoolAction } from '@campuspilot/opa/actions/school';
+import type { SchoolAction } from '@campuspilot/opa/policies/school';
 
 import { o } from '../index';
 import { assertPermission } from './authorization';
@@ -21,7 +21,7 @@ export function requireSchoolPermission<TInput extends SchoolScopedInput>(
         context,
         {
           action,
-          resource: { level: 'school', schoolId: input.schoolId },
+          resource: { kind: 'school', schoolId: input.schoolId },
         },
         signal,
       );

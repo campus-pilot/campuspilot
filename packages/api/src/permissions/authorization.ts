@@ -3,6 +3,7 @@ import {
   isAuthorized,
   type AuthorizationInput,
   type AuthorizationRequest,
+  type RoleAssignment,
 } from '@campuspilot/opa/authorization';
 import { and, eq } from 'drizzle-orm';
 
@@ -12,7 +13,8 @@ import { rpcError } from '../errors';
 /**
  * Resolves all role assignments for the subject and resource before asking OPA.
  * Multiple school roles are preserved as separate facts, including each row's
- * metadata. System-scoped actions intentionally receive no school-role facts.
+ * metadata. Every assignment carries its explicit runtime scope; namespaced
+ * roles identify the role vocabulary independently of that scope.
  */
 export async function assertPermission(
   context: Context,
@@ -22,35 +24,45 @@ export async function assertPermission(
   const authenticatedUser = context.session?.user;
   if (!authenticatedUser) throw rpcError.unauthorized();
 
-  // early exist if the resource level is system, since system-level actions do not require school role assignments
-  if (
-    request.resource.level === 'system' &&
-    authenticatedUser.role !== 'admin'
-  ) {
-    throw rpcError.forbidden();
-  }
+  const roleAssignments: RoleAssignment[] = [
+    ...(authenticatedUser.role
+      ? [
+          {
+            role: `platform.${authenticatedUser.role}` as const,
+            scope: { kind: 'platform' as const },
+          },
+        ]
+      : []),
+  ];
 
-  const roleAssignments =
-    request.resource.level === 'system'
-      ? [] // no need to fetch school roles for system-level actions, there are present in session
-      : await context.db
-          .select({
-            role: schoolUserRoleTable.role,
-            meta: schoolUserRoleTable.meta,
-          })
-          .from(schoolUserRoleTable)
-          .where(
-            and(
-              eq(schoolUserRoleTable.schoolId, request.resource.schoolId),
-              eq(schoolUserRoleTable.userId, authenticatedUser.id),
-            ),
-          );
+  if (request.resource.kind !== 'system') {
+    const schoolId = request.resource.schoolId;
+    const schoolRoleAssignments = await context.db
+      .select({
+        role: schoolUserRoleTable.role,
+        meta: schoolUserRoleTable.meta,
+      })
+      .from(schoolUserRoleTable)
+      .where(
+        and(
+          eq(schoolUserRoleTable.schoolId, schoolId),
+          eq(schoolUserRoleTable.userId, authenticatedUser.id),
+        ),
+      );
+
+    roleAssignments.push(
+      ...schoolRoleAssignments.map((assignment) => ({
+        role: `school.${assignment.role}` as const,
+        scope: { kind: 'school' as const, schoolId },
+        meta: assignment.meta,
+      })),
+    );
+  }
 
   const input: AuthorizationInput = {
     ...request,
     subject: {
       userId: authenticatedUser.id,
-      systemRole: authenticatedUser.role ?? null,
       roleAssignments,
     },
   };

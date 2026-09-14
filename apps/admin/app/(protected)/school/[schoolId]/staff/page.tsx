@@ -1,5 +1,10 @@
-import { AdminPageSkeleton } from '@campuspilot/components/admin-page-skeleton';
+import { StaffTable } from '@/components/staff-table';
 
-export default function StaffPage() {
-  return <AdminPageSkeleton />;
+export default async function StaffPage({
+  params,
+}: {
+  params: Promise<{ schoolId: string }>;
+}) {
+  const { schoolId } = await params;
+  return <StaffTable schoolId={schoolId} />;
 }

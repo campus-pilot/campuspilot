@@ -1,4 +1,4 @@
-import type { SystemAction } from '@campuspilot/opa/actions/system';
+import type { SystemAction } from '@campuspilot/opa/policies/system';
 
 import { o } from '../index';
 import { assertPermission } from './authorization';
@@ -8,7 +8,7 @@ export function requireSystemPermission(action: SystemAction) {
   return o.middleware(async ({ context, next, signal }) => {
     await assertPermission(
       context,
-      { action, resource: { level: 'system' } },
+      { action, resource: { kind: 'system' } },
       signal,
     );
 

@@ -9,17 +9,17 @@ valid_subject if {
 }
 
 valid_system_resource if {
-  input.resource.level == "system"
+  input.resource.kind == "system"
 }
 
 valid_school_resource if {
-  input.resource.level == "school"
+  input.resource.kind == "school"
   is_string(input.resource.schoolId)
   input.resource.schoolId != ""
 }
 
 valid_class_resource if {
-  input.resource.level == "class"
+  input.resource.kind == "class"
   is_string(input.resource.schoolId)
   input.resource.schoolId != ""
   is_string(input.resource.classId)

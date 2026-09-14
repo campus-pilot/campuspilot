@@ -1,224 +1,223 @@
 # CampusPilot authorization
 
 This package contains CampusPilot's typed authorization contract, OPA client,
-and Rego policies. The API supplies facts; OPA decides whether those facts grant
-a specific action.
+and Rego policies. Rego is the source of truth; generated TypeScript constants
+keep API action names and resource shapes synchronized with it.
 
-Authorization asks one question:
+Authorization asks: **May this subject perform this action on this exact
+resource?** The answer is deny-by-default. The model separates four concerns:
 
-> May this subject perform this action on this exact resource?
+1. **Action definitions** give an action a stable `id`, TypeScript `key`, and
+   target `resourceKind`.
+2. **Role grants** connect a namespaced role to an action ID.
+3. **Runtime assignments** state which namespaced roles this user actually has,
+   where each assignment applies, and any metadata attached to it.
+4. **Behavioral policies** validate resource scope and contextual restrictions.
 
-The answer is deny-by-default. Nothing is allowed merely because a user is
-authenticated, has a system role, or has some role in a school.
+## The declarations
 
-## How a decision is represented
+An action is defined once in the domain's `catalog.rego`:
 
-Every request contains three independent parts:
+```rego
+actions contains {
+  "id": "school.member.invite",
+  "key": "INVITE_MEMBER",
+  "resourceKind": "school",
+} if { true }
+```
+
+A grant refers only to that action ID, so it cannot repeat or disagree with the
+action's key or resource kind:
+
+```rego
+grants contains {
+  "role": "school.principal",
+  "action": "school.member.invite",
+} if { true }
+```
+
+Roles are namespaced. `platform.admin` belongs to the platform role vocabulary;
+`school.principal`, `school.teacher`, and `school.exam_coordinator` belong to the
+school role vocabulary. The namespace is not the runtime scope.
+
+At runtime, scope is explicit:
 
 ```json
 {
   "subject": {
     "userId": "user-17",
-    "systemRole": "user",
     "roleAssignments": [
       {
-        "role": "teacher",
+        "role": "school.teacher",
+        "scope": { "kind": "school", "schoolId": "school-1" },
         "meta": { "classIds": ["class-a", "class-b"] }
       }
     ]
   },
   "action": "class.student.add",
   "resource": {
-    "level": "class",
+    "kind": "class",
     "schoolId": "school-1",
     "classId": "class-b"
   }
 }
 ```
 
-In human terms:
+Human translation: user `user-17` is a teacher in `school-1`, is assigned to
+classes `a` and `b`, and wants to add a student to class `b`. The role grant
+makes the action possible; the class policy verifies the school scope and that
+`meta.classIds` contains the requested class.
 
-> User `user-17` wants to add a student to `class-b` in `school-1`. The user is
-> a teacher in that school and is assigned to `class-a` and `class-b`.
+`meta: null`, `classIds: null`, an empty array, a different class, or a role
+assignment scoped to another school all deny this request.
 
-OPA allows this request because the teacher's `classIds` contains the requested
-class. Changing `classId` to `class-c` denies the same request.
+## Resource kinds are not business domains
 
-## Resource levels
+`resourceKind` describes the containment boundary needed for authorization, not
+the feature area. Finance and examinations can both use school resources while
+retaining distinct action IDs such as `school.finance.invoice.approve` and
+`school.examination.result.publish`.
 
-Actions and resources are grouped by the level where authorization happens.
+| Resource kind | Required facts | Example |
+| --- | --- | --- |
+| `system` | `kind` | `system.school.list` |
+| `school` | `kind`, `schoolId` | `school.member.invite` |
+| `class` | `kind`, `schoolId`, `classId` | `class.student.add` |
 
-| Level | Example action | Required resource facts | Typical source of permission |
-| --- | --- | --- | --- |
-| System | `system.school.list` | `level: "system"` | An explicitly granted system role |
-| School | `school.member.invite` | `level: "school"`, `schoolId` | A role assignment in that school |
-| Class | `class.student.add` | `level: "class"`, `schoolId`, `classId` | A role assignment whose metadata includes that class |
+Generated `AuthorizationResourceByAction` types prevent pairing an action with
+the wrong resource shape in TypeScript.
 
-The TypeScript `AuthorizationResourceByAction` map explicitly connects each
-action to its resource type. Adding an action without registering its resource
-scope fails type-checking.
+## How checks flow
 
-## Current policies in plain English
+### Invite through a platform administrator
 
-### System school management
+- The action definition says `school.member.invite` targets a school resource.
+- `system/grants.rego` explicitly grants it to `platform.admin`.
+- The API supplies `{ role: "platform.admin", scope: { kind: "platform" } }`.
+- The system policy accepts platform-scoped assignments for explicitly granted
+  system or school actions. It still rejects class actions.
 
-The `admin` system role may perform only the actions listed in the system
-policy: list, read, create, update, update-logo, and delete schools. It may also
-invite a school member because that cross-level action is explicitly listed.
+Platform administrators are therefore not implicit superusers.
 
-Being a system admin does not imply permission for every action. For example,
-an admin with no matching teacher assignment is denied `class.student.add`.
+### Invite through a principal
 
-```ts
-protectedProcedure
-  .input(listSchoolsInputSchema)
-  .use(requireSystemPermission(systemActions.listSchools))
-  .handler(/* ... */);
+- `school/grants.rego` grants the action to `school.principal`.
+- The API loads every role row for the authenticated user and requested school.
+- It supplies a runtime assignment whose scope contains that `schoolId`.
+- The school policy requires the assignment's `scope.schoolId` to exactly equal
+  the requested resource's `schoolId`.
+
+A principal in school A cannot invite a member into school B.
+
+### Add a student through a teacher
+
+- The class action definition targets a class resource.
+- `class/grants.rego` grants it to `school.teacher`.
+- The class policy requires the teacher assignment to match the requested
+  school and requires the requested class ID in `meta.classIds`.
+
+A teacher may hold multiple classes, multiple roles in one school, or no
+classes. All role assignments are preserved; any one assignment may satisfy a
+policy, while an unrelated role does not cancel it. A teacher with no
+provisioned classes is denied class-scoped actions.
+
+Authorization does not prove that a class exists or belongs to a school. The
+future handler must validate those domain facts independently.
+
+## Generation flow
+
+Every catalog and grants file uses the shared package
+`campuspilot.authorization.catalog`. OPA merges its incremental `actions` and
+`grants` sets. The root catalog exposes a `generation_manifest`, and the
+generator evaluates:
+
+```text
+data.campuspilot.authorization.catalog.generation_manifest
 ```
 
-Human translation:
+The generator validates unique action IDs and keys, resource kinds, namespaced
+roles, and that every grant references a declared action. It then emits
+deterministic files in `src/generated`:
 
-> The caller must be authenticated, and their system role must explicitly
-> contain permission to list schools.
+```ts
+export const SCHOOL_ACTIONS = {
+  INVITE_MEMBER: 'school.member.invite',
+} as const;
+```
 
-### Inviting a school member
+Never edit generated files directly.
 
-A principal or manager assigned to the requested school may invite a member.
-A system admin may also do so because `school.member.invite` is an explicit
-system-role grant.
+## Public imports
+
+```ts
+import { SYSTEM_ACTIONS } from '@campuspilot/opa/policies/system';
+import { SCHOOL_ACTIONS } from '@campuspilot/opa/policies/school';
+import { CLASS_ACTIONS } from '@campuspilot/opa/policies/class';
+import type { ClassResource } from '@campuspilot/opa/resource';
+import { isAuthorized } from '@campuspilot/opa/authorization';
+import { OpaClient } from '@campuspilot/opa/client';
+```
+
+The export map is:
+
+```json
+{
+  "exports": {
+    "./policies/*": "./src/generated/*.ts",
+    "./resource": "./src/generated/resource.ts",
+    "./authorization": "./src/authorization.ts",
+    "./client": "./src/client.ts"
+  }
+}
+```
+
+## Applying a permission in the API
 
 ```ts
 protectedProcedure
   .input(inviteSchoolMemberInputSchema)
-  .use(requireSchoolPermission(schoolActions.inviteMember))
+  .use(requireSchoolPermission(SCHOOL_ACTIONS.INVITE_MEMBER))
   .handler(/* ... */);
 ```
 
-The middleware reads `schoolId` from the validated input and loads all role rows
-for the authenticated user in that school. A principal role in `school-a` does
-not grant invitation permission in `school-b`.
-
-### Adding a student to a class
-
-The class entity and route do not exist yet, but the contract and middleware are
-ready for them:
-
-```ts
-const addStudentInputSchema = z.object({
-  schoolId: z.string().min(1),
-  classId: z.string().min(1),
-  studentId: z.string().min(1),
-});
-
-protectedProcedure
-  .input(addStudentInputSchema)
-  .use(requireClassPermission(classActions.addStudent))
-  .handler(/* verify the class and add the student */);
-```
-
-The teacher policy behaves as follows:
-
-| Teacher assignment | Requested class | Result |
-| --- | --- | --- |
-| `classIds: ["a", "b"]` | `b` | Allow |
-| `classIds: ["a", "b"]` | `c` | Deny |
-| `classIds: []` | `a` | Deny |
-| `classIds: null` | `a` | Deny |
-| `meta: null` | `a` | Deny |
-
-Authorization only answers whether the user may act on the supplied class ID.
-The future handler must independently confirm that the class exists and belongs
-to the supplied school.
-
-## Multiple roles
-
-A user can hold any combination of roles in the same school. The API preserves
-every assignment instead of collapsing them into one role:
-
-```json
-{
-  "roleAssignments": [
-    { "role": "exam_coordinator", "meta": null },
-    {
-      "role": "teacher",
-      "meta": { "classIds": ["class-a", "class-b"] }
-    }
-  ]
-}
-```
-
-OPA evaluates each assignment. In this example, the exam-coordinator role does
-not grant `class.student.add`, but the teacher assignment can grant it for
-`class-a` or `class-b`. An unrelated role neither grants the action nor cancels
-a valid matching assignment.
-
-## Project layout
-
-```text
-src/
-├── actions/
-│   ├── system.ts
-│   ├── school.ts
-│   └── class.ts
-├── policies/
-│   ├── authorization.rego
-│   ├── common.rego
-│   ├── system/
-│   ├── school/
-│   └── class/
-├── authorization.ts
-└── client.ts
-```
-
-- `actions/` is the TypeScript action catalog used by API call sites.
-- `authorization.ts` maps actions to resource types and validates OPA results.
-- `policies/common.rego` validates shared input facts.
-- Each policy subdirectory contains grants and tests for one resource level.
-- `policies/authorization.rego` combines the scoped policies and exposes the
-  canonical `campuspilot/authorization/decision` query.
-- `client.ts` contains the HTTP client and rejects malformed decisions.
+The scoped middleware reads IDs from validated input, assembles runtime role
+assignments, and sends the typed request to OPA. Use
+`requireSystemPermission`, `requireSchoolPermission`, or
+`requireClassPermission` according to the action's generated resource kind.
 
 ## Adding an action
 
-For a new class action such as taking attendance:
+1. Define the action once in the appropriate `catalog.rego` with `id`, `key`,
+   and `resourceKind`.
+2. Add role-to-action references in the appropriate `grants.rego` files.
+3. Add or extend behavioral conditions in `permissions.rego`.
+4. Add allow and important denial cases in the adjacent Rego tests.
+5. Run `pnpm --filter @campuspilot/opa generate:actions`.
+6. Use the generated constant in typed API middleware.
+7. Run the package checks and workspace type-check.
 
-1. Add `takeAttendance: "class.attendance.take"` to
-   `src/actions/class.ts`.
-2. Map it to `ClassResource` in `AuthorizationResourceByAction`.
-3. Add the explicit role grant and any metadata conditions in
-   `src/policies/class/permissions.rego`.
-4. Add allow and deny cases in the adjacent Rego test file.
-5. Attach `requireClassPermission(classActions.takeAttendance)` after the
-   route's input schema.
-6. Run the TypeScript and Rego checks.
+## Layout and commands
 
-Do not introduce a raw action string in a router or a catch-all role rule in
-Rego. Those bypass the compile-time catalog and make grants difficult to audit.
-
-## Running locally
-
-The development Compose service mounts `src/policies` read-only at `/policies`
-and exposes OPA at the configured `OPA_URL` (normally
-`http://localhost:8181`).
-
-Start the service from the repository root:
-
-```sh
-docker compose -f docker/dev/compose.yml up -d opa
+```text
+src/policies/<kind>/catalog.rego      action definitions
+src/policies/<kind>/grants.rego       namespaced role grants
+src/policies/<kind>/permissions.rego  scope and contextual behavior
+src/policies/<kind>/*_test.rego       policy tests
+src/generated/                        generated TypeScript contract
+src/authorization.ts                  runtime types and decision helper
+src/client.ts                         OPA HTTP client
+scripts/generate-actions.mjs          Rego-to-TypeScript generator
 ```
 
-Run all policy tests with the pinned OPA version:
-
 ```sh
-docker run --rm \
-  -v "$PWD/packages/opa/src/policies:/policies:ro" \
-  openpolicyagent/opa:1.20.2 test /policies
-```
-
-Run the TypeScript contract checks:
-
-```sh
+pnpm --filter @campuspilot/opa generate:actions
+pnpm --filter @campuspilot/opa check:actions
+pnpm --filter @campuspilot/opa check:policies
+pnpm --filter @campuspilot/opa test:policies
 pnpm --filter @campuspilot/opa check-types
-pnpm --filter @campuspilot/api exec tsc --noEmit
+pnpm --filter @campuspilot/opa check
+pnpm check-types
 ```
 
+The OPA service is available through `docker/dev/compose.yml` and normally uses
+the configured `OPA_URL` at `http://localhost:8181`.

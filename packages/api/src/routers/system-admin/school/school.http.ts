@@ -1,7 +1,7 @@
-import { PutObjectCommand } from '@aws-sdk/client-s3';
+import { GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { schoolTable } from '@campuspilot/db/schema/school';
 import { env } from '@campuspilot/env/server';
-import { systemActions } from '@campuspilot/opa/actions/system';
+import { SYSTEM_ACTIONS } from '@campuspilot/opa/policies/system';
 import { getS3Client } from '@campuspilot/s3/client';
 import Busboy from 'busboy';
 import { eq } from 'drizzle-orm';
@@ -21,6 +21,8 @@ type ParsedImage = {
   bytes: Buffer;
   contentType: (typeof SCHOOL_LOGO_MIME_TYPES)[number];
 };
+
+type HttpErrorReporter = (error: unknown) => void;
 
 function hasExpectedImageSignature(image: ParsedImage): boolean {
   const { bytes, contentType } = image;
@@ -139,12 +141,13 @@ export async function handleSchoolLogoUpload(
   request: Request,
   context: Context,
   schoolId: string,
+  reportError?: HttpErrorReporter,
 ): Promise<Response> {
   try {
     if (!schoolId) throw rpcError.badRequest('A school id is required.');
     await assertPermission(context, {
-      action: systemActions.updateSchoolLogo,
-      resource: { level: 'system' },
+      action: SYSTEM_ACTIONS.UPDATE_SCHOOL_LOGO,
+      resource: { kind: 'system' },
     });
 
     const [existingSchool] = await context.db
@@ -182,6 +185,50 @@ export async function handleSchoolLogoUpload(
     const dto = schoolDtoSchema.parse(toSchoolDto(school));
     return Response.json(dto);
   } catch (error) {
+    reportError?.(error);
+    return rpcErrorResponse(error);
+  }
+}
+
+/** Streams a private school logo after checking system-level school access. */
+export async function handleSchoolLogoDownload(
+  context: Context,
+  schoolId: string,
+  reportError?: HttpErrorReporter,
+): Promise<Response> {
+  try {
+    if (!schoolId) throw rpcError.badRequest('A school id is required.');
+    await assertPermission(context, {
+      action: SYSTEM_ACTIONS.READ_SCHOOL,
+      resource: { kind: 'system' },
+    });
+
+    const [school] = await context.db
+      .select({ logoS3Key: schoolTable.logoS3Key })
+      .from(schoolTable)
+      .where(eq(schoolTable.id, schoolId))
+      .limit(1);
+    if (!school) throw rpcError.notFound('School');
+    if (!school.logoS3Key) throw rpcError.notFound('School logo');
+
+    const logo = await getS3Client().send(
+      new GetObjectCommand({
+        Bucket: env.S3_BUCKET,
+        Key: school.logoS3Key,
+      }),
+    );
+    if (!logo.Body) throw rpcError.notFound('School logo');
+
+    return new Response(logo.Body.transformToWebStream(), {
+      headers: {
+        // The object key is stable across replacements, so do not infer logo
+        // freshness from an unrelated school timestamp.
+        'Cache-Control': 'private, no-store',
+        'Content-Type': logo.ContentType ?? 'application/octet-stream',
+      },
+    });
+  } catch (error) {
+    reportError?.(error);
     return rpcErrorResponse(error);
   }
 }

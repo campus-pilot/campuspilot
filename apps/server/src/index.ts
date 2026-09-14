@@ -1,5 +1,9 @@
 import { createContext } from '@campuspilot/api/context';
-import { handleSchoolLogoUpload } from '@campuspilot/api/routers/system-admin/school/school.http';
+import {
+  handleSchoolLogoDownload,
+  handleSchoolLogoUpload,
+} from '@campuspilot/api/routers/system-admin/school/school.http';
+import { toRpcError } from '@campuspilot/api/errors';
 import { appRouter } from '@campuspilot/api/routers/index';
 import { auth } from '@campuspilot/auth/server';
 import { env } from '@campuspilot/env/server';
@@ -11,11 +15,30 @@ import { ZodToJsonSchemaConverter } from '@orpc/zod/zod4';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 
-import { logger as rootLogger } from '@campuspilot/logger';
+import { logger as rootLogger, type Logger } from '@campuspilot/logger';
 import { pinoLogger, type LoggerVariables } from '@campuspilot/logger/hono';
 
 import { log } from './log';
 const app = new Hono<{ Variables: LoggerVariables }>();
+
+/**
+ * The logo handlers return mapped error responses, so those failures never
+ * reach Hono's global error hook. Log the original exception here while the
+ * request-scoped logger and operation context are still available.
+ */
+function reportSchoolLogoError(
+  logger: Logger,
+  operation: 'download' | 'upload',
+  schoolId: string,
+  error: unknown,
+) {
+  const failure = toRpcError(error);
+  const details = { err: error, schoolId, status: failure.status };
+  const event = `school.logo.${operation}.error`;
+
+  if (failure.status >= 500) logger.error(details, event);
+  else logger.warn(details, event);
+}
 
 app.use(pinoLogger());
 app.use(
@@ -50,8 +73,19 @@ app.post('/api/account/set-password', async (c) => {
 });
 
 app.post('/api/system-admin/schools/:schoolId/logo', async (c) => {
+  const schoolId = c.req.param('schoolId');
   const context = await createContext({ context: c });
-  return handleSchoolLogoUpload(c.req.raw, context, c.req.param('schoolId'));
+  return handleSchoolLogoUpload(c.req.raw, context, schoolId, (error) =>
+    reportSchoolLogoError(c.var.logger, 'upload', schoolId, error),
+  );
+});
+
+app.get('/api/system-admin/schools/:schoolId/logo', async (c) => {
+  const schoolId = c.req.param('schoolId');
+  const context = await createContext({ context: c });
+  return handleSchoolLogoDownload(context, schoolId, (error) =>
+    reportSchoolLogoError(c.var.logger, 'download', schoolId, error),
+  );
 });
 
 export const apiHandler = new OpenAPIHandler(appRouter, {

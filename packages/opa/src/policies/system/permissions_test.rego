@@ -9,10 +9,9 @@ test_admin_can_use_an_explicit_system_action if {
     "action": "system.school.list",
     "subject": {
       "userId": "user-1",
-      "systemRole": "admin",
-      "roleAssignments": [],
+      "roleAssignments": [{"role": "platform.admin", "scope": {"kind": "platform"}}],
     },
-    "resource": {"level": "system"},
+    "resource": {"kind": "system"},
   }
 }
 
@@ -21,10 +20,9 @@ test_admin_can_use_an_explicit_school_action if {
     "action": "school.member.invite",
     "subject": {
       "userId": "user-1",
-      "systemRole": "admin",
-      "roleAssignments": [],
+      "roleAssignments": [{"role": "platform.admin", "scope": {"kind": "platform"}}],
     },
-    "resource": {"level": "school", "schoolId": "school-1"},
+    "resource": {"kind": "school", "schoolId": "school-1"},
   }
 }
 
@@ -33,11 +31,10 @@ test_admin_cannot_use_an_unlisted_class_action if {
     "action": "class.student.add",
     "subject": {
       "userId": "user-1",
-      "systemRole": "admin",
-      "roleAssignments": [],
+      "roleAssignments": [{"role": "platform.admin", "scope": {"kind": "platform"}}],
     },
     "resource": {
-      "level": "class",
+      "kind": "class",
       "schoolId": "school-1",
       "classId": "class-1",
     },
@@ -49,9 +46,8 @@ test_unknown_action_is_denied if {
     "action": "system.unknown",
     "subject": {
       "userId": "user-1",
-      "systemRole": "admin",
-      "roleAssignments": [],
+      "roleAssignments": [{"role": "platform.admin", "scope": {"kind": "platform"}}],
     },
-    "resource": {"level": "system"},
+    "resource": {"kind": "system"},
   }
 }

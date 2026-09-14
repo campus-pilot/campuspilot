@@ -1,5 +1,5 @@
 import { schoolTable } from "@campuspilot/db/schema/school";
-import { systemActions } from "@campuspilot/opa/actions/system";
+import { SYSTEM_ACTIONS } from "@campuspilot/opa/policies/system";
 import { and, asc, count, desc, eq, ilike, or } from "drizzle-orm";
 
 import { toRpcError, rpcError } from "../../../errors";
@@ -23,7 +23,7 @@ import {
 export const schoolRouter = {
   listSchools: protectedProcedure
     .input(listSchoolsInputSchema)
-    .use(requireSystemPermission(systemActions.listSchools))
+    .use(requireSystemPermission(SYSTEM_ACTIONS.LIST_SCHOOLS))
     .output(listSchoolsOutputSchema)
     .handler(async ({ context, input }) => {
       try {
@@ -80,7 +80,7 @@ export const schoolRouter = {
 
   getSchool: protectedProcedure
     .input(schoolIdInputSchema)
-    .use(requireSystemPermission(systemActions.readSchool))
+    .use(requireSystemPermission(SYSTEM_ACTIONS.READ_SCHOOL))
     .output(schoolDtoSchema)
     .handler(async ({ context, input }) => {
       try {
@@ -98,7 +98,7 @@ export const schoolRouter = {
 
   addSchool: protectedProcedure
     .input(addSchoolInputSchema)
-    .use(requireSystemPermission(systemActions.createSchool))
+    .use(requireSystemPermission(SYSTEM_ACTIONS.CREATE_SCHOOL))
     .output(schoolDtoSchema)
     .handler(async ({ context, input }) => {
       try {
@@ -112,7 +112,7 @@ export const schoolRouter = {
 
   updateSchool: protectedProcedure
     .input(updateSchoolInputSchema)
-    .use(requireSystemPermission(systemActions.updateSchool))
+    .use(requireSystemPermission(SYSTEM_ACTIONS.UPDATE_SCHOOL))
     .output(schoolDtoSchema)
     .handler(async ({ context, input }) => {
       const { id, ...changes } = input;
@@ -131,7 +131,7 @@ export const schoolRouter = {
 
   deleteSchool: protectedProcedure
     .input(schoolIdInputSchema)
-    .use(requireSystemPermission(systemActions.deleteSchool))
+    .use(requireSystemPermission(SYSTEM_ACTIONS.DELETE_SCHOOL))
     .output(schoolDtoSchema)
     .handler(async ({ context, input }) => {
       try {

@@ -1,5 +1,6 @@
 import { relations } from "drizzle-orm";
 import {
+  foreignKey,
   index,
   jsonb,
   pgTable,
@@ -11,6 +12,7 @@ import {
 import { user } from "./auth";
 import { roles, type RoleMeta } from "./jsonb/role";
 import { schoolTable } from "./school";
+import { schoolMemberTable } from "./school-member";
 
 /**
  * Stores platform roles independently from Better Auth's system-level role.
@@ -32,6 +34,11 @@ export const schoolUserRoleTable = pgTable(
   },
   (table) => [
     primaryKey({ columns: [table.schoolId, table.userId, table.role] }),
+    foreignKey({
+      columns: [table.schoolId, table.userId],
+      foreignColumns: [schoolMemberTable.schoolId, schoolMemberTable.userId],
+      name: "school_user_role_member_fk",
+    }).onDelete("cascade"),
     index("school_user_role_user_id_idx").on(table.userId),
   ],
 );
@@ -39,6 +46,10 @@ export const schoolUserRoleTable = pgTable(
 export const schoolUserRoleRelations = relations(
   schoolUserRoleTable,
   ({ one }) => ({
+    member: one(schoolMemberTable, {
+      fields: [schoolUserRoleTable.schoolId, schoolUserRoleTable.userId],
+      references: [schoolMemberTable.schoolId, schoolMemberTable.userId],
+    }),
     school: one(schoolTable, {
       fields: [schoolUserRoleTable.schoolId],
       references: [schoolTable.id],

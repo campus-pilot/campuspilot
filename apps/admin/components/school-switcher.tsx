@@ -22,6 +22,7 @@ import {
 import { Building2, ChevronsUpDown, Plus } from 'lucide-react';
 import { orpc } from '@/lib/orpc';
 import { AddSchoolDialog } from './add-school-dialog';
+import { SchoolAvatar } from './school-avatar';
 
 const SEARCH_DEBOUNCE_MS = 300;
 
@@ -85,7 +86,7 @@ function SchoolResults({
           data-checked={school.id === selectedSchoolId}
           onSelect={() => onSelect(school.id)}
         >
-          <Building2 />
+          <SchoolAvatar school={school} size="sm" />
           <span className="truncate">{school.name}</span>
         </CommandItem>
       ))}
@@ -125,7 +126,15 @@ export function SchoolSwitcher() {
   const router = useRouter();
   const schoolsQuery = useQuery(orpc.systemAdmin.listSchools.queryOptions({ input: {} }));
   const selectedSchoolId = schoolIdFromPath(pathname);
-  const selectedSchool = schoolsQuery.data?.items.find((school) => school.id === selectedSchoolId);
+  const selectedSchoolQuery = useQuery({
+    ...orpc.systemAdmin.getSchool.queryOptions({
+      input: { id: selectedSchoolId ?? '' },
+    }),
+    enabled: selectedSchoolId !== undefined,
+  });
+  const selectedSchool =
+    selectedSchoolQuery.data ??
+    schoolsQuery.data?.items.find((school) => school.id === selectedSchoolId);
   const searchForm = useForm({
     defaultValues: { searchQuery: '' },
     validators: { onChange: schoolSearchSchema },
@@ -172,9 +181,13 @@ export function SchoolSwitcher() {
       >
         <PopoverTrigger asChild>
           <Button variant="ghost" className="h-auto w-full min-w-0 justify-start rounded-xl p-1">
-            <span className="grid size-8 shrink-0 place-items-center rounded-xl bg-foreground text-background">
-              <Building2 className="size-4" />
-            </span>
+            {selectedSchool ? (
+              <SchoolAvatar school={selectedSchool} />
+            ) : (
+              <span className="grid size-8 shrink-0 place-items-center rounded-xl bg-foreground text-background">
+                <Building2 className="size-4" />
+              </span>
+            )}
             <span className="min-w-0 text-left">
               <span className="block truncate text-sm font-semibold">{label}</span>
               <span className="block truncate text-[10px] text-muted-foreground">System administration</span>

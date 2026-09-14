@@ -1,10 +1,10 @@
 import type { Metadata } from 'next';
-import { AdminPageSkeleton } from '@campuspilot/components/admin-page-skeleton';
+import { OrganizationsTable } from '@/components/organizations-table';
 
 export const metadata: Metadata = {
   title: 'Organizations | CampusPilot Admin',
 };
 
 export default function OrganizationsPage() {
-  return <AdminPageSkeleton />;
+  return <OrganizationsTable />;
 }

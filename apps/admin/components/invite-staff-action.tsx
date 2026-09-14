@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useForm } from '@tanstack/react-form';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   inviteSchoolMemberInputSchema,
   type Role,
@@ -27,7 +28,7 @@ import { Label } from '@campuspilot/ui/components/label';
 import { ScrollArea } from '@campuspilot/ui/components/scroll-area';
 import { ChevronDown, UserPlus } from 'lucide-react';
 import { z } from 'zod';
-import { client } from '@/lib/orpc';
+import { client, orpc } from '@/lib/orpc';
 
 /**
  * Temporary frontend-only class choices. Replace these with school classes from
@@ -72,7 +73,6 @@ const teacherClassLabels: Record<TeacherClassId, string> = {
 };
 
 const inviteStaffFormSchema = z.object({
-  name: inviteSchoolMemberInputSchema.shape.name,
   email: inviteSchoolMemberInputSchema.shape.email,
   roles: z.array(roleEnum).min(1, 'Select at least one role.'),
   teacherClassIds: z.array(z.enum(teacherClassIds)),
@@ -109,9 +109,9 @@ function InviteStaffDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const queryClient = useQueryClient();
   const form = useForm({
     defaultValues: {
-      name: '',
       email: '',
       roles: [] as Role[],
       teacherClassIds: [] as TeacherClassId[],
@@ -123,13 +123,15 @@ function InviteStaffDialog({
         const validated = inviteStaffFormSchema.parse(value);
         await client.school.inviteMember({
           schoolId,
-          name: validated.name,
           email: validated.email,
           roles: validated.roles.map((role) => ({
             role,
             // Class choices are frontend-only for now and are intentionally not sent.
             meta: role === 'teacher' ? { classIds: null } : null,
           })),
+        });
+        await queryClient.invalidateQueries({
+          queryKey: orpc.school.listMembers.queryKey({ input: { schoolId } }),
         });
         form.reset();
         onOpenChange(false);
@@ -158,7 +160,7 @@ function InviteStaffDialog({
         <DialogHeader>
           <DialogTitle>Invite staff member</DialogTitle>
           <DialogDescription>
-            Provision an account and assign a role in this school.
+            Invite by email and assign roles in this school.
           </DialogDescription>
         </DialogHeader>
         <form
@@ -169,20 +171,6 @@ function InviteStaffDialog({
             void form.handleSubmit();
           }}
         >
-          <form.Field name="name">
-            {(field) => (
-              <div className="flex flex-col gap-2">
-                <Label htmlFor={field.name}>Name</Label>
-                <Input
-                  id={field.name}
-                  value={field.state.value}
-                  onBlur={field.handleBlur}
-                  onChange={(event) => field.handleChange(event.target.value)}
-                />
-                <FieldErrors errors={field.state.meta.errors} />
-              </div>
-            )}
-          </form.Field>
           <form.Field name="email">
             {(field) => (
               <div className="flex flex-col gap-2">

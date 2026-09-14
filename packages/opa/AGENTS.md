@@ -1,85 +1,79 @@
 # OPA authorization rules
 
-These instructions apply to `packages/opa` and to API code that consumes its
-actions and policies.
+These rules apply to `packages/opa` and API code consuming its authorization
+contract.
 
-## Authorization model
+## Model
 
-- Model every decision as three independent facts: `subject`, `action`, and
-  `resource`. Never infer one fact from another because they currently happen
-  to correlate.
-- Authorization is deny-by-default. Missing actions, malformed inputs, missing
-  role metadata, OPA errors, and undefined OPA results must never grant access.
-- System roles are not superusers. Grant every system-role action explicitly in
-  `src/policies/system/permissions.rego`; never add a wildcard or blanket admin
-  bypass.
-- Preserve every school role assignment as `{ role, meta }`. A user may hold
-  any combination of roles in the same school, and one matching assignment is
-  sufficient only when that policy explicitly says so.
-- Query school role assignments by both `userId` and `schoolId`. A role in one
-  school must never authorize a resource in another school.
-- Class authorization must require a matching class-scoped assignment. For the
-  teacher policy, `meta.classIds` must be an array containing the requested
-  `resource.classId`. A null `meta`, null `classIds`, or empty `classIds` denies
-  class-scoped teacher access.
-- Authorization does not prove that a resource exists. Handlers must validate
-  class, school, or other resource existence independently when needed.
+- Treat subject, action, resource, role namespace, runtime scope, and metadata
+  as independent facts. Never infer one merely because it currently correlates
+  with another.
+- Authorization is deny-by-default. Missing or malformed facts, missing grants,
+  OPA failures, and invalid responses must never grant access.
+- Action definitions contain exactly the reusable action metadata: non-empty
+  `id`, upper-snake-case `key`, and supported `resourceKind`.
+- Role grants contain a namespaced `role` and an action ID. Never duplicate the
+  action key or resource kind in a grant.
+- Runtime assignments contain a namespaced role and explicit scope. School
+  assignments also preserve their metadata. Do not collapse multiple roles.
+- Use `platform.<role>` for platform roles and `school.<role>` for school roles.
+  A namespace identifies a role vocabulary; it does not substitute for scope.
+- Platform administrators are not wildcard superusers. Every grant is explicit.
 
-## Defining actions
+## Action definitions and grants
 
-- Define action constants only in `src/actions/<level>.ts`. Do not place raw
-  action strings in API routers, middleware, or application code.
-- Name actions as `<level>.<resource>[.<subresource>].<verb>`, using stable domain
-  language such as `school.member.invite` or `class.student.add`.
-- Export a literal union from each action file and re-export new action groups
-  from `src/actions/index.ts`.
-- Register every new action in `AuthorizationResourceByAction` in
-  `src/authorization.ts`. Select the exact `SystemResource`, `SchoolResource`,
-  or `ClassResource`; do not derive scope from the action string.
-- Keep `AuthorizationRequest` updated when introducing an entirely new resource
-  level. The TypeScript contract must preserve the action/resource correlation.
+- Place action definitions in the relevant `catalog.rego` and grants in
+  `grants.rego`. Both use `package campuspilot.authorization.catalog` so OPA
+  merges the incremental sets.
+- Name action IDs `<resourceKind>.<resource>[.<subresource>].<verb>`, such as
+  `school.member.invite` or `class.student.add`.
+- Supported resource kinds are `system`, `school`, and `class`. Adding another
+  requires an explicit generator resource shape, API middleware, aggregator
+  route, behavioral policy, and tests.
+- Every grant must reference a declared action. Several roles may reference the
+  same action definition.
+- Never edit `src/generated/*.ts`. Run `pnpm generate:actions` after Rego catalog
+  or grant changes and commit resulting artifacts.
 
-## Writing policies
+## Behavioral policies
 
-- Keep grants in the policy directory matching their resource level:
-  `src/policies/system`, `src/policies/school`, or `src/policies/class`.
-- Reuse validation rules from `src/policies/common.rego` instead of duplicating
-  or weakening input validation.
-- Add a new policy package to `src/policies/authorization.rego` when introducing
-  a new authorization level. The root `decision` remains the sole API query
-  target.
-- Keep role-to-action grants explicit and reviewable. Do not use action-prefix
-  matching or infer permission from similarly named actions.
-- Class-level rules must compare requested IDs with scoped metadata explicitly.
-  Do not treat the presence of the `teacher` role alone as class access.
-- Add Rego tests beside the changed policy. Cover at least one allowed case and
-  denials for the important boundary conditions, including wrong scope or
-  missing metadata where applicable.
+- Keep contextual logic in the directory matching the resource kind and reuse
+  validation from `common.rego`.
+- Verify `catalog.action_targets_resource(input.action, input.resource.kind)`.
+- Use `catalog.role_has_action(assignment.role, input.action)` for grants. Do
+  not introduce another permissions map or copy grants into behavioral rules.
+- School policies must require a school-scoped assignment whose `schoolId`
+  exactly matches the requested resource.
+- Class policies must separately require the matching school scope and relevant
+  class metadata. For teachers, `meta.classIds` must be an array containing the
+  requested `classId`; null or empty values deny access.
+- Authorization does not establish resource existence or parentage. Handlers
+  validate those domain facts independently.
+- Add allow tests and denial tests for scope, metadata, wrong resource kinds,
+  and unknown actions as applicable.
 
-## Applying permissions in the API
+## API usage
 
-- Use `protectedProcedure`, declare `.input(...)`, and then attach the matching
-  middleware before `.handler(...)`:
-  `requireSystemPermission`, `requireSchoolPermission`, or
-  `requireClassPermission`.
-- The input for school middleware must expose `schoolId`. The input for class
-  middleware must expose both `schoolId` and `classId` as independent fields.
-- Use action constants from `@campuspilot/opa/actions/*`; never duplicate an
-  action as a string literal.
-- Do not query OPA directly from routers. The API permission helpers assemble
-  the authenticated subject and scoped role assignments consistently.
-- For non-oRPC handlers, call `assertPermission` with a typed action/resource
-  request instead of checking `session.user.role` directly.
-- Do not add a reusable `systemAdminProcedure` or any direct
-  `role === "admin"` authorization bypass. System access must pass through its
-  explicit OPA action grant.
-- OPA transport or response-validation failures must become an internal error;
-  a valid negative decision must become forbidden.
+- Import actions from `@campuspilot/opa/policies/<kind>` and never use raw action
+  strings at call sites.
+- Attach the matching middleware after `.input(...)` and before `.handler(...)`.
+  School input exposes `schoolId`; class input exposes independent `schoolId`
+  and `classId` fields.
+- The API authorization helper is the only place that converts database/session
+  roles into namespaced, explicitly scoped runtime assignments.
+- Query school assignments by both authenticated `userId` and requested
+  `schoolId`, preserve every returned row, and let OPA make the decision.
+- Do not add direct role checks, reusable admin bypasses, or router-level OPA
+  calls. Non-oRPC handlers use typed `assertPermission`.
+- Convert OPA transport/validation failures to internal errors and negative
+  decisions to forbidden.
 
-## Required verification
+## Verification
 
-- Run `pnpm check-types` after changing actions, resource mappings, or API
-  middleware.
-- Run the Rego suite with the repository's pinned OPA image:
-  `docker run --rm -v "$PWD/packages/opa/src/policies:/policies:ro" openpolicyagent/opa:1.20.2 test /policies`.
-- Keep an allow and deny test for every new action grant.
+- `pnpm generate:actions` regenerates the TypeScript contract from the evaluated
+  Rego `generation_manifest`.
+- `pnpm check:actions` detects drift and invalid catalogs/grants.
+- `pnpm check:policies` performs strict compilation.
+- `pnpm test:policies` runs Rego tests.
+- `pnpm check` runs all package checks.
+- Run workspace `pnpm check-types` after changing consumers.

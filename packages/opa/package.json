@@ -4,12 +4,20 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./*": "./src/*.ts"
+    "./policies/*": "./src/generated/*.ts",
+    "./resource": "./src/generated/resource.ts",
+    "./authorization": "./src/authorization.ts",
+    "./client": "./src/client.ts"
   },
   "scripts": {
+    "check": "pnpm check:actions && pnpm check:policies && pnpm test:policies && pnpm check-types",
+    "check:actions": "node ./scripts/generate-actions.mjs --check",
+    "check:policies": "docker run --rm -v \"$PWD/src/policies:/policies:ro\" openpolicyagent/opa:1.20.2 check --strict /policies",
     "check-types": "tsc --noEmit",
+    "generate:actions": "node ./scripts/generate-actions.mjs",
     "lint": "eslint .",
-    "lint:fix": "eslint . --fix"
+    "lint:fix": "eslint . --fix",
+    "test:policies": "docker run --rm -v \"$PWD/src/policies:/policies:ro\" openpolicyagent/opa:1.20.2 test /policies"
   },
   "dependencies": {
     "@campuspilot/db": "workspace:*",

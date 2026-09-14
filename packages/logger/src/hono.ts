@@ -1,6 +1,6 @@
-import type { Context, MiddlewareHandler } from "hono";
-import type { Logger } from "pino";
-import { logger as rootLogger } from "@campuspilot/logger";
+import type { Context, MiddlewareHandler } from 'hono';
+import type { Logger } from 'pino';
+import { logger as rootLogger } from '@campuspilot/logger';
 
 export type LoggerVariables = {
   requestId: string;
@@ -45,11 +45,13 @@ export type LoggerVariables = {
  * attacker-controlled. It is safe here only because `x-real-ip` is overwritten
  * upstream and therefore always wins. Do not reorder these two.
  */
-export function resolveClientIpFromHeaders(headers: Headers): string | undefined {
-  const realIp = headers.get("x-real-ip")?.trim();
+export function resolveClientIpFromHeaders(
+  headers: Headers,
+): string | undefined {
+  const realIp = headers.get('x-real-ip')?.trim();
   if (realIp) return realIp;
 
-  const forwardedFor = headers.get("x-forwarded-for")?.trim();
+  const forwardedFor = headers.get('x-forwarded-for')?.trim();
   if (forwardedFor) return forwardedFor;
 
   return undefined;
@@ -79,32 +81,44 @@ export function resolveClientIp(c: Context): string | undefined {
  * To inspect a body during development, log it explicitly inside the procedure
  * with whatever subset is safe.
  */
-export function pinoLogger(): MiddlewareHandler<{ Variables: LoggerVariables }> {
+export function pinoLogger(): MiddlewareHandler<{
+  Variables: LoggerVariables;
+}> {
   return async (c, next) => {
-    const headerId = c.req.header("x-request-id");
-    const requestId = headerId && headerId.length > 0 ? headerId : crypto.randomUUID();
+    const headerId = c.req.header('x-request-id');
+    const requestId =
+      headerId && headerId.length > 0 ? headerId : crypto.randomUUID();
     const ip = resolveClientIp(c);
     const log = rootLogger.child({ reqId: requestId, ...(ip ? { ip } : {}) });
 
-    c.set("requestId", requestId);
-    c.set("logger", log);
-    c.res.headers.set("x-request-id", requestId);
+    c.set('requestId', requestId);
+    c.set('logger', log);
+    c.res.headers.set('x-request-id', requestId);
 
     const start = performance.now();
+    log.debug({
+      seperator: '----------------------------------------------------',
+    });
     log.info(
       {
         method: c.req.method,
         path: c.req.path,
-        userAgent: c.req.header("user-agent"),
+        userAgent: c.req.header('user-agent'),
       },
-      "http.request.start",
+      'http.request.start',
     );
 
     try {
       await next();
     } catch (err) {
       const durationMs = Math.round(performance.now() - start);
-      log.error({ err, durationMs, method: c.req.method, path: c.req.path }, "http.request.error");
+      log.error(
+        { err, durationMs, method: c.req.method, path: c.req.path },
+        'http.request.error',
+      );
+      log.debug({
+        seperator: '----------------------------------------------------',
+      });
       throw err;
     }
 
@@ -112,15 +126,17 @@ export function pinoLogger(): MiddlewareHandler<{ Variables: LoggerVariables }> 
     const status = c.res.status;
     const evt =
       status >= 500
-        ? "http.request.5xx"
+        ? 'http.request.5xx'
         : status >= 400
-          ? "http.request.4xx"
-          : "http.request.end";
-    const level = status >= 500 ? "error" : status >= 400 ? "warn" : "info";
-    (log as unknown as Record<string, (obj: object, msg: string) => void>)[level]!(
-      { status, durationMs, method: c.req.method, path: c.req.path },
-      evt,
-    );
+          ? 'http.request.4xx'
+          : 'http.request.end';
+    const level = status >= 500 ? 'error' : status >= 400 ? 'warn' : 'info';
+    (log as unknown as Record<string, (obj: object, msg: string) => void>)[
+      level
+    ]!({ status, durationMs, method: c.req.method, path: c.req.path }, evt);
+    log.debug({
+      seperator: '----------------------------------------------------',
+    });
   };
 }
 

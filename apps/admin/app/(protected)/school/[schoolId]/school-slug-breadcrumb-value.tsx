@@ -2,6 +2,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { orpc } from '@/lib/orpc';
+import { SchoolAvatar } from '@/components/school-avatar';
 
 export function SchoolSlugBreadcrumbValue({ schoolId }: { schoolId: string }) {
   const schoolQuery = useQuery(
@@ -10,10 +11,10 @@ export function SchoolSlugBreadcrumbValue({ schoolId }: { schoolId: string }) {
 
   if (schoolQuery.isPending) {
     return (
-      <span
-        aria-label="Loading school"
-        className="inline-block h-3.5 w-20 animate-pulse rounded bg-muted"
-      />
+      <span className="flex items-center gap-1.5" aria-label="Loading school">
+        <span className="size-4 animate-pulse rounded-sm bg-muted" />
+        <span className="h-3.5 w-20 animate-pulse rounded bg-muted" />
+      </span>
     );
   }
 
@@ -21,5 +22,10 @@ export function SchoolSlugBreadcrumbValue({ schoolId }: { schoolId: string }) {
     return <span>School unavailable</span>;
   }
 
-  return <span>{schoolQuery.data.slug}</span>;
+  return (
+    <span className="flex items-center gap-1.5">
+      <SchoolAvatar school={schoolQuery.data} className="size-4!" />
+      <span>{schoolQuery.data.slug}</span>
+    </span>
+  );
 }

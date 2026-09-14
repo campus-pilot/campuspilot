@@ -43,6 +43,13 @@
       "when": 1789303752238,
       "tag": "0005_melodic_ozymandias",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1789406904579,
+      "tag": "0006_daily_baron_strucker",
+      "breakpoints": true
     }
   ]
 }

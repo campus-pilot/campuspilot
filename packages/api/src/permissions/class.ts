@@ -1,4 +1,4 @@
-import type { ClassAction } from '@campuspilot/opa/actions/class';
+import type { ClassAction } from '@campuspilot/opa/policies/class';
 
 import { o } from '../index';
 import { assertPermission } from './authorization';
@@ -22,7 +22,7 @@ export function requireClassPermission<TInput extends ClassScopedInput>(
         {
           action,
           resource: {
-            level: 'class',
+            kind: 'class',
             schoolId: input.schoolId,
             classId: input.classId,
           },
