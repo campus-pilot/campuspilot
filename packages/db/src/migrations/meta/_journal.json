@@ -50,6 +50,20 @@
       "when": 1789406904579,
       "tag": "0006_daily_baron_strucker",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1789412030163,
+      "tag": "0007_add-school-session-activation",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1789412122318,
+      "tag": "0008_unique-school-session-years",
+      "breakpoints": true
     }
   ]
 }

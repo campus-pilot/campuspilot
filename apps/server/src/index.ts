@@ -1,10 +1,17 @@
-import { createContext } from '@campuspilot/api/context';
+import {
+  createContext,
+  createContextFromHeaders,
+} from '@campuspilot/api/context';
 import {
   handleSchoolLogoDownload,
   handleSchoolLogoUpload,
 } from '@campuspilot/api/routers/system-admin/school/school.http';
 import { toRpcError } from '@campuspilot/api/errors';
 import { appRouter } from '@campuspilot/api/routers/index';
+import {
+  normalizeApiKeyHeaders,
+  normalizeApiKeyRequest,
+} from '@campuspilot/auth/api-key-headers';
 import { auth } from '@campuspilot/auth/server';
 import { env } from '@campuspilot/env/server';
 import { OpenAPIHandler } from '@orpc/openapi/fetch';
@@ -19,6 +26,8 @@ import { logger as rootLogger, type Logger } from '@campuspilot/logger';
 import { pinoLogger, type LoggerVariables } from '@campuspilot/logger/hono';
 
 import { log } from './log';
+import { buildMcpToolDefinitions, createCampusPilotMcpHandler } from './mcp';
+
 const app = new Hono<{ Variables: LoggerVariables }>();
 
 /**
@@ -40,18 +49,43 @@ function reportSchoolLogoError(
   else logger.warn(details, event);
 }
 
+/**
+ * Whitelist origins for browser requests: configured frontend apps, auth baseURL,
+ * and same-origin requests (such as the interactive Scalar API reference hosted at /api-reference).
+ */
+const configuredOrigins = env.CORS_ORIGIN.split(',').map((o) => o.trim());
+const authOrigin = env.BETTER_AUTH_URL
+  ? new URL(env.BETTER_AUTH_URL).origin
+  : undefined;
+const allowedOrigins = new Set(
+  [...configuredOrigins, authOrigin].filter((o): o is string => Boolean(o)),
+);
+
 app.use(pinoLogger());
 app.use(
   '/*',
   cors({
-    origin: env.CORS_ORIGIN.split(','),
+    origin: (origin, c) => {
+      if (!origin) return null;
+      const host = c.req.header('host');
+      if (
+        host &&
+        (origin === `http://${host}` || origin === `https://${host}`)
+      ) {
+        return origin;
+      }
+      if (allowedOrigins.has(origin)) return origin;
+      return null;
+    },
     allowMethods: ['GET', 'POST', 'OPTIONS'],
-    allowHeaders: ['Content-Type', 'Authorization'],
+    allowHeaders: ['Content-Type', 'Authorization', 'X-API-Key', 'x-api-key'],
     credentials: true,
   }),
 );
 
-app.on(['POST', 'GET'], '/api/auth/*', (c) => auth.handler(c.req.raw));
+app.on(['POST', 'GET'], '/api/auth/*', (c) =>
+  auth.handler(normalizeApiKeyRequest(c.req.raw)),
+);
 
 app.post('/api/account/set-password', async (c) => {
   const body = (await c.req.json()) as { newPassword?: unknown };
@@ -62,7 +96,7 @@ app.post('/api/account/set-password', async (c) => {
   try {
     const result = await auth.api.setPassword({
       body: { newPassword: body.newPassword },
-      headers: c.req.raw.headers,
+      headers: normalizeApiKeyHeaders(c.req.raw.headers),
     });
     return c.json(result);
   } catch (error) {
@@ -88,10 +122,66 @@ app.get('/api/system-admin/schools/:schoolId/logo', async (c) => {
   );
 });
 
+const mcpTools = buildMcpToolDefinitions(appRouter);
+
+export const mcpHandler = createCampusPilotMcpHandler({
+  tools: mcpTools,
+  createContext: createContextFromHeaders,
+  reportError: (error, toolName) => {
+    log.error({ err: error, toolName }, 'mcp.error');
+  },
+});
+
+app.all('/api/mcp', (c) => mcpHandler.fetch(c.req.raw));
+
+/**
+ * Serves the OpenAPI specification and interactive Scalar API reference at /api-reference.
+ * While the reference UI lives at /api-reference, the target server for oRPC endpoints
+ * is explicitly configured as /rpc with x-api-key authentication so that reference
+ * documentation and client code samples target the actual RPC endpoints directly.
+ */
 export const apiHandler = new OpenAPIHandler(appRouter, {
   plugins: [
     new OpenAPIReferencePlugin({
       schemaConverters: [new ZodToJsonSchemaConverter()],
+      docsTitle: 'CampusPilot API Reference',
+      docsConfig: {
+        authentication: {
+          preferredSecurityScheme: 'ApiKeyAuth',
+        },
+      },
+      specGenerateOptions: (options) => {
+        const origin = options?.request?.url?.origin ?? env.BETTER_AUTH_URL;
+        return {
+          info: {
+            title: 'CampusPilot API Reference',
+            version: '0.0.0',
+            description:
+              'API Reference for CampusPilot RPC services. Endpoints are served at /rpc and authenticate via the x-api-key header.',
+          },
+          servers: [
+            {
+              url: new URL('/rpc', origin).toString(),
+              description: 'oRPC Server',
+            },
+          ],
+          components: {
+            securitySchemes: {
+              ApiKeyAuth: {
+                type: 'apiKey',
+                in: 'header',
+                name: 'x-api-key',
+                description: 'User API key token (sent as x-api-key: token)',
+              },
+            },
+          },
+          security: [
+            {
+              ApiKeyAuth: [],
+            },
+          ],
+        };
+      },
     }),
   ],
   interceptors: [
@@ -164,6 +254,9 @@ async function phase<T>(name: string, fn: () => Promise<T>): Promise<T> {
 }
 
 async function main() {
+  await phase('mcp.catalog', async () => {
+    await mcpTools;
+  });
   await phase('db.migrate', () => runMigrations());
   // await phase('auth.seed', () => seedIamDatabase());
 
@@ -182,6 +275,9 @@ async function main() {
 
   const shutdown = (signal: string) => {
     log.info({ signal }, 'boot.shutdown.start');
+    void mcpHandler.close().catch((err) => {
+      log.error({ err }, 'mcp.shutdown.error');
+    });
     server.close((err) => {
       if (err) log.error({ err }, 'boot.shutdown.error');
       else log.info('boot.shutdown.ok');

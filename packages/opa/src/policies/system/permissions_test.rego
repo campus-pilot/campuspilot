@@ -51,3 +51,23 @@ test_unknown_action_is_denied if {
     "resource": {"kind": "system"},
   }
 }
+
+test_admin_can_manage_and_activate_school_sessions if {
+  every action in {
+    "school.session.list",
+    "school.session.read",
+    "school.session.create",
+    "school.session.update",
+    "school.session.delete",
+    "school.session.activate",
+  } {
+    authorization.allow with input as {
+      "action": action,
+      "subject": {
+        "userId": "admin-1",
+        "roleAssignments": [{"role": "platform.admin", "scope": {"kind": "platform"}}],
+      },
+      "resource": {"kind": "school", "schoolId": "school-1"},
+    }
+  }
+}

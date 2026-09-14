@@ -1,19 +1,20 @@
-import type { RouterClient } from "@orpc/server";
+import type { RouterClient } from '@orpc/server';
 
-import { protectedProcedure, publicProcedure } from "../index";
-import { schoolRouter } from "./school/school.router";
-import { systemAdminRouter } from "./system-admin/system-admin.router";
+import { publicProcedure } from '../index';
+import { schoolRouter } from './school/school.router';
+import { systemAdminRouter } from './system-admin/system-admin.router';
 
 export const appRouter = {
-  healthCheck: publicProcedure.handler(() => {
-    return "OK";
-  }),
-  privateData: protectedProcedure.handler(({ context }) => {
-    return {
-      message: "This is private",
-      user: context.session?.user,
-    };
-  }),
+  healthCheck: publicProcedure
+    .route({
+      summary: 'Check API health',
+      description:
+        'Return a simple availability response. This public procedure does not require authentication.',
+      tags: ['System'],
+    })
+    .handler(() => {
+      return 'OK';
+    }),
   school: schoolRouter,
   systemAdmin: systemAdminRouter,
 };

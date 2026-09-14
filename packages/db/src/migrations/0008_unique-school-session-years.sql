@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "school_session_school_id_start_end_year_unique" ON "school_session" USING btree ("school_id","session_start_year","session_end_year");

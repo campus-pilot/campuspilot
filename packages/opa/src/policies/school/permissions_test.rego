@@ -119,3 +119,63 @@ test_member_crud_is_denied_for_ungranted_school_roles if {
     }
   }
 }
+
+test_session_crud_is_allowed_for_principals_and_managers if {
+  every role in {"school.principal", "school.manager"} {
+    every action in {
+      "school.session.list",
+      "school.session.read",
+      "school.session.create",
+      "school.session.update",
+      "school.session.delete",
+    } {
+      authorization.allow with input as {
+        "action": action,
+        "subject": {
+          "userId": "user-1",
+          "roleAssignments": [
+            {"role": role, "scope": {"kind": "school", "schoolId": "school-1"}, "meta": null},
+          ],
+        },
+        "resource": {"kind": "school", "schoolId": "school-1"},
+      }
+    }
+  }
+}
+
+test_session_activation_is_denied_for_principals_and_managers if {
+  every role in {"school.principal", "school.manager"} {
+    not authorization.allow with input as {
+      "action": "school.session.activate",
+      "subject": {
+        "userId": "user-1",
+        "roleAssignments": [
+          {"role": role, "scope": {"kind": "school", "schoolId": "school-1"}, "meta": null},
+        ],
+      },
+      "resource": {"kind": "school", "schoolId": "school-1"},
+    }
+  }
+}
+
+test_session_crud_is_denied_for_ungranted_school_roles if {
+  every action in {
+    "school.session.list",
+    "school.session.read",
+    "school.session.create",
+    "school.session.update",
+    "school.session.delete",
+    "school.session.activate",
+  } {
+    not authorization.allow with input as {
+      "action": action,
+      "subject": {
+        "userId": "user-1",
+        "roleAssignments": [
+          {"role": "school.teacher", "scope": {"kind": "school", "schoolId": "school-1"}, "meta": {"classIds": ["class-1"]}},
+        ],
+      },
+      "resource": {"kind": "school", "schoolId": "school-1"},
+    }
+  }
+}

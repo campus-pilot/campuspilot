@@ -22,5 +22,10 @@ grants contains {
     "school.member.read",
     "school.member.roles.update",
     "school.member.remove",
+    "school.session.list",
+    "school.session.read",
+    "school.session.create",
+    "school.session.update",
+    "school.session.delete",
   }
 }

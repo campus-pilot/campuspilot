@@ -27,6 +27,12 @@ export type AuthorizationResourceByAction = {
   [SCHOOL_ACTIONS.READ_MEMBER]: SchoolResource;
   [SCHOOL_ACTIONS.REMOVE_MEMBER]: SchoolResource;
   [SCHOOL_ACTIONS.UPDATE_MEMBER_ROLES]: SchoolResource;
+  [SCHOOL_ACTIONS.ACTIVATE_SESSION]: SchoolResource;
+  [SCHOOL_ACTIONS.CREATE_SESSION]: SchoolResource;
+  [SCHOOL_ACTIONS.DELETE_SESSION]: SchoolResource;
+  [SCHOOL_ACTIONS.LIST_SESSIONS]: SchoolResource;
+  [SCHOOL_ACTIONS.READ_SESSION]: SchoolResource;
+  [SCHOOL_ACTIONS.UPDATE_SESSION]: SchoolResource;
   [SYSTEM_ACTIONS.CREATE_SCHOOL]: SystemResource;
   [SYSTEM_ACTIONS.DELETE_SCHOOL]: SystemResource;
   [SYSTEM_ACTIONS.LIST_SCHOOLS]: SystemResource;

@@ -7,7 +7,9 @@
     "check-types": "tsc -b",
     "compile": "bun build --compile --minify --sourcemap --bytecode ./src/index.ts --outfile server",
     "dev": "tsx watch src/index.ts",
-    "start": "node dist/index.mjs"
+    "start": "node dist/index.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@campuspilot/api": "workspace:*",
@@ -17,6 +19,7 @@
     "@campuspilot/logger": "workspace:*",
     "@campuspilot/s3": "workspace:*",
     "@hono/node-server": "^2.0.12",
+    "@modelcontextprotocol/server": "^2.0.0",
     "@orpc/openapi": "catalog:",
     "@orpc/server": "catalog:",
     "@orpc/zod": "catalog:",
@@ -27,9 +30,11 @@
   },
   "devDependencies": {
     "@campuspilot/config": "workspace:*",
+    "@modelcontextprotocol/client": "^2.0.0",
     "@types/node": "catalog:",
     "tsdown": "^0.22.14",
     "tsx": "^4.23.1",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "vitest": "4.1.4"
   }
 }

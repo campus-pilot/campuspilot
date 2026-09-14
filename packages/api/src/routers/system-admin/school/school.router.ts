@@ -22,6 +22,12 @@ import {
 
 export const schoolRouter = {
   listSchools: protectedProcedure
+    .route({
+      summary: "List schools",
+      description:
+        "List schools across the platform with pagination, text search, onboarding-status filtering, and deterministic sorting. Requires system-administrator permission.",
+      tags: ["System Admin", "Schools"],
+    })
     .input(listSchoolsInputSchema)
     .use(requireSystemPermission(SYSTEM_ACTIONS.LIST_SCHOOLS))
     .output(listSchoolsOutputSchema)
@@ -79,6 +85,12 @@ export const schoolRouter = {
     }),
 
   getSchool: protectedProcedure
+    .route({
+      summary: "Get a school",
+      description:
+        "Get one school by its identifier. Requires system-administrator permission.",
+      tags: ["System Admin", "Schools"],
+    })
     .input(schoolIdInputSchema)
     .use(requireSystemPermission(SYSTEM_ACTIONS.READ_SCHOOL))
     .output(schoolDtoSchema)
@@ -97,6 +109,12 @@ export const schoolRouter = {
     }),
 
   addSchool: protectedProcedure
+    .route({
+      summary: "Create a school",
+      description:
+        "Create a new school with its identity, location, registration, and optional logo-key data. Requires system-administrator permission.",
+      tags: ["System Admin", "Schools"],
+    })
     .input(addSchoolInputSchema)
     .use(requireSystemPermission(SYSTEM_ACTIONS.CREATE_SCHOOL))
     .output(schoolDtoSchema)
@@ -111,6 +129,12 @@ export const schoolRouter = {
     }),
 
   updateSchool: protectedProcedure
+    .route({
+      summary: "Update a school",
+      description:
+        "Update the explicitly supplied fields of an existing school. Requires system-administrator permission.",
+      tags: ["System Admin", "Schools"],
+    })
     .input(updateSchoolInputSchema)
     .use(requireSystemPermission(SYSTEM_ACTIONS.UPDATE_SCHOOL))
     .output(schoolDtoSchema)
@@ -130,6 +154,12 @@ export const schoolRouter = {
     }),
 
   deleteSchool: protectedProcedure
+    .route({
+      summary: "Delete a school",
+      description:
+        "Permanently delete a school by its identifier. Requires system-administrator permission.",
+      tags: ["System Admin", "Schools"],
+    })
     .input(schoolIdInputSchema)
     .use(requireSystemPermission(SYSTEM_ACTIONS.DELETE_SCHOOL))
     .output(schoolDtoSchema)

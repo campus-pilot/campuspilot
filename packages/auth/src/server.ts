@@ -136,9 +136,9 @@ export function createAuth(db: DatabaseExecutor = createDb()) {
 
       additionalFields: {
         authMethod: { type: 'string', required: false, input: false },
-        // Set on sessions minted by exchanging a personal access key. Lets a
-        // key revocation cascade-delete its live sessions and lets the audit
-        // trail record which key acted.
+        // Reserved for persisted sessions that explicitly record their
+        // authentication source. Better Auth's API-key plugin creates a
+        // request-scoped mock session and does not populate this field.
         apiKeyId: { type: 'string', required: false, input: false },
       },
     },

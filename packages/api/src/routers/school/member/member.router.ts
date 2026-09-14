@@ -82,6 +82,12 @@ async function findSchoolMember(
 
 export const schoolMemberRouter = {
   listMembers: protectedProcedure
+    .route({
+      summary: "List school members",
+      description:
+        "List a school's members and all of their role assignments with pagination, name or email search, and deterministic sorting. Requires permission to list members in that school.",
+      tags: ["School", "Members"],
+    })
     .input(listSchoolMembersInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.LIST_MEMBERS))
     .output(listSchoolMembersOutputSchema)
@@ -182,6 +188,12 @@ export const schoolMemberRouter = {
     }),
 
   getMember: protectedProcedure
+    .route({
+      summary: "Get a school member",
+      description:
+        "Get one school member and all role assignments by school and user identifier. Requires permission to read members in that school.",
+      tags: ["School", "Members"],
+    })
     .input(schoolMemberIdInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_MEMBER))
     .output(schoolMemberDtoSchema)
@@ -200,6 +212,12 @@ export const schoolMemberRouter = {
     }),
 
   inviteMember: protectedProcedure
+    .route({
+      summary: "Invite a school member",
+      description:
+        "Atomically provision a user when needed, add the user to a school, and create the complete requested role-assignment set. Requires permission to invite members in that school.",
+      tags: ["School", "Members"],
+    })
     .input(inviteSchoolMemberInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.INVITE_MEMBER))
     .output(schoolMemberDtoSchema)
@@ -266,6 +284,12 @@ export const schoolMemberRouter = {
     }),
 
   updateMemberRoles: protectedProcedure
+    .route({
+      summary: "Replace school member roles",
+      description:
+        "Atomically replace a school member's complete role-assignment set; roles omitted from the request are removed. Requires permission to update member roles in that school.",
+      tags: ["School", "Members"],
+    })
     .input(updateSchoolMemberRolesInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.UPDATE_MEMBER_ROLES))
     .output(schoolMemberDtoSchema)
@@ -312,6 +336,12 @@ export const schoolMemberRouter = {
     }),
 
   removeMember: protectedProcedure
+    .route({
+      summary: "Remove a school member",
+      description:
+        "Remove a member and that school's role assignments while retaining the global user account and memberships in other schools. Requires permission to remove members in that school.",
+      tags: ["School", "Members"],
+    })
     .input(schoolMemberIdInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.REMOVE_MEMBER))
     .output(schoolMemberDtoSchema)
