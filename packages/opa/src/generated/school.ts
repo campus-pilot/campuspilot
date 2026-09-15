@@ -8,9 +8,11 @@ export const SCHOOL_ACTIONS = {
   INVITE_MEMBER: 'school.member.invite',
   LIST_MEMBERS: 'school.member.list',
   LIST_SESSIONS: 'school.session.list',
+  READ_LOGO: 'school.logo.read',
   READ_MEMBER: 'school.member.read',
   READ_SESSION: 'school.session.read',
   REMOVE_MEMBER: 'school.member.remove',
+  UPDATE_LOGO: 'school.logo.update',
   UPDATE_MEMBER_ROLES: 'school.member.roles.update',
   UPDATE_SESSION: 'school.session.update',
 } as const;

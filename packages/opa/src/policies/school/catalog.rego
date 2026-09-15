@@ -3,6 +3,18 @@ package campuspilot.authorization.catalog
 import rego.v1
 
 actions contains {
+  "id": "school.logo.read",
+  "key": "READ_LOGO",
+  "resourceKind": "school",
+} if { true }
+
+actions contains {
+  "id": "school.logo.update",
+  "key": "UPDATE_LOGO",
+  "resourceKind": "school",
+} if { true }
+
+actions contains {
   "id": "school.member.invite",
   "key": "INVITE_MEMBER",
   "resourceKind": "school",

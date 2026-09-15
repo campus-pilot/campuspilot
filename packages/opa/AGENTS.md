@@ -68,12 +68,18 @@ contract.
 - Convert OPA transport/validation failures to internal errors and negative
   decisions to forbidden.
 
-## Verification
+## Testing and Verification
 
+Whenever any policy, action catalog, grant, or TypeScript client/authorization code is added or modified in `packages/opa`, you MUST maintain and run BOTH types of tests:
+1. **Rego Unit Tests (`pnpm test:policies`)**: Add and update Rego unit tests under `src/policies/<domain>/permissions_test.rego` verifying allow and deny rules for actions, role grants, scope matches, metadata filters, and missing subjects.
+2. **Integration Tests (`pnpm test:integration` or `pnpm test`)**: Add and update integration tests under `src/__tests__/*.integration.test.ts` that execute against a real OPA Testcontainer. Test both `OpaClient` and `isAuthorized` evaluating policies end-to-end.
+
+Check commands:
 - `pnpm generate:actions` regenerates the TypeScript contract from the evaluated
   Rego `generation_manifest`.
 - `pnpm check:actions` detects drift and invalid catalogs/grants.
 - `pnpm check:policies` performs strict compilation.
 - `pnpm test:policies` runs Rego tests.
+- `pnpm test:integration` runs full integration tests with Testcontainers.
 - `pnpm check` runs all package checks.
 - Run workspace `pnpm check-types` after changing consumers.

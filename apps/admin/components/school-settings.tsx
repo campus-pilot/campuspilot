@@ -45,10 +45,7 @@ import { Label } from '@campuspilot/ui/components/label';
 import { Progress } from '@campuspilot/ui/components/progress';
 import { ImageUp, LoaderCircle, Pencil, Trash2 } from 'lucide-react';
 import { client, orpc } from '@/lib/orpc';
-import {
-  schoolLogoRevisionQueryKey,
-  uploadSchoolLogo,
-} from '@/lib/school-image';
+import { uploadSchoolLogo } from '@/lib/school-image';
 import { SchoolAvatar } from './school-avatar';
 
 const schoolDetailsFormSchema = z.object({
@@ -125,10 +122,11 @@ function SchoolLogoEditor({ school }: { school: SchoolDto }) {
           }),
           updatedSchool,
         );
-        queryClient.setQueryData<number>(
-          schoolLogoRevisionQueryKey(school.id),
-          (current = 0) => current + 1,
-        );
+        void queryClient.invalidateQueries({
+          queryKey: orpc.school.getLogo.queryKey({
+            input: { schoolId: school.id },
+          }),
+        });
         form.reset();
         setUploadProgress(undefined);
         setIsOpen(false);

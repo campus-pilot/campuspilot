@@ -1,10 +1,12 @@
 import type { RouterClient } from '@orpc/server';
 
 import { publicProcedure } from '../index';
+import { authRouter } from './auth/auth.router';
 import { schoolRouter } from './school/school.router';
 import { systemAdminRouter } from './system-admin/system-admin.router';
 
 export const appRouter = {
+  auth: authRouter,
   healthCheck: publicProcedure
     .route({
       summary: 'Check API health',

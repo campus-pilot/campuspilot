@@ -9,9 +9,13 @@
       "default": "./src/*.ts"
     }
   },
-  "scripts": {},
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1130.0",
+    "@aws-sdk/s3-request-presigner": "^3.1132.0",
     "@campuspilot/auth": "workspace:*",
     "@campuspilot/db": "workspace:*",
     "@campuspilot/env": "workspace:*",
@@ -28,9 +32,14 @@
   },
   "devDependencies": {
     "@campuspilot/config": "workspace:*",
+    "@testcontainers/postgresql": "catalog:",
+    "@testcontainers/redis": "catalog:",
     "@types/busboy": "^1.5.4",
-    "@types/pg": "^8.20.0",
+    "@types/pg": "catalog:",
     "hono": "catalog:",
-    "typescript": "catalog:"
+    "pg": "catalog:",
+    "testcontainers": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   }
 }

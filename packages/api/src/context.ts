@@ -13,16 +13,18 @@ export type CreateContextOptions = {
  * produce the same authorization context for HTTP, RPC, OpenAPI, and MCP.
  */
 export async function createContextFromHeaders(headers: Headers) {
+  const normalizedHeaders = normalizeApiKeyHeaders(headers);
   let session = null;
   try {
     session = await auth.api.getSession({
-      headers: normalizeApiKeyHeaders(headers),
+      headers: normalizedHeaders,
     });
   } catch {
     session = null;
   }
   return {
     db,
+    headers: normalizedHeaders,
     session,
   };
 }

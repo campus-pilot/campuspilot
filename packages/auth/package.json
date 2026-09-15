@@ -26,7 +26,12 @@
   },
   "devDependencies": {
     "@campuspilot/config": "workspace:*",
+    "@testcontainers/postgresql": "catalog:",
+    "@testcontainers/redis": "catalog:",
+    "@types/pg": "catalog:",
+    "pg": "catalog:",
+    "testcontainers": "catalog:",
     "typescript": "catalog:",
-    "vitest": "4.1.4"
+    "vitest": "catalog:"
   }
 }

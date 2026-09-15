@@ -24,11 +24,6 @@ grants contains {
 
 grants contains {
   "role": "platform.admin",
-  "action": "system.school.logo.update",
-} if { true }
-
-grants contains {
-  "role": "platform.admin",
   "action": "system.school.delete",
 } if { true }
 
@@ -42,6 +37,8 @@ grants contains {
   "action": action,
 } if {
   some action in {
+    "school.logo.read",
+    "school.logo.update",
     "school.member.list",
     "school.member.read",
     "school.member.roles.update",

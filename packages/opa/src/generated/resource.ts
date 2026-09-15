@@ -22,6 +22,8 @@ export type ClassResource = {
 
 export type AuthorizationResourceByAction = {
   [CLASS_ACTIONS.ADD_STUDENT]: ClassResource;
+  [SCHOOL_ACTIONS.READ_LOGO]: SchoolResource;
+  [SCHOOL_ACTIONS.UPDATE_LOGO]: SchoolResource;
   [SCHOOL_ACTIONS.INVITE_MEMBER]: SchoolResource;
   [SCHOOL_ACTIONS.LIST_MEMBERS]: SchoolResource;
   [SCHOOL_ACTIONS.READ_MEMBER]: SchoolResource;
@@ -36,7 +38,6 @@ export type AuthorizationResourceByAction = {
   [SYSTEM_ACTIONS.CREATE_SCHOOL]: SystemResource;
   [SYSTEM_ACTIONS.DELETE_SCHOOL]: SystemResource;
   [SYSTEM_ACTIONS.LIST_SCHOOLS]: SystemResource;
-  [SYSTEM_ACTIONS.UPDATE_SCHOOL_LOGO]: SystemResource;
   [SYSTEM_ACTIONS.READ_SCHOOL]: SystemResource;
   [SYSTEM_ACTIONS.UPDATE_SCHOOL]: SystemResource;
 };

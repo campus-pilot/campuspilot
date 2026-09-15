@@ -7,7 +7,6 @@ export const SYSTEM_ACTIONS = {
   LIST_SCHOOLS: 'system.school.list',
   READ_SCHOOL: 'system.school.read',
   UPDATE_SCHOOL: 'system.school.update',
-  UPDATE_SCHOOL_LOGO: 'system.school.logo.update',
 } as const;
 
 export type SystemAction =

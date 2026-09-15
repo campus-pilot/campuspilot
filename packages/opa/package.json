@@ -17,6 +17,8 @@
     "generate:actions": "node ./scripts/generate-actions.mjs",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
+    "test": "vitest run",
+    "test:integration": "vitest run",
     "test:policies": "docker run --rm -v \"$PWD/src/policies:/policies:ro\" openpolicyagent/opa:1.20.2 test /policies"
   },
   "dependencies": {
@@ -27,6 +29,8 @@
   "devDependencies": {
     "@campuspilot/config": "workspace:*",
     "@typescript/native": "npm:typescript@^7.0.2",
-    "typescript": "npm:@typescript/typescript6@^6.0.2"
+    "testcontainers": "catalog:",
+    "typescript": "npm:@typescript/typescript6@^6.0.2",
+    "vitest": "catalog:"
   }
 }

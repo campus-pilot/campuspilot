@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useForm } from '@tanstack/react-form';
 import { z } from 'zod';
-import { env } from '@campuspilot/env/admin.client';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -37,6 +36,7 @@ import {
   UserRound,
 } from 'lucide-react';
 import { authClient } from '@/lib/auth-client';
+import { client } from '@/lib/orpc';
 
 type AccountSection = 'profile' | 'security' | 'api-keys';
 
@@ -264,21 +264,7 @@ function SecuritySection({ active }: { active: boolean }) {
           });
           if (error) throw error;
         } else {
-          const response = await fetch(
-            new URL('/api/account/set-password', env.NEXT_PUBLIC_SERVER_URL),
-            {
-              method: 'POST',
-              credentials: 'include',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ newPassword: value.newPassword }),
-            },
-          );
-          if (!response.ok) {
-            const body = (await response.json().catch(() => null)) as {
-              message?: string;
-            } | null;
-            throw new Error(body?.message ?? 'Unable to set password.');
-          }
+          await client.auth.setPassword({ newPassword: value.newPassword });
           setHasPassword(true);
         }
 

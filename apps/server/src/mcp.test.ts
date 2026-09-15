@@ -178,7 +178,7 @@ describe('buildMcpToolDefinitions', () => {
     );
   });
 
-  it('covers every current appRouter leaf and excludes direct logo handlers', async () => {
+  it('covers every appRouter leaf while excluding the direct logo upload handler', async () => {
     vi.stubEnv('SKIP_ENV_VALIDATION', 'true');
     const { appRouter } = await import('@campuspilot/api/routers/index');
 
@@ -186,12 +186,12 @@ describe('buildMcpToolDefinitions', () => {
     const names = tools.map(({ name }) => name);
 
     expect(names).toContain('healthCheck');
+    expect(names).toContain('auth.setPassword');
+    expect(names).toContain('school.getLogo');
     expect(names).toContain('school.listMembers');
     expect(names).toContain('school.activateSession');
     expect(names).toContain('systemAdmin.listSchools');
-    expect(names.some((name) => name.toLowerCase().includes('logo'))).toBe(
-      false,
-    );
+    expect(names).not.toContain('school.uploadLogo');
   });
 });
 

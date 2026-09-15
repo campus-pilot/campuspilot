@@ -18,6 +18,8 @@ grants contains {
 } if {
   some role in {"school.principal", "school.manager"}
   some action in {
+    "school.logo.read",
+    "school.logo.update",
     "school.member.list",
     "school.member.read",
     "school.member.roles.update",

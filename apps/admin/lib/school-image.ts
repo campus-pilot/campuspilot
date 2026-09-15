@@ -4,12 +4,15 @@ import { z } from 'zod';
 import { schoolDtoSchema, type SchoolDto } from '@campuspilot/api/routers/system-admin/school/school.dto';
 import {
   MAX_SCHOOL_LOGO_BYTES,
+  SCHOOL_LOGO_EXTENSIONS_BY_MIME_TYPE,
   SCHOOL_LOGO_FIELD_NAME,
+  SCHOOL_LOGO_MIME_TYPES,
 } from '@campuspilot/api/routers/system-admin/school/school.constants';
 import { env } from '@campuspilot/env/admin.client';
 
 const MAX_LOGO_DIMENSION = 1_600;
 const MIN_WEBP_QUALITY = 0.45;
+const PREPARED_LOGO_MIME_TYPE = 'image/webp' as const;
 
 /**
  * The logo endpoint is plain HTTP rather than oRPC, so JSON serialization turns
@@ -21,30 +24,11 @@ const schoolLogoResponseSchema = schoolDtoSchema.extend({
   updatedAt: z.coerce.date().nullable(),
 });
 
-export function getSchoolLogoUrl(
-  school: Pick<SchoolDto, 'id' | 'logoS3Key'>,
-  revision = 0,
-): string | undefined {
-  if (!school.logoS3Key) return undefined;
-
-  const logoUrl = new URL(
-    `/api/system-admin/schools/${encodeURIComponent(school.id)}/logo`,
-    env.NEXT_PUBLIC_SERVER_URL,
-  );
-  if (revision > 0) logoUrl.searchParams.set('revision', String(revision));
-  return logoUrl.toString();
-}
-
-/** Explicit client-side version used to refresh a replaced stable logo URL. */
-export function schoolLogoRevisionQueryKey(schoolId: string) {
-  return ['school-logo-revision', schoolId] as const;
-}
-
 function canvasToBlob(canvas: HTMLCanvasElement, quality: number): Promise<Blob> {
   return new Promise((resolve, reject) => {
     canvas.toBlob(
       (blob) => (blob ? resolve(blob) : reject(new Error('Unable to encode the school logo.'))),
-      'image/webp',
+      PREPARED_LOGO_MIME_TYPE,
       quality,
     );
   });
@@ -88,8 +72,20 @@ export async function prepareSchoolLogo(file: File): Promise<File> {
     throw new Error('The logo could not be reduced below 5 MB. Choose a smaller image.');
   }
 
+  const preparedMimeType = SCHOOL_LOGO_MIME_TYPES.find(
+    (mimeType) => mimeType === blob.type,
+  );
+  if (!preparedMimeType) {
+    throw new Error('The browser returned an unsupported image format.');
+  }
+  /** Name the prepared file from the canvas result, not the source file type. */
+  const extension =
+    SCHOOL_LOGO_EXTENSIONS_BY_MIME_TYPE[preparedMimeType][0];
   const baseName = file.name.replace(/\.[^.]+$/, '') || 'school-logo';
-  return new File([blob], `${baseName}.webp`, { type: blob.type, lastModified: Date.now() });
+  return new File([blob], `${baseName}.${extension}`, {
+    type: preparedMimeType,
+    lastModified: Date.now(),
+  });
 }
 
 type SchoolLogoUploadOptions = {
@@ -173,7 +169,10 @@ export async function uploadSchoolLogo(
   formData.set(SCHOOL_LOGO_FIELD_NAME, logo);
 
   const body = await uploadFormData(
-    new URL(`/api/system-admin/schools/${encodeURIComponent(schoolId)}/logo`, env.NEXT_PUBLIC_SERVER_URL),
+    new URL(
+      `/api/blob/schools/${encodeURIComponent(schoolId)}/logo`,
+      env.NEXT_PUBLIC_SERVER_URL,
+    ),
     formData,
     options,
   );

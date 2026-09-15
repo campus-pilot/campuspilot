@@ -27,12 +27,6 @@ actions contains {
 } if { true }
 
 actions contains {
-  "id": "system.school.logo.update",
-  "key": "UPDATE_SCHOOL_LOGO",
-  "resourceKind": "system",
-} if { true }
-
-actions contains {
   "id": "system.school.delete",
   "key": "DELETE_SCHOOL",
   "resourceKind": "system",

@@ -2,16 +2,10 @@ import {
   createContext,
   createContextFromHeaders,
 } from '@campuspilot/api/context';
-import {
-  handleSchoolLogoDownload,
-  handleSchoolLogoUpload,
-} from '@campuspilot/api/routers/system-admin/school/school.http';
+import { handleSchoolLogoUpload } from '@campuspilot/api/routers/system-admin/school/school.http';
 import { toRpcError } from '@campuspilot/api/errors';
 import { appRouter } from '@campuspilot/api/routers/index';
-import {
-  normalizeApiKeyHeaders,
-  normalizeApiKeyRequest,
-} from '@campuspilot/auth/api-key-headers';
+import { normalizeApiKeyRequest } from '@campuspilot/auth/api-key-headers';
 import { auth } from '@campuspilot/auth/server';
 import { env } from '@campuspilot/env/server';
 import { OpenAPIHandler } from '@orpc/openapi/fetch';
@@ -37,13 +31,12 @@ const app = new Hono<{ Variables: LoggerVariables }>();
  */
 function reportSchoolLogoError(
   logger: Logger,
-  operation: 'download' | 'upload',
   schoolId: string,
   error: unknown,
 ) {
   const failure = toRpcError(error);
   const details = { err: error, schoolId, status: failure.status };
-  const event = `school.logo.${operation}.error`;
+  const event = 'school.logo.upload.error';
 
   if (failure.status >= 500) logger.error(details, event);
   else logger.warn(details, event);
@@ -87,38 +80,11 @@ app.on(['POST', 'GET'], '/api/auth/*', (c) =>
   auth.handler(normalizeApiKeyRequest(c.req.raw)),
 );
 
-app.post('/api/account/set-password', async (c) => {
-  const body = (await c.req.json()) as { newPassword?: unknown };
-  if (typeof body.newPassword !== 'string') {
-    return c.json({ message: 'A new password is required.' }, 400);
-  }
-
-  try {
-    const result = await auth.api.setPassword({
-      body: { newPassword: body.newPassword },
-      headers: normalizeApiKeyHeaders(c.req.raw.headers),
-    });
-    return c.json(result);
-  } catch (error) {
-    const message =
-      error instanceof Error ? error.message : 'Unable to set password.';
-    return c.json({ message }, 400);
-  }
-});
-
-app.post('/api/system-admin/schools/:schoolId/logo', async (c) => {
+app.post('/api/blob/schools/:schoolId/logo', async (c) => {
   const schoolId = c.req.param('schoolId');
   const context = await createContext({ context: c });
   return handleSchoolLogoUpload(c.req.raw, context, schoolId, (error) =>
-    reportSchoolLogoError(c.var.logger, 'upload', schoolId, error),
-  );
-});
-
-app.get('/api/system-admin/schools/:schoolId/logo', async (c) => {
-  const schoolId = c.req.param('schoolId');
-  const context = await createContext({ context: c });
-  return handleSchoolLogoDownload(context, schoolId, (error) =>
-    reportSchoolLogoError(c.var.logger, 'download', schoolId, error),
+    reportSchoolLogoError(c.var.logger, schoolId, error),
   );
 });
 

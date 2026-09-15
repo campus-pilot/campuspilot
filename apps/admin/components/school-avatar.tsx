@@ -8,10 +8,7 @@ import {
   AvatarFallback,
   AvatarImage,
 } from '@campuspilot/ui/components/avatar';
-import {
-  getSchoolLogoUrl,
-  schoolLogoRevisionQueryKey,
-} from '@/lib/school-image';
+import { orpc } from '@/lib/orpc';
 
 type SchoolIdentity = Pick<SchoolDto, 'id' | 'logoS3Key' | 'name'>;
 
@@ -34,13 +31,18 @@ export function SchoolAvatar({
   size?: ComponentProps<typeof Avatar>['size'];
   className?: string;
 }) {
-  const { data: logoRevision = 0 } = useQuery({
-    queryKey: schoolLogoRevisionQueryKey(school.id),
-    queryFn: async () => 0,
-    initialData: 0,
-    enabled: false,
+  const logoQuery = useQuery({
+    ...orpc.school.getLogo.queryOptions({
+      input: { schoolId: school.id },
+    }),
+    enabled: Boolean(school.logoS3Key),
+    staleTime: 4 * 60 * 1_000,
   });
-  const logoUrl = getSchoolLogoUrl(school, logoRevision);
+  const logoUrl = logoQuery.data?.url;
+  /** Remount after a refresh even when two signatures share the same second. */
+  const logoImageKey = logoUrl
+    ? `${logoUrl}:${logoQuery.dataUpdatedAt}`
+    : undefined;
 
   return (
     <Avatar
@@ -51,11 +53,10 @@ export function SchoolAvatar({
     >
       {logoUrl ? (
         <AvatarImage
-          key={logoUrl}
+          key={logoImageKey}
           src={logoUrl}
           alt=""
           className="rounded-md"
-          crossOrigin="use-credentials"
         />
       ) : null}
       <AvatarFallback className="rounded-md">

@@ -32,6 +32,36 @@ test_roles_without_the_action_are_denied if {
   }
 }
 
+test_logo_access_is_allowed_for_principals_and_managers if {
+  every role in {"school.principal", "school.manager"} {
+    every action in {"school.logo.read", "school.logo.update"} {
+      authorization.allow with input as {
+        "action": action,
+        "subject": {
+          "userId": "user-1",
+          "roleAssignments": [
+            {"role": role, "scope": {"kind": "school", "schoolId": "school-1"}, "meta": null},
+          ],
+        },
+        "resource": {"kind": "school", "schoolId": "school-1"},
+      }
+    }
+  }
+}
+
+test_logo_read_from_another_school_is_denied if {
+  not authorization.allow with input as {
+    "action": "school.logo.read",
+    "subject": {
+      "userId": "user-1",
+      "roleAssignments": [
+        {"role": "school.principal", "scope": {"kind": "school", "schoolId": "school-1"}, "meta": null},
+      ],
+    },
+    "resource": {"kind": "school", "schoolId": "school-2"},
+  }
+}
+
 test_role_assignment_from_another_school_is_denied if {
   not authorization.allow with input as {
     "action": "school.member.invite",
