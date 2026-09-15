@@ -1,4 +1,4 @@
-import { SessionManagement } from '@/components/session/session-management';
+import { SessionsTable } from '@/components/session/sessions-table';
 
 export default async function SessionsPage({
   params,
@@ -6,5 +6,6 @@ export default async function SessionsPage({
   params: Promise<{ schoolId: string }>;
 }) {
   const { schoolId } = await params;
-  return <SessionManagement schoolId={schoolId} />;
+  return <SessionsTable schoolId={schoolId} />;
 }
+

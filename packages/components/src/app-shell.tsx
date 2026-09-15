@@ -70,8 +70,10 @@ export type AppShellNavigationItem = {
   href: string;
   icon: AppShellIcon;
   match?: 'exact' | 'prefix';
+  isActive?: (currentPath: string) => boolean;
   items?: AppShellNavigationItem[];
 };
+
 
 export type AppShellNavigationGroup = {
   type: 'group';
@@ -120,12 +122,17 @@ type AppShellProps = {
 };
 
 function pathMatches(item: AppShellNavigationItem, currentPath: string) {
+  if (item.isActive) {
+    return item.isActive(currentPath);
+  }
+
   if (item.match === 'exact' || item.href === '/') {
     return currentPath === item.href;
   }
 
   return currentPath === item.href || currentPath.startsWith(`${item.href}/`);
 }
+
 
 function initials(name: string) {
   return name

@@ -13,10 +13,13 @@ import {
   Sparkles,
   Users,
 } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 import { AdminShell, type AdminShellState } from '@/components/admin-shell';
 import { resolveAdminPageActions } from '@/components/admin-route';
+import { orpc } from '@/lib/orpc';
 import { dashboardPage } from './_route';
 import { sessionsPage } from './sessions/_route';
+import { sessionDetailPage } from './sessions/[sessionId]/_route';
 import { settingsPage } from './settings/_route';
 import { staffPage } from './staff/_route';
 import { studentsPage } from './students/_route';
@@ -27,6 +30,7 @@ import { schoolHref, type SchoolRouteParams } from './school-route';
 
 const pages = [
   dashboardPage,
+  sessionDetailPage,
   sessionsPage,
   staffPage,
   studentsPage,
@@ -36,7 +40,11 @@ const pages = [
   settingsPage,
 ];
 
-function navigationFor(schoolId: string): AppShellNavigationEntry[] {
+function navigationFor(
+  schoolId: string,
+  activeSessionId?: string,
+): AppShellNavigationEntry[] {
+
   return [
     {
       type: 'group',
@@ -55,9 +63,15 @@ function navigationFor(schoolId: string): AppShellNavigationEntry[] {
           type: 'item',
           id: 'sessions',
           label: 'Sessions',
-          href: schoolHref(schoolId, '/sessions'),
+          href: activeSessionId
+            ? schoolHref(schoolId, `/sessions/${activeSessionId}`)
+            : schoolHref(schoolId, '/sessions'),
           icon: CalendarDays,
+          isActive: (currentPath) =>
+            currentPath === schoolHref(schoolId, '/sessions') ||
+            currentPath.startsWith(schoolHref(schoolId, '/sessions/')),
         },
+
         {
           type: 'item',
           id: 'staff',
@@ -114,14 +128,25 @@ function navigationFor(schoolId: string): AppShellNavigationEntry[] {
 
 export default function SchoolLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const { schoolId } = useParams<SchoolRouteParams>();
+  const routeParams = useParams();
+  const schoolId = String(routeParams.schoolId ?? '');
+  const sessionsQuery = useQuery(
+    orpc.school.listSessions.queryOptions({
+      input: { schoolId },
+    }),
+  );
+  const activeSession =
+    sessionsQuery.data?.items.find((s) => s.isActive) ??
+    sessionsQuery.data?.items[0];
+
   const page = pages.find((candidate) => candidate.matches(pathname));
-  const params = { schoolId };
+  const params = { schoolId, ...routeParams } as any;
   const state: AdminShellState = {
-    navigation: navigationFor(schoolId),
+    navigation: navigationFor(schoolId, activeSession?.id),
     breadcrumbs: page?.breadcrumbs(params) ?? [],
     navbarActions: resolveAdminPageActions(page, params),
   };
 
   return <AdminShell state={state}>{children}</AdminShell>;
 }
+

@@ -32,7 +32,9 @@ export type DataTableProps<TData> = Omit<
   ariaLabel: string;
   emptyMessage?: string;
   showPagination?: boolean;
+  onRowClick?: (row: TData) => void;
 };
+
 
 function SortIndicator({ direction }: { direction: false | 'asc' | 'desc' }) {
   if (direction === 'asc') return <ArrowUp aria-hidden className="size-3.5" />;
@@ -49,8 +51,10 @@ export function DataTable<TData>({
   ariaLabel,
   emptyMessage = 'No results found.',
   showPagination = false,
+  onRowClick,
   ...options
 }: DataTableProps<TData>) {
+
   const table = useReactTable({
     ...options,
     getCoreRowModel: getCoreRowModel(),
@@ -98,7 +102,27 @@ export function DataTable<TData>({
         <TableBody>
           {rows.length > 0 ? (
             rows.map((row) => (
-              <TableRow key={row.id} data-state={row.getIsSelected() && 'selected'}>
+              <TableRow
+                key={row.id}
+                data-state={row.getIsSelected() && 'selected'}
+                className={onRowClick ? 'cursor-pointer hover:bg-muted/50' : undefined}
+                onClick={
+                  onRowClick
+                    ? (event) => {
+                        const target = event.target as HTMLElement | null;
+                        if (
+                          target?.closest(
+                            'button, a, input, select, textarea, [role="button"], [role="menuitem"], [data-slot="dropdown-menu-trigger"]',
+                          )
+                        ) {
+                          return;
+                        }
+                        onRowClick(row.original);
+                      }
+                    : undefined
+                }
+              >
+
                 {row.getVisibleCells().map((cell) => (
                   <TableCell key={cell.id}>
                     {flexRender(cell.column.columnDef.cell, cell.getContext())}

@@ -180,6 +180,48 @@ describe('school.session Router Integration', () => {
       expect(allList.items).toHaveLength(2);
       expect(allList.items[0]!.sessionStartYear).toBe(2024);
       expect(allList.items[1]!.sessionStartYear).toBe(2025);
+
+      // Filter by startYears
+      const startYearFiltered = await client.school.listSessions({
+        schoolId: testSchool.id,
+        filters: { startYears: [2024] },
+      });
+      expect(startYearFiltered.items).toHaveLength(1);
+      expect(startYearFiltered.items[0]!.sessionStartYear).toBe(2024);
+
+      // Filter by endYears
+      const endYearFiltered = await client.school.listSessions({
+        schoolId: testSchool.id,
+        filters: { endYears: [2026] },
+      });
+      expect(endYearFiltered.items).toHaveLength(1);
+      expect(endYearFiltered.items[0]!.sessionEndYear).toBe(2026);
+    });
+
+    it('allows principal to retrieve distinct session filter options', async () => {
+      const testSchool = await createTestSchool();
+      const staff = await createSchoolStaffSession(testSchool.id, [
+        { role: 'principal', meta: null },
+      ]);
+      const client = createTestClient(staff.session);
+
+      await createTestSession({
+        schoolId: testSchool.id,
+        sessionStartYear: 2023,
+        sessionEndYear: 2024,
+      });
+      await createTestSession({
+        schoolId: testSchool.id,
+        sessionStartYear: 2024,
+        sessionEndYear: 2025,
+      });
+
+      const filterOptions = await client.school.listSessionFilterOptions({
+        schoolId: testSchool.id,
+      });
+
+      expect(filterOptions.startYears).toEqual([2024, 2023]);
+      expect(filterOptions.endYears).toEqual([2025, 2024]);
     });
 
     it('denies regular users from listing sessions', async () => {
@@ -192,6 +234,7 @@ describe('school.session Router Integration', () => {
       );
     });
   });
+
 
   describe('updateSession', () => {
     it('allows principal to update session start and end years', async () => {

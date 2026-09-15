@@ -33,6 +33,8 @@ export const listSchoolSessionsInputSchema = createListInputSchema({
   filters: z
     .object({
       isActive: z.boolean().optional(),
+      startYears: z.array(z.number().int()).optional(),
+      endYears: z.array(z.number().int()).optional(),
     })
     .optional(),
   orderBy: z
@@ -51,6 +53,16 @@ export const listSchoolSessionsInputSchema = createListInputSchema({
 export const listSchoolSessionsOutputSchema = createPaginatedOutputSchema(
   schoolSessionDtoSchema,
 );
+
+export const sessionFilterOptionsOutputSchema = z.object({
+  startYears: z.array(z.number().int()),
+  endYears: z.array(z.number().int()),
+});
+
+export type SessionFilterOptions = z.infer<
+  typeof sessionFilterOptionsOutputSchema
+>;
+
 
 export const schoolSessionIdInputSchema = z.object({
   schoolId: z.string().min(1),

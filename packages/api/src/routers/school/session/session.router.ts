@@ -1,7 +1,8 @@
 import { schoolSessionTable } from '@campuspilot/db/schema/session';
 import { schoolTable } from '@campuspilot/db/schema/school';
 import { SCHOOL_ACTIONS } from '@campuspilot/opa/policies/school';
-import { and, asc, count, desc, eq } from 'drizzle-orm';
+import { and, asc, count, desc, eq, inArray } from 'drizzle-orm';
+import { z } from 'zod';
 
 import { rpcError, toRpcError } from '../../../errors';
 import { protectedProcedure } from '../../../index';
@@ -17,9 +18,11 @@ import {
   listSchoolSessionsOutputSchema,
   schoolSessionDtoSchema,
   schoolSessionIdInputSchema,
+  sessionFilterOptionsOutputSchema,
   toSchoolSessionDto,
   updateSchoolSessionInputSchema,
 } from './session.dto';
+
 
 export const schoolSessionRouter = {
   listSessions: protectedProcedure
@@ -39,10 +42,27 @@ export const schoolSessionRouter = {
           input.filters?.isActive === undefined
             ? undefined
             : eq(schoolSessionTable.isActive, input.filters.isActive);
+        const startYearCondition =
+          input.filters?.startYears && input.filters.startYears.length > 0
+            ? inArray(
+                schoolSessionTable.sessionStartYear,
+                input.filters.startYears,
+              )
+            : undefined;
+        const endYearCondition =
+          input.filters?.endYears && input.filters.endYears.length > 0
+            ? inArray(
+                schoolSessionTable.sessionEndYear,
+                input.filters.endYears,
+              )
+            : undefined;
         const where = and(
           eq(schoolSessionTable.schoolId, input.schoolId),
           activeCondition,
+          startYearCondition,
+          endYearCondition,
         );
+
         const orderByColumn = {
           sessionStartYear: schoolSessionTable.sessionStartYear,
           sessionEndYear: schoolSessionTable.sessionEndYear,
@@ -291,4 +311,39 @@ export const schoolSessionRouter = {
         throw toRpcError(error);
       }
     }),
+
+  listSessionFilterOptions: protectedProcedure
+    .route({
+      summary: 'List available session filter options',
+      description:
+        'List distinct start and end years for academic sessions within a school. Requires permission to list sessions in that school.',
+      tags: ['School', 'Sessions'],
+    })
+    .input(z.object({ schoolId: z.string().min(1) }))
+    .use(requireSchoolPermission(SCHOOL_ACTIONS.LIST_SESSIONS))
+    .output(sessionFilterOptionsOutputSchema)
+    .handler(async ({ context, input }) => {
+      try {
+        const rows = await context.db
+          .select({
+            sessionStartYear: schoolSessionTable.sessionStartYear,
+            sessionEndYear: schoolSessionTable.sessionEndYear,
+          })
+          .from(schoolSessionTable)
+          .where(eq(schoolSessionTable.schoolId, input.schoolId))
+          .orderBy(desc(schoolSessionTable.sessionStartYear));
+
+        const startYears = Array.from(
+          new Set(rows.map((r) => r.sessionStartYear)),
+        ).sort((a, b) => b - a);
+        const endYears = Array.from(
+          new Set(rows.map((r) => r.sessionEndYear)),
+        ).sort((a, b) => b - a);
+
+        return { startYears, endYears };
+      } catch (error) {
+        throw toRpcError(error);
+      }
+    }),
 };
+

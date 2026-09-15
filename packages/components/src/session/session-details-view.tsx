@@ -66,78 +66,106 @@ export function SessionDetailsView({
   const [draftFinanceConfig, setDraftFinanceConfig] =
     useState<FinanceSchemaConfig | null>(() => session.financeConfig);
 
-  // Compute dirty status by serializing the drafts against baseline props
-  const isDirty = useMemo(() => {
-    const originalSessionNormalized = normalizeSessionConfig(session.sessionConfig);
-    const draftSessionNormalized = normalizeSessionConfig(draftSessionConfig);
+  function computeDirty(
+    nextSession: SessionConfig | null,
+    nextFinance: FinanceSchemaConfig | null,
+  ) {
+    const originalSessionNormalized = normalizeSessionConfig(
+      session.sessionConfig,
+    );
+    const draftSessionNormalized = normalizeSessionConfig(nextSession);
     const sessionConfigChanged =
       JSON.stringify(originalSessionNormalized) !==
       JSON.stringify(draftSessionNormalized);
 
     const financeConfigChanged =
-      JSON.stringify(session.financeConfig) !==
-      JSON.stringify(draftFinanceConfig);
+      JSON.stringify(session.financeConfig) !== JSON.stringify(nextFinance);
 
-    const dirty = sessionConfigChanged || financeConfigChanged;
-    onDirtyChange?.(dirty);
-    return dirty;
+    return sessionConfigChanged || financeConfigChanged;
+  }
+
+  // Compute dirty status by serializing the drafts against baseline props
+  const isDirty = useMemo(() => {
+    return computeDirty(draftSessionConfig, draftFinanceConfig);
   }, [
     session.sessionConfig,
     session.financeConfig,
     draftSessionConfig,
     draftFinanceConfig,
-    onDirtyChange,
   ]);
+
+  function notifyDirty(
+    nextSession: SessionConfig | null,
+    nextFinance: FinanceSchemaConfig | null,
+  ) {
+    onDirtyChange?.(computeDirty(nextSession, nextFinance));
+  }
 
   function handleReset() {
     setDraftSessionConfig(session.sessionConfig);
     setDraftFinanceConfig(session.financeConfig);
+    onDirtyChange?.(false);
   }
 
   function handleExamConfigChange(
     nextExamConfig: Record<string, ExamDefinition>,
   ) {
-    setDraftSessionConfig((prev) => ({
+    const nextSession: SessionConfig = {
       examConfig: nextExamConfig,
-      coScholasticAreas: prev?.coScholasticAreas ?? {},
-      gradingScale: prev?.gradingScale ?? {},
-      attendanceTracking: prev?.attendanceTracking ?? { enabled: false },
-    }));
+      coScholasticAreas: draftSessionConfig?.coScholasticAreas ?? {},
+      gradingScale: draftSessionConfig?.gradingScale ?? {},
+      attendanceTracking: draftSessionConfig?.attendanceTracking ?? {
+        enabled: false,
+      },
+    };
+    setDraftSessionConfig(nextSession);
+    notifyDirty(nextSession, draftFinanceConfig);
   }
 
   function handleCoScholasticChange(
     nextAreas: Record<string, CoScholasticArea>,
   ) {
-    setDraftSessionConfig((prev) => ({
-      examConfig: prev?.examConfig ?? {},
+    const nextSession: SessionConfig = {
+      examConfig: draftSessionConfig?.examConfig ?? {},
       coScholasticAreas: nextAreas,
-      gradingScale: prev?.gradingScale ?? {},
-      attendanceTracking: prev?.attendanceTracking ?? { enabled: false },
-    }));
+      gradingScale: draftSessionConfig?.gradingScale ?? {},
+      attendanceTracking: draftSessionConfig?.attendanceTracking ?? {
+        enabled: false,
+      },
+    };
+    setDraftSessionConfig(nextSession);
+    notifyDirty(nextSession, draftFinanceConfig);
   }
 
   function handleGradingScaleChange(
     nextScale: Record<string, GradeDefinition>,
   ) {
-    setDraftSessionConfig((prev) => ({
-      examConfig: prev?.examConfig ?? {},
-      coScholasticAreas: prev?.coScholasticAreas ?? {},
+    const nextSession: SessionConfig = {
+      examConfig: draftSessionConfig?.examConfig ?? {},
+      coScholasticAreas: draftSessionConfig?.coScholasticAreas ?? {},
       gradingScale: nextScale,
-      attendanceTracking: prev?.attendanceTracking ?? { enabled: false },
-    }));
+      attendanceTracking: draftSessionConfig?.attendanceTracking ?? {
+        enabled: false,
+      },
+    };
+    setDraftSessionConfig(nextSession);
+    notifyDirty(nextSession, draftFinanceConfig);
   }
 
   function handleAttendanceChange(enabled: boolean) {
-    setDraftSessionConfig((prev) => ({
-      examConfig: prev?.examConfig ?? {},
-      coScholasticAreas: prev?.coScholasticAreas ?? {},
-      gradingScale: prev?.gradingScale ?? {},
+    const nextSession: SessionConfig = {
+      examConfig: draftSessionConfig?.examConfig ?? {},
+      coScholasticAreas: draftSessionConfig?.coScholasticAreas ?? {},
+      gradingScale: draftSessionConfig?.gradingScale ?? {},
       attendanceTracking: { enabled },
-    }));
+    };
+    setDraftSessionConfig(nextSession);
+    notifyDirty(nextSession, draftFinanceConfig);
   }
 
   function handleFinanceChange(nextFinance: FinanceSchemaConfig | null) {
     setDraftFinanceConfig(nextFinance);
+    notifyDirty(draftSessionConfig, nextFinance);
   }
 
   async function handleSubmitSave() {
@@ -146,7 +174,9 @@ export function SessionDetailsView({
       sessionConfig: draftSessionConfig,
       financeConfig: draftFinanceConfig,
     });
+    onDirtyChange?.(false);
   }
+
 
   return (
     <div className="flex flex-col gap-6">
