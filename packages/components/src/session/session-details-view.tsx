@@ -4,9 +4,7 @@ import { useMemo, useState } from 'react';
 import { Badge } from '@campuspilot/ui/components/badge';
 import { Button } from '@campuspilot/ui/components/button';
 import {
-  Calendar,
   CheckCircle2,
-  Clock,
   LoaderCircle,
   Save,
   Undo2,
@@ -33,6 +31,8 @@ export interface SessionDetailsViewProps {
     financeConfig: FinanceSchemaConfig | null;
   }) => Promise<void> | void;
   onDirtyChange?: (isDirty: boolean) => void;
+  onActivate?: () => void;
+  isActivating?: boolean;
 }
 
 /**
@@ -51,14 +51,16 @@ function normalizeSessionConfig(config: SessionConfig | null | undefined) {
 
 /**
  * Presentation and editing view for an academic session.
- * Renders the 5 core sections in order: Examinations, Co-scholastics, Grading Scale,
- * Attendance, and Finance, wrapped in clean bordered divs.
+ * Renders the top session status & save toolbar followed by the 5 core sections:
+ * Examinations, Co-scholastics, Grading Scale, Attendance, and Finance.
  */
 export function SessionDetailsView({
   session,
-  isSaving = false,
+  isSaving,
   onSave,
   onDirtyChange,
+  onActivate,
+  isActivating,
 }: SessionDetailsViewProps) {
   const [draftSessionConfig, setDraftSessionConfig] = useState<SessionConfig | null>(
     () => session.sessionConfig,
@@ -180,33 +182,36 @@ export function SessionDetailsView({
 
   return (
     <div className="flex flex-col gap-6">
-      {/* Session Banner / Action Bar */}
-      <div className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4 sm:flex-row sm:items-center sm:justify-between">
+      {/* Session Page Header: Title, Active Status & Save Controls */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">
-          <div className="flex size-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
-            <Calendar className="size-5" />
-          </div>
-          <div className="flex flex-col gap-0.5">
-            <div className="flex items-center gap-2">
-              <h1 className="text-base font-semibold tracking-tight text-foreground">
-                Academic Year {session.sessionStartYear}&ndash;{session.sessionEndYear}
-              </h1>
-              {session.isActive ? (
-                <Badge variant="default" className="gap-1 bg-emerald-600 text-[10px] hover:bg-emerald-600/90 dark:bg-emerald-500">
-                  <CheckCircle2 className="size-3" />
-                  Active session
-                </Badge>
+          <h1 className="text-xl font-semibold tracking-tight text-foreground">
+            Academic Session {session.sessionStartYear}&ndash;{session.sessionEndYear}
+          </h1>
+
+          {session.isActive ? (
+            <Badge
+              variant="outline"
+              className="border-emerald-500/30 text-[10px] text-emerald-600 dark:text-emerald-400"
+            >
+              Active
+            </Badge>
+          ) : onActivate ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="xs"
+              disabled={isActivating}
+              onClick={onActivate}
+            >
+              {isActivating ? (
+                <LoaderCircle className="size-3 animate-spin" />
               ) : (
-                <Badge variant="secondary" className="gap-1 text-[10px]">
-                  <Clock className="size-3" />
-                  Inactive
-                </Badge>
+                <CheckCircle2 className="size-3 text-emerald-600" />
               )}
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Manage evaluations, ECA criteria, grade scales, and financial schemas for this academic term.
-            </p>
-          </div>
+              Set as active
+            </Button>
+          ) : null}
         </div>
 
         <div className="flex items-center gap-2 self-end sm:self-auto">

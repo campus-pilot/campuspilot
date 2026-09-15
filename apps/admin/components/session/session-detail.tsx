@@ -20,7 +20,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@campuspilot/ui/components/alert-dialog';
-import { Badge } from '@campuspilot/ui/components/badge';
 import { Button } from '@campuspilot/ui/components/button';
 import {
   Empty,
@@ -28,14 +27,10 @@ import {
   EmptyHeader,
   EmptyTitle,
 } from '@campuspilot/ui/components/empty';
-import {
-  CalendarDays,
-  CheckCircle2,
-  LoaderCircle,
-  Trash2,
-} from 'lucide-react';
+import { LoaderCircle, Trash2 } from 'lucide-react';
 import { schoolHref } from '@/app/(protected)/school/[schoolId]/school-route';
 import { client, orpc } from '@/lib/orpc';
+
 
 export function SessionDetail({
   schoolId,
@@ -48,20 +43,71 @@ export function SessionDetail({
   const queryClient = useQueryClient();
   const [isDirty, setIsDirty] = useState(false);
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
+  const [pendingNavigationUrl, setPendingNavigationUrl] = useState<
+    string | null
+  >(null);
 
   /**
-   * User-approved beforeunload listener: Warns user on accidental browser reload
-   * or tab close if there are pending unsaved changes.
+   * User-approved navigation interceptor:
+   * Prevents losing unsaved session changes on link clicks, browser history navigation, or tab reload.
    */
   useEffect(() => {
     if (!isDirty) return;
+
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
       event.preventDefault();
       event.returnValue = '';
     };
+
+    const handleDocumentClick = (event: MouseEvent) => {
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+        return;
+      }
+
+      const target = event.target as HTMLElement | null;
+      const anchor = target?.closest('a') as HTMLAnchorElement | null;
+      if (!anchor || !anchor.href) return;
+
+      if (
+        anchor.href.startsWith('mailto:') ||
+        anchor.href.startsWith('tel:') ||
+        anchor.href.startsWith('javascript:')
+      ) {
+        return;
+      }
+
+      const url = new URL(anchor.href, window.location.href);
+      if (
+        url.origin === window.location.origin &&
+        url.pathname === window.location.pathname &&
+        url.search === window.location.search
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      setPendingNavigationUrl(anchor.href);
+    };
+
+    const handlePopState = () => {
+      window.history.pushState(null, '', window.location.href);
+      setPendingNavigationUrl('BACK');
+    };
+
     window.addEventListener('beforeunload', handleBeforeUnload);
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+    document.addEventListener('click', handleDocumentClick, { capture: true });
+    window.addEventListener('popstate', handlePopState);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      document.removeEventListener('click', handleDocumentClick, {
+        capture: true,
+      });
+      window.removeEventListener('popstate', handlePopState);
+    };
   }, [isDirty]);
+
 
   const sessionQuery = useQuery(
     orpc.school.getSession.queryOptions({
@@ -171,66 +217,44 @@ export function SessionDetail({
 
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
-      {/* Top Toolbar: Session Status and Actions */}
-      <div className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-3">
-          <CalendarDays className="size-4 text-muted-foreground" />
-          <span className="text-sm font-semibold tracking-tight">
-            Academic session {session.sessionStartYear}&ndash;{session.sessionEndYear}
-          </span>
-
-          {session.isActive ? (
-            <Badge
-              variant="outline"
-              className="border-emerald-500/30 text-[10px] text-emerald-600 dark:text-emerald-400"
-            >
-              Active
-            </Badge>
-          ) : (
-            <Button
-              type="button"
-              variant="outline"
-              size="xs"
-              disabled={activateSessionMutation.isPending}
-              onClick={() => activateSessionMutation.mutate()}
-            >
-              {activateSessionMutation.isPending ? (
-                <LoaderCircle className="size-3 animate-spin" />
-              ) : (
-                <CheckCircle2 className="size-3 text-emerald-600" />
-              )}
-              Set as active
-            </Button>
-          )}
-        </div>
-
-        <div className="flex items-center gap-2">
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-            onClick={() => setIsDeleteOpen(true)}
-          >
-            <Trash2 className="size-3.5" />
-            Delete
-          </Button>
-        </div>
-      </div>
-
       {/* Main Session View & Editor */}
       <SessionDetailsView
         key={session.id}
         session={session as SchoolSessionDto}
         isSaving={updateSessionMutation.isPending}
+        isActivating={activateSessionMutation.isPending}
+        onActivate={() => activateSessionMutation.mutate()}
         onSave={async (updates) => {
           await updateSessionMutation.mutateAsync(updates);
         }}
         onDirtyChange={setIsDirty}
       />
 
+      {/* Danger Zone: Delete Session at the lowermost portion */}
+      <div className="flex flex-col gap-3 rounded-xl border border-destructive/20 bg-destructive/5 p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-1">
+          <h3 className="text-sm font-semibold text-destructive">
+            Delete academic session
+          </h3>
+          <p className="text-xs text-muted-foreground">
+            Permanently remove session {session.sessionStartYear}&ndash;{session.sessionEndYear} and its associated configurations. This action cannot be undone.
+          </p>
+        </div>
+        <Button
+          type="button"
+          variant="destructive"
+          size="sm"
+          className="w-fit shrink-0 gap-1.5"
+          onClick={() => setIsDeleteOpen(true)}
+        >
+          <Trash2 className="size-3.5" />
+          <span>Delete session</span>
+        </Button>
+      </div>
+
       {/* Delete Session Confirmation */}
       <AlertDialog open={isDeleteOpen} onOpenChange={setIsDeleteOpen}>
+
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
@@ -259,6 +283,25 @@ export function SessionDetail({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Unsaved Changes Confirmation Dialog */}
+      <UnsavedChangesDialog
+        open={Boolean(pendingNavigationUrl)}
+        onOpenChange={(open) => {
+          if (!open) setPendingNavigationUrl(null);
+        }}
+        onConfirmDiscard={() => {
+          const target = pendingNavigationUrl;
+          setPendingNavigationUrl(null);
+          setIsDirty(false);
+          if (target === 'BACK') {
+            window.history.back();
+          } else if (target) {
+            router.push(target);
+          }
+        }}
+      />
     </div>
   );
 }
+
