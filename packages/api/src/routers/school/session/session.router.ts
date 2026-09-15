@@ -1,16 +1,16 @@
-import { schoolSessionTable } from "@campuspilot/db/schema/session";
-import { schoolTable } from "@campuspilot/db/schema/school";
-import { SCHOOL_ACTIONS } from "@campuspilot/opa/policies/school";
-import { and, asc, count, desc, eq } from "drizzle-orm";
+import { schoolSessionTable } from '@campuspilot/db/schema/session';
+import { schoolTable } from '@campuspilot/db/schema/school';
+import { SCHOOL_ACTIONS } from '@campuspilot/opa/policies/school';
+import { and, asc, count, desc, eq } from 'drizzle-orm';
 
-import { rpcError, toRpcError } from "../../../errors";
-import { protectedProcedure } from "../../../index";
+import { rpcError, toRpcError } from '../../../errors';
+import { protectedProcedure } from '../../../index';
 import {
   createNextPageCursor,
   createPaginatedResult,
   resolvePaginationInput,
-} from "../../../paginations";
-import { requireSchoolPermission } from "../../../permissions/school";
+} from '../../../paginations';
+import { requireSchoolPermission } from '../../../permissions/school';
 import {
   createSchoolSessionInputSchema,
   listSchoolSessionsInputSchema,
@@ -19,15 +19,15 @@ import {
   schoolSessionIdInputSchema,
   toSchoolSessionDto,
   updateSchoolSessionInputSchema,
-} from "./session.dto";
+} from './session.dto';
 
 export const schoolSessionRouter = {
   listSessions: protectedProcedure
     .route({
-      summary: "List school sessions",
+      summary: 'List school sessions',
       description:
         "List a school's academic sessions with pagination, active-status filtering, and deterministic sorting. Requires permission to list sessions in that school.",
-      tags: ["School", "Sessions"],
+      tags: ['School', 'Sessions'],
     })
     .input(listSchoolSessionsInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.LIST_SESSIONS))
@@ -49,7 +49,7 @@ export const schoolSessionRouter = {
           createdAt: schoolSessionTable.createdAt,
           updatedAt: schoolSessionTable.updatedAt,
         }[input.orderBy.field];
-        const orderDirection = input.orderBy.direction === "asc" ? asc : desc;
+        const orderDirection = input.orderBy.direction === 'asc' ? asc : desc;
 
         const [sessions, totalRows] = await Promise.all([
           context.db
@@ -85,10 +85,10 @@ export const schoolSessionRouter = {
 
   getSession: protectedProcedure
     .route({
-      summary: "Get a school session",
+      summary: 'Get a school session',
       description:
-        "Get one academic session by school and session identifier. Requires permission to read sessions in that school.",
-      tags: ["School", "Sessions"],
+        'Get one academic session by school and session identifier. Requires permission to read sessions in that school.',
+      tags: ['School', 'Sessions'],
     })
     .input(schoolSessionIdInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_SESSION))
@@ -105,7 +105,7 @@ export const schoolSessionRouter = {
             ),
           )
           .limit(1);
-        if (!session) throw rpcError.notFound("School session");
+        if (!session) throw rpcError.notFound('School session');
         return toSchoolSessionDto(session);
       } catch (error) {
         throw toRpcError(error);
@@ -114,10 +114,10 @@ export const schoolSessionRouter = {
 
   createSession: protectedProcedure
     .route({
-      summary: "Create a school session",
+      summary: 'Create a school session',
       description:
-        "Create an academic session for a school with explicit year boundaries and optional session and finance configuration. Requires permission to create sessions in that school.",
-      tags: ["School", "Sessions"],
+        'Create an academic session for a school with explicit year boundaries and optional session and finance configuration. Requires permission to create sessions in that school.',
+      tags: ['School', 'Sessions'],
     })
     .input(createSchoolSessionInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.CREATE_SESSION))
@@ -130,7 +130,7 @@ export const schoolSessionRouter = {
           .from(schoolTable)
           .where(eq(schoolTable.id, schoolId))
           .limit(1);
-        if (!school) throw rpcError.notFound("School");
+        if (!school) throw rpcError.notFound('School');
 
         const [session] = await context.db
           .insert(schoolSessionTable)
@@ -145,10 +145,10 @@ export const schoolSessionRouter = {
 
   updateSession: protectedProcedure
     .route({
-      summary: "Update a school session",
+      summary: 'Update a school session',
       description:
-        "Update explicitly supplied academic-session fields while validating year boundaries against stored values. Requires permission to update sessions in that school.",
-      tags: ["School", "Sessions"],
+        'Update explicitly supplied academic-session fields while validating year boundaries against stored values. Requires permission to update sessions in that school.',
+      tags: ['School', 'Sessions'],
     })
     .input(updateSchoolSessionInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.UPDATE_SESSION))
@@ -169,7 +169,7 @@ export const schoolSessionRouter = {
             ),
           )
           .limit(1);
-        if (!existingSession) throw rpcError.notFound("School session");
+        if (!existingSession) throw rpcError.notFound('School session');
 
         // Partial year updates are validated against the stored counterpart so
         // the API never infers one academic boundary from the other.
@@ -179,7 +179,7 @@ export const schoolSessionRouter = {
           changes.sessionEndYear ?? existingSession.sessionEndYear;
         if (sessionEndYear <= sessionStartYear) {
           throw rpcError.badRequest(
-            "Session end year must be after its start year.",
+            'Session end year must be after its start year.',
           );
         }
 
@@ -193,7 +193,7 @@ export const schoolSessionRouter = {
             ),
           )
           .returning();
-        if (!session) throw rpcError.notFound("School session");
+        if (!session) throw rpcError.notFound('School session');
         return toSchoolSessionDto(session);
       } catch (error) {
         throw toRpcError(error);
@@ -202,10 +202,10 @@ export const schoolSessionRouter = {
 
   deleteSession: protectedProcedure
     .route({
-      summary: "Delete a school session",
+      summary: 'Delete a school session',
       description:
-        "Permanently delete an academic session from a school. Requires permission to delete sessions in that school.",
-      tags: ["School", "Sessions"],
+        'Permanently delete an academic session from a school. Requires permission to delete sessions in that school.',
+      tags: ['School', 'Sessions'],
     })
     .input(schoolSessionIdInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.DELETE_SESSION))
@@ -221,7 +221,7 @@ export const schoolSessionRouter = {
             ),
           )
           .returning();
-        if (!session) throw rpcError.notFound("School session");
+        if (!session) throw rpcError.notFound('School session');
         return toSchoolSessionDto(session);
       } catch (error) {
         throw toRpcError(error);
@@ -230,10 +230,10 @@ export const schoolSessionRouter = {
 
   activateSession: protectedProcedure
     .route({
-      summary: "Activate a school session",
+      summary: 'Activate a school session',
       description:
-        "Atomically activate one academic session and deactivate the school's currently active session. Requires permission to activate sessions in that school.",
-      tags: ["School", "Sessions"],
+        "Atomically activate one academic session and deactivate the school's currently active session.",
+      tags: ['School', 'Sessions'],
     })
     .input(schoolSessionIdInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.ACTIVATE_SESSION))
@@ -247,9 +247,9 @@ export const schoolSessionRouter = {
             .select({ id: schoolTable.id })
             .from(schoolTable)
             .where(eq(schoolTable.id, input.schoolId))
-            .for("update")
+            .for('update')
             .limit(1);
-          if (!school) throw rpcError.notFound("School");
+          if (!school) throw rpcError.notFound('School');
 
           const [targetSession] = await transaction
             .select({ id: schoolSessionTable.id })
@@ -261,7 +261,7 @@ export const schoolSessionRouter = {
               ),
             )
             .limit(1);
-          if (!targetSession) throw rpcError.notFound("School session");
+          if (!targetSession) throw rpcError.notFound('School session');
 
           const activatedAt = new Date();
           await transaction
@@ -284,7 +284,7 @@ export const schoolSessionRouter = {
               ),
             )
             .returning();
-          if (!session) throw rpcError.notFound("School session");
+          if (!session) throw rpcError.notFound('School session');
           return toSchoolSessionDto(session);
         });
       } catch (error) {

@@ -11,7 +11,6 @@ import {
   LayoutDashboard,
   Settings,
   Sparkles,
-  UserRoundCog,
   Users,
 } from 'lucide-react';
 import { AdminShell, type AdminShellState } from '@/components/admin-shell';
@@ -23,7 +22,6 @@ import { staffPage } from './staff/_route';
 import { studentsPage } from './students/_route';
 import { aiUsagePage } from './usage/ai/_route';
 import { featureFlagsPage } from './usage/feature-flags/_route';
-import { staffUsagePage } from './usage/staff/_route';
 import { storageUsagePage } from './usage/storage/_route';
 import { schoolHref, type SchoolRouteParams } from './school-route';
 
@@ -34,7 +32,6 @@ const pages = [
   studentsPage,
   aiUsagePage,
   storageUsagePage,
-  staffUsagePage,
   featureFlagsPage,
   settingsPage,
 ];
@@ -54,9 +51,27 @@ function navigationFor(schoolId: string): AppShellNavigationEntry[] {
           icon: LayoutDashboard,
           match: 'exact',
         },
-        { type: 'item', id: 'sessions', label: 'Sessions', href: schoolHref(schoolId, '/sessions'), icon: CalendarDays },
-        { type: 'item', id: 'staff', label: 'Staff', href: schoolHref(schoolId, '/staff'), icon: Users },
-        { type: 'item', id: 'students', label: 'Students', href: schoolHref(schoolId, '/students'), icon: GraduationCap },
+        {
+          type: 'item',
+          id: 'sessions',
+          label: 'Sessions',
+          href: schoolHref(schoolId, '/sessions'),
+          icon: CalendarDays,
+        },
+        {
+          type: 'item',
+          id: 'staff',
+          label: 'Staff',
+          href: schoolHref(schoolId, '/staff'),
+          icon: Users,
+        },
+        {
+          type: 'item',
+          id: 'students',
+          label: 'Students',
+          href: schoolHref(schoolId, '/students'),
+          icon: GraduationCap,
+        },
       ],
     },
     {
@@ -64,10 +79,27 @@ function navigationFor(schoolId: string): AppShellNavigationEntry[] {
       id: 'usage',
       label: 'Usage',
       items: [
-        { type: 'item', id: 'ai-usage', label: 'AI', href: schoolHref(schoolId, '/usage/ai'), icon: Sparkles },
-        { type: 'item', id: 'storage-usage', label: 'Storage', href: schoolHref(schoolId, '/usage/storage'), icon: Database },
-        { type: 'item', id: 'staff-usage', label: 'Staff', href: schoolHref(schoolId, '/usage/staff'), icon: UserRoundCog },
-        { type: 'item', id: 'feature-flags', label: 'Feature Flags', href: schoolHref(schoolId, '/usage/feature-flags'), icon: Flag },
+        {
+          type: 'item',
+          id: 'ai-usage',
+          label: 'AI',
+          href: schoolHref(schoolId, '/usage/ai'),
+          icon: Sparkles,
+        },
+        {
+          type: 'item',
+          id: 'storage-usage',
+          label: 'Storage',
+          href: schoolHref(schoolId, '/usage/storage'),
+          icon: Database,
+        },
+        {
+          type: 'item',
+          id: 'feature-flags',
+          label: 'Feature Flags',
+          href: schoolHref(schoolId, '/usage/feature-flags'),
+          icon: Flag,
+        },
       ],
     },
     {
