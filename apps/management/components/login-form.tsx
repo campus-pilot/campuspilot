@@ -19,7 +19,9 @@ import {
   FieldSeparator,
 } from '@campuspilot/ui/components/field';
 import { Input } from '@campuspilot/ui/components/input';
-import { ArrowRight, CircleUserRound, LockKeyhole } from 'lucide-react';
+import { BrandLogo } from '@campuspilot/components/brand-logo';
+import { SiGoogle } from '@icons-pack/react-simple-icons';
+import { ArrowRight } from 'lucide-react';
 import { authClient } from '@/lib/auth-client';
 import { AuthLoading } from './auth-loading';
 
@@ -50,7 +52,11 @@ const loginSchema = z
     }
   });
 
-export function LoginForm() {
+/**
+ * The sign-in route is explicit so alternate login presentations return to
+ * their own screen when an external provider reports an error.
+ */
+export function LoginForm({ signInPath = '/auth/login' }: { signInPath?: string }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { data: session, isPending } = authClient.useSession();
@@ -74,7 +80,7 @@ export function LoginForm() {
           callbackURL: buildAuthCallbackURL(window.location.origin, redirectPath),
           errorCallbackURL: buildAuthCallbackURL(
             window.location.origin,
-            buildSignInRedirectPath(redirectPath, '/auth/login'),
+            buildSignInRedirectPath(redirectPath, signInPath),
           ),
         });
 
@@ -114,15 +120,10 @@ export function LoginForm() {
   return (
     <div className="flex flex-col gap-8">
       <div className="flex flex-col gap-3">
-        <span className="grid size-11 place-items-center rounded-xl bg-primary/10 text-primary">
-          <LockKeyhole className="size-5" aria-hidden="true" />
-        </span>
-        <div className="flex flex-col gap-1.5">
-          <h2 className="text-3xl font-semibold tracking-[-0.03em]">Welcome back</h2>
-          <p className="text-sm leading-6 text-muted-foreground">
-            Enter your school account details to continue.
-          </p>
-        </div>
+        <BrandLogo />
+        <p className="text-sm leading-6 text-muted-foreground">
+          Enter your school account details to continue.
+        </p>
       </div>
 
       <form
@@ -214,7 +215,7 @@ export function LoginForm() {
                   void form.handleSubmit();
                 }}
               >
-                <CircleUserRound className="size-4" aria-hidden="true" />
+                <SiGoogle className="size-4" aria-hidden="true" />
                 {isSubmitting && method === 'google'
                   ? 'Opening Google…'
                   : 'Continue with Google'}
