@@ -1,12 +1,14 @@
 import { createEnv } from '@t3-oss/env-core';
 import { z } from 'zod';
 
-// contains env for building apps/web
+// Environment exposed to the statically exported management application.
 export const env = createEnv({
-  clientPrefix: 'VITE_',
+  clientPrefix: 'NEXT_PUBLIC_',
   client: {
-    VITE_SERVER_URL: z.url(),
+    NEXT_PUBLIC_SERVER_URL: z.url(),
   },
-  runtimeEnv: (import.meta as any).env,
+  runtimeEnv: {
+    NEXT_PUBLIC_SERVER_URL: process.env.NEXT_PUBLIC_SERVER_URL,
+  },
   emptyStringAsUndefined: true,
 });

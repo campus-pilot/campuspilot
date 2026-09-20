@@ -5,8 +5,11 @@ import { TooltipProvider } from '@campuspilot/ui/components/tooltip';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Management',
-  description: 'CampusPilot management application',
+  title: {
+    default: 'CampusPilot Management',
+    template: '%s | CampusPilot',
+  },
+  description: 'Run your school from one secure CampusPilot workspace.',
 };
 
 export default function RootLayout({
@@ -14,7 +17,7 @@ export default function RootLayout({
 }: Readonly<{ children: ReactNode }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body>
+      <body className="min-h-screen bg-background antialiased">
         <ThemeProvider
           attribute="class"
           defaultTheme="system"

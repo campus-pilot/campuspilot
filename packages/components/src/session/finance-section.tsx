@@ -27,12 +27,7 @@ import {
   NativeSelect,
   NativeSelectOption,
 } from '@campuspilot/ui/components/native-select';
-import {
-  Pencil,
-  Plus,
-  Sparkles,
-  Trash2,
-} from 'lucide-react';
+import { Pencil, Plus, Sparkles, Trash2 } from 'lucide-react';
 import {
   DEFAULT_FINANCE_CONFIG,
   EXAMPLE_ELEMENTS,
@@ -53,7 +48,10 @@ const elementFormSchema = z
       .string()
       .trim()
       .min(1, 'Element slug is required')
-      .regex(/^[a-z0-9_]+$/, 'Slug can only contain lowercase letters, numbers, and underscores'),
+      .regex(
+        /^[a-z0-9_]+$/,
+        'Slug can only contain lowercase letters, numbers, and underscores',
+      ),
     scopes: z
       .array(z.enum(['school', 'class', 'student']))
       .min(1, 'Select at least one scope'),
@@ -122,14 +120,23 @@ function FeeElementDialog({
       name: initialValues?.element.name ?? '',
       slug: initialValues?.slug ?? '',
       scopes: initialValues?.element.scopes ?? (['class'] as FinanceScope[]),
-      requiredAtLevel: (initialValues?.element.requiredAtLevel ??
-        'none') as 'school' | 'class' | 'student' | 'bill_generation' | 'none',
+      requiredAtLevel: (initialValues?.element.requiredAtLevel ?? 'none') as
+        | 'school'
+        | 'class'
+        | 'student'
+        | 'bill_generation'
+        | 'none',
       defaultValue: initialValues?.element.defaultValue,
     } as {
       name: string;
       slug: string;
       scopes: FinanceScope[];
-      requiredAtLevel: 'school' | 'class' | 'student' | 'bill_generation' | 'none';
+      requiredAtLevel:
+        | 'school'
+        | 'class'
+        | 'student'
+        | 'bill_generation'
+        | 'none';
       defaultValue?: number;
     },
     validators: {
@@ -173,7 +180,8 @@ function FeeElementDialog({
             {isEditing ? 'Edit fee element' : 'Add fee element'}
           </DialogTitle>
           <DialogDescription>
-            Configure where this fee is assigned and whether a default amount applies.
+            Configure where this fee is assigned and whether a default amount
+            applies.
           </DialogDescription>
         </DialogHeader>
         <form
@@ -239,10 +247,15 @@ function FeeElementDialog({
                             checked={isChecked}
                             onCheckedChange={(checked) => {
                               if (checked) {
-                                field.handleChange([...field.state.value, opt.value]);
+                                field.handleChange([
+                                  ...field.state.value,
+                                  opt.value,
+                                ]);
                               } else {
                                 field.handleChange(
-                                  field.state.value.filter((s: FinanceScope) => s !== opt.value),
+                                  field.state.value.filter(
+                                    (s: FinanceScope) => s !== opt.value,
+                                  ),
                                 );
                               }
                             }}
@@ -275,10 +288,16 @@ function FeeElementDialog({
                       )
                     }
                   >
-                    <NativeSelectOption value="none">Optional / None</NativeSelectOption>
-                    <NativeSelectOption value="school">School</NativeSelectOption>
+                    <NativeSelectOption value="none">
+                      Optional / None
+                    </NativeSelectOption>
+                    <NativeSelectOption value="school">
+                      School
+                    </NativeSelectOption>
                     <NativeSelectOption value="class">Class</NativeSelectOption>
-                    <NativeSelectOption value="student">Student</NativeSelectOption>
+                    <NativeSelectOption value="student">
+                      Student
+                    </NativeSelectOption>
                     <NativeSelectOption value="bill_generation">
                       While Bill Generation
                     </NativeSelectOption>
@@ -436,7 +455,8 @@ export function FinanceSection({
           <EmptyHeader>
             <EmptyTitle>No finance schema configured</EmptyTitle>
             <EmptyDescription>
-              Set up fee elements and recurring billing frequency, or start with standard school fee blueprints.
+              Set up fee elements and recurring billing frequency, or start with
+              standard school fee blueprints.
             </EmptyDescription>
           </EmptyHeader>
           <EmptyContent className="flex-row gap-2">
@@ -449,11 +469,7 @@ export function FinanceSection({
               <Sparkles className="size-3.5" />
               Load example fees
             </Button>
-            <Button
-              type="button"
-              size="sm"
-              onClick={handleCreateDefault}
-            >
+            <Button type="button" size="sm" onClick={handleCreateDefault}>
               <Plus className="size-3.5" />
               Create finance schema
             </Button>
@@ -471,7 +487,8 @@ export function FinanceSection({
             Finance
           </h2>
           <p className="text-xs text-muted-foreground">
-            Define fee elements, scopes, and recurring intervals for student billing.
+            Define fee elements, scopes, and recurring intervals for student
+            billing.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -527,7 +544,8 @@ export function FinanceSection({
       {entries.length === 0 ? (
         <div className="flex flex-col gap-3 rounded-lg border border-dashed p-4 text-center">
           <p className="text-xs text-muted-foreground">
-            No fee elements added yet. Add a custom element or pick from common school fee types:
+            No fee elements added yet. Add a custom element or pick from common
+            school fee types:
           </p>
           <div className="flex flex-wrap justify-center gap-2">
             {EXAMPLE_ELEMENTS.map((item) => (
@@ -560,7 +578,9 @@ export function FinanceSection({
                 className="grid grid-cols-[1.5fr_1fr_1fr_1fr_auto] items-center px-3 py-2 text-xs"
               >
                 <div className="flex flex-col gap-0.5">
-                  <span className="font-medium text-foreground">{element.name}</span>
+                  <span className="font-medium text-foreground">
+                    {element.name}
+                  </span>
                   <span className="font-mono text-[10px] text-muted-foreground">
                     {slug}
                   </span>
@@ -583,13 +603,13 @@ export function FinanceSection({
                         element.requiredAtLevel}
                     </Badge>
                   ) : (
-                    <span className="text-muted-foreground">&mdash;</span>
+                    <span className="text-muted-foreground">-</span>
                   )}
                 </div>
                 <span className="font-mono text-xs text-foreground">
                   {element.defaultValue !== undefined
                     ? `${element.defaultValue} ${financeConfig.currency}`
-                    : '&mdash;'}
+                    : '-'}
                 </span>
                 <div className="flex items-center justify-end gap-1">
                   <Button

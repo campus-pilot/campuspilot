@@ -1,1 +1,10 @@
 @import "@campuspilot/ui/globals.css";
+
+html {
+  min-width: 320px;
+  background: var(--background);
+}
+
+body {
+  min-width: 320px;
+}
