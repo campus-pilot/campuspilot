@@ -180,8 +180,8 @@ function AreaItem({
 }: {
   slug: string;
   area: CoScholasticArea;
-  onEdit: () => void;
-  onDelete: () => void;
+  onEdit?: () => void;
+  onDelete?: () => void;
 }) {
   return (
     <div className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2 text-xs">
@@ -189,7 +189,7 @@ function AreaItem({
         <span className="font-medium text-foreground">{area.name}</span>
         <span className="font-mono text-[10px] text-muted-foreground">{slug}</span>
       </div>
-      <div className="flex items-center gap-1">
+      {onEdit && onDelete ? <div className="flex items-center gap-1">
         <Button
           type="button"
           variant="ghost"
@@ -209,14 +209,14 @@ function AreaItem({
         >
           <Trash2 className="size-3.5" />
         </Button>
-      </div>
+      </div> : null}
     </div>
   );
 }
 
 export interface CoScholasticSectionProps {
   areas: Record<string, CoScholasticArea> | null | undefined;
-  onChange: (nextAreas: Record<string, CoScholasticArea>) => void;
+  onChange?: (nextAreas: Record<string, CoScholasticArea>) => void;
 }
 
 export function CoScholasticSection({
@@ -238,13 +238,13 @@ export function CoScholasticSection({
       delete current[dialogState.editingSlug];
     }
     current[values.slug] = { name: values.name };
-    onChange(current);
+    onChange?.(current);
   }
 
   function handleDelete(slug: string) {
     const current = { ...(areas ?? {}) };
     delete current[slug];
-    onChange(current);
+    onChange?.(current);
   }
 
   function handleLoadDefaults() {
@@ -252,7 +252,7 @@ export function CoScholasticSection({
     DEFAULT_CO_SCHOLASTIC_AREAS.forEach((item) => {
       defaults[item.slug] = { name: item.name };
     });
-    onChange(defaults);
+    onChange?.(defaults);
   }
 
   return (
@@ -266,7 +266,7 @@ export function CoScholasticSection({
             Configure extra-curricular assessment areas assessed alongside academics.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        {onChange ? <div className="flex items-center gap-2">
           {isEmpty && (
             <Button
               type="button"
@@ -287,7 +287,7 @@ export function CoScholasticSection({
             <Plus className="size-3.5" />
             Add area
           </Button>
-        </div>
+        </div> : null}
       </div>
 
       {isEmpty ? (
@@ -298,7 +298,7 @@ export function CoScholasticSection({
               Add assessment areas or generate recommended defaults (Discipline, Arts, Physical Ed).
             </EmptyDescription>
           </EmptyHeader>
-          <EmptyContent className="flex-row gap-2">
+          {onChange ? <EmptyContent className="flex-row gap-2">
             <Button
               type="button"
               variant="outline"
@@ -316,7 +316,7 @@ export function CoScholasticSection({
               <Plus className="size-3.5" />
               Create area
             </Button>
-          </EmptyContent>
+          </EmptyContent> : null}
         </Empty>
       ) : (
         <div className="grid gap-2 sm:grid-cols-2">
@@ -325,14 +325,14 @@ export function CoScholasticSection({
               key={slug}
               slug={slug}
               area={area}
-              onEdit={() => setDialogState({ open: true, editingSlug: slug })}
-              onDelete={() => handleDelete(slug)}
+              onEdit={onChange ? () => setDialogState({ open: true, editingSlug: slug }) : undefined}
+              onDelete={onChange ? () => handleDelete(slug) : undefined}
             />
           ))}
         </div>
       )}
 
-      {dialogState.open && (
+      {onChange && dialogState.open && (
         <AreaDialog
           key={dialogState.editingSlug ?? 'new-area'}
           open={dialogState.open}

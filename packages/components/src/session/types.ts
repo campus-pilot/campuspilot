@@ -19,6 +19,22 @@ export interface FinanceSchemaConfig {
   elements: Record<string, FinanceElement>;
 }
 
+export type FinanceValuesMap = Record<string, number>;
+export type FinanceClassOverrides = Record<string, FinanceValuesMap>;
+
+export interface SessionFinanceClassDto {
+  slug: string;
+  label: string;
+}
+
+export interface SchoolSessionFinanceDto {
+  schoolId: string;
+  sessionId: string;
+  financeConfig: FinanceSchemaConfig | null;
+  classOverrides: FinanceClassOverrides;
+  classes: SessionFinanceClassDto[];
+}
+
 export interface ExamDefinition {
   name: string;
   order: number;
@@ -50,7 +66,6 @@ export interface SchoolSessionDto {
   sessionStartYear: number;
   sessionEndYear: number;
   sessionConfig: SessionConfig | null;
-  financeConfig: FinanceSchemaConfig | null;
   isActive: boolean;
   createdAt: Date | string | null;
   updatedAt: Date | string | null;

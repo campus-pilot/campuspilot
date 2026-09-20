@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildAuthCallbackURL,
+  buildAuthErrorPath,
   buildSignInRedirectPath,
   sanitizeAuthRedirectPath,
 } from '../redirects';
@@ -34,5 +35,11 @@ describe('authentication redirects', () => {
         '/reports/42?tab=fees',
       ),
     ).toBe('http://localhost:3003/reports/42?tab=fees');
+  });
+
+  it('routes provider errors through the auth error screen', () => {
+    expect(buildAuthErrorPath('/reports/42?tab=fees')).toBe(
+      '/auth/error?redirect=%2Freports%2F42%3Ftab%3Dfees',
+    );
   });
 });

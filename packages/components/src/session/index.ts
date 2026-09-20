@@ -1,4 +1,8 @@
 export {
+  ClassFinanceOverridesSection,
+  type ClassFinanceOverridesSectionProps,
+} from './class-finance-overrides-section';
+export {
   AttendanceSection,
   type AttendanceSectionProps,
 } from './attendance-section';
@@ -22,6 +26,10 @@ export {
   SessionDetailsView,
   type SessionDetailsViewProps,
 } from './session-details-view';
+export {
+  SessionFinanceView,
+  type SessionFinanceViewProps,
+} from './session-finance-view';
 export {
   UnsavedChangesDialog,
 } from './unsaved-changes-dialog';

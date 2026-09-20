@@ -60,8 +60,39 @@ test_admin_can_manage_and_activate_school_sessions if {
     "school.session.update",
     "school.session.delete",
     "school.session.activate",
+    "school.session.finance.read",
+    "school.session.finance.update",
   } {
     authorization.allow with input as {
+      "action": action,
+      "subject": {
+        "userId": "admin-1",
+        "roleAssignments": [{"role": "platform.admin", "scope": {"kind": "platform"}}],
+      },
+      "resource": {"kind": "school", "schoolId": "school-1"},
+    }
+  }
+}
+
+test_admin_can_read_and_update_school_details if {
+  every action in {
+    "school.details.read",
+    "school.details.update",
+  } {
+    authorization.allow with input as {
+      "action": action,
+      "subject": {
+        "userId": "admin-1",
+        "roleAssignments": [{"role": "platform.admin", "scope": {"kind": "platform"}}],
+      },
+      "resource": {"kind": "school", "schoolId": "school-1"},
+    }
+  }
+}
+
+test_admin_cannot_create_classes_or_sections_without_explicit_grants if {
+  every action in {"school.class.create", "school.section.create"} {
+    not authorization.allow with input as {
       "action": action,
       "subject": {
         "userId": "admin-1",

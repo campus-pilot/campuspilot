@@ -2,11 +2,33 @@ import { ORPCError } from "@orpc/server";
 
 type DatabaseError = {
   code?: unknown;
+  cause?: unknown;
   constraint?: unknown;
 };
 
 function isDatabaseError(error: unknown): error is DatabaseError {
   return typeof error === "object" && error !== null && "code" in error;
+}
+
+function findDatabaseError(
+  error: unknown,
+  expectedCode: string,
+): DatabaseError | undefined {
+  let current = error;
+  const visited = new Set<object>();
+
+  while (typeof current === "object" && current !== null) {
+    if (visited.has(current)) return undefined;
+    visited.add(current);
+
+    if (isDatabaseError(current) && current.code === expectedCode) {
+      return current;
+    }
+
+    current = "cause" in current ? current.cause : undefined;
+  }
+
+  return undefined;
 }
 
 export const rpcError = {
@@ -30,15 +52,20 @@ export const rpcError = {
 };
 
 /**
- * Converts infrastructure failures into stable RPC errors. PostgreSQL's 23505
- * is the canonical unique-constraint violation; all other implementation
- * details remain private behind INTERNAL_SERVER_ERROR.
+ * Converts infrastructure failures into stable RPC errors. Drizzle preserves
+ * the PostgreSQL error as a nested cause, so the cause chain is inspected for
+ * the canonical 23505 unique-constraint code. All other implementation details
+ * remain private behind INTERNAL_SERVER_ERROR.
  */
 export function toRpcError(error: unknown): ORPCError<string, unknown> {
   if (error instanceof ORPCError) return error;
 
-  if (isDatabaseError(error) && error.code === "23505") {
-    return rpcError.conflict("A resource with those unique values already exists.", error);
+  const uniqueViolation = findDatabaseError(error, "23505");
+  if (uniqueViolation) {
+    return rpcError.conflict(
+      "A resource with those unique values already exists.",
+      uniqueViolation,
+    );
   }
 
   return rpcError.internal(error);

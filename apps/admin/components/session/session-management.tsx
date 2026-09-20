@@ -7,7 +7,6 @@ import { z } from 'zod';
 import {
   SessionDetailsView,
   UnsavedChangesDialog,
-  type FinanceSchemaConfig,
   type SchoolSessionDto,
   type SessionConfig,
 } from '@campuspilot/components/session';
@@ -52,6 +51,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { client, orpc } from '@/lib/orpc';
+import { SessionFinanceSettings } from './session-finance-settings';
 
 const newSessionSchema = z
   .object({
@@ -210,10 +210,12 @@ function CreateSessionDialog({
 export function SessionManagement({ schoolId }: { schoolId: string }) {
   const queryClient = useQueryClient();
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
-  const [isDirty, setIsDirty] = useState(false);
+  const [isSessionDirty, setIsSessionDirty] = useState(false);
+  const [isFinanceDirty, setIsFinanceDirty] = useState(false);
   const [pendingSessionId, setPendingSessionId] = useState<string | null>(null);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
+  const isDirty = isSessionDirty || isFinanceDirty;
 
   /**
    * User-approved beforeunload listener: Warns user on accidental browser reload
@@ -256,21 +258,17 @@ export function SessionManagement({ schoolId }: { schoolId: string }) {
 
   // Mutations
   const updateSessionMutation = useMutation({
-    mutationFn: async (payload: {
-      sessionConfig: SessionConfig | null;
-      financeConfig: FinanceSchemaConfig | null;
-    }) => {
+    mutationFn: async (payload: { sessionConfig: SessionConfig | null }) => {
       if (!currentSession) return;
       return await client.school.updateSession({
         schoolId,
         sessionId: currentSession.id,
         sessionConfig: payload.sessionConfig,
-        financeConfig: payload.financeConfig,
       });
     },
     onSuccess: (updated) => {
       if (updated) {
-        setIsDirty(false);
+        setIsSessionDirty(false);
         void queryClient.invalidateQueries({
           queryKey: orpc.school.listSessions.queryKey({
             input: { schoolId },
@@ -293,7 +291,8 @@ export function SessionManagement({ schoolId }: { schoolId: string }) {
     },
     onSuccess: (created) => {
       setSelectedSessionId(created.id);
-      setIsDirty(false);
+      setIsSessionDirty(false);
+      setIsFinanceDirty(false);
       void queryClient.invalidateQueries({
         queryKey: orpc.school.listSessions.queryKey({
           input: { schoolId },
@@ -330,7 +329,8 @@ export function SessionManagement({ schoolId }: { schoolId: string }) {
     onSuccess: () => {
       setIsDeleteOpen(false);
       setSelectedSessionId(null);
-      setIsDirty(false);
+      setIsSessionDirty(false);
+      setIsFinanceDirty(false);
       void queryClient.invalidateQueries({
         queryKey: orpc.school.listSessions.queryKey({
           input: { schoolId },
@@ -353,7 +353,8 @@ export function SessionManagement({ schoolId }: { schoolId: string }) {
       setSelectedSessionId(pendingSessionId);
       setPendingSessionId(null);
     }
-    setIsDirty(false);
+    setIsSessionDirty(false);
+    setIsFinanceDirty(false);
   }
 
   if (sessionsQuery.isPending) {
@@ -374,7 +375,7 @@ export function SessionManagement({ schoolId }: { schoolId: string }) {
             Academic Sessions
           </h1>
           <p className="text-xs text-muted-foreground">
-            Create academic school sessions to configure exams, grading scales, and financial schemas.
+            Create academic school sessions to configure exams, grading scales, and attendance.
           </p>
         </div>
 
@@ -478,15 +479,23 @@ export function SessionManagement({ schoolId }: { schoolId: string }) {
 
       {/* Main Session View & Editor */}
       {currentSession && (
-        <SessionDetailsView
-          key={currentSession.id}
-          session={currentSession as SchoolSessionDto}
-          isSaving={updateSessionMutation.isPending}
-          onSave={async (updates) => {
-            await updateSessionMutation.mutateAsync(updates);
-          }}
-          onDirtyChange={setIsDirty}
-        />
+        <>
+          <SessionDetailsView
+            key={currentSession.id}
+            session={currentSession as SchoolSessionDto}
+            isSaving={updateSessionMutation.isPending}
+            onSave={async (updates) => {
+              await updateSessionMutation.mutateAsync(updates);
+            }}
+            onDirtyChange={setIsSessionDirty}
+          />
+          <SessionFinanceSettings
+            key={`finance-${currentSession.id}`}
+            schoolId={schoolId}
+            sessionId={currentSession.id}
+            onDirtyChange={setIsFinanceDirty}
+          />
+        </>
       )}
 
       {/* Unsaved Changes Confirmation Dialog */}

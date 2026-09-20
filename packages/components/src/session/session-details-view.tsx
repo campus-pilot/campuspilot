@@ -12,12 +12,10 @@ import {
 import { AttendanceSection } from './attendance-section';
 import { CoScholasticSection } from './co-scholastic-section';
 import { ExaminationSection } from './examination-section';
-import { FinanceSection } from './finance-section';
 import { GradingScaleSection } from './grading-scale-section';
 import type {
   CoScholasticArea,
   ExamDefinition,
-  FinanceSchemaConfig,
   GradeDefinition,
   SchoolSessionDto,
   SessionConfig,
@@ -26,10 +24,9 @@ import type {
 export interface SessionDetailsViewProps {
   session: SchoolSessionDto;
   isSaving?: boolean;
-  onSave?: (updates: {
-    sessionConfig: SessionConfig | null;
-    financeConfig: FinanceSchemaConfig | null;
-  }) => Promise<void> | void;
+  onSave?: (updates: { sessionConfig: SessionConfig | null }) =>
+    | Promise<void>
+    | void;
   onDirtyChange?: (isDirty: boolean) => void;
   onActivate?: () => void;
   isActivating?: boolean;
@@ -51,8 +48,8 @@ function normalizeSessionConfig(config: SessionConfig | null | undefined) {
 
 /**
  * Presentation and editing view for an academic session.
- * Renders the top session status & save toolbar followed by the 5 core sections:
- * Examinations, Co-scholastics, Grading Scale, Attendance, and Finance.
+ * Renders the session status, save toolbar, and public academic configuration.
+ * Finance is intentionally rendered by a separate permission-gated resource.
  */
 export function SessionDetailsView({
   session,
@@ -62,50 +59,32 @@ export function SessionDetailsView({
   onActivate,
   isActivating,
 }: SessionDetailsViewProps) {
-  const [draftSessionConfig, setDraftSessionConfig] = useState<SessionConfig | null>(
-    () => session.sessionConfig,
-  );
-  const [draftFinanceConfig, setDraftFinanceConfig] =
-    useState<FinanceSchemaConfig | null>(() => session.financeConfig);
+  const isEditable = onSave !== undefined;
+  const [draftSessionConfig, setDraftSessionConfig] =
+    useState<SessionConfig | null>(() => session.sessionConfig);
 
-  function computeDirty(
-    nextSession: SessionConfig | null,
-    nextFinance: FinanceSchemaConfig | null,
-  ) {
+  function computeDirty(nextSession: SessionConfig | null) {
     const originalSessionNormalized = normalizeSessionConfig(
       session.sessionConfig,
     );
     const draftSessionNormalized = normalizeSessionConfig(nextSession);
-    const sessionConfigChanged =
+    return (
       JSON.stringify(originalSessionNormalized) !==
-      JSON.stringify(draftSessionNormalized);
-
-    const financeConfigChanged =
-      JSON.stringify(session.financeConfig) !== JSON.stringify(nextFinance);
-
-    return sessionConfigChanged || financeConfigChanged;
+      JSON.stringify(draftSessionNormalized)
+    );
   }
 
   // Compute dirty status by serializing the drafts against baseline props
   const isDirty = useMemo(() => {
-    return computeDirty(draftSessionConfig, draftFinanceConfig);
-  }, [
-    session.sessionConfig,
-    session.financeConfig,
-    draftSessionConfig,
-    draftFinanceConfig,
-  ]);
+    return computeDirty(draftSessionConfig);
+  }, [session.sessionConfig, draftSessionConfig]);
 
-  function notifyDirty(
-    nextSession: SessionConfig | null,
-    nextFinance: FinanceSchemaConfig | null,
-  ) {
-    onDirtyChange?.(computeDirty(nextSession, nextFinance));
+  function notifyDirty(nextSession: SessionConfig | null) {
+    onDirtyChange?.(computeDirty(nextSession));
   }
 
   function handleReset() {
     setDraftSessionConfig(session.sessionConfig);
-    setDraftFinanceConfig(session.financeConfig);
     onDirtyChange?.(false);
   }
 
@@ -121,7 +100,7 @@ export function SessionDetailsView({
       },
     };
     setDraftSessionConfig(nextSession);
-    notifyDirty(nextSession, draftFinanceConfig);
+    notifyDirty(nextSession);
   }
 
   function handleCoScholasticChange(
@@ -136,7 +115,7 @@ export function SessionDetailsView({
       },
     };
     setDraftSessionConfig(nextSession);
-    notifyDirty(nextSession, draftFinanceConfig);
+    notifyDirty(nextSession);
   }
 
   function handleGradingScaleChange(
@@ -151,7 +130,7 @@ export function SessionDetailsView({
       },
     };
     setDraftSessionConfig(nextSession);
-    notifyDirty(nextSession, draftFinanceConfig);
+    notifyDirty(nextSession);
   }
 
   function handleAttendanceChange(enabled: boolean) {
@@ -162,23 +141,16 @@ export function SessionDetailsView({
       attendanceTracking: { enabled },
     };
     setDraftSessionConfig(nextSession);
-    notifyDirty(nextSession, draftFinanceConfig);
-  }
-
-  function handleFinanceChange(nextFinance: FinanceSchemaConfig | null) {
-    setDraftFinanceConfig(nextFinance);
-    notifyDirty(draftSessionConfig, nextFinance);
+    notifyDirty(nextSession);
   }
 
   async function handleSubmitSave() {
     if (!onSave) return;
     await onSave({
       sessionConfig: draftSessionConfig,
-      financeConfig: draftFinanceConfig,
     });
     onDirtyChange?.(false);
   }
-
 
   return (
     <div className="flex flex-col gap-6">
@@ -214,64 +186,64 @@ export function SessionDetailsView({
           ) : null}
         </div>
 
-        <div className="flex items-center gap-2 self-end sm:self-auto">
-          {isDirty ? (
+        {isEditable ? (
+          <div className="flex items-center gap-2 self-end sm:self-auto">
+            {isDirty ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={isSaving}
+                onClick={handleReset}
+              >
+                <Undo2 className="size-3.5" />
+                Discard
+              </Button>
+            ) : null}
             <Button
               type="button"
-              variant="outline"
+              variant={isDirty ? 'default' : 'secondary'}
               size="sm"
-              disabled={isSaving}
-              onClick={handleReset}
+              disabled={!isDirty || isSaving}
+              onClick={handleSubmitSave}
             >
-              <Undo2 className="size-3.5" />
-              Discard
+              {isSaving ? (
+                <LoaderCircle className="size-3.5 animate-spin" />
+              ) : (
+                <Save className="size-3.5" />
+              )}
+              {isSaving
+                ? 'Saving changes…'
+                : isDirty
+                  ? 'Save changes'
+                  : 'Saved'}
             </Button>
-          ) : null}
-          <Button
-            type="button"
-            variant={isDirty ? 'default' : 'secondary'}
-            size="sm"
-            disabled={!isDirty || isSaving}
-            onClick={handleSubmitSave}
-          >
-            {isSaving ? (
-              <LoaderCircle className="size-3.5 animate-spin" />
-            ) : (
-              <Save className="size-3.5" />
-            )}
-            {isSaving ? 'Saving changes…' : isDirty ? 'Save changes' : 'Saved'}
-          </Button>
-        </div>
+          </div>
+        ) : null}
       </div>
 
       {/* 1. Examinations */}
       <ExaminationSection
         examConfig={draftSessionConfig?.examConfig}
-        onChange={handleExamConfigChange}
+        onChange={isEditable ? handleExamConfigChange : undefined}
       />
 
       {/* 2. Co-scholastics (ECA) */}
       <CoScholasticSection
         areas={draftSessionConfig?.coScholasticAreas}
-        onChange={handleCoScholasticChange}
+        onChange={isEditable ? handleCoScholasticChange : undefined}
       />
 
       {/* 3. Grading Scale */}
       <GradingScaleSection
         gradingScale={draftSessionConfig?.gradingScale}
-        onChange={handleGradingScaleChange}
+        onChange={isEditable ? handleGradingScaleChange : undefined}
       />
 
       {/* 4. Attendance */}
       <AttendanceSection
         enabled={draftSessionConfig?.attendanceTracking?.enabled ?? false}
-        onChange={handleAttendanceChange}
-      />
-
-      {/* 5. Finance */}
-      <FinanceSection
-        financeConfig={draftFinanceConfig}
-        onChange={handleFinanceChange}
+        onChange={isEditable ? handleAttendanceChange : undefined}
       />
     </div>
   );

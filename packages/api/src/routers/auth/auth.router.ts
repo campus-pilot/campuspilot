@@ -1,5 +1,4 @@
 import { auth } from '@campuspilot/auth/server';
-
 import { rpcError } from '../../errors';
 import { protectedProcedure } from '../../index';
 import {

@@ -6,7 +6,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   SessionDetailsView,
   UnsavedChangesDialog,
-  type FinanceSchemaConfig,
   type SchoolSessionDto,
   type SessionConfig,
 } from '@campuspilot/components/session';
@@ -30,6 +29,7 @@ import {
 import { LoaderCircle, Trash2 } from 'lucide-react';
 import { schoolHref } from '@/app/(protected)/school/[schoolId]/school-route';
 import { client, orpc } from '@/lib/orpc';
+import { SessionFinanceSettings } from './session-finance-settings';
 
 
 export function SessionDetail({
@@ -41,11 +41,13 @@ export function SessionDetail({
 }) {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const [isDirty, setIsDirty] = useState(false);
+  const [isSessionDirty, setIsSessionDirty] = useState(false);
+  const [isFinanceDirty, setIsFinanceDirty] = useState(false);
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [pendingNavigationUrl, setPendingNavigationUrl] = useState<
     string | null
   >(null);
+  const isDirty = isSessionDirty || isFinanceDirty;
 
   /**
    * User-approved navigation interceptor:
@@ -119,21 +121,17 @@ export function SessionDetail({
 
   // Mutations
   const updateSessionMutation = useMutation({
-    mutationFn: async (payload: {
-      sessionConfig: SessionConfig | null;
-      financeConfig: FinanceSchemaConfig | null;
-    }) => {
+    mutationFn: async (payload: { sessionConfig: SessionConfig | null }) => {
       if (!session) return;
       return await client.school.updateSession({
         schoolId,
         sessionId: session.id,
         sessionConfig: payload.sessionConfig,
-        financeConfig: payload.financeConfig,
       });
     },
     onSuccess: (updated) => {
       if (updated) {
-        setIsDirty(false);
+        setIsSessionDirty(false);
         void queryClient.invalidateQueries({
           queryKey: orpc.school.getSession.queryKey({
             input: { schoolId, sessionId },
@@ -180,7 +178,8 @@ export function SessionDetail({
     },
     onSuccess: () => {
       setIsDeleteOpen(false);
-      setIsDirty(false);
+      setIsSessionDirty(false);
+      setIsFinanceDirty(false);
       void queryClient.invalidateQueries({
         queryKey: orpc.school.listSessions.queryKey({
           input: { schoolId },
@@ -227,7 +226,13 @@ export function SessionDetail({
         onSave={async (updates) => {
           await updateSessionMutation.mutateAsync(updates);
         }}
-        onDirtyChange={setIsDirty}
+        onDirtyChange={setIsSessionDirty}
+      />
+
+      <SessionFinanceSettings
+        schoolId={schoolId}
+        sessionId={session.id}
+        onDirtyChange={setIsFinanceDirty}
       />
 
       {/* Danger Zone: Delete Session at the lowermost portion */}
@@ -293,7 +298,8 @@ export function SessionDetail({
         onConfirmDiscard={() => {
           const target = pendingNavigationUrl;
           setPendingNavigationUrl(null);
-          setIsDirty(false);
+          setIsSessionDirty(false);
+          setIsFinanceDirty(false);
           if (target === 'BACK') {
             window.history.back();
           } else if (target) {
@@ -304,4 +310,3 @@ export function SessionDetail({
     </div>
   );
 }
-

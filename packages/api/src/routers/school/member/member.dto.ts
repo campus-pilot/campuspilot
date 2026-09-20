@@ -46,7 +46,7 @@ export const schoolMemberDtoSchema = z.object({
   userId: z.string(),
   name: z.string(),
   email: z.email(),
-  image: z.string().nullable(),
+  profileImageUrl: z.url().nullable(),
   addedAt: z.date(),
   roles: z.array(schoolRoleAssignmentSchema),
 });

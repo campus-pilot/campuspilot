@@ -64,6 +64,20 @@
       "when": 1789412122318,
       "tag": "0008_unique-school-session-years",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1789932169679,
+      "tag": "0009_add-user-profile-image",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1789939886637,
+      "tag": "0010_add-school-classes",
+      "breakpoints": true
     }
   ]
 }

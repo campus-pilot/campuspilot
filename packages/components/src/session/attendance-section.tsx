@@ -12,7 +12,7 @@ import { CalendarCheck, Sparkles } from 'lucide-react';
 
 export interface AttendanceSectionProps {
   enabled: boolean;
-  onChange: (enabled: boolean) => void;
+  onChange?: (enabled: boolean) => void;
 }
 
 export function AttendanceSection({
@@ -36,10 +36,7 @@ export function AttendanceSection({
             <CalendarCheck className="size-4" />
           </div>
           <div className="flex flex-col gap-0.5">
-            <Label
-              htmlFor="attendance-toggle"
-              className="cursor-pointer font-medium"
-            >
+            <Label htmlFor={onChange ? 'attendance-toggle' : undefined} className="font-medium">
               Enable session attendance entry
             </Label>
             <span className="text-[11px] text-muted-foreground">
@@ -48,11 +45,11 @@ export function AttendanceSection({
             </span>
           </div>
         </div>
-        <Switch
+        {onChange ? <Switch
           id="attendance-toggle"
           checked={enabled}
           onCheckedChange={onChange}
-        />
+        /> : <Badge variant="outline">{enabled ? 'Enabled' : 'Disabled'}</Badge>}
       </div>
 
       <Alert>

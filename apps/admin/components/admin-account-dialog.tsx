@@ -37,6 +37,7 @@ import {
 } from 'lucide-react';
 import { authClient } from '@/lib/auth-client';
 import { client } from '@/lib/orpc';
+import { AccountProfileImage } from './account-profile-image';
 
 type AccountSection = 'profile' | 'security' | 'api-keys';
 
@@ -127,6 +128,7 @@ function ProfileSection({
           Update the name shown across CampusPilot.
         </p>
       </div>
+      <AccountProfileImage name={initialName} />
       <form
         className="flex max-w-md flex-col gap-4"
         onSubmit={(event) => {

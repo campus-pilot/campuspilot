@@ -1,6 +1,9 @@
 import { randomUUID } from 'node:crypto';
+import { PutObjectCommand } from '@aws-sdk/client-s3';
 import { db } from '@campuspilot/db';
 import { user } from '@campuspilot/db/schema/auth';
+import { env } from '@campuspilot/env/server';
+import { getS3Client } from '@campuspilot/s3/client';
 import { eq } from 'drizzle-orm';
 import { beforeAll, describe, expect, it } from 'vitest';
 
@@ -68,6 +71,7 @@ describe('school.member Router Integration', () => {
         .limit(1);
       expect(dbUser).toBeDefined();
       expect(dbUser!.id).toBe(member.userId);
+      expect(dbUser!.emailVerified).toBe(true);
     });
 
     it('allows school manager to invite a member', async () => {
@@ -184,6 +188,43 @@ describe('school.member Router Integration', () => {
         expect.objectContaining({ code: 'NOT_FOUND' }),
       );
     });
+
+    it('returns a private S3 profile-image URL instead of the provider URL', async () => {
+      const client = createTestClient(principalSession);
+      const invited = await client.school.inviteMember({
+        schoolId: school.id,
+        email: `profile_${randomUUID().toLowerCase()}@example.com`,
+        roles: [{ role: 'teacher', meta: null }],
+      });
+      const profileImageS3Key =
+        `users/${invited.userId}/profile-image/${randomUUID()}.png`;
+      await Promise.all([
+        db
+          .update(user)
+          .set({
+            image: 'https://lh3.googleusercontent.com/provider-image',
+            profileImageS3Key,
+          })
+          .where(eq(user.id, invited.userId)),
+        getS3Client().send(
+          new PutObjectCommand({
+            Bucket: env.S3_BUCKET,
+            Key: profileImageS3Key,
+            Body: Buffer.from('profile-image'),
+            ContentType: 'image/png',
+          }),
+        ),
+      ]);
+
+      const member = await client.school.getMember({
+        schoolId: school.id,
+        userId: invited.userId,
+      });
+
+      expect(member.profileImageUrl).toContain('X-Amz-Signature=');
+      expect(member).not.toHaveProperty('profileImageS3Key');
+      expect(member).not.toHaveProperty('image');
+    });
   });
 
   describe('listMembers', () => {
@@ -223,6 +264,14 @@ describe('school.member Router Integration', () => {
       ).rejects.toThrowError(
         expect.objectContaining({ code: 'FORBIDDEN' }),
       );
+    });
+
+    it('allows a teacher in the school to list members', async () => {
+      const result = await createTestClient(teacherSession).school.listMembers({
+        schoolId: school.id,
+      });
+
+      expect(result.items.some(({ userId }) => userId === teacherSession.user.id)).toBe(true);
     });
   });
 

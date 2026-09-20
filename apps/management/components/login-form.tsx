@@ -6,7 +6,7 @@ import { z } from 'zod';
 import {
   AUTH_REDIRECT_QUERY_PARAM,
   buildAuthCallbackURL,
-  buildSignInRedirectPath,
+  buildAuthErrorPath,
   sanitizeAuthRedirectPath,
 } from '@campuspilot/auth/redirects';
 import { Button } from '@campuspilot/ui/components/button';
@@ -52,11 +52,7 @@ const loginSchema = z
     }
   });
 
-/**
- * The sign-in route is explicit so alternate login presentations return to
- * their own screen when an external provider reports an error.
- */
-export function LoginForm({ signInPath = '/auth/login' }: { signInPath?: string }) {
+export function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { data: session, isPending } = authClient.useSession();
@@ -80,7 +76,7 @@ export function LoginForm({ signInPath = '/auth/login' }: { signInPath?: string 
           callbackURL: buildAuthCallbackURL(window.location.origin, redirectPath),
           errorCallbackURL: buildAuthCallbackURL(
             window.location.origin,
-            buildSignInRedirectPath(redirectPath, signInPath),
+            buildAuthErrorPath(redirectPath),
           ),
         });
 

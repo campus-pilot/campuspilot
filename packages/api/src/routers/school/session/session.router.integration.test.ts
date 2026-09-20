@@ -292,7 +292,7 @@ describe('school.session Router Integration', () => {
   });
 
   describe('activateSession', () => {
-    it('denies school principal from activating a session (requires platform admin)', async () => {
+    it('allows a school principal to activate a session', async () => {
       const created = await createTestSession({
         schoolId: school.id,
         sessionStartYear: 2040,
@@ -301,14 +301,12 @@ describe('school.session Router Integration', () => {
       });
       const client = createTestClient(principalSession);
 
-      await expect(
-        client.school.activateSession({
-          schoolId: school.id,
-          sessionId: created.id,
-        }),
-      ).rejects.toThrowError(
-        expect.objectContaining({ code: 'FORBIDDEN' }),
-      );
+      const activated = await client.school.activateSession({
+        schoolId: school.id,
+        sessionId: created.id,
+      });
+
+      expect(activated.isActive).toBe(true);
     });
 
     it('allows platform admin to activate a session and atomically deactivate previous active session', async () => {

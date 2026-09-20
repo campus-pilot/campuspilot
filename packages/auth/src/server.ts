@@ -4,20 +4,60 @@ import { env } from '@campuspilot/env/server';
 import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { admin } from 'better-auth/plugins';
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 
 import { getRedisClient } from '@campuspilot/redis/client';
 import { log } from './log';
 
 import { redisStorage } from '@better-auth/redis-storage';
 import { apiKey } from '@better-auth/api-key';
+import {
+  googlePictureFromIdToken,
+  importGoogleProfileImage,
+} from './profile-image';
 
 const redis = getRedisClient();
 
 export function createAuth(db: DatabaseExecutor = createDb()) {
-
   const roleForEmail = (email: string) =>
     email.toLowerCase() === env.SYSTEM_ADMIN_EMAIL ? 'admin' : 'user';
+
+  /**
+   * Provider images seed an account only while it has no CampusPilot image.
+   * A later user upload therefore always takes precedence over Google.
+   */
+  const persistGoogleProfileImageIfMissing = async (
+    userId: string,
+    sourceUrl: string | null | undefined,
+  ) => {
+    if (!sourceUrl) return;
+
+    const [currentUser] = await db
+      .select({ profileImageS3Key: schema.user.profileImageS3Key })
+      .from(schema.user)
+      .where(eq(schema.user.id, userId))
+      .limit(1);
+    if (!currentUser || currentUser.profileImageS3Key) return;
+
+    try {
+      const profileImageS3Key = await importGoogleProfileImage(
+        userId,
+        sourceUrl,
+      );
+      await db
+        .update(schema.user)
+        .set({ profileImageS3Key, updatedAt: new Date() })
+        .where(
+          and(
+            eq(schema.user.id, userId),
+            isNull(schema.user.profileImageS3Key),
+          ),
+        );
+    } catch (error) {
+      // Profile-image import is enrichment; it must never prevent authentication.
+      log.warn({ err: error, userId }, 'auth.google.profile-image.import-failed');
+    }
+  };
 
   return betterAuth({
     logger: {
@@ -66,10 +106,16 @@ export function createAuth(db: DatabaseExecutor = createDb()) {
         clientSecret: env.GOOGLE_CLIENT_SECRET as string,
       },
     },
+    account: {
+      accountLinking: {
+        enabled: true,
+        trustedProviders: ['google'],
+      },
+    },
 
     ...(env.PUBLIC_APP_URL && {
       onAPIError: {
-        errorURL: new URL('/auth/sign-in/error', env.PUBLIC_APP_URL).toString(),
+        errorURL: new URL('/auth/error', env.PUBLIC_APP_URL).toString(),
       },
     }),
 
@@ -96,6 +142,7 @@ export function createAuth(db: DatabaseExecutor = createDb()) {
     user: {
       additionalFields: {
         setupStatus: { type: 'json', required: false, input: false },
+        profileImageS3Key: { type: 'string', required: false, input: false },
       },
     },
     databaseHooks: {
@@ -104,13 +151,27 @@ export function createAuth(db: DatabaseExecutor = createDb()) {
           before: async (user) => ({
             data: { ...user, role: roleForEmail(user.email) },
           }),
+          after: async (user) => {
+            await persistGoogleProfileImageIfMissing(user.id, user.image);
+          },
+        },
+      },
+      account: {
+        create: {
+          after: async (account) => {
+            if (account.providerId !== 'google') return;
+            await persistGoogleProfileImageIfMissing(
+              account.userId,
+              googlePictureFromIdToken(account.idToken),
+            );
+          },
         },
       },
       session: {
         create: {
           before: async (session) => {
             const signedInUser = await db.query.user.findFirst({
-              columns: { email: true, role: true },
+              columns: { email: true, profileImageS3Key: true, role: true },
               where: eq(schema.user.id, session.userId),
             });
 
@@ -121,6 +182,20 @@ export function createAuth(db: DatabaseExecutor = createDb()) {
                   .update(schema.user)
                   .set({ role })
                   .where(eq(schema.user.id, session.userId));
+              }
+
+              if (!signedInUser.profileImageS3Key) {
+                const googleAccount = await db.query.account.findFirst({
+                  columns: { idToken: true },
+                  where: and(
+                    eq(schema.account.userId, session.userId),
+                    eq(schema.account.providerId, 'google'),
+                  ),
+                });
+                await persistGoogleProfileImageIfMissing(
+                  session.userId,
+                  googlePictureFromIdToken(googleAccount?.idToken),
+                );
               }
             }
 

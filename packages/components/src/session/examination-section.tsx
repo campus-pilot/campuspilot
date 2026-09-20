@@ -204,9 +204,10 @@ interface SortableExamItemProps {
   exam: ExamDefinition;
   onEdit: () => void;
   onDelete: () => void;
+  editable: boolean;
 }
 
-function SortableExamItem({ id, exam, onEdit, onDelete }: SortableExamItemProps) {
+function SortableExamItem({ id, exam, onEdit, onDelete, editable }: SortableExamItemProps) {
   const {
     attributes,
     listeners,
@@ -214,7 +215,7 @@ function SortableExamItem({ id, exam, onEdit, onDelete }: SortableExamItemProps)
     transform,
     transition,
     isDragging,
-  } = useSortable({ id });
+  } = useSortable({ id, disabled: !editable });
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -229,7 +230,7 @@ function SortableExamItem({ id, exam, onEdit, onDelete }: SortableExamItemProps)
       className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2 text-xs"
     >
       <div className="flex items-center gap-3">
-        <button
+        {editable ? <button
           type="button"
           className="cursor-grab text-muted-foreground hover:text-foreground active:cursor-grabbing"
           aria-label={`Reorder ${exam.name}`}
@@ -237,7 +238,7 @@ function SortableExamItem({ id, exam, onEdit, onDelete }: SortableExamItemProps)
           {...listeners}
         >
           <GripVertical className="size-4" />
-        </button>
+        </button> : null}
         <Badge variant="secondary" className="font-mono text-[10px]">
           #{exam.order}
         </Badge>
@@ -248,7 +249,7 @@ function SortableExamItem({ id, exam, onEdit, onDelete }: SortableExamItemProps)
           </span>
         </div>
       </div>
-      <div className="flex items-center gap-1">
+      {editable ? <div className="flex items-center gap-1">
         <Button
           type="button"
           variant="ghost"
@@ -268,14 +269,14 @@ function SortableExamItem({ id, exam, onEdit, onDelete }: SortableExamItemProps)
         >
           <Trash2 className="size-3.5" />
         </Button>
-      </div>
+      </div> : null}
     </div>
   );
 }
 
 export interface ExaminationSectionProps {
   examConfig: Record<string, ExamDefinition> | null | undefined;
-  onChange: (nextConfig: Record<string, ExamDefinition>) => void;
+  onChange?: (nextConfig: Record<string, ExamDefinition>) => void;
 }
 
 export function ExaminationSection({
@@ -321,7 +322,7 @@ export function ExaminationSection({
         };
       }
     });
-    onChange(updated);
+    onChange?.(updated);
   }
 
   function handleAddOrEdit(values: { slug: string; name: string }) {
@@ -338,7 +339,7 @@ export function ExaminationSection({
       name: values.name,
       order,
     };
-    onChange(current);
+    onChange?.(current);
   }
 
   function handleDelete(slug: string) {
@@ -352,7 +353,7 @@ export function ExaminationSection({
     remaining.forEach(([key, val], index) => {
       normalized[key] = { name: val.name, order: index + 1 };
     });
-    onChange(normalized);
+    onChange?.(normalized);
   }
 
   function handleLoadDefaults() {
@@ -360,7 +361,7 @@ export function ExaminationSection({
     DEFAULT_EXAMINATIONS.forEach((item) => {
       defaults[item.slug] = { name: item.name, order: item.order };
     });
-    onChange(defaults);
+    onChange?.(defaults);
   }
 
   return (
@@ -374,7 +375,7 @@ export function ExaminationSection({
             Define all examinations in your school for this session. Drag to preserve examination order.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        {onChange ? <div className="flex items-center gap-2">
           {isEmpty && (
             <Button
               type="button"
@@ -395,7 +396,7 @@ export function ExaminationSection({
             <Plus className="size-3.5" />
             Add exam
           </Button>
-        </div>
+        </div> : null}
       </div>
 
       {isEmpty ? (
@@ -406,7 +407,7 @@ export function ExaminationSection({
               Add academic assessments for this session, or initialize with recommended terms.
             </EmptyDescription>
           </EmptyHeader>
-          <EmptyContent className="flex-row gap-2">
+          {onChange ? <EmptyContent className="flex-row gap-2">
             <Button
               type="button"
               variant="outline"
@@ -424,7 +425,7 @@ export function ExaminationSection({
               <Plus className="size-3.5" />
               Create examination
             </Button>
-          </EmptyContent>
+          </EmptyContent> : null}
         </Empty>
       ) : (
         <DndContext
@@ -443,6 +444,7 @@ export function ExaminationSection({
                   key={slug}
                   id={slug}
                   exam={exam}
+                  editable={onChange !== undefined}
                   onEdit={() =>
                     setDialogState({ open: true, editingSlug: slug })
                   }
@@ -454,7 +456,7 @@ export function ExaminationSection({
         </DndContext>
       )}
 
-      {dialogState.open && (
+      {onChange && dialogState.open && (
         <ExamDialog
           key={dialogState.editingSlug ?? 'new-exam'}
           open={dialogState.open}

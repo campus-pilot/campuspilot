@@ -37,6 +37,8 @@ grants contains {
   "action": action,
 } if {
   some action in {
+    "school.details.read",
+    "school.details.update",
     "school.logo.read",
     "school.logo.update",
     "school.member.list",
@@ -49,5 +51,7 @@ grants contains {
     "school.session.update",
     "school.session.delete",
     "school.session.activate",
+    "school.session.finance.read",
+    "school.session.finance.update",
   }
 }

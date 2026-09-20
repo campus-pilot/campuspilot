@@ -229,7 +229,7 @@ describe('isAuthorized Integration with OPA Container', () => {
       expect(allowed).toBe(true);
     });
 
-    it('denies school principal from activating a session (only platform.admin is granted)', async () => {
+    it('allows school principal to activate a session', async () => {
       const allowed = await isAuthorized(
         {
           action: SCHOOL_ACTIONS.ACTIVATE_SESSION,
@@ -248,7 +248,7 @@ describe('isAuthorized Integration with OPA Container', () => {
         { client },
       );
 
-      expect(allowed).toBe(false);
+      expect(allowed).toBe(true);
     });
 
     it('allows platform.admin to activate a school session', async () => {
@@ -267,6 +267,86 @@ describe('isAuthorized Integration with OPA Container', () => {
       );
 
       expect(allowed).toBe(true);
+    });
+
+    it('allows principals to create classes and teachers to update class configuration', async () => {
+      const [principalCanCreate, teacherCanUpdateConfig] = await Promise.all([
+        isAuthorized(
+          {
+            action: SCHOOL_ACTIONS.CREATE_CLASS,
+            subject: {
+              userId: 'principal-1',
+              roleAssignments: [
+                {
+                  role: 'school.principal',
+                  scope: { kind: 'school', schoolId: 'school-1' },
+                  meta: null,
+                },
+              ],
+            },
+            resource: { kind: 'school', schoolId: 'school-1' },
+          },
+          { client },
+        ),
+        isAuthorized(
+          {
+            action: SCHOOL_ACTIONS.UPDATE_CLASS_CONFIGURATION,
+            subject: {
+              userId: 'teacher-1',
+              roleAssignments: [
+                {
+                  role: 'school.teacher',
+                  scope: { kind: 'school', schoolId: 'school-1' },
+                  meta: { classIds: [] },
+                },
+              ],
+            },
+            resource: { kind: 'school', schoolId: 'school-1' },
+          },
+          { client },
+        ),
+      ]);
+
+      expect(principalCanCreate).toBe(true);
+      expect(teacherCanUpdateConfig).toBe(true);
+    });
+
+    it('denies teachers and platform admins from creating classes', async () => {
+      const [teacherAllowed, adminAllowed] = await Promise.all([
+        isAuthorized(
+          {
+            action: SCHOOL_ACTIONS.CREATE_CLASS,
+            subject: {
+              userId: 'teacher-1',
+              roleAssignments: [
+                {
+                  role: 'school.teacher',
+                  scope: { kind: 'school', schoolId: 'school-1' },
+                  meta: { classIds: ['class-1'] },
+                },
+              ],
+            },
+            resource: { kind: 'school', schoolId: 'school-1' },
+          },
+          { client },
+        ),
+        isAuthorized(
+          {
+            action: SCHOOL_ACTIONS.CREATE_CLASS,
+            subject: {
+              userId: 'admin-1',
+              roleAssignments: [
+                { role: 'platform.admin', scope: { kind: 'platform' } },
+              ],
+            },
+            resource: { kind: 'school', schoolId: 'school-1' },
+          },
+          { client },
+        ),
+      ]);
+
+      expect(teacherAllowed).toBe(false);
+      expect(adminAllowed).toBe(false);
     });
   });
 

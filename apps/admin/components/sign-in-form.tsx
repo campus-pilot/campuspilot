@@ -7,7 +7,7 @@ import { z } from 'zod';
 import {
   AUTH_REDIRECT_QUERY_PARAM,
   buildAuthCallbackURL,
-  buildSignInRedirectPath,
+  buildAuthErrorPath,
   sanitizeAuthRedirectPath,
 } from '@campuspilot/auth/redirects';
 import { ThemeToggle } from '@campuspilot/components/theme-toggle';
@@ -61,7 +61,10 @@ export function SignInForm() {
     const result = await authClient.signIn.social({
       provider: 'google',
       callbackURL: buildAuthCallbackURL(window.location.origin, redirectPath),
-      errorCallbackURL: buildAuthCallbackURL(window.location.origin, buildSignInRedirectPath(redirectPath)),
+      errorCallbackURL: buildAuthCallbackURL(
+        window.location.origin,
+        buildAuthErrorPath(redirectPath),
+      ),
     });
     setIsSocialSignInPending(false);
     if (result.error) setError(result.error.message ?? 'Unable to sign in with Google.');

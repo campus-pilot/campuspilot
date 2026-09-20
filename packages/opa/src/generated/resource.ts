@@ -22,6 +22,14 @@ export type ClassResource = {
 
 export type AuthorizationResourceByAction = {
   [CLASS_ACTIONS.ADD_STUDENT]: ClassResource;
+  [SCHOOL_ACTIONS.UPDATE_CLASS_CONFIGURATION]: SchoolResource;
+  [SCHOOL_ACTIONS.CREATE_CLASS]: SchoolResource;
+  [SCHOOL_ACTIONS.DELETE_CLASS]: SchoolResource;
+  [SCHOOL_ACTIONS.LIST_CLASSES]: SchoolResource;
+  [SCHOOL_ACTIONS.READ_CLASS]: SchoolResource;
+  [SCHOOL_ACTIONS.UPDATE_CLASS]: SchoolResource;
+  [SCHOOL_ACTIONS.READ_DETAILS]: SchoolResource;
+  [SCHOOL_ACTIONS.UPDATE_DETAILS]: SchoolResource;
   [SCHOOL_ACTIONS.READ_LOGO]: SchoolResource;
   [SCHOOL_ACTIONS.UPDATE_LOGO]: SchoolResource;
   [SCHOOL_ACTIONS.INVITE_MEMBER]: SchoolResource;
@@ -29,9 +37,17 @@ export type AuthorizationResourceByAction = {
   [SCHOOL_ACTIONS.READ_MEMBER]: SchoolResource;
   [SCHOOL_ACTIONS.REMOVE_MEMBER]: SchoolResource;
   [SCHOOL_ACTIONS.UPDATE_MEMBER_ROLES]: SchoolResource;
+  [SCHOOL_ACTIONS.UPDATE_SECTION_ATTRIBUTES]: SchoolResource;
+  [SCHOOL_ACTIONS.CREATE_SECTION]: SchoolResource;
+  [SCHOOL_ACTIONS.DELETE_SECTION]: SchoolResource;
+  [SCHOOL_ACTIONS.LIST_SECTIONS]: SchoolResource;
+  [SCHOOL_ACTIONS.READ_SECTION]: SchoolResource;
+  [SCHOOL_ACTIONS.UPDATE_SECTION]: SchoolResource;
   [SCHOOL_ACTIONS.ACTIVATE_SESSION]: SchoolResource;
   [SCHOOL_ACTIONS.CREATE_SESSION]: SchoolResource;
   [SCHOOL_ACTIONS.DELETE_SESSION]: SchoolResource;
+  [SCHOOL_ACTIONS.READ_SESSION_FINANCE]: SchoolResource;
+  [SCHOOL_ACTIONS.UPDATE_SESSION_FINANCE]: SchoolResource;
   [SCHOOL_ACTIONS.LIST_SESSIONS]: SchoolResource;
   [SCHOOL_ACTIONS.READ_SESSION]: SchoolResource;
   [SCHOOL_ACTIONS.UPDATE_SESSION]: SchoolResource;

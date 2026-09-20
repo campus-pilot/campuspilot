@@ -1,4 +1,5 @@
 export const AUTH_REDIRECT_QUERY_PARAM = 'redirect';
+export const AUTH_ERROR_PATH = '/auth/error';
 export const DEFAULT_POST_SIGN_IN_PATH = '/dashboard';
 
 const UNSAFE_PATH = /[\\\u0000-\u001f\u007f]|%(?:2f|5c)/i;
@@ -27,6 +28,22 @@ export function buildSignInRedirectPath(
   });
 
   return `${signInPath}?${search.toString()}`;
+}
+
+/**
+ * Keep the intended destination while routing provider failures through the
+ * application's dedicated error screen. Better Auth appends its own `error`
+ * and optional `error_description` parameters after this URL.
+ */
+export function buildAuthErrorPath(
+  returnTo: string,
+  errorPath = AUTH_ERROR_PATH,
+) {
+  const search = new URLSearchParams({
+    [AUTH_REDIRECT_QUERY_PARAM]: sanitizeAuthRedirectPath(returnTo),
+  });
+
+  return `${errorPath}?${search.toString()}`;
 }
 
 export function buildAuthCallbackURL(appOrigin: string, redirectPath: string) {

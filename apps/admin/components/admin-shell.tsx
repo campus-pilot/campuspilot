@@ -8,6 +8,8 @@ import {
   type AppShellBreadcrumb,
   type AppShellNavigationEntry,
 } from '@campuspilot/components/app-shell';
+import { getProfileImageUrl } from '@campuspilot/auth/profile-image.client';
+import { env } from '@campuspilot/env/admin.client';
 import { Button } from '@campuspilot/ui/components/button';
 import { Command, Search } from 'lucide-react';
 import { authClient } from '@/lib/auth-client';
@@ -52,7 +54,10 @@ export function AdminShell({
   const user = {
     name: session?.user.name ?? 'CampusPilot admin',
     secondaryLabel: session?.user.email ?? 'Administrator',
-    avatarUrl: session?.user.image,
+    avatarUrl: getProfileImageUrl(
+      env.NEXT_PUBLIC_SERVER_URL,
+      session?.user.profileImageS3Key,
+    ),
   };
 
   return (

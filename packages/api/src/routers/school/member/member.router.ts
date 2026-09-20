@@ -24,6 +24,7 @@ import {
   resolvePaginationInput,
 } from "../../../paginations";
 import { requireSchoolPermission } from "../../../permissions/school";
+import { createProfileImageUrl } from "../../auth/profile-image";
 import {
   inviteSchoolMemberInputSchema,
   listSchoolMembersInputSchema,
@@ -48,7 +49,7 @@ async function findSchoolMember(
       userId: user.id,
       name: user.name,
       email: user.email,
-      image: user.image,
+      profileImageS3Key: user.profileImageS3Key,
       addedAt: schoolMemberTable.addedAt,
     })
     .from(schoolMemberTable)
@@ -62,6 +63,7 @@ async function findSchoolMember(
     .limit(1);
 
   if (!member) return null;
+  const { profileImageS3Key, ...memberDetails } = member;
 
   const roles = await db
     .select({
@@ -77,7 +79,14 @@ async function findSchoolMember(
     )
     .orderBy(asc(schoolUserRoleTable.role));
 
-  return schoolMemberDtoSchema.parse({ schoolId, ...member, roles });
+  return schoolMemberDtoSchema.parse({
+    schoolId,
+    ...memberDetails,
+    profileImageUrl: profileImageS3Key
+      ? await createProfileImageUrl(profileImageS3Key)
+      : null,
+    roles,
+  });
 }
 
 export const schoolMemberRouter = {
@@ -117,7 +126,7 @@ export const schoolMemberRouter = {
               userId: user.id,
               name: user.name,
               email: user.email,
-              image: user.image,
+              profileImageS3Key: user.profileImageS3Key,
               addedAt: schoolMemberTable.addedAt,
             })
             .from(schoolMemberTable)
@@ -167,13 +176,19 @@ export const schoolMemberRouter = {
         const totalItems = totalRows[0]?.totalItems ?? 0;
         const totalPages = Math.ceil(totalItems / pageSize);
         return createPaginatedResult({
-          items: members.map((member) =>
-            schoolMemberDtoSchema.parse({
-              schoolId: input.schoolId,
-              ...member,
-              roles: (rolesByUserId.get(member.userId) ?? []).map(
-                ({ role, meta }) => ({ role, meta }),
-              ),
+          items: await Promise.all(
+            members.map(async (member) => {
+              const { profileImageS3Key, ...memberDetails } = member;
+              return schoolMemberDtoSchema.parse({
+                schoolId: input.schoolId,
+                ...memberDetails,
+                profileImageUrl: profileImageS3Key
+                  ? await createProfileImageUrl(profileImageS3Key)
+                  : null,
+                roles: (rolesByUserId.get(member.userId) ?? []).map(
+                  ({ role, meta }) => ({ role, meta }),
+                ),
+              });
             }),
           ),
           nextCursor: createNextPageCursor(currentPage, totalPages),
@@ -252,7 +267,14 @@ export const schoolMemberRouter = {
             const created = await transactionalAuth.api.createUser({
               // Better Auth requires the column, but the invited person owns
               // their display name and supplies it during account setup.
-              body: { email: input.email, name: "" },
+              // A school invitation is also the administrator's explicit
+              // verification of this address. This allows Better Auth to link
+              // the new user to a trusted Google identity with the same email.
+              body: {
+                email: input.email,
+                name: "",
+                data: { emailVerified: true },
+              },
             });
             invitedUser = created.user;
           }

@@ -13,12 +13,14 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1130.0",
     "@better-auth/api-key": "^1.7.1",
     "@better-auth/redis-storage": "^1.7.1",
     "@campuspilot/db": "workspace:*",
     "@campuspilot/env": "workspace:*",
     "@campuspilot/logger": "workspace:*",
     "@campuspilot/redis": "workspace:*",
+    "@campuspilot/s3": "workspace:*",
     "better-auth": "catalog:",
     "dotenv": "catalog:",
     "drizzle-orm": "^0.45.2",

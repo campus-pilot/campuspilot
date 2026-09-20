@@ -1,5 +1,6 @@
 import { db } from '@campuspilot/db';
 import { user } from '@campuspilot/db/schema/auth';
+import { classTable, sectionTable } from '@campuspilot/db/schema/class';
 import type { Role, RoleMeta } from '@campuspilot/db/schema/jsonb/role';
 import { schoolTable } from '@campuspilot/db/schema/school';
 import { schoolMemberTable } from '@campuspilot/db/schema/school-member';
@@ -254,4 +255,53 @@ export async function createTestSession(overrides: {
     .returning();
 
   return session!;
+}
+
+/**
+ * Inserts a test class with at least one section while preserving the same
+ * invariant as the public createClass procedure.
+ */
+export async function createTestClass(overrides: {
+  id?: string;
+  schoolId: string;
+  slug?: string;
+  label?: string;
+  sections?: Array<{
+    id?: string;
+    slug?: string;
+    label?: string;
+    attributes?: Record<string, unknown>;
+  }>;
+}) {
+  return db.transaction(async (transaction) => {
+    const slug = overrides.slug ?? `class-${randomUUID().toLowerCase()}`;
+    const [schoolClass] = await transaction
+      .insert(classTable)
+      .values({
+        id: overrides.id ?? randomUUID(),
+        schoolId: overrides.schoolId,
+        slug,
+        label: overrides.label ?? `Test Class ${slug}`,
+      })
+      .returning();
+
+    const sectionValues = overrides.sections ?? [
+      { slug: 'a', label: 'Section A' },
+    ];
+    const sections = await transaction
+      .insert(sectionTable)
+      .values(
+        sectionValues.map((section) => ({
+          id: section.id ?? randomUUID(),
+          schoolId: overrides.schoolId,
+          classId: schoolClass!.id,
+          slug: section.slug ?? `section-${randomUUID().toLowerCase()}`,
+          label: section.label ?? 'Test Section',
+          attributes: section.attributes,
+        })),
+      )
+      .returning();
+
+    return { schoolClass: schoolClass!, sections };
+  });
 }

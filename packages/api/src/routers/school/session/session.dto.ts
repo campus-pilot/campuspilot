@@ -1,4 +1,3 @@
-import { financeSchemaConfigSchema } from "@campuspilot/db/schema/jsonb/finance-config";
 import { sessionConfigSchema } from "@campuspilot/db/schema/jsonb/session-config";
 import { z } from "zod";
 
@@ -16,7 +15,6 @@ export const schoolSessionDtoSchema = z.object({
   sessionStartYear: sessionStartYearSchema,
   sessionEndYear: sessionEndYearSchema,
   sessionConfig: sessionConfigSchema.nullable(),
-  financeConfig: financeSchemaConfigSchema.nullable(),
   isActive: z.boolean(),
   createdAt: z.date().nullable(),
   updatedAt: z.date().nullable(),
@@ -75,7 +73,6 @@ export const createSchoolSessionInputSchema = z
     sessionStartYear: sessionStartYearSchema,
     sessionEndYear: sessionEndYearSchema,
     sessionConfig: sessionConfigSchema.nullable().optional(),
-    financeConfig: financeSchemaConfigSchema.nullable().optional(),
   })
   .refine(
     ({ sessionStartYear, sessionEndYear }) =>
@@ -91,7 +88,6 @@ export const updateSchoolSessionInputSchema = schoolSessionIdInputSchema
     sessionStartYear: sessionStartYearSchema.optional(),
     sessionEndYear: sessionEndYearSchema.optional(),
     sessionConfig: sessionConfigSchema.nullable().optional(),
-    financeConfig: financeSchemaConfigSchema.nullable().optional(),
   })
   .refine(
     ({ schoolId: _schoolId, sessionId: _sessionId, ...changes }) =>

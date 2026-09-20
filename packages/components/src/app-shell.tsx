@@ -74,7 +74,6 @@ export type AppShellNavigationItem = {
   items?: AppShellNavigationItem[];
 };
 
-
 export type AppShellNavigationGroup = {
   type: 'group';
   id: string;
@@ -91,6 +90,13 @@ export type AppShellBreadcrumb = {
   label: ReactNode;
   icon?: AppShellIcon;
   href?: string;
+};
+
+export type AppShellFooterLink = {
+  id: string;
+  label: string;
+  href: string;
+  icon: AppShellIcon;
 };
 
 export type AppShellUser = {
@@ -115,6 +121,8 @@ type AppShellProps = {
   search: ReactNode;
   user: AppShellUser;
   docsHref?: string;
+  /** App-owned links rendered directly above the shared Docs link. */
+  footerLinks?: AppShellFooterLink[];
   navbarActions?: ReactNode;
   onManageAccount?: () => void;
   onLogout?: () => void | Promise<void>;
@@ -132,7 +140,6 @@ function pathMatches(item: AppShellNavigationItem, currentPath: string) {
 
   return currentPath === item.href || currentPath.startsWith(`${item.href}/`);
 }
-
 
 function initials(name: string) {
   return name
@@ -178,11 +185,7 @@ function NavigationItem({
 
   return (
     <SidebarMenuItem>
-      <SidebarMenuButton
-        asChild
-        isActive={isActive}
-        className="rounded-lg"
-      >
+      <SidebarMenuButton asChild isActive={isActive} className="rounded-lg">
         <AppLink
           href={item.href}
           ariaCurrent={isDirectlyActive ? 'page' : undefined}
@@ -222,34 +225,53 @@ function NavigationItem({
   );
 }
 
-function UserMenu({
+export function AppShellUserMenu({
   user,
   onManageAccount,
   onLogout,
-}: Pick<AppShellProps, 'user' | 'onManageAccount' | 'onLogout'>) {
+  trigger = 'sidebar',
+}: Pick<AppShellProps, 'user' | 'onManageAccount' | 'onLogout'> & {
+  trigger?: 'avatar' | 'sidebar';
+}) {
   const { resolvedTheme, setTheme } = useTheme();
+  const isAvatarTrigger = trigger === 'avatar';
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button
           variant="ghost"
-          className="h-auto w-full justify-start rounded-lg px-2 py-1.5"
+          className={
+            isAvatarTrigger
+              ? 'size-9 rounded-full p-0'
+              : 'h-auto w-full justify-start rounded-lg px-2 py-1.5'
+          }
+          aria-label={isAvatarTrigger ? 'Open account menu' : undefined}
         >
           <Avatar size="sm">
-            {user.avatarUrl ? <AvatarImage src={user.avatarUrl} alt="" /> : null}
+            {user.avatarUrl ? (
+              <AvatarImage src={user.avatarUrl} alt="" />
+            ) : null}
             <AvatarFallback>{initials(user.name)}</AvatarFallback>
           </Avatar>
-          <span className="min-w-0 flex-1 text-left">
-            <span className="block truncate font-medium">{user.name}</span>
-            <span className="block truncate text-[10px] font-normal text-muted-foreground">
-              {user.secondaryLabel}
-            </span>
-          </span>
-          <MoreHorizontal />
+          {!isAvatarTrigger ? (
+            <>
+              <span className="min-w-0 flex-1 text-left">
+                <span className="block truncate font-medium">{user.name}</span>
+                <span className="block truncate text-[10px] font-normal text-muted-foreground">
+                  {user.secondaryLabel}
+                </span>
+              </span>
+              <MoreHorizontal />
+            </>
+          ) : null}
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent side="top" align="start" className="w-60 rounded-xl">
+      <DropdownMenuContent
+        side={isAvatarTrigger ? 'bottom' : 'top'}
+        align={isAvatarTrigger ? 'end' : 'start'}
+        className="w-60 rounded-xl"
+      >
         <DropdownMenuGroup>
           <DropdownMenuLabel>
             <span className="block truncate font-medium text-foreground">
@@ -301,6 +323,7 @@ export function AppShell({
   search,
   user,
   docsHref = '/docs',
+  footerLinks = [],
   navbarActions,
   onManageAccount,
   onLogout,
@@ -335,7 +358,7 @@ export function AppShell({
             ) : (
               <SidebarGroup
                 key={entry.id}
-                className="mt-8 group-data-[collapsible=icon]:mt-0"
+                className="mt-1/2 group-data-[collapsible=icon]:mt-0"
               >
                 <SidebarGroupContent>
                   <SidebarMenu>
@@ -352,6 +375,23 @@ export function AppShell({
         </SidebarContent>
         <SidebarFooter className="gap-1 p-3">
           {search}
+          {footerLinks.map((link) => {
+            const Icon = link.icon;
+
+            return (
+              <Button
+                key={link.id}
+                asChild
+                variant="ghost"
+                className="justify-start rounded-lg px-2"
+              >
+                <AppLink href={link.href} renderLink={renderLink}>
+                  <Icon />
+                  {link.label}
+                </AppLink>
+              </Button>
+            );
+          })}
           <Button
             asChild
             variant="ghost"
@@ -363,7 +403,7 @@ export function AppShell({
             </AppLink>
           </Button>
           <Separator className="my-2" />
-          <UserMenu
+          <AppShellUserMenu
             user={user}
             onManageAccount={onManageAccount}
             onLogout={onLogout}

@@ -11,7 +11,12 @@ import {
 } from "drizzle-orm/pg-core";
 
 import { generateId } from "../id";
-import type { FinanceSchemaConfig, SessionConfig } from "./jsonb";
+import { financeClassOverridesSchema } from "./jsonb";
+import type {
+  FinanceClassOverrides,
+  FinanceSchemaConfig,
+  SessionConfig,
+} from "./jsonb";
 import { schoolTable } from "./school";
 
 export const schoolSessionTable = pgTable(
@@ -27,6 +32,10 @@ export const schoolSessionTable = pgTable(
     sessionStartYear: integer("session_start_year").notNull(),
     sessionConfig: jsonb("session_config").$type<SessionConfig>(),
     financeConfig: jsonb("finance_config").$type<FinanceSchemaConfig>(),
+    financeClassOverrides: jsonb("finance_class_overrides")
+      .$type<FinanceClassOverrides>()
+      .notNull()
+      .default(financeClassOverridesSchema.parse({})),
     isActive: boolean("is_active").notNull().default(false),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow(),

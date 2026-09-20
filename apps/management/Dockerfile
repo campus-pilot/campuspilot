@@ -14,13 +14,20 @@ ENV NEXT_PUBLIC_SERVER_URL
 RUN --mount=type=cache,target=/pnpm-store pnpm install --frozen-lockfile --store-dir /pnpm-store
 RUN pnpm --filter management build
 
-FROM nginx:1.29-alpine AS runner
-COPY apps/management/nginx.conf /etc/nginx/conf.d/default.conf
-COPY --from=builder /app/apps/management/out /usr/share/nginx/html
+FROM node:24-slim AS runner
+
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV HOSTNAME=0.0.0.0
+ENV PORT=3002
+
+COPY --from=builder /app/apps/management/.next/standalone ./
+COPY --from=builder /app/apps/management/.next/static ./apps/management/.next/static
 
 EXPOSE 3002
 
 HEALTHCHECK --interval=10s --timeout=5s --retries=5 \
-  CMD wget --quiet --tries=1 --spider http://localhost:3002/ || exit 1
+  CMD node -e "fetch('http://localhost:3002/').then(response => { if (!response.ok) process.exit(1) }).catch(() => process.exit(1))"
 
-CMD ["nginx", "-g", "daemon off;"]
+CMD ["node", "apps/management/server.js"]

@@ -5,16 +5,20 @@
   "scripts": {
     "build": "next build",
     "dev": "next dev --port 3002",
-    "start": "serve out --listen 3002",
+    "start": "next start --port 3002",
     "check-types": "tsc --noEmit"
   },
   "dependencies": {
+    "@campuspilot/api": "workspace:*",
     "@campuspilot/auth": "workspace:*",
     "@campuspilot/components": "workspace:*",
     "@campuspilot/env": "workspace:*",
     "@campuspilot/ui": "workspace:*",
     "@icons-pack/react-simple-icons": "^13.15.1",
+    "@orpc/client": "catalog:",
+    "@orpc/tanstack-query": "^1.14.12",
     "@tanstack/react-form": "^1.33.2",
+    "@tanstack/react-query": "^5.101.4",
     "better-auth": "catalog:",
     "lucide-react": "catalog:",
     "next": "^16.1.6",
@@ -29,7 +33,6 @@
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
     "@types/three": "^0.186.0",
-    "serve": "^14.2.5",
     "tailwindcss": "catalog:",
     "typescript": "catalog:"
   }

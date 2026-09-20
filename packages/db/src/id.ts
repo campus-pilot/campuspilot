@@ -4,6 +4,8 @@ import { z } from "zod/v4";
 const nanoid = customAlphabet("0123456789abcdefghijklmnopqrstuvwxyz", 21);
 
 export const PREFIX_MAP = {
+  class: "cls",
+  section: "sec",
   school: "sch",
   schoolSession: "sess",
 } as const;

@@ -360,7 +360,7 @@ function FeeElementDialog({
 
 export interface FinanceSectionProps {
   financeConfig: FinanceSchemaConfig | null | undefined;
-  onChange: (nextConfig: FinanceSchemaConfig | null) => void;
+  onChange?: (nextConfig: FinanceSchemaConfig | null) => void;
 }
 
 export function FinanceSection({
@@ -378,7 +378,7 @@ export function FinanceSection({
   const existingSlugs = entries.map(([slug]) => slug);
 
   function handleCreateDefault() {
-    onChange({ ...DEFAULT_FINANCE_CONFIG });
+    onChange?.({ ...DEFAULT_FINANCE_CONFIG });
   }
 
   function handleCreateWithExamples() {
@@ -391,7 +391,7 @@ export function FinanceSection({
         defaultValue: item.defaultValue,
       };
     });
-    onChange({
+    onChange?.({
       recurring: 'monthly',
       currency: 'INR',
       elements: exampleMap,
@@ -400,12 +400,12 @@ export function FinanceSection({
 
   function handleRecurringChange(recurring: FinanceRecurring) {
     if (!financeConfig) return;
-    onChange({ ...financeConfig, recurring });
+    onChange?.({ ...financeConfig, recurring });
   }
 
   function handleCurrencyChange(currency: string) {
     if (!financeConfig) return;
-    onChange({ ...financeConfig, currency: currency.toUpperCase() });
+    onChange?.({ ...financeConfig, currency: currency.toUpperCase() });
   }
 
   function handleAddOrEditElement(values: {
@@ -418,14 +418,14 @@ export function FinanceSection({
       delete currentElements[dialogState.editingSlug];
     }
     currentElements[values.slug] = values.element;
-    onChange({ ...financeConfig, elements: currentElements });
+    onChange?.({ ...financeConfig, elements: currentElements });
   }
 
   function handleDeleteElement(slug: string) {
     if (!financeConfig) return;
     const currentElements = { ...financeConfig.elements };
     delete currentElements[slug];
-    onChange({ ...financeConfig, elements: currentElements });
+    onChange?.({ ...financeConfig, elements: currentElements });
   }
 
   function handleQuickAddExample(item: (typeof EXAMPLE_ELEMENTS)[0]) {
@@ -437,7 +437,7 @@ export function FinanceSection({
       requiredAtLevel: item.requiredAtLevel,
       defaultValue: item.defaultValue,
     };
-    onChange({ ...financeConfig, elements: currentElements });
+    onChange?.({ ...financeConfig, elements: currentElements });
   }
 
   if (!financeConfig) {
@@ -459,7 +459,7 @@ export function FinanceSection({
               standard school fee blueprints.
             </EmptyDescription>
           </EmptyHeader>
-          <EmptyContent className="flex-row gap-2">
+          {onChange ? <EmptyContent className="flex-row gap-2">
             <Button
               type="button"
               variant="outline"
@@ -473,7 +473,7 @@ export function FinanceSection({
               <Plus className="size-3.5" />
               Create finance schema
             </Button>
-          </EmptyContent>
+          </EmptyContent> : null}
         </Empty>
       </div>
     );
@@ -491,7 +491,7 @@ export function FinanceSection({
             billing.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        {onChange ? <div className="flex items-center gap-2">
           <Button
             type="button"
             variant="outline"
@@ -510,13 +510,13 @@ export function FinanceSection({
             <Plus className="size-3.5" />
             Add fee element
           </Button>
-        </div>
+        </div> : null}
       </div>
 
       <div className="grid gap-3 rounded-lg border border-border bg-background p-3 sm:grid-cols-2">
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="finance-recurring">Billing frequency</Label>
-          <NativeSelect
+          {onChange ? <NativeSelect
             id="finance-recurring"
             value={financeConfig.recurring}
             onChange={(event) =>
@@ -526,18 +526,18 @@ export function FinanceSection({
             <NativeSelectOption value="monthly">Monthly</NativeSelectOption>
             <NativeSelectOption value="quarterly">Quarterly</NativeSelectOption>
             <NativeSelectOption value="yearly">Yearly</NativeSelectOption>
-          </NativeSelect>
+          </NativeSelect> : <p className="text-sm capitalize">{financeConfig.recurring}</p>}
         </div>
 
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="finance-currency">Currency (ISO 4217)</Label>
-          <Input
+          {onChange ? <Input
             id="finance-currency"
             value={financeConfig.currency ?? 'INR'}
             maxLength={3}
             className="font-mono uppercase"
             onChange={(event) => handleCurrencyChange(event.target.value)}
-          />
+          /> : <p className="font-mono text-sm">{financeConfig.currency ?? 'INR'}</p>}
         </div>
       </div>
 
@@ -547,7 +547,7 @@ export function FinanceSection({
             No fee elements added yet. Add a custom element or pick from common
             school fee types:
           </p>
-          <div className="flex flex-wrap justify-center gap-2">
+          {onChange ? <div className="flex flex-wrap justify-center gap-2">
             {EXAMPLE_ELEMENTS.map((item) => (
               <Button
                 key={item.slug}
@@ -560,7 +560,7 @@ export function FinanceSection({
                 {item.name}
               </Button>
             ))}
-          </div>
+          </div> : null}
         </div>
       ) : (
         <div className="flex flex-col overflow-hidden rounded-lg border border-border">
@@ -569,7 +569,7 @@ export function FinanceSection({
             <span>Assignable to</span>
             <span>Required at</span>
             <span>Default</span>
-            <span className="text-right">Actions</span>
+            {onChange ? <span className="text-right">Actions</span> : null}
           </div>
           <div className="divide-y divide-border bg-background">
             {entries.map(([slug, element]) => (
@@ -611,7 +611,7 @@ export function FinanceSection({
                     ? `${element.defaultValue} ${financeConfig.currency}`
                     : '-'}
                 </span>
-                <div className="flex items-center justify-end gap-1">
+                {onChange ? <div className="flex items-center justify-end gap-1">
                   <Button
                     type="button"
                     variant="ghost"
@@ -633,14 +633,14 @@ export function FinanceSection({
                   >
                     <Trash2 className="size-3.5" />
                   </Button>
-                </div>
+                </div> : null}
               </div>
             ))}
           </div>
         </div>
       )}
 
-      {dialogState.open && (
+      {onChange && dialogState.open && (
         <FeeElementDialog
           key={dialogState.editingSlug ?? 'new-element'}
           open={dialogState.open}

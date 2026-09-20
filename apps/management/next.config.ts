@@ -1,9 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // Emit static assets only. No Next.js server (and therefore no runtime SSR)
-  // is included in the production image.
-  output: "export",
+  // School identifiers are runtime tenant data, so the management app cannot
+  // use static export's build-time-only dynamic route enumeration.
+  output: "standalone",
   images: {
     unoptimized: true,
   },

@@ -1,0 +1,1 @@
+ALTER TABLE "user" ADD COLUMN "profile_image_s3_key" text;

@@ -198,7 +198,7 @@ function GradeDialog({
 
 export interface GradingScaleSectionProps {
   gradingScale: Record<string, GradeDefinition> | null | undefined;
-  onChange: (nextScale: Record<string, GradeDefinition>) => void;
+  onChange?: (nextScale: Record<string, GradeDefinition>) => void;
 }
 
 export function GradingScaleSection({
@@ -230,13 +230,13 @@ export function GradingScaleSection({
       label: values.label,
       minScore: values.minScore,
     };
-    onChange(current);
+    onChange?.(current);
   }
 
   function handleDelete(key: string) {
     const current = { ...(gradingScale ?? {}) };
     delete current[key];
-    onChange(current);
+    onChange?.(current);
   }
 
   function handleLoadDefaults() {
@@ -244,7 +244,7 @@ export function GradingScaleSection({
     DEFAULT_GRADES.forEach((item) => {
       defaults[item.key] = item.value;
     });
-    onChange(defaults);
+    onChange?.(defaults);
   }
 
   return (
@@ -258,7 +258,7 @@ export function GradingScaleSection({
             Convert student marks into letter grades. Ordered automatically by minimum score threshold descending.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        {onChange ? <div className="flex items-center gap-2">
           {isEmpty && (
             <Button
               type="button"
@@ -279,7 +279,7 @@ export function GradingScaleSection({
             <Plus className="size-3.5" />
             Add grade
           </Button>
-        </div>
+        </div> : null}
       </div>
 
       {isEmpty ? (
@@ -290,7 +290,7 @@ export function GradingScaleSection({
               Add grades with percentage thresholds (e.g. A1 &ge; 91%), or load standard 8-point grading.
             </EmptyDescription>
           </EmptyHeader>
-          <EmptyContent className="flex-row gap-2">
+          {onChange ? <EmptyContent className="flex-row gap-2">
             <Button
               type="button"
               variant="outline"
@@ -308,7 +308,7 @@ export function GradingScaleSection({
               <Plus className="size-3.5" />
               Create grade
             </Button>
-          </EmptyContent>
+          </EmptyContent> : null}
         </Empty>
       ) : (
         <div className="flex flex-col overflow-hidden rounded-lg border border-border">
@@ -316,7 +316,7 @@ export function GradingScaleSection({
             <span>Grade label</span>
             <span>Minimum score</span>
             <span>Key</span>
-            <span className="text-right">Actions</span>
+            {onChange ? <span className="text-right">Actions</span> : null}
           </div>
           <div className="divide-y divide-border bg-background">
             {sortedEntries.map(([key, grade]) => (
@@ -335,7 +335,7 @@ export function GradingScaleSection({
                 <span className="font-mono text-[10px] text-muted-foreground">
                   {key}
                 </span>
-                <div className="flex items-center justify-end gap-1">
+                {onChange ? <div className="flex items-center justify-end gap-1">
                   <Button
                     type="button"
                     variant="ghost"
@@ -357,14 +357,14 @@ export function GradingScaleSection({
                   >
                     <Trash2 className="size-3.5" />
                   </Button>
-                </div>
+                </div> : null}
               </div>
             ))}
           </div>
         </div>
       )}
 
-      {dialogState.open && (
+      {onChange && dialogState.open && (
         <GradeDialog
           key={dialogState.editingKey ?? 'new-grade'}
           open={dialogState.open}

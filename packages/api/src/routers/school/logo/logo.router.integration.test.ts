@@ -54,7 +54,13 @@ describe('school.getLogo integration', () => {
     expect(Buffer.from(await response.arrayBuffer())).toEqual(bytes);
   });
 
-  it.each(['principal', 'manager'] as const)(
+  it.each([
+    'principal',
+    'manager',
+    'teacher',
+    'accountant',
+    'exam_coordinator',
+  ] as const)(
     'allows a school %s to request the logo URL for their school',
     async (role) => {
       const { school } = await createSchoolWithLogo();

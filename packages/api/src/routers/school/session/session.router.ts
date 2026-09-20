@@ -23,6 +23,16 @@ import {
   updateSchoolSessionInputSchema,
 } from './session.dto';
 
+const schoolSessionDtoColumns = {
+  id: schoolSessionTable.id,
+  schoolId: schoolSessionTable.schoolId,
+  sessionStartYear: schoolSessionTable.sessionStartYear,
+  sessionEndYear: schoolSessionTable.sessionEndYear,
+  sessionConfig: schoolSessionTable.sessionConfig,
+  isActive: schoolSessionTable.isActive,
+  createdAt: schoolSessionTable.createdAt,
+  updatedAt: schoolSessionTable.updatedAt,
+};
 
 export const schoolSessionRouter = {
   listSessions: protectedProcedure
@@ -73,7 +83,7 @@ export const schoolSessionRouter = {
 
         const [sessions, totalRows] = await Promise.all([
           context.db
-            .select()
+            .select(schoolSessionDtoColumns)
             .from(schoolSessionTable)
             .where(where)
             .orderBy(
@@ -116,7 +126,7 @@ export const schoolSessionRouter = {
     .handler(async ({ context, input }) => {
       try {
         const [session] = await context.db
-          .select()
+          .select(schoolSessionDtoColumns)
           .from(schoolSessionTable)
           .where(
             and(
@@ -136,7 +146,7 @@ export const schoolSessionRouter = {
     .route({
       summary: 'Create a school session',
       description:
-        'Create an academic session for a school with explicit year boundaries and optional session and finance configuration. Requires permission to create sessions in that school.',
+        'Create an academic session for a school with explicit year boundaries and optional academic configuration. Finance configuration is managed through its dedicated restricted routes.',
       tags: ['School', 'Sessions'],
     })
     .input(createSchoolSessionInputSchema)
@@ -155,7 +165,7 @@ export const schoolSessionRouter = {
         const [session] = await context.db
           .insert(schoolSessionTable)
           .values({ schoolId, ...values })
-          .returning();
+          .returning(schoolSessionDtoColumns);
         if (!session) throw rpcError.internal();
         return toSchoolSessionDto(session);
       } catch (error) {
@@ -212,7 +222,7 @@ export const schoolSessionRouter = {
               eq(schoolSessionTable.id, sessionId),
             ),
           )
-          .returning();
+          .returning(schoolSessionDtoColumns);
         if (!session) throw rpcError.notFound('School session');
         return toSchoolSessionDto(session);
       } catch (error) {
@@ -240,7 +250,7 @@ export const schoolSessionRouter = {
               eq(schoolSessionTable.id, input.sessionId),
             ),
           )
-          .returning();
+          .returning(schoolSessionDtoColumns);
         if (!session) throw rpcError.notFound('School session');
         return toSchoolSessionDto(session);
       } catch (error) {
@@ -303,7 +313,7 @@ export const schoolSessionRouter = {
                 eq(schoolSessionTable.id, input.sessionId),
               ),
             )
-            .returning();
+            .returning(schoolSessionDtoColumns);
           if (!session) throw rpcError.notFound('School session');
           return toSchoolSessionDto(session);
         });
@@ -346,4 +356,3 @@ export const schoolSessionRouter = {
       }
     }),
 };
-

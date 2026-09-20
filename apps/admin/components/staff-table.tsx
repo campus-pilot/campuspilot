@@ -117,8 +117,8 @@ function createStaffColumns(
       cell: ({ row }) => (
         <div className="flex min-w-52 items-center gap-2.5">
           <Avatar>
-            {row.original.image ? (
-              <AvatarImage src={row.original.image} alt="" />
+            {row.original.profileImageUrl ? (
+              <AvatarImage src={row.original.profileImageUrl} alt="" />
             ) : null}
             <AvatarFallback>{memberInitials(row.original)}</AvatarFallback>
           </Avatar>
