@@ -12,41 +12,67 @@ import {
   Settings,
   UserRoundPlus,
   Users,
-  WalletCards,
 } from 'lucide-react';
 import {
   ManagementShell,
   type ManagementShellState,
 } from '@/components/management-shell';
 import { resolveManagementPageActions } from '@/components/management-route';
-import { schoolHref, type SchoolRouteParams } from '@/components/school-route';
-import { admissionsPage } from './admissions/_route';
-import { billingPage } from './billing/_route';
-import { classroomPage } from './classroom/_route';
-import { dashboardPage } from './_route';
-import { examPage } from './exam/_route';
-import { financePage } from './finance/_route';
-import { noticesPage } from './notices/_route';
+import type { ManagementPageDescriptor } from '@/components/management-route';
+import {
+  schoolHref,
+  schoolSessionHref,
+  type SchoolSessionRouteParams,
+} from '@/components/school-route';
+import {
+  PersistSchoolSessionSelection,
+  useSchoolSessions,
+  useStoredSchoolSessionId,
+} from '@/components/session-selection';
+import { SessionSwitcher } from '@/components/session-switcher';
+import { admissionPage } from './admission/_route';
+import { admissionDetailsPage } from './admission/[admissionId]/_route';
+import { billingPage } from './sessions/[sessionId]/billing/_route';
+import {
+  classroomDetailsPage,
+  classStudentDetailsPage,
+  classStudentsPage,
+  classroomPage,
+} from './sessions/[sessionId]/classroom/_route';
+import { dashboardPage } from './sessions/[sessionId]/_route';
+import { examPage } from './sessions/[sessionId]/exam/_route';
+import { noticesPage } from './sessions/[sessionId]/notices/_route';
 import { staffPage } from './staff/_route';
 
-const pages = [
+const pages: ManagementPageDescriptor<any>[] = [
   dashboardPage,
   staffPage,
   noticesPage,
-  admissionsPage,
+  admissionPage,
+  admissionDetailsPage,
   classroomPage,
+  classStudentDetailsPage,
+  classStudentsPage,
+  classroomDetailsPage,
   examPage,
-  financePage,
   billingPage,
 ];
 
-function navigationFor(schoolId: string): AppShellNavigationEntry[] {
+function navigationFor(
+  schoolId: string,
+  sessionId?: string,
+): AppShellNavigationEntry[] {
+  const sessionHref = (suffix = '') =>
+    sessionId
+      ? schoolSessionHref(schoolId, sessionId, suffix)
+      : schoolHref(schoolId);
+
   return [
     {
       type: 'item',
       id: 'dashboard',
       label: 'Dashboard',
-      href: schoolHref(schoolId),
+      href: sessionHref(),
       icon: LayoutDashboard,
       match: 'exact',
     },
@@ -64,10 +90,10 @@ function navigationFor(schoolId: string): AppShellNavigationEntry[] {
         },
         {
           type: 'item',
-          id: 'notices',
-          label: 'Notices',
-          href: schoolHref(schoolId, '/notices'),
-          icon: Bell,
+          id: 'admission',
+          label: 'Admission',
+          href: schoolHref(schoolId, '/admission'),
+          icon: UserRoundPlus,
         },
       ],
     },
@@ -78,45 +104,38 @@ function navigationFor(schoolId: string): AppShellNavigationEntry[] {
       items: [
         {
           type: 'item',
-          id: 'admissions',
-          label: 'Admissions',
-          href: schoolHref(schoolId, '/admissions'),
-          icon: UserRoundPlus,
+          id: 'classroom',
+          label: 'Classroom',
+          href: sessionHref('/classroom'),
+          icon: GraduationCap,
         },
         {
           type: 'item',
-          id: 'classroom',
-          label: 'Classroom',
-          href: schoolHref(schoolId, '/classroom'),
-          icon: GraduationCap,
+          id: 'exam',
+          label: 'Exam',
+          href: sessionHref('/exam'),
+          icon: ClipboardCheck,
         },
       ],
     },
     {
-      type: 'item',
-      id: 'exam',
-      label: 'Exam',
-      href: schoolHref(schoolId, '/exam'),
-      icon: ClipboardCheck,
-    },
-    {
       type: 'group',
-      id: 'finance-and-billing',
-      label: 'Finance and Billing',
+      id: 'operations',
+      label: 'Operations',
       items: [
-        {
-          type: 'item',
-          id: 'finance',
-          label: 'Finance',
-          href: schoolHref(schoolId, '/finance'),
-          icon: WalletCards,
-        },
         {
           type: 'item',
           id: 'billing',
           label: 'Billing',
-          href: schoolHref(schoolId, '/billing'),
+          href: sessionHref('/billing'),
           icon: CreditCard,
+        },
+        {
+          type: 'item',
+          id: 'notices',
+          label: 'Notices',
+          href: sessionHref('/notices'),
+          icon: Bell,
         },
       ],
     },
@@ -138,13 +157,41 @@ export default function SchoolWorkspaceLayout({
   const pathname = usePathname();
   const routeParams = useParams();
   const schoolId = String(routeParams.schoolId ?? '');
+  const routeSessionId = String(routeParams.sessionId ?? '') || undefined;
+  const storedSessionId = useStoredSchoolSessionId(schoolId);
+  const sessionsQuery = useSchoolSessions(schoolId);
+  const sessions = sessionsQuery.data ?? [];
+  const activeSessionId = sessions.find((session) => session.isActive)?.id;
+  const selectedSessionId =
+    routeSessionId ?? storedSessionId ?? activeSessionId;
   const page = pages.find((candidate) => candidate.matches(pathname));
-  const params: SchoolRouteParams = { schoolId };
+  const params = {
+    ...routeParams,
+    schoolId,
+    sessionId: routeSessionId ?? selectedSessionId ?? '',
+  } as SchoolSessionRouteParams & Record<string, string>;
   const state: ManagementShellState = {
-    navigation: navigationFor(schoolId),
+    navigation: navigationFor(schoolId, selectedSessionId),
     breadcrumbs: page?.breadcrumbs(params) ?? [],
+    footerContent: (
+      <SessionSwitcher
+        schoolId={schoolId}
+        selectedSessionId={selectedSessionId}
+        sessions={sessions}
+      />
+    ),
     navbarActions: resolveManagementPageActions(page, params),
   };
 
-  return <ManagementShell state={state}>{children}</ManagementShell>;
+  const shell = <ManagementShell state={state}>{children}</ManagementShell>;
+  return routeSessionId ? (
+    <PersistSchoolSessionSelection
+      schoolId={schoolId}
+      sessionId={routeSessionId}
+    >
+      {shell}
+    </PersistSchoolSessionSelection>
+  ) : (
+    shell
+  );
 }

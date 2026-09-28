@@ -1,19 +1,16 @@
 import { classTable, sectionTable } from "@campuspilot/db/schema/class";
 import { SCHOOL_ACTIONS } from "@campuspilot/opa/policies/school";
-import { and, asc, count, desc, eq, ilike, or } from "drizzle-orm";
+import { and, asc, count, eq, max, sql } from "drizzle-orm";
 
 import { rpcError, toRpcError } from "../../../errors";
 import { protectedProcedure } from "../../../index";
-import {
-  createNextPageCursor,
-  createPaginatedResult,
-  resolvePaginationInput,
-} from "../../../paginations";
 import { requireSchoolPermission } from "../../../permissions/school";
 import {
   createSectionInputSchema,
   listSectionsInputSchema,
   listSectionsOutputSchema,
+  reorderSectionsInputSchema,
+  reorderSectionsOutputSchema,
   sectionDtoSchema,
   sectionIdInputSchema,
   toSectionDto,
@@ -26,7 +23,7 @@ export const schoolSectionRouter = {
     .route({
       summary: "List class sections",
       description:
-        "List one class's sections with pagination, search, and deterministic sorting.",
+        "List every section in a class in its explicit display order.",
       tags: ["School", "Classes", "Sections"],
     })
     .input(listSectionsInputSchema)
@@ -46,53 +43,19 @@ export const schoolSectionRouter = {
           .limit(1);
         if (!schoolClass) throw rpcError.notFound("Class");
 
-        const { currentPage, pageSize, offset } = resolvePaginationInput(input);
-        const searchCondition = input.searchQuery
-          ? or(
-              ilike(sectionTable.slug, `%${input.searchQuery}%`),
-              ilike(sectionTable.label, `%${input.searchQuery}%`),
-            )
-          : undefined;
-        const where = and(
-          eq(sectionTable.schoolId, input.schoolId),
-          eq(sectionTable.classId, input.classId),
-          searchCondition,
-        );
-        const orderByColumn = {
-          slug: sectionTable.slug,
-          label: sectionTable.label,
-          createdAt: sectionTable.createdAt,
-          updatedAt: sectionTable.updatedAt,
-        }[input.orderBy.field];
-        const orderDirection = input.orderBy.direction === "asc" ? asc : desc;
-
-        const [sections, totalRows] = await Promise.all([
-          context.db
-            .select()
-            .from(sectionTable)
-            .where(where)
-            .orderBy(
-              orderDirection(orderByColumn),
-              orderDirection(sectionTable.id),
-            )
-            .limit(pageSize)
-            .offset(offset),
-          context.db
-            .select({ totalItems: count() })
-            .from(sectionTable)
-            .where(where),
-        ]);
-        const totalItems = totalRows[0]?.totalItems ?? 0;
-        const totalPages = Math.ceil(totalItems / pageSize);
-
-        return createPaginatedResult({
-          items: sections.map(toSectionDto),
-          nextCursor: createNextPageCursor(currentPage, totalPages),
-          currentPage,
-          totalPages,
-          totalItems,
-          pageSize,
-        });
+        // A class has a small bounded set of sections, and the complete order
+        // is required for drag-and-drop, so this list is unpaginated.
+        const sections = await context.db
+          .select()
+          .from(sectionTable)
+          .where(
+            and(
+              eq(sectionTable.schoolId, input.schoolId),
+              eq(sectionTable.classId, input.classId),
+            ),
+          )
+          .orderBy(asc(sectionTable.displayOrder), asc(sectionTable.id));
+        return sections.map(toSectionDto);
       } catch (error) {
         throw toRpcError(error);
       }
@@ -156,9 +119,22 @@ export const schoolSectionRouter = {
             .limit(1);
           if (!schoolClass) throw rpcError.notFound("Class");
 
+          const [lastSection] = await transaction
+            .select({ displayOrder: max(sectionTable.displayOrder) })
+            .from(sectionTable)
+            .where(
+              and(
+                eq(sectionTable.schoolId, input.schoolId),
+                eq(sectionTable.classId, input.classId),
+              ),
+            );
+
           const [section] = await transaction
             .insert(sectionTable)
-            .values(input)
+            .values({
+              ...input,
+              displayOrder: (lastSection?.displayOrder ?? 0) + 1,
+            })
             .returning();
           if (!section) throw rpcError.internal();
           return toSectionDto(section);
@@ -172,7 +148,7 @@ export const schoolSectionRouter = {
     .route({
       summary: "Update a class section",
       description:
-        "Update a section slug or label. This structural mutation is restricted to school managers and principals.",
+        "Update a section slug or label. Any role in the school may perform this mutation.",
       tags: ["School", "Classes", "Sections"],
     })
     .input(updateSectionInputSchema)
@@ -194,6 +170,90 @@ export const schoolSectionRouter = {
           .returning();
         if (!section) throw rpcError.notFound("Section");
         return toSectionDto(section);
+      } catch (error) {
+        throw toRpcError(error);
+      }
+    }),
+
+  reorderSections: protectedProcedure
+    .route({
+      summary: "Reorder class sections",
+      description:
+        "Replace the complete section display order for a class. Requires permission to reorder sections.",
+      tags: ["School", "Classes", "Sections"],
+    })
+    .input(reorderSectionsInputSchema)
+    .use(requireSchoolPermission(SCHOOL_ACTIONS.REORDER_SECTIONS))
+    .output(reorderSectionsOutputSchema)
+    .handler(async ({ context, input }) => {
+      try {
+        return await context.db.transaction(async (transaction) => {
+          const [schoolClass] = await transaction
+            .select({ id: classTable.id })
+            .from(classTable)
+            .where(
+              and(
+                eq(classTable.schoolId, input.schoolId),
+                eq(classTable.id, input.classId),
+              ),
+            )
+            .for("update")
+            .limit(1);
+          if (!schoolClass) throw rpcError.notFound("Class");
+
+          const existing = await transaction
+            .select({ id: sectionTable.id })
+            .from(sectionTable)
+            .where(
+              and(
+                eq(sectionTable.schoolId, input.schoolId),
+                eq(sectionTable.classId, input.classId),
+              ),
+            );
+          const existingIds = new Set(existing.map(({ id }) => id));
+          if (
+            existingIds.size !== input.orderedSectionIds.length ||
+            input.orderedSectionIds.some((id) => !existingIds.has(id))
+          ) {
+            throw rpcError.badRequest(
+              "The section order must contain every section in the class exactly once.",
+            );
+          }
+
+          await transaction
+            .update(sectionTable)
+            .set({ displayOrder: sql`-${sectionTable.displayOrder}` })
+            .where(
+              and(
+                eq(sectionTable.schoolId, input.schoolId),
+                eq(sectionTable.classId, input.classId),
+              ),
+            );
+          for (const [index, sectionId] of input.orderedSectionIds.entries()) {
+            await transaction
+              .update(sectionTable)
+              .set({ displayOrder: index + 1, updatedAt: new Date() })
+              .where(
+                and(
+                  eq(sectionTable.schoolId, input.schoolId),
+                  eq(sectionTable.classId, input.classId),
+                  eq(sectionTable.id, sectionId),
+                ),
+              );
+          }
+
+          const reordered = await transaction
+            .select()
+            .from(sectionTable)
+            .where(
+              and(
+                eq(sectionTable.schoolId, input.schoolId),
+                eq(sectionTable.classId, input.classId),
+              ),
+            )
+            .orderBy(asc(sectionTable.displayOrder), asc(sectionTable.id));
+          return reordered.map(toSectionDto);
+        });
       } catch (error) {
         throw toRpcError(error);
       }
@@ -296,6 +356,23 @@ export const schoolSectionRouter = {
             )
             .returning();
           if (!section) throw rpcError.notFound("Section");
+
+          const remainingSections = await transaction
+            .select({ id: sectionTable.id })
+            .from(sectionTable)
+            .where(
+              and(
+                eq(sectionTable.schoolId, input.schoolId),
+                eq(sectionTable.classId, input.classId),
+              ),
+            )
+            .orderBy(asc(sectionTable.displayOrder), asc(sectionTable.id));
+          for (const [index, remaining] of remainingSections.entries()) {
+            await transaction
+              .update(sectionTable)
+              .set({ displayOrder: index + 1 })
+              .where(eq(sectionTable.id, remaining.id));
+          }
           return toSectionDto(section);
         });
       } catch (error) {

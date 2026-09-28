@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { AppShellAlert } from '@campuspilot/components/app-shell';
 import {
   SessionDetailsView,
   UnsavedChangesDialog,
@@ -216,6 +217,18 @@ export function SessionDetail({
 
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
+      {isSessionDirty ? (
+        <AppShellAlert
+          slug="session/academic/unsaved"
+          message="Examination and academic settings have unsaved changes."
+        />
+      ) : null}
+      {isFinanceDirty ? (
+        <AppShellAlert
+          slug="session/finance/unsaved"
+          message="Financial settings have unsaved changes."
+        />
+      ) : null}
       {/* Main Session View & Editor */}
       <SessionDetailsView
         key={session.id}
@@ -223,71 +236,83 @@ export function SessionDetail({
         isSaving={updateSessionMutation.isPending}
         isActivating={activateSessionMutation.isPending}
         onActivate={() => activateSessionMutation.mutate()}
-        onSave={async (updates) => {
-          await updateSessionMutation.mutateAsync(updates);
-        }}
-        onDirtyChange={setIsSessionDirty}
+        onSave={
+          session.isActive
+            ? async (updates) => {
+                await updateSessionMutation.mutateAsync(updates);
+              }
+            : undefined
+        }
+        onDirtyChange={session.isActive ? setIsSessionDirty : undefined}
       />
 
       <SessionFinanceSettings
         schoolId={schoolId}
         sessionId={session.id}
+        isEditable={session.isActive}
         onDirtyChange={setIsFinanceDirty}
       />
 
-      {/* Danger Zone: Delete Session at the lowermost portion */}
-      <div className="flex flex-col gap-3 rounded-xl border border-destructive/20 bg-destructive/5 p-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex flex-col gap-1">
-          <h3 className="text-sm font-semibold text-destructive">
-            Delete academic session
-          </h3>
-          <p className="text-xs text-muted-foreground">
-            Permanently remove session {session.sessionStartYear}&ndash;{session.sessionEndYear} and its associated configurations. This action cannot be undone.
-          </p>
-        </div>
-        <Button
-          type="button"
-          variant="destructive"
-          size="sm"
-          className="w-fit shrink-0 gap-1.5"
-          onClick={() => setIsDeleteOpen(true)}
-        >
-          <Trash2 className="size-3.5" />
-          <span>Delete session</span>
-        </Button>
-      </div>
-
-      {/* Delete Session Confirmation */}
-      <AlertDialog open={isDeleteOpen} onOpenChange={setIsDeleteOpen}>
-
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              Delete session {session.sessionStartYear}&ndash;{session.sessionEndYear}?
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              This will permanently remove this academic session and its configuration. This action cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleteSessionMutation.isPending}>
-              Cancel
-            </AlertDialogCancel>
-            <AlertDialogAction
+      {!session.isActive ? (
+        <>
+          {/* Danger Zone: Delete Session at the lowermost portion */}
+          <div className="flex flex-col gap-3 rounded-xl border border-destructive/20 bg-destructive/5 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-col gap-1">
+              <h3 className="text-sm font-semibold text-destructive">
+                Delete academic session
+              </h3>
+              <p className="text-xs text-muted-foreground">
+                Permanently remove session {session.sessionStartYear}&ndash;
+                {session.sessionEndYear} and its associated configurations.
+                This action cannot be undone.
+              </p>
+            </div>
+            <Button
+              type="button"
               variant="destructive"
-              disabled={deleteSessionMutation.isPending}
-              onClick={() => deleteSessionMutation.mutate()}
+              size="sm"
+              className="w-fit shrink-0 gap-1.5"
+              onClick={() => setIsDeleteOpen(true)}
             >
-              {deleteSessionMutation.isPending ? (
-                <LoaderCircle className="size-3.5 animate-spin" />
-              ) : (
-                <Trash2 className="size-3.5" />
-              )}
-              Delete session
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+              <Trash2 className="size-3.5" />
+              <span>Delete session</span>
+            </Button>
+          </div>
+
+          {/* Delete Session Confirmation */}
+          <AlertDialog open={isDeleteOpen} onOpenChange={setIsDeleteOpen}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>
+                  Delete session {session.sessionStartYear}&ndash;
+                  {session.sessionEndYear}?
+                </AlertDialogTitle>
+                <AlertDialogDescription>
+                  This will permanently remove this academic session and its
+                  configuration. This action cannot be undone.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel disabled={deleteSessionMutation.isPending}>
+                  Cancel
+                </AlertDialogCancel>
+                <AlertDialogAction
+                  variant="destructive"
+                  disabled={deleteSessionMutation.isPending}
+                  onClick={() => deleteSessionMutation.mutate()}
+                >
+                  {deleteSessionMutation.isPending ? (
+                    <LoaderCircle className="size-3.5 animate-spin" />
+                  ) : (
+                    <Trash2 className="size-3.5" />
+                  )}
+                  Delete session
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </>
+      ) : null}
 
       {/* Unsaved Changes Confirmation Dialog */}
       <UnsavedChangesDialog

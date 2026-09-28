@@ -129,6 +129,12 @@ actions contains {
 } if { true }
 
 actions contains {
+  "id": "school.class.reorder",
+  "key": "REORDER_CLASSES",
+  "resourceKind": "school",
+} if { true }
+
+actions contains {
   "id": "school.class.configuration.update",
   "key": "UPDATE_CLASS_CONFIGURATION",
   "resourceKind": "school",
@@ -165,6 +171,12 @@ actions contains {
 } if { true }
 
 actions contains {
+  "id": "school.section.reorder",
+  "key": "REORDER_SECTIONS",
+  "resourceKind": "school",
+} if { true }
+
+actions contains {
   "id": "school.section.attributes.update",
   "key": "UPDATE_SECTION_ATTRIBUTES",
   "resourceKind": "school",
@@ -173,5 +185,89 @@ actions contains {
 actions contains {
   "id": "school.section.delete",
   "key": "DELETE_SECTION",
+  "resourceKind": "school",
+} if { true }
+
+actions contains {
+  "id": "school.admission.settings.read",
+  "key": "READ_ADMISSION_SETTINGS",
+  "resourceKind": "school",
+} if { true }
+
+actions contains {
+  "id": "school.admission.settings.update",
+  "key": "UPDATE_ADMISSION_SETTINGS",
+  "resourceKind": "school",
+} if { true }
+
+actions contains {
+  "id": "school.admission.list",
+  "key": "LIST_ADMISSIONS",
+  "resourceKind": "school",
+} if { true }
+
+actions contains {
+  "id": "school.admission.read",
+  "key": "READ_ADMISSION",
+  "resourceKind": "school",
+} if { true }
+
+actions contains {
+  "id": "school.admission.create",
+  "key": "CREATE_ADMISSION",
+  "resourceKind": "school",
+} if { true }
+
+actions contains {
+  "id": "school.admission.update",
+  "key": "UPDATE_ADMISSION",
+  "resourceKind": "school",
+} if { true }
+
+actions contains {
+  "id": "school.admission.unregister",
+  "key": "UNREGISTER_ADMISSION",
+  "resourceKind": "school",
+} if { true }
+
+actions contains {
+  "id": "school.admission.delete",
+  "key": "DELETE_ADMISSION",
+  "resourceKind": "school",
+} if { true }
+
+actions contains {
+  "id": "school.student.list",
+  "key": "LIST_STUDENTS",
+  "resourceKind": "school",
+} if { true }
+
+actions contains {
+  "id": "school.student.read",
+  "key": "READ_STUDENT",
+  "resourceKind": "school",
+} if { true }
+
+actions contains {
+  "id": "school.student.create",
+  "key": "CREATE_STUDENT",
+  "resourceKind": "school",
+} if { true }
+
+actions contains {
+  "id": "school.student.update",
+  "key": "UPDATE_STUDENT",
+  "resourceKind": "school",
+} if { true }
+
+actions contains {
+  "id": "school.student.class.remove",
+  "key": "REMOVE_STUDENT_FROM_CLASS",
+  "resourceKind": "school",
+} if { true }
+
+actions contains {
+  "id": "school.student.delete",
+  "key": "DELETE_STUDENT",
   "resourceKind": "school",
 } if { true }

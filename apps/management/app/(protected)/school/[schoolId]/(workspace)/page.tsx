@@ -1,13 +1,10 @@
-import { LayoutDashboard } from 'lucide-react';
-import { ModulePlaceholder } from '@/components/module-placeholder';
+import { SchoolSessionEntryRedirect } from '@/components/school-selection';
 
-export default function DashboardPage() {
-  return (
-    <ModulePlaceholder
-      icon={LayoutDashboard}
-      title="Dashboard"
-      description="Your school overview will bring the most important activity and actions together here."
-    />
-  );
+export default async function SchoolEntryPage({
+  params,
+}: {
+  params: Promise<{ schoolId: string }>;
+}) {
+  const { schoolId } = await params;
+  return <SchoolSessionEntryRedirect schoolId={schoolId} />;
 }
-

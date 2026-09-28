@@ -455,16 +455,18 @@ export function SessionManagement({ schoolId }: { schoolId: string }) {
         </div>
 
         <div className="flex items-center gap-2">
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-            onClick={() => setIsDeleteOpen(true)}
-          >
-            <Trash2 className="size-3.5" />
-            Delete
-          </Button>
+          {!currentSession?.isActive ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+              onClick={() => setIsDeleteOpen(true)}
+            >
+              <Trash2 className="size-3.5" />
+              Delete
+            </Button>
+          ) : null}
           <Button
             type="button"
             variant="outline"
@@ -493,6 +495,7 @@ export function SessionManagement({ schoolId }: { schoolId: string }) {
             key={`finance-${currentSession.id}`}
             schoolId={schoolId}
             sessionId={currentSession.id}
+            isEditable={currentSession.isActive}
             onDirtyChange={setIsFinanceDirty}
           />
         </>
@@ -518,7 +521,7 @@ export function SessionManagement({ schoolId }: { schoolId: string }) {
       />
 
       {/* Delete Session Confirmation */}
-      {currentSession && (
+      {currentSession && !currentSession.isActive ? (
         <AlertDialog open={isDeleteOpen} onOpenChange={setIsDeleteOpen}>
           <AlertDialogContent>
             <AlertDialogHeader>
@@ -548,7 +551,7 @@ export function SessionManagement({ schoolId }: { schoolId: string }) {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
-      )}
+      ) : null}
     </div>
   );
 }

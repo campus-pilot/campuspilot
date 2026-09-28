@@ -7,6 +7,7 @@ import {
   CalendarDays,
   Database,
   Flag,
+  Files,
   GraduationCap,
   LayoutDashboard,
   Settings,
@@ -21,6 +22,7 @@ import { dashboardPage } from './_route';
 import { sessionsPage } from './sessions/_route';
 import { sessionDetailPage } from './sessions/[sessionId]/_route';
 import { settingsPage } from './settings/_route';
+import { documentSettingsPage } from './settings/documents/_route';
 import { staffPage } from './staff/_route';
 import { studentsPage } from './students/_route';
 import { aiUsagePage } from './usage/ai/_route';
@@ -38,6 +40,7 @@ const pages = [
   storageUsagePage,
   featureFlagsPage,
   settingsPage,
+  documentSettingsPage,
 ];
 
 function navigationFor(
@@ -122,6 +125,15 @@ function navigationFor(
       label: 'Settings',
       href: schoolHref(schoolId, '/settings'),
       icon: Settings,
+      isActive: (currentPath) =>
+        currentPath === schoolHref(schoolId, '/settings'),
+    },
+    {
+      type: 'item',
+      id: 'admission-documents',
+      label: 'Documents',
+      href: schoolHref(schoolId, '/settings/documents'),
+      icon: Files,
     },
   ];
 }
@@ -132,12 +144,10 @@ export default function SchoolLayout({ children }: { children: ReactNode }) {
   const schoolId = String(routeParams.schoolId ?? '');
   const sessionsQuery = useQuery(
     orpc.school.listSessions.queryOptions({
-      input: { schoolId },
+      input: { schoolId, limit: 1, filters: { isActive: true } },
     }),
   );
-  const activeSession =
-    sessionsQuery.data?.items.find((s) => s.isActive) ??
-    sessionsQuery.data?.items[0];
+  const activeSession = sessionsQuery.data?.items[0];
 
   const page = pages.find((candidate) => candidate.matches(pathname));
   const params = { schoolId, ...routeParams } as any;
@@ -149,4 +159,3 @@ export default function SchoolLayout({ children }: { children: ReactNode }) {
 
   return <AdminShell state={state}>{children}</AdminShell>;
 }
-

@@ -13,6 +13,7 @@ import {
   ClipboardCheck,
   CreditCard,
   FileBadge,
+  Files,
   GraduationCap,
   ReceiptText,
   School,
@@ -22,11 +23,25 @@ import {
   ManagementShell,
   type ManagementShellState,
 } from '@/components/management-shell';
-import { resolveManagementPageActions } from '@/components/management-route';
-import { schoolHref, type SchoolRouteParams } from '@/components/school-route';
+import {
+  resolveManagementPageActions,
+  type ManagementPageDescriptor,
+} from '@/components/management-route';
+import {
+  schoolHref,
+  schoolSessionHref,
+  type SchoolRouteParams,
+} from '@/components/school-route';
+import {
+  useSchoolSessions,
+  useStoredSchoolSessionId,
+} from '@/components/session-selection';
+import { SessionSwitcher } from '@/components/session-switcher';
 import { orpc } from '@/lib/orpc';
 import { schoolSettingsPage } from './_route';
+import { documentSettingsPage } from './documents/_route';
 import { sessionSettingsPage } from './session/_route';
+import { sessionDetailPage } from './session/[sessionId]/_route';
 import { admitCardTemplatePage } from './templates/admit-card/_route';
 import { billTemplatePage } from './templates/bill/_route';
 import { examinationTemplatePage } from './templates/examination/_route';
@@ -35,8 +50,12 @@ import { noticeTemplatePage } from './templates/notice/_route';
 import { receiptTemplatePage } from './templates/receipt/_route';
 import { timetableTemplatePage } from './templates/timetable/_route';
 
-const pages = [
+type SettingsRouteParams = SchoolRouteParams & { sessionId: string };
+
+const pages: ManagementPageDescriptor<SettingsRouteParams>[] = [
   schoolSettingsPage,
+  documentSettingsPage,
+  sessionDetailPage,
   sessionSettingsPage,
   examinationTemplatePage,
   idCardTemplatePage,
@@ -50,6 +69,7 @@ const pages = [
 function navigationFor(
   schoolId: string,
   canViewSessions: boolean,
+  activeSessionId?: string,
 ): AppShellNavigationEntry[] {
   return [
     {
@@ -60,13 +80,31 @@ function navigationFor(
       icon: School,
       match: 'exact',
     },
-    ...(canViewSessions ? [{
+    {
       type: 'item',
-      id: 'session-settings',
-      label: 'Session',
-      href: schoolHref(schoolId, '/settings/session'),
-      icon: CalendarDays,
-    } satisfies AppShellNavigationEntry] : []),
+      id: 'admission-documents',
+      label: 'Documents',
+      href: schoolHref(schoolId, '/settings/documents'),
+      icon: Files,
+    },
+    ...(canViewSessions
+      ? [
+          {
+            type: 'item',
+            id: 'session-settings',
+            label: 'Sessions',
+            href: activeSessionId
+              ? schoolHref(schoolId, `/settings/session/${activeSessionId}`)
+              : schoolHref(schoolId, '/settings/session'),
+            icon: CalendarDays,
+            isActive: (currentPath) =>
+              currentPath === schoolHref(schoolId, '/settings/session') ||
+              currentPath.startsWith(
+                schoolHref(schoolId, '/settings/session/'),
+              ),
+          } satisfies AppShellNavigationEntry,
+        ]
+      : []),
     {
       type: 'item',
       id: 'templates',
@@ -136,8 +174,8 @@ export default function SchoolSettingsLayout({
   const pathname = usePathname();
   const routeParams = useParams();
   const schoolId = String(routeParams.schoolId ?? '');
+  const storedSessionId = useStoredSchoolSessionId(schoolId);
   const page = pages.find((candidate) => candidate.matches(pathname));
-  const params: SchoolRouteParams = { schoolId };
   const sessionPermissionQuery = useQuery(
     orpc.authorization.checkPermissions.queryOptions({
       input: {
@@ -150,17 +188,38 @@ export default function SchoolSettingsLayout({
       },
     }),
   );
+  const sessionsQuery = useSchoolSessions(
+    schoolId,
+    sessionPermissionQuery.data?.results[0] === true,
+  );
+  const sessions = sessionsQuery.data ?? [];
+  const activeSessionId = sessions.find((session) => session.isActive)?.id;
+  const selectedSessionId = storedSessionId ?? activeSessionId;
+  const params = {
+    schoolId,
+    sessionId: String(routeParams.sessionId ?? ''),
+  };
   const state: ManagementShellState = {
     navigation: navigationFor(
       schoolId,
       sessionPermissionQuery.data?.results[0] === true,
+      activeSessionId,
     ),
     breadcrumbs: page?.breadcrumbs(params) ?? [],
+    footerContent: (
+      <SessionSwitcher
+        schoolId={schoolId}
+        selectedSessionId={selectedSessionId}
+        sessions={sessions}
+      />
+    ),
     footerLinks: [
       {
         id: 'back-to-dashboard',
         label: 'Back to dashboard',
-        href: schoolHref(schoolId),
+        href: selectedSessionId
+          ? schoolSessionHref(schoolId, selectedSessionId)
+          : schoolHref(schoolId),
         icon: ArrowLeft,
       },
     ],

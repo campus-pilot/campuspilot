@@ -6,6 +6,9 @@ import { settingsBreadcrumbs } from '../settings-breadcrumbs';
 export const sessionSettingsPage = defineManagementPage<SchoolRouteParams>({
   matches: (pathname) => /^\/school\/[^/]+\/settings\/session$/.test(pathname),
   breadcrumbs: ({ schoolId }) =>
-    settingsBreadcrumbs(schoolId, { id: 'session-settings', label: 'Session', icon: CalendarDays }),
+    settingsBreadcrumbs(schoolId, {
+      id: 'session-settings',
+      label: 'Sessions',
+      icon: CalendarDays,
+    }),
 });
-

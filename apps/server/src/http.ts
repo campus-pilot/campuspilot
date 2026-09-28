@@ -9,6 +9,13 @@ import {
   handleProfileImageUpload,
 } from '@campuspilot/api/routers/auth/auth.http';
 import { handleSchoolLogoUpload } from '@campuspilot/api/routers/system-admin/school/school.http';
+import {
+  handleAdmissionDocumentDelete,
+  handleAdmissionDocumentRead,
+  handleAdmissionDocumentUpload,
+  handleAdmissionPhotoRead,
+  handleAdmissionPhotoUpload,
+} from '@campuspilot/api/routers/school/admission/admission.http';
 import { normalizeApiKeyRequest } from '@campuspilot/auth/api-key-headers';
 import { auth } from '@campuspilot/auth/server';
 import { env } from '@campuspilot/env/server';
@@ -52,6 +59,65 @@ app.post('/api/blob/schools/:schoolId/logo', async (context) => {
       { schoolId },
       error,
     ),
+  );
+});
+
+app.post('/api/blob/schools/:schoolId/admissions/:admissionId/documents/:documentValue', async (context) => {
+  const input = {
+    schoolId: context.req.param('schoolId'),
+    admissionId: context.req.param('admissionId'),
+    documentValue: context.req.param('documentValue'),
+    documentLabel: context.req.query('label'),
+  };
+  const apiContext = await createContext({ context });
+  return handleAdmissionDocumentUpload(context.req.raw, apiContext, input, (error) =>
+    reportUploadError(context.var.logger, 'admission.document.upload.error', input, error),
+  );
+});
+
+app.post('/api/blob/schools/:schoolId/admissions/:admissionId/photo', async (context) => {
+  const input = {
+    schoolId: context.req.param('schoolId'),
+    admissionId: context.req.param('admissionId'),
+  };
+  const apiContext = await createContext({ context });
+  return handleAdmissionPhotoUpload(context.req.raw, apiContext, input, (error) =>
+    reportUploadError(context.var.logger, 'admission.photo.upload.error', input, error),
+  );
+});
+
+app.get('/api/blob/schools/:schoolId/admissions/:admissionId/photo', async (context) => {
+  const input = {
+    schoolId: context.req.param('schoolId'),
+    admissionId: context.req.param('admissionId'),
+  };
+  const apiContext = await createContext({ context });
+  return handleAdmissionPhotoRead(apiContext, input, (error) =>
+    reportUploadError(context.var.logger, 'admission.photo.read.error', input, error),
+  );
+});
+
+app.get('/api/blob/schools/:schoolId/admissions/:admissionId/documents/:fileId', async (context) => {
+  const input = {
+    schoolId: context.req.param('schoolId'),
+    admissionId: context.req.param('admissionId'),
+    fileId: context.req.param('fileId'),
+  };
+  const apiContext = await createContext({ context });
+  return handleAdmissionDocumentRead(apiContext, input, (error) =>
+    reportUploadError(context.var.logger, 'admission.document.read.error', input, error),
+  );
+});
+
+app.delete('/api/blob/schools/:schoolId/admissions/:admissionId/documents/:fileId', async (context) => {
+  const input = {
+    schoolId: context.req.param('schoolId'),
+    admissionId: context.req.param('admissionId'),
+    fileId: context.req.param('fileId'),
+  };
+  const apiContext = await createContext({ context });
+  return handleAdmissionDocumentDelete(apiContext, input, (error) =>
+    reportUploadError(context.var.logger, 'admission.document.delete.error', input, error),
   );
 });
 

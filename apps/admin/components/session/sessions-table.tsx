@@ -103,13 +103,15 @@ function SessionRowActions({
               Set as active
             </DropdownMenuItem>
           ) : null}
-          <DropdownMenuItem
-            variant="destructive"
-            onClick={() => onDelete(session)}
-          >
-            <Trash2 aria-hidden />
-            Delete session
-          </DropdownMenuItem>
+          {!session.isActive ? (
+            <DropdownMenuItem
+              variant="destructive"
+              onClick={() => onDelete(session)}
+            >
+              <Trash2 aria-hidden />
+              Delete session
+            </DropdownMenuItem>
+          ) : null}
         </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>

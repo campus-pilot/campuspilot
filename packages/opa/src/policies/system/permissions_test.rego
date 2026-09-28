@@ -90,8 +90,8 @@ test_admin_can_read_and_update_school_details if {
   }
 }
 
-test_admin_cannot_create_classes_or_sections_without_explicit_grants if {
-  every action in {"school.class.create", "school.section.create"} {
+test_admin_cannot_manage_classes_or_sections_without_explicit_grants if {
+  every action in {"school.class.create", "school.class.reorder", "school.section.create", "school.section.reorder"} {
     not authorization.allow with input as {
       "action": action,
       "subject": {

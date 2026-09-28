@@ -78,6 +78,20 @@
       "when": 1789939886637,
       "tag": "0010_add-school-classes",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1789942828780,
+      "tag": "0011_add-class-section-display-order",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1790027294360,
+      "tag": "0012_add-admissions-students",
+      "breakpoints": true
     }
   ]
 }

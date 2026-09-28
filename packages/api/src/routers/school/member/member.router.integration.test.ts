@@ -273,6 +273,43 @@ describe('school.member Router Integration', () => {
 
       expect(result.items.some(({ userId }) => userId === teacherSession.user.id)).toBe(true);
     });
+
+    it('filters teachers by class assignment and exclusion independently', async () => {
+      const client = createTestClient(principalSession);
+      const classId = `class-${randomUUID().toLowerCase()}`;
+      const assigned = await client.school.inviteMember({
+        schoolId: school.id,
+        email: `assigned_${randomUUID().toLowerCase()}@example.com`,
+        roles: [{ role: 'teacher', meta: { classIds: [classId] } }],
+      });
+      const available = await client.school.inviteMember({
+        schoolId: school.id,
+        email: `available_${randomUUID().toLowerCase()}@example.com`,
+        roles: [{ role: 'teacher', meta: { classIds: [] } }],
+      });
+
+      const assignedResult = await client.school.listMembers({
+        schoolId: school.id,
+        filters: { role: 'teacher', classId },
+      });
+      const availableResult = await client.school.listMembers({
+        schoolId: school.id,
+        filters: { role: 'teacher', excludeClassId: classId },
+      });
+
+      expect(assignedResult.items.map(({ userId }) => userId)).toContain(
+        assigned.userId,
+      );
+      expect(assignedResult.items.map(({ userId }) => userId)).not.toContain(
+        available.userId,
+      );
+      expect(availableResult.items.map(({ userId }) => userId)).toContain(
+        available.userId,
+      );
+      expect(availableResult.items.map(({ userId }) => userId)).not.toContain(
+        assigned.userId,
+      );
+    });
   });
 
   describe('updateMemberRoles', () => {

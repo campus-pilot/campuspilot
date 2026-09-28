@@ -244,6 +244,10 @@ describe('school.session Router Integration', () => {
         sessionEndYear: 2033,
       });
       const client = createTestClient(principalSession);
+      await client.school.activateSession({
+        schoolId: school.id,
+        sessionId: created.id,
+      });
 
       const updated = await client.school.updateSession({
         schoolId: school.id,
@@ -256,6 +260,29 @@ describe('school.session Router Integration', () => {
       expect(updated.sessionEndYear).toBe(2034);
     });
 
+    it('rejects updates to an inactive session', async () => {
+      const created = await createTestSession({
+        schoolId: school.id,
+        sessionStartYear: 2033,
+        sessionEndYear: 2034,
+        isActive: false,
+      });
+      const client = createTestClient(principalSession);
+
+      await expect(
+        client.school.updateSession({
+          schoolId: school.id,
+          sessionId: created.id,
+          sessionConfig: null,
+        }),
+      ).rejects.toThrowError(
+        expect.objectContaining({
+          code: 'CONFLICT',
+          message: 'Only the active academic session can be updated.',
+        }),
+      );
+    });
+
     it('validates partial year update against stored boundary', async () => {
       const created = await createTestSession({
         schoolId: school.id,
@@ -263,6 +290,10 @@ describe('school.session Router Integration', () => {
         sessionEndYear: 2036,
       });
       const client = createTestClient(principalSession);
+      await client.school.activateSession({
+        schoolId: school.id,
+        sessionId: created.id,
+      });
 
       // Updating end year to earlier than start year (2035) should fail
       await expect(
@@ -367,6 +398,39 @@ describe('school.session Router Integration', () => {
       ).rejects.toThrowError(
         expect.objectContaining({ code: 'NOT_FOUND' }),
       );
+    });
+
+    it('rejects deleting the active session', async () => {
+      const testSchool = await createTestSchool();
+      const staff = await createSchoolStaffSession(testSchool.id, [
+        { role: 'principal', meta: null },
+      ]);
+      const activeSession = await createTestSession({
+        schoolId: testSchool.id,
+        sessionStartYear: 2047,
+        sessionEndYear: 2048,
+        isActive: true,
+      });
+      const client = createTestClient(staff.session);
+
+      await expect(
+        client.school.deleteSession({
+          schoolId: testSchool.id,
+          sessionId: activeSession.id,
+        }),
+      ).rejects.toThrowError(
+        expect.objectContaining({
+          code: 'CONFLICT',
+          message:
+            'The active academic session cannot be deleted. Activate another session first.',
+        }),
+      );
+
+      const preservedSession = await client.school.getSession({
+        schoolId: testSchool.id,
+        sessionId: activeSession.id,
+      });
+      expect(preservedSession.isActive).toBe(true);
     });
 
     it('returns NOT_FOUND when deleting non-existent session', async () => {

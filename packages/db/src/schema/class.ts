@@ -1,4 +1,5 @@
 import {
+  integer,
   jsonb,
   pgTable,
   text,
@@ -20,6 +21,7 @@ export const classTable = pgTable(
       .$default(() => generateId("class")),
     slug: varchar("slug").notNull(),
     label: varchar("label").notNull(),
+    displayOrder: integer("display_order").notNull(),
     schoolId: text("school_id")
       .notNull()
       .references(() => schoolTable.id),
@@ -36,6 +38,10 @@ export const classTable = pgTable(
   },
   (table) => [
     unique("class_slug_unique").on(table.schoolId, table.slug),
+    unique("class_school_id_display_order_unique").on(
+      table.schoolId,
+      table.displayOrder,
+    ),
   ],
 );
 
@@ -47,6 +53,7 @@ export const sectionTable = pgTable(
       .$default(() => generateId("section")),
     slug: varchar("slug").notNull(),
     label: varchar("label").notNull(),
+    displayOrder: integer("display_order").notNull(),
     classId: text("class_id")
       .notNull()
       .references(() => classTable.id),
@@ -62,5 +69,9 @@ export const sectionTable = pgTable(
   },
   (table) => [
     unique("section_slug_unique").on(table.classId, table.slug),
+    unique("section_class_id_display_order_unique").on(
+      table.classId,
+      table.displayOrder,
+    ),
   ],
 );

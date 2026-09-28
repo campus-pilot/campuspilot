@@ -53,5 +53,7 @@ grants contains {
     "school.session.activate",
     "school.session.finance.read",
     "school.session.finance.update",
+    "school.admission.settings.read",
+    "school.admission.settings.update",
   }
 }

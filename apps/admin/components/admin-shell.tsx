@@ -72,8 +72,19 @@ export function AdminShell({
         navbarActions={state.navbarActions}
         onManageAccount={() => setIsAccountDialogOpen(true)}
         onLogout={logout}
-        renderLink={({ href, children: linkChildren, className, ariaCurrent }) => (
-          <Link href={href} className={className} aria-current={ariaCurrent}>
+        renderLink={({
+          href,
+          children: linkChildren,
+          className,
+          ariaCurrent,
+          onClick,
+        }) => (
+          <Link
+            href={href}
+            className={className}
+            aria-current={ariaCurrent}
+            onClick={onClick}
+          >
             {linkChildren}
           </Link>
         )}

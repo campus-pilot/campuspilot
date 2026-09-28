@@ -17,10 +17,12 @@ import { client, orpc } from '@/lib/orpc';
 export function SessionFinanceSettings({
   schoolId,
   sessionId,
+  isEditable,
   onDirtyChange,
 }: {
   schoolId: string;
   sessionId: string;
+  isEditable: boolean;
   onDirtyChange: (isDirty: boolean) => void;
 }) {
   const queryClient = useQueryClient();
@@ -73,10 +75,14 @@ export function SessionFinanceSettings({
       key={sessionId}
       finance={financeQuery.data}
       isSaving={updateMutation.isPending}
-      onSave={async (updates) => {
-        await updateMutation.mutateAsync(updates);
-      }}
-      onDirtyChange={onDirtyChange}
+      onSave={
+        isEditable
+          ? async (updates) => {
+              await updateMutation.mutateAsync(updates);
+            }
+          : undefined
+      }
+      onDirtyChange={isEditable ? onDirtyChange : undefined}
     />
   );
 }

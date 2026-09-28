@@ -98,6 +98,18 @@ export const financeClassOverridesSchema = z
     "Map of class slug to fee element amounts overridden for that class",
   );
 
+export const studentFinanceValuesSchema = z
+  .record(
+    z
+      .string()
+      .min(1)
+      .describe("School session ID for these student-level finance values"),
+    financeValuesMapSchema,
+  )
+  .describe(
+    "Map of school session ID to fee element amounts overridden for one admission",
+  );
+
 export const financeValueScopeTypeEnum = z
   .enum(["session", "class", "student"])
   .describe(
@@ -114,6 +126,9 @@ export type FinanceSchemaConfig = z.infer<typeof financeSchemaConfigSchema>;
 export type FinanceValuesMap = z.infer<typeof financeValuesMapSchema>;
 export type FinanceClassOverrides = z.infer<
   typeof financeClassOverridesSchema
+>;
+export type StudentFinanceValuesMap = z.infer<
+  typeof studentFinanceValuesSchema
 >;
 export type FinanceValueScopeType = z.infer<
   typeof financeValueScopeTypeEnum

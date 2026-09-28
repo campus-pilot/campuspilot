@@ -1,7 +1,7 @@
 import { SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
 import { PermissionDenied } from '@/components/permission-denied';
 import { RequirePermissions } from '@/components/require-permissions';
-import { SessionSettings } from '@/components/session-settings';
+import { SessionsTable } from '@/components/session/sessions-table';
 
 export default async function SessionSettingsPage({
   params,
@@ -20,7 +20,7 @@ export default async function SessionSettingsPage({
         <PermissionDenied description="You do not have the required permission to view academic sessions." />
       }
     >
-      <SessionSettings schoolId={schoolId} />
+      <SessionsTable schoolId={schoolId} />
     </RequirePermissions>
   );
 }

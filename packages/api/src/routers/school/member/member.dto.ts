@@ -56,6 +56,18 @@ export type SchoolMemberDto = z.infer<typeof schoolMemberDtoSchema>;
 export const listSchoolMembersInputSchema = createListInputSchema({
   schoolId: z.string().min(1),
   searchQuery: z.string().trim().min(1).max(200).optional(),
+  filters: z
+    .object({
+      role: roleEnum.optional(),
+      classId: z.string().min(1).optional(),
+      excludeClassId: z.string().min(1).optional(),
+    })
+    .refine(
+      ({ classId, excludeClassId }) =>
+        classId === undefined || excludeClassId === undefined,
+      { message: "Class inclusion and exclusion filters cannot be combined." },
+    )
+    .optional(),
   orderBy: z
     .object({
       field: z.enum(["name", "email", "addedAt"]),

@@ -252,6 +252,119 @@ test_session_activation_is_allowed_for_principals_and_managers if {
   }
 }
 
+test_admission_and_student_reads_are_explicitly_allowed_for_current_school_roles if {
+  every role in {"school.principal", "school.manager", "school.teacher", "school.accountant", "school.exam_coordinator"} {
+    every action in {
+      "school.admission.settings.read",
+      "school.admission.list",
+      "school.admission.read",
+      "school.student.list",
+      "school.student.read",
+    } {
+      authorization.allow with input as {
+        "action": action,
+        "subject": {
+          "userId": "user-1",
+          "roleAssignments": [
+            {"role": role, "scope": {"kind": "school", "schoolId": "school-1"}, "meta": null},
+          ],
+        },
+        "resource": {"kind": "school", "schoolId": "school-1"},
+      }
+    }
+  }
+}
+
+test_admission_and_student_mutations_are_allowed_for_principals_and_managers if {
+  every role in {"school.principal", "school.manager"} {
+    every action in {
+      "school.admission.settings.update",
+      "school.admission.create",
+      "school.admission.update",
+      "school.admission.unregister",
+      "school.admission.delete",
+      "school.student.create",
+      "school.student.update",
+      "school.student.class.remove",
+      "school.student.delete",
+    } {
+      authorization.allow with input as {
+        "action": action,
+        "subject": {
+          "userId": "user-1",
+          "roleAssignments": [
+            {"role": role, "scope": {"kind": "school", "schoolId": "school-1"}, "meta": null},
+          ],
+        },
+        "resource": {"kind": "school", "schoolId": "school-1"},
+      }
+    }
+  }
+}
+
+test_admission_and_student_mutations_are_denied_for_other_school_roles if {
+  every role in {"school.teacher", "school.accountant", "school.exam_coordinator"} {
+    every action in {
+      "school.admission.settings.update",
+      "school.admission.create",
+      "school.admission.update",
+      "school.admission.unregister",
+      "school.admission.delete",
+      "school.student.create",
+      "school.student.update",
+      "school.student.class.remove",
+      "school.student.delete",
+    } {
+      not authorization.allow with input as {
+        "action": action,
+        "subject": {
+          "userId": "user-1",
+          "roleAssignments": [
+            {"role": role, "scope": {"kind": "school", "schoolId": "school-1"}, "meta": null},
+          ],
+        },
+        "resource": {"kind": "school", "schoolId": "school-1"},
+      }
+    }
+  }
+}
+
+test_platform_admin_can_govern_admission_settings_only if {
+  every action in {
+    "school.admission.settings.read",
+    "school.admission.settings.update",
+  } {
+    authorization.allow with input as {
+      "action": action,
+      "subject": {
+        "userId": "admin-1",
+        "roleAssignments": [
+          {"role": "platform.admin", "scope": {"kind": "platform"}},
+        ],
+      },
+      "resource": {"kind": "school", "schoolId": "school-1"},
+    }
+  }
+
+  every action in {
+    "school.admission.create",
+    "school.admission.update",
+    "school.admission.unregister",
+    "school.admission.delete",
+  } {
+    not authorization.allow with input as {
+      "action": action,
+      "subject": {
+        "userId": "admin-1",
+        "roleAssignments": [
+          {"role": "platform.admin", "scope": {"kind": "platform"}},
+        ],
+      },
+      "resource": {"kind": "school", "schoolId": "school-1"},
+    }
+  }
+}
+
 test_session_mutations_are_denied_for_ungranted_school_roles if {
   every action in {
     "school.session.create",
@@ -306,15 +419,15 @@ test_session_finance_is_denied_for_non_finance_school_roles if {
   }
 }
 
-test_class_and_section_structural_crud_is_allowed_for_principals_and_managers if {
+test_class_and_section_management_is_allowed_for_principals_and_managers if {
   every role in {"school.principal", "school.manager"} {
     every action in {
       "school.class.create",
-      "school.class.update",
       "school.class.delete",
+      "school.class.reorder",
       "school.section.create",
-      "school.section.update",
       "school.section.delete",
+      "school.section.reorder",
     } {
       authorization.allow with input as {
         "action": action,
@@ -330,14 +443,16 @@ test_class_and_section_structural_crud_is_allowed_for_principals_and_managers if
   }
 }
 
-test_class_and_section_reads_and_json_updates_are_allowed_for_every_school_role if {
+test_class_and_section_reads_and_edits_are_allowed_for_every_school_role if {
   every role in {"school.principal", "school.manager", "school.teacher", "school.accountant", "school.exam_coordinator"} {
     every action in {
       "school.class.list",
       "school.class.read",
+      "school.class.update",
       "school.class.configuration.update",
       "school.section.list",
       "school.section.read",
+      "school.section.update",
       "school.section.attributes.update",
     } {
       authorization.allow with input as {
@@ -354,14 +469,14 @@ test_class_and_section_reads_and_json_updates_are_allowed_for_every_school_role 
   }
 }
 
-test_class_and_section_structural_mutations_are_denied_for_teacher if {
+test_class_and_section_management_is_denied_for_teacher if {
   every action in {
     "school.class.create",
-    "school.class.update",
     "school.class.delete",
+    "school.class.reorder",
     "school.section.create",
-    "school.section.update",
     "school.section.delete",
+    "school.section.reorder",
   } {
     not authorization.allow with input as {
       "action": action,

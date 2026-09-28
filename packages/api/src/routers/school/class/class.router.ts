@@ -1,16 +1,12 @@
 import { classTable, sectionTable } from "@campuspilot/db/schema/class";
 import { schoolTable } from "@campuspilot/db/schema/school";
+import { schoolUserRoleTable } from "@campuspilot/db/schema/school-user-role";
 import { schoolSessionTable } from "@campuspilot/db/schema/session";
 import { SCHOOL_ACTIONS } from "@campuspilot/opa/policies/school";
-import { and, asc, count, desc, eq, ilike, or, sql } from "drizzle-orm";
+import { and, asc, eq, max, sql } from "drizzle-orm";
 
 import { rpcError, toRpcError } from "../../../errors";
 import { protectedProcedure } from "../../../index";
-import {
-  createNextPageCursor,
-  createPaginatedResult,
-  resolvePaginationInput,
-} from "../../../paginations";
 import { requireSchoolPermission } from "../../../permissions/school";
 import {
   classDtoSchema,
@@ -18,6 +14,8 @@ import {
   createClassInputSchema,
   listClassesInputSchema,
   listClassesOutputSchema,
+  reorderClassesInputSchema,
+  reorderClassesOutputSchema,
   toClassDto,
   updateClassConfigurationInputSchema,
   updateClassInputSchema,
@@ -28,7 +26,7 @@ export const schoolClassRouter = {
     .route({
       summary: "List school classes",
       description:
-        "List a school's classes with pagination, search, and deterministic sorting.",
+        "List every class in a school in its explicit display order, including dashboard counts.",
       tags: ["School", "Classes"],
     })
     .input(listClassesInputSchema)
@@ -36,49 +34,49 @@ export const schoolClassRouter = {
     .output(listClassesOutputSchema)
     .handler(async ({ context, input }) => {
       try {
-        const { currentPage, pageSize, offset } = resolvePaginationInput(input);
-        const searchCondition = input.searchQuery
-          ? or(
-              ilike(classTable.slug, `%${input.searchQuery}%`),
-              ilike(classTable.label, `%${input.searchQuery}%`),
-            )
-          : undefined;
-        const where = and(
-          eq(classTable.schoolId, input.schoolId),
-          searchCondition,
-        );
-        const orderByColumn = {
-          slug: classTable.slug,
-          label: classTable.label,
-          createdAt: classTable.createdAt,
-          updatedAt: classTable.updatedAt,
-        }[input.orderBy.field];
-        const orderDirection = input.orderBy.direction === "asc" ? asc : desc;
-
-        const [classes, totalRows] = await Promise.all([
+        // Schools have a small bounded set of classes, and the complete ordered
+        // collection is required for drag-and-drop, so this list is unpaginated.
+        const [classes, sections, teacherAssignments] = await Promise.all([
           context.db
             .select()
             .from(classTable)
-            .where(where)
-            .orderBy(orderDirection(orderByColumn), orderDirection(classTable.id))
-            .limit(pageSize)
-            .offset(offset),
+            .where(eq(classTable.schoolId, input.schoolId))
+            .orderBy(asc(classTable.displayOrder), asc(classTable.id)),
           context.db
-            .select({ totalItems: count() })
-            .from(classTable)
-            .where(where),
+            .select({ classId: sectionTable.classId })
+            .from(sectionTable)
+            .where(eq(sectionTable.schoolId, input.schoolId)),
+          context.db
+            .select({ meta: schoolUserRoleTable.meta })
+            .from(schoolUserRoleTable)
+            .where(
+              and(
+                eq(schoolUserRoleTable.schoolId, input.schoolId),
+                eq(schoolUserRoleTable.role, "teacher"),
+              ),
+            ),
         ]);
-        const totalItems = totalRows[0]?.totalItems ?? 0;
-        const totalPages = Math.ceil(totalItems / pageSize);
+        const sectionCounts = new Map<string, number>();
+        for (const section of sections) {
+          sectionCounts.set(
+            section.classId,
+            (sectionCounts.get(section.classId) ?? 0) + 1,
+          );
+        }
+        const teacherCounts = new Map<string, number>();
+        for (const assignment of teacherAssignments) {
+          for (const classId of assignment.meta?.classIds ?? []) {
+            teacherCounts.set(classId, (teacherCounts.get(classId) ?? 0) + 1);
+          }
+        }
 
-        return createPaginatedResult({
-          items: classes.map(toClassDto),
-          nextCursor: createNextPageCursor(currentPage, totalPages),
-          currentPage,
-          totalPages,
-          totalItems,
-          pageSize,
-        });
+        return classes.map((schoolClass) => ({
+          ...toClassDto(schoolClass),
+          sectionCount: sectionCounts.get(schoolClass.id) ?? 0,
+          teacherCount: teacherCounts.get(schoolClass.id) ?? 0,
+          studentCount: null,
+          subjectCount: Object.keys(schoolClass.config.subjects).length,
+        }));
       } catch (error) {
         throw toRpcError(error);
       }
@@ -129,21 +127,31 @@ export const schoolClassRouter = {
             .select({ id: schoolTable.id })
             .from(schoolTable)
             .where(eq(schoolTable.id, input.schoolId))
+            .for("update")
             .limit(1);
           if (!school) throw rpcError.notFound("School");
 
           const { sections, schoolId, ...values } = input;
+          const [lastClass] = await transaction
+            .select({ displayOrder: max(classTable.displayOrder) })
+            .from(classTable)
+            .where(eq(classTable.schoolId, schoolId));
           const [schoolClass] = await transaction
             .insert(classTable)
-            .values({ schoolId, ...values })
+            .values({
+              schoolId,
+              ...values,
+              displayOrder: (lastClass?.displayOrder ?? 0) + 1,
+            })
             .returning();
           if (!schoolClass) throw rpcError.internal();
 
           await transaction.insert(sectionTable).values(
-            sections.map((section) => ({
+            sections.map((section, sectionIndex) => ({
               ...section,
               schoolId,
               classId: schoolClass.id,
+              displayOrder: sectionIndex + 1,
             })),
           );
 
@@ -158,7 +166,7 @@ export const schoolClassRouter = {
     .route({
       summary: "Update a school class",
       description:
-        "Update a class slug or label. This structural mutation is restricted to school managers and principals.",
+        "Update a class slug or label. Any role in the school may perform this mutation.",
       tags: ["School", "Classes"],
     })
     .input(updateClassInputSchema)
@@ -227,6 +235,71 @@ export const schoolClassRouter = {
       }
     }),
 
+  reorderClasses: protectedProcedure
+    .route({
+      summary: "Reorder school classes",
+      description:
+        "Replace the complete class display order for a school. Requires permission to reorder classes.",
+      tags: ["School", "Classes"],
+    })
+    .input(reorderClassesInputSchema)
+    .use(requireSchoolPermission(SCHOOL_ACTIONS.REORDER_CLASSES))
+    .output(reorderClassesOutputSchema)
+    .handler(async ({ context, input }) => {
+      try {
+        return await context.db.transaction(async (transaction) => {
+          const [school] = await transaction
+            .select({ id: schoolTable.id })
+            .from(schoolTable)
+            .where(eq(schoolTable.id, input.schoolId))
+            .for("update")
+            .limit(1);
+          if (!school) throw rpcError.notFound("School");
+
+          const existing = await transaction
+            .select({ id: classTable.id })
+            .from(classTable)
+            .where(eq(classTable.schoolId, input.schoolId));
+          const existingIds = new Set(existing.map(({ id }) => id));
+          if (
+            existingIds.size !== input.orderedClassIds.length ||
+            input.orderedClassIds.some((id) => !existingIds.has(id))
+          ) {
+            throw rpcError.badRequest(
+              "The class order must contain every class in the school exactly once.",
+            );
+          }
+
+          // Move all values into a temporary negative range before assigning
+          // the normalized positive order so swaps cannot trip uniqueness.
+          await transaction
+            .update(classTable)
+            .set({ displayOrder: sql`-${classTable.displayOrder}` })
+            .where(eq(classTable.schoolId, input.schoolId));
+          for (const [index, classId] of input.orderedClassIds.entries()) {
+            await transaction
+              .update(classTable)
+              .set({ displayOrder: index + 1, updatedAt: new Date() })
+              .where(
+                and(
+                  eq(classTable.schoolId, input.schoolId),
+                  eq(classTable.id, classId),
+                ),
+              );
+          }
+
+          const reordered = await transaction
+            .select()
+            .from(classTable)
+            .where(eq(classTable.schoolId, input.schoolId))
+            .orderBy(asc(classTable.displayOrder), asc(classTable.id));
+          return reordered.map(toClassDto);
+        });
+      } catch (error) {
+        throw toRpcError(error);
+      }
+    }),
+
   updateClassConfiguration: protectedProcedure
     .route({
       summary: "Update class attributes or configuration",
@@ -270,6 +343,14 @@ export const schoolClassRouter = {
     .handler(async ({ context, input }) => {
       try {
         return await context.db.transaction(async (transaction) => {
+          const [school] = await transaction
+            .select({ id: schoolTable.id })
+            .from(schoolTable)
+            .where(eq(schoolTable.id, input.schoolId))
+            .for("update")
+            .limit(1);
+          if (!school) throw rpcError.notFound("School");
+
           const [schoolClass] = await transaction
             .select()
             .from(classTable)
@@ -289,6 +370,25 @@ export const schoolClassRouter = {
               and(
                 eq(sectionTable.schoolId, input.schoolId),
                 eq(sectionTable.classId, input.classId),
+              ),
+            );
+
+          // Teacher assignments are stored as class IDs inside role metadata,
+          // so deleting the class must remove that ID explicitly.
+          await transaction
+            .update(schoolUserRoleTable)
+            .set({
+              meta: sql`jsonb_set(
+                ${schoolUserRoleTable.meta},
+                '{classIds}',
+                (${schoolUserRoleTable.meta} -> 'classIds') - ${schoolClass.id}
+              )`,
+            })
+            .where(
+              and(
+                eq(schoolUserRoleTable.schoolId, input.schoolId),
+                eq(schoolUserRoleTable.role, "teacher"),
+                sql`${schoolUserRoleTable.meta} -> 'classIds' ? ${schoolClass.id}`,
               ),
             );
 
@@ -314,6 +414,18 @@ export const schoolClassRouter = {
                 eq(classTable.id, input.classId),
               ),
             );
+
+          const remainingClasses = await transaction
+            .select({ id: classTable.id })
+            .from(classTable)
+            .where(eq(classTable.schoolId, input.schoolId))
+            .orderBy(asc(classTable.displayOrder), asc(classTable.id));
+          for (const [index, remaining] of remainingClasses.entries()) {
+            await transaction
+              .update(classTable)
+              .set({ displayOrder: index + 1 })
+              .where(eq(classTable.id, remaining.id));
+          }
 
           return toClassDto(schoolClass);
         });

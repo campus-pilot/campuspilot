@@ -5,7 +5,8 @@ import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { AuthLoading } from '@/components/auth-loading';
 import { orpc } from '@/lib/orpc';
-import { schoolHref } from './school-route';
+import { schoolHref, schoolSessionHref } from './school-route';
+import { storeSchoolSessionId } from './session-selection';
 
 const ACTIVE_SCHOOL_KEY = 'campuspilot.management.activeSchoolId';
 
@@ -25,9 +26,11 @@ export function clearStoredSchoolId() {
 function RouteAfterCommit({
   href,
   schoolId,
+  sessionId,
 }: {
   href: string;
   schoolId?: string;
+  sessionId?: string;
 }) {
   const router = useRouter();
   /**
@@ -39,9 +42,10 @@ function RouteAfterCommit({
       if (!node) return;
       clearStoredSchoolId();
       if (schoolId) storeSchoolId(schoolId);
+      if (schoolId && sessionId) storeSchoolSessionId(schoolId, sessionId);
       router.replace(href);
     },
-    [href, router, schoolId],
+    [href, router, schoolId, sessionId],
   );
 
   return (
@@ -117,4 +121,41 @@ export function SchoolAccessBoundary({
 
 export function SchoolEntryRedirect({ schoolId }: { schoolId: string }) {
   return <RouteAfterCommit href={schoolHref(schoolId)} schoolId={schoolId} />;
+}
+
+/**
+ * A direct school entry intentionally resets that school's remembered session
+ * to the currently active session before opening its dashboard.
+ */
+export function SchoolSessionEntryRedirect({ schoolId }: { schoolId: string }) {
+  const activeSessionQuery = useQuery(
+    orpc.school.listSessions.queryOptions({
+      input: { schoolId, limit: 1, filters: { isActive: true } },
+    }),
+  );
+
+  if (activeSessionQuery.isPending) {
+    return <AuthLoading label="Opening the active session…" />;
+  }
+
+  const activeSession = activeSessionQuery.data?.items[0];
+  if (!activeSession) {
+    return (
+      <main className="grid min-h-[50vh] place-items-center px-6">
+        <p className="text-sm text-muted-foreground">
+          {activeSessionQuery.isError
+            ? 'Unable to load the active school session.'
+            : 'This school does not have an active session.'}
+        </p>
+      </main>
+    );
+  }
+
+  return (
+    <RouteAfterCommit
+      href={schoolSessionHref(schoolId, activeSession.id)}
+      schoolId={schoolId}
+      sessionId={activeSession.id}
+    />
+  );
 }

@@ -47,11 +47,13 @@ describe('school.sessionFinance Router Integration', () => {
       schoolId: school.id,
       sessionStartYear: 2050,
       sessionEndYear: 2051,
+      isActive: true,
     });
     await db.insert(classTable).values({
       schoolId: school.id,
       slug: 'grade-8',
       label: 'Grade 8',
+      displayOrder: 1,
     });
 
     principalSession = (
@@ -119,6 +121,28 @@ describe('school.sessionFinance Router Integration', () => {
     });
 
     expect(updated.classOverrides['grade-8']?.tuition).toBe(1300);
+  });
+
+  it('rejects finance updates to an inactive session', async () => {
+    const inactiveSession = await createTestSession({
+      schoolId: school.id,
+      sessionStartYear: 2052,
+      sessionEndYear: 2053,
+      isActive: false,
+    });
+
+    await expect(
+      createTestClient(principalSession).school.updateSessionFinance({
+        schoolId: school.id,
+        sessionId: inactiveSession.id,
+        financeConfig,
+      }),
+    ).rejects.toThrowError(
+      expect.objectContaining({
+        code: 'CONFLICT',
+        message: 'Only the active academic session can be updated.',
+      }),
+    );
   });
 
   it('denies finance routes to school roles outside the finance allowlist', async () => {

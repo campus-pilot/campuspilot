@@ -48,6 +48,19 @@ export const subjectSchema = z
       .default({})
       .describe("Exam assessment modes and their weights for this subject"),
   })
+  .superRefine(({ examModes }, context) => {
+    const modes = Object.values(examModes);
+    if (modes.length === 0) return;
+
+    const total = modes.reduce((sum, mode) => sum + mode.percentage, 0);
+    if (Math.abs(total - 100) > 0.001) {
+      context.addIssue({
+        code: "custom",
+        path: ["examModes"],
+        message: "Exam mode percentages must sum to 100%",
+      });
+    }
+  })
   .describe("Subject configuration including books and exam modes");
 
 export const classConfigSchema = z

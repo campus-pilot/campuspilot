@@ -1,4 +1,6 @@
 import { db } from '@campuspilot/db';
+import { admissionTable } from '@campuspilot/db/schema/admission';
+import { studentTable } from '@campuspilot/db/schema/student';
 import { user } from '@campuspilot/db/schema/auth';
 import { classTable, sectionTable } from '@campuspilot/db/schema/class';
 import type { Role, RoleMeta } from '@campuspilot/db/schema/jsonb/role';
@@ -6,7 +8,7 @@ import { schoolTable } from '@campuspilot/db/schema/school';
 import { schoolMemberTable } from '@campuspilot/db/schema/school-member';
 import { schoolUserRoleTable } from '@campuspilot/db/schema/school-user-role';
 import { schoolSessionTable } from '@campuspilot/db/schema/session';
-import { eq } from 'drizzle-orm';
+import { eq, max } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { createRouterClient } from '@orpc/server';
 
@@ -275,6 +277,10 @@ export async function createTestClass(overrides: {
 }) {
   return db.transaction(async (transaction) => {
     const slug = overrides.slug ?? `class-${randomUUID().toLowerCase()}`;
+    const [lastClass] = await transaction
+      .select({ displayOrder: max(classTable.displayOrder) })
+      .from(classTable)
+      .where(eq(classTable.schoolId, overrides.schoolId));
     const [schoolClass] = await transaction
       .insert(classTable)
       .values({
@@ -282,6 +288,7 @@ export async function createTestClass(overrides: {
         schoolId: overrides.schoolId,
         slug,
         label: overrides.label ?? `Test Class ${slug}`,
+        displayOrder: (lastClass?.displayOrder ?? 0) + 1,
       })
       .returning();
 
@@ -291,12 +298,13 @@ export async function createTestClass(overrides: {
     const sections = await transaction
       .insert(sectionTable)
       .values(
-        sectionValues.map((section) => ({
+        sectionValues.map((section, sectionIndex) => ({
           id: section.id ?? randomUUID(),
           schoolId: overrides.schoolId,
           classId: schoolClass!.id,
           slug: section.slug ?? `section-${randomUUID().toLowerCase()}`,
           label: section.label ?? 'Test Section',
+          displayOrder: sectionIndex + 1,
           attributes: section.attributes,
         })),
       )
@@ -304,4 +312,64 @@ export async function createTestClass(overrides: {
 
     return { schoolClass: schoolClass!, sections };
   });
+}
+
+/** Inserts an admission directly for router tests which do not exercise creation. */
+export async function createTestAdmission(overrides: {
+  id?: string;
+  schoolId: string;
+  name?: string;
+  admissionNo?: string;
+  admissionClassId?: string | null;
+  registered?: boolean;
+}) {
+  const [admission] = await db
+    .insert(admissionTable)
+    .values({
+      id: overrides.id ?? randomUUID(),
+      schoolId: overrides.schoolId,
+      name: overrides.name ?? 'Test Student',
+      admissionNo: overrides.admissionNo ?? `ADM-${randomUUID()}`,
+      admissionClassId: overrides.admissionClassId ?? null,
+      address: 'Test address',
+      phoneNo: '9999999999',
+      email: null,
+      dob: '2015-01-01',
+      fatherName: 'Test Father',
+      motherName: 'Test Mother',
+      registered: overrides.registered ?? true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .returning();
+
+  return admission!;
+}
+
+/** Inserts one explicitly session-scoped student enrollment. */
+export async function createTestStudent(overrides: {
+  id?: string;
+  schoolId: string;
+  admissionId: string;
+  sessionId: string;
+  classId?: string | null;
+  sectionId?: string | null;
+  rollNo?: number | null;
+}) {
+  const [student] = await db
+    .insert(studentTable)
+    .values({
+      id: overrides.id ?? randomUUID(),
+      schoolId: overrides.schoolId,
+      admissionId: overrides.admissionId,
+      sessionId: overrides.sessionId,
+      classId: overrides.classId ?? null,
+      sectionId: overrides.sectionId ?? null,
+      rollNo: overrides.rollNo ?? null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .returning();
+
+  return student!;
 }

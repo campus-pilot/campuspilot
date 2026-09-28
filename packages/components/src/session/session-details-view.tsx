@@ -59,7 +59,9 @@ export function SessionDetailsView({
   onActivate,
   isActivating,
 }: SessionDetailsViewProps) {
-  const isEditable = onSave !== undefined;
+  // Historical sessions remain visible for reference, but all configuration
+  // changes must go through the one session currently active for the school.
+  const isEditable = session.isActive && onSave !== undefined;
   const [draftSessionConfig, setDraftSessionConfig] =
     useState<SessionConfig | null>(() => session.sessionConfig);
 
@@ -221,6 +223,13 @@ export function SessionDetailsView({
           </div>
         ) : null}
       </div>
+
+      {!session.isActive ? (
+        <p className="text-sm text-muted-foreground">
+          Inactive sessions are read-only. Set this session as active to edit
+          its configuration.
+        </p>
+      ) : null}
 
       {/* 1. Examinations */}
       <ExaminationSection

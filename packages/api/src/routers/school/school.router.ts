@@ -7,6 +7,8 @@ import { z } from "zod";
 import { rpcError, toRpcError } from "../../errors";
 import { protectedProcedure } from "../../index";
 import { requireSchoolPermission } from "../../permissions/school";
+import { schoolAdmissionSettingsRouter } from "./admission-settings/admission-settings.router";
+import { schoolAdmissionRouter } from "./admission/admission.router";
 import { schoolClassRouter } from "./class/class.router";
 import { schoolSectionRouter } from "./class/section.router";
 import { schoolLogoRouter } from "./logo/logo.router";
@@ -19,6 +21,7 @@ import {
 } from "./school.dto";
 import { schoolSessionFinanceRouter } from "./session-finance/session-finance.router";
 import { schoolSessionRouter } from "./session/session.router";
+import { schoolStudentRouter } from "./student/student.router";
 
 export const schoolRouter = {
   listMySchools: protectedProcedure
@@ -113,10 +116,13 @@ export const schoolRouter = {
         throw toRpcError(error);
       }
     }),
+  ...schoolAdmissionSettingsRouter,
+  ...schoolAdmissionRouter,
   ...schoolLogoRouter,
   ...schoolClassRouter,
   ...schoolSectionRouter,
   ...schoolMemberRouter,
   ...schoolSessionFinanceRouter,
   ...schoolSessionRouter,
+  ...schoolStudentRouter,
 };

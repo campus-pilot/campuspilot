@@ -21,6 +21,7 @@ export type ManagementShellState = {
   navigation: AppShellNavigationEntry[];
   breadcrumbs: AppShellBreadcrumb[];
   footerLinks?: AppShellFooterLink[];
+  footerContent?: ReactNode;
   navbarActions?: ReactNode;
 };
 
@@ -74,11 +75,23 @@ export function ManagementShell({
         search={showSearch ? <SchoolSearch /> : null}
         user={user}
         footerLinks={state.footerLinks}
+        footerContent={state.footerContent}
         navbarActions={state.navbarActions}
         onManageAccount={() => setIsAccountDialogOpen(true)}
         onLogout={logout}
-        renderLink={({ href, children: linkChildren, className, ariaCurrent }) => (
-          <Link href={href} className={className} aria-current={ariaCurrent}>
+        renderLink={({
+          href,
+          children: linkChildren,
+          className,
+          ariaCurrent,
+          onClick,
+        }) => (
+          <Link
+            href={href}
+            className={className}
+            aria-current={ariaCurrent}
+            onClick={onClick}
+          >
             {linkChildren}
           </Link>
         )}

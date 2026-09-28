@@ -99,7 +99,7 @@ export const schoolSessionFinanceRouter = {
     .route({
       summary: 'Update school session finance configuration',
       description:
-        'Atomically update the restricted finance schema or class-level overrides for one academic session.',
+        'Atomically update the restricted finance schema or class-level overrides for the active academic session. Inactive sessions are read-only.',
       tags: ['School', 'Session Finance'],
     })
     .input(updateSchoolSessionFinanceInputSchema)
@@ -114,6 +114,7 @@ export const schoolSessionFinanceRouter = {
             .select({
               financeConfig: schoolSessionTable.financeConfig,
               classOverrides: schoolSessionTable.financeClassOverrides,
+              isActive: schoolSessionTable.isActive,
             })
             .from(schoolSessionTable)
             .where(
@@ -125,6 +126,11 @@ export const schoolSessionFinanceRouter = {
             .for('update')
             .limit(1);
           if (!session) throw rpcError.notFound('School session');
+          if (!session.isActive) {
+            throw rpcError.conflict(
+              'Only the active academic session can be updated.',
+            );
+          }
 
           const classes = await transaction
             .select({ slug: classTable.slug, label: classTable.label })

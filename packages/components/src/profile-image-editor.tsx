@@ -24,14 +24,16 @@ import { z } from 'zod';
 
 import { Dropzone, formatFileSize } from './dropzone';
 
-const profileImageFormSchema = z.object({
-  image: z
-    .instanceof(File, { message: 'Choose a profile image to upload.' })
-    .refine(
-      (file) => PROFILE_IMAGE_MIME_TYPES.some((type) => type === file.type),
-      { message: 'Choose a JPEG, PNG, or WebP image.' },
-    ),
-});
+function imageFormSchema(subject: string) {
+  return z.object({
+    image: z
+      .instanceof(File, { message: `Choose a ${subject} to upload.` })
+      .refine(
+        (file) => PROFILE_IMAGE_MIME_TYPES.some((type) => type === file.type),
+        { message: 'Choose a JPEG, PNG, or WebP image.' },
+      ),
+  });
+}
 
 function initials(name: string) {
   return name
@@ -61,23 +63,32 @@ export function ProfileImageEditor({
   imageUrl,
   name,
   onUpload,
+  subject = 'profile image',
+  label = 'Profile image',
+  description = 'JPEG, PNG, or WebP. Images are resized and compressed before upload.',
+  canEdit = true,
 }: {
   imageUrl?: string | null;
   name: string;
-  onUpload: (file: File, options: ProfileImageUploadOptions) => Promise<void>;
+  onUpload?: (file: File, options: ProfileImageUploadOptions) => Promise<void>;
+  subject?: string;
+  label?: string;
+  description?: string;
+  canEdit?: boolean;
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<number>();
   const abortControllerRef = useRef<AbortController | undefined>(undefined);
+  const formSchema = imageFormSchema(subject);
   const form = useForm({
     defaultValues: { image: null as File | null },
     validators: {
-      onChange: profileImageFormSchema,
-      onSubmit: profileImageFormSchema,
+      onChange: formSchema,
+      onSubmit: formSchema,
     },
     onSubmit: async ({ value }) => {
       form.setErrorMap({});
-      if (!value.image) return;
+      if (!value.image || !onUpload) return;
 
       const abortController = new AbortController();
       abortControllerRef.current = abortController;
@@ -102,7 +113,7 @@ export function ProfileImageEditor({
             form:
               error instanceof Error
                 ? error.message
-                : 'Unable to upload the profile image.',
+                : `Unable to upload the ${subject}.`,
             fields: {},
           },
         });
@@ -130,7 +141,8 @@ export function ProfileImageEditor({
       <button
         type="button"
         className="group relative shrink-0 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-        aria-label="Change profile image"
+        aria-label={`Change ${subject}`}
+        disabled={!canEdit}
         onClick={() => setIsOpen(true)}
       >
         <Avatar className="size-20!">
@@ -139,17 +151,17 @@ export function ProfileImageEditor({
           ) : null}
           <AvatarFallback className="text-lg">{initials(name)}</AvatarFallback>
         </Avatar>
-        <span className="absolute inset-0 flex items-center justify-center rounded-full bg-black/55 text-white opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+        {canEdit ? <span className="absolute inset-0 flex items-center justify-center rounded-full bg-black/55 text-white opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
           <Pencil aria-hidden />
-          <span className="sr-only">Change profile image</span>
-        </span>
+          <span className="sr-only">Change {subject}</span>
+        </span> : null}
       </button>
       <div className="min-w-0">
-        <p className="text-sm font-medium">Profile image</p>
+        <p className="text-sm font-medium">{label}</p>
         <p className="mt-1 text-xs text-muted-foreground">
-          JPEG, PNG, or WebP. Images are resized and compressed before upload.
+          {description}
         </p>
-        <Button
+        {canEdit ? <Button
           type="button"
           variant="outline"
           size="sm"
@@ -157,12 +169,12 @@ export function ProfileImageEditor({
           onClick={() => setIsOpen(true)}
         >
           <ImageUp /> Change image
-        </Button>
+        </Button> : null}
       </div>
-      <Dialog open={isOpen} onOpenChange={handleOpenChange}>
+      {canEdit ? <Dialog open={isOpen} onOpenChange={handleOpenChange}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Upload profile image</DialogTitle>
+            <DialogTitle>Upload {subject}</DialogTitle>
             <DialogDescription>
               The image is processed locally and stored privately in
               CampusPilot.
@@ -189,12 +201,12 @@ export function ProfileImageEditor({
                         }
                         name={field.name}
                         accept={PROFILE_IMAGE_MIME_TYPES.join(',')}
-                        aria-label="Profile image"
+                        aria-label={label}
                         icon={ImageUp}
                         title={
                           field.state.value
                             ? field.state.value.name
-                            : 'Drop your profile image here'
+                            : `Drop your ${subject} here`
                         }
                         description="or click to choose an image"
                         footer={
@@ -272,7 +284,7 @@ export function ProfileImageEditor({
             </form.Subscribe>
           </form>
         </DialogContent>
-      </Dialog>
+      </Dialog> : null}
     </div>
   );
 }

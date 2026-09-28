@@ -269,11 +269,11 @@ describe('isAuthorized Integration with OPA Container', () => {
       expect(allowed).toBe(true);
     });
 
-    it('allows principals to create classes and teachers to update class configuration', async () => {
-      const [principalCanCreate, teacherCanUpdateConfig] = await Promise.all([
+    it('allows principals to manage class order and teachers to edit class details', async () => {
+      const [principalCanReorder, teacherCanUpdate, teacherCanUpdateConfig] = await Promise.all([
         isAuthorized(
           {
-            action: SCHOOL_ACTIONS.CREATE_CLASS,
+            action: SCHOOL_ACTIONS.REORDER_CLASSES,
             subject: {
               userId: 'principal-1',
               roleAssignments: [
@@ -281,6 +281,23 @@ describe('isAuthorized Integration with OPA Container', () => {
                   role: 'school.principal',
                   scope: { kind: 'school', schoolId: 'school-1' },
                   meta: null,
+                },
+              ],
+            },
+            resource: { kind: 'school', schoolId: 'school-1' },
+          },
+          { client },
+        ),
+        isAuthorized(
+          {
+            action: SCHOOL_ACTIONS.UPDATE_CLASS,
+            subject: {
+              userId: 'teacher-1',
+              roleAssignments: [
+                {
+                  role: 'school.teacher',
+                  scope: { kind: 'school', schoolId: 'school-1' },
+                  meta: { classIds: [] },
                 },
               ],
             },
@@ -307,7 +324,8 @@ describe('isAuthorized Integration with OPA Container', () => {
         ),
       ]);
 
-      expect(principalCanCreate).toBe(true);
+      expect(principalCanReorder).toBe(true);
+      expect(teacherCanUpdate).toBe(true);
       expect(teacherCanUpdateConfig).toBe(true);
     });
 

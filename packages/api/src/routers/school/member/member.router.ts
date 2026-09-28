@@ -11,9 +11,12 @@ import {
   count,
   desc,
   eq,
+  exists,
   ilike,
   inArray,
+  notExists,
   or,
+  sql,
 } from "drizzle-orm";
 
 import { rpcError, toRpcError } from "../../../errors";
@@ -109,9 +112,65 @@ export const schoolMemberRouter = {
               ilike(user.email, `%${input.searchQuery}%`),
             )
           : undefined;
+        const roleCondition = input.filters?.role
+          ? exists(
+              context.db
+                .select({ value: sql`1` })
+                .from(schoolUserRoleTable)
+                .where(
+                  and(
+                    eq(schoolUserRoleTable.schoolId, input.schoolId),
+                    eq(
+                      schoolUserRoleTable.userId,
+                      schoolMemberTable.userId,
+                    ),
+                    eq(schoolUserRoleTable.role, input.filters.role),
+                  ),
+                ),
+            )
+          : undefined;
+        const classCondition = input.filters?.classId
+          ? exists(
+              context.db
+                .select({ value: sql`1` })
+                .from(schoolUserRoleTable)
+                .where(
+                  and(
+                    eq(schoolUserRoleTable.schoolId, input.schoolId),
+                    eq(
+                      schoolUserRoleTable.userId,
+                      schoolMemberTable.userId,
+                    ),
+                    eq(schoolUserRoleTable.role, "teacher"),
+                    sql`${schoolUserRoleTable.meta} -> 'classIds' ? ${input.filters.classId}`,
+                  ),
+                ),
+            )
+          : undefined;
+        const excludeClassCondition = input.filters?.excludeClassId
+          ? notExists(
+              context.db
+                .select({ value: sql`1` })
+                .from(schoolUserRoleTable)
+                .where(
+                  and(
+                    eq(schoolUserRoleTable.schoolId, input.schoolId),
+                    eq(
+                      schoolUserRoleTable.userId,
+                      schoolMemberTable.userId,
+                    ),
+                    eq(schoolUserRoleTable.role, "teacher"),
+                    sql`${schoolUserRoleTable.meta} -> 'classIds' ? ${input.filters.excludeClassId}`,
+                  ),
+                ),
+            )
+          : undefined;
         const where = and(
           eq(schoolMemberTable.schoolId, input.schoolId),
           searchCondition,
+          roleCondition,
+          classCondition,
+          excludeClassCondition,
         );
         const orderByColumn = {
           name: user.name,

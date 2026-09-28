@@ -27,11 +27,20 @@ grants contains {
     "school.session.delete",
     "school.session.activate",
     "school.class.create",
-    "school.class.update",
     "school.class.delete",
+    "school.class.reorder",
     "school.section.create",
-    "school.section.update",
     "school.section.delete",
+    "school.section.reorder",
+    "school.admission.settings.update",
+    "school.admission.create",
+    "school.admission.update",
+    "school.admission.unregister",
+    "school.admission.delete",
+    "school.student.create",
+    "school.student.update",
+    "school.student.class.remove",
+    "school.student.delete",
   }
 }
 
@@ -55,10 +64,17 @@ grants contains {
     "school.session.read",
     "school.class.list",
     "school.class.read",
+    "school.class.update",
     "school.class.configuration.update",
     "school.section.list",
     "school.section.read",
+    "school.section.update",
     "school.section.attributes.update",
+    "school.admission.settings.read",
+    "school.admission.list",
+    "school.admission.read",
+    "school.student.list",
+    "school.student.read",
   }
 }
 

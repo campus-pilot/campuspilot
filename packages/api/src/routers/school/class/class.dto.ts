@@ -2,11 +2,6 @@ import { attributesSchema } from "@campuspilot/db/schema/jsonb/attributes";
 import { classConfigSchema } from "@campuspilot/db/schema/jsonb/class-config";
 import { z } from "zod";
 
-import {
-  createListInputSchema,
-  createPaginatedOutputSchema,
-} from "../../../paginations";
-
 const slugSchema = z
   .string()
   .trim()
@@ -23,6 +18,7 @@ export const classDtoSchema = z.object({
   id: z.string(),
   slug: z.string(),
   label: z.string(),
+  displayOrder: z.number().int().positive(),
   schoolId: z.string(),
   attributes: attributesSchema,
   config: classConfigSchema,
@@ -34,6 +30,7 @@ export const sectionDtoSchema = z.object({
   id: z.string(),
   slug: z.string(),
   label: z.string(),
+  displayOrder: z.number().int().positive(),
   classId: z.string(),
   schoolId: z.string(),
   attributes: attributesSchema,
@@ -44,6 +41,14 @@ export const sectionDtoSchema = z.object({
 export type ClassDto = z.infer<typeof classDtoSchema>;
 export type SectionDto = z.infer<typeof sectionDtoSchema>;
 
+export const classSummaryDtoSchema = classDtoSchema.extend({
+  sectionCount: z.number().int().nonnegative(),
+  teacherCount: z.number().int().nonnegative(),
+  // Student membership is not modeled yet; null keeps that absence explicit.
+  studentCount: z.number().int().nonnegative().nullable(),
+  subjectCount: z.number().int().nonnegative(),
+});
+
 export function toClassDto(value: ClassDto): ClassDto {
   return classDtoSchema.parse(value);
 }
@@ -52,19 +57,11 @@ export function toSectionDto(value: SectionDto): SectionDto {
   return sectionDtoSchema.parse(value);
 }
 
-export const listClassesInputSchema = createListInputSchema({
+export const listClassesInputSchema = z.object({
   schoolId: z.string().min(1),
-  searchQuery: z.string().trim().min(1).max(100).optional(),
-  orderBy: z
-    .object({
-      field: z.enum(["slug", "label", "createdAt", "updatedAt"]),
-      direction: z.enum(["asc", "desc"]),
-    })
-    .default({ field: "label", direction: "asc" }),
 });
 
-export const listClassesOutputSchema =
-  createPaginatedOutputSchema(classDtoSchema);
+export const listClassesOutputSchema = z.array(classSummaryDtoSchema);
 
 export const classIdInputSchema = z.object({
   schoolId: z.string().min(1),
@@ -108,20 +105,12 @@ export const updateClassConfigurationInputSchema = classIdInputSchema
     { message: "Attributes or config must be provided." },
   );
 
-export const listSectionsInputSchema = createListInputSchema({
+export const listSectionsInputSchema = z.object({
   schoolId: z.string().min(1),
   classId: z.string().min(1),
-  searchQuery: z.string().trim().min(1).max(100).optional(),
-  orderBy: z
-    .object({
-      field: z.enum(["slug", "label", "createdAt", "updatedAt"]),
-      direction: z.enum(["asc", "desc"]),
-    })
-    .default({ field: "label", direction: "asc" }),
 });
 
-export const listSectionsOutputSchema =
-  createPaginatedOutputSchema(sectionDtoSchema);
+export const listSectionsOutputSchema = z.array(sectionDtoSchema);
 
 export const sectionIdInputSchema = classIdInputSchema.extend({
   sectionId: z.string().min(1),
@@ -145,3 +134,26 @@ export const updateSectionInputSchema = sectionIdInputSchema
 export const updateSectionAttributesInputSchema = sectionIdInputSchema.extend({
   attributes: attributesSchema,
 });
+
+function uniqueIds(values: string[]) {
+  return new Set(values).size === values.length;
+}
+
+export const reorderClassesInputSchema = z.object({
+  schoolId: z.string().min(1),
+  orderedClassIds: z
+    .array(z.string().min(1))
+    .min(1)
+    .refine(uniqueIds, "Class identifiers must be unique"),
+});
+
+export const reorderClassesOutputSchema = z.array(classDtoSchema);
+
+export const reorderSectionsInputSchema = classIdInputSchema.extend({
+  orderedSectionIds: z
+    .array(z.string().min(1))
+    .min(1)
+    .refine(uniqueIds, "Section identifiers must be unique"),
+});
+
+export const reorderSectionsOutputSchema = z.array(sectionDtoSchema);

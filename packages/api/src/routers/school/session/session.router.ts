@@ -177,7 +177,7 @@ export const schoolSessionRouter = {
     .route({
       summary: 'Update a school session',
       description:
-        'Update explicitly supplied academic-session fields while validating year boundaries against stored values. Requires permission to update sessions in that school.',
+        'Update explicitly supplied fields on the active academic session while validating year boundaries against stored values. Inactive sessions are read-only.',
       tags: ['School', 'Sessions'],
     })
     .input(updateSchoolSessionInputSchema)
@@ -190,6 +190,7 @@ export const schoolSessionRouter = {
           .select({
             sessionStartYear: schoolSessionTable.sessionStartYear,
             sessionEndYear: schoolSessionTable.sessionEndYear,
+            isActive: schoolSessionTable.isActive,
           })
           .from(schoolSessionTable)
           .where(
@@ -200,6 +201,11 @@ export const schoolSessionRouter = {
           )
           .limit(1);
         if (!existingSession) throw rpcError.notFound('School session');
+        if (!existingSession.isActive) {
+          throw rpcError.conflict(
+            'Only the active academic session can be updated.',
+          );
+        }
 
         // Partial year updates are validated against the stored counterpart so
         // the API never infers one academic boundary from the other.
@@ -220,10 +226,17 @@ export const schoolSessionRouter = {
             and(
               eq(schoolSessionTable.schoolId, schoolId),
               eq(schoolSessionTable.id, sessionId),
+              // The predicate closes the race where another session becomes
+              // active after the state check but before this update executes.
+              eq(schoolSessionTable.isActive, true),
             ),
           )
           .returning(schoolSessionDtoColumns);
-        if (!session) throw rpcError.notFound('School session');
+        if (!session) {
+          throw rpcError.conflict(
+            'Only the active academic session can be updated.',
+          );
+        }
         return toSchoolSessionDto(session);
       } catch (error) {
         throw toRpcError(error);
@@ -234,7 +247,7 @@ export const schoolSessionRouter = {
     .route({
       summary: 'Delete a school session',
       description:
-        'Permanently delete an academic session from a school. Requires permission to delete sessions in that school.',
+        'Permanently delete an inactive academic session from a school. The active session must be replaced before it can be deleted.',
       tags: ['School', 'Sessions'],
     })
     .input(schoolSessionIdInputSchema)
@@ -248,10 +261,28 @@ export const schoolSessionRouter = {
             and(
               eq(schoolSessionTable.schoolId, input.schoolId),
               eq(schoolSessionTable.id, input.sessionId),
+              eq(schoolSessionTable.isActive, false),
             ),
           )
           .returning(schoolSessionDtoColumns);
-        if (!session) throw rpcError.notFound('School session');
+        if (!session) {
+          // A failed conditional delete can mean either a missing session or
+          // an active one; resolve those states explicitly for stable clients.
+          const [existingSession] = await context.db
+            .select({ isActive: schoolSessionTable.isActive })
+            .from(schoolSessionTable)
+            .where(
+              and(
+                eq(schoolSessionTable.schoolId, input.schoolId),
+                eq(schoolSessionTable.id, input.sessionId),
+              ),
+            )
+            .limit(1);
+          if (!existingSession) throw rpcError.notFound('School session');
+          throw rpcError.conflict(
+            'The active academic session cannot be deleted. Activate another session first.',
+          );
+        }
         return toSchoolSessionDto(session);
       } catch (error) {
         throw toRpcError(error);

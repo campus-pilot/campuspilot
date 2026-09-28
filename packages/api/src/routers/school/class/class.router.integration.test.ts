@@ -1,5 +1,6 @@
 import { db } from "@campuspilot/db";
 import { classTable, sectionTable } from "@campuspilot/db/schema/class";
+import { schoolUserRoleTable } from "@campuspilot/db/schema/school-user-role";
 import { and, eq } from "drizzle-orm";
 import { beforeAll, describe, expect, it } from "vitest";
 
@@ -60,6 +61,7 @@ describe("school class and section router integration", () => {
         schoolId: school.id,
         slug: "grade-one",
         label: "Grade One",
+        displayOrder: 1,
         attributes: {},
         config: { subjects: {} },
       });
@@ -68,6 +70,7 @@ describe("school class and section router integration", () => {
         .from(sectionTable)
         .where(eq(sectionTable.classId, schoolClass.id));
       expect(sections).toHaveLength(2);
+      expect(sections.map(({ displayOrder }) => displayOrder)).toEqual([1, 2]);
       expect(sections.every((section) => section.schoolId === school.id)).toBe(
         true,
       );
@@ -180,51 +183,94 @@ describe("school class and section router integration", () => {
   });
 
   describe("class reads and updates", () => {
-    it("allows any school role to list, search, and read classes", async () => {
+    it("allows any school role to list ordered class summaries and read classes", async () => {
       const testSchool = await createTestSchool();
       const teacher = await createSchoolStaffSession(testSchool.id, [
         { role: "teacher", meta: { classIds: [] } },
       ]);
       const { schoolClass } = await createTestClass({
         schoolId: testSchool.id,
-        slug: "searched-class",
-        label: "Searched Class",
+        slug: "first-class",
+        label: "First Class",
+        sections: [
+          { slug: "a", label: "Section A" },
+          { slug: "b", label: "Section B" },
+        ],
+      });
+      await createTestClass({
+        schoolId: testSchool.id,
+        slug: "second-class",
+        label: "Second Class",
       });
       const client = createTestClient(teacher.session);
 
       const classes = await client.school.listClasses({
         schoolId: testSchool.id,
-        searchQuery: "searched",
       });
       const fetched = await client.school.getClass({
         schoolId: testSchool.id,
         classId: schoolClass.id,
       });
 
-      expect(classes.items.map((item) => item.id)).toContain(schoolClass.id);
-      expect(classes.pagination.totalItems).toBe(1);
+      expect(classes.map((item) => item.displayOrder)).toEqual([1, 2]);
+      expect(classes[0]).toMatchObject({
+        id: schoolClass.id,
+        sectionCount: 2,
+        teacherCount: 0,
+        studentCount: null,
+        subjectCount: 0,
+      });
       expect(fetched.id).toBe(schoolClass.id);
     });
 
-    it("allows a principal to rename a class and denies a teacher", async () => {
+    it("allows a teacher to rename a class", async () => {
       const { schoolClass } = await createTestClass({
         schoolId: school.id,
         slug: "rename-class",
       });
 
-      const updated = await createTestClient(principalSession).school.updateClass({
+      const updated = await createTestClient(teacherSession).school.updateClass({
         schoolId: school.id,
         classId: schoolClass.id,
         slug: "renamed-class",
         label: "Renamed Class",
       });
       expect(updated.slug).toBe("renamed-class");
+    });
+
+    it("allows managers to reorder every class and denies teachers", async () => {
+      const testSchool = await createTestSchool();
+      const manager = await createSchoolStaffSession(testSchool.id, [
+        { role: "manager", meta: null },
+      ]);
+      const teacher = await createSchoolStaffSession(testSchool.id, [
+        { role: "teacher", meta: { classIds: [] } },
+      ]);
+      const first = await createTestClass({
+        schoolId: testSchool.id,
+        slug: "nursery",
+      });
+      const second = await createTestClass({
+        schoolId: testSchool.id,
+        slug: "lkg",
+      });
+
+      const reordered = await createTestClient(
+        manager.session,
+      ).school.reorderClasses({
+        schoolId: testSchool.id,
+        orderedClassIds: [second.schoolClass.id, first.schoolClass.id],
+      });
+      expect(reordered.map(({ id }) => id)).toEqual([
+        second.schoolClass.id,
+        first.schoolClass.id,
+      ]);
+      expect(reordered.map(({ displayOrder }) => displayOrder)).toEqual([1, 2]);
 
       await expect(
-        createTestClient(teacherSession).school.updateClass({
-          schoolId: school.id,
-          classId: schoolClass.id,
-          label: "Teacher Rename",
+        createTestClient(teacher.session).school.reorderClasses({
+          schoolId: testSchool.id,
+          orderedClassIds: [first.schoolClass.id, second.schoolClass.id],
         }),
       ).rejects.toThrowError(expect.objectContaining({ code: "FORBIDDEN" }));
     });
@@ -258,6 +304,32 @@ describe("school class and section router integration", () => {
       expect(updated.config.subjects.math?.books).toEqual([
         { title: "Numbers" },
       ]);
+    });
+
+    it("rejects subject exam modes whose percentages do not sum to 100", async () => {
+      const { schoolClass } = await createTestClass({
+        schoolId: school.id,
+        slug: "invalid-subject-class",
+      });
+
+      await expect(
+        createTestClient(teacherSession).school.updateClassConfiguration({
+          schoolId: school.id,
+          classId: schoolClass.id,
+          config: {
+            subjects: {
+              science: {
+                name: "Science",
+                books: [],
+                examModes: {
+                  written: { name: "Written", percentage: 70 },
+                  practical: { name: "Practical", percentage: 20 },
+                },
+              },
+            },
+          },
+        }),
+      ).rejects.toThrow();
     });
 
     it("returns NOT_FOUND for a class outside the supplied school", async () => {
@@ -304,12 +376,13 @@ describe("school class and section router integration", () => {
         label: "Section Beta",
       });
 
-      expect(listed.items).toHaveLength(2);
+      expect(listed).toHaveLength(2);
+      expect(listed.map(({ displayOrder }) => displayOrder)).toEqual([1, 2]);
       expect(fetched.id).toBe(created.id);
       expect(updated).toMatchObject({ slug: "beta", label: "Section Beta" });
     });
 
-    it("allows teachers to update attributes but not structural fields or create sections", async () => {
+    it("allows teachers to edit sections but not create them", async () => {
       const { schoolClass, sections } = await createTestClass({
         schoolId: school.id,
         slug: "teacher-section-class",
@@ -324,14 +397,13 @@ describe("school class and section router integration", () => {
       });
       expect(updated.attributes).toEqual({ floor: 2 });
 
-      await expect(
-        client.school.updateSection({
-          schoolId: school.id,
-          classId: schoolClass.id,
-          sectionId: sections[0]!.id,
-          label: "Not Allowed",
-        }),
-      ).rejects.toThrowError(expect.objectContaining({ code: "FORBIDDEN" }));
+      const renamed = await client.school.updateSection({
+        schoolId: school.id,
+        classId: schoolClass.id,
+        sectionId: sections[0]!.id,
+        label: "Teacher Renamed",
+      });
+      expect(renamed.label).toBe("Teacher Renamed");
       await expect(
         client.school.createSection({
           schoolId: school.id,
@@ -340,6 +412,38 @@ describe("school class and section router integration", () => {
           label: "Section B",
         }),
       ).rejects.toThrowError(expect.objectContaining({ code: "FORBIDDEN" }));
+    });
+
+    it("allows principals to reorder sections and validates the complete set", async () => {
+      const { schoolClass, sections } = await createTestClass({
+        schoolId: school.id,
+        slug: "reordered-sections-class",
+        sections: [
+          { slug: "a", label: "Section A" },
+          { slug: "b", label: "Section B" },
+          { slug: "c", label: "Section C" },
+        ],
+      });
+      const client = createTestClient(principalSession);
+
+      const reordered = await client.school.reorderSections({
+        schoolId: school.id,
+        classId: schoolClass.id,
+        orderedSectionIds: [sections[2]!.id, sections[0]!.id, sections[1]!.id],
+      });
+      expect(reordered.map(({ id }) => id)).toEqual([
+        sections[2]!.id,
+        sections[0]!.id,
+        sections[1]!.id,
+      ]);
+
+      await expect(
+        client.school.reorderSections({
+          schoolId: school.id,
+          classId: schoolClass.id,
+          orderedSectionIds: [sections[0]!.id],
+        }),
+      ).rejects.toThrowError(expect.objectContaining({ code: "BAD_REQUEST" }));
     });
 
     it("prevents deleting a class's only section", async () => {
@@ -410,6 +514,16 @@ describe("school class and section router integration", () => {
           { slug: "b", label: "Section B" },
         ],
       });
+      await db
+        .update(schoolUserRoleTable)
+        .set({ meta: { classIds: [schoolClass.id, "another-class"] } })
+        .where(
+          and(
+            eq(schoolUserRoleTable.schoolId, school.id),
+            eq(schoolUserRoleTable.userId, teacherSession.user.id),
+            eq(schoolUserRoleTable.role, "teacher"),
+          ),
+        );
 
       const deleted = await createTestClient(managerSession).school.deleteClass({
         schoolId: school.id,
@@ -422,6 +536,17 @@ describe("school class and section router integration", () => {
         .from(sectionTable)
         .where(eq(sectionTable.classId, schoolClass.id));
       expect(sections).toHaveLength(0);
+      const [teacherRole] = await db
+        .select({ meta: schoolUserRoleTable.meta })
+        .from(schoolUserRoleTable)
+        .where(
+          and(
+            eq(schoolUserRoleTable.schoolId, school.id),
+            eq(schoolUserRoleTable.userId, teacherSession.user.id),
+            eq(schoolUserRoleTable.role, "teacher"),
+          ),
+        );
+      expect(teacherRole?.meta).toEqual({ classIds: ["another-class"] });
     });
   });
 });
