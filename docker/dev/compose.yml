@@ -36,6 +36,10 @@ services:
   gotenberg:
     image: gotenberg/gotenberg:8.36.0
     container_name: campuspilot-gotenberg
+    environment:
+      CHROMIUM_DISABLE_JAVASCRIPT: 'true'
+      CHROMIUM_DENY_PRIVATE_IPS: 'true'
+      CHROMIUM_DENY_PUBLIC_IPS: 'true'
     ports:
       - '8781:3000'
     restart: unless-stopped

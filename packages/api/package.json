@@ -14,6 +14,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@ai-sdk/openai": "^3.0.128",
     "@aws-sdk/client-s3": "^3.1130.0",
     "@aws-sdk/s3-request-presigner": "^3.1132.0",
     "@campuspilot/auth": "workspace:*",
@@ -25,9 +26,12 @@
     "@orpc/openapi": "catalog:",
     "@orpc/server": "catalog:",
     "@orpc/zod": "catalog:",
+    "ai": "^6.0.307",
     "busboy": "^1.6.0",
     "dotenv": "catalog:",
     "drizzle-orm": "^0.45.2",
+    "handlebars": "^4.7.10",
+    "sanitize-html": "^2.18.1",
     "zod": "catalog:"
   },
   "devDependencies": {
@@ -36,7 +40,9 @@
     "@testcontainers/redis": "catalog:",
     "@types/busboy": "^1.5.4",
     "@types/pg": "catalog:",
+    "@types/sanitize-html": "^2.16.2",
     "hono": "catalog:",
+    "pdf-lib": "^1.17.1",
     "pg": "catalog:",
     "testcontainers": "catalog:",
     "typescript": "catalog:",

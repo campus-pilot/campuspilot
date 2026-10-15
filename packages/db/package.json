@@ -15,6 +15,7 @@
   "dependencies": {
     "@campuspilot/env": "workspace:*",
     "@campuspilot/logger": "workspace:*",
+    "@opentelemetry/api": "^1.9.1",
     "dotenv": "catalog:",
     "drizzle-orm": "^0.45.2",
     "nanoid": "^6.0.1",

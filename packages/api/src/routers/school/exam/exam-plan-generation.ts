@@ -15,7 +15,7 @@ export async function prepareExamPlan(db: DatabaseExecutor, scope: ExamScope, lo
   const query = db.select().from(classTable).where(eq(classTable.schoolId, scope.schoolId)).orderBy(asc(classTable.displayOrder), asc(classTable.id));
   const classes = await (lock ? query.for('share') : query);
   const [existing] = await db.select({ value: count() }).from(examPlanTable).where(and(eq(examPlanTable.schoolId, scope.schoolId), eq(examPlanTable.sessionId, scope.sessionId), eq(examPlanTable.examSlug, scope.examSlug)));
-  const totalMarks = 100;
+  const totalMarks = 100 as const;
   const plans: Array<typeof examPlanTable.$inferInsert> = [];
   const overview = classes.map((schoolClass) => ({
     classId: schoolClass.id,

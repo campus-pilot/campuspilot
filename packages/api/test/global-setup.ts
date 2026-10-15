@@ -1,4 +1,6 @@
 import fs from 'node:fs';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CreateBucketCommand, S3Client } from '@aws-sdk/client-s3';
@@ -30,6 +32,8 @@ if (!process.env.DOCKER_HOST && !fs.existsSync('/var/run/docker.sock')) {
 
 declare module 'vitest' {
   export interface ProvidedContext {
+    GOTENBERG_URL: string;
+    AI_BASE_URL: string;
     DATABASE_URL: string;
     REDIS_URL: string;
     OPA_URL: string;
@@ -42,9 +46,13 @@ let postgresContainer: StartedPostgreSqlContainer | undefined;
 let redisContainer: StartedRedisContainer | undefined;
 let opaContainer: StartedTestContainer | undefined;
 let minioContainer: StartedTestContainer | undefined;
+let gotenbergContainer: StartedTestContainer | undefined;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const POLICIES_DIR = path.resolve(__dirname, '../../../packages/opa/src/policies');
+const POLICIES_DIR = path.resolve(
+  __dirname,
+  '../../../packages/opa/src/policies',
+);
 const MIGRATIONS_DIR = path.resolve(
   __dirname,
   '../../../packages/db/src/migrations',
@@ -53,7 +61,7 @@ const TEST_BUCKET = 'campuspilot';
 
 export default async function setup(project: TestProject) {
   // Spin up all dev-stack testcontainers in parallel
-  const [pgContainer, rdContainer, opContainer, mnContainer] =
+  const [pgContainer, rdContainer, opContainer, mnContainer, pdfContainer] =
     await Promise.all([
       new PostgreSqlContainer('postgres:18.6')
         .withDatabase('campuspilot_test')
@@ -82,12 +90,22 @@ export default async function setup(project: TestProject) {
         .withExposedPorts(9000)
         .withWaitStrategy(Wait.forHttp('/minio/health/live', 9000))
         .start(),
+      new GenericContainer('gotenberg/gotenberg:8.36.0')
+        .withEnvironment({
+          CHROMIUM_DISABLE_JAVASCRIPT: 'true',
+          CHROMIUM_DENY_PRIVATE_IPS: 'true',
+          CHROMIUM_DENY_PUBLIC_IPS: 'true',
+        })
+        .withExposedPorts(3000)
+        .withWaitStrategy(Wait.forHttp('/health', 3000))
+        .start(),
     ]);
 
   postgresContainer = pgContainer;
   redisContainer = rdContainer;
   opaContainer = opContainer;
   minioContainer = mnContainer;
+  gotenbergContainer = pdfContainer;
 
   const databaseUrl = pgContainer.getConnectionUri();
   const redisUrl = rdContainer.getConnectionUrl();
@@ -110,9 +128,55 @@ export default async function setup(project: TestProject) {
     },
     forcePathStyle: true,
   });
-  await s3.send(new CreateBucketCommand({ Bucket: TEST_BUCKET })).catch(() => {});
+  await s3
+    .send(new CreateBucketCommand({ Bucket: TEST_BUCKET }))
+    .catch(() => {});
 
   // 3. Provide connection information to Vitest workers
+  // A local HTTP provider fixture exercises the real AI SDK transport without
+  // spending provider credits or requiring real credentials in integration tests.
+  const aiFixture = createServer(async (request, response) => {
+    for await (const _ of request) {
+      /* consume the SDK request */
+    }
+    response.setHeader('content-type', 'application/json');
+    response.end(
+      JSON.stringify({
+        id: 'resp_fixture',
+        object: 'response',
+        created_at: 1,
+        model: 'gpt-4o',
+        status: 'completed',
+        output: [
+          {
+            id: 'msg_fixture',
+            type: 'message',
+            role: 'assistant',
+            status: 'completed',
+            content: [
+              {
+                type: 'output_text',
+                text: '<h1 style="color:green">AI draft</h1><p>{{student.name}}</p>',
+                annotations: [],
+              },
+            ],
+          },
+        ],
+        usage: { input_tokens: 10, output_tokens: 10, total_tokens: 20 },
+      }),
+    );
+  });
+  await new Promise<void>((resolve) =>
+    aiFixture.listen(0, '127.0.0.1', resolve),
+  );
+  project.provide(
+    'AI_BASE_URL',
+    `http://127.0.0.1:${(aiFixture.address() as AddressInfo).port}/v1`,
+  );
+  project.provide(
+    'GOTENBERG_URL',
+    `http://${pdfContainer.getHost()}:${pdfContainer.getMappedPort(3000)}`,
+  );
   project.provide('DATABASE_URL', databaseUrl);
   project.provide('REDIS_URL', redisUrl);
   project.provide('OPA_URL', opaUrl);
@@ -125,6 +189,10 @@ export default async function setup(project: TestProject) {
       redisContainer?.stop(),
       opaContainer?.stop(),
       minioContainer?.stop(),
+      gotenbergContainer?.stop(),
+      new Promise<void>((resolve, reject) =>
+        aiFixture.close((error) => (error ? reject(error) : resolve())),
+      ),
     ]);
   };
 }

@@ -24,7 +24,10 @@ import { schoolSessionFinanceRouter } from "./session-finance/session-finance.ro
 import { schoolSessionRouter } from "./session/session.router";
 import { schoolStudentRouter } from "./student/student.router";
 
+import { schoolDocumentRouter } from "./document/document.router";
+
 export const schoolRouter = {
+  ...schoolDocumentRouter,
   ...schoolExamRouter,
   listMySchools: protectedProcedure
     .route({
