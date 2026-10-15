@@ -49,3 +49,7 @@ For reusable compopnents / layouts that need api calls they should be placed in 
 # USING ENV
 
 use env directly from `@campuspilot/env` never use `import.meta` or `process.env`
+
+## Local document preview
+
+Reusable user-authorized test login and launch instructions are in `docs/local-document-preview.md`. Read that note before testing this preview. Preserve the running preview and its user edits when refreshing code.
