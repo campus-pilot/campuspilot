@@ -115,5 +115,5 @@ grants contains {"role": role, "action": action} if {
 }
 grants contains {"role": role, "action": action} if {
   some role in {"school.principal", "school.manager", "school.exam_coordinator"}
-  some action in {"school.document.templates.manage", "school.document.generate", "school.document.artifacts.delete", "school.document.templates.ai"}
+  some action in {"school.document.templates.manage", "school.document.generate", "school.document.artifacts.delete"}
 }

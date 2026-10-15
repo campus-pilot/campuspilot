@@ -9,7 +9,6 @@ import {
 } from '@campuspilot/db/schema/artifact';
 import { schoolTable } from '@campuspilot/db/schema/school';
 import { SCHOOL_ACTIONS } from '@campuspilot/opa/policies/school';
-import { env } from '@campuspilot/env/server';
 import { o, protectedProcedure } from '../../../index';
 import { rpcError, toRpcError } from '../../../errors';
 import { requireSchoolPermission } from '../../../permissions/school';
@@ -37,7 +36,6 @@ import {
   readDocumentTemplate,
 } from './document.storage';
 import { buildDocumentContexts } from './document.context';
-import { proposeDocumentTemplate } from './document.ai';
 
 const route = (summary: string, description: string) => ({
   summary,
@@ -360,39 +358,6 @@ export const schoolDocumentRouter = {
       html: renderDocument(input.content, SAMPLE_DOCUMENT_CONTEXT),
       contextHelp: DOCUMENT_CONTEXT_HELP,
     })),
-  getDocumentAiAvailability: protectedProcedure
-    .route(
-      route(
-        'Check AI template editing availability',
-        'Report whether the server has configured an AI provider. Provider credentials are never returned.',
-      ),
-    )
-    .input(dto.schoolScopeSchema)
-    .use(
-      requireSchoolPermission(SCHOOL_ACTIONS.EDIT_DOCUMENT_TEMPLATES_WITH_AI),
-    )
-    .output(z.object({ available: z.boolean() }))
-    .handler(async () => ({ available: Boolean(env.AI_API_KEY) })),
-  proposeDocumentTemplate: protectedProcedure
-    .route(
-      route(
-        'Propose template changes with AI',
-        'Use a prompt and the current source to produce a validated draft. Only the draft source and prompt are sent to the configured provider; nothing is saved or activated automatically.',
-      ),
-    )
-    .input(dto.aiTemplateSchema)
-    .use(
-      requireSchoolPermission(SCHOOL_ACTIONS.EDIT_DOCUMENT_TEMPLATES_WITH_AI),
-    )
-    .use(requireSchoolPermission(SCHOOL_ACTIONS.MANAGE_DOCUMENT_TEMPLATES))
-    .output(z.object({ content: z.string(), html: z.string() }))
-    .handler(async ({ input, signal }) => {
-      try {
-        return await proposeDocumentTemplate(input, signal);
-      } catch (error) {
-        throw toRpcError(error);
-      }
-    }),
   previewDocument: protectedProcedure
     .route(
       route(

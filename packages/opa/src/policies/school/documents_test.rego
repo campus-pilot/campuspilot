@@ -15,7 +15,7 @@ test_document_read_grants if {
  }
 }
 test_document_mutation_grants if {
- every action in {"school.document.templates.manage", "school.document.generate", "school.document.artifacts.delete", "school.document.templates.ai"} {
+ every action in {"school.document.templates.manage", "school.document.generate", "school.document.artifacts.delete"} {
   every role in {"school.principal", "school.manager", "school.exam_coordinator"} {
    authorization.allow with input as request(action, role, "school-1")
    not authorization.allow with input as request(action, role, "school-2")

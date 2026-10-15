@@ -424,9 +424,6 @@ importers:
 
   packages/api:
     dependencies:
-      '@ai-sdk/openai':
-        specifier: ^3.0.128
-        version: 3.0.128(zod@4.6.1)
       '@aws-sdk/client-s3':
         specifier: ^3.1130.0
         version: 3.1130.0
@@ -460,9 +457,6 @@ importers:
       '@orpc/zod':
         specifier: 'catalog:'
         version: 1.15.0(@opentelemetry/api@1.9.1)(@orpc/contract@1.15.0(@opentelemetry/api@1.9.1))(@orpc/server@1.15.0(@opentelemetry/api@1.9.1))(zod@4.6.1)
-      ai:
-        specifier: ^6.0.307
-        version: 6.0.307(zod@4.6.1)
       busboy:
         specifier: ^1.6.0
         version: 1.6.0
@@ -634,6 +628,9 @@ importers:
       typescript:
         specifier: 'catalog:'
         version: 6.0.3
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.4(@opentelemetry/api@1.9.1)(@types/node@26.5.1)(vite@8.3.0(@types/node@26.5.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)(yaml@2.9.1))
 
   packages/config: {}
 
@@ -645,9 +642,6 @@ importers:
       '@campuspilot/logger':
         specifier: workspace:*
         version: link:../logger
-      '@opentelemetry/api':
-        specifier: ^1.9.1
-        version: 1.9.1
       dotenv:
         specifier: 'catalog:'
         version: 17.4.2
@@ -898,28 +892,6 @@ importers:
         version: 6.0.3
 
 packages:
-
-  '@ai-sdk/gateway@3.0.215':
-    resolution: {integrity: sha512-QOw3arKUe+bu2InKAD/GwG+QYjvdKFO0CtF0ai5op5naFmIE/eaMwmevwpjPuHZNjuk1G3o7ozjihRZs8KsdCg==}
-    engines: {node: '>=18'}
-    peerDependencies:
-      zod: ^3.25.76 || ^4.1.8
-
-  '@ai-sdk/openai@3.0.128':
-    resolution: {integrity: sha512-q6xHyoMLph8GqwmFyMHpJnesl3vkfZCklinS0hSCJg+DOoPbUsZW6h3anc73efSOxsgvYxE72CuQ1pw+YpPC5Q==}
-    engines: {node: '>=18'}
-    peerDependencies:
-      zod: ^3.25.76 || ^4.1.8
-
-  '@ai-sdk/provider-utils@4.0.59':
-    resolution: {integrity: sha512-HR51CwEHIaGKUTUCLpfVDvajk1C8CGd34ezi34vOeUyxbchBDIKGVNJZRNvILuvHDS8nOvxYUJ9NZvzp0UufUg==}
-    engines: {node: '>=18.17'}
-    peerDependencies:
-      zod: ^3.25.76 || ^4.1.8
-
-  '@ai-sdk/provider@3.0.18':
-    resolution: {integrity: sha512-IpefF5ssZVOZCD4Wu7zxt6PwZoGT2HLVjxpJ10Bjx6EAmRfLYJPjyrfxb0RYDlwvXnDb9nkQ7Do/oJVDuRFzew==}
-    engines: {node: '>=18'}
 
   '@alloc/quick-lru@5.3.0':
     resolution: {integrity: sha512-U4+70Pc5ZS9osnCBCE5Jha/ciHM+Yp+CNMNC/7HvYbNRk1Ldd+f7qO65W5qfhu/TCv+/ozljlXXe9Nj8419DMA==}
@@ -3560,10 +3532,6 @@ packages:
     resolution: {integrity: sha512-mbCddXd+jm7hfx7w2YU64/Av4/NqqeG3GoRZgxPcgoTxYjhrcfJRw9ULch71SS4G+Q3bOXFhRvPqjguN0Hyp5w==}
     hasBin: true
 
-  '@vercel/oidc@3.2.0':
-    resolution: {integrity: sha512-UycprH3T6n3jH0k44NHMa7pnFHGu/N05MjojYr+Mc6I7obkoLIJujSWwin1pCvdy/eOxrI/l3uDLQsmcrOb4ug==}
-    engines: {node: '>= 20'}
-
   '@vitest/expect@4.1.4':
     resolution: {integrity: sha512-iPBpra+VDuXmBFI3FMKHSFXp3Gx5HfmSCE8X67Dn+bwephCnQCaB7qWK2ldHa+8ncN8hJU8VTMcxjPpyMkUjww==}
 
@@ -3759,12 +3727,6 @@ packages:
   accepts@2.0.0:
     resolution: {integrity: sha512-5cvg6CtKwfgdmVqY1WIiXKc3Q1bkRqGLi+2W/6ao+6Y7gu/RCwRuAhGEzh5B4KlszSuTLgZYuqFqo5bImjNKng==}
     engines: {node: '>= 0.6'}
-
-  ai@6.0.307:
-    resolution: {integrity: sha512-jVheHvKkeldXBjFtbnM/n9gL8fcZlhQH9OiV9oT+Wj98tIRjskl33sG3d5K2Q/WJX6jlvlOjIH2+wEKetgpd6w==}
-    engines: {node: '>=18'}
-    peerDependencies:
-      zod: ^3.25.76 || ^4.1.8
 
   ajv-formats@2.1.1:
     resolution: {integrity: sha512-Wx0Kx52hxE7C18hkMEggYlEifqWZtYaRgouJor+WMdPnQyEK13vgEWyVNup7SoeeoLMsr4kf5h6dOW11I15MUA==}
@@ -5027,9 +4989,6 @@ packages:
 
   json-schema-typed@8.0.2:
     resolution: {integrity: sha512-fQhoXdcvc3V28x7C7BMs4P5+kNlgUURe2jmUT1T//oBRMDrqy1QPelJimwZGo7Hg9VPV3EQV5Bnq4hbFy2vetA==}
-
-  json-schema@0.4.0:
-    resolution: {integrity: sha512-es94M3nTIfsEPisRafak+HDLfHXnKBhV3vU5eqPcS3flIWqcxJWgXHXiey3YrpaNsanY5ei1VoYEbOzijuq9BA==}
 
   json5@2.2.3:
     resolution: {integrity: sha512-XmOWe7eyHYH14cLdVPoyg+GOH3rYX++KpzrylJwSW98t3Nk+U8XOl8FWKOgwtzdb8lXGf6zYwDUzeHMWfxasyg==}
@@ -6301,10 +6260,6 @@ packages:
   undici-types@8.9.0:
     resolution: {integrity: sha512-KTDyRTYX8sWmKXAikPHHSyc63CRPETMctyjKFupcC6OBLXT3xsN0e9aF7m+mIXutFWpUXuedtowG7iLOzp0kQg==}
 
-  undici@6.29.0:
-    resolution: {integrity: sha512-R+RODBqp6i2pPflGdq+xIOUkl+RNfGgHwoinecKu/JCuf2uO06cOKoDbI2P7Dn6KcswdKwrczbU6IYJ6K8X+wg==}
-    engines: {node: '>=18.17'}
-
   undici@7.29.1:
     resolution: {integrity: sha512-RYONW2MeafgYlkVOKYKkA/Ag7BmXqgIWCa8t1m0JcxrQg9pI9lEqRhAOruOBCbAohOa/gkCF+iPi9hrgvTzu6Q==}
     engines: {node: '>=20.18.1'}
@@ -6565,31 +6520,6 @@ packages:
     resolution: {integrity: sha512-341aRWQsve0rvronKNTqZpjmzdbUDlFuzHaI/XLg/Ej82qffDJRRfBTCuv7+9q/rMjB6LSLyEBnW4InJeMtt/Q==}
 
 snapshots:
-
-  '@ai-sdk/gateway@3.0.215(zod@4.6.1)':
-    dependencies:
-      '@ai-sdk/provider': 3.0.18
-      '@ai-sdk/provider-utils': 4.0.59(zod@4.6.1)
-      '@vercel/oidc': 3.2.0
-      zod: 4.6.1
-
-  '@ai-sdk/openai@3.0.128(zod@4.6.1)':
-    dependencies:
-      '@ai-sdk/provider': 3.0.18
-      '@ai-sdk/provider-utils': 4.0.59(zod@4.6.1)
-      zod: 4.6.1
-
-  '@ai-sdk/provider-utils@4.0.59(zod@4.6.1)':
-    dependencies:
-      '@ai-sdk/provider': 3.0.18
-      '@standard-schema/spec': 1.1.0
-      eventsource-parser: 3.1.1
-      undici: 6.29.0
-      zod: 4.6.1
-
-  '@ai-sdk/provider@3.0.18':
-    dependencies:
-      json-schema: 0.4.0
 
   '@alloc/quick-lru@5.3.0': {}
 
@@ -7615,7 +7545,8 @@ snapshots:
       '@nodelib/fs.scandir': 2.1.5
       fastq: 1.20.3
 
-  '@opentelemetry/api@1.9.1': {}
+  '@opentelemetry/api@1.9.1':
+    optional: true
 
   '@opentelemetry/semantic-conventions@1.43.0': {}
 
@@ -9093,8 +9024,6 @@ snapshots:
     dependencies:
       '@typescript/old': typescript@6.0.3
 
-  '@vercel/oidc@3.2.0': {}
-
   '@vitest/expect@4.1.4':
     dependencies:
       '@standard-schema/spec': 1.1.0
@@ -9226,14 +9155,6 @@ snapshots:
     dependencies:
       mime-types: 3.0.2
       negotiator: 1.1.0
-
-  ai@6.0.307(zod@4.6.1):
-    dependencies:
-      '@ai-sdk/gateway': 3.0.215(zod@4.6.1)
-      '@ai-sdk/provider': 3.0.18
-      '@ai-sdk/provider-utils': 4.0.59(zod@4.6.1)
-      '@opentelemetry/api': 1.9.1
-      zod: 4.6.1
 
   ajv-formats@2.1.1(ajv@8.20.0):
     optionalDependencies:
@@ -10353,8 +10274,6 @@ snapshots:
   json-schema-typed@7.0.3: {}
 
   json-schema-typed@8.0.2: {}
-
-  json-schema@0.4.0: {}
 
   json5@2.2.3: {}
 
@@ -11710,8 +11629,6 @@ snapshots:
   undici-types@6.21.0: {}
 
   undici-types@8.9.0: {}
-
-  undici@6.29.0: {}
 
   undici@7.29.1: {}
 

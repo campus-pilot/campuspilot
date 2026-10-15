@@ -20,7 +20,6 @@ export const SCHOOL_ACTIONS = {
   DELETE_SECTION: 'school.section.delete',
   DELETE_SESSION: 'school.session.delete',
   DELETE_STUDENT: 'school.student.delete',
-  EDIT_DOCUMENT_TEMPLATES_WITH_AI: 'school.document.templates.ai',
   GENERATE_DOCUMENTS: 'school.document.generate',
   INVITE_MEMBER: 'school.member.invite',
   LIST_ADMISSIONS: 'school.admission.list',

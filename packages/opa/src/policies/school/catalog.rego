@@ -368,5 +368,3 @@ actions contains {"id": "school.document.generate", "key": "GENERATE_DOCUMENTS",
 actions contains {"id": "school.document.artifacts.read", "key": "READ_DOCUMENT_ARTIFACTS", "resourceKind": "school"} if { true }
 
 actions contains {"id": "school.document.artifacts.delete", "key": "DELETE_DOCUMENT_ARTIFACTS", "resourceKind": "school"} if { true }
-
-actions contains {"id": "school.document.templates.ai", "key": "EDIT_DOCUMENT_TEMPLATES_WITH_AI", "resourceKind": "school"} if { true }

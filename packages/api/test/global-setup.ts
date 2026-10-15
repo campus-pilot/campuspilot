@@ -1,6 +1,4 @@
 import fs from 'node:fs';
-import { createServer } from 'node:http';
-import type { AddressInfo } from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CreateBucketCommand, S3Client } from '@aws-sdk/client-s3';
@@ -33,7 +31,6 @@ if (!process.env.DOCKER_HOST && !fs.existsSync('/var/run/docker.sock')) {
 declare module 'vitest' {
   export interface ProvidedContext {
     GOTENBERG_URL: string;
-    AI_BASE_URL: string;
     DATABASE_URL: string;
     REDIS_URL: string;
     OPA_URL: string;
@@ -133,46 +130,6 @@ export default async function setup(project: TestProject) {
     .catch(() => {});
 
   // 3. Provide connection information to Vitest workers
-  // A local HTTP provider fixture exercises the real AI SDK transport without
-  // spending provider credits or requiring real credentials in integration tests.
-  const aiFixture = createServer(async (request, response) => {
-    for await (const _ of request) {
-      /* consume the SDK request */
-    }
-    response.setHeader('content-type', 'application/json');
-    response.end(
-      JSON.stringify({
-        id: 'resp_fixture',
-        object: 'response',
-        created_at: 1,
-        model: 'gpt-4o',
-        status: 'completed',
-        output: [
-          {
-            id: 'msg_fixture',
-            type: 'message',
-            role: 'assistant',
-            status: 'completed',
-            content: [
-              {
-                type: 'output_text',
-                text: '<h1 style="color:green">AI draft</h1><p>{{student.name}}</p>',
-                annotations: [],
-              },
-            ],
-          },
-        ],
-        usage: { input_tokens: 10, output_tokens: 10, total_tokens: 20 },
-      }),
-    );
-  });
-  await new Promise<void>((resolve) =>
-    aiFixture.listen(0, '127.0.0.1', resolve),
-  );
-  project.provide(
-    'AI_BASE_URL',
-    `http://127.0.0.1:${(aiFixture.address() as AddressInfo).port}/v1`,
-  );
   project.provide(
     'GOTENBERG_URL',
     `http://${pdfContainer.getHost()}:${pdfContainer.getMappedPort(3000)}`,
@@ -190,9 +147,6 @@ export default async function setup(project: TestProject) {
       opaContainer?.stop(),
       minioContainer?.stop(),
       gotenbergContainer?.stop(),
-      new Promise<void>((resolve, reject) =>
-        aiFixture.close((error) => (error ? reject(error) : resolve())),
-      ),
     ]);
   };
 }

@@ -45,7 +45,6 @@ describe('Document permissions against real OPA', () => {
       SCHOOL_ACTIONS.MANAGE_DOCUMENT_TEMPLATES,
       SCHOOL_ACTIONS.GENERATE_DOCUMENTS,
       SCHOOL_ACTIONS.DELETE_DOCUMENT_ARTIFACTS,
-      SCHOOL_ACTIONS.EDIT_DOCUMENT_TEMPLATES_WITH_AI,
     ]) {
       for (const role of [
         'school.manager',

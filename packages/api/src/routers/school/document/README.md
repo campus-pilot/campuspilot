@@ -25,21 +25,13 @@ Uploads are compensated if their database transaction fails. A simultaneous stor
 
 Deleting a PDF first records `deleting`, removes its object, then removes its row. Storage failure leaves a visible, retryable record and disables downloads. Template revisions are retained for provenance. Only PDFs can be deleted through this API. Downloads are authorized before issuing a fresh five-minute signed URL; signed URLs and raw S3 keys are not stored in the frontend history cache.
 
-## Template and AI editing
+## Template editing and portable prompts
 
 The server-owned marketplace contains modern and classic starting points for all four document types. Source and sample previews are available through normal oRPC procedures. `document.catalog.ts` defines the variable reference and synthetic preview data.
 
-Template editing uses TanStack Form, field-level Zod errors, explicit preview/save actions, and a callback-ref navigation guard. AI returns a suggestion for review. Applying a suggestion updates only the local draft; saving explicitly activates a new revision. Student records are never loaded for AI requests; only the current draft source, prompt, and variable specification are sent.
+Template editing uses TanStack Form, field-level Zod errors, explicit preview/save actions, and a callback-ref navigation guard. Users describe their edits and copy a context prompt, the latest unsaved HTML, or both together into their own AI application. The brief includes the document's print dimensions, rendering constraints, and server-owned variable reference. Returned HTML is pasted into the existing source editor, previewed, and explicitly saved as a new revision. Clipboard failures leave a selectable full prompt for manual copying.
 
-Optional server settings preserve v1's provider contract:
-
-```dotenv
-AI_BASE_URL=https://api.openai.com/v1
-AI_MODEL=gpt-4o
-AI_API_KEY=your-provider-key
-```
-
-The AI SDK's default Responses transport matches v1. A compatible custom base URL must support that transport. No credentials from the old app are copied automatically. The UI reports unavailable AI configuration while manual editing remains available.
+There is no integrated AI provider, provider configuration, SDK, AI permission, or AI endpoint. Building/copying the brief stays in the browser and sends no request to a model provider.
 
 ## Rendering and deployment
 
@@ -53,14 +45,14 @@ CHROMIUM_DENY_PRIVATE_IPS=true
 CHROMIUM_DENY_PUBLIC_IPS=true
 ```
 
-Limits: 200 KB template source, 4,000-character AI prompts, 500 selected students, 5 MB per image, 20 MB embedded images, 25 MB rendered HTML, 30 MB resulting PDF. Conversion times out after 120 seconds; AI requests after 90 seconds. Large classes can use explicit student selections to create smaller batches.
+Limits: 200 KB template source, 4,000-character editing instructions, 500 selected students, 5 MB per image, 20 MB embedded images, 25 MB rendered HTML, 30 MB resulting PDF. Conversion times out after 120 seconds. Large classes can use explicit student selections to create smaller batches.
 
 Gotenberg's multipart HTML route and data-URI support: https://gotenberg.dev/docs/convert-with-chromium/convert-html-to-pdf
 Outbound filtering configuration: https://gotenberg.dev/docs/configuration
 
 ## Authorization
 
-New school actions separately cover template reading/management, generation, history/download reading, deletion, and AI editing. Principals, managers, and exam coordinators manage/generate/delete/use AI. School staff may read templates and PDF history. Platform administrators receive no implicit document grant.
+New school actions separately cover template reading/management, generation, history/download reading, and deletion. Principals, managers, and exam coordinators manage/generate/delete. School staff may read templates and PDF history. Platform administrators receive no implicit document grant.
 
 Generation also requires independent source-domain read permissions. UI entry points check the corresponding export and selector permissions before mounting queries. The backend remains the authorization boundary. Shared system policy rejects school-vocabulary roles paired with malformed platform scope.
 
@@ -74,4 +66,6 @@ pnpm check-types
 pnpm --filter @campuspilot/api exec tsc --noEmit
 ```
 
-Document integration tests run real PostgreSQL, Redis, OPA, MinIO, and Gotenberg. A local HTTP AI fixture exercises the real provider SDK without using paid credentials. Tests cover every procedure's authentication/tenant boundaries, validation, state persistence, missing data, approval requirements, signed downloads, immutable revisions, simultaneous saves, conversion/upload failure, interrupted deletion/retry, and PDF page counts and dimensions. Rego and OPA integration tests cover grants and malformed role/scope combinations.
+Document integration tests run real PostgreSQL, Redis, OPA, MinIO, and Gotenberg. Tests cover every procedure's authentication/tenant boundaries, validation, state persistence, missing data, approval requirements, signed downloads, immutable revisions, simultaneous saves, conversion/upload failure, interrupted deletion/retry, and PDF page counts and dimensions. Rego and OPA integration tests cover grants and malformed role/scope combinations.
+
+Classroom summaries accept an explicit session ID for enrollment counts. Omitting it returns `null`; they do not infer the active session. Registration status is independent of class membership. Document recipient selection uses a searchable, paginated multi-select combobox and retains explicit selections across searches.

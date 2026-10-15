@@ -197,13 +197,6 @@ describe('document templates, generation, and artifact lifecycle', () => {
           content: '<p>Hello</p>',
           expectedRevisionId: null,
         }),
-      () => c.school.getDocumentAiAvailability({ schoolId }),
-      () =>
-        c.school.proposeDocumentTemplate({
-          ...read,
-          content: '<p>Hello</p>',
-          prompt: 'Green header',
-        }),
       () =>
         c.school.previewDocument({
           schoolId,
@@ -541,30 +534,6 @@ describe('document templates, generation, and artifact lifecycle', () => {
         artifactId: artifact.id,
       }),
     ).rejects.toMatchObject({ code: 'NOT_FOUND' });
-  });
-  it('checks AI availability and proposes a draft without activating it', async () => {
-    expect(
-      await manager.school.getDocumentAiAvailability({ schoolId }),
-    ).toEqual({ available: true });
-    const before = await manager.school.getActiveDocumentTemplate({
-      schoolId,
-      documentType: 'id_card',
-    });
-    const proposal = await manager.school.proposeDocumentTemplate({
-      schoolId,
-      documentType: 'id_card',
-      content: before!.content,
-      prompt: 'Use a green header',
-    });
-    expect(proposal.content).toContain('AI draft');
-    expect(
-      (
-        await manager.school.getActiveDocumentTemplate({
-          schoolId,
-          documentType: 'id_card',
-        })
-      )?.artifact.id,
-    ).toBe(before!.artifact.id);
   });
   it('does not reinterpret student text as Handlebars during bulk wrapping and resolves grades without invented fallbacks', () => {
     const html = combineDocuments(

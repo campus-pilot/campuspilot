@@ -14,7 +14,6 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@ai-sdk/openai": "^3.0.128",
     "@aws-sdk/client-s3": "^3.1130.0",
     "@aws-sdk/s3-request-presigner": "^3.1132.0",
     "@campuspilot/auth": "workspace:*",
@@ -26,7 +25,6 @@
     "@orpc/openapi": "catalog:",
     "@orpc/server": "catalog:",
     "@orpc/zod": "catalog:",
-    "ai": "^6.0.307",
     "busboy": "^1.6.0",
     "dotenv": "catalog:",
     "drizzle-orm": "^0.45.2",

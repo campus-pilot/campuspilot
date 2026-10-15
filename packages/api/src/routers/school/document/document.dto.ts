@@ -83,10 +83,6 @@ export const previewOutputSchema = z.object({
   studentCount: z.number().int(),
   warnings: z.array(z.string()),
 });
-export const aiTemplateSchema = templateScopeSchema.extend({
-  content: templateContentSchema,
-  prompt: z.string().trim().min(1).max(4000),
-});
 
 const selection = {
   sessionId: id,

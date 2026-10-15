@@ -8,7 +8,6 @@ import {
   Eye,
   LayoutTemplate,
   Save,
-  Sparkles,
 } from 'lucide-react';
 import type { activeTemplateSchema } from '@campuspilot/api/routers/school/document/document.dto';
 import {
@@ -20,6 +19,7 @@ import {
   DocumentPreview,
 } from '@campuspilot/components/documents/document-controls';
 import { client, orpc } from '@/lib/orpc';
+import { TemplatePromptEditor } from './template-prompt-editor';
 import { confirmNavigation } from '@/lib/navigation-guard';
 import {
   DocumentDirtyGuard,
@@ -268,11 +268,8 @@ function SavedTemplatePreview({
     />
   );
 }
-const proposalSchema = z
-  .object({ content: z.string(), html: z.string() })
-  .nullable();
 /** Draft content remains local until an explicit save creates a new revision;
- * AI suggestions and preview responses never replace the active template.
+ * Preview responses never replace the active template.
  */
 function useDocumentTemplateForm(
   scope: DocumentTemplateScope,
@@ -292,7 +289,6 @@ function useDocumentTemplateForm(
       previewContent: '',
       error: '',
       mode: 'save',
-      proposal: null as z.infer<typeof proposalSchema>,
     },
     validators: {
       onChange: z.object({
@@ -302,7 +298,6 @@ function useDocumentTemplateForm(
         previewContent: z.string(),
         error: z.string(),
         mode: z.enum(['save', 'preview']),
-        proposal: proposalSchema,
       }),
     },
     onSubmit: async ({ value }) => {
@@ -384,57 +379,8 @@ function TemplateEditor({
           </pre>
         </details>
       </DocumentPanel>
-      <DocumentPermission
-        schoolId={scope.schoolId}
-        action={SCHOOL_ACTIONS.EDIT_DOCUMENT_TEMPLATES_WITH_AI}
-      >
-        <AiTemplateEditor
-          scope={scope}
-          getContent={() => form.state.values.content}
-          onProposal={(proposal) => form.setFieldValue('proposal', proposal)}
-        />
-      </DocumentPermission>
-      <form.Subscribe selector={(state) => state.values.proposal}>
-        {(proposal) =>
-          proposal && (
-            <DocumentPanel
-              title="Review AI’s suggestion"
-              description="Review the layout and source. Apply it to your draft when ready, then save to activate it."
-            >
-              <DocumentPreview
-                html={proposal.html}
-                sample
-                label="AI suggestion"
-              />
-              <details>
-                <summary className="cursor-pointer text-sm font-medium">
-                  View suggested source
-                </summary>
-                <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap rounded-lg bg-muted p-4 text-xs">
-                  {proposal.content}
-                </pre>
-              </details>
-              <div className="flex gap-2">
-                <DocumentButton
-                  onClick={() => {
-                    form.setFieldValue('content', proposal.content);
-                    form.setFieldValue('preview', proposal.html);
-                    form.setFieldValue('previewContent', proposal.content);
-                    form.setFieldValue('proposal', null);
-                  }}
-                >
-                  Apply to draft
-                </DocumentButton>
-                <DocumentButton
-                  variant="outline"
-                  onClick={() => form.setFieldValue('proposal', null)}
-                >
-                  Discard suggestion
-                </DocumentButton>
-              </div>
-            </DocumentPanel>
-          )
-        }
+      <form.Subscribe selector={state => state.values.content}>
+        {content => <TemplatePromptEditor documentType={scope.documentType} content={content} contextHelp={initialPreview.data?.contextHelp} />}
       </form.Subscribe>
     </div>
   );
@@ -562,110 +508,5 @@ function TemplateDraftPreview({
         </div>
       )}
     </form.Subscribe>
-  );
-}
-function AiTemplateEditor({
-  scope,
-  getContent,
-  onProposal,
-}: {
-  scope: DocumentTemplateScope;
-  getContent: () => string;
-  onProposal: (proposal: { content: string; html: string }) => void;
-}) {
-  const availability = useQuery(
-    orpc.school.getDocumentAiAvailability.queryOptions({
-      input: { schoolId: scope.schoolId },
-    }),
-  );
-  const form = useForm({
-    defaultValues: { prompt: '', error: '' },
-    validators: {
-      onChange: z.object({
-        prompt: z
-          .string()
-          .trim()
-          .min(1, 'Describe the change you want')
-          .max(4000),
-        error: z.string(),
-      }),
-    },
-    onSubmit: async ({ value }) => {
-      form.setFieldValue('error', '');
-      try {
-        onProposal(
-          await client.school.proposeDocumentTemplate({
-            ...scope,
-            prompt: value.prompt,
-            content: getContent(),
-          }),
-        );
-      } catch (error) {
-        form.setFieldValue(
-          'error',
-          error instanceof Error
-            ? error.message
-            : 'Unable to generate a suggestion.',
-        );
-      }
-    },
-  });
-  return (
-    <DocumentPanel
-      title="Design with a prompt"
-      description="Describe a change in your own words. AI suggests a draft using the template’s variables."
-    >
-      {availability.isError ? (
-        <DocumentReadError
-          error={availability.error}
-          retry={availability.refetch}
-        />
-      ) : !availability.data?.available ? (
-        <DocumentNotice>
-          {availability.isPending
-            ? 'Checking AI availability…'
-            : 'AI editing is not configured yet. You can still customize the template source above.'}
-        </DocumentNotice>
-      ) : (
-        <form
-          className="flex flex-col gap-4"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void form.handleSubmit();
-          }}
-        >
-          <form.Field name="prompt">
-            {(field) => (
-              <DocumentField
-                field={field}
-                label="What would you like to change?"
-                multiline
-                description="For example: Use our green school color, make the student photo larger, and add a principal signature area."
-              />
-            )}
-          </form.Field>
-          <form.Subscribe
-            selector={(state) => ({
-              submitting: state.isSubmitting,
-              canSubmit: state.canSubmit,
-              error: state.values.error,
-            })}
-          >
-            {({ submitting, canSubmit, error }) => (
-              <div className="flex flex-col items-start gap-3">
-                {error && <DocumentNotice error>{error}</DocumentNotice>}
-                <DocumentButton
-                  type="submit"
-                  disabled={submitting || !canSubmit}
-                >
-                  <Sparkles />
-                  {submitting ? 'Creating a suggestion…' : 'Suggest changes'}
-                </DocumentButton>
-              </div>
-            )}
-          </form.Subscribe>
-        </form>
-      )}
-    </DocumentPanel>
   );
 }
