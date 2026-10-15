@@ -6,7 +6,6 @@ import { ArrowRight, Eye, FileDown, CheckCircle2 } from 'lucide-react';
 import {
   DocumentButton,
   DocumentErrors,
-  DocumentField,
   DocumentNotice,
   DocumentPanel,
   DocumentPreview,
@@ -28,6 +27,7 @@ import {
   useDocumentCache,
   type DocumentScope,
 } from './document-common';
+import { StudentPicker } from './student-recipient-picker';
 import type { DocumentInitialSelection } from './document-workspace';
 
 type Preview = {
@@ -509,160 +509,6 @@ function ExamSelector({
         </option>
       ))}
     </DocumentSelect>
-  );
-}
-function StudentPicker({
-  scope,
-  classId,
-  selected,
-  onChange,
-  errors,
-}: {
-  scope: DocumentScope;
-  classId: string;
-  selected: string[];
-  onChange: (ids: string[]) => void;
-  errors: readonly unknown[];
-}) {
-  const form = useForm({
-    defaultValues: { search: '', page: 1 },
-    validators: {
-      onChange: z.object({
-        search: z.string().max(200),
-        page: z.number().int().positive(),
-      }),
-    },
-  });
-  return (
-    <div className="flex flex-col gap-3">
-      <form.Field name="search">
-        {(field) => (
-          <DocumentField
-            field={{
-              name: field.name,
-              state: field.state,
-              handleBlur: field.handleBlur,
-              handleChange: (value) => {
-                field.handleChange(value);
-                form.setFieldValue('page', 1);
-              },
-            }}
-            label="Find students"
-          />
-        )}
-      </form.Field>
-      <p className="text-xs text-muted-foreground">
-        {selected.length} selected across all pages
-      </p>
-      <form.Subscribe selector={(state) => state.values}>
-        {(values) => (
-          <StudentOptions
-            scope={scope}
-            classId={classId}
-            selected={selected}
-            onChange={onChange}
-            search={values.search}
-            page={values.page}
-            onPage={(page) => form.setFieldValue('page', page)}
-          />
-        )}
-      </form.Subscribe>
-      <DocumentErrors errors={errors} />
-    </div>
-  );
-}
-function StudentOptions({
-  scope,
-  classId,
-  selected,
-  onChange,
-  search,
-  page,
-  onPage,
-}: {
-  scope: DocumentScope;
-  classId: string;
-  selected: string[];
-  onChange: (ids: string[]) => void;
-  search: string;
-  page: number;
-  onPage: (page: number) => void;
-}) {
-  const students = useQuery(
-    orpc.school.listStudents.queryOptions({
-      input: {
-        ...scope,
-        filters: { classId },
-        page,
-        ...(search.trim() ? { searchQuery: search.trim() } : {}),
-      },
-    }),
-  );
-  if (students.isPending)
-    return <DocumentNotice>Loading students…</DocumentNotice>;
-  if (students.isError)
-    return (
-      <DocumentReadError error={students.error} retry={students.refetch} />
-    );
-  return (
-    <fieldset className="flex flex-col gap-3">
-      <legend className="mb-2 text-sm font-medium">Select students</legend>
-      <div className="flex max-h-64 flex-col gap-1 overflow-auto rounded-lg border p-2">
-        {students.data.items.map((student) => (
-          <label
-            key={student.id}
-            className="flex min-h-11 cursor-pointer items-center gap-3 rounded-md p-2 text-sm hover:bg-muted"
-          >
-            <input
-              type="checkbox"
-              checked={selected.includes(student.id)}
-              disabled={
-                !selected.includes(student.id) && selected.length >= 500
-              }
-              onChange={(event) =>
-                onChange(
-                  event.target.checked
-                    ? [...selected, student.id]
-                    : selected.filter((id) => id !== student.id),
-                )
-              }
-            />
-            <span>
-              {student.admission.name}
-              <span className="block text-xs text-muted-foreground">
-                {student.admission.admissionNo}
-              </span>
-            </span>
-          </label>
-        ))}
-        {!students.data.items.length && (
-          <p className="p-2 text-sm text-muted-foreground">
-            No students found.
-          </p>
-        )}
-      </div>
-      <div className="flex items-center justify-between gap-2">
-        <DocumentButton
-          type="button"
-          variant="ghost"
-          disabled={page <= 1}
-          onClick={() => onPage(page - 1)}
-        >
-          Previous
-        </DocumentButton>
-        <span className="text-xs">
-          {page} / {Math.max(1, students.data.pagination.totalPages)}
-        </span>
-        <DocumentButton
-          type="button"
-          variant="ghost"
-          disabled={!students.data.pagination.nextCursor}
-          onClick={() => onPage(page + 1)}
-        >
-          Next
-        </DocumentButton>
-      </div>
-    </fieldset>
   );
 }
 function GenerationSuccess({

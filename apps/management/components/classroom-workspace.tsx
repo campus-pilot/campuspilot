@@ -1,16 +1,16 @@
-'use client';
+"use client";
 
-import type { ReactNode } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { AppShellAlert } from '@campuspilot/components/app-shell';
-import { Button } from '@campuspilot/ui/components/button';
+import type { ReactNode } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { AppShellAlert } from "@campuspilot/components/app-shell";
+import { Button } from "@campuspilot/ui/components/button";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@campuspilot/ui/components/select';
+} from "@campuspilot/ui/components/select";
 import {
   BookOpen,
   FileText,
@@ -20,10 +20,12 @@ import {
   UserRound,
   Users,
   type LucideIcon,
-} from 'lucide-react';
-import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
-import { orpc } from '@/lib/orpc';
+} from "lucide-react";
+import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
+import { orpc } from "@/lib/orpc";
+import { SCHOOL_ACTIONS } from "@campuspilot/api/routers/authorization/authorization.dto";
+import { RequirePermissions } from "./require-permissions";
 
 type WorkspaceItem = {
   id: string;
@@ -36,15 +38,52 @@ function closeAlertDialog(closeDialog: () => void) {
 }
 
 const items: WorkspaceItem[] = [
-  { id: 'students', label: 'Students', icon: UserRound },
-  { id: 'teachers', label: 'Teachers', icon: Users },
-  { id: 'sections', label: 'Sections', icon: Layers3 },
-  { id: 'subjects', label: 'Subjects', icon: BookOpen },
-  { id: 'documents', label: 'Documents', icon: FileText },
-  { id: 'settings', label: 'Settings', icon: Settings },
+  { id: "students", label: "Students", icon: UserRound },
+  { id: "teachers", label: "Teachers", icon: Users },
+  { id: "sections", label: "Sections", icon: Layers3 },
+  { id: "subjects", label: "Subjects", icon: BookOpen },
+  { id: "documents", label: "Documents", icon: FileText },
+  { id: "settings", label: "Settings", icon: Settings },
 ];
 
 export function ClassroomWorkspace({
+  children,
+  classId,
+  schoolId,
+  sessionId,
+}: {
+  children: ReactNode;
+  classId: string;
+  schoolId: string;
+  sessionId: string;
+}) {
+  return (
+    <RequirePermissions
+      permissions={[
+        SCHOOL_ACTIONS.LIST_CLASSES,
+        SCHOOL_ACTIONS.READ_CLASS,
+        SCHOOL_ACTIONS.READ_SESSION,
+      ].map((action) => ({
+        action,
+        resource: { kind: "school" as const, schoolId },
+      }))}
+      fallback={
+        <p className="text-sm text-muted-foreground">
+          Classroom access is unavailable.
+        </p>
+      }
+    >
+      <ClassroomWorkspaceContent
+        classId={classId}
+        schoolId={schoolId}
+        sessionId={sessionId}
+      >
+        {children}
+      </ClassroomWorkspaceContent>
+    </RequirePermissions>
+  );
+}
+function ClassroomWorkspaceContent({
   children,
   classId,
   schoolId,
@@ -61,7 +100,7 @@ export function ClassroomWorkspace({
     orpc.school.getClass.queryOptions({ input: { schoolId, classId } }),
   );
   const classesQuery = useQuery(
-    orpc.school.listClasses.queryOptions({ input: { schoolId } }),
+    orpc.school.listClasses.queryOptions({ input: { schoolId, sessionId } }),
   );
   const classSummary = classesQuery.data?.find(({ id }) => id === classId);
   const activeItem =
@@ -106,7 +145,7 @@ export function ClassroomWorkspace({
             Classroom
           </p>
           <h1 className="truncate text-xl font-semibold tracking-tight">
-            {classQuery.data?.label ?? 'Loading classroom…'}
+            {classQuery.data?.label ?? "Loading classroom…"}
           </h1>
         </div>
       </div>
@@ -139,7 +178,7 @@ export function ClassroomWorkspace({
             <Button
               key={item.id}
               asChild
-              variant={activeItem.id === item.id ? 'secondary' : 'ghost'}
+              variant={activeItem.id === item.id ? "secondary" : "ghost"}
               className="justify-start"
             >
               <Link href={`${baseHref}/${item.id}`}>

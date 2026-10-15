@@ -3,10 +3,13 @@ import { schoolTable } from "@campuspilot/db/schema/school";
 import { schoolUserRoleTable } from "@campuspilot/db/schema/school-user-role";
 import { schoolSessionTable } from "@campuspilot/db/schema/session";
 import { SCHOOL_ACTIONS } from "@campuspilot/opa/policies/school";
-import { and, asc, eq, max, sql } from "drizzle-orm";
+import { and, asc, eq, max, sql, count } from "drizzle-orm";
 
 import { rpcError, toRpcError } from "../../../errors";
-import { protectedProcedure } from "../../../index";
+import { o, protectedProcedure } from "../../../index";
+import { assertPermission } from "../../../permissions/authorization";
+import { studentTable } from "@campuspilot/db/schema/student";
+import { admissionTable } from "@campuspilot/db/schema/admission";
 import { requireSchoolPermission } from "../../../permissions/school";
 import {
   classDtoSchema,
@@ -21,41 +24,97 @@ import {
   updateClassInputSchema,
 } from "./class.dto";
 
+/** A session is an independent input, never inferred from the active session.
+ * Scoped counts require the session read grant in addition to class listing.
+ */
+const requireCountSessionPermission = o.middleware<
+  Record<never, never>,
+  { schoolId: string; sessionId?: string }
+>(async ({ context, next, signal }, input) => {
+  if (input.sessionId)
+    await assertPermission(
+      context,
+      {
+        action: SCHOOL_ACTIONS.READ_SESSION,
+        resource: { kind: "school", schoolId: input.schoolId },
+      },
+      signal,
+    );
+  return next();
+});
+
 export const schoolClassRouter = {
   listClasses: protectedProcedure
     .route({
       summary: "List school classes",
       description:
-        "List every class in a school in its explicit display order, including dashboard counts.",
+        "List every class in a school in its explicit display order, including section, teacher, subject, and explicitly session-scoped enrollment counts.",
       tags: ["School", "Classes"],
     })
     .input(listClassesInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.LIST_CLASSES))
+    .use(requireCountSessionPermission)
     .output(listClassesOutputSchema)
     .handler(async ({ context, input }) => {
       try {
-        // Schools have a small bounded set of classes, and the complete ordered
-        // collection is required for drag-and-drop, so this list is unpaginated.
-        const [classes, sections, teacherAssignments] = await Promise.all([
-          context.db
-            .select()
-            .from(classTable)
-            .where(eq(classTable.schoolId, input.schoolId))
-            .orderBy(asc(classTable.displayOrder), asc(classTable.id)),
-          context.db
-            .select({ classId: sectionTable.classId })
-            .from(sectionTable)
-            .where(eq(sectionTable.schoolId, input.schoolId)),
-          context.db
-            .select({ meta: schoolUserRoleTable.meta })
-            .from(schoolUserRoleTable)
+        if (input.sessionId) {
+          const [session] = await context.db
+            .select({ id: schoolSessionTable.id })
+            .from(schoolSessionTable)
             .where(
               and(
-                eq(schoolUserRoleTable.schoolId, input.schoolId),
-                eq(schoolUserRoleTable.role, "teacher"),
+                eq(schoolSessionTable.id, input.sessionId),
+                eq(schoolSessionTable.schoolId, input.schoolId),
               ),
-            ),
-        ]);
+            )
+            .limit(1);
+          if (!session) throw rpcError.notFound("School session");
+        }
+        // Schools have a small bounded set of classes, and the complete ordered
+        // collection is required for drag-and-drop, so this list is unpaginated.
+        const [classes, sections, teacherAssignments, enrollments] =
+          await Promise.all([
+            context.db
+              .select()
+              .from(classTable)
+              .where(eq(classTable.schoolId, input.schoolId))
+              .orderBy(asc(classTable.displayOrder), asc(classTable.id)),
+            context.db
+              .select({ classId: sectionTable.classId })
+              .from(sectionTable)
+              .where(eq(sectionTable.schoolId, input.schoolId)),
+            context.db
+              .select({ meta: schoolUserRoleTable.meta })
+              .from(schoolUserRoleTable)
+              .where(
+                and(
+                  eq(schoolUserRoleTable.schoolId, input.schoolId),
+                  eq(schoolUserRoleTable.role, "teacher"),
+                ),
+              ),
+            input.sessionId
+              ? context.db
+                  .select({ classId: studentTable.classId, value: count() })
+                  .from(studentTable)
+                  .innerJoin(
+                    admissionTable,
+                    and(
+                      eq(admissionTable.id, studentTable.admissionId),
+                      eq(admissionTable.schoolId, input.schoolId),
+                    ),
+                  )
+                  .where(
+                    and(
+                      eq(studentTable.schoolId, input.schoolId),
+                      eq(studentTable.sessionId, input.sessionId),
+                    ),
+                  )
+                  .groupBy(studentTable.classId)
+              : Promise.resolve([]),
+          ]);
+        const studentCounts = new Map(
+          enrollments.map((row) => [row.classId, row.value]),
+        );
         const sectionCounts = new Map<string, number>();
         for (const section of sections) {
           sectionCounts.set(
@@ -74,7 +133,9 @@ export const schoolClassRouter = {
           ...toClassDto(schoolClass),
           sectionCount: sectionCounts.get(schoolClass.id) ?? 0,
           teacherCount: teacherCounts.get(schoolClass.id) ?? 0,
-          studentCount: null,
+          studentCount: input.sessionId
+            ? (studentCounts.get(schoolClass.id) ?? 0)
+            : null,
           subjectCount: Object.keys(schoolClass.config.subjects).length,
         }));
       } catch (error) {
@@ -317,10 +378,7 @@ export const schoolClassRouter = {
           .update(classTable)
           .set({ ...changes, updatedAt: new Date() })
           .where(
-            and(
-              eq(classTable.schoolId, schoolId),
-              eq(classTable.id, classId),
-            ),
+            and(eq(classTable.schoolId, schoolId), eq(classTable.id, classId)),
           )
           .returning();
         if (!schoolClass) throw rpcError.notFound("Class");

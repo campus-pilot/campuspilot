@@ -44,7 +44,7 @@ export type SectionDto = z.infer<typeof sectionDtoSchema>;
 export const classSummaryDtoSchema = classDtoSchema.extend({
   sectionCount: z.number().int().nonnegative(),
   teacherCount: z.number().int().nonnegative(),
-  // Student membership is not modeled yet; null keeps that absence explicit.
+  // Counts require an explicit academic session; school-wide selectors omit it.
   studentCount: z.number().int().nonnegative().nullable(),
   subjectCount: z.number().int().nonnegative(),
 });
@@ -59,6 +59,7 @@ export function toSectionDto(value: SectionDto): SectionDto {
 
 export const listClassesInputSchema = z.object({
   schoolId: z.string().min(1),
+  sessionId: z.string().min(1).optional(),
 });
 
 export const listClassesOutputSchema = z.array(classSummaryDtoSchema);

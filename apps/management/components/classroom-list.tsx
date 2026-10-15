@@ -1,17 +1,17 @@
-'use client';
+"use client";
 
-import type { ClassDto } from '@campuspilot/api/routers/school/class/class.dto';
-import { SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import type { ClassDto } from "@campuspilot/api/routers/school/class/class.dto";
+import { SCHOOL_ACTIONS } from "@campuspilot/api/routers/authorization/authorization.dto";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   SortableTable,
   type SortableTableColumn,
-} from '@campuspilot/components/sortable-table';
-import { Skeleton } from '@campuspilot/ui/components/skeleton';
-import { BookOpen, GraduationCap, Layers3, Users } from 'lucide-react';
-import { useRouter } from 'next/navigation';
-import { client, orpc } from '@/lib/orpc';
-import { RequirePermissions } from './require-permissions';
+} from "@campuspilot/components/sortable-table";
+import { Skeleton } from "@campuspilot/ui/components/skeleton";
+import { BookOpen, GraduationCap, Layers3, Users } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { client, orpc } from "@/lib/orpc";
+import { RequirePermissions } from "./require-permissions";
 
 type ClassSummary = Awaited<
   ReturnType<typeof client.school.listClasses>
@@ -19,9 +19,9 @@ type ClassSummary = Awaited<
 
 const columns: SortableTableColumn<ClassSummary>[] = [
   {
-    id: 'class',
-    header: 'Class',
-    className: 'min-w-52',
+    id: "class",
+    header: "Class",
+    className: "min-w-52",
     cell: (schoolClass) => (
       <div className="flex items-center gap-3">
         <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
@@ -37,8 +37,8 @@ const columns: SortableTableColumn<ClassSummary>[] = [
     ),
   },
   {
-    id: 'sections',
-    header: 'Sections',
+    id: "sections",
+    header: "Sections",
     cell: (schoolClass) => (
       <span className="inline-flex items-center gap-1.5">
         <Layers3 className="size-3.5 text-muted-foreground" aria-hidden />
@@ -47,8 +47,8 @@ const columns: SortableTableColumn<ClassSummary>[] = [
     ),
   },
   {
-    id: 'teachers',
-    header: 'Teachers',
+    id: "teachers",
+    header: "Teachers",
     cell: (schoolClass) => (
       <span className="inline-flex items-center gap-1.5">
         <Users className="size-3.5 text-muted-foreground" aria-hidden />
@@ -57,8 +57,8 @@ const columns: SortableTableColumn<ClassSummary>[] = [
     ),
   },
   {
-    id: 'students',
-    header: 'Students',
+    id: "students",
+    header: "Students",
     cell: (schoolClass) =>
       schoolClass.studentCount === null ? (
         <span className="text-muted-foreground">—</span>
@@ -67,8 +67,8 @@ const columns: SortableTableColumn<ClassSummary>[] = [
       ),
   },
   {
-    id: 'subjects',
-    header: 'Subjects',
+    id: "subjects",
+    header: "Subjects",
     cell: (schoolClass) => (
       <span className="inline-flex items-center gap-1.5">
         <BookOpen className="size-3.5 text-muted-foreground" aria-hidden />
@@ -113,10 +113,36 @@ export function ClassroomList({
   schoolId: string;
   sessionId: string;
 }) {
+  return (
+    <RequirePermissions
+      permissions={[
+        SCHOOL_ACTIONS.LIST_CLASSES,
+        SCHOOL_ACTIONS.READ_SESSION,
+      ].map((action) => ({
+        action,
+        resource: { kind: "school" as const, schoolId },
+      }))}
+      fallback={
+        <p className="text-sm text-muted-foreground">
+          Classroom access is unavailable.
+        </p>
+      }
+    >
+      <ClassroomListContent schoolId={schoolId} sessionId={sessionId} />
+    </RequirePermissions>
+  );
+}
+function ClassroomListContent({
+  schoolId,
+  sessionId,
+}: {
+  schoolId: string;
+  sessionId: string;
+}) {
   const router = useRouter();
   const queryClient = useQueryClient();
   const queryOptions = orpc.school.listClasses.queryOptions({
-    input: { schoolId },
+    input: { schoolId, sessionId },
   });
   const classesQuery = useQuery(queryOptions);
   const reorderMutation = useMutation({
@@ -184,7 +210,7 @@ export function ClassroomList({
       <RequirePermissions
         permissions={{
           action: SCHOOL_ACTIONS.REORDER_CLASSES,
-          resource: { kind: 'school', schoolId },
+          resource: { kind: "school", schoolId },
         }}
         fallback={
           <ClassroomTable
@@ -208,7 +234,7 @@ export function ClassroomList({
         <p className="text-xs text-destructive">
           {reorderMutation.error instanceof Error
             ? reorderMutation.error.message
-            : 'Unable to reorder classrooms.'}
+            : "Unable to reorder classrooms."}
         </p>
       ) : null}
     </section>

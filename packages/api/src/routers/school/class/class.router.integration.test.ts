@@ -9,6 +9,9 @@ import {
   createRegularUserSession,
   createSchoolStaffSession,
   createTestClass,
+  createTestSession,
+  createTestAdmission,
+  createTestStudent,
   createTestClient,
   createTestSchool,
   type UserSession,
@@ -77,7 +80,9 @@ describe("school class and section router integration", () => {
     });
 
     it("allows managers to create classes", async () => {
-      const schoolClass = await createTestClient(managerSession).school.createClass({
+      const schoolClass = await createTestClient(
+        managerSession,
+      ).school.createClass({
         schoolId: school.id,
         slug: "grade-two",
         label: "Grade Two",
@@ -223,18 +228,128 @@ describe("school class and section router integration", () => {
       expect(fetched.id).toBe(schoolClass.id);
     });
 
+    it("counts actual enrollments for the explicitly selected session, including historical sessions", async () => {
+      const school = await createTestSchool();
+      const teacher = await createSchoolStaffSession(school.id, [
+        { role: "teacher", meta: { classIds: [] } },
+      ]);
+      const client = createTestClient(teacher.session);
+      const current = await createTestSession({
+        schoolId: school.id,
+        sessionStartYear: 2026,
+        sessionEndYear: 2027,
+        isActive: true,
+      });
+      const historical = await createTestSession({
+        schoolId: school.id,
+        sessionStartYear: 2025,
+        sessionEndYear: 2026,
+      });
+      const { schoolClass } = await createTestClass({ schoolId: school.id });
+      const empty = (await createTestClass({ schoolId: school.id }))
+        .schoolClass;
+      const admission = await createTestAdmission({ schoolId: school.id });
+      await createTestStudent({
+        schoolId: school.id,
+        sessionId: current.id,
+        classId: schoolClass.id,
+        admissionId: admission.id,
+      });
+      await createTestStudent({
+        schoolId: school.id,
+        sessionId: historical.id,
+        classId: schoolClass.id,
+        admissionId: admission.id,
+      });
+      await createTestStudent({
+        schoolId: school.id,
+        sessionId: historical.id,
+        classId: schoolClass.id,
+        admissionId: (
+          await createTestAdmission({ schoolId: school.id, registered: false })
+        ).id,
+      });
+      await createTestStudent({
+        schoolId: school.id,
+        sessionId: current.id,
+        admissionId: (await createTestAdmission({ schoolId: school.id })).id,
+      });
+      const classes = await client.school.listClasses({
+        schoolId: school.id,
+        sessionId: current.id,
+      });
+      expect(classes.find((c) => c.id === schoolClass.id)?.studentCount).toBe(
+        1,
+      );
+      expect(classes.find((c) => c.id === empty.id)?.studentCount).toBe(0);
+      expect(
+        (
+          await client.school.listClasses({
+            schoolId: school.id,
+            sessionId: historical.id,
+          })
+        ).find((c) => c.id === schoolClass.id)?.studentCount,
+      ).toBe(2);
+      expect(
+        (await client.school.listClasses({ schoolId: school.id })).every(
+          (c) => c.studentCount === null,
+        ),
+      ).toBe(true);
+      await expect(
+        client.school.listClasses({ schoolId: school.id, sessionId: "" }),
+      ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+      await expect(
+        client.school.listClasses({
+          schoolId: school.id,
+          sessionId: "missing",
+        }),
+      ).rejects.toMatchObject({ code: "NOT_FOUND" });
+      const other = await createTestSchool();
+      const foreignSession = await createTestSession({
+        schoolId: other.id,
+        sessionStartYear: 2026,
+        sessionEndYear: 2027,
+      });
+      await expect(
+        client.school.listClasses({
+          schoolId: school.id,
+          sessionId: foreignSession.id,
+        }),
+      ).rejects.toMatchObject({ code: "NOT_FOUND" });
+      await expect(
+        client.school.listClasses({
+          schoolId: other.id,
+          sessionId: foreignSession.id,
+        }),
+      ).rejects.toMatchObject({ code: "FORBIDDEN" });
+      await expect(
+        createTestClient(null).school.listClasses({
+          schoolId: school.id,
+          sessionId: current.id,
+        }),
+      ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+      await expect(
+        createTestClient(await createRegularUserSession()).school.listClasses({
+          schoolId: school.id,
+          sessionId: current.id,
+        }),
+      ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    });
+
     it("allows a teacher to rename a class", async () => {
       const { schoolClass } = await createTestClass({
         schoolId: school.id,
         slug: "rename-class",
       });
 
-      const updated = await createTestClient(teacherSession).school.updateClass({
-        schoolId: school.id,
-        classId: schoolClass.id,
-        slug: "renamed-class",
-        label: "Renamed Class",
-      });
+      const updated = await createTestClient(teacherSession).school.updateClass(
+        {
+          schoolId: school.id,
+          classId: schoolClass.id,
+          slug: "renamed-class",
+          label: "Renamed Class",
+        },
+      );
       expect(updated.slug).toBe("renamed-class");
     });
 
@@ -334,7 +449,9 @@ describe("school class and section router integration", () => {
 
     it("returns NOT_FOUND for a class outside the supplied school", async () => {
       const otherSchool = await createTestSchool();
-      const { schoolClass } = await createTestClass({ schoolId: otherSchool.id });
+      const { schoolClass } = await createTestClass({
+        schoolId: otherSchool.id,
+      });
 
       await expect(
         createTestClient(principalSession).school.getClass({
@@ -491,7 +608,9 @@ describe("school class and section router integration", () => {
 
     it("validates class parentage independently from the supplied school", async () => {
       const otherSchool = await createTestSchool();
-      const { schoolClass } = await createTestClass({ schoolId: otherSchool.id });
+      const { schoolClass } = await createTestClass({
+        schoolId: otherSchool.id,
+      });
 
       await expect(
         createTestClient(principalSession).school.createSection({
@@ -525,10 +644,12 @@ describe("school class and section router integration", () => {
           ),
         );
 
-      const deleted = await createTestClient(managerSession).school.deleteClass({
-        schoolId: school.id,
-        classId: schoolClass.id,
-      });
+      const deleted = await createTestClient(managerSession).school.deleteClass(
+        {
+          schoolId: school.id,
+          classId: schoolClass.id,
+        },
+      );
       expect(deleted.id).toBe(schoolClass.id);
 
       const sections = await db
