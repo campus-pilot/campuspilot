@@ -29,7 +29,13 @@ export function RequirePermissions({
     }),
   );
 
-  if (!permissionsQuery.data?.results.every(Boolean)) return fallback;
+  if (
+    permissionsQuery.isPending ||
+    permissionsQuery.isError ||
+    permissionsQuery.data.results.length !== permissionList.length ||
+    !permissionsQuery.data.results.every(Boolean)
+  )
+    return fallback;
 
   return children;
 }

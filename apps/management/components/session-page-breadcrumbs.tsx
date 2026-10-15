@@ -6,6 +6,8 @@ import type {
   AppShellIcon,
 } from '@campuspilot/components/app-shell';
 import { CalendarRange, House } from 'lucide-react';
+import { SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
+import { RequirePermissions } from './require-permissions';
 import { orpc } from '@/lib/orpc';
 import { schoolHref, schoolSessionHref } from './school-route';
 
@@ -23,8 +25,7 @@ function SessionBreadcrumbValue({
   if (!sessionQuery.data) return <>Session</>;
   return (
     <>
-      {sessionQuery.data.sessionStartYear}-
-      {sessionQuery.data.sessionEndYear}
+      {sessionQuery.data.sessionStartYear}-{sessionQuery.data.sessionEndYear}
     </>
   );
 }
@@ -46,7 +47,15 @@ export function sessionPageBreadcrumbs(
     {
       id: 'school-session',
       label: (
-        <SessionBreadcrumbValue schoolId={schoolId} sessionId={sessionId} />
+        <RequirePermissions
+          permissions={{
+            action: SCHOOL_ACTIONS.READ_SESSION,
+            resource: { kind: 'school', schoolId },
+          }}
+          fallback={<>Session</>}
+        >
+          <SessionBreadcrumbValue schoolId={schoolId} sessionId={sessionId} />
+        </RequirePermissions>
       ),
       href: leaf ? sessionHref : undefined,
       icon: CalendarRange,

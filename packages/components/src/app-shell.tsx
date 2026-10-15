@@ -89,6 +89,8 @@ export type AppShellNavigationItem = {
   match?: 'exact' | 'prefix';
   isActive?: (currentPath: string) => boolean;
   items?: AppShellNavigationItem[];
+  /** Lets the consuming app gate a complete navigation entry without fetching data in the shell. */
+  wrap?: (children: ReactNode) => ReactNode;
 };
 
 export type AppShellNavigationGroup = {
@@ -434,7 +436,7 @@ function NavigationItem({
   const isActive = pathMatches(item, currentPath) || Boolean(hasActiveChild);
   const Icon = item.icon;
 
-  return (
+  const content = (
     <SidebarMenuItem>
       <SidebarMenuButton asChild isActive={isActive} className="rounded-lg">
         <AppLink
@@ -474,6 +476,7 @@ function NavigationItem({
       ) : null}
     </SidebarMenuItem>
   );
+  return item.wrap ? item.wrap(content) : content;
 }
 
 export function AppShellUserMenu({

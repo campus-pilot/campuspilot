@@ -23,6 +23,7 @@ import { Building2, ChevronsUpDown } from 'lucide-react';
 import { orpc } from '@/lib/orpc';
 import { SchoolAvatar } from './school-avatar';
 import { schoolHref } from './school-route';
+import { confirmNavigation } from '@/lib/navigation-guard';
 import { storeSchoolId } from './school-selection';
 
 const switcherSearchSchema = z.object({ searchQuery: z.string().max(200) });
@@ -121,6 +122,7 @@ export function SchoolSwitcher() {
                   value={`${school.name} ${school.location}`}
                   data-checked={school.id === selectedSchoolId}
                   onSelect={() => {
+                    if (!confirmNavigation()) return;
                     handleOpenChange(false);
                     storeSchoolId(school.id);
                     router.push(schoolHref(school.id));

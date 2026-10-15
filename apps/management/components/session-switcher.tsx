@@ -21,6 +21,7 @@ import { CalendarRange, Check, ChevronsUpDown } from 'lucide-react';
 import { usePathname, useRouter } from 'next/navigation';
 import { z } from 'zod';
 import { schoolSessionHref } from './school-route';
+import { confirmNavigation } from '@/lib/navigation-guard';
 import { storeSchoolSessionId } from './session-selection';
 
 const sessionSwitcherSchema = z.object({
@@ -63,13 +64,16 @@ export function SessionSwitcher({
   }
 
   function selectSession(sessionId: string) {
+    if (!confirmNavigation()) return;
     storeSchoolSessionId(schoolId, sessionId);
     handleOpenChange(false);
+    // Exam plans are scoped to one session; a session change returns to its examination list.
+    const suffix = sessionSuffixFromPath(pathname);
     router.push(
       schoolSessionHref(
         schoolId,
         sessionId,
-        sessionSuffixFromPath(pathname),
+        suffix.startsWith('/exam/') ? '/exam' : suffix,
       ),
     );
   }

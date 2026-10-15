@@ -5,7 +5,7 @@ import type { SchoolSessionRouteParams } from '@/components/school-route';
 
 export const examPage = defineManagementPage<SchoolSessionRouteParams>({
   matches: (pathname) =>
-    /^\/school\/[^/]+\/sessions\/[^/]+\/exam$/.test(pathname),
+    /^\/school\/[^/]+\/sessions\/[^/]+\/exam(?:\/|$)/.test(pathname),
   breadcrumbs: ({ schoolId, sessionId }) =>
-    sessionPageBreadcrumbs(schoolId, sessionId, { id: 'exam', label: 'Exam', icon: ClipboardCheck }),
+    sessionPageBreadcrumbs(schoolId, sessionId, { id: 'exam', label: 'Examinations', icon: ClipboardCheck }),
 });

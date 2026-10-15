@@ -7,3 +7,5 @@ actions contains {
   "key": "ADD_STUDENT",
   "resourceKind": "class",
 } if { true }
+
+actions contains {"id": "class.exam.result.approve", "key": "APPROVE_EXAM_RESULTS", "resourceKind": "class"} if { true }

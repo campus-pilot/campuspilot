@@ -1,4 +1,7 @@
 import { schoolSessionTable } from '@campuspilot/db/schema/session';
+import { examPlanTable, examTimetableTable } from '@campuspilot/db/schema/exam';
+import { sessionConfigSchema } from '@campuspilot/db/schema/jsonb/session-config';
+import { resolveSessionExamPermission } from '../../../permissions/session-exams';
 import { schoolTable } from '@campuspilot/db/schema/school';
 import { SCHOOL_ACTIONS } from '@campuspilot/opa/policies/school';
 import { and, asc, count, desc, eq, inArray } from 'drizzle-orm';
@@ -61,10 +64,7 @@ export const schoolSessionRouter = {
             : undefined;
         const endYearCondition =
           input.filters?.endYears && input.filters.endYears.length > 0
-            ? inArray(
-                schoolSessionTable.sessionEndYear,
-                input.filters.endYears,
-              )
+            ? inArray(schoolSessionTable.sessionEndYear, input.filters.endYears)
             : undefined;
         const where = and(
           eq(schoolSessionTable.schoolId, input.schoolId),
@@ -151,10 +151,19 @@ export const schoolSessionRouter = {
     })
     .input(createSchoolSessionInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.CREATE_SESSION))
+    .use(resolveSessionExamPermission(SCHOOL_ACTIONS.CREATE_EXAM))
     .output(schoolSessionDtoSchema)
     .handler(async ({ context, input }) => {
       try {
         const { schoolId, ...values } = input;
+        if (
+          Object.keys(values.sessionConfig?.examConfig ?? {}).length &&
+          !context.canManageSessionExams
+        ) {
+          throw rpcError.forbidden(
+            'Only school exam administrators can create exam definitions, including through session configuration.',
+          );
+        }
         const [school] = await context.db
           .select({ id: schoolTable.id })
           .from(schoolTable)
@@ -182,62 +191,89 @@ export const schoolSessionRouter = {
     })
     .input(updateSchoolSessionInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.UPDATE_SESSION))
+    .use(resolveSessionExamPermission(SCHOOL_ACTIONS.UPDATE_EXAM))
     .output(schoolSessionDtoSchema)
     .handler(async ({ context, input }) => {
       const { schoolId, sessionId, ...changes } = input;
       try {
-        const [existingSession] = await context.db
-          .select({
-            sessionStartYear: schoolSessionTable.sessionStartYear,
-            sessionEndYear: schoolSessionTable.sessionEndYear,
-            isActive: schoolSessionTable.isActive,
-          })
-          .from(schoolSessionTable)
-          .where(
-            and(
-              eq(schoolSessionTable.schoolId, schoolId),
-              eq(schoolSessionTable.id, sessionId),
-            ),
-          )
-          .limit(1);
-        if (!existingSession) throw rpcError.notFound('School session');
-        if (!existingSession.isActive) {
-          throw rpcError.conflict(
-            'Only the active academic session can be updated.',
-          );
-        }
-
-        // Partial year updates are validated against the stored counterpart so
-        // the API never infers one academic boundary from the other.
-        const sessionStartYear =
-          changes.sessionStartYear ?? existingSession.sessionStartYear;
-        const sessionEndYear =
-          changes.sessionEndYear ?? existingSession.sessionEndYear;
-        if (sessionEndYear <= sessionStartYear) {
-          throw rpcError.badRequest(
-            'Session end year must be after its start year.',
-          );
-        }
-
-        const [session] = await context.db
-          .update(schoolSessionTable)
-          .set({ ...changes, updatedAt: new Date() })
-          .where(
-            and(
-              eq(schoolSessionTable.schoolId, schoolId),
-              eq(schoolSessionTable.id, sessionId),
-              // The predicate closes the race where another session becomes
-              // active after the state check but before this update executes.
-              eq(schoolSessionTable.isActive, true),
-            ),
-          )
-          .returning(schoolSessionDtoColumns);
-        if (!session) {
-          throw rpcError.conflict(
-            'Only the active academic session can be updated.',
-          );
-        }
-        return toSchoolSessionDto(session);
+        return await context.db.transaction(async (transaction) => {
+          const [existingSession] = await transaction
+            .select()
+            .from(schoolSessionTable)
+            .where(
+              and(
+                eq(schoolSessionTable.schoolId, schoolId),
+                eq(schoolSessionTable.id, sessionId),
+              ),
+            )
+            .for('update')
+            .limit(1);
+          if (!existingSession) throw rpcError.notFound('School session');
+          if (!existingSession.isActive)
+            throw rpcError.conflict(
+              'Only the active academic session can be updated.',
+            );
+          const sessionStartYear =
+            changes.sessionStartYear ?? existingSession.sessionStartYear;
+          const sessionEndYear =
+            changes.sessionEndYear ?? existingSession.sessionEndYear;
+          if (sessionEndYear <= sessionStartYear)
+            throw rpcError.badRequest(
+              'Session end year must be after its start year.',
+            );
+          if (changes.sessionConfig !== undefined) {
+            const previous = sessionConfigSchema.parse(
+              existingSession.sessionConfig ?? {},
+            );
+            const next = sessionConfigSchema.parse(changes.sessionConfig ?? {});
+            const sameExams =
+              Object.keys(previous.examConfig).length ===
+                Object.keys(next.examConfig).length &&
+              Object.entries(previous.examConfig).every(
+                ([slug, exam]) =>
+                  next.examConfig[slug]?.name === exam.name &&
+                  next.examConfig[slug]?.order === exam.order,
+              );
+            if (!sameExams && !context.canManageSessionExams)
+              throw rpcError.forbidden(
+                'Only school exam administrators can change exam definitions, including through session configuration.',
+              );
+            // The exclusive session lock prevents concurrent plan/timetable creation
+            // while a legacy full-config replacement validates retained exam slugs.
+            const plans = await transaction
+              .select({ examSlug: examPlanTable.examSlug })
+              .from(examPlanTable)
+              .where(eq(examPlanTable.sessionId, sessionId));
+            const timetables = await transaction
+              .select({ examSlug: examTimetableTable.examSlug })
+              .from(examTimetableTable)
+              .where(eq(examTimetableTable.sessionId, sessionId));
+            if (
+              [...plans, ...timetables].some(
+                (row) => !Object.hasOwn(next.examConfig, row.examSlug),
+              )
+            )
+              throw rpcError.conflict(
+                'Exam definitions with existing plans or timetables cannot be removed.',
+              );
+          }
+          const [session] = await transaction
+            .update(schoolSessionTable)
+            .set({ ...changes, updatedAt: new Date() })
+            .where(
+              and(
+                eq(schoolSessionTable.schoolId, schoolId),
+                eq(schoolSessionTable.id, sessionId),
+                eq(schoolSessionTable.isActive, true),
+              ),
+            )
+            .returning(schoolSessionDtoColumns);
+          if (!session)
+            throw rpcError.conflict(
+              'Only the active academic session can be updated.',
+            );
+          return toSchoolSessionDto(session);
+        });
       } catch (error) {
         throw toRpcError(error);
       }

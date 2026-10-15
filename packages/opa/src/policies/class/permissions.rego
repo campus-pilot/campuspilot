@@ -17,3 +17,16 @@ allow if {
   is_array(assignment.meta.classIds)
   input.resource.classId in assignment.meta.classIds
 }
+
+# Class metadata restricts teacher assignments. Other granted school roles
+# operate across their school, while grants remain explicit for every action.
+allow if {
+  common.valid_subject
+  common.valid_class_resource
+  catalog.action_targets_resource(input.action, input.resource.kind)
+  some assignment in input.subject.roleAssignments
+  assignment.scope.kind == "school"
+  assignment.scope.schoolId == input.resource.schoolId
+  assignment.role != "school.teacher"
+  catalog.role_has_action(assignment.role, input.action)
+}

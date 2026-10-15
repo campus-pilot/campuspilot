@@ -3,6 +3,7 @@ import { Inter } from 'next/font/google';
 import type { ReactNode } from 'react';
 import { ThemeProvider } from '@campuspilot/components/theme-provider';
 import { TooltipProvider } from '@campuspilot/ui/components/tooltip';
+import { ExamNotifications } from '@/components/exam/exam-notifications';
 import { QueryProvider } from '@/components/query-provider';
 import './globals.css';
 
@@ -36,7 +37,10 @@ export default function RootLayout({
             enableSystem
             disableTransitionOnChange
           >
-            <TooltipProvider>{children}</TooltipProvider>
+            <TooltipProvider>
+              {children}
+              <ExamNotifications />
+            </TooltipProvider>
           </ThemeProvider>
         </QueryProvider>
       </body>

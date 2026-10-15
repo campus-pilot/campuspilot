@@ -2,6 +2,8 @@
 
 import type { ReactNode } from 'react';
 import { useParams, usePathname } from 'next/navigation';
+import { SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
+import { RequirePermissions } from '@/components/require-permissions';
 import type { AppShellNavigationEntry } from '@campuspilot/components/app-shell';
 import {
   Bell,
@@ -112,7 +114,8 @@ function navigationFor(
         {
           type: 'item',
           id: 'exam',
-          label: 'Exam',
+          label: 'Examinations',
+          wrap: children => <RequirePermissions permissions={{ action: SCHOOL_ACTIONS.READ_EXAMS, resource: { kind: 'school', schoolId } }}>{children}</RequirePermissions>,
           href: sessionHref('/exam'),
           icon: ClipboardCheck,
         },

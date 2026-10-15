@@ -11,6 +11,7 @@ import { schoolAdmissionSettingsRouter } from "./admission-settings/admission-se
 import { schoolAdmissionRouter } from "./admission/admission.router";
 import { schoolClassRouter } from "./class/class.router";
 import { schoolSectionRouter } from "./class/section.router";
+import { schoolExamRouter } from "./exam/exam.router";
 import { schoolLogoRouter } from "./logo/logo.router";
 import { schoolMemberRouter } from "./member/member.router";
 import {
@@ -24,6 +25,7 @@ import { schoolSessionRouter } from "./session/session.router";
 import { schoolStudentRouter } from "./student/student.router";
 
 export const schoolRouter = {
+  ...schoolExamRouter,
   listMySchools: protectedProcedure
     .route({
       summary: "List my schools",
