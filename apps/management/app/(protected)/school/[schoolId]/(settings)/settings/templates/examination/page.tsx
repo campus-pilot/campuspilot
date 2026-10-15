@@ -1,7 +1,11 @@
-import { ClipboardCheck } from 'lucide-react';
-import { ModulePlaceholder } from '@/components/module-placeholder';
-
-export default function ExaminationTemplatePage() {
-  return <ModulePlaceholder icon={ClipboardCheck} title="Examination template" description="Examination document templates will be configured here." />;
+import { DocumentTemplateSettings } from '@/components/documents/document-template-settings';
+export default async function Page({
+  params,
+}: {
+  params: Promise<{ schoolId: string }>;
+}) {
+  const { schoolId } = await params;
+  return (
+    <DocumentTemplateSettings schoolId={schoolId} documentType="report_card" />
+  );
 }
-

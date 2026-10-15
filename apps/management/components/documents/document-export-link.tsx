@@ -1,0 +1,80 @@
+'use client';
+import Link from 'next/link';
+import { Files } from 'lucide-react';
+import type { DocumentType } from '@campuspilot/api/routers/school/document/document.dto';
+import { DocumentButton } from '@campuspilot/components/documents/document-controls';
+import { RequirePermissions } from '@/components/require-permissions';
+import {
+  documentPermission,
+  SCHOOL_ACTIONS,
+  type DocumentScope,
+} from './document-common';
+
+/** Exporting and reading each source are separate permissions. The selector
+ * additionally lists classes/students, so those grants are checked explicitly.
+ */
+export function documentWorkspacePermissions(
+  schoolId: string,
+  type: DocumentType,
+) {
+  const source =
+    type === 'timetable'
+      ? [SCHOOL_ACTIONS.READ_EXAM_TIMETABLE]
+      : type === 'id_card'
+        ? [SCHOOL_ACTIONS.READ_STUDENT, SCHOOL_ACTIONS.LIST_STUDENTS]
+        : type === 'report_card'
+          ? [
+              SCHOOL_ACTIONS.READ_STUDENT,
+              SCHOOL_ACTIONS.LIST_STUDENTS,
+              SCHOOL_ACTIONS.READ_EXAM_RESULTS,
+            ]
+          : [
+              SCHOOL_ACTIONS.READ_STUDENT,
+              SCHOOL_ACTIONS.LIST_STUDENTS,
+              SCHOOL_ACTIONS.READ_EXAM_TIMETABLE,
+            ];
+  return [
+    SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES,
+    SCHOOL_ACTIONS.GENERATE_DOCUMENTS,
+    SCHOOL_ACTIONS.READ_SESSION,
+    SCHOOL_ACTIONS.READ_CLASS,
+    SCHOOL_ACTIONS.LIST_CLASSES,
+    ...source,
+  ].map((action) => documentPermission(schoolId, action));
+}
+export function DocumentExportLink({
+  scope,
+  type,
+  classId,
+  examSlug,
+  studentId,
+  label = 'Create PDF',
+}: {
+  scope: DocumentScope;
+  type: DocumentType;
+  classId?: string;
+  examSlug?: string;
+  studentId?: string;
+  label?: string;
+}) {
+  const query = new URLSearchParams({
+    type,
+    ...(classId ? { classId } : {}),
+    ...(examSlug ? { examSlug } : {}),
+    ...(studentId ? { studentId } : {}),
+  });
+  return (
+    <RequirePermissions
+      permissions={documentWorkspacePermissions(scope.schoolId, type)}
+    >
+      <DocumentButton asChild variant="outline">
+        <Link
+          href={`/school/${encodeURIComponent(scope.schoolId)}/sessions/${encodeURIComponent(scope.sessionId)}/documents?${query}`}
+        >
+          <Files />
+          {label}
+        </Link>
+      </DocumentButton>
+    </RequirePermissions>
+  );
+}

@@ -1,5 +1,6 @@
 'use client';
 import { useRouter } from 'next/navigation';
+import { DocumentExportLink } from '@/components/documents/document-export-link';
 import { useForm } from '@tanstack/react-form';
 import { useQuery } from '@tanstack/react-query';
 import { z } from 'zod';
@@ -74,6 +75,11 @@ function WorkspaceData({
       back={{ href: examHref(scope), label: 'Examinations' }}
     >
       {query.isError && <ReadError error={query.error} retry={query.refetch} />}
+      <div className="flex flex-wrap gap-2">
+        <DocumentExportLink scope={scope} type="report_card" examSlug={scope.examSlug} label="Report card PDFs" />
+        <DocumentExportLink scope={scope} type="admit_card" examSlug={scope.examSlug} label="Admit card PDFs" />
+        <DocumentExportLink scope={scope} type="timetable" examSlug={scope.examSlug} label="Timetable PDF" />
+      </div>
       <form.Subscribe selector={(state) => state.values}>
         {({ tab, editing }) => (
           <>

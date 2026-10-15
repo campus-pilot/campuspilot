@@ -1,7 +1,11 @@
-import { FileBadge } from 'lucide-react';
-import { ModulePlaceholder } from '@/components/module-placeholder';
-
-export default function IdCardTemplatePage() {
-  return <ModulePlaceholder icon={FileBadge} title="ID card template" description="Student and staff ID card templates will be configured here." />;
+import { DocumentTemplateSettings } from '@/components/documents/document-template-settings';
+export default async function Page({
+  params,
+}: {
+  params: Promise<{ schoolId: string }>;
+}) {
+  const { schoolId } = await params;
+  return (
+    <DocumentTemplateSettings schoolId={schoolId} documentType="id_card" />
+  );
 }
-

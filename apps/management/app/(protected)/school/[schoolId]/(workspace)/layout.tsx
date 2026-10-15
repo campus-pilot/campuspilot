@@ -7,6 +7,7 @@ import { RequirePermissions } from '@/components/require-permissions';
 import type { AppShellNavigationEntry } from '@campuspilot/components/app-shell';
 import {
   Bell,
+  Files,
   ClipboardCheck,
   CreditCard,
   GraduationCap,
@@ -46,7 +47,10 @@ import { examPage } from './sessions/[sessionId]/exam/_route';
 import { noticesPage } from './sessions/[sessionId]/notices/_route';
 import { staffPage } from './staff/_route';
 
+import { documentsPage } from './sessions/[sessionId]/documents/_route';
+
 const pages: ManagementPageDescriptor<any>[] = [
+  documentsPage,
   dashboardPage,
   staffPage,
   noticesPage,
@@ -126,6 +130,7 @@ function navigationFor(
       id: 'operations',
       label: 'Operations',
       items: [
+        { type: 'item', id: 'documents', label: 'Documents', href: sessionHref('/documents'), icon: Files, wrap: children => <RequirePermissions permissions={{ action: SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES, resource: { kind: 'school', schoolId } }}>{children}</RequirePermissions> },
         {
           type: 'item',
           id: 'billing',

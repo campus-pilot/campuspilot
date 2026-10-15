@@ -1,7 +1,11 @@
-import { CalendarRange } from 'lucide-react';
-import { ModulePlaceholder } from '@/components/module-placeholder';
-
-export default function TimetableTemplatePage() {
-  return <ModulePlaceholder icon={CalendarRange} title="Timetable template" description="Timetable templates will be configured here." />;
+import { DocumentTemplateSettings } from '@/components/documents/document-template-settings';
+export default async function Page({
+  params,
+}: {
+  params: Promise<{ schoolId: string }>;
+}) {
+  const { schoolId } = await params;
+  return (
+    <DocumentTemplateSettings schoolId={schoolId} documentType="timetable" />
+  );
 }
-

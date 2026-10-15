@@ -1,7 +1,11 @@
-import { GraduationCap } from 'lucide-react';
-import { ModulePlaceholder } from '@/components/module-placeholder';
-
-export default function AdmitCardTemplatePage() {
-  return <ModulePlaceholder icon={GraduationCap} title="Admit card template" description="Exam admit card templates will be configured here." />;
+import { DocumentTemplateSettings } from '@/components/documents/document-template-settings';
+export default async function Page({
+  params,
+}: {
+  params: Promise<{ schoolId: string }>;
+}) {
+  const { schoolId } = await params;
+  return (
+    <DocumentTemplateSettings schoolId={schoolId} documentType="admit_card" />
+  );
 }
-

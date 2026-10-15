@@ -38,6 +38,7 @@ import {
 } from '@/components/session-selection';
 import { SessionSwitcher } from '@/components/session-switcher';
 import { orpc } from '@/lib/orpc';
+import { RequirePermissions } from '@/components/require-permissions';
 import { schoolSettingsPage } from './_route';
 import { documentSettingsPage } from './documents/_route';
 import { sessionSettingsPage } from './session/_route';
@@ -71,6 +72,16 @@ function navigationFor(
   canViewSessions: boolean,
   activeSessionId?: string,
 ): AppShellNavigationEntry[] {
+  const withTemplatePermission = (children: ReactNode) => (
+    <RequirePermissions
+      permissions={{
+        action: SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES,
+        resource: { kind: 'school', schoolId },
+      }}
+    >
+      {children}
+    </RequirePermissions>
+  );
   return [
     {
       type: 'item',
@@ -108,6 +119,7 @@ function navigationFor(
     {
       type: 'item',
       id: 'templates',
+      wrap: withTemplatePermission,
       label: 'Templates',
       href: schoolHref(schoolId, '/settings/templates/examination'),
       icon: Settings,
@@ -115,6 +127,7 @@ function navigationFor(
         {
           type: 'item',
           id: 'examination-template',
+          wrap: withTemplatePermission,
           label: 'Examination',
           href: schoolHref(schoolId, '/settings/templates/examination'),
           icon: ClipboardCheck,
@@ -122,6 +135,7 @@ function navigationFor(
         {
           type: 'item',
           id: 'id-card-template',
+          wrap: withTemplatePermission,
           label: 'ID card',
           href: schoolHref(schoolId, '/settings/templates/id-card'),
           icon: FileBadge,
@@ -129,6 +143,7 @@ function navigationFor(
         {
           type: 'item',
           id: 'admit-card-template',
+          wrap: withTemplatePermission,
           label: 'Admit card',
           href: schoolHref(schoolId, '/settings/templates/admit-card'),
           icon: GraduationCap,
@@ -136,6 +151,7 @@ function navigationFor(
         {
           type: 'item',
           id: 'timetable-template',
+          wrap: withTemplatePermission,
           label: 'Timetable',
           href: schoolHref(schoolId, '/settings/templates/timetable'),
           icon: CalendarRange,
