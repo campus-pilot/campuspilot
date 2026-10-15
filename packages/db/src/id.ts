@@ -4,6 +4,7 @@ import { z } from "zod/v4";
 const nanoid = customAlphabet("0123456789abcdefghijklmnopqrstuvwxyz", 21);
 
 export const PREFIX_MAP = {
+  artifact: "art",
   examPlan: "exp",
   examResult: "exr",
   examTimetable: "ext",

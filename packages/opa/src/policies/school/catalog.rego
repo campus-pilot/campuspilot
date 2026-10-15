@@ -358,3 +358,15 @@ actions contains {
 
 actions contains {"id": "school.exam.result.write", "key": "WRITE_EXAM_RESULTS", "resourceKind": "school"} if { true }
 actions contains {"id": "school.exam.result.delete", "key": "DELETE_EXAM_RESULTS", "resourceKind": "school"} if { true }
+
+actions contains {"id": "school.document.templates.read", "key": "READ_DOCUMENT_TEMPLATES", "resourceKind": "school"} if { true }
+
+actions contains {"id": "school.document.templates.manage", "key": "MANAGE_DOCUMENT_TEMPLATES", "resourceKind": "school"} if { true }
+
+actions contains {"id": "school.document.generate", "key": "GENERATE_DOCUMENTS", "resourceKind": "school"} if { true }
+
+actions contains {"id": "school.document.artifacts.read", "key": "READ_DOCUMENT_ARTIFACTS", "resourceKind": "school"} if { true }
+
+actions contains {"id": "school.document.artifacts.delete", "key": "DELETE_DOCUMENT_ARTIFACTS", "resourceKind": "school"} if { true }
+
+actions contains {"id": "school.document.templates.ai", "key": "EDIT_DOCUMENT_TEMPLATES_WITH_AI", "resourceKind": "school"} if { true }

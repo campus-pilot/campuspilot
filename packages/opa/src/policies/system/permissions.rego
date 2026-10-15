@@ -19,5 +19,6 @@ allow if {
   catalog.action_targets_resource(input.action, input.resource.kind)
   some assignment in input.subject.roleAssignments
   assignment.scope.kind == "platform"
+  startswith(assignment.role, "platform.")
   catalog.role_has_action(assignment.role, input.action)
 }
