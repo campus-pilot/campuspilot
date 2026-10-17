@@ -90,8 +90,8 @@ function DocumentWorkspaceContent({
           <>
             <DocumentKindPicker
               value={documentType}
-              onChange={(value) => {
-                if (value !== documentType && confirmNavigation())
+              onChange={async (value) => {
+                if (value !== documentType && await confirmNavigation())
                   form.setFieldValue('documentType', value);
               }}
             />
@@ -108,8 +108,8 @@ function DocumentWorkspaceContent({
                   <DocumentButton
                     variant={tab === item.value ? 'secondary' : 'ghost'}
                     aria-current={tab === item.value ? 'page' : undefined}
-                    onClick={() => {
-                      if (tab !== item.value && confirmNavigation())
+                    onClick={async () => {
+                      if (tab !== item.value && await confirmNavigation())
                         form.setFieldValue('tab', item.value);
                     }}
                   >

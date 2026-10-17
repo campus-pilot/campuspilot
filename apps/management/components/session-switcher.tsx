@@ -63,8 +63,8 @@ export function SessionSwitcher({
     if (!nextOpen) form.reset();
   }
 
-  function selectSession(sessionId: string) {
-    if (!confirmNavigation()) return;
+  async function selectSession(sessionId: string) {
+    if (!(await confirmNavigation())) return;
     storeSchoolSessionId(schoolId, sessionId);
     handleOpenChange(false);
     // Exam plans are scoped to one session; a session change returns to its examination list.

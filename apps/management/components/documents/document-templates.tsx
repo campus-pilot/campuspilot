@@ -142,7 +142,7 @@ function MarketplaceCard({
     defaultValues: { error: '' },
     validators: { onChange: z.object({ error: z.string() }) },
     onSubmit: async () => {
-      if (!confirmNavigation()) return;
+      if (!(await confirmNavigation())) return;
       form.setFieldValue('error', '');
       try {
         await client.school.selectMarketplaceTemplate({
@@ -468,8 +468,8 @@ function TemplateSourceForm({
                 type="button"
                 variant="ghost"
                 disabled={submitting}
-                onClick={() => {
-                  if (confirmNavigation()) void onReload();
+                onClick={async () => {
+                  if (await confirmNavigation()) void onReload();
                 }}
               >
                 Reload saved revision

@@ -8,4 +8,5 @@ export * from "./school-user-role";
 export * from "./session";
 
 export * from "./exam";
+
 export * from "./artifact";

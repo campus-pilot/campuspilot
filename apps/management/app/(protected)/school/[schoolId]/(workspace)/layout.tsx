@@ -43,7 +43,7 @@ import {
   classroomPage,
 } from './sessions/[sessionId]/classroom/_route';
 import { dashboardPage } from './sessions/[sessionId]/_route';
-import { examPage } from './sessions/[sessionId]/exam/_route';
+import { examPage, examDetailsPage } from './sessions/[sessionId]/exam/_route';
 import { noticesPage } from './sessions/[sessionId]/notices/_route';
 import { staffPage } from './staff/_route';
 
@@ -61,6 +61,7 @@ const pages: ManagementPageDescriptor<any>[] = [
   classStudentsPage,
   classroomDetailsPage,
   examPage,
+  examDetailsPage,
   billingPage,
 ];
 

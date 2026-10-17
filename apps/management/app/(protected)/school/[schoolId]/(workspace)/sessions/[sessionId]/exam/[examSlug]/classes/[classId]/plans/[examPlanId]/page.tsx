@@ -1,6 +1,6 @@
-import { ExamResultRoster } from '@/components/exam/exam-result-roster';
-
+import { redirect } from 'next/navigation';
+import { examClassHref } from '@/components/exam/exam-model';
+/** Preserve old subject-first links while making the class roster canonical. */
 export default async function Page({ params }: { params: Promise<{ schoolId: string; sessionId: string; examSlug: string; classId: string; examPlanId: string }> }) {
-  const scope = await params;
-  return <ExamResultRoster key={JSON.stringify(scope)} scope={scope} />;
+  redirect(examClassHref(await params));
 }

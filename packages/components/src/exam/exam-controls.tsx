@@ -7,13 +7,14 @@ import {
 } from 'react';
 import { Button } from '@campuspilot/ui/components/button';
 import { Input } from '@campuspilot/ui/components/input';
+import { NativeSelect } from '@campuspilot/ui/components/native-select';
 
-export const controlClass = 'min-h-11 text-base md:text-base';
 export function ExamButton(props: ComponentProps<typeof Button>) {
   return (
     <Button
       {...props}
-      className={`${controlClass} h-auto max-w-full whitespace-normal px-4 py-2 ${props.className ?? ''}`}
+      type={props.type ?? 'button'}
+      className={props.className}
     />
   );
 }
@@ -77,7 +78,6 @@ export function ExamInput({
         {...props}
         id={id}
         name={field.name}
-        className={controlClass}
         value={field.state.value}
         onBlur={field.handleBlur}
         onChange={(event) => field.handleChange(event.target.value)}
@@ -109,10 +109,11 @@ export function ExamSelect({
 }) {
   const id = useId();
   return (
-    <label className="flex min-w-0 flex-col gap-2 text-sm font-medium">
-      {label}
-      <select
-        className="min-h-11 min-w-0 rounded-md border bg-background px-3 text-base"
+    <div className="flex min-w-0 flex-col gap-2 text-sm font-medium">
+      <label htmlFor={id}>{label}</label>
+      <NativeSelect
+        id={id}
+        className="w-full"
         value={value}
         name={name}
         aria-invalid={errors.length > 0}
@@ -121,11 +122,11 @@ export function ExamSelect({
         onChange={(event) => onChange(event.target.value)}
       >
         {children}
-      </select>
+      </NativeSelect>
       <span id={`${id}-errors`}>
         <Issues errors={errors} />
       </span>
-    </label>
+    </div>
   );
 }
 export function LoadingExam() {
@@ -220,34 +221,48 @@ export function submitExam(
 export function ExamPageFrame({
   title,
   description,
-  back,
   children,
+  level = 'h1',
 }: {
   title: string;
   description: string;
-  back?: ReactNode;
   children: ReactNode;
+  level?: 'h1' | 'h2';
 }) {
+  const Heading = level;
   return (
-    <div className="mx-auto flex w-full min-w-0 max-w-4xl flex-col gap-5 pb-10">
-      {back}
+    <div className="mx-auto flex w-full min-w-0 max-w-7xl flex-col gap-4">
       <header className="flex min-w-0 flex-col gap-1">
-        <h1 className="break-words text-2xl font-semibold">{title}</h1>
-        <p className="break-words text-sm text-muted-foreground">
-          {description}
-        </p>
+        <Heading
+          className={`break-words font-semibold tracking-tight ${level === 'h1' ? 'text-2xl' : 'text-lg'}`}
+        >
+          {title}
+        </Heading>
+        {description && (
+          <p className="break-words text-sm text-muted-foreground">
+            {description}
+          </p>
+        )}
       </header>
       {children}
     </div>
   );
 }
 
-/** Opens a collapsed optional section before moving focus to its first invalid field. */
+/** Opens optional sections and focuses the first visible invalid control.
+ * Responsive editors can render both grid and card controls; hidden breakpoint
+ * variants must never capture validation focus.
+ */
 export function focusInvalidExamField(form: HTMLFormElement | null) {
   requestAnimationFrame(() => {
-    const input = form?.querySelector<HTMLElement>('[aria-invalid="true"]');
-    const details = input?.closest('details');
-    if (details) details.open = true;
-    input?.focus();
+    for (const input of form?.querySelectorAll<HTMLElement>(
+      '[aria-invalid="true"]',
+    ) ?? []) {
+      const details = input.closest('details');
+      if (details) details.open = true;
+      if (!input.getClientRects().length) continue;
+      input.focus();
+      break;
+    }
   });
 }

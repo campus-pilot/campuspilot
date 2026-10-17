@@ -1,55 +1,98 @@
-import { and, asc, count, desc, eq, sql } from "drizzle-orm";
-import { admissionTable } from "@campuspilot/db/schema/admission";
-import { studentTable } from "@campuspilot/db/schema/student";
-import { examPlanTable, examResultTable } from "@campuspilot/db/schema/exam";
-import { resolvePaginationInput } from "../../../paginations";
-import { pageResult, route } from "./exam.pagination";
+import { transitionExam } from './exam-lifecycle.service';
+import { and, asc, count, desc, eq, sql } from 'drizzle-orm';
+import { admissionTable } from '@campuspilot/db/schema/admission';
+import { studentTable } from '@campuspilot/db/schema/student';
+import {
+  examPlanTable,
+  examResultTable,
+  examLifecycleTable,
+} from '@campuspilot/db/schema/exam';
+import { resolvePaginationInput } from '../../../paginations';
+import { pageResult, route } from './exam.pagination';
 import {
   getExam,
+  getExamSession,
   getExamClass,
   getPlan,
   resolveModeConfig,
-} from "./exam.service";
-import { SCHOOL_ACTIONS } from "@campuspilot/opa/policies/school";
-import { protectedProcedure } from "../../../index";
-import { requireSchoolPermission } from "../../../permissions/school";
-import { rpcError, toRpcError } from "../../../errors";
-import * as dto from "./exam.dto";
+} from './exam.service';
+import { SCHOOL_ACTIONS } from '@campuspilot/opa/policies/school';
+import { protectedProcedure } from '../../../index';
+import { requireSchoolPermission } from '../../../permissions/school';
+import { rpcError, toRpcError } from '../../../errors';
+import * as dto from './exam.dto';
 
-import { prepareExamPlan, assertCreatableExamPlan } from './exam-plan-generation';
+import {
+  prepareExamPlan,
+  assertCreatableExamPlan,
+} from './exam-plan-generation';
 
 export const schoolExamPlanRouter = {
   getExamPlanPreview: protectedProcedure
-    .route(route('Preview automatic exam plan', 'Review every school class, subject and configured assessment mode before generating the initial draft plan. No data is written.'))
+    .route(
+      route(
+        'Preview automatic exam plan',
+        'Review every school class, subject and configured assessment mode before generating the initial plan. No data is written.',
+      ),
+    )
     .input(dto.examScopeSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_EXAM_PLANS))
     .output(dto.examPlanPreviewSchema)
     .handler(async ({ context, input }) => {
-      try { return (await prepareExamPlan(context.db, input)).preview; }
-      catch (error) { throw toRpcError(error); }
+      try {
+        return (await prepareExamPlan(context.db, input)).preview;
+      } catch (error) {
+        throw toRpcError(error);
+      }
     }),
   generateExamPlan: protectedProcedure
-    .route(route('Generate an exam plan from class configuration', 'Atomically create a draft plan for every configured class subject using its assessment modes and 100 total marks. Reject existing plans, invalid configuration or a changed preview. Timetable creation is a separate step.'))
+    .route(
+      route(
+        'Generate an exam plan from class configuration',
+        'Atomically create a ready-to-start plan for every configured class subject using its assessment modes and 100 total marks. Reject existing plans, invalid configuration or a changed preview. Timetable creation is a separate step.',
+      ),
+    )
     .input(dto.generateExamPlanInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.CREATE_EXAM_PLAN))
     .output(dto.generateExamPlanOutputSchema)
     .handler(async ({ context, input }) => {
-      try { return await context.db.transaction(async (tx) => {
-        const prepared = await prepareExamPlan(tx, input, true);
-        assertCreatableExamPlan(prepared, input.configurationVersion);
-        // Chunk within the same transaction to stay below PostgreSQL's bind
-        // parameter limit even for a large school. Any failure rolls back all rows.
-        for (let offset = 0; offset < prepared.plans.length; offset += 100) {
-          await tx.insert(examPlanTable).values(prepared.plans.slice(offset, offset + 100));
-        }
-        return { createdCount: prepared.plans.length };
-      }); } catch (error) { throw toRpcError(error); }
+      try {
+        return await context.db.transaction(async (tx) => {
+          const prepared = await prepareExamPlan(tx, input, true);
+          assertCreatableExamPlan(prepared, input.configurationVersion);
+          // Chunk within the same transaction to stay below PostgreSQL's bind
+          // parameter limit even for a large school. Any failure rolls back all rows.
+          for (let offset = 0; offset < prepared.plans.length; offset += 100) {
+            await tx
+              .insert(examPlanTable)
+              .values(prepared.plans.slice(offset, offset + 100));
+          }
+          await tx
+            .insert(examLifecycleTable)
+            .values({
+              schoolId: input.schoolId,
+              sessionId: input.sessionId,
+              examSlug: input.examSlug,
+              status: 'ready',
+            })
+            .onConflictDoUpdate({
+              target: [
+                examLifecycleTable.sessionId,
+                examLifecycleTable.examSlug,
+              ],
+              set: { status: 'ready', startedAt: null, completedAt: null },
+            });
+          return { createdCount: prepared.plans.length };
+        });
+      } catch (error) {
+        throw toRpcError(error);
+      }
     }),
   listExamPlans: protectedProcedure
     .route(
       route(
-        "List exam plans",
-        "Read plans for an exam, with independent class and lifecycle status filters, ordered by class, subject and ID.",
+        'List exam plans',
+        'Read plans for an exam, with independent class and lifecycle status filters, ordered by class, subject and ID.',
       ),
     )
     .input(dto.listExamPlansInputSchema)
@@ -76,7 +119,7 @@ export const schoolExamPlanRouter = {
           createdAt: examPlanTable.createdAt,
           status: examPlanTable.status,
         };
-        const sort = input.orderBy.direction === "asc" ? asc : desc;
+        const sort = input.orderBy.direction === 'asc' ? asc : desc;
         const [items, [total]] = await Promise.all([
           context.db
             .select()
@@ -103,8 +146,8 @@ export const schoolExamPlanRouter = {
   getExamPlan: protectedProcedure
     .route(
       route(
-        "Get an exam plan",
-        "Read a plan by its independent school, session, class and plan identifiers.",
+        'Get an exam plan',
+        'Read a plan by its independent school, session, class and plan identifiers.',
       ),
     )
     .input(dto.planScopeSchema)
@@ -120,8 +163,8 @@ export const schoolExamPlanRouter = {
   createExamPlan: protectedProcedure
     .route(
       route(
-        "Create an exam plan",
-        "Create a draft plan with assessment modes derived from the class subject or explicitly customized percentages.",
+        'Create an exam plan',
+        'Create a draft plan with assessment modes derived from the class subject or explicitly customized percentages.',
       ),
     )
     .input(dto.createExamPlanInputSchema)
@@ -130,7 +173,7 @@ export const schoolExamPlanRouter = {
     .handler(async ({ context, input }) => {
       try {
         return await context.db.transaction(async (tx) => {
-          const { session } = await getExam(tx, input, "share");
+          const { session } = await getExam(tx, input, 'share');
           const schoolClass = await getExamClass(
             tx,
             input.schoolId,
@@ -144,14 +187,14 @@ export const schoolExamPlanRouter = {
             : undefined;
           if (!subject)
             throw rpcError.badRequest(
-              "The subject is not configured for this class.",
+              'The subject is not configured for this class.',
             );
           if (
             input.totalWorkingDays !== null &&
             !session.config.attendanceTracking.enabled
           )
             throw rpcError.badRequest(
-              "Attendance tracking is disabled for this session.",
+              'Attendance tracking is disabled for this session.',
             );
           const modeConfig = resolveModeConfig(
             input.totalMarks,
@@ -162,6 +205,14 @@ export const schoolExamPlanRouter = {
             .insert(examPlanTable)
             .values({ ...input, modeConfig })
             .returning();
+          await tx
+            .insert(examLifecycleTable)
+            .values({
+              schoolId: input.schoolId,
+              sessionId: input.sessionId,
+              examSlug: input.examSlug,
+            })
+            .onConflictDoNothing();
           return plan!;
         });
       } catch (error) {
@@ -171,8 +222,8 @@ export const schoolExamPlanRouter = {
   updateExamPlan: protectedProcedure
     .route(
       route(
-        "Update an exam plan",
-        "Edit marks and mode percentages before activation. Editing an approved plan resets it to draft for another review.",
+        'Update an exam plan',
+        'Edit marks and mode percentages before activation. Editing an approved plan resets it to draft for another review.',
       ),
     )
     .input(dto.updateExamPlanInputSchema)
@@ -182,9 +233,9 @@ export const schoolExamPlanRouter = {
       try {
         return await context.db.transaction(async (tx) => {
           const { plan, session } = await getPlan(tx, input, true);
-          if (!["draft", "approved"].includes(plan.status))
+          if (!['draft', 'approved'].includes(plan.status))
             throw rpcError.badRequest(
-              "Active and completed exam plans are locked.",
+              'Active and completed exam plans are locked.',
             );
           const schoolClass = await getExamClass(
             tx,
@@ -199,7 +250,7 @@ export const schoolExamPlanRouter = {
             : undefined;
           if (!subject)
             throw rpcError.badRequest(
-              "The plan’s subject is no longer configured for this class.",
+              'The plan’s subject is no longer configured for this class.',
             );
           if (
             input.totalWorkingDays !== undefined &&
@@ -207,7 +258,7 @@ export const schoolExamPlanRouter = {
             !session.config.attendanceTracking.enabled
           )
             throw rpcError.badRequest(
-              "Attendance tracking is disabled for this session.",
+              'Attendance tracking is disabled for this session.',
             );
           const totalMarks = input.totalMarks ?? plan.totalMarks;
           const totalWorkingDays =
@@ -234,7 +285,7 @@ export const schoolExamPlanRouter = {
               totalMarks,
               totalWorkingDays,
               modeConfig,
-              status: "draft",
+              status: 'draft',
               updatedAt: new Date(),
             })
             .where(eq(examPlanTable.id, plan.id))
@@ -248,8 +299,8 @@ export const schoolExamPlanRouter = {
   deleteExamPlan: protectedProcedure
     .route(
       route(
-        "Delete an exam plan",
-        "Delete a draft or approved exam plan; active and completed plans cannot be deleted.",
+        'Delete an exam plan',
+        'Delete a draft or approved exam plan; active and completed plans cannot be deleted.',
       ),
     )
     .input(dto.planScopeSchema)
@@ -259,9 +310,9 @@ export const schoolExamPlanRouter = {
       try {
         return await context.db.transaction(async (tx) => {
           const { plan } = await getPlan(tx, input, true);
-          if (!["draft", "approved"].includes(plan.status))
+          if (!['draft', 'approved'].includes(plan.status))
             throw rpcError.badRequest(
-              "Active and completed exam plans cannot be deleted.",
+              'Active and completed exam plans cannot be deleted.',
             );
           await tx.delete(examPlanTable).where(eq(examPlanTable.id, plan.id));
           return plan;
@@ -273,8 +324,8 @@ export const schoolExamPlanRouter = {
   transitionExamPlan: protectedProcedure
     .route(
       route(
-        "Transition an exam plan",
-        "Enforce draft → approved → active → completed, or completed → active to reopen. Completion requires approved results for all currently registered students enrolled in the class.",
+        'Transition an exam plan',
+        'Enforce draft → approved → active → completed, or completed → active to reopen. Completion requires approved results for all currently registered students enrolled in the class.',
       ),
     )
     .input(dto.transitionExamPlanInputSchema)
@@ -283,18 +334,32 @@ export const schoolExamPlanRouter = {
     .handler(async ({ context, input }) => {
       try {
         return await context.db.transaction(async (tx) => {
+          await getExamSession(tx, input, 'update');
           const { plan } = await getPlan(tx, input, true);
           const transitions = {
-            draft: "approved",
-            approved: "active",
-            active: "completed",
-            completed: "active",
+            draft: 'approved',
+            approved: 'active',
+            active: 'completed',
+            completed: 'active',
           } as const;
           if (transitions[plan.status] !== input.status)
             throw rpcError.badRequest(
               `Cannot transition an exam plan from ${plan.status} to ${input.status}.`,
             );
-          if (input.status === "completed") {
+          if (input.status === 'active') {
+            await transitionExam(tx, {
+              schoolId: plan.schoolId,
+              sessionId: plan.sessionId,
+              examSlug: plan.examSlug,
+              status: 'active',
+            });
+            const [started] = await tx
+              .select()
+              .from(examPlanTable)
+              .where(eq(examPlanTable.id, plan.id));
+            return started!;
+          }
+          if (input.status === 'completed') {
             const [missing] = await tx
               .select({ studentId: studentTable.id })
               .from(studentTable)
@@ -321,7 +386,7 @@ export const schoolExamPlanRouter = {
               .limit(1);
             if (missing)
               throw rpcError.badRequest(
-                "Every registered student enrolled in this class must have an approved result before completing the exam plan.",
+                'Every registered student enrolled in this class must have an approved result before completing the exam plan.',
               );
             const [unapproved] = await tx
               .select({ id: examResultTable.id })
@@ -335,7 +400,7 @@ export const schoolExamPlanRouter = {
               .limit(1);
             if (unapproved)
               throw rpcError.badRequest(
-                "All saved results must be approved before completing the exam plan.",
+                'All saved results must be approved before completing the exam plan.',
               );
           }
           const [updated] = await tx
@@ -343,6 +408,29 @@ export const schoolExamPlanRouter = {
             .set({ status: input.status, updatedAt: new Date() })
             .where(eq(examPlanTable.id, plan.id))
             .returning();
+          if (input.status === 'completed') {
+            const [unfinished] = await tx
+              .select()
+              .from(examPlanTable)
+              .where(
+                and(
+                  eq(examPlanTable.sessionId, plan.sessionId),
+                  eq(examPlanTable.examSlug, plan.examSlug),
+                  sql`${examPlanTable.status} <> 'completed'`,
+                ),
+              )
+              .limit(1);
+            if (!unfinished)
+              await tx
+                .update(examLifecycleTable)
+                .set({ status: 'completed', completedAt: new Date() })
+                .where(
+                  and(
+                    eq(examLifecycleTable.sessionId, plan.sessionId),
+                    eq(examLifecycleTable.examSlug, plan.examSlug),
+                  ),
+                );
+          }
           return updated!;
         });
       } catch (error) {

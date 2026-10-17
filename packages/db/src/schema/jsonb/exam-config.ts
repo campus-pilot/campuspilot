@@ -1,10 +1,10 @@
-import { z } from "zod";
+import { z } from 'zod';
 
 export const examPlanStatusSchema = z.enum([
-  "draft",
-  "approved",
-  "active",
-  "completed",
+  'draft',
+  'approved',
+  'active',
+  'completed',
 ]);
 export const modeMarkSchema = z.object({
   percentage: z.number().min(0).max(100),
@@ -19,7 +19,7 @@ export const modeConfigSchema = z
         Object.values(modes).reduce((sum, mode) => sum + mode.percentage, 0) -
           100,
       ) < 0.000001,
-    "At least one mode is required and percentages must sum to 100%",
+    'At least one mode is required and percentages must sum to 100%',
   );
 export const resultMarksSchema = z.record(
   z.string().min(1),
@@ -33,7 +33,7 @@ export const timetableCellSchema = z.object({
   subjectSlug: z.string().min(1),
   modeSlug: z.string().min(1),
 });
-const timeSchema = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Use HH:mm");
+const timeSchema = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Use HH:mm');
 const dateSchema = z.iso.date();
 export const timetableRowSchema = z
   .object({
@@ -49,8 +49,8 @@ export const timetableRowSchema = z
     ),
   })
   .refine((row) => row.startTime < row.endTime, {
-    message: "End time must be after start time",
-    path: ["endTime"],
+    message: 'End time must be after start time',
+    path: ['endTime'],
   });
 export const timetableConfigSchema = z
   .object({
@@ -60,34 +60,37 @@ export const timetableConfigSchema = z
   .superRefine((config, ctx) => {
     if (new Set(config.columns).size !== config.columns.length)
       ctx.addIssue({
-        code: "custom",
-        path: ["columns"],
-        message: "Classes must be unique",
+        code: 'custom',
+        path: ['columns'],
+        message: 'Classes must be unique',
       });
     if (new Set(config.rows.map((row) => row.id)).size !== config.rows.length)
       ctx.addIssue({
-        code: "custom",
-        path: ["rows"],
-        message: "Row IDs must be unique",
+        code: 'custom',
+        path: ['rows'],
+        message: 'Row IDs must be unique',
       });
     for (const [index, row] of config.rows.entries()) {
       if (Object.keys(row.cells).some((id) => !config.columns.includes(id)))
         ctx.addIssue({
-          code: "custom",
-          path: ["rows", index, "cells"],
-          message: "Cells must belong to a grid column",
+          code: 'custom',
+          path: ['rows', index, 'cells'],
+          message: 'Cells must belong to a grid column',
         });
       for (const classId of config.columns) {
         const cell = row.cells[classId];
         if (
           Array.isArray(cell) &&
-          new Set(cell.map((entry) => `${entry.subjectSlug}:${entry.modeSlug}`))
-            .size !== cell.length
+          new Set(
+            cell.map((entry) =>
+              JSON.stringify([entry.subjectSlug, entry.modeSlug]),
+            ),
+          ).size !== cell.length
         )
           ctx.addIssue({
-            code: "custom",
-            path: ["rows", index, "cells", classId],
-            message: "Duplicate subject and mode",
+            code: 'custom',
+            path: ['rows', index, 'cells', classId],
+            message: 'Duplicate subject and mode',
           });
         if (!cell) continue;
         if (
@@ -102,9 +105,9 @@ export const timetableConfigSchema = z
             )
         )
           ctx.addIssue({
-            code: "custom",
-            path: ["rows", index],
-            message: "A class has overlapping exam slots",
+            code: 'custom',
+            path: ['rows', index],
+            message: 'A class has overlapping exam slots',
           });
       }
     }

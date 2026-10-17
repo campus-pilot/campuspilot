@@ -1,5 +1,6 @@
 'use client';
-import { useCallback, useRef, type ReactNode } from 'react';
+import { type ReactNode } from 'react';
+import { DirtyGuard } from '@/components/exam/exam-common';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   SCHOOL_ACTIONS,
@@ -11,7 +12,6 @@ import {
   DocumentNotice,
 } from '@campuspilot/components/documents/document-controls';
 import { RequirePermissions } from '@/components/require-permissions';
-import { registerNavigationGuard } from '@/lib/navigation-guard';
 import { orpc } from '@/lib/orpc';
 export { SCHOOL_ACTIONS };
 export type DocumentScope = { schoolId: string; sessionId: string };
@@ -93,59 +93,7 @@ export function useDocumentCache() {
       }),
   };
 }
-/** Callback-ref cleanup owns listeners; the current form state is read only when
- * navigation occurs, so no effect or extra input state is required.
- */
+/** Document drafts use the same app-dialog navigation guard as exam editors. */
 export function DocumentDirtyGuard({ dirty }: { dirty: boolean }) {
-  const current = useRef(dirty);
-  current.current = dirty;
-  const ref = useCallback((element: HTMLDivElement | null) => {
-    if (!element) return;
-    const confirm = () =>
-      !current.current || window.confirm('Discard unsaved template changes?');
-    const unregister = registerNavigationGuard(confirm);
-    const beforeUnload = (event: BeforeUnloadEvent) => {
-      if (current.current) {
-        event.preventDefault();
-        event.returnValue = '';
-      }
-    };
-    const click = (event: MouseEvent) => {
-      if (
-        event.defaultPrevented ||
-        event.button !== 0 ||
-        event.metaKey ||
-        event.ctrlKey ||
-        event.shiftKey ||
-        event.altKey
-      )
-        return;
-      const link =
-        event.target instanceof Element
-          ? event.target.closest('a[href]')
-          : null;
-      if (link && link.getAttribute('target') !== '_blank' && !confirm()) {
-        event.preventDefault();
-        event.stopPropagation();
-      }
-    };
-    const traverse = (event: NavigateEvent) => {
-      if (event.navigationType === 'traverse' && event.cancelable && !confirm())
-        event.preventDefault();
-    };
-    window.addEventListener('beforeunload', beforeUnload);
-    document.addEventListener('click', click, true);
-    window.navigation?.addEventListener('navigate', traverse);
-    return () => {
-      unregister();
-      window.removeEventListener('beforeunload', beforeUnload);
-      document.removeEventListener('click', click, true);
-      window.navigation?.removeEventListener('navigate', traverse);
-    };
-  }, []);
-  return (
-    <div ref={ref}>
-      {dirty && <DocumentNotice>Unsaved template changes</DocumentNotice>}
-    </div>
-  );
+  return <DirtyGuard dirty={dirty} />;
 }

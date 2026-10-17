@@ -121,8 +121,8 @@ export function SchoolSwitcher() {
                   key={school.id}
                   value={`${school.name} ${school.location}`}
                   data-checked={school.id === selectedSchoolId}
-                  onSelect={() => {
-                    if (!confirmNavigation()) return;
+                  onSelect={async () => {
+                    if (!(await confirmNavigation())) return;
                     handleOpenChange(false);
                     storeSchoolId(school.id);
                     router.push(schoolHref(school.id));

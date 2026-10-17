@@ -1,5 +1,7 @@
 'use client';
 import Link from 'next/link';
+import { Badge } from '@campuspilot/ui/components/badge';
+import { ClipboardCheck, ArrowUpRight } from 'lucide-react';
 import { useForm } from '@tanstack/react-form';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { z } from 'zod';
@@ -7,7 +9,6 @@ import { SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authoriza
 import { RequirePermissions } from '@/components/require-permissions';
 import { orpc } from '@/lib/orpc';
 import {
-  ExamButton,
   ExamFrame,
   ExamPager,
   ExamSession,
@@ -15,8 +16,12 @@ import {
   Notice,
   ReadError,
 } from './exam-common';
-import { examHref, schoolPermission, type SessionScope } from './exam-model';
-import { ExamDefinitionForm } from './exam-definition-form';
+import {
+  examHref,
+  examStatusLabel,
+  schoolPermission,
+  type SessionScope,
+} from './exam-model';
 
 export function ExamList({ scope }: { scope: SessionScope }) {
   return (
@@ -26,64 +31,28 @@ export function ExamList({ scope }: { scope: SessionScope }) {
     >
       <ExamFrame
         title="Examinations"
-        description="Configure assessments, enter marks, and review results."
+        description="View the exams configured in session settings, manage plans, and review results."
       >
         <ExamSession scope={scope}>
-          {(active) => <ExamListData scope={scope} active={active} />}
+          {() => <ExamListData scope={scope} />}
         </ExamSession>
       </ExamFrame>
     </RequirePermissions>
   );
 }
-function ExamListData({
-  scope,
-  active,
-}: {
-  scope: SessionScope;
-  active: boolean;
-}) {
+function ExamListData({ scope }: { scope: SessionScope }) {
   const form = useForm({
-    defaultValues: { page: 1, creating: false },
-    validators: {
-      onChange: z.object({
-        page: z.number().int().positive(),
-        creating: z.boolean(),
-      }),
-    },
+    defaultValues: { page: 1 },
+    validators: { onChange: z.object({ page: z.number().int().positive() }) },
   });
   return (
-    <form.Subscribe selector={(state) => state.values}>
-      {({ page, creating }) => (
-        <>
-          {(active || creating) && (
-            <RequirePermissions
-              permissions={schoolPermission(
-                scope.schoolId,
-                SCHOOL_ACTIONS.CREATE_EXAM,
-              )}
-            >
-              {creating ? (
-                <ExamDefinitionForm
-                  scope={scope}
-                  active={active}
-                  onClose={() => form.setFieldValue('creating', false)}
-                />
-              ) : (
-                <ExamButton
-                  className="self-start"
-                  onClick={() => form.setFieldValue('creating', true)}
-                >
-                  Create exam
-                </ExamButton>
-              )}
-            </RequirePermissions>
-          )}
-          <ExamListPage
-            scope={scope}
-            page={page}
-            onPage={(page) => form.setFieldValue('page', page)}
-          />
-        </>
+    <form.Subscribe selector={(state) => state.values.page}>
+      {(page) => (
+        <ExamListPage
+          scope={scope}
+          page={page}
+          onPage={(page) => form.setFieldValue('page', page)}
+        />
       )}
     </form.Subscribe>
   );
@@ -114,31 +83,59 @@ function ExamListPage({
   return (
     <>
       {query.isError && <ReadError error={query.error} retry={query.refetch} />}
-      {query.isFetching && <Notice>Refreshing this list…</Notice>}
       {query.data!.items.length === 0 ? (
-        <Notice>No exams configured for this session</Notice>
+        <Notice>
+          No exams configured. Add examinations in session settings.
+        </Notice>
       ) : (
-        query.data!.items.map((exam) => (
-          <Link
-            key={exam.slug}
-            href={examHref(scope, exam.slug)}
-            className="flex min-w-0 flex-col gap-1 rounded-xl border p-4 hover:bg-muted/40"
-          >
-            <h2 className="break-words text-lg font-semibold">{exam.name}</h2>
-            <span className="break-words text-sm text-muted-foreground">
-              Order {exam.order} · {exam.slug}
-            </span>
-            <span className="mt-2 text-sm font-medium">Open exam →</span>
-          </Link>
-        ))
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          {query.data!.items.map((exam) => (
+            <article
+              key={exam.slug}
+              className="flex min-w-0 flex-col gap-4 rounded-xl border bg-card p-4"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <ClipboardCheck
+                  className="size-5 text-muted-foreground"
+                  aria-hidden
+                />
+                <Badge variant="outline">{examStatusLabel(exam.status)}</Badge>
+              </div>
+              <div className="flex flex-col gap-1">
+                <h2 className="text-sm font-semibold">{exam.name}</h2>
+                <p className="text-xs text-muted-foreground">
+                  {exam.planCount > 0
+                    ? 'Exam plan generated'
+                    : 'Exam plan not generated'}
+                </p>
+              </div>
+              {(exam.startedAt || exam.completedAt) && (
+                <p className="text-xs text-muted-foreground">
+                  {exam.completedAt
+                    ? `Completed ${new Intl.DateTimeFormat('en', { dateStyle: 'medium' }).format(exam.completedAt)}`
+                    : `Started ${new Intl.DateTimeFormat('en', { dateStyle: 'medium' }).format(exam.startedAt!)}`}
+                </p>
+              )}
+              <Link
+                href={examHref(scope, exam.slug)}
+                className="mt-auto inline-flex items-center gap-1 text-xs font-medium hover:underline"
+              >
+                View more details
+                <ArrowUpRight className="size-3.5" aria-hidden />
+              </Link>
+            </article>
+          ))}
+        </div>
       )}
-      <ExamPager
-        page={query.data!.pagination.currentPage}
-        disabled={query.isFetching}
-        pages={query.data!.pagination.totalPages}
-        total={query.data!.pagination.totalItems}
-        onPage={onPage}
-      />
+      {query.data!.pagination.totalPages > 1 && (
+        <ExamPager
+          page={query.data!.pagination.currentPage}
+          disabled={query.isFetching}
+          pages={query.data!.pagination.totalPages}
+          total={query.data!.pagination.totalItems}
+          onPage={onPage}
+        />
+      )}
     </>
   );
 }

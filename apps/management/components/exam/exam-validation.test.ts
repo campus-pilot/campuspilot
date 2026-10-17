@@ -5,25 +5,18 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { FieldApi, FormApi } from '@tanstack/react-form';
 import { QueryClient } from '@tanstack/react-query';
-import type {
-  ExamContextDto,
-  ExamPlanDto,
-  ExamResultDto,
-} from '@campuspilot/api/routers/school/exam/exam.dto';
-import { ResultSummary } from '@campuspilot/components/exam/result-summary';
+import type { ExamContextDto } from '@campuspilot/api/routers/school/exam/exam.dto';
 import {
-  resultDefaults,
-  resultFormSchema,
-  resultPayload,
-  numericText,
-  toPlanScope,
-  toResultScope,
-} from './exam-model';
-import {
-  planFormSchema,
-  timetableFormSchema,
-  timetableSchema,
-} from './exam-validation';
+  copyTimetableTiming,
+  decodeTimetablePair,
+  encodeTimetablePair,
+  nextTimetableDate,
+  parseTimetableDate,
+  removeTimetableColumn,
+} from '@campuspilot/components/exam/timetable-builder-model';
+import { ExamButton } from '@campuspilot/components/exam/exam-controls';
+import { numericText, isExamSaveUncertain, toExamScope } from './exam-model';
+import { timetableFormSchema, timetableSchema } from './exam-validation';
 import {
   confirmNavigation,
   registerNavigationGuard,
@@ -48,47 +41,6 @@ const context: ExamContextDto = {
   coScholasticAreas: { art: { name: 'Art' } },
   attendanceTracking: { enabled: true },
 };
-const plan: ExamPlanDto = {
-  id: 'plan-a',
-  schoolId: 'school',
-  sessionId: 'session',
-  examSlug: 'midterm',
-  classId: 'class-a',
-  subjectSlug: 'maths',
-  totalMarks: 100,
-  modeConfig: {
-    written: { percentage: 80, maxMarks: 80 },
-    practical: { percentage: 20, maxMarks: 20 },
-  },
-  totalWorkingDays: 200,
-  status: 'active',
-  createdAt: null,
-  updatedAt: null,
-};
-const result: ExamResultDto = {
-  id: 'result',
-  schoolId: 'school',
-  sessionId: 'session',
-  examPlanId: plan.id,
-  studentId: 'enrollment',
-  marks: { written: 65, practical: 18 },
-  coScholastics: { art: 'A' },
-  daysAttended: 180,
-  approved: false,
-  createdAt: null,
-  updatedAt: null,
-};
-const validPlan = {
-  classId: 'class-a',
-  subjectSlug: 'maths',
-  totalMarks: '100',
-  totalWorkingDays: '800',
-  modes: [
-    { slug: 'written', percentage: '80', enabled: true },
-    { slug: 'practical', percentage: '20', enabled: true },
-  ],
-  duplicate: false,
-};
 const cell = { subjectSlug: 'maths', modeSlug: 'written' };
 const slot = (
   id: string,
@@ -103,193 +55,9 @@ const slot = (
   cells: { [classId]: cell },
 });
 
-test('empty marks remain empty and cannot be submitted as zero', async () => {
-  const values = resultDefaults(plan, context, null);
-  assert.equal(values.marks[0]?.value, '');
-  assert.equal(
-    resultFormSchema(plan, context).safeParse(values).success,
-    false,
-  );
-  let calls = 0;
-  const form = new FormApi({
-    defaultValues: values,
-    validators: { onSubmit: resultFormSchema(plan, context) },
-    onSubmit: () => {
-      calls++;
-    },
-  });
-  const unmount = form.mount();
-  const scores = [
-    new FieldApi({ form, name: 'marks[0].value' }),
-    new FieldApi({ form, name: 'marks[1].value' }),
-  ];
-  const unmountFields = scores.map((field) => field.mount());
-  await form.handleSubmit();
-  assert.equal(calls, 0);
-  scores.forEach((field) => field.handleChange('0'));
-  await form.handleSubmit();
-  assert.equal(calls, 1);
-  unmountFields.forEach((unmountField) => unmountField());
-  unmount();
-});
-test('zero scores and zero attendance are valid explicit values', () => {
-  const values = resultDefaults(plan, context, null);
-  values.marks.forEach((item) => {
-    item.value = '0';
-  });
-  values.daysAttended = '0';
-  const payload = resultPayload(resultFormSchema(plan, context).parse(values));
-  assert.deepEqual(payload.marks, { written: 0, practical: 0 });
-  assert.equal(payload.daysAttended, 0);
-  assert.equal(payload.coScholastics, null);
-});
-test('marks-only changes preserve grades and attendance and send explicit approval intent', () => {
-  const values = resultDefaults(plan, context, result);
-  values.marks[0]!.value = '65.123456789';
-  const payload = resultPayload(resultFormSchema(plan, context).parse(values));
-  assert.equal(payload.marks.written, 65.123456789);
-  assert.deepEqual(payload.coScholastics, { art: 'A' });
-  assert.equal(payload.daysAttended, 180);
-  assert.equal(payload.approved, false);
-  values.approved = true;
-  assert.equal(resultPayload(values).approved, true);
-});
-test('invalid numeric text, missing components, and scores over maxima are rejected', () => {
+test('numeric text rejects blank, partial and nondecimal marks', () => {
   for (const text of ['', ' ', '65abc', 'Infinity', 'NaN', '0x10'])
     assert.equal(numericText.safeParse(text).success, false, text);
-  const values = resultDefaults(plan, context, result);
-  values.marks[0]!.value = '80.01';
-  assert.equal(
-    resultFormSchema(plan, context).safeParse(values).success,
-    false,
-  );
-  values.marks = [{ slug: 'written', value: '65' }];
-  assert.equal(
-    resultFormSchema(plan, context).safeParse(values).success,
-    false,
-  );
-  values.marks = [
-    { slug: 'written', value: '65' },
-    { slug: 'unexpected', value: '18' },
-  ];
-  assert.equal(
-    resultFormSchema(plan, context).safeParse(values).success,
-    false,
-  );
-});
-test('zero-maximum modes still require an explicit zero', () => {
-  const withZero = {
-    ...plan,
-    modeConfig: { ...plan.modeConfig, oral: { percentage: 0, maxMarks: 0 } },
-  };
-  const values = resultDefaults(withZero, context, result);
-  assert.equal(
-    resultFormSchema(withZero, context).safeParse(values).success,
-    false,
-  );
-  values.marks[2]!.value = '0';
-  assert.equal(
-    resultFormSchema(withZero, context).safeParse(values).success,
-    true,
-  );
-});
-test('historical grades and disabled attendance are retained until explicitly corrected', () => {
-  const historical = {
-    ...result,
-    coScholastics: { removed: 'B' },
-    daysAttended: 0,
-  };
-  const changed = { ...context, attendanceTracking: { enabled: false } };
-  const values = resultDefaults(plan, changed, historical);
-  assert.deepEqual(
-    values.grades.find((item) => item.slug === 'removed'),
-    { slug: 'removed', value: 'B' },
-  );
-  assert.equal(values.daysAttended, '0');
-  assert.equal(
-    resultFormSchema(plan, changed).safeParse(values).success,
-    false,
-  );
-  values.grades.forEach((item) => {
-    item.value = '';
-  });
-  values.daysAttended = '';
-  assert.equal(resultFormSchema(plan, changed).safeParse(values).success, true);
-});
-test('attendance is nullable and bounded by explicit working days', () => {
-  const values = resultDefaults(plan, context, result);
-  values.daysAttended = '201';
-  assert.equal(
-    resultFormSchema(plan, context).safeParse(values).success,
-    false,
-  );
-  values.daysAttended = '0';
-  assert.equal(
-    resultFormSchema({ ...plan, totalWorkingDays: null }, context).safeParse(
-      values,
-    ).success,
-    false,
-  );
-  values.daysAttended = '';
-  assert.equal(
-    resultFormSchema({ ...plan, totalWorkingDays: null }, context).safeParse(
-      values,
-    ).success,
-    true,
-  );
-});
-test('plan maxima must be integer-derived without rounding', () => {
-  assert.equal(planFormSchema(context).safeParse(validPlan).success, true);
-  assert.equal(
-    planFormSchema(context).safeParse({ ...validPlan, totalMarks: '101' })
-      .success,
-    false,
-  );
-  assert.equal(
-    planFormSchema(context).safeParse({
-      ...validPlan,
-      totalMarks: '2147483648',
-    }).success,
-    false,
-  );
-});
-test('configured mode subsets and zero percent are allowed; invented or duplicate modes are rejected', () => {
-  const modes = [
-    { slug: 'written', percentage: '100', enabled: true },
-    { slug: 'practical', percentage: '', enabled: false },
-    { slug: 'oral', percentage: '0', enabled: true },
-  ];
-  assert.equal(
-    planFormSchema(context).safeParse({ ...validPlan, modes }).success,
-    true,
-  );
-  assert.equal(
-    planFormSchema(context).safeParse({
-      ...validPlan,
-      modes: [{ slug: 'invented', percentage: '100', enabled: true }],
-    }).success,
-    false,
-  );
-  assert.equal(
-    planFormSchema(context).safeParse({
-      ...validPlan,
-      modes: [
-        { slug: 'written', percentage: '50', enabled: true },
-        { slug: 'written', percentage: '50', enabled: true },
-      ],
-    }).success,
-    false,
-  );
-});
-test('working days do not have an invented 366-day ceiling, and disabled tracking requires null', () => {
-  assert.equal(planFormSchema(context).safeParse(validPlan).success, true);
-  const changed = { ...context, attendanceTracking: { enabled: false } };
-  assert.equal(planFormSchema(changed).safeParse(validPlan).success, false);
-  assert.equal(
-    planFormSchema(changed).safeParse({ ...validPlan, totalWorkingDays: '' })
-      .success,
-    true,
-  );
 });
 test('shared-grid validation detects hidden-class overlaps and allows adjacent slots', () => {
   const schema = timetableSchema(context);
@@ -355,64 +123,61 @@ test('timetable accepts configured modes independent of the plan subset', () => 
     true,
   );
 });
-test('preview displays 83/100 and 83% without applying the weights again', () => {
-  const html = renderToStaticMarkup(
-    createElement(ResultSummary, { plan, result }),
-  );
-  assert.match(html, /83 \/ 100 · 83%/);
-  assert.match(html, /Awaiting review/);
-  const draft = renderToStaticMarkup(
-    createElement(ResultSummary, {
-      plan,
-      result: { ...result, approved: true },
-      unsaved: true,
-    }),
-  );
-  assert.match(draft, /Unsaved preview/);
-  assert.doesNotMatch(draft, /✓ Approved/);
-});
-test('partial scope invalidation reaches all pages/filters without invalidating another plan', async () => {
+test('partial scope invalidation reaches all pages/filters without invalidating another exam', async () => {
   const cache = new QueryClient();
   const scope = {
     schoolId: 'school',
     sessionId: 'session',
     examSlug: 'midterm',
     classId: 'class-a',
-    examPlanId: 'plan-a',
     studentId: 'enrollment',
   };
-  const prefix = [['school', 'listExamRoster'], { input: toPlanScope(scope) }];
+  const prefix = [
+    ['school', 'listExamStudents'],
+    { input: toExamScope(scope) },
+  ];
   const first = [
-    ['school', 'listExamRoster'],
-    { input: { ...toPlanScope(scope), page: 1 } },
+    ['school', 'listExamStudents'],
+    { input: { ...toExamScope(scope), page: 1 } },
   ];
   const second = [
-    ['school', 'listExamRoster'],
-    { input: { ...toPlanScope(scope), page: 2 } },
+    ['school', 'listExamStudents'],
+    { input: { ...toExamScope(scope), page: 2 } },
   ];
   const other = [
-    ['school', 'listExamRoster'],
-    { input: { ...toPlanScope(scope), examPlanId: 'plan-b', page: 1 } },
+    ['school', 'listExamStudents'],
+    { input: { ...toExamScope(scope), examSlug: 'other-exam', page: 1 } },
   ];
   [first, second, other].forEach((key) => cache.setQueryData(key, []));
   await cache.invalidateQueries({ queryKey: prefix });
   assert.equal(cache.getQueryState(first)?.isInvalidated, true);
   assert.equal(cache.getQueryState(second)?.isInvalidated, true);
   assert.equal(cache.getQueryState(other)?.isInvalidated, false);
-  assert.deepEqual(toResultScope(scope), {
-    schoolId: 'school',
-    sessionId: 'session',
-    classId: 'class-a',
-    examPlanId: 'plan-a',
-    studentId: 'enrollment',
-  });
   cache.clear();
 });
-test('programmatic scope changes stop when a mounted editor chooses to keep its edits', () => {
-  const unregister = registerNavigationGuard(() => false);
-  assert.equal(confirmNavigation(), false);
+test('programmatic scope changes await the mounted editor’s app dialog decision', async () => {
+  let decide!: (discard: boolean) => void;
+  const unregister = registerNavigationGuard(
+    () =>
+      new Promise<boolean>((resolve) => {
+        decide = resolve;
+      }),
+  );
+  let settled = false;
+  const navigation = confirmNavigation().then((allowed) => {
+    settled = true;
+    return allowed;
+  });
+  await Promise.resolve();
+  assert.equal(
+    settled,
+    false,
+    'scope changes wait while the app dialog is open',
+  );
+  decide(false);
+  assert.equal(await navigation, false);
   unregister();
-  assert.equal(confirmNavigation(), true);
+  assert.equal(await confirmNavigation(), true);
 });
 
 test('a timetable validation failure can be corrected and submitted without stale nested errors', async () => {
@@ -420,8 +185,6 @@ test('a timetable validation failure can be corrected and submitted without stal
   const values: z.infer<ReturnType<typeof timetableFormSchema>> = {
     config: { columns: ['class-a'], rows: [slot('a', '10:00', '09:00')] },
     classId: 'class-a',
-    addClassId: '',
-    message: '',
   };
   const form = new FormApi({
     defaultValues: values,
@@ -442,26 +205,99 @@ test('a timetable validation failure can be corrected and submitted without stal
   unmount();
 });
 
-test('background defaults do not reset a dirty student form or its additional assessments', () => {
-  const initial = resultDefaults(plan, context, result);
-  const form = new FormApi({
-    defaultValues: initial,
-    validators: { onSubmit: resultFormSchema(plan, context) },
+test('copying slot timing preserves dates, stable identities and hidden class assessments', () => {
+  const rows = [
+    slot('first', '09:00', '10:00'),
+    { ...slot('second', '11:00', '12:00', 'class-b'), date: '2026-12-31' },
+  ];
+  const before = structuredClone(rows);
+  const copied = copyTimetableTiming(rows, 'first', 'second');
+  assert.deepEqual(rows, before);
+  assert.deepEqual(copied[1], {
+    ...before[1],
+    startTime: '09:00',
+    endTime: '10:00',
   });
-  const unmount = form.mount();
-  const score = new FieldApi({ form, name: 'marks[0].value' });
-  const unmountScore = score.mount();
-  score.handleChange('66');
-  form.update({
-    defaultValues: resultDefaults(plan, context, {
-      ...result,
-      marks: { written: 50, practical: 10 },
-      coScholastics: { art: 'B' },
-    }),
+  assert.equal(copied[0], rows[0]);
+  assert.equal(copied[1]?.cells, rows[1]?.cells);
+});
+
+test('removing a timetable column deletes only that class and preserves other assignments', () => {
+  const row = {
+    ...slot('first', '09:00', '10:00'),
+    cells: { 'class-a': cell, 'class-b': [cell] },
+  };
+  const config = { columns: ['class-b', 'class-a'], rows: [row] };
+  const removed = removeTimetableColumn(config, 'class-a');
+  assert.deepEqual(removed.columns, ['class-b']);
+  assert.deepEqual(removed.rows[0], { ...row, cells: { 'class-b': [cell] } });
+  assert.deepEqual(config.columns, ['class-b', 'class-a']);
+  assert.deepEqual(config.rows[0]?.cells['class-a'], cell);
+});
+
+test('timetable date defaults follow the local calendar across leap/month/year boundaries', () => {
+  const dated = (date: string) => [
+    { ...slot('first', '09:00', '10:00'), date },
+  ];
+  assert.equal(nextTimetableDate(dated('2028-02-28')), '2028-02-29');
+  assert.equal(nextTimetableDate(dated('2028-02-29')), '2028-03-01');
+  assert.equal(nextTimetableDate(dated('2026-12-31')), '2027-01-01');
+  assert.equal(
+    nextTimetableDate(dated('2026-02-30'), new Date(2026, 9, 15, 23, 59)),
+    '2026-10-15',
+  );
+  assert.equal(parseTimetableDate('2026-02-30'), null);
+  assert.equal(parseTimetableDate('2028-02-29')?.getDate(), 29);
+});
+
+test('combined assessment selection round-trips slugs containing separator characters', () => {
+  const pair = { subjectSlug: 'math::science', modeSlug: 'oral:practical' };
+  assert.deepEqual(decodeTimetablePair(encodeTimetablePair(pair)), pair);
+  assert.equal(decodeTimetablePair(''), null);
+});
+
+test('an incomplete additional timetable assessment points to that selector, not the valid first one', () => {
+  const parsed = timetableSchema(context).safeParse({
+    columns: ['class-a'],
+    rows: [
+      {
+        ...slot('a', '09:00', '10:00'),
+        cells: { 'class-a': [cell, { subjectSlug: '', modeSlug: '' }] },
+      },
+    ],
   });
-  assert.equal(form.state.values.marks[0]?.value, '66');
-  assert.equal(form.state.values.grades[0]?.value, 'A');
-  assert.equal(form.state.values.daysAttended, '180');
-  unmountScore();
-  unmount();
+  assert.equal(parsed.success, false);
+  const issue = parsed.error?.issues.find(
+    (issue) =>
+      issue.code === 'custom' && issue.message.includes('configured subject'),
+  );
+  assert.deepEqual(issue?.path, ['rows', 0, 'cells', 'class-a', 1]);
+});
+
+test('examination actions do not submit a form unless explicitly declared as save actions', () => {
+  assert.match(
+    renderToStaticMarkup(createElement(ExamButton, {}, 'Preview')),
+    /type="button"/,
+  );
+  assert.match(
+    renderToStaticMarkup(createElement(ExamButton, { type: 'submit' }, 'Save')),
+    /type="submit"/,
+  );
+});
+
+test('ambiguous exam saves require reloading while definitive rejections can be corrected', () => {
+  for (const error of [
+    new TypeError('Failed to fetch'),
+    { code: 'INTERNAL_SERVER_ERROR' },
+    null,
+  ])
+    assert.equal(isExamSaveUncertain(error), true);
+  for (const code of [
+    'BAD_REQUEST',
+    'UNAUTHORIZED',
+    'FORBIDDEN',
+    'NOT_FOUND',
+    'CONFLICT',
+  ])
+    assert.equal(isExamSaveUncertain({ code }), false);
 });

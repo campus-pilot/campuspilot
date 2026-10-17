@@ -35,7 +35,7 @@ There is no integrated AI provider, provider configuration, SDK, AI permission, 
 
 ## Rendering and deployment
 
-Existing `S3_*` and `GOTENBERG_URL` settings are reused. Server startup applies migration `0014_document-artifacts.sql` through the existing migration runner. Deploy the migration with the server before using the management Documents page.
+Existing `S3_*` and `GOTENBERG_URL` settings are reused. Server startup applies migration `0015_document-artifacts.sql` through the existing migration runner. Deploy the migration with the server before using the management Documents page.
 
 Sanitized HTML is wrapped in a restrictive CSP and displayed in an empty-sandbox iframe. School and student images are read directly from S3, validated, and embedded as raster data URIs. External assets, scripts, forms, navigation attributes, and prototype access are unavailable. The dev/test Gotenberg service disables JavaScript and both private/public outbound network access. Apply the same Chromium flags in hosted Gotenberg deployments:
 

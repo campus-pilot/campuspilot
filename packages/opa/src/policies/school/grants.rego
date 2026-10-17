@@ -108,7 +108,6 @@ grants contains {"role": role, "action": action} if {
   some action in {"school.exam.result.write", "school.exam.result.delete"}
 }
 
-
 grants contains {"role": role, "action": action} if {
   some role in {"school.principal", "school.manager", "school.exam_coordinator", "school.teacher", "school.accountant"}
   some action in {"school.document.templates.read", "school.document.artifacts.read"}

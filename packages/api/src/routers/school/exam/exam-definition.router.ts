@@ -1,22 +1,23 @@
-import { and, asc, eq } from "drizzle-orm";
-import { classTable } from "@campuspilot/db/schema/class";
-import { schoolSessionTable } from "@campuspilot/db/schema/session";
-import { examPlanTable, examTimetableTable } from "@campuspilot/db/schema/exam";
-import { resolvePaginationInput } from "../../../paginations";
-import { pageResult, route } from "./exam.pagination";
-import { getExam, getExamSession } from "./exam.service";
-import { SCHOOL_ACTIONS } from "@campuspilot/opa/policies/school";
-import { protectedProcedure } from "../../../index";
-import { requireSchoolPermission } from "../../../permissions/school";
-import { rpcError, toRpcError } from "../../../errors";
-import * as dto from "./exam.dto";
+import { examOverview, examOverviews } from './exam-lifecycle.service';
+import { and, asc, eq } from 'drizzle-orm';
+import { classTable } from '@campuspilot/db/schema/class';
+import { schoolSessionTable } from '@campuspilot/db/schema/session';
+import { examPlanTable, examTimetableTable } from '@campuspilot/db/schema/exam';
+import { resolvePaginationInput } from '../../../paginations';
+import { pageResult, route } from './exam.pagination';
+import { getExam, getExamSession } from './exam.service';
+import { SCHOOL_ACTIONS } from '@campuspilot/opa/policies/school';
+import { protectedProcedure } from '../../../index';
+import { requireSchoolPermission } from '../../../permissions/school';
+import { rpcError, toRpcError } from '../../../errors';
+import * as dto from './exam.dto';
 
 export const schoolExamDefinitionRouter = {
   listExams: protectedProcedure
     .route(
       route(
-        "List session exams",
-        "Read configured exam definitions, ordered by their explicit display order and slug.",
+        'List session exams',
+        'Read configured exam definitions, ordered by their explicit display order and slug.',
       ),
     )
     .input(dto.listExamsInputSchema)
@@ -29,17 +30,23 @@ export const schoolExamDefinitionRouter = {
           .map(([slug, exam]) => ({ slug, ...exam }))
           .sort((a, b) => {
             const primary =
-              input.orderBy.field === "order"
+              input.orderBy.field === 'order'
                 ? a.order - b.order
                 : a[input.orderBy.field].localeCompare(b[input.orderBy.field]);
             return (
-              (input.orderBy.direction === "asc" ? primary : -primary) ||
+              (input.orderBy.direction === 'asc' ? primary : -primary) ||
               a.slug.localeCompare(b.slug)
             );
           });
         const { offset, pageSize } = resolvePaginationInput(input);
+        const page = exams.slice(offset, offset + pageSize);
+        const overviews = await examOverviews(
+          context.db,
+          input,
+          page.map((exam) => exam.slug),
+        );
         return pageResult(
-          exams.slice(offset, offset + pageSize),
+          page.map((exam) => ({ ...exam, ...overviews.get(exam.slug)! })),
           exams.length,
           input,
         );
@@ -47,11 +54,29 @@ export const schoolExamDefinitionRouter = {
         throw toRpcError(error);
       }
     }),
+  getExamOverview: protectedProcedure
+    .route(
+      route(
+        'Get examination lifecycle overview',
+        'Read independent plan-generation count, explicitly controlled examination lifecycle and known start/completion timestamps. Generating a plan never starts the exam.',
+      ),
+    )
+    .input(dto.examScopeSchema)
+    .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_EXAMS))
+    .output(dto.examOverviewSchema)
+    .handler(async ({ context, input }) => {
+      try {
+        await getExam(context.db, input);
+        return await examOverview(context.db, input);
+      } catch (error) {
+        throw toRpcError(error);
+      }
+    }),
   getExam: protectedProcedure
     .route(
       route(
-        "Get an exam",
-        "Read one configured examination in a school session.",
+        'Get an exam',
+        'Read one configured examination in a school session.',
       ),
     )
     .input(dto.examScopeSchema)
@@ -67,8 +92,8 @@ export const schoolExamDefinitionRouter = {
   getExamContext: protectedProcedure
     .route(
       route(
-        "Get exam configuration context",
-        "Read class subjects and assessment modes, attendance settings and co-scholastic areas for the exam workspace.",
+        'Get exam configuration context',
+        'Read class subjects and assessment modes, attendance settings and co-scholastic areas for the exam workspace.',
       ),
     )
     .input(dto.examScopeSchema)
@@ -99,8 +124,8 @@ export const schoolExamDefinitionRouter = {
   createExam: protectedProcedure
     .route(
       route(
-        "Create a session exam",
-        "Add a unique exam slug and definition to an active session. School exam administrators only.",
+        'Create a session exam',
+        'Add a unique exam slug and definition to an active session. School exam administrators only.',
       ),
     )
     .input(dto.createExamInputSchema)
@@ -109,10 +134,10 @@ export const schoolExamDefinitionRouter = {
     .handler(async ({ context, input }) => {
       try {
         return await context.db.transaction(async (tx) => {
-          const session = await getExamSession(tx, input, "update");
+          const session = await getExamSession(tx, input, 'update');
           if (Object.hasOwn(session.config.examConfig, input.examSlug))
             throw rpcError.conflict(
-              "An exam with this slug already exists in the session.",
+              'An exam with this slug already exists in the session.',
             );
           const exam = { name: input.name, order: input.order };
           await tx
@@ -137,8 +162,8 @@ export const schoolExamDefinitionRouter = {
   updateExam: protectedProcedure
     .route(
       route(
-        "Update a session exam",
-        "Edit the name and display order of an exam without changing its stable slug.",
+        'Update a session exam',
+        'Edit the name and display order of an exam without changing its stable slug.',
       ),
     )
     .input(dto.updateExamInputSchema)
@@ -150,7 +175,7 @@ export const schoolExamDefinitionRouter = {
           const { session, exam: existing } = await getExam(
             tx,
             input,
-            "update",
+            'update',
           );
           const exam = {
             name: input.name ?? existing.name,
@@ -178,8 +203,8 @@ export const schoolExamDefinitionRouter = {
   deleteExam: protectedProcedure
     .route(
       route(
-        "Delete a session exam",
-        "Remove an exam definition only after all its plans and optional timetable have been deleted.",
+        'Delete a session exam',
+        'Remove an exam definition only after all its plans and optional timetable have been deleted.',
       ),
     )
     .input(dto.examScopeSchema)
@@ -188,7 +213,7 @@ export const schoolExamDefinitionRouter = {
     .handler(async ({ context, input }) => {
       try {
         return await context.db.transaction(async (tx) => {
-          const { session, exam } = await getExam(tx, input, "update");
+          const { session, exam } = await getExam(tx, input, 'update');
           const [plan] = await tx
             .select({ id: examPlanTable.id })
             .from(examPlanTable)
@@ -211,7 +236,7 @@ export const schoolExamDefinitionRouter = {
             .limit(1);
           if (plan || timetable)
             throw rpcError.conflict(
-              "Delete this exam’s plans and timetable before deleting the exam.",
+              'Delete this exam’s plans and timetable before deleting the exam.',
             );
           const examConfig = { ...session.config.examConfig };
           delete examConfig[input.examSlug];

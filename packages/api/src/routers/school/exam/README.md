@@ -22,37 +22,54 @@ and platform roles are independent assignments: a platform role never substitute
 for a school governance grant. Session configuration endpoints apply the same
 exam-governance boundary, including full-config replacements.
 
-## Lifecycle
+## Lifecycle and student-wide API
 
-1. `createExam` defines a stable slug, name and display order for a session.
-2. `createExamPlan` selects an exam, class and subject. It derives modes from the
-   class configuration unless explicitly supplied. Total marks default to 100.
-   Percentages total 100; maximum
-   marks must equal `totalMarks * percentage / 100` and be whole numbers. There is
-   no implicit rounding.
-3. `updateExamPlan` edits a draft or approved plan. Editing an approved plan resets
-   it to draft. Omitted fields stay unchanged; send `totalWorkingDays: null` to
-   explicitly clear that value. Exam, class and subject identifiers cannot be changed
-   in place.
-4. `transitionExamPlan` permits only `draft → approved → active → completed`, or
-   `completed → active` to reopen. Governance transitions require school exam
-   administrator access, including approval of the plan itself.
-5. `upsertExamResult` or atomic `upsertExamResults` saves scores while the plan is
-   active. Each student must be a registered enrollment in its school, session and
-   class. Marks contain exactly the plan's modes and stay within their maxima.
-   Co-scholastic keys must exist in session configuration; grade labels are free
-   text. Attendance is optional, permitted only when enabled, and bounded by the
-   plan's explicitly configured total working days.
-6. `approveExamResult` reviews an existing result, or use `approved: true` during a
-   save. Completion requires approved results for every currently registered
-   enrollment in the class and approval of every saved result.
-7. Completed plans reject all result mutations. Reopening preserves the saved
-   results and their approvals; changing an approved result still requires a school
-   exam administrator.
+1. Configure exam definitions in session settings. `getExamPlanPreview` returns
+   classes, registered enrollment counts, subjects, assessment modes and a
+   configuration hash. `generateExamPlan` atomically creates draft planning snapshots and an explicit **ready** examination from
+   that review. There is no per-subject approval prerequisite. A school principal,
+   manager or exam coordinator must manually start it through `transitionExam`
+   before results may be saved, approved or deleted, including legacy APIs.
+   Each subject has 100 total marks; invalid configuration, existing plans and
+   changed reviews reject generation without partial writes.
+2. `listExamClasses` paginates saved class snapshots, counts and sections;
+   `listExamStudents` paginates registered enrollments with section/name filters
+   and saved/approved subject progress. Lists use the shared 20-item limit.
+3. `getStudentExam` reads one consistent student workspace in a repeatable-read
+   transaction. `saveStudentExam` atomically saves **every** subject and one shared
+   attendance/activity assessment, with explicit `approved` intent. It reuses the
+   existing school write, class approval and school revision permissions.
+4. Session config enables tracking and defines co-scholastic area names.
+   `getExamAssessmentSettings` / `updateExamAssessmentSettings` manage the exam's
+   explicit working-day limit independently from the subject plan snapshots.
+   Attendance is optional, nonnegative, integral and bounded by that limit.
+5. `transitionExam` completes all plans together after registered enrollments have
+   approved results and enabled shared assessments are reviewed. It also rejects
+   any unapproved saved score/shared assessment. Reopening preserves approvals;
+   the same single action opens pre-existing legacy draft/approved subject plans.
 
-Historical, inactive sessions can be read but cannot be mutated. Plans cannot be
-deleted after activation. Exam definitions cannot be deleted or removed through a
-session-config replacement while any plans or timetable still reference them.
+Migration 0015 adds `exam_lifecycle` with independent ready/active/completed state
+and nullable known start/completion timestamps. `getExamOverview` and `listExams`
+expose plan generation and exam status independently. Legacy states are migrated
+without fabricating transition times. Migration 0014 adds `exam_assessment_settings` and `exam_student_assessment`.
+The latter stores one shared attendance/activity/approval record per exam and
+student enrollment. Legacy `exam_result` metadata stays preserved separately;
+new saves do not infer or overwrite shared values from those old fields.
+
+Mutations lock session before subject plans, with plans ordered by ID. Academic
+writes, shared metadata and approval commit or roll back together. Working-day
+changes lock the session exclusively and cannot invalidate recorded attendance.
+Inactive sessions and completed plans remain protected independently of role.
+
+### Compatibility procedures
+
+Existing single-plan/result CRUD, roster, batch saves and transitions remain for
+old API consumers. `createExamPlan` still creates a draft; `transitionExamPlan`
+retains its legacy draft → approved → active → completed contract. They no longer
+drive management navigation or automatic creation. Subject marks snapshots remain
+locked after activation. Exams with referenced plans/timetables cannot be deleted
+or removed by replacing session configuration. The normal new flow uses
+`generateExamPlan`, `saveStudentExam` and exam-wide `transitionExam`.
 
 ## Save and approve
 
@@ -108,7 +125,9 @@ assessment settings for API consumers.
 ## Concurrency
 
 All exam mutations lock the academic session before the plan. Definition and
-shared timetable writes exclusively lock the session. Result saves, reviews,
+shared timetable writes exclusively lock the session. Automatic generation also
+locks the session and reviewed class rows, preventing competing creation and
+configuration updates from overwriting an existing plan. Result saves, reviews,
 deletes and lifecycle transitions lock the same plan row, so they cannot race
 with completion. Batches validate every row before upserting in one transaction.
 Result entry also locks the referenced student and admission rows for the duration

@@ -1,11 +1,12 @@
 'use client';
 
-import { Suspense, type ReactNode } from 'react';
+import { Fragment, Suspense, type ReactNode } from 'react';
 import {
   flexRender,
   getCoreRowModel,
   useReactTable,
   type ColumnDef,
+  type Row,
   type TableOptions,
 } from '@tanstack/react-table';
 import { ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react';
@@ -33,6 +34,10 @@ export type DataTableProps<TData> = Omit<
   emptyMessage?: string;
   showPagination?: boolean;
   onRowClick?: (row: TData) => void;
+  /** Renders a full-width detail row directly beneath an expanded parent row.
+   * Expansion state and the accessible toggle control belong to the caller.
+   */
+  renderExpandedRow?: (row: Row<TData>) => ReactNode;
 };
 
 
@@ -52,6 +57,7 @@ export function DataTable<TData>({
   emptyMessage = 'No results found.',
   showPagination = false,
   onRowClick,
+  renderExpandedRow,
   ...options
 }: DataTableProps<TData>) {
 
@@ -102,33 +108,41 @@ export function DataTable<TData>({
         <TableBody>
           {rows.length > 0 ? (
             rows.map((row) => (
-              <TableRow
-                key={row.id}
-                data-state={row.getIsSelected() && 'selected'}
-                className={onRowClick ? 'cursor-pointer hover:bg-muted/50' : undefined}
-                onClick={
-                  onRowClick
-                    ? (event) => {
-                        const target = event.target as HTMLElement | null;
-                        if (
-                          target?.closest(
-                            'button, a, input, select, textarea, [role="button"], [role="menuitem"], [data-slot="dropdown-menu-trigger"]',
-                          )
-                        ) {
-                          return;
+              <Fragment key={row.id}>
+                <TableRow
+                  data-state={row.getIsSelected() && 'selected'}
+                  className={onRowClick ? 'cursor-pointer hover:bg-muted/50' : undefined}
+                  onClick={
+                    onRowClick
+                      ? (event) => {
+                          const target = event.target as HTMLElement | null;
+                          if (
+                            target?.closest(
+                              'button, a, input, select, textarea, [role="button"], [role="menuitem"], [data-slot="dropdown-menu-trigger"]',
+                            )
+                          ) {
+                            return;
+                          }
+                          onRowClick(row.original);
                         }
-                        onRowClick(row.original);
-                      }
-                    : undefined
-                }
-              >
+                      : undefined
+                  }
+                >
 
-                {row.getVisibleCells().map((cell) => (
-                  <TableCell key={cell.id}>
-                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                  </TableCell>
-                ))}
-              </TableRow>
+                  {row.getVisibleCells().map((cell) => (
+                    <TableCell key={cell.id}>
+                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                    </TableCell>
+                  ))}
+                </TableRow>
+                {renderExpandedRow && row.getIsExpanded() && (
+                  <TableRow className="bg-muted/20 hover:bg-muted/20">
+                    <TableCell colSpan={row.getVisibleCells().length}>
+                      {renderExpandedRow(row)}
+                    </TableCell>
+                  </TableRow>
+                )}
+              </Fragment>
             ))
           ) : (
             <TableRow>

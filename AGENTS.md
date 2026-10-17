@@ -50,6 +50,33 @@ For reusable compopnents / layouts that need api calls they should be placed in 
 
 use env directly from `@campuspilot/env` never use `import.meta` or `process.env`
 
-## Local document preview
+## Follow existing UI patterns
 
-Reusable user-authorized test login and launch instructions are in `docs/local-document-preview.md`. Read that note before testing this preview. Preserve the running preview and its user edits when refreshing code.
+Read [Management UI patterns](apps/management/docs/ui-patterns.md) before changing
+management screens. It records the reference implementations, layout and feedback
+conventions, mobile verification expectations, and examination redesign decisions.
+
+Before implementing or redesigning a workflow, inspect existing screens with the
+same behavior (admission/staff tables, classroom/admission workspaces and student
+forms). Reuse shared controls and layouts instead of introducing local sizing or
+navigation conventions. Buttons and inputs use their shared default sizes; do not
+inject taller minimum heights or padding into feature wrappers. Tables should keep
+the standard compact row density. Use TableSearchBar and TableFilterBar together
+as on admission tables. Detail workspaces use left secondary navigation on desktop
+and a section selector on mobile, with related actions in a top-right overflow
+menu. Keep section links in secondary navigation rather than duplicating them in
+action menus; examination menus contain lifecycle actions only. Breadcrumbs provide
+back navigation; do not add feature-level back buttons.
+
+Use app dialogs for confirmation, removal and unsaved-change navigation. Do not
+call window.confirm, window.alert or window.prompt. Await navigation guard decisions
+before switching school/session. Native beforeunload warnings are only for browser
+reload/tab closure, where an asynchronous app dialog cannot prevent document exit.
+
+For persistent, actionable setup warnings use AppShellAlert from
+@campuspilot/components/app-shell, as in classroom-workspace.tsx. Supply a stable,
+resource-scoped slug, type="warning", concise message, and a permission-gated
+actionLabel/onAction (or actionHref). onAction receives closeDialog; close the
+alert list before opening the relevant editor. Remove the registration when the
+condition is resolved. Use adjacent field errors and transient save feedback for
+validation/submission errors rather than adding them to the shell warning list.

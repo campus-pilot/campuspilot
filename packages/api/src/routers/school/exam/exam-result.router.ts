@@ -1,31 +1,32 @@
-import { z } from "zod";
-import { and, asc, count, desc, eq } from "drizzle-orm";
-import { admissionTable } from "@campuspilot/db/schema/admission";
-import { studentTable } from "@campuspilot/db/schema/student";
-import { examResultTable } from "@campuspilot/db/schema/exam";
-import { CLASS_ACTIONS } from "@campuspilot/opa/policies/class";
-import { requireClassPermission } from "../../../permissions/class";
-import { requireExamResultPermissions } from "../../../permissions/exam";
-import { resolvePaginationInput } from "../../../paginations";
-import { pageResult, route } from "./exam.pagination";
+import { z } from 'zod';
+import { and, asc, count, desc, eq } from 'drizzle-orm';
+import { admissionTable } from '@campuspilot/db/schema/admission';
+import { studentTable } from '@campuspilot/db/schema/student';
+import { examResultTable } from '@campuspilot/db/schema/exam';
+import { CLASS_ACTIONS } from '@campuspilot/opa/policies/class';
+import { requireClassPermission } from '../../../permissions/class';
+import { requireExamResultPermissions } from '../../../permissions/exam';
+import { resolvePaginationInput } from '../../../paginations';
+import { pageResult, route } from './exam.pagination';
 import {
   getPlan,
   requireActivePlan,
+  requireStartedExam,
   requireRevisionPermission,
   saveResults,
-} from "./exam.service";
-import { SCHOOL_ACTIONS } from "@campuspilot/opa/policies/school";
-import { protectedProcedure } from "../../../index";
-import { requireSchoolPermission } from "../../../permissions/school";
-import { rpcError, toRpcError } from "../../../errors";
-import * as dto from "./exam.dto";
+} from './exam.service';
+import { SCHOOL_ACTIONS } from '@campuspilot/opa/policies/school';
+import { protectedProcedure } from '../../../index';
+import { requireSchoolPermission } from '../../../permissions/school';
+import { rpcError, toRpcError } from '../../../errors';
+import * as dto from './exam.dto';
 
 export const schoolExamResultRouter = {
   listExamResults: protectedProcedure
     .route(
       route(
-        "List exam results",
-        "Read saved results for one exam plan in student ID and result ID order.",
+        'List exam results',
+        'Read saved results for one exam plan in student ID and result ID order.',
       ),
     )
     .input(dto.listExamResultsInputSchema)
@@ -48,7 +49,7 @@ export const schoolExamResultRouter = {
           createdAt: examResultTable.createdAt,
           approved: examResultTable.approved,
         };
-        const sort = input.orderBy.direction === "asc" ? asc : desc;
+        const sort = input.orderBy.direction === 'asc' ? asc : desc;
         const { offset, pageSize } = resolvePaginationInput(input);
         const [items, [total]] = await Promise.all([
           context.db
@@ -75,8 +76,8 @@ export const schoolExamResultRouter = {
   listExamRoster: protectedProcedure
     .route(
       route(
-        "List exam result entry roster",
-        "Read currently registered students in the plan’s class and session alongside their optional result, ordered by student name and ID.",
+        'List exam result entry roster',
+        'Read currently registered students in the plan’s class and session alongside their optional result, ordered by student name and ID.',
       ),
     )
     .input(dto.listExamRosterInputSchema)
@@ -98,7 +99,7 @@ export const schoolExamResultRouter = {
           admissionNo: admissionTable.admissionNo,
           rollNo: studentTable.rollNo,
         };
-        const sort = input.orderBy.direction === "asc" ? asc : desc;
+        const sort = input.orderBy.direction === 'asc' ? asc : desc;
         const [items, [total]] = await Promise.all([
           context.db
             .select({
@@ -144,8 +145,8 @@ export const schoolExamResultRouter = {
   getExamResult: protectedProcedure
     .route(
       route(
-        "Get a student exam result",
-        "Read the saved result for an independently scoped plan and student.",
+        'Get a student exam result',
+        'Read the saved result for an independently scoped plan and student.',
       ),
     )
     .input(dto.resultScopeSchema)
@@ -164,7 +165,7 @@ export const schoolExamResultRouter = {
             ),
           )
           .limit(1);
-        if (!result) throw rpcError.notFound("Exam result");
+        if (!result) throw rpcError.notFound('Exam result');
         return result;
       } catch (error) {
         throw toRpcError(error);
@@ -173,8 +174,8 @@ export const schoolExamResultRouter = {
   upsertExamResult: protectedProcedure
     .route(
       route(
-        "Save a student exam result",
-        "Create or update a result while the plan is active. Teachers can enter any class; approved=true additionally requires the assigned class teacher or a school exam administrator.",
+        'Save a student exam result',
+        'Create or update a result while the plan is active. Teachers can enter any class; approved=true additionally requires the assigned class teacher or a school exam administrator.',
       ),
     )
     .input(dto.upsertExamResultInputSchema)
@@ -195,8 +196,8 @@ export const schoolExamResultRouter = {
   upsertExamResults: protectedProcedure
     .route(
       route(
-        "Save a batch of exam results",
-        "Atomically save up to 100 students with explicit approval flags and an additional assigned-class approval check. Any failure rolls back the complete batch.",
+        'Save a batch of exam results',
+        'Atomically save up to 100 students with explicit approval flags and an additional assigned-class approval check. Any failure rolls back the complete batch.',
       ),
     )
     .input(dto.upsertExamResultsInputSchema)
@@ -215,8 +216,8 @@ export const schoolExamResultRouter = {
   approveExamResult: protectedProcedure
     .route(
       route(
-        "Review an exam result",
-        "Approve a saved result as its assigned class teacher or a school exam administrator. Only administrators can revoke or change an existing approval.",
+        'Review an exam result',
+        'Approve a saved result as its assigned class teacher or a school exam administrator. Only administrators can revoke or change an existing approval.',
       ),
     )
     .input(dto.approveExamResultInputSchema)
@@ -227,6 +228,7 @@ export const schoolExamResultRouter = {
       try {
         return await context.db.transaction(async (tx) => {
           const { plan } = await getPlan(tx, input, true);
+          await requireStartedExam(tx, plan);
           requireActivePlan(plan);
           const [result] = await tx
             .select()
@@ -238,7 +240,7 @@ export const schoolExamResultRouter = {
               ),
             )
             .limit(1);
-          if (!result) throw rpcError.notFound("Exam result");
+          if (!result) throw rpcError.notFound('Exam result');
           if (result.approved === input.approved) return result;
           requireRevisionPermission(
             result.approved,
@@ -258,8 +260,8 @@ export const schoolExamResultRouter = {
   deleteExamResult: protectedProcedure
     .route(
       route(
-        "Delete a student exam result",
-        "Delete an active-plan result. Teachers may delete unapproved results across the school; approved results require a school exam administrator.",
+        'Delete a student exam result',
+        'Delete an active-plan result. Teachers may delete unapproved results across the school; approved results require a school exam administrator.',
       ),
     )
     .input(dto.resultScopeSchema)
@@ -270,6 +272,7 @@ export const schoolExamResultRouter = {
       try {
         return await context.db.transaction(async (tx) => {
           const { plan } = await getPlan(tx, input, true);
+          await requireStartedExam(tx, plan);
           requireActivePlan(plan);
           const [result] = await tx
             .select()
@@ -281,7 +284,7 @@ export const schoolExamResultRouter = {
               ),
             )
             .limit(1);
-          if (!result) throw rpcError.notFound("Exam result");
+          if (!result) throw rpcError.notFound('Exam result');
           requireRevisionPermission(
             result.approved,
             context.canReviseExamResults,

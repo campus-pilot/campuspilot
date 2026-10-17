@@ -1,36 +1,50 @@
 'use client';
-import { useRouter } from 'next/navigation';
-import { DocumentExportLink } from '@/components/documents/document-export-link';
-import { useForm } from '@tanstack/react-form';
+import type { ReactNode } from 'react';
+import Link from 'next/link';
+import { usePathname, useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { z } from 'zod';
+import { ClipboardCheck, ClipboardList, CalendarDays, Settings2 } from 'lucide-react';
+import { Badge } from '@campuspilot/ui/components/badge';
+import { Button } from '@campuspilot/ui/components/button';
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from '@campuspilot/ui/components/select';
+import { ExamNavigationLayout } from '@campuspilot/components/exam/exam-navigation-layout';
 import { SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
 import { RequirePermissions } from '@/components/require-permissions';
-import { client, orpc } from '@/lib/orpc';
+import { orpc } from '@/lib/orpc';
+import { ExamSession, LoadingExam, Notice, ReadError } from './exam-common';
 import {
-  ExamButton,
-  ExamFrame,
-  ExamSession,
-  LoadingExam,
-  Notice,
-  ReadError,
-  useExamCache,
-} from './exam-common';
-import { examHref, schoolPermission, type ExamScope } from './exam-model';
-import { ExamDefinitionForm } from './exam-definition-form';
-import { ExamPlans } from './exam-plans';
-import { ExamTimetable } from './exam-timetable';
+  examHref,
+  examStatusLabel,
+  schoolPermission,
+  type ExamScope,
+} from './exam-model';
+import { ExamActions } from './exam-lifecycle';
 import { confirmNavigation } from '@/lib/navigation-guard';
-import { ExamCommand } from './exam-command';
 
-export function ExamWorkspace({ scope }: { scope: ExamScope }) {
+export function ExamWorkspace({
+  scope,
+  children,
+}: {
+  scope: ExamScope;
+  children: ReactNode;
+}) {
   return (
     <RequirePermissions
       permissions={schoolPermission(scope.schoolId, SCHOOL_ACTIONS.READ_EXAMS)}
       fallback={<Notice>Examination access is unavailable.</Notice>}
     >
       <ExamSession scope={scope}>
-        {(active) => <WorkspaceData scope={scope} active={active} />}
+        {(active) => (
+          <WorkspaceData scope={scope} active={active}>
+            {children}
+          </WorkspaceData>
+        )}
       </ExamSession>
     </RequirePermissions>
   );
@@ -38,178 +52,191 @@ export function ExamWorkspace({ scope }: { scope: ExamScope }) {
 function WorkspaceData({
   scope,
   active,
+  children,
 }: {
   scope: ExamScope;
   active: boolean;
+  children: ReactNode;
 }) {
   const query = useQuery(
     orpc.school.getExamContext.queryOptions({ input: scope }),
   );
-  const queries = useExamCache();
-  const router = useRouter();
-  const form = useForm({
-    defaultValues: { tab: 'plans', editing: false },
-    validators: {
-      onChange: z.object({
-        tab: z.enum(['plans', 'timetable']),
-        editing: z.boolean(),
-      }),
-    },
-  });
-  if (query.isPending) return <LoadingExam />;
-  if (query.isError && !query.data)
+  const overview = useQuery(
+    orpc.school.getExamOverview.queryOptions({ input: scope }),
+  );
+  if (query.isPending || overview.isPending) return <LoadingExam />;
+  if (!query.data || !overview.data)
     return (
-      <ExamFrame
-        title="Exam unavailable"
-        description="Review the requested exam or retry."
-        back={{ href: examHref(scope), label: 'Examinations' }}
-      >
-        <ReadError error={query.error} retry={query.refetch} />
-      </ExamFrame>
+      <ReadError
+        error={query.error ?? overview.error}
+        retry={() => Promise.all([query.refetch(), overview.refetch()])}
+      />
     );
-  const context = query.data!;
   return (
-    <ExamFrame
-      title={context.exam.name}
-      description="Class and subject plans, results, and the optional shared timetable."
-      back={{ href: examHref(scope), label: 'Examinations' }}
+    <WorkspaceLayout
+      scope={scope}
+      title={query.data.exam.name}
+      overview={overview.data}
+      actions={
+        <RequirePermissions
+          permissions={schoolPermission(
+            scope.schoolId,
+            SCHOOL_ACTIONS.READ_EXAM_PLANS,
+          )}
+        >
+          <WorkspaceActions
+            scope={scope}
+            active={active && !query.isError && !overview.isError}
+            attendanceEnabled={query.data.attendanceTracking.enabled}
+            overview={overview.data}
+          />
+        </RequirePermissions>
+      }
     >
-      {query.isError && <ReadError error={query.error} retry={query.refetch} />}
-      <div className="flex flex-wrap gap-2">
-        <DocumentExportLink scope={scope} type="report_card" examSlug={scope.examSlug} label="Report card PDFs" />
-        <DocumentExportLink scope={scope} type="admit_card" examSlug={scope.examSlug} label="Admit card PDFs" />
-        <DocumentExportLink scope={scope} type="timetable" examSlug={scope.examSlug} label="Timetable PDF" />
+      {(query.isError || overview.isError) && (
+        <ReadError
+          error={query.error ?? overview.error}
+          retry={() => Promise.all([query.refetch(), overview.refetch()])}
+        />
+      )}
+      {children}
+    </WorkspaceLayout>
+  );
+}
+function WorkspaceActions(
+  props: Omit<Parameters<typeof ExamActions>[0], 'totalWorkingDays'>,
+) {
+  const query = useQuery(
+    orpc.school.getExamAssessmentSettings.queryOptions({ input: props.scope }),
+  );
+  if (!query.data || query.isError)
+    return query.isError ? (
+      <ReadError error={query.error} retry={query.refetch} />
+    ) : null;
+  return (
+    <ExamActions {...props} totalWorkingDays={query.data.totalWorkingDays} />
+  );
+}
+function WorkspaceLayout({
+  scope,
+  title,
+  overview,
+  actions,
+  children,
+}: {
+  scope: ExamScope;
+  title: string;
+  overview: {
+    planCount: number;
+    status: 'ready' | 'active' | 'completed' | null;
+  };
+  actions: ReactNode;
+  children: ReactNode;
+}) {
+  const path = usePathname();
+  const router = useRouter();
+  const base = examHref(scope, scope.examSlug);
+  const section = path.endsWith('/settings') ? 'settings' : path.endsWith('/timetable') ? 'timetable' : 'results';
+  const items = [
+    {
+      id: 'results',
+      label: 'Results',
+      icon: ClipboardList,
+      href: base,
+      action: SCHOOL_ACTIONS.READ_EXAM_PLANS,
+    },
+    ...(overview.planCount > 0
+      ? [
+          {
+            id: 'timetable',
+            label: 'Timetable',
+            icon: CalendarDays,
+            href: `${base}/timetable`,
+            action: SCHOOL_ACTIONS.READ_EXAM_TIMETABLE,
+          },
+          {
+            id: 'settings', label: 'Settings', icon: Settings2,
+            href: `${base}/settings`, action: SCHOOL_ACTIONS.READ_EXAM_PLANS,
+          },
+        ]
+      : []),
+  ];
+  const selected =
+    items.find((item) => item.id === section) ??
+    items[0]!;
+  const heading = (
+    <div className="flex min-w-0 flex-1 items-center gap-3">
+      <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
+        <ClipboardCheck className="size-5" aria-hidden />
+      </span>
+      <div className="flex min-w-0 flex-col gap-1">
+        <h1 className="truncate text-xl font-semibold tracking-tight">
+          {title}
+        </h1>
+        <Badge variant="outline" className="w-fit">
+          {examStatusLabel(overview.status)}
+        </Badge>
       </div>
-      <form.Subscribe selector={(state) => state.values}>
-        {({ tab, editing }) => (
-          <>
-            {(active || editing) && (
-              <details>
-                <summary className="flex min-h-11 cursor-pointer items-center text-sm">
-                  Exam actions
-                </summary>
-                <div className="flex flex-col gap-3 pt-2">
-                  <RequirePermissions
-                    permissions={schoolPermission(
-                      scope.schoolId,
-                      SCHOOL_ACTIONS.UPDATE_EXAM,
-                    )}
-                  >
-                    {editing ? (
-                      <ExamDefinitionForm
-                        scope={scope}
-                        exam={context.exam}
-                        active={active && !query.isError}
-                        onClose={() => form.setFieldValue('editing', false)}
-                      />
-                    ) : (
-                      <ExamButton
-                        variant="outline"
-                        onClick={() => form.setFieldValue('editing', true)}
-                      >
-                        Edit exam
-                      </ExamButton>
-                    )}
-                  </RequirePermissions>
-                  <ExamCommand
-                    permissions={schoolPermission(
-                      scope.schoolId,
-                      SCHOOL_ACTIONS.DELETE_EXAM,
-                    )}
-                    label="Delete exam"
-                    destructive
-                    explanation={`Delete ${context.exam.name}? Plans and the shared timetable must be explicitly removed first. Referenced exams cannot be deleted.`}
-                    run={async () => {
-                      await client.school.deleteExam(scope);
-                      queries.cache.removeQueries({
-                        queryKey: orpc.school.getExamContext.key({
-                          input: scope,
-                        }),
-                      });
-                      queries.cache.removeQueries({
-                        queryKey: orpc.school.getExam.key({ input: scope }),
-                      });
-                      await queries.definitions(scope, scope.examSlug);
-                      router.push(examHref(scope));
-                    }}
-                  />
-                </div>
-              </details>
-            )}
-            <div
-              role="tablist"
-              aria-label="Exam workspace"
-              className="flex flex-wrap gap-2"
-            >
+    </div>
+  );
+  return (
+    <ExamNavigationLayout
+      heading={heading}
+      actions={actions}
+      navigation={
+        overview.planCount > 0
+          ? items.map((item) => (
               <RequirePermissions
-                permissions={schoolPermission(
-                  scope.schoolId,
-                  SCHOOL_ACTIONS.READ_EXAM_PLANS,
-                )}
+                key={item.id}
+                permissions={schoolPermission(scope.schoolId, item.action)}
               >
-                <ExamButton
-                  role="tab"
-                  aria-selected={tab === 'plans'}
-                  variant={tab === 'plans' ? 'default' : 'outline'}
-                  onClick={() => {
-                    if (tab !== 'plans' && !confirmNavigation()) return;
-                    form.setFieldValue('tab', 'plans');
-                  }}
+                <Button
+                  asChild
+                  variant={item.id === selected.id ? 'secondary' : 'ghost'}
+                  className="justify-start"
                 >
-                  Plans &amp; results
-                </ExamButton>
+                  <Link href={item.href}>
+                    <item.icon aria-hidden />
+                    {item.label}
+                  </Link>
+                </Button>
               </RequirePermissions>
-              <RequirePermissions
-                permissions={schoolPermission(
-                  scope.schoolId,
-                  SCHOOL_ACTIONS.READ_EXAM_TIMETABLE,
-                )}
-              >
-                <ExamButton
-                  role="tab"
-                  aria-selected={tab === 'timetable'}
-                  variant={tab === 'timetable' ? 'default' : 'outline'}
-                  onClick={() => {
-                    if (tab !== 'timetable' && !confirmNavigation()) return;
-                    form.setFieldValue('tab', 'timetable');
-                  }}
+            ))
+          : null
+      }
+      mobileNavigation={
+        overview.planCount > 0 ? (
+          <Select
+            value={selected.id}
+            onValueChange={async (value) => {
+              const item = items.find((item) => item.id === value);
+              if (item && await confirmNavigation()) router.push(item.href);
+            }}
+          >
+            <SelectTrigger className="w-full" aria-label="Examination section">
+              <SelectValue>
+                <selected.icon aria-hidden />
+                {selected.label}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {items.map((item) => (
+                <RequirePermissions
+                  key={item.id}
+                  permissions={schoolPermission(scope.schoolId, item.action)}
                 >
-                  Timetable
-                </ExamButton>
-              </RequirePermissions>
-            </div>
-            {tab === 'plans' ? (
-              <RequirePermissions
-                permissions={schoolPermission(
-                  scope.schoolId,
-                  SCHOOL_ACTIONS.READ_EXAM_PLANS,
-                )}
-                fallback={<Notice>Plan access is unavailable.</Notice>}
-              >
-                <ExamPlans
-                  scope={scope}
-                  context={context}
-                  active={active && !query.isError}
-                />
-              </RequirePermissions>
-            ) : (
-              <RequirePermissions
-                permissions={schoolPermission(
-                  scope.schoolId,
-                  SCHOOL_ACTIONS.READ_EXAM_TIMETABLE,
-                )}
-                fallback={<Notice>Timetable access is unavailable.</Notice>}
-              >
-                <ExamTimetable
-                  scope={scope}
-                  context={context}
-                  active={active && !query.isError}
-                />
-              </RequirePermissions>
-            )}
-          </>
-        )}
-      </form.Subscribe>
-    </ExamFrame>
+                  <SelectItem value={item.id}>
+                    <item.icon aria-hidden />
+                    {item.label}
+                  </SelectItem>
+                </RequirePermissions>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : null
+      }
+    >
+      {children}
+    </ExamNavigationLayout>
   );
 }

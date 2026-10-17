@@ -1,4 +1,5 @@
 'use client';
+import { ConfirmationDialog } from '@campuspilot/components/confirmation-dialog';
 import { toast } from '@campuspilot/ui/lib/toast';
 import { useForm } from '@tanstack/react-form';
 import { z } from 'zod';
@@ -51,7 +52,8 @@ function CommandForm({
       try {
         await run();
         toast.success(`${label}: successful.`);
-        form.reset({ confirming: false, message: `${label}: successful.` });
+        form.reset();
+        form.setFieldValue('message', `${label}: successful.`);
       } catch (error) {
         form.setErrorMap({
           onSubmit: { form: errorMessage(error), fields: {} },
@@ -61,61 +63,43 @@ function CommandForm({
     },
   });
   return (
-    <form
-      onSubmit={(event) => {
-        event.preventDefault();
-        void form.handleSubmit();
-      }}
-      className="flex flex-col gap-2"
+    <form.Subscribe
+      selector={(state) => ({
+        ...state.values,
+        pending: state.isSubmitting,
+        canSubmit: state.canSubmit,
+        errors: state.errors,
+      })}
     >
-      <form.Subscribe
-        selector={(state) => ({
-          ...state.values,
-          isSubmitting: state.isSubmitting,
-          errors: state.errors,
-        })}
-      >
-        {({ confirming, message, isSubmitting, errors }) => (
-          <>
-            {confirming ? (
-              <>
-                <Notice>{explanation}</Notice>
-                <div className="flex flex-wrap gap-3">
-                  <ExamButton
-                    type="submit"
-                    variant={destructive ? 'destructive' : 'default'}
-                    disabled={isSubmitting}
-                  >
-                    {isSubmitting ? 'Working…' : label}
-                  </ExamButton>
-                  <ExamButton
-                    type="button"
-                    variant="outline"
-                    disabled={isSubmitting}
-                    onClick={() => form.setFieldValue('confirming', false)}
-                  >
-                    Cancel
-                  </ExamButton>
-                </div>
-              </>
-            ) : (
-              <ExamButton
-                type="button"
-                variant={destructive ? 'destructive' : 'outline'}
-                onClick={() => {
-                  form.setErrorMap({});
-                  form.setFieldValue('message', '');
-                  form.setFieldValue('confirming', true);
-                }}
-              >
-                {label}
-              </ExamButton>
-            )}
-            {message && <Notice>{message}</Notice>}
+      {({ confirming, message, pending, canSubmit, errors }) => (
+        <div className="flex flex-col gap-2">
+          <ExamButton
+            variant={destructive ? 'destructive' : 'outline'}
+            onClick={() => {
+              form.setErrorMap({});
+              form.setFieldValue('message', '');
+              form.setFieldValue('confirming', true);
+            }}
+          >
+            {label}
+          </ExamButton>
+          <ConfirmationDialog
+            open={confirming}
+            title={label}
+            description={explanation}
+            confirmLabel={pending ? 'Working…' : label}
+            confirmVariant={destructive ? 'destructive' : 'default'}
+            pending={pending}
+            onOpenChange={(open) => form.setFieldValue('confirming', open)}
+            onConfirm={() => {
+              if (canSubmit && !pending) void form.handleSubmit();
+            }}
+          >
             <Issues errors={errors} />
-          </>
-        )}
-      </form.Subscribe>
-    </form>
+          </ConfirmationDialog>
+          {message && <Notice>{message}</Notice>}
+        </div>
+      )}
+    </form.Subscribe>
   );
 }
