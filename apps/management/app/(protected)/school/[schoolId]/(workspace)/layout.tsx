@@ -2,6 +2,8 @@
 
 import type { ReactNode } from 'react';
 import { useParams, usePathname } from 'next/navigation';
+import { SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
+import { RequirePermissions } from '@/components/require-permissions';
 import type { AppShellNavigationEntry } from '@campuspilot/components/app-shell';
 import {
   Bell,
@@ -40,7 +42,7 @@ import {
   classroomPage,
 } from './sessions/[sessionId]/classroom/_route';
 import { dashboardPage } from './sessions/[sessionId]/_route';
-import { examPage } from './sessions/[sessionId]/exam/_route';
+import { examPage, examDetailsPage } from './sessions/[sessionId]/exam/_route';
 import { noticesPage } from './sessions/[sessionId]/notices/_route';
 import { staffPage } from './staff/_route';
 
@@ -55,6 +57,7 @@ const pages: ManagementPageDescriptor<any>[] = [
   classStudentsPage,
   classroomDetailsPage,
   examPage,
+  examDetailsPage,
   billingPage,
 ];
 
@@ -112,7 +115,8 @@ function navigationFor(
         {
           type: 'item',
           id: 'exam',
-          label: 'Exam',
+          label: 'Examinations',
+          wrap: children => <RequirePermissions permissions={{ action: SCHOOL_ACTIONS.READ_EXAMS, resource: { kind: 'school', schoolId } }}>{children}</RequirePermissions>,
           href: sessionHref('/exam'),
           icon: ClipboardCheck,
         },

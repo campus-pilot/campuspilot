@@ -8,6 +8,14 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 <!-- END:nextjs-agent-rules -->
 
+## UI conventions
+
+Read [Management UI patterns](docs/ui-patterns.md) before implementing or redesigning
+a screen. Inspect the linked admission/classroom references and shared components
+before choosing layout, navigation, control sizes, tables or warning presentation.
+The guide also records the examination-specific decisions and earlier approaches
+that user feedback replaced.
+
 ## Permission-gated UI
 
 Use `RequirePermissions` from `@/components/require-permissions` everywhere a

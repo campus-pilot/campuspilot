@@ -447,3 +447,57 @@ describe('school.session Router Integration', () => {
     });
   });
 });
+
+describe('session exam governance cannot bypass exam permissions', () => {
+  it('allows platform session administration while rejecting exam configuration changes', async () => {
+    const school = await createTestSchool();
+    const session = await createTestSession({
+      schoolId: school.id,
+      sessionStartYear: 2030,
+      sessionEndYear: 2031,
+      isActive: true,
+    });
+    const admin = createTestClient(await createAdminSession());
+    await expect(
+      admin.school.updateSession({
+        schoolId: school.id,
+        sessionId: session.id,
+        sessionConfig: { examConfig: { final: { name: 'Final', order: 1 } } },
+      }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(
+      admin.school.createSession({
+        schoolId: school.id,
+        sessionStartYear: 2031,
+        sessionEndYear: 2032,
+        sessionConfig: { examConfig: { final: { name: 'Final', order: 1 } } },
+      }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    expect(
+      (
+        await admin.school.updateSession({
+          schoolId: school.id,
+          sessionId: session.id,
+          sessionConfig: { coScholasticAreas: { art: { name: 'Art' } } },
+        })
+      ).sessionConfig!.coScholasticAreas.art!.name,
+    ).toBe('Art');
+    const manager = createTestClient(
+      (await createSchoolStaffSession(school.id, [{ role: 'manager' }]))
+        .session,
+    );
+    const updated = await manager.school.updateSession({
+      schoolId: school.id,
+      sessionId: session.id,
+      sessionConfig: { examConfig: { final: { name: 'Final', order: 1 } } },
+    });
+    expect(updated.sessionConfig!.examConfig.final!.name).toBe('Final');
+    await expect(
+      admin.school.updateSession({
+        schoolId: school.id,
+        sessionId: session.id,
+        sessionConfig: null,
+      }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+});

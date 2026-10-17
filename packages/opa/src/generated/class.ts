@@ -3,6 +3,7 @@
 
 export const CLASS_ACTIONS = {
   ADD_STUDENT: 'class.student.add',
+  APPROVE_EXAM_RESULTS: 'class.exam.result.approve',
 } as const;
 
 export type ClassAction =

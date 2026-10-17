@@ -1,6 +1,6 @@
-import { ClipboardCheck } from 'lucide-react';
-import { ModulePlaceholder } from '@/components/module-placeholder';
+import { ExamList } from '@/components/exam/exam-list';
 
-export default function ExamPage() {
-  return <ModulePlaceholder icon={ClipboardCheck} title="Exam" description="Exam planning and administration will be available here." />;
+export default async function Page({ params }: { params: Promise<{ schoolId: string; sessionId: string }> }) {
+  const scope = await params;
+  return <ExamList key={JSON.stringify(scope)} scope={scope} />;
 }

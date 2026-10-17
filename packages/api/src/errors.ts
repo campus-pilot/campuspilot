@@ -35,7 +35,7 @@ export const rpcError = {
   badRequest: (message: string, cause?: unknown) =>
     new ORPCError("BAD_REQUEST", { message, cause }),
   unauthorized: () => new ORPCError("UNAUTHORIZED"),
-  forbidden: () => new ORPCError("FORBIDDEN"),
+  forbidden: (message?: string) => new ORPCError("FORBIDDEN", { message }),
   notFound: (resource: string) =>
     new ORPCError("NOT_FOUND", { message: `${resource} was not found.` }),
   conflict: (message: string, cause?: unknown) =>

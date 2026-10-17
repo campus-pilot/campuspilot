@@ -92,3 +92,18 @@ grants contains {
     "school.session.finance.update",
   }
 }
+
+grants contains {"role": role, "action": action} if {
+  some role in {"school.principal", "school.manager", "school.teacher", "school.accountant", "school.exam_coordinator"}
+  some action in {"school.exam.read", "school.exam.plan.read", "school.exam.result.read", "school.exam.timetable.read"}
+}
+
+grants contains {"role": role, "action": action} if {
+  some role in {"school.principal", "school.manager", "school.exam_coordinator"}
+  some action in {"school.exam.create", "school.exam.update", "school.exam.delete", "school.exam.plan.create", "school.exam.plan.update", "school.exam.plan.delete", "school.exam.plan.transition", "school.exam.result.revise", "school.exam.timetable.update", "school.exam.timetable.delete"}
+}
+
+grants contains {"role": role, "action": action} if {
+  some role in {"school.principal", "school.manager", "school.exam_coordinator", "school.teacher"}
+  some action in {"school.exam.result.write", "school.exam.result.delete"}
+}

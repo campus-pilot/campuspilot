@@ -271,3 +271,90 @@ actions contains {
   "key": "DELETE_STUDENT",
   "resourceKind": "school",
 } if { true }
+
+actions contains {
+  "id": "school.exam.read",
+  "key": "READ_EXAMS",
+  "resourceKind": "school",
+} if { true }
+
+actions contains {
+  "id": "school.exam.create",
+  "key": "CREATE_EXAM",
+  "resourceKind": "school",
+} if { true }
+
+actions contains {
+  "id": "school.exam.update",
+  "key": "UPDATE_EXAM",
+  "resourceKind": "school",
+} if { true }
+
+actions contains {
+  "id": "school.exam.delete",
+  "key": "DELETE_EXAM",
+  "resourceKind": "school",
+} if { true }
+
+actions contains {
+  "id": "school.exam.plan.read",
+  "key": "READ_EXAM_PLANS",
+  "resourceKind": "school",
+} if { true }
+
+actions contains {
+  "id": "school.exam.plan.create",
+  "key": "CREATE_EXAM_PLAN",
+  "resourceKind": "school",
+} if { true }
+
+actions contains {
+  "id": "school.exam.plan.update",
+  "key": "UPDATE_EXAM_PLAN",
+  "resourceKind": "school",
+} if { true }
+
+actions contains {
+  "id": "school.exam.plan.delete",
+  "key": "DELETE_EXAM_PLAN",
+  "resourceKind": "school",
+} if { true }
+
+actions contains {
+  "id": "school.exam.plan.transition",
+  "key": "TRANSITION_EXAM_PLAN",
+  "resourceKind": "school",
+} if { true }
+
+actions contains {
+  "id": "school.exam.result.read",
+  "key": "READ_EXAM_RESULTS",
+  "resourceKind": "school",
+} if { true }
+
+actions contains {
+  "id": "school.exam.result.revise",
+  "key": "REVISE_EXAM_RESULTS",
+  "resourceKind": "school",
+} if { true }
+
+actions contains {
+  "id": "school.exam.timetable.read",
+  "key": "READ_EXAM_TIMETABLE",
+  "resourceKind": "school",
+} if { true }
+
+actions contains {
+  "id": "school.exam.timetable.update",
+  "key": "UPDATE_EXAM_TIMETABLE",
+  "resourceKind": "school",
+} if { true }
+
+actions contains {
+  "id": "school.exam.timetable.delete",
+  "key": "DELETE_EXAM_TIMETABLE",
+  "resourceKind": "school",
+} if { true }
+
+actions contains {"id": "school.exam.result.write", "key": "WRITE_EXAM_RESULTS", "resourceKind": "school"} if { true }
+actions contains {"id": "school.exam.result.delete", "key": "DELETE_EXAM_RESULTS", "resourceKind": "school"} if { true }

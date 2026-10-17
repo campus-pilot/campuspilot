@@ -21,6 +21,7 @@ export type ClassResource = {
 };
 
 export type AuthorizationResourceByAction = {
+  [CLASS_ACTIONS.APPROVE_EXAM_RESULTS]: ClassResource;
   [CLASS_ACTIONS.ADD_STUDENT]: ClassResource;
   [SCHOOL_ACTIONS.CREATE_ADMISSION]: SchoolResource;
   [SCHOOL_ACTIONS.DELETE_ADMISSION]: SchoolResource;
@@ -39,6 +40,22 @@ export type AuthorizationResourceByAction = {
   [SCHOOL_ACTIONS.UPDATE_CLASS]: SchoolResource;
   [SCHOOL_ACTIONS.READ_DETAILS]: SchoolResource;
   [SCHOOL_ACTIONS.UPDATE_DETAILS]: SchoolResource;
+  [SCHOOL_ACTIONS.CREATE_EXAM]: SchoolResource;
+  [SCHOOL_ACTIONS.DELETE_EXAM]: SchoolResource;
+  [SCHOOL_ACTIONS.CREATE_EXAM_PLAN]: SchoolResource;
+  [SCHOOL_ACTIONS.DELETE_EXAM_PLAN]: SchoolResource;
+  [SCHOOL_ACTIONS.READ_EXAM_PLANS]: SchoolResource;
+  [SCHOOL_ACTIONS.TRANSITION_EXAM_PLAN]: SchoolResource;
+  [SCHOOL_ACTIONS.UPDATE_EXAM_PLAN]: SchoolResource;
+  [SCHOOL_ACTIONS.READ_EXAMS]: SchoolResource;
+  [SCHOOL_ACTIONS.DELETE_EXAM_RESULTS]: SchoolResource;
+  [SCHOOL_ACTIONS.READ_EXAM_RESULTS]: SchoolResource;
+  [SCHOOL_ACTIONS.REVISE_EXAM_RESULTS]: SchoolResource;
+  [SCHOOL_ACTIONS.WRITE_EXAM_RESULTS]: SchoolResource;
+  [SCHOOL_ACTIONS.DELETE_EXAM_TIMETABLE]: SchoolResource;
+  [SCHOOL_ACTIONS.READ_EXAM_TIMETABLE]: SchoolResource;
+  [SCHOOL_ACTIONS.UPDATE_EXAM_TIMETABLE]: SchoolResource;
+  [SCHOOL_ACTIONS.UPDATE_EXAM]: SchoolResource;
   [SCHOOL_ACTIONS.READ_LOGO]: SchoolResource;
   [SCHOOL_ACTIONS.UPDATE_LOGO]: SchoolResource;
   [SCHOOL_ACTIONS.INVITE_MEMBER]: SchoolResource;
