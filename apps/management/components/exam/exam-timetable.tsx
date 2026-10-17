@@ -1,4 +1,5 @@
 'use client';
+import { DocumentExportLink } from '@/components/documents/document-export-link';
 import { TimetablePreview } from '@campuspilot/components/exam/timetable-preview';
 import { toast } from '@campuspilot/ui/lib/toast';
 import {
@@ -122,7 +123,15 @@ export function ExamTimetable({
         </Empty>
       ) : (
         <>
-          {actions}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            {actions}
+            <DocumentExportLink
+              scope={scope}
+              type="timetable"
+              examSlug={scope.examSlug}
+              label="Create timetable PDF"
+            />
+          </div>
           <TimetablePreview
             config={query.data.config}
             classes={context.classes}

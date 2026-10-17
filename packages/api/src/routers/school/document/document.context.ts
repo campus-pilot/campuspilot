@@ -1,19 +1,22 @@
-import type { DatabaseExecutor } from '@campuspilot/db';
-import { admissionTable } from '@campuspilot/db/schema/admission';
-import { classTable, sectionTable } from '@campuspilot/db/schema/class';
+import type { DatabaseExecutor } from "@campuspilot/db";
+import { admissionTable } from "@campuspilot/db/schema/admission";
+import { classTable, sectionTable } from "@campuspilot/db/schema/class";
 import {
   examPlanTable,
+  examAssessmentSettingsTable,
+  examStudentAssessmentTable,
+  examLifecycleTable,
   examResultTable,
   examTimetableTable,
-} from '@campuspilot/db/schema/exam';
-import { schoolTable } from '@campuspilot/db/schema/school';
-import { schoolSessionTable } from '@campuspilot/db/schema/session';
-import { studentTable } from '@campuspilot/db/schema/student';
-import { sessionConfigSchema } from '@campuspilot/db/schema/jsonb/session-config';
-import { and, asc, eq, inArray } from 'drizzle-orm';
-import { rpcError } from '../../../errors';
-import type { DocumentSource } from './document.dto';
-import { documentImage } from './document.storage';
+} from "@campuspilot/db/schema/exam";
+import { schoolTable } from "@campuspilot/db/schema/school";
+import { schoolSessionTable } from "@campuspilot/db/schema/session";
+import { studentTable } from "@campuspilot/db/schema/student";
+import { sessionConfigSchema } from "@campuspilot/db/schema/jsonb/session-config";
+import { and, asc, eq, inArray } from "drizzle-orm";
+import { rpcError } from "../../../errors";
+import type { DocumentSource } from "./document.dto";
+import { documentImage } from "./document.storage";
 
 export function documentGrade(
   percentage: number,
@@ -22,11 +25,41 @@ export function documentGrade(
   return (
     Object.values(scale)
       .sort((a, b) => b.minScore - a.minScore)
-      .find((grade) => percentage >= grade.minScore)?.label ?? '—'
+      .find((grade) => percentage >= grade.minScore)?.label ?? "—"
   );
 }
 const percent = (score: number, maximum: number) =>
   maximum > 0 ? Math.round((score / maximum) * 1000) / 10 : 0;
+
+/** Calendar dates and local school times never pass through the host timezone. */
+export function documentScheduleSlot(row: {
+  date: string;
+  startTime: string;
+  endTime: string;
+}) {
+  const date = new Date(`${row.date}T00:00:00.000Z`);
+  const formatTime = (time: string) => {
+    const [hour, minute] = time.split(":").map(Number);
+    return `${hour! % 12 || 12}:${String(minute).padStart(2, "0")} ${hour! < 12 ? "AM" : "PM"}`;
+  };
+  return {
+    date: row.date,
+    displayDate: new Intl.DateTimeFormat("en-IN", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      timeZone: "UTC",
+    }).format(date),
+    dayOfWeek: new Intl.DateTimeFormat("en-IN", {
+      weekday: "long",
+      timeZone: "UTC",
+    }).format(date),
+    startTime: row.startTime,
+    endTime: row.endTime,
+    displayStartTime: formatTime(row.startTime),
+    displayEndTime: formatTime(row.endTime),
+  };
+}
 
 /** Called inside a repeatable-read transaction. Every relationship is checked
  * independently, including historical sessions and explicit student selections.
@@ -42,7 +75,7 @@ export async function buildDocumentContexts(
     .from(schoolTable)
     .where(eq(schoolTable.id, schoolId))
     .limit(1);
-  if (!school) throw rpcError.notFound('School');
+  if (!school) throw rpcError.notFound("School");
   const [session] = await db
     .select()
     .from(schoolSessionTable)
@@ -53,14 +86,14 @@ export async function buildDocumentContexts(
       ),
     )
     .limit(1);
-  if (!session) throw rpcError.notFound('School session');
+  if (!session) throw rpcError.notFound("School session");
   const config = sessionConfigSchema.parse(session.sessionConfig ?? {});
-  const examSlug = 'examSlug' in source ? source.examSlug : null;
+  const examSlug = "examSlug" in source ? source.examSlug : null;
   const exam =
     examSlug && Object.hasOwn(config.examConfig, examSlug)
       ? { slug: examSlug, ...config.examConfig[examSlug]! }
       : null;
-  if (examSlug && !exam) throw rpcError.notFound('Exam');
+  if (examSlug && !exam) throw rpcError.notFound("Exam");
   const classes = await db
     .select()
     .from(classTable)
@@ -68,7 +101,7 @@ export async function buildDocumentContexts(
     .orderBy(asc(classTable.displayOrder), asc(classTable.id));
   const classMap = new Map(classes.map((c) => [c.id, c]));
   if (source.classId && !classMap.has(source.classId))
-    throw rpcError.notFound('School class');
+    throw rpcError.notFound("School class");
   const [grid] = examSlug
     ? await db
         .select()
@@ -88,13 +121,33 @@ export async function buildDocumentContexts(
     registrationNo: school.registrationNo,
     logoUrl: await documentImage(school.logoS3Key),
   };
+  const [lifecycle] = examSlug
+    ? await db
+        .select()
+        .from(examLifecycleTable)
+        .where(
+          and(
+            eq(examLifecycleTable.schoolId, schoolId),
+            eq(examLifecycleTable.sessionId, session.id),
+            eq(examLifecycleTable.examSlug, examSlug),
+          ),
+        )
+        .limit(1)
+    : [];
   const common = {
     school: schoolContext,
     session: {
       startYear: session.sessionStartYear,
       endYear: session.sessionEndYear,
     },
-    exam,
+    exam: exam
+      ? {
+          ...exam,
+          status: lifecycle?.status ?? null,
+          startedAt: lifecycle?.startedAt?.toISOString() ?? null,
+          completedAt: lifecycle?.completedAt?.toISOString() ?? null,
+        }
+      : null,
     generatedAt: new Date().toISOString(),
   };
   const sortedRows = [...(grid?.config.rows ?? [])].sort(
@@ -112,7 +165,7 @@ export async function buildDocumentContexts(
       const subject = classMap.get(classId)?.config.subjects[entry.subjectSlug];
       if (!subject?.examModes[entry.modeSlug])
         throw rpcError.badRequest(
-          'A timetable subject or mode is no longer configured. Update the timetable first.',
+          "A timetable subject or mode is no longer configured. Update the timetable first.",
         );
       return {
         ...entry,
@@ -121,10 +174,10 @@ export async function buildDocumentContexts(
       };
     });
   };
-  if (source.documentType === 'timetable') {
+  if (source.documentType === "timetable") {
     if (!grid || !sortedRows.length)
       throw rpcError.badRequest(
-        'No exam timetable is available. Add examination slots first.',
+        "No exam timetable is available. Add examination slots first.",
       );
     const columnIds = source.classId ? [source.classId] : grid.config.columns;
     if (
@@ -134,21 +187,29 @@ export async function buildDocumentContexts(
       )
     )
       throw rpcError.badRequest(
-        'The selected class is not part of this timetable.',
+        "The selected class is not part of this timetable.",
       );
     const columns = columnIds.map((id) => ({
       classId: id,
       label: classMap.get(id)!.label,
     }));
-    const rows = sortedRows.map((row) => ({
-      displayDate: row.date,
-      startTime: row.startTime,
-      endTime: row.endTime,
-      entries: columnIds.map((classId) => ({
+    const rows = sortedRows.map((row) => {
+      const entries = columnIds.map((classId) => ({
         classId,
         subjects: subjectsForCell(row, classId),
-      })),
-    }));
+      }));
+      const cells = Object.fromEntries(
+        entries.map(({ classId, subjects }) => [
+          classId,
+          !subjects.length
+            ? null
+            : Array.isArray(row.cells[classId])
+              ? subjects
+              : subjects[0],
+        ]),
+      );
+      return { ...documentScheduleSlot(row), entries, cells };
+    });
     return {
       contexts: [{ ...common, columns, rows }],
       studentIds: [],
@@ -160,7 +221,40 @@ export async function buildDocumentContexts(
     source.studentIds &&
     new Set(source.studentIds).size !== source.studentIds.length
   )
-    throw rpcError.badRequest('Select each student only once.');
+    throw rpcError.badRequest("Select each student only once.");
+  const plans =
+    source.documentType === "report_card"
+      ? await db
+          .select()
+          .from(examPlanTable)
+          .where(
+            and(
+              eq(examPlanTable.schoolId, schoolId),
+              eq(examPlanTable.sessionId, session.id),
+              eq(examPlanTable.examSlug, source.examSlug),
+              source.classId
+                ? eq(examPlanTable.classId, source.classId)
+                : undefined,
+            ),
+          )
+          .orderBy(asc(examPlanTable.subjectSlug), asc(examPlanTable.id))
+      : [];
+  if (source.documentType === "report_card") {
+    if (
+      !plans.length ||
+      plans.some(
+        (plan) => plan.status === "draft" || plan.status === "approved",
+      ) ||
+      lifecycle?.status === "ready"
+    )
+      throw rpcError.badRequest(
+        "Report cards need started examinations and active or completed subject plans.",
+      );
+    if (source.studentIds && !source.classId)
+      throw rpcError.badRequest(
+        "Choose a class for an explicit student selection.",
+      );
+  }
   const enrolled = await db
     .select({
       student: studentTable,
@@ -179,49 +273,50 @@ export async function buildDocumentContexts(
       sectionTable,
       and(
         eq(sectionTable.id, studentTable.sectionId),
-        eq(sectionTable.classId, source.classId),
+        eq(sectionTable.classId, studentTable.classId),
         eq(sectionTable.schoolId, schoolId),
+      ),
+    )
+    .innerJoin(
+      classTable,
+      and(
+        eq(classTable.id, studentTable.classId),
+        eq(classTable.schoolId, schoolId),
       ),
     )
     .where(
       and(
         eq(studentTable.schoolId, schoolId),
         eq(studentTable.sessionId, session.id),
-        eq(studentTable.classId, source.classId),
+        source.classId
+          ? eq(studentTable.classId, source.classId)
+          : inArray(studentTable.classId, [
+              ...new Set(plans.map((plan) => plan.classId)),
+            ]),
         eq(admissionTable.registered, true),
         source.studentIds
           ? inArray(studentTable.id, source.studentIds)
           : undefined,
       ),
     )
-    .orderBy(asc(admissionTable.name), asc(studentTable.id))
+    .orderBy(
+      asc(classTable.displayOrder),
+      asc(sectionTable.displayOrder),
+      asc(studentTable.rollNo),
+      asc(admissionTable.name),
+      asc(studentTable.id),
+    )
     .limit(501);
   if (source.studentIds && enrolled.length !== source.studentIds.length)
-    throw rpcError.notFound('One or more selected enrolled students');
+    throw rpcError.notFound("One or more selected enrolled students");
   if (!enrolled.length)
     throw rpcError.badRequest(
-      'This class has no registered students in the selected session.',
+      "This class has no registered students in the selected session.",
     );
   if (enrolled.length > 500)
     throw rpcError.badRequest(
-      'Select up to 500 students per document request.',
+      "Select up to 500 students per document request.",
     );
-  const schoolClass = classMap.get(source.classId)!;
-  const plans =
-    source.documentType === 'report_card'
-      ? await db
-          .select()
-          .from(examPlanTable)
-          .where(
-            and(
-              eq(examPlanTable.schoolId, schoolId),
-              eq(examPlanTable.sessionId, session.id),
-              eq(examPlanTable.examSlug, examSlug!),
-              eq(examPlanTable.classId, schoolClass.id),
-            ),
-          )
-          .orderBy(asc(examPlanTable.subjectSlug), asc(examPlanTable.id))
-      : [];
   const results = plans.length
     ? await db
         .select()
@@ -241,37 +336,95 @@ export async function buildDocumentContexts(
           ),
         )
     : [];
-  if (
-    source.documentType === 'report_card' &&
-    (!plans.length ||
-      plans.some((p) => p.status === 'draft' || p.status === 'approved'))
-  )
-    throw rpcError.badRequest(
-      'Report cards need active or completed subject plans.',
-    );
+  const [settings] =
+    source.documentType === "report_card"
+      ? await db
+          .select()
+          .from(examAssessmentSettingsTable)
+          .where(
+            and(
+              eq(examAssessmentSettingsTable.schoolId, schoolId),
+              eq(examAssessmentSettingsTable.sessionId, session.id),
+              eq(examAssessmentSettingsTable.examSlug, source.examSlug),
+            ),
+          )
+          .limit(1)
+      : [];
+  const assessments =
+    source.documentType === "report_card"
+      ? await db
+          .select()
+          .from(examStudentAssessmentTable)
+          .where(
+            and(
+              eq(examStudentAssessmentTable.schoolId, schoolId),
+              eq(examStudentAssessmentTable.sessionId, session.id),
+              eq(examStudentAssessmentTable.examSlug, source.examSlug),
+              inArray(
+                examStudentAssessmentTable.studentId,
+                enrolled.map((row) => row.student.id),
+              ),
+            ),
+          )
+      : [];
+  const assessmentByStudent = new Map(
+    assessments.map((row) => [row.studentId, row]),
+  );
+  const requiresAssessment =
+    source.documentType === "report_card" &&
+    ((source.reportSections.includeAttendance &&
+      config.attendanceTracking.enabled) ||
+      (source.reportSections.includeCoScholastics &&
+        Object.keys(config.coScholasticAreas).length > 0));
   const warnings: string[] = [];
   const timetable =
-    source.documentType === 'admit_card'
+    source.documentType === "admit_card"
       ? sortedRows.flatMap((row) =>
           subjectsForCell(row, source.classId).map((subject) => ({
-            displayDate: row.date,
-            startTime: row.startTime,
-            endTime: row.endTime,
+            ...documentScheduleSlot(row),
             ...subject,
           })),
         )
       : [];
-  if (source.documentType === 'admit_card' && !timetable.length)
+  if (source.documentType === "admit_card" && !timetable.length)
     warnings.push(
-      'No exam schedule is configured for this class. Admit cards will include identity details only.',
+      "No exam schedule is configured for this class. Admit cards will include identity details only.",
     );
   const contexts: object[] = [];
+  const includedStudentIds: string[] = [];
   let embeddedBytes = 0;
+  let excluded = 0;
   for (const { student, admission, section } of enrolled) {
     if (student.sectionId && !section)
       throw rpcError.badRequest(
-        'A student section no longer belongs to the selected class.',
+        "A student section no longer belongs to the selected class.",
       );
+    const schoolClass = classMap.get(student.classId!)!;
+    const studentPlans = plans.filter(
+      (plan) => plan.classId === student.classId,
+    );
+    const assessment = assessmentByStudent.get(student.id);
+    if (source.documentType === "report_card") {
+      const marksApproved =
+        studentPlans.length > 0 &&
+        studentPlans.every((plan) =>
+          results.some(
+            (result) =>
+              result.studentId === student.id &&
+              result.examPlanId === plan.id &&
+              result.approved,
+          ),
+        );
+      if (!marksApproved || (requiresAssessment && !assessment?.approved)) {
+        if (source.resultPolicy === "approved_only" && !source.studentIds) {
+          excluded++;
+          continue;
+        }
+        throw rpcError.badRequest(
+          `Approve every subject result and the configured exam-wide attendance/activities for ${admission.name} before generating report cards.`,
+        );
+      }
+    }
     const identity = {
       name: admission.name,
       admissionNo: admission.admissionNo,
@@ -289,9 +442,9 @@ export async function buildDocumentContexts(
       (identity.photoUrl?.length ?? 0) + (schoolContext.logoUrl?.length ?? 0);
     if (embeddedBytes > 20_000_000)
       throw rpcError.badRequest(
-        'The selected photos exceed the document size limit. Select fewer students or use smaller photos.',
+        "The selected photos exceed the document size limit. Select fewer students or use smaller photos.",
       );
-    const subjects = plans.map((plan) => {
+    const subjects = studentPlans.map((plan) => {
       const result = results.find(
         (r) => r.examPlanId === plan.id && r.studentId === student.id,
       );
@@ -301,7 +454,7 @@ export async function buildDocumentContexts(
         );
       const subject = schoolClass.config.subjects[plan.subjectSlug];
       if (!subject)
-        throw rpcError.badRequest('A report subject is no longer configured.');
+        throw rpcError.badRequest("A report subject is no longer configured.");
       const modes = Object.entries(plan.modeConfig);
       if (
         modes.some(
@@ -359,6 +512,44 @@ export async function buildDocumentContexts(
     const grandTotal = subjects.reduce((sum, s) => sum + s.total, 0);
     const grandMaxMarks = subjects.reduce((sum, s) => sum + s.totalMarks, 0);
     const overallPercentage = percent(grandTotal, grandMaxMarks);
+    // Shared assessment values are separate records. Never choose a subject's
+    // legacy metadata as an exam-wide attendance or activity value.
+    let attendance = null;
+    if (
+      (source.documentType !== "report_card" ||
+        source.reportSections.includeAttendance) &&
+      config.attendanceTracking.enabled &&
+      assessment?.approved &&
+      assessment.daysAttended !== null
+    ) {
+      if (
+        settings?.totalWorkingDays === null ||
+        settings?.totalWorkingDays === undefined ||
+        settings.totalWorkingDays <= 0 ||
+        assessment.daysAttended < 0 ||
+        assessment.daysAttended > settings.totalWorkingDays
+      )
+        throw rpcError.badRequest(
+          "Configure valid examination working days before printing attendance.",
+        );
+      attendance = {
+        daysAttended: assessment.daysAttended,
+        totalWorkingDays: settings.totalWorkingDays,
+        percentage: percent(assessment.daysAttended, settings.totalWorkingDays),
+      };
+    }
+    const coScholastics =
+      assessment?.approved &&
+      assessment.coScholastics &&
+      Object.keys(assessment.coScholastics).length
+        ? Object.fromEntries(
+            Object.entries(assessment.coScholastics).map(([slug, grade]) => [
+              slug,
+              { areaName: config.coScholasticAreas[slug]?.name ?? slug, grade },
+            ]),
+          )
+        : null;
+    includedStudentIds.push(student.id);
     contexts.push({
       ...common,
       student: identity,
@@ -368,14 +559,34 @@ export async function buildDocumentContexts(
       grandMaxMarks,
       overallPercentage,
       overallGrade: documentGrade(overallPercentage, config.gradingScale),
-      gradingScale: config.gradingScale,
+      gradingScale: Object.fromEntries(
+        Object.entries(config.gradingScale).sort(
+          ([, a], [, b]) => b.minScore - a.minScore,
+        ),
+      ),
+      attendance,
+      coScholastics,
+      coScholasticAreas: Object.keys(config.coScholasticAreas).length
+        ? config.coScholasticAreas
+        : null,
+      assessmentApproved: assessment?.approved ?? null,
+      reportSections:
+        source.documentType === "report_card" ? source.reportSections : null,
       attendanceEnabled: config.attendanceTracking.enabled,
     });
   }
+  if (!contexts.length)
+    throw rpcError.badRequest(
+      "No students have complete approved results and the requested assessments for this selection.",
+    );
+  if (excluded)
+    warnings.push(
+      `${excluded} student${excluded === 1 ? " was" : "s were"} excluded because results or requested assessments are missing or unapproved.`,
+    );
   return {
     contexts,
-    studentIds: enrolled.map((s) => s.student.id),
+    studentIds: includedStudentIds,
     warnings,
-    name: `${source.documentType === 'id_card' ? 'Student IDs' : source.documentType === 'admit_card' ? `${exam!.name} · Admit cards` : `${exam!.name} · Report cards`} · ${schoolClass.label}`,
+    name: `${source.documentType === "id_card" ? "Student IDs" : source.documentType === "admit_card" ? `${exam!.name} · Admit cards` : `${exam!.name} · Report cards`} · ${source.classId ? classMap.get(source.classId)!.label : "All classes"}`,
   };
 }

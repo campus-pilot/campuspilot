@@ -39,8 +39,14 @@ const { eq } = await import("../packages/db/node_modules/drizzle-orm/index.js");
 const { schoolSessionTable } =
   await import("../packages/db/src/schema/session");
 const { classTable } = await import("../packages/db/src/schema/class");
-const { examPlanTable, examResultTable, examTimetableTable } =
-  await import("../packages/db/src/schema/exam");
+const {
+  examPlanTable,
+  examResultTable,
+  examTimetableTable,
+  examAssessmentSettingsTable,
+  examStudentAssessmentTable,
+  examLifecycleTable,
+} = await import("../packages/db/src/schema/exam");
 await db
   .update(schoolSessionTable)
   .set({
@@ -55,34 +61,73 @@ await db
     },
   })
   .where(eq(schoolSessionTable.id, session.id));
+const subjects = [
+  ["math", "Mathematics"],
+  ["english", "English"],
+  ["science", "Science"],
+  ["social", "Social Studies"],
+  ["hindi", "Hindi"],
+  ["computer", "Computer Science"],
+] as const;
 await db
   .update(classTable)
   .set({
     config: {
-      subjects: {
-        math: {
-          name: "Mathematics",
-          books: [],
-          examModes: { written: { name: "Written", percentage: 100 } },
-        },
-      },
+      subjects: Object.fromEntries(
+        subjects.map(([slug, name]) => [
+          slug,
+          {
+            name,
+            books: [],
+            examModes:
+              slug === "math"
+                ? {
+                    written: { name: "Written", percentage: 80 },
+                    oral: { name: "Oral", percentage: 20 },
+                  }
+                : { written: { name: "Written", percentage: 100 } },
+          },
+        ]),
+      ),
     },
   })
   .where(eq(classTable.id, schoolClass.id));
-const [plan] = await db
-  .insert(examPlanTable)
-  .values({
-    schoolId: school.id,
-    sessionId: session.id,
-    classId: schoolClass.id,
-    examSlug: "midterm",
-    subjectSlug: "math",
-    totalMarks: 100,
-    modeConfig: { written: { percentage: 100, maxMarks: 100 } },
-    totalWorkingDays: 90,
-    status: "active",
-  })
-  .returning();
+const plans = [];
+for (const [subjectSlug] of subjects) {
+  const [plan] = await db
+    .insert(examPlanTable)
+    .values({
+      schoolId: school.id,
+      sessionId: session.id,
+      classId: schoolClass.id,
+      examSlug: "midterm",
+      subjectSlug,
+      totalMarks: 100,
+      modeConfig:
+        subjectSlug === "math"
+          ? {
+              written: { percentage: 80, maxMarks: 80 },
+              oral: { percentage: 20, maxMarks: 20 },
+            }
+          : { written: { percentage: 100, maxMarks: 100 } },
+      status: "active",
+    })
+    .returning();
+  plans.push(plan!);
+}
+await db.insert(examAssessmentSettingsTable).values({
+  schoolId: school.id,
+  sessionId: session.id,
+  examSlug: "midterm",
+  totalWorkingDays: 90,
+});
+await db.insert(examLifecycleTable).values({
+  schoolId: school.id,
+  sessionId: session.id,
+  examSlug: "midterm",
+  status: "active",
+  startedAt: new Date(),
+});
 for (let i = 0; i < 24; i++) {
   const admission = await f.createTestAdmission({
     schoolId: school.id,
@@ -99,16 +144,29 @@ for (let i = 0; i < 24; i++) {
     admissionId: admission.id,
     rollNo: i + 1,
   });
-  await db.insert(examResultTable).values({
+  await db.insert(examStudentAssessmentTable).values({
     schoolId: school.id,
     sessionId: session.id,
+    examSlug: "midterm",
     studentId: student.id,
-    examPlanId: plan!.id,
-    marks: { written: 80 + (i % 20) },
-    approved: true,
     daysAttended: 82,
     coScholastics: { art: "A" },
+    approved: true,
   });
+  for (const plan of plans)
+    await db.insert(examResultTable).values({
+      schoolId: school.id,
+      sessionId: session.id,
+      studentId: student.id,
+      examPlanId: plan.id,
+      marks:
+        plan.subjectSlug === "math"
+          ? { written: 65 + (i % 15), oral: 15 + (i % 6) }
+          : { written: 80 + (i % 21) },
+      approved: true,
+      daysAttended: 82,
+      coScholastics: { art: "A" },
+    });
 }
 await db.insert(examTimetableTable).values({
   schoolId: school.id,
@@ -116,17 +174,15 @@ await db.insert(examTimetableTable).values({
   examSlug: "midterm",
   config: {
     columns: [schoolClass.id],
-    rows: [
-      {
-        id: "slot-1",
-        date: "2026-10-20",
-        startTime: "09:00",
-        endTime: "12:00",
-        cells: {
-          [schoolClass.id]: { subjectSlug: "math", modeSlug: "written" },
-        },
+    rows: subjects.map(([subjectSlug], index) => ({
+      id: `slot-${index}`,
+      date: `2026-10-${20 + index}`,
+      startTime: "09:00",
+      endTime: "12:00",
+      cells: {
+        [schoolClass.id]: { subjectSlug, modeSlug: "written" },
       },
-    ],
+    })),
   },
 });
 const actor = await f.createSchoolStaffSession(school.id, [

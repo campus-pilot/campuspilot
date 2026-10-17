@@ -1,5 +1,6 @@
 'use client';
 import Link from 'next/link';
+import { DocumentExportLink } from '@/components/documents/document-export-link';
 import { useForm } from '@tanstack/react-form';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { z } from 'zod';
@@ -63,6 +64,15 @@ function ClassData({ scope }: { scope: Scope }) {
       title={schoolClass.label}
       description={`${schoolClass.subjectCount} ${schoolClass.subjectCount === 1 ? 'subject' : 'subjects'}`}
     >
+      <div className="flex justify-end">
+        <DocumentExportLink
+          scope={scope}
+          type="report_card"
+          examSlug={scope.examSlug}
+          classId={scope.classId}
+          label="Create class report cards"
+        />
+      </div>
       {query.isError && (
         <ReadError error={query.error} retry={() => query.refetch()} />
       )}

@@ -4,18 +4,20 @@ Documents are available at `/school/:schoolId/sessions/:sessionId/documents` in 
 
 ## Supported documents
 
-- Report cards combine all active/completed subject plans for one class and exam. Every included student must have an approved result in every included plan. Missing marks never become zero marks. Grades use the session's explicit thresholds; no matching grade renders as an em dash.
+- Report cards combine all active/completed subject plans for one class or the whole examination. Every included student must have an approved result in every included plan. The default UI policy excludes incomplete/unapproved students with an explicit warning; strict mode rejects the batch. Explicitly selected students always require complete approval. Ready examinations cannot export results; active, completed and historical examinations remain available. Missing marks never become zero marks. Grades use the session's explicit thresholds; no matching grade renders as an em dash.
 - Student ID cards use session enrollment plus admission identity/photo data, imposed as 86 × 54 mm cards on A4 sheets.
 - Admit cards include student identity and that class's optional exam schedule. Missing schedules produce an explicit preview warning.
 - Timetables render all scheduled classes or one selected class, with all subjects in a shared slot preserved, on landscape A4.
 
-Exports support a whole class or up to 500 explicitly selected students. Historical sessions remain exportable. Only registered admissions are eligible. Session, class, exam, student, and tenant relationships are validated independently.
+Exports support a whole examination, one class, or up to 500 explicitly selected students. Every export is limited to 500 students. Historical sessions remain exportable. Only registered admissions are eligible. Session, class, exam, student, and tenant relationships are validated independently.
 
-Attendance and co-scholastic assessments are per-subject facts in this app. Each subject exposes its own assessment; the renderer does not choose the first available result as a school-wide assessment. This deliberately fixes the ambiguous aggregation in v1.
+Root attendance and co-scholastic areas use the explicit exam-wide assessment and working-day settings. Printing configured assessments requires their independent approval. Zero attendance remains zero; missing data remains null. Legacy per-subject values remain available only under each subject and are never promoted to shared facts. Four explicit print options control mode marks, attendance, co-scholastic areas and the grading key, without changing saved results or calculations. Hidden attendance does not require working-day configuration.
+
+The context retains v1 report fields, heterogeneous subject modes and grade thresholds. Timetables expose both modern entries and legacy `rows[].cells[classId]` (single cell, array or null), plus calendar-safe display dates, weekdays and times. The numeric `add` helper supports existing table column spans.
 
 ## Persistence
 
-`artifact` stores a unique S3 key, kind, document type, SHA-256, byte size, creator, explicit source identifiers, and the exact template revision used for a PDF. HTML and PDF bytes remain in S3. Source identifiers are historical values rather than cascading foreign keys, so a generated document survives source enrollment/session removal.
+`artifact` stores a unique S3 key, kind, document type, SHA-256, byte size, creator, explicit source identifiers, and the exact template revision used for a PDF, plus report-section choices and approval policy. HTML and PDF bytes remain in S3. Source identifiers are historical values rather than cascading foreign keys, so a generated document survives source enrollment/session removal.
 
 `school_document_template` selects one immutable template artifact per school and document type. Marketplace selection copies server-owned source to a school-specific object. Saving a custom design creates another object and artifact; it never overwrites old HTML or PDFs. The client must supply `expectedRevisionId` (`null` for the first selection). A non-key tenant-row lock serializes selections without deadlocking concurrent artifact foreign-key inserts. A losing save removes its unused S3 upload and returns `CONFLICT`.
 
@@ -35,7 +37,7 @@ There is no integrated AI provider, provider configuration, SDK, AI permission, 
 
 ## Rendering and deployment
 
-Existing `S3_*` and `GOTENBERG_URL` settings are reused. Server startup applies migration `0015_document-artifacts.sql` through the existing migration runner. Deploy the migration with the server before using the management Documents page.
+Existing `S3_*` and `GOTENBERG_URL` settings are reused. Server startup applies migrations `0016_document-artifacts.sql` and `0017_document-generation-options.sql` through the existing migration runner. Deploy the migrations with the server before using the management Documents page.
 
 Sanitized HTML is wrapped in a restrictive CSP and displayed in an empty-sandbox iframe. School and student images are read directly from S3, validated, and embedded as raster data URIs. External assets, scripts, forms, navigation attributes, and prototype access are unavailable. The dev/test Gotenberg service disables JavaScript and both private/public outbound network access. Apply the same Chromium flags in hosted Gotenberg deployments:
 

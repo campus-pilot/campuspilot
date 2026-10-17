@@ -187,7 +187,7 @@ the implementation and APIs in more detail.
   component must not leave the rest partially saved. Completed examinations and
   inactive sessions remain protected independently of the user's role.
 - Timetables are optional. Mobile editing of one class must preserve the grid's
-  other classes. PDF, export and document-generation flows are outside this scope.
+  other classes. Document exports use the shared Documents workspace; contextual links preselect the examination, class or student without adding navigation items to lifecycle menus.
 - The timetable page shows a separate table for every class, without a class filter.
   The builder stays a date/time × class table on desktop and mobile (mobile may edit
   one class at a time). Headers contain a drag handle, class name and remove icon;

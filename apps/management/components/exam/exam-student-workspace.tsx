@@ -1,5 +1,6 @@
 'use client';
 import { useRef } from 'react';
+import { DocumentExportLink } from '@/components/documents/document-export-link';
 import type { StudentExamWorkspaceDto } from '@campuspilot/api/routers/school/exam/exam.dto';
 import { useForm } from '@tanstack/react-form';
 import { useQuery } from '@tanstack/react-query';
@@ -95,7 +96,12 @@ function StudentData({
  * editor keeps its baseline when lifecycle/refetch checks later close entry;
  * saving or cancelling deliberately returns to the saved preview.
  */
-function StudentResults({ scope, data, open, completed }: {
+function StudentResults({
+  scope,
+  data,
+  open,
+  completed,
+}: {
   scope: StudentExamScope;
   data: StudentExamWorkspaceDto;
   open: boolean;
@@ -120,32 +126,57 @@ function StudentResults({ scope, data, open, completed }: {
       {(editing) => {
         const preview = (
           <>
+            <div className="flex justify-end">
+              <DocumentExportLink
+                scope={scope}
+                type="report_card"
+                examSlug={scope.examSlug}
+                classId={scope.classId}
+                studentId={scope.studentId}
+                label="Create report card PDF"
+              />
+            </div>
             <StudentExamPreview data={data} />
             {!open && (
               <p className="text-sm text-muted-foreground">
-                {completed ? 'Examination completed · Results are read-only.' : 'Result entry is not open.'}
+                {completed
+                  ? 'Examination completed · Results are read-only.'
+                  : 'Result entry is not open.'}
               </p>
             )}
             {open && (
               <RequirePermissions permissions={writePermissions}>
-                <ExamButton className="self-start" onClick={() => ui.setFieldValue('editing', true)}>
-                  {data.student.savedSubjects ? 'Edit results' : 'Enter results'}
+                <ExamButton
+                  className="self-start"
+                  onClick={() => ui.setFieldValue('editing', true)}
+                >
+                  {data.student.savedSubjects
+                    ? 'Edit results'
+                    : 'Enter results'}
                 </ExamButton>
               </RequirePermissions>
             )}
             {open && approved && (
               <p className="text-sm text-muted-foreground">
-                Approved results can be revised by the exam coordinator, principal or manager.
+                Approved results can be revised by the exam coordinator,
+                principal or manager.
               </p>
             )}
           </>
         );
         return editing ? (
           <RequirePermissions permissions={writePermissions} fallback={preview}>
-            <StudentExamForm scope={scope} initial={data} latest={data} active={open}
-              onDone={() => ui.setFieldValue('editing', false)} />
+            <StudentExamForm
+              scope={scope}
+              initial={data}
+              latest={data}
+              active={open}
+              onDone={() => ui.setFieldValue('editing', false)}
+            />
           </RequirePermissions>
-        ) : preview;
+        ) : (
+          preview
+        );
       }}
     </ui.Subscribe>
   );

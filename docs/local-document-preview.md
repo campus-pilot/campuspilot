@@ -11,7 +11,7 @@ User-authorized reusable login for the isolated synthetic preview:
 
 These are local test credentials. They are not a production account or a general authorization to modify other schools. Use them when the user requests testing this preview.
 
-The running preview's exact school/session URL is written to `/private/tmp/campuspilot-document-preview.json`. Read that file rather than assuming IDs; a fresh launch creates a new synthetic dataset. It includes 24 enrolled Grade 8 students, approved marks, a timetable, and selected templates for all four document types.
+The running preview's exact school/session URL is written to `/private/tmp/campuspilot-document-preview.json`. Read that file rather than assuming IDs; a fresh launch creates a new synthetic dataset. It includes 24 enrolled Grade 8 students, six subject plans with approved marks, approved exam-wide attendance and activities, a six-day timetable, and selected templates for all four document types.
 
 To launch a fresh preview when no preview is already running, enable Docker Desktop, then from this worktree run:
 

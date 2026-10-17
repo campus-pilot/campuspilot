@@ -5,6 +5,8 @@ import { artifactTable } from '@campuspilot/db/schema/artifact';
 import { classTable } from '@campuspilot/db/schema/class';
 import {
   examPlanTable,
+  examAssessmentSettingsTable,
+  examStudentAssessmentTable,
   examResultTable,
   examTimetableTable,
 } from '@campuspilot/db/schema/exam';
@@ -149,6 +151,8 @@ describe('document templates, generation, and artifact lifecycle', () => {
         })
         .returning()
     )[0]!.id;
+    await db.insert(examAssessmentSettingsTable).values({ schoolId, sessionId, examSlug: 'midterm', totalWorkingDays: 90 });
+    await db.insert(examStudentAssessmentTable).values({ schoolId, sessionId, examSlug: 'midterm', studentId, daysAttended: 82, approved: true });
     await db.insert(examTimetableTable).values({
       schoolId,
       sessionId,
@@ -782,6 +786,7 @@ describe('document templates, generation, and artifact lifecycle', () => {
         ).id,
       });
       studentIds.push(student.id);
+      await db.insert(examStudentAssessmentTable).values({ schoolId, sessionId, examSlug: 'midterm', studentId: student.id, approved: true });
       await db.insert(examResultTable).values({
         schoolId,
         sessionId,

@@ -95,5 +95,10 @@ export function useDocumentCache() {
 }
 /** Document drafts use the same app-dialog navigation guard as exam editors. */
 export function DocumentDirtyGuard({ dirty }: { dirty: boolean }) {
-  return <DirtyGuard dirty={dirty} />;
+  return (
+    <DirtyGuard
+      dirty={dirty}
+      description="Your unsaved template changes will be lost. The saved template will stay as it was."
+    />
+  );
 }

@@ -78,7 +78,7 @@ function SessionData({
  * uses beforeunload because browsers cannot wait for an asynchronous app dialog.
  * Callback refs bind listeners to the committed editor without an effect.
  */
-export function DirtyGuard({ dirty }: { dirty: boolean }) {
+export function DirtyGuard({ dirty, description = 'Your examination edits will be lost. Saved data will stay as it was.' }: { dirty: boolean; description?: string }) {
   const router = useRouter();
   const dirtyRef = useRef(dirty);
   const leaving = useRef(false);
@@ -182,7 +182,7 @@ export function DirtyGuard({ dirty }: { dirty: boolean }) {
           <ConfirmationDialog
             open={confirming}
             title="Discard unsaved changes?"
-            description="Your examination edits will be lost. Saved data will stay as it was."
+            description={description}
             confirmLabel="Discard changes"
             cancelLabel="Keep editing"
             onOpenChange={(open) => {

@@ -1,24 +1,26 @@
-'use client';
-import { useForm } from '@tanstack/react-form';
-import { useQuery } from '@tanstack/react-query';
-import { z } from 'zod';
-import { ArrowRight, Eye, FileDown, CheckCircle2 } from 'lucide-react';
+"use client";
+import { useForm } from "@tanstack/react-form";
+import { useQuery } from "@tanstack/react-query";
+import { z } from "zod";
+import { ArrowRight, Eye, FileDown, CheckCircle2 } from "lucide-react";
 import {
   DocumentButton,
+  DocumentCheckbox,
   DocumentErrors,
   DocumentNotice,
   DocumentPanel,
   DocumentPreview,
   DocumentSelect,
-} from '@campuspilot/components/documents/document-controls';
+} from "@campuspilot/components/documents/document-controls";
 import {
   DOCUMENT_LABELS,
+  DEFAULT_REPORT_SECTIONS,
   type DocumentSource,
   type DocumentType,
-} from '@campuspilot/api/routers/school/document/document.dto';
-import { client, orpc } from '@/lib/orpc';
-import { RequirePermissions } from '@/components/require-permissions';
-import { documentWorkspacePermissions } from './document-export-link';
+} from "@campuspilot/api/routers/school/document/document.dto";
+import { client, orpc } from "@/lib/orpc";
+import { RequirePermissions } from "@/components/require-permissions";
+import { documentWorkspacePermissions } from "./document-export-link";
 import {
   DocumentLoading,
   DocumentPermission,
@@ -26,9 +28,9 @@ import {
   SCHOOL_ACTIONS,
   useDocumentCache,
   type DocumentScope,
-} from './document-common';
-import { StudentPicker } from './student-recipient-picker';
-import type { DocumentInitialSelection } from './document-workspace';
+} from "./document-common";
+import { StudentPicker } from "./student-recipient-picker";
+import type { DocumentInitialSelection } from "./document-workspace";
 
 type Preview = {
   html: string;
@@ -153,30 +155,47 @@ function useDocumentGeneration({
   const schema = z
     .object({
       classId:
-        documentType === 'timetable'
+        documentType === "timetable" || documentType === "report_card"
           ? z.string()
-          : z.string().min(1, 'Choose a class'),
+          : z.string().min(1, "Choose a class"),
       examSlug:
-        documentType === 'id_card'
+        documentType === "id_card"
           ? z.string()
-          : z.string().min(1, 'Choose an examination'),
-      audience: z.enum(['all', 'selected']),
+          : z.string().min(1, "Choose an examination"),
+      audience: z.enum(["all", "selected"]),
       studentIds: z.array(z.string()).max(500),
-      mode: z.enum(['preview', 'generate']),
+      reportSections: z.object({
+        includeModeMarks: z.boolean(),
+        includeAttendance: z.boolean(),
+        includeCoScholastics: z.boolean(),
+        includeGradingScale: z.boolean(),
+      }),
+      resultPolicy: z.enum(["require_all", "approved_only"]),
+      mode: z.enum(["preview", "generate"]),
       error: z.string(),
       preview: z.custom<Preview>().nullable(),
       generatedId: z.string(),
     })
     .superRefine((value, ctx) => {
       if (
-        documentType !== 'timetable' &&
-        value.audience === 'selected' &&
+        documentType !== "timetable" &&
+        value.audience === "selected" &&
         value.studentIds.length === 0
       )
         ctx.addIssue({
-          code: 'custom',
-          path: ['studentIds'],
-          message: 'Select at least one student',
+          code: "custom",
+          path: ["studentIds"],
+          message: "Select at least one student",
+        });
+      if (
+        documentType !== "timetable" &&
+        value.audience === "selected" &&
+        !value.classId
+      )
+        ctx.addIssue({
+          code: "custom",
+          path: ["classId"],
+          message: "Choose a class before selecting students",
         });
     });
   const sourceFor = (value: {
@@ -184,8 +203,10 @@ function useDocumentGeneration({
     examSlug: string;
     audience: string;
     studentIds: string[];
+    reportSections: typeof DEFAULT_REPORT_SECTIONS;
+    resultPolicy: "approved_only" | "require_all";
   }): DocumentSource => {
-    if (documentType === 'timetable')
+    if (documentType === "timetable")
       return {
         documentType,
         sessionId: scope.sessionId,
@@ -195,46 +216,57 @@ function useDocumentGeneration({
     const selection = {
       sessionId: scope.sessionId,
       classId: value.classId,
-      ...(value.audience === 'selected'
+      ...(value.audience === "selected"
         ? { studentIds: value.studentIds }
         : {}),
     };
-    return documentType === 'id_card'
+    if (documentType === "report_card")
+      return {
+        documentType,
+        ...selection,
+        classId: value.classId || undefined,
+        examSlug: value.examSlug,
+        reportSections: value.reportSections,
+        resultPolicy: value.resultPolicy,
+      };
+    return documentType === "id_card"
       ? { documentType, ...selection }
       : { documentType, ...selection, examSlug: value.examSlug };
   };
   const form = useForm({
     defaultValues: {
-      classId: initial.classId ?? '',
-      examSlug: initial.examSlug ?? '',
-      audience: initial.studentId ? 'selected' : 'all',
+      classId: initial.classId ?? "",
+      examSlug: initial.examSlug ?? "",
+      audience: (initial.studentId ? "selected" : "all") as "selected" | "all",
       studentIds: initial.studentId ? [initial.studentId] : ([] as string[]),
-      mode: 'preview',
-      error: '',
+      reportSections: DEFAULT_REPORT_SECTIONS,
+      resultPolicy: "approved_only" as "approved_only" | "require_all",
+      mode: "preview" as "preview" | "generate",
+      error: "",
       preview: null as Preview | null,
-      generatedId: '',
+      generatedId: "",
     },
     validators: { onChange: schema },
     onSubmit: async ({ value }) => {
-      form.setFieldValue('error', '');
+      form.setFieldValue("error", "");
       const source = sourceFor(value);
       try {
-        if (value.mode === 'preview') {
+        if (value.mode === "preview") {
           const preview = await client.school.previewDocument({
             schoolId: scope.schoolId,
             source,
             templateRevisionId: template.id,
           });
-          form.setFieldValue('preview', {
+          form.setFieldValue("preview", {
             ...preview,
             fingerprint: JSON.stringify(source),
           });
-          form.setFieldValue('generatedId', '');
+          form.setFieldValue("generatedId", "");
         } else {
           if (value.preview?.fingerprint !== JSON.stringify(source)) {
             form.setFieldValue(
-              'error',
-              'Preview this selection before creating the PDF.',
+              "error",
+              "Preview this selection before creating the PDF.",
             );
             return;
           }
@@ -243,21 +275,21 @@ function useDocumentGeneration({
             source,
             templateRevisionId: template.id,
           });
-          form.setFieldValue('generatedId', result.artifact.id);
+          form.setFieldValue("generatedId", result.artifact.id);
           await cache.artifacts(scope.schoolId);
         }
       } catch (error) {
         form.setFieldValue(
-          'error',
+          "error",
           error instanceof Error
             ? error.message
-            : 'Unable to create this document.',
+            : "Unable to create this document.",
         );
         if (
           error &&
-          typeof error === 'object' &&
-          'code' in error &&
-          error.code === 'CONFLICT'
+          typeof error === "object" &&
+          "code" in error &&
+          error.code === "CONFLICT"
         )
           await cache.templates({ schoolId: scope.schoolId, documentType });
       }
@@ -287,7 +319,7 @@ function GenerationForm({
     template,
   });
   return (
-    <div className="grid items-start gap-6 xl:grid-cols-[360px_minmax(0,1fr)]">
+    <div className="grid items-start gap-6 2xl:grid-cols-[300px_minmax(0,1fr)]">
       <DocumentPanel
         title="Create a document"
         description="Choose the data to include, check the preview, and create your PDF."
@@ -301,7 +333,7 @@ function GenerationForm({
           className="flex flex-col gap-5"
           onSubmit={(event) => {
             event.preventDefault();
-            form.setFieldValue('mode', 'preview');
+            form.setFieldValue("mode", "preview");
             void form.handleSubmit();
           }}
         >
@@ -314,15 +346,21 @@ function GenerationForm({
                   handleBlur: field.handleBlur,
                   handleChange: (value) => {
                     field.handleChange(value);
-                    form.setFieldValue('studentIds', []);
+                    form.setFieldValue("studentIds", []);
                   },
                 }}
-                label={documentType === 'timetable' ? 'Classes' : 'Class'}
+                label={
+                  documentType === "timetable" || documentType === "report_card"
+                    ? "Classes"
+                    : "Class"
+                }
               >
                 <option value="">
-                  {documentType === 'timetable'
-                    ? 'All scheduled classes'
-                    : 'Choose a class'}
+                  {documentType === "timetable"
+                    ? "All scheduled classes"
+                    : documentType === "report_card"
+                      ? "All examination classes"
+                      : "Choose a class"}
                 </option>
                 {classes.map((c) => (
                   <option key={c.id} value={c.id}>
@@ -332,18 +370,18 @@ function GenerationForm({
               </DocumentSelect>
             )}
           </form.Field>
-          {documentType !== 'id_card' && (
+          {documentType !== "id_card" && (
             <form.Field name="examSlug">
               {(field) => <ExamSelector scope={scope} field={field} />}
             </form.Field>
           )}
-          {documentType !== 'timetable' && (
+          {documentType !== "timetable" && (
             <>
               <form.Field name="audience">
                 {(field) => (
                   <DocumentSelect field={field} label="Recipients">
                     <option value="all">
-                      All registered students in this class
+                      All registered students in the selected classes
                     </option>
                     <option value="selected">Select students</option>
                   </DocumentSelect>
@@ -356,7 +394,7 @@ function GenerationForm({
                 })}
               >
                 {(values) =>
-                  values.audience === 'selected' &&
+                  values.audience === "selected" &&
                   values.classId && (
                     <form.Field name="studentIds">
                       {(field) => (
@@ -375,12 +413,7 @@ function GenerationForm({
               </form.Subscribe>
             </>
           )}
-          {documentType === 'report_card' && (
-            <DocumentNotice>
-              Report cards include approved results only. Every subject plan
-              must be active or completed.
-            </DocumentNotice>
-          )}
+          {documentType === "report_card" && <ReportOptions form={form} />}
           <GenerationActions
             form={form}
             sourceFor={sourceFor}
@@ -407,8 +440,8 @@ function GenerationForm({
               html={values.preview?.html}
               label={
                 values.preview
-                  ? `Print preview${values.preview.studentCount ? ` · ${values.preview.studentCount} student${values.preview.studentCount === 1 ? '' : 's'}` : ''}`
-                  : 'Print preview'
+                  ? `Print preview${values.preview.studentCount ? ` · ${values.preview.studentCount} student${values.preview.studentCount === 1 ? "" : "s"}` : ""}`
+                  : "Print preview"
               }
             />
           </div>
@@ -417,7 +450,42 @@ function GenerationForm({
     </div>
   );
 }
-type GenerationFormApi = ReturnType<typeof useDocumentGeneration>['form'];
+type GenerationFormApi = ReturnType<typeof useDocumentGeneration>["form"];
+function ReportOptions({ form }: { form: GenerationFormApi }) {
+  return (
+    <fieldset className="flex flex-col gap-3">
+      <legend className="mb-2 text-sm font-medium">Report contents</legend>
+      {(
+        [
+          ["includeModeMarks", "Marks by assessment mode"],
+          ["includeAttendance", "Attendance"],
+          ["includeCoScholastics", "Co-scholastic activities"],
+          ["includeGradingScale", "Grading key"],
+        ] as const
+      ).map(([name, label]) => (
+        <form.Field key={name} name={`reportSections.${name}`}>
+          {(field) => <DocumentCheckbox field={field} label={label} />}
+        </form.Field>
+      ))}
+      <form.Field name="resultPolicy">
+        {(field) => (
+          <DocumentSelect field={field} label="Approval policy">
+            <option value="approved_only">
+              Include fully approved students only
+            </option>
+            <option value="require_all">
+              Require every selected student to be approved
+            </option>
+          </DocumentSelect>
+        )}
+      </form.Field>
+      <p className="text-xs text-muted-foreground">
+        Attendance and activities appear when configured and approved. A chosen
+        student is never silently excluded. Maximum 500 students per PDF.
+      </p>
+    </fieldset>
+  );
+}
 function GenerationActions({
   form,
   sourceFor,
@@ -425,7 +493,7 @@ function GenerationActions({
   onHistory,
 }: {
   form: GenerationFormApi;
-  sourceFor: ReturnType<typeof useDocumentGeneration>['sourceFor'];
+  sourceFor: ReturnType<typeof useDocumentGeneration>["sourceFor"];
   scope: DocumentScope;
   onHistory: () => void;
 }) {
@@ -450,9 +518,9 @@ function GenerationActions({
             disabled={submitting || !canSubmit}
           >
             <Eye />
-            {submitting && values.mode === 'preview'
-              ? 'Preparing preview…'
-              : 'Preview document'}
+            {submitting && values.mode === "preview"
+              ? "Preparing preview…"
+              : "Preview document"}
           </DocumentButton>
           <DocumentButton
             type="button"
@@ -462,14 +530,14 @@ function GenerationActions({
               values.preview?.fingerprint !== JSON.stringify(sourceFor(values))
             }
             onClick={() => {
-              form.setFieldValue('mode', 'generate');
+              form.setFieldValue("mode", "generate");
               void form.handleSubmit();
             }}
           >
             <FileDown />
-            {submitting && values.mode === 'generate'
-              ? 'Creating PDF…'
-              : 'Create PDF'}
+            {submitting && values.mode === "generate"
+              ? "Creating PDF…"
+              : "Create PDF"}
           </DocumentButton>
           {values.generatedId && (
             <GenerationSuccess
@@ -488,7 +556,7 @@ function ExamSelector({
   field,
 }: {
   scope: DocumentScope;
-  field: import('@campuspilot/components/documents/document-controls').DocumentStringField;
+  field: import("@campuspilot/components/documents/document-controls").DocumentStringField;
 }) {
   const session = useQuery(
     orpc.school.getSession.queryOptions({ input: scope }),
@@ -550,23 +618,23 @@ export function DocumentDownload({
   artifactId: string;
 }) {
   const form = useForm({
-    defaultValues: { error: '' },
+    defaultValues: { error: "" },
     validators: { onChange: z.object({ error: z.string() }) },
     onSubmit: async () => {
-      form.setFieldValue('error', '');
+      form.setFieldValue("error", "");
       try {
         const { url } = await client.school.getDocumentDownload({
           schoolId,
           artifactId,
         });
-        const link = document.createElement('a');
+        const link = document.createElement("a");
         link.href = url;
-        link.rel = 'noopener noreferrer';
+        link.rel = "noopener noreferrer";
         link.click();
       } catch (error) {
         form.setFieldValue(
-          'error',
-          error instanceof Error ? error.message : 'Download unavailable.',
+          "error",
+          error instanceof Error ? error.message : "Download unavailable.",
         );
       }
     },
@@ -587,7 +655,7 @@ export function DocumentDownload({
             onClick={() => void form.handleSubmit()}
           >
             <FileDown />
-            {submitting ? 'Preparing download…' : 'Download PDF'}
+            {submitting ? "Preparing download…" : "Download PDF"}
           </DocumentButton>
           {error && <DocumentNotice error>{error}</DocumentNotice>}
         </div>

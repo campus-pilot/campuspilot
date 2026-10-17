@@ -1,48 +1,47 @@
-'use client';
-import { useId, type ReactNode, type ComponentProps } from 'react';
-import { Button } from '@campuspilot/ui/components/button';
+"use client";
+import { useId, type ReactNode, type ComponentProps } from "react";
+import { Input } from "@campuspilot/ui/components/input";
+import { Textarea } from "@campuspilot/ui/components/textarea";
+import { NativeSelect } from "@campuspilot/ui/components/native-select";
+import { Checkbox } from "@campuspilot/ui/components/checkbox";
+import { Button } from "@campuspilot/ui/components/button";
 import {
   FileText,
   Fingerprint,
   CalendarDays,
   GraduationCap,
   ScanEye,
-} from 'lucide-react';
+} from "lucide-react";
 export type DocumentKind =
-  'report_card' | 'id_card' | 'admit_card' | 'timetable';
+  "report_card" | "id_card" | "admit_card" | "timetable";
 export const documentKinds = [
   {
-    value: 'report_card',
-    label: 'Report cards',
-    description: 'Approved marks and grades',
+    value: "report_card",
+    label: "Report cards",
+    description: "Approved marks and grades",
     icon: GraduationCap,
   },
   {
-    value: 'id_card',
-    label: 'Student IDs',
-    description: 'Print-ready identity cards',
+    value: "id_card",
+    label: "Student IDs",
+    description: "Print-ready identity cards",
     icon: Fingerprint,
   },
   {
-    value: 'admit_card',
-    label: 'Admit cards',
-    description: 'Identity and exam schedule',
+    value: "admit_card",
+    label: "Admit cards",
+    description: "Identity and exam schedule",
     icon: FileText,
   },
   {
-    value: 'timetable',
-    label: 'Timetables',
-    description: 'A clear examination schedule',
+    value: "timetable",
+    label: "Timetables",
+    description: "A clear examination schedule",
     icon: CalendarDays,
   },
 ] as const;
 export function DocumentButton(props: ComponentProps<typeof Button>) {
-  return (
-    <Button
-      {...props}
-      className={`min-h-10 h-auto gap-2 whitespace-normal px-4 py-2 text-sm ${props.className ?? ''}`}
-    />
-  );
+  return <Button {...props} type={props.type ?? "button"} />;
 }
 export function DocumentKindPicker({
   value,
@@ -51,30 +50,26 @@ export function DocumentKindPicker({
   value: DocumentKind;
   onChange: (value: DocumentKind) => void;
 }) {
+  const id = useId();
+  const selected = documentKinds.find((item) => item.value === value)!;
   return (
-    <div
-      aria-label="Document type"
-      className="grid grid-cols-2 gap-3 lg:grid-cols-4"
-    >
-      {documentKinds.map((item) => (
-        <button
-          type="button"
-          key={item.value}
-          aria-pressed={value === item.value}
-          onClick={() => onChange(item.value)}
-          className={`flex min-h-24 items-start gap-3 rounded-xl border p-4 text-left transition-colors focus-visible:outline-2 focus-visible:outline-primary ${value === item.value ? 'border-primary bg-primary/5 ring-1 ring-primary/20' : 'bg-card hover:bg-muted/40'}`}
-        >
-          <item.icon
-            className={`mt-0.5 size-5 shrink-0 ${value === item.value ? 'text-primary' : 'text-muted-foreground'}`}
-          />
-          <span className="flex flex-col gap-1">
-            <span className="text-sm font-semibold">{item.label}</span>
-            <span className="text-xs text-muted-foreground">
-              {item.description}
-            </span>
-          </span>
-        </button>
-      ))}
+    <div className="flex min-w-0 flex-col gap-2">
+      <label htmlFor={id} className="text-xs font-medium">
+        Document type
+      </label>
+      <NativeSelect
+        id={id}
+        value={value}
+        onChange={(event) => onChange(event.target.value as DocumentKind)}
+        className="w-full sm:max-w-xs"
+      >
+        {documentKinds.map((item) => (
+          <option key={item.value} value={item.value}>
+            {item.label}
+          </option>
+        ))}
+      </NativeSelect>
+      <p className="text-xs text-muted-foreground">{selected.description}</p>
     </div>
   );
 }
@@ -106,7 +101,7 @@ export function DocumentPanel({
 }
 export function DocumentPreview({
   html,
-  label = 'Document preview',
+  label = "Document preview",
   sample = false,
 }: {
   html?: string;
@@ -157,8 +152,8 @@ export function DocumentNotice({
 }) {
   return (
     <div
-      role={error ? 'alert' : 'status'}
-      className={`rounded-lg border px-4 py-3 text-sm ${error ? 'border-destructive/30 bg-destructive/5 text-destructive' : 'bg-muted/40 text-muted-foreground'}`}
+      role={error ? "alert" : "status"}
+      className={`rounded-lg border px-4 py-3 text-sm ${error ? "border-destructive/30 bg-destructive/5 text-destructive" : "bg-muted/40 text-muted-foreground"}`}
     >
       {children}
     </div>
@@ -166,9 +161,9 @@ export function DocumentNotice({
 }
 export function DocumentErrors({ errors }: { errors: readonly unknown[] }) {
   const messages = errors.flatMap((e) =>
-    typeof e === 'string'
+    typeof e === "string"
       ? [e]
-      : e && typeof e === 'object' && 'message' in e
+      : e && typeof e === "object" && "message" in e
         ? [String(e.message)]
         : [],
   );
@@ -182,10 +177,10 @@ export function DocumentErrors({ errors }: { errors: readonly unknown[] }) {
     </>
   );
 }
-export type DocumentStringField = {
+export type DocumentStringField<T extends string = string> = {
   name: string;
-  state: { value: string; meta: { errors: readonly unknown[] } };
-  handleChange: (value: string) => void;
+  state: { value: T; meta: { errors: readonly unknown[] } };
+  handleChange: (value: T) => void;
   handleBlur: () => void;
 };
 export function DocumentField({
@@ -213,9 +208,9 @@ export function DocumentField({
     ) => field.handleChange(event.target.value),
     onBlur: field.handleBlur,
     disabled,
-    'aria-invalid': field.state.meta.errors.length > 0,
-    'aria-describedby': `${id}-help`,
-    className: `min-h-11 w-full rounded-lg border bg-background p-3 text-sm focus-visible:outline-2 focus-visible:outline-primary ${code ? 'min-h-80 font-mono text-xs' : ''}`,
+    "aria-invalid": field.state.meta.errors.length > 0,
+    "aria-describedby": `${id}-help`,
+    className: code ? "min-h-64 font-mono text-xs" : "w-full",
   };
   return (
     <div className="flex min-w-0 flex-col gap-2">
@@ -223,9 +218,9 @@ export function DocumentField({
         {label}
       </label>
       {multiline ? (
-        <textarea {...props} rows={code ? 18 : 3} spellCheck={!code} />
+        <Textarea {...props} rows={code ? 18 : 3} spellCheck={!code} />
       ) : (
-        <input {...props} />
+        <Input {...props} />
       )}
       <div id={`${id}-help`}>
         {description && (
@@ -236,13 +231,13 @@ export function DocumentField({
     </div>
   );
 }
-export function DocumentSelect({
+export function DocumentSelect<T extends string>({
   field,
   label,
   children,
   disabled = false,
 }: {
-  field: DocumentStringField;
+  field: DocumentStringField<T>;
   label: string;
   children: ReactNode;
   disabled?: boolean;
@@ -253,22 +248,53 @@ export function DocumentSelect({
       <label htmlFor={id} className="text-sm font-medium">
         {label}
       </label>
-      <select
+      <NativeSelect
         id={id}
         name={field.name}
         value={field.state.value}
-        onChange={(event) => field.handleChange(event.target.value)}
+        onChange={(event) => field.handleChange(event.target.value as T)}
         onBlur={field.handleBlur}
         disabled={disabled}
         aria-invalid={field.state.meta.errors.length > 0}
         aria-describedby={`${id}-errors`}
-        className="min-h-11 min-w-0 rounded-lg border bg-background px-3 text-sm"
+        className="w-full min-w-0"
       >
         {children}
-      </select>
+      </NativeSelect>
       <div id={`${id}-errors`}>
         <DocumentErrors errors={field.state.meta.errors} />
       </div>
+    </div>
+  );
+}
+
+export function DocumentCheckbox({
+  field,
+  label,
+}: {
+  field: {
+    name: string;
+    state: { value: boolean; meta: { errors: readonly unknown[] } };
+    handleChange: (value: boolean) => void;
+    handleBlur: () => void;
+  };
+  label: string;
+}) {
+  const id = useId();
+  return (
+    <div className="flex flex-col gap-1">
+      <label htmlFor={id} className="flex items-center gap-2 text-xs">
+        <Checkbox
+          id={id}
+          name={field.name}
+          checked={field.state.value}
+          onCheckedChange={field.handleChange}
+          onBlur={field.handleBlur}
+          aria-invalid={field.state.meta.errors.length > 0}
+        />
+        {label}
+      </label>
+      <DocumentErrors errors={field.state.meta.errors} />
     </div>
   );
 }

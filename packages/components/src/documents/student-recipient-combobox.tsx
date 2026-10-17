@@ -56,7 +56,7 @@ export function StudentRecipientCombobox(props: {
         isItemEqualToValue={(a, b) => a.id === b.id}
         onValueChange={props.onChange}
       >
-        <ComboboxChips ref={anchor} className="min-h-11 p-2">
+        <ComboboxChips ref={anchor}>
           <ComboboxValue>
             {(values: StudentRecipient[]) =>
               values.map((value) => (
@@ -85,7 +85,7 @@ export function StudentRecipientCombobox(props: {
               <ComboboxItem
                 key={item.id}
                 value={item}
-                className="min-h-11 pr-8"
+                className="pr-8"
                 disabled={
                   props.selected.length >= 500 &&
                   !props.selected.some((value) => value.id === item.id)

@@ -1,42 +1,73 @@
-'use client';
-import { useForm } from '@tanstack/react-form';
-import { z } from 'zod';
-import { Files, LayoutTemplate, History, WandSparkles } from 'lucide-react';
+"use client";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useForm } from "@tanstack/react-form";
+import { z } from "zod";
+import { Files, LayoutTemplate, History, FilePlus } from "lucide-react";
+import { Button } from "@campuspilot/ui/components/button";
 import {
-  DocumentButton,
-  DocumentKindPicker,
+  Select,
+  SelectTrigger,
+  SelectContent,
+  SelectItem,
+  SelectValue,
+} from "@campuspilot/ui/components/select";
+import { WorkspaceNavigationLayout } from "@campuspilot/components/workspace-navigation-layout";
+import {
   DocumentNotice,
-} from '@campuspilot/components/documents/document-controls';
+  DocumentKindPicker,
+} from "@campuspilot/components/documents/document-controls";
 import {
   documentTypeSchema,
   type DocumentType,
-} from '@campuspilot/api/routers/school/document/document.dto';
-import { confirmNavigation } from '@/lib/navigation-guard';
+} from "@campuspilot/api/routers/school/document/document.dto";
+import { confirmNavigation } from "@/lib/navigation-guard";
 import {
   DocumentPermission,
   SCHOOL_ACTIONS,
   type DocumentScope,
-} from './document-common';
-import { DocumentTemplates } from './document-templates';
-import { DocumentGenerator } from './document-generator';
-import { DocumentHistory } from './document-history';
+} from "./document-common";
+import { DocumentGenerator } from "./document-generator";
+import { DocumentTemplates } from "./document-templates";
+import { DocumentHistory } from "./document-history";
 export type DocumentInitialSelection = {
   documentType?: DocumentType;
   classId?: string;
   examSlug?: string;
   studentId?: string;
 };
-const tabs = [
-  { value: 'generate', label: 'Create document', icon: WandSparkles },
-  { value: 'templates', label: 'Templates', icon: LayoutTemplate },
-  { value: 'history', label: 'Document history', icon: History },
+export type DocumentSection = "generate" | "templates" | "history";
+const sections = [
+  {
+    value: "generate",
+    label: "Create document",
+    icon: FilePlus,
+    action: SCHOOL_ACTIONS.GENERATE_DOCUMENTS,
+  },
+  {
+    value: "templates",
+    label: "Templates",
+    icon: LayoutTemplate,
+    action: SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES,
+  },
+  {
+    value: "history",
+    label: "Document history",
+    icon: History,
+    action: SCHOOL_ACTIONS.READ_DOCUMENT_ARTIFACTS,
+  },
 ] as const;
+/** Section routes preserve an explicit document type and source selection.
+ * App-dialog guard decisions are awaited before leaving a dirty template.
+ */
 export function DocumentWorkspace({
   scope,
   initial = {},
+  section = "generate",
 }: {
   scope: DocumentScope;
   initial?: DocumentInitialSelection;
+  section?: DocumentSection;
 }) {
   return (
     <DocumentPermission
@@ -48,136 +79,150 @@ export function DocumentWorkspace({
         </DocumentNotice>
       }
     >
-      <DocumentWorkspaceContent scope={scope} initial={initial} />
+      <DocumentWorkspaceContent
+        scope={scope}
+        initial={initial}
+        section={section}
+      />
     </DocumentPermission>
   );
 }
 function DocumentWorkspaceContent({
   scope,
   initial,
+  section,
 }: {
   scope: DocumentScope;
   initial: DocumentInitialSelection;
+  section: DocumentSection;
 }) {
+  const router = useRouter();
   const form = useForm({
     defaultValues: {
-      documentType: initial.documentType ?? ('report_card' as DocumentType),
-      tab: 'generate',
+      documentType: initial.documentType ?? ("report_card" as DocumentType),
     },
-    validators: {
-      onChange: z.object({
-        documentType: documentTypeSchema,
-        tab: z.enum(['generate', 'templates', 'history']),
-      }),
-    },
+    validators: { onChange: z.object({ documentType: documentTypeSchema }) },
   });
+  const href = (target: DocumentSection, type: DocumentType) => {
+    const query = new URLSearchParams({
+      type,
+      ...(initial.classId ? { classId: initial.classId } : {}),
+      ...(initial.examSlug ? { examSlug: initial.examSlug } : {}),
+      ...(initial.studentId ? { studentId: initial.studentId } : {}),
+    });
+    return `/school/${encodeURIComponent(scope.schoolId)}/sessions/${encodeURIComponent(scope.sessionId)}/documents${target === "generate" ? "" : `/${target}`}?${query}`;
+  };
   return (
-    <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 pb-12">
-      <header className="flex items-start gap-4">
-        <span className="rounded-xl border bg-primary/5 p-3 text-primary">
-          <Files className="size-6" />
-        </span>
-        <div className="flex flex-col gap-1">
-          <h1 className="text-2xl font-semibold tracking-tight">Documents</h1>
-          <p className="max-w-2xl text-sm text-muted-foreground">
-            Your school’s templates. Your students’ details. Beautiful
-            documents, ready to print.
-          </p>
-        </div>
-      </header>
-      <form.Subscribe selector={(state) => state.values}>
-        {({ documentType, tab }) => (
-          <>
-            <DocumentKindPicker
-              value={documentType}
-              onChange={async (value) => {
-                if (value !== documentType && await confirmNavigation())
-                  form.setFieldValue('documentType', value);
-              }}
-            />
-            <nav
-              aria-label="Documents workspace"
-              className="flex flex-wrap gap-2 border-b pb-4"
-            >
-              {tabs.map((item) => (
-                <DocumentTab
-                  key={item.value}
-                  schoolId={scope.schoolId}
-                  tab={item.value}
+    <form.Subscribe selector={(state) => state.values.documentType}>
+      {(documentType) => {
+        const navigate = async (target: DocumentSection) => {
+          if (await confirmNavigation())
+            router.push(href(target, documentType));
+        };
+        const active = sections.find((item) => item.value === section)!;
+        return (
+          <WorkspaceNavigationLayout
+            heading={
+              <div className="flex min-w-0 items-center gap-3">
+                <Files className="size-5 shrink-0 text-muted-foreground" />
+                <h1 className="text-xl font-semibold">Documents</h1>
+              </div>
+            }
+            actions={null}
+            navigationLabel="Document sections"
+            navigation={sections.map((item) => (
+              <DocumentPermission
+                key={item.value}
+                schoolId={scope.schoolId}
+                action={item.action}
+              >
+                <Button
+                  asChild
+                  variant={item.value === section ? "secondary" : "ghost"}
+                  className="justify-start"
                 >
-                  <DocumentButton
-                    variant={tab === item.value ? 'secondary' : 'ghost'}
-                    aria-current={tab === item.value ? 'page' : undefined}
-                    onClick={async () => {
-                      if (tab !== item.value && await confirmNavigation())
-                        form.setFieldValue('tab', item.value);
-                    }}
-                  >
-                    <item.icon className="size-4" />
+                  <Link href={href(item.value, documentType)}>
+                    <item.icon aria-hidden />
                     {item.label}
-                  </DocumentButton>
-                </DocumentTab>
-              ))}
-            </nav>
-            <div key={`${documentType}-${tab}`}>
-              {tab === 'templates' ? (
-                <DocumentTemplates
-                  scope={{ schoolId: scope.schoolId, documentType }}
-                />
-              ) : tab === 'history' ? (
-                <DocumentPermission
-                  schoolId={scope.schoolId}
-                  action={SCHOOL_ACTIONS.READ_DOCUMENT_ARTIFACTS}
-                >
-                  <DocumentHistory scope={scope} documentType={documentType} />
-                </DocumentPermission>
-              ) : (
-                <DocumentPermission
-                  schoolId={scope.schoolId}
-                  action={SCHOOL_ACTIONS.GENERATE_DOCUMENTS}
-                  fallback={
-                    <DocumentNotice>
-                      You can browse templates and document history. Generating
-                      documents requires additional permission.
-                    </DocumentNotice>
-                  }
-                >
-                  <DocumentGenerator
-                    scope={scope}
-                    documentType={documentType}
-                    initial={initial}
-                    onChooseTemplate={() =>
-                      form.setFieldValue('tab', 'templates')
-                    }
-                    onHistory={() => form.setFieldValue('tab', 'history')}
+                  </Link>
+                </Button>
+              </DocumentPermission>
+            ))}
+            mobileNavigation={
+              <Select
+                value={section}
+                onValueChange={(value) => {
+                  if (value) void navigate(value as DocumentSection);
+                }}
+              >
+                <SelectTrigger aria-label="Document section" className="w-full">
+                  <SelectValue>
+                    <active.icon aria-hidden />
+                    {active.label}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {sections.map((item) => (
+                    <DocumentPermission
+                      key={item.value}
+                      schoolId={scope.schoolId}
+                      action={item.action}
+                    >
+                      <SelectItem value={item.value}>{item.label}</SelectItem>
+                    </DocumentPermission>
+                  ))}
+                </SelectContent>
+              </Select>
+            }
+          >
+            <div className="flex min-w-0 flex-col gap-4">
+              <DocumentKindPicker
+                value={documentType}
+                onChange={async (value) => {
+                  if (value !== documentType && (await confirmNavigation()))
+                    form.setFieldValue("documentType", value);
+                }}
+              />
+              <div key={`${documentType}-${section}`}>
+                {section === "templates" ? (
+                  <DocumentTemplates
+                    scope={{ schoolId: scope.schoolId, documentType }}
                   />
-                </DocumentPermission>
-              )}
+                ) : section === "history" ? (
+                  <DocumentPermission
+                    schoolId={scope.schoolId}
+                    action={SCHOOL_ACTIONS.READ_DOCUMENT_ARTIFACTS}
+                  >
+                    <DocumentHistory
+                      scope={scope}
+                      documentType={documentType}
+                    />
+                  </DocumentPermission>
+                ) : (
+                  <DocumentPermission
+                    schoolId={scope.schoolId}
+                    action={SCHOOL_ACTIONS.GENERATE_DOCUMENTS}
+                    fallback={
+                      <DocumentNotice>
+                        You can browse templates and document history.
+                        Generating documents requires additional permission.
+                      </DocumentNotice>
+                    }
+                  >
+                    <DocumentGenerator
+                      scope={scope}
+                      documentType={documentType}
+                      initial={initial}
+                      onChooseTemplate={() => void navigate("templates")}
+                      onHistory={() => void navigate("history")}
+                    />
+                  </DocumentPermission>
+                )}
+              </div>
             </div>
-          </>
-        )}
-      </form.Subscribe>
-    </div>
-  );
-}
-function DocumentTab({
-  schoolId,
-  tab,
-  children,
-}: {
-  schoolId: string;
-  tab: string;
-  children: React.ReactNode;
-}) {
-  const action =
-    tab === 'history'
-      ? SCHOOL_ACTIONS.READ_DOCUMENT_ARTIFACTS
-      : tab === 'generate'
-        ? SCHOOL_ACTIONS.GENERATE_DOCUMENTS
-        : SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES;
-  return (
-    <DocumentPermission schoolId={schoolId} action={action}>
-      {children}
-    </DocumentPermission>
+          </WorkspaceNavigationLayout>
+        );
+      }}
+    </form.Subscribe>
   );
 }

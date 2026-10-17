@@ -39,6 +39,8 @@ export function documentWorkspacePermissions(
     SCHOOL_ACTIONS.READ_SESSION,
     SCHOOL_ACTIONS.READ_CLASS,
     SCHOOL_ACTIONS.LIST_CLASSES,
+    ...(type === 'id_card' ? [] : [SCHOOL_ACTIONS.READ_EXAMS]),
+    ...(type === 'report_card' ? [SCHOOL_ACTIONS.READ_EXAM_PLANS] : []),
     ...source,
   ].map((action) => documentPermission(schoolId, action));
 }

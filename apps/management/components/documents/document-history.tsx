@@ -2,6 +2,7 @@
 import { useForm } from '@tanstack/react-form';
 import { useQuery } from '@tanstack/react-query';
 import { z } from 'zod';
+import { ConfirmationDialog } from '@campuspilot/components/confirmation-dialog';
 import { FileText, Trash2, RefreshCw } from 'lucide-react';
 import {
   DocumentButton,
@@ -226,37 +227,24 @@ function DeleteArtifact({ artifact }: { artifact: DocumentArtifact }) {
     >
       {({ confirming, error, submitting, canSubmit }) => (
         <div className="flex max-w-sm flex-col gap-3">
-          {confirming ? (
-            <>
-              <p className="text-sm">
-                Delete this PDF from document history and storage?
-              </p>
-              <div className="flex gap-2">
-                <DocumentButton
-                  variant="destructive"
-                  disabled={submitting || !canSubmit}
-                  onClick={() => void form.handleSubmit()}
-                >
-                  {submitting ? 'Deleting…' : 'Delete PDF'}
-                </DocumentButton>
-                <DocumentButton
-                  variant="ghost"
-                  disabled={submitting}
-                  onClick={() => form.setFieldValue('confirming', false)}
-                >
-                  Cancel
-                </DocumentButton>
-              </div>
-            </>
-          ) : (
-            <DocumentButton
-              variant="ghost"
-              onClick={() => form.setFieldValue('confirming', true)}
-            >
-              {artifact.status === 'deleting' ? <RefreshCw /> : <Trash2 />}
-              {artifact.status === 'deleting' ? 'Retry deletion' : 'Delete'}
-            </DocumentButton>
-          )}
+          <DocumentButton
+            variant="ghost"
+            onClick={() => form.setFieldValue('confirming', true)}
+          >
+            {artifact.status === 'deleting' ? <RefreshCw /> : <Trash2 />}
+            {artifact.status === 'deleting' ? 'Retry deletion' : 'Delete'}
+          </DocumentButton>
+          <ConfirmationDialog
+            open={confirming}
+            title="Delete PDF?"
+            description="This removes the PDF from document history and storage. Saved templates and examination records remain available."
+            confirmLabel={submitting ? 'Deleting…' : 'Delete PDF'}
+            pending={submitting}
+            onOpenChange={(open) => form.setFieldValue('confirming', open)}
+            onConfirm={() => {
+              if (canSubmit) void form.handleSubmit();
+            }}
+          />
           {error && <DocumentNotice error>{error}</DocumentNotice>}
         </div>
       )}

@@ -47,7 +47,7 @@ row's times. Add class appears only when a class is missing. Save/Cancel stay at
 the footer's left and Expand editor at its right. Phones use the same table while
 editing one class at a time without discarding the other columns. Removal/discard
 and in-app navigation use app dialogs rather than browser confirm functions. Completion/reopening
-is exam-wide; completed/inactive sessions are read-only. No document/export flows.
+is exam-wide; completed/inactive sessions are read-only. Report links open the document workspace for the whole examination, class or student. Timetable export opens the same workspace with the examination preselected. Source reads and generation are independently permission-gated; lifecycle actions remain in the overflow menu.
 
 All input workflows use TanStack Form with Zod. Dirty editors retain their baseline
 through background refetches, validate beside fields and
