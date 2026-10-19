@@ -23,6 +23,7 @@ for the management implementation.
 | `document-generator.tsx` | Type-specific source form, live preview, PDF creation |
 | `document-history.tsx` | Unified session history, downloads, deletion |
 | `document-templates.tsx` | Settings empty state, editor, sample preview, immutable revision save |
+| `template-code-editor.tsx` | Dynamically loaded Monaco source editor and format action |
 | `document-template-settings.tsx` | Settings permission boundary and scope adapter |
 | `document-template-marketplace.tsx` | Catalog list, dedicated detail preview, import mutation |
 | `template-prompt-editor.tsx` | Provider-neutral portable-prompt dialog |
@@ -44,8 +45,9 @@ the provider-neutral brief; and `copy-text-button.tsx` owns clipboard feedback.
   template, catalog, and history are server state managed by TanStack Query.
 - Use a component `key` when a selected type or immutable revision needs a clean
   form baseline. Do not synchronize a new baseline into an open dirty form.
-- Preview HTML is derived from an explicit preview request. Editing source does not
-  continuously send requests or overwrite the last successful preview.
+- Template-editor preview HTML is derived from a 650 ms debounced request or an
+  explicit refresh. Request versioning prevents an older response from replacing
+  the latest successful preview. Document-generation previews remain explicit.
 - Cache invalidation after selecting/saving a template must refresh both the active
   template and any consumers that show template availability.
 - A missing template is a persistent setup condition: register `AppShellAlert` and
@@ -58,8 +60,15 @@ the provider-neutral brief; and `copy-text-button.tsx` owns clipboard feedback.
   history.
 - `DocumentKindCards` is the selector for document types in both Documents and the
   marketplace. Preserve accessible radiogroup semantics.
-- The editor source panel is collapsible. Keep source before preview in DOM order so
-  the stacked mobile layout follows the task sequence.
+- The editor and preview share one border with no inter-panel padding. Their
+  resizable divider and explicit editor control collapse the source panel. Keep
+  source before preview in DOM order so the stacked mobile layout follows the task
+  sequence.
+- Monaco is client-only and uses HTML language services for Handlebars-containing
+  markup. Preserve line numbers, wrapping, theme support, and the format action.
+- Preview controls offer scrollable and A4-page modes. Report cards use portrait
+  A4, timetables use landscape A4, and smaller card formats are imposed on portrait
+  A4 without relaxing iframe sandboxing.
 - Edit with AI and Marketplace remain peer header actions. The marketplace should
   not visually dominate source editing when a template is already selected.
 - At desktop, source and preview share the workspace. At 390 px and 320 px they

@@ -117,19 +117,29 @@ marketplace action. It does not render a disabled or empty source editor.
 When a revision exists, an authorized editor sees:
 
 - Edit with AI and Marketplace as peer actions in the header;
-- a collapsible source panel on the left at wide widths and first in the stack on
-  smaller screens;
-- the template name and Handlebars HTML fields;
-- Preview changes, Save template, and Reload saved revision actions;
+- one integrated, resizable workspace with an explicit collapse/expand control for
+  the source panel on the left at wide widths and first in the stack on smaller
+  screens;
+- the template name and a Monaco Handlebars/HTML code editor with formatting,
+  syntax highlighting, line numbers, wrapping, and theme support;
+- Save template and Reload saved revision actions;
 - a collapsible variable reference;
 - a sanitized sample preview on the right at wide widths and second in the stack
-  on smaller screens.
+  on smaller screens, with scrollable and A4-page modes plus a manual refresh.
 
-Draft name and source remain local until Save. Preview never saves or selects a
-revision. Saving creates a new immutable object and makes it active. A keyed editor
-adopts the newly selected revision only after the query cache refreshes. Dirty
-navigation uses the application dialog and browser `beforeunload` fallback; it must
-not use `window.confirm`.
+Draft name and source remain local until Save. Source edits request a debounced
+sample render; the manual refresh bypasses that delay. Preview requests are
+versioned so an older, slower response cannot replace a newer draft. Preview never
+saves or selects a revision. Saving creates a new immutable object and makes it
+active. A keyed editor adopts the newly selected revision only after the query
+cache refreshes. Dirty navigation uses the application dialog and browser
+`beforeunload` fallback; it must not use `window.confirm`.
+
+The code editor is dynamically loaded in a client-only boundary because Monaco
+depends on browser APIs and is unnecessary for empty or read-only states. The
+preview stays in an empty-sandbox iframe. A4 mode uses portrait A4 for report cards,
+portrait A4 imposition for student IDs and admit cards, and landscape A4 for
+timetables; scrollable mode lets the rendered document use the full preview pane.
 
 Read-only users see the selected template preview but no source mutation controls.
 
@@ -159,6 +169,7 @@ callbacks and must not call APIs.
 | `DocumentGenerator` | Type-specific source fields, template dependency, preview, generation, and warnings |
 | `DocumentHistory` | One session-wide artifact list, downloads, provenance, and deletion |
 | `DocumentTemplates` | Empty state, read-only preview, or authorized school-template editor |
+| `TemplateCodeEditor` | Client-only Monaco wrapper and source-format action |
 | `TemplatePromptEditor` | Local portable-prompt dialog and clipboard operations |
 | `DocumentTemplateMarketplace` | Document-type selection and catalog cards |
 | `DocumentTemplateMarketplaceDetail` | Contextual catalog preview and import action |

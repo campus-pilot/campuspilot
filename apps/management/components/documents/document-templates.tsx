@@ -1,23 +1,39 @@
 'use client';
 
+import dynamic from 'next/dynamic';
 import Link from 'next/link';
-import type { ReactNode } from 'react';
+import {
+  useCallback,
+  useRef,
+  useSyncExternalStore,
+  type ReactNode,
+} from 'react';
 import { useForm } from '@tanstack/react-form';
 import { useQuery } from '@tanstack/react-query';
-import { Braces, Eye, Save, Store } from 'lucide-react';
-import { z } from 'zod';
 import {
-  DOCUMENT_LABELS,
-  type activeTemplateSchema,
-} from '@campuspilot/api/routers/school/document/document.dto';
+  FileText,
+  Maximize2,
+  PanelLeftOpen,
+  RefreshCw,
+  Save,
+  ScrollText,
+  Store,
+} from 'lucide-react';
+import { z } from 'zod';
+import { type activeTemplateSchema } from '@campuspilot/api/routers/school/document/document.dto';
 import {
   DocumentButton,
   DocumentErrors,
   DocumentField,
-  DocumentNotice,
   DocumentPanel,
   DocumentPreview,
 } from '@campuspilot/components/documents/document-controls';
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+  useResizablePanelRef,
+} from '@campuspilot/ui/components/resizable';
 import { client, orpc } from '@/lib/orpc';
 import { confirmNavigation } from '@/lib/navigation-guard';
 import { TemplatePromptEditor } from './template-prompt-editor';
@@ -33,6 +49,41 @@ import {
 
 type ActiveTemplate = z.infer<typeof activeTemplateSchema>;
 
+const TemplateCodeEditor = dynamic(
+  () =>
+    import('./template-code-editor').then(
+      (module) => module.TemplateCodeEditor,
+    ),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="grid h-full min-h-96 place-items-center bg-card text-sm text-muted-foreground">
+        Loading code editor…
+      </div>
+    ),
+  },
+);
+
+const TEMPLATE_TITLES: Record<DocumentTemplateScope['documentType'], string> = {
+  report_card: 'Report Cards Template',
+  id_card: 'Student ID Cards Template',
+  admit_card: 'Admit Cards Template',
+  timetable: 'Exam Timetable Template',
+};
+
+const TEMPLATE_DIMENSIONS: Record<
+  DocumentTemplateScope['documentType'],
+  { width: number; height: number }
+> = {
+  report_card: { width: 210, height: 297 },
+  id_card: { width: 85.6, height: 53.98 },
+  admit_card: { width: 210, height: 148.5 },
+  timetable: { width: 297, height: 210 },
+};
+
+const DESKTOP_WORKSPACE_QUERY = '(min-width: 1280px)';
+const MM_TO_PX = 96 / 25.4;
+
 function marketplaceHref(scope: DocumentTemplateScope) {
   return `/school/${encodeURIComponent(scope.schoolId)}/marketplace/templates?type=${scope.documentType}`;
 }
@@ -46,18 +97,9 @@ function TemplatePageHeader({
 }) {
   return (
     <header className="flex flex-col gap-4 border-b pb-5 sm:flex-row sm:items-start sm:justify-between">
-      <div className="flex min-w-0 flex-col gap-1">
-        <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-          School template
-        </p>
-        <h1 className="text-2xl font-semibold tracking-tight">
-          {DOCUMENT_LABELS[scope.documentType]}
-        </h1>
-        <p className="max-w-2xl text-sm text-muted-foreground">
-          Edit the school-owned template and preview it with safe sample data.
-          The saved revision is used across academic sessions.
-        </p>
-      </div>
+      <h1 className="text-2xl font-semibold tracking-tight">
+        {TEMPLATE_TITLES[scope.documentType]}
+      </h1>
       <div className="flex shrink-0 flex-wrap gap-2">
         {actions}
         <DocumentButton asChild variant="outline">
@@ -161,6 +203,7 @@ function useDocumentTemplateForm(
   template: ActiveTemplate,
 ) {
   const cache = useDocumentCache();
+  const previewVersion = useRef(0);
   const initialPreview = useQuery(
     orpc.school.previewDocumentTemplate.queryOptions({
       input: { ...scope, content: template.content },
@@ -173,7 +216,7 @@ function useDocumentTemplateForm(
       preview: '',
       previewContent: '',
       error: '',
-      mode: 'save' as 'save' | 'preview',
+      previewing: false,
     },
     validators: {
       onChange: z.object({
@@ -182,28 +225,19 @@ function useDocumentTemplateForm(
         preview: z.string(),
         previewContent: z.string(),
         error: z.string(),
-        mode: z.enum(['save', 'preview']),
+        previewing: z.boolean(),
       }),
     },
     onSubmit: async ({ value }) => {
       form.setFieldValue('error', '');
       try {
-        if (value.mode === 'preview') {
-          const result = await client.school.previewDocumentTemplate({
-            ...scope,
-            content: value.content,
-          });
-          form.setFieldValue('preview', result.html);
-          form.setFieldValue('previewContent', value.content);
-        } else {
-          await client.school.saveDocumentTemplate({
-            ...scope,
-            name: value.name,
-            content: value.content,
-            expectedRevisionId: template.artifact.id,
-          });
-          await cache.templates(scope);
-        }
+        await client.school.saveDocumentTemplate({
+          ...scope,
+          name: value.name,
+          content: value.content,
+          expectedRevisionId: template.artifact.id,
+        });
+        await cache.templates(scope);
       } catch (error) {
         form.setFieldValue(
           'error',
@@ -214,7 +248,63 @@ function useDocumentTemplateForm(
       }
     },
   });
-  return { form, initialPreview };
+
+  /** Only the newest preview request may update the iframe. This prevents a
+   * slower response for an older draft from replacing a newer render.
+   */
+  const renderPreview = useCallback(
+    async (content: string) => {
+      const version = previewVersion.current + 1;
+      previewVersion.current = version;
+      form.setFieldValue('error', '');
+      form.setFieldValue('previewing', true);
+      try {
+        const result = await client.school.previewDocumentTemplate({
+          ...scope,
+          content,
+        });
+        if (previewVersion.current !== version) return;
+        form.setFieldValue('preview', result.html);
+        form.setFieldValue('previewContent', content);
+      } catch (error) {
+        if (previewVersion.current !== version) return;
+        form.setFieldValue(
+          'error',
+          error instanceof Error
+            ? error.message
+            : 'Unable to render this template.',
+        );
+      } finally {
+        if (previewVersion.current === version) {
+          form.setFieldValue('previewing', false);
+        }
+      }
+    },
+    [form, scope],
+  );
+
+  return { form, initialPreview, renderPreview };
+}
+
+function subscribeToDesktopWorkspace(onChange: () => void) {
+  const query = window.matchMedia(DESKTOP_WORKSPACE_QUERY);
+  query.addEventListener('change', onChange);
+  return () => query.removeEventListener('change', onChange);
+}
+
+function getDesktopWorkspaceSnapshot() {
+  return window.matchMedia(DESKTOP_WORKSPACE_QUERY).matches;
+}
+
+/** matchMedia is consumed as an external store so responsive panel direction
+ * does not require an effect or duplicate the stateful Monaco editor.
+ */
+function useDesktopWorkspace() {
+  return useSyncExternalStore(
+    subscribeToDesktopWorkspace,
+    getDesktopWorkspaceSnapshot,
+    () => false,
+  );
 }
 
 function TemplateEditor({
@@ -226,7 +316,44 @@ function TemplateEditor({
   template: ActiveTemplate;
   onReload: () => Promise<void>;
 }) {
-  const { form, initialPreview } = useDocumentTemplateForm(scope, template);
+  const { form, initialPreview, renderPreview } = useDocumentTemplateForm(
+    scope,
+    template,
+  );
+  const previewTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sourcePanelRef = useResizablePanelRef();
+  const workspace = useForm({
+    defaultValues: { sourceOpen: true },
+    validators: {
+      onChange: z.object({ sourceOpen: z.boolean() }),
+    },
+  });
+  const desktop = useDesktopWorkspace();
+  const schedulePreview = useCallback(
+    (content: string) => {
+      if (previewTimer.current) clearTimeout(previewTimer.current);
+      previewTimer.current = setTimeout(() => {
+        previewTimer.current = null;
+        void renderPreview(content);
+      }, 650);
+    },
+    [renderPreview],
+  );
+  const refreshPreview = useCallback(
+    (content: string) => {
+      if (previewTimer.current) clearTimeout(previewTimer.current);
+      previewTimer.current = null;
+      return renderPreview(content);
+    },
+    [renderPreview],
+  );
+  const workspaceRef = useCallback((node: HTMLDivElement | null) => {
+    if (!node) return;
+    return () => {
+      if (previewTimer.current) clearTimeout(previewTimer.current);
+    };
+  }, []);
+
   return (
     <div className="flex min-w-0 flex-col gap-5">
       <form.Subscribe selector={(state) => state.values.content}>
@@ -253,37 +380,52 @@ function TemplateEditor({
           />
         )}
       </form.Subscribe>
-      <div className="grid min-w-0 items-start gap-5 xl:grid-cols-[minmax(22rem,0.9fr)_minmax(0,1.1fr)]">
-        <details open className="group min-w-0 rounded-xl border bg-card">
-          <summary className="flex cursor-pointer items-center gap-2 border-b px-5 py-4 text-sm font-semibold marker:hidden">
-            <Braces className="size-4 text-muted-foreground" aria-hidden />
-            Template HTML
-            <span className="ml-auto text-xs font-normal text-muted-foreground group-open:hidden">
-              Expand editor
-            </span>
-          </summary>
-          <div className="flex min-w-0 flex-col gap-5 p-5">
+      <div
+        ref={workspaceRef}
+        className="h-[70rem] min-w-0 overflow-hidden rounded-xl border bg-card xl:h-[46rem]"
+      >
+        <ResizablePanelGroup
+          key={desktop ? 'desktop' : 'mobile'}
+          orientation={desktop ? 'horizontal' : 'vertical'}
+        >
+          <ResizablePanel
+            defaultSize="50"
+            minSize={desktop ? '28' : '34'}
+            collapsible
+            collapsedSize="0"
+            panelRef={sourcePanelRef}
+            onResize={(size) => {
+              workspace.setFieldValue('sourceOpen', size.asPercentage > 0);
+            }}
+          >
             <TemplateSourceForm
               form={form}
               template={template}
               onReload={onReload}
+              onContentChange={schedulePreview}
+              contextHelp={initialPreview.data?.contextHelp}
+              onCollapse={() => sourcePanelRef.current?.collapse()}
             />
-            <details className="rounded-lg border p-4">
-              <summary className="cursor-pointer text-sm font-medium">
-                Template variable reference
-              </summary>
-              <pre className="mt-4 whitespace-pre-wrap break-words text-xs leading-relaxed text-muted-foreground">
-                {initialPreview.data?.contextHelp ??
-                  'Loading variable reference…'}
-              </pre>
-            </details>
-          </div>
-        </details>
-        <TemplateDraftPreview
-          form={form}
-          template={template}
-          initialHtml={initialPreview.data?.html}
-        />
+          </ResizablePanel>
+          <ResizableHandle withHandle />
+          <ResizablePanel defaultSize="50" minSize={desktop ? '28' : '34'}>
+            <workspace.Subscribe
+              selector={(state) => state.values.sourceOpen}
+            >
+              {(sourceOpen) => (
+                <TemplateDraftPreview
+                  form={form}
+                  scope={scope}
+                  template={template}
+                  initialHtml={initialPreview.data?.html}
+                  onRefresh={refreshPreview}
+                  sourceOpen={sourceOpen}
+                  onExpand={() => sourcePanelRef.current?.expand()}
+                />
+              )}
+            </workspace.Subscribe>
+          </ResizablePanel>
+        </ResizablePanelGroup>
       </div>
     </div>
   );
@@ -295,31 +437,40 @@ function TemplateSourceForm({
   form,
   template,
   onReload,
+  onContentChange,
+  contextHelp,
+  onCollapse,
 }: {
   form: TemplateForm;
   template: ActiveTemplate;
   onReload: () => Promise<void>;
+  onContentChange: (content: string) => void;
+  contextHelp?: string;
+  onCollapse: () => void;
 }) {
   return (
     <form
-      className="flex min-w-0 flex-col gap-4"
+      className="flex h-full min-h-0 min-w-0 flex-col"
       onSubmit={(event) => {
         event.preventDefault();
-        form.setFieldValue('mode', 'save');
         void form.handleSubmit();
       }}
     >
-      <form.Field name="name">
-        {(field) => <DocumentField field={field} label="Template name" />}
-      </form.Field>
+      <div className="shrink-0 border-b p-3">
+        <form.Field name="name">
+          {(field) => <DocumentField field={field} label="Template name" />}
+        </form.Field>
+      </div>
       <form.Field name="content">
         {(field) => (
-          <DocumentField
-            field={field}
-            label="Handlebars HTML"
-            multiline
-            code
-            description="Keep styles self-contained. School branding and student photos are embedded automatically when available."
+          <TemplateCodeEditor
+            value={field.state.value}
+            onBlur={field.handleBlur}
+            onCollapse={onCollapse}
+            onChange={(content) => {
+              field.handleChange(content);
+              onContentChange(content);
+            }}
           />
         )}
       </form.Field>
@@ -332,29 +483,15 @@ function TemplateSourceForm({
         })}
       >
         {({ values, submitting, canSubmit, errors }) => (
-          <div className="flex flex-col gap-3">
+          <div className="flex shrink-0 flex-col gap-3 border-t p-3">
             <DocumentErrors errors={errors} />
             {values.error ? (
-              <DocumentNotice error>
+              <p role="alert" className="text-sm text-destructive">
                 {values.error} Your edits are still here. Reload the saved
                 revision if someone else changed the template.
-              </DocumentNotice>
+              </p>
             ) : null}
             <div className="flex flex-wrap gap-2">
-              <DocumentButton
-                type="button"
-                variant="outline"
-                disabled={submitting || !canSubmit}
-                onClick={() => {
-                  form.setFieldValue('mode', 'preview');
-                  void form.handleSubmit();
-                }}
-              >
-                <Eye />
-                {submitting && values.mode === 'preview'
-                  ? 'Rendering…'
-                  : 'Preview changes'}
-              </DocumentButton>
               <DocumentButton
                 type="submit"
                 disabled={
@@ -365,12 +502,9 @@ function TemplateSourceForm({
                 }
               >
                 <Save />
-                {submitting && values.mode === 'save'
-                  ? 'Saving…'
-                  : 'Save template'}
+                {submitting ? 'Saving…' : 'Save template'}
               </DocumentButton>
               <DocumentButton
-                type="button"
                 variant="ghost"
                 disabled={submitting}
                 onClick={async () => {
@@ -380,6 +514,14 @@ function TemplateSourceForm({
                 Reload saved revision
               </DocumentButton>
             </div>
+            <details className="border-t pt-3">
+              <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
+                Template variable reference
+              </summary>
+              <pre className="mt-3 max-h-48 overflow-auto whitespace-pre-wrap break-words text-xs leading-relaxed text-muted-foreground">
+                {contextHelp ?? 'Loading variable reference…'}
+              </pre>
+            </details>
           </div>
         )}
       </form.Subscribe>
@@ -389,30 +531,205 @@ function TemplateSourceForm({
 
 function TemplateDraftPreview({
   form,
+  scope,
   template,
   initialHtml,
+  onRefresh,
+  sourceOpen,
+  onExpand,
 }: {
   form: TemplateForm;
+  scope: DocumentTemplateScope;
   template: ActiveTemplate;
   initialHtml?: string;
+  onRefresh: (content: string) => Promise<void>;
+  sourceOpen: boolean;
+  onExpand: () => void;
 }) {
+  const view = useForm({
+    defaultValues: {
+      mode: 'scroll' as 'scroll' | 'page',
+      width: 720,
+    },
+    validators: {
+      onChange: z.object({
+        mode: z.enum(['scroll', 'page']),
+        width: z.number().positive(),
+      }),
+    },
+  });
+  const measurePreview = useCallback(
+    (node: HTMLDivElement | null) => {
+      if (!node) return;
+      const updateWidth = () => {
+        view.setFieldValue('width', node.getBoundingClientRect().width);
+      };
+      updateWidth();
+      const observer = new ResizeObserver(updateWidth);
+      observer.observe(node);
+      return () => observer.disconnect();
+    },
+    [view],
+  );
+
   return (
     <form.Subscribe selector={(state) => state.values}>
-      {(values) => (
-        <div className="flex min-w-0 flex-col gap-3">
-          {(values.previewContent || template.content) !== values.content ? (
-            <DocumentNotice>
-              Preview reflects an earlier draft. Preview changes again before
-              saving.
-            </DocumentNotice>
-          ) : null}
-          <DocumentPreview
-            html={values.preview || initialHtml}
-            sample
-            label="Template preview"
+      {(values) => {
+        const previewSource = values.preview
+          ? values.previewContent
+          : template.content;
+        const stale = previewSource !== values.content;
+        return (
+          <section className="flex h-full min-w-0 flex-col bg-muted/30">
+            <header className="flex min-h-11 shrink-0 flex-wrap items-center justify-between gap-2 border-b bg-card px-3 py-1.5">
+              <div className="flex min-w-0 items-center gap-2">
+                <FileText className="size-3.5 shrink-0 text-muted-foreground" />
+                <span className="text-xs font-medium">Template preview</span>
+                <span
+                  className="text-xs text-muted-foreground"
+                  aria-live="polite"
+                >
+                  {values.previewing
+                    ? 'Refreshing…'
+                    : stale
+                      ? 'Waiting to refresh…'
+                      : 'Sample data'}
+                </span>
+              </div>
+              <div className="flex items-center gap-1">
+                {!sourceOpen ? (
+                  <DocumentButton
+                    size="icon-sm"
+                    variant="ghost"
+                    aria-label="Expand code editor"
+                    title="Expand code editor"
+                    onClick={onExpand}
+                  >
+                    <PanelLeftOpen />
+                  </DocumentButton>
+                ) : null}
+                <view.Subscribe selector={(state) => state.values.mode}>
+                  {(mode) => (
+                    <>
+                      <DocumentButton
+                        size="sm"
+                        variant={mode === 'scroll' ? 'secondary' : 'ghost'}
+                        aria-pressed={mode === 'scroll'}
+                        onClick={() => view.setFieldValue('mode', 'scroll')}
+                      >
+                        <ScrollText />
+                        Scrollable
+                      </DocumentButton>
+                      <DocumentButton
+                        size="sm"
+                        variant={mode === 'page' ? 'secondary' : 'ghost'}
+                        aria-pressed={mode === 'page'}
+                        onClick={() => view.setFieldValue('mode', 'page')}
+                      >
+                        <Maximize2 />
+                        A4 page
+                      </DocumentButton>
+                    </>
+                  )}
+                </view.Subscribe>
+                <DocumentButton
+                  size="icon-sm"
+                  variant="ghost"
+                  aria-label="Refresh template preview"
+                  disabled={values.previewing}
+                  onClick={() => void onRefresh(values.content)}
+                >
+                  <RefreshCw
+                    className={values.previewing ? 'animate-spin' : undefined}
+                  />
+                </DocumentButton>
+              </div>
+            </header>
+            <div ref={measurePreview} className="min-h-0 flex-1 overflow-auto">
+              <view.Subscribe selector={(state) => state.values}>
+                {(viewValues) => (
+                  <TemplatePreviewCanvas
+                    documentType={scope.documentType}
+                    html={values.preview || initialHtml}
+                    mode={viewValues.mode}
+                    width={viewValues.width}
+                  />
+                )}
+              </view.Subscribe>
+            </div>
+          </section>
+        );
+      }}
+    </form.Subscribe>
+  );
+}
+
+function TemplatePreviewCanvas({
+  documentType,
+  html,
+  mode,
+  width,
+}: {
+  documentType: DocumentTemplateScope['documentType'];
+  html?: string;
+  mode: 'scroll' | 'page';
+  width: number;
+}) {
+  if (!html) {
+    return (
+      <div className="grid h-full min-h-96 place-items-center text-sm text-muted-foreground">
+        Your preview will appear here.
+      </div>
+    );
+  }
+
+  if (mode === 'scroll') {
+    return (
+      <iframe
+        title="Scrollable template preview"
+        sandbox=""
+        referrerPolicy="no-referrer"
+        srcDoc={html}
+        className="block h-full min-h-[40rem] w-full border-0 bg-white"
+      />
+    );
+  }
+
+  const template = TEMPLATE_DIMENSIONS[documentType];
+  const landscape = documentType === 'timetable';
+  const pageWidth = (landscape ? 297 : 210) * MM_TO_PX;
+  const pageHeight = (landscape ? 210 : 297) * MM_TO_PX;
+  const templateWidth = template.width * MM_TO_PX;
+  const templateHeight = template.height * MM_TO_PX;
+  const scale = Math.min(Math.max((width - 32) / pageWidth, 0.25), 1);
+
+  return (
+    <div className="flex min-h-full justify-center p-4">
+      <div
+        className="relative shrink-0"
+        style={{ width: pageWidth * scale, height: pageHeight * scale }}
+      >
+        <div
+          className="absolute left-0 top-0 flex overflow-hidden border bg-white shadow-lg"
+          style={{
+            width: pageWidth,
+            height: pageHeight,
+            transform: `scale(${scale})`,
+            transformOrigin: 'top left',
+            alignItems: documentType === 'id_card' ? 'center' : 'flex-start',
+            justifyContent: documentType === 'id_card' ? 'center' : 'flex-start',
+          }}
+        >
+          <iframe
+            title="A4 template preview"
+            sandbox=""
+            referrerPolicy="no-referrer"
+            srcDoc={html}
+            className="block shrink-0 border-0 bg-white"
+            style={{ width: templateWidth, height: templateHeight }}
           />
         </div>
-      )}
-    </form.Subscribe>
+      </div>
+    </div>
   );
 }
