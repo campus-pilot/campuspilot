@@ -354,20 +354,22 @@ function GenerationForm({
                     ? "Classes"
                     : "Class"
                 }
-              >
-                <option value="">
-                  {documentType === "timetable"
-                    ? "All scheduled classes"
-                    : documentType === "report_card"
-                      ? "All examination classes"
-                      : "Choose a class"}
-                </option>
-                {classes.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.label}
-                  </option>
-                ))}
-              </DocumentSelect>
+                options={[
+                  {
+                    value: "",
+                    label:
+                      documentType === "timetable"
+                        ? "All scheduled classes"
+                        : documentType === "report_card"
+                          ? "All examination classes"
+                          : "Choose a class",
+                  },
+                  ...classes.map((schoolClass) => ({
+                    value: schoolClass.id,
+                    label: schoolClass.label,
+                  })),
+                ]}
+              />
             )}
           </form.Field>
           {documentType !== "id_card" && (
@@ -379,12 +381,18 @@ function GenerationForm({
             <>
               <form.Field name="audience">
                 {(field) => (
-                  <DocumentSelect field={field} label="Recipients">
-                    <option value="all">
-                      All registered students in the selected classes
-                    </option>
-                    <option value="selected">Select students</option>
-                  </DocumentSelect>
+                  <DocumentSelect
+                    field={field}
+                    label="Recipients"
+                    options={[
+                      {
+                        value: "all",
+                        label:
+                          "All registered students in the selected classes",
+                      },
+                      { value: "selected", label: "Select students" },
+                    ]}
+                  />
                 )}
               </form.Field>
               <form.Subscribe
@@ -469,14 +477,20 @@ function ReportOptions({ form }: { form: GenerationFormApi }) {
       ))}
       <form.Field name="resultPolicy">
         {(field) => (
-          <DocumentSelect field={field} label="Approval policy">
-            <option value="approved_only">
-              Include fully approved students only
-            </option>
-            <option value="require_all">
-              Require every selected student to be approved
-            </option>
-          </DocumentSelect>
+          <DocumentSelect
+            field={field}
+            label="Approval policy"
+            options={[
+              {
+                value: "approved_only",
+                label: "Include fully approved students only",
+              },
+              {
+                value: "require_all",
+                label: "Require every selected student to be approved",
+              },
+            ]}
+          />
         )}
       </form.Field>
       <p className="text-xs text-muted-foreground">
@@ -569,14 +583,14 @@ function ExamSelector({
     session.data.sessionConfig?.examConfig ?? {},
   ).sort(([a, x], [b, y]) => x.order - y.order || a.localeCompare(b));
   return (
-    <DocumentSelect field={field} label="Examination">
-      <option value="">Choose an examination</option>
-      {exams.map(([slug, exam]) => (
-        <option key={slug} value={slug}>
-          {exam.name}
-        </option>
-      ))}
-    </DocumentSelect>
+    <DocumentSelect
+      field={field}
+      label="Examination"
+      options={[
+        { value: "", label: "Choose an examination" },
+        ...exams.map(([slug, exam]) => ({ value: slug, label: exam.name })),
+      ]}
+    />
   );
 }
 function GenerationSuccess({

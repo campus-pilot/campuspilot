@@ -2,9 +2,12 @@
 import { useId, type ReactNode, type ComponentProps } from "react";
 import { Input } from "@campuspilot/ui/components/input";
 import { Textarea } from "@campuspilot/ui/components/textarea";
-import { NativeSelect } from "@campuspilot/ui/components/native-select";
 import { Checkbox } from "@campuspilot/ui/components/checkbox";
 import { Button } from "@campuspilot/ui/components/button";
+import {
+  OptionSelect,
+  type OptionSelectOption,
+} from "../option-select";
 import {
   FileText,
   Fingerprint,
@@ -57,18 +60,12 @@ export function DocumentKindPicker({
       <label htmlFor={id} className="text-xs font-medium">
         Document type
       </label>
-      <NativeSelect
-        id={id}
+      <OptionSelect
         value={value}
-        onChange={(event) => onChange(event.target.value as DocumentKind)}
-        className="w-full sm:max-w-xs"
-      >
-        {documentKinds.map((item) => (
-          <option key={item.value} value={item.value}>
-            {item.label}
-          </option>
-        ))}
-      </NativeSelect>
+        options={documentKinds}
+        onValueChange={onChange}
+        triggerProps={{ id, className: "w-full sm:max-w-xs" }}
+      />
       <p className="text-xs text-muted-foreground">{selected.description}</p>
     </div>
   );
@@ -234,12 +231,12 @@ export function DocumentField({
 export function DocumentSelect<T extends string>({
   field,
   label,
-  children,
+  options,
   disabled = false,
 }: {
   field: DocumentStringField<T>;
   label: string;
-  children: ReactNode;
+  options: readonly OptionSelectOption<T>[];
   disabled?: boolean;
 }) {
   const id = useId();
@@ -248,19 +245,20 @@ export function DocumentSelect<T extends string>({
       <label htmlFor={id} className="text-sm font-medium">
         {label}
       </label>
-      <NativeSelect
-        id={id}
+      <OptionSelect
         name={field.name}
         value={field.state.value}
-        onChange={(event) => field.handleChange(event.target.value as T)}
-        onBlur={field.handleBlur}
+        options={options}
+        onValueChange={field.handleChange}
         disabled={disabled}
-        aria-invalid={field.state.meta.errors.length > 0}
-        aria-describedby={`${id}-errors`}
-        className="w-full min-w-0"
-      >
-        {children}
-      </NativeSelect>
+        triggerProps={{
+          id,
+          onBlur: field.handleBlur,
+          'aria-invalid': field.state.meta.errors.length > 0,
+          'aria-describedby': `${id}-errors`,
+          className: "w-full min-w-0",
+        }}
+      />
       <div id={`${id}-errors`}>
         <DocumentErrors errors={field.state.meta.errors} />
       </div>

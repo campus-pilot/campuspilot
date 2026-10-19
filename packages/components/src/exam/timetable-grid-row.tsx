@@ -215,25 +215,25 @@ function CellAssignments({
                 )}
               disabled={disabled}
               onChange={(value) => choose(index, value)}
-            >
-              <option value="">
-                {pair ? 'Choose assessment / clear' : 'No exam'}
-              </option>
-              {pair &&
-                !options.some(
-                  (option) => option.value === encodeTimetablePair(pair),
-                ) && (
-                  <option value={encodeTimetablePair(pair)}>
-                    {pair.subjectSlug || 'Choose subject'} ·{' '}
-                    {pair.modeSlug || 'Choose mode'}
-                  </option>
-                )}
-              {options.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </ExamSelect>
+              options={[
+                {
+                  value: '',
+                  label: pair ? 'Choose assessment / clear' : 'No exam',
+                },
+                ...(pair &&
+                  !options.some(
+                    (option) => option.value === encodeTimetablePair(pair),
+                  )
+                  ? [
+                      {
+                        value: encodeTimetablePair(pair),
+                        label: `${pair.subjectSlug || 'Choose subject'} · ${pair.modeSlug || 'Choose mode'}`,
+                      },
+                    ]
+                  : []),
+                ...options,
+              ]}
+            />
           </div>
           {pair && (
             <ExamButton

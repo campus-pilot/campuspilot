@@ -155,14 +155,14 @@ export function TimetableTimingActions({
                       value={field.state.value}
                       errors={field.state.meta.errors}
                       onChange={field.handleChange}
-                    >
-                      <option value="">Choose a time</option>
-                      {timings.map((entry) => (
-                        <option key={entry.id} value={entry.id}>
-                          {entry.startTime}–{entry.endTime}
-                        </option>
-                      ))}
-                    </ExamSelect>
+                      options={[
+                        { value: '', label: 'Choose a time' },
+                        ...timings.map((entry) => ({
+                          value: entry.id,
+                          label: `${entry.startTime}–${entry.endTime}`,
+                        })),
+                      ]}
+                    />
                   )}
                 </form.Field>
               ) : (

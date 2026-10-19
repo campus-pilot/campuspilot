@@ -39,10 +39,7 @@ import {
 } from '@campuspilot/ui/components/empty';
 import { Input } from '@campuspilot/ui/components/input';
 import { Label } from '@campuspilot/ui/components/label';
-import {
-  NativeSelect,
-  NativeSelectOption,
-} from '@campuspilot/ui/components/native-select';
+import { OptionSelect } from '@campuspilot/components/option-select';
 import {
   CalendarDays,
   CheckCircle2,
@@ -419,18 +416,17 @@ export function SessionManagement({ schoolId }: { schoolId: string }) {
           <Label htmlFor="session-switcher" className="text-xs font-medium">
             Session:
           </Label>
-          <NativeSelect
-            id="session-switcher"
+          <OptionSelect
             value={currentSession?.id ?? ''}
-            onChange={(event) => handleSelectSession(event.target.value)}
-          >
-            {sessions.map((s) => (
-              <NativeSelectOption key={s.id} value={s.id}>
-                {s.sessionStartYear}&ndash;{s.sessionEndYear}
-                {s.isActive ? ' (Active)' : ''}
-              </NativeSelectOption>
-            ))}
-          </NativeSelect>
+            onValueChange={handleSelectSession}
+            options={sessions.map((session) => ({
+              value: session.id,
+              label: `${session.sessionStartYear}–${session.sessionEndYear}${
+                session.isActive ? ' (Active)' : ''
+              }`,
+            }))}
+            triggerProps={{ id: 'session-switcher' }}
+          />
 
           {currentSession?.isActive ? (
             <Badge variant="outline" className="border-emerald-500/30 text-[10px] text-emerald-600 dark:text-emerald-400">

@@ -23,10 +23,7 @@ import {
 } from '@campuspilot/ui/components/empty';
 import { Input } from '@campuspilot/ui/components/input';
 import { Label } from '@campuspilot/ui/components/label';
-import {
-  NativeSelect,
-  NativeSelectOption,
-} from '@campuspilot/ui/components/native-select';
+import { OptionSelect } from '../option-select';
 import { Pencil, Plus, Sparkles, Trash2 } from 'lucide-react';
 import {
   DEFAULT_FINANCE_CONFIG,
@@ -274,34 +271,21 @@ function FeeElementDialog({
               {(field) => (
                 <div className="flex flex-col gap-1.5">
                   <Label htmlFor="required-level">Required level</Label>
-                  <NativeSelect
-                    id="required-level"
+                  <OptionSelect
                     value={field.state.value}
-                    onChange={(event) =>
-                      field.handleChange(
-                        event.target.value as
-                          | 'school'
-                          | 'class'
-                          | 'student'
-                          | 'bill_generation'
-                          | 'none',
-                      )
-                    }
-                  >
-                    <NativeSelectOption value="none">
-                      Optional / None
-                    </NativeSelectOption>
-                    <NativeSelectOption value="school">
-                      School
-                    </NativeSelectOption>
-                    <NativeSelectOption value="class">Class</NativeSelectOption>
-                    <NativeSelectOption value="student">
-                      Student
-                    </NativeSelectOption>
-                    <NativeSelectOption value="bill_generation">
-                      While Bill Generation
-                    </NativeSelectOption>
-                  </NativeSelect>
+                    onValueChange={field.handleChange}
+                    options={[
+                      { value: 'none', label: 'Optional / None' },
+                      { value: 'school', label: 'School' },
+                      { value: 'class', label: 'Class' },
+                      { value: 'student', label: 'Student' },
+                      {
+                        value: 'bill_generation',
+                        label: 'While Bill Generation',
+                      },
+                    ]}
+                    triggerProps={{ id: 'required-level' }}
+                  />
                   <FieldErrors errors={field.state.meta.errors} />
                 </div>
               )}
@@ -516,17 +500,20 @@ export function FinanceSection({
       <div className="grid gap-3 rounded-lg border border-border bg-background p-3 sm:grid-cols-2">
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="finance-recurring">Billing frequency</Label>
-          {onChange ? <NativeSelect
-            id="finance-recurring"
-            value={financeConfig.recurring}
-            onChange={(event) =>
-              handleRecurringChange(event.target.value as FinanceRecurring)
-            }
-          >
-            <NativeSelectOption value="monthly">Monthly</NativeSelectOption>
-            <NativeSelectOption value="quarterly">Quarterly</NativeSelectOption>
-            <NativeSelectOption value="yearly">Yearly</NativeSelectOption>
-          </NativeSelect> : <p className="text-sm capitalize">{financeConfig.recurring}</p>}
+          {onChange ? (
+            <OptionSelect
+              value={financeConfig.recurring}
+              onValueChange={handleRecurringChange}
+              options={[
+                { value: 'monthly', label: 'Monthly' },
+                { value: 'quarterly', label: 'Quarterly' },
+                { value: 'yearly', label: 'Yearly' },
+              ]}
+              triggerProps={{ id: 'finance-recurring' }}
+            />
+          ) : (
+            <p className="text-sm capitalize">{financeConfig.recurring}</p>
+          )}
         </div>
 
         <div className="flex flex-col gap-1.5">

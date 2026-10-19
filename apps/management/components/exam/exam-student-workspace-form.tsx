@@ -540,18 +540,18 @@ function ActivityGradeSelect({
       errors={field.state.meta.errors}
       disabled={disabled || (!gradeLabels.length && !historical)}
       onChange={field.handleChange}
-    >
-      <option value="">No grade</option>
-      {historical && (
-        <option value={field.state.value}>
-          {field.state.value} (not in current scale)
-        </option>
-      )}
-      {gradeLabels.map((grade) => (
-        <option key={grade} value={grade}>
-          {grade}
-        </option>
-      ))}
-    </ExamSelect>
+      options={[
+        { value: '', label: 'No grade' },
+        ...(historical
+          ? [
+              {
+                value: field.state.value,
+                label: `${field.state.value} (not in current scale)`,
+              },
+            ]
+          : []),
+        ...gradeLabels.map((grade) => ({ value: grade, label: grade })),
+      ]}
+    />
   );
 }

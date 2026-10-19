@@ -159,14 +159,14 @@ function BuilderToolbar({
           label="Class to edit"
           value={selectedClassId}
           onChange={onSelectClass}
-        >
-          <option value="">Choose a class</option>
-          {config.columns.map((id) => (
-            <option key={id} value={id}>
-              {classes.find((entry) => entry.id === id)?.label ?? id}
-            </option>
-          ))}
-        </ExamSelect>
+          options={[
+            { value: '', label: 'Choose a class' },
+            ...config.columns.map((id) => ({
+              value: id,
+              label: classes.find((entry) => entry.id === id)?.label ?? id,
+            })),
+          ]}
+        />
       </div>
       {available.length > 0 && (
         <div className="min-w-0 flex-1">
@@ -179,14 +179,14 @@ function BuilderToolbar({
               onChange({ ...config, columns: [...config.columns, id] });
               onSelectClass(id);
             }}
-          >
-            <option value="">Choose a class to add</option>
-            {available.map((entry) => (
-              <option key={entry.id} value={entry.id}>
-                {entry.label}
-              </option>
-            ))}
-          </ExamSelect>
+            options={[
+              { value: '', label: 'Choose a class to add' },
+              ...available.map((entry) => ({
+                value: entry.id,
+                label: entry.label,
+              })),
+            ]}
+          />
         </div>
       )}
     </div>

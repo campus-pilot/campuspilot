@@ -19,7 +19,7 @@ APIs must be adapted to this application.
 | Search, filters, operational tables and pagination | [Admission table](../components/admission-table.tsx), [staff table](../components/staff-table.tsx), [shared data grid](../../../packages/components/src/data-grid) |
 | Detail header, desktop secondary navigation and mobile section selector | [Admission workspace](../components/admission-workspace.tsx), [classroom workspace](../components/classroom-workspace.tsx) |
 | Persistent setup warnings | [Classroom workspace](../components/classroom-workspace.tsx), [AppShellAlert](../../../packages/components/src/app-shell.tsx) |
-| Shared control sizing | [Button](../../../packages/ui/src/components/button.tsx), [Input](../../../packages/ui/src/components/input.tsx), [NativeSelect](../../../packages/ui/src/components/native-select.tsx) |
+| Shared control sizing | [Button](../../../packages/ui/src/components/button.tsx), [Input](../../../packages/ui/src/components/input.tsx), [Select](../../../packages/ui/src/components/select.tsx) |
 | Typed permission gates | [RequirePermissions](../components/require-permissions.tsx), [management agent instructions](../AGENTS.md) |
 | Examination application of these patterns | [Exam workspace](../components/exam/exam-workspace.tsx), [class roster](../components/exam/exam-class-students.tsx), [student editor](../components/exam/exam-student-workspace-form.tsx) |
 

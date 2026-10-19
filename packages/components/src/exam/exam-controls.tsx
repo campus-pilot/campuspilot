@@ -7,7 +7,10 @@ import {
 } from 'react';
 import { Button } from '@campuspilot/ui/components/button';
 import { Input } from '@campuspilot/ui/components/input';
-import { NativeSelect } from '@campuspilot/ui/components/native-select';
+import {
+  OptionSelect,
+  type OptionSelectOption,
+} from '../option-select';
 
 export function ExamButton(props: ComponentProps<typeof Button>) {
   return (
@@ -94,7 +97,7 @@ export function ExamSelect({
   label,
   value,
   onChange,
-  children,
+  options,
   disabled = false,
   errors = [],
   name,
@@ -102,7 +105,7 @@ export function ExamSelect({
   label: string;
   value: string;
   onChange: (value: string) => void;
-  children: ReactNode;
+  options: readonly OptionSelectOption[];
   disabled?: boolean;
   errors?: readonly unknown[];
   name?: string;
@@ -111,18 +114,19 @@ export function ExamSelect({
   return (
     <div className="flex min-w-0 flex-col gap-2 text-sm font-medium">
       <label htmlFor={id}>{label}</label>
-      <NativeSelect
-        id={id}
-        className="w-full"
+      <OptionSelect
         value={value}
+        options={options}
         name={name}
-        aria-invalid={errors.length > 0}
-        aria-describedby={`${id}-errors`}
         disabled={disabled}
-        onChange={(event) => onChange(event.target.value)}
-      >
-        {children}
-      </NativeSelect>
+        onValueChange={onChange}
+        triggerProps={{
+          id,
+          className: 'w-full',
+          'aria-invalid': errors.length > 0,
+          'aria-describedby': `${id}-errors`,
+        }}
+      />
       <span id={`${id}-errors`}>
         <Issues errors={errors} />
       </span>
