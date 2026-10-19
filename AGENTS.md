@@ -56,6 +56,13 @@ Read [Management UI patterns](apps/management/docs/ui-patterns.md) before changi
 management screens. It records the reference implementations, layout and feedback
 conventions, mobile verification expectations, and examination redesign decisions.
 
+Before changing document generation, document history, school template settings,
+the template marketplace, or template rendering, read the canonical
+[Document system guide](docs/document-system.md). It records the route ownership,
+permission boundaries, immutable template lifecycle, all-classroom timetable
+invariant, safe Handlebars contract, and the checks required when extending a
+document type or marketplace design.
+
 Before implementing or redesigning a workflow, inspect existing screens with the
 same behavior (admission/staff tables, classroom/admission workspaces and student
 forms). Reuse shared controls and layouts instead of introducing local sizing or

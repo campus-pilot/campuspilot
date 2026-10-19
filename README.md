@@ -101,6 +101,19 @@ campuspilot/
 │   └── db/          # Database schema & queries
 ```
 
+## Developer guides
+
+- [Management UI patterns](apps/management/docs/ui-patterns.md) documents shared
+  layout, form, navigation, permission, warning, and responsive conventions.
+- [Document system](docs/document-system.md) documents the Documents workspace,
+  school template settings, marketplace, rendering pipeline, permissions, and
+  extension checklists.
+- [Examination frontend](apps/management/components/exam/README.md) and
+  [examination API](packages/api/src/routers/school/exam/README.md) document the
+  assessment and examination workflows.
+- [Local document preview](docs/local-document-preview.md) describes the isolated
+  synthetic document-testing environment.
+
 ## Available Scripts
 
 - `pnpm run dev`: Start all applications in development mode

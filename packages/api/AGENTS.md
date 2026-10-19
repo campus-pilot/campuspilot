@@ -43,3 +43,14 @@
   3. **Domain Logic & Errors**: Verify happy paths and domain errors (`NOT_FOUND` for non-existent entities, `CONFLICT` for duplicate memberships/resources, `BAD_REQUEST` for invalid state transitions).
   4. **State Persistence**: Verify database rows or S3 objects are correctly inserted, updated, or removed.
 - Run tests via `pnpm --filter @campuspilot/api test`.
+
+# School documents
+
+Before modifying document DTOs, procedures, contexts, templates, rendering,
+storage, or artifact persistence, read the canonical
+[Document system guide](../../docs/document-system.md) and the package-local
+[backend contract](src/routers/school/document/README.md). Preserve strict
+per-document source schemas, immutable template/PDF revisions, optimistic template
+selection, explicit context fields, network-free rendering, and the all-classroom
+timetable invariant. Update integration tests and the user-facing template context
+reference whenever those contracts change.

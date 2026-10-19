@@ -201,6 +201,38 @@ the implementation and APIs in more detail.
   its right. Keep the editor header to its title rather than repeating instructions
   above the table.
 
+## Documents and template decisions to preserve
+
+The [document system guide](../../../docs/document-system.md) is the canonical
+architecture and extension reference. The following user-facing boundaries are
+deliberate and must remain visible in future redesigns:
+
+- The session-scoped Documents workspace is operational. It contains only Create
+  document and Document history. Do not reintroduce template selection or editing
+  there.
+- School-level Settings owns the selected template and custom HTML. The template
+  marketplace owns discovery, contextual preview, and import. A marketplace card's
+  Preview navigates to a dedicated detail route; Use template creates and selects
+  an immutable school revision.
+- When a document type has no selected school template, register one stable
+  school-scoped `AppShellAlert`. Viewers may see the warning, while only users with
+  template-management permission receive the configuration action. The generator
+  itself explains why creation is unavailable but does not provide an alternate
+  selector.
+- Choose document types with the shared visual cards, not a compact dropdown.
+  Once selected, reveal that type's required fields and preview/generation flow.
+- Template editing is a split workspace on wide screens and a stacked workspace
+  on small screens: collapsible Handlebars source first, sanitized sample preview
+  second. Edit with AI and Marketplace are peer actions in the page header.
+- The AI helper is a portable-prompt workflow. It must remain provider-neutral and
+  local to the browser; it never calls an AI service or silently replaces template
+  source.
+- Timetable PDFs are examination-wide and always contain every scheduled
+  classroom. Do not add a classroom picker or serialize `classId` for a timetable,
+  even when a contextual link contains one for other document types.
+- Document history is a unified session list. Show each artifact's document type
+  and template provenance rather than making the user select a type first.
+
 ## Corrections from the redesign
 
 | Earlier approach | Established direction |

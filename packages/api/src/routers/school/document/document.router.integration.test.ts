@@ -229,7 +229,7 @@ describe('document templates, generation, and artifact lifecycle', () => {
       await expect(call()).rejects.toMatchObject({ code: 'FORBIDDEN' });
     expect(
       (await teacher.school.listMarketplaceTemplates(read)).items,
-    ).toHaveLength(2);
+    ).toHaveLength(4);
   });
   it('validates list boundaries and rejects unsupported template syntax', async () => {
     await expect(
@@ -273,6 +273,18 @@ describe('document templates, generation, and artifact lifecycle', () => {
         expectedRevisionId: null,
       }),
     ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await expect(
+      manager.school.previewDocument({
+        schoolId,
+        templateRevisionId: 'unknown',
+        source: {
+          documentType: 'timetable',
+          sessionId,
+          examSlug: 'midterm',
+          classId,
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
   });
   it('persists immutable templates, previews drafts, and rejects concurrent lost updates', async () => {
     expect(

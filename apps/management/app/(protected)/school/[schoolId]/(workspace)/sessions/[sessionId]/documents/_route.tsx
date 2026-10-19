@@ -4,7 +4,7 @@ import { sessionPageBreadcrumbs } from "@/components/session-page-breadcrumbs";
 import type { SchoolSessionRouteParams } from "@/components/school-route";
 
 /** Each section owns a real route so breadcrumbs provide parent navigation. */
-export const documentPages = [undefined, "templates", "history"].map(
+export const documentPages = [undefined, "history"].map(
   (section) =>
     defineManagementPage<SchoolSessionRouteParams>({
       matches: (pathname) =>
@@ -22,7 +22,7 @@ export const documentPages = [undefined, "templates", "history"].map(
             `/school/${schoolId}/sessions/${sessionId}/documents`;
           breadcrumbs.push({
             id: section,
-            label: section === "templates" ? "Templates" : "History",
+            label: "History",
           });
         }
         return breadcrumbs;

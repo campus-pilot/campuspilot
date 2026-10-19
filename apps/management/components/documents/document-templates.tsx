@@ -1,15 +1,15 @@
 'use client';
+
+import Link from 'next/link';
+import type { ReactNode } from 'react';
 import { useForm } from '@tanstack/react-form';
 import { useQuery } from '@tanstack/react-query';
+import { Braces, Eye, Save, Store } from 'lucide-react';
 import { z } from 'zod';
 import {
-  Check,
-  Code2,
-  Eye,
-  LayoutTemplate,
-  Save,
-} from 'lucide-react';
-import type { activeTemplateSchema } from '@campuspilot/api/routers/school/document/document.dto';
+  DOCUMENT_LABELS,
+  type activeTemplateSchema,
+} from '@campuspilot/api/routers/school/document/document.dto';
 import {
   DocumentButton,
   DocumentErrors,
@@ -19,8 +19,8 @@ import {
   DocumentPreview,
 } from '@campuspilot/components/documents/document-controls';
 import { client, orpc } from '@/lib/orpc';
-import { TemplatePromptEditor } from './template-prompt-editor';
 import { confirmNavigation } from '@/lib/navigation-guard';
+import { TemplatePromptEditor } from './template-prompt-editor';
 import {
   DocumentDirtyGuard,
   DocumentLoading,
@@ -30,222 +30,101 @@ import {
   useDocumentCache,
   type DocumentTemplateScope,
 } from './document-common';
+
 type ActiveTemplate = z.infer<typeof activeTemplateSchema>;
+
+function marketplaceHref(scope: DocumentTemplateScope) {
+  return `/school/${encodeURIComponent(scope.schoolId)}/marketplace/templates?type=${scope.documentType}`;
+}
+
+function TemplatePageHeader({
+  scope,
+  actions,
+}: {
+  scope: DocumentTemplateScope;
+  actions?: ReactNode;
+}) {
+  return (
+    <header className="flex flex-col gap-4 border-b pb-5 sm:flex-row sm:items-start sm:justify-between">
+      <div className="flex min-w-0 flex-col gap-1">
+        <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+          School template
+        </p>
+        <h1 className="text-2xl font-semibold tracking-tight">
+          {DOCUMENT_LABELS[scope.documentType]}
+        </h1>
+        <p className="max-w-2xl text-sm text-muted-foreground">
+          Edit the school-owned template and preview it with safe sample data.
+          The saved revision is used across academic sessions.
+        </p>
+      </div>
+      <div className="flex shrink-0 flex-wrap gap-2">
+        {actions}
+        <DocumentButton asChild variant="outline">
+          <Link href={marketplaceHref(scope)}>
+            <Store />
+            Marketplace
+          </Link>
+        </DocumentButton>
+      </div>
+    </header>
+  );
+}
+
+/** Settings owns the active school template. Marketplace browsing and import
+ * live on dedicated routes so selecting a design never competes with editing.
+ */
 export function DocumentTemplates({ scope }: { scope: DocumentTemplateScope }) {
   const active = useQuery(
     orpc.school.getActiveDocumentTemplate.queryOptions({ input: scope }),
   );
-  const market = useQuery(
-    orpc.school.listMarketplaceTemplates.queryOptions({ input: scope }),
-  );
-  const selection = useForm({
-    defaultValues: { slug: '', editorEpoch: 0 },
-    validators: {
-      onChange: z.object({ slug: z.string(), editorEpoch: z.number() }),
-    },
-  });
-  if (active.isPending || market.isPending) return <DocumentLoading />;
+  if (active.isPending) return <DocumentLoading />;
   if (active.isError)
     return <DocumentReadError error={active.error} retry={active.refetch} />;
-  if (market.isError)
-    return <DocumentReadError error={market.error} retry={market.refetch} />;
-  return (
-    <div className="flex flex-col gap-6">
-      <DocumentPanel
-        title="Find your school’s style"
-        description="Choose a starting point, then make it your own. Your selection applies across academic sessions."
-      >
-        <div className="grid gap-4 sm:grid-cols-2">
-          {market.data.items.map((item) => (
-            <MarketplaceCard
-              key={item.slug}
-              scope={scope}
-              item={item}
-              active={active.data}
-              onPreview={() => selection.setFieldValue('slug', item.slug)}
-            />
-          ))}
-        </div>
-      </DocumentPanel>
-      <selection.Subscribe selector={(state) => state.values.slug}>
-        {(slug) => slug && <MarketplacePreview scope={scope} slug={slug} />}
-      </selection.Subscribe>
-      {active.data ? (
-        <DocumentPermission
-          schoolId={scope.schoolId}
-          action={SCHOOL_ACTIONS.MANAGE_DOCUMENT_TEMPLATES}
-          fallback={
-            <SavedTemplatePreview scope={scope} template={active.data} />
-          }
+
+  if (!active.data) {
+    return (
+      <div className="flex flex-col gap-5">
+        <TemplatePageHeader scope={scope} />
+        <DocumentPanel
+          title="No template selected"
+          description="Import a design from the template marketplace before editing this document type."
         >
-          <selection.Subscribe selector={(state) => state.values.editorEpoch}>
-            {(epoch) => (
-              <TemplateEditor
-                key={`${active.data!.artifact.id}-${epoch}`}
-                scope={scope}
-                template={active.data!}
-                onReload={async () => {
-                  await active.refetch();
-                  selection.setFieldValue('editorEpoch', epoch + 1);
-                }}
-              />
-            )}
-          </selection.Subscribe>
-        </DocumentPermission>
-      ) : (
-        <DocumentNotice>
-          No template selected yet. Preview a design above and choose “Use
-          template” to get started.
-        </DocumentNotice>
-      )}
-    </div>
-  );
-}
-function TemplateThumbnail({
-  classic,
-  card,
-}: {
-  classic: boolean;
-  card: boolean;
-}) {
-  return (
-    <div
-      aria-hidden="true"
-      className={`flex h-32 items-center justify-center overflow-hidden rounded-lg border bg-muted/30 ${classic ? 'text-blue-900' : 'text-emerald-800'}`}
-    >
-      <div
-        className={`flex flex-col gap-2 border-t-4 border-current bg-white p-3 shadow-sm ${card ? 'w-48 rounded-md' : 'mt-10 h-36 w-40'}`}
-      >
-        <div className="h-1.5 w-20 rounded bg-current opacity-80" />
-        <div className="h-1 w-28 rounded bg-slate-200" />
-        <div className="mt-2 h-1 w-24 rounded bg-current opacity-30" />
-        <div className="h-1 w-full rounded bg-slate-200" />
-        <div className="h-1 w-full rounded bg-slate-200" />
-        <div className="h-1 w-20 rounded bg-slate-200" />
-      </div>
-    </div>
-  );
-}
-function MarketplaceCard({
-  scope,
-  item,
-  active,
-  onPreview,
-}: {
-  scope: DocumentTemplateScope;
-  item: { slug: string; name: string; description: string };
-  active: ActiveTemplate | null;
-  onPreview: () => void;
-}) {
-  const cache = useDocumentCache();
-  const form = useForm({
-    defaultValues: { error: '' },
-    validators: { onChange: z.object({ error: z.string() }) },
-    onSubmit: async () => {
-      if (!(await confirmNavigation())) return;
-      form.setFieldValue('error', '');
-      try {
-        await client.school.selectMarketplaceTemplate({
-          ...scope,
-          slug: item.slug,
-          expectedRevisionId: active?.artifact.id ?? null,
-        });
-        await cache.templates(scope);
-      } catch (error) {
-        form.setFieldValue(
-          'error',
-          error instanceof Error
-            ? error.message
-            : 'Unable to select this template.',
-        );
-      }
-    },
-  });
-  const selected = active?.artifact.marketplaceSlug === item.slug;
-  return (
-    <article
-      className={`flex flex-col gap-4 rounded-xl border p-4 ${selected ? 'border-primary/50 bg-primary/[0.02]' : ''}`}
-    >
-      <TemplateThumbnail
-        classic={item.slug.endsWith('classic')}
-        card={scope.documentType === 'id_card'}
-      />
-      <div className="flex flex-col gap-1">
-        <h3 className="text-sm font-semibold">{item.name}</h3>
-        <p className="text-xs text-muted-foreground">{item.description}</p>
-      </div>
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          void form.handleSubmit();
-        }}
-      >
-        <form.Subscribe
-          selector={(state) => ({
-            submitting: state.isSubmitting,
-            canSubmit: state.canSubmit,
-            error: state.values.error,
-          })}
-        >
-          {({ submitting, canSubmit, error }) => (
-            <div className="flex flex-col gap-3">
-              <div className="flex flex-wrap gap-2">
-                <DocumentButton
-                  type="button"
-                  variant="outline"
-                  onClick={onPreview}
-                >
-                  <Eye />
-                  Preview
-                </DocumentButton>
-                <DocumentPermission
-                  schoolId={scope.schoolId}
-                  action={SCHOOL_ACTIONS.MANAGE_DOCUMENT_TEMPLATES}
-                >
-                  <DocumentButton
-                    type="submit"
-                    disabled={selected || submitting || !canSubmit}
-                  >
-                    {selected ? <Check /> : <LayoutTemplate />}
-                    {selected
-                      ? 'Selected'
-                      : submitting
-                        ? 'Selecting…'
-                        : 'Use template'}
-                  </DocumentButton>
-                </DocumentPermission>
-              </div>
-              {error && <DocumentNotice error>{error}</DocumentNotice>}
+          <div className="flex min-h-64 flex-col items-center justify-center gap-4 rounded-lg border border-dashed px-6 text-center">
+            <Store className="size-10 text-muted-foreground/50" aria-hidden />
+            <div className="flex max-w-md flex-col gap-1">
+              <p className="text-sm font-medium">Browse the marketplace</p>
+              <p className="text-xs text-muted-foreground">
+                Preview available designs, then import one into this school.
+              </p>
             </div>
-          )}
-        </form.Subscribe>
-      </form>
-    </article>
-  );
-}
-function MarketplacePreview({
-  scope,
-  slug,
-}: {
-  scope: DocumentTemplateScope;
-  slug: string;
-}) {
-  const preview = useQuery(
-    orpc.school.getMarketplaceTemplate.queryOptions({
-      input: { ...scope, slug },
-    }),
-  );
-  if (preview.isPending) return <DocumentLoading />;
-  if (preview.isError)
-    return <DocumentReadError error={preview.error} retry={preview.refetch} />;
+            <DocumentButton asChild variant="outline">
+              <Link href={marketplaceHref(scope)}>Browse marketplace</Link>
+            </DocumentButton>
+          </div>
+        </DocumentPanel>
+      </div>
+    );
+  }
+
   return (
-    <DocumentPreview
-      html={preview.data.html}
-      label={preview.data.name}
-      sample
-    />
+    <DocumentPermission
+      schoolId={scope.schoolId}
+      action={SCHOOL_ACTIONS.MANAGE_DOCUMENT_TEMPLATES}
+      fallback={<SavedTemplatePreview scope={scope} template={active.data} />}
+    >
+      <TemplateEditor
+        key={active.data.artifact.id}
+        scope={scope}
+        template={active.data}
+        onReload={async () => {
+          await active.refetch();
+        }}
+      />
+    </DocumentPermission>
   );
 }
+
 function SavedTemplatePreview({
   scope,
   template,
@@ -258,18 +137,24 @@ function SavedTemplatePreview({
       input: { ...scope, content: template.content },
     }),
   );
-  return preview.isError ? (
-    <DocumentReadError error={preview.error} retry={preview.refetch} />
-  ) : (
-    <DocumentPreview
-      html={preview.data?.html}
-      label={template.artifact.name}
-      sample
-    />
+  return (
+    <div className="flex flex-col gap-5">
+      <TemplatePageHeader scope={scope} />
+      {preview.isError ? (
+        <DocumentReadError error={preview.error} retry={preview.refetch} />
+      ) : (
+        <DocumentPreview
+          html={preview.data?.html}
+          label={template.artifact.name}
+          sample
+        />
+      )}
+    </div>
   );
 }
+
 /** Draft content remains local until an explicit save creates a new revision;
- * Preview responses never replace the active template.
+ * preview responses never replace the active template.
  */
 function useDocumentTemplateForm(
   scope: DocumentTemplateScope,
@@ -288,7 +173,7 @@ function useDocumentTemplateForm(
       preview: '',
       previewContent: '',
       error: '',
-      mode: 'save',
+      mode: 'save' as 'save' | 'preview',
     },
     validators: {
       onChange: z.object({
@@ -331,6 +216,7 @@ function useDocumentTemplateForm(
   });
   return { form, initialPreview };
 }
+
 function TemplateEditor({
   scope,
   template,
@@ -342,50 +228,69 @@ function TemplateEditor({
 }) {
   const { form, initialPreview } = useDocumentTemplateForm(scope, template);
   return (
-    <div className="flex flex-col gap-5">
-      <DocumentPanel
-        title="Make it yours"
-        description={`Editing ${template.artifact.name}. Changes only become active when you save.`}
-      >
-        <form.Subscribe selector={(state) => state.values}>
-          {(values) => (
-            <DocumentDirtyGuard
-              dirty={
-                values.name !== template.artifact.name ||
-                values.content !== template.content
-              }
-            />
-          )}
-        </form.Subscribe>
-        <div className="grid items-start gap-5 xl:grid-cols-2">
-          <TemplateSourceForm
-            form={form}
-            template={template}
-            onReload={onReload}
+    <div className="flex min-w-0 flex-col gap-5">
+      <form.Subscribe selector={(state) => state.values.content}>
+        {(content) => (
+          <TemplatePageHeader
+            scope={scope}
+            actions={
+              <TemplatePromptEditor
+                documentType={scope.documentType}
+                content={content}
+                contextHelp={initialPreview.data?.contextHelp}
+              />
+            }
           />
-          <TemplateDraftPreview
-            form={form}
-            template={template}
-            initialHtml={initialPreview.data?.html}
-          />
-        </div>
-        <details className="rounded-lg border p-4">
-          <summary className="flex cursor-pointer items-center gap-2 text-sm font-medium">
-            <Code2 className="size-4" />
-            Template variable reference
-          </summary>
-          <pre className="mt-4 whitespace-pre-wrap break-words text-xs leading-relaxed text-muted-foreground">
-            {initialPreview.data?.contextHelp ?? 'Loading variable reference…'}
-          </pre>
-        </details>
-      </DocumentPanel>
-      <form.Subscribe selector={state => state.values.content}>
-        {content => <TemplatePromptEditor documentType={scope.documentType} content={content} contextHelp={initialPreview.data?.contextHelp} />}
+        )}
       </form.Subscribe>
+      <form.Subscribe selector={(state) => state.values}>
+        {(values) => (
+          <DocumentDirtyGuard
+            dirty={
+              values.name !== template.artifact.name ||
+              values.content !== template.content
+            }
+          />
+        )}
+      </form.Subscribe>
+      <div className="grid min-w-0 items-start gap-5 xl:grid-cols-[minmax(22rem,0.9fr)_minmax(0,1.1fr)]">
+        <details open className="group min-w-0 rounded-xl border bg-card">
+          <summary className="flex cursor-pointer items-center gap-2 border-b px-5 py-4 text-sm font-semibold marker:hidden">
+            <Braces className="size-4 text-muted-foreground" aria-hidden />
+            Template HTML
+            <span className="ml-auto text-xs font-normal text-muted-foreground group-open:hidden">
+              Expand editor
+            </span>
+          </summary>
+          <div className="flex min-w-0 flex-col gap-5 p-5">
+            <TemplateSourceForm
+              form={form}
+              template={template}
+              onReload={onReload}
+            />
+            <details className="rounded-lg border p-4">
+              <summary className="cursor-pointer text-sm font-medium">
+                Template variable reference
+              </summary>
+              <pre className="mt-4 whitespace-pre-wrap break-words text-xs leading-relaxed text-muted-foreground">
+                {initialPreview.data?.contextHelp ??
+                  'Loading variable reference…'}
+              </pre>
+            </details>
+          </div>
+        </details>
+        <TemplateDraftPreview
+          form={form}
+          template={template}
+          initialHtml={initialPreview.data?.html}
+        />
+      </div>
     </div>
   );
 }
+
 type TemplateForm = ReturnType<typeof useDocumentTemplateForm>['form'];
+
 function TemplateSourceForm({
   form,
   template,
@@ -414,7 +319,7 @@ function TemplateSourceForm({
             label="Handlebars HTML"
             multiline
             code
-            description="Use the variable reference below. Keep styles self-contained; school branding and student photos are embedded automatically."
+            description="Keep styles self-contained. School branding and student photos are embedded automatically when available."
           />
         )}
       </form.Field>
@@ -429,12 +334,12 @@ function TemplateSourceForm({
         {({ values, submitting, canSubmit, errors }) => (
           <div className="flex flex-col gap-3">
             <DocumentErrors errors={errors} />
-            {values.error && (
+            {values.error ? (
               <DocumentNotice error>
                 {values.error} Your edits are still here. Reload the saved
                 revision if someone else changed the template.
               </DocumentNotice>
-            )}
+            ) : null}
             <div className="flex flex-wrap gap-2">
               <DocumentButton
                 type="button"
@@ -481,6 +386,7 @@ function TemplateSourceForm({
     </form>
   );
 }
+
 function TemplateDraftPreview({
   form,
   template,
@@ -493,13 +399,13 @@ function TemplateDraftPreview({
   return (
     <form.Subscribe selector={(state) => state.values}>
       {(values) => (
-        <div className="flex flex-col gap-3">
-          {(values.previewContent || template.content) !== values.content && (
+        <div className="flex min-w-0 flex-col gap-3">
+          {(values.previewContent || template.content) !== values.content ? (
             <DocumentNotice>
               Preview reflects an earlier draft. Preview changes again before
               saving.
             </DocumentNotice>
-          )}
+          ) : null}
           <DocumentPreview
             html={values.preview || initialHtml}
             sample
