@@ -155,7 +155,9 @@ function useDocumentGeneration({
   const schema = z
     .object({
       classId:
-        documentType === "timetable" || documentType === "report_card"
+        documentType === "timetable" ||
+        documentType === "report_card" ||
+        documentType === "admit_card"
           ? z.string()
           : z.string().min(1, "Choose a class"),
       examSlug:
@@ -215,7 +217,7 @@ function useDocumentGeneration({
       };
     const selection = {
       sessionId: scope.sessionId,
-      classId: value.classId,
+      ...(value.classId ? { classId: value.classId } : {}),
       ...(value.audience === "selected"
         ? { studentIds: value.studentIds }
         : {}),
@@ -230,7 +232,14 @@ function useDocumentGeneration({
         resultPolicy: value.resultPolicy,
       };
     return documentType === "id_card"
-      ? { documentType, ...selection }
+      ? {
+          documentType,
+          sessionId: scope.sessionId,
+          classId: value.classId,
+          ...(value.audience === "selected"
+            ? { studentIds: value.studentIds }
+            : {}),
+        }
       : { documentType, ...selection, examSlug: value.examSlug };
   };
   const form = useForm({
@@ -350,7 +359,9 @@ function GenerationForm({
                   },
                 }}
                 label={
-                  documentType === "timetable" || documentType === "report_card"
+                  documentType === "timetable" ||
+                  documentType === "report_card" ||
+                  documentType === "admit_card"
                     ? "Classes"
                     : "Class"
                 }
@@ -360,7 +371,8 @@ function GenerationForm({
                     label:
                       documentType === "timetable"
                         ? "All scheduled classes"
-                        : documentType === "report_card"
+                        : documentType === "report_card" ||
+                            documentType === "admit_card"
                           ? "All examination classes"
                           : "Choose a class",
                   },

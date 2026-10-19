@@ -64,15 +64,20 @@ do not add another feature-level back button.
 
 Keep section navigation in the secondary sidebar, without duplicating it in the
 header's overflow menu. Examination sections are Results, Timetable and Settings.
-The examination overflow contains only the applicable lifecycle action. Navbar
-actions are specific to the exact route, with no inheritance from the exam root:
+Once a plan exists, the examination's in-page overflow contains contextual document
+actions. Results, class and student pages link to the appropriately scoped admit
+card and Create Results workflows; keep Create Results disabled until the
+examination is completed. The timetable page uses the same overflow for Edit
+timetable, Download timetable and Delete timetable. Lifecycle actions stay in
+Settings and the exam-root navbar rather than the in-page overflow. Navbar actions
+are specific to the exact route, with no inheritance from the exam root:
 
 | Page | Navbar action |
 | --- | --- |
 | `/exam/<slug>` | Applicable Start / Complete / Reopen action |
 | `/exam/<slug>/classes/<classId>` | None |
 | `/exam/<slug>/classes/<classId>/students/<studentId>` | Disabled Preview placeholder until implemented |
-| `/exam/<slug>/timetable` | Create timetable or Edit timetable, with the same editor and authorization as the page action |
+| `/exam/<slug>/timetable` | None; populated timetable actions use the in-page overflow |
 | `/exam/<slug>/settings` | None |
 
 Settings holds
@@ -161,6 +166,9 @@ the implementation and APIs in more detail.
 - Generating plans leaves the examination Not started. Starting it is a separate,
   explicit school governance action. Completing and reopening are exam-wide.
   The normal UI has no per-subject plan approval prerequisite.
+- Before that explicit start, class rosters remain visible but student names are
+  not links. The contextual Create Results action appears after plan creation but
+  remains disabled through result entry; only a completed examination enables it.
 - Plan availability, examination lifecycle, result approval, timetable availability
   and session editability are independent facts. Never infer one from another.
   Preserve unknown historical timestamps rather than inventing them.
@@ -188,7 +196,9 @@ the implementation and APIs in more detail.
   component must not leave the rest partially saved. Completed examinations and
   inactive sessions remain protected independently of the user's role.
 - Timetables are optional. Mobile editing of one class must preserve the grid's
-  other classes. Document exports use the shared Documents workspace; contextual links preselect the examination, class or student without adding navigation items to lifecycle menus.
+  other classes. Document exports use the shared Documents workspace. The class
+  report-card action preselects the current examination, class or student from the
+  shared in-page overflow.
 - The timetable page shows a separate table for every class, without a class filter.
   The builder stays a date/time × class table on desktop and mobile (mobile may edit
   one class at a time). Headers contain a drag handle, class name and remove icon;

@@ -6,7 +6,7 @@ Documents are available at `/school/:schoolId/sessions/:sessionId/documents` in 
 
 - Report cards combine all active/completed subject plans for one class or the whole examination. Every included student must have an approved result in every included plan. The default UI policy excludes incomplete/unapproved students with an explicit warning; strict mode rejects the batch. Explicitly selected students always require complete approval. Ready examinations cannot export results; active, completed and historical examinations remain available. Missing marks never become zero marks. Grades use the session's explicit thresholds; no matching grade renders as an em dash.
 - Student ID cards use session enrollment plus admission identity/photo data, imposed as 86 × 54 mm cards on A4 sheets.
-- Admit cards include student identity and that class's optional exam schedule. Missing schedules produce an explicit preview warning.
+- Admit cards can target one student, one class or every class in the examination plan. Each card includes student identity and that student's class schedule. Missing class schedules produce explicit preview warnings.
 - Timetables render all scheduled classes or one selected class, with all subjects in a shared slot preserved, on landscape A4.
 
 Exports support a whole examination, one class, or up to 500 explicitly selected students. Every export is limited to 500 students. Historical sessions remain exportable. Only registered admissions are eligible. Session, class, exam, student, and tenant relationships are validated independently.

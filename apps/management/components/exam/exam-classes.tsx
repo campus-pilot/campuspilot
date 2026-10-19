@@ -1,6 +1,5 @@
 'use client';
 import Link from 'next/link';
-import { DocumentExportLink } from '@/components/documents/document-export-link';
 import { SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
 import { RequirePermissions } from '@/components/require-permissions';
 import { useForm } from '@tanstack/react-form';
@@ -57,14 +56,6 @@ function ClassesPage({
   return (
     <>
       {query.isError && <ReadError error={query.error} retry={query.refetch} />}
-      <div className="flex justify-end">
-        <DocumentExportLink
-          scope={scope}
-          type="report_card"
-          examSlug={scope.examSlug}
-          label="Create examination report cards"
-        />
-      </div>
       <DataTable
         ariaLabel="Examination classes"
         data={query.data.items}

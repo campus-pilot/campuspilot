@@ -1,6 +1,5 @@
 'use client';
 import Link from 'next/link';
-import { DocumentExportLink } from '@/components/documents/document-export-link';
 import { useForm } from '@tanstack/react-form';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { z } from 'zod';
@@ -19,8 +18,12 @@ import {
   Notice,
   ReadError,
 } from './exam-common';
-import { schoolPermission, type ExamScope } from './exam-model';
-import { examStudentHref } from './exam-model';
+import {
+  examStudentHref,
+  hasExamStarted,
+  schoolPermission,
+  type ExamScope,
+} from './exam-model';
 
 type Scope = ExamScope & { classId: string };
 export function ExamClassStudents({ scope }: { scope: Scope }) {
@@ -43,6 +46,9 @@ function ClassData({ scope }: { scope: Scope }) {
       input: { ...scope, filters: { classId: scope.classId } },
     }),
   );
+  const overview = useQuery(
+    orpc.school.getExamOverview.queryOptions({ input: scope }),
+  );
   const form = useForm({
     defaultValues: { page: 1, sectionId: '', search: '' },
     validators: {
@@ -53,28 +59,29 @@ function ClassData({ scope }: { scope: Scope }) {
       }),
     },
   });
-  if (query.isPending) return <LoadingExam />;
-  if (!query.data)
-    return <ReadError error={query.error} retry={() => query.refetch()} />;
+  if (query.isPending || overview.isPending) return <LoadingExam />;
+  if (!query.data || !overview.data)
+    return (
+      <ReadError
+        error={query.error ?? overview.error}
+        retry={() => Promise.all([query.refetch(), overview.refetch()])}
+      />
+    );
   const schoolClass = query.data.items[0];
   if (!schoolClass) return <Notice>No exam plan found for this class.</Notice>;
+  const studentsNavigable =
+    !overview.isError && hasExamStarted(overview.data.status);
   return (
     <ExamFrame
       level="h2"
       title={schoolClass.label}
       description={`${schoolClass.subjectCount} ${schoolClass.subjectCount === 1 ? 'subject' : 'subjects'}`}
     >
-      <div className="flex justify-end">
-        <DocumentExportLink
-          scope={scope}
-          type="report_card"
-          examSlug={scope.examSlug}
-          classId={scope.classId}
-          label="Create class report cards"
+      {(query.isError || overview.isError) && (
+        <ReadError
+          error={query.error ?? overview.error}
+          retry={() => Promise.all([query.refetch(), overview.refetch()])}
         />
-      </div>
-      {query.isError && (
-        <ReadError error={query.error} retry={() => query.refetch()} />
       )}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <form.Field name="search">
@@ -120,6 +127,7 @@ function ClassData({ scope }: { scope: Scope }) {
           <StudentsPage
             scope={scope}
             {...values}
+            studentsNavigable={studentsNavigable}
             onPage={(page) => form.setFieldValue('page', page)}
           />
         )}
@@ -132,12 +140,14 @@ function StudentsPage({
   page,
   sectionId,
   search,
+  studentsNavigable,
   onPage,
 }: {
   scope: Scope;
   page: number;
   sectionId: string;
   search: string;
+  studentsNavigable: boolean;
   onPage: (page: number) => void;
 }) {
   const query = useQuery(
@@ -165,17 +175,20 @@ function StudentsPage({
           {
             id: 'name',
             header: 'Student',
-            cell: ({ row }) => (
-              <Link
-                className="flex flex-col justify-center font-medium hover:underline"
-                href={examStudentHref({
-                  ...scope,
-                  studentId: row.original.studentId,
-                })}
-              >
-                {row.original.name}
-              </Link>
-            ),
+            cell: ({ row }) =>
+              studentsNavigable ? (
+                <Link
+                  className="flex flex-col justify-center font-medium hover:underline"
+                  href={examStudentHref({
+                    ...scope,
+                    studentId: row.original.studentId,
+                  })}
+                >
+                  {row.original.name}
+                </Link>
+              ) : (
+                <span className="font-medium">{row.original.name}</span>
+              ),
           },
           {
             accessorKey: 'admissionNo',

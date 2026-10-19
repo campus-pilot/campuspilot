@@ -1,6 +1,11 @@
 'use client';
-import { DocumentExportLink } from '@/components/documents/document-export-link';
+import Link from 'next/link';
+import {
+  documentWorkspaceHref,
+  documentWorkspacePermissions,
+} from '@/components/documents/document-export-link';
 import { TimetablePreview } from '@campuspilot/components/exam/timetable-preview';
+import { ConfirmationDialog } from '@campuspilot/components/confirmation-dialog';
 import { toast } from '@campuspilot/ui/lib/toast';
 import {
   Empty,
@@ -10,72 +15,34 @@ import {
 import { useForm } from '@tanstack/react-form';
 import { useQuery } from '@tanstack/react-query';
 import { z } from 'zod';
+import { FileDown, MoreVertical, Pencil, Trash2 } from 'lucide-react';
 import {
   saveExamTimetableInputSchema,
   type ExamContextDto,
 } from '@campuspilot/api/routers/school/exam/exam.dto';
 import { SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
 import { RequirePermissions } from '@/components/require-permissions';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@campuspilot/ui/components/dropdown-menu';
 import { client, orpc } from '@/lib/orpc';
 import {
   ExamButton,
+  Issues,
   LoadingExam,
   Notice,
   ReadError,
   useExamCache,
 } from './exam-common';
 import { errorMessage, schoolPermission, type ExamScope } from './exam-model';
-import { ExamCommand } from './exam-command';
 
 import { TimetableEditor } from './exam-timetable-editor';
 
 type Config = z.infer<typeof saveExamTimetableInputSchema>['config'];
-
-export function ExamTimetableNavbarAction({ scope }: { scope: ExamScope }) {
-  return (
-    <RequirePermissions
-      permissions={[
-        SCHOOL_ACTIONS.READ_EXAMS,
-        SCHOOL_ACTIONS.READ_EXAM_PLANS,
-        SCHOOL_ACTIONS.READ_EXAM_TIMETABLE,
-        SCHOOL_ACTIONS.READ_SESSION,
-        SCHOOL_ACTIONS.UPDATE_EXAM_TIMETABLE,
-      ].map((action) => schoolPermission(scope.schoolId, action))}
-    >
-      <TimetableNavbarData scope={scope} />
-    </RequirePermissions>
-  );
-}
-
-function TimetableNavbarData({ scope }: { scope: ExamScope }) {
-  const session = useQuery(
-    orpc.school.getSession.queryOptions({ input: scope }),
-  );
-  const context = useQuery(
-    orpc.school.getExamContext.queryOptions({ input: scope }),
-  );
-  const overview = useQuery(
-    orpc.school.getExamOverview.queryOptions({ input: scope }),
-  );
-  if (
-    !session.data ||
-    !context.data ||
-    !overview.data ||
-    session.isError ||
-    context.isError ||
-    overview.isError ||
-    !overview.data.planCount
-  )
-    return null;
-  return (
-    <TimetableActions
-      scope={scope}
-      context={context.data}
-      active={session.data.isActive}
-      placement="navbar"
-    />
-  );
-}
 
 export function ExamTimetable({
   scope,
@@ -92,25 +59,6 @@ export function ExamTimetable({
   if (query.isPending) return <LoadingExam />;
   if (query.isError && query.data === undefined)
     return <ReadError error={query.error} retry={query.refetch} />;
-  const actions = (
-    <RequirePermissions
-      permissions={schoolPermission(
-        scope.schoolId,
-        SCHOOL_ACTIONS.READ_EXAM_PLANS,
-      )}
-      fallback={
-        <Notice>
-          Plan status is unavailable. Timetable editing is closed.
-        </Notice>
-      }
-    >
-      <TimetableActions
-        scope={scope}
-        context={context}
-        active={active && !query.isError}
-      />
-    </RequirePermissions>
-  );
   return (
     <div className="flex flex-col gap-4">
       {query.isError && <ReadError error={query.error} retry={query.refetch} />}
@@ -119,28 +67,61 @@ export function ExamTimetable({
           <EmptyHeader>
             <EmptyTitle>No timetable yet</EmptyTitle>
           </EmptyHeader>
-          {actions}
+          <RequirePermissions
+            permissions={schoolPermission(
+              scope.schoolId,
+              SCHOOL_ACTIONS.READ_EXAM_PLANS,
+            )}
+            fallback={
+              <Notice>
+                Plan status is unavailable. Timetable editing is closed.
+              </Notice>
+            }
+          >
+            <TimetableActions
+              scope={scope}
+              context={context}
+              active={active && !query.isError}
+            />
+          </RequirePermissions>
         </Empty>
       ) : (
-        <>
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            {actions}
-            <DocumentExportLink
-              scope={scope}
-              type="timetable"
-              examSlug={scope.examSlug}
-              label="Create timetable PDF"
-            />
-          </div>
-          <TimetablePreview
-            config={query.data.config}
-            classes={context.classes}
-          />
-        </>
+        <TimetablePreview
+          config={query.data.config}
+          classes={context.classes}
+        />
       )}
     </div>
   );
 }
+
+/** Populated timetable actions belong in the examination workspace header. */
+export function ExamTimetableMenu({
+  scope,
+  context,
+  active,
+}: {
+  scope: ExamScope;
+  context: ExamContextDto;
+  active: boolean;
+}) {
+  return (
+    <RequirePermissions
+      permissions={schoolPermission(
+        scope.schoolId,
+        SCHOOL_ACTIONS.READ_EXAM_PLANS,
+      )}
+    >
+      <TimetableActions
+        scope={scope}
+        context={context}
+        active={active}
+        placement="menu"
+      />
+    </RequirePermissions>
+  );
+}
+
 function TimetableActions({
   scope,
   context,
@@ -150,7 +131,7 @@ function TimetableActions({
   scope: ExamScope;
   context: ExamContextDto;
   active: boolean;
-  placement?: 'page' | 'navbar';
+  placement?: 'page' | 'menu';
 }) {
   const completed = useQuery(
     orpc.school.listExamPlans.queryOptions({
@@ -168,6 +149,7 @@ function TimetableActions({
       version: '',
       editorKey: 0,
       error: '',
+      confirmingDelete: false,
     },
     validators: {
       onChange: z.object({
@@ -176,7 +158,24 @@ function TimetableActions({
         version: z.string(),
         editorKey: z.number(),
         error: z.string(),
+        confirmingDelete: z.boolean(),
       }),
+    },
+    onSubmit: async () => {
+      try {
+        await client.school.deleteExamTimetable(scope);
+        queries.cache.setQueryData(
+          orpc.school.getExamTimetable.queryKey({ input: scope }),
+          null,
+        );
+        form.setFieldValue('confirmingDelete', false);
+        toast.success('Timetable deleted.');
+      } catch (error) {
+        form.setErrorMap({
+          onSubmit: { form: errorMessage(error), fields: {} },
+        });
+        await timetable.refetch();
+      }
     },
   });
   const editable =
@@ -190,7 +189,7 @@ function TimetableActions({
     const result = await timetable.refetch();
     if (result.isError) {
       form.setFieldValue('error', errorMessage(result.error));
-      if (placement === 'navbar') toast.error(errorMessage(result.error));
+      if (placement !== 'page') toast.error(errorMessage(result.error));
       return;
     }
     form.setFieldValue('error', '');
@@ -206,8 +205,14 @@ function TimetableActions({
     form.setFieldValue('editing', true);
   };
   return (
-    <form.Subscribe selector={(state) => state.values}>
-      {(values) => (
+    <form.Subscribe
+      selector={(state) => ({
+        values: state.values,
+        pending: state.isSubmitting,
+        errors: state.errors,
+      })}
+    >
+      {({ values, pending, errors }) => (
         <>
           {placement === 'page' && completed.isError && (
             <ReadError error={completed.error} retry={completed.refetch} />
@@ -242,7 +247,7 @@ function TimetableActions({
                 onReload={open}
                 onClose={() => form.setFieldValue('editing', false)}
               />
-            ) : editable ? (
+            ) : editable && placement === 'page' && !timetable.data ? (
               <ExamButton
                 size={
                   placement === 'page' && !timetable.data ? 'sm' : 'default'
@@ -258,30 +263,95 @@ function TimetableActions({
           {placement === 'page' && values.error && (
             <Notice error>{values.error}</Notice>
           )}
-          {placement === 'page' &&
-            editable &&
-            timetable.data &&
-            !values.editing && (
-              <ExamCommand
-                permissions={schoolPermission(
-                  scope.schoolId,
-                  SCHOOL_ACTIONS.DELETE_EXAM_TIMETABLE,
-                )}
-                label="Delete shared timetable"
-                destructive
-                explanation={`Delete the entire ${context.exam.name} timetable, including every class and slot?`}
-                run={async () => {
-                  await client.school.deleteExamTimetable(scope);
-                  queries.cache.setQueryData(
-                    orpc.school.getExamTimetable.queryKey({ input: scope }),
-                    null,
-                  );
+          {placement === 'menu' && timetable.data && !values.editing && (
+            <>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <ExamButton
+                    variant="ghost"
+                    size="icon"
+                    aria-label="Timetable actions"
+                  >
+                    <MoreVertical aria-hidden />
+                  </ExamButton>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuGroup>
+                    {editable && (
+                      <RequirePermissions
+                        permissions={schoolPermission(
+                          scope.schoolId,
+                          SCHOOL_ACTIONS.UPDATE_EXAM_TIMETABLE,
+                        )}
+                      >
+                        <DropdownMenuItem
+                          onSelect={() => {
+                            void open();
+                          }}
+                        >
+                          <Pencil aria-hidden />
+                          Edit timetable
+                        </DropdownMenuItem>
+                      </RequirePermissions>
+                    )}
+                    <RequirePermissions
+                      permissions={documentWorkspacePermissions(
+                        scope.schoolId,
+                        'timetable',
+                      )}
+                    >
+                      <DropdownMenuItem asChild>
+                        <Link
+                          href={documentWorkspaceHref({
+                            scope,
+                            type: 'timetable',
+                            examSlug: scope.examSlug,
+                          })}
+                        >
+                          <FileDown aria-hidden />
+                          Download timetable
+                        </Link>
+                      </DropdownMenuItem>
+                    </RequirePermissions>
+                    {editable && (
+                      <RequirePermissions
+                        permissions={schoolPermission(
+                          scope.schoolId,
+                          SCHOOL_ACTIONS.DELETE_EXAM_TIMETABLE,
+                        )}
+                      >
+                        <DropdownMenuItem
+                          variant="destructive"
+                          onSelect={() => {
+                            form.setErrorMap({});
+                            form.setFieldValue('confirmingDelete', true);
+                          }}
+                        >
+                          <Trash2 aria-hidden />
+                          Delete timetable
+                        </DropdownMenuItem>
+                      </RequirePermissions>
+                    )}
+                  </DropdownMenuGroup>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <ConfirmationDialog
+                open={values.confirmingDelete}
+                title="Delete timetable"
+                description={`Delete the entire ${context.exam.name} timetable, including every class and slot?`}
+                confirmLabel={pending ? 'Deleting…' : 'Delete timetable'}
+                pending={pending}
+                onOpenChange={(open) =>
+                  form.setFieldValue('confirmingDelete', open)
+                }
+                onConfirm={() => {
+                  if (!pending) void form.handleSubmit();
                 }}
-                onFailure={async () => {
-                  await timetable.refetch();
-                }}
-              />
-            )}
+              >
+                <Issues errors={errors} />
+              </ConfirmationDialog>
+            </>
+          )}
         </>
       )}
     </form.Subscribe>

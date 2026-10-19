@@ -1,6 +1,5 @@
 'use client';
 import { useRef } from 'react';
-import { DocumentExportLink } from '@/components/documents/document-export-link';
 import type { StudentExamWorkspaceDto } from '@campuspilot/api/routers/school/exam/exam.dto';
 import { useForm } from '@tanstack/react-form';
 import { useQuery } from '@tanstack/react-query';
@@ -126,16 +125,6 @@ function StudentResults({
       {(editing) => {
         const preview = (
           <>
-            <div className="flex justify-end">
-              <DocumentExportLink
-                scope={scope}
-                type="report_card"
-                examSlug={scope.examSlug}
-                classId={scope.classId}
-                studentId={scope.studentId}
-                label="Create report card PDF"
-              />
-            </div>
             <StudentExamPreview data={data} />
             {!open && (
               <p className="text-sm text-muted-foreground">

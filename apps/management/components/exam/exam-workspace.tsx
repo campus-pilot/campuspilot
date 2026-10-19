@@ -1,11 +1,26 @@
 'use client';
 import type { ReactNode } from 'react';
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
+import { useParams, usePathname, useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { ClipboardCheck, ClipboardList, CalendarDays, Settings2 } from 'lucide-react';
+import {
+  CalendarDays,
+  ClipboardCheck,
+  ClipboardList,
+  FileDown,
+  Files,
+  MoreVertical,
+  Settings2,
+} from 'lucide-react';
 import { Badge } from '@campuspilot/ui/components/badge';
 import { Button } from '@campuspilot/ui/components/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@campuspilot/ui/components/dropdown-menu';
 import {
   Select,
   SelectTrigger,
@@ -14,17 +29,24 @@ import {
   SelectItem,
 } from '@campuspilot/ui/components/select';
 import { ExamNavigationLayout } from '@campuspilot/components/exam/exam-navigation-layout';
+import type { ExamContextDto } from '@campuspilot/api/routers/school/exam/exam.dto';
 import { SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
 import { RequirePermissions } from '@/components/require-permissions';
+import {
+  documentWorkspaceHref,
+  documentWorkspacePermissions,
+} from '@/components/documents/document-export-link';
 import { orpc } from '@/lib/orpc';
 import { ExamSession, LoadingExam, Notice, ReadError } from './exam-common';
 import {
+  canCreateExamReportCards,
   examHref,
   examStatusLabel,
   schoolPermission,
   type ExamScope,
 } from './exam-model';
 import { ExamActions } from './exam-lifecycle';
+import { ExamTimetableMenu } from './exam-timetable';
 import { confirmNavigation } from '@/lib/navigation-guard';
 
 export function ExamWorkspace({
@@ -89,6 +111,7 @@ function WorkspaceData({
             active={active && !query.isError && !overview.isError}
             attendanceEnabled={query.data.attendanceTracking.enabled}
             overview={overview.data}
+            context={query.data}
           />
         </RequirePermissions>
       }
@@ -104,17 +127,153 @@ function WorkspaceData({
   );
 }
 function WorkspaceActions(
-  props: Omit<Parameters<typeof ExamActions>[0], 'totalWorkingDays'>,
+  {
+    context,
+    ...props
+  }: Omit<Parameters<typeof ExamActions>[0], 'totalWorkingDays'> & {
+    context: ExamContextDto;
+  },
 ) {
+  const pathname = usePathname().replace(/\/$/, '');
+  const base = examHref(props.scope, props.scope.examSlug);
+  const params = useParams<{ classId?: string; studentId?: string }>();
+  const classId =
+    typeof params.classId === 'string' ? params.classId : undefined;
+  const studentId =
+    typeof params.studentId === 'string' ? params.studentId : undefined;
   const query = useQuery(
     orpc.school.getExamAssessmentSettings.queryOptions({ input: props.scope }),
   );
-  if (!query.data || query.isError)
-    return query.isError ? (
-      <ReadError error={query.error} retry={query.refetch} />
-    ) : null;
   return (
-    <ExamActions {...props} totalWorkingDays={query.data.totalWorkingDays} />
+    <>
+      {query.isError ? (
+        <ReadError error={query.error} retry={query.refetch} />
+      ) : query.data ? (
+        <ExamActions
+          {...props}
+          totalWorkingDays={query.data.totalWorkingDays}
+        />
+      ) : null}
+      {props.overview.planCount > 0 &&
+        (pathname === `${base}/timetable` ? (
+          <ExamTimetableMenu
+            scope={props.scope}
+            context={context}
+            active={props.active}
+          />
+        ) : pathname === `${base}/settings` ? null : (
+          <ExamDocumentsMenu
+            scope={props.scope}
+            classId={classId}
+            studentId={studentId}
+            reportCardsEnabled={canCreateExamReportCards(
+              props.overview.status,
+            )}
+          />
+        ))}
+    </>
+  );
+}
+
+/** Keeps admit-card and result permissions independent while sharing one menu. */
+function ExamDocumentsMenu({
+  scope,
+  classId,
+  studentId,
+  reportCardsEnabled,
+}: {
+  scope: ExamScope;
+  classId?: string;
+  studentId?: string;
+  reportCardsEnabled: boolean;
+}) {
+  const reportCardHref = documentWorkspaceHref({
+    scope,
+    type: 'report_card',
+    examSlug: scope.examSlug,
+    classId,
+    studentId,
+  });
+  const admitCardHref = documentWorkspaceHref({
+    scope,
+    type: 'admit_card',
+    examSlug: scope.examSlug,
+    classId,
+    studentId,
+  });
+  const admitCardLabel = studentId
+    ? 'Download admit card'
+    : classId
+      ? 'Download class admit cards'
+      : 'Download all admit cards';
+  const admitCardPermissions = documentWorkspacePermissions(
+    scope.schoolId,
+    'admit_card',
+  );
+  const reportCardPermissions = documentWorkspacePermissions(
+    scope.schoolId,
+    'report_card',
+  );
+  const permissions = useQuery(
+    orpc.authorization.checkPermissions.queryOptions({
+      input: {
+        permissions: [...admitCardPermissions, ...reportCardPermissions],
+      },
+    }),
+  );
+  if (
+    !permissions.data ||
+    permissions.isError ||
+    permissions.data.results.length !==
+      admitCardPermissions.length + reportCardPermissions.length
+  )
+    return null;
+  const canDownloadAdmitCards = permissions.data.results
+    .slice(0, admitCardPermissions.length)
+    .every(Boolean);
+  const canCreateResults = permissions.data.results
+    .slice(admitCardPermissions.length)
+    .every(Boolean);
+  if (!canDownloadAdmitCards && !canCreateResults) return null;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          aria-label="Examination actions"
+        >
+          <MoreVertical aria-hidden />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuGroup>
+          {canDownloadAdmitCards && (
+            <DropdownMenuItem asChild>
+              <Link href={admitCardHref}>
+                <FileDown aria-hidden />
+                {admitCardLabel}
+              </Link>
+            </DropdownMenuItem>
+          )}
+          {canCreateResults &&
+            (reportCardsEnabled ? (
+              <DropdownMenuItem asChild>
+                <Link href={reportCardHref}>
+                  <Files aria-hidden />
+                  Create Results
+                </Link>
+              </DropdownMenuItem>
+            ) : (
+              <DropdownMenuItem disabled>
+                <Files aria-hidden />
+                Create Results
+              </DropdownMenuItem>
+            ))}
+        </DropdownMenuGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 function WorkspaceLayout({

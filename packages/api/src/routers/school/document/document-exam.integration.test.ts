@@ -267,6 +267,51 @@ describe("examination document parity", () => {
       ),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
+  it("builds school-wide admit cards with each student's class timetable", async () => {
+    const result = await buildDocumentContexts(
+      db,
+      schoolId,
+      documentSourceSchema.parse({
+        documentType: "admit_card",
+        sessionId,
+        examSlug: "final",
+      }),
+    );
+    expect(new Set(result.studentIds)).toEqual(
+      new Set([firstStudent, pendingStudent, secondStudent]),
+    );
+    const contexts = result.contexts as {
+      student: { className: string };
+      timetable: { subjectName: string; modeName: string }[];
+    }[];
+    const firstClass = contexts.find(
+      (context) => context.student.className === "Grade 8",
+    );
+    const secondClass = contexts.find(
+      (context) => context.student.className === "Grade 9",
+    );
+    expect(firstClass?.timetable).toEqual([
+      expect.objectContaining({ subjectName: "Mathematics", modeName: "Written" }),
+      expect.objectContaining({ subjectName: "Mathematics", modeName: "Oral" }),
+    ]);
+    expect(secondClass?.timetable).toEqual([]);
+    expect(result.warnings).toEqual([
+      "No exam schedule is configured for Grade 9. Those admit cards will include identity details only.",
+    ]);
+    expect(result.name).toContain("All classes");
+    await expect(
+      buildDocumentContexts(
+        db,
+        schoolId,
+        documentSourceSchema.parse({
+          documentType: "admit_card",
+          sessionId,
+          examSlug: "final",
+          studentIds: [firstStudent],
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
   it("never promotes legacy subject values into an unapproved shared assessment", async () => {
     await db
       .update(examStudentAssessmentTable)

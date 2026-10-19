@@ -89,6 +89,24 @@ export const examStatusLabel = (
       ? 'Completed'
       : 'Not started';
 
+/** Active and completed examinations have both crossed the explicit start
+ * transition. A generated plan or ready state does not make results available.
+ */
+export function hasExamStarted(
+  status: 'ready' | 'active' | 'completed' | null,
+) {
+  return status === 'active' || status === 'completed';
+}
+
+/** Report cards are final documents and become available only after the
+ * examination has completed, independently of plan or result counts.
+ */
+export function canCreateExamReportCards(
+  status: 'ready' | 'active' | 'completed' | null,
+) {
+  return status === 'completed';
+}
+
 /** The explicit exam lifecycle and session activity both gate entry; active
  * subject snapshots alone never mean that the examination has started.
  */

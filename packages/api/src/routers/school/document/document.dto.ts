@@ -113,7 +113,9 @@ export const documentSourceSchema = z.discriminatedUnion("documentType", [
   }),
   z.object({
     documentType: z.literal("admit_card"),
-    ...selection,
+    sessionId: id,
+    classId: id.optional(),
+    studentIds: selection.studentIds,
     examSlug: id,
   }),
   z.object({

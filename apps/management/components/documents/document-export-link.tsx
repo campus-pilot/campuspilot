@@ -59,24 +59,46 @@ export function DocumentExportLink({
   studentId?: string;
   label?: string;
 }) {
-  const query = new URLSearchParams({
+  const href = documentWorkspaceHref({
+    scope,
     type,
-    ...(classId ? { classId } : {}),
-    ...(examSlug ? { examSlug } : {}),
-    ...(studentId ? { studentId } : {}),
+    classId,
+    examSlug,
+    studentId,
   });
   return (
     <RequirePermissions
       permissions={documentWorkspacePermissions(scope.schoolId, type)}
     >
       <DocumentButton asChild variant="outline">
-        <Link
-          href={`/school/${encodeURIComponent(scope.schoolId)}/sessions/${encodeURIComponent(scope.sessionId)}/documents?${query}`}
-        >
+        <Link href={href}>
           <Files />
           {label}
         </Link>
       </DocumentButton>
     </RequirePermissions>
   );
+}
+
+/** Keeps contextual document links consistent across buttons and action menus. */
+export function documentWorkspaceHref({
+  scope,
+  type,
+  classId,
+  examSlug,
+  studentId,
+}: {
+  scope: DocumentScope;
+  type: DocumentType;
+  classId?: string;
+  examSlug?: string;
+  studentId?: string;
+}) {
+  const query = new URLSearchParams({
+    type,
+    ...(classId ? { classId } : {}),
+    ...(examSlug ? { examSlug } : {}),
+    ...(studentId ? { studentId } : {}),
+  });
+  return `/school/${encodeURIComponent(scope.schoolId)}/sessions/${encodeURIComponent(scope.sessionId)}/documents?${query}`;
 }

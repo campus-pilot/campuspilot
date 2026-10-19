@@ -222,8 +222,11 @@ export async function buildDocumentContexts(
     new Set(source.studentIds).size !== source.studentIds.length
   )
     throw rpcError.badRequest("Select each student only once.");
+  // School-wide examination documents are scoped to explicit plan classes,
+  // never every class that happens to exist in the school.
   const plans =
-    source.documentType === "report_card"
+    source.documentType === "report_card" ||
+    source.documentType === "admit_card"
       ? await db
           .select()
           .from(examPlanTable)
@@ -249,6 +252,16 @@ export async function buildDocumentContexts(
     )
       throw rpcError.badRequest(
         "Report cards need started examinations and active or completed subject plans.",
+      );
+    if (source.studentIds && !source.classId)
+      throw rpcError.badRequest(
+        "Choose a class for an explicit student selection.",
+      );
+  }
+  if (source.documentType === "admit_card") {
+    if (!plans.length)
+      throw rpcError.badRequest(
+        "Admit cards need an examination plan for the selected classes.",
       );
     if (source.studentIds && !source.classId)
       throw rpcError.badRequest(
@@ -311,13 +324,13 @@ export async function buildDocumentContexts(
     throw rpcError.notFound("One or more selected enrolled students");
   if (!enrolled.length)
     throw rpcError.badRequest(
-      "This class has no registered students in the selected session.",
+      "This selection has no registered students in the selected session.",
     );
   if (enrolled.length > 500)
     throw rpcError.badRequest(
       "Select up to 500 students per document request.",
     );
-  const results = plans.length
+  const results = source.documentType === "report_card" && plans.length
     ? await db
         .select()
         .from(examResultTable)
@@ -377,19 +390,7 @@ export async function buildDocumentContexts(
       (source.reportSections.includeCoScholastics &&
         Object.keys(config.coScholasticAreas).length > 0));
   const warnings: string[] = [];
-  const timetable =
-    source.documentType === "admit_card"
-      ? sortedRows.flatMap((row) =>
-          subjectsForCell(row, source.classId).map((subject) => ({
-            ...documentScheduleSlot(row),
-            ...subject,
-          })),
-        )
-      : [];
-  if (source.documentType === "admit_card" && !timetable.length)
-    warnings.push(
-      "No exam schedule is configured for this class. Admit cards will include identity details only.",
-    );
+  const classesWithoutSchedules = new Set<string>();
   const contexts: object[] = [];
   const includedStudentIds: string[] = [];
   let embeddedBytes = 0;
@@ -403,6 +404,17 @@ export async function buildDocumentContexts(
     const studentPlans = plans.filter(
       (plan) => plan.classId === student.classId,
     );
+    const timetable =
+      source.documentType === "admit_card"
+        ? sortedRows.flatMap((row) =>
+            subjectsForCell(row, schoolClass.id).map((subject) => ({
+              ...documentScheduleSlot(row),
+              ...subject,
+            })),
+          )
+        : [];
+    if (source.documentType === "admit_card" && !timetable.length)
+      classesWithoutSchedules.add(schoolClass.id);
     const assessment = assessmentByStudent.get(student.id);
     if (source.documentType === "report_card") {
       const marksApproved =
@@ -444,71 +456,82 @@ export async function buildDocumentContexts(
       throw rpcError.badRequest(
         "The selected photos exceed the document size limit. Select fewer students or use smaller photos.",
       );
-    const subjects = studentPlans.map((plan) => {
-      const result = results.find(
-        (r) => r.examPlanId === plan.id && r.studentId === student.id,
-      );
-      if (!result?.approved)
-        throw rpcError.badRequest(
-          `Approve every subject result for ${admission.name} before generating report cards.`,
-        );
-      const subject = schoolClass.config.subjects[plan.subjectSlug];
-      if (!subject)
-        throw rpcError.badRequest("A report subject is no longer configured.");
-      const modes = Object.entries(plan.modeConfig);
-      if (
-        modes.some(
-          ([slug, mode]) =>
-            !Object.hasOwn(result.marks, slug) ||
-            result.marks[slug]! > mode.maxMarks,
-        ) ||
-        Object.keys(result.marks).some(
-          (slug) => !Object.hasOwn(plan.modeConfig, slug),
-        )
-      )
-        throw rpcError.badRequest(
-          `Marks for ${admission.name} do not match the subject plan.`,
-        );
-      const total = Object.values(result.marks).reduce(
-        (sum, mark) => sum + mark,
-        0,
-      );
-      const percentage = percent(total, plan.totalMarks);
-      return {
-        slug: plan.subjectSlug,
-        name: subject.name,
-        totalMarks: plan.totalMarks,
-        marks: result.marks,
-        modeConfig: Object.fromEntries(
-          modes.map(([slug, mode]) => [
-            slug,
-            { ...mode, name: subject.examModes[slug]?.name ?? slug },
-          ]),
-        ),
-        total,
-        percentage,
-        grade: documentGrade(percentage, config.gradingScale),
-        attendance:
-          result.daysAttended !== null && plan.totalWorkingDays !== null
-            ? {
-                daysAttended: result.daysAttended,
-                totalWorkingDays: plan.totalWorkingDays,
-                percentage: percent(result.daysAttended, plan.totalWorkingDays),
-              }
-            : null,
-        coScholastics: result.coScholastics
-          ? Object.fromEntries(
-              Object.entries(result.coScholastics).map(([slug, grade]) => [
-                slug,
-                {
-                  areaName: config.coScholasticAreas[slug]?.name ?? slug,
-                  grade,
-                },
-              ]),
+    const subjects =
+      source.documentType === "report_card"
+        ? studentPlans.map((plan) => {
+            const result = results.find(
+              (r) => r.examPlanId === plan.id && r.studentId === student.id,
+            );
+            if (!result?.approved)
+              throw rpcError.badRequest(
+                `Approve every subject result for ${admission.name} before generating report cards.`,
+              );
+            const subject = schoolClass.config.subjects[plan.subjectSlug];
+            if (!subject)
+              throw rpcError.badRequest(
+                "A report subject is no longer configured.",
+              );
+            const modes = Object.entries(plan.modeConfig);
+            if (
+              modes.some(
+                ([slug, mode]) =>
+                  !Object.hasOwn(result.marks, slug) ||
+                  result.marks[slug]! > mode.maxMarks,
+              ) ||
+              Object.keys(result.marks).some(
+                (slug) => !Object.hasOwn(plan.modeConfig, slug),
+              )
             )
-          : null,
-      };
-    });
+              throw rpcError.badRequest(
+                `Marks for ${admission.name} do not match the subject plan.`,
+              );
+            const total = Object.values(result.marks).reduce(
+              (sum, mark) => sum + mark,
+              0,
+            );
+            const percentage = percent(total, plan.totalMarks);
+            return {
+              slug: plan.subjectSlug,
+              name: subject.name,
+              totalMarks: plan.totalMarks,
+              marks: result.marks,
+              modeConfig: Object.fromEntries(
+                modes.map(([slug, mode]) => [
+                  slug,
+                  { ...mode, name: subject.examModes[slug]?.name ?? slug },
+                ]),
+              ),
+              total,
+              percentage,
+              grade: documentGrade(percentage, config.gradingScale),
+              attendance:
+                result.daysAttended !== null && plan.totalWorkingDays !== null
+                  ? {
+                      daysAttended: result.daysAttended,
+                      totalWorkingDays: plan.totalWorkingDays,
+                      percentage: percent(
+                        result.daysAttended,
+                        plan.totalWorkingDays,
+                      ),
+                    }
+                  : null,
+              coScholastics: result.coScholastics
+                ? Object.fromEntries(
+                    Object.entries(result.coScholastics).map(
+                      ([slug, grade]) => [
+                        slug,
+                        {
+                          areaName:
+                            config.coScholasticAreas[slug]?.name ?? slug,
+                          grade,
+                        },
+                      ],
+                    ),
+                  )
+                : null,
+            };
+          })
+        : [];
     const grandTotal = subjects.reduce((sum, s) => sum + s.total, 0);
     const grandMaxMarks = subjects.reduce((sum, s) => sum + s.totalMarks, 0);
     const overallPercentage = percent(grandTotal, grandMaxMarks);
@@ -582,6 +605,10 @@ export async function buildDocumentContexts(
   if (excluded)
     warnings.push(
       `${excluded} student${excluded === 1 ? " was" : "s were"} excluded because results or requested assessments are missing or unapproved.`,
+    );
+  for (const classId of classesWithoutSchedules)
+    warnings.push(
+      `No exam schedule is configured for ${classMap.get(classId)!.label}. Those admit cards will include identity details only.`,
     );
   return {
     contexts,

@@ -12,10 +12,13 @@ creates draft snapshots and a Not started examination; no per-subject approval s
 exists. Starting is a separate school-admin action. Classes and rosters use the app's shared DataTable and full workspace width.
 The detail workspace uses admission/classroom secondary navigation: Results,
 Timetable and Settings. Working days and lifecycle controls live in Settings;
-the header overflow contains only the applicable lifecycle action. The navbar
-shows that lifecycle action only at the exam root; class and Settings pages have
-no navbar action. Student pages have no navbar action. The timetable
-navbar opens the same Create/Edit timetable workflow as the page action.
+once a plan exists, the in-page overflow contains contextual admit-card and Create
+Results actions, with Create Results disabled until the examination is completed. Student names are
+non-interactive before the examination starts. The navbar shows the lifecycle
+action only at the exam root; class and Settings pages have no navbar action.
+Student and timetable pages have no navbar action. A populated timetable uses the
+in-page overflow for editing, downloading and deletion; an empty timetable keeps
+Create timetable in its empty state.
 A persistent AppShellAlert links to the working-days editor when
 attendance is enabled but not configured. Shared compact control sizes are used
 without feature height overrides. Old subject-first URLs redirect to the new class/student routes.
@@ -48,7 +51,11 @@ an otherwise empty grid. Add class appears only when a class is missing. Expand
 editor stays at the footer's left and Save/Cancel at its right. Phones use the same
 table while editing one class at a time without discarding the other columns.
 Removal/discard and in-app navigation use app dialogs rather than browser confirm functions. Completion/reopening
-is exam-wide; completed/inactive sessions are read-only. Report links open the document workspace for the whole examination, class or student. Timetable export opens the same workspace with the examination preselected. Source reads and generation are independently permission-gated; lifecycle actions remain in the overflow menu.
+is exam-wide; completed/inactive sessions are read-only. Report links open the
+document workspace for the whole examination, class or student. Timetable export
+opens the same workspace with the examination preselected. Source reads and
+generation are independently permission-gated; lifecycle actions stay in Settings
+and the exam-root navbar.
 
 All input workflows use TanStack Form with Zod. Dirty editors retain their baseline
 through background refetches, validate beside fields and

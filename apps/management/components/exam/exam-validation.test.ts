@@ -15,7 +15,13 @@ import {
   removeTimetableColumn,
 } from '@campuspilot/components/exam/timetable-builder-model';
 import { ExamButton } from '@campuspilot/components/exam/exam-controls';
-import { numericText, isExamSaveUncertain, toExamScope } from './exam-model';
+import {
+  canCreateExamReportCards,
+  hasExamStarted,
+  numericText,
+  isExamSaveUncertain,
+  toExamScope,
+} from './exam-model';
 import { timetableFormSchema, timetableSchema } from './exam-validation';
 import {
   confirmNavigation,
@@ -283,6 +289,20 @@ test('examination actions do not submit a form unless explicitly declared as sav
     renderToStaticMarkup(createElement(ExamButton, { type: 'submit' }, 'Save')),
     /type="submit"/,
   );
+});
+
+test('only an explicit start transition unlocks result navigation', () => {
+  assert.equal(hasExamStarted(null), false);
+  assert.equal(hasExamStarted('ready'), false);
+  assert.equal(hasExamStarted('active'), true);
+  assert.equal(hasExamStarted('completed'), true);
+});
+
+test('only a completed examination unlocks report cards', () => {
+  assert.equal(canCreateExamReportCards(null), false);
+  assert.equal(canCreateExamReportCards('ready'), false);
+  assert.equal(canCreateExamReportCards('active'), false);
+  assert.equal(canCreateExamReportCards('completed'), true);
 });
 
 test('ambiguous exam saves require reloading while definitive rejections can be corrected', () => {

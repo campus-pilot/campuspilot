@@ -3,7 +3,6 @@ import { useForm } from '@tanstack/react-form';
 import { useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
 import {
-  MoreVertical,
   Play,
   Settings2,
   CheckCircle2,
@@ -12,14 +11,6 @@ import {
 import { AppShellAlert } from '@campuspilot/components/app-shell';
 import type { ExamOverviewDto } from '@campuspilot/api/routers/school/exam/exam.dto';
 import { SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
-import { Button } from '@campuspilot/ui/components/button';
-import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuGroup,
-} from '@campuspilot/ui/components/dropdown-menu';
 import {
   Dialog,
   DialogContent,
@@ -45,10 +36,10 @@ type Props = {
   overview: ExamOverviewDto;
   attendanceEnabled: boolean;
   totalWorkingDays: number | null;
-  placement?: 'menu' | 'navbar' | 'settings';
+  placement?: 'workspace' | 'navbar' | 'settings';
 };
 export function ExamActions(props: Props) {
-  const { scope, active, overview, attendanceEnabled, totalWorkingDays, placement = 'menu' } = props;
+  const { scope, active, overview, attendanceEnabled, totalWorkingDays, placement = 'workspace' } = props;
   const ui = useForm({
     defaultValues: { action: '' as Action },
     validators: {
@@ -67,7 +58,7 @@ export function ExamActions(props: Props) {
         : 'start';
   return (
     <>
-      {placement === 'menu' && attendanceEnabled &&
+      {placement === 'workspace' && attendanceEnabled &&
         totalWorkingDays === null &&
         overview.planCount > 0 &&
         overview.status !== 'completed' && (
@@ -117,10 +108,9 @@ export function ExamActions(props: Props) {
           </section>
         </div>
       )}
-      {placement !== 'settings' && (
+      {placement === 'navbar' && (
         <LifecycleTrigger scope={scope} visible={active && overview.planCount > 0}
-          menu={placement === 'menu'} action={lifecycleAction}
-          onSelect={() => ui.setFieldValue('action', lifecycleAction)} />
+          action={lifecycleAction} onSelect={() => ui.setFieldValue('action', lifecycleAction)} />
       )}
       <ui.Subscribe selector={(state) => state.values.action}>
         {(action) =>
@@ -147,28 +137,15 @@ export function ExamActions(props: Props) {
     </>
   );
 }
-function LifecycleTrigger({ scope, visible, action, onSelect, menu = false }: {
+function LifecycleTrigger({ scope, visible, action, onSelect }: {
   scope: ExamScope; visible: boolean; action: Exclude<Action, '' | 'working-days'>;
-  onSelect: () => void; menu?: boolean;
+  onSelect: () => void;
 }) {
   if (!visible) return null;
   const Icon = action === 'start' ? Play : action === 'complete' ? CheckCircle2 : RotateCcw;
   return (
     <RequirePermissions permissions={schoolPermission(scope.schoolId, SCHOOL_ACTIONS.TRANSITION_EXAM_PLAN)}>
-      {menu ? (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button type="button" variant="ghost" size="icon" aria-label="Examination actions"><MoreVertical aria-hidden /></Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuGroup>
-              <DropdownMenuItem onSelect={onSelect}><Icon aria-hidden />{actionLabel(action)}</DropdownMenuItem>
-            </DropdownMenuGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      ) : (
-        <ExamButton variant="outline" onClick={onSelect}><Icon aria-hidden />{actionLabel(action)}</ExamButton>
-      )}
+      <ExamButton variant="outline" onClick={onSelect}><Icon aria-hidden />{actionLabel(action)}</ExamButton>
     </RequirePermissions>
   );
 }
