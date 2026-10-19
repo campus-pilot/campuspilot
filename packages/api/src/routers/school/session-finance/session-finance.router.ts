@@ -1,16 +1,21 @@
+import { admissionTable } from '@campuspilot/db/schema/admission';
 import { classTable } from '@campuspilot/db/schema/class';
+import { financeLedgerEntryTable } from '@campuspilot/db/schema/finance';
 import type {
   FinanceClassOverrides,
-  FinanceSchemaConfig,
+  FinanceValuesMap,
+  PersistedFinanceSchemaConfig,
 } from '@campuspilot/db/schema/jsonb/finance-config';
 import { schoolSessionTable } from '@campuspilot/db/schema/session';
 import { SCHOOL_ACTIONS } from '@campuspilot/opa/policies/school';
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, sql } from 'drizzle-orm';
+import type { DatabaseExecutor } from '@campuspilot/db';
 
 import { rpcError, toRpcError } from '../../../errors';
 import { protectedProcedure } from '../../../index';
 import { requireSchoolPermission } from '../../../permissions/school';
 import {
+  getFinanceConfigurationReadiness,
   schoolSessionFinanceDtoSchema,
   schoolSessionFinanceInputSchema,
   updateSchoolSessionFinanceInputSchema,
@@ -23,10 +28,13 @@ type FinanceClass = { slug: string; label: string };
  * assigned to fee elements that are not explicitly configurable by class.
  */
 function validateClassOverrides(
-  financeConfig: FinanceSchemaConfig | null,
+  financeConfig: PersistedFinanceSchemaConfig | null,
   classOverrides: FinanceClassOverrides,
   classes: FinanceClass[],
 ) {
+  if (Object.values(classOverrides).some((values) => Object.keys(values).length > 0) && !financeConfig?.currency) {
+    throw rpcError.badRequest('Choose a supported currency before setting class finance amounts.');
+  }
   const classSlugs = new Set(classes.map(({ slug }) => slug));
 
   for (const [classSlug, values] of Object.entries(classOverrides)) {
@@ -49,6 +57,102 @@ function validateClassOverrides(
         );
       }
     }
+  }
+}
+
+function validateAdmissionOverrides(
+  financeConfig: PersistedFinanceSchemaConfig | null,
+  admissionOverrides: Array<{ admissionId: string; values: FinanceValuesMap }>,
+) {
+  for (const { admissionId, values } of admissionOverrides) {
+    for (const elementSlug of Object.keys(values)) {
+      const element = financeConfig?.elements[elementSlug];
+      if (!element) {
+        throw rpcError.conflict(
+          `Finance element "${elementSlug}" is still used by admission ${admissionId}. Remove that override before removing or renaming the element.`,
+        );
+      }
+      if (!element.scopes.includes('student')) {
+        throw rpcError.conflict(
+          `Finance element "${elementSlug}" is still used by admission ${admissionId} and cannot remove admission scope.`,
+        );
+      }
+    }
+  }
+}
+
+async function readAdmissionOverrides(
+  db: DatabaseExecutor,
+  schoolId: string,
+  sessionId: string,
+) {
+  const rows = await db
+    .select({
+      admissionId: admissionTable.id,
+      financeValue: admissionTable.financeValue,
+    })
+    .from(admissionTable)
+    .where(
+      and(
+        eq(admissionTable.schoolId, schoolId),
+        sql`${admissionTable.financeValue} ? ${sessionId}`,
+      ),
+    );
+  return rows.map(({ admissionId, financeValue }) => ({
+    admissionId,
+    values: financeValue[sessionId] ?? {},
+  }));
+}
+
+/**
+ * Currency conversion is intentionally not an implicit side effect of a
+ * configuration edit. Once any amount exists, a future reviewed conversion or
+ * reset command must change currency and all dependent facts atomically.
+ */
+async function assertCurrencyCanChange(
+  db: DatabaseExecutor,
+  input: {
+    schoolId: string;
+    sessionId: string;
+    currentConfig: PersistedFinanceSchemaConfig | null;
+    nextConfig: PersistedFinanceSchemaConfig | null;
+    classOverrides: FinanceClassOverrides;
+    admissionOverrides: Array<{ values: FinanceValuesMap }>;
+  },
+) {
+  const currentCurrency = input.currentConfig?.currency;
+  const nextCurrency = input.nextConfig?.currency;
+  if (currentCurrency === nextCurrency) return;
+
+  const hasBaseAmounts = Object.values(
+    input.currentConfig?.elements ?? {},
+  ).some(({ defaultAmountMinor }) => defaultAmountMinor !== undefined);
+  const hasClassAmounts = Object.values(input.classOverrides).some(
+    (values) => Object.keys(values).length > 0,
+  );
+  const hasAdmissionAmounts = input.admissionOverrides.some(
+    ({ values }) => Object.keys(values).length > 0,
+  );
+  const [postedFact] = await db
+    .select({ id: financeLedgerEntryTable.id })
+    .from(financeLedgerEntryTable)
+    .where(
+      and(
+        eq(financeLedgerEntryTable.schoolId, input.schoolId),
+        eq(financeLedgerEntryTable.sessionId, input.sessionId),
+      ),
+    )
+    .limit(1);
+
+  if (
+    hasBaseAmounts ||
+    hasClassAmounts ||
+    hasAdmissionAmounts ||
+    postedFact
+  ) {
+    throw rpcError.conflict(
+      'Currency cannot change while configured amounts or posted finance facts exist. A reviewed conversion or reset flow is required.',
+    );
   }
 }
 
@@ -89,7 +193,13 @@ export const schoolSessionFinanceRouter = {
         ]);
         if (!session) throw rpcError.notFound('School session');
 
-        return schoolSessionFinanceDtoSchema.parse({ ...session, classes });
+        return schoolSessionFinanceDtoSchema.parse({
+          ...session,
+          classes,
+          configurationReadiness: getFinanceConfigurationReadiness(
+            session.financeConfig,
+          ),
+        });
       } catch (error) {
         throw toRpcError(error);
       }
@@ -145,8 +255,22 @@ export const schoolSessionFinanceRouter = {
             input.classOverrides !== undefined
               ? input.classOverrides
               : session.classOverrides;
+          const admissionOverrides = await readAdmissionOverrides(
+            transaction,
+            schoolId,
+            sessionId,
+          );
 
           validateClassOverrides(financeConfig, classOverrides, classes);
+          validateAdmissionOverrides(financeConfig, admissionOverrides);
+          await assertCurrencyCanChange(transaction, {
+            schoolId,
+            sessionId,
+            currentConfig: session.financeConfig,
+            nextConfig: financeConfig,
+            classOverrides: session.classOverrides,
+            admissionOverrides,
+          });
 
           const [updated] = await transaction
             .update(schoolSessionTable)
@@ -169,7 +293,13 @@ export const schoolSessionFinanceRouter = {
             });
           if (!updated) throw rpcError.notFound('School session');
 
-          return schoolSessionFinanceDtoSchema.parse({ ...updated, classes });
+          return schoolSessionFinanceDtoSchema.parse({
+            ...updated,
+            classes,
+            configurationReadiness: getFinanceConfigurationReadiness(
+              updated.financeConfig,
+            ),
+          });
         });
       } catch (error) {
         throw toRpcError(error);

@@ -127,6 +127,13 @@
       "when": 1792059173442,
       "tag": "0017_document-generation-options",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1792440295638,
+      "tag": "0018_finance-foundation",
+      "breakpoints": true
     }
   ]
 }

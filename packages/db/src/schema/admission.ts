@@ -1,8 +1,10 @@
 import {
   boolean,
+  index,
   date,
   jsonb,
   pgTable,
+  unique,
   text,
   timestamp,
   varchar,
@@ -43,6 +45,11 @@ export const admissionTable = pgTable("admission", {
    * returning to the school requires a new admission record.
    */
   registered: boolean("registered").notNull().default(true),
+  /**
+   * Exact lifecycle fact for new unregister operations. Legacy unregistered
+   * rows may remain null because their historical transition time is unknown.
+   */
+  unregisteredAt: timestamp("unregistered_at", { withTimezone: true }),
   photoS3Key: varchar("photo_s3_key"),
   documents: jsonb("documents")
     .$type<AdmissionDocument[]>()
@@ -58,4 +65,14 @@ export const admissionTable = pgTable("admission", {
     .default(studentFinanceValuesSchema.parse({})),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
-});
+}, (table) => [
+  unique("admission_id_school_id_unique").on(table.id, table.schoolId),
+  unique("admission_school_id_admission_no_unique").on(
+    table.schoolId,
+    table.admissionNo,
+  ),
+  index("admission_school_id_registered_idx").on(
+    table.schoolId,
+    table.registered,
+  ),
+]);

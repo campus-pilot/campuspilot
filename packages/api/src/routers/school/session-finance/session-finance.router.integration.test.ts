@@ -1,6 +1,11 @@
 import { db } from '@campuspilot/db';
+import { admissionTable } from '@campuspilot/db/schema/admission';
 import { classTable } from '@campuspilot/db/schema/class';
-import type { FinanceSchemaConfig } from '@campuspilot/db/schema/jsonb/finance-config';
+import type {
+  FinanceSchemaConfig,
+  PersistedFinanceSchemaConfig,
+} from '@campuspilot/db/schema/jsonb/finance-config';
+import { schoolSessionTable } from '@campuspilot/db/schema/session';
 import { eq } from 'drizzle-orm';
 import { beforeAll, describe, expect, it } from 'vitest';
 
@@ -8,6 +13,7 @@ import {
   createAdminSession,
   createSchoolStaffSession,
   createTestClient,
+  createTestAdmission,
   createTestSchool,
   createTestSession,
   type UserSession,
@@ -16,18 +22,20 @@ import {
 const financeConfig: FinanceSchemaConfig = {
   recurring: 'monthly' as const,
   currency: 'INR',
+  timeZone: 'Asia/Kolkata',
+  cycleStartMonth: 4,
   elements: {
     tuition: {
       name: 'Tuition',
       scopes: ['class'],
       requiredAtLevel: 'class',
-      defaultValue: 1000,
+      defaultAmountMinor: 100_000,
     },
     activity: {
       name: 'Activity',
       scopes: ['school'],
       requiredAtLevel: 'school',
-      defaultValue: 200,
+      defaultAmountMinor: 20_000,
     },
   },
 };
@@ -199,6 +207,154 @@ describe('school.sessionFinance Router Integration', () => {
         classOverrides: { 'grade-8': { activity: 300 } },
       }),
     ).rejects.toThrowError(expect.objectContaining({ code: 'BAD_REQUEST' }));
+  });
+
+  it('preserves and exposes incomplete migrated configuration until an explicit write completes it', async () => {
+    const incompleteSchool = await createTestSchool();
+    const incompleteSession = await createTestSession({
+      schoolId: incompleteSchool.id,
+      sessionStartYear: 2060,
+      sessionEndYear: 2061,
+      isActive: true,
+    });
+    await db.insert(classTable).values({
+      schoolId: incompleteSchool.id,
+      slug: 'grade-5',
+      label: 'Grade 5',
+      displayOrder: 1,
+    });
+    const incompleteConfig: PersistedFinanceSchemaConfig = {
+      recurring: 'monthly',
+      currency: 'INR',
+      elements: {
+        tuition: {
+          name: 'Tuition',
+          scopes: ['school', 'class'],
+          requiredAtLevel: 'school',
+          defaultAmountMinor: 125_000,
+        },
+      },
+    };
+    await db
+      .update(schoolSessionTable)
+      .set({ financeConfig: incompleteConfig })
+      .where(eq(schoolSessionTable.id, incompleteSession.id));
+    const incompletePrincipal = (
+      await createSchoolStaffSession(incompleteSchool.id, [
+        { role: 'principal', meta: null },
+      ])
+    ).session;
+    const client = createTestClient(incompletePrincipal);
+
+    const read = await client.school.getSessionFinance({
+      schoolId: incompleteSchool.id,
+      sessionId: incompleteSession.id,
+    });
+    expect(read.financeConfig).toEqual(incompleteConfig);
+    expect(read.configurationReadiness).toEqual({
+      status: 'incomplete',
+      readyForBilling: false,
+      missingFields: ['timeZone', 'cycleStartMonth'],
+    });
+
+    const preserved = await client.school.updateSessionFinance({
+      schoolId: incompleteSchool.id,
+      sessionId: incompleteSession.id,
+      classOverrides: { 'grade-5': { tuition: 130_000 } },
+    });
+    expect(preserved.financeConfig).toEqual(incompleteConfig);
+    expect(preserved.configurationReadiness.readyForBilling).toBe(false);
+
+    const completed = await client.school.updateSessionFinance({
+      schoolId: incompleteSchool.id,
+      sessionId: incompleteSession.id,
+      financeConfig: {
+        ...incompleteConfig,
+        currency: 'INR',
+        timeZone: 'Asia/Kolkata',
+        cycleStartMonth: 4,
+      },
+    });
+    expect(completed.financeConfig?.elements).toEqual(
+      incompleteConfig.elements,
+    );
+    expect(completed.configurationReadiness).toEqual({
+      status: 'ready',
+      readyForBilling: true,
+      missingFields: [],
+    });
+  });
+
+  it('blocks currency changes once configured values exist', async () => {
+    await expect(
+      createTestClient(principalSession).school.updateSessionFinance({
+        schoolId: school.id,
+        sessionId: session.id,
+        financeConfig: { ...financeConfig, currency: 'USD' },
+      }),
+    ).rejects.toThrowError(expect.objectContaining({ code: 'CONFLICT' }));
+  });
+
+  it('rejects amounts without currency and treats completing currency as a reviewed conversion when amounts already exist', async () => {
+    const legacySchool = await createTestSchool();
+    const legacySession = await createTestSession({ schoolId: legacySchool.id, sessionStartYear: 2065, sessionEndYear: 2066, isActive: true });
+    await db.insert(classTable).values({ schoolId: legacySchool.id, slug: 'grade-1', label: 'Grade 1', displayOrder: 1 });
+    const legacyConfig: PersistedFinanceSchemaConfig = {
+      recurring: 'monthly',
+      elements: { fee: { name: 'Fee', scopes: ['school', 'class', 'student'], requiredAtLevel: 'school', defaultAmountMinor: 100 } },
+    };
+    await db.update(schoolSessionTable).set({ financeConfig: legacyConfig }).where(eq(schoolSessionTable.id, legacySession.id));
+    const admission = await createTestAdmission({ schoolId: legacySchool.id });
+    const staff = (await createSchoolStaffSession(legacySchool.id, [{ role: 'principal', meta: null }])).session;
+    const client = createTestClient(staff);
+    await expect(client.school.updateSessionFinance({ schoolId: legacySchool.id, sessionId: legacySession.id, classOverrides: { 'grade-1': { fee: 100 } } })).rejects.toThrowError(expect.objectContaining({ code: 'BAD_REQUEST' }));
+    await expect(client.school.updateAdmissionFinanceValues({ schoolId: legacySchool.id, admissionId: admission.id, sessionId: legacySession.id, values: { fee: 100 } })).rejects.toThrowError(expect.objectContaining({ code: 'BAD_REQUEST' }));
+    await expect(client.school.updateSessionFinance({
+      schoolId: legacySchool.id,
+      sessionId: legacySession.id,
+      financeConfig: { ...legacyConfig, currency: 'INR', timeZone: 'Asia/Kolkata', cycleStartMonth: 4 },
+    })).rejects.toThrowError(expect.objectContaining({ code: 'CONFLICT' }));
+  });
+
+  it('validates element removal, rename, and admission-scope changes against admission overrides', async () => {
+    const scopedSchool = await createTestSchool();
+    const scopedSession = await createTestSession({
+      schoolId: scopedSchool.id,
+      sessionStartYear: 2070,
+      sessionEndYear: 2071,
+      isActive: true,
+    });
+    const admission = await createTestAdmission({ schoolId: scopedSchool.id });
+    const config: FinanceSchemaConfig = {
+      recurring: 'monthly',
+      currency: 'INR',
+      timeZone: 'Asia/Kolkata',
+      cycleStartMonth: 4,
+      elements: {
+        transport: { name: 'Transport', scopes: ['student'] },
+      },
+    };
+    await db.update(schoolSessionTable).set({ financeConfig: config }).where(eq(schoolSessionTable.id, scopedSession.id));
+    await db.update(admissionTable).set({
+      financeValue: { [scopedSession.id]: { transport: 50_000 } },
+    }).where(eq(admissionTable.id, admission.id));
+    const staff = (await createSchoolStaffSession(scopedSchool.id, [{ role: 'principal', meta: null }])).session;
+    const client = createTestClient(staff);
+
+    const invalidElements: FinanceSchemaConfig['elements'][] = [
+      {},
+      { bus: { name: 'Transport', scopes: ['student'] } },
+      { transport: { name: 'Transport', scopes: ['school'] } },
+    ];
+    for (const elements of invalidElements) {
+      await expect(
+        client.school.updateSessionFinance({
+          schoolId: scopedSchool.id,
+          sessionId: scopedSession.id,
+          financeConfig: { ...config, elements },
+        }),
+      ).rejects.toThrowError(expect.objectContaining({ code: 'CONFLICT' }));
+    }
   });
 
   it('moves slug-keyed overrides when a class slug is renamed', async () => {

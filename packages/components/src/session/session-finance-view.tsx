@@ -4,43 +4,30 @@ import { useForm } from '@tanstack/react-form';
 import { Button } from '@campuspilot/ui/components/button';
 import { LoaderCircle, Save, Undo2 } from 'lucide-react';
 import { z } from 'zod';
+import {
+  financeClassOverridesSchema,
+  financeSchemaConfigSchema,
+  persistedFinanceSchemaConfigSchema,
+} from '@campuspilot/db/schema/jsonb/finance-config';
 import { ClassFinanceOverridesSection } from './class-finance-overrides-section';
 import { FinanceSection } from './finance-section';
 import type {
   FinanceClassOverrides,
   FinanceSchemaConfig,
+  PersistedFinanceSchemaConfig,
   SchoolSessionFinanceDto,
 } from './types';
 
 const financeFormSchema = z.object({
-  financeConfig: z
-    .object({
-      recurring: z.enum(['monthly', 'quarterly', 'yearly']),
-      currency: z.string().regex(/^[A-Z]{3}$/, 'Use a three-letter currency code.'),
-      elements: z.record(
-        z.string().min(1),
-        z.object({
-          name: z.string().min(1),
-          scopes: z.array(z.enum(['school', 'class', 'student'])).min(1),
-          requiredAtLevel: z
-            .enum(['school', 'class', 'student', 'bill_generation'])
-            .optional(),
-          defaultValue: z.number().nonnegative().optional(),
-        }),
-      ),
-    })
-    .nullable(),
-  classOverrides: z.record(
-    z.string().min(1),
-    z.record(z.string().min(1), z.number().nonnegative()),
-  ),
+  financeConfig: persistedFinanceSchemaConfigSchema.nullable(),
+  classOverrides: financeClassOverridesSchema,
 });
 
 export interface SessionFinanceViewProps {
   finance: SchoolSessionFinanceDto;
   isSaving?: boolean;
   onSave?: (updates: {
-    financeConfig: FinanceSchemaConfig | null;
+    financeConfig?: FinanceSchemaConfig | null;
     classOverrides: FinanceClassOverrides;
   }) => Promise<void> | void;
   onDirtyChange?: (isDirty: boolean) => void;
@@ -48,7 +35,7 @@ export interface SessionFinanceViewProps {
 
 function areFinanceValuesEqual(
   finance: SchoolSessionFinanceDto,
-  financeConfig: FinanceSchemaConfig | null,
+  financeConfig: PersistedFinanceSchemaConfig | null,
   classOverrides: FinanceClassOverrides,
 ) {
   return (
@@ -62,7 +49,7 @@ function areFinanceValuesEqual(
  * schema edit and its dependent overrides consistent in the same save.
  */
 function retainValidClassOverrides(
-  financeConfig: FinanceSchemaConfig | null,
+  financeConfig: PersistedFinanceSchemaConfig | null,
   classOverrides: FinanceClassOverrides,
 ) {
   if (!financeConfig) return {};
@@ -102,8 +89,17 @@ export function SessionFinanceView({
     onSubmit: async ({ value }) => {
       if (!onSave) return;
       try {
-        await onSave(value);
-        form.reset(value);
+        const parsed = financeFormSchema.parse(value);
+        const configChanged =
+          JSON.stringify(parsed.financeConfig) !==
+          JSON.stringify(finance.financeConfig);
+        await onSave({
+          ...(configChanged
+            ? { financeConfig: financeSchemaConfigSchema.nullable().parse(parsed.financeConfig) }
+            : {}),
+          classOverrides: parsed.classOverrides,
+        });
+        form.reset(parsed);
         onDirtyChange?.(false);
       } catch (error) {
         form.setErrorMap({
@@ -120,7 +116,7 @@ export function SessionFinanceView({
   });
 
   function notifyDirty(
-    financeConfig: FinanceSchemaConfig | null,
+    financeConfig: PersistedFinanceSchemaConfig | null,
     classOverrides: FinanceClassOverrides,
   ) {
     onDirtyChange?.(
@@ -128,7 +124,9 @@ export function SessionFinanceView({
     );
   }
 
-  function handleFinanceChange(financeConfig: FinanceSchemaConfig | null) {
+  function handleFinanceChange(
+    financeConfig: PersistedFinanceSchemaConfig | null,
+  ) {
     const classOverrides = retainValidClassOverrides(
       financeConfig,
       form.state.values.classOverrides,
@@ -195,6 +193,14 @@ export function SessionFinanceView({
               </div>
             ) : null}
           </div>
+
+          {!finance.configurationReadiness.readyForBilling &&
+          finance.configurationReadiness.status !== 'not_configured' ? (
+            <p className="rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm">
+              Billing remains unavailable until these explicit settings are
+              supplied: {finance.configurationReadiness.missingFields.join(', ')}.
+            </p>
+          ) : null}
 
           {errors.map((error, index) => {
             const message =

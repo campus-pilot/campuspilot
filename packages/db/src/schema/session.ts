@@ -7,6 +7,7 @@ import {
   pgTable,
   text,
   timestamp,
+  unique,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 
@@ -14,7 +15,7 @@ import { generateId } from "../id";
 import { financeClassOverridesSchema } from "./jsonb";
 import type {
   FinanceClassOverrides,
-  FinanceSchemaConfig,
+  PersistedFinanceSchemaConfig,
   SessionConfig,
 } from "./jsonb";
 import { schoolTable } from "./school";
@@ -31,7 +32,7 @@ export const schoolSessionTable = pgTable(
     sessionEndYear: integer("session_end_year").notNull(),
     sessionStartYear: integer("session_start_year").notNull(),
     sessionConfig: jsonb("session_config").$type<SessionConfig>(),
-    financeConfig: jsonb("finance_config").$type<FinanceSchemaConfig>(),
+    financeConfig: jsonb("finance_config").$type<PersistedFinanceSchemaConfig>(),
     financeClassOverrides: jsonb("finance_class_overrides")
       .$type<FinanceClassOverrides>()
       .notNull()
@@ -47,6 +48,7 @@ export const schoolSessionTable = pgTable(
       table.sessionStartYear,
       table.sessionEndYear,
     ),
+    unique("school_session_id_school_id_unique").on(table.id, table.schoolId),
     // Activation is modeled independently from the session dates. The partial
     // index enforces that a school can have at most one active session.
     uniqueIndex("school_session_one_active_per_school_idx")

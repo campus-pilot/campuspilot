@@ -35,7 +35,7 @@ export function SessionFinanceSettings({
   );
   const updateMutation = useMutation({
     mutationFn: (updates: {
-      financeConfig: FinanceSchemaConfig | null;
+      financeConfig?: FinanceSchemaConfig | null;
       classOverrides: FinanceClassOverrides;
     }) =>
       client.school.updateSessionFinance({

@@ -585,6 +585,9 @@ importers:
       '@campuspilot/auth':
         specifier: workspace:*
         version: link:../auth
+      '@campuspilot/db':
+        specifier: workspace:*
+        version: link:../db
       '@campuspilot/ui':
         specifier: workspace:*
         version: link:../ui

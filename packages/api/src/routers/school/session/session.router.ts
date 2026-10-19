@@ -1,10 +1,14 @@
 import { schoolSessionTable } from '@campuspilot/db/schema/session';
+import {
+  financeLedgerEntryTable,
+  financeNumberCounterTable,
+} from '@campuspilot/db/schema/finance';
 import { examPlanTable, examTimetableTable } from '@campuspilot/db/schema/exam';
 import { sessionConfigSchema } from '@campuspilot/db/schema/jsonb/session-config';
 import { resolveSessionExamPermission } from '../../../permissions/session-exams';
 import { schoolTable } from '@campuspilot/db/schema/school';
 import { SCHOOL_ACTIONS } from '@campuspilot/opa/policies/school';
-import { and, asc, count, desc, eq, inArray } from 'drizzle-orm';
+import { and, asc, count, desc, eq, inArray, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 
 import { rpcError, toRpcError } from '../../../errors';
@@ -221,6 +225,37 @@ export const schoolSessionRouter = {
             throw rpcError.badRequest(
               'Session end year must be after its start year.',
             );
+          const yearsChanged =
+            sessionStartYear !== existingSession.sessionStartYear ||
+            sessionEndYear !== existingSession.sessionEndYear;
+          if (yearsChanged) {
+            const [history] = await transaction
+              .select({ id: schoolSessionTable.id })
+              .from(schoolSessionTable)
+              .leftJoin(
+                financeNumberCounterTable,
+                eq(financeNumberCounterTable.sessionId, schoolSessionTable.id),
+              )
+              .leftJoin(
+                financeLedgerEntryTable,
+                eq(financeLedgerEntryTable.sessionId, schoolSessionTable.id),
+              )
+              .where(
+                and(
+                  eq(schoolSessionTable.id, sessionId),
+                  or(
+                    sql`${financeNumberCounterTable.sessionId} is not null`,
+                    sql`${financeLedgerEntryTable.sessionId} is not null`,
+                  ),
+                ),
+              )
+              .limit(1);
+            if (history) {
+              throw rpcError.conflict(
+                'Session years cannot change after finance numbering or posting history exists.',
+              );
+            }
+          }
           if (changes.sessionConfig !== undefined) {
             const previous = sessionConfigSchema.parse(
               existingSession.sessionConfig ?? {},

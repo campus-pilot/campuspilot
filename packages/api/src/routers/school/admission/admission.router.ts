@@ -429,7 +429,11 @@ export const schoolAdmissionRouter = {
 
           const [updated] = await transaction
             .update(admissionTable)
-            .set({ registered: false, updatedAt: new Date() })
+            .set({
+              registered: false,
+              unregisteredAt: new Date(),
+              updatedAt: new Date(),
+            })
             .where(
               and(
                 eq(admissionTable.schoolId, input.schoolId),

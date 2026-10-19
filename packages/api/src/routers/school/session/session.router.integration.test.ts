@@ -1,4 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest';
+import { db } from '@campuspilot/db';
+import { financeNumberCounterTable } from '@campuspilot/db/schema/finance';
 
 import {
   createAdminSession,
@@ -258,6 +260,14 @@ describe('school.session Router Integration', () => {
 
       expect(updated.sessionStartYear).toBe(2031);
       expect(updated.sessionEndYear).toBe(2034);
+    });
+
+    it('rejects session year changes after finance numbering exists', async () => {
+      const created = await createTestSession({ schoolId: school.id, sessionStartYear: 2080, sessionEndYear: 2081, isActive: false });
+      const client = createTestClient(principalSession);
+      await client.school.activateSession({ schoolId: school.id, sessionId: created.id });
+      await db.insert(financeNumberCounterTable).values({ schoolId: school.id, sessionId: created.id, kind: 'bill', fiscalKey: '2080-2081', nextValue: 1n });
+      await expect(client.school.updateSession({ schoolId: school.id, sessionId: created.id, sessionStartYear: 2079 })).rejects.toThrowError(expect.objectContaining({ code: 'CONFLICT' }));
     });
 
     it('rejects updates to an inactive session', async () => {

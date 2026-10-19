@@ -22,6 +22,7 @@ export const admissionDtoSchema = z.object({
   fatherName: z.string(),
   motherName: z.string(),
   registered: z.boolean(),
+  unregisteredAt: z.date().nullable(),
   photoS3Key: z.string().nullable(),
   documents: admissionDocumentsSchema,
   createdAt: z.date().nullable(),

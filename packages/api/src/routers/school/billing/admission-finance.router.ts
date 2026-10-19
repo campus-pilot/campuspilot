@@ -1,7 +1,7 @@
 import { admissionTable } from '@campuspilot/db/schema/admission';
 import type {
-  FinanceSchemaConfig,
   FinanceValuesMap,
+  PersistedFinanceSchemaConfig,
   StudentFinanceValuesMap,
 } from '@campuspilot/db/schema/jsonb/finance-config';
 import { schoolSessionTable } from '@campuspilot/db/schema/session';
@@ -23,9 +23,14 @@ import {
  * is still the durable admission, never a session enrollment.
  */
 function validateAdmissionValues(
-  financeConfig: FinanceSchemaConfig | null,
+  financeConfig: PersistedFinanceSchemaConfig | null,
   values: FinanceValuesMap,
 ) {
+  if (Object.keys(values).length > 0 && !financeConfig?.currency) {
+    throw rpcError.badRequest(
+      'Choose a supported currency before setting admission finance amounts.',
+    );
+  }
   for (const elementSlug of Object.keys(values)) {
     const element = financeConfig?.elements[elementSlug];
     if (!element) {

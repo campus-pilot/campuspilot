@@ -2,6 +2,29 @@ import { z } from "zod";
 
 import { currencyCodeSchema } from "./currencies";
 
+export const financeAmountMinorSchema = z
+  .number()
+  .int("Amount must be an integer number of minor currency units")
+  .safe("Amount exceeds the exact JSON integer range")
+  .nonnegative()
+  .describe("Exact amount in the configured currency's minor units");
+
+export const financeTimeZoneSchema = z
+  .string()
+  .min(1)
+  .refine(
+    (value) => {
+      try {
+        new Intl.DateTimeFormat("en", { timeZone: value }).format();
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    { message: "Timezone must be a valid IANA timezone identifier" },
+  )
+  .describe("IANA timezone used to calculate local billing boundaries");
+
 export const financeScopeEnum = z
   .enum(["school", "class", "student"])
   .describe(
@@ -33,20 +56,34 @@ export const financeElementSchema = z
     requiredAtLevel: financeRequiredLevelEnum
       .optional()
       .describe("Level at which a value must be provided before billing"),
-    defaultValue: z
-      .number()
-      .nonnegative()
+    defaultAmountMinor: financeAmountMinorSchema
       .optional()
-      .describe("Default amount if no value is set at the required level"),
+      .describe(
+        "Default amount in minor units if no value is set at the required level",
+      ),
   })
   .describe("A fee element definition (e.g. Tuition, Transport, Lab Fee)")
   .refine(
     (element) =>
-      element.defaultValue === undefined || element.requiredAtLevel != null,
+      element.defaultAmountMinor === undefined || element.requiredAtLevel != null,
     {
-      message: "Default value can only be set when requiredAtLevel is specified",
+      message: "Default amount can only be set when requiredAtLevel is specified",
     },
-  );
+  )
+  .superRefine((element, context) => {
+    const requiredScope = element.requiredAtLevel;
+    if (
+      requiredScope &&
+      requiredScope !== "bill_generation" &&
+      !element.scopes.includes(requiredScope)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["requiredAtLevel"],
+        message: `Required level "${requiredScope}" must also be an allowed scope`,
+      });
+    }
+  });
 
 export const financeElementsSchema = z
   .record(
@@ -60,17 +97,47 @@ export const financeElementsSchema = z
   )
   .describe("Map of element slug to fee element definition");
 
+export const financeCycleStartMonthSchema = z
+  .number()
+  .int()
+  .min(1)
+  .max(12)
+  .describe("Calendar month (1-12) that anchors quarterly and yearly cycles");
+
+const financeConfigShape = {
+  recurring: financeRecurringEnum.describe(
+    "Billing frequency: monthly, quarterly, or yearly",
+  ),
+  elements: financeElementsSchema.describe(
+    "Map of element slug to fee element definition",
+  ),
+};
+
+/**
+ * Compatibility shape for migrated configuration whose fee facts are known
+ * but whose independent currency/period facts may not be. Missing facts are
+ * exposed as incomplete and must never receive inferred defaults.
+ */
+export const persistedFinanceSchemaConfigSchema = z
+  .object({
+    ...financeConfigShape,
+    currency: currencyCodeSchema
+      .optional()
+      .describe("Explicit ISO 4217 currency code when known"),
+    timeZone: financeTimeZoneSchema.optional(),
+    cycleStartMonth: financeCycleStartMonthSchema.optional(),
+  })
+  .describe(
+    "Persisted finance configuration, including migrated incomplete configuration",
+  );
+
+/** Complete configuration accepted by writes and required before billing. */
 export const financeSchemaConfigSchema = z
   .object({
-    recurring: financeRecurringEnum.describe(
-      "Billing frequency: monthly, quarterly, or yearly",
-    ),
-    currency: currencyCodeSchema
-      .default("INR")
-      .describe("ISO 4217 currency code (default: INR)"),
-    elements: financeElementsSchema.describe(
-      "Map of element slug to fee element definition",
-    ),
+    ...financeConfigShape,
+    currency: currencyCodeSchema.describe("Explicit ISO 4217 currency code"),
+    timeZone: financeTimeZoneSchema,
+    cycleStartMonth: financeCycleStartMonthSchema,
   })
   .describe(
     "School-level finance configuration defining fee structure and billing frequency",
@@ -82,7 +149,9 @@ export const financeValuesMapSchema = z
       .string()
       .min(1)
       .describe("Fee element slug (must match a key in the finance schema elements)"),
-    z.number().nonnegative().describe("Amount for this fee element"),
+    financeAmountMinorSchema.describe(
+      "Exact amount in minor units for this fee element",
+    ),
   )
   .describe("Map of fee element slug to amount value");
 
@@ -122,6 +191,9 @@ export type FinanceRequiredLevel = z.infer<
   typeof financeRequiredLevelEnum
 >;
 export type FinanceElement = z.infer<typeof financeElementSchema>;
+export type PersistedFinanceSchemaConfig = z.infer<
+  typeof persistedFinanceSchemaConfigSchema
+>;
 export type FinanceSchemaConfig = z.infer<typeof financeSchemaConfigSchema>;
 export type FinanceValuesMap = z.infer<typeof financeValuesMapSchema>;
 export type FinanceClassOverrides = z.infer<

@@ -1,26 +1,24 @@
-export type FinanceScope = 'school' | 'class' | 'student';
-export type FinanceRecurring = 'monthly' | 'quarterly' | 'yearly';
-export type FinanceRequiredLevel =
-  | 'school'
-  | 'class'
-  | 'student'
-  | 'bill_generation';
+import type {
+  FinanceClassOverrides,
+  FinanceElement,
+  FinanceRecurring,
+  FinanceRequiredLevel,
+  FinanceSchemaConfig,
+  FinanceScope,
+  FinanceValuesMap,
+  PersistedFinanceSchemaConfig,
+} from '@campuspilot/db/schema/jsonb/finance-config';
 
-export interface FinanceElement {
-  name: string;
-  scopes: FinanceScope[];
-  requiredAtLevel?: FinanceRequiredLevel;
-  defaultValue?: number;
-}
-
-export interface FinanceSchemaConfig {
-  recurring: FinanceRecurring;
-  currency: string;
-  elements: Record<string, FinanceElement>;
-}
-
-export type FinanceValuesMap = Record<string, number>;
-export type FinanceClassOverrides = Record<string, FinanceValuesMap>;
+export type {
+  FinanceClassOverrides,
+  FinanceElement,
+  FinanceRecurring,
+  FinanceRequiredLevel,
+  FinanceSchemaConfig,
+  FinanceScope,
+  FinanceValuesMap,
+  PersistedFinanceSchemaConfig,
+};
 
 export interface SessionFinanceClassDto {
   slug: string;
@@ -30,7 +28,12 @@ export interface SessionFinanceClassDto {
 export interface SchoolSessionFinanceDto {
   schoolId: string;
   sessionId: string;
-  financeConfig: FinanceSchemaConfig | null;
+  financeConfig: PersistedFinanceSchemaConfig | null;
+  configurationReadiness: {
+    status: 'not_configured' | 'incomplete' | 'ready';
+    readyForBilling: boolean;
+    missingFields: Array<'currency' | 'timeZone' | 'cycleStartMonth'>;
+  };
   classOverrides: FinanceClassOverrides;
   classes: SessionFinanceClassDto[];
 }
@@ -71,10 +74,9 @@ export interface SchoolSessionDto {
   updatedAt: Date | string | null;
 }
 
-/** Default empty finance schema configuration */
-export const DEFAULT_FINANCE_CONFIG: FinanceSchemaConfig = {
+/** New drafts deliberately leave independent billing facts unconfigured. */
+export const DEFAULT_FINANCE_CONFIG: PersistedFinanceSchemaConfig = {
   recurring: 'monthly',
-  currency: 'INR',
   elements: {},
 };
 
@@ -99,7 +101,7 @@ export const EXAMPLE_ELEMENTS: Array<{
   slug: string;
   scopes: FinanceScope[];
   requiredAtLevel?: FinanceRequiredLevel;
-  defaultValue?: number;
+  defaultAmountMinor?: number;
   description: string;
 }> = [
   {
@@ -115,9 +117,8 @@ export const EXAMPLE_ELEMENTS: Array<{
     slug: 'transport_fee',
     scopes: ['student'],
     requiredAtLevel: 'student',
-    defaultValue: 1500,
     description:
-      'Only configured per student since routes vary. Default of 1500 applies unless overridden.',
+      'Only configured per student since routes vary. Set an amount after choosing the session currency.',
   },
   {
     name: 'Playground Fee',

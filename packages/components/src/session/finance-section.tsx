@@ -3,6 +3,13 @@
 import { useState } from 'react';
 import { useForm } from '@tanstack/react-form';
 import { z } from 'zod';
+import {
+  SUPPORTED_CURRENCY_CODES,
+  currencyCodeSchema,
+  formatCurrencyMinorNumber,
+  parseCurrencyDecimalToMinorNumber,
+  type CurrencyCode,
+} from '@campuspilot/db/schema/jsonb/currencies';
 import { Badge } from '@campuspilot/ui/components/badge';
 import { Button } from '@campuspilot/ui/components/button';
 import { Checkbox } from '@campuspilot/ui/components/checkbox';
@@ -34,8 +41,8 @@ import {
   type FinanceElement,
   type FinanceRecurring,
   type FinanceRequiredLevel,
-  type FinanceSchemaConfig,
   type FinanceScope,
+  type PersistedFinanceSchemaConfig,
 } from './types';
 
 const elementFormSchema = z
@@ -59,15 +66,15 @@ const elementFormSchema = z
       'bill_generation',
       'none',
     ]),
-    defaultValue: z.number().min(0).optional(),
+    defaultAmount: z.string(),
   })
   .refine(
     (data) =>
-      data.defaultValue === undefined ||
+      data.defaultAmount === '' ||
       (data.requiredAtLevel !== 'none' && data.requiredAtLevel != null),
     {
       message: 'Default value can only be set when a required level is chosen',
-      path: ['defaultValue'],
+      path: ['defaultAmount'],
     },
   );
 
@@ -101,6 +108,7 @@ interface FeeElementDialogProps {
   onOpenChange: (open: boolean) => void;
   initialValues?: { slug: string; element: FinanceElement };
   existingSlugs: string[];
+  currency?: CurrencyCode;
   onSubmit: (values: { slug: string; element: FinanceElement }) => void;
 }
 
@@ -109,6 +117,7 @@ function FeeElementDialog({
   onOpenChange,
   initialValues,
   existingSlugs,
+  currency,
   onSubmit,
 }: FeeElementDialogProps) {
   const isEditing = Boolean(initialValues);
@@ -123,7 +132,13 @@ function FeeElementDialog({
         | 'student'
         | 'bill_generation'
         | 'none',
-      defaultValue: initialValues?.element.defaultValue,
+      defaultAmount:
+        currency && initialValues?.element.defaultAmountMinor !== undefined
+          ? formatCurrencyMinorNumber(
+              initialValues.element.defaultAmountMinor,
+              currency,
+            )
+          : '',
     } as {
       name: string;
       slug: string;
@@ -134,19 +149,40 @@ function FeeElementDialog({
         | 'student'
         | 'bill_generation'
         | 'none';
-      defaultValue?: number;
+      defaultAmount: string;
     },
     validators: {
-      onSubmit: elementFormSchema.refine(
-        (val) => {
-          if (isEditing && val.slug === initialValues?.slug) return true;
-          return !existingSlugs.includes(val.slug);
-        },
-        {
-          message: 'A fee element with this identifier already exists.',
-          path: ['slug'],
-        },
-      ),
+      onSubmit: elementFormSchema.superRefine((val, context) => {
+        if (
+          !(isEditing && val.slug === initialValues?.slug) &&
+          existingSlugs.includes(val.slug)
+        ) {
+          context.addIssue({
+            code: 'custom',
+            message: 'A fee element with this identifier already exists.',
+            path: ['slug'],
+          });
+        }
+        if (val.defaultAmount === '') return;
+        if (!currency) {
+          context.addIssue({
+            code: 'custom',
+            message: 'Choose the session currency before setting an amount.',
+            path: ['defaultAmount'],
+          });
+          return;
+        }
+        try {
+          parseCurrencyDecimalToMinorNumber(val.defaultAmount, currency);
+        } catch (error) {
+          context.addIssue({
+            code: 'custom',
+            message:
+              error instanceof Error ? error.message : 'Enter an exact amount.',
+            path: ['defaultAmount'],
+          });
+        }
+      }),
     },
     onSubmit: ({ value }) => {
       const requiredAtLevel =
@@ -158,10 +194,10 @@ function FeeElementDialog({
         name: value.name,
         scopes: value.scopes,
         requiredAtLevel,
-        defaultValue:
-          value.defaultValue !== undefined && !Number.isNaN(value.defaultValue)
-            ? value.defaultValue
-            : undefined,
+        defaultAmountMinor:
+          value.defaultAmount === '' || !currency
+            ? undefined
+            : parseCurrencyDecimalToMinorNumber(value.defaultAmount, currency),
       };
 
       onSubmit({ slug: value.slug, element });
@@ -291,7 +327,7 @@ function FeeElementDialog({
               )}
             </form.Field>
 
-            <form.Field name="defaultValue">
+            <form.Field name="defaultAmount">
               {(field) => (
                 <div className="flex flex-col gap-1.5">
                   <Label htmlFor="element-default-value">
@@ -299,14 +335,12 @@ function FeeElementDialog({
                   </Label>
                   <Input
                     id="element-default-value"
-                    type="number"
-                    min={0}
-                    placeholder="0"
-                    value={field.state.value ?? ''}
+                    inputMode="decimal"
+                    placeholder={currency ? '0' : 'Choose currency first'}
+                    value={field.state.value}
                     onBlur={field.handleBlur}
                     onChange={(event) => {
-                      const val = event.target.value;
-                      field.handleChange(val === '' ? undefined : Number(val));
+                      field.handleChange(event.target.value);
                     }}
                   />
                   <FieldErrors errors={field.state.meta.errors} />
@@ -343,8 +377,8 @@ function FeeElementDialog({
 }
 
 export interface FinanceSectionProps {
-  financeConfig: FinanceSchemaConfig | null | undefined;
-  onChange?: (nextConfig: FinanceSchemaConfig | null) => void;
+  financeConfig: PersistedFinanceSchemaConfig | null | undefined;
+  onChange?: (nextConfig: PersistedFinanceSchemaConfig | null) => void;
 }
 
 export function FinanceSection({
@@ -372,12 +406,11 @@ export function FinanceSection({
         name: item.name,
         scopes: item.scopes,
         requiredAtLevel: item.requiredAtLevel,
-        defaultValue: item.defaultValue,
+        defaultAmountMinor: item.defaultAmountMinor,
       };
     });
     onChange?.({
       recurring: 'monthly',
-      currency: 'INR',
       elements: exampleMap,
     });
   }
@@ -389,7 +422,26 @@ export function FinanceSection({
 
   function handleCurrencyChange(currency: string) {
     if (!financeConfig) return;
-    onChange?.({ ...financeConfig, currency: currency.toUpperCase() });
+    onChange?.({
+      ...financeConfig,
+      currency: currency === '' ? undefined : currencyCodeSchema.parse(currency),
+    });
+  }
+
+  function handleTimeZoneChange(timeZone: string) {
+    if (!financeConfig) return;
+    onChange?.({
+      ...financeConfig,
+      timeZone: timeZone.trim() === '' ? undefined : timeZone,
+    });
+  }
+
+  function handleCycleStartMonthChange(value: string) {
+    if (!financeConfig) return;
+    onChange?.({
+      ...financeConfig,
+      cycleStartMonth: value === '' ? undefined : parseInt(value, 10),
+    });
   }
 
   function handleAddOrEditElement(values: {
@@ -419,7 +471,7 @@ export function FinanceSection({
       name: item.name,
       scopes: item.scopes,
       requiredAtLevel: item.requiredAtLevel,
-      defaultValue: item.defaultValue,
+      defaultAmountMinor: item.defaultAmountMinor,
     };
     onChange?.({ ...financeConfig, elements: currentElements });
   }
@@ -518,13 +570,64 @@ export function FinanceSection({
 
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="finance-currency">Currency (ISO 4217)</Label>
-          {onChange ? <Input
-            id="finance-currency"
-            value={financeConfig.currency ?? 'INR'}
-            maxLength={3}
-            className="font-mono uppercase"
-            onChange={(event) => handleCurrencyChange(event.target.value)}
-          /> : <p className="font-mono text-sm">{financeConfig.currency ?? 'INR'}</p>}
+          {onChange ? (
+            <OptionSelect
+              value={financeConfig.currency ?? ''}
+              onValueChange={handleCurrencyChange}
+              options={[
+                { value: '', label: 'Choose currency' },
+                ...SUPPORTED_CURRENCY_CODES.map((currency) => ({
+                  value: currency,
+                  label: currency,
+                })),
+              ]}
+              triggerProps={{ id: 'finance-currency' }}
+            />
+          ) : (
+            <p className="font-mono text-sm">
+              {financeConfig.currency ?? 'Not configured'}
+            </p>
+          )}
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="finance-time-zone">Billing time zone</Label>
+          {onChange ? (
+            <Input
+              id="finance-time-zone"
+              value={financeConfig.timeZone ?? ''}
+              placeholder="e.g. Asia/Kolkata"
+              onChange={(event) => handleTimeZoneChange(event.target.value)}
+            />
+          ) : (
+            <p className="text-sm">
+              {financeConfig.timeZone ?? 'Not configured'}
+            </p>
+          )}
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="finance-cycle-start">Cycle start month</Label>
+          {onChange ? (
+            <OptionSelect
+              value={financeConfig.cycleStartMonth?.toString() ?? ''}
+              onValueChange={handleCycleStartMonthChange}
+              options={[
+                { value: '', label: 'Choose month' },
+                ...Array.from({ length: 12 }, (_, index) => ({
+                  value: String(index + 1),
+                  label: new Intl.DateTimeFormat('en', {
+                    month: 'long',
+                  }).format(new Date(Date.UTC(2020, index, 1))),
+                })),
+              ]}
+              triggerProps={{ id: 'finance-cycle-start' }}
+            />
+          ) : (
+            <p className="text-sm">
+              {financeConfig.cycleStartMonth ?? 'Not configured'}
+            </p>
+          )}
         </div>
       </div>
 
@@ -594,8 +697,9 @@ export function FinanceSection({
                   )}
                 </div>
                 <span className="font-mono text-xs text-foreground">
-                  {element.defaultValue !== undefined
-                    ? `${element.defaultValue} ${financeConfig.currency}`
+                  {element.defaultAmountMinor !== undefined &&
+                  financeConfig.currency
+                    ? `${formatCurrencyMinorNumber(element.defaultAmountMinor, financeConfig.currency)} ${financeConfig.currency}`
                     : '-'}
                 </span>
                 {onChange ? <div className="flex items-center justify-end gap-1">
@@ -641,6 +745,7 @@ export function FinanceSection({
               : undefined
           }
           existingSlugs={existingSlugs}
+          currency={financeConfig.currency}
           onSubmit={handleAddOrEditElement}
         />
       )}

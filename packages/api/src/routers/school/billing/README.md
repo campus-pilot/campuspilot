@@ -132,6 +132,28 @@ not performed during preview.
 
 ## Restricted configuration boundary
 
+### Exact configuration representation
+
+- `financeConfig.currency`, `financeConfig.timeZone`, and
+  `financeConfig.cycleStartMonth` are independent required facts whenever a
+  session has finance configuration. The timezone must be an IANA identifier;
+  the cycle month is an integer from 1 through 12.
+- Migrated configuration may retain fee elements and exact amounts while any
+  of those independent facts are absent. Restricted reads expose
+  `configurationReadiness.status`, `readyForBilling`, and `missingFields`;
+  class/admission value edits preserve the incomplete configuration. A full
+  authorized configuration write must supply every required fact before later
+  billing preview/posting services may treat the session as ready.
+- Element defaults use `defaultAmountMinor`. Session, class, and admission
+  value maps also contain non-negative safe integers in minor units. Decimal
+  major-unit values and fractional minor units are rejected.
+- The session configuration's explicit currency governs its class and
+  admission override maps. Operational facts repeat currency on every money
+  row so historical postings never depend on mutable configuration.
+- `unregisteredAt` records new unregister transitions independently from the
+  boolean lifecycle state. It may be null on legacy unregistered rows because
+  an unknown historical time is not inferred from a correlated timestamp.
+
 General admission create/update DTOs explicitly reject the retired
 `financeValue` input, and general create/read/list/update outputs never return
 it. Restricted admission values are accessed only through:
@@ -150,6 +172,23 @@ explicit session.
 
 Session finance configuration remains behind `getSessionFinance` and
 `updateSessionFinance`; it is not part of general session DTOs.
+
+## Operational concurrency and transport
+
+Every future poster that appends a ledger entry must call
+`lockFinanceAdmissionAccount` before it reads the account ledger, allocates the
+next sequence, writes facts, or updates projections. Projection rebuild uses
+the same lock and the canonical ordering is session/account work before any
+secondary resource locks. This prevents a rebuild from publishing a snapshot
+that omits a concurrently committed posting. Reconciliation is read-only and
+uses one repeatable-read transaction so all compared rows come from one
+database snapshot.
+
+PostgreSQL `bigint` values never cross an API boundary as JavaScript numbers.
+Amounts, ledger sequences, and counter values serialize as unsigned base-10
+decimal strings; incoming strings are validated before conversion to `bigint`.
+Projection diagnostics expose arrays and decimal strings, never `Map` or
+`BigInt`, so the shape is JSON-safe without casts or lossy conversion.
 
 ## Authorization
 

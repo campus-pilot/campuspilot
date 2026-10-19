@@ -11,6 +11,8 @@ export function createFinanceConfig(
   return {
     recurring: overrides.recurring ?? 'monthly',
     currency: overrides.currency ?? 'INR',
+    timeZone: overrides.timeZone ?? 'Asia/Kolkata',
+    cycleStartMonth: overrides.cycleStartMonth ?? 4,
     elements: overrides.elements ?? {
       transport: {
         name: 'Transport',
