@@ -4,8 +4,15 @@ export const DEFAULT_LIST_LIMIT = 20;
 export const MAX_LIST_LIMIT = 20;
 
 const paginationInputShape = {
-  cursor: z.string().regex(/^[1-9]\d*$/, "Cursor must identify a positive page.").optional(),
-  page: z.number().int().positive().optional(),
+  cursor: z
+    .string()
+    .regex(/^[1-9]\d*$/, "Cursor must identify a positive page.")
+    .refine(
+      (value) => Number.isSafeInteger(Number(value)),
+      "Cursor must identify a safe positive page.",
+    )
+    .optional(),
+  page: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
   limit: z.number().int().positive().max(MAX_LIST_LIMIT).default(DEFAULT_LIST_LIMIT),
 };
 
