@@ -54,8 +54,8 @@ export const rpcError = {
 /**
  * Converts infrastructure failures into stable RPC errors. Drizzle preserves
  * the PostgreSQL error as a nested cause, so the cause chain is inspected for
- * the canonical 23505 unique-constraint code. All other implementation details
- * remain private behind INTERNAL_SERVER_ERROR.
+ * canonical unique and retryable transaction codes. Other implementation
+ * details remain private behind INTERNAL_SERVER_ERROR.
  */
 export function toRpcError(error: unknown): ORPCError<string, unknown> {
   if (error instanceof ORPCError) return error;
@@ -65,6 +65,15 @@ export function toRpcError(error: unknown): ORPCError<string, unknown> {
     return rpcError.conflict(
       "A resource with those unique values already exists.",
       uniqueViolation,
+    );
+  }
+
+  const serializationFailure = findDatabaseError(error, "40001");
+  const deadlockDetected = findDatabaseError(error, "40P01");
+  if (serializationFailure || deadlockDetected) {
+    return rpcError.conflict(
+      "The operation conflicted with another finance update. Retry the same idempotent command.",
+      serializationFailure ?? deadlockDetected,
     );
   }
 

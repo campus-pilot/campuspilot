@@ -93,6 +93,11 @@ grants contains {
     "school.admission.finance.read",
     "school.admission.finance.update",
     "school.billing.run.read",
+    "school.billing.run.preview",
+    "school.billing.run.post",
+    "school.billing.bill.manual.create",
+    "school.billing.bill.reverse",
+    "school.billing.run.reverse",
     "school.billing.report.read",
     "school.admission.ledger.read",
   }

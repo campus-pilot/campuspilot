@@ -189,6 +189,59 @@ Amounts, ledger sequences, and counter values serialize as unsigned base-10
 decimal strings; incoming strings are validated before conversion to `bigint`.
 Projection diagnostics expose arrays and decimal strings, never `Map` or
 `BigInt`, so the shape is JSON-safe without casts or lossy conversion.
+Individual operational facts remain PostgreSQL `bigint`. Rebuildable lifetime
+and session debit/credit projection caches use exact `NUMERIC(38,0)` columns
+mapped to JavaScript `bigint`, allowing cumulative totals to exceed one
+individual operational value without overflow or loss of transport precision.
+
+### Billing-run and bill operations
+
+`previewBillingRun` and `postBillingRun` accept an explicit school, session,
+local billing date, optional admission/class selections, and bill-generation
+values. Run-time class values are keyed by durable class ID; persisted class
+pricing remains keyed by the configuration's class slug. Preview is read-only
+and returns grouped blocking/non-blocking issues, exact totals, paginated bill
+breakdowns, immutable pricing-source snapshots, and a SHA-256 review hash.
+Posting locks the session, admission accounts, and enrollments in deterministic
+order, recomputes the same derivation, and rejects a stale hash before writing.
+Explicit selection arrays contain at least one ID; omission alone means all.
+Every selected class is independently checked against the school context, and
+a run is capped at 5,000 candidate admissions. Candidate discovery reads at
+most 5,001 IDs and returns the blocking size issue before enrollment/pricing
+materialization or finance locks. Posting bulk-locks accounts,
+reserves one contiguous bill-number block, and writes ledger, bill, line,
+projection, and finalization rows in bounded chunks, so round trips grow by
+chunk count rather than by admission count.
+
+Regular runs are unique by school, explicit session, and deterministic period
+key. A second legitimate charge uses `kind: "supplemental"` with a nonempty
+reason; there is no force flag. An idempotency-key retry returns the existing
+result only when its canonical command payload matches. A reused key with a
+different payload is a conflict.
+
+`createManualBill` is an ordinary new-charge workflow. It requires a registered
+admission with an enrollment and class placement in the explicit session, a
+reason, and configured fee-element lines. Settlement/correction APIs may later
+operate on unregistered accounts, but this ordinary bill command may not.
+
+`reverseBill` and `reverseBillingRun` append exact opposite ledger entries and
+advance projections; they do not mutate bill/run headers. A bill with live
+allocations or bill-specific credits cannot be reversed independently. Run
+reversal validates every member first and commits every opposite fact or none.
+The absence of a `reversed` status is intentional: reversal is derived from the
+immutable linked ledger fact.
+Standalone and run-reversal child idempotency keys occupy separate internal
+namespaces. A run retry accepts either zero existing children or its complete
+exact child set; partial sets and independently-created reversals conflict and
+are never adopted. Run reversal returns a compact aggregate rather than an
+unbounded child array. Child keys, existing target reversals, allocations, and
+live credits are validated set-wise; opposite ledger and projection facts use
+the same bounded bulk writer as posting.
+
+Preview readiness issues and run-detail bills are independently paginated.
+Public bill details use immutable bill and line snapshots for session years,
+enrollment, class/section IDs, slugs and labels, roll/admission identity,
+configuration hash, line counts, exact amounts, and pricing sources.
 
 ## Authorization
 

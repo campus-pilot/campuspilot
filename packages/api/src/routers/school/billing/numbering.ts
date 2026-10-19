@@ -11,15 +11,32 @@ const PREFIX: Record<FinanceNumberKind, string> = {
   refund: "RFN",
 };
 
-/** Allocates one human number under a serialized per-session counter row. */
-export async function allocateFinanceNumber(
+function formatFinanceNumber(
+  kind: FinanceNumberKind,
+  fiscalKey: string,
+  sequence: bigint,
+): { number: string; sequence: string } {
+  return {
+    number: `${PREFIX[kind]}/${fiscalKey}/${sequence
+      .toString(10)
+      .padStart(6, "0")}`,
+    sequence: sequence.toString(10),
+  };
+}
+
+/** Reserves a contiguous number block with one counter transition. */
+export async function reserveFinanceNumbers(
   transaction: DatabaseTransaction,
   input: {
     schoolId: string;
     sessionId: string;
     kind: FinanceNumberKind;
+    count: number;
   },
-): Promise<{ number: string; sequence: string }> {
+): Promise<Array<{ number: string; sequence: string }>> {
+  if (!Number.isSafeInteger(input.count) || input.count < 1) {
+    throw new Error("Finance number reservation count must be positive");
+  }
   const [session] = await transaction
     .select({
       startYear: schoolSessionTable.sessionStartYear,
@@ -38,7 +55,13 @@ export async function allocateFinanceNumber(
   const fiscalKey = `${session.startYear}-${session.endYear}`;
   await transaction
     .insert(financeNumberCounterTable)
-    .values({ ...input, fiscalKey, nextValue: 1n })
+    .values({
+      schoolId: input.schoolId,
+      sessionId: input.sessionId,
+      kind: input.kind,
+      fiscalKey,
+      nextValue: BigInt(1),
+    })
     .onConflictDoNothing();
   const [counter] = await transaction
     .select()
@@ -56,11 +79,10 @@ export async function allocateFinanceNumber(
   if (counter.fiscalKey !== fiscalKey) {
     throw new Error("Finance counter fiscal key does not match the session");
   }
-
-  const sequence = counter.nextValue;
+  const start = counter.nextValue;
   await transaction
     .update(financeNumberCounterTable)
-    .set({ nextValue: sequence + 1n, updatedAt: new Date() })
+    .set({ nextValue: start + BigInt(input.count), updatedAt: new Date() })
     .where(
       and(
         eq(financeNumberCounterTable.schoolId, input.schoolId),
@@ -68,10 +90,24 @@ export async function allocateFinanceNumber(
         eq(financeNumberCounterTable.kind, input.kind),
       ),
     );
-  return {
-    number: `${PREFIX[input.kind]}/${fiscalKey}/${sequence
-      .toString(10)
-      .padStart(6, "0")}`,
-    sequence: sequence.toString(10),
-  };
+  return Array.from({ length: input.count }, (_, index) =>
+    formatFinanceNumber(input.kind, fiscalKey, start + BigInt(index)),
+  );
+}
+
+/** Allocates one human number under a serialized per-session counter row. */
+export async function allocateFinanceNumber(
+  transaction: DatabaseTransaction,
+  input: {
+    schoolId: string;
+    sessionId: string;
+    kind: FinanceNumberKind;
+  },
+): Promise<{ number: string; sequence: string }> {
+  const [number] = await reserveFinanceNumbers(transaction, {
+    ...input,
+    count: 1,
+  });
+  if (!number) throw new Error("Finance number was not reserved");
+  return number;
 }

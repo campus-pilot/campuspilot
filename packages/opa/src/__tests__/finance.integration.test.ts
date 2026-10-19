@@ -9,7 +9,7 @@ import { OpaClient } from '../client';
 import { SCHOOL_ACTIONS, type SchoolAction } from '../generated/school';
 import { startOpaContainer, type RunningOpaContainer } from './opa-container';
 
-const financeActions = () =>
+const financeReadActions = () =>
   [
     SCHOOL_ACTIONS.READ_SESSION_FINANCE,
     SCHOOL_ACTIONS.UPDATE_SESSION_FINANCE,
@@ -19,6 +19,20 @@ const financeActions = () =>
     SCHOOL_ACTIONS.READ_BILLING_REPORTS,
     SCHOOL_ACTIONS.READ_ADMISSION_LEDGER,
   ] as const;
+
+const financePostActions = () =>
+  [
+    SCHOOL_ACTIONS.PREVIEW_BILLING_RUN,
+    SCHOOL_ACTIONS.POST_BILLING_RUN,
+    SCHOOL_ACTIONS.CREATE_MANUAL_BILL,
+    SCHOOL_ACTIONS.REVERSE_BILL,
+    SCHOOL_ACTIONS.REVERSE_BILLING_RUN,
+  ] as const;
+
+const financeActions = () => [
+  ...financeReadActions(),
+  ...financePostActions(),
+] as const;
 
 function schoolRequest(
   action: SchoolAction,
@@ -94,10 +108,15 @@ describe('Finance permissions against real OPA', () => {
   });
 
   it('grants platform administrators finance reads and pricing updates', async () => {
-    for (const action of financeActions()) {
+    for (const action of financeReadActions()) {
       await expect(
         isAuthorized(platformRequest(action), { client }),
       ).resolves.toBe(true);
+    }
+    for (const action of financePostActions()) {
+      await expect(
+        isAuthorized(platformRequest(action), { client }),
+      ).resolves.toBe(false);
     }
   });
 });

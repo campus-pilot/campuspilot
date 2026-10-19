@@ -66,6 +66,22 @@ describe('RPC errors', () => {
     });
   });
 
+  it.each(['40001', '40P01'])(
+    'maps retryable PostgreSQL concurrency failure %s to conflict',
+    (code) => {
+      const databaseError = { code };
+      const wrapped = new Error('query failed', { cause: databaseError });
+
+      expect(toRpcError(wrapped)).toMatchObject({
+        code: 'CONFLICT',
+        status: 409,
+        message:
+          'The operation conflicted with another finance update. Retry the same idempotent command.',
+        cause: databaseError,
+      });
+    },
+  );
+
   it('keeps non-unique database errors private as internal failures', () => {
     const databaseError = { code: '23503', detail: 'private database detail' };
 

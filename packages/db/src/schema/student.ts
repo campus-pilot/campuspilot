@@ -1,4 +1,5 @@
 import {
+  index,
   integer,
   pgTable,
   text,
@@ -48,6 +49,19 @@ export const studentTable = pgTable(
       table.classId,
       table.sectionId,
       table.rollNo,
+    ),
+    index("student_school_session_admission_id_idx").on(
+      table.schoolId,
+      table.sessionId,
+      table.admissionId,
+      table.id,
+    ),
+    index("student_school_session_class_admission_id_idx").on(
+      table.schoolId,
+      table.sessionId,
+      table.classId,
+      table.admissionId,
+      table.id,
     ),
   ],
 );

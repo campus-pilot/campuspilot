@@ -3,7 +3,7 @@ import {
   currencyMinorUnitDigits,
 } from "@campuspilot/db/schema/jsonb/currencies";
 
-const POSTGRES_BIGINT_MAX = 9_223_372_036_854_775_807n;
+const POSTGRES_BIGINT_MAX = BigInt("9223372036854775807");
 
 /**
  * Parses a non-negative, non-exponent decimal string without ever passing
@@ -28,7 +28,7 @@ export function parseDecimalAmountToMinor(
     );
   }
 
-  const scale = 10n ** BigInt(digits);
+  const scale = BigInt(10) ** BigInt(digits);
   const amount =
     BigInt(match[1]!) * scale + BigInt(fraction.padEnd(digits, "0") || "0");
   if (amount > POSTGRES_BIGINT_MAX) {

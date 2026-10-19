@@ -277,36 +277,38 @@ export const schoolStudentRouter = {
         }
 
         return await context.db.transaction(async (transaction) => {
-          const [[session], [admission]] = await Promise.all([
-            transaction
-              .select({ id: schoolSessionTable.id })
-              .from(schoolSessionTable)
-              .where(
-                and(
-                  eq(schoolSessionTable.schoolId, input.schoolId),
-                  eq(schoolSessionTable.id, input.sessionId),
-                ),
-              )
-              .limit(1),
-            transaction
-              .select({
-                id: admissionTable.id,
-                name: admissionTable.name,
-                admissionNo: admissionTable.admissionNo,
-                photoS3Key: admissionTable.photoS3Key,
-                registered: admissionTable.registered,
-              })
-              .from(admissionTable)
-              .where(
-                and(
-                  eq(admissionTable.schoolId, input.schoolId),
-                  eq(admissionTable.id, input.admissionId),
-                ),
-              )
-              .limit(1)
-              .for("update"),
-          ]);
+          // Finance writers use session -> admission -> enrollment everywhere.
+          // Enrollment creation follows the same order to avoid a lock cycle
+          // with a concurrent reviewed billing post.
+          const [session] = await transaction
+            .select({ id: schoolSessionTable.id })
+            .from(schoolSessionTable)
+            .where(
+              and(
+                eq(schoolSessionTable.schoolId, input.schoolId),
+                eq(schoolSessionTable.id, input.sessionId),
+              ),
+            )
+            .for("update")
+            .limit(1);
           if (!session) throw rpcError.notFound("School session");
+          const [admission] = await transaction
+            .select({
+              id: admissionTable.id,
+              name: admissionTable.name,
+              admissionNo: admissionTable.admissionNo,
+              photoS3Key: admissionTable.photoS3Key,
+              registered: admissionTable.registered,
+            })
+            .from(admissionTable)
+            .where(
+              and(
+                eq(admissionTable.schoolId, input.schoolId),
+                eq(admissionTable.id, input.admissionId),
+              ),
+            )
+            .for("update")
+            .limit(1);
           if (!admission) throw rpcError.notFound("Admission");
           if (!admission.registered) {
             throw rpcError.badRequest(

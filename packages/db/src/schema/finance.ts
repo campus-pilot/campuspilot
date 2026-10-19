@@ -7,6 +7,7 @@ import {
   index,
   integer,
   jsonb,
+  numeric,
   pgEnum,
   pgTable,
   primaryKey,
@@ -843,8 +844,16 @@ export const financeAdmissionBalanceTable = pgTable(
     admissionId: text("admission_id").notNull(),
     currency: varchar("currency", { length: 3 }).notNull(),
     lastSequence: bigint("last_sequence", { mode: "bigint" }).notNull(),
-    debitTotalMinor: bigint("debit_total_minor", { mode: "bigint" }).notNull(),
-    creditTotalMinor: bigint("credit_total_minor", { mode: "bigint" }).notNull(),
+    debitTotalMinor: numeric("debit_total_minor", {
+      precision: 38,
+      scale: 0,
+      mode: "bigint",
+    }).notNull(),
+    creditTotalMinor: numeric("credit_total_minor", {
+      precision: 38,
+      scale: 0,
+      mode: "bigint",
+    }).notNull(),
     rebuiltAt: timestamp("rebuilt_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -876,8 +885,16 @@ export const financeAdmissionSessionActivityTable = pgTable(
     currency: varchar("currency", { length: 3 }).notNull(),
     lastSequence: bigint("last_sequence", { mode: "bigint" }).notNull(),
     entryCount: bigint("entry_count", { mode: "bigint" }).notNull(),
-    debitTotalMinor: bigint("debit_total_minor", { mode: "bigint" }).notNull(),
-    creditTotalMinor: bigint("credit_total_minor", { mode: "bigint" }).notNull(),
+    debitTotalMinor: numeric("debit_total_minor", {
+      precision: 38,
+      scale: 0,
+      mode: "bigint",
+    }).notNull(),
+    creditTotalMinor: numeric("credit_total_minor", {
+      precision: 38,
+      scale: 0,
+      mode: "bigint",
+    }).notNull(),
     rebuiltAt: timestamp("rebuilt_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

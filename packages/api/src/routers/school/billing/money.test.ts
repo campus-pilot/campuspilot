@@ -7,6 +7,7 @@ import {
 } from "./money";
 import { currencyMinorUnitDigits } from "@campuspilot/db/schema/jsonb/currencies";
 import {
+  checkedFinanceAddition,
   parseFinanceInteger,
   serializeFinanceInteger,
   serializeProjectionTotals,
@@ -106,5 +107,22 @@ describe("exact finance money conversion", () => {
       debitTotalMinor: "9223372036854775807",
       creditTotalMinor: "1",
     });
+  });
+
+  it("checks aggregate addition at the PostgreSQL bigint boundary", () => {
+    expect(
+      checkedFinanceAddition(BigInt("9223372036854775806"), BigInt(1)),
+    ).toBe(BigInt("9223372036854775807"));
+    expect(() =>
+      checkedFinanceAddition(BigInt("9223372036854775807"), BigInt(1)),
+    ).toThrow("PostgreSQL bigint range");
+    expect(
+      serializeProjectionTotals({
+        lastSequence: BigInt(2),
+        entryCount: BigInt(2),
+        debitTotalMinor: BigInt("9223372036854775808"),
+        creditTotalMinor: BigInt(0),
+      }).debitTotalMinor,
+    ).toBe("9223372036854775808");
   });
 });

@@ -123,6 +123,36 @@ actions contains {
 } if { true }
 
 actions contains {
+  "id": "school.billing.run.preview",
+  "key": "PREVIEW_BILLING_RUN",
+  "resourceKind": "school",
+} if { true }
+
+actions contains {
+  "id": "school.billing.run.post",
+  "key": "POST_BILLING_RUN",
+  "resourceKind": "school",
+} if { true }
+
+actions contains {
+  "id": "school.billing.bill.manual.create",
+  "key": "CREATE_MANUAL_BILL",
+  "resourceKind": "school",
+} if { true }
+
+actions contains {
+  "id": "school.billing.bill.reverse",
+  "key": "REVERSE_BILL",
+  "resourceKind": "school",
+} if { true }
+
+actions contains {
+  "id": "school.billing.run.reverse",
+  "key": "REVERSE_BILLING_RUN",
+  "resourceKind": "school",
+} if { true }
+
+actions contains {
   "id": "school.billing.report.read",
   "key": "READ_BILLING_REPORTS",
   "resourceKind": "school",

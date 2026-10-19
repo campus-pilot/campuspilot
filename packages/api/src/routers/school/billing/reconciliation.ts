@@ -23,10 +23,10 @@ type ProjectionTotals = {
 
 function emptyProjection(): ProjectionTotals {
   return {
-    lastSequence: 0n,
-    entryCount: 0n,
-    debitTotalMinor: 0n,
-    creditTotalMinor: 0n,
+    lastSequence: BigInt(0),
+    entryCount: BigInt(0),
+    debitTotalMinor: BigInt(0),
+    creditTotalMinor: BigInt(0),
   };
 }
 
@@ -46,13 +46,13 @@ export function foldAdmissionLedger(
   const sessions = new Map<string, ProjectionTotals>();
 
   for (const entry of entries) {
-    lifetime.entryCount += 1n;
+    lifetime.entryCount += BigInt(1);
     lifetime.lastSequence = entry.sequence;
     lifetime[entry.direction === "debit" ? "debitTotalMinor" : "creditTotalMinor"] +=
       entry.amountMinor;
 
     const session = sessions.get(entry.sessionId) ?? emptyProjection();
-    session.entryCount += 1n;
+    session.entryCount += BigInt(1);
     session.lastSequence = entry.sequence;
     session[entry.direction === "debit" ? "debitTotalMinor" : "creditTotalMinor"] +=
       entry.amountMinor;
@@ -113,7 +113,7 @@ export async function rebuildAdmissionProjection(
         ),
       );
 
-    if (expected.lifetime.entryCount > 0n) {
+    if (expected.lifetime.entryCount > BigInt(0)) {
       await transaction.insert(financeAdmissionBalanceTable).values({
         ...key,
         lastSequence: expected.lifetime.lastSequence,
@@ -184,7 +184,7 @@ export async function reconcileAdmissionProjection(
       const actualSessions = new Map(
         activities.map((activity) => [activity.sessionId, activity]),
       );
-      const isEmpty = expected.lifetime.entryCount === 0n;
+      const isEmpty = expected.lifetime.entryCount === BigInt(0);
       const lifetimeMatches = isEmpty
         ? actualLifetime === null
         : actualLifetime !== null &&
