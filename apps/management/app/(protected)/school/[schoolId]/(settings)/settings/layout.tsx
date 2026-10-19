@@ -242,9 +242,5 @@ export default function SchoolSettingsLayout({
     navbarActions: resolveManagementPageActions(page, params),
   };
 
-  return (
-    <ManagementShell state={state} showSearch={false}>
-      {children}
-    </ManagementShell>
-  );
+  return <ManagementShell state={state}>{children}</ManagementShell>;
 }

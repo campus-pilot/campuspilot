@@ -33,6 +33,11 @@ function sessionLabel(session: SchoolSessionDto) {
   return `${session.sessionStartYear}-${session.sessionEndYear}`;
 }
 
+/** Keeps the sidebar trigger compact while the picker retains unambiguous full years. */
+function compactSessionLabel(session: SchoolSessionDto) {
+  return `${String(session.sessionStartYear).slice(-2)}-${String(session.sessionEndYear).slice(-2)}`;
+}
+
 /** Keeps the current session-scoped subpage when changing academic sessions. */
 function sessionSuffixFromPath(pathname: string) {
   return /^\/school\/[^/]+\/sessions\/[^/]+(\/.*)?$/.exec(pathname)?.[1] ?? '';
@@ -83,19 +88,21 @@ export function SessionSwitcher({
       <PopoverTrigger asChild>
         <Button
           variant="ghost"
-          className="h-auto w-full min-w-0 justify-start rounded-lg px-2 py-1.5"
+          className="w-full min-w-0 justify-start rounded-lg px-2"
           disabled={sessions.length === 0}
+          aria-label={
+            selectedSession
+              ? `Switch session, current session ${sessionLabel(selectedSession)}`
+              : 'Switch session, no session selected'
+          }
         >
-          <CalendarRange className="size-4 shrink-0" aria-hidden />
-          <span className="min-w-0 text-left">
-            <span className="block text-[10px] text-muted-foreground">
-              Session
-            </span>
-            <span className="block truncate text-sm font-medium">
-              {selectedSession ? sessionLabel(selectedSession) : 'No session'}
-            </span>
+          <CalendarRange aria-hidden />
+          <span className="min-w-0 truncate">
+            {selectedSession
+              ? compactSessionLabel(selectedSession)
+              : 'No session'}
           </span>
-          <ChevronsUpDown className="ml-auto size-4 shrink-0" aria-hidden />
+          <ChevronsUpDown className="ml-auto" aria-hidden />
         </Button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-64 p-0">

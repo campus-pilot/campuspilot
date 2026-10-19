@@ -179,11 +179,11 @@ type AppShellProps = {
   breadcrumbs: AppShellBreadcrumb[];
   sidebarHeader: ReactNode;
   search: ReactNode;
-  /** App-owned control rendered between search and footer links. */
+  /** App-owned control rendered after the footer links. */
   footerContent?: ReactNode;
   user: AppShellUser;
   docsHref?: string;
-  /** App-owned links rendered directly above the shared Docs link. */
+  /** App-owned links rendered between the shared Docs link and footer content. */
   footerLinks?: AppShellFooterLink[];
   navbarActions?: ReactNode;
   onManageAccount?: () => void;
@@ -658,7 +658,17 @@ export function AppShell({
           </SidebarContent>
           <SidebarFooter className="gap-1 p-3">
             {search}
-            {footerContent}
+            <Button
+              asChild
+              variant="ghost"
+              className="justify-start rounded-lg px-2"
+            >
+              <AppLink href={docsHref} renderLink={renderLink}>
+                <BookOpen />
+                Docs
+              </AppLink>
+            </Button>
+            {footerLinks.length > 0 ? <Separator className="my-1" /> : null}
             {footerLinks.map((link) => {
               const Icon = link.icon;
 
@@ -676,16 +686,7 @@ export function AppShell({
                 </Button>
               );
             })}
-            <Button
-              asChild
-              variant="ghost"
-              className="justify-start rounded-lg px-2"
-            >
-              <AppLink href={docsHref} renderLink={renderLink}>
-                <BookOpen />
-                Docs
-              </AppLink>
-            </Button>
+            {footerContent}
             <Separator className="my-2" />
             <AppShellUserMenu
               user={user}

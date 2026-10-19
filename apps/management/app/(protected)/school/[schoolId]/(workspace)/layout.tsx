@@ -150,13 +150,6 @@ function navigationFor(
         },
       ],
     },
-    {
-      type: 'item',
-      id: 'settings',
-      label: 'Settings',
-      href: schoolHref(schoolId, '/settings'),
-      icon: Settings,
-    },
   ];
 }
 
@@ -191,6 +184,14 @@ export default function SchoolWorkspaceLayout({
         sessions={sessions}
       />
     ),
+    footerLinks: [
+      {
+        id: 'settings',
+        label: 'Settings',
+        href: schoolHref(schoolId, '/settings'),
+        icon: Settings,
+      },
+    ],
     navbarActions: resolveManagementPageActions(page, params),
   };
 
