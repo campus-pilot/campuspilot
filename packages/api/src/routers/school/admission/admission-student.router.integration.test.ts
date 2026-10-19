@@ -1,5 +1,5 @@
 import { db } from "@campuspilot/db";
-import { schoolSessionTable } from "@campuspilot/db/schema/session";
+import { admissionTable } from "@campuspilot/db/schema/admission";
 import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 
@@ -222,52 +222,61 @@ describe("school admission and student router integration", () => {
     ]);
   });
 
-  it("validates admission finance values against explicit school sessions and student scopes", async () => {
+  it("keeps restricted finance values out of general admission DTOs", async () => {
     const school = await createTestSchool();
-    const principal = await createSchoolStaffSession(school.id, [
-      { role: "principal", meta: null },
+    const teacher = await createSchoolStaffSession(school.id, [
+      { role: "teacher", meta: { classIds: [] } },
     ]);
     const session = await createTestSession({
       schoolId: school.id,
       sessionStartYear: 2032,
       sessionEndYear: 2033,
     });
+    const admission = await createTestAdmission({ schoolId: school.id });
     await db
-      .update(schoolSessionTable)
+      .update(admissionTable)
       .set({
-        financeConfig: {
-          recurring: "monthly",
-          currency: "INR",
-          elements: {
-            transport: {
-              name: "Transport",
-              scopes: ["student"],
-            },
-            tuition: {
-              name: "Tuition",
-              scopes: ["class"],
-            },
-          },
-        },
+        financeValue: { [session.id]: { transport: 500 } },
       })
-      .where(eq(schoolSessionTable.id, session.id));
-    const client = createTestClient(principal.session);
+      .where(eq(admissionTable.id, admission.id));
+    const client = createTestClient(teacher.session);
 
-    const admission = await client.school.createAdmission({
-      ...admissionInput(school.id, "FIN-1"),
-      financeValue: { [session.id]: { transport: 500 } },
-    });
-    expect(admission.financeValue).toEqual({
-      [session.id]: { transport: 500 },
-    });
-
-    await expect(
-      client.school.updateAdmission({
+    const [fetched, listed] = await Promise.all([
+      client.school.getAdmission({
         schoolId: school.id,
         admissionId: admission.id,
-        financeValue: { [session.id]: { tuition: 1000 } },
       }),
+      client.school.listAdmissions({ schoolId: school.id }),
+    ]);
+    expect(fetched).not.toHaveProperty("financeValue");
+    expect(listed.items[0]).not.toHaveProperty("financeValue");
+
+    const principal = await createSchoolStaffSession(school.id, [
+      { role: "principal", meta: null },
+    ]);
+    const unsafeChanges = {
+      schoolId: school.id,
+      admissionId: admission.id,
+      address: "Updated without touching pricing",
+      financeValue: { [session.id]: { transport: 999 } },
+    };
+    await expect(
+      createTestClient(principal.session).school.updateAdmission(
+        unsafeChanges as never,
+      ),
     ).rejects.toThrowError(expect.objectContaining({ code: "BAD_REQUEST" }));
+
+    const [stored] = await db
+      .select({
+        address: admissionTable.address,
+        financeValue: admissionTable.financeValue,
+      })
+      .from(admissionTable)
+      .where(eq(admissionTable.id, admission.id));
+    expect(stored?.address).toBe(admission.address);
+    expect(stored?.financeValue).toEqual({
+      [session.id]: { transport: 500 },
+    });
   });
 
   it("enrolls students in explicit sessions for managers or assigned teachers and supports detachment", async () => {

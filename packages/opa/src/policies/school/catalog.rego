@@ -105,6 +105,36 @@ actions contains {
 } if { true }
 
 actions contains {
+  "id": "school.admission.finance.read",
+  "key": "READ_ADMISSION_FINANCE",
+  "resourceKind": "school",
+} if { true }
+
+actions contains {
+  "id": "school.admission.finance.update",
+  "key": "UPDATE_ADMISSION_FINANCE",
+  "resourceKind": "school",
+} if { true }
+
+actions contains {
+  "id": "school.billing.run.read",
+  "key": "READ_BILLING_RUNS",
+  "resourceKind": "school",
+} if { true }
+
+actions contains {
+  "id": "school.billing.report.read",
+  "key": "READ_BILLING_REPORTS",
+  "resourceKind": "school",
+} if { true }
+
+actions contains {
+  "id": "school.admission.ledger.read",
+  "key": "READ_ADMISSION_LEDGER",
+  "resourceKind": "school",
+} if { true }
+
+actions contains {
   "id": "school.class.list",
   "key": "LIST_CLASSES",
   "resourceKind": "school",

@@ -2,7 +2,6 @@ import type { DatabaseExecutor } from "@campuspilot/db";
 import { admissionTable } from "@campuspilot/db/schema/admission";
 import { studentTable } from "@campuspilot/db/schema/student";
 import { classTable } from "@campuspilot/db/schema/class";
-import type { StudentFinanceValuesMap } from "@campuspilot/db/schema/jsonb/finance-config";
 import { schoolTable } from "@campuspilot/db/schema/school";
 import { schoolSessionTable } from "@campuspilot/db/schema/session";
 import { SCHOOL_ACTIONS } from "@campuspilot/opa/policies/school";
@@ -62,16 +61,14 @@ async function findAdmission(
 }
 
 /**
- * Validates school-owned references and student-scoped finance values before
- * an admission write. Finance keys are session IDs because an admission can
- * span several academic sessions.
+ * Validates references that are safe to mutate through the general admission
+ * boundary. Restricted pricing values are handled by the billing router.
  */
 async function validateAdmissionReferences(
   db: DatabaseExecutor,
   schoolId: string,
   values: {
     admissionClassId?: string | null;
-    financeValue?: StudentFinanceValuesMap;
   },
 ) {
   if (values.admissionClassId) {
@@ -86,47 +83,6 @@ async function validateAdmissionReferences(
       )
       .limit(1);
     if (!schoolClass) throw rpcError.notFound("Admission class");
-  }
-
-  if (values.financeValue === undefined) return;
-  const sessionIds = Object.keys(values.financeValue);
-  if (sessionIds.length === 0) return;
-
-  const sessions = await db
-    .select({
-      id: schoolSessionTable.id,
-      financeConfig: schoolSessionTable.financeConfig,
-    })
-    .from(schoolSessionTable)
-    .where(
-      and(
-        eq(schoolSessionTable.schoolId, schoolId),
-        inArray(schoolSessionTable.id, sessionIds),
-      ),
-    );
-  const sessionsById = new Map(sessions.map((session) => [session.id, session]));
-
-  for (const [sessionId, financeValues] of Object.entries(values.financeValue)) {
-    const session = sessionsById.get(sessionId);
-    if (!session) {
-      throw rpcError.badRequest(
-        `School session "${sessionId}" does not belong to this school.`,
-      );
-    }
-
-    for (const elementSlug of Object.keys(financeValues)) {
-      const element = session.financeConfig?.elements[elementSlug];
-      if (!element) {
-        throw rpcError.badRequest(
-          `Finance element "${elementSlug}" is not defined for session "${sessionId}".`,
-        );
-      }
-      if (!element.scopes.includes("student")) {
-        throw rpcError.badRequest(
-          `Finance element "${elementSlug}" cannot be overridden by student.`,
-        );
-      }
-    }
   }
 }
 

@@ -1,5 +1,4 @@
 import { admissionDocumentsSchema } from "@campuspilot/db/schema/jsonb/admission-config";
-import { studentFinanceValuesSchema } from "@campuspilot/db/schema/jsonb/finance-config";
 import { z } from "zod";
 
 import {
@@ -25,7 +24,6 @@ export const admissionDtoSchema = z.object({
   registered: z.boolean(),
   photoS3Key: z.string().nullable(),
   documents: admissionDocumentsSchema,
-  financeValue: studentFinanceValuesSchema,
   createdAt: z.date().nullable(),
   updatedAt: z.date().nullable(),
 });
@@ -100,7 +98,8 @@ export const createAdmissionInputSchema = z.object({
   dob: z.iso.date(),
   fatherName: requiredTextSchema,
   motherName: requiredTextSchema,
-  financeValue: studentFinanceValuesSchema.optional(),
+  /** Pricing moved to the restricted billing router; reject stale clients. */
+  financeValue: z.never().optional(),
 });
 
 export const updateAdmissionInputSchema = admissionIdInputSchema
@@ -114,7 +113,8 @@ export const updateAdmissionInputSchema = admissionIdInputSchema
     dob: z.iso.date().optional(),
     fatherName: requiredTextSchema.optional(),
     motherName: requiredTextSchema.optional(),
-    financeValue: studentFinanceValuesSchema.optional(),
+    /** Pricing moved to the restricted billing router; reject stale clients. */
+    financeValue: z.never().optional(),
   })
   .refine(
     ({ schoolId: _schoolId, admissionId: _admissionId, ...changes }) =>

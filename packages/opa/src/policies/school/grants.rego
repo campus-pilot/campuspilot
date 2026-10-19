@@ -90,6 +90,11 @@ grants contains {
   some action in {
     "school.session.finance.read",
     "school.session.finance.update",
+    "school.admission.finance.read",
+    "school.admission.finance.update",
+    "school.billing.run.read",
+    "school.billing.report.read",
+    "school.admission.ledger.read",
   }
 }
 

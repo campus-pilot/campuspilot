@@ -10,6 +10,7 @@ import { protectedProcedure } from "../../index";
 import { requireSchoolPermission } from "../../permissions/school";
 import { schoolAdmissionSettingsRouter } from "./admission-settings/admission-settings.router";
 import { schoolAdmissionRouter } from "./admission/admission.router";
+import { schoolBillingRouter } from "./billing/billing.router";
 import { schoolClassRouter } from "./class/class.router";
 import { schoolSectionRouter } from "./class/section.router";
 import { schoolExamRouter } from "./exam/exam.router";
@@ -122,6 +123,7 @@ export const schoolRouter = {
     }),
   ...schoolAdmissionSettingsRouter,
   ...schoolAdmissionRouter,
+  ...schoolBillingRouter,
   ...schoolLogoRouter,
   ...schoolClassRouter,
   ...schoolSectionRouter,
