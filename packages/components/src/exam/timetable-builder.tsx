@@ -136,31 +136,6 @@ export function TimetableBuilder(props: Props) {
           />
         )}
       </ui.Subscribe>
-      <ExamButton
-        type="button"
-        variant="outline"
-        className="self-start"
-        disabled={disabled || config.rows.length >= 500}
-        onClick={() =>
-          onChange({
-            ...config,
-            rows: [
-              ...config.rows,
-              {
-                id: crypto.randomUUID(),
-                date: nextTimetableDate(config.rows),
-                startTime: config.rows.at(-1)?.startTime ?? '',
-                endTime: config.rows.at(-1)?.endTime ?? '',
-                cells: Object.fromEntries(
-                  config.columns.map((id) => [id, null]),
-                ),
-              },
-            ],
-          })
-        }
-      >
-        <Plus aria-hidden /> Add date / time slot
-      </ExamButton>
     </div>
   );
 }
@@ -243,6 +218,25 @@ function BuilderGrid(
         columns: arrayMove(props.config.columns, from, to),
       });
   };
+  const addRow = () =>
+    props.onChange({
+      ...props.config,
+      rows: [
+        ...props.config.rows,
+        {
+          id: crypto.randomUUID(),
+          date: nextTimetableDate(props.config.rows),
+          startTime: props.config.rows.at(-1)?.startTime ?? '',
+          endTime: props.config.rows.at(-1)?.endTime ?? '',
+          cells: Object.fromEntries(
+            props.config.columns.map((id) => [id, null]),
+          ),
+        },
+      ],
+    });
+  const visibleColumnCount = (
+    props.visibleColumns ?? props.config.columns
+  ).length;
   return (
     <DndContext
       id={id}
@@ -271,13 +265,21 @@ function BuilderGrid(
                   index={index}
                 />
               ))}
+              <tr>
+                <td colSpan={visibleColumnCount + 3} className="p-2">
+                  <ExamButton
+                    type="button"
+                    variant="outline"
+                    className="h-auto w-full justify-start border-dashed py-3 text-muted-foreground hover:text-foreground"
+                    disabled={props.disabled || props.config.rows.length >= 500}
+                    onClick={addRow}
+                  >
+                    <Plus aria-hidden /> Add date and time slot
+                  </ExamButton>
+                </td>
+              </tr>
             </tbody>
           </table>
-          {props.config.rows.length === 0 && (
-            <p className="p-8 text-center text-sm text-muted-foreground">
-              No slots yet. Add a date and time slot to start scheduling.
-            </p>
-          )}
         </div>
       </SortableContext>
     </DndContext>
@@ -285,15 +287,18 @@ function BuilderGrid(
 }
 function GridHead(props: BuilderProps & { visibleColumns?: string[] }) {
   return (
-    <thead className="sticky top-0 z-20 bg-background">
+    <thead className="sticky top-0 z-20 bg-muted">
       <tr>
         <th
           scope="col"
-          className="sticky left-0 z-30 min-w-40 border-b border-r bg-background p-2 text-left"
+          className="sticky left-0 z-30 min-w-40 border-b border-r bg-muted p-2 text-left"
         >
           Date
         </th>
-        <th scope="col" className="min-w-60 border-b border-r p-2 text-left">
+        <th
+          scope="col"
+          className="min-w-60 border-b border-r bg-muted p-2 text-left"
+        >
           Time
         </th>
         {(props.visibleColumns ?? props.config.columns).map((id) => (
@@ -322,7 +327,7 @@ function ClassHeader({
         opacity: drag.isDragging ? 0.5 : 1,
       }}
       scope="col"
-      className="min-w-56 border-b border-r bg-background p-2 align-top"
+      className="min-w-56 border-b border-r bg-muted p-2 align-top"
     >
       <div className="flex items-center gap-1">
         <ExamButton

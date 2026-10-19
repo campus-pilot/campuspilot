@@ -270,27 +270,10 @@ export function TimetableEditor({
                       </Notice>
                     )}
                   </div>
-                  <div className="flex shrink-0 flex-wrap gap-3 border-t bg-background py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-                    <ExamButton
-                      type="submit"
-                      disabled={
-                        !editable || submitting || !canSubmit || uncertain
-                      }
-                    >
-                      {submitting ? 'Saving…' : 'Save'}
-                    </ExamButton>
+                  <div className="flex shrink-0 flex-wrap items-center gap-3 border-t bg-background py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
                     <ExamButton
                       type="button"
                       variant="outline"
-                      disabled={submitting}
-                      onClick={close}
-                    >
-                      Cancel
-                    </ExamButton>
-                    <ExamButton
-                      type="button"
-                      variant="outline"
-                      className="ml-auto"
                       aria-label={
                         expanded
                           ? 'Exit expanded timetable'
@@ -304,6 +287,23 @@ export function TimetableEditor({
                         <Maximize2 aria-hidden />
                       )}
                       {expanded ? 'Compact view' : 'Expand editor'}
+                    </ExamButton>
+                    <ExamButton
+                      type="submit"
+                      className="ml-auto"
+                      disabled={
+                        !editable || submitting || !canSubmit || uncertain
+                      }
+                    >
+                      {submitting ? 'Saving…' : 'Save'}
+                    </ExamButton>
+                    <ExamButton
+                      type="button"
+                      variant="outline"
+                      disabled={submitting}
+                      onClick={close}
+                    >
+                      Cancel
                     </ExamButton>
                   </div>
                 </form>

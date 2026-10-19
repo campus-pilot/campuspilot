@@ -83,8 +83,9 @@ group/context hierarchy; inspect the actual wrapper before composing its parts.
 
 Use operational tables for classes, students, admissions and staff. The examination
 definition list intentionally uses compact cards with a name, plan availability,
-exam status and View more details. This collection-specific decision does not make
-cards the default for every operational list.
+and exam status. The entire card links to the examination workspace; do not add a
+redundant details link. This collection-specific decision does not make cards the
+default for every operational list.
 
 ## Empty states and configuration-driven creation
 
@@ -195,8 +196,10 @@ the implementation and APIs in more detail.
 - New slots advance the last valid date by one calendar day and inherit the last
   row's start/end times. Reuse time and Copy time are tooltip-labelled icons that
   open dialogs; copying allows multiple destination slots and preserves assessments.
-  Put Save and Cancel at the footer's left, Expand editor at its right. Keep the
-  editor header to its title rather than repeating instructions above the table.
+  Keep Add date and time slot as the grid's final row, including when the grid is
+  otherwise empty. Put Expand editor at the footer's left, with Save and Cancel at
+  its right. Keep the editor header to its title rather than repeating instructions
+  above the table.
 
 ## Corrections from the redesign
 

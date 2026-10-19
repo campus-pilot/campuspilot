@@ -33,7 +33,7 @@ export function TimetableGridRow(
   );
   return (
     <tr>
-      <td className="sticky left-0 z-10 border-b border-r bg-background p-2 align-top">
+      <td className="sticky left-0 z-10 border-b border-r bg-muted/60 p-2 align-top">
         <SlotDate
           row={props.row}
           disabled={props.disabled}
@@ -41,7 +41,7 @@ export function TimetableGridRow(
           onPatch={(patch) => props.onPatch(props.row.id, patch)}
         />
       </td>
-      <td className="border-b border-r p-2 align-top">
+      <td className="border-b border-r bg-muted/30 p-2 align-top">
         <SlotTimes {...props} issues={errors} />
         <Issues errors={errors.filter((issue) => issue.path.length === 2)} />
       </td>

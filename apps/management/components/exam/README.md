@@ -43,10 +43,11 @@ Timetables remain optional, after creation. The page shows a table for every cla
 without a class filter. The editor grid supports draggable class columns with a
 remove icon, multiple assessments per cell, and tooltip-labelled timing tools
 that open reuse/copy dialogs. New slots advance the date and inherit the previous
-row's times. Add class appears only when a class is missing. Save/Cancel stay at
-the footer's left and Expand editor at its right. Phones use the same table while
-editing one class at a time without discarding the other columns. Removal/discard
-and in-app navigation use app dialogs rather than browser confirm functions. Completion/reopening
+row's times. Add date and time slot is always the grid's final row, including in
+an otherwise empty grid. Add class appears only when a class is missing. Expand
+editor stays at the footer's left and Save/Cancel at its right. Phones use the same
+table while editing one class at a time without discarding the other columns.
+Removal/discard and in-app navigation use app dialogs rather than browser confirm functions. Completion/reopening
 is exam-wide; completed/inactive sessions are read-only. Report links open the document workspace for the whole examination, class or student. Timetable export opens the same workspace with the examination preselected. Source reads and generation are independently permission-gated; lifecycle actions remain in the overflow menu.
 
 All input workflows use TanStack Form with Zod. Dirty editors retain their baseline
