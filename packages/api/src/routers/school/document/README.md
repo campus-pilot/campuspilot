@@ -1,13 +1,35 @@
 # School documents and artifacts
 
-Documents are available at `/school/:schoolId/sessions/:sessionId/documents` in management. The existing examination, ID-card, admit-card, and timetable template settings pages use the same marketplace and editor. Exam workspaces link directly to report cards, admit cards, and timetable exports with the exam preselected.
+The cross-layer architecture, route ownership, UI state model, extension
+checklists, and LLM-facing template guidance live in the canonical
+[Document system guide](../../../../../../docs/document-system.md). This README is
+the backend contract for data, persistence, rendering, and authorization.
+
+## Backend source map
+
+| File | Responsibility |
+| --- | --- |
+| `document.dto.ts` | Strict request/output schemas and the discriminated document-source union |
+| `document.router.ts` | oRPC procedures, authorization composition, template selection, generation, history, and deletion |
+| `document.context.ts` | Independently validates source relationships and builds the explicit Handlebars context |
+| `document.catalog.ts` | Server-owned marketplace source, synthetic preview context, and user-facing variable reference |
+| `document.render.ts` | Handlebars restrictions, sanitization, batch layout, and Gotenberg conversion |
+| `document.storage.ts` | Immutable S3 persistence, image validation/embedding, and compensation |
+| `document.router.integration.test.ts` | Procedure, authorization, persistence, conflict, storage, and artifact lifecycle coverage |
+| `document-exam.integration.test.ts` | Examination context, approval, schedule, rendering, PDF size/page, and legacy compatibility coverage |
+
+Keep API operations in this package and expose them through the school router.
+Binary conversion and object storage remain server concerns; the management app
+uses normal typed oRPC calls and never receives raw S3 keys.
+
+Documents are available at `/school/:schoolId/sessions/:sessionId/documents` in management. This operational workspace creates PDFs and shows history only. School template settings own editing, while `/school/:schoolId/marketplace/templates` owns browsing, previews, and imports. Exam workspaces link directly to report cards, admit cards, and timetable exports with the exam preselected.
 
 ## Supported documents
 
 - Report cards combine all active/completed subject plans for one class or the whole examination. Every included student must have an approved result in every included plan. The default UI policy excludes incomplete/unapproved students with an explicit warning; strict mode rejects the batch. Explicitly selected students always require complete approval. Ready examinations cannot export results; active, completed and historical examinations remain available. Missing marks never become zero marks. Grades use the session's explicit thresholds; no matching grade renders as an em dash.
 - Student ID cards use session enrollment plus admission identity/photo data, imposed as 86 × 54 mm cards on A4 sheets.
 - Admit cards can target one student, one class or every class in the examination plan. Each card includes student identity and that student's class schedule. Missing class schedules produce explicit preview warnings.
-- Timetables render all scheduled classes or one selected class, with all subjects in a shared slot preserved, on landscape A4.
+- Timetables always render every scheduled classroom, with all subjects in a shared slot preserved, on landscape A4. The API rejects a class-scoped timetable source.
 
 Exports support a whole examination, one class, or up to 500 explicitly selected students. Every export is limited to 500 students. Historical sessions remain exportable. Only registered admissions are eligible. Session, class, exam, student, and tenant relationships are validated independently.
 
@@ -29,7 +51,7 @@ Deleting a PDF first records `deleting`, removes its object, then removes its ro
 
 ## Template editing and portable prompts
 
-The server-owned marketplace contains modern and classic starting points for all four document types. Source and sample previews are available through normal oRPC procedures. `document.catalog.ts` defines the variable reference and synthetic preview data.
+The server-owned marketplace contains modern, classic, minimal, and logo-forward crest starting points for all four document types. Source and branded sample previews are available through normal oRPC procedures. `document.catalog.ts` defines the variable reference and synthetic preview data.
 
 Template editing uses TanStack Form, field-level Zod errors, explicit preview/save actions, and a callback-ref navigation guard. Users describe their edits and copy a context prompt, the latest unsaved HTML, or both together into their own AI application. The brief includes the document's print dimensions, rendering constraints, and server-owned variable reference. Returned HTML is pasted into the existing source editor, previewed, and explicitly saved as a new revision. Clipboard failures leave a selectable full prompt for manual copying.
 

@@ -48,8 +48,10 @@ import { noticesPage } from './sessions/[sessionId]/notices/_route';
 import { staffPage } from './staff/_route';
 
 import { documentPages } from './sessions/[sessionId]/documents/_route';
+import { templateMarketplacePages } from './marketplace/templates/_route';
 
 const pages: ManagementPageDescriptor<any>[] = [
+  ...templateMarketplacePages,
   ...documentPages,
   dashboardPage,
   staffPage,

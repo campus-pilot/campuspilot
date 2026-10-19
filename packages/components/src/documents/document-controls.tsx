@@ -9,6 +9,7 @@ import {
   type OptionSelectOption,
 } from "../option-select";
 import {
+  Check,
   FileText,
   Fingerprint,
   CalendarDays,
@@ -70,6 +71,54 @@ export function DocumentKindPicker({
     </div>
   );
 }
+
+/** Card selection keeps the available document workflows visible at once.
+ * The caller owns routing and data loading; this shared component is presentation-only.
+ */
+export function DocumentKindCards({
+  value,
+  onChange,
+}: {
+  value: DocumentKind;
+  onChange: (value: DocumentKind) => void;
+}) {
+  return (
+    <div
+      role="radiogroup"
+      aria-label="Document type"
+      className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"
+    >
+      {documentKinds.map((item) => {
+        const selected = item.value === value;
+        return (
+          <button
+            key={item.value}
+            type="button"
+            role="radio"
+            aria-checked={selected}
+            onClick={() => onChange(item.value)}
+            className={`flex min-w-0 items-start gap-3 rounded-xl border p-4 text-left transition-colors hover:border-primary/40 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${selected ? "border-primary/50 bg-primary/[0.04]" : "bg-card"}`}
+          >
+            <span
+              className={`grid size-9 shrink-0 place-items-center rounded-lg ${selected ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}
+            >
+              <item.icon className="size-4" aria-hidden />
+            </span>
+            <span className="flex min-w-0 flex-1 flex-col gap-1">
+              <span className="flex items-center justify-between gap-2 text-sm font-semibold">
+                {item.label}
+                {selected ? <Check className="size-4 text-primary" aria-hidden /> : null}
+              </span>
+              <span className="text-xs leading-relaxed text-muted-foreground">
+                {item.description}
+              </span>
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 export function DocumentPanel({
   title,
   description,
@@ -96,6 +145,10 @@ export function DocumentPanel({
     </section>
   );
 }
+/** Displays server-sanitized HTML without scripts, navigation, or inherited
+ * origin privileges. Keep the sandbox empty; adding capabilities here weakens
+ * both marketplace previews and the school template editor.
+ */
 export function DocumentPreview({
   html,
   label = "Document preview",

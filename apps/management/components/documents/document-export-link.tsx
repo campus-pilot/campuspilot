@@ -94,9 +94,11 @@ export function documentWorkspaceHref({
   examSlug?: string;
   studentId?: string;
 }) {
+  // A timetable is an examination-wide grid. Contextual class links may reuse
+  // this helper, but they must never turn a timetable into a class export.
   const query = new URLSearchParams({
     type,
-    ...(classId ? { classId } : {}),
+    ...(classId && type !== 'timetable' ? { classId } : {}),
     ...(examSlug ? { examSlug } : {}),
     ...(studentId ? { studentId } : {}),
   });

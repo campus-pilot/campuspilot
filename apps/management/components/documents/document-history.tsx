@@ -10,9 +10,9 @@ import {
   DocumentNotice,
   DocumentPanel,
 } from '@campuspilot/components/documents/document-controls';
-import type {
-  DocumentArtifact,
-  DocumentType,
+import {
+  DOCUMENT_LABELS,
+  type DocumentArtifact,
 } from '@campuspilot/api/routers/school/document/document.dto';
 import { client, orpc } from '@/lib/orpc';
 import {
@@ -24,12 +24,14 @@ import {
   type DocumentScope,
 } from './document-common';
 import { DocumentDownload } from './document-generator';
+/** History is intentionally session-wide across document types. Type and
+ * immutable template provenance are attributes of each row, not a prerequisite
+ * filter the user must choose before seeing their documents.
+ */
 export function DocumentHistory({
   scope,
-  documentType,
 }: {
   scope: DocumentScope;
-  documentType: DocumentType;
 }) {
   const form = useForm({
     defaultValues: { search: '', page: 1 },
@@ -65,7 +67,6 @@ export function DocumentHistory({
         {(values) => (
           <HistoryRows
             scope={scope}
-            documentType={documentType}
             search={values.search}
             page={values.page}
             onPage={(page) => form.setFieldValue('page', page)}
@@ -77,13 +78,11 @@ export function DocumentHistory({
 }
 function HistoryRows({
   scope,
-  documentType,
   search,
   page,
   onPage,
 }: {
   scope: DocumentScope;
-  documentType: DocumentType;
   search: string;
   page: number;
   onPage: (value: number) => void;
@@ -92,7 +91,7 @@ function HistoryRows({
     orpc.school.listDocumentArtifacts.queryOptions({
       input: {
         schoolId: scope.schoolId,
-        filters: { documentType, sessionId: scope.sessionId },
+        filters: { sessionId: scope.sessionId },
         searchQuery: search,
         page,
       },
@@ -181,7 +180,8 @@ function ArtifactDetails({ artifact }: { artifact: DocumentArtifact }) {
         {artifact.studentCount > 0 && ` · ${artifact.studentCount} students`}
       </p>
       <p className="text-xs text-muted-foreground">
-        Template: {artifact.templateName ?? 'Saved school template'}
+        {DOCUMENT_LABELS[artifact.documentType]} · Template:{' '}
+        {artifact.templateName ?? 'Saved school template'}
       </p>
       {artifact.status === 'deleting' && (
         <p className="text-xs text-destructive">

@@ -100,7 +100,11 @@ export async function buildDocumentContexts(
     .where(eq(classTable.schoolId, schoolId))
     .orderBy(asc(classTable.displayOrder), asc(classTable.id));
   const classMap = new Map(classes.map((c) => [c.id, c]));
-  if (source.classId && !classMap.has(source.classId))
+  if (
+    "classId" in source &&
+    source.classId &&
+    !classMap.has(source.classId)
+  )
     throw rpcError.notFound("School class");
   const [grid] = examSlug
     ? await db
@@ -179,7 +183,10 @@ export async function buildDocumentContexts(
       throw rpcError.badRequest(
         "No exam timetable is available. Add examination slots first.",
       );
-    const columnIds = source.classId ? [source.classId] : grid.config.columns;
+    // Timetable PDFs are examination-wide. The DTO has no classId and context
+    // construction preserves every configured column plus every subject/mode in
+    // a shared slot; do not narrow this from a contextual UI selection.
+    const columnIds = grid.config.columns;
     if (
       !columnIds.length ||
       columnIds.some(

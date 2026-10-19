@@ -16,6 +16,13 @@ before choosing layout, navigation, control sizes, tables or warning presentatio
 The guide also records the examination-specific decisions and earlier approaches
 that user feedback replaced.
 
+For the Documents workspace, document history, template Settings pages, template
+marketplace, or portable AI prompt flow, also read the canonical
+[Document system guide](../../docs/document-system.md) and the local
+[document component map](components/documents/README.md). Preserve the documented
+operational/configuration/marketplace separation and the examination-wide
+timetable export invariant.
+
 ## Permission-gated UI
 
 Use `RequirePermissions` from `@/components/require-permissions` everywhere a

@@ -428,7 +428,8 @@ export const schoolDocumentRouter = {
             templateRevisionId: data.template.row.id,
             sessionId: input.source.sessionId,
             examSlug: "examSlug" in input.source ? input.source.examSlug : null,
-            classId: input.source.classId ?? null,
+            classId:
+              "classId" in input.source ? (input.source.classId ?? null) : null,
             studentIds: data.studentIds,
             studentCount: data.studentIds.length,
             generationOptions:

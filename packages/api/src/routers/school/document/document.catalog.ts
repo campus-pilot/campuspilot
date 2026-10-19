@@ -9,12 +9,68 @@ const bodies: Record<DocumentType, string> = {
   admit_card: `${schoolHeader}<div class="title"><span>EXAMINATION ADMIT CARD</span><h2>{{exam.name}}</h2><p>{{session.startYear}}–{{session.endYear}}</p></div>${student}{{#if timetable}}<h3>Examination schedule</h3>${schedule}{{/if}}<p>Please bring this card to each examination.</p><footer><span>Student signature</span><span>Principal</span></footer>`,
   timetable: `${schoolHeader}<div class="title"><span>EXAMINATION SCHEDULE</span><h2>{{exam.name}}</h2><p>{{session.startYear}}–{{session.endYear}}</p></div><table><thead><tr><th>Date / time</th>{{#each columns}}<th>{{label}}</th>{{/each}}</tr></thead><tbody>{{#each rows}}<tr><td>{{displayDate}}<br>{{dayOfWeek}}<br>{{displayStartTime}}–{{displayEndTime}}</td>{{#each entries}}<td>{{#each subjects}}<strong>{{subjectName}}</strong><br>{{modeName}}{{#unless @last}}<br>{{/unless}}{{/each}}</td>{{/each}}</tr>{{/each}}</tbody></table>`,
 };
-function content(type: DocumentType, accent: string, classic: boolean) {
+type CatalogStyle = {
+  slug: "modern" | "classic" | "minimal" | "crest";
+  name: string;
+  description: string;
+  accent: string;
+  font: string;
+  border: string;
+  surface: string;
+};
+
+/** A catalog family applies intentionally to every supported document type.
+ * Published slugs become artifact provenance, so style slugs must remain stable.
+ */
+const catalogStyles: CatalogStyle[] = [
+  {
+    slug: "modern",
+    name: "Modern",
+    description: "Clear typography, forest accents, and generous spacing.",
+    accent: "#146b56",
+    font: "Arial,sans-serif",
+    border: "1px solid #d9e0e9",
+    surface: "#f2f5f9",
+  },
+  {
+    slug: "classic",
+    name: "Classic",
+    description: "Traditional serif typography with a structured navy layout.",
+    accent: "#253d68",
+    font: "Georgia,serif",
+    border: "1px solid #9ca8bb",
+    surface: "#eef2f7",
+  },
+  {
+    slug: "minimal",
+    name: "Minimal",
+    description: "A compact, ink-friendly layout inspired by the original school app.",
+    accent: "#334155",
+    font: "Arial,sans-serif",
+    border: "1px solid #cbd5e1",
+    surface: "#f8fafc",
+  },
+  {
+    slug: "crest",
+    name: "Crest",
+    description: "A logo-forward ceremonial layout with warm heritage accents.",
+    accent: "#854d0e",
+    font: "Georgia,serif",
+    border: "3px double #a16207",
+    surface: "#fffbeb",
+  },
+];
+
+/** Builds self-contained, network-free source. Rendering safety is still
+ * enforced by document.render.ts; catalog HTML must not rely on sanitization to
+ * remove unsafe or externally hosted content.
+ */
+function content(type: DocumentType, style: CatalogStyle) {
   const page = type === "timetable" ? "A4 landscape" : "A4";
   const card = type === "id_card";
   return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><style>
- @page{size:${page};margin:12mm}*{box-sizing:border-box}body{margin:0;font-family:${classic ? "Georgia,serif" : "Arial,sans-serif"};color:#172033;font-size:${card ? "8px" : "12px"}}
- .document{${card ? "width:86mm;height:54mm;padding:3mm;overflow:hidden;" : "padding:8mm;"}border:1px solid #d9e0e9;border-top:5px solid ${accent};border-radius:8px}header{display:flex;align-items:center;gap:12px;border-bottom:1px solid #e4e8ef;padding-bottom:${card ? "3px" : "16px"}}h1{margin:0;color:${accent};font-size:${card ? "12px" : "24px"}}h2{margin:4px 0;font-size:${card ? "10px" : "20px"}}p{margin:4px 0;color:#526077}header p{font-size:${card ? "7px" : "11px"}}.logo{width:${card ? "24px" : "54px"};height:${card ? "24px" : "54px"};object-fit:contain}.title{margin:${card ? "4px 0" : "24px 0"}}.title span{font-size:${card ? "7px" : "10px"};letter-spacing:1.5px;color:${accent}}.identity{display:flex;gap:16px;align-items:center;margin:${card ? "4px 0" : "20px 0"}}.photo{width:${card ? "35px" : "62px"};height:${card ? "42px" : "76px"};object-fit:cover;border-radius:4px}table{border-collapse:collapse;width:100%;margin:18px 0}th{text-align:left;background:${accent};color:white;padding:10px}td{border-bottom:1px solid #e4e8ef;padding:10px}tr{break-inside:avoid}.total{display:flex;justify-content:space-between;gap:8px;background:#f2f5f9;padding:${card ? "4px" : "16px"};border-radius:4px}.small{font-size:7px}footer{display:flex;justify-content:space-between;margin-top:60px;border-top:1px solid #d9e0e9;padding-top:12px}
+ @page{size:${page};margin:12mm}*{box-sizing:border-box}body{margin:0;font-family:${style.font};color:#172033;font-size:${card ? "8px" : "12px"}}
+ .document{${card ? "width:86mm;height:54mm;padding:3mm;overflow:hidden;" : "padding:8mm;"}border:${style.border};border-top:5px solid ${style.accent};border-radius:${style.slug === "minimal" ? "2px" : "8px"}}header{display:flex;align-items:center;${style.slug === "crest" ? "justify-content:center;text-align:center;" : ""}gap:12px;border-bottom:1px solid #e4e8ef;padding-bottom:${card ? "3px" : "16px"}}h1{margin:0;color:${style.accent};font-size:${card ? "12px" : "24px"}}h2{margin:4px 0;font-size:${card ? "10px" : "20px"}}p{margin:4px 0;color:#526077}header p{font-size:${card ? "7px" : "11px"}}.logo{width:${card ? "24px" : style.slug === "crest" ? "68px" : "54px"};height:${card ? "24px" : style.slug === "crest" ? "68px" : "54px"};object-fit:contain}.title{margin:${card ? "4px 0" : style.slug === "minimal" ? "14px 0" : "24px 0"};${style.slug === "crest" ? "text-align:center" : ""}}.title span{font-size:${card ? "7px" : "10px"};letter-spacing:1.5px;color:${style.accent}}.identity{display:flex;gap:16px;align-items:center;margin:${card ? "4px 0" : "20px 0"}}.photo{width:${card ? "35px" : "62px"};height:${card ? "42px" : "76px"};object-fit:cover;border-radius:4px}table{border-collapse:collapse;width:100%;margin:18px 0}th{text-align:left;background:${style.accent};color:white;padding:10px}td{border-bottom:1px solid #e4e8ef;padding:10px}tr{break-inside:avoid}.total{display:flex;justify-content:space-between;gap:8px;background:${style.surface};padding:${card ? "4px" : "16px"};border-radius:4px}.small{font-size:7px}footer{display:flex;justify-content:space-between;margin-top:60px;border-top:1px solid #d9e0e9;padding-top:12px}
  ${type === "report_card" ? ".document{padding:6mm}header{padding-bottom:10px}h1{font-size:22px}h2{font-size:18px}.title{margin:14px 0}.identity{margin:12px 0}table{margin:12px 0}th,td{padding:7px}.total{padding:10px}h3{margin:14px 0 8px}footer{margin-top:36px}" : ""}
  </style></head><body><main class="document">${bodies[type]}</main></body></html>`;
 }
@@ -33,22 +89,15 @@ const nouns: Record<DocumentType, string> = {
 /** Catalog content is server-owned. Selecting a slug never accepts replacement
  * HTML from the client; custom content is saved through the editor explicitly.
  */
-export const DOCUMENT_MARKETPLACE = types.flatMap((documentType) => [
-  {
-    slug: `${documentType}-modern`,
+export const DOCUMENT_MARKETPLACE = types.flatMap((documentType) =>
+  catalogStyles.map((style) => ({
+    slug: `${documentType}-${style.slug}`,
     documentType,
-    name: `${nouns[documentType]} · Modern`,
-    description: "Clear typography, forest accents, and generous spacing.",
-    content: content(documentType, "#146b56", false),
-  },
-  {
-    slug: `${documentType}-classic`,
-    documentType,
-    name: `${nouns[documentType]} · Classic`,
-    description: "Traditional serif typography with a structured navy layout.",
-    content: content(documentType, "#253d68", true),
-  },
-]);
+    name: `${nouns[documentType]} · ${style.name}`,
+    description: style.description,
+    content: content(documentType, style),
+  })),
+);
 
 /** Synthetic editor data never reads another school's students or results. */
 export const SAMPLE_DOCUMENT_CONTEXT = {
@@ -56,7 +105,8 @@ export const SAMPLE_DOCUMENT_CONTEXT = {
     name: "Greenwood Public School",
     location: "School Road, Bengaluru",
     registrationNo: "SCH-2026",
-    logoUrl: null,
+    logoUrl:
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAYAAADimHc4AAACsUlEQVR4nO2dPVIDMQyFHYaeM3AhSg6TA+QwlFyIE1BQUYaC2cHsbOI/SU+y39czsd9nyesA69P1+/OaCIwH9ABWhwLAUAAYCgBDAWAoAAwFgHlED6CWy+tz88+c3z4URiLLyetBrCfwEh6FuBKgEfotvMiAC7AM/RZIGTABHoLfgxBhLsBj8HssRZg+hkYIPyXbcZpUQJTgj9CuBvUKiBx+SvrjVxUQPfwNzXmotKBZgj9CuiWJV8DM4ackPz9RAbOHvyE5TzEBq4S/ITVffh0NRkQAcvWf379gny0x72EBHsKPLGHoMRQV/r3ALy9PhiP5o/fxNNweUFrtyGrooVsAYvXXhouQ0JtHVwuyDn8kUOuW1NqK3Leg0dXsvSU1V4DV6tcIzqoaWqrAZQVorVqP1dAkwGL1a4dkIaElJzd/mGW5OrfPQp0Zcly0IFRr8NCSqgVotR90CFqfX5sXrAWhg89BtiRIC/IUfg5iXFXnAKn24zX4I6SqoXQmMKuASOGnZDdeEwHRwt+wGLfqJhw1+BztDbpYAb39f4bwc3rnU8pPrQL2KyaiEIvHUhcn4ZWhADAUAIYCwLj5OrqGlk0xyqbPCgBDAWAoAAwFgKEAMBQApijAy0stouLmFzLkGAoAQwFgqgRwH+ijJjdWABgKAFMtgG2ojdq8WAFgKABMkwC2oTrC/4vSSjQLYBXcZ7p/U52d7ndFrPZ+oBp6ukN3BbAV/WeZl3XMxpAAVsEvIzkMV8DqEkbnL9KCVpUgMW/uAWDEBKxWBVLzFa2AVSRIzlO8Bc0uQXp+qvcHzHRa1lpYqpvwLNWgOQ/1p6DoErTHb3qJT6SWZLVwTM8BUarBcpy8RyxjiXvE9ngQseRNekfwLklH8DZVZ/A+YaICv44GQwFgKAAMBYChADAUAOYHGv05csL2gJ8AAAAASUVORK5CYII=",
   },
   session: { startYear: 2026, endYear: 2027 },
   exam: { name: "Term I Examination", slug: "term-1", order: 1 },

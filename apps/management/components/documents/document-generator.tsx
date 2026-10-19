@@ -42,13 +42,11 @@ export function DocumentGenerator({
   scope,
   documentType,
   initial,
-  onChooseTemplate,
   onHistory,
 }: {
   scope: DocumentScope;
   documentType: DocumentType;
   initial: DocumentInitialSelection;
-  onChooseTemplate: () => void;
   onHistory: () => void;
 }) {
   return (
@@ -64,7 +62,6 @@ export function DocumentGenerator({
         scope={scope}
         documentType={documentType}
         initial={initial}
-        onChooseTemplate={onChooseTemplate}
         onHistory={onHistory}
       />
     </RequirePermissions>
@@ -74,13 +71,11 @@ function DocumentGeneratorData({
   scope,
   documentType,
   initial,
-  onChooseTemplate,
   onHistory,
 }: {
   scope: DocumentScope;
   documentType: DocumentType;
   initial: DocumentInitialSelection;
-  onChooseTemplate: () => void;
   onHistory: () => void;
 }) {
   const template = useQuery(
@@ -103,23 +98,13 @@ function DocumentGeneratorData({
   if (!template.data)
     return (
       <DocumentPanel
-        title="Choose a template to get started"
-        description={`${DOCUMENT_LABELS[documentType]} need a selected school template before you can create a document.`}
+        title={`${DOCUMENT_LABELS[documentType]} need a template`}
+        description="Template selection is managed in School settings so every academic session uses the same approved design."
       >
-        <DocumentPermission
-          schoolId={scope.schoolId}
-          action={SCHOOL_ACTIONS.MANAGE_DOCUMENT_TEMPLATES}
-          fallback={
-            <DocumentNotice>
-              Ask your school’s manager to select a template.
-            </DocumentNotice>
-          }
-        >
-          <DocumentButton onClick={onChooseTemplate}>
-            Explore templates
-            <ArrowRight />
-          </DocumentButton>
-        </DocumentPermission>
+        <DocumentNotice>
+          Use the setup warning in the app header to open template settings. If
+          you cannot configure templates, ask a school manager to do it.
+        </DocumentNotice>
       </DocumentPanel>
     );
   return (
@@ -213,7 +198,6 @@ function useDocumentGeneration({
         documentType,
         sessionId: scope.sessionId,
         examSlug: value.examSlug,
-        ...(value.classId ? { classId: value.classId } : {}),
       };
     const selection = {
       sessionId: scope.sessionId,
@@ -346,44 +330,47 @@ function GenerationForm({
             void form.handleSubmit();
           }}
         >
-          <form.Field name="classId">
-            {(field) => (
-              <DocumentSelect
-                field={{
-                  name: field.name,
-                  state: field.state,
-                  handleBlur: field.handleBlur,
-                  handleChange: (value) => {
-                    field.handleChange(value);
-                    form.setFieldValue("studentIds", []);
-                  },
-                }}
-                label={
-                  documentType === "timetable" ||
-                  documentType === "report_card" ||
-                  documentType === "admit_card"
-                    ? "Classes"
-                    : "Class"
-                }
-                options={[
-                  {
-                    value: "",
-                    label:
-                      documentType === "timetable"
-                        ? "All scheduled classes"
-                        : documentType === "report_card" ||
-                            documentType === "admit_card"
+          {documentType !== "timetable" ? (
+            <form.Field name="classId">
+              {(field) => (
+                <DocumentSelect
+                  field={{
+                    name: field.name,
+                    state: field.state,
+                    handleBlur: field.handleBlur,
+                    handleChange: (value) => {
+                      field.handleChange(value);
+                      form.setFieldValue("studentIds", []);
+                    },
+                  }}
+                  label={
+                    documentType === "report_card" ||
+                    documentType === "admit_card"
+                      ? "Classes"
+                      : "Class"
+                  }
+                  options={[
+                    {
+                      value: "",
+                      label:
+                        documentType === "report_card" ||
+                        documentType === "admit_card"
                           ? "All examination classes"
                           : "Choose a class",
-                  },
-                  ...classes.map((schoolClass) => ({
-                    value: schoolClass.id,
-                    label: schoolClass.label,
-                  })),
-                ]}
-              />
-            )}
-          </form.Field>
+                    },
+                    ...classes.map((schoolClass) => ({
+                      value: schoolClass.id,
+                      label: schoolClass.label,
+                    })),
+                  ]}
+                />
+              )}
+            </form.Field>
+          ) : (
+            <DocumentNotice>
+              The timetable PDF includes every classroom in this examination.
+            </DocumentNotice>
+          )}
           {documentType !== "id_card" && (
             <form.Field name="examSlug">
               {(field) => <ExamSelector scope={scope} field={field} />}

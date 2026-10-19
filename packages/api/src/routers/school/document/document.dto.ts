@@ -118,12 +118,16 @@ export const documentSourceSchema = z.discriminatedUnion("documentType", [
     studentIds: selection.studentIds,
     examSlug: id,
   }),
-  z.object({
-    documentType: z.literal("timetable"),
-    sessionId: id,
-    examSlug: id,
-    classId: id.optional(),
-  }),
+  /** Timetable PDFs are school-wide examination schedules. This branch is
+   * strict so stale clients cannot silently submit a class scope.
+   */
+  z
+    .object({
+      documentType: z.literal("timetable"),
+      sessionId: id,
+      examSlug: id,
+    })
+    .strict(),
 ]);
 export type DocumentSource = z.infer<typeof documentSourceSchema>;
 export const generateDocumentSchema = schoolScopeSchema.extend({
