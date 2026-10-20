@@ -133,14 +133,11 @@ function BillDetailPanel({
   schoolId,
   admissionId,
   billId,
-  timeZone,
 }: {
   schoolId: string;
   admissionId: string;
   billId: string;
-  timeZone: string | null;
 }) {
-  const [allocationPage, setAllocationPage] = useState(1);
   const [adjustmentPage, setAdjustmentPage] = useState(1);
   const query = useQuery(
     orpc.school.getAdmissionBill.queryOptions({
@@ -148,8 +145,6 @@ function BillDetailPanel({
         schoolId,
         admissionId,
         billId,
-        allocationPage,
-        allocationLimit: 10,
         adjustmentPage,
         adjustmentLimit: 10,
       },
@@ -170,8 +165,8 @@ function BillDetailPanel({
           <p>{query.data.issueDate}</p>
         </div>
         <div>
-          <p className="text-xs text-muted-foreground">Outstanding</p>
-          <p>{formatMinor(query.data.outstandingMinor, query.data.currency)}</p>
+          <p className="text-xs text-muted-foreground">Net charge</p>
+          <p>{formatMinor(query.data.netAmountMinor, query.data.currency)}</p>
         </div>
       </div>
       {query.data.manualReason ? (
@@ -196,23 +191,6 @@ function BillDetailPanel({
             <span>{formatMinor(line.amountMinor, line.currency)}</span>
           </div>
         ))}
-      </section>
-      <section>
-        <h3 className="text-sm font-medium">Allocations</h3>
-        {query.data.allocations.items.map((item) => (
-          <div
-            key={item.id}
-            className="flex justify-between gap-3 border-t py-2 text-sm"
-          >
-            <span>{financeInstantLabel(item.recordedAt, timeZone)}</span>
-            <span>{formatMinor(item.amountMinor, item.currency)}</span>
-          </div>
-        ))}
-        <SimplePagination
-          currentPage={query.data.allocations.pagination.currentPage}
-          totalPages={query.data.allocations.pagination.totalPages}
-          onPageChange={setAllocationPage}
-        />
       </section>
       <section>
         <h3 className="text-sm font-medium">Adjustments</h3>
@@ -250,7 +228,6 @@ function PaymentDetailPanel({
   admissionId: string;
   paymentId: string;
 }) {
-  const [allocationPage, setAllocationPage] = useState(1);
   const [refundPage, setRefundPage] = useState(1);
   const query = useQuery(
     orpc.school.getPayment.queryOptions({
@@ -258,8 +235,6 @@ function PaymentDetailPanel({
         schoolId,
         admissionId,
         paymentId,
-        allocationPage,
-        allocationLimit: 10,
         refundPage,
         refundLimit: 10,
       },
@@ -274,28 +249,12 @@ function PaymentDetailPanel({
         <p className="text-xs text-muted-foreground">Related receipt</p>
         <p className="font-mono">{query.data.receiptNumber}</p>
       </div>
-      <section>
-        <h3 className="text-sm font-medium">Allocations</h3>
-        {query.data.allocations.items.map((item) => (
-          <div
-            key={item.id}
-            className="flex justify-between gap-3 border-t py-2 text-sm"
-          >
-            <div>
-              <p className="font-mono">{item.billNumber ?? "Bill"}</p>
-              <p className="text-xs text-muted-foreground">
-                {financeInstantLabel(item.recordedAt, query.data.timeZone)}
-              </p>
-            </div>
-            <span>{formatMinor(item.amountMinor, item.currency)}</span>
-          </div>
-        ))}
-        <SimplePagination
-          currentPage={query.data.allocations.pagination.currentPage}
-          totalPages={query.data.allocations.pagination.totalPages}
-          onPageChange={setAllocationPage}
-        />
-      </section>
+      <div className="grid gap-3 sm:grid-cols-3">
+        <div><p className="text-xs text-muted-foreground">Amount received</p><p>{formatMinor(query.data.amountMinor, query.data.currency)}</p></div>
+        <div><p className="text-xs text-muted-foreground">Refunded</p><p>{formatMinor(query.data.refundedMinor, query.data.currency)}</p></div>
+        <div><p className="text-xs text-muted-foreground">Refundable</p><p>{formatMinor(query.data.refundableMinor, query.data.currency)}</p></div>
+      </div>
+      <p className="text-sm text-muted-foreground">This payment is an admission account credit and is not assigned to an individual bill.</p>
       <section>
         <h3 className="text-sm font-medium">Refunds</h3>
         {query.data.refunds.items.map((item) => (
@@ -373,7 +332,6 @@ function LedgerEntryDetail({
             schoolId={schoolId}
             admissionId={admissionId}
             billId={billId}
-            timeZone={entry.timeZone}
           />
         ) : paymentId ? (
           <PaymentDetailPanel
@@ -729,13 +687,6 @@ function LedgerData({
                   value: formatMinor(summary.refundMinor, summary.currency),
                 },
                 {
-                  label: "Lifetime unallocated account credit",
-                  value: formatMinor(
-                    summary.unallocatedCreditMinor,
-                    summary.currency,
-                  ),
-                },
-                {
                   label: "Brought forward",
                   value: sessionId
                     ? formatMinor(summary.broughtForwardMinor, summary.currency)
@@ -746,8 +697,8 @@ function LedgerData({
                 },
                 {
                   label: "Bills",
-                  value: `${summary.billCounts.open} open`,
-                  detail: `${summary.billCounts.settled} settled · ${summary.billCounts.reversed} reversed`,
+                  value: `${summary.billCounts.posted} posted`,
+                  detail: `${summary.billCounts.reversed} reversed`,
                 },
               ]}
             />

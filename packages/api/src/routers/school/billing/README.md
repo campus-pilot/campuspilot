@@ -19,8 +19,8 @@ combined payment/discount records are explicitly not part of this contract.
 - A **billing period** is a timezone-bound interval. A **billing run** is an
   idempotent command that posts bills for one explicit session and period.
 - A **bill** is an admission-owned debit with immutable enrollment and pricing
-  snapshots. A **payment** is cash received. An **allocation** explicitly links
-  payment credit to a bill.
+  snapshots. A **payment** is cash received as an admission-level account credit;
+  it is never linked to an individual bill.
 - A **discount**, **waiver**, **write-off**, **refund**, and **reversal** is its
   own reasoned accounting fact. None is embedded in or mutates another fact.
 - A **statement** is an as-of view; it does not create a charge. A **receipt**
@@ -90,18 +90,17 @@ with stored data. The route and accounting owner are admission-based. Phase 2
 will migrate configuration to the final exact-money representation and can
 rename that persisted scope without leaking the legacy ownership model.
 
-### Money, allocation, and corrections
+### Money, account credits, and corrections
 
 - Phase 2 stores operational money as integer minor units plus ISO currency.
   No posted money uses JavaScript floating-point arithmetic. Zero is a valid
   configured value; blank means inherit or unresolved.
-- Payments default to a previewed oldest-issued-outstanding-bill-first proposal
-  because v1 has no due date. Staff may edit allocations or retain unallocated
-  credit.
-- Overpayment is allowed only after explicit confirmation and is displayed as
-  admission credit, never as a confusing negative due amount.
+- Every payment is an admission-level credit. The payment command accepts no
+  bill IDs, so receiving money cannot mark or mutate a particular bill.
+- Overpayment is allowed and displayed as admission credit, never as a
+  confusing negative due amount.
 - Posted facts are immutable. Corrections append linked opposite or adjustment
-  entries; they do not update or delete bills, payments, allocations, or ledger
+  entries; they do not update or delete bills, payments, or ledger
   entries.
 - Every posting command is idempotent within its school and operation type.
   Effective time and recorded time remain independent facts.
@@ -233,7 +232,7 @@ operate on unregistered accounts, but this ordinary bill command may not.
 
 `reverseBill` and `reverseBillingRun` append exact opposite ledger entries and
 advance projections; they do not mutate bill/run headers. A bill with live
-allocations or bill-specific credits cannot be reversed independently. Run
+bill-specific credits cannot be reversed independently. Run
 reversal validates every member first and commits every opposite fact or none.
 The absence of a `reversed` status is intentional: reversal is derived from the
 immutable linked ledger fact.
@@ -241,8 +240,8 @@ Standalone and run-reversal child idempotency keys occupy separate internal
 namespaces. A run retry accepts either zero existing children or its complete
 exact child set; partial sets and independently-created reversals conflict and
 are never adopted. Run reversal returns a compact aggregate rather than an
-unbounded child array. Child keys, existing target reversals, allocations, and
-live credits are validated set-wise; opposite ledger and projection facts use
+unbounded child array. Child keys, existing target reversals, and live credits
+are validated set-wise; opposite ledger and projection facts use
 the same bounded bulk writer as posting.
 
 Preview readiness issues and run-detail bills are independently paginated.
@@ -256,39 +255,30 @@ configuration hash, line counts, exact amounts, and pricing sources.
 filter is supplied. It orders by `effectiveAt`, account sequence, and ID; pages
 entries without changing the independently calculated opening/closing balances;
 returns the balance immediately before each page plus the running balance at
-every displayed entry; and returns specialized bill, payment-allocation,
-adjustment, refund, and reversal metadata. Lifetime and selected-session
+every displayed entry; and returns specialized bill, payment, adjustment,
+refund, and reversal metadata. Lifetime and selected-session
 summaries are aggregated from immutable ledger facts rather than projection
 caches, never aggregate currencies, and expose due and credit as separate
 non-negative decimal strings. Aggregate amounts use exact `NUMERIC(38,0)`
 decimal-string transport while each posting remains bounded by PostgreSQL
 `bigint`.
 
-Payment allocation preview and posting share the same deterministic ordering:
-oldest `issueDate`, then bill number, then bill ID. Explicit allocations must
-target outstanding bills owned by the same admission and currency, but may cross
-sessions. Any retained amount is admission credit and requires
-`confirmUnallocatedCredit` before posting. Receipt allocation, payment metadata,
-the immutable credit entry, numbering, and both projections commit atomically.
-Automatic proposals inspect at most 500 outstanding bills. Preview returns a
-review hash over the payment inputs, proposed allocations, and effective bill
-settlement state; proposal-mode posting recomputes it under the account lock and
-rejects stale review. Explicit mode remains available for bounded batches.
-Idempotency compares a persisted canonical command hash that includes the mode,
-explicit allocations, confirmation flag, dates, method, references, payer, and
-note, so later bills or corrections cannot change retry identity.
+Payment posting locks the admission account and atomically persists the payment
+metadata, immutable credit entry, receipt number, and projections. Idempotency
+compares a persisted canonical command hash containing amount, currency, dates,
+method, references, payer, and note, so later bills or corrections cannot change
+retry identity. Bill IDs and allocation modes are intentionally absent.
 
 Discounts, waivers, write-offs, and debit/credit corrections are separate
 adjustment facts. Percentage inputs are converted once against the remaining
 adjustable bill or line amount with integer half-up rounding; the fixed result,
 source input, eligible amount, target snapshot, reason, and approval metadata
-are persisted. Refunds draw only from the original payment's effective,
-unallocated, unrefunded credit. A reversed refund restores that refundable
-capacity; allocations are never silently removed.
+are persisted. Refunds draw only from the original payment's unrefunded amount.
+A reversed refund restores that refundable capacity.
 
 Generic ledger reversal appends one exact opposite posting. It rejects a prior
-reversal, reversal-of-reversal, settled/adjusted bills, and allocated/refunded
-payments. Specialized metadata remains immutable and historically readable.
+reversal, reversal-of-reversal, adjusted bills, and payments with live refunds.
+Specialized metadata remains immutable and historically readable.
 All posting commands lock session then admission, use serializable transactions,
 and compare idempotent retries against the original immutable command snapshot.
 Bill/payment detail collections are independently paginated.
@@ -297,9 +287,9 @@ Session overview defines collection rate as effective net cash (payments minus
 refunds) divided by effective billed ledger facts, rounded half-up to basis
 points. The collection register is a paginated immutable payment/refund fact
 view. Fee-element reporting uses bill-line snapshots and line-targeted
-adjustments; it does not invent a fee-element attribution for bill-level cash
-allocations. Class snapshots aggregate immutable bill/class snapshots, live
-allocations, and live adjustments. Reports stay currency-separated and expose
+adjustments; it does not invent a fee-element attribution for account-level
+cash. Class snapshots aggregate immutable bill/class snapshots and live
+adjustments. Reports stay currency-separated and expose
 no due-date, overdue, or aging concepts.
 
 ## Authorization

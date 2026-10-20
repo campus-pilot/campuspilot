@@ -25,7 +25,7 @@ The implementation should preserve useful ideas from the old application—fee c
 - Finance terminology and domain rules.
 - Exact-money representation.
 - Fee configuration and value resolution.
-- Admission-owned bills, payments, discounts/waivers, refunds, reversals, allocations, and ledger reads.
+- Admission-owned bills, account-credit payments, discounts/waivers, refunds, reversals, and ledger reads.
 - Session billing runs and manual admission charges.
 - Admission-lifetime and session-filtered summaries.
 - Bill and receipt artifacts/templates.
@@ -54,7 +54,7 @@ The implementation should preserve useful ideas from the old application—fee c
 | Ledger event | Payment plus an embedded discount | One immutable debit/credit posting with a specific type; payment and discount are separate facts |
 | Projection | Running totals keyed by `studentId` | Rebuildable admission/currency balance cache; never the source of truth |
 | Individual bill | Ad-hoc amount plus a note | Manual bill with structured lines, reason, session attribution, and normal audit/reversal rules |
-| Monthly bill | Statement from month start through a cutoff | An as-of statement generated from immutable admission postings and allocations |
+| Monthly bill | Statement from month start through a cutoff | An as-of statement generated from immutable admission postings |
 
 ### 3.2 What the old backend does
 
@@ -145,7 +145,7 @@ Admission (durable account)
   └─ Finance ledger (all sessions)
        ├─ Session A bills/payments/adjustments
        ├─ Session B bills/payments/adjustments
-       └─ cross-session allocations and brought-forward balance
+       └─ admission-wide account balance and brought-forward balance
 ```
 
 Rules:
@@ -155,7 +155,7 @@ Rules:
 - For billing, the server resolves the enrollment with `(schoolId, admissionId, sessionId)` and derives class/section from it. A client-supplied class is never authoritative.
 - Financial history must not cascade-delete with a student/enrollment row. Historical enrollment/class/section IDs are provenance values, accompanied by immutable labels and roll/admission snapshots.
 - A session filter narrows an admission ledger; it does not change ledger ownership.
-- A payment belongs to the admission. Its `sessionId` records the session in which it was received/accounted; explicit allocations identify which bills and therefore which billing sessions it settles.
+- A payment belongs to the admission. Its `sessionId` records the session in which it was received/accounted. It is an account-level credit and never identifies or settles an individual bill.
 
 ### 4.2 Canonical terms
 
@@ -165,7 +165,7 @@ Rules:
 - **Billing run**: one idempotent batch that posts bills for eligible admissions in one session/period.
 - **Bill**: one admission's posted debit, containing immutable line items and enrollment/pricing snapshots.
 - **Payment**: money received from/for an admission. It is not a discount.
-- **Allocation**: an explicit amount from a payment to one bill.
+- **Account credit**: a payment received against the admission account, independent of any individual bill.
 - **Adjustment**: a non-cash debit or credit such as discount, waiver, write-off, or correction.
 - **Refund**: money returned against a recorded payment.
 - **Reversal**: a new opposite posting that cancels an erroneous posting without deleting it.
@@ -178,7 +178,7 @@ Rules:
 - Store operational accounting amounts as integer minor units (`amountMinor`, PostgreSQL `bigint`) plus an explicit ISO currency code.
 - API money inputs should be decimal strings or minor-unit integers validated and converted once on the server. Do not calculate money with binary floating-point numbers.
 - Configuration should migrate from JSON numbers to minor-unit integers before posting starts. If a compatibility input accepts decimal numbers temporarily, it must normalize immediately and must not become the source of truth.
-- Every bill, payment, adjustment, refund, allocation, ledger entry, and document snapshot stores currency.
+- Every bill, payment, adjustment, refund, ledger entry, and document snapshot stores currency.
 - Never aggregate different currencies. Admission-lifetime balances are grouped by currency even if the school currently uses only one.
 - Zero is a valid configured fee value; blank means inherit/missing. Posted ledger entries must be strictly positive and use a separate debit/credit direction.
 
@@ -205,7 +205,7 @@ The resolver returns `{ amountMinor, sourceKind, sourceId/sourceKey }`. The exac
 
 ### 4.5 Posting invariants
 
-- Posted bills, ledger entries, payments, allocations, adjustments, refunds, receipt numbers, and bill numbers are immutable.
+- Posted bills, ledger entries, payments, adjustments, refunds, receipt numbers, and bill numbers are immutable.
 - Corrections append reversals/adjustments; they never update or delete posted monetary facts.
 - Each command accepts an idempotency key, unique within a school and operation type.
 - Every reversal references one original entry; an entry can be reversed only once unless a later explicit reversal-of-reversal policy is added.
@@ -242,7 +242,7 @@ Prefer a dedicated restricted admission-finance route for admission overrides. T
 | `finance_bill` | One admission bill: optional run, linked debit ledger entry, source kind, human bill number, issue/due dates, admission/enrollment/class/section snapshots, total/currency | unique bill number per school; unique ledger entry; run/admission indexes |
 | `finance_bill_line` | Immutable fee lines: bill, order, fee slug/name, amount, resolution source, pricing-rule snapshot, optional manual reason | amount >= 0; deterministic order; bill index |
 | `finance_payment` | Payment metadata linked to one credit ledger entry: receipt number, method, external reference, payer, received time | unique receipt number per school; unique ledger entry; searchable method/reference/time indexes |
-| `finance_payment_allocation` | Explicit payment-to-bill settlement | unique payment/bill pair; amount > 0; transaction enforces payment and bill currency/admission match and prevents over-allocation |
+| `finance_payment_allocation` | Deprecated compatibility storage for facts created before account-credit payments were adopted | no API creates or reads rows; retain only so already-applied migrations and historical databases remain readable until a dedicated cleanup migration |
 | `finance_adjustment` | Discount, waiver, write-off, debit correction, or credit correction linked to its ledger entry and optionally a bill/line | explicit reason code/note; optional approver; unique ledger entry; no embedded adjustment on payment |
 | `finance_refund` | Refund debit linked to an original payment, with refund number, method/reference, reason, and recorder | cannot exceed unreversed/unrefunded payment; currency/admission match; unique ledger entry |
 | `finance_number_counter` | Serialized school/fiscal-period counters for bill, receipt, and refund numbers | unique school/document-kind/fiscal-key; row locked during allocation |
@@ -257,14 +257,14 @@ Use composite tenant integrity where practical: add unique candidate keys such a
 | --- | --- | --- |
 | `bill` | debit | increases amount due |
 | `manual_debit_adjustment` | debit | increases amount due |
-| `payment` | credit | reduces account balance or creates unallocated credit |
+| `payment` | credit | reduces the admission account balance or creates account credit |
 | `discount` / `waiver` / `write_off` | credit | reduces a specific bill/line balance without cash collection |
 | `refund` | debit | returns cash and increases the account balance accordingly |
 | `reversal` | opposite of target | cancels a posted fact with a traceable counter-entry |
 
-Admission balance is `sum(debits) - sum(credits)` for one currency. Positive is due; zero is settled; negative is credit.
+Admission balance is `sum(debits) - sum(credits)` for one currency. Positive is due; zero is balanced; negative is credit.
 
-Bill settlement is calculated from payment allocations plus bill-specific credit adjustments, not inferred from an account-wide payment total.
+Bills remain immutable charge documents. Bill-specific adjustments produce a net charge, while payment state is represented only by the admission-wide balance; an account payment never marks a particular bill as settled.
 
 ### 5.4 Snapshot requirements
 
@@ -279,7 +279,7 @@ At bill posting, capture at least:
 - currency, billing period, issue date, and due date;
 - configuration hash/revision used by the preview/post command.
 
-Generated documents must use these snapshots and as-of ledger/allocation facts, never current admission/class/session configuration.
+Generated documents must use these snapshots and as-of ledger facts, never current admission/class/session configuration.
 
 ## 6. API and service design
 
@@ -314,7 +314,7 @@ Create a focused module under `packages/api/src/routers/school/billing/`, compos
   - resolve enrollment only for snapshot context; allow arrears handling under the adopted unregistered-admission policy.
 - `reverseBill` / `reverseBillingRun`
   - privileged, reason-required correcting postings;
-  - reject reversal where allocations/refunds require coordinated reversal unless the transaction performs the complete correction.
+  - reject reversal where live bill-specific credit adjustments require coordinated reversal unless the transaction performs the complete correction.
 
 There is no `force` duplicate-generation flag. A legitimate second charge in a period is an explicit supplemental run with a reason; an erroneous run is reversed.
 
@@ -323,16 +323,14 @@ There is no `force` duplicate-generation flag. A legitimate second charge in a p
 - `getAdmissionLedger({ schoolId, admissionId, sessionId?, currency?, page/cursor, filters })`
   - admission-wide by default;
   - optional session attribution filter;
-  - returns opening/closing balances for the requested window, entries, allocation details, and per-session summaries.
+  - returns opening/closing balances for the requested window, chronological bill/payment/adjustment/refund entries, and per-session summaries.
 - `getAdmissionFinanceSummary`
-  - lifetime balances by currency, selected-session activity, brought-forward balance, current due, unallocated credit, and overdue bill count.
+  - lifetime balances by currency, selected-session activity, brought-forward balance, current due or credit, and posted/reversed bill counts.
 - `listAdmissionBills` / `getAdmissionBill`.
 - `listPayments` / `getPayment` with server-side admission number/name, method, reference, session, date, and status filters.
-- `previewPaymentAllocation`
-  - shows explicit allocations or the proposed server allocation strategy before posting.
 - `recordPayment`
-  - amount, currency, method, reference, received/effective time, note, allocation choice, idempotency key;
-  - creates payment, credit entry, allocations, receipt number, and projection updates atomically.
+  - amount, currency, method, reference, received/effective time, note, and idempotency key;
+  - creates an admission-level credit entry, payment metadata, receipt number, and projection updates atomically, without accepting bill IDs.
 - `recordAdjustment`
   - explicit type, amount or percentage input, target bill/line, reason, approval metadata, idempotency key;
   - percentage is converted to a fixed minor-unit amount and that fixed result is posted.
@@ -358,7 +356,7 @@ Define collection rate explicitly. Recommended default: cash collected net of re
 - Preview returns a hash over the session config, relevant class/admission overrides, eligible enrollments, and run inputs.
 - Posting locks the session first, then admissions/projection rows ordered by ID to avoid deadlocks.
 - Unique constraints are the final defense against duplicate periods, document numbers, idempotency reuse, sequence races, and double reversal.
-- Payment/allocation writes lock the admission balance and target bills before validating remaining amounts.
+- Payment writes lock the admission account before appending the account credit.
 - A transaction either posts all bills/lines/entries/projections or none.
 - Projection rebuild reads ledger entries in sequence order and atomically replaces cached totals.
 - Document rendering/storage is not part of the PostgreSQL transaction. Persist a retryable artifact job/status or compensate uploaded objects consistently with the current document subsystem.
@@ -440,7 +438,7 @@ Replace the existing placeholder at `/school/[schoolId]/admission/[admissionId]/
 - Default to All sessions, with an explicit session filter and brought-forward balance.
 - Paginated chronological ledger table/timeline with entry type, effective date, session, debit, credit, balance, recorder, reference, and reversal status.
 - Bill detail exposes line items and pricing/enrollment snapshots.
-- Payments expose allocations and receipt.
+- Payments expose receipt, refund history, and remaining refundable amount.
 - Permission-gated actions: manual bill, record payment, adjustment, refund, reversal, statement.
 - Keep section navigation in the existing admission sidebar/mobile selector; do not duplicate Ledger in an action menu.
 
@@ -448,7 +446,7 @@ The ledger remains readable after admission unregistration. Whether collection/c
 
 ### 8.3 Forms and interaction rules
 
-- Use TanStack Form with Zod validators for billing run inputs, manual charges, payments, allocations, adjustments, refunds, and statement cutoffs.
+- Use TanStack Form with Zod validators for billing run inputs, manual charges, payments, adjustments, refunds, and statement cutoffs.
 - Show adjacent validation errors and derive pending/submit state from `form.Subscribe`.
 - Preserve blank versus zero.
 - Do not add `useEffect` for form synchronization; use keyed component lifecycles, event handlers, and query/form baselines.
@@ -476,7 +474,7 @@ The database and backend should make a future portal straightforward even though
 
 - Portal URLs and API identity use `admissionId`.
 - A guardian/user may be linked to multiple admissions; ownership is an explicit association, not an email or current-enrollment inference.
-- Portal-safe reads return the admission-wide balance, sessions, bills, allocations, payments, receipts, and statements, with optional session filters.
+- Portal-safe reads return the admission-wide balance, sessions, bills, payments, receipts, and statements, with optional session filters.
 - Historical data remains visible after promotion because no query starts from the current student ID.
 - Portal DTOs omit staff-only notes, approval details, internal idempotency keys, and sensitive recorder data.
 - Portal downloads authorize admission ownership before returning a short-lived signed URL.
@@ -491,7 +489,7 @@ The repository and old application do not define these policies. Resolve them in
 3. How is due date calculated, and what constitutes overdue?
 4. Can regular bills be posted for inactive sessions? Recommended: read/correct historical sessions, but require an elevated explicit action for new backdated charges.
 5. Can an unregistered admission receive late payments/refunds/corrections? Recommended: yes for settlement/correction; no new recurring batch bills.
-6. Are payments automatically allocated oldest-due-first, explicitly allocated by staff, or allowed to remain unallocated? Recommended: preview an oldest-due-first proposal and permit explicit allocations/unallocated credit.
+6. Payments are admission-level account credits and are never allocated to individual bills.
 7. Is overpayment allowed? If yes, require explicit confirmation and display it as admission credit.
 8. Which roles/approval limits apply to discounts, waivers, write-offs, refunds, and reversals?
 9. What are the human bill/receipt/refund number formats and fiscal reset rules?
@@ -508,7 +506,7 @@ Each phase is intentionally self-contained so it can be executed in a fresh task
 What to implement:
 
 - Resolve and document every decision in Section 10.
-- Write `packages/api/src/routers/school/billing/README.md` with terminology, money rules, resolution precedence, lifecycles, allocation policy, correction rules, and permission matrix.
+- Write `packages/api/src/routers/school/billing/README.md` with terminology, money rules, resolution precedence, lifecycles, account-credit policy, correction rules, and permission matrix.
 - Remove finance overrides from general admission DTOs and add dedicated read/update finance routes.
 - Add new Rego actions/grants/tests needed for configuration and future operational reads.
 
@@ -590,12 +588,12 @@ Anti-pattern guards:
 - No force duplicate mode.
 - No live config joins for previously posted bills.
 
-### Phase 4 — Payments, allocations, adjustments, refunds, and ledger reads
+### Phase 4 — Account-credit payments, adjustments, refunds, and ledger reads
 
 What to implement:
 
 - Admission-wide ledger and finance summary services.
-- Payment allocation preview and idempotent payment posting.
+- Idempotent admission-account payment posting.
 - Separate discount/waiver/write-off records.
 - Refund and reversal commands.
 - Paginated bill/payment/ledger/report routes.
@@ -609,7 +607,7 @@ References to copy/adapt:
 
 Verification:
 
-- Test partial/multi-bill allocation, unallocated credit, cross-session allocation, overpayment policy, discount-only adjustment, refund limits, one-time reversal, and concurrency.
+- Test account credits, overpayment/negative balances, bill independence, discount-only adjustment, refund limits, one-time reversal, and concurrency.
 - Test lifetime ledger plus every session filter, opening/brought-forward balance, and multiple currencies.
 - Tenant/admission/session mismatch tests exist for every route.
 - Rebuild projections and compare every total with source postings.
@@ -699,7 +697,7 @@ References to copy/adapt:
 
 Verification:
 
-- Reports agree with source ledger/allocations across session and lifetime views.
+- Reports agree with the source ledger across session and lifetime views.
 - Portal-safe DTO snapshot tests exclude staff-only fields.
 - Explain/analyze critical admission, session, billing-run, payment-register, and aging queries against realistic fixtures.
 - A new session enrollment can immediately read the same admission account without migration/carry-forward writes.
@@ -751,10 +749,9 @@ The implementation is complete only when these scenarios pass end to end:
 2. A Session A bill continues to show the Session A class, section, roll number, fee names, prices, currency, and balance context after current records/configuration change.
 3. Two identical billing-post requests race; exactly one run posts and the other returns the same idempotent result or a stable conflict without duplicate charges.
 4. A stale preview cannot post after enrollment or pricing changes.
-5. A payment can settle bills from multiple sessions, leave explicit unallocated credit, and display allocations without changing bill ownership.
+5. A payment credits the admission account, can create a negative balance, and never changes the state of an individual bill.
 6. A discount is independently authorized, reasoned, allocated, reported, and reversible; it never masquerades as cash collected.
 7. A refund/reversal preserves the original transaction and receipt while producing a clear correcting trail.
 8. Removing a student enrollment or unregistering an admission does not delete or orphan financial history or documents.
 9. A teacher cannot see finance configuration, billing navigation, or admission ledger data; authorized finance roles see only their permitted actions; platform access follows explicit grants.
 10. Projection rebuild produces the same admission balances, session activity, bill settlement, and report totals as the immutable source postings.
-

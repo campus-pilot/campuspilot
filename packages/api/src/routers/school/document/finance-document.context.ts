@@ -5,7 +5,6 @@ import {
   financeBillTable,
   financeAdjustmentTable,
   financeLedgerEntryTable,
-  financePaymentAllocationTable,
   financePaymentTable,
   financeRefundTable,
 } from "@campuspilot/db/schema/finance";
@@ -135,10 +134,7 @@ export async function buildFinanceDocumentContexts(
     const payments = await db.select().from(financePaymentTable).where(and(eq(financePaymentTable.schoolId, schoolId), inArray(financePaymentTable.id, parentPaymentIds)));
     if (payments.length !== parentPaymentIds.length) throw rpcError.notFound("Receipt payment snapshot");
     const transactionLedgerIds = [...directPayments.map((payment) => payment.ledgerEntryId), ...refunds.map((refund) => refund.ledgerEntryId)];
-    const [ledgers, allocations] = await Promise.all([
-      db.select().from(financeLedgerEntryTable).where(and(eq(financeLedgerEntryTable.schoolId, schoolId), inArray(financeLedgerEntryTable.id, transactionLedgerIds))),
-      parentPaymentIds.length ? db.select({ allocation: financePaymentAllocationTable, billNumber: financeBillTable.billNumber }).from(financePaymentAllocationTable).innerJoin(financeBillTable, and(eq(financeBillTable.schoolId, schoolId), eq(financeBillTable.id, financePaymentAllocationTable.billId))).where(and(eq(financePaymentAllocationTable.schoolId, schoolId), inArray(financePaymentAllocationTable.paymentId, parentPaymentIds))) : [],
-    ]);
+    const ledgers = await db.select().from(financeLedgerEntryTable).where(and(eq(financeLedgerEntryTable.schoolId, schoolId), inArray(financeLedgerEntryTable.id, transactionLedgerIds)));
     const ledgerById = new Map(ledgers.map((entry) => [entry.id, entry]));
     const paymentById = new Map(payments.map((payment) => [payment.id, payment]));
     const refundById = new Map(refunds.map((refund) => [refund.id, refund]));
@@ -160,7 +156,6 @@ export async function buildFinanceDocumentContexts(
         currency: { code: payment.currency, exponent: currencyMinorUnitDigits(currencyCodeSchema.parse(payment.currency)) },
         transaction: { kind: requested.kind, isRefund: requested.kind === "refund", id: requested.id, documentNumber: refund?.refundNumber ?? payment.receiptNumber },
         payment: { id: payment.id, receiptNumber: refund?.refundNumber ?? payment.receiptNumber, receivedAt: (refund?.recordedAt ?? payment.receivedAt).toISOString(), amount: amount(transactionAmount, payment.currency), amountMinor: transactionAmount.toString(), method: refund?.method ?? payment.method, externalReference: refund?.externalReference ?? payment.externalReference, payerName: payment.payerName, note: refund?.reason ?? payment.note },
-        allocations: requested.kind === "payment" ? allocations.filter(({ allocation }) => allocation.paymentId === payment.id).map(({ allocation, billNumber }) => ({ billId: allocation.billId, billNumber, amount: amount(allocation.amountMinor, allocation.currency), amountMinor: allocation.amountMinor.toString() })) : [],
         previousBalance: amount(previousMinor, payment.currency),
         remainingBalance: amount(remainingMinor, payment.currency),
         generatedAt: new Date().toISOString(),

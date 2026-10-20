@@ -15,10 +15,8 @@ import {
   getPaymentInputSchema,
   listAdmissionBillsInputSchema,
   listPaymentsInputSchema,
-  paymentAllocationPreviewOutputSchema,
   paymentListOutputSchema,
   paymentOutputSchema,
-  previewPaymentAllocationInputSchema,
   recordAdjustmentInputSchema,
   recordPaymentInputSchema,
   recordRefundInputSchema,
@@ -30,7 +28,6 @@ import {
   reverseLedgerEntryInputSchema,
 } from "./ledger.dto";
 import {
-  previewPaymentAllocation,
   recordAdjustment,
   recordPayment,
   recordRefund,
@@ -80,7 +77,7 @@ export const ledgerOperationsRouter = {
     .route(
       route(
         "Read an admission finance summary",
-        "Read projected billed, paid, adjusted, refunded, outstanding, and credit totals for one admission in either session or lifetime scope.",
+        "Read projected billed, paid, adjusted, refunded, due, and credit totals for one admission in either session or lifetime scope.",
       ),
     )
     .input(getAdmissionFinanceSummaryInputSchema)
@@ -123,7 +120,7 @@ export const ledgerOperationsRouter = {
     .route(
       route(
         "Read an immutable admission bill",
-        "Read one tenant-scoped bill with its snapshotted lines, source facts, settlement state, allocations, and reversal history.",
+        "Read one tenant-scoped bill with its snapshotted lines, bill-specific adjustments, and reversal history.",
       ),
     )
     .input(getAdmissionBillInputSchema)
@@ -147,7 +144,7 @@ export const ledgerOperationsRouter = {
     .route(
       route(
         "Read an immutable payment",
-        "Read one tenant-scoped payment with its receipt number, allocation facts, unallocated credit, refund history, and reversal state.",
+        "Read one tenant-scoped account-credit payment with its receipt number, refundable balance, refund history, and reversal state.",
       ),
     )
     .input(getPaymentInputSchema)
@@ -155,23 +152,11 @@ export const ledgerOperationsRouter = {
     .output(paymentOutputSchema)
     .handler(({ context, input }) => financeHandler((value: typeof input) => getPayment(context.db, value))({ input })),
 
-  previewPaymentAllocation: protectedProcedure
-    .route(
-      route(
-        "Preview payment allocations",
-        "Preview deterministic oldest-first or explicit bill allocations for a payment and return a review hash before any money is recorded.",
-      ),
-    )
-    .input(previewPaymentAllocationInputSchema)
-    .use(requireSchoolPermission(SCHOOL_ACTIONS.RECORD_PAYMENT))
-    .output(paymentAllocationPreviewOutputSchema)
-    .handler(({ context, input }) => financeHandler((value: typeof input) => previewPaymentAllocation(context.db, value))({ input })),
-
   recordPayment: protectedProcedure
     .route(
       route(
         "Record a payment",
-        "Atomically record an idempotent payment, receipt number, reviewed bill allocations, and any remaining admission credit as immutable finance facts.",
+        "Atomically record an idempotent payment and receipt number as an admission-level account credit without linking it to a bill.",
       ),
     )
     .input(recordPaymentInputSchema)

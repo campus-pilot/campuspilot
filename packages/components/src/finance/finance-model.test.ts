@@ -19,9 +19,7 @@ import {
   financeAmountError,
   financeDateTimeError,
   formatFinanceInstant,
-  requiresExplicitCreditConfirmation,
   reversalActionForEntry,
-  updateExplicitAllocation,
   adjustmentTargetFields,
   groupFinanceIssues,
   paymentDeepLinkTarget,
@@ -111,13 +109,7 @@ describe("finance presentation model", () => {
     expect(formatFinanceInstant("2026-01-01T00:15:00.000Z", "Asia/Kolkata")).toContain("5:45");
   });
 
-  it("models multi-bill allocation, overpayment confirmation, and reversal routing", () => {
-    const first = updateExplicitAllocation([], "bill-a", "10.00");
-    const second = updateExplicitAllocation(first, "bill-b", "20.00");
-    expect(second).toEqual([{ billId: "bill-a", amount: "10.00" }, { billId: "bill-b", amount: "20.00" }]);
-    expect(updateExplicitAllocation(second, "bill-a", undefined)).toEqual([{ billId: "bill-b", amount: "20.00" }]);
-    expect(requiresExplicitCreditConfirmation("1")).toBe(true);
-    expect(requiresExplicitCreditConfirmation("0")).toBe(false);
+  it("routes bill and non-bill reversals to their dedicated operations", () => {
     expect(reversalActionForEntry("bill")).toBe("bill");
     expect(reversalActionForEntry("credit_correction")).toBe("ledger_entry");
   });

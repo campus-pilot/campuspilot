@@ -5,7 +5,6 @@ import {
   financeBillLineTable,
   financeBillTable,
   financeLedgerEntryTable,
-  financePaymentAllocationTable,
   financePaymentTable,
   financeRefundTable,
 } from "@campuspilot/db/schema/finance";
@@ -13,19 +12,16 @@ import { schoolSessionTable } from "@campuspilot/db/schema/session";
 import { admissionTable } from "@campuspilot/db/schema/admission";
 import { studentTable } from "@campuspilot/db/schema/student";
 import { classTable, sectionTable } from "@campuspilot/db/schema/class";
-import { and, asc, eq, inArray } from "drizzle-orm";
-import { sql } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 
 import { isRetryableTransactionError, rpcError } from "../../../errors";
 import { lockFinanceAdmissionAccount } from "./account-lock";
-import { assertAdmissionContext, billSettlementMap } from "./ledger-read";
+import { billSettlementMap } from "./ledger-read";
 import { appendFinanceLedgerEntry } from "./ledger-posting";
 import { allocateFinanceNumber } from "./numbering";
 import { POSTGRES_BIGINT_MAX } from "./transport";
 
 const ZERO = BigInt(0);
-const MAX_PAYMENT_ALLOCATIONS = 500;
-const ALLOCATION_INSERT_CHUNK_SIZE = 100;
 const SERIALIZABLE_ATTEMPTS = 3;
 
 /** Replays the whole idempotent command after PostgreSQL serialization/deadlock aborts. */
@@ -40,21 +36,19 @@ async function runSerializable<T>(db: Database, operation: (transaction: Databas
   throw new Error("Serializable retry loop exhausted unexpectedly");
 }
 
-type AllocationInput = { billId: string; amountMinor: string };
-type PaymentAllocationCommand = {
+type RecordPaymentCommand = {
   schoolId: string;
   admissionId: string;
   sessionId: string;
   amountMinor: string;
   currency: string;
-  allocationMode: "proposal" | "explicit" | "unallocated";
-  allocations?: AllocationInput[];
-};
-
-type AllocationCandidate = {
-  bill: typeof financeBillTable.$inferSelect;
-  outstandingMinor: bigint;
-  settlement: Awaited<ReturnType<typeof billSettlementMap>> extends Map<string, infer V> ? V : never;
+  method: typeof financePaymentTable.$inferInsert.method;
+  externalReference?: string | null;
+  payerName?: string | null;
+  receivedAt: Date;
+  effectiveAt: Date;
+  note?: string | null;
+  idempotencyKey: string;
 };
 
 function sha256(value: unknown) {
@@ -69,12 +63,6 @@ function paymentCommandSnapshot(command: RecordPaymentCommand) {
     sessionId: command.sessionId,
     amountMinor: command.amountMinor,
     currency: command.currency,
-    allocationMode: command.allocationMode,
-    allocations: command.allocationMode === "explicit"
-      ? [...(command.allocations ?? [])].sort((left, right) => left.billId.localeCompare(right.billId))
-      : null,
-    expectedAllocationReviewHash: command.expectedAllocationReviewHash ?? null,
-    confirmUnallocatedCredit: command.confirmUnallocatedCredit,
     method: command.method,
     externalReference: command.externalReference ?? null,
     payerName: command.payerName ?? null,
@@ -103,216 +91,20 @@ async function lockSession(
   return session;
 }
 
-async function outstandingBills(
-  db: DatabaseExecutor,
-  input: { schoolId: string; admissionId: string; currency: string },
-) {
-  const bills = await db
-    .select()
-    .from(financeBillTable)
-    .where(
-      and(
-        eq(financeBillTable.schoolId, input.schoolId),
-        eq(financeBillTable.admissionId, input.admissionId),
-        eq(financeBillTable.currency, input.currency),
-        eq(financeBillTable.status, "posted"),
-        sql`not exists (
-          select 1 from ${financeLedgerEntryTable} reversal
-          where reversal.school_id = ${financeBillTable.schoolId}
-            and reversal.reversal_of_entry_id = ${financeBillTable.ledgerEntryId}
-        )`,
-        sql`${financeBillTable.totalAmountMinor}
-          + coalesce((select sum(adjustment.amount_minor) from ${financeAdjustmentTable} adjustment
-            where adjustment.school_id = ${financeBillTable.schoolId}
-              and adjustment.bill_id = ${financeBillTable.id}
-              and adjustment.kind = 'debit_correction'
-              and not exists (select 1 from ${financeLedgerEntryTable} adjustment_reversal
-                where adjustment_reversal.school_id = adjustment.school_id
-                  and adjustment_reversal.reversal_of_entry_id = adjustment.ledger_entry_id)), 0)
-          > coalesce((select sum(allocation.amount_minor) from ${financePaymentAllocationTable} allocation
-            where allocation.school_id = ${financeBillTable.schoolId}
-              and allocation.bill_id = ${financeBillTable.id}), 0)
-          + coalesce((select sum(adjustment.amount_minor) from ${financeAdjustmentTable} adjustment
-            where adjustment.school_id = ${financeBillTable.schoolId}
-              and adjustment.bill_id = ${financeBillTable.id}
-              and adjustment.kind in ('discount', 'waiver', 'write_off', 'credit_correction')
-              and not exists (select 1 from ${financeLedgerEntryTable} adjustment_reversal
-                where adjustment_reversal.school_id = adjustment.school_id
-                  and adjustment_reversal.reversal_of_entry_id = adjustment.ledger_entry_id)), 0)`,
-      ),
-    )
-    .orderBy(asc(financeBillTable.issueDate), asc(financeBillTable.billNumber), asc(financeBillTable.id))
-    .limit(MAX_PAYMENT_ALLOCATIONS + 1);
-  const settlements = await billSettlementMap(db, input.schoolId, bills);
-  return bills.flatMap((bill) => {
-    const state = settlements.get(bill.id)!;
-    if (state.reversed) return [];
-    const charge = bill.totalAmountMinor + state.debited;
-    const settled = state.allocated + state.adjusted;
-    if (settled >= charge) return [];
-    return [{ bill, outstandingMinor: charge - settled, settlement: state }];
-  });
-}
-
-async function explicitAllocationBills(
-  db: DatabaseExecutor,
-  command: PaymentAllocationCommand,
-): Promise<AllocationCandidate[]> {
-  const ids = command.allocations?.map(({ billId }) => billId) ?? [];
-  if (!ids.length) return [];
-  const bills = await db.select().from(financeBillTable).where(and(
-    eq(financeBillTable.schoolId, command.schoolId),
-    eq(financeBillTable.admissionId, command.admissionId),
-    eq(financeBillTable.currency, command.currency),
-    eq(financeBillTable.status, "posted"),
-    inArray(financeBillTable.id, ids),
-  ));
-  const settlements = await billSettlementMap(db, command.schoolId, bills);
-  return bills.flatMap((bill) => {
-    const settlement = settlements.get(bill.id)!;
-    const outstandingMinor = bill.totalAmountMinor + settlement.debited - settlement.allocated - settlement.adjusted;
-    return settlement.reversed || outstandingMinor <= ZERO ? [] : [{ bill, settlement, outstandingMinor }];
-  });
-}
-
-async function resolveAllocations(
-  db: DatabaseExecutor,
-  command: PaymentAllocationCommand,
-) {
-  const amount = BigInt(command.amountMinor);
-  const candidates = command.allocationMode === "explicit"
-    ? await explicitAllocationBills(db, command)
-    : await outstandingBills(db, command);
-  const candidateLimitExceeded = command.allocationMode === "proposal" && candidates.length > MAX_PAYMENT_ALLOCATIONS;
-  const boundedCandidates = candidates.slice(0, MAX_PAYMENT_ALLOCATIONS);
-  const candidateById = new Map(boundedCandidates.map((candidate) => [candidate.bill.id, candidate]));
-  let allocations: Array<{ billId: string; amountMinor: bigint }> = [];
-  if (command.allocationMode === "proposal" && !candidateLimitExceeded) {
-    let remaining = amount;
-    for (const candidate of boundedCandidates) {
-      if (remaining === ZERO) break;
-      const allocated = remaining < candidate.outstandingMinor ? remaining : candidate.outstandingMinor;
-      allocations.push({ billId: candidate.bill.id, amountMinor: allocated });
-      remaining -= allocated;
-    }
-  } else if (command.allocationMode === "explicit") {
-    const seen = new Set<string>();
-    allocations = (command.allocations ?? []).map((allocation) => {
-      if (seen.has(allocation.billId)) throw rpcError.badRequest("Each bill may appear only once in a payment allocation.");
-      seen.add(allocation.billId);
-      const candidate = candidateById.get(allocation.billId);
-      if (!candidate) throw rpcError.notFound("Outstanding allocation bill");
-      const value = BigInt(allocation.amountMinor);
-      if (value > candidate.outstandingMinor) throw rpcError.badRequest("A payment allocation cannot exceed the bill's outstanding amount.");
-      return { billId: allocation.billId, amountMinor: value };
-    });
-  }
-  const allocatedMinor = allocations.reduce((total, allocation) => total + allocation.amountMinor, ZERO);
-  if (allocatedMinor > amount) throw rpcError.badRequest("Payment allocations cannot exceed the payment amount.");
-  return {
-    allocations: allocations.map((allocation) => {
-      const candidate = candidateById.get(allocation.billId)!;
-      return {
-        ...allocation,
-        billNumber: candidate.bill.billNumber,
-        sessionId: candidate.bill.sessionId,
-        sessionLabel: `${candidate.bill.sessionStartYearSnapshot}–${candidate.bill.sessionEndYearSnapshot}`,
-        outstandingMinor: candidate.outstandingMinor.toString(),
-      };
-    }),
-    allocatedMinor,
-    unallocatedCreditMinor: amount - allocatedMinor,
-    totalOutstandingMinor: boundedCandidates.reduce((total, candidate) => total + candidate.outstandingMinor, ZERO),
-    candidateLimitExceeded,
-    reviewState: boundedCandidates.map(({ bill, settlement, outstandingMinor }) => ({
-      billId: bill.id,
-      issueDate: bill.issueDate,
-      billNumber: bill.billNumber,
-      totalAmountMinor: bill.totalAmountMinor.toString(),
-      allocatedMinor: settlement.allocated.toString(),
-      creditedAdjustmentMinor: settlement.adjusted.toString(),
-      debitedAdjustmentMinor: settlement.debited.toString(),
-      outstandingMinor: outstandingMinor.toString(),
-    })),
-  };
-}
-
-function allocationReviewHash(
-  command: PaymentAllocationCommand,
-  result: Awaited<ReturnType<typeof resolveAllocations>>,
-) {
-  if (command.allocationMode !== "proposal" || result.candidateLimitExceeded) return null;
-  return sha256({
-    input: {
-      schoolId: command.schoolId,
-      admissionId: command.admissionId,
-      sessionId: command.sessionId,
-      amountMinor: command.amountMinor,
-      currency: command.currency,
-      allocationMode: command.allocationMode,
-    },
-    proposedAllocations: result.allocations.map(({ billId, amountMinor }) => ({ billId, amountMinor: amountMinor.toString() })),
-    settlementState: result.reviewState,
-  });
-}
-
-export async function previewPaymentAllocation(db: DatabaseExecutor, command: PaymentAllocationCommand) {
-  await assertAdmissionContext(db, command);
-  const result = await resolveAllocations(db, command);
-  return {
-    amountMinor: command.amountMinor,
-    currency: command.currency,
-    allocationMode: command.allocationMode,
-    readyToRecord: !result.candidateLimitExceeded,
-    blockingIssues: result.candidateLimitExceeded
-      ? [{ code: "candidate_limit_exceeded" as const, message: `Automatic allocation is limited to ${MAX_PAYMENT_ALLOCATIONS} outstanding bills; use explicit allocations in batches.` }]
-      : [],
-    allocationReviewHash: allocationReviewHash(command, result),
-    allocations: result.allocations.map((allocation) => ({
-      billId: allocation.billId,
-      billNumber: allocation.billNumber,
-      sessionId: allocation.sessionId,
-      sessionLabel: allocation.sessionLabel,
-      outstandingMinor: allocation.outstandingMinor,
-      amountMinor: allocation.amountMinor.toString(),
-    })),
-    allocatedMinor: result.allocatedMinor.toString(),
-    unallocatedCreditMinor: result.unallocatedCreditMinor.toString(),
-    totalOutstandingMinor: result.totalOutstandingMinor.toString(),
-    requiresUnallocatedCreditConfirmation: result.unallocatedCreditMinor > ZERO,
-  };
-}
-
-type RecordPaymentCommand = PaymentAllocationCommand & {
-  method: typeof financePaymentTable.$inferInsert.method;
-  externalReference?: string | null;
-  payerName?: string | null;
-  receivedAt: Date;
-  effectiveAt: Date;
-  note?: string | null;
-  confirmUnallocatedCredit: boolean;
-  expectedAllocationReviewHash?: string;
-  idempotencyKey: string;
-};
-
 async function readPaymentByKey(db: DatabaseExecutor, schoolId: string, key: string) {
   const [payment] = await db.select().from(financePaymentTable).where(and(eq(financePaymentTable.schoolId, schoolId), eq(financePaymentTable.idempotencyKey, key))).limit(1);
   if (!payment) return null;
-  const [allocations, ledgerRows] = await Promise.all([
-    db.select().from(financePaymentAllocationTable).where(and(eq(financePaymentAllocationTable.schoolId, schoolId), eq(financePaymentAllocationTable.paymentId, payment.id))).orderBy(asc(financePaymentAllocationTable.billId)),
-    db.select().from(financeLedgerEntryTable).where(and(eq(financeLedgerEntryTable.schoolId, schoolId), eq(financeLedgerEntryTable.id, payment.ledgerEntryId))).limit(1),
-  ]);
+  const ledgerRows = await db.select().from(financeLedgerEntryTable).where(and(eq(financeLedgerEntryTable.schoolId, schoolId), eq(financeLedgerEntryTable.id, payment.ledgerEntryId))).limit(1);
   const ledger = ledgerRows[0];
   if (!ledger) throw new Error("Payment ledger entry was not found");
-  return { payment, allocations, ledger };
+  return { payment, ledger };
 }
 
 function paymentTransport(value: NonNullable<Awaited<ReturnType<typeof readPaymentByKey>>>) {
-  const allocated = value.allocations.reduce((total, allocation) => total + allocation.amountMinor, ZERO);
-  return { ...value.payment, amountMinor: value.payment.amountMinor.toString(), allocatedMinor: allocated.toString(), unallocatedCreditMinor: (value.payment.amountMinor - allocated).toString(), allocations: value.allocations.map((allocation) => ({ ...allocation, amountMinor: allocation.amountMinor.toString() })) };
+  return { ...value.payment, amountMinor: value.payment.amountMinor.toString() };
 }
 
-/** Posts cash receipt and its allocations as one serializable accounting command. */
+/** Posts a cash receipt as an admission-level credit without assigning it to any bill. */
 export async function recordPayment(db: Database, command: RecordPaymentCommand, recordedBy: string) {
   return runSerializable(db, async (transaction) => {
     const session = await lockSession(transaction, command.schoolId, command.sessionId);
@@ -323,16 +115,6 @@ export async function recordPayment(db: Database, command: RecordPaymentCommand,
     if (existing) {
       if (existing.payment.commandHash !== commandHash) throw rpcError.conflict("This payment idempotency key was already used with a different payload.");
       return paymentTransport(existing);
-    }
-    const resolved = await resolveAllocations(transaction, command);
-    if (resolved.candidateLimitExceeded) {
-      throw rpcError.conflict(`Automatic allocation is limited to ${MAX_PAYMENT_ALLOCATIONS} outstanding bills; use explicit allocations in batches.`);
-    }
-    if (command.allocationMode === "proposal" && allocationReviewHash(command, resolved) !== command.expectedAllocationReviewHash) {
-      throw rpcError.conflict("The proposed allocation changed after review. Preview the allocation again before recording the payment.");
-    }
-    if (resolved.unallocatedCreditMinor > ZERO && !command.confirmUnallocatedCredit) {
-      throw rpcError.badRequest("Confirm the unallocated admission credit before recording this payment.");
     }
     const [identity] = await transaction
       .select({
@@ -372,16 +154,9 @@ export async function recordPayment(db: Database, command: RecordPaymentCommand,
         sessionEndYear: session.endYear,
       },
       receivedAt: command.receivedAt, note: command.note ?? null, idempotencyKey: command.idempotencyKey,
-      commandHash, commandSnapshot: { command: commandSnapshot, allocationReviewHash: command.expectedAllocationReviewHash ?? null }, recordedBy,
+      commandHash, commandSnapshot: { command: commandSnapshot }, recordedBy,
     }).returning();
     if (!payment) throw new Error("Payment was not created");
-    for (let offset = 0; offset < resolved.allocations.length; offset += ALLOCATION_INSERT_CHUNK_SIZE) {
-      const chunk = resolved.allocations.slice(offset, offset + ALLOCATION_INSERT_CHUNK_SIZE);
-      await transaction.insert(financePaymentAllocationTable).values(chunk.map((allocation) => ({
-        schoolId: command.schoolId, admissionId: command.admissionId, paymentId: payment.id,
-        billId: allocation.billId, amountMinor: allocation.amountMinor, currency: command.currency,
-      })));
-    }
     const created = await readPaymentByKey(transaction, command.schoolId, command.idempotencyKey);
     if (!created) throw new Error("Payment could not be read after posting");
     return paymentTransport(created);
@@ -445,7 +220,7 @@ export async function recordAdjustment(db: Database, command: RecordAdjustmentCo
       if (!bill) throw rpcError.notFound("Adjustment bill");
       const settlement = (await billSettlementMap(transaction, command.schoolId, [bill])).get(bill.id)!;
       if (settlement.reversed) throw rpcError.conflict("A reversed bill cannot receive an adjustment.");
-      eligibleMinor = bill.totalAmountMinor + settlement.debited - settlement.allocated - settlement.adjusted;
+      eligibleMinor = bill.totalAmountMinor + settlement.debited - settlement.adjusted;
       if (eligibleMinor <= ZERO && (isCredit || command.calculation.kind === "percentage")) throw rpcError.conflict("The bill has no remaining adjustable amount.");
       if (command.billLineId) {
         [line] = await transaction.select().from(financeBillLineTable).where(and(eq(financeBillLineTable.schoolId, command.schoolId), eq(financeBillLineTable.billId, bill.id), eq(financeBillLineTable.id, command.billLineId), eq(financeBillLineTable.currency, command.currency))).limit(1);
@@ -491,7 +266,7 @@ async function readRefundByKey(db: DatabaseExecutor, schoolId: string, key: stri
   return { refund: row, ledger };
 }
 
-/** Refunds only the still-unallocated effective credit of one payment. */
+/** Refunds only the still-unrefunded amount of one account-credit payment. */
 export async function recordRefund(db: Database, command: RecordRefundCommand, recordedBy: string) {
   return runSerializable(db, async (transaction) => {
     await lockSession(transaction, command.schoolId, command.sessionId);
@@ -506,17 +281,13 @@ export async function recordRefund(db: Database, command: RecordRefundCommand, r
     if (!payment) throw rpcError.notFound("Payment");
     const paymentReversal = await transaction.select({ id: financeLedgerEntryTable.id }).from(financeLedgerEntryTable).where(and(eq(financeLedgerEntryTable.schoolId, command.schoolId), eq(financeLedgerEntryTable.reversalOfEntryId, payment.ledgerEntryId))).limit(1);
     if (paymentReversal[0]) throw rpcError.conflict("A reversed payment cannot be refunded.");
-    const [allocations, refunds] = await Promise.all([
-      transaction.select().from(financePaymentAllocationTable).where(and(eq(financePaymentAllocationTable.schoolId, command.schoolId), eq(financePaymentAllocationTable.paymentId, payment.id))),
-      transaction.select().from(financeRefundTable).where(and(eq(financeRefundTable.schoolId, command.schoolId), eq(financeRefundTable.paymentId, payment.id))),
-    ]);
+    const refunds = await transaction.select().from(financeRefundTable).where(and(eq(financeRefundTable.schoolId, command.schoolId), eq(financeRefundTable.paymentId, payment.id)));
     const refundReversals = refunds.length ? await transaction.select({ target: financeLedgerEntryTable.reversalOfEntryId }).from(financeLedgerEntryTable).where(and(eq(financeLedgerEntryTable.schoolId, command.schoolId), inArray(financeLedgerEntryTable.reversalOfEntryId, refunds.map(({ ledgerEntryId }) => ledgerEntryId)))) : [];
     const reversedRefunds = new Set(refundReversals.map(({ target }) => target));
-    const allocated = allocations.reduce((total, row) => total + row.amountMinor, ZERO);
     const refunded = refunds.reduce((total, row) => total + (reversedRefunds.has(row.ledgerEntryId) ? ZERO : row.amountMinor), ZERO);
-    const available = payment.amountMinor - allocated - refunded;
+    const available = payment.amountMinor - refunded;
     const amountMinor = BigInt(command.amountMinor);
-    if (amountMinor > available) throw rpcError.badRequest("A refund cannot exceed the original payment's unreversed, unallocated credit.");
+    if (amountMinor > available) throw rpcError.badRequest("A refund cannot exceed the original payment's remaining refundable amount.");
     const ledger = await appendFinanceLedgerEntry(transaction, {
       schoolId: command.schoolId, admissionId: command.admissionId, sessionId: command.sessionId,
       type: "refund", direction: "debit", amountMinor, currency: payment.currency,
@@ -561,21 +332,18 @@ export async function reverseLedgerEntry(db: Database, command: ReverseLedgerCom
     }
     const [payment] = await transaction.select().from(financePaymentTable).where(and(eq(financePaymentTable.schoolId, command.schoolId), eq(financePaymentTable.ledgerEntryId, target.id))).limit(1);
     if (payment) {
-      const [allocation, refunds] = await Promise.all([
-        transaction.select({ id: financePaymentAllocationTable.id }).from(financePaymentAllocationTable).where(and(eq(financePaymentAllocationTable.schoolId, command.schoolId), eq(financePaymentAllocationTable.paymentId, payment.id))).limit(1),
-        transaction.select({ ledgerEntryId: financeRefundTable.ledgerEntryId }).from(financeRefundTable).where(and(eq(financeRefundTable.schoolId, command.schoolId), eq(financeRefundTable.paymentId, payment.id))),
-      ]);
+      const refunds = await transaction.select({ ledgerEntryId: financeRefundTable.ledgerEntryId }).from(financeRefundTable).where(and(eq(financeRefundTable.schoolId, command.schoolId), eq(financeRefundTable.paymentId, payment.id)));
       const refundReversals = refunds.length ? await transaction.select({ target: financeLedgerEntryTable.reversalOfEntryId }).from(financeLedgerEntryTable).where(and(eq(financeLedgerEntryTable.schoolId, command.schoolId), inArray(financeLedgerEntryTable.reversalOfEntryId, refunds.map(({ ledgerEntryId }) => ledgerEntryId)))) : [];
       const reversedRefunds = new Set(refundReversals.map(({ target }) => target));
       const hasLiveRefund = refunds.some(({ ledgerEntryId }) => !reversedRefunds.has(ledgerEntryId));
-      if (allocation[0] || hasLiveRefund) throw rpcError.conflict("An allocated or effectively refunded payment requires a coordinated correction and cannot be reversed alone.");
+      if (hasLiveRefund) throw rpcError.conflict("A payment with a live refund requires a coordinated correction and cannot be reversed alone.");
     }
     const [adjustment] = await transaction.select().from(financeAdjustmentTable).where(and(eq(financeAdjustmentTable.schoolId, command.schoolId), eq(financeAdjustmentTable.ledgerEntryId, target.id))).limit(1);
     if (adjustment?.kind === "debit_correction" && adjustment.billId) {
       const [adjustmentBill] = await transaction.select().from(financeBillTable).where(and(eq(financeBillTable.schoolId, command.schoolId), eq(financeBillTable.id, adjustment.billId))).for("update").limit(1);
       if (!adjustmentBill) throw rpcError.notFound("Adjustment bill");
       const state = (await billSettlementMap(transaction, command.schoolId, [adjustmentBill])).get(adjustmentBill.id)!;
-      if (state.allocated + state.adjusted > adjustmentBill.totalAmountMinor + state.debited - adjustment.amountMinor) {
+      if (state.adjusted > adjustmentBill.totalAmountMinor + state.debited - adjustment.amountMinor) {
         throw rpcError.conflict("This debit correction supports live bill settlements and cannot be reversed alone.");
       }
     }

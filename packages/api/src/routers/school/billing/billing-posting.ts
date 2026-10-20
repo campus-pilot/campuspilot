@@ -9,7 +9,6 @@ import {
   financeBillRunTable,
   financeBillTable,
   financeLedgerEntryTable,
-  financePaymentAllocationTable,
 } from "@campuspilot/db/schema/finance";
 import { financeTimeZoneSchema } from "@campuspilot/db/schema/jsonb/finance-config";
 import { schoolSessionTable } from "@campuspilot/db/schema/session";
@@ -729,16 +728,6 @@ async function assertBillCanReverse(
       ),
     )
     .limit(1);
-  const allocation = await transaction
-    .select({ id: financePaymentAllocationTable.id })
-    .from(financePaymentAllocationTable)
-    .where(
-      and(
-        eq(financePaymentAllocationTable.schoolId, input.schoolId),
-        eq(financePaymentAllocationTable.billId, input.billId),
-      ),
-    )
-    .limit(1);
   const liveAdjustment = await transaction
     .select({ id: financeAdjustmentTable.id })
     .from(financeAdjustmentTable)
@@ -766,9 +755,9 @@ async function assertBillCanReverse(
       ),
     )
     .limit(1);
-  if (allocation.length || liveAdjustment.length) {
+  if (liveAdjustment.length) {
     throw rpcError.conflict(
-      "This bill has live settlement facts. Reverse or coordinate those facts before reversing the bill.",
+      "This bill has live credit adjustments. Reverse or coordinate those facts before reversing the bill.",
     );
   }
   return existingReversal[0] ?? null;
@@ -1003,15 +992,6 @@ export async function reversePostedBillingRun(
             ),
           ),
         );
-      const allocationRows = await transaction
-        .select({ billId: financePaymentAllocationTable.billId })
-        .from(financePaymentAllocationTable)
-        .where(
-          and(
-            eq(financePaymentAllocationTable.schoolId, command.schoolId),
-            inArray(financePaymentAllocationTable.billId, billIds),
-          ),
-        );
       const adjustmentRows = await transaction
         .select({ billId: financeAdjustmentTable.billId })
         .from(financeAdjustmentTable)
@@ -1049,10 +1029,9 @@ export async function reversePostedBillingRun(
           row.reversalOfEntryId ? [[row.reversalOfEntryId, row] as const] : [],
         ),
       );
-      const settledBillIds = new Set([
-        ...allocationRows.map(({ billId }) => billId),
-        ...adjustmentRows.flatMap(({ billId }) => (billId ? [billId] : [])),
-      ]);
+      const settledBillIds = new Set(
+        adjustmentRows.flatMap(({ billId }) => (billId ? [billId] : [])),
+      );
       const validated = prepared.map((item) => {
         const existing = reversalByKey.get(item.idempotencyKey) ?? null;
         if (

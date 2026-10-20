@@ -280,7 +280,6 @@ function PaymentDetail({
   payment: PaymentTarget;
   onClose: () => void;
 }) {
-  const [allocationPage, setAllocationPage] = useState(1);
   const [refundPage, setRefundPage] = useState(1);
   const query = useQuery(
     orpc.school.getPayment.queryOptions({
@@ -288,8 +287,6 @@ function PaymentDetail({
         schoolId,
         admissionId: payment.admissionId,
         paymentId: payment.id,
-        allocationPage,
-        allocationLimit: 10,
         refundPage,
         refundLimit: 10,
       },
@@ -305,7 +302,7 @@ function PaymentDetail({
               "Payment detail"}
           </DialogTitle>
           <DialogDescription>
-            Immutable payment, allocation, and refund details.
+            Immutable account-credit payment and refund details.
           </DialogDescription>
         </DialogHeader>
         {query.isPending ? (
@@ -322,70 +319,24 @@ function PaymentDetail({
                 </p>
               </div>
               <div>
-                <p className="text-xs text-muted-foreground">Allocated</p>
+                <p className="text-xs text-muted-foreground">Refunded</p>
                 <p className="font-semibold">
-                  {formatMinor(query.data.allocatedMinor, query.data.currency)}
+                  {formatMinor(query.data.refundedMinor, query.data.currency)}
                 </p>
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">
-                  Available credit
+                  Refundable
                 </p>
                 <p className="font-semibold">
                   {formatMinor(
-                    query.data.unallocatedCreditMinor,
+                    query.data.refundableMinor,
                     query.data.currency,
                   )}
                 </p>
               </div>
             </div>
-            <div>
-              <h3 className="mb-2 text-sm font-medium">Allocations</h3>
-              <div className="overflow-x-auto rounded-lg border">
-                <table className="w-full min-w-[480px] text-xs">
-                  <thead className="bg-muted/40">
-                    <tr>
-                      <th className="p-2 text-left">Bill</th>
-                      <th className="p-2 text-right">Amount</th>
-                      <th className="p-2 text-left">Recorded</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {query.data.allocations.items.map((item) => (
-                      <tr key={item.id} className="border-t">
-                        <td className="p-2 font-mono">
-                          {item.billNumber ?? "Bill"}
-                        </td>
-                        <td className="p-2 text-right">
-                          {formatMinor(item.amountMinor, item.currency)}
-                        </td>
-                        <td className="p-2">
-                          {financeInstantLabel(
-                            item.recordedAt,
-                            query.data.timeZone,
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                    {!query.data.allocations.items.length ? (
-                      <tr>
-                        <td
-                          colSpan={3}
-                          className="p-4 text-center text-muted-foreground"
-                        >
-                          Unallocated payment credit.
-                        </td>
-                      </tr>
-                    ) : null}
-                  </tbody>
-                </table>
-              </div>
-              <SimplePagination
-                currentPage={query.data.allocations.pagination.currentPage}
-                totalPages={query.data.allocations.pagination.totalPages}
-                onPageChange={setAllocationPage}
-              />
-            </div>
+            <p className="rounded-lg border p-3 text-sm text-muted-foreground">This payment is credited to the admission account and is not assigned to any individual bill.</p>
             {query.data.refunds.pagination.totalItems ? (
               <div>
                 <h3 className="mb-2 text-sm font-medium">Refunds</h3>
@@ -510,11 +461,11 @@ function PaymentRows({
       ),
     },
     {
-      accessorKey: "unallocatedCreditMinor",
-      header: "Credit",
+      accessorKey: "refundableMinor",
+      header: "Refundable",
       enableSorting: false,
       cell: ({ row }) =>
-        formatMinor(row.original.unallocatedCreditMinor, row.original.currency),
+        formatMinor(row.original.refundableMinor, row.original.currency),
     },
     {
       accessorKey: "status",
@@ -595,9 +546,9 @@ export function BillingPayments({
       label: "Status",
       type: "single",
       options: [
-        "unallocated",
-        "partially_allocated",
-        "allocated",
+        "recorded",
+        "partially_refunded",
+        "refunded",
         "reversed",
       ].map((value) => ({ value, label: value.replaceAll("_", " ") })),
     },

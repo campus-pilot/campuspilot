@@ -142,25 +142,8 @@ export function financeDateTimeError(value: string, timeZone: string): string | 
   }
 }
 
-export type ExplicitAllocationDraft = { billId: string; amount: string };
-
-/** Canonicalizes editable explicit allocations while preserving their exact
- * decimal text until currency-aware validation converts it at submission. */
-export function updateExplicitAllocation(
-  values: ExplicitAllocationDraft[],
-  billId: string,
-  amount: string | undefined,
-): ExplicitAllocationDraft[] {
-  const without = values.filter((value) => value.billId !== billId);
-  return amount === undefined ? without : [...without, { billId, amount }];
-}
-
 export function reversalActionForEntry(type: string): "bill" | "ledger_entry" {
   return type === "bill" ? "bill" : "ledger_entry";
-}
-
-export function requiresExplicitCreditConfirmation(unallocatedCreditMinor: string): boolean {
-  return BigInt(unallocatedCreditMinor) > BigInt(0);
 }
 
 export function adjustmentTargetFields(input: { kind: string; target: "bill" | "account"; billId?: string; billLineId?: string }) {

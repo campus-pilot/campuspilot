@@ -65,6 +65,6 @@ export const classFinanceSnapshotInputSchema = reportListInput({ search: z.strin
 export const classFinanceSnapshotOutputSchema = createPaginatedOutputSchema(z.object({
   sessionId: z.string(), currency: currencySchema, classId: z.string().nullable(), classLabel: z.string().nullable(),
   billCount: z.number().int().nonnegative(), billedMinor: financeCumulativeIntegerStringSchema,
-  allocatedMinor: financeCumulativeIntegerStringSchema, creditAdjustmentMinor: financeCumulativeIntegerStringSchema,
-  debitAdjustmentMinor: financeCumulativeIntegerStringSchema, outstandingMinor: financeCumulativeIntegerStringSchema,
+  creditAdjustmentMinor: financeCumulativeIntegerStringSchema,
+  debitAdjustmentMinor: financeCumulativeIntegerStringSchema, netChargeMinor: signedCumulativeSchema,
 }));

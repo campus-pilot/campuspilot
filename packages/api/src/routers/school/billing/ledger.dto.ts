@@ -69,7 +69,7 @@ export const listAdmissionBillsInputSchema = createListInputSchema({
       sessionId: z.string().min(1).optional(),
       currency: currencySchema.optional(),
       search: z.string().trim().min(1).max(200).optional(),
-      status: z.enum(["open", "settled", "reversed"]).optional(),
+      status: z.enum(["posted", "reversed"]).optional(),
       issueFrom: z.string().date().optional(),
       issueTo: z.string().date().optional(),
     })
@@ -86,8 +86,6 @@ export const getAdmissionBillInputSchema = z.object({
   schoolId: z.string().min(1),
   admissionId: z.string().min(1),
   billId: z.string().min(1),
-  allocationPage: z.number().int().positive().default(1),
-  allocationLimit: z.number().int().positive().max(100).default(20),
   adjustmentPage: z.number().int().positive().default(1),
   adjustmentLimit: z.number().int().positive().max(100).default(20),
 });
@@ -102,7 +100,7 @@ export const listPaymentsInputSchema = createListInputSchema({
       search: z.string().trim().min(1).max(200).optional(),
       method: paymentMethodSchema.optional(),
       externalReference: z.string().trim().min(1).max(500).optional(),
-      status: z.enum(["unallocated", "partially_allocated", "allocated", "reversed"]).optional(),
+      status: z.enum(["recorded", "partially_refunded", "refunded", "reversed"]).optional(),
       receivedFrom: z.coerce.date().optional(),
       receivedTo: z.coerce.date().optional(),
     })
@@ -119,17 +117,8 @@ export const getPaymentInputSchema = z.object({
   schoolId: z.string().min(1),
   admissionId: z.string().min(1).optional(),
   paymentId: z.string().min(1),
-  allocationPage: z.number().int().positive().default(1),
-  allocationLimit: z.number().int().positive().max(100).default(20),
   refundPage: z.number().int().positive().default(1),
   refundLimit: z.number().int().positive().max(100).default(20),
-});
-
-const paymentAllocationSchema = z.object({
-  billId: z.string().min(1),
-  amountMinor: financeIntegerStringSchema.refine((value) => BigInt(value) > BigInt(0), {
-    message: "Allocation amount must be positive",
-  }),
 });
 
 const paymentCommandShape = {
@@ -140,36 +129,9 @@ const paymentCommandShape = {
     message: "Payment amount must be positive",
   }),
   currency: currencySchema,
-  allocationMode: z.enum(["proposal", "explicit", "unallocated"]),
-  allocations: z.array(paymentAllocationSchema).max(500).optional(),
 } as const;
 
-function paymentAllocationRefinement(
-  value: { allocationMode: "proposal" | "explicit" | "unallocated"; allocations?: unknown[] },
-  context: z.RefinementCtx,
-) {
-  if (value.allocationMode === "explicit" && !value.allocations?.length) {
-    context.addIssue({
-      code: "custom",
-      path: ["allocations"],
-      message: "Explicit allocation mode requires at least one allocation.",
-    });
-  }
-  if (value.allocationMode !== "explicit" && value.allocations !== undefined) {
-    context.addIssue({
-      code: "custom",
-      path: ["allocations"],
-      message: "Allocations are accepted only in explicit mode.",
-    });
-  }
-}
-
-export const previewPaymentAllocationInputSchema = z
-  .object(paymentCommandShape)
-  .superRefine(paymentAllocationRefinement);
-
-export const recordPaymentInputSchema = z
-  .object({
+export const recordPaymentInputSchema = z.object({
     ...paymentCommandShape,
     method: paymentMethodSchema,
     externalReference: z.string().trim().min(1).max(500).nullable().optional(),
@@ -177,18 +139,7 @@ export const recordPaymentInputSchema = z
     receivedAt: z.coerce.date(),
     effectiveAt: z.coerce.date(),
     note: z.string().trim().min(1).max(1000).nullable().optional(),
-    confirmUnallocatedCredit: z.boolean().default(false),
-    expectedAllocationReviewHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
     idempotencyKey: idempotencyKeySchema,
-  })
-  .superRefine((value, context) => {
-    paymentAllocationRefinement(value, context);
-    if (value.allocationMode === "proposal" && !value.expectedAllocationReviewHash) {
-      context.addIssue({ code: "custom", path: ["expectedAllocationReviewHash"], message: "Proposal payments require the reviewed allocation hash." });
-    }
-    if (value.allocationMode !== "proposal" && value.expectedAllocationReviewHash !== undefined) {
-      context.addIssue({ code: "custom", path: ["expectedAllocationReviewHash"], message: "Only proposal payments accept an allocation review hash." });
-    }
   });
 
 const percentageSchema = z
@@ -271,7 +222,7 @@ const balanceSchema = z.object({
   dueMinor: financeCumulativeIntegerStringSchema,
   creditMinor: financeCumulativeIntegerStringSchema,
 });
-const billStatusSchema = z.enum(["open", "settled", "reversed"]);
+const billStatusSchema = z.enum(["posted", "reversed"]);
 
 export const admissionLedgerOutputSchema = z.object({
   openingBalances: z.array(balanceSchema),
@@ -308,8 +259,7 @@ export const admissionFinanceSummaryOutputSchema = z.object({
     refundMinor: financeCumulativeIntegerStringSchema,
     selectedSession: z.object({ debitMinor: financeCumulativeIntegerStringSchema, creditMinor: financeCumulativeIntegerStringSchema, balanceMinor: signedFinanceCumulativeIntegerStringSchema }).nullable(),
     broughtForwardMinor: signedFinanceCumulativeIntegerStringSchema,
-    unallocatedCreditMinor: financeCumulativeIntegerStringSchema,
-    billCounts: z.object({ open: z.number().int().nonnegative(), settled: z.number().int().nonnegative(), reversed: z.number().int().nonnegative() }),
+    billCounts: z.object({ posted: z.number().int().nonnegative(), reversed: z.number().int().nonnegative() }),
   })),
 });
 
@@ -317,8 +267,8 @@ const billListItemSchema = z.object({
   id: z.string(), schoolId: z.string(), admissionId: z.string(), sessionId: z.string(), billRunId: z.string().nullable(),
   ledgerEntryId: z.string(), status: billStatusSchema, sourceKind: z.enum(["billing_run", "manual"]),
   billNumber: z.string(), issueDate: z.string().date(), periodKey: z.string().nullable(), currency: currencySchema,
-  totalAmountMinor: financeIntegerStringSchema, allocatedMinor: financeCumulativeIntegerStringSchema,
-  adjustedMinor: financeCumulativeIntegerStringSchema, debitedAdjustmentMinor: financeCumulativeIntegerStringSchema, outstandingMinor: financeCumulativeIntegerStringSchema,
+  totalAmountMinor: financeIntegerStringSchema,
+  adjustedMinor: financeCumulativeIntegerStringSchema, debitedAdjustmentMinor: financeCumulativeIntegerStringSchema, netAmountMinor: financeCumulativeIntegerStringSchema,
   lineCount: z.number().int().positive(), admissionNumberSnapshot: z.string(), admissionNameSnapshot: z.string(),
   sessionStartYearSnapshot: z.number().int(), sessionEndYearSnapshot: z.number().int(),
   enrollmentIdSnapshot: z.string().nullable(), classIdSnapshot: z.string().nullable(), classSlugSnapshot: z.string().nullable(),
@@ -335,7 +285,6 @@ export const admissionBillOutputSchema = billListItemSchema.omit({ status: true 
     currency: currencySchema, pricingSourceKind: z.enum(["admission", "class", "session", "run_class", "run_session", "fallback", "manual"]),
     pricingSourceKey: z.string().nullable(), pricingRuleSnapshot: z.record(z.string(), z.unknown()), manualReason: z.string().nullable(),
   })),
-  allocations: createPaginatedOutputSchema(z.object({ id: z.string(), schoolId: z.string(), admissionId: z.string(), paymentId: z.string(), billId: z.string(), amountMinor: financeIntegerStringSchema, currency: currencySchema, recordedAt: z.date() })),
   adjustments: createPaginatedOutputSchema(z.object({
     id: z.string(), schoolId: z.string(), admissionId: z.string(), sessionId: z.string(), ledgerEntryId: z.string(),
     billId: z.string().nullable(), billLineId: z.string().nullable(), kind: z.enum(["discount", "waiver", "write_off", "debit_correction", "credit_correction"]),
@@ -349,41 +298,18 @@ const paymentListItemSchema = z.object({
   id: z.string(), schoolId: z.string(), admissionId: z.string(), sessionId: z.string(), ledgerEntryId: z.string(),
   receiptNumber: z.string(), amountMinor: financeIntegerStringSchema, currency: currencySchema, method: paymentMethodSchema,
   externalReference: z.string().nullable(), payerName: z.string().nullable(), receivedAt: z.date(), note: z.string().nullable(),
-  idempotencyKey: z.string(), recordedBy: z.string(), recordedAt: z.date(), allocatedMinor: financeCumulativeIntegerStringSchema,
-  refundedMinor: financeCumulativeIntegerStringSchema, unallocatedCreditMinor: financeCumulativeIntegerStringSchema,
+  idempotencyKey: z.string(), recordedBy: z.string(), recordedAt: z.date(),
+  refundedMinor: financeCumulativeIntegerStringSchema, refundableMinor: financeCumulativeIntegerStringSchema,
   timeZone: z.string().nullable(),
   reversed: z.boolean(),
-  status: z.enum(["unallocated", "partially_allocated", "allocated", "reversed"]),
+  status: z.enum(["recorded", "partially_refunded", "refunded", "reversed"]),
   admissionNumber: z.string(), admissionName: z.string(),
 });
 export const paymentListOutputSchema = createPaginatedOutputSchema(paymentListItemSchema);
-const allocationOutputSchema = z.object({ id: z.string(), schoolId: z.string(), admissionId: z.string(), paymentId: z.string(), billId: z.string(), billNumber: z.string().optional(), amountMinor: financeIntegerStringSchema, currency: currencySchema, recordedAt: z.date() });
 const refundOutputSchema = z.object({ id: z.string(), schoolId: z.string(), admissionId: z.string(), sessionId: z.string(), paymentId: z.string(), ledgerEntryId: z.string(), refundNumber: z.string(), amountMinor: financeIntegerStringSchema, currency: currencySchema, method: paymentMethodSchema, externalReference: z.string().nullable(), reason: z.string(), idempotencyKey: z.string(), recordedBy: z.string(), recordedAt: z.date() });
-export const paymentOutputSchema = paymentListItemSchema.omit({ status: true, admissionNumber: true, admissionName: true }).extend({ reversed: z.boolean(), allocations: createPaginatedOutputSchema(allocationOutputSchema), refunds: createPaginatedOutputSchema(refundOutputSchema.extend({ reversed: z.boolean() })) });
-
-export const paymentAllocationPreviewOutputSchema = z.object({
-  amountMinor: financeIntegerStringSchema,
-  currency: currencySchema,
-  allocationMode: z.enum(["proposal", "explicit", "unallocated"]),
-  readyToRecord: z.boolean(),
-  blockingIssues: z.array(z.object({ code: z.enum(["candidate_limit_exceeded"]), message: z.string() })),
-  allocationReviewHash: z.string().regex(/^[a-f0-9]{64}$/).nullable(),
-  allocations: z.array(z.object({
-    billId: z.string(),
-    billNumber: z.string(),
-    sessionId: z.string(),
-    sessionLabel: z.string(),
-    outstandingMinor: financeCumulativeIntegerStringSchema,
-    amountMinor: financeIntegerStringSchema,
-  })),
-  allocatedMinor: financeCumulativeIntegerStringSchema,
-  unallocatedCreditMinor: financeCumulativeIntegerStringSchema,
-  totalOutstandingMinor: financeCumulativeIntegerStringSchema,
-  requiresUnallocatedCreditConfirmation: z.boolean(),
-});
+export const paymentOutputSchema = paymentListItemSchema.omit({ admissionNumber: true, admissionName: true }).extend({ refunds: createPaginatedOutputSchema(refundOutputSchema.extend({ reversed: z.boolean() })) });
 export const recordedPaymentOutputSchema = paymentOutputSchema
-  .omit({ refundedMinor: true, reversed: true, refunds: true, allocations: true, timeZone: true })
-  .extend({ allocations: z.array(allocationOutputSchema) });
+  .omit({ refundedMinor: true, refundableMinor: true, reversed: true, status: true, refunds: true, timeZone: true });
 export const adjustmentOutputSchema = z.object({ id: z.string(), schoolId: z.string(), admissionId: z.string(), sessionId: z.string(), ledgerEntryId: z.string(), billId: z.string().nullable(), billLineId: z.string().nullable(), kind: z.enum(["discount", "waiver", "write_off", "debit_correction", "credit_correction"]), amountMinor: financeIntegerStringSchema, currency: currencySchema, reasonCode: z.string(), reasonNote: z.string(), calculationSnapshot: z.record(z.string(), z.unknown()), approvedBy: z.string().nullable(), idempotencyKey: z.string(), recordedBy: z.string(), recordedAt: z.date() });
 export const refundRecordOutputSchema = refundOutputSchema;
 export const reversalOutputSchema = z.object({ id: z.string(), schoolId: z.string(), admissionId: z.string(), sessionId: z.string(), sequence: financeIntegerStringSchema, type: z.literal("reversal"), direction: z.enum(["debit", "credit"]), amountMinor: financeIntegerStringSchema, currency: currencySchema, effectiveAt: z.date(), recordedAt: z.date(), recordedBy: z.string(), note: z.string().nullable(), reversalOfEntryId: z.string(), idempotencyKey: z.string() });

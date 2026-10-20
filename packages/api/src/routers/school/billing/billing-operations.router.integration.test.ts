@@ -1414,7 +1414,7 @@ describe("school billing operations", () => {
     ).rejects.toMatchObject({ code: "CONFLICT" });
   });
 
-  it("rejects one bill and its multi-member run atomically while one allocation is live", async () => {
+  it("preserves legacy allocation integrity while the public workflow no longer creates allocations", async () => {
     const secondAdmission = await createTestAdmission({ schoolId: scenario.school.id });
     await Promise.all([
       db

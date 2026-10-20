@@ -37,12 +37,10 @@ describe("immutable finance document contexts", () => {
       sessionId: scenario.activeSession.id,
       amountMinor: "12500",
       currency: "INR",
-      allocationMode: "unallocated",
       method: "cash",
       payerName: "Original payer",
       receivedAt: new Date("2026-10-02T10:00:00Z"),
       effectiveAt: new Date("2026-10-02T10:00:00Z"),
-      confirmUnallocatedCredit: true,
       idempotencyKey: createFinanceIdempotencyKey("document-old-receipt"),
     });
     const source = { documentType: "receipt" as const, sessionId: scenario.activeSession.id, transactions: [{ kind: "payment" as const, id: payment.id }] };
@@ -52,9 +50,9 @@ describe("immutable finance document contexts", () => {
     await db.delete(studentTable).where(eq(studentTable.id, scenario.activeStudent.id));
     await scenario.actors.accountant.client.school.recordPayment({
       schoolId: scenario.school.id, admissionId: scenario.admission.id, sessionId: scenario.activeSession.id,
-      amountMinor: "500", currency: "INR", allocationMode: "unallocated", method: "cash",
+      amountMinor: "500", currency: "INR", method: "cash",
       receivedAt: new Date("2026-10-03T10:00:00Z"), effectiveAt: new Date("2026-10-03T10:00:00Z"),
-      confirmUnallocatedCredit: true, idempotencyKey: createFinanceIdempotencyKey("document-later-payment"),
+      idempotencyKey: createFinanceIdempotencyKey("document-later-payment"),
     });
     const after = await buildFinanceDocumentContexts(db, scenario.school.id, source);
     const stable = (value: typeof before) => value.contexts.map(({ generatedAt: _generatedAt, ...context }) => context);
@@ -100,8 +98,8 @@ describe("immutable finance document contexts", () => {
     vi.setSystemTime(new Date("2026-10-20T06:00:00.000Z"));
     const post = (suffix: string, at: string) => scenario.actors.accountant.client.school.recordPayment({
       schoolId: scenario.school.id, admissionId: scenario.admission.id, sessionId: scenario.activeSession.id,
-      amountMinor: "100", currency: "INR", allocationMode: "unallocated" as const, method: "cash" as const,
-      receivedAt: new Date(at), effectiveAt: new Date(at), confirmUnallocatedCredit: true,
+      amountMinor: "100", currency: "INR", method: "cash" as const,
+      receivedAt: new Date(at), effectiveAt: new Date(at),
       idempotencyKey: createFinanceIdempotencyKey(suffix),
     });
     await post("statement-first", "2026-10-02T10:00:00Z");
@@ -147,9 +145,9 @@ describe("immutable finance document contexts", () => {
   it("enforces the public finance PDF lifecycle across role and tenant boundaries", async () => {
     const payment = await scenario.actors.accountant.client.school.recordPayment({
       schoolId: scenario.school.id, admissionId: scenario.admission.id, sessionId: scenario.activeSession.id,
-      amountMinor: "500", currency: "INR", allocationMode: "unallocated", method: "cash",
+      amountMinor: "500", currency: "INR", method: "cash",
       receivedAt: new Date("2026-10-02T10:00:00Z"), effectiveAt: new Date("2026-10-02T10:00:00Z"),
-      confirmUnallocatedCredit: true, idempotencyKey: createFinanceIdempotencyKey("receipt-lifecycle"),
+      idempotencyKey: createFinanceIdempotencyKey("receipt-lifecycle"),
     });
     const selected = await scenario.actors.accountant.client.school.selectMarketplaceTemplate({
       schoolId: scenario.school.id, documentType: "receipt", slug: "receipt-modern", expectedRevisionId: null,
@@ -214,9 +212,9 @@ describe("immutable finance document contexts", () => {
   it("generates semantically distinct refund and as-of statement PDFs on A4", async () => {
     const payment = await scenario.actors.accountant.client.school.recordPayment({
       schoolId: scenario.school.id, admissionId: scenario.admission.id, sessionId: scenario.activeSession.id,
-      amountMinor: "900", currency: "INR", allocationMode: "unallocated", method: "cash",
+      amountMinor: "900", currency: "INR", method: "cash",
       receivedAt: new Date("2026-10-02T10:00:00Z"), effectiveAt: new Date("2026-10-02T10:00:00Z"),
-      confirmUnallocatedCredit: true, idempotencyKey: createFinanceIdempotencyKey("pdf-refund-payment"),
+      idempotencyKey: createFinanceIdempotencyKey("pdf-refund-payment"),
     });
     const refund = await scenario.actors.accountant.client.school.recordRefund({
       schoolId: scenario.school.id, admissionId: scenario.admission.id, sessionId: scenario.activeSession.id,
@@ -249,9 +247,9 @@ describe("immutable finance document contexts", () => {
   it("rejects statement generation when a posting changes the reviewed cutoff", async () => {
     const post = (suffix: string) => scenario.actors.accountant.client.school.recordPayment({
       schoolId: scenario.school.id, admissionId: scenario.admission.id, sessionId: scenario.activeSession.id,
-      amountMinor: "100", currency: "INR", allocationMode: "unallocated" as const, method: "cash" as const,
+      amountMinor: "100", currency: "INR", method: "cash" as const,
       receivedAt: new Date("2026-10-02T10:00:00Z"), effectiveAt: new Date("2026-10-02T10:00:00Z"),
-      confirmUnallocatedCredit: true, idempotencyKey: createFinanceIdempotencyKey(suffix),
+      idempotencyKey: createFinanceIdempotencyKey(suffix),
     });
     await post("statement-stale-first");
     const selected = await scenario.actors.accountant.client.school.selectMarketplaceTemplate({ schoolId: scenario.school.id, documentType: "statement", slug: "statement-modern", expectedRevisionId: null });

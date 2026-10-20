@@ -228,8 +228,7 @@ Each legacy payment event is decomposed:
   reference in the migration manifest;
 - each imported payment persists a canonical command snapshot and SHA-256
   command hash covering amount, currency, accounting session, effective and
-  received times, allocation mode/explicit links, unallocated-credit
-  confirmation, method, reference, payer, and note; migration provenance is
+  received times, method, reference, payer, and note; migration provenance is
   explicit and is never reconstructed from later mutable bill state;
 - a zero cash or zero discount component creates no zero-valued posting;
 - negative or internally contradictory components are exceptions.
@@ -239,23 +238,23 @@ code that says the reason was unavailable in the legacy source; they must not
 pretend to have a school-supplied rationale. Waivers, scholarships, and
 write-offs are not inferred from a generic legacy discount.
 
-## Allocations, overpayment, and unallocated credit
+## Account-credit payments and overpayment
 
-Legacy payments generally do not contain trustworthy bill allocations.
-Account-wide outstanding totals do not prove which bill was settled. Therefore:
+Target payments are intentionally not linked to individual bills. Account-wide
+balances do not prove which bill was settled, so the importer must not manufacture
+that relationship. Therefore:
 
-- import explicit source allocations only when the source contains a valid
-  admission-, currency-, and bill-matching relationship;
-- otherwise retain the payment as unallocated admission credit;
-- do not retroactively apply the new oldest-issued-first proposal unless an
-  operator approves a separate allocation plan produced in the dry run;
-- imported allocation totals may not exceed either payment amount or target
-  bill outstanding;
-- overpayment remains labelled unallocated credit and must not be displayed as
-  a negative amount due.
+- import every valid cash event as an admission-level account credit;
+- do not populate `finance_payment_allocation`, even when a legacy source has a
+  payment-to-bill hint; preserve that hint only in migration provenance when it
+  is needed for audit;
+- calculate due or credit solely from admission ledger debits minus credits;
+- display overpayment as positive account credit, not as a negative amount due;
+- keep bills as independent immutable charge documents whose net charge changes
+  only through bill-specific adjustments or reversal.
 
-Reconciliation reports separate billed debits, allocated cash, unallocated
-cash, discounts/waivers, refunds, and net admission balance.
+Reconciliation reports separate billed debits, payment cash, discounts/waivers,
+refunds, and net admission balance.
 
 ## Refund and reversal limitations
 
@@ -353,8 +352,8 @@ Reconcile, per school/admission/session/currency and in aggregate:
 - discount, waiver, and write-off totals separately;
 - refund totals;
 - debit and credit reversal totals;
-- allocated versus unallocated payment amounts;
-- bill outstanding derived from allocations and bill-specific credits;
+- payment and refund amounts by admission account;
+- bill net charges derived only from bill-specific credits/debits;
 - admission balance as debits minus credits;
 - entry counts, first/last effective time, and target last sequence;
 - source event totals versus normalized target fact totals;
@@ -432,7 +431,7 @@ for:
 - duplicate/forced billing periods and duplicate human numbers;
 - malformed bills or line totals not matching their header;
 - payment/discount decomposition failures;
-- invalid/over-limit allocations, refunds, or reversals;
+- invalid/over-limit refunds or reversals;
 - missing/ambiguous timestamps and ordering ties;
 - source-event versus legacy-projection variance;
 - target-ledger versus rebuilt-projection variance;
@@ -460,8 +459,8 @@ The future importer is acceptable only when all applicable scenarios pass:
    matching ordered lines under the correct admission/session/tenant.
 6. A legacy payment with embedded discount becomes two independent credit facts
    whose sum matches the source components.
-7. A payment without authoritative bill linkage remains unallocated credit;
-   no allocation is inferred from account outstanding.
+7. Every payment becomes admission-level account credit; no bill linkage is
+   imported or inferred from account balance.
 8. Duplicate forced-period bills appear in an exception/supplemental decision
    report rather than being silently dropped or posted as regular duplicates.
 9. Unsupported negative/refund/reversal rows are blocked; supported explicit
