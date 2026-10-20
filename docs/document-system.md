@@ -46,6 +46,10 @@ Do not infer one surface's state from another fact. In particular:
 | `/school/:schoolId/settings/templates/id-card` | Student-ID template editor |
 | `/school/:schoolId/settings/templates/admit-card` | Admit-card template editor |
 | `/school/:schoolId/settings/templates/timetable` | Examination-wide timetable template editor |
+| `/school/:schoolId/settings/templates/bill` | Finance bill template editor |
+| `/school/:schoolId/settings/templates/receipt` | Payment/refund receipt template editor |
+| `/school/:schoolId/settings/templates/statement` | Admission account-statement template editor |
+| `/school/:schoolId/sessions/:sessionId/billing/documents` | Finance-document history, downloads, and retryable deletion |
 | `/school/:schoolId/marketplace/templates?type=:documentType` | Marketplace filtered to one document type |
 | `/school/:schoolId/marketplace/templates/:documentType/:slug` | Dedicated marketplace preview and import action |
 
@@ -194,11 +198,11 @@ same boundary through server middleware.
 | `selectMarketplaceTemplate` | Import and select a catalog design | `MANAGE_DOCUMENT_TEMPLATES` |
 | `saveDocumentTemplate` | Save and select a custom revision | `MANAGE_DOCUMENT_TEMPLATES` |
 | `previewDocumentTemplate` | Render source with synthetic data; also powers read-only selected-template previews | `READ_DOCUMENT_TEMPLATES` |
-| `previewDocument` | Render authorized live school data without persistence | `GENERATE_DOCUMENTS` plus source reads |
-| `generateDocument` | Render, convert, persist, and return a PDF artifact | `GENERATE_DOCUMENTS` plus source reads |
-| `listDocumentArtifacts` | Paginated PDF history | `READ_DOCUMENT_ARTIFACTS` |
-| `getDocumentDownload` | Issue a fresh short-lived signed URL | `READ_DOCUMENT_ARTIFACTS` |
-| `deleteDocumentArtifact` | Retry-safe PDF deletion | `DELETE_DOCUMENT_ARTIFACTS` |
+| `previewDocument` | Render authorized data without persistence | Academic: `GENERATE_DOCUMENTS`; finance: `GENERATE_FINANCE_DOCUMENTS` |
+| `generateDocument` | Render, convert, persist, and return a PDF artifact | Academic: `GENERATE_DOCUMENTS`; finance: `GENERATE_FINANCE_DOCUMENTS` |
+| `listDocumentArtifacts` | Paginated PDF history | Type-scoped academic or finance artifact read action |
+| `getDocumentDownload` | Issue a fresh short-lived signed URL | Type-aware academic or finance artifact read action |
+| `deleteDocumentArtifact` | Retry-safe PDF deletion | Type-aware academic or finance artifact delete action |
 
 Generation also requires the independent permissions needed for its source data.
 For example, visibility of a Generate button does not grant access to examination
@@ -240,8 +244,8 @@ the object and row; storage failure leaves a visible record that can be retried.
 
 ## Document source rules
 
-The supported `DocumentType` values are `report_card`, `id_card`, `admit_card`, and
-`timetable`. Their source DTOs are a strict discriminated union. Do not add optional
+The supported `DocumentType` values are `report_card`, `id_card`, `admit_card`,
+`timetable`, `bill`, `receipt`, and `statement`. Their source DTOs are a strict discriminated union. Do not add optional
 fields to a common base merely because two types happen to use the same value today.
 
 - Report cards can target a complete examination, one class, or up to 500 explicit
@@ -252,6 +256,20 @@ fields to a common base merely because two types happen to use the same value to
   within a class. Each card combines identity with that student's class schedule.
 - Timetables are examination-wide. Their source contains only school/session,
   document type, and examination slug. It never accepts `classId`.
+- Bills identify immutable posted bill facts. Receipts identify an explicit payment
+  or refund and use the identity/session snapshot captured when the payment posted.
+- Statements accept a session, admissions, and a real local through-date. The
+  server derives currency and IANA time zone from that session's complete finance
+  configuration, validates the session/future boundaries, and records one
+  high-water sequence per admission/currency. Generation must present the hash of
+  the reviewed cutoff so intervening postings cannot silently change the PDF.
+
+Finance rendering must not join current admission, enrollment, or classroom
+records. Identity comes from the posting-time ledger/payment/bill snapshot bounded
+by the document cutoff. Session finance configuration is read only to derive the
+server-owned currency/time-zone scope, which is included in statement review
+provenance. A legacy fact without the required immutable snapshot fails explicitly
+rather than inventing an empty or zero value.
 
 The timetable rule is enforced in all three layers:
 

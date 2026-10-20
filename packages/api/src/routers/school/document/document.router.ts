@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { alias } from "drizzle-orm/pg-core";
-import { and, asc, count, desc, eq, ilike, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, ilike, inArray, notInArray, sql } from "drizzle-orm";
 import { generateId } from "@campuspilot/db/id";
 import type { Database } from "@campuspilot/db";
 import {
@@ -11,7 +11,6 @@ import { schoolTable } from "@campuspilot/db/schema/school";
 import { SCHOOL_ACTIONS } from "@campuspilot/opa/policies/school";
 import { o, protectedProcedure } from "../../../index";
 import { rpcError, toRpcError } from "../../../errors";
-import { requireSchoolPermission } from "../../../permissions/school";
 import { assertPermission } from "../../../permissions/authorization";
 import {
   createNextPageCursor,
@@ -36,6 +35,50 @@ import {
   readDocumentTemplate,
 } from "./document.storage";
 import { buildDocumentContexts } from "./document.context";
+import { buildFinanceDocumentContexts } from "./finance-document.context";
+
+const FINANCE_DOCUMENT_TYPES = new Set<dto.DocumentType>(["bill", "receipt", "statement"]);
+const isFinanceDocument = (type: dto.DocumentType) => FINANCE_DOCUMENT_TYPES.has(type);
+
+function requireDocumentTypePermission(
+  academicAction: Parameters<typeof assertPermission>[1]["action"],
+  financeAction: Parameters<typeof assertPermission>[1]["action"],
+) {
+  return o.middleware<Record<never, never>, { schoolId: string; documentType: dto.DocumentType }>(
+    async ({ context, next, signal }, input) => {
+      await assertPermission(context, {
+        action: isFinanceDocument(input.documentType) ? financeAction : academicAction,
+        resource: { kind: "school", schoolId: input.schoolId },
+      }, signal);
+      return next();
+    },
+  );
+}
+function requireSourceTypePermission(
+  academicAction: Parameters<typeof assertPermission>[1]["action"],
+  financeAction: Parameters<typeof assertPermission>[1]["action"],
+) {
+  return o.middleware<Record<never, never>, z.infer<typeof dto.generateDocumentSchema>>(
+    async ({ context, next, signal }, input) => {
+      await assertPermission(context, {
+        action: isFinanceDocument(input.source.documentType) ? financeAction : academicAction,
+        resource: { kind: "school", schoolId: input.schoolId },
+      }, signal);
+      return next();
+    },
+  );
+}
+const requireArtifactListPermission = o.middleware<Record<never, never>, z.infer<typeof dto.listArtifactsSchema>>(
+  async ({ context, next, signal }, input) => {
+    const finance = input.filters.documentDomain === "finance"
+      || Boolean(input.filters.documentType && isFinanceDocument(input.filters.documentType));
+    await assertPermission(context, {
+      action: finance ? SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_ARTIFACTS : SCHOOL_ACTIONS.READ_DOCUMENT_ARTIFACTS,
+      resource: { kind: "school", schoolId: input.schoolId },
+    }, signal);
+    return next();
+  },
+);
 
 const route = (summary: string, description: string) => ({
   summary,
@@ -173,6 +216,14 @@ const requireSourcePermissions = o.middleware<
   Record<never, never>,
   z.infer<typeof dto.generateDocumentSchema>
 >(async ({ context, next, signal }, input) => {
+  if (isFinanceDocument(input.source.documentType)) {
+    for (const action of [
+      SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_TEMPLATES,
+      SCHOOL_ACTIONS.READ_SESSION_FINANCE,
+      SCHOOL_ACTIONS.READ_ADMISSION_LEDGER,
+    ]) await assertPermission(context, { action, resource: { kind: "school", schoolId: input.schoolId } }, signal);
+    return next();
+  }
   const actions =
     input.source.documentType === "timetable"
       ? [SCHOOL_ACTIONS.READ_EXAM_TIMETABLE, SCHOOL_ACTIONS.READ_EXAMS]
@@ -212,18 +263,18 @@ async function renderSelection(
     { schoolId: input.schoolId, documentType: input.source.documentType },
     input.templateRevisionId,
   );
+  if (isFinanceDocument(input.source.documentType)) {
+    const data = await db.transaction(
+      (tx) => buildFinanceDocumentContexts(tx, input.schoolId, input.source as Extract<dto.DocumentSource, { documentType: "bill" | "receipt" | "statement" }>),
+      { isolationLevel: "repeatable read", accessMode: "read only" },
+    );
+    return { ...data, studentIds: [] as string[], recipientCount: data.contexts.length, warnings: [] as string[], template, html: combineDocuments(data.contexts.map((context) => renderDocument(template.content, context)), input.source.documentType) };
+  }
   const data = await db.transaction(
-    (tx) => buildDocumentContexts(tx, input.schoolId, input.source),
+    (tx) => buildDocumentContexts(tx, input.schoolId, input.source as Exclude<dto.DocumentSource, { documentType: "bill" | "receipt" | "statement" }>),
     { isolationLevel: "repeatable read", accessMode: "read only" },
   );
-  const documents = data.contexts.map((context) =>
-    renderDocument(template.content, context),
-  );
-  return {
-    ...data,
-    template,
-    html: combineDocuments(documents, input.source.documentType),
-  };
+  return { ...data, recipientCount: data.studentIds.length, financeSource: null, reviewHash: null, template, html: combineDocuments(data.contexts.map((context) => renderDocument(template.content, context)), input.source.documentType) };
 }
 export const schoolDocumentRouter = {
   listMarketplaceTemplates: protectedProcedure
@@ -234,7 +285,7 @@ export const schoolDocumentRouter = {
       ),
     )
     .input(dto.listMarketplaceSchema)
-    .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES))
+    .use(requireDocumentTypePermission(SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES, SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_TEMPLATES))
     .output(dto.listMarketplaceOutputSchema)
     .handler(async ({ input }) => {
       const items = DOCUMENT_MARKETPLACE.filter(
@@ -257,7 +308,7 @@ export const schoolDocumentRouter = {
       ),
     )
     .input(dto.templateScopeSchema.extend({ slug: z.string().min(1).max(100) }))
-    .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES))
+    .use(requireDocumentTypePermission(SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES, SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_TEMPLATES))
     .output(
       dto.marketplaceItemSchema.extend({
         content: z.string(),
@@ -284,7 +335,7 @@ export const schoolDocumentRouter = {
       ),
     )
     .input(dto.templateScopeSchema)
-    .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES))
+    .use(requireDocumentTypePermission(SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES, SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_TEMPLATES))
     .output(dto.activeTemplateSchema.nullable())
     .handler(async ({ context, input }) => {
       try {
@@ -313,7 +364,7 @@ export const schoolDocumentRouter = {
       ),
     )
     .input(dto.selectTemplateSchema)
-    .use(requireSchoolPermission(SCHOOL_ACTIONS.MANAGE_DOCUMENT_TEMPLATES))
+    .use(requireDocumentTypePermission(SCHOOL_ACTIONS.MANAGE_DOCUMENT_TEMPLATES, SCHOOL_ACTIONS.MANAGE_FINANCE_DOCUMENT_TEMPLATES))
     .output(dto.activeTemplateSchema)
     .handler(async ({ context, input }) => {
       try {
@@ -339,7 +390,7 @@ export const schoolDocumentRouter = {
       ),
     )
     .input(dto.saveTemplateSchema)
-    .use(requireSchoolPermission(SCHOOL_ACTIONS.MANAGE_DOCUMENT_TEMPLATES))
+    .use(requireDocumentTypePermission(SCHOOL_ACTIONS.MANAGE_DOCUMENT_TEMPLATES, SCHOOL_ACTIONS.MANAGE_FINANCE_DOCUMENT_TEMPLATES))
     .output(dto.activeTemplateSchema)
     .handler(async ({ context, input }) => {
       try {
@@ -361,7 +412,7 @@ export const schoolDocumentRouter = {
       ),
     )
     .input(dto.previewTemplateSchema)
-    .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES))
+    .use(requireDocumentTypePermission(SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES, SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_TEMPLATES))
     .output(z.object({ html: z.string(), contextHelp: z.string() }))
     .handler(async ({ input }) => ({
       html: renderDocument(input.content, SAMPLE_DOCUMENT_CONTEXT),
@@ -375,7 +426,7 @@ export const schoolDocumentRouter = {
       ),
     )
     .input(dto.generateDocumentSchema)
-    .use(requireSchoolPermission(SCHOOL_ACTIONS.GENERATE_DOCUMENTS))
+    .use(requireSourceTypePermission(SCHOOL_ACTIONS.GENERATE_DOCUMENTS, SCHOOL_ACTIONS.GENERATE_FINANCE_DOCUMENTS))
     .use(requireSourcePermissions)
     .output(dto.previewOutputSchema)
     .handler(async ({ context, input }) => {
@@ -383,8 +434,9 @@ export const schoolDocumentRouter = {
         const data = await renderSelection(context.db, input);
         return {
           html: data.html,
-          studentCount: data.studentIds.length,
+          studentCount: data.recipientCount,
           warnings: data.warnings,
+          reviewHash: data.reviewHash,
         };
       } catch (error) {
         throw toRpcError(error);
@@ -398,7 +450,7 @@ export const schoolDocumentRouter = {
       ),
     )
     .input(dto.generateDocumentSchema)
-    .use(requireSchoolPermission(SCHOOL_ACTIONS.GENERATE_DOCUMENTS))
+    .use(requireSourceTypePermission(SCHOOL_ACTIONS.GENERATE_DOCUMENTS, SCHOOL_ACTIONS.GENERATE_FINANCE_DOCUMENTS))
     .use(requireSourcePermissions)
     .output(
       z.object({
@@ -409,6 +461,12 @@ export const schoolDocumentRouter = {
     .handler(async ({ context, input, signal }) => {
       try {
         const data = await renderSelection(context.db, input);
+        if (input.source.documentType === "statement") {
+          if (!input.source.expectedReviewHash)
+            throw rpcError.badRequest("Preview the statement before generating it.");
+          if (input.source.expectedReviewHash !== data.reviewHash)
+            throw rpcError.conflict("The statement changed after preview. Preview it again before generating.");
+        }
         const bytes = await convertDocumentPdf(
           data.html,
           input.source.documentType,
@@ -432,6 +490,7 @@ export const schoolDocumentRouter = {
               "classId" in input.source ? (input.source.classId ?? null) : null,
             studentIds: data.studentIds,
             studentCount: data.studentIds.length,
+            financeSource: data.financeSource,
             generationOptions:
               input.source.documentType === "report_card"
                 ? {
@@ -457,7 +516,7 @@ export const schoolDocumentRouter = {
       ),
     )
     .input(dto.listArtifactsSchema)
-    .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_DOCUMENT_ARTIFACTS))
+    .use(requireArtifactListPermission)
     .output(dto.listArtifactsOutputSchema)
     .handler(async ({ context, input }) => {
       try {
@@ -467,12 +526,23 @@ export const schoolDocumentRouter = {
           eq(artifactTable.kind, "pdf"),
           f.documentType
             ? eq(artifactTable.documentType, f.documentType)
-            : undefined,
+            : f.documentDomain === "finance"
+              ? inArray(artifactTable.documentType, ["bill", "receipt", "statement"])
+              : notInArray(artifactTable.documentType, ["bill", "receipt", "statement"]),
           f.sessionId ? eq(artifactTable.sessionId, f.sessionId) : undefined,
           f.classId ? eq(artifactTable.classId, f.classId) : undefined,
           f.examSlug ? eq(artifactTable.examSlug, f.examSlug) : undefined,
           f.studentId
             ? sql`${artifactTable.studentIds} @> ${JSON.stringify([f.studentId])}::jsonb`
+            : undefined,
+          f.admissionId
+            ? sql`(${artifactTable.financeSource} -> 'admissionIds' @> ${JSON.stringify([f.admissionId])}::jsonb or exists (select 1 from jsonb_array_elements(coalesce(${artifactTable.financeSource} -> 'accounts', '[]'::jsonb)) account where account ->> 'admissionId' = ${f.admissionId}))`
+            : undefined,
+          f.billId
+            ? sql`${artifactTable.financeSource} -> 'billIds' @> ${JSON.stringify([f.billId])}::jsonb`
+            : undefined,
+          f.paymentId
+            ? sql`exists (select 1 from jsonb_array_elements(coalesce(${artifactTable.financeSource} -> 'transactions', '[]'::jsonb)) transaction where transaction ->> 'kind' = 'payment' and transaction ->> 'id' = ${f.paymentId})`
             : undefined,
           input.searchQuery
             ? ilike(
@@ -531,7 +601,7 @@ export const schoolDocumentRouter = {
       ),
     )
     .input(dto.artifactScopeSchema)
-    .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_DOCUMENT_ARTIFACTS))
+    .use(requireDocumentTypePermission(SCHOOL_ACTIONS.READ_DOCUMENT_ARTIFACTS, SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_ARTIFACTS))
     .output(z.object({ url: z.url(), expiresIn: z.number().int() }))
     .handler(async ({ context, input }) => {
       try {
@@ -543,10 +613,15 @@ export const schoolDocumentRouter = {
               eq(artifactTable.id, input.artifactId),
               eq(artifactTable.schoolId, input.schoolId),
               eq(artifactTable.kind, "pdf"),
+              eq(artifactTable.documentType, input.documentType),
             ),
           )
           .limit(1);
         if (!row) throw rpcError.notFound("Document artifact");
+        await assertPermission(context, {
+          action: isFinanceDocument(row.documentType) ? SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_ARTIFACTS : SCHOOL_ACTIONS.READ_DOCUMENT_ARTIFACTS,
+          resource: { kind: "school", schoolId: input.schoolId },
+        });
         if (row.status !== "ready")
           throw rpcError.conflict(
             "This document is being deleted. Retry deletion to finish removing it.",
@@ -567,7 +642,7 @@ export const schoolDocumentRouter = {
       ),
     )
     .input(dto.artifactScopeSchema)
-    .use(requireSchoolPermission(SCHOOL_ACTIONS.DELETE_DOCUMENT_ARTIFACTS))
+    .use(requireDocumentTypePermission(SCHOOL_ACTIONS.DELETE_DOCUMENT_ARTIFACTS, SCHOOL_ACTIONS.DELETE_FINANCE_DOCUMENT_ARTIFACTS))
     .output(z.object({ deleted: z.literal(true) }))
     .handler(async ({ context, input }) => {
       try {
@@ -575,12 +650,15 @@ export const schoolDocumentRouter = {
           eq(artifactTable.id, input.artifactId),
           eq(artifactTable.schoolId, input.schoolId),
           eq(artifactTable.kind, "pdf"),
+          eq(artifactTable.documentType, input.documentType),
         );
-        const [row] = await context.db
-          .update(artifactTable)
-          .set({ status: "deleting" })
-          .where(where)
-          .returning();
+        const [existing] = await context.db.select().from(artifactTable).where(where).limit(1);
+        if (!existing) throw rpcError.notFound("Document artifact");
+        await assertPermission(context, {
+          action: isFinanceDocument(existing.documentType) ? SCHOOL_ACTIONS.DELETE_FINANCE_DOCUMENT_ARTIFACTS : SCHOOL_ACTIONS.DELETE_DOCUMENT_ARTIFACTS,
+          resource: { kind: "school", schoolId: input.schoolId },
+        });
+        const [row] = await context.db.update(artifactTable).set({ status: "deleting" }).where(where).returning();
         if (!row) throw rpcError.notFound("Document artifact");
         await deleteDocumentObject(row.s3Key);
         await context.db.delete(artifactTable).where(where);

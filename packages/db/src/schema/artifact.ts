@@ -17,6 +17,9 @@ export const documentTypeEnum = pgEnum("document_type", [
   "id_card",
   "admit_card",
   "timetable",
+  "bill",
+  "receipt",
+  "statement",
 ]);
 export const artifactKindEnum = pgEnum("artifact_kind", ["template", "pdf"]);
 export const artifactStatusEnum = pgEnum("artifact_status", [
@@ -56,6 +59,16 @@ export const artifactTable = pgTable(
       .notNull()
       .default({}),
     studentCount: integer("student_count").notNull().default(0),
+    /** Finance source IDs and the exact as-of sequence are historical
+     * provenance, not foreign keys: posted facts and generated PDFs must
+     * remain explainable after operational records are archived. */
+    financeSource: jsonb("finance_source")
+      .$type<
+        | { kind: "bill"; admissionIds: string[]; billIds: string[]; billRunId: string | null }
+        | { kind: "receipt"; admissionIds: string[]; transactions: Array<{ kind: "payment" | "refund"; id: string }> }
+        | { kind: "statement"; currency: string; throughDate: string; timeZone: string; accounts: Array<{ admissionId: string; highWaterSequence: string }> }
+        | null
+      >(),
     createdBy: text("created_by").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()

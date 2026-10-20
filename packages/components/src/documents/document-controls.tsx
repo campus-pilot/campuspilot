@@ -15,9 +15,12 @@ import {
   CalendarDays,
   GraduationCap,
   ScanEye,
+  ReceiptText,
+  CreditCard,
+  ScrollText,
 } from "lucide-react";
 export type DocumentKind =
-  "report_card" | "id_card" | "admit_card" | "timetable";
+  "report_card" | "id_card" | "admit_card" | "timetable" | "bill" | "receipt" | "statement";
 export const documentKinds = [
   {
     value: "report_card",
@@ -43,6 +46,12 @@ export const documentKinds = [
     description: "A clear examination schedule",
     icon: CalendarDays,
   },
+] as const;
+export const allDocumentKinds = [
+  ...documentKinds,
+  { value: "bill", label: "Bills", description: "Posted fee charges", icon: CreditCard },
+  { value: "receipt", label: "Receipts", description: "Payments and refunds", icon: ReceiptText },
+  { value: "statement", label: "Statements", description: "Account activity as of a date", icon: ScrollText },
 ] as const;
 export function DocumentButton(props: ComponentProps<typeof Button>) {
   return <Button {...props} type={props.type ?? "button"} />;
@@ -78,9 +87,11 @@ export function DocumentKindPicker({
 export function DocumentKindCards({
   value,
   onChange,
+  items = documentKinds,
 }: {
   value: DocumentKind;
   onChange: (value: DocumentKind) => void;
+  items?: readonly (typeof allDocumentKinds)[number][];
 }) {
   return (
     <div
@@ -88,7 +99,7 @@ export function DocumentKindCards({
       aria-label="Document type"
       className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"
     >
-      {documentKinds.map((item) => {
+      {items.map((item) => {
         const selected = item.value === value;
         return (
           <button

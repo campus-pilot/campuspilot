@@ -192,7 +192,7 @@ describe('document templates, generation, and artifact lifecycle', () => {
           content: '<p>{{student.name}}</p>',
         }),
       () => c.school.listDocumentArtifacts({ schoolId }),
-      () => c.school.getDocumentDownload({ schoolId, artifactId: 'unknown' }),
+      () => c.school.getDocumentDownload({ schoolId, artifactId: 'unknown', documentType: 'id_card' }),
       () => c.school.selectMarketplaceTemplate(mutation),
       () =>
         c.school.saveDocumentTemplate({
@@ -214,7 +214,7 @@ describe('document templates, generation, and artifact lifecycle', () => {
           templateRevisionId: 'unknown',
         }),
       () =>
-        c.school.deleteDocumentArtifact({ schoolId, artifactId: 'unknown' }),
+        c.school.deleteDocumentArtifact({ schoolId, artifactId: 'unknown', documentType: 'id_card' }),
     ];
     for (const [client, code] of [
       [createTestClient(null), 'UNAUTHORIZED'],
@@ -402,6 +402,7 @@ describe('document templates, generation, and artifact lifecycle', () => {
       const link = await manager.school.getDocumentDownload({
         schoolId,
         artifactId: row!.id,
+        documentType,
       });
       const response = await fetch(link.url);
       expect(response.ok).toBe(true);
@@ -512,6 +513,7 @@ describe('document templates, generation, and artifact lifecycle', () => {
       outsider.school.getDocumentDownload({
         schoolId,
         artifactId: artifact.id,
+        documentType: artifact.documentType,
       }),
     ).rejects.toMatchObject({ code: 'FORBIDDEN' });
     const otherSchool = (await createTestSchool()).id;
@@ -523,6 +525,7 @@ describe('document templates, generation, and artifact lifecycle', () => {
       otherManager.school.getDocumentDownload({
         schoolId: otherSchool,
         artifactId: artifact.id,
+        documentType: artifact.documentType,
       }),
     ).rejects.toMatchObject({ code: 'NOT_FOUND' });
     const [row] = await db
@@ -532,6 +535,7 @@ describe('document templates, generation, and artifact lifecycle', () => {
     await manager.school.deleteDocumentArtifact({
       schoolId,
       artifactId: artifact.id,
+      documentType: artifact.documentType,
     });
     expect(
       await db
@@ -545,12 +549,13 @@ describe('document templates, generation, and artifact lifecycle', () => {
       ),
     ).rejects.toBeDefined();
     await expect(
-      manager.school.getDocumentDownload({ schoolId, artifactId: artifact.id }),
+      manager.school.getDocumentDownload({ schoolId, artifactId: artifact.id, documentType: artifact.documentType }),
     ).rejects.toMatchObject({ code: 'NOT_FOUND' });
     await expect(
       manager.school.deleteDocumentArtifact({
         schoolId,
         artifactId: artifact.id,
+        documentType: artifact.documentType,
       }),
     ).rejects.toMatchObject({ code: 'NOT_FOUND' });
   });
@@ -561,7 +566,7 @@ describe('document templates, generation, and artifact lifecycle', () => {
     );
     expect(html).toContain('{{unknown helper}}');
     expect(documentGrade(20, { a: { label: 'A', minScore: 80 } })).toBe('—');
-    expect(DOCUMENT_MARKETPLACE).toHaveLength(16);
+    expect(DOCUMENT_MARKETPLACE).toHaveLength(28);
   });
   it('cleans losing concurrent uploads and preserves exactly one active revision', async () => {
     const current = await manager.school.getActiveDocumentTemplate({
@@ -635,6 +640,7 @@ describe('document templates, generation, and artifact lifecycle', () => {
         manager.school.deleteDocumentArtifact({
           schoolId,
           artifactId: artifact.id,
+          documentType: artifact.documentType,
         }),
       ).rejects.toMatchObject({ code: 'INTERNAL_SERVER_ERROR' });
       const [row] = await db
@@ -646,6 +652,7 @@ describe('document templates, generation, and artifact lifecycle', () => {
         manager.school.getDocumentDownload({
           schoolId,
           artifactId: artifact.id,
+          documentType: artifact.documentType,
         }),
       ).rejects.toMatchObject({ code: 'CONFLICT' });
       expect(
@@ -659,6 +666,7 @@ describe('document templates, generation, and artifact lifecycle', () => {
     await manager.school.deleteDocumentArtifact({
       schoolId,
       artifactId: artifact.id,
+      documentType: artifact.documentType,
     });
     expect(
       await db

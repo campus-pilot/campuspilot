@@ -43,6 +43,7 @@ import {
   DocumentPermission,
   DocumentReadError,
   SCHOOL_ACTIONS,
+  templateManageAction,
   useDocumentCache,
   type DocumentTemplateScope,
 } from './document-common';
@@ -69,6 +70,9 @@ const TEMPLATE_TITLES: Record<DocumentTemplateScope['documentType'], string> = {
   id_card: 'Student ID Cards Template',
   admit_card: 'Admit Cards Template',
   timetable: 'Exam Timetable Template',
+  bill: 'Bill Template',
+  receipt: 'Receipt Template',
+  statement: 'Account Statement Template',
 };
 
 const TEMPLATE_DIMENSIONS: Record<
@@ -79,6 +83,9 @@ const TEMPLATE_DIMENSIONS: Record<
   id_card: { width: 85.6, height: 53.98 },
   admit_card: { width: 210, height: 148.5 },
   timetable: { width: 297, height: 210 },
+  bill: { width: 210, height: 297 },
+  receipt: { width: 210, height: 297 },
+  statement: { width: 210, height: 297 },
 };
 
 const DESKTOP_WORKSPACE_QUERY = '(min-width: 1280px)';
@@ -152,7 +159,7 @@ export function DocumentTemplates({ scope }: { scope: DocumentTemplateScope }) {
   return (
     <DocumentPermission
       schoolId={scope.schoolId}
-      action={SCHOOL_ACTIONS.MANAGE_DOCUMENT_TEMPLATES}
+      action={templateManageAction(scope.documentType)}
       fallback={<SavedTemplatePreview scope={scope} template={active.data} />}
     >
       <TemplateEditor

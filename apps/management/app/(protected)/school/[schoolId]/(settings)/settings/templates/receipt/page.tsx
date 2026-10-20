@@ -1,7 +1,6 @@
-import { ReceiptText } from 'lucide-react';
-import { ModulePlaceholder } from '@/components/module-placeholder';
+import { DocumentTemplateSettings } from '@/components/documents/document-template-settings';
 
-export default function ReceiptTemplatePage() {
-  return <ModulePlaceholder icon={ReceiptText} title="Receipt template" description="Payment receipt templates will be configured here." />;
+export default async function ReceiptTemplatePage({ params }: { params: Promise<{ schoolId: string }> }) {
+  const { schoolId } = await params;
+  return <DocumentTemplateSettings schoolId={schoolId} documentType="receipt" />;
 }
-

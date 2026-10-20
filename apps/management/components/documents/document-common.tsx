@@ -19,6 +19,16 @@ export type DocumentTemplateScope = {
   schoolId: string;
   documentType: DocumentType;
 };
+export const isFinanceDocumentType = (type: DocumentType) =>
+  type === 'bill' || type === 'receipt' || type === 'statement';
+export const templateReadAction = (type: DocumentType) =>
+  isFinanceDocumentType(type)
+    ? SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_TEMPLATES
+    : SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES;
+export const templateManageAction = (type: DocumentType) =>
+  isFinanceDocumentType(type)
+    ? SCHOOL_ACTIONS.MANAGE_FINANCE_DOCUMENT_TEMPLATES
+    : SCHOOL_ACTIONS.MANAGE_DOCUMENT_TEMPLATES;
 type SchoolDocumentAction = Extract<
   PermissionCheck,
   { resource: { kind: 'school' } }

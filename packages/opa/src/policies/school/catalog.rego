@@ -188,6 +188,12 @@ actions contains {
   "resourceKind": "school",
 } if { true }
 
+actions contains { "id": "school.finance.document.templates.read", "key": "READ_FINANCE_DOCUMENT_TEMPLATES", "resourceKind": "school" } if { true }
+actions contains { "id": "school.finance.document.templates.manage", "key": "MANAGE_FINANCE_DOCUMENT_TEMPLATES", "resourceKind": "school" } if { true }
+actions contains { "id": "school.finance.document.generate", "key": "GENERATE_FINANCE_DOCUMENTS", "resourceKind": "school" } if { true }
+actions contains { "id": "school.finance.document.artifacts.read", "key": "READ_FINANCE_DOCUMENT_ARTIFACTS", "resourceKind": "school" } if { true }
+actions contains { "id": "school.finance.document.artifacts.delete", "key": "DELETE_FINANCE_DOCUMENT_ARTIFACTS", "resourceKind": "school" } if { true }
+
 actions contains {
   "id": "school.class.list",
   "key": "LIST_CLASSES",

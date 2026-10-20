@@ -17,6 +17,8 @@ the backend contract for data, persistence, rendering, and authorization.
 | `document.storage.ts` | Immutable S3 persistence, image validation/embedding, and compensation |
 | `document.router.integration.test.ts` | Procedure, authorization, persistence, conflict, storage, and artifact lifecycle coverage |
 | `document-exam.integration.test.ts` | Examination context, approval, schedule, rendering, PDF size/page, and legacy compatibility coverage |
+| `finance-document.context.ts` | Immutable bill, payment/refund receipt, and cutoff statement contexts |
+| `finance-document.integration.test.ts` | Finance history, authorization, cutoff, and historical-regeneration coverage |
 
 Keep API operations in this package and expose them through the school router.
 Binary conversion and object storage remain server concerns; the management app
@@ -30,6 +32,14 @@ Documents are available at `/school/:schoolId/sessions/:sessionId/documents` in 
 - Student ID cards use session enrollment plus admission identity/photo data, imposed as 86 × 54 mm cards on A4 sheets.
 - Admit cards can target one student, one class or every class in the examination plan. Each card includes student identity and that student's class schedule. Missing class schedules produce explicit preview warnings.
 - Timetables always render every scheduled classroom, with all subjects in a shared slot preserved, on landscape A4. The API rejects a class-scoped timetable source.
+- Bills render posted bill and line snapshots, including complete billing-run
+  exports read in bounded database chunks. Receipts render a payment or refund
+  from the payment's posting-time identity/session snapshot and label returned
+  funds explicitly. Statements derive currency and IANA time zone from the
+  selected session configuration, validate the local through-date, and use
+  posting-time ledger identity plus per-admission high-water sequences protected
+  by the preview review hash. Statement rows show the current month's opening
+  balance, period activity, human document references, and closing balance.
 
 Exports support a whole examination, one class, or up to 500 explicitly selected students. Every export is limited to 500 students. Historical sessions remain exportable. Only registered admissions are eligible. Session, class, exam, student, and tenant relationships are validated independently.
 
@@ -59,7 +69,10 @@ There is no integrated AI provider, provider configuration, SDK, AI permission, 
 
 ## Rendering and deployment
 
-Existing `S3_*` and `GOTENBERG_URL` settings are reused. Server startup applies migrations `0016_document-artifacts.sql` and `0017_document-generation-options.sql` through the existing migration runner. Deploy the migrations with the server before using the management Documents page.
+Existing `S3_*` and `GOTENBERG_URL` settings are reused. Server startup applies the
+document migrations through the existing migration runner, including
+`0021_finance-documents.sql` for finance sources and payment snapshots. Deploy the
+migrations with the server before using document generation.
 
 Sanitized HTML is wrapped in a restrictive CSP and displayed in an empty-sandbox iframe. School and student images are read directly from S3, validated, and embedded as raster data URIs. External assets, scripts, forms, navigation attributes, and prototype access are unavailable. The dev/test Gotenberg service disables JavaScript and both private/public outbound network access. Apply the same Chromium flags in hosted Gotenberg deployments:
 
@@ -76,7 +89,12 @@ Outbound filtering configuration: https://gotenberg.dev/docs/configuration
 
 ## Authorization
 
-New school actions separately cover template reading/management, generation, history/download reading, and deletion. Principals, managers, and exam coordinators manage/generate/delete. School staff may read templates and PDF history. Platform administrators receive no implicit document grant.
+Academic and finance document actions are distinct. Principals, managers, and
+accountants have full finance template/generation/history/deletion access. Platform
+administrators can read finance templates and artifacts but cannot generate,
+mutate templates, or delete. Teachers and exam coordinators receive no finance
+document access. Finance routes inspect the requested or persisted document type
+before applying these grants; generic academic history excludes finance artifacts.
 
 Generation also requires independent source-domain read permissions. UI entry points check the corresponding export and selector permissions before mounting queries. The backend remains the authorization boundary. Shared system policy rejects school-vocabulary roles paired with malformed platform scope.
 

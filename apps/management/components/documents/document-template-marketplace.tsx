@@ -16,14 +16,15 @@ import {
   DocumentNotice,
   DocumentPanel,
   DocumentPreview,
-  documentKinds,
+  allDocumentKinds,
 } from '@campuspilot/components/documents/document-controls';
 import { client, orpc } from '@/lib/orpc';
 import {
   DocumentLoading,
   DocumentPermission,
   DocumentReadError,
-  SCHOOL_ACTIONS,
+  templateManageAction,
+  templateReadAction,
   useDocumentCache,
   type DocumentTemplateScope,
 } from './document-common';
@@ -41,6 +42,9 @@ const settingsSlugs: Record<DocumentType, string> = {
   id_card: 'id-card',
   admit_card: 'admit-card',
   timetable: 'timetable',
+  bill: 'bill',
+  receipt: 'receipt',
+  statement: 'statement',
 };
 
 function settingsHref(scope: DocumentTemplateScope) {
@@ -61,16 +65,7 @@ export function DocumentTemplateMarketplace({
     },
   });
   return (
-    <DocumentPermission
-      schoolId={schoolId}
-      action={SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES}
-      fallback={
-        <DocumentNotice>
-          Template marketplace access is unavailable for your account.
-        </DocumentNotice>
-      }
-    >
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-5 pb-12">
+    <div className="mx-auto flex w-full max-w-7xl flex-col gap-5 pb-12">
         <header className="flex flex-col gap-1 border-b pb-5">
           <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
             Marketplace
@@ -88,19 +83,14 @@ export function DocumentTemplateMarketplace({
             <DocumentKindCards
               value={field.state.value}
               onChange={field.handleChange}
+              items={allDocumentKinds}
             />
           )}
         </form.Field>
         <form.Subscribe selector={(state) => state.values.documentType}>
-          {(documentType) => (
-            <MarketplaceTypeSection
-              key={documentType}
-              scope={{ schoolId, documentType }}
-            />
-          )}
+          {(documentType) => <DocumentPermission schoolId={schoolId} action={templateReadAction(documentType)} fallback={<DocumentNotice>Template marketplace access is unavailable for your account.</DocumentNotice>}><MarketplaceTypeSection key={documentType} scope={{ schoolId, documentType }} /></DocumentPermission>}
         </form.Subscribe>
-      </div>
-    </DocumentPermission>
+    </div>
   );
 }
 
@@ -145,7 +135,7 @@ function MarketplaceTypeSection({ scope }: { scope: DocumentTemplateScope }) {
 }
 
 function TemplateThumbnail({ item }: { item: MarketplaceItem }) {
-  const kind = documentKinds.find(({ value }) => value === item.documentType)!;
+  const kind = allDocumentKinds.find(({ value }) => value === item.documentType)!;
   const palette = item.slug.endsWith('classic')
     ? 'border-blue-900/50 text-blue-900'
     : item.slug.endsWith('minimal')
@@ -265,7 +255,7 @@ function UseMarketplaceTemplate({
   return (
     <DocumentPermission
       schoolId={scope.schoolId}
-      action={SCHOOL_ACTIONS.MANAGE_DOCUMENT_TEMPLATES}
+      action={templateManageAction(scope.documentType)}
     >
       <form.Subscribe
         selector={(state) => ({
@@ -319,7 +309,7 @@ export function DocumentTemplateMarketplaceDetail({
   return (
     <DocumentPermission
       schoolId={scope.schoolId}
-      action={SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES}
+      action={templateReadAction(scope.documentType)}
       fallback={
         <DocumentNotice>
           Template marketplace access is unavailable for your account.

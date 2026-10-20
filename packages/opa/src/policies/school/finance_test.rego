@@ -12,6 +12,8 @@ finance_actions := {
   "school.billing.run.read",
   "school.billing.report.read",
   "school.admission.ledger.read",
+  "school.finance.document.templates.read",
+  "school.finance.document.artifacts.read",
 }
 
 finance_post_actions := {
@@ -24,6 +26,9 @@ finance_post_actions := {
   "school.billing.adjustment.record",
   "school.billing.refund.record",
   "school.admission.ledger.reverse",
+  "school.finance.document.templates.manage",
+  "school.finance.document.generate",
+  "school.finance.document.artifacts.delete",
 }
 
 test_finance_roles_have_configuration_and_read_boundaries if {

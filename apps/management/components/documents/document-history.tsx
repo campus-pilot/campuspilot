@@ -155,6 +155,7 @@ function ArtifactRow({ artifact }: { artifact: DocumentArtifact }) {
           <DocumentDownload
             schoolId={artifact.schoolId}
             artifactId={artifact.id}
+            documentType={artifact.documentType as Exclude<DocumentArtifact['documentType'], 'bill' | 'receipt' | 'statement'>}
           />
         )}
         <DocumentPermission
@@ -204,6 +205,7 @@ function DeleteArtifact({ artifact }: { artifact: DocumentArtifact }) {
         await client.school.deleteDocumentArtifact({
           schoolId: artifact.schoolId,
           artifactId: artifact.id,
+          documentType: artifact.documentType,
         });
         await cache.artifacts(artifact.schoolId);
       } catch (error) {

@@ -10,6 +10,9 @@ import {
   financeRefundTable,
 } from "@campuspilot/db/schema/finance";
 import { schoolSessionTable } from "@campuspilot/db/schema/session";
+import { admissionTable } from "@campuspilot/db/schema/admission";
+import { studentTable } from "@campuspilot/db/schema/student";
+import { classTable, sectionTable } from "@campuspilot/db/schema/class";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 
@@ -87,12 +90,17 @@ async function lockSession(
   sessionId: string,
 ) {
   const [session] = await transaction
-    .select({ id: schoolSessionTable.id })
+    .select({
+      id: schoolSessionTable.id,
+      startYear: schoolSessionTable.sessionStartYear,
+      endYear: schoolSessionTable.sessionEndYear,
+    })
     .from(schoolSessionTable)
     .where(and(eq(schoolSessionTable.schoolId, schoolId), eq(schoolSessionTable.id, sessionId)))
     .for("update")
     .limit(1);
   if (!session) throw rpcError.notFound("School session");
+  return session;
 }
 
 async function outstandingBills(
@@ -307,7 +315,7 @@ function paymentTransport(value: NonNullable<Awaited<ReturnType<typeof readPayme
 /** Posts cash receipt and its allocations as one serializable accounting command. */
 export async function recordPayment(db: Database, command: RecordPaymentCommand, recordedBy: string) {
   return runSerializable(db, async (transaction) => {
-    await lockSession(transaction, command.schoolId, command.sessionId);
+    const session = await lockSession(transaction, command.schoolId, command.sessionId);
     await lockFinanceAdmissionAccount(transaction, command.schoolId, command.admissionId);
     const commandSnapshot = paymentCommandSnapshot(command);
     const commandHash = sha256(commandSnapshot);
@@ -326,6 +334,26 @@ export async function recordPayment(db: Database, command: RecordPaymentCommand,
     if (resolved.unallocatedCreditMinor > ZERO && !command.confirmUnallocatedCredit) {
       throw rpcError.badRequest("Confirm the unallocated admission credit before recording this payment.");
     }
+    const [identity] = await transaction
+      .select({
+        admissionNumber: admissionTable.admissionNo,
+        admissionName: admissionTable.name,
+        fatherName: admissionTable.fatherName,
+        motherName: admissionTable.motherName,
+        enrollmentId: studentTable.id,
+        classId: studentTable.classId,
+        classLabel: classTable.label,
+        sectionId: studentTable.sectionId,
+        sectionLabel: sectionTable.label,
+        rollNumber: studentTable.rollNo,
+      })
+      .from(admissionTable)
+      .leftJoin(studentTable, and(eq(studentTable.schoolId, command.schoolId), eq(studentTable.admissionId, admissionTable.id), eq(studentTable.sessionId, command.sessionId)))
+      .leftJoin(classTable, and(eq(classTable.schoolId, command.schoolId), eq(classTable.id, studentTable.classId)))
+      .leftJoin(sectionTable, and(eq(sectionTable.schoolId, command.schoolId), eq(sectionTable.id, studentTable.sectionId)))
+      .where(and(eq(admissionTable.schoolId, command.schoolId), eq(admissionTable.id, command.admissionId)))
+      .limit(1);
+    if (!identity) throw rpcError.notFound("Admission");
     const amountMinor = BigInt(command.amountMinor);
     const ledger = await appendFinanceLedgerEntry(transaction, {
       schoolId: command.schoolId, admissionId: command.admissionId, sessionId: command.sessionId,
@@ -338,6 +366,11 @@ export async function recordPayment(db: Database, command: RecordPaymentCommand,
       schoolId: command.schoolId, admissionId: command.admissionId, sessionId: command.sessionId,
       ledgerEntryId: ledger.id, receiptNumber: receipt.number, amountMinor, currency: command.currency,
       method: command.method, externalReference: command.externalReference ?? null, payerName: command.payerName ?? null,
+      documentSnapshot: {
+        ...identity,
+        sessionStartYear: session.startYear,
+        sessionEndYear: session.endYear,
+      },
       receivedAt: command.receivedAt, note: command.note ?? null, idempotencyKey: command.idempotencyKey,
       commandHash, commandSnapshot: { command: commandSnapshot, allocationReviewHash: command.expectedAllocationReviewHash ?? null }, recordedBy,
     }).returning();

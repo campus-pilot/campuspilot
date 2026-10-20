@@ -58,6 +58,8 @@ grants contains {
     "school.billing.run.read",
     "school.billing.report.read",
     "school.admission.ledger.read",
+    "school.finance.document.templates.read",
+    "school.finance.document.artifacts.read",
     "school.admission.settings.read",
     "school.admission.settings.update",
   }

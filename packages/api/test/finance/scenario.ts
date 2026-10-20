@@ -23,6 +23,9 @@ import { createFinanceConfig } from './factories';
 export type FinanceScenarioOptions = {
   activeValues?: FinanceValuesMap;
   historicalValues?: FinanceValuesMap;
+  /** Override only for date-boundary tests; normal finance fixtures remain in
+   * their intentionally isolated future sessions. */
+  activeStartYear?: number;
 };
 
 export type FinanceScenario = {
@@ -47,6 +50,7 @@ export type FinanceScenario = {
 export async function createFinanceScenario(
   options: FinanceScenarioOptions = {},
 ): Promise<FinanceScenario> {
+  const activeStartYear = options.activeStartYear ?? 2040;
   const [school, outsiderSchool] = await Promise.all([
     createTestSchool(),
     createTestSchool(),
@@ -54,14 +58,14 @@ export async function createFinanceScenario(
   const [activeSession, historicalSession] = await Promise.all([
     createTestSession({
       schoolId: school.id,
-      sessionStartYear: 2040,
-      sessionEndYear: 2041,
+      sessionStartYear: activeStartYear,
+      sessionEndYear: activeStartYear + 1,
       isActive: true,
     }),
     createTestSession({
       schoolId: school.id,
-      sessionStartYear: 2039,
-      sessionEndYear: 2040,
+      sessionStartYear: activeStartYear - 1,
+      sessionEndYear: activeStartYear,
       isActive: false,
     }),
   ]);

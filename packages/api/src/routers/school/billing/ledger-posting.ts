@@ -5,6 +5,11 @@ import {
   financeAdmissionSessionActivityTable,
   financeLedgerEntryTable,
 } from "@campuspilot/db/schema/finance";
+import type { FinanceDocumentIdentitySnapshot } from "@campuspilot/db/schema/finance";
+import { admissionTable } from "@campuspilot/db/schema/admission";
+import { studentTable } from "@campuspilot/db/schema/student";
+import { classTable, sectionTable } from "@campuspilot/db/schema/class";
+import { schoolSessionTable } from "@campuspilot/db/schema/session";
 import { and, desc, eq, inArray, max, sql } from "drizzle-orm";
 
 type LedgerEntryType = typeof financeLedgerEntryTable.$inferInsert.type;
@@ -20,9 +25,48 @@ type LedgerAppendInput = {
   effectiveAt: Date;
   recordedBy: string;
   note?: string | null;
+  documentSnapshot?: FinanceDocumentIdentitySnapshot | null;
   reversalOfEntryId?: string | null;
   idempotencyKey: string;
 };
+
+async function captureDocumentSnapshots(
+  transaction: DatabaseTransaction,
+  inputs: LedgerAppendInput[],
+) {
+  const schoolId = inputs[0]!.schoolId;
+  const admissionIds = [...new Set(inputs.map((input) => input.admissionId))];
+  const sessionIds = [...new Set(inputs.map((input) => input.sessionId))];
+  const [admissions, sessions, enrollments] = await Promise.all([
+    transaction.select({ id: admissionTable.id, admissionNumber: admissionTable.admissionNo, admissionName: admissionTable.name, fatherName: admissionTable.fatherName, motherName: admissionTable.motherName }).from(admissionTable).where(and(eq(admissionTable.schoolId, schoolId), inArray(admissionTable.id, admissionIds))),
+    transaction.select({ id: schoolSessionTable.id, sessionStartYear: schoolSessionTable.sessionStartYear, sessionEndYear: schoolSessionTable.sessionEndYear }).from(schoolSessionTable).where(and(eq(schoolSessionTable.schoolId, schoolId), inArray(schoolSessionTable.id, sessionIds))),
+    transaction.select({ admissionId: studentTable.admissionId, sessionId: studentTable.sessionId, enrollmentId: studentTable.id, classId: studentTable.classId, classLabel: classTable.label, sectionId: studentTable.sectionId, sectionLabel: sectionTable.label, rollNumber: studentTable.rollNo }).from(studentTable).leftJoin(classTable, and(eq(classTable.schoolId, schoolId), eq(classTable.id, studentTable.classId))).leftJoin(sectionTable, and(eq(sectionTable.schoolId, schoolId), eq(sectionTable.id, studentTable.sectionId))).where(and(eq(studentTable.schoolId, schoolId), inArray(studentTable.admissionId, admissionIds), inArray(studentTable.sessionId, sessionIds))),
+  ]);
+  const admissionById = new Map(admissions.map((row) => [row.id, row]));
+  const sessionById = new Map(sessions.map((row) => [row.id, row]));
+  const enrollmentByScope = new Map(enrollments.map((row) => [`${row.admissionId}:${row.sessionId}`, row]));
+  return inputs.map((input) => {
+    if (input.documentSnapshot) return input.documentSnapshot;
+    const admission = admissionById.get(input.admissionId);
+    const session = sessionById.get(input.sessionId);
+    if (!admission || !session) throw new Error("Finance ledger identity scope was not found");
+    const enrollment = enrollmentByScope.get(`${input.admissionId}:${input.sessionId}`);
+    return {
+      admissionNumber: admission.admissionNumber,
+      admissionName: admission.admissionName,
+      fatherName: admission.fatherName,
+      motherName: admission.motherName,
+      sessionStartYear: session.sessionStartYear,
+      sessionEndYear: session.sessionEndYear,
+      enrollmentId: enrollment?.enrollmentId ?? null,
+      classId: enrollment?.classId ?? null,
+      classLabel: enrollment?.classLabel ?? null,
+      sectionId: enrollment?.sectionId ?? null,
+      sectionLabel: enrollment?.sectionLabel ?? null,
+      rollNumber: enrollment?.rollNumber ?? null,
+    } satisfies FinanceDocumentIdentitySnapshot;
+  });
+}
 
 const WRITE_CHUNK_SIZE = 500;
 
@@ -57,6 +101,7 @@ export async function appendFinanceLedgerEntries(
   ) {
     throw new Error("Bulk finance ledger append requires one school and currency");
   }
+  const documentSnapshots = await captureDocumentSnapshots(transaction, inputs);
   const latest = await transaction
     .select({
       admissionId: financeLedgerEntryTable.admissionId,
@@ -77,9 +122,10 @@ export async function appendFinanceLedgerEntries(
       (sequence ?? BigInt(0)) + BigInt(1),
     ]),
   );
-  const rows = inputs.map((input) => ({
+  const rows = inputs.map((input, index) => ({
     id: generateId("financeLedgerEntry"),
     ...input,
+    documentSnapshot: documentSnapshots[index]!,
     sequence: sequenceByAdmission.get(input.admissionId) ?? BigInt(1),
   }));
   const inserted: Array<typeof financeLedgerEntryTable.$inferSelect> = [];
@@ -167,6 +213,7 @@ export async function appendFinanceLedgerEntry(
   transaction: DatabaseTransaction,
   input: LedgerAppendInput,
 ) {
+  const [documentSnapshot] = await captureDocumentSnapshots(transaction, [input]);
   const [latest] = await transaction
     .select({ sequence: financeLedgerEntryTable.sequence })
     .from(financeLedgerEntryTable)
@@ -182,7 +229,7 @@ export async function appendFinanceLedgerEntry(
   const sequence = (latest?.sequence ?? BigInt(0)) + BigInt(1);
   const [entry] = await transaction
     .insert(financeLedgerEntryTable)
-    .values({ ...input, sequence })
+    .values({ ...input, documentSnapshot, sequence })
     .returning();
   if (!entry) throw new Error("Finance ledger entry was not created");
 

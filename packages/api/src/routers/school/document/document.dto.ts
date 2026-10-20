@@ -17,13 +17,20 @@ export const documentTypeSchema = z.enum([
   "id_card",
   "admit_card",
   "timetable",
+  "bill",
+  "receipt",
+  "statement",
 ]);
 export type DocumentType = z.infer<typeof documentTypeSchema>;
+export type AcademicDocumentType = Exclude<DocumentType, "bill" | "receipt" | "statement">;
 export const DOCUMENT_LABELS: Record<DocumentType, string> = {
   report_card: "Report cards",
   id_card: "Student ID cards",
   admit_card: "Admit cards",
   timetable: "Exam timetables",
+  bill: "Bills",
+  receipt: "Receipts",
+  statement: "Account statements",
 };
 const id = z.string().trim().min(1).max(100);
 export const schoolScopeSchema = z.object({ schoolId: id });
@@ -53,6 +60,11 @@ export const artifactDtoSchema = z.object({
   classId: z.string().nullable(),
   studentIds: z.array(z.string()),
   studentCount: z.number().int(),
+  financeSource: z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("bill"), admissionIds: z.array(z.string()), billIds: z.array(z.string()), billRunId: z.string().nullable() }),
+    z.object({ kind: z.literal("receipt"), admissionIds: z.array(z.string()), transactions: z.array(z.object({ kind: z.enum(["payment", "refund"]), id: z.string() })) }),
+    z.object({ kind: z.literal("statement"), currency: z.string(), throughDate: z.string(), timeZone: z.string(), accounts: z.array(z.object({ admissionId: z.string(), highWaterSequence: z.string() })) }),
+  ]).nullable(),
   generationOptions: documentGenerationOptionsSchema,
   createdBy: z.string(),
   createdAt: z.string(),
@@ -91,6 +103,7 @@ export const previewOutputSchema = z.object({
   html: z.string(),
   studentCount: z.number().int(),
   warnings: z.array(z.string()),
+  reviewHash: z.string().nullable(),
 });
 
 const selection = {
@@ -128,7 +141,37 @@ export const documentSourceSchema = z.discriminatedUnion("documentType", [
       examSlug: id,
     })
     .strict(),
-]);
+  z.object({
+    documentType: z.literal("bill"),
+    sessionId: id,
+    billIds: z.array(id).min(1).max(500).optional(),
+    billRunId: id.optional(),
+  }).strict().superRefine((source, context) => {
+    if (Boolean(source.billIds) === Boolean(source.billRunId)) context.addIssue({ code: "custom", message: "Choose bill IDs or one complete billing run." });
+  }),
+  z.object({
+    documentType: z.literal("receipt"),
+    sessionId: id,
+    transactions: z.array(z.object({ kind: z.enum(["payment", "refund"]), id })).min(1).max(500),
+  }).strict(),
+  z.object({
+    documentType: z.literal("statement"),
+    sessionId: id,
+    admissionIds: z.array(id).min(1).max(500),
+    throughDate: z.string().date(),
+    /** Required by generation after preview; preview omits it. */
+    expectedReviewHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  }).strict(),
+]).superRefine((source, context) => {
+  const ids = source.documentType === "bill"
+    ? source.billIds ?? []
+    : source.documentType === "receipt"
+      ? source.transactions.map(({ kind, id: value }) => `${kind}:${value}`)
+      : source.documentType === "statement"
+        ? source.admissionIds
+        : "studentIds" in source ? source.studentIds ?? [] : [];
+  if (new Set(ids).size !== ids.length) context.addIssue({ code: "custom", message: "Document source IDs must be unique." });
+});
 export type DocumentSource = z.infer<typeof documentSourceSchema>;
 export const generateDocumentSchema = schoolScopeSchema.extend({
   source: documentSourceSchema,
@@ -139,10 +182,25 @@ export const listArtifactsSchema = createListInputSchema({
   filters: z
     .object({
       documentType: documentTypeSchema.optional(),
+      /** Selects the permission and type family when no exact document type is
+       * supplied. This keeps finance history unified without ever falling back
+       * to the academic-document permission boundary. */
+      documentDomain: z.enum(["academic", "finance"]).optional(),
       sessionId: id.optional(),
       classId: id.optional(),
       examSlug: id.optional(),
       studentId: id.optional(),
+      admissionId: id.optional(),
+      billId: id.optional(),
+      paymentId: id.optional(),
+    })
+    .superRefine((filters, context) => {
+      if (filters.documentType && filters.documentDomain) {
+        const finance = ["bill", "receipt", "statement"].includes(filters.documentType);
+        if ((filters.documentDomain === "finance") !== finance) {
+          context.addIssue({ code: "custom", message: "Document type does not belong to the selected domain.", path: ["documentType"] });
+        }
+      }
     })
     .default({}),
   searchQuery: z.string().trim().max(100).default(""),
@@ -155,4 +213,9 @@ export const listArtifactsSchema = createListInputSchema({
 });
 export const listArtifactsOutputSchema =
   createPaginatedOutputSchema(artifactDtoSchema);
-export const artifactScopeSchema = schoolScopeSchema.extend({ artifactId: id });
+/** Artifact IDs are always accompanied by their document type so permission
+ * preflight occurs before lookup and cannot reveal cross-domain existence. */
+export const artifactScopeSchema = schoolScopeSchema.extend({
+  artifactId: id,
+  documentType: documentTypeSchema,
+});

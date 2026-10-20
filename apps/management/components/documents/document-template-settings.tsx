@@ -2,7 +2,7 @@
 import type { DocumentType } from '@campuspilot/api/routers/school/document/document.dto';
 import { DocumentNotice } from '@campuspilot/components/documents/document-controls';
 import { DocumentTemplates } from './document-templates';
-import { DocumentPermission, SCHOOL_ACTIONS } from './document-common';
+import { DocumentPermission, templateReadAction } from './document-common';
 /** School settings is the only template editing surface. Operational document
  * pages consume the selected revision without exposing configuration controls.
  */
@@ -16,7 +16,7 @@ export function DocumentTemplateSettings({
   return (
     <DocumentPermission
       schoolId={schoolId}
-      action={SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES}
+      action={templateReadAction(documentType)}
       fallback={
         <DocumentNotice>
           Template access is unavailable for your account.

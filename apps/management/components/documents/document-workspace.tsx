@@ -23,8 +23,7 @@ import {
   SelectValue,
 } from "@campuspilot/ui/components/select";
 import {
-  documentTypeSchema,
-  type DocumentType,
+  type AcademicDocumentType,
 } from "@campuspilot/api/routers/school/document/document.dto";
 import { orpc } from "@/lib/orpc";
 import {
@@ -36,7 +35,7 @@ import { DocumentGenerator } from "./document-generator";
 import { DocumentHistory } from "./document-history";
 
 export type DocumentInitialSelection = {
-  documentType?: DocumentType;
+  documentType?: AcademicDocumentType;
   classId?: string;
   examSlug?: string;
   studentId?: string;
@@ -62,7 +61,7 @@ const sections = [
 /** Settings slugs are existing product vocabulary, not a transformation of the
  * API enum. Keep this mapping exhaustive when adding a document type.
  */
-const templateSettingsSlugs: Record<DocumentType, string> = {
+const templateSettingsSlugs: Record<AcademicDocumentType, string> = {
   report_card: "examination",
   id_card: "id-card",
   admit_card: "admit-card",
@@ -164,11 +163,11 @@ function DocumentWorkspaceContent({
   const router = useRouter();
   const form = useForm({
     defaultValues: {
-      documentType: initial.documentType ?? ("report_card" as DocumentType),
+      documentType: initial.documentType ?? ("report_card" as AcademicDocumentType),
     },
-    validators: { onChange: z.object({ documentType: documentTypeSchema }) },
+    validators: { onChange: z.object({ documentType: z.enum(["report_card", "id_card", "admit_card", "timetable"]) }) },
   });
-  const href = (target: DocumentSection, type: DocumentType) => {
+  const href = (target: DocumentSection, type: AcademicDocumentType) => {
     const query = new URLSearchParams({
       ...(target === "generate" ? { type } : {}),
       ...(initial.classId ? { classId: initial.classId } : {}),
@@ -259,7 +258,7 @@ function DocumentWorkspaceContent({
                     <DocumentKindCards
                       value={documentType}
                       onChange={(value) =>
-                        form.setFieldValue("documentType", value)
+                        form.setFieldValue("documentType", value as AcademicDocumentType)
                       }
                     />
                   </DocumentPanel>

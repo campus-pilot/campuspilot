@@ -97,6 +97,23 @@ export const financeNumberKindEnum = pgEnum("finance_number_kind", [
 
 type JsonSnapshot = Record<string, unknown>;
 
+/** Posting-time identity used by finance documents. Nullable placement fields
+ * are facts in their own right; they must never be synthesized later. */
+export type FinanceDocumentIdentitySnapshot = {
+  admissionNumber: string;
+  admissionName: string;
+  fatherName: string;
+  motherName: string;
+  sessionStartYear: number;
+  sessionEndYear: number;
+  enrollmentId: string | null;
+  classId: string | null;
+  classLabel: string | null;
+  sectionId: string | null;
+  sectionLabel: string | null;
+  rollNumber: number | null;
+};
+
 const currencyCheck = (column: { name: string }) =>
   sql`${sql.identifier(column.name)} in ('AED','AUD','BDT','BHD','CAD','CLF','EUR','GBP','INR','JPY','KWD','LKR','NPR','PKR','QAR','SAR','SGD','USD')`;
 
@@ -209,6 +226,10 @@ export const financeLedgerEntryTable = pgTable(
       .defaultNow(),
     recordedBy: text("recorded_by").notNull(),
     note: text("note"),
+    /** Immutable account identity as observed when this ledger fact posted.
+     * Null identifies pre-migration facts whose historical identity is unknown. */
+    documentSnapshot: jsonb("document_snapshot")
+      .$type<FinanceDocumentIdentitySnapshot | null>(),
     reversalOfEntryId: text("reversal_of_entry_id"),
     idempotencyKey: text("idempotency_key").notNull(),
   },
@@ -504,6 +525,11 @@ export const financePaymentTable = pgTable(
     method: financePaymentMethodEnum("method").notNull(),
     externalReference: text("external_reference"),
     payerName: text("payer_name"),
+    /** Captured at posting so receipts never consult mutable admission or
+     * enrollment records. Null explicitly identifies legacy rows that predate
+     * this invariant and cannot be regenerated until migrated. */
+    documentSnapshot: jsonb("document_snapshot")
+      .$type<FinanceDocumentIdentitySnapshot | null>(),
     receivedAt: timestamp("received_at", { withTimezone: true }).notNull(),
     note: text("note"),
     idempotencyKey: text("idempotency_key").notNull(),

@@ -70,6 +70,9 @@ export async function buildDocumentContexts(
   schoolId: string,
   source: DocumentSource,
 ) {
+  if (source.documentType === "bill" || source.documentType === "receipt" || source.documentType === "statement") {
+    throw rpcError.badRequest("Finance documents use the immutable finance context builder.");
+  }
   const [school] = await db
     .select()
     .from(schoolTable)

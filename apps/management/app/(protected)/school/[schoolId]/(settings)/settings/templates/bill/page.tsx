@@ -1,7 +1,6 @@
-import { CreditCard } from 'lucide-react';
-import { ModulePlaceholder } from '@/components/module-placeholder';
+import { DocumentTemplateSettings } from '@/components/documents/document-template-settings';
 
-export default function BillTemplatePage() {
-  return <ModulePlaceholder icon={CreditCard} title="Bill template" description="Billing document templates will be configured here." />;
+export default async function BillTemplatePage({ params }: { params: Promise<{ schoolId: string }> }) {
+  const { schoolId } = await params;
+  return <DocumentTemplateSettings schoolId={schoolId} documentType="bill" />;
 }
-

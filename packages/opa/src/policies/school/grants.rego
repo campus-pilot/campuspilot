@@ -104,6 +104,11 @@ grants contains {
     "school.billing.adjustment.record",
     "school.billing.refund.record",
     "school.admission.ledger.reverse",
+    "school.finance.document.templates.read",
+    "school.finance.document.templates.manage",
+    "school.finance.document.generate",
+    "school.finance.document.artifacts.read",
+    "school.finance.document.artifacts.delete",
   }
 }
 

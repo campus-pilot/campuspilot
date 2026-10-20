@@ -17,6 +17,7 @@ import {
   GraduationCap,
   ReceiptText,
   School,
+  ScrollText,
   Settings,
 } from 'lucide-react';
 import {
@@ -50,6 +51,7 @@ import { idCardTemplatePage } from './templates/id-card/_route';
 import { noticeTemplatePage } from './templates/notice/_route';
 import { receiptTemplatePage } from './templates/receipt/_route';
 import { timetableTemplatePage } from './templates/timetable/_route';
+import { statementTemplatePage } from './templates/statement/_route';
 
 type SettingsRouteParams = SchoolRouteParams & { sessionId: string };
 
@@ -64,6 +66,7 @@ const pages: ManagementPageDescriptor<SettingsRouteParams>[] = [
   timetableTemplatePage,
   billTemplatePage,
   receiptTemplatePage,
+  statementTemplatePage,
   noticeTemplatePage,
 ];
 
@@ -79,6 +82,11 @@ function navigationFor(
         resource: { kind: 'school', schoolId },
       }}
     >
+      {children}
+    </RequirePermissions>
+  );
+  const withFinanceTemplatePermission = (children: ReactNode) => (
+    <RequirePermissions permissions={{ action: SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_TEMPLATES, resource: { kind: 'school', schoolId } }}>
       {children}
     </RequirePermissions>
   );
@@ -159,6 +167,7 @@ function navigationFor(
         {
           type: 'item',
           id: 'bill-template',
+          wrap: withFinanceTemplatePermission,
           label: 'Bill',
           href: schoolHref(schoolId, '/settings/templates/bill'),
           icon: CreditCard,
@@ -166,9 +175,18 @@ function navigationFor(
         {
           type: 'item',
           id: 'receipt-template',
+          wrap: withFinanceTemplatePermission,
           label: 'Receipt',
           href: schoolHref(schoolId, '/settings/templates/receipt'),
           icon: ReceiptText,
+        },
+        {
+          type: 'item',
+          id: 'statement-template',
+          wrap: withFinanceTemplatePermission,
+          label: 'Statement',
+          href: schoolHref(schoolId, '/settings/templates/statement'),
+          icon: ScrollText,
         },
         {
           type: 'item',

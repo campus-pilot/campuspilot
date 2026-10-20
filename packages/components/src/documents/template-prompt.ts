@@ -1,10 +1,13 @@
 export type TemplatePromptKind =
-  "report_card" | "id_card" | "admit_card" | "timetable";
+  "report_card" | "id_card" | "admit_card" | "timetable" | "bill" | "receipt" | "statement";
 const labels: Record<TemplatePromptKind, string> = {
   report_card: "student report card",
   id_card: "student ID card",
   admit_card: "examination admit card",
   timetable: "examination timetable",
+  bill: "finance bill",
+  receipt: "payment or refund receipt",
+  statement: "admission account statement",
 };
 
 /** Build an exportable editing brief, never a provider request. The caller

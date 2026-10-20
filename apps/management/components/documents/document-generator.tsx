@@ -16,7 +16,7 @@ import {
   DOCUMENT_LABELS,
   DEFAULT_REPORT_SECTIONS,
   type DocumentSource,
-  type DocumentType,
+  type AcademicDocumentType,
 } from "@campuspilot/api/routers/school/document/document.dto";
 import { client, orpc } from "@/lib/orpc";
 import { RequirePermissions } from "@/components/require-permissions";
@@ -45,7 +45,7 @@ export function DocumentGenerator({
   onHistory,
 }: {
   scope: DocumentScope;
-  documentType: DocumentType;
+  documentType: AcademicDocumentType;
   initial: DocumentInitialSelection;
   onHistory: () => void;
 }) {
@@ -74,7 +74,7 @@ function DocumentGeneratorData({
   onHistory,
 }: {
   scope: DocumentScope;
-  documentType: DocumentType;
+  documentType: AcademicDocumentType;
   initial: DocumentInitialSelection;
   onHistory: () => void;
 }) {
@@ -132,7 +132,7 @@ function useDocumentGeneration({
   template,
 }: {
   scope: DocumentScope;
-  documentType: DocumentType;
+  documentType: AcademicDocumentType;
   initial: DocumentInitialSelection;
   template: { id: string; name: string };
 }) {
@@ -299,7 +299,7 @@ function GenerationForm({
   onHistory,
 }: {
   scope: DocumentScope;
-  documentType: DocumentType;
+  documentType: AcademicDocumentType;
   initial: DocumentInitialSelection;
   template: { id: string; name: string };
   classes: { id: string; label: string }[];
@@ -425,6 +425,7 @@ function GenerationForm({
             form={form}
             sourceFor={sourceFor}
             scope={scope}
+            documentType={documentType}
             onHistory={onHistory}
           />
         </form>
@@ -503,11 +504,13 @@ function GenerationActions({
   form,
   sourceFor,
   scope,
+  documentType,
   onHistory,
 }: {
   form: GenerationFormApi;
   sourceFor: ReturnType<typeof useDocumentGeneration>["sourceFor"];
   scope: DocumentScope;
+  documentType: AcademicDocumentType;
   onHistory: () => void;
 }) {
   return (
@@ -556,6 +559,7 @@ function GenerationActions({
             <GenerationSuccess
               schoolId={scope.schoolId}
               artifactId={values.generatedId}
+              documentType={documentType}
               onHistory={onHistory}
             />
           )}
@@ -595,10 +599,12 @@ function ExamSelector({
 function GenerationSuccess({
   schoolId,
   artifactId,
+  documentType,
   onHistory,
 }: {
   schoolId: string;
   artifactId: string;
+  documentType: AcademicDocumentType;
   onHistory: () => void;
 }) {
   return (
@@ -611,7 +617,7 @@ function GenerationSuccess({
         schoolId={schoolId}
         action={SCHOOL_ACTIONS.READ_DOCUMENT_ARTIFACTS}
       >
-        <DocumentDownload schoolId={schoolId} artifactId={artifactId} />
+        <DocumentDownload schoolId={schoolId} artifactId={artifactId} documentType={documentType} />
         <DocumentButton type="button" variant="ghost" onClick={onHistory}>
           View document history
           <ArrowRight />
@@ -626,9 +632,11 @@ function GenerationSuccess({
 export function DocumentDownload({
   schoolId,
   artifactId,
+  documentType,
 }: {
   schoolId: string;
   artifactId: string;
+  documentType: AcademicDocumentType;
 }) {
   const form = useForm({
     defaultValues: { error: "" },
@@ -639,6 +647,7 @@ export function DocumentDownload({
         const { url } = await client.school.getDocumentDownload({
           schoolId,
           artifactId,
+          documentType,
         });
         const link = document.createElement("a");
         link.href = url;
