@@ -15,6 +15,7 @@ import { ExternalLink, Plus } from "lucide-react";
 import { RequirePermissions } from "@/components/require-permissions";
 import { orpc } from "@/lib/orpc";
 import { BillingRunDialog } from "./billing-run-dialog";
+import { FinanceDocumentAction } from "./finance-document-action";
 import { FinanceError, FinanceLoading, PageSection } from "./finance-ui";
 
 type BillingRun = z.infer<typeof billingRunDtoSchema>;
@@ -40,8 +41,9 @@ function RecentRuns({ schoolId, sessionId }: { schoolId: string; sessionId: stri
     { accessorKey: "kind", header: "Type", cell: ({ row }) => <span className="capitalize">{row.original.kind}</span> },
     { accessorKey: "billCount", header: "Bills" },
     { accessorKey: "totalAmountMinor", header: "Total", cell: ({ row }) => formatMinor(row.original.totalAmountMinor, row.original.currency) },
+    { accessorKey: "issueDate", header: "Billing date" },
     { accessorKey: "recordedAt", header: "Posted", cell: ({ row }) => formatFinanceInstant(row.original.recordedAt, row.original.timeZone) },
-    { id: "actions", header: "", cell: ({ row }) => <Button asChild variant="ghost" size="sm"><Link href={`${base}/${encodeURIComponent(row.original.id)}`}>View<span className="sr-only"> billing run {row.original.periodKey}</span><ExternalLink aria-hidden /></Link></Button> },
+    { id: "actions", header: "", cell: ({ row }) => <div className="flex flex-wrap items-start justify-end gap-2"><FinanceDocumentAction schoolId={schoolId} source={{ documentType: "bill", sessionId, billRunId: row.original.id }} label="Download bills" /><Button asChild variant="ghost" size="sm"><Link href={`${base}/${encodeURIComponent(row.original.id)}`}>View<span className="sr-only"> billing run {row.original.periodKey}</span><ExternalLink aria-hidden /></Link></Button></div> },
   ];
   return <PageSection title="Recent billing runs" description="The five most recently posted run commands."><DataTable ariaLabel="Recent billing runs" columns={columns} data={query.data.items} getRowId={(run) => run.id} /></PageSection>;
 }

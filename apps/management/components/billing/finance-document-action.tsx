@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useForm } from '@tanstack/react-form';
 import { CheckCircle2, CircleAlert, Download, FileText, LoaderCircle, RefreshCw, Settings } from 'lucide-react';
+import { z } from 'zod';
 import type { DocumentSource } from '@campuspilot/api/routers/school/document/document.dto';
 import { SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
 import {
@@ -27,24 +28,129 @@ export type { StatementSession } from '@campuspilot/components/documents/stateme
 
 type FinanceSource = Extract<DocumentSource, { documentType: 'bill' | 'receipt' }>;
 
-/** Generates an immutable PDF, then obtains a fresh short-lived signed URL.
- * The client never stores an S3 key or a durable download URL. */
+/** Generates an immutable PDF and starts its download without relying on a
+ * popup opened after the asynchronous render. The generated artifact remains
+ * available for an explicit retry with a fresh short-lived URL. */
 export function FinanceDocumentAction({ schoolId, source, label }: { schoolId: string; source: FinanceSource; label: string }) {
-  return <RequirePermissions permissions={{ action: SCHOOL_ACTIONS.GENERATE_FINANCE_DOCUMENTS, resource: { kind: 'school', schoolId } }}><FinanceDocumentActionInner schoolId={schoolId} source={source} label={label} /></RequirePermissions>;
+  const resource = { kind: 'school' as const, schoolId };
+  return (
+    <RequirePermissions
+      permissions={[
+        { action: SCHOOL_ACTIONS.GENERATE_FINANCE_DOCUMENTS, resource },
+        { action: SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_TEMPLATES, resource },
+        { action: SCHOOL_ACTIONS.READ_SESSION_FINANCE, resource },
+        { action: SCHOOL_ACTIONS.READ_ADMISSION_LEDGER, resource },
+        { action: SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_ARTIFACTS, resource },
+      ]}
+    >
+      <FinanceDocumentActionInner
+        key={JSON.stringify(source)}
+        schoolId={schoolId}
+        source={source}
+        label={label}
+      />
+    </RequirePermissions>
+  );
 }
 
 function FinanceDocumentActionInner({ schoolId, source, label }: { schoolId: string; source: FinanceSource; label: string }) {
   const template = useQuery(orpc.school.getActiveDocumentTemplate.queryOptions({ input: { schoolId, documentType: source.documentType } }));
-  const mutation = useMutation({
-    mutationFn: async () => {
-      if (!template.data) throw new Error(`Configure the ${source.documentType} template before generating a PDF.`);
-      const generated = await client.school.generateDocument({ schoolId, source, templateRevisionId: template.data.artifact.id });
-      return client.school.getDocumentDownload({ schoolId, artifactId: generated.artifact.id, documentType: source.documentType });
+  const form = useForm({
+    defaultValues: { artifactId: '', error: '' },
+    validators: {
+      onChange: z.object({ artifactId: z.string(), error: z.string() }),
     },
-    onSuccess: ({ url }) => window.open(url, '_blank', 'noopener,noreferrer'),
+    onSubmit: async () => {
+      form.setFieldValue('error', '');
+      try {
+        if (!template.data) {
+          throw new Error(`Configure the ${source.documentType} template before generating a PDF.`);
+        }
+        const generated = await client.school.generateDocument({
+          schoolId,
+          source,
+          templateRevisionId: template.data.artifact.id,
+        });
+        form.setFieldValue('artifactId', generated.artifact.id);
+        const { url } = await client.school.getDocumentDownload({
+          schoolId,
+          artifactId: generated.artifact.id,
+          documentType: source.documentType,
+        });
+        const link = document.createElement('a');
+        link.href = url;
+        link.rel = 'noopener noreferrer';
+        link.click();
+      } catch (error) {
+        form.setFieldValue(
+          'error',
+          error instanceof Error ? error.message : 'Unable to generate the document.',
+        );
+      }
+    },
   });
-  const error = template.error ?? mutation.error;
-  return <div className="flex flex-col items-start gap-1"><Button type="button" variant="outline" disabled={template.isPending || mutation.isPending || !template.data} onClick={() => mutation.mutate()}>{mutation.isPending ? <FileText aria-hidden /> : <Download aria-hidden />}{mutation.isPending ? 'Generating…' : label}</Button>{!template.isPending && !template.data ? <p className="text-xs text-muted-foreground">Configure this template in Settings first.</p> : null}{error ? <p className="text-xs text-destructive">{error instanceof Error ? error.message : 'Unable to generate the document.'}</p> : null}</div>;
+  return (
+    <form.Subscribe
+      selector={(state) => ({
+        artifactId: state.values.artifactId,
+        error: state.values.error,
+        submitting: state.isSubmitting,
+      })}
+    >
+      {({ artifactId, error, submitting }) => (
+        <div className="flex flex-col items-start gap-1">
+          {artifactId ? (
+            <div className="flex flex-col items-start gap-2">
+              <p role="status" className="flex items-center gap-2 text-xs font-medium">
+                <CheckCircle2 className="size-4" aria-hidden />
+                PDF ready
+              </p>
+              <DocumentDownload
+                schoolId={schoolId}
+                artifactId={artifactId}
+                documentType={source.documentType}
+              />
+            </div>
+          ) : (
+            <Button
+              type="button"
+              variant="outline"
+              disabled={template.isPending || template.isFetching || submitting || !template.data}
+              onClick={() => void form.handleSubmit()}
+            >
+              {submitting ? <FileText aria-hidden /> : <Download aria-hidden />}
+              {submitting ? 'Generating…' : label}
+            </Button>
+          )}
+          {template.isError ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-xs text-destructive">
+                {template.error instanceof Error
+                  ? template.error.message
+                  : `Unable to check the ${source.documentType} template.`}
+              </p>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                disabled={template.isFetching}
+                onClick={() => void template.refetch()}
+              >
+                <RefreshCw className={template.isFetching ? 'animate-spin' : undefined} aria-hidden />
+                Retry
+              </Button>
+            </div>
+          ) : null}
+          {!template.isPending && !template.isError && !template.data ? (
+            <p className="text-xs text-muted-foreground">
+              Configure this template in Settings first.
+            </p>
+          ) : null}
+          {error ? <p className="text-xs text-destructive">{error}</p> : null}
+        </div>
+      )}
+    </form.Subscribe>
+  );
 }
 
 function sessionStatusLabel(session: StatementSession) {

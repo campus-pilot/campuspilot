@@ -8,6 +8,7 @@ import { and, eq } from "drizzle-orm";
 import { PDFDocument } from "pdf-lib";
 import { createFinanceConfig, createFinanceIdempotencyKey } from "../../../../test/finance/factories";
 import { createFinanceScenario, type FinanceScenario } from "../../../../test/finance/scenario";
+import { createTestAdmission, createTestStudent } from "../../../../test/fixtures";
 import { buildFinanceDocumentContexts } from "./finance-document.context";
 
 async function expectA4Pdf(url: string, expectedPages: number) {
@@ -207,6 +208,115 @@ describe("immutable finance document contexts", () => {
     expect(generated.artifact.financeSource).toEqual({ kind: "bill", admissionIds: [scenario.admission.id], billIds: [bill.id], billRunId: run.id });
     const signed = await scenario.actors.accountant.client.school.getDocumentDownload({ schoolId: scenario.school.id, artifactId: generated.artifact.id, documentType: "bill" });
     await expectA4Pdf(signed.url, 1);
+  });
+
+  it("builds every bill in a run with its billing-date balance rather than its posting sequence", async () => {
+    const secondAdmission = await createTestAdmission({
+      schoolId: scenario.school.id,
+      name: "Second billed admission",
+    });
+    await createTestStudent({
+      schoolId: scenario.school.id,
+      admissionId: secondAdmission.id,
+      sessionId: scenario.activeSession.id,
+      classId: scenario.schoolClass.id,
+      sectionId: scenario.section.id,
+      rollNo: 2,
+    });
+    const financeConfig = createFinanceConfig({
+      recurring: "monthly",
+      elements: {
+        tuition: {
+          name: "Tuition",
+          scopes: ["class"],
+          requiredAtLevel: "class",
+        },
+      },
+    });
+    await db.update(schoolSessionTable).set({
+      financeConfig,
+      financeClassOverrides: {
+        [scenario.schoolClass.slug]: { tuition: 12_000 },
+      },
+    }).where(and(
+      eq(schoolSessionTable.schoolId, scenario.school.id),
+      eq(schoolSessionTable.id, scenario.activeSession.id),
+    ));
+
+    // This payment was recorded first but takes effect after the bill date. A
+    // sequence-only balance would incorrectly include it as previous credit.
+    await scenario.actors.accountant.client.school.recordPayment({
+      schoolId: scenario.school.id,
+      admissionId: scenario.admission.id,
+      sessionId: scenario.activeSession.id,
+      amountMinor: "7000",
+      currency: "INR",
+      method: "cash",
+      receivedAt: new Date("2026-10-01T10:00:00Z"),
+      effectiveAt: new Date("2026-10-20T10:00:00Z"),
+      idempotencyKey: createFinanceIdempotencyKey("document-future-effective-payment"),
+    });
+    await scenario.actors.accountant.client.school.createManualBill({
+      schoolId: scenario.school.id,
+      admissionId: scenario.admission.id,
+      sessionId: scenario.activeSession.id,
+      issueDate: "2026-10-05",
+      reason: "Earlier due for first admission",
+      lines: [{ title: "Prior charge", amountMinor: "1000" }],
+      idempotencyKey: createFinanceIdempotencyKey("document-prior-due-one"),
+    });
+    await scenario.actors.accountant.client.school.createManualBill({
+      schoolId: scenario.school.id,
+      admissionId: secondAdmission.id,
+      sessionId: scenario.activeSession.id,
+      issueDate: "2026-10-05",
+      reason: "Earlier due for second admission",
+      lines: [{ title: "Prior charge", amountMinor: "2500" }],
+      idempotencyKey: createFinanceIdempotencyKey("document-prior-due-two"),
+    });
+
+    const command = {
+      schoolId: scenario.school.id,
+      sessionId: scenario.activeSession.id,
+      billingDate: "2026-10-10",
+      runValues: { session: {}, classes: {} },
+    };
+    const preview = await scenario.actors.accountant.client.school.previewBillingRun({
+      ...command,
+      page: 1,
+      limit: 20,
+    });
+    const run = await scenario.actors.accountant.client.school.postBillingRun({
+      ...command,
+      expectedConfigurationHash: preview.configurationHash,
+      idempotencyKey: createFinanceIdempotencyKey("document-multi-admission-run"),
+      kind: "regular",
+    });
+    expect(run.issueDate).toBe(command.billingDate);
+    expect(run.recordedAt.toISOString().slice(0, 10)).not.toBe(command.billingDate);
+
+    const result = await buildFinanceDocumentContexts(db, scenario.school.id, {
+      documentType: "bill",
+      sessionId: scenario.activeSession.id,
+      billRunId: run.id,
+    });
+    expect(result.contexts).toHaveLength(2);
+    expect(result.financeSource).toMatchObject({
+      kind: "bill",
+      admissionIds: expect.arrayContaining([scenario.admission.id, secondAdmission.id]),
+      billRunId: run.id,
+    });
+    const contextByAdmission = new Map(result.contexts.map((context) => [context.admission.number, context]));
+    expect(contextByAdmission.get(scenario.admission.admissionNo)).toMatchObject({
+      bill: { issueDate: command.billingDate, totalMinor: "12000" },
+      balanceBefore: "10.00",
+      balanceAfter: "130.00",
+    });
+    expect(contextByAdmission.get(secondAdmission.admissionNo)).toMatchObject({
+      bill: { issueDate: command.billingDate, totalMinor: "12000" },
+      balanceBefore: "25.00",
+      balanceAfter: "145.00",
+    });
   });
 
   it("generates semantically distinct refund and as-of statement PDFs on A4", async () => {

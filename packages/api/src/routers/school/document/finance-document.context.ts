@@ -11,7 +11,7 @@ import {
 import { schoolTable } from "@campuspilot/db/schema/school";
 import { schoolSessionTable } from "@campuspilot/db/schema/session";
 import { financeSchemaConfigSchema } from "@campuspilot/db/schema/jsonb/finance-config";
-import { and, asc, eq, inArray, lt, lte } from "drizzle-orm";
+import { and, asc, eq, inArray, lt, or } from "drizzle-orm";
 import { createHash } from "node:crypto";
 import { rpcError } from "../../../errors";
 import type { DocumentSource } from "./document.dto";
@@ -25,6 +25,17 @@ function chunks<T>(values: T[], size = SOURCE_QUERY_CHUNK) {
   const groups: T[][] = [];
   for (let index = 0; index < values.length; index += size) groups.push(values.slice(index, index + size));
   return groups;
+}
+
+/** Keeps large document selections within PostgreSQL parameter limits without
+ * opening an unbounded number of concurrent database queries. */
+async function loadInChunks<TValue, TRow>(
+  values: TValue[],
+  load: (group: TValue[]) => Promise<TRow[]>,
+) {
+  const rows: TRow[] = [];
+  for (const group of chunks(values)) rows.push(...await load(group));
+  return rows;
 }
 
 export function formatDocumentMoney(value: bigint, currency: string) {
@@ -43,12 +54,84 @@ const amount = formatDocumentMoney;
 const signed = (entry: { direction: "debit" | "credit"; amountMinor: bigint }) =>
   entry.direction === "debit" ? entry.amountMinor : -entry.amountMinor;
 
-async function balanceAt(
+const ledgerAccountKey = (admissionId: string, currency: string) =>
+  `${admissionId}\u0000${currency}`;
+
+type OrderedLedgerFact = Pick<
+  typeof financeLedgerEntryTable.$inferSelect,
+  "id" | "admissionId" | "currency" | "effectiveAt" | "sequence" | "direction" | "amountMinor"
+>;
+
+function compareLedgerFacts(left: OrderedLedgerFact, right: OrderedLedgerFact) {
+  const effectiveDifference = left.effectiveAt.getTime() - right.effectiveAt.getTime();
+  if (effectiveDifference !== 0) return effectiveDifference;
+  if (left.sequence < right.sequence) return -1;
+  if (left.sequence > right.sequence) return 1;
+  return left.id.localeCompare(right.id);
+}
+
+/** Computes every selected bill's prior balance in one pass per account after
+ * chunked loading, preserving the ledger's canonical effective-date order. */
+async function billBalancesBefore(
+  db: DatabaseExecutor,
+  schoolId: string,
+  bills: Array<Pick<typeof financeBillTable.$inferSelect, "admissionId" | "currency" | "ledgerEntryId">>,
+) {
+  const accountKeys = new Set(
+    bills.map((bill) => ledgerAccountKey(bill.admissionId, bill.currency)),
+  );
+  const admissionIds = [...new Set(bills.map((bill) => bill.admissionId))];
+  const currencies = [...new Set(bills.map((bill) => bill.currency))];
+  const facts = await loadInChunks(admissionIds, (ids) => db.select({
+    id: financeLedgerEntryTable.id,
+    admissionId: financeLedgerEntryTable.admissionId,
+    currency: financeLedgerEntryTable.currency,
+    effectiveAt: financeLedgerEntryTable.effectiveAt,
+    sequence: financeLedgerEntryTable.sequence,
+    direction: financeLedgerEntryTable.direction,
+    amountMinor: financeLedgerEntryTable.amountMinor,
+  }).from(financeLedgerEntryTable).where(and(
+    eq(financeLedgerEntryTable.schoolId, schoolId),
+    inArray(financeLedgerEntryTable.admissionId, ids),
+    inArray(financeLedgerEntryTable.currency, currencies),
+  )).orderBy(
+    asc(financeLedgerEntryTable.effectiveAt),
+    asc(financeLedgerEntryTable.sequence),
+    asc(financeLedgerEntryTable.id),
+  ));
+  const factsByAccount = new Map<string, OrderedLedgerFact[]>();
+  for (const fact of facts) {
+    const key = ledgerAccountKey(fact.admissionId, fact.currency);
+    if (!accountKeys.has(key)) continue;
+    const accountFacts = factsByAccount.get(key) ?? [];
+    accountFacts.push(fact);
+    factsByAccount.set(key, accountFacts);
+  }
+  const selectedLedgerIds = new Set(bills.map((bill) => bill.ledgerEntryId));
+  const balances = new Map<string, bigint>();
+  for (const accountFacts of factsByAccount.values()) {
+    accountFacts.sort(compareLedgerFacts);
+    let running = BigInt(0);
+    for (const fact of accountFacts) {
+      if (selectedLedgerIds.has(fact.id)) balances.set(fact.id, running);
+      running += signed(fact);
+    }
+  }
+  return balances;
+}
+
+/**
+ * Calculates the balance immediately before an immutable ledger fact using
+ * the same effective-date ordering exposed by the admission ledger. Sequence
+ * alone is insufficient because an earlier-posted fact may take effect after
+ * the bill or receipt being rendered.
+ */
+async function balanceBeforeLedgerFact(
   db: DatabaseExecutor,
   schoolId: string,
   admissionId: string,
   currency: string,
-  sequence: bigint,
+  fact: Pick<typeof financeLedgerEntryTable.$inferSelect, "effectiveAt" | "sequence" | "id">,
 ) {
   const rows = await db.select({ direction: financeLedgerEntryTable.direction, amountMinor: financeLedgerEntryTable.amountMinor })
     .from(financeLedgerEntryTable)
@@ -56,7 +139,18 @@ async function balanceAt(
       eq(financeLedgerEntryTable.schoolId, schoolId),
       eq(financeLedgerEntryTable.admissionId, admissionId),
       eq(financeLedgerEntryTable.currency, currency),
-      lte(financeLedgerEntryTable.sequence, sequence),
+      or(
+        lt(financeLedgerEntryTable.effectiveAt, fact.effectiveAt),
+        and(
+          eq(financeLedgerEntryTable.effectiveAt, fact.effectiveAt),
+          lt(financeLedgerEntryTable.sequence, fact.sequence),
+        ),
+        and(
+          eq(financeLedgerEntryTable.effectiveAt, fact.effectiveAt),
+          eq(financeLedgerEntryTable.sequence, fact.sequence),
+          lt(financeLedgerEntryTable.id, fact.id),
+        ),
+      ),
     ));
   return rows.reduce((total, row) => total + signed(row), BigInt(0));
 }
@@ -94,18 +188,19 @@ export async function buildFinanceDocumentContexts(
     if (!bills.length || (source.billIds && bills.length !== new Set(source.billIds).size)) throw rpcError.notFound("Posted bill");
     if (source.billRunId && bills.some((bill) => bill.billRunId !== source.billRunId)) throw rpcError.notFound("Posted billing run");
     const billIds = bills.map((bill) => bill.id);
-    const ledgerIds = bills.map((bill) => bill.ledgerEntryId);
-    const [lineGroups, ledgerGroups] = await Promise.all([
-      Promise.all(chunks(billIds).map((ids) => db.select().from(financeBillLineTable).where(and(eq(financeBillLineTable.schoolId, schoolId), inArray(financeBillLineTable.billId, ids))).orderBy(asc(financeBillLineTable.billId), asc(financeBillLineTable.lineOrder)))),
-      Promise.all(chunks(ledgerIds).map((ids) => db.select().from(financeLedgerEntryTable).where(and(eq(financeLedgerEntryTable.schoolId, schoolId), inArray(financeLedgerEntryTable.id, ids))))),
+    const [lines, balanceByLedgerId] = await Promise.all([
+      loadInChunks(billIds, (ids) => db.select().from(financeBillLineTable).where(and(eq(financeBillLineTable.schoolId, schoolId), inArray(financeBillLineTable.billId, ids))).orderBy(asc(financeBillLineTable.billId), asc(financeBillLineTable.lineOrder))),
+      billBalancesBefore(db, schoolId, bills),
     ]);
-    const lines = lineGroups.flat();
-    const ledgers = ledgerGroups.flat();
-    const ledgerById = new Map(ledgers.map((entry) => [entry.id, entry]));
-    const contexts = await Promise.all(bills.sort((a, b) => a.billNumber.localeCompare(b.billNumber)).map(async (bill) => {
-      const ledger = ledgerById.get(bill.ledgerEntryId);
-      if (!ledger) throw rpcError.notFound("Bill ledger fact");
-      const beforeMinor = await balanceAt(db, schoolId, bill.admissionId, bill.currency, ledger.sequence - BigInt(1));
+    const linesByBillId = new Map<string, typeof lines>();
+    for (const line of lines) {
+      const billLines = linesByBillId.get(line.billId) ?? [];
+      billLines.push(line);
+      linesByBillId.set(line.billId, billLines);
+    }
+    const contexts = bills.sort((a, b) => a.billNumber.localeCompare(b.billNumber)).map((bill) => {
+      const beforeMinor = balanceByLedgerId.get(bill.ledgerEntryId);
+      if (beforeMinor === undefined) throw rpcError.notFound("Bill ledger fact");
       const afterMinor = beforeMinor + bill.totalAmountMinor;
       return {
         school,
@@ -113,12 +208,12 @@ export async function buildFinanceDocumentContexts(
         admission: { name: bill.admissionNameSnapshot, number: bill.admissionNumberSnapshot, fatherName: null, motherName: null, classLabel: bill.classLabelSnapshot, sectionLabel: bill.sectionLabelSnapshot, rollNumber: bill.rollNumberSnapshot?.toString() ?? null },
         currency: { code: bill.currency, exponent: currencyMinorUnitDigits(currencyCodeSchema.parse(bill.currency)) },
         bill: { id: bill.id, number: bill.billNumber, issueDate: bill.issueDate, periodKey: bill.periodKey, total: amount(bill.totalAmountMinor, bill.currency), totalMinor: bill.totalAmountMinor.toString() },
-        lines: lines.filter((line) => line.billId === bill.id).map((line) => ({ slug: line.feeElementSlug, name: line.feeElementName, amount: amount(line.amountMinor, line.currency), amountMinor: line.amountMinor.toString(), pricingSource: line.pricingSourceKind })),
+        lines: (linesByBillId.get(bill.id) ?? []).map((line) => ({ slug: line.feeElementSlug, name: line.feeElementName, amount: amount(line.amountMinor, line.currency), amountMinor: line.amountMinor.toString(), pricingSource: line.pricingSourceKind })),
         balanceBefore: amount(beforeMinor, bill.currency),
         balanceAfter: amount(afterMinor, bill.currency),
         generatedAt: new Date().toISOString(),
       };
-    }));
+    });
     return { contexts, name: bills.length === 1 ? `Bill ${bills[0]!.billNumber}` : `${bills.length} bills`, financeSource: { kind: "bill" as const, admissionIds: [...new Set(bills.map((bill) => bill.admissionId))], billIds, billRunId: source.billRunId ?? null }, reviewHash: null };
   }
 
@@ -146,7 +241,7 @@ export async function buildFinanceDocumentContexts(
       if (!ledger) throw rpcError.notFound("Receipt ledger fact");
       const snapshot = payment.documentSnapshot;
       if (!snapshot) throw rpcError.conflict("This legacy payment has no immutable receipt identity snapshot.");
-      const previousMinor = await balanceAt(db, schoolId, payment.admissionId, payment.currency, ledger.sequence - BigInt(1));
+      const previousMinor = await balanceBeforeLedgerFact(db, schoolId, payment.admissionId, payment.currency, ledger);
       const transactionAmount = refund?.amountMinor ?? payment.amountMinor;
       const remainingMinor = previousMinor + signed(ledger);
       return {
