@@ -142,7 +142,10 @@ describe("school billing operations", () => {
   });
 
   it("previews exact source snapshots without writes and enforces the actor matrix", async () => {
-    const before = await db.select({ value: count() }).from(financeBillRunTable);
+    const before = await db
+      .select({ value: count() })
+      .from(financeBillRunTable)
+      .where(eq(financeBillRunTable.schoolId, scenario.school.id));
     const preview = await scenario.actors.principal.client.school.previewBillingRun({
       ...draft(scenario),
       page: 1,
@@ -167,7 +170,10 @@ describe("school billing operations", () => {
         pricingSourceKind: "class",
       }),
     ]);
-    const after = await db.select({ value: count() }).from(financeBillRunTable);
+    const after = await db
+      .select({ value: count() })
+      .from(financeBillRunTable)
+      .where(eq(financeBillRunTable.schoolId, scenario.school.id));
     expect(after[0]?.value).toBe(before[0]?.value);
 
     await expect(
@@ -1120,6 +1126,9 @@ describe("school billing operations", () => {
       );
     expect(balance?.debitTotalMinor).toBe(BigInt("9223372036854775808"));
     expect(activity?.debitTotalMinor).toBe(BigInt("9223372036854775808"));
+    await expect(scenario.actors.platformAdmin.client.school.getAdmissionFinanceSummary({ schoolId: scenario.school.id, admissionId: scenario.admission.id, sessionId: scenario.activeSession.id })).resolves.toMatchObject({ currencies: [expect.objectContaining({ lifetimeDebitMinor: "9223372036854775808", balanceMinor: "9223372036854775808", dueMinor: "9223372036854775808" })] });
+    await expect(scenario.actors.platformAdmin.client.school.getAdmissionLedger({ schoolId: scenario.school.id, admissionId: scenario.admission.id, limit: 20 })).resolves.toMatchObject({ closingBalances: [expect.objectContaining({ balanceMinor: "9223372036854775808" })], sessionSummaries: [expect.objectContaining({ debitTotalMinor: "9223372036854775808" })] });
+    await expect(scenario.actors.platformAdmin.client.school.reconcileAdmissionProjection({ schoolId: scenario.school.id, admissionId: scenario.admission.id, currency: "INR" })).resolves.toMatchObject({ matches: true, expected: { lifetime: expect.objectContaining({ debitTotalMinor: "9223372036854775808" }) } });
   });
 
   it("returns non-leaking NOT_FOUND for missing or cross-school finance accounts", async () => {
@@ -1353,6 +1362,8 @@ describe("school billing operations", () => {
         method: "cash",
         receivedAt: new Date("2040-05-15T00:00:00.000Z"),
         idempotencyKey: createFinanceIdempotencyKey("settlement-payment"),
+        commandHash: "a".repeat(64),
+        commandSnapshot: { test: true },
         recordedBy: scenario.actors.manager.session.user.id,
       })
       .returning();

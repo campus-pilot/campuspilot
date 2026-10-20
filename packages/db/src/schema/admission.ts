@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   boolean,
   index,
@@ -74,5 +75,13 @@ export const admissionTable = pgTable("admission", {
   index("admission_school_id_registered_idx").on(
     table.schoolId,
     table.registered,
+  ),
+  index("admission_number_trgm_idx").using(
+    "gin",
+    sql`${table.admissionNo} gin_trgm_ops`,
+  ),
+  index("admission_name_trgm_idx").using(
+    "gin",
+    sql`${table.name} gin_trgm_ops`,
   ),
 ]);

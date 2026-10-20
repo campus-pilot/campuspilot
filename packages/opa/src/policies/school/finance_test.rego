@@ -20,6 +20,10 @@ finance_post_actions := {
   "school.billing.bill.manual.create",
   "school.billing.bill.reverse",
   "school.billing.run.reverse",
+  "school.billing.payment.record",
+  "school.billing.adjustment.record",
+  "school.billing.refund.record",
+  "school.admission.ledger.reverse",
 }
 
 test_finance_roles_have_configuration_and_read_boundaries if {

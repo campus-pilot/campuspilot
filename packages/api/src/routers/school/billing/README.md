@@ -243,6 +243,58 @@ Public bill details use immutable bill and line snapshots for session years,
 enrollment, class/section IDs, slugs and labels, roll/admission identity,
 configuration hash, line counts, exact amounts, and pricing sources.
 
+### Payment, adjustment, refund, and ledger operations
+
+`getAdmissionLedger` is admission-wide unless an explicit session attribution
+filter is supplied. It orders by `effectiveAt`, account sequence, and ID; pages
+entries without changing the independently calculated opening/closing balances;
+returns the balance immediately before each page plus the running balance at
+every displayed entry; and returns specialized bill, payment-allocation,
+adjustment, refund, and reversal metadata. Lifetime and selected-session
+summaries are aggregated from immutable ledger facts rather than projection
+caches, never aggregate currencies, and expose due and credit as separate
+non-negative decimal strings. Aggregate amounts use exact `NUMERIC(38,0)`
+decimal-string transport while each posting remains bounded by PostgreSQL
+`bigint`.
+
+Payment allocation preview and posting share the same deterministic ordering:
+oldest `issueDate`, then bill number, then bill ID. Explicit allocations must
+target outstanding bills owned by the same admission and currency, but may cross
+sessions. Any retained amount is admission credit and requires
+`confirmUnallocatedCredit` before posting. Receipt allocation, payment metadata,
+the immutable credit entry, numbering, and both projections commit atomically.
+Automatic proposals inspect at most 500 outstanding bills. Preview returns a
+review hash over the payment inputs, proposed allocations, and effective bill
+settlement state; proposal-mode posting recomputes it under the account lock and
+rejects stale review. Explicit mode remains available for bounded batches.
+Idempotency compares a persisted canonical command hash that includes the mode,
+explicit allocations, confirmation flag, dates, method, references, payer, and
+note, so later bills or corrections cannot change retry identity.
+
+Discounts, waivers, write-offs, and debit/credit corrections are separate
+adjustment facts. Percentage inputs are converted once against the remaining
+adjustable bill or line amount with integer half-up rounding; the fixed result,
+source input, eligible amount, target snapshot, reason, and approval metadata
+are persisted. Refunds draw only from the original payment's effective,
+unallocated, unrefunded credit. A reversed refund restores that refundable
+capacity; allocations are never silently removed.
+
+Generic ledger reversal appends one exact opposite posting. It rejects a prior
+reversal, reversal-of-reversal, settled/adjusted bills, and allocated/refunded
+payments. Specialized metadata remains immutable and historically readable.
+All posting commands lock session then admission, use serializable transactions,
+and compare idempotent retries against the original immutable command snapshot.
+Bill/payment detail collections are independently paginated.
+
+Session overview defines collection rate as effective net cash (payments minus
+refunds) divided by effective billed ledger facts, rounded half-up to basis
+points. The collection register is a paginated immutable payment/refund fact
+view. Fee-element reporting uses bill-line snapshots and line-targeted
+adjustments; it does not invent a fee-element attribution for bill-level cash
+allocations. Class snapshots aggregate immutable bill/class snapshots, live
+allocations, and live adjustments. Reports stay currency-separated and expose
+no due-date, overdue, or aging concepts.
+
 ## Authorization
 
 OPA actions remain operation-specific. Backend middleware is authoritative; UI

@@ -402,6 +402,32 @@ export const financeBillTable = pgTable(
       table.issueDate,
       table.id,
     ),
+    index("finance_bill_school_issue_idx").on(
+      table.schoolId,
+      table.issueDate,
+      table.id,
+    ),
+    index("finance_bill_allocation_proposal_idx").on(
+      table.schoolId,
+      table.admissionId,
+      table.currency,
+      table.status,
+      table.issueDate,
+      table.billNumber,
+      table.id,
+    ),
+    index("finance_bill_admission_number_trgm_idx").using(
+      "gin",
+      sql`${table.admissionNumberSnapshot} gin_trgm_ops`,
+    ),
+    index("finance_bill_admission_name_trgm_idx").using(
+      "gin",
+      sql`${table.admissionNameSnapshot} gin_trgm_ops`,
+    ),
+    index("finance_bill_number_trgm_idx").using(
+      "gin",
+      sql`${table.billNumber} gin_trgm_ops`,
+    ),
     index("finance_bill_run_idx").on(table.schoolId, table.billRunId),
   ],
 );
@@ -481,6 +507,14 @@ export const financePaymentTable = pgTable(
     receivedAt: timestamp("received_at", { withTimezone: true }).notNull(),
     note: text("note"),
     idempotencyKey: text("idempotency_key").notNull(),
+    /**
+     * Exact canonical command used for idempotency. Migration-origin payments
+     * receive an explicit legacy snapshot rather than inferred intent.
+     */
+    commandHash: text("command_hash").notNull(),
+    commandSnapshot: jsonb("command_snapshot")
+      .$type<JsonSnapshot>()
+      .notNull(),
     recordedBy: text("recorded_by").notNull(),
     recordedAt: timestamp("recorded_at", { withTimezone: true })
       .notNull()
@@ -539,6 +573,10 @@ export const financePaymentTable = pgTable(
     }),
     check("finance_payment_amount_positive_check", sql`${table.amountMinor} > 0`),
     check("finance_payment_currency_check", currencyCheck(table.currency)),
+    check(
+      "finance_payment_command_hash_check",
+      sql`${table.commandHash} ~ '^[a-f0-9]{64}$' or ${table.commandHash} like 'legacy:%'`,
+    ),
     index("finance_payment_admission_received_idx").on(
       table.schoolId,
       table.admissionId,
@@ -548,6 +586,19 @@ export const financePaymentTable = pgTable(
     index("finance_payment_reference_idx").on(
       table.schoolId,
       table.externalReference,
+    ),
+    index("finance_payment_school_received_idx").on(
+      table.schoolId,
+      table.receivedAt,
+      table.id,
+    ),
+    index("finance_payment_reference_trgm_idx").using(
+      "gin",
+      sql`${table.externalReference} gin_trgm_ops`,
+    ),
+    index("finance_payment_receipt_trgm_idx").using(
+      "gin",
+      sql`${table.receiptNumber} gin_trgm_ops`,
     ),
   ],
 );

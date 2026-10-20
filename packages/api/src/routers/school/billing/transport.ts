@@ -10,10 +10,25 @@ export const financeIntegerStringSchema = z
     "Finance integer exceeds the PostgreSQL bigint range",
   );
 
+/** Exact non-negative transport for cumulative NUMERIC(38,0) totals. */
+export const financeCumulativeIntegerStringSchema = z
+  .string()
+  .regex(/^(0|[1-9]\d*)$/, "Expected a non-negative base-10 integer string")
+  .refine(
+    (value) => value.length < 38 || (value.length === 38 && value <= "9".repeat(38)),
+    "Finance cumulative integer exceeds NUMERIC(38,0)",
+  );
+
 /** JSON-safe wire representation for PostgreSQL bigint finance values. */
 export function serializeFinanceInteger(value: bigint): string {
   if (value < BigInt(0)) throw new Error("Finance integer cannot be negative");
   return value.toString(10);
+}
+
+/** JSON-safe transport for cumulative NUMERIC(38,0) values beyond int8. */
+export function serializeFinanceCumulativeInteger(value: bigint): string {
+  if (value < BigInt(0)) throw new Error("Finance cumulative integer cannot be negative");
+  return financeCumulativeIntegerStringSchema.parse(value.toString(10));
 }
 
 /** Parses an API finance integer without passing through JavaScript number. */
@@ -45,7 +60,7 @@ export function serializeProjectionTotals(value: {
   return {
     lastSequence: serializeFinanceInteger(value.lastSequence),
     entryCount: serializeFinanceInteger(value.entryCount),
-    debitTotalMinor: serializeFinanceInteger(value.debitTotalMinor),
-    creditTotalMinor: serializeFinanceInteger(value.creditTotalMinor),
+    debitTotalMinor: serializeFinanceCumulativeInteger(value.debitTotalMinor),
+    creditTotalMinor: serializeFinanceCumulativeInteger(value.creditTotalMinor),
   };
 }

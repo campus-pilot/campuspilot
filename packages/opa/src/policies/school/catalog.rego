@@ -165,6 +165,30 @@ actions contains {
 } if { true }
 
 actions contains {
+  "id": "school.billing.payment.record",
+  "key": "RECORD_PAYMENT",
+  "resourceKind": "school",
+} if { true }
+
+actions contains {
+  "id": "school.billing.adjustment.record",
+  "key": "RECORD_FINANCE_ADJUSTMENT",
+  "resourceKind": "school",
+} if { true }
+
+actions contains {
+  "id": "school.billing.refund.record",
+  "key": "RECORD_REFUND",
+  "resourceKind": "school",
+} if { true }
+
+actions contains {
+  "id": "school.admission.ledger.reverse",
+  "key": "REVERSE_LEDGER_ENTRY",
+  "resourceKind": "school",
+} if { true }
+
+actions contains {
   "id": "school.class.list",
   "key": "LIST_CLASSES",
   "resourceKind": "school",

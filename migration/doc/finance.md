@@ -217,6 +217,11 @@ Each legacy payment event is decomposed:
   `finance_adjustment` of kind `discount`;
 - each fact retains the source event ID and shares a deterministic import-group
   reference in the migration manifest;
+- each imported payment persists a canonical command snapshot and SHA-256
+  command hash covering amount, currency, accounting session, effective and
+  received times, allocation mode/explicit links, unallocated-credit
+  confirmation, method, reference, payer, and note; migration provenance is
+  explicit and is never reconstructed from later mutable bill state;
 - a zero cash or zero discount component creates no zero-valued posting;
 - negative or internally contradictory components are exceptions.
 
@@ -309,6 +314,10 @@ Every imported target fact receives a deterministic idempotency key derived
 from the frozen source system identifier, source table/type, source primary key,
 and target operation type. Re-running the same manifest must produce no new
 facts. A key collision with different normalized content is a blocking error.
+Payment retries compare the persisted canonical command hash. Import tooling
+must calculate that hash from the normalized manifest before writing; the
+`legacy:` database backfill marker is reserved for rows that predate command
+snapshots and is not valid for new importer writes.
 
 Admission ledger sequence is allocated deterministically within
 `(school, admission, currency)`. Candidate ordering is:

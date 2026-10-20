@@ -570,6 +570,8 @@ describe("finance database foundation", () => {
         method: "cash",
         receivedAt: new Date(),
         idempotencyKey: randomUUID(),
+        commandHash: "a".repeat(64),
+        commandSnapshot: { test: true },
         recordedBy: "finance-test-user",
       }),
     ).rejects.toThrow();
@@ -584,6 +586,8 @@ describe("finance database foundation", () => {
         method: "cash",
         receivedAt: new Date(),
         idempotencyKey: randomUUID(),
+        commandHash: "b".repeat(64),
+        commandSnapshot: { test: true },
         recordedBy: "finance-test-user",
       })
       .returning();
@@ -868,20 +872,20 @@ describe("finance database foundation", () => {
     const discountEntry = await insertLedgerEntry({ ...base, sequence: 2n, type: "discount", direction: "credit", amountMinor: 2_000n });
     await db.insert(financeAdjustmentTable).values({ ...base, ledgerEntryId: discountEntry.id, billId: bill!.id, kind: "discount", amountMinor: 2_000n, currency: "INR", reasonCode: "AID", reasonNote: "Approved", calculationSnapshot: {}, idempotencyKey: randomUUID(), recordedBy: "finance-test-user" });
     const paymentEntry = await insertLedgerEntry({ ...base, sequence: 3n, type: "payment", direction: "credit", amountMinor: 10_000n });
-    const [payment] = await db.insert(financePaymentTable).values({ ...base, ledgerEntryId: paymentEntry.id, receiptNumber: `R/${randomUUID()}`, amountMinor: 10_000n, currency: "INR", method: "cash", receivedAt: new Date(), idempotencyKey: randomUUID(), recordedBy: "finance-test-user" }).returning();
+    const [payment] = await db.insert(financePaymentTable).values({ ...base, ledgerEntryId: paymentEntry.id, receiptNumber: `R/${randomUUID()}`, amountMinor: 10_000n, currency: "INR", method: "cash", receivedAt: new Date(), idempotencyKey: randomUUID(), commandHash: "c".repeat(64), commandSnapshot: { test: true }, recordedBy: "finance-test-user" }).returning();
     await expect(db.insert(financePaymentAllocationTable).values({ schoolId: base.schoolId, admissionId: base.admissionId, paymentId: payment!.id, billId: bill!.id, amountMinor: 8_001n, currency: "INR" })).rejects.toThrow();
     await db.insert(financePaymentAllocationTable).values({ schoolId: base.schoolId, admissionId: base.admissionId, paymentId: payment!.id, billId: bill!.id, amountMinor: 8_000n, currency: "INR" });
     await expect(insertLedgerEntry({ ...base, sequence: 4n, type: "reversal", direction: "debit", amountMinor: 10_000n, reversalOfEntryId: paymentEntry.id })).rejects.toThrow();
     await expect(insertLedgerEntry({ ...base, sequence: 4n, type: "reversal", direction: "credit", reversalOfEntryId: billEntry.id })).rejects.toThrow();
 
     const paymentEntry2 = await insertLedgerEntry({ ...base, sequence: 4n, type: "payment", direction: "credit", amountMinor: 5_000n });
-    const [payment2] = await db.insert(financePaymentTable).values({ ...base, ledgerEntryId: paymentEntry2.id, receiptNumber: `R/${randomUUID()}`, amountMinor: 5_000n, currency: "INR", method: "cash", receivedAt: new Date(), idempotencyKey: randomUUID(), recordedBy: "finance-test-user" }).returning();
+    const [payment2] = await db.insert(financePaymentTable).values({ ...base, ledgerEntryId: paymentEntry2.id, receiptNumber: `R/${randomUUID()}`, amountMinor: 5_000n, currency: "INR", method: "cash", receivedAt: new Date(), idempotencyKey: randomUUID(), commandHash: "d".repeat(64), commandSnapshot: { test: true }, recordedBy: "finance-test-user" }).returning();
     await insertLedgerEntry({ ...base, sequence: 5n, type: "reversal", direction: "debit", amountMinor: 5_000n, reversalOfEntryId: paymentEntry2.id });
     const reversedPaymentRefund = await insertLedgerEntry({ ...base, sequence: 6n, type: "refund", direction: "debit", amountMinor: 1_000n });
     await expect(db.insert(financeRefundTable).values({ ...base, paymentId: payment2!.id, ledgerEntryId: reversedPaymentRefund.id, refundNumber: `RF/${randomUUID()}`, amountMinor: 1_000n, currency: "INR", method: "cash", reason: "Test", idempotencyKey: randomUUID(), recordedBy: "finance-test-user" })).rejects.toThrow();
 
     const paymentEntry3 = await insertLedgerEntry({ ...base, sequence: 7n, type: "payment", direction: "credit", amountMinor: 5_000n });
-    const [payment3] = await db.insert(financePaymentTable).values({ ...base, ledgerEntryId: paymentEntry3.id, receiptNumber: `R/${randomUUID()}`, amountMinor: 5_000n, currency: "INR", method: "cash", receivedAt: new Date(), idempotencyKey: randomUUID(), recordedBy: "finance-test-user" }).returning();
+    const [payment3] = await db.insert(financePaymentTable).values({ ...base, ledgerEntryId: paymentEntry3.id, receiptNumber: `R/${randomUUID()}`, amountMinor: 5_000n, currency: "INR", method: "cash", receivedAt: new Date(), idempotencyKey: randomUUID(), commandHash: "e".repeat(64), commandSnapshot: { test: true }, recordedBy: "finance-test-user" }).returning();
     const refundEntry = await insertLedgerEntry({ ...base, sequence: 8n, type: "refund", direction: "debit", amountMinor: 4_000n });
     await db.insert(financeRefundTable).values({ ...base, paymentId: payment3!.id, ledgerEntryId: refundEntry.id, refundNumber: `RF/${randomUUID()}`, amountMinor: 4_000n, currency: "INR", method: "cash", reason: "Test", idempotencyKey: randomUUID(), recordedBy: "finance-test-user" });
     await insertLedgerEntry({ ...base, sequence: 9n, type: "reversal", direction: "credit", amountMinor: 4_000n, reversalOfEntryId: refundEntry.id });
@@ -889,6 +893,11 @@ describe("finance database foundation", () => {
     await expect(db.insert(financeRefundTable).values({ ...base, paymentId: payment3!.id, ledgerEntryId: replacementRefund.id, refundNumber: `RF/${randomUUID()}`, amountMinor: 5_000n, currency: "INR", method: "cash", reason: "Replacement", idempotencyKey: randomUUID(), recordedBy: "finance-test-user" })).resolves.toBeDefined();
     const cumulativeCredit = await insertLedgerEntry({ ...base, sequence: 11n, type: "waiver", direction: "credit", amountMinor: 1n });
     await expect(db.insert(financeAdjustmentTable).values({ ...base, ledgerEntryId: cumulativeCredit.id, billId: bill!.id, kind: "waiver", amountMinor: 1n, currency: "INR", reasonCode: "LIMIT", reasonNote: "Would exceed remaining outstanding", calculationSnapshot: {}, idempotencyKey: randomUUID(), recordedBy: "finance-test-user" })).rejects.toThrow();
+    const debitCorrection = await insertLedgerEntry({ ...base, sequence: 12n, type: "debit_correction", direction: "debit", amountMinor: 1_000n });
+    await expect(db.insert(financeAdjustmentTable).values({ ...base, ledgerEntryId: debitCorrection.id, billId: bill!.id, kind: "debit_correction", amountMinor: 1_000n, currency: "INR", reasonCode: "CORRECTION", reasonNote: "Additional charge", calculationSnapshot: {}, idempotencyKey: randomUUID(), recordedBy: "finance-test-user" })).resolves.toBeDefined();
+    const supportedCredit = await insertLedgerEntry({ ...base, sequence: 13n, type: "credit_correction", direction: "credit", amountMinor: 1_000n });
+    await expect(db.insert(financeAdjustmentTable).values({ ...base, ledgerEntryId: supportedCredit.id, billId: bill!.id, kind: "credit_correction", amountMinor: 1_000n, currency: "INR", reasonCode: "CORRECTION", reasonNote: "Offset charge", calculationSnapshot: {}, idempotencyKey: randomUUID(), recordedBy: "finance-test-user" })).resolves.toBeDefined();
+    await expect(insertLedgerEntry({ ...base, sequence: 14n, type: "reversal", direction: "credit", amountMinor: 1_000n, reversalOfEntryId: debitCorrection.id })).rejects.toThrow();
   });
 
   it("serializes run finalization against concurrent member insertion", async () => {
@@ -932,7 +941,7 @@ describe("finance database foundation", () => {
     await db.insert(financeBillLineTable).values({ schoolId: base.schoolId, billId: bill!.id, lineOrder: 0, feeElementSlug: "fee", feeElementName: "Fee", amountMinor: 10_000n, currency: "INR", pricingSourceKind: "manual", pricingRuleSnapshot: {}, manualReason: "Test" });
     await db.update(financeBillTable).set({ status: "posted", finalizedAt: new Date() }).where(eq(financeBillTable.id, bill!.id));
     const paymentEntry = await insertLedgerEntry({ ...base, sequence: 2n, type: "payment", direction: "credit" });
-    const [payment] = await db.insert(financePaymentTable).values({ ...base, ledgerEntryId: paymentEntry.id, receiptNumber: `R/${randomUUID()}`, amountMinor: 10_000n, currency: "INR", method: "cash", receivedAt: new Date(), idempotencyKey: randomUUID(), recordedBy: "finance-test-user" }).returning();
+    const [payment] = await db.insert(financePaymentTable).values({ ...base, ledgerEntryId: paymentEntry.id, receiptNumber: `R/${randomUUID()}`, amountMinor: 10_000n, currency: "INR", method: "cash", receivedAt: new Date(), idempotencyKey: randomUUID(), commandHash: "f".repeat(64), commandSnapshot: { test: true }, recordedBy: "finance-test-user" }).returning();
     const refundEntry = await insertLedgerEntry({ ...base, sequence: 3n, type: "refund", direction: "debit", amountMinor: 1_000n });
     let releasePayment!: () => void;
     const holdPayment = new Promise<void>((resolve) => { releasePayment = resolve; });
@@ -1010,7 +1019,7 @@ describe("finance database foundation", () => {
     await db.insert(financeBillLineTable).values({ schoolId: base.schoolId, billId: bill!.id, lineOrder: 0, feeElementSlug: "fee", feeElementName: "Fee", amountMinor: 10_000n, currency: "INR", pricingSourceKind: "manual", pricingRuleSnapshot: {}, manualReason: "Test" });
     await db.update(financeBillTable).set({ status: "posted", finalizedAt: new Date() }).where(eq(financeBillTable.id, bill!.id));
     const paymentEntry = await insertLedgerEntry({ ...base, sequence: 2n, type: "payment", direction: "credit", amountMinor: 5_000n });
-    const [payment] = await db.insert(financePaymentTable).values({ ...base, ledgerEntryId: paymentEntry.id, receiptNumber: `R/${randomUUID()}`, amountMinor: 5_000n, currency: "INR", method: "cash", receivedAt: new Date(), idempotencyKey: randomUUID(), recordedBy: "finance-test-user" }).returning();
+    const [payment] = await db.insert(financePaymentTable).values({ ...base, ledgerEntryId: paymentEntry.id, receiptNumber: `R/${randomUUID()}`, amountMinor: 5_000n, currency: "INR", method: "cash", receivedAt: new Date(), idempotencyKey: randomUUID(), commandHash: "0".repeat(64), commandSnapshot: { test: true }, recordedBy: "finance-test-user" }).returning();
     const creditEntry = await insertLedgerEntry({ ...base, sequence: 3n, type: "discount", direction: "credit", amountMinor: 6_000n });
 
     let releaseCredit!: () => void;

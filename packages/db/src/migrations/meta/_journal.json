@@ -141,6 +141,13 @@
       "when": 1792446140877,
       "tag": "0019_widen-finance-projections-and-index-billing-candidates",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1792448229973,
+      "tag": "0020_finance-phase-4-invariants",
+      "breakpoints": true
     }
   ]
 }

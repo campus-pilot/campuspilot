@@ -31,6 +31,11 @@ function findDatabaseError(
   return undefined;
 }
 
+/** True when PostgreSQL requires the complete transaction to be replayed. */
+export function isRetryableTransactionError(error: unknown): boolean {
+  return Boolean(findDatabaseError(error, "40001") ?? findDatabaseError(error, "40P01"));
+}
+
 export const rpcError = {
   badRequest: (message: string, cause?: unknown) =>
     new ORPCError("BAD_REQUEST", { message, cause }),

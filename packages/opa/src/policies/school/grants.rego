@@ -100,6 +100,10 @@ grants contains {
     "school.billing.run.reverse",
     "school.billing.report.read",
     "school.admission.ledger.read",
+    "school.billing.payment.record",
+    "school.billing.adjustment.record",
+    "school.billing.refund.record",
+    "school.admission.ledger.reverse",
   }
 }
 
