@@ -34,6 +34,7 @@ import { OptionSelect } from '../option-select';
 import { Pencil, Plus, Sparkles, Trash2 } from 'lucide-react';
 import {
   DEFAULT_FINANCE_CONFIG,
+  DEFAULT_FINANCE_TIME_ZONE,
   EXAMPLE_ELEMENTS,
   REQUIRED_LEVEL_LABELS,
   SCOPE_OPTIONS,
@@ -44,6 +45,50 @@ import {
   type FinanceScope,
   type PersistedFinanceSchemaConfig,
 } from './types';
+
+const BILLING_TIME_ZONE_OPTIONS = [
+  {
+    value: DEFAULT_FINANCE_TIME_ZONE,
+    label: 'Kolkata (India Standard Time) — Asia/Kolkata',
+  },
+  { value: 'UTC', label: 'Coordinated Universal Time — UTC' },
+  { value: 'Asia/Kathmandu', label: 'Kathmandu — Asia/Kathmandu' },
+  { value: 'Asia/Dhaka', label: 'Dhaka — Asia/Dhaka' },
+  { value: 'Asia/Colombo', label: 'Colombo — Asia/Colombo' },
+  { value: 'Asia/Karachi', label: 'Karachi — Asia/Karachi' },
+  { value: 'Asia/Dubai', label: 'Dubai — Asia/Dubai' },
+  { value: 'Asia/Singapore', label: 'Singapore — Asia/Singapore' },
+  { value: 'Europe/London', label: 'London — Europe/London' },
+  { value: 'America/New_York', label: 'New York — America/New_York' },
+  { value: 'America/Chicago', label: 'Chicago — America/Chicago' },
+  { value: 'America/Denver', label: 'Denver — America/Denver' },
+  {
+    value: 'America/Los_Angeles',
+    label: 'Los Angeles — America/Los_Angeles',
+  },
+  { value: 'Australia/Sydney', label: 'Sydney — Australia/Sydney' },
+  { value: 'Pacific/Auckland', label: 'Auckland — Pacific/Auckland' },
+] as const;
+
+/**
+ * Keeps a migrated/custom IANA identifier selectable without making the
+ * predefined list depend on browser-specific ICU data.
+ */
+function billingTimeZoneOptions(currentTimeZone?: string) {
+  if (
+    !currentTimeZone ||
+    BILLING_TIME_ZONE_OPTIONS.some(
+      (option) => option.value === currentTimeZone,
+    )
+  ) {
+    return BILLING_TIME_ZONE_OPTIONS;
+  }
+
+  return [
+    { value: currentTimeZone, label: `${currentTimeZone} (saved)` },
+    ...BILLING_TIME_ZONE_OPTIONS,
+  ];
+}
 
 const elementFormSchema = z
   .object({
@@ -410,7 +455,7 @@ export function FinanceSection({
       };
     });
     onChange?.({
-      recurring: 'monthly',
+      ...DEFAULT_FINANCE_CONFIG,
       elements: exampleMap,
     });
   }
@@ -432,7 +477,7 @@ export function FinanceSection({
     if (!financeConfig) return;
     onChange?.({
       ...financeConfig,
-      timeZone: timeZone.trim() === '' ? undefined : timeZone,
+      timeZone,
     });
   }
 
@@ -593,11 +638,11 @@ export function FinanceSection({
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="finance-time-zone">Billing time zone</Label>
           {onChange ? (
-            <Input
-              id="finance-time-zone"
-              value={financeConfig.timeZone ?? ''}
-              placeholder="e.g. Asia/Kolkata"
-              onChange={(event) => handleTimeZoneChange(event.target.value)}
+            <OptionSelect
+              value={financeConfig.timeZone ?? DEFAULT_FINANCE_TIME_ZONE}
+              onValueChange={handleTimeZoneChange}
+              options={billingTimeZoneOptions(financeConfig.timeZone)}
+              triggerProps={{ id: 'finance-time-zone' }}
             />
           ) : (
             <p className="text-sm">

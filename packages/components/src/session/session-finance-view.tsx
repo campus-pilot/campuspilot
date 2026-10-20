@@ -11,11 +11,12 @@ import {
 } from '@campuspilot/db/schema/jsonb/finance-config';
 import { ClassFinanceOverridesSection } from './class-finance-overrides-section';
 import { FinanceSection } from './finance-section';
-import type {
-  FinanceClassOverrides,
-  FinanceSchemaConfig,
-  PersistedFinanceSchemaConfig,
-  SchoolSessionFinanceDto,
+import {
+  DEFAULT_FINANCE_TIME_ZONE,
+  type FinanceClassOverrides,
+  type FinanceSchemaConfig,
+  type PersistedFinanceSchemaConfig,
+  type SchoolSessionFinanceDto,
 } from './types';
 
 const financeFormSchema = z.object({
@@ -114,6 +115,21 @@ export function SessionFinanceView({
       }
     },
   });
+
+  /**
+   * Migrated sessions remain incomplete until a finance edit is saved. While
+   * editing, Kolkata is the explicit draft default and is persisted with the
+   * user's next finance change instead of being inferred by the API.
+   */
+  function editableFinanceConfig(
+    financeConfig: PersistedFinanceSchemaConfig | null,
+  ) {
+    if (!isEditable || !financeConfig || financeConfig.timeZone) {
+      return financeConfig;
+    }
+
+    return { ...financeConfig, timeZone: DEFAULT_FINANCE_TIME_ZONE };
+  }
 
   function notifyDirty(
     financeConfig: PersistedFinanceSchemaConfig | null,
@@ -217,7 +233,7 @@ export function SessionFinanceView({
           })}
 
           <FinanceSection
-            financeConfig={values.financeConfig}
+            financeConfig={editableFinanceConfig(values.financeConfig)}
             onChange={isEditable ? handleFinanceChange : undefined}
           />
           <ClassFinanceOverridesSection

@@ -74,9 +74,16 @@ export interface SchoolSessionDto {
   updatedAt: Date | string | null;
 }
 
-/** New drafts deliberately leave independent billing facts unconfigured. */
+/** Default IANA time zone offered for newly configured school billing. */
+export const DEFAULT_FINANCE_TIME_ZONE = 'Asia/Kolkata';
+
+/**
+ * New drafts use Kolkata while leaving the other independent billing facts
+ * explicit.
+ */
 export const DEFAULT_FINANCE_CONFIG: PersistedFinanceSchemaConfig = {
   recurring: 'monthly',
+  timeZone: DEFAULT_FINANCE_TIME_ZONE,
   elements: {},
 };
 
