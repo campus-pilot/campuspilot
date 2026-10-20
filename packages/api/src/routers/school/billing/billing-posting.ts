@@ -2,6 +2,7 @@ import type { Database, DatabaseExecutor, DatabaseTransaction } from "@campuspil
 import { generateId } from "@campuspilot/db/id";
 import { admissionTable } from "@campuspilot/db/schema/admission";
 import { classTable, sectionTable } from "@campuspilot/db/schema/class";
+import { currencyCodeSchema } from "@campuspilot/db/schema/jsonb/currencies";
 import {
   financeAdjustmentTable,
   financeBillLineTable,
@@ -10,7 +11,7 @@ import {
   financeLedgerEntryTable,
   financePaymentAllocationTable,
 } from "@campuspilot/db/schema/finance";
-import { financeSchemaConfigSchema } from "@campuspilot/db/schema/jsonb/finance-config";
+import { financeTimeZoneSchema } from "@campuspilot/db/schema/jsonb/finance-config";
 import { schoolSessionTable } from "@campuspilot/db/schema/session";
 import { studentTable } from "@campuspilot/db/schema/student";
 import {
@@ -22,6 +23,7 @@ import {
   isNull,
   or,
 } from "drizzle-orm";
+import { z } from "zod";
 
 import { rpcError } from "../../../errors";
 import {
@@ -60,8 +62,13 @@ type ManualBillCommand = {
   issueDate: string;
   reason: string;
   idempotencyKey: string;
-  lines: Array<{ feeElementSlug: string; amountMinor: string }>;
+  lines: Array<{ title: string; amountMinor: string }>;
 };
+
+const manualBillFinanceContextSchema = z.object({
+  currency: currencyCodeSchema,
+  timeZone: financeTimeZoneSchema,
+});
 
 type ReverseBillCommand = {
   schoolId: string;
@@ -517,7 +524,7 @@ export async function createPostedManualBill(
           existing.lines.length === command.lines.length &&
           existing.lines.every(
             (line, index) =>
-              line.feeElementSlug === command.lines[index]?.feeElementSlug &&
+              line.feeElementName === command.lines[index]?.title &&
               line.amountMinor === BigInt(command.lines[index]!.amountMinor),
           );
         if (
@@ -535,10 +542,12 @@ export async function createPostedManualBill(
         return manualBillTransport(existing);
       }
 
-      const config = financeSchemaConfigSchema.safeParse(session.financeConfig);
+      const config = manualBillFinanceContextSchema.safeParse(
+        session.financeConfig,
+      );
       if (!config.success) {
         throw rpcError.badRequest(
-          "Complete the session finance currency, timezone, cycle month, and fee configuration before posting a manual bill.",
+          "Configure the session finance currency and timezone before posting a manual bill.",
         );
       }
       const [account] = await transaction
@@ -596,18 +605,6 @@ export async function createPostedManualBill(
         throw rpcError.badRequest(
           "The admission requires a class placement before an ordinary manual bill can be posted.",
         );
-      }
-      const duplicateSlugs = new Set<string>();
-      for (const line of command.lines) {
-        if (duplicateSlugs.has(line.feeElementSlug)) {
-          throw rpcError.badRequest("Manual bill fee elements must be unique.");
-        }
-        duplicateSlugs.add(line.feeElementSlug);
-        if (!config.data.elements[line.feeElementSlug]) {
-          throw rpcError.badRequest(
-            `Finance element "${line.feeElementSlug}" is not defined for this session.`,
-          );
-        }
       }
       let totalAmountMinor = BigInt(0);
       try {
@@ -677,29 +674,28 @@ export async function createPostedManualBill(
         .returning();
       if (!bill) throw new Error("Manual bill was not created");
       await transaction.insert(financeBillLineTable).values(
-        command.lines.map((line, lineOrder) => {
-          const element = config.data.elements[line.feeElementSlug]!;
-          return {
-            schoolId: command.schoolId,
-            billId: bill.id,
-            lineOrder,
-            feeElementSlug: line.feeElementSlug,
-            feeElementName: element.name,
-            amountMinor: BigInt(line.amountMinor),
+        command.lines.map((line, lineOrder) => ({
+          schoolId: command.schoolId,
+          billId: bill.id,
+          lineOrder,
+          // Manual items are not fee elements. This internal compatibility key
+          // preserves the immutable bill-line/report shape; the title is the
+          // authoritative customer-facing label and report grouping dimension.
+          feeElementSlug: "manual-item",
+          feeElementName: line.title,
+          amountMinor: BigInt(line.amountMinor),
+          currency: config.data.currency,
+          pricingSourceKind: "manual" as const,
+          pricingSourceKey: `manual:${command.idempotencyKey}:${lineOrder}`,
+          pricingRuleSnapshot: {
+            title: line.title,
+            amountMinor: line.amountMinor,
             currency: config.data.currency,
-            pricingSourceKind: "manual" as const,
-            pricingSourceKey: `manual:${command.idempotencyKey}:${lineOrder}`,
-            pricingRuleSnapshot: {
-              elementSlug: line.feeElementSlug,
-              element,
-              amountMinor: line.amountMinor,
-              currency: config.data.currency,
-              timeZone: config.data.timeZone,
-              reason: command.reason,
-            },
-            manualReason: command.reason,
-          };
-        }),
+            timeZone: config.data.timeZone,
+            reason: command.reason,
+          },
+          manualReason: command.reason,
+        })),
       );
       await transaction
         .update(financeBillTable)

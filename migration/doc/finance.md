@@ -205,6 +205,15 @@ Each accepted legacy bill becomes:
 - an optional `finance_bill_run` grouping only when the source generation event
   is valid and its members reconcile.
 
+Legacy custom/manual charges require a separate line mapping from configured
+fees. Preserve the source's customer-facing item/description as
+`fee_element_name`, use the target-only `manual-item` compatibility key, retain
+stable source line order separately, and preserve the source justification as
+both the bill/line manual reason and ledger note. A custom charge must not be mapped to a
+configured fee element merely because its wording or amount looks similar. A
+missing item title or missing justification is a blocking exception requiring
+an operator-approved value; neither may be inferred from the other.
+
 Duplicate/forced same-period source runs are not discarded. The dry run labels
 each as regular, candidate supplemental with a required reason, duplicate, or
 blocked ambiguity. Operators approve how each duplicate is represented; the

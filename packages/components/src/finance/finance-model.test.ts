@@ -67,7 +67,7 @@ describe("finance presentation model", () => {
   });
 
   it("validates supplemental reasons while preserving blank versus zero run values", () => {
-    const base = { billingDate: "2026-10-20", admissionSelections: [], classSelections: [], admissionSearch: "", admissionPage: 1, classSearch: "", classPage: 1, runValues: { session: { transport: "", tuition: "0" }, classes: { "class-1": { lab: "125.50" } } } };
+    const base = { billingDate: "2026-10-20", classSelections: [], classSearch: "", classPage: 1, runValues: { session: { transport: "", tuition: "0" }, classes: { "class-1": { lab: "125.50" } } } };
     expect(financeBillingDraftSchema.safeParse({ ...base, kind: "regular", supplementalReason: "" }).success).toBe(true);
     expect(financeBillingDraftSchema.safeParse({ ...base, kind: "supplemental", supplementalReason: "" }).success).toBe(false);
     expect(financeBillingDraftSchema.safeParse({ ...base, kind: "supplemental", supplementalReason: "Correction" }).success).toBe(true);

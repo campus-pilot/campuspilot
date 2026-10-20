@@ -19,7 +19,7 @@ async function createBill(
     issueDate: input.issueDate,
     reason: `Phase 4 ${input.suffix}`,
     idempotencyKey: createFinanceIdempotencyKey(`bill-${input.suffix}`),
-    lines: [{ feeElementSlug: "tuition", amountMinor: input.amountMinor }],
+    lines: [{ title: "Tuition charge", amountMinor: input.amountMinor }],
   });
 }
 
@@ -122,7 +122,7 @@ describe("school finance ledger operations", () => {
     await expect(scenario.actors.platformAdmin.client.school.getSessionFinanceOverview({ schoolId: scenario.school.id, sessionId: scenario.activeSession.id })).resolves.toMatchObject({ currencies: [expect.objectContaining({ currency: "INR", billedMinor: "10000", paymentMinor: "12000", netCashMinor: "12000" })] });
     await expect(scenario.actors.manager.client.school.getCollectionRegister({ schoolId: scenario.school.id, filters: { sessionId: scenario.activeSession.id }, limit: 20 })).resolves.toMatchObject({ items: [expect.objectContaining({ kind: "payment", amountMinor: "12000" })] });
     await expect(scenario.actors.manager.client.school.getCollectionRegister({ schoolId: scenario.school.id, filters: { sessionId: scenario.activeSession.id, search: scenario.admission.admissionNo }, limit: 20 })).resolves.toMatchObject({ items: [expect.objectContaining({ admissionId: scenario.admission.id })] });
-    await expect(scenario.actors.manager.client.school.getFeeElementFinanceReport({ schoolId: scenario.school.id, filters: { sessionId: scenario.activeSession.id }, limit: 20 })).resolves.toMatchObject({ items: [expect.objectContaining({ feeElementSlug: "tuition", billedMinor: "10000" })] });
+    await expect(scenario.actors.manager.client.school.getFeeElementFinanceReport({ schoolId: scenario.school.id, filters: { sessionId: scenario.activeSession.id }, limit: 20 })).resolves.toMatchObject({ items: [expect.objectContaining({ feeElementSlug: "manual-item", feeElementName: "Tuition charge", billedMinor: "10000" })] });
     await expect(scenario.actors.manager.client.school.getClassFinanceSnapshot({ schoolId: scenario.school.id, filters: { sessionId: scenario.activeSession.id }, limit: 20 })).resolves.toMatchObject({ items: [expect.objectContaining({ billedMinor: "10000", allocatedMinor: "7000", outstandingMinor: "3000" })] });
   });
 
@@ -249,7 +249,7 @@ describe("school finance ledger operations", () => {
       }),
     ).resolves.toMatchObject({
       items: expect.arrayContaining([
-        expect.objectContaining({ feeElementSlug: "tuition", billedMinor: "1001", creditAdjustmentMinor: "0" }),
+        expect.objectContaining({ feeElementSlug: "manual-item", feeElementName: "Tuition charge", billedMinor: "1001", creditAdjustmentMinor: "0" }),
         expect.objectContaining({ feeElementSlug: "__bill_unallocated_adjustments__", billedMinor: "0", creditAdjustmentMinor: "501", netChargeMinor: "-501" }),
       ]),
     });

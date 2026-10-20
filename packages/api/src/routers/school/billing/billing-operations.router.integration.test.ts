@@ -215,7 +215,7 @@ describe("school billing operations", () => {
         idempotencyKey: createFinanceIdempotencyKey("out-of-range"),
         lines: [
           {
-            feeElementSlug: "tuition",
+            title: "Out-of-range charge",
             amountMinor: "9223372036854775808",
           },
         ],
@@ -583,8 +583,8 @@ describe("school billing operations", () => {
         reason: "Overflow must not reach the database",
         idempotencyKey: createFinanceIdempotencyKey("manual-overflow"),
         lines: [
-          { feeElementSlug: "tuition", amountMinor: "9223372036854775807" },
-          { feeElementSlug: "transport", amountMinor: "1" },
+          { title: "Primary charge", amountMinor: "9223372036854775807" },
+          { title: "Overflowing charge", amountMinor: "1" },
         ],
       }),
     ).rejects.toBeDefined();
@@ -1128,7 +1128,7 @@ describe("school billing operations", () => {
       issueDate: "2040-05-12",
       reason: "One-off laboratory charge",
       idempotencyKey: createFinanceIdempotencyKey("manual"),
-      lines: [{ feeElementSlug: "tuition", amountMinor: "2500" }],
+      lines: [{ title: "Broken laboratory beaker", amountMinor: "2500" }],
     };
     const bill = await scenario.actors.accountant.client.school.createManualBill(input);
     expect(bill).toMatchObject({
@@ -1136,6 +1136,14 @@ describe("school billing operations", () => {
       totalAmountMinor: "2500",
       admissionNameSnapshot: scenario.admission.name,
       classLabelSnapshot: scenario.schoolClass.label,
+      manualReason: "One-off laboratory charge",
+      lines: [
+        expect.objectContaining({
+          feeElementSlug: "manual-item",
+          feeElementName: "Broken laboratory beaker",
+          amountMinor: "2500",
+        }),
+      ],
     });
     await expect(
       scenario.actors.accountant.client.school.createManualBill(input),
@@ -1146,6 +1154,19 @@ describe("school billing operations", () => {
         reason: "Changed payload",
       }),
     ).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(
+      scenario.actors.accountant.client.school.createManualBill({
+        ...input,
+        lines: [{ title: "Different item", amountMinor: "2500" }],
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(
+      scenario.actors.accountant.client.school.createManualBill({
+        ...input,
+        reason: " ",
+        idempotencyKey: createFinanceIdempotencyKey("manual-blank-reason"),
+      }),
+    ).rejects.toBeDefined();
     await scenario.actors.accountant.client.school.reverseBill({
       schoolId: scenario.school.id,
       sessionId: scenario.activeSession.id,
@@ -1180,7 +1201,7 @@ describe("school billing operations", () => {
       issueDate: "2040-05-12",
       reason: "Maximum individual posting",
       idempotencyKey: createFinanceIdempotencyKey("projection-max"),
-      lines: [{ feeElementSlug: "tuition", amountMinor: maximum }],
+      lines: [{ title: "Maximum charge", amountMinor: maximum }],
     });
     const second = await scenario.actors.accountant.client.school.createManualBill({
       schoolId: scenario.school.id,
@@ -1189,7 +1210,7 @@ describe("school billing operations", () => {
       issueDate: "2040-05-13",
       reason: "Projection exceeds operational bigint",
       idempotencyKey: createFinanceIdempotencyKey("projection-max-plus-one"),
-      lines: [{ feeElementSlug: "tuition", amountMinor: "1" }],
+      lines: [{ title: "Additional charge", amountMinor: "1" }],
     });
     expect(first.totalAmountMinor).toBe(maximum);
     expect(second.totalAmountMinor).toBe("1");
@@ -1236,7 +1257,7 @@ describe("school billing operations", () => {
       sessionId: scenario.activeSession.id,
       issueDate: "2040-05-12",
       reason: "Account ownership test",
-      lines: [{ feeElementSlug: "tuition", amountMinor: "100" }],
+      lines: [{ title: "Account ownership charge", amountMinor: "100" }],
     };
     for (const admissionId of [foreignAdmission.id, "missing-admission"]) {
       await expect(
@@ -1728,7 +1749,7 @@ describe("school billing operations", () => {
       issueDate: "2040-05-01",
       reason: "Seed first bill number",
       idempotencyKey: createFinanceIdempotencyKey("rollback-seed"),
-      lines: [{ feeElementSlug: "tuition", amountMinor: "100" }],
+      lines: [{ title: "Seed charge", amountMinor: "100" }],
     });
     await db
       .update(financeNumberCounterTable)

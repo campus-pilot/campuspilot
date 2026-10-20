@@ -174,6 +174,12 @@ function BillDetailPanel({
           <p>{formatMinor(query.data.outstandingMinor, query.data.currency)}</p>
         </div>
       </div>
+      {query.data.manualReason ? (
+        <div className="rounded-xl border p-3">
+          <p className="text-xs text-muted-foreground">Manual charge reason</p>
+          <p className="text-sm">{query.data.manualReason}</p>
+        </div>
+      ) : null}
       <section>
         <h3 className="mb-2 text-sm font-medium">Line snapshots</h3>
         {query.data.lines.map((line) => (

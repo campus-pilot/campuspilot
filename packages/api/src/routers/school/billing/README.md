@@ -197,8 +197,11 @@ individual operational value without overflow or loss of transport precision.
 ### Billing-run and bill operations
 
 `previewBillingRun` and `postBillingRun` accept an explicit school, session,
-local billing date, optional admission/class selections, and bill-generation
-values. Run-time class values are keyed by durable class ID; persisted class
+local billing date, optional class selection, and bill-generation values. The
+school-level management workflow never submits admission IDs: the server
+discovers every enrollment in the explicit session and then excludes
+unregistered admissions during readiness evaluation. Run-time class values are
+keyed by durable class ID; persisted class
 pricing remains keyed by the configuration's class slug. Preview is read-only
 and returns grouped blocking/non-blocking issues, exact totals, paginated bill
 breakdowns, immutable pricing-source snapshots, and a SHA-256 review hash.
@@ -220,8 +223,12 @@ result only when its canonical command payload matches. A reused key with a
 different payload is a conflict.
 
 `createManualBill` is an ordinary new-charge workflow. It requires a registered
-admission with an enrollment and class placement in the explicit session, a
-reason, and configured fee-element lines. Settlement/correction APIs may later
+admission with an enrollment and class placement in the explicit session,
+configured session currency/timezone, a required audit reason, and one or more
+free-text titled items with positive amounts. Manual items are intentionally
+independent of configured fee elements: the immutable line name is the title
+shown on bills and documents, while the internal `manual-item` compatibility
+key preserves the shared reporting shape. Settlement/correction APIs may later
 operate on unregistered accounts, but this ordinary bill command may not.
 
 `reverseBill` and `reverseBillingRun` append exact opposite ledger entries and

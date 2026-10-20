@@ -253,10 +253,7 @@ export const financeBillingDraftSchema = z.object({
   billingDate: z.string().date("Choose a billing date."),
   kind: z.enum(["regular", "supplemental"]),
   supplementalReason: z.string(),
-  admissionSelections: z.array(z.object({ id: z.string().min(1), label: z.string().min(1) })),
   classSelections: z.array(z.object({ id: z.string().min(1), label: z.string().min(1) })),
-  admissionSearch: z.string(),
-  admissionPage: z.number().int().positive(),
   classSearch: z.string(),
   classPage: z.number().int().positive(),
   runValues: z.object({

@@ -39,7 +39,6 @@ function commandDraft(value: BillingFormValue) {
     billingDate: value.billingDate,
     kind: value.kind,
     supplementalReason: value.kind === "supplemental" ? value.supplementalReason.trim() : "",
-    admissionIds: value.admissionSelections.map(({ id }) => id).sort(),
     classIds: value.classSelections.map(({ id }) => id).sort(),
     runValues: value.runValues,
   };
@@ -82,17 +81,6 @@ function selectedBillingClasses(
 function commandDraftFingerprint(value: unknown) {
   const parsed = formSchema.safeParse(value);
   return parsed.success ? JSON.stringify(commandDraft(parsed.data)) : null;
-}
-
-function ScopeSelections({ label, values, onRemove }: { label: string; values: ScopeSelection[]; onRemove: (id: string) => void }) {
-  if (!values.length) return <p className="text-xs text-muted-foreground">No {label.toLowerCase()} selected; all eligible records are included.</p>;
-  return <div className="flex flex-wrap gap-2">{values.map((value) => <Badge key={value.id} variant="outline">{value.label}<button type="button" className="ml-1 rounded-sm px-1 hover:bg-muted" aria-label={`Remove ${value.label}`} onClick={() => onRemove(value.id)}>×</button></Badge>)}</div>;
-}
-
-function AdmissionScopePicker({ schoolId, values, search, page, onValuesChange, onSearchChange, onPageChange }: { schoolId: string; values: ScopeSelection[]; search: string; page: number; onValuesChange: (values: ScopeSelection[]) => void; onSearchChange: (value: string) => void; onPageChange: (page: number) => void }) {
-  const query = useQuery(orpc.school.listAdmissions.queryOptions({ input: { schoolId, page, limit: 10, searchQuery: search.trim() || undefined, filters: { registered: true } } }));
-  const selected = new Set(values.map(({ id }) => id));
-  return <fieldset className="flex flex-col gap-2 rounded-xl border p-3"><legend className="px-1 text-sm font-medium">Admissions</legend><Input value={search} placeholder="Search name or admission number…" aria-label="Search admissions for billing" onChange={(event) => { onSearchChange(event.target.value); onPageChange(1); }} /><ScopeSelections label="Admissions" values={values} onRemove={(id) => onValuesChange(values.filter((value) => value.id !== id))} />{query.isPending ? <p className="text-xs text-muted-foreground">Loading admissions…</p> : query.isError ? <p className="text-xs text-destructive">Unable to load admissions.</p> : <><div className="flex flex-col gap-1">{query.data.items.map((admission) => <Button key={admission.id} type="button" size="sm" variant={selected.has(admission.id) ? "secondary" : "ghost"} className="justify-between" onClick={() => onValuesChange(selected.has(admission.id) ? values.filter(({ id }) => id !== admission.id) : [...values, { id: admission.id, label: `${admission.name} · ${admission.admissionNo}` }])}><span className="truncate">{admission.name} · {admission.admissionNo}</span><span>{selected.has(admission.id) ? "Selected" : "Add"}</span></Button>)}</div><SimplePagination currentPage={query.data.pagination.currentPage} totalPages={query.data.pagination.totalPages} onPageChange={onPageChange} /></>}</fieldset>;
 }
 
 function ClassScopePicker({ classes, isPending, isError, values, search, page, onValuesChange, onSearchChange, onPageChange }: { classes: BillingClass[]; isPending: boolean; isError: boolean; values: ScopeSelection[]; search: string; page: number; onValuesChange: (values: ScopeSelection[]) => void; onSearchChange: (value: string) => void; onPageChange: (page: number) => void }) {
@@ -140,7 +128,7 @@ function BillingScopeFields({ form, schoolId, sessionId, currency, amountPlaceho
   const classesQuery = useQuery(orpc.school.listClasses.queryOptions({ input: { schoolId, sessionId } }));
   const classes = classesQuery.data ?? [];
   const classRuntimeElements = runtimeElements.filter(({ scopes }) => scopes.includes("class"));
-  return <div className="flex flex-col gap-3"><div className="grid gap-3 sm:grid-cols-2"><form.Subscribe selector={(state: any) => ({ values: state.values.classSelections, search: state.values.classSearch, page: state.values.classPage })}>{({ values, search, page }: any) => <form.Field name="classSelections">{(selectionField: any) => <form.Field name="classSearch">{(searchField: any) => <form.Field name="classPage">{(pageField: any) => <ClassScopePicker classes={classes} isPending={classesQuery.isPending} isError={classesQuery.isError} values={values} search={search} page={page} onValuesChange={selectionField.handleChange} onSearchChange={searchField.handleChange} onPageChange={pageField.handleChange} />}</form.Field>}</form.Field>}</form.Field>}</form.Subscribe><form.Subscribe selector={(state: any) => ({ values: state.values.admissionSelections, search: state.values.admissionSearch, page: state.values.admissionPage })}>{({ values, search, page }: any) => <form.Field name="admissionSelections">{(selectionField: any) => <form.Field name="admissionSearch">{(searchField: any) => <form.Field name="admissionPage">{(pageField: any) => <AdmissionScopePicker schoolId={schoolId} values={values} search={search} page={page} onValuesChange={selectionField.handleChange} onSearchChange={searchField.handleChange} onPageChange={pageField.handleChange} />}</form.Field>}</form.Field>}</form.Field>}</form.Subscribe></div>{classesQuery.isPending ? <p className="text-xs text-muted-foreground">Loading class billing values…</p> : classesQuery.isError ? null : <ClassRunValueFields form={form} classes={classes} runtimeElements={classRuntimeElements} currency={currency} amountPlaceholder={amountPlaceholder} />}</div>;
+  return <div className="flex flex-col gap-3"><p className="text-sm text-muted-foreground">This school-level run includes every registered admission enrolled in the session for the selected classes.</p><form.Subscribe selector={(state: any) => ({ values: state.values.classSelections, search: state.values.classSearch, page: state.values.classPage })}>{({ values, search, page }: any) => <form.Field name="classSelections">{(selectionField: any) => <form.Field name="classSearch">{(searchField: any) => <form.Field name="classPage">{(pageField: any) => <ClassScopePicker classes={classes} isPending={classesQuery.isPending} isError={classesQuery.isError} values={values} search={search} page={page} onValuesChange={selectionField.handleChange} onSearchChange={searchField.handleChange} onPageChange={pageField.handleChange} />}</form.Field>}</form.Field>}</form.Field>}</form.Subscribe>{classesQuery.isPending ? <p className="text-xs text-muted-foreground">Loading class billing values…</p> : classesQuery.isError ? null : <ClassRunValueFields form={form} classes={classes} runtimeElements={classRuntimeElements} currency={currency} amountPlaceholder={amountPlaceholder} />}</div>;
 }
 
 function BillingPreviewPanel({ preview, currency, values, previewPage, issuePage, refreshPreview }: { preview: BillingPreview; currency: string; values: BillingFormValue; previewPage: number; issuePage: number; refreshPreview: (value: BillingFormValue, page: number, issuePage: number) => Promise<void> }) {
@@ -187,12 +175,12 @@ export function BillingRunDialog({ open, onOpenChange, schoolId, sessionId, curr
     }
   });
   const form = useForm({
-    defaultValues: { billingDate: civilDateInTimeZone(timeZone), kind: "regular" as "regular" | "supplemental", supplementalReason: "", admissionSelections: [] as ScopeSelection[], classSelections: [] as ScopeSelection[], admissionSearch: "", admissionPage: 1, classSearch: "", classPage: 1, runValues: { session: Object.fromEntries(runtimeElements.filter(({ scopes }) => !scopes.includes("class")).map(({ slug }) => [slug, ""])), classes: {} as Record<string, Record<string, string>> } },
+    defaultValues: { billingDate: civilDateInTimeZone(timeZone), kind: "regular" as "regular" | "supplemental", supplementalReason: "", classSelections: [] as ScopeSelection[], classSearch: "", classPage: 1, runValues: { session: Object.fromEntries(runtimeElements.filter(({ scopes }) => !scopes.includes("class")).map(({ slug }) => [slug, ""])), classes: {} as Record<string, Record<string, string>> } },
     validators: { onSubmit: schema },
     onSubmit: async ({ value }) => {
       const parsed = schema.parse(value);
       const runValues = billingRunValues(parsed, currency);
-      await previewMutation.mutateAsync({ schoolId, sessionId, billingDate: parsed.billingDate, admissionIds: financeScopeIds(parsed.admissionSelections), classIds: financeScopeIds(parsed.classSelections), runValues, page: previewPage, limit: 20, issuePage, issueLimit: 50 });
+      await previewMutation.mutateAsync({ schoolId, sessionId, billingDate: parsed.billingDate, classIds: financeScopeIds(parsed.classSelections), runValues, page: previewPage, limit: 20, issuePage, issueLimit: 50 });
       reviewedDraft.current = JSON.stringify(commandDraft(parsed));
     },
   });
@@ -209,7 +197,7 @@ export function BillingRunDialog({ open, onOpenChange, schoolId, sessionId, curr
     setPreviewPage(page);
     setIssuePage(nextIssuePage);
     const runValues = billingRunValues(parsed.data, currency);
-    await previewMutation.mutateAsync({ schoolId, sessionId, billingDate: parsed.data.billingDate, admissionIds: financeScopeIds(parsed.data.admissionSelections), classIds: financeScopeIds(parsed.data.classSelections), runValues, page, limit: 20, issuePage: nextIssuePage, issueLimit: 50 });
+    await previewMutation.mutateAsync({ schoolId, sessionId, billingDate: parsed.data.billingDate, classIds: financeScopeIds(parsed.data.classSelections), runValues, page, limit: 20, issuePage: nextIssuePage, issueLimit: 50 });
     reviewedDraft.current = JSON.stringify(commandDraft(parsed.data));
   }
 
@@ -229,7 +217,7 @@ export function BillingRunDialog({ open, onOpenChange, schoolId, sessionId, curr
     const fingerprint = JSON.stringify({ schoolId, sessionId, ...commandDraft(parsed.data), runValues, configurationHash: preview.configurationHash });
     idempotency.current = idempotencyForDraft(idempotency.current, fingerprint, () => crypto.randomUUID());
     try {
-      await postMutation.mutateAsync({ schoolId, sessionId, billingDate: parsed.data.billingDate, admissionIds: financeScopeIds(parsed.data.admissionSelections), classIds: financeScopeIds(parsed.data.classSelections), runValues, kind: parsed.data.kind, supplementalReason: parsed.data.kind === "supplemental" ? parsed.data.supplementalReason.trim() : undefined, expectedConfigurationHash: preview.configurationHash, idempotencyKey: idempotency.current.key });
+      await postMutation.mutateAsync({ schoolId, sessionId, billingDate: parsed.data.billingDate, classIds: financeScopeIds(parsed.data.classSelections), runValues, kind: parsed.data.kind, supplementalReason: parsed.data.kind === "supplemental" ? parsed.data.supplementalReason.trim() : undefined, expectedConfigurationHash: preview.configurationHash, idempotencyKey: idempotency.current.key });
       setConfirmOpen(false);
     } catch (error) {
       setConfirmOpen(false);

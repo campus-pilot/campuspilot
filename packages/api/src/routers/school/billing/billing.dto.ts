@@ -295,7 +295,7 @@ export const createManualBillInputSchema = z.object({
   lines: z
     .array(
       z.object({
-        feeElementSlug: z.string().trim().min(1).max(100),
+        title: z.string().trim().min(1).max(200),
         amountMinor: financeIntegerStringSchema.refine(
           (value) => BigInt(value) > BigInt(0),
           "Manual bill line amount must be positive.",
