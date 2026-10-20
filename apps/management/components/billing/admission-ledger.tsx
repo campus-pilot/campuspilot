@@ -50,7 +50,11 @@ import {
   type FinanceSessionOption,
 } from "./admission-finance-dialogs";
 import { FinanceError, FinanceLoading, SimplePagination } from "./finance-ui";
-import { FinanceDocumentAction, StatementDocumentDialog } from "./finance-document-action";
+import {
+  FinanceDocumentAction,
+  StatementDocumentDialog,
+  type StatementSession,
+} from "./finance-document-action";
 
 type ActionDialog =
   | "manual"
@@ -75,6 +79,12 @@ type LedgerEntry = {
   reversed: boolean;
   detail: Record<string, unknown> | null;
   sequence: string;
+};
+type LedgerSession = {
+  id: string;
+  label: string;
+  startYear: number;
+  endYear: number;
 };
 
 function detailString(detail: Record<string, unknown> | null, key: string) {
@@ -377,6 +387,7 @@ function AdmissionFinanceActions({
   admissionId,
   registered,
   financeSessions,
+  statementSessions,
   defaultSessionId,
   selectedEntry,
   dialog,
@@ -386,6 +397,7 @@ function AdmissionFinanceActions({
   admissionId: string;
   registered: boolean;
   financeSessions: FinanceSessionOption[];
+  statementSessions: StatementSession[];
   defaultSessionId: string;
   selectedEntry?: LedgerEntry;
   dialog: ActionDialog;
@@ -396,6 +408,21 @@ function AdmissionFinanceActions({
   )
     ? defaultSessionId
     : (financeSessions[0]?.id ?? "");
+  const statementSessionDefault = statementSessions.some(
+    ({ id }) => id === defaultSessionId,
+  )
+    ? defaultSessionId
+    : (statementSessions[0]?.id ?? "");
+  const defaultStatementSession = statementSessions.find(
+    ({ id }) => id === statementSessionDefault,
+  );
+  /** Only an authoritative transition for the dialog's resolved default
+   * session remounts its form. Updates to unrelated sessions must preserve a
+   * person's current session and date selection. */
+  const statementDialogRevision =
+    defaultStatementSession?.status === "ready"
+      ? `${defaultStatementSession.id}:ready:${defaultStatementSession.currency}:${defaultStatementSession.timeZone}:${defaultStatementSession.startYear}:${defaultStatementSession.endYear}:${defaultStatementSession.cycleStartMonth}`
+      : `${defaultStatementSession?.id ?? "none"}:${defaultStatementSession?.status ?? "missing"}`;
   const entry = selectedEntry
     ? {
         id: selectedEntry.id,
@@ -494,10 +521,31 @@ function AdmissionFinanceActions({
             Refund
           </Button>
         </RequirePermissions>
-        <RequirePermissions permissions={{ action: SCHOOL_ACTIONS.GENERATE_FINANCE_DOCUMENTS, resource: { kind: "school", schoolId } }}><Button type="button" variant="outline" disabled={actionsDisabled} onClick={() => onDialogChange("statement")}>
-          <ReceiptText aria-hidden />
-          Statement
-        </Button></RequirePermissions>
+        <RequirePermissions
+          permissions={[
+            {
+              action: SCHOOL_ACTIONS.GENERATE_FINANCE_DOCUMENTS,
+              resource: { kind: "school", schoolId },
+            },
+            {
+              action: SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_TEMPLATES,
+              resource: { kind: "school", schoolId },
+            },
+            {
+              action: SCHOOL_ACTIONS.READ_SESSION_FINANCE,
+              resource: { kind: "school", schoolId },
+            },
+          ]}
+        >
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => onDialogChange("statement")}
+          >
+            <ReceiptText aria-hidden />
+            Statement
+          </Button>
+        </RequirePermissions>
       </div>
       {dialog === "manual" ? (
         <ManualBillDialog {...baseProps} />
@@ -510,9 +558,109 @@ function AdmissionFinanceActions({
       ) : dialog === "reversal" && selectedEntry ? (
         <ReversalDialog {...baseProps} />
       ) : dialog === "statement" ? (
-        <StatementDocumentDialog schoolId={schoolId} admissionIds={[admissionId]} sessions={financeSessions} defaultSessionId={sessionDefault} onClose={() => onDialogChange(null)} />
+        <StatementDocumentDialog key={statementDialogRevision} schoolId={schoolId} admissionIds={[admissionId]} sessions={statementSessions} defaultSessionId={statementSessionDefault} onClose={() => onDialogChange(null)} />
       ) : null}
     </>
+  );
+}
+
+function AdmissionFinanceActionsLoader({
+  schoolId,
+  admissionId,
+  registered,
+  sessions,
+  defaultSessionId,
+  selectedEntry,
+  dialog,
+  onDialogChange,
+}: {
+  schoolId: string;
+  admissionId: string;
+  registered: boolean;
+  sessions: LedgerSession[];
+  defaultSessionId: string;
+  selectedEntry?: LedgerEntry;
+  dialog: ActionDialog;
+  onDialogChange: (dialog: ActionDialog) => void;
+}) {
+  const financeQueries = useQueries({
+    queries: sessions.map((session) =>
+      orpc.school.getSessionFinance.queryOptions({
+        input: { schoolId, sessionId: session.id },
+      }),
+    ),
+  });
+  const financeSessions: FinanceSessionOption[] = sessions.flatMap(
+    (session, index) => {
+      const config = financeQueries[index]?.data?.financeConfig;
+      return config?.currency && config.timeZone
+        ? [
+            {
+              ...session,
+              currency: config.currency,
+              timeZone: config.timeZone,
+              feeElements: Object.entries(config.elements).map(
+                ([slug, element]) => ({ slug, name: element.name }),
+              ),
+            },
+          ]
+        : [];
+    },
+  );
+  const statementSessions: StatementSession[] = sessions.map(
+    (session, index) => {
+      const query = financeQueries[index];
+      if (!query || query.isPending) {
+        return { id: session.id, label: session.label, status: "checking" };
+      }
+      if (query.isError) {
+        return {
+          id: session.id,
+          label: session.label,
+          status: "error",
+          error: query.error,
+          retrying: query.isFetching,
+          retry: () => query.refetch(),
+        };
+      }
+      const config = query.data.financeConfig;
+      if (
+        !query.data.configurationReadiness.readyForBilling ||
+        !config?.currency ||
+        !config.timeZone ||
+        !config.cycleStartMonth
+      ) {
+        return {
+          id: session.id,
+          label: session.label,
+          status: "incomplete",
+          missingFields: query.data.configurationReadiness.missingFields,
+        };
+      }
+      return {
+        id: session.id,
+        label: session.label,
+        status: "ready",
+        currency: config.currency,
+        timeZone: config.timeZone,
+        cycleStartMonth: config.cycleStartMonth,
+        startYear: session.startYear,
+        endYear: session.endYear,
+      };
+    },
+  );
+  return (
+    <AdmissionFinanceActions
+      schoolId={schoolId}
+      admissionId={admissionId}
+      registered={registered}
+      financeSessions={financeSessions}
+      statementSessions={statementSessions}
+      defaultSessionId={defaultSessionId}
+      selectedEntry={selectedEntry}
+      dialog={dialog}
+      onDialogChange={onDialogChange}
+    />
   );
 }
 
@@ -530,7 +678,7 @@ function LedgerData({
   sessionId?: string;
   sessionLabels: Map<string, string>;
   registered: boolean;
-  sessions: Array<{ id: string; label: string }>;
+  sessions: LedgerSession[];
   defaultSessionId: string;
 }) {
   const [page, setPage] = useState(1);
@@ -538,13 +686,6 @@ function LedgerData({
   const [reversalEntry, setReversalEntry] = useState<LedgerEntry>();
   const [detailEntry, setDetailEntry] = useState<LedgerEntry>();
   const selectedEntry = reversalEntry;
-  const financeQueries = useQueries({
-    queries: sessions.map((session) =>
-      orpc.school.getSessionFinance.queryOptions({
-        input: { schoolId, sessionId: session.id },
-      }),
-    ),
-  });
   const summaryQuery = useQuery(
     orpc.school.getAdmissionFinanceSummary.queryOptions({
       input: { schoolId, admissionId, ...(sessionId ? { sessionId } : {}) },
@@ -575,23 +716,6 @@ function LedgerData({
         error={new Error("Ledger data was unavailable.")}
       />
     );
-  const financeSessions: FinanceSessionOption[] = sessions.flatMap(
-    (session, index) => {
-      const config = financeQueries[index]?.data?.financeConfig;
-      return config?.currency && config.timeZone
-        ? [
-            {
-              ...session,
-              currency: config.currency,
-              timeZone: config.timeZone,
-              feeElements: Object.entries(config.elements).map(
-                ([slug, element]) => ({ slug, name: element.name }),
-              ),
-            },
-          ]
-        : [];
-    },
-  );
   const rows: FinanceLedgerRow[] = ledgerQuery.data.entries.items.map(
     (entry) => ({
       id: entry.id,
@@ -614,19 +738,26 @@ function LedgerData({
   );
   return (
     <div className="flex min-w-0 flex-col gap-6">
-      <AdmissionFinanceActions
-        schoolId={schoolId}
-        admissionId={admissionId}
-        registered={registered}
-        financeSessions={financeSessions}
-        defaultSessionId={sessionId ?? defaultSessionId}
-        selectedEntry={selectedEntry}
-        dialog={dialog}
-        onDialogChange={(next) => {
-          setDialog(next);
-          if (!next) setReversalEntry(undefined);
+      <RequirePermissions
+        permissions={{
+          action: SCHOOL_ACTIONS.READ_SESSION_FINANCE,
+          resource: { kind: "school", schoolId },
         }}
-      />
+      >
+        <AdmissionFinanceActionsLoader
+          schoolId={schoolId}
+          admissionId={admissionId}
+          registered={registered}
+          sessions={sessions}
+          defaultSessionId={sessionId ?? defaultSessionId}
+          selectedEntry={selectedEntry}
+          dialog={dialog}
+          onDialogChange={(next) => {
+            setDialog(next);
+            if (!next) setReversalEntry(undefined);
+          }}
+        />
+      </RequirePermissions>
       {summaryQuery.data.currencies.length ? (
         summaryQuery.data.currencies.map((summary) => (
           <section key={summary.currency} className="flex flex-col gap-3">
@@ -787,6 +918,8 @@ export function AdmissionLedger({
   const sessions = sessionsQuery.data.map((session) => ({
     id: session.id,
     label: `${session.sessionStartYear}–${session.sessionEndYear}`,
+    startYear: session.sessionStartYear,
+    endYear: session.sessionEndYear,
   }));
   const labels = new Map(
     sessions.map((session) => [session.id, session.label]),

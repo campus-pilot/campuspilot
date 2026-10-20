@@ -17,6 +17,7 @@ import {
   DEFAULT_REPORT_SECTIONS,
   type DocumentSource,
   type AcademicDocumentType,
+  type DocumentType,
 } from "@campuspilot/api/routers/school/document/document.dto";
 import { client, orpc } from "@/lib/orpc";
 import { RequirePermissions } from "@/components/require-permissions";
@@ -636,7 +637,7 @@ export function DocumentDownload({
 }: {
   schoolId: string;
   artifactId: string;
-  documentType: AcademicDocumentType;
+  documentType: DocumentType;
 }) {
   const form = useForm({
     defaultValues: { error: "" },
