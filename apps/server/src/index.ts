@@ -1,5 +1,6 @@
 import { serve } from '@hono/node-server';
 import { runMigrations } from '@campuspilot/db/migrate';
+import { env } from '@campuspilot/env/server';
 
 import { app, mcpHandler, mcpTools } from './http';
 import { log } from './log';
@@ -29,7 +30,7 @@ async function main() {
   const server = serve(
     {
       fetch: app.fetch,
-      port: 3000,
+      port: env.SERVER_PORT,
     },
     (info) => {
       log.info(

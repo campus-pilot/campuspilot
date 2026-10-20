@@ -57,23 +57,44 @@ function financeHandler<TInput, TOutput>(callback: (input: TInput) => Promise<TO
   };
 }
 
+const route = (summary: string, description: string) => ({
+  summary,
+  description,
+  tags: ["School", "Billing"],
+});
+
 export const ledgerOperationsRouter = {
   getAdmissionLedger: protectedProcedure
-    .route({ summary: "Read an admission ledger", tags: ["School", "Billing"] })
+    .route(
+      route(
+        "Read an admission ledger",
+        "List immutable ledger entries for one admission, optionally scoped to an academic session, with deterministic pagination and running balances.",
+      ),
+    )
     .input(getAdmissionLedgerInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_ADMISSION_LEDGER))
     .output(admissionLedgerOutputSchema)
     .handler(({ context, input }) => financeHandler((value: typeof input) => getAdmissionLedger(context.db, value))({ input })),
 
   getAdmissionFinanceSummary: protectedProcedure
-    .route({ summary: "Read an admission finance summary", tags: ["School", "Billing"] })
+    .route(
+      route(
+        "Read an admission finance summary",
+        "Read projected billed, paid, adjusted, refunded, outstanding, and credit totals for one admission in either session or lifetime scope.",
+      ),
+    )
     .input(getAdmissionFinanceSummaryInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_ADMISSION_LEDGER))
     .output(admissionFinanceSummaryOutputSchema)
     .handler(({ context, input }) => financeHandler((value: typeof input) => getAdmissionFinanceSummary(context.db, value))({ input })),
 
   reconcileAdmissionProjection: protectedProcedure
-    .route({ summary: "Reconcile admission finance projections", tags: ["School", "Billing"] })
+    .route(
+      route(
+        "Reconcile admission finance projections",
+        "Compare one admission's stored finance projections with totals recomputed from its immutable ledger and report any mismatch without changing financial facts.",
+      ),
+    )
     .input(reconcileAdmissionProjectionInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_BILLING_REPORTS))
     .output(reconciliationOutputSchema)
@@ -87,42 +108,72 @@ export const ledgerOperationsRouter = {
     }),
 
   listAdmissionBills: protectedProcedure
-    .route({ summary: "List admission bills", tags: ["School", "Billing"] })
+    .route(
+      route(
+        "List admission bills",
+        "List immutable bills for one admission with explicit session and status filters, stable ordering, and pagination.",
+      ),
+    )
     .input(listAdmissionBillsInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_ADMISSION_LEDGER))
     .output(admissionBillListOutputSchema)
     .handler(({ context, input }) => financeHandler((value: typeof input) => listAdmissionBills(context.db, value))({ input })),
 
   getAdmissionBill: protectedProcedure
-    .route({ summary: "Read an immutable admission bill", tags: ["School", "Billing"] })
+    .route(
+      route(
+        "Read an immutable admission bill",
+        "Read one tenant-scoped bill with its snapshotted lines, source facts, settlement state, allocations, and reversal history.",
+      ),
+    )
     .input(getAdmissionBillInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_ADMISSION_LEDGER))
     .output(admissionBillOutputSchema)
     .handler(({ context, input }) => financeHandler((value: typeof input) => getAdmissionBill(context.db, value))({ input })),
 
   listPayments: protectedProcedure
-    .route({ summary: "List recorded payments", tags: ["School", "Billing"] })
+    .route(
+      route(
+        "List recorded payments",
+        "List immutable payments for one admission with optional session filtering, stable ordering, and pagination.",
+      ),
+    )
     .input(listPaymentsInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_ADMISSION_LEDGER))
     .output(paymentListOutputSchema)
     .handler(({ context, input }) => financeHandler((value: typeof input) => listPayments(context.db, value))({ input })),
 
   getPayment: protectedProcedure
-    .route({ summary: "Read an immutable payment", tags: ["School", "Billing"] })
+    .route(
+      route(
+        "Read an immutable payment",
+        "Read one tenant-scoped payment with its receipt number, allocation facts, unallocated credit, refund history, and reversal state.",
+      ),
+    )
     .input(getPaymentInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_ADMISSION_LEDGER))
     .output(paymentOutputSchema)
     .handler(({ context, input }) => financeHandler((value: typeof input) => getPayment(context.db, value))({ input })),
 
   previewPaymentAllocation: protectedProcedure
-    .route({ summary: "Preview payment allocations", tags: ["School", "Billing"] })
+    .route(
+      route(
+        "Preview payment allocations",
+        "Preview deterministic oldest-first or explicit bill allocations for a payment and return a review hash before any money is recorded.",
+      ),
+    )
     .input(previewPaymentAllocationInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.RECORD_PAYMENT))
     .output(paymentAllocationPreviewOutputSchema)
     .handler(({ context, input }) => financeHandler((value: typeof input) => previewPaymentAllocation(context.db, value))({ input })),
 
   recordPayment: protectedProcedure
-    .route({ summary: "Record a payment", tags: ["School", "Billing"] })
+    .route(
+      route(
+        "Record a payment",
+        "Atomically record an idempotent payment, receipt number, reviewed bill allocations, and any remaining admission credit as immutable finance facts.",
+      ),
+    )
     .input(recordPaymentInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.RECORD_PAYMENT))
     .output(recordedPaymentOutputSchema)
@@ -132,7 +183,12 @@ export const ledgerOperationsRouter = {
     }),
 
   recordAdjustment: protectedProcedure
-    .route({ summary: "Record a non-cash finance adjustment", tags: ["School", "Billing"] })
+    .route(
+      route(
+        "Record a non-cash finance adjustment",
+        "Append an idempotent discount, waiver, write-off, correction, or debit adjustment with an explicit reason and immutable audit provenance.",
+      ),
+    )
     .input(recordAdjustmentInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.RECORD_FINANCE_ADJUSTMENT))
     .output(adjustmentOutputSchema)
@@ -142,7 +198,12 @@ export const ledgerOperationsRouter = {
     }),
 
   recordRefund: protectedProcedure
-    .route({ summary: "Record a payment refund", tags: ["School", "Billing"] })
+    .route(
+      route(
+        "Record a payment refund",
+        "Atomically append an idempotent refund against a recorded payment while enforcing its refundable balance and preserving an immutable audit trail.",
+      ),
+    )
     .input(recordRefundInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.RECORD_REFUND))
     .output(refundRecordOutputSchema)
@@ -152,7 +213,12 @@ export const ledgerOperationsRouter = {
     }),
 
   reverseLedgerEntry: protectedProcedure
-    .route({ summary: "Reverse a ledger entry", tags: ["School", "Billing"] })
+    .route(
+      route(
+        "Reverse a ledger entry",
+        "Append an idempotent opposite entry for an eligible payment, refund, or adjustment; the original immutable ledger fact remains preserved.",
+      ),
+    )
     .input(reverseLedgerEntryInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.REVERSE_LEDGER_ENTRY))
     .output(reversalOutputSchema)

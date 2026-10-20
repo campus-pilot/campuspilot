@@ -11,9 +11,27 @@ const reportHandler = <TInput, TOutput>(callback: (input: TInput) => Promise<TOu
   catch (error) { throw toRpcError(error); }
 };
 
+const route = (summary: string, description: string) => ({
+  summary,
+  description,
+  tags: ["School", "Billing", "Reports"],
+});
+
 export const financeReportsRouter = {
-  getSessionFinanceOverview: protectedProcedure.route({ summary: "Read session finance overview", tags: ["School", "Billing", "Reports"] }).input(sessionFinanceOverviewInputSchema).use(requireSchoolPermission(SCHOOL_ACTIONS.READ_BILLING_REPORTS)).output(sessionFinanceOverviewOutputSchema).handler(({ context, input }) => reportHandler((value: typeof input) => getSessionFinanceOverview(context.db, value))({ input })),
-  getCollectionRegister: protectedProcedure.route({ summary: "Read collection register", tags: ["School", "Billing", "Reports"] }).input(collectionRegisterInputSchema).use(requireSchoolPermission(SCHOOL_ACTIONS.READ_BILLING_REPORTS)).output(collectionRegisterOutputSchema).handler(({ context, input }) => reportHandler((value: typeof input) => getCollectionRegister(context.db, value))({ input })),
-  getFeeElementFinanceReport: protectedProcedure.route({ summary: "Read fee-element finance report", tags: ["School", "Billing", "Reports"] }).input(feeElementReportInputSchema).use(requireSchoolPermission(SCHOOL_ACTIONS.READ_BILLING_REPORTS)).output(feeElementReportOutputSchema).handler(({ context, input }) => reportHandler((value: typeof input) => getFeeElementReport(context.db, value))({ input })),
-  getClassFinanceSnapshot: protectedProcedure.route({ summary: "Read class finance snapshot", tags: ["School", "Billing", "Reports"] }).input(classFinanceSnapshotInputSchema).use(requireSchoolPermission(SCHOOL_ACTIONS.READ_BILLING_REPORTS)).output(classFinanceSnapshotOutputSchema).handler(({ context, input }) => reportHandler((value: typeof input) => getClassFinanceSnapshot(context.db, value))({ input })),
+  getSessionFinanceOverview: protectedProcedure.route(route(
+    "Read session finance overview",
+    "Read aggregate billed, collected, refunded, adjusted, outstanding, credit, and collection-rate totals for one explicit academic session.",
+  )).input(sessionFinanceOverviewInputSchema).use(requireSchoolPermission(SCHOOL_ACTIONS.READ_BILLING_REPORTS)).output(sessionFinanceOverviewOutputSchema).handler(({ context, input }) => reportHandler((value: typeof input) => getSessionFinanceOverview(context.db, value))({ input })),
+  getCollectionRegister: protectedProcedure.route(route(
+    "Read collection register",
+    "List payment and refund transactions for one explicit academic session with stable pagination and optional recorded-date filtering.",
+  )).input(collectionRegisterInputSchema).use(requireSchoolPermission(SCHOOL_ACTIONS.READ_BILLING_REPORTS)).output(collectionRegisterOutputSchema).handler(({ context, input }) => reportHandler((value: typeof input) => getCollectionRegister(context.db, value))({ input })),
+  getFeeElementFinanceReport: protectedProcedure.route(route(
+    "Read fee-element finance report",
+    "Summarize billed amounts and bill-level adjustments by immutable fee-element snapshot for one explicit academic session.",
+  )).input(feeElementReportInputSchema).use(requireSchoolPermission(SCHOOL_ACTIONS.READ_BILLING_REPORTS)).output(feeElementReportOutputSchema).handler(({ context, input }) => reportHandler((value: typeof input) => getFeeElementReport(context.db, value))({ input })),
+  getClassFinanceSnapshot: protectedProcedure.route(route(
+    "Read class finance snapshot",
+    "Summarize bills, allocations, adjustments, and outstanding balances by snapshotted class placement for one explicit academic session.",
+  )).input(classFinanceSnapshotInputSchema).use(requireSchoolPermission(SCHOOL_ACTIONS.READ_BILLING_REPORTS)).output(classFinanceSnapshotOutputSchema).handler(({ context, input }) => reportHandler((value: typeof input) => getClassFinanceSnapshot(context.db, value))({ input })),
 };

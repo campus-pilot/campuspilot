@@ -12,6 +12,8 @@ export const env = createEnv({
     PUBLIC_APP_URL: z.url(),
 
     CORS_ORIGIN: z.string().min(1),
+    /** HTTP port for the API server, configurable for parallel worktree runs. */
+    SERVER_PORT: z.coerce.number().int().min(1).max(65_535).default(3000),
     NODE_ENV: z
       .enum(['development', 'production', 'test'])
       .default('development'),

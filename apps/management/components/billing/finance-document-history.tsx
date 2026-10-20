@@ -20,7 +20,7 @@ export function FinanceDocumentHistory({ schoolId, sessionId }: { schoolId: stri
 }
 
 function FinanceHistoryRows({ schoolId, sessionId, search, page, onPage }: { schoolId: string; sessionId: string; search: string; page: number; onPage: (page: number) => void }) {
-  const history = useQuery(orpc.school.listDocumentArtifacts.queryOptions({ input: { schoolId, filters: { sessionId, documentDomain: 'finance' }, searchQuery: search, page, limit: 25 } }));
+  const history = useQuery(orpc.school.listDocumentArtifacts.queryOptions({ input: { schoolId, filters: { sessionId, documentDomain: 'finance' }, searchQuery: search, page, limit: 20 } }));
   const finance = useQuery(orpc.school.getSessionFinance.queryOptions({ input: { schoolId, sessionId } }));
   if (history.isPending || finance.isPending) return <FinanceLoading />;
   if (history.isError || finance.isError) return <FinanceError title="Unable to load finance documents" error={history.error ?? finance.error} />;
