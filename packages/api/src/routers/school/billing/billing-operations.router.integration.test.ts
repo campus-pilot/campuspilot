@@ -226,6 +226,51 @@ describe("school billing operations", () => {
     ).rejects.toBeDefined();
   });
 
+  it("searches the complete eligible billing preview before pagination", async () => {
+    const secondAdmission = await createTestAdmission({
+      schoolId: scenario.school.id,
+      name: "Preview Search Target",
+      admissionNo: "PREVIEW-SEARCH-002",
+    });
+    await createTestStudent({
+      schoolId: scenario.school.id,
+      sessionId: scenario.activeSession.id,
+      admissionId: secondAdmission.id,
+      classId: scenario.schoolClass.id,
+      sectionId: scenario.section.id,
+      rollNo: 2,
+    });
+
+    const completePreview = await scenario.actors.manager.client.school.previewBillingRun({
+      ...draft(scenario),
+      page: 1,
+      limit: 20,
+    });
+    const firstPage = await scenario.actors.manager.client.school.previewBillingRun({
+      ...draft(scenario),
+      page: 1,
+      limit: 1,
+    });
+    const target = completePreview.breakdown.items.find(
+      ({ admissionId }) => admissionId !== firstPage.breakdown.items[0]?.admissionId,
+    );
+    expect(target).toBeDefined();
+
+    const searched = await scenario.actors.manager.client.school.previewBillingRun({
+      ...draft(scenario),
+      searchQuery: target!.admissionNumber.toLowerCase(),
+      page: 1,
+      limit: 1,
+    });
+
+    expect(searched.configurationHash).toBe(completePreview.configurationHash);
+    expect(searched.counts).toEqual({ selected: 2, eligible: 2, skipped: 0 });
+    expect(searched.breakdown).toMatchObject({
+      items: [expect.objectContaining({ admissionId: target!.admissionId })],
+      pagination: { currentPage: 1, totalPages: 1, totalItems: 1, pageSize: 1 },
+    });
+  });
+
   it("applies explicit bill-generation values independently for every class", async () => {
     const [{ schoolClass: secondClass, sections }, secondAdmission] =
       await Promise.all([

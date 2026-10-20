@@ -35,13 +35,12 @@ export function PageSection({ title, description, action, children }: { title: s
   );
 }
 
-export function SimplePagination({ currentPage, totalPages, onPageChange }: { currentPage: number; totalPages: number; onPageChange: (page: number) => void }) {
+export function SimplePagination({ currentPage, totalPages, disabled = false, onPageChange }: { currentPage: number; totalPages: number; disabled?: boolean; onPageChange: (page: number) => void }) {
   return (
     <div className="flex items-center justify-end gap-2">
       <span className="text-xs text-muted-foreground">Page {totalPages === 0 ? 0 : currentPage} of {totalPages}</span>
-      <Button type="button" size="sm" variant="outline" disabled={currentPage <= 1} onClick={() => onPageChange(currentPage - 1)}>Previous</Button>
-      <Button type="button" size="sm" variant="outline" disabled={totalPages === 0 || currentPage >= totalPages} onClick={() => onPageChange(currentPage + 1)}>Next</Button>
+      <Button type="button" size="sm" variant="outline" disabled={disabled || currentPage <= 1} onClick={() => onPageChange(currentPage - 1)}>Previous</Button>
+      <Button type="button" size="sm" variant="outline" disabled={disabled || totalPages === 0 || currentPage >= totalPages} onClick={() => onPageChange(currentPage + 1)}>Next</Button>
     </div>
   );
 }
-

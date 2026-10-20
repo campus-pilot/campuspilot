@@ -31,12 +31,22 @@ import { serializeFinanceInteger } from "./transport";
 
 function previewTransport(
   prepared: Awaited<ReturnType<typeof prepareBillingRun>>,
+  searchQuery: string,
   page: number,
   limit: number,
   issuePage: number,
   issueLimit: number,
 ) {
-  const totalItems = prepared.eligible.length;
+  /** Search changes only the displayed slice; the reviewed command and hash remain complete. */
+  const normalizedSearch = searchQuery.toLowerCase();
+  const matchingAdmissions = normalizedSearch
+    ? prepared.eligible.filter(
+        ({ admissionName, admissionNumber }) =>
+          admissionName.toLowerCase().includes(normalizedSearch) ||
+          admissionNumber.toLowerCase().includes(normalizedSearch),
+      )
+    : prepared.eligible;
+  const totalItems = matchingAdmissions.length;
   const totalPages = Math.ceil(totalItems / limit);
   const offset = (page - 1) * limit;
   const issueTotalItems = prepared.issues.length;
@@ -64,7 +74,7 @@ function previewTransport(
       },
     },
     breakdown: {
-      items: prepared.eligible.slice(offset, offset + limit).map((admission) => ({
+      items: matchingAdmissions.slice(offset, offset + limit).map((admission) => ({
         ...admission,
         totalAmountMinor: serializeFinanceInteger(admission.totalAmountMinor),
         lines: admission.lines.map((line) => ({
@@ -99,6 +109,7 @@ export const billingOperationsRouter = {
         const prepared = await prepareBillingRun(context.db, input);
         return previewTransport(
           prepared,
+          input.searchQuery,
           input.page,
           input.limit,
           input.issuePage,

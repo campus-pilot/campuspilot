@@ -47,6 +47,7 @@ export const billingRunDraftInputSchema = z.object({
 });
 
 export const previewBillingRunInputSchema = billingRunDraftInputSchema.extend({
+  searchQuery: z.string().trim().max(200).default(""),
   page: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).default(1),
   limit: z.number().int().positive().max(20).default(20),
   issuePage: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).default(1),

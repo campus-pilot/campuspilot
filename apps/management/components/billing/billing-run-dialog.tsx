@@ -35,6 +35,13 @@ type BillingPreview = z.infer<typeof billingRunPreviewOutputSchema>;
 
 const formSchema = financeBillingDraftSchema;
 type BillingFormValue = z.infer<typeof formSchema>;
+type PreviewAdmission = BillingPreview["breakdown"]["items"][number];
+type PreviewLine = PreviewAdmission["lines"][number];
+
+const previewSearchSchema = z.object({
+  query: z.string().max(200, "Search cannot exceed 200 characters."),
+  appliedQuery: z.string().max(200),
+});
 
 const billingRunSetupSchema = z
   .object({
@@ -85,15 +92,6 @@ function billingRunValues(value: BillingFormValue, currency: string) {
     session: compactValues(value.runValues.session),
     classes,
   };
-}
-
-/** True only when the operator entered at least one optional run value. */
-function hasExplicitBillingRunValues(value: BillingFormValue, currency: string) {
-  const runValues = billingRunValues(value, currency);
-  return Object.keys(runValues.session).length > 0 ||
-    Object.values(runValues.classes).some(
-      (classValues) => Object.keys(classValues).length > 0,
-    );
 }
 
 /** An empty selection is the compact command representation for all classes. */
@@ -167,28 +165,70 @@ function OptionalBillingRunValues({ form, schoolId, sessionId, currency, amountP
   const sessionElements = runtimeElements.filter(({ scopes }) => !scopes.includes("class"));
   const classElements = runtimeElements.filter(({ scopes }) => scopes.includes("class"));
   if (!runtimeElements.length) return <div className="rounded-xl border border-dashed p-4"><p className="text-sm font-medium">No optional run values</p><p className="text-xs text-muted-foreground">This run will use only the ordinary prices already configured for the session, classes, and admissions.</p></div>;
-  return <div className="flex flex-col gap-3"><div><h3 className="text-sm font-medium">Optional bill-generation values</h3><p className="text-xs text-muted-foreground">Leave every value blank unless this run should add that charge. Entered values become part of immutable bill lines after confirmation.</p></div>{sessionElements.length ? <fieldset className="grid gap-3 rounded-xl border p-3 sm:grid-cols-2"><legend className="px-1 text-sm font-medium">School-wide values · Optional</legend>{sessionElements.map((element) => <form.Field key={element.slug} name={`runValues.session.${element.slug}`}>{(field: any) => <div className="flex flex-col gap-1.5"><Label htmlFor={`run-session-${element.slug}`}>{element.name} ({currency})</Label><Input id={`run-session-${element.slug}`} inputMode="decimal" placeholder={amountPlaceholder} value={String(field.state.value ?? "")} onBlur={field.handleBlur} onChange={(event) => field.handleChange(event.target.value)} /><FieldErrors errors={field.state.meta.errors} /></div>}</form.Field>)}</fieldset> : null}{classesQuery.isPending ? <p className="text-xs text-muted-foreground">Loading class value rows…</p> : classesQuery.isError ? <p className="text-xs text-destructive">Unable to load class value rows.</p> : <ClassRunValueFields form={form} classes={classes} runtimeElements={classElements} currency={currency} amountPlaceholder={amountPlaceholder} />}</div>;
+  return <div className="flex flex-col gap-3"><div><h3 className="text-sm font-medium">Optional bill-generation values</h3><p className="text-xs text-muted-foreground">Leave every value blank unless this run should add that charge. Entered values become part of immutable bill lines when the run is created.</p></div>{sessionElements.length ? <fieldset className="grid gap-3 rounded-xl border p-3 sm:grid-cols-2"><legend className="px-1 text-sm font-medium">School-wide values · Optional</legend>{sessionElements.map((element) => <form.Field key={element.slug} name={`runValues.session.${element.slug}`}>{(field: any) => <div className="flex flex-col gap-1.5"><Label htmlFor={`run-session-${element.slug}`}>{element.name} ({currency})</Label><Input id={`run-session-${element.slug}`} inputMode="decimal" placeholder={amountPlaceholder} value={String(field.state.value ?? "")} onBlur={field.handleBlur} onChange={(event) => field.handleChange(event.target.value)} /><FieldErrors errors={field.state.meta.errors} /></div>}</form.Field>)}</fieldset> : null}{classesQuery.isPending ? <p className="text-xs text-muted-foreground">Loading class value rows…</p> : classesQuery.isError ? <p className="text-xs text-destructive">Unable to load class value rows.</p> : <ClassRunValueFields form={form} classes={classes} runtimeElements={classElements} currency={currency} amountPlaceholder={amountPlaceholder} />}</div>;
 }
 
-function BillingRunSteps({ step }: { step: 1 | 2 }) {
-  return <ol className="grid grid-cols-2 gap-2" aria-label="Billing run steps"><li className={step === 1 ? "rounded-lg bg-primary px-3 py-2 text-primary-foreground" : "rounded-lg bg-muted px-3 py-2 text-muted-foreground"}><span className="block text-[10px] font-medium uppercase tracking-wide">Step 1</span><span className="text-sm font-medium">Run setup</span></li><li className={step === 2 ? "rounded-lg bg-primary px-3 py-2 text-primary-foreground" : "rounded-lg bg-muted px-3 py-2 text-muted-foreground"}><span className="block text-[10px] font-medium uppercase tracking-wide">Step 2</span><span className="text-sm font-medium">Optional values</span></li></ol>;
+function BillingPreviewCharges({ lines, currency }: { lines: PreviewLine[]; currency: string }) {
+  return <ul className="flex min-w-48 flex-col gap-1">{lines.map((line) => <li key={line.feeElementSlug} className="flex items-baseline justify-between gap-3"><span>{line.feeElementName}</span><span className="whitespace-nowrap text-muted-foreground">{formatMinor(line.amountMinor, currency)}</span></li>)}</ul>;
 }
 
-function BillingPreviewPanel({ preview, currency, values, previewPage, issuePage, refreshPreview }: { preview: BillingPreview; currency: string; values: BillingFormValue; previewPage: number; issuePage: number; refreshPreview: (value: BillingFormValue, page: number, issuePage: number) => Promise<void> }) {
+function BillingPreviewRow({ item, currency }: { item: PreviewAdmission; currency: string }) {
+  return <tr className="border-b align-top last:border-0"><td className="p-2"><p className="font-medium">{item.admissionName}</p><p className="text-xs text-muted-foreground">{item.admissionNumber}</p></td><td className="p-2">{item.classLabel}{item.sectionLabel ? ` / ${item.sectionLabel}` : ""}</td><td className="p-2"><BillingPreviewCharges lines={item.lines} currency={currency} /></td><td className="p-2 text-right font-medium">{formatMinor(item.totalAmountMinor, currency)}</td></tr>;
+}
+
+function BillingPreviewTable({ items, currency }: { items: PreviewAdmission[]; currency: string }) {
+  return <div className="overflow-x-auto overflow-y-hidden rounded-xl border"><table className="w-full min-w-[640px] text-sm"><thead className="bg-muted/50"><tr className="border-b text-left"><th className="p-2 font-medium">Name</th><th className="p-2 font-medium">Class</th><th className="p-2 font-medium">Charges</th><th className="p-2 text-right font-medium">Total</th></tr></thead><tbody>{items.length ? items.map((item) => <BillingPreviewRow key={item.admissionId} item={item} currency={currency} />) : <tr><td colSpan={4} className="p-6 text-center text-muted-foreground">No student bills match this search.</td></tr>}</tbody></table></div>;
+}
+
+function BillingPreviewSearchControls({ form, isPending, onClear }: { form: any; isPending: boolean; onClear: () => void }) {
+  return <form.Field name="query">{(field: any) => <div className="flex flex-col gap-1.5" role="search"><Label htmlFor="billing-preview-search">Search student bills</Label><div className="flex flex-wrap gap-2"><Input id="billing-preview-search" className="min-w-56 flex-1" disabled={isPending} maxLength={200} placeholder="Search name or admission number…" value={field.state.value} onBlur={field.handleBlur} onChange={(event) => field.handleChange(event.target.value)} onKeyDown={(event) => { if (event.key !== "Enter") return; event.preventDefault(); event.stopPropagation(); if (!isPending) void form.handleSubmit().catch(() => undefined); }} /><Button type="button" variant="secondary" disabled={isPending} onClick={() => void form.handleSubmit().catch(() => undefined)}>{isPending ? "Searching…" : "Search"}</Button>{field.state.value ? <Button type="button" variant="outline" disabled={isPending} onClick={onClear}>Clear</Button> : null}</div><FieldErrors errors={field.state.meta.errors} /></div>}</form.Field>;
+}
+
+function BillingPreviewBrowser({ preview, currency, issuePage, isPending, searchForm, onClear, onRefresh }: { preview: BillingPreview; currency: string; issuePage: number; isPending: boolean; searchForm: any; onClear: () => void; onRefresh: (page: number, issuePage: number, searchQuery: string) => Promise<void> }) {
   const previewCurrency = preview.currency ?? currency;
-  return <div className="flex flex-col gap-4 overflow-x-auto rounded-xl border p-3"><div className="flex flex-wrap items-center justify-between gap-2"><div><h3 className="font-medium">Charge review</h3><p className="text-xs text-muted-foreground">{preview.counts.eligible} bills ready · {preview.counts.skipped} need attention · Configuration {preview.configurationHash.slice(0, 12)}…</p></div><p className="text-lg font-semibold">{formatMinor(preview.totalAmountMinor, previewCurrency)}</p></div>{preview.issues.items.length ? <section className="flex flex-col gap-2"><PreviewIssues issues={preview.issues.items} skippedCount={preview.counts.skipped} /><SimplePagination currentPage={preview.issues.pagination.currentPage} totalPages={preview.issues.pagination.totalPages} onPageChange={(page) => void refreshPreview(values, previewPage, page)} /></section> : null}<table className="w-full min-w-[640px] text-xs"><thead><tr className="border-b text-left"><th className="p-2">Admission</th><th className="p-2">Class</th><th className="p-2">Charges</th><th className="p-2 text-right">Total</th></tr></thead><tbody>{preview.breakdown.items.map((item) => <tr key={item.admissionId} className="border-b last:border-0"><td className="p-2 font-medium">{item.admissionName} · {item.admissionNumber}</td><td className="p-2">{item.classLabel}{item.sectionLabel ? ` · ${item.sectionLabel}` : ""}</td><td className="p-2">{item.lines.map((line) => line.feeElementName).join(", ")}</td><td className="p-2 text-right font-medium">{formatMinor(item.totalAmountMinor, previewCurrency)}</td></tr>)}</tbody></table><SimplePagination currentPage={preview.breakdown.pagination.currentPage} totalPages={preview.breakdown.pagination.totalPages} onPageChange={(page) => void refreshPreview(values, page, issuePage)} /></div>;
+  return <div className="flex flex-col gap-3"><BillingPreviewSearchControls form={searchForm} isPending={isPending} onClear={onClear} /><BillingPreviewTable items={preview.breakdown.items} currency={previewCurrency} /><searchForm.Subscribe selector={(state: any) => state.values.appliedQuery}>{(appliedQuery: string) => <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs text-muted-foreground">{preview.breakdown.pagination.totalItems} matching student bill{preview.breakdown.pagination.totalItems === 1 ? "" : "s"}</p><SimplePagination currentPage={preview.breakdown.pagination.currentPage} totalPages={preview.breakdown.pagination.totalPages} disabled={isPending} onPageChange={(page) => { if (!isPending) void onRefresh(page, issuePage, appliedQuery).catch(() => undefined); }} /></div>}</searchForm.Subscribe></div>;
+}
+
+function BillingPreviewSummary({ preview, currency }: { preview: BillingPreview; currency: string }) {
+  return <div className="flex flex-wrap items-center justify-between gap-2"><div><h3 className="font-medium">Review billing run</h3><p className="text-xs text-muted-foreground">{preview.counts.eligible} bills ready · {preview.counts.skipped} need attention</p></div><div className="text-right"><p className="text-xs text-muted-foreground">Billing total</p><p className="text-lg font-semibold">{formatMinor(preview.totalAmountMinor, preview.currency ?? currency)}</p></div></div>;
+}
+
+function BillingPreviewPanel({ preview, currency, values, previewPage, issuePage, previewVisible, isPending, onShowPreview, refreshPreview }: { preview: BillingPreview; currency: string; values: BillingFormValue; previewPage: number; issuePage: number; previewVisible: boolean; isPending: boolean; onShowPreview: () => void; refreshPreview: (value: BillingFormValue, page: number, issuePage: number, searchQuery?: string) => Promise<void> }) {
+  const searchForm = useForm({
+    defaultValues: { query: "", appliedQuery: "" },
+    validators: { onChange: previewSearchSchema },
+    onSubmit: async ({ value }) => {
+      const query = value.query.trim();
+      await refreshPreview(values, 1, issuePage, query);
+      searchForm.setFieldValue("appliedQuery", query);
+    },
+  });
+
+  async function clearSearch() {
+    searchForm.setFieldValue("query", "");
+    try {
+      await refreshPreview(values, 1, issuePage, "");
+      searchForm.setFieldValue("appliedQuery", "");
+    } catch {
+      // The previous successful table remains visible and a blank Search can retry.
+    }
+  }
+
+  return <searchForm.Subscribe selector={(state) => state.values.appliedQuery}>{(appliedQuery) => <div className="flex flex-col gap-4"><BillingPreviewSummary preview={preview} currency={currency} />{preview.issues.items.length ? <section className="flex flex-col gap-2"><PreviewIssues issues={preview.issues.items} skippedCount={preview.counts.skipped} /><SimplePagination currentPage={preview.issues.pagination.currentPage} totalPages={preview.issues.pagination.totalPages} disabled={isPending} onPageChange={(page) => { if (!isPending) void refreshPreview(values, previewPage, page, appliedQuery).catch(() => undefined); }} /></section> : null}{previewVisible ? <BillingPreviewBrowser preview={preview} currency={currency} issuePage={issuePage} isPending={isPending} searchForm={searchForm} onClear={() => void clearSearch()} onRefresh={(page, nextIssuePage, searchQuery) => refreshPreview(values, page, nextIssuePage, searchQuery)} /> : <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed p-6 text-center"><div><p className="text-sm font-medium">Student bill preview</p><p className="text-xs text-muted-foreground">Optionally inspect up to five student bills at a time before creating the run.</p></div><Button type="button" variant="outline" onClick={onShowPreview}>Show preview</Button></div>}</div>}</searchForm.Subscribe>;
 }
 
 export function BillingRunDialog({ open, onOpenChange, schoolId, sessionId, currency, timeZone, runtimeElements }: { open: boolean; onOpenChange: (open: boolean) => void; schoolId: string; sessionId: string; currency: string; timeZone: string; runtimeElements: RuntimeElement[] }) {
   const queryClient = useQueryClient();
   const router = useRouter();
-  const [step, setStep] = useState<1 | 2>(1);
-  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [step, setStep] = useState<"setup" | "values" | "review">("setup");
   const [discardOpen, setDiscardOpen] = useState(false);
+  const [previewVisible, setPreviewVisible] = useState(false);
+  const [previewSearchVersion, setPreviewSearchVersion] = useState(0);
   const [previewPage, setPreviewPage] = useState(1);
   const [issuePage, setIssuePage] = useState(1);
   const idempotency = useRef<IdempotencyDraftState>(undefined);
   const reviewedDraft = useRef<string | undefined>(undefined);
+  const lastSuccessfulPreview = useRef<BillingPreview | undefined>(undefined);
   const previewMutation = useMutation({ mutationFn: (input: any) => client.school.previewBillingRun(input) });
   const postMutation = useMutation({
     mutationFn: (input: any) => client.school.postBillingRun(input),
@@ -198,7 +238,7 @@ export function BillingRunDialog({ open, onOpenChange, schoolId, sessionId, curr
       router.push(`/school/${encodeURIComponent(schoolId)}/sessions/${encodeURIComponent(sessionId)}/billing/runs/${encodeURIComponent(run.id)}`);
     },
   });
-  const schema = financeBillingDraftSchema.superRefine((value, context) => {
+  const schema = formSchema.superRefine((value, context) => {
     const amounts = [
       ...Object.entries(value.runValues.session).map(([slug, amount]) => ({
         path: ["runValues", "session", slug],
@@ -224,15 +264,26 @@ export function BillingRunDialog({ open, onOpenChange, schoolId, sessionId, curr
     onSubmit: async ({ value }) => {
       const parsed = schema.parse(value);
       const runValues = billingRunValues(parsed, currency);
-      await previewMutation.mutateAsync({ schoolId, sessionId, billingDate: parsed.billingDate, classIds: financeScopeIds(parsed.classSelections), runValues, page: previewPage, limit: 20, issuePage, issueLimit: 50 });
+      setPreviewPage(1);
+      setIssuePage(1);
+      setPreviewVisible(false);
+      await requestPreview({ schoolId, sessionId, billingDate: parsed.billingDate, classIds: financeScopeIds(parsed.classSelections), runValues, searchQuery: "", page: 1, limit: 5, issuePage: 1, issueLimit: 50 });
       reviewedDraft.current = JSON.stringify(commandDraft(parsed));
+      setStep("review");
     },
   });
-  const preview = previewMutation.data;
+  const preview = previewMutation.data ?? lastSuccessfulPreview.current;
   const exponent = currencyExponent(currency);
   const amountPlaceholder = exponent ? `0.${"0".repeat(exponent)}` : "0";
 
-  async function refreshPreview(value: BillingFormValue, page: number, nextIssuePage: number) {
+  /** Retains the last successful review while a presentation-only refresh is pending or fails. */
+  async function requestPreview(input: Parameters<typeof client.school.previewBillingRun>[0]) {
+    const nextPreview = await previewMutation.mutateAsync(input);
+    lastSuccessfulPreview.current = nextPreview;
+    return nextPreview;
+  }
+
+  async function refreshPreview(value: BillingFormValue, page: number, nextIssuePage: number, searchQuery = "") {
     const parsed = schema.safeParse(value);
     if (!parsed.success) {
       form.setErrorMap({ onSubmit: { fields: Object.fromEntries(parsed.error.issues.map((issue) => [issue.path.join("."), issue.message])), form: undefined } });
@@ -241,7 +292,7 @@ export function BillingRunDialog({ open, onOpenChange, schoolId, sessionId, curr
     setPreviewPage(page);
     setIssuePage(nextIssuePage);
     const runValues = billingRunValues(parsed.data, currency);
-    await previewMutation.mutateAsync({ schoolId, sessionId, billingDate: parsed.data.billingDate, classIds: financeScopeIds(parsed.data.classSelections), runValues, page, limit: 20, issuePage: nextIssuePage, issueLimit: 50 });
+    await requestPreview({ schoolId, sessionId, billingDate: parsed.data.billingDate, classIds: financeScopeIds(parsed.data.classSelections), runValues, searchQuery: searchQuery.trim(), page, limit: 5, issuePage: nextIssuePage, issueLimit: 50 });
     reviewedDraft.current = JSON.stringify(commandDraft(parsed.data));
   }
 
@@ -250,7 +301,6 @@ export function BillingRunDialog({ open, onOpenChange, schoolId, sessionId, curr
     const parsed = schema.safeParse(value);
     if (!parsed.success) {
       form.setErrorMap({ onSubmit: { fields: Object.fromEntries(parsed.error.issues.map((issue) => [issue.path.join("."), issue.message])), form: undefined } });
-      setConfirmOpen(false);
       return;
     }
     if (reviewedDraft.current !== JSON.stringify(commandDraft(parsed.data))) {
@@ -262,11 +312,11 @@ export function BillingRunDialog({ open, onOpenChange, schoolId, sessionId, curr
     idempotency.current = idempotencyForDraft(idempotency.current, fingerprint, () => crypto.randomUUID());
     try {
       await postMutation.mutateAsync({ schoolId, sessionId, billingDate: parsed.data.billingDate, classIds: financeScopeIds(parsed.data.classSelections), runValues, kind: parsed.data.kind, supplementalReason: parsed.data.kind === "supplemental" ? parsed.data.supplementalReason.trim() : undefined, expectedConfigurationHash: preview.configurationHash, idempotencyKey: idempotency.current.key });
-      setConfirmOpen(false);
     } catch (error) {
-      setConfirmOpen(false);
-      form.setErrorMap({ onSubmit: { fields: {}, form: error instanceof Error ? `${error.message} Your draft was retained; preview and confirm it again.` : "The reviewed preview is stale. Your draft was retained; preview again." } });
+      form.setErrorMap({ onSubmit: { fields: {}, form: error instanceof Error ? `${error.message} Your draft was retained; review it and create again.` : "The reviewed preview is stale. Your draft was retained; review it again." } });
       idempotency.current = markIdempotencyAmbiguous(idempotency.current);
+      setPreviewVisible(false);
+      setPreviewSearchVersion((version) => version + 1);
       await invalidateFinanceReadModels(queryClient, "billing_run");
       await refreshPreview(value, 1, 1).catch(() => undefined);
     }
@@ -294,7 +344,7 @@ export function BillingRunDialog({ open, onOpenChange, schoolId, sessionId, curr
       return;
     }
     form.setErrorMap({ onSubmit: { fields: {}, form: undefined } });
-    setStep(2);
+    setStep("values");
   }
 
   return <form.Subscribe selector={(state) => ({ dirty: state.isDirty, values: state.values })}>{({ dirty, values }) => (
@@ -302,15 +352,15 @@ export function BillingRunDialog({ open, onOpenChange, schoolId, sessionId, curr
       <DirtyGuard dirty={dirty} description="Your unposted billing command and preview will be lost." />
       <Dialog open={open} onOpenChange={(nextOpen) => { if (!nextOpen) requestClose(dirty); }}>
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-4xl">
-          <DialogHeader><DialogTitle>Create billing run</DialogTitle><DialogDescription>Choose the run scope, add any optional charges, then preview the immutable bills before posting.</DialogDescription></DialogHeader>
-          <form className="flex flex-col gap-4" onSubmit={(event) => { event.preventDefault(); event.stopPropagation(); if (step === 1) showOptionalValues(values); else void form.handleSubmit(); }}>
-            <BillingRunSteps step={step} />
-            {step === 1 ? <><BillingRunSetupFields form={form} /><BillingClassScopeField form={form} schoolId={schoolId} sessionId={sessionId} /></> : <><OptionalBillingRunValues form={form} schoolId={schoolId} sessionId={sessionId} currency={currency} amountPlaceholder={amountPlaceholder} runtimeElements={runtimeElements} />{preview ? <BillingPreviewPanel preview={preview} currency={currency} values={values} previewPage={previewPage} issuePage={issuePage} refreshPreview={refreshPreview} /> : null}</>}
-            <form.Subscribe selector={(state) => ({ canSubmit: state.canSubmit, errors: state.errors, isSubmitting: state.isSubmitting, values: state.values })}>{({ canSubmit, errors, isSubmitting, values: footerValues }) => <><FieldErrors errors={errors} />{previewMutation.isError ? <p className="text-xs text-destructive">{previewMutation.error.message}</p> : null}<DialogFooter><Button type="button" variant="outline" disabled={isSubmitting || postMutation.isPending} onClick={() => requestClose(dirty)}>Cancel</Button>{step === 1 ? <Button type="submit">Continue</Button> : <><Button type="button" variant="outline" disabled={isSubmitting || postMutation.isPending} onClick={() => setStep(1)}>Back</Button><Button type="submit" variant="secondary" disabled={!canSubmit || isSubmitting}>{isSubmitting ? "Reviewing…" : preview ? "Refresh review" : "Review charges"}</Button><Button type="button" disabled={!preview?.readyToPost || reviewedDraft.current !== commandDraftFingerprint(footerValues) || isSubmitting || postMutation.isPending} onClick={() => setConfirmOpen(true)}>Create</Button></>}</DialogFooter></>}</form.Subscribe>
+          <DialogHeader><DialogTitle>Create billing run</DialogTitle><DialogDescription>Choose the run scope, add any optional charges, then review the totals and optionally inspect individual bills before posting.</DialogDescription></DialogHeader>
+          <form className="flex flex-col gap-4" onSubmit={(event) => { event.preventDefault(); event.stopPropagation(); if (step === "setup") showOptionalValues(values); else if (step === "values") void form.handleSubmit(); }}>
+            {step === "setup" ? <><BillingRunSetupFields form={form} /><BillingClassScopeField form={form} schoolId={schoolId} sessionId={sessionId} /></> : null}
+            {step === "values" ? <OptionalBillingRunValues form={form} schoolId={schoolId} sessionId={sessionId} currency={currency} amountPlaceholder={amountPlaceholder} runtimeElements={runtimeElements} /> : null}
+            {step === "review" && preview ? <BillingPreviewPanel key={previewSearchVersion} preview={preview} currency={currency} values={values} previewPage={previewPage} issuePage={issuePage} previewVisible={previewVisible} isPending={previewMutation.isPending} onShowPreview={() => setPreviewVisible(true)} refreshPreview={refreshPreview} /> : null}
+            <form.Subscribe selector={(state) => ({ canSubmit: state.canSubmit, errors: state.errors, isSubmitting: state.isSubmitting, values: state.values })}>{({ canSubmit, errors, isSubmitting, values: footerValues }) => <><FieldErrors errors={errors} />{previewMutation.isError ? <p className="text-xs text-destructive">{previewMutation.error.message}</p> : null}<DialogFooter>{step === "setup" ? <Button type="submit">Continue</Button> : null}{step === "values" ? <><Button type="button" variant="outline" disabled={isSubmitting || postMutation.isPending} onClick={() => setStep("setup")}>Back</Button><Button type="submit" disabled={!canSubmit || isSubmitting}>{isSubmitting ? "Preparing review…" : "Next"}</Button></> : null}{step === "review" ? <><Button type="button" variant="outline" disabled={isSubmitting || previewMutation.isPending || postMutation.isPending} onClick={() => setStep("values")}>Back</Button><Button type="button" disabled={!preview?.readyToPost || reviewedDraft.current !== commandDraftFingerprint(footerValues) || isSubmitting || previewMutation.isPending || postMutation.isPending} onClick={() => void postReviewedRun(footerValues)}>{postMutation.isPending ? "Creating…" : "Create"}</Button></> : null}</DialogFooter></>}</form.Subscribe>
           </form>
         </DialogContent>
       </Dialog>
-      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Create this billing run?</AlertDialogTitle><AlertDialogDescription>{hasExplicitBillingRunValues(values, currency) ? "The optional values entered on step 2 will be copied into immutable bill lines and cannot be edited after creation. Corrections require an adjustment or reversal. " : "No optional bill-generation values were entered. Only the ordinary configured charges shown in the review will be created. "}This creates bills for {preview?.counts.eligible ?? 0} admissions totaling {preview ? formatMinor(preview.totalAmountMinor, preview.currency ?? currency) : "—"}.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel disabled={postMutation.isPending}>Keep reviewing</AlertDialogCancel><AlertDialogAction disabled={postMutation.isPending} onClick={(event) => { event.preventDefault(); void postReviewedRun(values); }}>{postMutation.isPending ? "Creating…" : "Create"}</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
       <AlertDialog open={discardOpen} onOpenChange={setDiscardOpen}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Discard billing draft?</AlertDialogTitle><AlertDialogDescription>Your unposted billing command and preview will be lost.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Keep editing</AlertDialogCancel><AlertDialogAction variant="destructive" onClick={() => onOpenChange(false)}>Discard draft</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
     </>
   )}</form.Subscribe>;
