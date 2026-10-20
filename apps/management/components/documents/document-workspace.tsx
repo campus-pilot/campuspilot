@@ -16,6 +16,13 @@ import {
 } from "@campuspilot/components/documents/document-controls";
 import { Button } from "@campuspilot/ui/components/button";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@campuspilot/ui/components/dialog";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -67,6 +74,23 @@ const templateSettingsSlugs: Record<AcademicDocumentType, string> = {
   admit_card: "admit-card",
   timetable: "timetable",
 };
+
+const documentCreateTitles: Record<AcademicDocumentType, string> = {
+  report_card: "Create report cards",
+  id_card: "Create student IDs",
+  admit_card: "Create admit cards",
+  timetable: "Create exam timetables",
+};
+
+/** Contextual source values belong to the document type named by the link.
+ * Reopening another card must start a clean workflow rather than borrowing them.
+ */
+function initialForDocumentType(
+  documentType: AcademicDocumentType,
+  initial: DocumentInitialSelection,
+) {
+  return documentType === initial.documentType ? initial : {};
+}
 
 function closeAlertDialog(closeDialog: () => void) {
   closeDialog();
@@ -163,27 +187,43 @@ function DocumentWorkspaceContent({
   const router = useRouter();
   const form = useForm({
     defaultValues: {
-      documentType: initial.documentType ?? ("report_card" as AcademicDocumentType),
+      documentType: initial.documentType ?? ("" as AcademicDocumentType | ""),
     },
-    validators: { onChange: z.object({ documentType: z.enum(["report_card", "id_card", "admit_card", "timetable"]) }) },
+    validators: {
+      onChange: z.object({
+        documentType: z.union([
+          z.literal(""),
+          z.enum(["report_card", "id_card", "admit_card", "timetable"]),
+        ]),
+      }),
+    },
   });
-  const href = (target: DocumentSection, type: AcademicDocumentType) => {
+  const createHref = `/school/${encodeURIComponent(scope.schoolId)}/sessions/${encodeURIComponent(scope.sessionId)}/documents`;
+  const href = (target: DocumentSection, type?: AcademicDocumentType) => {
     const query = new URLSearchParams({
-      ...(target === "generate" ? { type } : {}),
+      ...(target === "generate" && type ? { type } : {}),
       ...(initial.classId ? { classId: initial.classId } : {}),
       ...(initial.examSlug ? { examSlug: initial.examSlug } : {}),
       ...(initial.studentId ? { studentId: initial.studentId } : {}),
     });
     const suffix = target === "generate" ? "" : `/${target}`;
     const serialized = query.toString();
-    return `/school/${encodeURIComponent(scope.schoolId)}/sessions/${encodeURIComponent(scope.sessionId)}/documents${suffix}${serialized ? `?${serialized}` : ""}`;
+    return `${createHref}${suffix}${serialized ? `?${serialized}` : ""}`;
+  };
+
+  /** Closing a context-opened dialog also clears its URL contract so refresh
+   * and later card launches cannot restore or inherit the old source values.
+   */
+  const closeDocumentDialog = () => {
+    form.setFieldValue("documentType", "");
+    if (initial.documentType) router.replace(createHref);
   };
 
   return (
     <form.Subscribe selector={(state) => state.values.documentType}>
       {(documentType) => {
         const navigate = (target: DocumentSection) =>
-          router.push(href(target, documentType));
+          router.push(href(target, documentType || undefined));
         const active = sections.find((item) => item.value === section)!;
         return (
           <>
@@ -208,7 +248,7 @@ function DocumentWorkspaceContent({
                     variant={item.value === section ? "secondary" : "ghost"}
                     className="justify-start"
                   >
-                    <Link href={href(item.value, documentType)}>
+                    <Link href={href(item.value, documentType || undefined)}>
                       <item.icon aria-hidden />
                       {item.label}
                     </Link>
@@ -250,38 +290,58 @@ function DocumentWorkspaceContent({
                   <DocumentHistory scope={scope} />
                 </DocumentPermission>
               ) : (
-                <div className="flex min-w-0 flex-col gap-4">
-                  <DocumentPanel
-                    title="What would you like to create?"
-                    description="Choose a document type, then provide the details needed for that PDF."
-                  >
-                    <DocumentKindCards
-                      value={documentType}
-                      onChange={(value) =>
-                        form.setFieldValue("documentType", value as AcademicDocumentType)
-                      }
-                    />
-                  </DocumentPanel>
-                  <DocumentPermission
-                    schoolId={scope.schoolId}
-                    action={SCHOOL_ACTIONS.GENERATE_DOCUMENTS}
-                    fallback={
-                      <DocumentNotice>
-                        Creating documents requires additional permission.
-                      </DocumentNotice>
+                <DocumentPanel
+                  title="What would you like to create?"
+                  description="Choose a document type to configure, preview, and create its PDF."
+                >
+                  <DocumentKindCards
+                    onChange={(value) =>
+                      form.setFieldValue(
+                        "documentType",
+                        value as AcademicDocumentType,
+                      )
                     }
-                  >
-                    <DocumentGenerator
-                      key={documentType}
-                      scope={scope}
-                      documentType={documentType}
-                      initial={initial}
-                      onHistory={() => navigate("history")}
-                    />
-                  </DocumentPermission>
-                </div>
+                  />
+                </DocumentPanel>
               )}
             </WorkspaceNavigationLayout>
+            {section === "generate" && documentType ? (
+              <Dialog
+                open
+                onOpenChange={(open) => {
+                  if (!open) closeDocumentDialog();
+                }}
+              >
+                <DialogContent className="flex max-h-[calc(100dvh-1rem)] min-h-0 w-[calc(100vw-1rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-6xl">
+                  <DialogHeader className="shrink-0 border-b px-5 py-4 pr-12">
+                    <DialogTitle>{documentCreateTitles[documentType]}</DialogTitle>
+                    <DialogDescription>
+                      Choose the source data, preview the result, and create the
+                      PDF.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="min-h-0 overflow-y-auto p-4 sm:p-5">
+                    <DocumentPermission
+                      schoolId={scope.schoolId}
+                      action={SCHOOL_ACTIONS.GENERATE_DOCUMENTS}
+                      fallback={
+                        <DocumentNotice>
+                          Creating documents requires additional permission.
+                        </DocumentNotice>
+                      }
+                    >
+                      <DocumentGenerator
+                        key={documentType}
+                        scope={scope}
+                        documentType={documentType}
+                        initial={initialForDocumentType(documentType, initial)}
+                        onHistory={() => navigate("history")}
+                      />
+                    </DocumentPermission>
+                  </div>
+                </DialogContent>
+              </Dialog>
+            ) : null}
           </>
         );
       }}

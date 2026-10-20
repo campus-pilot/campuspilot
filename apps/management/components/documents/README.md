@@ -58,8 +58,13 @@ the provider-neutral brief; and `copy-text-button.tsx` owns clipboard feedback.
 
 - The Documents workspace has exactly two sections: Create document and Document
   history.
-- `DocumentKindCards` is the selector for document types in both Documents and the
-  marketplace. Preserve accessible radiogroup semantics.
+- Create document initially shows only the available type cards. Activating an
+  academic card opens its complete settings, preview, create, download, and
+  history workflow in a wide responsive dialog. Contextual query parameters open
+  that dialog with applicable source values preselected.
+- `DocumentKindCards` is the type chooser in both Documents and the marketplace.
+  It is a button group when cards launch workflows and a radiogroup when a selected
+  `value` is supplied.
 - The editor and preview share one border with no inter-panel padding. Their
   resizable divider and explicit editor control collapse the source panel. Keep
   source before preview in DOM order so the stacked mobile layout follows the task

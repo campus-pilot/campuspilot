@@ -313,7 +313,7 @@ function GenerationForm({
     template,
   });
   return (
-    <div className="grid items-start gap-6 2xl:grid-cols-[300px_minmax(0,1fr)]">
+    <div className="grid min-w-0 items-start gap-5 lg:grid-cols-[minmax(280px,340px)_minmax(0,1fr)]">
       <DocumentPanel
         title="Create a document"
         description="Choose the data to include, check the preview, and create your PDF."

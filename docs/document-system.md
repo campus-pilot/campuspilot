@@ -39,7 +39,7 @@ Do not infer one surface's state from another fact. In particular:
 
 | Route | Behavior |
 | --- | --- |
-| `/school/:schoolId/sessions/:sessionId/documents` | Document-type cards followed by the selected generator |
+| `/school/:schoolId/sessions/:sessionId/documents` | Document-type cards that open the selected generator in a dialog |
 | `/school/:schoolId/sessions/:sessionId/documents/history` | Unified history for every supported document type in the session |
 | `/school/:schoolId/sessions/:sessionId/documents/templates` | Compatibility redirect to the corresponding school template setting |
 | `/school/:schoolId/settings/templates/examination` | Report-card template editor |
@@ -67,20 +67,27 @@ only Create document and Document history.
 
 1. The user opens the session Documents workspace.
 2. `DocumentKindCards` presents report card, student ID, admit card, and timetable
-   choices as visual cards rather than a dropdown.
-3. The chosen generator requests the active school template and the independent
-   source-domain data it needs.
-4. If the template is missing, generation stays unavailable. An inline explanation
+   choices as visual cards rather than a dropdown. The page shows only these cards
+   until the user chooses one.
+3. The chosen card opens a wide, mobile-safe dialog containing the complete
+   settings, explicit preview, generation, download, and history workflow. A
+   contextual URL opens the corresponding dialog with its examination, class, or
+   student preselected.
+4. The dialog requests the active school template and the independent source-domain
+   data it needs only after the type-specific permission gate succeeds.
+5. If the template is missing, generation stays unavailable. An inline explanation
    describes the dependency, while the shell warning provides the authorized path
    to Settings.
-5. Preview validates and renders the current choices without writing an artifact.
-6. Generate converts the same authorized context to PDF, stores it, and navigates
-   to the unified history view.
+6. Preview validates and renders the current choices without writing an artifact.
+7. Generate converts the same authorized context to PDF and stores it. The dialog
+   then offers a fresh authorized download and a link to unified history.
 
 Contextual links from examinations may preselect an examination, class, or student
 for applicable document types. Those query values are conveniences, not authority;
 the backend revalidates every school, session, class, examination, and student
-relationship.
+relationship. Closing a context-opened dialog replaces that URL with the clean
+Documents create route so a refresh or later card launch cannot restore stale
+source values.
 
 ### Resolve missing templates
 
@@ -169,7 +176,7 @@ callbacks and must not call APIs.
 
 | Component | Responsibility |
 | --- | --- |
-| `DocumentWorkspace` | Section navigation, selected document type, template warning registration, and generator/history composition |
+| `DocumentWorkspace` | Section navigation, card-triggered generator dialog, template warning registration, and history composition |
 | `DocumentGenerator` | Type-specific source fields, template dependency, preview, generation, and warnings |
 | `DocumentHistory` | One session-wide artifact list, downloads, provenance, and deletion |
 | `DocumentTemplates` | Empty state, read-only preview, or authorized school-template editor |

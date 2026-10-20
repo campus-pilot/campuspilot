@@ -57,6 +57,11 @@ and include the current resource, rather than leaving the trail at its parent.
 Session context already supplied by the shell and breadcrumb does not need another
 session heading in every examination screen.
 
+The session Documents create page starts with document-type cards only. Each card
+opens a wide responsive dialog for that type's settings, explicit preview, PDF
+creation, download, and history action. Contextual document links open the same
+dialog with applicable values preselected; closing it returns to a clean card view.
+
 Detail workspaces use left secondary navigation on desktop and a shared section
 Select on mobile. Sections have navigable routes. Follow the admission/classroom
 layout instead of adding button-shaped tabs. Breadcrumbs provide parent navigation;

@@ -81,21 +81,23 @@ export function DocumentKindPicker({
   );
 }
 
-/** Card selection keeps the available document workflows visible at once.
- * The caller owns routing and data loading; this shared component is presentation-only.
+/** Cards expose the available document workflows at once. Supplying `value`
+ * makes them a persistent radio selection; omitting it makes each card a launch
+ * button for a caller-owned workflow such as a dialog.
  */
 export function DocumentKindCards({
   value,
   onChange,
   items = documentKinds,
 }: {
-  value: DocumentKind;
+  value?: DocumentKind;
   onChange: (value: DocumentKind) => void;
   items?: readonly (typeof allDocumentKinds)[number][];
 }) {
+  const isSelection = value !== undefined;
   return (
     <div
-      role="radiogroup"
+      role={isSelection ? "radiogroup" : "group"}
       aria-label="Document type"
       className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"
     >
@@ -105,8 +107,8 @@ export function DocumentKindCards({
           <button
             key={item.value}
             type="button"
-            role="radio"
-            aria-checked={selected}
+            role={isSelection ? "radio" : undefined}
+            aria-checked={isSelection ? selected : undefined}
             onClick={() => onChange(item.value)}
             className={`flex min-w-0 items-start gap-3 rounded-xl border p-4 text-left transition-colors hover:border-primary/40 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${selected ? "border-primary/50 bg-primary/[0.04]" : "bg-card"}`}
           >
