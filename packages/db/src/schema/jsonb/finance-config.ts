@@ -38,7 +38,7 @@ export const financeRecurringEnum = z
 export const financeRequiredLevelEnum = z
   .enum(["school", "class", "student", "bill_generation"])
   .describe(
-    "Level at which a value must be provided: school, class, student, or bill_generation (prompted at bill time)",
+    "Level at which ordinary pricing is required, or bill_generation for an optional value prompted while creating a run",
   );
 
 export const financeElementSchema = z
@@ -55,7 +55,9 @@ export const financeElementSchema = z
       .describe("Levels at which amounts can be set for this element"),
     requiredAtLevel: financeRequiredLevelEnum
       .optional()
-      .describe("Level at which a value must be provided before billing"),
+      .describe(
+        "Level at which ordinary pricing is required; bill_generation values are optional per run",
+      ),
     defaultAmountMinor: financeAmountMinorSchema
       .optional()
       .describe(

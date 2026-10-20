@@ -150,19 +150,11 @@ export function resolveBillingPrice(
   );
 
   if (element.requiredAtLevel === "bill_generation") {
-    if (element.scopes.includes("student") && admissionAmount !== undefined) {
-      return resolved(
-        BigInt(admissionAmount),
-        "admission",
-        `${context.sessionId}:${context.admissionId}:${elementSlug}`,
-      );
-    }
-
     const classAmount = configuredString(
       context.runClassValues[context.classId],
       elementSlug,
     );
-    if (classAmount !== undefined) {
+    if (element.scopes.includes("class") && classAmount !== undefined) {
       return resolved(
         BigInt(classAmount),
         "run_class",
@@ -174,21 +166,16 @@ export function resolveBillingPrice(
       context.runSessionValues,
       elementSlug,
     );
-    if (sessionAmount !== undefined) {
+    if (element.scopes.includes("school") && sessionAmount !== undefined) {
       return resolved(
         BigInt(sessionAmount),
         "run_session",
         `${context.sessionId}:${elementSlug}`,
       );
     }
-
-    if (element.defaultAmountMinor !== undefined) {
-      return resolved(
-        BigInt(element.defaultAmountMinor),
-        "fallback",
-        `element:${elementSlug}:default`,
-      );
-    }
+    // Bill-generation elements are opt-in command values. Persisted admission
+    // values and configured defaults must not silently add an optional charge
+    // when the operator leaves this run blank.
     return null;
   }
 

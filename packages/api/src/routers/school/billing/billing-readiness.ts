@@ -178,7 +178,16 @@ function validateRunValues(
   ) => {
     for (const elementSlug of Object.keys(values).sort()) {
       const element = config.config.elements[elementSlug];
-      if (!element || element.requiredAtLevel !== "bill_generation") {
+      const allowedAtScope =
+        element &&
+        (scope === "session"
+          ? element.scopes.includes("school")
+          : element.scopes.includes("class"));
+      if (
+        !element ||
+        element.requiredAtLevel !== "bill_generation" ||
+        !allowedAtScope
+      ) {
         issue(
           {
             scope,
@@ -187,7 +196,7 @@ function validateRunValues(
             code: "invalid_run_value",
             feeElementSlug: elementSlug,
             blocking: true,
-            message: `Run-time value "${elementSlug}" is not a bill-generation fee element.`,
+            message: `Run-time value "${elementSlug}" is not an optional bill-generation fee at the ${scope} scope.`,
           },
           issues,
         );
@@ -574,7 +583,13 @@ export async function prepareBillingRun(
           runClassValues: draft.runValues.classes,
         });
         if (!price) {
-          if (element.requiredAtLevel !== undefined) {
+          // Bill-generation elements are optional, opt-in charges. Leaving a
+          // run value blank omits that line instead of making the whole run
+          // unpostable; ordinary configured fees remain required as before.
+          if (
+            element.requiredAtLevel !== undefined &&
+            element.requiredAtLevel !== "bill_generation"
+          ) {
             hasUnresolvedRequired = true;
             issue(
               {

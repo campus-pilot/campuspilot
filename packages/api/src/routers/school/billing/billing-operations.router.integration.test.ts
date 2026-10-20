@@ -95,7 +95,10 @@ function draft(scenario: FinanceScenario, historical = false) {
       ? scenario.historicalSession.id
       : scenario.activeSession.id,
     billingDate: historical ? "2040-02-10" : "2040-05-10",
-    runValues: { session: {}, classes: {} },
+    runValues: {
+      session: { transport: historical ? "600" : "500" },
+      classes: {},
+    },
   };
 }
 
@@ -162,7 +165,7 @@ describe("school billing operations", () => {
       expect.objectContaining({
         feeElementSlug: "transport",
         amountMinor: "500",
-        pricingSourceKind: "admission",
+        pricingSourceKind: "run_session",
       }),
       expect.objectContaining({
         feeElementSlug: "tuition",
@@ -263,6 +266,27 @@ describe("school billing operations", () => {
       .update(admissionTable)
       .set({ financeValue: { [scenario.activeSession.id]: {} } })
       .where(eq(admissionTable.id, scenario.admission.id));
+
+    const wrongScope =
+      await scenario.actors.manager.client.school.previewBillingRun({
+        ...draft(scenario),
+        runValues: {
+          session: { laboratory: "1000" },
+          classes: {},
+        },
+        page: 1,
+        limit: 20,
+      });
+    expect(wrongScope.readyToPost).toBe(false);
+    expect(wrongScope.issues.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "invalid_run_value",
+          feeElementSlug: "laboratory",
+          blocking: true,
+        }),
+      ]),
+    );
 
     const runValues = {
       session: {},
@@ -475,7 +499,7 @@ describe("school billing operations", () => {
     expect(rows[0]?.value).toBe(0);
   });
 
-  it("paginates readiness issues and captures unresolved pricing candidates exactly", async () => {
+  it("omits blank bill-generation elements without blocking ordinary charges", async () => {
     const config = postableConfig();
     await Promise.all([
       db
@@ -499,42 +523,32 @@ describe("school billing operations", () => {
         .set({ financeValue: { [scenario.activeSession.id]: {} } })
         .where(eq(admissionTable.id, scenario.admission.id)),
     ]);
-    const first = await scenario.actors.manager.client.school.previewBillingRun({
+    const preview = await scenario.actors.manager.client.school.previewBillingRun({
       ...draft(scenario),
+      runValues: { session: {}, classes: {} },
       page: 1,
       limit: 20,
       issuePage: 1,
       issueLimit: 1,
     });
-    expect(first.issues.pagination).toMatchObject({
+    expect(preview).toMatchObject({
+      readyToPost: true,
+      totalAmountMinor: "12000",
+      counts: { selected: 1, eligible: 1, skipped: 0 },
+    });
+    expect(preview.issues.pagination).toMatchObject({
       currentPage: 1,
-      totalPages: 2,
-      totalItems: 2,
-      nextCursor: "2",
+      totalPages: 0,
+      totalItems: 0,
+      nextCursor: null,
     });
-    expect(first.issues.items[0]).toMatchObject({
-      code: "unresolved_price",
-      blocking: true,
-      pricingResolutionSnapshot: {
-        candidates: {
-          admission: null,
-          class: null,
-          runClass: null,
-          runSession: null,
-          fallback: null,
-        },
-      },
-    });
-    const second = await scenario.actors.manager.client.school.previewBillingRun({
-      ...draft(scenario),
-      page: 1,
-      limit: 20,
-      issuePage: 2,
-      issueLimit: 1,
-    });
-    expect(second.configurationHash).toBe(first.configurationHash);
-    expect(second.issues.pagination.nextCursor).toBeNull();
-    expect(second.issues.items).toHaveLength(1);
+    expect(preview.issues.items).toHaveLength(0);
+    expect(preview.breakdown.items[0]?.lines).toEqual([
+      expect.objectContaining({
+        feeElementSlug: "tuition",
+        amountMinor: "12000",
+      }),
+    ]);
   });
 
   it("blocks exact-money aggregate overflow before any finance write", async () => {
@@ -1014,7 +1028,7 @@ describe("school billing operations", () => {
         idempotencyKey: createFinanceIdempotencyKey("enrollment-race-valid"),
         kind: "regular",
       }),
-    ).resolves.toMatchObject({ billCount: 1, totalAmountMinor: "12800" });
+    ).resolves.toMatchObject({ billCount: 1, totalAmountMinor: "12500" });
   });
 
   it("requires an explicit supplemental reason and permits a supplemental run beside the regular period", async () => {
@@ -1568,7 +1582,7 @@ describe("school billing operations", () => {
       );
     expect(reversed).toMatchObject({
       reversedBillCount: 2,
-      totalAmountMinor: "25200",
+      totalAmountMinor: "25000",
       currency: "INR",
     });
     await expect(

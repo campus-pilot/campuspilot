@@ -79,9 +79,13 @@ Ordinary fee elements resolve in this order:
 3. session base/default value;
 4. unresolved.
 
-Bill-generation elements resolve from an allowed admission override, then a
-run-time class value, then a run-time school/session value, then an explicit
-configured fallback. Run inputs never overwrite persisted ordinary pricing.
+Bill-generation elements resolve only from an explicit run-time class value
+allowed by class scope or a run-time school/session value allowed by school
+scope. If neither resolves, the optional element is
+omitted rather than blocking the run. Blank therefore means no charge, while
+explicit zero remains a value. Persisted admission values and configured
+defaults do not silently add these opt-in charges. Run inputs never overwrite
+persisted ordinary pricing.
 The resolver returns the amount and source; posted bill lines snapshot both.
 Preview and posting must execute the same resolver and validator.
 

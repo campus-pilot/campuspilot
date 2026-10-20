@@ -74,15 +74,6 @@ describe("finance pricing resolver", () => {
 
   it.each([
     [
-      "admission",
-      context({
-        admissionValues: { transport: 10 },
-        runClassValues: { "class-1": { transport: "20" } },
-        runSessionValues: { transport: "30" },
-      }),
-      10n,
-    ],
-    [
       "run_class",
       context({
         runClassValues: { "class-1": { transport: "0" } },
@@ -91,11 +82,10 @@ describe("finance pricing resolver", () => {
       0n,
     ],
     ["run_session", context({ runSessionValues: { transport: "30" } }), 30n],
-    ["fallback", context(), 40n],
   ])("resolves bill-generation %s precedence", (source, value, amount) => {
     const element: FinanceElement = {
       name: "Transport",
-      scopes: ["student"],
+      scopes: ["school", "class", "student"],
       requiredAtLevel: "bill_generation",
       defaultAmountMinor: 40,
     };
@@ -105,7 +95,38 @@ describe("finance pricing resolver", () => {
     });
   });
 
-  it("does not use an admission override when bill-generation admission scope is forbidden", () => {
+  it("does not silently apply persisted values or defaults to an optional run charge", () => {
+    const element: FinanceElement = {
+      name: "Transport",
+      scopes: ["school", "class", "student"],
+      requiredAtLevel: "bill_generation",
+      defaultAmountMinor: 40,
+    };
+    expect(
+      resolveBillingPrice(
+        "transport",
+        element,
+        context({ admissionValues: { transport: 10 } }),
+      ),
+    ).toBeNull();
+  });
+
+  it("does not apply a school-wide command value to a class-only run charge", () => {
+    const element: FinanceElement = {
+      name: "Laboratory",
+      scopes: ["class"],
+      requiredAtLevel: "bill_generation",
+    };
+    expect(
+      resolveBillingPrice(
+        "laboratory",
+        element,
+        context({ runSessionValues: { laboratory: "40" } }),
+      ),
+    ).toBeNull();
+  });
+
+  it("uses an explicit run value instead of a persisted admission override", () => {
     const element: FinanceElement = {
       name: "Activity",
       scopes: ["school"],

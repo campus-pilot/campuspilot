@@ -147,7 +147,10 @@ Target ordinary pricing precedence is:
 4. unresolved.
 
 Bill-generation-only elements use the separately documented runtime precedence
-and are never imported as generic persisted overrides.
+and are never imported as generic persisted overrides. They are optional on
+each new billing run: an absent runtime value omits that line rather than
+blocking the run. Do not synthesize a runtime value during migration merely
+because the legacy configuration labelled the element as required.
 
 The importer translates:
 

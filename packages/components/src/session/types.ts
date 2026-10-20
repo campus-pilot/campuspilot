@@ -99,7 +99,7 @@ export const REQUIRED_LEVEL_LABELS: Record<string, string> = {
   school: 'School',
   class: 'Class',
   student: 'Student',
-  bill_generation: 'While Bill Generation',
+  bill_generation: 'Optional While Bill Generation',
 };
 
 /** Example fee element blueprints for quick initialization */
@@ -149,7 +149,7 @@ export const EXAMPLE_ELEMENTS: Array<{
     scopes: ['class'],
     requiredAtLevel: 'bill_generation',
     description:
-      'Varies by class. But need to configured when generating bills.',
+      'Optional per run. Enter a value only for classes that should receive this charge.',
   },
 ];
 

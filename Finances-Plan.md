@@ -193,13 +193,16 @@ For ordinary fee elements, resolve in this order:
 
 For `requiredAtLevel: bill_generation` elements:
 
-1. admission override, if that element permits admission scope;
-2. billing-run class value;
-3. billing-run school/session value;
-4. explicit configured fallback, if the schema permits one;
-5. unresolved.
+1. explicit billing-run class value, when class scope is allowed;
+2. explicit billing-run school/session value, when school scope is allowed;
+3. omitted from the bill when neither command value is present.
 
-Billing-run values are inputs only for elements declared as bill-generation values. They are not a generic way to overwrite all persisted prices.
+Bill-generation elements are optional for every run. Blank means the charge is
+not assigned by that command, while an explicit zero remains a configured value.
+Persisted admission overrides and configured defaults do not silently opt a
+student into this category.
+Billing-run values are inputs only for elements declared as bill-generation
+values. They are not a generic way to overwrite all persisted prices.
 
 The resolver returns `{ amountMinor, sourceKind, sourceId/sourceKey }`. The exact resolved output is copied into the bill line. Readiness preview and posting must call the same resolver and validator.
 
@@ -421,12 +424,13 @@ Overview:
 
 Billing-run flow:
 
-1. Choose explicit period/date and any bill-generation values.
-2. Call preview and show grouped issues by session, class, and admission.
-3. Review eligible admissions, line totals, skipped records, and the configuration hash.
-4. Confirm posting with the app dialog.
-5. On a stale preview, retain the user's draft, refresh the review, and require confirmation again.
-6. Show the posted run detail, document status, and any permitted reversal action.
+1. Choose the explicit period/date, run type, and classes. All classes are selected by default and edited through a compact popover.
+2. On a separate step, optionally enter school-wide or per-class bill-generation values. Blank values create no charge.
+3. Call preview and show grouped issues by session, class, and admission.
+4. Review eligible admissions, line totals, skipped records, and the configuration hash.
+5. Confirm that entered run values become immutable bill-line snapshots, then post with the app dialog.
+6. On a stale preview, retain the user's draft, refresh the review, and require confirmation again.
+7. Show the posted run detail, document status, and any permitted reversal action.
 
 Use operational tables with `TableSearchBar` and `TableFilterBar`, standard compact density, pagination, and local horizontal scrolling. Do not recreate the old hover-only billing calendar as the primary control.
 

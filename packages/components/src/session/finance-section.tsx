@@ -362,7 +362,7 @@ function FeeElementDialog({
                       { value: 'student', label: 'Student' },
                       {
                         value: 'bill_generation',
-                        label: 'While Bill Generation',
+                        label: 'Optional While Bill Generation',
                       },
                     ]}
                     triggerProps={{ id: 'required-level' }}

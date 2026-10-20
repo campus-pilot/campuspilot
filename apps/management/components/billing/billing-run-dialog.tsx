@@ -4,15 +4,18 @@ import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useForm } from "@tanstack/react-form";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { z } from "zod";
+import { Check, ChevronsUpDown } from "lucide-react";
+import { z } from "zod";
 import { billingRunPreviewOutputSchema } from "@campuspilot/api/routers/school/billing/billing.dto";
 import { civilDateInTimeZone, currencyExponent, financeAmountError, financeBillingDraftSchema, financeScopeIds, formatMinor, decimalToMinor, groupFinanceIssues, idempotencyForDraft, markIdempotencyAmbiguous, type FinanceScopeSelection, type IdempotencyDraftState } from "@campuspilot/components/finance";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@campuspilot/ui/components/alert-dialog";
 import { Badge } from "@campuspilot/ui/components/badge";
 import { Button } from "@campuspilot/ui/components/button";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@campuspilot/ui/components/command";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@campuspilot/ui/components/dialog";
 import { Input } from "@campuspilot/ui/components/input";
 import { Label } from "@campuspilot/ui/components/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@campuspilot/ui/components/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@campuspilot/ui/components/select";
 import { Textarea } from "@campuspilot/ui/components/textarea";
 import { client, orpc } from "@/lib/orpc";
@@ -32,6 +35,22 @@ type BillingPreview = z.infer<typeof billingRunPreviewOutputSchema>;
 
 const formSchema = financeBillingDraftSchema;
 type BillingFormValue = z.infer<typeof formSchema>;
+
+const billingRunSetupSchema = z
+  .object({
+    billingDate: z.string().date("Choose a billing date."),
+    kind: z.enum(["regular", "supplemental"]),
+    supplementalReason: z.string(),
+  })
+  .superRefine((value, context) => {
+    if (value.kind === "supplemental" && !value.supplementalReason.trim()) {
+      context.addIssue({
+        code: "custom",
+        path: ["supplementalReason"],
+        message: "Explain why this supplemental charge is required.",
+      });
+    }
+  });
 
 /** Excludes selector search/pagination state from command identity. */
 function commandDraft(value: BillingFormValue) {
@@ -55,7 +74,7 @@ function billingRunValues(value: BillingFormValue, currency: string) {
         .filter(([, amount]) => amount.trim())
         .map(([slug, amount]) => [slug, decimalToMinor(amount, currency)]),
     );
-  const classes = Object.fromEntries(
+  const classes: Record<string, Record<string, string>> = Object.fromEntries(
     Object.entries(value.runValues.classes)
       .filter(([classId]) => !selectedClassIds || selectedClassIds.has(classId))
       .map(([classId, values]) => [classId, compactValues(values)])
@@ -66,6 +85,15 @@ function billingRunValues(value: BillingFormValue, currency: string) {
     session: compactValues(value.runValues.session),
     classes,
   };
+}
+
+/** True only when the operator entered at least one optional run value. */
+function hasExplicitBillingRunValues(value: BillingFormValue, currency: string) {
+  const runValues = billingRunValues(value, currency);
+  return Object.keys(runValues.session).length > 0 ||
+    Object.values(runValues.classes).some(
+      (classValues) => Object.keys(classValues).length > 0,
+    );
 }
 
 /** An empty selection is the compact command representation for all classes. */
@@ -100,7 +128,13 @@ function ClassScopePicker({ classes, isPending, isError, values, search, page, o
     onValuesChange(next.length === classes.length ? [] : next);
   }
 
-  return <fieldset className="flex flex-col gap-2 rounded-xl border p-3"><legend className="px-1 text-sm font-medium">Classes</legend><div className="flex items-center justify-between gap-2"><p className="text-xs text-muted-foreground">{isPending ? "Loading classes…" : `${selectedClasses.length} of ${classes.length} classes selected`}</p>{values.length ? <Button type="button" size="xs" variant="outline" onClick={() => onValuesChange([])}>Select all</Button> : null}</div><Input value={search} placeholder="Search classes…" aria-label="Search classes for billing" onChange={(event) => { onSearchChange(event.target.value); onPageChange(1); }} />{isError ? <p className="text-xs text-destructive">Unable to load classes.</p> : <><div className="flex flex-col gap-1">{visible.map((item) => <Button key={item.id} type="button" size="sm" variant={selected.has(item.id) ? "secondary" : "ghost"} className="justify-between" onClick={() => toggleClass(item)}><span className="truncate">{item.label}</span><span>{selected.has(item.id) ? "Selected" : "Excluded"}</span></Button>)}</div><SimplePagination currentPage={page} totalPages={totalPages} onPageChange={onPageChange} /></>}</fieldset>;
+  const summary = isPending
+    ? "Loading classes…"
+    : values.length
+      ? `${selectedClasses.length} of ${classes.length} classes`
+      : `All ${classes.length} classes`;
+
+  return <div className="flex flex-col gap-1.5"><Label>Classes</Label><Popover><PopoverTrigger asChild><Button type="button" variant="outline" role="combobox" className="w-full justify-between" disabled={isPending || isError}><span className="truncate">{summary}</span><ChevronsUpDown className="size-4 shrink-0 text-muted-foreground" aria-hidden /></Button></PopoverTrigger><PopoverContent align="start" className="w-80 p-0"><Command shouldFilter={false}><CommandInput value={search} placeholder="Search classes…" onValueChange={(value) => { onSearchChange(value); onPageChange(1); }} /><CommandList><CommandEmpty>No classes match this search.</CommandEmpty><CommandGroup heading="Classes in this session">{visible.map((item) => <CommandItem key={item.id} value={item.label} onSelect={() => toggleClass(item)}><Check className={selected.has(item.id) ? "size-4 opacity-100" : "size-4 opacity-0"} aria-hidden /><span className="truncate">{item.label}</span></CommandItem>)}</CommandGroup></CommandList><div className="flex flex-col gap-2 border-t p-2">{values.length ? <Button type="button" size="xs" variant="outline" onClick={() => onValuesChange([])}>Select all classes</Button> : <p className="text-center text-xs text-muted-foreground">All classes are selected</p>}<SimplePagination currentPage={page} totalPages={totalPages} onPageChange={onPageChange} /></div></Command></PopoverContent></Popover>{isError ? <p className="text-xs text-destructive">Unable to load classes.</p> : <p className="text-xs text-muted-foreground">All classes are selected by default. Open this list only to exclude or restore classes.</p>}</div>;
 }
 
 function PreviewIssues({ issues, skippedCount }: { issues: PreviewIssue[]; skippedCount: number }) {
@@ -109,26 +143,35 @@ function PreviewIssues({ issues, skippedCount }: { issues: PreviewIssue[]; skipp
   return <div className="flex flex-col gap-3"><h4 className="text-sm font-medium">Readiness issues</h4>{scopes.map(({ scope, items }) => <section key={scope} className="flex flex-col gap-1"><h5 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{scope}</h5>{items.map((issue, index) => <div key={`${issue.code}-${issue.entityId}-${index}`} className="flex items-start gap-2 rounded-lg bg-muted/50 p-2"><Badge variant={issue.blocking ? "destructive" : "outline"}>{issue.blocking ? "Blocking" : "Notice"}</Badge><div><p>{issue.entityLabel}</p><p className="text-xs text-muted-foreground">{issue.message}</p></div></div>)}</section>)}{skippedCount ? <div className="overflow-x-auto"><p className="mb-2 text-sm font-medium">Skipped records ({skippedCount})</p><table className="w-full min-w-[480px] text-xs"><thead><tr className="border-b text-left"><th className="p-2">Admission</th><th className="p-2">Reason</th></tr></thead><tbody>{skipped.map((issue, index) => <tr key={`${issue.entityId}-${index}`} className="border-b last:border-0"><td className="p-2 font-medium">{issue.entityLabel}</td><td className="p-2">{issue.message}</td></tr>)}</tbody></table>{skipped.length < skippedCount ? <p className="p-2 text-xs text-muted-foreground">This page shows {skipped.length} of {skippedCount} skipped records. Use issue pagination for the remaining records.</p> : null}</div> : null}</div>;
 }
 
-function BillingRunFields({ form, currency, amountPlaceholder, runtimeElements }: { form: any; currency: string; amountPlaceholder: string; runtimeElements: RuntimeElement[] }) {
-  const sessionElements = runtimeElements.filter(
-    ({ scopes }) => !scopes.includes("class"),
-  );
-  return <><div className="grid gap-3 sm:grid-cols-2"><form.Field name="billingDate">{(field: any) => <div className="flex flex-col gap-1.5"><Label htmlFor="billing-date">Billing date</Label><Input id="billing-date" type="date" value={field.state.value} onBlur={field.handleBlur} onChange={(event) => field.handleChange(event.target.value)} /><FieldErrors errors={field.state.meta.errors} /></div>}</form.Field><form.Field name="kind">{(field: any) => <div className="flex flex-col gap-1.5"><Label htmlFor="billing-kind">Run type</Label><Select value={field.state.value} onValueChange={(value) => field.handleChange(value as "regular" | "supplemental")}><SelectTrigger id="billing-kind" className="w-full"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="regular">Regular</SelectItem><SelectItem value="supplemental">Supplemental</SelectItem></SelectContent></Select><FieldErrors errors={field.state.meta.errors} /></div>}</form.Field></div><form.Subscribe selector={(state: any) => state.values.kind}>{(kind: string) => kind === "supplemental" ? <form.Field name="supplementalReason">{(field: any) => <div className="flex flex-col gap-1.5"><Label htmlFor="supplemental-reason">Supplemental reason</Label><Textarea id="supplemental-reason" value={field.state.value} onBlur={field.handleBlur} onChange={(event) => field.handleChange(event.target.value)} /><FieldErrors errors={field.state.meta.errors} /></div>}</form.Field> : null}</form.Subscribe>{sessionElements.length ? <fieldset className="grid gap-3 rounded-xl border p-3 sm:grid-cols-2"><legend className="px-1 text-sm font-medium">School-wide run values</legend>{sessionElements.map((element) => <form.Field key={element.slug} name={`runValues.session.${element.slug}`}>{(field: any) => <div className="flex flex-col gap-1.5"><Label htmlFor={`run-session-${element.slug}`}>{element.name} ({currency})</Label><Input id={`run-session-${element.slug}`} inputMode="decimal" placeholder={amountPlaceholder} value={String(field.state.value ?? "")} onBlur={field.handleBlur} onChange={(event) => field.handleChange(event.target.value)} /><FieldErrors errors={field.state.meta.errors} /></div>}</form.Field>)}</fieldset> : null}</>;
+function BillingRunSetupFields({ form }: { form: any }) {
+  return <><div className="grid gap-3 sm:grid-cols-2"><form.Field name="billingDate">{(field: any) => <div className="flex flex-col gap-1.5"><Label htmlFor="billing-date">Billing date</Label><Input id="billing-date" type="date" value={field.state.value} onBlur={field.handleBlur} onChange={(event) => field.handleChange(event.target.value)} /><FieldErrors errors={field.state.meta.errors} /></div>}</form.Field><form.Field name="kind">{(field: any) => <div className="flex flex-col gap-1.5"><Label htmlFor="billing-kind">Run type</Label><Select value={field.state.value} onValueChange={(value) => field.handleChange(value as "regular" | "supplemental")}><SelectTrigger id="billing-kind" className="w-full"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="regular">Regular</SelectItem><SelectItem value="supplemental">Supplemental</SelectItem></SelectContent></Select><FieldErrors errors={field.state.meta.errors} /></div>}</form.Field></div><form.Subscribe selector={(state: any) => state.values.kind}>{(kind: string) => kind === "supplemental" ? <form.Field name="supplementalReason">{(field: any) => <div className="flex flex-col gap-1.5"><Label htmlFor="supplemental-reason">Supplemental reason</Label><Textarea id="supplemental-reason" value={field.state.value} onBlur={field.handleBlur} onChange={(event) => field.handleChange(event.target.value)} /><FieldErrors errors={field.state.meta.errors} /></div>}</form.Field> : null}</form.Subscribe></>;
 }
 
 function ClassRunValueFields({ form, classes, runtimeElements, currency, amountPlaceholder }: { form: any; classes: BillingClass[]; runtimeElements: RuntimeElement[]; currency: string; amountPlaceholder: string }) {
   if (!runtimeElements.length) return null;
   return <form.Subscribe selector={(state: any) => state.values.classSelections}>{(classSelections: ScopeSelection[]) => {
     const selectedClasses = selectedBillingClasses(classes, classSelections);
-    return <fieldset className="flex flex-col gap-3 rounded-xl border p-3"><legend className="px-1 text-sm font-medium">Values by class</legend><p className="text-xs text-muted-foreground">Enter the amount to charge for each selected class. A blank value is resolved only when a student-specific value or configured default exists.</p><div className="overflow-x-auto"><table className="w-full min-w-[520px] text-sm"><thead><tr className="border-b text-left"><th className="p-2">Class</th>{runtimeElements.map((element) => <th key={element.slug} className="p-2">{element.name} ({currency})</th>)}</tr></thead><tbody>{selectedClasses.map((schoolClass) => <tr key={schoolClass.id} className="border-b last:border-0"><th scope="row" className="p-2 text-left font-medium">{schoolClass.label}</th>{runtimeElements.map((element) => <td key={element.slug} className="p-2"><form.Field name={`runValues.classes.${schoolClass.id}.${element.slug}`}>{(field: any) => <div className="flex min-w-36 flex-col gap-1"><Input aria-label={`${element.name} for ${schoolClass.label}`} inputMode="decimal" placeholder={amountPlaceholder} value={String(field.state.value ?? "")} onBlur={field.handleBlur} onChange={(event) => field.handleChange(event.target.value)} /><FieldErrors errors={field.state.meta.errors} /></div>}</form.Field></td>)}</tr>)}</tbody></table></div></fieldset>;
+    return <fieldset className="flex flex-col gap-3 rounded-xl border p-3"><legend className="px-1 text-sm font-medium">Values by class · Optional</legend><p className="text-xs text-muted-foreground">Enter a value only for classes that should receive this charge. Blank cells are omitted from this billing run; zero is an explicit value.</p><div className="overflow-x-auto"><table className="w-full min-w-[520px] text-sm"><thead><tr className="border-b text-left"><th className="p-2">Class</th>{runtimeElements.map((element) => <th key={element.slug} className="p-2">{element.name} ({currency})</th>)}</tr></thead><tbody>{selectedClasses.map((schoolClass) => <tr key={schoolClass.id} className="border-b last:border-0"><th scope="row" className="p-2 text-left font-medium">{schoolClass.label}</th>{runtimeElements.map((element) => <td key={element.slug} className="p-2"><form.Field name={`runValues.classes.${schoolClass.id}.${element.slug}`}>{(field: any) => <div className="flex min-w-36 flex-col gap-1"><Input aria-label={`${element.name} for ${schoolClass.label}`} inputMode="decimal" placeholder={amountPlaceholder} value={String(field.state.value ?? "")} onBlur={field.handleBlur} onChange={(event) => field.handleChange(event.target.value)} /><FieldErrors errors={field.state.meta.errors} /></div>}</form.Field></td>)}</tr>)}</tbody></table></div></fieldset>;
   }}</form.Subscribe>;
 }
 
-function BillingScopeFields({ form, schoolId, sessionId, currency, amountPlaceholder, runtimeElements }: { form: any; schoolId: string; sessionId: string; currency: string; amountPlaceholder: string; runtimeElements: RuntimeElement[] }) {
+function BillingClassScopeField({ form, schoolId, sessionId }: { form: any; schoolId: string; sessionId: string }) {
   const classesQuery = useQuery(orpc.school.listClasses.queryOptions({ input: { schoolId, sessionId } }));
   const classes = classesQuery.data ?? [];
-  const classRuntimeElements = runtimeElements.filter(({ scopes }) => scopes.includes("class"));
-  return <div className="flex flex-col gap-3"><p className="text-sm text-muted-foreground">This school-level run includes every registered admission enrolled in the session for the selected classes.</p><form.Subscribe selector={(state: any) => ({ values: state.values.classSelections, search: state.values.classSearch, page: state.values.classPage })}>{({ values, search, page }: any) => <form.Field name="classSelections">{(selectionField: any) => <form.Field name="classSearch">{(searchField: any) => <form.Field name="classPage">{(pageField: any) => <ClassScopePicker classes={classes} isPending={classesQuery.isPending} isError={classesQuery.isError} values={values} search={search} page={page} onValuesChange={selectionField.handleChange} onSearchChange={searchField.handleChange} onPageChange={pageField.handleChange} />}</form.Field>}</form.Field>}</form.Field>}</form.Subscribe>{classesQuery.isPending ? <p className="text-xs text-muted-foreground">Loading class billing values…</p> : classesQuery.isError ? null : <ClassRunValueFields form={form} classes={classes} runtimeElements={classRuntimeElements} currency={currency} amountPlaceholder={amountPlaceholder} />}</div>;
+  return <div className="flex flex-col gap-3"><p className="text-sm text-muted-foreground">This school-level run includes every active, registered admission enrolled in the session for the selected classes.</p><form.Subscribe selector={(state: any) => ({ values: state.values.classSelections, search: state.values.classSearch, page: state.values.classPage })}>{({ values, search, page }: any) => <form.Field name="classSelections">{(selectionField: any) => <form.Field name="classSearch">{(searchField: any) => <form.Field name="classPage">{(pageField: any) => <ClassScopePicker classes={classes} isPending={classesQuery.isPending} isError={classesQuery.isError} values={values} search={search} page={page} onValuesChange={selectionField.handleChange} onSearchChange={searchField.handleChange} onPageChange={pageField.handleChange} />}</form.Field>}</form.Field>}</form.Field>}</form.Subscribe></div>;
+}
+
+function OptionalBillingRunValues({ form, schoolId, sessionId, currency, amountPlaceholder, runtimeElements }: { form: any; schoolId: string; sessionId: string; currency: string; amountPlaceholder: string; runtimeElements: RuntimeElement[] }) {
+  const classesQuery = useQuery(orpc.school.listClasses.queryOptions({ input: { schoolId, sessionId } }));
+  const classes = classesQuery.data ?? [];
+  const sessionElements = runtimeElements.filter(({ scopes }) => !scopes.includes("class"));
+  const classElements = runtimeElements.filter(({ scopes }) => scopes.includes("class"));
+  if (!runtimeElements.length) return <div className="rounded-xl border border-dashed p-4"><p className="text-sm font-medium">No optional run values</p><p className="text-xs text-muted-foreground">This run will use only the ordinary prices already configured for the session, classes, and admissions.</p></div>;
+  return <div className="flex flex-col gap-3"><div><h3 className="text-sm font-medium">Optional bill-generation values</h3><p className="text-xs text-muted-foreground">Leave every value blank unless this run should add that charge. Entered values become part of immutable bill lines after confirmation.</p></div>{sessionElements.length ? <fieldset className="grid gap-3 rounded-xl border p-3 sm:grid-cols-2"><legend className="px-1 text-sm font-medium">School-wide values · Optional</legend>{sessionElements.map((element) => <form.Field key={element.slug} name={`runValues.session.${element.slug}`}>{(field: any) => <div className="flex flex-col gap-1.5"><Label htmlFor={`run-session-${element.slug}`}>{element.name} ({currency})</Label><Input id={`run-session-${element.slug}`} inputMode="decimal" placeholder={amountPlaceholder} value={String(field.state.value ?? "")} onBlur={field.handleBlur} onChange={(event) => field.handleChange(event.target.value)} /><FieldErrors errors={field.state.meta.errors} /></div>}</form.Field>)}</fieldset> : null}{classesQuery.isPending ? <p className="text-xs text-muted-foreground">Loading class value rows…</p> : classesQuery.isError ? <p className="text-xs text-destructive">Unable to load class value rows.</p> : <ClassRunValueFields form={form} classes={classes} runtimeElements={classElements} currency={currency} amountPlaceholder={amountPlaceholder} />}</div>;
+}
+
+function BillingRunSteps({ step }: { step: 1 | 2 }) {
+  return <ol className="grid grid-cols-2 gap-2" aria-label="Billing run steps"><li className={step === 1 ? "rounded-lg bg-primary px-3 py-2 text-primary-foreground" : "rounded-lg bg-muted px-3 py-2 text-muted-foreground"}><span className="block text-[10px] font-medium uppercase tracking-wide">Step 1</span><span className="text-sm font-medium">Run setup</span></li><li className={step === 2 ? "rounded-lg bg-primary px-3 py-2 text-primary-foreground" : "rounded-lg bg-muted px-3 py-2 text-muted-foreground"}><span className="block text-[10px] font-medium uppercase tracking-wide">Step 2</span><span className="text-sm font-medium">Optional values</span></li></ol>;
 }
 
 function BillingPreviewPanel({ preview, currency, values, previewPage, issuePage, refreshPreview }: { preview: BillingPreview; currency: string; values: BillingFormValue; previewPage: number; issuePage: number; refreshPreview: (value: BillingFormValue, page: number, issuePage: number) => Promise<void> }) {
@@ -139,6 +182,7 @@ function BillingPreviewPanel({ preview, currency, values, previewPage, issuePage
 export function BillingRunDialog({ open, onOpenChange, schoolId, sessionId, currency, timeZone, runtimeElements }: { open: boolean; onOpenChange: (open: boolean) => void; schoolId: string; sessionId: string; currency: string; timeZone: string; runtimeElements: RuntimeElement[] }) {
   const queryClient = useQueryClient();
   const router = useRouter();
+  const [step, setStep] = useState<1 | 2>(1);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [discardOpen, setDiscardOpen] = useState(false);
   const [previewPage, setPreviewPage] = useState(1);
@@ -233,21 +277,40 @@ export function BillingRunDialog({ open, onOpenChange, schoolId, sessionId, curr
     else onOpenChange(false);
   }
 
+  function showOptionalValues(value: BillingFormValue) {
+    const parsed = billingRunSetupSchema.safeParse(value);
+    if (!parsed.success) {
+      form.setErrorMap({
+        onSubmit: {
+          fields: Object.fromEntries(
+            parsed.error.issues.map((issue) => [
+              issue.path.join("."),
+              issue.message,
+            ]),
+          ),
+          form: undefined,
+        },
+      });
+      return;
+    }
+    form.setErrorMap({ onSubmit: { fields: {}, form: undefined } });
+    setStep(2);
+  }
+
   return <form.Subscribe selector={(state) => ({ dirty: state.isDirty, values: state.values })}>{({ dirty, values }) => (
     <>
       <DirtyGuard dirty={dirty} description="Your unposted billing command and preview will be lost." />
       <Dialog open={open} onOpenChange={(nextOpen) => { if (!nextOpen) requestClose(dirty); }}>
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-4xl">
-          <DialogHeader><DialogTitle>Create billing run</DialogTitle><DialogDescription>Preview exact charges for an explicit period before posting anything.</DialogDescription></DialogHeader>
-          <form className="flex flex-col gap-4" onSubmit={(event) => { event.preventDefault(); event.stopPropagation(); void form.handleSubmit(); }}>
-            <BillingRunFields form={form} currency={currency} amountPlaceholder={amountPlaceholder} runtimeElements={runtimeElements} />
-            <BillingScopeFields form={form} schoolId={schoolId} sessionId={sessionId} currency={currency} amountPlaceholder={amountPlaceholder} runtimeElements={runtimeElements} />
-            {preview ? <BillingPreviewPanel preview={preview} currency={currency} values={values} previewPage={previewPage} issuePage={issuePage} refreshPreview={refreshPreview} /> : null}
-            <form.Subscribe selector={(state) => ({ canSubmit: state.canSubmit, errors: state.errors, isSubmitting: state.isSubmitting, values: state.values })}>{({ canSubmit, errors, isSubmitting, values: footerValues }) => <><FieldErrors errors={errors} />{previewMutation.isError ? <p className="text-xs text-destructive">{previewMutation.error.message}</p> : null}<DialogFooter><Button type="button" variant="outline" disabled={isSubmitting || postMutation.isPending} onClick={() => requestClose(dirty)}>Cancel</Button><Button type="submit" variant="secondary" disabled={!canSubmit || isSubmitting}>{isSubmitting ? "Previewing…" : preview ? "Refresh preview" : "Preview run"}</Button><Button type="button" disabled={!preview?.readyToPost || reviewedDraft.current !== commandDraftFingerprint(footerValues) || isSubmitting || postMutation.isPending} onClick={() => setConfirmOpen(true)}>Post billing run</Button></DialogFooter></>}</form.Subscribe>
+          <DialogHeader><DialogTitle>Create billing run</DialogTitle><DialogDescription>Choose the run scope, add any optional charges, then preview the immutable bills before posting.</DialogDescription></DialogHeader>
+          <form className="flex flex-col gap-4" onSubmit={(event) => { event.preventDefault(); event.stopPropagation(); if (step === 1) showOptionalValues(values); else void form.handleSubmit(); }}>
+            <BillingRunSteps step={step} />
+            {step === 1 ? <><BillingRunSetupFields form={form} /><BillingClassScopeField form={form} schoolId={schoolId} sessionId={sessionId} /></> : <><OptionalBillingRunValues form={form} schoolId={schoolId} sessionId={sessionId} currency={currency} amountPlaceholder={amountPlaceholder} runtimeElements={runtimeElements} />{preview ? <BillingPreviewPanel preview={preview} currency={currency} values={values} previewPage={previewPage} issuePage={issuePage} refreshPreview={refreshPreview} /> : null}</>}
+            <form.Subscribe selector={(state) => ({ canSubmit: state.canSubmit, errors: state.errors, isSubmitting: state.isSubmitting, values: state.values })}>{({ canSubmit, errors, isSubmitting, values: footerValues }) => <><FieldErrors errors={errors} />{previewMutation.isError ? <p className="text-xs text-destructive">{previewMutation.error.message}</p> : null}<DialogFooter><Button type="button" variant="outline" disabled={isSubmitting || postMutation.isPending} onClick={() => requestClose(dirty)}>Cancel</Button>{step === 1 ? <Button type="submit">Continue to optional values</Button> : <><Button type="button" variant="outline" disabled={isSubmitting || postMutation.isPending} onClick={() => setStep(1)}>Back</Button><Button type="submit" variant="secondary" disabled={!canSubmit || isSubmitting}>{isSubmitting ? "Previewing…" : preview ? "Refresh preview" : "Preview run"}</Button><Button type="button" disabled={!preview?.readyToPost || reviewedDraft.current !== commandDraftFingerprint(footerValues) || isSubmitting || postMutation.isPending} onClick={() => setConfirmOpen(true)}>Post billing run</Button></>}</DialogFooter></>}</form.Subscribe>
           </form>
         </DialogContent>
       </Dialog>
-      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Post this billing run?</AlertDialogTitle><AlertDialogDescription>This creates immutable bills for {preview?.counts.eligible ?? 0} admissions totaling {preview ? formatMinor(preview.totalAmountMinor, preview.currency ?? currency) : "—"}. A later correction must be recorded as a reversal.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel disabled={postMutation.isPending}>Keep reviewing</AlertDialogCancel><AlertDialogAction disabled={postMutation.isPending} onClick={(event) => { event.preventDefault(); void postReviewedRun(values); }}>{postMutation.isPending ? "Posting…" : "Post bills"}</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
+      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Continue and post this billing run?</AlertDialogTitle><AlertDialogDescription>{hasExplicitBillingRunValues(values, currency) ? "The optional values entered on step 2 will be copied into immutable bill lines and cannot be edited after posting. Corrections require an adjustment or reversal. " : "No optional bill-generation values were entered. Only the ordinary configured charges shown in the preview will be posted. "}This creates bills for {preview?.counts.eligible ?? 0} admissions totaling {preview ? formatMinor(preview.totalAmountMinor, preview.currency ?? currency) : "—"}.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel disabled={postMutation.isPending}>Keep reviewing</AlertDialogCancel><AlertDialogAction disabled={postMutation.isPending} onClick={(event) => { event.preventDefault(); void postReviewedRun(values); }}>{postMutation.isPending ? "Posting…" : "Confirm and post bills"}</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
       <AlertDialog open={discardOpen} onOpenChange={setDiscardOpen}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Discard billing draft?</AlertDialogTitle><AlertDialogDescription>Your unposted billing command and preview will be lost.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Keep editing</AlertDialogCancel><AlertDialogAction variant="destructive" onClick={() => onOpenChange(false)}>Discard draft</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
     </>
   )}</form.Subscribe>;
