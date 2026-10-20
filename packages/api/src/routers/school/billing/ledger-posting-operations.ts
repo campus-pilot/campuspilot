@@ -202,7 +202,16 @@ async function resolveAllocations(
   const allocatedMinor = allocations.reduce((total, allocation) => total + allocation.amountMinor, ZERO);
   if (allocatedMinor > amount) throw rpcError.badRequest("Payment allocations cannot exceed the payment amount.");
   return {
-    allocations,
+    allocations: allocations.map((allocation) => {
+      const candidate = candidateById.get(allocation.billId)!;
+      return {
+        ...allocation,
+        billNumber: candidate.bill.billNumber,
+        sessionId: candidate.bill.sessionId,
+        sessionLabel: `${candidate.bill.sessionStartYearSnapshot}–${candidate.bill.sessionEndYearSnapshot}`,
+        outstandingMinor: candidate.outstandingMinor.toString(),
+      };
+    }),
     allocatedMinor,
     unallocatedCreditMinor: amount - allocatedMinor,
     totalOutstandingMinor: boundedCandidates.reduce((total, candidate) => total + candidate.outstandingMinor, ZERO),
@@ -251,7 +260,14 @@ export async function previewPaymentAllocation(db: DatabaseExecutor, command: Pa
       ? [{ code: "candidate_limit_exceeded" as const, message: `Automatic allocation is limited to ${MAX_PAYMENT_ALLOCATIONS} outstanding bills; use explicit allocations in batches.` }]
       : [],
     allocationReviewHash: allocationReviewHash(command, result),
-    allocations: result.allocations.map((allocation) => ({ billId: allocation.billId, amountMinor: allocation.amountMinor.toString() })),
+    allocations: result.allocations.map((allocation) => ({
+      billId: allocation.billId,
+      billNumber: allocation.billNumber,
+      sessionId: allocation.sessionId,
+      sessionLabel: allocation.sessionLabel,
+      outstandingMinor: allocation.outstandingMinor,
+      amountMinor: allocation.amountMinor.toString(),
+    })),
     allocatedMinor: result.allocatedMinor.toString(),
     unallocatedCreditMinor: result.unallocatedCreditMinor.toString(),
     totalOutstandingMinor: result.totalOutstandingMinor.toString(),
@@ -506,8 +522,9 @@ export async function reverseLedgerEntry(db: Database, command: ReverseLedgerCom
     if (prior[0]) throw rpcError.conflict("This ledger entry has already been reversed.");
     const [bill] = await transaction.select().from(financeBillTable).where(and(eq(financeBillTable.schoolId, command.schoolId), eq(financeBillTable.ledgerEntryId, target.id))).limit(1);
     if (bill) {
-      const state = (await billSettlementMap(transaction, command.schoolId, [bill])).get(bill.id)!;
-      if (state.allocated > ZERO || state.adjusted > ZERO || state.debited > ZERO) throw rpcError.conflict("A settled or adjusted bill requires a coordinated correction and cannot be reversed alone.");
+      // Bill reversals have their own permission and coordinated posting path. Allowing
+      // them here would let REVERSE_LEDGER_ENTRY bypass the REVERSE_BILL boundary.
+      throw rpcError.badRequest("Bill postings must be reversed with the dedicated bill reversal operation.");
     }
     const [payment] = await transaction.select().from(financePaymentTable).where(and(eq(financePaymentTable.schoolId, command.schoolId), eq(financePaymentTable.ledgerEntryId, target.id))).limit(1);
     if (payment) {

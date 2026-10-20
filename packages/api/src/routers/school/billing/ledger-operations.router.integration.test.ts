@@ -54,8 +54,8 @@ describe("school finance ledger operations", () => {
     const preview = await scenario.actors.accountant.client.school.previewPaymentAllocation(command);
     expect(preview).toMatchObject({
       allocations: [
-        { billId: historical.id, amountMinor: "5000" },
-        { billId: current.id, amountMinor: "7000" },
+        { billId: historical.id, billNumber: historical.billNumber, sessionId: scenario.historicalSession.id, sessionLabel: "2039–2040", outstandingMinor: "5000", amountMinor: "5000" },
+        { billId: current.id, billNumber: current.billNumber, sessionId: scenario.activeSession.id, sessionLabel: "2040–2041", outstandingMinor: "10000", amountMinor: "7000" },
       ],
       unallocatedCreditMinor: "0",
     });
@@ -92,7 +92,12 @@ describe("school finance ledger operations", () => {
         balanceMinor: "3000",
         dueMinor: "3000",
         creditMinor: "0",
-        billCounts: { open: 1, settled: 1, reversed: 0 },
+        billedMinor: "10000",
+        collectedMinor: "12000",
+        creditAdjustmentMinor: "0",
+        debitAdjustmentMinor: "0",
+        refundMinor: "0",
+        billCounts: { open: 1, settled: 0, reversed: 0 },
       }),
     ]);
     const ledger = await scenario.actors.manager.client.school.getAdmissionLedger({
@@ -112,9 +117,11 @@ describe("school finance ledger operations", () => {
     expect(ledger.pageOpeningBalances).toEqual([{ currency: "INR", balanceMinor: "0", dueMinor: "0", creditMinor: "0" }]);
     await expect(scenario.actors.manager.client.school.getAdmissionLedger({ schoolId: scenario.school.id, admissionId: scenario.admission.id, page: 2, limit: 1 })).resolves.toMatchObject({ pageOpeningBalances: [{ currency: "INR", balanceMinor: "5000" }], entries: { items: [expect.objectContaining({ runningBalanceMinor: "15000" })] } });
     await expect(scenario.actors.manager.client.school.getPayment({ schoolId: scenario.school.id, admissionId: scenario.admission.id, paymentId: payment.id, allocationPage: 2, allocationLimit: 1 })).resolves.toMatchObject({ allocations: { items: [expect.any(Object)], pagination: { currentPage: 2, totalItems: 2 } } });
+    await expect(scenario.actors.manager.client.school.getPayment({ schoolId: scenario.school.id, paymentId: payment.id })).resolves.toMatchObject({ id: payment.id, admissionId: scenario.admission.id });
     await expect(scenario.actors.manager.client.school.getAdmissionBill({ schoolId: scenario.school.id, admissionId: scenario.admission.id, billId: historical.id, allocationLimit: 1 })).resolves.toMatchObject({ allocations: { items: [expect.objectContaining({ amountMinor: "5000" })], pagination: { totalItems: 1 } } });
     await expect(scenario.actors.platformAdmin.client.school.getSessionFinanceOverview({ schoolId: scenario.school.id, sessionId: scenario.activeSession.id })).resolves.toMatchObject({ currencies: [expect.objectContaining({ currency: "INR", billedMinor: "10000", paymentMinor: "12000", netCashMinor: "12000" })] });
     await expect(scenario.actors.manager.client.school.getCollectionRegister({ schoolId: scenario.school.id, filters: { sessionId: scenario.activeSession.id }, limit: 20 })).resolves.toMatchObject({ items: [expect.objectContaining({ kind: "payment", amountMinor: "12000" })] });
+    await expect(scenario.actors.manager.client.school.getCollectionRegister({ schoolId: scenario.school.id, filters: { sessionId: scenario.activeSession.id, search: scenario.admission.admissionNo }, limit: 20 })).resolves.toMatchObject({ items: [expect.objectContaining({ admissionId: scenario.admission.id })] });
     await expect(scenario.actors.manager.client.school.getFeeElementFinanceReport({ schoolId: scenario.school.id, filters: { sessionId: scenario.activeSession.id }, limit: 20 })).resolves.toMatchObject({ items: [expect.objectContaining({ feeElementSlug: "tuition", billedMinor: "10000" })] });
     await expect(scenario.actors.manager.client.school.getClassFinanceSnapshot({ schoolId: scenario.school.id, filters: { sessionId: scenario.activeSession.id }, limit: 20 })).resolves.toMatchObject({ items: [expect.objectContaining({ billedMinor: "10000", allocatedMinor: "7000", outstandingMinor: "3000" })] });
   });
@@ -226,6 +233,26 @@ describe("school finance ledger operations", () => {
       idempotencyKey: createFinanceIdempotencyKey("discount"),
     });
     expect(adjustment.amountMinor).toBe("501");
+    await expect(
+      scenario.actors.platformAdmin.client.school.getSessionFinanceOverview({
+        schoolId: scenario.school.id,
+        sessionId: scenario.activeSession.id,
+      }),
+    ).resolves.toMatchObject({
+      currencies: [expect.objectContaining({ discountMinor: "501", waiverMinor: "0", writeOffMinor: "0", creditCorrectionMinor: "0" })],
+    });
+    await expect(
+      scenario.actors.manager.client.school.getFeeElementFinanceReport({
+        schoolId: scenario.school.id,
+        filters: { sessionId: scenario.activeSession.id },
+        limit: 20,
+      }),
+    ).resolves.toMatchObject({
+      items: expect.arrayContaining([
+        expect.objectContaining({ feeElementSlug: "tuition", billedMinor: "1001", creditAdjustmentMinor: "0" }),
+        expect.objectContaining({ feeElementSlug: "__bill_unallocated_adjustments__", billedMinor: "0", creditAdjustmentMinor: "501", netChargeMinor: "-501" }),
+      ]),
+    });
 
     const paymentInput = {
       schoolId: scenario.school.id,
@@ -338,6 +365,7 @@ describe("school finance ledger operations", () => {
       }),
     ).rejects.toMatchObject({ code: "CONFLICT" });
     await expect(scenario.actors.accountant.client.school.reverseLedgerEntry({ ...reversalInput, ledgerEntryId: reversal.id, idempotencyKey: createFinanceIdempotencyKey("reversal-of-reversal") })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(scenario.actors.manager.client.school.getAdmissionLedger({ schoolId: scenario.school.id, admissionId: scenario.admission.id, limit: 20 })).resolves.toMatchObject({ entries: { items: expect.arrayContaining([expect.objectContaining({ id: adjustment.ledgerEntryId, reversed: true })]) } });
     await expect(
       scenario.actors.platformAdmin.client.school.reconcileAdmissionProjection({
         schoolId: scenario.school.id,
@@ -345,6 +373,30 @@ describe("school finance ledger operations", () => {
         currency: "INR",
       }),
     ).resolves.toMatchObject({ matches: true });
+  });
+
+  it("rejects bill postings on the generic ledger reversal path", async () => {
+    const bill = await createBill(scenario, {
+      sessionId: scenario.activeSession.id,
+      issueDate: "2040-05-01",
+      amountMinor: "1000",
+      suffix: "dedicated-reversal",
+    });
+
+    await expect(
+      scenario.actors.accountant.client.school.reverseLedgerEntry({
+        schoolId: scenario.school.id,
+        admissionId: scenario.admission.id,
+        sessionId: scenario.activeSession.id,
+        ledgerEntryId: bill.ledgerEntryId,
+        reason: "Entered in error",
+        effectiveAt: new Date("2040-05-02T00:00:00Z"),
+        idempotencyKey: createFinanceIdempotencyKey("generic-bill-reversal"),
+      }),
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: expect.stringContaining("dedicated bill reversal"),
+    });
   });
 
   it("honors explicit allocation choices and keeps different currencies isolated", async () => {

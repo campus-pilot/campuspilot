@@ -194,7 +194,8 @@ export async function getAdmissionLedger(
   const opening = new Map(openingRows.map((row) => [row.currency, asBigInt(row.balance)]));
   const closing = new Map(closingRows.map((row) => [row.currency, asBigInt(row.balance)]));
   const entryIds = entries.map(({ id }) => id);
-  const [bills, payments, adjustments, refunds, allocations, runningRows] = await Promise.all([
+  const entrySessionIds = [...new Set(entries.map(({ sessionId }) => sessionId))];
+  const [bills, payments, adjustments, refunds, allocations, runningRows, reversals, entrySessions] = await Promise.all([
     entryIds.length ? db.select().from(financeBillTable).where(and(eq(financeBillTable.schoolId, input.schoolId), inArray(financeBillTable.ledgerEntryId, entryIds))) : [],
     entryIds.length ? db.select().from(financePaymentTable).where(and(eq(financePaymentTable.schoolId, input.schoolId), inArray(financePaymentTable.ledgerEntryId, entryIds))) : [],
     entryIds.length ? db.select().from(financeAdjustmentTable).where(and(eq(financeAdjustmentTable.schoolId, input.schoolId), inArray(financeAdjustmentTable.ledgerEntryId, entryIds))) : [],
@@ -213,6 +214,8 @@ export async function getAdmissionLedger(
       from finance_ledger_entry current_entry
       where current_entry.id in (${sql.join(entryIds.map((id) => sql`${id}`), sql`, `)})
     `).then((result) => result.rows) : [],
+    entryIds.length ? db.select({ target: financeLedgerEntryTable.reversalOfEntryId }).from(financeLedgerEntryTable).where(and(eq(financeLedgerEntryTable.schoolId, input.schoolId), inArray(financeLedgerEntryTable.reversalOfEntryId, entryIds))) : [],
+    entrySessionIds.length ? db.select({ id: schoolSessionTable.id, financeConfig: schoolSessionTable.financeConfig }).from(schoolSessionTable).where(and(eq(schoolSessionTable.schoolId, input.schoolId), inArray(schoolSessionTable.id, entrySessionIds))) : [],
   ]);
   const details = new Map<string, Record<string, unknown>>();
   for (const bill of bills) details.set(bill.ledgerEntryId, { kind: "bill", billId: bill.id, billNumber: bill.billNumber, issueDate: bill.issueDate });
@@ -227,6 +230,8 @@ export async function getAdmissionLedger(
   const totalPages = Math.ceil(totalItems / pageSize);
   const currencies = new Set([...opening.keys(), ...closing.keys()]);
   const runningById = new Map(runningRows.map((row) => [row.id, asBigInt(row.runningBalance)]));
+  const reversedEntryIds = new Set(reversals.map(({ target }) => target));
+  const timeZoneBySession = new Map(entrySessions.map((session) => [session.id, session.financeConfig?.timeZone ?? null]));
   const firstEntryByCurrency = new Map<string, (typeof entries)[number]>();
   for (const entry of entries) if (!firstEntryByCurrency.has(entry.currency)) firstEntryByCurrency.set(entry.currency, entry);
   const pageOpeningBalances = [...firstEntryByCurrency].sort(([left], [right]) => left.localeCompare(right)).map(([currency, entry]) => {
@@ -245,7 +250,7 @@ export async function getAdmissionLedger(
     }),
     pageOpeningBalances,
     entries: createPaginatedResult({
-      items: entries.map((entry) => ({ ...entry, sequence: serializeFinanceInteger(entry.sequence), amountMinor: serializeFinanceInteger(entry.amountMinor), runningBalanceMinor: (runningById.get(entry.id) ?? ZERO).toString(), detail: details.get(entry.id) ?? (entry.type === "reversal" ? { kind: "reversal", reversalOfEntryId: entry.reversalOfEntryId } : null) })),
+      items: entries.map((entry) => ({ ...entry, timeZone: timeZoneBySession.get(entry.sessionId) ?? null, sequence: serializeFinanceInteger(entry.sequence), amountMinor: serializeFinanceInteger(entry.amountMinor), reversed: reversedEntryIds.has(entry.id), runningBalanceMinor: (runningById.get(entry.id) ?? ZERO).toString(), detail: details.get(entry.id) ?? (entry.type === "reversal" ? { kind: "reversal", reversalOfEntryId: entry.reversalOfEntryId } : null) })),
       nextCursor: createNextPageCursor(currentPage, totalPages), currentPage, totalPages, totalItems, pageSize,
     }),
   };
@@ -260,7 +265,7 @@ export async function getAdmissionFinanceSummary(
   const billAllocatedExpression = sql<bigint>`coalesce((select sum(pa.amount_minor) from ${financePaymentAllocationTable} pa where pa.school_id = ${financeBillTable.schoolId} and pa.bill_id = ${financeBillTable.id}), 0)`;
   const billCreditsExpression = sql<bigint>`coalesce((select sum(fa.amount_minor) from ${financeAdjustmentTable} fa where fa.school_id = ${financeBillTable.schoolId} and fa.bill_id = ${financeBillTable.id} and fa.kind <> 'debit_correction' and not exists (select 1 from ${financeLedgerEntryTable} ar where ar.school_id = fa.school_id and ar.reversal_of_entry_id = fa.ledger_entry_id)), 0)`;
   const billDebitsExpression = sql<bigint>`coalesce((select sum(fa.amount_minor) from ${financeAdjustmentTable} fa where fa.school_id = ${financeBillTable.schoolId} and fa.bill_id = ${financeBillTable.id} and fa.kind = 'debit_correction' and not exists (select 1 from ${financeLedgerEntryTable} ar where ar.school_id = fa.school_id and ar.reversal_of_entry_id = fa.ledger_entry_id)), 0)`;
-  const [lifetime, activities, selectedSession, billCounts, unallocated] = await Promise.all([
+  const [lifetime, activities, selectedSession, billCounts, unallocated, activityTotals] = await Promise.all([
     db.select({
       currency: financeLedgerEntryTable.currency,
       debitTotalMinor: sql<string>`coalesce(sum(${financeLedgerEntryTable.amountMinor}) filter (where ${financeLedgerEntryTable.direction} = 'debit'), 0)::numeric`,
@@ -280,7 +285,7 @@ export async function getAdmissionFinanceSummary(
       open: sql<string>`count(*) filter (where not (${reversedBillExpression}) and ${billAllocatedExpression} + ${billCreditsExpression} < ${financeBillTable.totalAmountMinor} + ${billDebitsExpression})::numeric`,
       settled: sql<string>`count(*) filter (where not (${reversedBillExpression}) and ${billAllocatedExpression} + ${billCreditsExpression} >= ${financeBillTable.totalAmountMinor} + ${billDebitsExpression})::numeric`,
       reversed: sql<string>`count(*) filter (where ${reversedBillExpression})::numeric`,
-    }).from(financeBillTable).where(and(eq(financeBillTable.schoolId, input.schoolId), eq(financeBillTable.admissionId, input.admissionId))).groupBy(financeBillTable.currency),
+    }).from(financeBillTable).where(and(eq(financeBillTable.schoolId, input.schoolId), eq(financeBillTable.admissionId, input.admissionId), input.sessionId ? eq(financeBillTable.sessionId, input.sessionId) : undefined)).groupBy(financeBillTable.currency),
     db.execute<{ currency: string; amount: string }>(sql`
       select payment.currency,
         coalesce(sum(payment.amount_minor
@@ -300,6 +305,36 @@ export async function getAdmissionFinanceSummary(
             and payment_reversal.reversal_of_entry_id = payment.ledger_entry_id)
       group by payment.currency
     `).then((result) => result.rows),
+    db.execute<{ currency: string; billed: string; collected: string; creditAdjustments: string; debitAdjustments: string; refunds: string }>(sql`
+      select entry.currency,
+        coalesce(sum(case
+          when entry.type in ('bill', 'manual_debit_adjustment') then entry.amount_minor
+          when entry.type = 'reversal' and target.type in ('bill', 'manual_debit_adjustment') then -entry.amount_minor
+          else 0 end), 0)::numeric as billed,
+        coalesce(sum(case
+          when entry.type = 'payment' then entry.amount_minor
+          when entry.type = 'reversal' and target.type = 'payment' then -entry.amount_minor
+          else 0 end), 0)::numeric as collected,
+        coalesce(sum(case
+          when entry.type in ('discount', 'waiver', 'write_off', 'credit_correction') then entry.amount_minor
+          when entry.type = 'reversal' and target.type in ('discount', 'waiver', 'write_off', 'credit_correction') then -entry.amount_minor
+          else 0 end), 0)::numeric as "creditAdjustments",
+        coalesce(sum(case
+          when entry.type = 'debit_correction' then entry.amount_minor
+          when entry.type = 'reversal' and target.type = 'debit_correction' then -entry.amount_minor
+          else 0 end), 0)::numeric as "debitAdjustments",
+        coalesce(sum(case
+          when entry.type = 'refund' then entry.amount_minor
+          when entry.type = 'reversal' and target.type = 'refund' then -entry.amount_minor
+          else 0 end), 0)::numeric as refunds
+      from finance_ledger_entry entry
+      left join finance_ledger_entry target
+        on target.school_id = entry.school_id and target.id = entry.reversal_of_entry_id
+      where entry.school_id = ${input.schoolId}
+        and entry.admission_id = ${input.admissionId}
+        ${input.sessionId ? sql`and entry.session_id = ${input.sessionId}` : sql``}
+      group by entry.currency
+    `).then((result) => result.rows),
   ]);
   const selectedByCurrency = new Map(activities.filter((activity) => activity.sessionId === input.sessionId).map((activity) => [activity.currency, activity]));
   const selectedYears = selectedSession[0];
@@ -315,6 +350,7 @@ export async function getAdmissionFinanceSummary(
   }
   const unallocatedByCurrency = new Map(unallocated.map((row) => [row.currency, asBigInt(row.amount)]));
   const billCountsByCurrency = new Map(billCounts.map((row) => [row.currency, row]));
+  const activityTotalsByCurrency = new Map(activityTotals.map((row) => [row.currency, row]));
   return {
     currencies: lifetime.map((row) => {
       const lifetimeDebit = asBigInt(row.debitTotalMinor);
@@ -326,12 +362,18 @@ export async function getAdmissionFinanceSummary(
       const sessionBalance = sessionDebit - sessionCredit;
       const broughtForward = broughtForwardByCurrency.get(row.currency) ?? ZERO;
       const counts = billCountsByCurrency.get(row.currency);
+      const totals = activityTotalsByCurrency.get(row.currency);
       return {
         currency: row.currency,
         lifetimeDebitMinor: lifetimeDebit.toString(),
         lifetimeCreditMinor: lifetimeCredit.toString(),
         balanceMinor: balance.toString(),
         ...amountSplit(balance),
+        billedMinor: asBigInt(totals?.billed).toString(),
+        collectedMinor: asBigInt(totals?.collected).toString(),
+        creditAdjustmentMinor: asBigInt(totals?.creditAdjustments).toString(),
+        debitAdjustmentMinor: asBigInt(totals?.debitAdjustments).toString(),
+        refundMinor: asBigInt(totals?.refunds).toString(),
         selectedSession: activity ? { debitMinor: sessionDebit.toString(), creditMinor: sessionCredit.toString(), balanceMinor: sessionBalance.toString() } : null,
         broughtForwardMinor: broughtForward.toString(),
         unallocatedCreditMinor: (unallocatedByCurrency.get(row.currency) ?? ZERO).toString(),
@@ -485,38 +527,42 @@ export async function listPayments(
   ]);
   const ids = rows.map(({ payment }) => payment.id);
   const ledgerIds = rows.map(({ payment }) => payment.ledgerEntryId);
-  const [allocations, refunds, reversals] = await Promise.all([
+  const sessionIds = [...new Set(rows.map(({ payment }) => payment.sessionId))];
+  const [allocations, refunds, reversals, sessions] = await Promise.all([
     ids.length ? db.select().from(financePaymentAllocationTable).where(and(eq(financePaymentAllocationTable.schoolId, input.schoolId), inArray(financePaymentAllocationTable.paymentId, ids))) : [],
     ids.length ? db.select().from(financeRefundTable).where(and(eq(financeRefundTable.schoolId, input.schoolId), inArray(financeRefundTable.paymentId, ids))) : [],
     ledgerIds.length ? db.select({ target: financeLedgerEntryTable.reversalOfEntryId }).from(financeLedgerEntryTable).where(and(eq(financeLedgerEntryTable.schoolId, input.schoolId), inArray(financeLedgerEntryTable.reversalOfEntryId, ledgerIds))) : [],
+    sessionIds.length ? db.select({ id: schoolSessionTable.id, financeConfig: schoolSessionTable.financeConfig }).from(schoolSessionTable).where(and(eq(schoolSessionTable.schoolId, input.schoolId), inArray(schoolSessionTable.id, sessionIds))) : [],
   ]);
   const refundReversals = refunds.length ? await db.select({ target: financeLedgerEntryTable.reversalOfEntryId }).from(financeLedgerEntryTable).where(and(eq(financeLedgerEntryTable.schoolId, input.schoolId), inArray(financeLedgerEntryTable.reversalOfEntryId, refunds.map(({ ledgerEntryId }) => ledgerEntryId)))) : [];
   const reversed = new Set([...reversals, ...refundReversals].map(({ target }) => target));
+  const timeZoneBySession = new Map(sessions.map((session) => [session.id, session.financeConfig?.timeZone ?? null]));
   const enriched = rows.map(({ payment, ...identity }) => {
     const allocated = allocations.filter(({ paymentId }) => paymentId === payment.id).reduce((sum, row) => sum + row.amountMinor, ZERO);
     const refunded = refunds.filter(({ paymentId, ledgerEntryId }) => paymentId === payment.id && !reversed.has(ledgerEntryId)).reduce((sum, row) => sum + row.amountMinor, ZERO);
     const paymentReversed = reversed.has(payment.ledgerEntryId);
     const unallocated = paymentReversed ? ZERO : payment.amountMinor - allocated - refunded;
     const status: "reversed" | "unallocated" | "allocated" | "partially_allocated" = paymentReversed ? "reversed" : allocated === ZERO ? "unallocated" : unallocated === ZERO ? "allocated" : "partially_allocated";
-    return { ...payment, ...identity, amountMinor: payment.amountMinor.toString(), allocatedMinor: allocated.toString(), refundedMinor: refunded.toString(), unallocatedCreditMinor: unallocated.toString(), status };
+    return { ...payment, ...identity, timeZone: timeZoneBySession.get(payment.sessionId) ?? null, amountMinor: payment.amountMinor.toString(), allocatedMinor: allocated.toString(), refundedMinor: refunded.toString(), unallocatedCreditMinor: unallocated.toString(), reversed: paymentReversed, status };
   });
   const totalItems = totals[0]?.value ?? 0;
   const totalPages = Math.ceil(totalItems / pageSize);
   return createPaginatedResult({ items: enriched, nextCursor: createNextPageCursor(currentPage, totalPages), currentPage, totalPages, totalItems, pageSize });
 }
 
-export async function getPayment(db: DatabaseExecutor, input: { schoolId: string; admissionId: string; paymentId: string; allocationPage: number; allocationLimit: number; refundPage: number; refundLimit: number }) {
-  await assertAdmissionContext(db, input);
-  const [payment] = await db.select().from(financePaymentTable).where(and(eq(financePaymentTable.schoolId, input.schoolId), eq(financePaymentTable.admissionId, input.admissionId), eq(financePaymentTable.id, input.paymentId))).limit(1);
+export async function getPayment(db: DatabaseExecutor, input: { schoolId: string; admissionId?: string; paymentId: string; allocationPage: number; allocationLimit: number; refundPage: number; refundLimit: number }) {
+  const [payment] = await db.select().from(financePaymentTable).where(and(eq(financePaymentTable.schoolId, input.schoolId), input.admissionId ? eq(financePaymentTable.admissionId, input.admissionId) : undefined, eq(financePaymentTable.id, input.paymentId))).limit(1);
   if (!payment) throw rpcError.notFound("Payment");
+  await assertAdmissionContext(db, { schoolId: input.schoolId, admissionId: payment.admissionId, sessionId: payment.sessionId });
   const allocationOffset = (input.allocationPage - 1) * input.allocationLimit;
   const refundOffset = (input.refundPage - 1) * input.refundLimit;
-  const [allocations, refunds, reversal, allocationTotals, refundTotals] = await Promise.all([
-    db.select().from(financePaymentAllocationTable).where(and(eq(financePaymentAllocationTable.schoolId, input.schoolId), eq(financePaymentAllocationTable.paymentId, input.paymentId))).orderBy(asc(financePaymentAllocationTable.recordedAt), asc(financePaymentAllocationTable.id)).limit(input.allocationLimit).offset(allocationOffset),
+  const [allocations, refunds, reversal, allocationTotals, refundTotals, sessions] = await Promise.all([
+    db.select({ allocation: financePaymentAllocationTable, billNumber: financeBillTable.billNumber }).from(financePaymentAllocationTable).innerJoin(financeBillTable, and(eq(financeBillTable.schoolId, financePaymentAllocationTable.schoolId), eq(financeBillTable.id, financePaymentAllocationTable.billId))).where(and(eq(financePaymentAllocationTable.schoolId, input.schoolId), eq(financePaymentAllocationTable.paymentId, input.paymentId))).orderBy(asc(financePaymentAllocationTable.recordedAt), asc(financePaymentAllocationTable.id)).limit(input.allocationLimit).offset(allocationOffset),
     db.select().from(financeRefundTable).where(and(eq(financeRefundTable.schoolId, input.schoolId), eq(financeRefundTable.paymentId, input.paymentId))).orderBy(asc(financeRefundTable.recordedAt), asc(financeRefundTable.id)).limit(input.refundLimit).offset(refundOffset),
     db.select({ id: financeLedgerEntryTable.id }).from(financeLedgerEntryTable).where(and(eq(financeLedgerEntryTable.schoolId, input.schoolId), eq(financeLedgerEntryTable.reversalOfEntryId, payment.ledgerEntryId))).limit(1),
     db.select({ value: count() }).from(financePaymentAllocationTable).where(and(eq(financePaymentAllocationTable.schoolId, input.schoolId), eq(financePaymentAllocationTable.paymentId, input.paymentId))),
     db.select({ value: count() }).from(financeRefundTable).where(and(eq(financeRefundTable.schoolId, input.schoolId), eq(financeRefundTable.paymentId, input.paymentId))),
+    db.select({ financeConfig: schoolSessionTable.financeConfig }).from(schoolSessionTable).where(and(eq(schoolSessionTable.schoolId, input.schoolId), eq(schoolSessionTable.id, payment.sessionId))).limit(1),
   ]);
   const refundReversals = refunds.length ? await db.select({ target: financeLedgerEntryTable.reversalOfEntryId }).from(financeLedgerEntryTable).where(and(eq(financeLedgerEntryTable.schoolId, input.schoolId), inArray(financeLedgerEntryTable.reversalOfEntryId, refunds.map(({ ledgerEntryId }) => ledgerEntryId)))) : [];
   const reversedRefunds = new Set(refundReversals.map(({ target }) => target));
@@ -533,7 +579,7 @@ export async function getPayment(db: DatabaseExecutor, input: { schoolId: string
   const allocationPages = Math.ceil(allocationItems / input.allocationLimit);
   const refundItems = refundTotals[0]?.value ?? 0;
   const refundPages = Math.ceil(refundItems / input.refundLimit);
-  return { ...payment, amountMinor: payment.amountMinor.toString(), allocatedMinor: allocated.toString(), refundedMinor: refunded.toString(), unallocatedCreditMinor: (paymentReversed ? ZERO : payment.amountMinor - allocated - refunded).toString(), reversed: paymentReversed, allocations: createPaginatedResult({ items: allocations.map((row) => ({ ...row, amountMinor: row.amountMinor.toString() })), nextCursor: createNextPageCursor(input.allocationPage, allocationPages), currentPage: input.allocationPage, totalPages: allocationPages, totalItems: allocationItems, pageSize: input.allocationLimit }), refunds: createPaginatedResult({ items: refunds.map((row) => ({ ...row, amountMinor: row.amountMinor.toString(), reversed: reversedRefunds.has(row.ledgerEntryId) })), nextCursor: createNextPageCursor(input.refundPage, refundPages), currentPage: input.refundPage, totalPages: refundPages, totalItems: refundItems, pageSize: input.refundLimit }) };
+  return { ...payment, timeZone: sessions[0]?.financeConfig?.timeZone ?? null, amountMinor: payment.amountMinor.toString(), allocatedMinor: allocated.toString(), refundedMinor: refunded.toString(), unallocatedCreditMinor: (paymentReversed ? ZERO : payment.amountMinor - allocated - refunded).toString(), reversed: paymentReversed, allocations: createPaginatedResult({ items: allocations.map(({ allocation, billNumber }) => ({ ...allocation, billNumber, amountMinor: allocation.amountMinor.toString() })), nextCursor: createNextPageCursor(input.allocationPage, allocationPages), currentPage: input.allocationPage, totalPages: allocationPages, totalItems: allocationItems, pageSize: input.allocationLimit }), refunds: createPaginatedResult({ items: refunds.map((row) => ({ ...row, amountMinor: row.amountMinor.toString(), reversed: reversedRefunds.has(row.ledgerEntryId) })), nextCursor: createNextPageCursor(input.refundPage, refundPages), currentPage: input.refundPage, totalPages: refundPages, totalItems: refundItems, pageSize: input.refundLimit }) };
 }
 
 export { assertAdmissionContext, assertSchoolSessionContext, billSettlementMap };

@@ -73,7 +73,7 @@ export function DataTable<TData>({
   const lastItem = Math.min(firstItem + rows.length - 1, totalItems);
 
   return (
-    <div className="overflow-hidden rounded-xl border bg-card">
+    <div className="overflow-x-auto rounded-xl border bg-card">
       <Table aria-label={ariaLabel}>
         <TableHeader className="bg-muted/40">
           {table.getHeaderGroups().map((headerGroup) => (

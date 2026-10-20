@@ -35,7 +35,7 @@ import {
 import { SessionSwitcher } from '@/components/session-switcher';
 import { admissionPage } from './admission/_route';
 import { admissionDetailsPage } from './admission/[admissionId]/_route';
-import { billingPage } from './sessions/[sessionId]/billing/_route';
+import { billingPages, billingRunDetailPage } from './sessions/[sessionId]/billing/_route';
 import {
   classroomDetailsPage,
   classStudentDetailsPage,
@@ -64,7 +64,8 @@ const pages: ManagementPageDescriptor<any>[] = [
   classroomDetailsPage,
   examPage,
   examDetailsPage,
-  billingPage,
+  ...billingPages,
+  billingRunDetailPage,
 ];
 
 function navigationFor(
@@ -140,6 +141,7 @@ function navigationFor(
           label: 'Billing',
           href: sessionHref('/billing'),
           icon: CreditCard,
+          wrap: children => <RequirePermissions mode="any" permissions={[SCHOOL_ACTIONS.READ_BILLING_REPORTS, SCHOOL_ACTIONS.READ_BILLING_RUNS, SCHOOL_ACTIONS.READ_ADMISSION_LEDGER].map(action => ({ action, resource: { kind: 'school' as const, schoolId } }))}>{children}</RequirePermissions>,
         },
         {
           type: 'item',

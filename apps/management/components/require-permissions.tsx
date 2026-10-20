@@ -9,16 +9,18 @@ export type RequirePermissionsProps = {
   children: ReactNode;
   permissions: PermissionCheck | readonly PermissionCheck[];
   fallback?: ReactNode;
+  mode?: 'all' | 'any';
 };
 
 /**
- * Renders children only when every requested permission is allowed. Pending,
- * failed, and denied checks fail closed to the supplied fallback.
+ * Renders children when the requested all/any permission policy is satisfied.
+ * Pending, failed, incomplete, and denied checks fail closed.
  */
 export function RequirePermissions({
   children,
   permissions,
   fallback = null,
+  mode = 'all',
 }: RequirePermissionsProps) {
   const permissionList: PermissionCheck[] = Array.isArray(permissions)
     ? [...permissions]
@@ -33,7 +35,9 @@ export function RequirePermissions({
     permissionsQuery.isPending ||
     permissionsQuery.isError ||
     permissionsQuery.data.results.length !== permissionList.length ||
-    !permissionsQuery.data.results.every(Boolean)
+    !(mode === 'any'
+      ? permissionsQuery.data.results.some(Boolean)
+      : permissionsQuery.data.results.every(Boolean))
   )
     return fallback;
 

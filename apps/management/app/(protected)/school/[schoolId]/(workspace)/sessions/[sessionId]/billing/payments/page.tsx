@@ -1,0 +1,4 @@
+import { SCHOOL_ACTIONS } from "@campuspilot/api/routers/authorization/authorization.dto";
+import { BillingPayments } from "@/components/billing/billing-payments";
+import { RequirePermissions } from "@/components/require-permissions";
+export default async function Page({ params, searchParams }: { params: Promise<{ schoolId: string; sessionId: string }>; searchParams: Promise<{ paymentId?: string; admissionId?: string }> }) { const [{ schoolId, sessionId }, query] = await Promise.all([params, searchParams]); return <RequirePermissions permissions={{ action: SCHOOL_ACTIONS.READ_ADMISSION_LEDGER, resource: { kind: "school", schoolId } }} fallback={<p className="text-sm text-muted-foreground">Payment register access is unavailable for your account.</p>}><BillingPayments schoolId={schoolId} sessionId={sessionId} initialPaymentId={query.paymentId} initialAdmissionId={query.admissionId} /></RequirePermissions>; }

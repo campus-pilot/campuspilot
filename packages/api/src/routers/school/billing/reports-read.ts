@@ -11,11 +11,15 @@ const asBigInt = (value: unknown) => typeof value === "bigint" ? value : BigInt(
 
 export async function getSessionFinanceOverview(db: DatabaseExecutor, input: { schoolId: string; sessionId: string; currency?: string }) {
   await assertSchoolSessionContext(db, input.schoolId, input.sessionId);
-  const result = await db.execute<{ currency: string; billed: string; payments: string; refunds: string; credit_adjustments: string; debit_adjustments: string; balance: string }>(sql`
+  const result = await db.execute<{ currency: string; billed: string; payments: string; refunds: string; discounts: string; waivers: string; write_offs: string; credit_corrections: string; credit_adjustments: string; debit_adjustments: string; balance: string }>(sql`
     select entry.currency,
       coalesce(sum(entry.amount_minor) filter (where entry.type in ('bill', 'manual_debit_adjustment')), 0)::numeric as billed,
       coalesce(sum(entry.amount_minor) filter (where entry.type = 'payment'), 0)::numeric as payments,
       coalesce(sum(entry.amount_minor) filter (where entry.type = 'refund'), 0)::numeric as refunds,
+      coalesce(sum(entry.amount_minor) filter (where entry.type = 'discount'), 0)::numeric as discounts,
+      coalesce(sum(entry.amount_minor) filter (where entry.type = 'waiver'), 0)::numeric as waivers,
+      coalesce(sum(entry.amount_minor) filter (where entry.type = 'write_off'), 0)::numeric as write_offs,
+      coalesce(sum(entry.amount_minor) filter (where entry.type = 'credit_correction'), 0)::numeric as credit_corrections,
       coalesce(sum(entry.amount_minor) filter (where entry.type in ('discount', 'waiver', 'write_off', 'credit_correction')), 0)::numeric as credit_adjustments,
       coalesce(sum(entry.amount_minor) filter (where entry.type = 'debit_correction'), 0)::numeric as debit_adjustments,
       coalesce(sum(case when entry.direction = 'debit' then entry.amount_minor else -entry.amount_minor end), 0)::numeric as balance
@@ -30,7 +34,7 @@ export async function getSessionFinanceOverview(db: DatabaseExecutor, input: { s
     const billed = asBigInt(row.billed), payment = asBigInt(row.payments), refund = asBigInt(row.refunds), balance = asBigInt(row.balance);
     const netCash = payment - refund;
     const rate = billed === ZERO ? null : ((netCash * BigInt(10_000) + billed / BigInt(2)) / billed).toString();
-    return { currency: row.currency, billedMinor: billed.toString(), paymentMinor: payment.toString(), refundMinor: refund.toString(), netCashMinor: netCash.toString(), creditAdjustmentMinor: String(row.credit_adjustments), debitAdjustmentMinor: String(row.debit_adjustments), balanceMinor: balance.toString(), dueMinor: (balance > ZERO ? balance : ZERO).toString(), creditMinor: (balance < ZERO ? -balance : ZERO).toString(), collectionRateBasisPoints: rate };
+    return { currency: row.currency, billedMinor: billed.toString(), paymentMinor: payment.toString(), refundMinor: refund.toString(), netCashMinor: netCash.toString(), discountMinor: String(row.discounts), waiverMinor: String(row.waivers), writeOffMinor: String(row.write_offs), creditCorrectionMinor: String(row.credit_corrections), creditAdjustmentMinor: String(row.credit_adjustments), debitAdjustmentMinor: String(row.debit_adjustments), balanceMinor: balance.toString(), dueMinor: (balance > ZERO ? balance : ZERO).toString(), creditMinor: (balance < ZERO ? -balance : ZERO).toString(), collectionRateBasisPoints: rate };
   }) };
 }
 
@@ -39,13 +43,17 @@ type ListInput = { schoolId: string; filters?: { sessionId?: string; currency?: 
 export async function getCollectionRegister(db: DatabaseExecutor, input: ListInput) {
   if (input.filters?.sessionId) await assertSchoolSessionContext(db, input.schoolId, input.filters.sessionId);
   const { currentPage, pageSize, offset } = resolvePaginationInput(input);
+  const admissionMatches = input.filters?.search ? sql`exists (select 1 from admission searched_admission
+    where searched_admission.school_id = ${financeLedgerEntryTable.schoolId}
+      and searched_admission.id = ${financeLedgerEntryTable.admissionId}
+      and (searched_admission.name ilike ${`%${input.filters.search}%`} or searched_admission.admission_no ilike ${`%${input.filters.search}%`}))` : sql`false`;
   const detailMatches = sql<boolean>`(
     (${financeLedgerEntryTable.type} = 'payment' and exists (select 1 from ${financePaymentTable} p where p.ledger_entry_id = ${financeLedgerEntryTable.id}
       ${input.filters?.method ? sql`and p.method = ${input.filters.method}` : sql``}
-      ${input.filters?.search ? sql`and (p.receipt_number ilike ${`%${input.filters.search}%`} or p.external_reference ilike ${`%${input.filters.search}%`})` : sql``}))
+      ${input.filters?.search ? sql`and (p.receipt_number ilike ${`%${input.filters.search}%`} or p.external_reference ilike ${`%${input.filters.search}%`} or ${admissionMatches})` : sql``}))
     or (${financeLedgerEntryTable.type} = 'refund' and exists (select 1 from ${financeRefundTable} r where r.ledger_entry_id = ${financeLedgerEntryTable.id}
       ${input.filters?.method ? sql`and r.method = ${input.filters.method}` : sql``}
-      ${input.filters?.search ? sql`and (r.refund_number ilike ${`%${input.filters.search}%`} or r.external_reference ilike ${`%${input.filters.search}%`})` : sql``}))
+      ${input.filters?.search ? sql`and (r.refund_number ilike ${`%${input.filters.search}%`} or r.external_reference ilike ${`%${input.filters.search}%`} or ${admissionMatches})` : sql``}))
   )`;
   const where = and(eq(financeLedgerEntryTable.schoolId, input.schoolId), inArray(financeLedgerEntryTable.type, ["payment", "refund"]), input.filters?.sessionId ? eq(financeLedgerEntryTable.sessionId, input.filters.sessionId) : undefined, input.filters?.currency ? eq(financeLedgerEntryTable.currency, input.filters.currency) : undefined, input.filters?.from ? gte(financeLedgerEntryTable.effectiveAt, input.filters.from) : undefined, input.filters?.to ? lte(financeLedgerEntryTable.effectiveAt, input.filters.to) : undefined, detailMatches);
   const [entries, totals] = await Promise.all([db.select({ entry: financeLedgerEntryTable, admissionNumber: admissionTable.admissionNo, admissionName: admissionTable.name }).from(financeLedgerEntryTable).innerJoin(admissionTable, and(eq(admissionTable.schoolId, financeLedgerEntryTable.schoolId), eq(admissionTable.id, financeLedgerEntryTable.admissionId))).where(where).orderBy(desc(financeLedgerEntryTable.effectiveAt), desc(financeLedgerEntryTable.sequence), desc(financeLedgerEntryTable.id)).limit(pageSize).offset(offset), db.select({ value: count() }).from(financeLedgerEntryTable).where(where)]);
@@ -71,13 +79,34 @@ export async function getFeeElementReport(db: DatabaseExecutor, input: ListInput
     ${input.filters?.to ? sql`and bill.finalized_at <= ${input.filters.to}` : sql``}
     ${input.filters?.search ? sql`and (line.fee_element_slug ilike ${`%${input.filters.search}%`} or line.fee_element_name ilike ${`%${input.filters.search}%`})` : sql``}
     and not exists (select 1 from finance_ledger_entry br where br.school_id = bill.school_id and br.reversal_of_entry_id = bill.ledger_entry_id)`;
-  const report = sql`select bill.session_id as "sessionId", bill.currency, line.fee_element_slug as "feeElementSlug", line.fee_element_name as "feeElementName",
+  const lineReport = sql`select bill.session_id as "sessionId", bill.currency, line.fee_element_slug as "feeElementSlug", line.fee_element_name as "feeElementName",
       count(distinct bill.id)::integer as "billCount", sum(line.amount_minor)::numeric as "billedMinor",
       coalesce(sum((select coalesce(sum(a.amount_minor),0) from finance_adjustment a where a.school_id = bill.school_id and a.bill_line_id = line.id and a.kind <> 'debit_correction' and not exists (select 1 from finance_ledger_entry ar where ar.school_id = a.school_id and ar.reversal_of_entry_id = a.ledger_entry_id))),0)::numeric as "creditAdjustmentMinor",
       coalesce(sum((select coalesce(sum(a.amount_minor),0) from finance_adjustment a where a.school_id = bill.school_id and a.bill_line_id = line.id and a.kind = 'debit_correction' and not exists (select 1 from finance_ledger_entry ar where ar.school_id = a.school_id and ar.reversal_of_entry_id = a.ledger_entry_id))),0)::numeric as "debitAdjustmentMinor"
     from finance_bill_line line inner join finance_bill bill on bill.school_id = line.school_id and bill.id = line.bill_id
     where ${predicates}
     group by bill.session_id, bill.currency, line.fee_element_slug, line.fee_element_name`;
+  const bucketSearchMatches = !input.filters?.search || "bill-level / unallocated adjustments".includes(input.filters.search.toLocaleLowerCase());
+  // Adjustments without a bill-line target cannot be attributed to a fee
+  // element. Keep them in an explicit reconciliation bucket rather than
+  // silently dropping them from the report totals.
+  const adjustmentBucket = sql`select adjustment.session_id as "sessionId", adjustment.currency,
+      '__bill_unallocated_adjustments__'::text as "feeElementSlug",
+      'Bill-level / unallocated adjustments'::text as "feeElementName",
+      count(distinct adjustment.bill_id)::integer as "billCount", 0::numeric as "billedMinor",
+      coalesce(sum(adjustment.amount_minor) filter (where adjustment.kind <> 'debit_correction'),0)::numeric as "creditAdjustmentMinor",
+      coalesce(sum(adjustment.amount_minor) filter (where adjustment.kind = 'debit_correction'),0)::numeric as "debitAdjustmentMinor"
+    from finance_adjustment adjustment
+    inner join finance_ledger_entry adjustment_entry on adjustment_entry.school_id = adjustment.school_id and adjustment_entry.id = adjustment.ledger_entry_id
+    where adjustment.school_id = ${input.schoolId} and adjustment.bill_line_id is null
+      ${input.filters?.sessionId ? sql`and adjustment.session_id = ${input.filters.sessionId}` : sql``}
+      ${input.filters?.currency ? sql`and adjustment.currency = ${input.filters.currency}` : sql``}
+      ${input.filters?.from ? sql`and adjustment_entry.effective_at >= ${input.filters.from}` : sql``}
+      ${input.filters?.to ? sql`and adjustment_entry.effective_at <= ${input.filters.to}` : sql``}
+      ${bucketSearchMatches ? sql`` : sql`and false`}
+      and not exists (select 1 from finance_ledger_entry ar where ar.school_id = adjustment.school_id and ar.reversal_of_entry_id = adjustment.ledger_entry_id)
+    group by adjustment.session_id, adjustment.currency`;
+  const report = sql`${lineReport} union all ${adjustmentBucket}`;
   const [rowResult, totalResult] = await Promise.all([db.execute<{ sessionId: string; currency: string; feeElementSlug: string; feeElementName: string; billCount: number; billedMinor: string; creditAdjustmentMinor: string; debitAdjustmentMinor: string }>(sql`${report} order by "feeElementName", "feeElementSlug" limit ${pageSize} offset ${offset}`), db.execute<{ value: string }>(sql`select count(*)::numeric as value from (${report}) grouped`)]);
   const rows = rowResult.rows;
   const totalItems = Number(totalResult.rows[0]?.value ?? 0), totalPages = Math.ceil(totalItems / pageSize);

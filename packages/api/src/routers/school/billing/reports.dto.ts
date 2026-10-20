@@ -22,6 +22,10 @@ export const sessionFinanceOverviewOutputSchema = z.object({
     paymentMinor: financeCumulativeIntegerStringSchema,
     refundMinor: financeCumulativeIntegerStringSchema,
     netCashMinor: signedCumulativeSchema,
+    discountMinor: financeCumulativeIntegerStringSchema,
+    waiverMinor: financeCumulativeIntegerStringSchema,
+    writeOffMinor: financeCumulativeIntegerStringSchema,
+    creditCorrectionMinor: financeCumulativeIntegerStringSchema,
     creditAdjustmentMinor: financeCumulativeIntegerStringSchema,
     debitAdjustmentMinor: financeCumulativeIntegerStringSchema,
     balanceMinor: signedCumulativeSchema,
@@ -32,10 +36,10 @@ export const sessionFinanceOverviewOutputSchema = z.object({
   })),
 });
 
-const reportListInput = (shape: z.ZodRawShape) => createListInputSchema({
+const reportListInput = <const TShape extends z.ZodRawShape>(shape: TShape) => createListInputSchema({
   schoolId: z.string().min(1),
   filters: z.object({ sessionId: z.string().min(1).optional(), currency: currencySchema.optional(), from: z.coerce.date().optional(), to: z.coerce.date().optional(), ...shape }).optional(),
-}).superRefine(dateRangeRefinement);
+}).superRefine((value, context) => dateRangeRefinement(value as { filters?: { from?: Date; to?: Date } }, context));
 
 export const collectionRegisterInputSchema = reportListInput({
   method: z.enum(["cash", "bank_transfer", "card", "cheque", "other"]).optional(),
