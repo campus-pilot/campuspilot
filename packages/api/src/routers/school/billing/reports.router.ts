@@ -32,6 +32,6 @@ export const financeReportsRouter = {
   )).input(feeElementReportInputSchema).use(requireSchoolPermission(SCHOOL_ACTIONS.READ_BILLING_REPORTS)).output(feeElementReportOutputSchema).handler(({ context, input }) => reportHandler((value: typeof input) => getFeeElementReport(context.db, value))({ input })),
   getClassFinanceSnapshot: protectedProcedure.route(route(
     "Read class finance snapshot",
-    "Summarize bills, allocations, adjustments, and outstanding balances by snapshotted class placement for one explicit academic session.",
+    "Summarize billed amounts, bill-level adjustments, and net charges by snapshotted class placement for one explicit academic session.",
   )).input(classFinanceSnapshotInputSchema).use(requireSchoolPermission(SCHOOL_ACTIONS.READ_BILLING_REPORTS)).output(classFinanceSnapshotOutputSchema).handler(({ context, input }) => reportHandler((value: typeof input) => getClassFinanceSnapshot(context.db, value))({ input })),
 };

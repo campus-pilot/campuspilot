@@ -9,6 +9,7 @@ import {
   financeBillRunTable,
   financeBillTable,
   financeLedgerEntryTable,
+  financePaymentAllocationTable,
 } from "@campuspilot/db/schema/finance";
 import { financeTimeZoneSchema } from "@campuspilot/db/schema/jsonb/finance-config";
 import { schoolSessionTable } from "@campuspilot/db/schema/session";
@@ -760,6 +761,24 @@ async function assertBillCanReverse(
       "This bill has live credit adjustments. Reverse or coordinate those facts before reversing the bill.",
     );
   }
+  // New payments are admission-account credits and never create allocations.
+  // Keep this read-only guard for imported legacy facts so a historic link is
+  // reported as a stable conflict instead of surfacing a database trigger error.
+  const legacyAllocation = await transaction
+    .select({ id: financePaymentAllocationTable.id })
+    .from(financePaymentAllocationTable)
+    .where(
+      and(
+        eq(financePaymentAllocationTable.schoolId, input.schoolId),
+        eq(financePaymentAllocationTable.billId, input.billId),
+      ),
+    )
+    .limit(1);
+  if (legacyAllocation.length) {
+    throw rpcError.conflict(
+      "This bill has a historical payment allocation and cannot be reversed independently.",
+    );
+  }
   return existingReversal[0] ?? null;
 }
 
@@ -1021,6 +1040,18 @@ export async function reversePostedBillingRun(
             isNull(financeLedgerEntryTable.id),
           ),
         );
+      // Allocations are deprecated compatibility facts. Public payment flows
+      // cannot create them, but imported history must still block a run
+      // reversal atomically and return a domain conflict.
+      const legacyAllocationRows = await transaction
+        .select({ billId: financePaymentAllocationTable.billId })
+        .from(financePaymentAllocationTable)
+        .where(
+          and(
+            eq(financePaymentAllocationTable.schoolId, command.schoolId),
+            inArray(financePaymentAllocationTable.billId, billIds),
+          ),
+        );
       const reversalByKey = new Map(
         reversalRows.map((row) => [row.idempotencyKey, row]),
       );
@@ -1030,7 +1061,9 @@ export async function reversePostedBillingRun(
         ),
       );
       const settledBillIds = new Set(
-        adjustmentRows.flatMap(({ billId }) => (billId ? [billId] : [])),
+        [...adjustmentRows, ...legacyAllocationRows].flatMap(({ billId }) =>
+          billId ? [billId] : [],
+        ),
       );
       const validated = prepared.map((item) => {
         const existing = reversalByKey.get(item.idempotencyKey) ?? null;
