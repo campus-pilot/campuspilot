@@ -223,6 +223,102 @@ describe("school billing operations", () => {
     ).rejects.toBeDefined();
   });
 
+  it("applies explicit bill-generation values independently for every class", async () => {
+    const [{ schoolClass: secondClass, sections }, secondAdmission] =
+      await Promise.all([
+        createTestClass({ schoolId: scenario.school.id }),
+        createTestAdmission({ schoolId: scenario.school.id }),
+      ]);
+    await createTestStudent({
+      schoolId: scenario.school.id,
+      sessionId: scenario.activeSession.id,
+      admissionId: secondAdmission.id,
+      classId: secondClass.id,
+      sectionId: sections[0]!.id,
+      rollNo: 2,
+    });
+    await db
+      .update(schoolSessionTable)
+      .set({
+        financeConfig: createFinanceConfig({
+          recurring: "monthly",
+          elements: {
+            tuition: {
+              name: "Tuition",
+              scopes: ["class"],
+              requiredAtLevel: "class",
+              defaultAmountMinor: 10_000,
+            },
+            laboratory: {
+              name: "Laboratory",
+              scopes: ["class"],
+              requiredAtLevel: "bill_generation",
+            },
+          },
+        }),
+        financeClassOverrides: {},
+      })
+      .where(eq(schoolSessionTable.id, scenario.activeSession.id));
+    await db
+      .update(admissionTable)
+      .set({ financeValue: { [scenario.activeSession.id]: {} } })
+      .where(eq(admissionTable.id, scenario.admission.id));
+
+    const runValues = {
+      session: {},
+      classes: {
+        [scenario.schoolClass.id]: { laboratory: "1000" },
+        [secondClass.id]: { laboratory: "2500" },
+      },
+    };
+    const preview =
+      await scenario.actors.manager.client.school.previewBillingRun({
+        ...draft(scenario),
+        runValues,
+        page: 1,
+        limit: 20,
+      });
+
+    expect(preview).toMatchObject({
+      readyToPost: true,
+      counts: { selected: 2, eligible: 2, skipped: 0 },
+      totalAmountMinor: "23500",
+    });
+    const byClass = new Map(
+      preview.breakdown.items.map((item) => [item.classId, item]),
+    );
+    expect(byClass.get(scenario.schoolClass.id)).toMatchObject({
+      totalAmountMinor: "11000",
+      lines: expect.arrayContaining([
+        expect.objectContaining({
+          feeElementSlug: "laboratory",
+          amountMinor: "1000",
+          pricingSourceKind: "run_class",
+        }),
+      ]),
+    });
+    expect(byClass.get(secondClass.id)).toMatchObject({
+      totalAmountMinor: "12500",
+      lines: expect.arrayContaining([
+        expect.objectContaining({
+          feeElementSlug: "laboratory",
+          amountMinor: "2500",
+          pricingSourceKind: "run_class",
+        }),
+      ]),
+    });
+
+    await expect(
+      scenario.actors.manager.client.school.postBillingRun({
+        ...draft(scenario),
+        runValues,
+        expectedConfigurationHash: preview.configurationHash,
+        idempotencyKey: createFinanceIdempotencyKey("class-run-values"),
+        kind: "regular",
+      }),
+    ).resolves.toMatchObject({ billCount: 2, totalAmountMinor: "23500" });
+  });
+
   it("rejects explicit empty selections for preview and post without widening scope", async () => {
     const client = scenario.actors.manager.client.school;
     await expect(

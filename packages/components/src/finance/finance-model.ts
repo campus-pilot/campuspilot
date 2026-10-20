@@ -259,19 +259,35 @@ export const financeBillingDraftSchema = z.object({
   admissionPage: z.number().int().positive(),
   classSearch: z.string(),
   classPage: z.number().int().positive(),
-  runValues: z.record(z.string(), z.string()),
+  runValues: z.object({
+    session: z.record(z.string(), z.string()),
+    classes: z.record(z.string(), z.record(z.string(), z.string())),
+  }),
 }).superRefine((value, context) => {
   if (value.kind === "supplemental" && !value.supplementalReason.trim()) {
     context.addIssue({ code: "custom", path: ["supplementalReason"], message: "Explain why this supplemental charge is required." });
   }
-  for (const [slug, amount] of Object.entries(value.runValues)) {
+  const amounts = [
+    ...Object.entries(value.runValues.session).map(([slug, amount]) => ({
+      path: ["runValues", "session", slug],
+      amount,
+    })),
+    ...Object.entries(value.runValues.classes).flatMap(
+      ([classId, classValues]) =>
+        Object.entries(classValues).map(([slug, amount]) => ({
+          path: ["runValues", "classes", classId, slug],
+          amount,
+        })),
+    ),
+  ];
+  for (const { path, amount } of amounts) {
     if (!amount.trim()) continue;
     try {
       // Draft validation is currency-independent; exact exponent validation is
       // repeated beside the currency-aware input before preview submission.
       if (!DECIMAL_MAJOR.test(amount)) throw new Error("Enter a non-negative plain decimal amount.");
     } catch (error) {
-      context.addIssue({ code: "custom", path: ["runValues", slug], message: error instanceof Error ? error.message : "Enter an exact amount." });
+      context.addIssue({ code: "custom", path, message: error instanceof Error ? error.message : "Enter an exact amount." });
     }
   }
 });

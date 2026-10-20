@@ -26,7 +26,7 @@ function BillingRunAction({ schoolId, sessionId }: { schoolId: string; sessionId
   if (financeQuery.isPending) return <Button type="button" disabled><Plus aria-hidden />Create billing run</Button>;
   if (financeQuery.isError || !financeQuery.data) return null;
   const finance = financeQuery.data;
-  const elements = Object.entries(finance.financeConfig?.elements ?? {}).filter(([, element]) => element.requiredAtLevel === "bill_generation").map(([slug, element]) => ({ slug, name: element.name }));
+  const elements = Object.entries(finance.financeConfig?.elements ?? {}).filter(([, element]) => element.requiredAtLevel === "bill_generation").map(([slug, element]) => ({ slug, name: element.name, scopes: element.scopes }));
   return <><Button type="button" disabled={!finance.configurationReadiness.readyForBilling} onClick={() => setOpen(true)}><Plus aria-hidden />Create billing run</Button>{open && finance.financeConfig?.currency && finance.financeConfig.timeZone ? <BillingRunDialog open schoolId={schoolId} sessionId={sessionId} currency={finance.financeConfig.currency} timeZone={finance.financeConfig.timeZone} runtimeElements={elements} onOpenChange={setOpen} /> : null}</>;
 }
 
