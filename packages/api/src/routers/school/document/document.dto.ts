@@ -153,7 +153,21 @@ export const documentSourceSchema = z.discriminatedUnion("documentType", [
     documentType: z.literal("receipt"),
     sessionId: id,
     transactions: z.array(z.object({ kind: z.enum(["payment", "refund"]), id })).min(1).max(500),
-  }).strict(),
+    /** Session Documents uses this explicit policy for its payment-only bulk
+     * picker. Contextual payment/refund regeneration intentionally omits it. */
+    selectionPolicy: z.literal("posted_unreversed_payments").optional(),
+  }).strict().superRefine((source, context) => {
+    if (
+      source.selectionPolicy === "posted_unreversed_payments" &&
+      source.transactions.some(({ kind }) => kind !== "payment")
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["transactions"],
+        message: "This receipt selection accepts posted payments only.",
+      });
+    }
+  }),
   z.object({
     documentType: z.literal("statement"),
     sessionId: id,
@@ -185,7 +199,7 @@ export const listArtifactsSchema = createListInputSchema({
       /** Selects the permission and type family when no exact document type is
        * supplied. This keeps finance history unified without ever falling back
        * to the academic-document permission boundary. */
-      documentDomain: z.enum(["academic", "finance"]).optional(),
+      documentDomain: z.enum(["academic", "finance", "all"]).optional(),
       sessionId: id.optional(),
       classId: id.optional(),
       examSlug: id.optional(),
@@ -195,7 +209,11 @@ export const listArtifactsSchema = createListInputSchema({
       paymentId: id.optional(),
     })
     .superRefine((filters, context) => {
-      if (filters.documentType && filters.documentDomain) {
+      if (
+        filters.documentType &&
+        filters.documentDomain &&
+        filters.documentDomain !== "all"
+      ) {
         const finance = ["bill", "receipt", "statement"].includes(filters.documentType);
         if ((filters.documentDomain === "finance") !== finance) {
           context.addIssue({ code: "custom", message: "Document type does not belong to the selected domain.", path: ["documentType"] });

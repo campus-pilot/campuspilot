@@ -230,6 +230,30 @@ export async function buildFinanceDocumentContexts(
     if (payments.length !== parentPaymentIds.length) throw rpcError.notFound("Receipt payment snapshot");
     const transactionLedgerIds = [...directPayments.map((payment) => payment.ledgerEntryId), ...refunds.map((refund) => refund.ledgerEntryId)];
     const ledgers = await db.select().from(financeLedgerEntryTable).where(and(eq(financeLedgerEntryTable.schoolId, schoolId), inArray(financeLedgerEntryTable.id, transactionLedgerIds)));
+    if (source.selectionPolicy === "posted_unreversed_payments") {
+      const selectedPaymentLedgerIds = directPayments.map(
+        (payment) => payment.ledgerEntryId,
+      );
+      const reversals = selectedPaymentLedgerIds.length
+        ? await db
+            .select({ id: financeLedgerEntryTable.id })
+            .from(financeLedgerEntryTable)
+            .where(
+              and(
+                eq(financeLedgerEntryTable.schoolId, schoolId),
+                inArray(
+                  financeLedgerEntryTable.reversalOfEntryId,
+                  selectedPaymentLedgerIds,
+                ),
+              ),
+            )
+        : [];
+      if (reversals.length) {
+        throw rpcError.conflict(
+          "A selected payment was reversed. Refresh the payment selection before creating receipts.",
+        );
+      }
+    }
     const ledgerById = new Map(ledgers.map((entry) => [entry.id, entry]));
     const paymentById = new Map(payments.map((payment) => [payment.id, payment]));
     const refundById = new Map(refunds.map((refund) => [refund.id, refund]));

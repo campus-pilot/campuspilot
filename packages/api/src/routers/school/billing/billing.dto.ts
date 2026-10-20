@@ -201,6 +201,7 @@ export const billingRunDtoSchema = z.object({
 
 export const listBillingRunsInputSchema = createListInputSchema({
   schoolId: z.string().min(1),
+  searchQuery: z.string().trim().max(100).default(""),
   filters: z
     .object({
       sessionId: z.string().min(1).optional(),

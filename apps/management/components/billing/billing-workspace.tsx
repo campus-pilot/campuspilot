@@ -9,7 +9,7 @@ import { AppShellAlert } from "@campuspilot/components/app-shell";
 import { WorkspaceNavigationLayout } from "@campuspilot/components/workspace-navigation-layout";
 import { Button } from "@campuspilot/ui/components/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@campuspilot/ui/components/select";
-import { BarChart3, CreditCard, Files, LayoutDashboard, PlaySquare, ReceiptText } from "lucide-react";
+import { BarChart3, CreditCard, LayoutDashboard, PlaySquare, ReceiptText } from "lucide-react";
 import { orpc } from "@/lib/orpc";
 import { RequirePermissions } from "@/components/require-permissions";
 import { confirmNavigation } from "@/lib/navigation-guard";
@@ -19,7 +19,6 @@ const sections = [
   { id: "runs", label: "Billing runs", suffix: "/runs", icon: PlaySquare, action: SCHOOL_ACTIONS.READ_BILLING_RUNS },
   { id: "payments", label: "Payments", suffix: "/payments", icon: ReceiptText, action: SCHOOL_ACTIONS.READ_ADMISSION_LEDGER },
   { id: "reports", label: "Reports", suffix: "/reports", icon: BarChart3, action: SCHOOL_ACTIONS.READ_BILLING_REPORTS },
-  { id: "documents", label: "Documents", suffix: "/documents", icon: Files, action: SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_ARTIFACTS },
 ] as const;
 
 function closeAlertDialog(closeDialog: () => void) {

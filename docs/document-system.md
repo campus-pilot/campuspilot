@@ -49,7 +49,7 @@ Do not infer one surface's state from another fact. In particular:
 | `/school/:schoolId/settings/templates/bill` | Finance bill template editor |
 | `/school/:schoolId/settings/templates/receipt` | Payment/refund receipt template editor |
 | `/school/:schoolId/settings/templates/statement` | Admission account-statement template editor |
-| `/school/:schoolId/sessions/:sessionId/billing/documents` | Finance-document history, downloads, and retryable deletion |
+| `/school/:schoolId/sessions/:sessionId/billing/documents` | Compatibility redirect to session-wide document history |
 | `/school/:schoolId/marketplace/templates?type=:documentType` | Marketplace filtered to one document type |
 | `/school/:schoolId/marketplace/templates/:documentType/:slug` | Dedicated marketplace preview and import action |
 
@@ -66,9 +66,10 @@ only Create document and Document history.
 ### Create a document
 
 1. The user opens the session Documents workspace.
-2. `DocumentKindCards` presents report card, student ID, admit card, and timetable
-   choices as visual cards rather than a dropdown. The page shows only these cards
-   until the user chooses one.
+2. `DocumentKindCards` presents report card, student ID, admit card, timetable,
+   bill, and receipt choices as visual cards rather than a dropdown. Account
+   statements remain contextual to an admission ledger. The page shows only these
+   cards until the user chooses one.
 3. The chosen card opens a wide, mobile-safe dialog containing the complete
    settings, explicit preview, generation, download, and history workflow. A
    contextual URL opens the corresponding dialog with its examination, class, or
@@ -82,6 +83,23 @@ only Create document and Document history.
 7. Generate converts the same authorized context to PDF and stores it. The dialog
    then offers a fresh authorized download and a link to unified history.
 
+The bill dialog searches and pages posted billing runs, displays the run period,
+billing date, bill count, amount, and state, and rejects empty or non-posted runs.
+Fully reversed runs remain selectable because bill documents reproduce immutable
+original postings; the reversal state remains visible. A run source always
+previews and generates the complete immutable run by
+`billRunId`. The receipt dialog keeps non-reversed payment selections across search
+pages up to the 500-source API limit. Both preserve the current session in their
+source and require the current selection to be previewed before creation. The
+global receipt source carries an explicit payment-only eligibility policy; preview
+and generation both recheck in the database transaction that every selected
+payment still has no reversal, so a stale browser selection cannot create a
+valid-looking receipt after reversal.
+
+Removing Billing's duplicate Documents section intentionally removes its old bulk
+statement picker. Statements are account-cutoff documents and remain available
+per admission from the admission ledger; they are not a session-global card.
+
 Contextual links from examinations may preselect an examination, class, or student
 for applicable document types. Those query values are conveniences, not authority;
 the backend revalidates every school, session, class, examination, and student
@@ -91,16 +109,18 @@ source values.
 
 ### Resolve missing templates
 
-`DocumentTemplateAlerts` checks all supported document types. While any are
-missing, it registers a single stable alert with the slug
-`school/:schoolId/documents/templates-missing`.
+`DocumentTemplateAlerts` checks only the academic and finance template domains the
+user may read. While any visible type is missing, it registers one stable alert per
+authorized domain with the slug
+`school/:schoolId/documents/:domain-templates-missing`.
 
-The warning is visible to users who can access Documents. Its action is rendered
-only for users with `MANAGE_DOCUMENT_TEMPLATES`. The action leads to the first
+Each warning is visible to users who can access that template domain. Its action is rendered
+only for users with the matching academic or finance template-management action.
+The action leads to the first
 missing template's Settings page. Registering the permission-gated version with
-the same slug replaces the message-only registration rather than creating two
-alerts. Remove the registration by no longer rendering it after every type is
-configured.
+the same domain slug replaces the message-only registration rather than creating
+two copies for that domain. Remove the registration by no longer rendering it
+after every type in that domain is configured.
 
 Do not replace this with a toast, repeated body banner, or template chooser inside
 the generator.
@@ -177,7 +197,8 @@ callbacks and must not call APIs.
 | Component | Responsibility |
 | --- | --- |
 | `DocumentWorkspace` | Section navigation, card-triggered generator dialog, template warning registration, and history composition |
-| `DocumentGenerator` | Type-specific source fields, template dependency, preview, generation, and warnings |
+| `DocumentGenerator` | Academic type-specific source fields, template dependency, preview, generation, and warnings |
+| `FinanceDocumentGenerator` | Posted billing-run/payment selection, finance preview, generation, download, and history handoff |
 | `DocumentHistory` | One session-wide artifact list, downloads, provenance, and deletion |
 | `DocumentTemplates` | Empty state, read-only preview, or authorized school-template editor |
 | `TemplateCodeEditor` | Client-only Monaco wrapper and source-format action |
@@ -207,7 +228,7 @@ same boundary through server middleware.
 | `previewDocumentTemplate` | Render source with synthetic data; also powers read-only selected-template previews | `READ_DOCUMENT_TEMPLATES` |
 | `previewDocument` | Render authorized data without persistence | Academic: `GENERATE_DOCUMENTS`; finance: `GENERATE_FINANCE_DOCUMENTS` |
 | `generateDocument` | Render, convert, persist, and return a PDF artifact | Academic: `GENERATE_DOCUMENTS`; finance: `GENERATE_FINANCE_DOCUMENTS` |
-| `listDocumentArtifacts` | Paginated PDF history | Type-scoped academic or finance artifact read action |
+| `listDocumentArtifacts` | Paginated PDF history; explicit `all` requests form a chronological secure union | Requested academic and/or finance artifact read actions |
 | `getDocumentDownload` | Issue a fresh short-lived signed URL | Type-aware academic or finance artifact read action |
 | `deleteDocumentArtifact` | Retry-safe PDF deletion | Type-aware academic or finance artifact delete action |
 

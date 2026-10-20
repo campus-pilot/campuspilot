@@ -66,6 +66,62 @@ describe("immutable finance document contexts", () => {
     });
   });
 
+  it("rejects a stale global receipt selection after its payment is reversed", async () => {
+    const payment = await scenario.actors.accountant.client.school.recordPayment({
+      schoolId: scenario.school.id,
+      admissionId: scenario.admission.id,
+      sessionId: scenario.activeSession.id,
+      amountMinor: "12500",
+      currency: "INR",
+      method: "cash",
+      payerName: "Original payer",
+      receivedAt: new Date("2026-10-02T10:00:00Z"),
+      effectiveAt: new Date("2026-10-02T10:00:00Z"),
+      idempotencyKey: createFinanceIdempotencyKey(
+        "document-stale-global-receipt",
+      ),
+    });
+    const template =
+      await scenario.actors.accountant.client.school.selectMarketplaceTemplate({
+        schoolId: scenario.school.id,
+        documentType: "receipt",
+        slug: "receipt-modern",
+        expectedRevisionId: null,
+      });
+    const input = {
+      schoolId: scenario.school.id,
+      source: {
+        documentType: "receipt" as const,
+        sessionId: scenario.activeSession.id,
+        selectionPolicy: "posted_unreversed_payments" as const,
+        transactions: [{ kind: "payment" as const, id: payment.id }],
+      },
+      templateRevisionId: template.artifact.id,
+    };
+    await expect(
+      scenario.actors.accountant.client.school.previewDocument(input),
+    ).resolves.toMatchObject({ studentCount: 1 });
+
+    await scenario.actors.accountant.client.school.reverseLedgerEntry({
+      schoolId: scenario.school.id,
+      admissionId: scenario.admission.id,
+      sessionId: scenario.activeSession.id,
+      ledgerEntryId: payment.ledgerEntryId,
+      reason: "Payment entered in error after receipt selection",
+      effectiveAt: new Date("2026-10-03T10:00:00Z"),
+      idempotencyKey: createFinanceIdempotencyKey(
+        "document-stale-global-receipt-reversal",
+      ),
+    });
+
+    await expect(
+      scenario.actors.accountant.client.school.previewDocument(input),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(
+      scenario.actors.accountant.client.school.generateDocument(input),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+  });
+
   it("enforces finance-specific template and artifact permissions", async () => {
     const scope = { schoolId: scenario.school.id, documentType: "receipt" as const };
     await expect(scenario.actors.accountant.client.school.listMarketplaceTemplates(scope)).resolves.toMatchObject({ items: expect.any(Array) });
@@ -75,6 +131,8 @@ describe("immutable finance document contexts", () => {
     await expect(scenario.actors.platformAdmin.client.school.selectMarketplaceTemplate({ ...scope, slug: "receipt-modern", expectedRevisionId: null })).rejects.toMatchObject({ code: "FORBIDDEN" });
 
     const [template] = await db.insert(artifactTable).values({ schoolId: scenario.school.id, kind: "template", documentType: "receipt", name: "Receipt template", s3Key: `test/finance-template-${Date.now()}.hbs`, contentType: "text/x-handlebars-template", byteSize: 8, sha256: "b".repeat(64), createdBy: scenario.actors.accountant.session.user.id }).returning();
+    const [academicTemplate] = await db.insert(artifactTable).values({ schoolId: scenario.school.id, kind: "template", documentType: "id_card", name: "ID template", s3Key: `test/academic-template-${Date.now()}.hbs`, contentType: "text/x-handlebars-template", byteSize: 8, sha256: "d".repeat(64), createdBy: scenario.actors.accountant.session.user.id }).returning();
+    await db.insert(artifactTable).values({ schoolId: scenario.school.id, kind: "pdf", documentType: "id_card", name: "Student identity cards", s3Key: `test/academic-document-${Date.now()}.pdf`, contentType: "application/pdf", byteSize: 8, sha256: "e".repeat(64), templateRevisionId: academicTemplate!.id, sessionId: scenario.activeSession.id, studentIds: [scenario.activeStudent.id], studentCount: 1, createdBy: scenario.actors.accountant.session.user.id });
     await db.insert(artifactTable).values({ schoolId: scenario.school.id, kind: "pdf", documentType: "receipt", name: "Immutable receipt", s3Key: `test/finance-document-${Date.now()}.pdf`, contentType: "application/pdf", byteSize: 8, sha256: "a".repeat(64), templateRevisionId: template!.id, sessionId: scenario.activeSession.id, financeSource: { kind: "receipt", admissionIds: [scenario.admission.id], transactions: [{ kind: "payment", id: "payment" }] }, createdBy: scenario.actors.accountant.session.user.id });
     await db.insert(artifactTable).values(["Older receipt", "Oldest receipt"].map((name, index) => ({ schoolId: scenario.school.id, kind: "pdf" as const, documentType: "receipt" as const, name, s3Key: `test/finance-history-${Date.now()}-${index}.pdf`, contentType: "application/pdf", byteSize: 8, sha256: String(index + 1).repeat(64), templateRevisionId: template!.id, sessionId: scenario.activeSession.id, financeSource: { kind: "receipt" as const, admissionIds: [scenario.admission.id], transactions: [{ kind: "payment" as const, id: `payment-${index}` }] }, createdBy: scenario.actors.accountant.session.user.id })));
     const platformReceiptHistory = await scenario.actors.platformAdmin.client.school.listDocumentArtifacts({ schoolId: scenario.school.id, filters: { documentType: "receipt", sessionId: scenario.activeSession.id } });
@@ -84,8 +142,21 @@ describe("immutable finance document contexts", () => {
     expect(financePage).toMatchObject({ items: [expect.objectContaining({ documentType: "receipt" })], pagination: { currentPage: 2, totalItems: 3, totalPages: 3 } });
     await expect(scenario.actors.teacher.client.school.listDocumentArtifacts({ schoolId: scenario.school.id, filters: { documentDomain: "finance", sessionId: scenario.activeSession.id } })).rejects.toMatchObject({ code: "FORBIDDEN" });
     await expect(scenario.actors.platformAdmin.client.school.listDocumentArtifacts({ schoolId: scenario.school.id, filters: { documentDomain: "finance", sessionId: scenario.activeSession.id }, searchQuery: "Immutable receipt" })).resolves.toMatchObject({ items: [expect.objectContaining({ name: "Immutable receipt" })], pagination: { totalItems: 1 } });
+    const allDomains = await scenario.actors.manager.client.school.listDocumentArtifacts({ schoolId: scenario.school.id, filters: { documentDomain: "all", sessionId: scenario.activeSession.id }, limit: 1, page: 1 });
+    const allDomainsSecondPage = await scenario.actors.manager.client.school.listDocumentArtifacts({ schoolId: scenario.school.id, filters: { documentDomain: "all", sessionId: scenario.activeSession.id }, limit: 1, page: 2 });
+    expect(allDomains.pagination).toMatchObject({ currentPage: 1, totalItems: 4, totalPages: 4, nextCursor: "2" });
+    expect(allDomainsSecondPage.items[0]?.id).not.toBe(allDomains.items[0]?.id);
+    const allDomainItems = await scenario.actors.manager.client.school.listDocumentArtifacts({ schoolId: scenario.school.id, filters: { documentDomain: "all", sessionId: scenario.activeSession.id }, limit: 20 });
+    expect(allDomainItems.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ documentType: "receipt" }),
+      expect.objectContaining({ documentType: "id_card" }),
+    ]));
+    await expect(scenario.actors.manager.client.school.listDocumentArtifacts({ schoolId: scenario.school.id, filters: { documentDomain: "all", sessionId: scenario.activeSession.id }, searchQuery: "Student identity" })).resolves.toMatchObject({ items: [expect.objectContaining({ documentType: "id_card" })], pagination: { totalItems: 1 } });
+    await expect(scenario.actors.teacher.client.school.listDocumentArtifacts({ schoolId: scenario.school.id, filters: { documentDomain: "all", sessionId: scenario.activeSession.id } })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(scenario.actors.platformAdmin.client.school.listDocumentArtifacts({ schoolId: scenario.school.id, filters: { documentDomain: "all", sessionId: scenario.activeSession.id } })).rejects.toMatchObject({ code: "FORBIDDEN" });
     const academicHistory = await scenario.actors.teacher.client.school.listDocumentArtifacts({ schoolId: scenario.school.id });
     expect(academicHistory.items.some((item) => item.documentType === "receipt")).toBe(false);
+    expect(academicHistory.items.some((item) => item.documentType === "id_card")).toBe(true);
   });
 
   it("rejects mismatched or incomplete finance artifact provenance in PostgreSQL", async () => {

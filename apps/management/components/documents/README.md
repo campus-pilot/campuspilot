@@ -21,6 +21,7 @@ for the management implementation.
 | --- | --- |
 | `document-workspace.tsx` | Create/history navigation, visual type selection, missing-template shell alert |
 | `document-generator.tsx` | Type-specific source form, live preview, PDF creation |
+| `finance-document-generator.tsx` | Posted billing-run and payment selection, finance preview, PDF creation |
 | `document-history.tsx` | Unified session history, downloads, deletion |
 | `document-templates.tsx` | Settings empty state, editor, sample preview, immutable revision save |
 | `template-code-editor.tsx` | Dynamically loaded Monaco source editor and format action |
@@ -50,18 +51,22 @@ the provider-neutral brief; and `copy-text-button.tsx` owns clipboard feedback.
   the latest successful preview. Document-generation previews remain explicit.
 - Cache invalidation after selecting/saving a template must refresh both the active
   template and any consumers that show template availability.
-- A missing template is a persistent setup condition: register `AppShellAlert` and
-  render a local explanation. It is not a toast or a reason to mount a selector in
-  the generator.
+- A missing template is a persistent setup condition: register one domain-scoped
+  `AppShellAlert` for each authorized academic/finance domain and render a local
+  explanation. It is not a toast or a reason to mount a selector in the generator.
 
 ## Layout rules
 
 - The Documents workspace has exactly two sections: Create document and Document
   history.
-- Create document initially shows only the available type cards. Activating an
-  academic card opens its complete settings, preview, create, download, and
-  history workflow in a wide responsive dialog. Contextual query parameters open
-  that dialog with applicable source values preselected.
+- Create document initially shows only the available type cards. It combines the
+  four academic types with Bills and Receipts; account statements remain in the
+  admission ledger. Activating a card opens its complete settings, preview,
+  create, download, and history workflow in a wide responsive dialog. Contextual
+  query parameters open that dialog with applicable source values preselected.
+- The removed Billing Documents page is not a second home for bulk statements.
+  Statement generation intentionally remains per admission in the admission
+  ledger; do not add a global Statements card without a new product decision.
 - `DocumentKindCards` is the type chooser in both Documents and the marketplace.
   It is a button group when cards launch workflows and a radiogroup when a selected
   `value` is supplied.
@@ -88,6 +93,8 @@ report_card -> examination
 id_card     -> id-card
 admit_card  -> admit-card
 timetable   -> timetable
+bill        -> bill
+receipt     -> receipt
 ```
 
 Keep the mapping exhaustive. If a document type is added, update the Settings
@@ -102,7 +109,7 @@ from report/admit card flows and is enforced again by the server.
 
 ## Manual verification
 
-Check configured and missing-template states, all four document cards, unified
+Check configured and missing-template states, all six document cards, unified
 history, Settings editor/read-only/empty states, AI dialog, marketplace list/detail,
 and permission-denied fallbacks. Inspect desktop, 390 px, and 320 px layouts. A
 type-check is not a substitute for opening the real authenticated UI and inspecting

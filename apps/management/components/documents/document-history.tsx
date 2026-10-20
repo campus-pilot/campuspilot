@@ -30,8 +30,10 @@ import { DocumentDownload } from './document-generator';
  */
 export function DocumentHistory({
   scope,
+  domains,
 }: {
   scope: DocumentScope;
+  domains: { academic: boolean; finance: boolean };
 }) {
   const form = useForm({
     defaultValues: { search: '', page: 1 },
@@ -67,6 +69,7 @@ export function DocumentHistory({
         {(values) => (
           <HistoryRows
             scope={scope}
+            domains={domains}
             search={values.search}
             page={values.page}
             onPage={(page) => form.setFieldValue('page', page)}
@@ -78,11 +81,13 @@ export function DocumentHistory({
 }
 function HistoryRows({
   scope,
+  domains,
   search,
   page,
   onPage,
 }: {
   scope: DocumentScope;
+  domains: { academic: boolean; finance: boolean };
   search: string;
   page: number;
   onPage: (value: number) => void;
@@ -91,7 +96,15 @@ function HistoryRows({
     orpc.school.listDocumentArtifacts.queryOptions({
       input: {
         schoolId: scope.schoolId,
-        filters: { sessionId: scope.sessionId },
+        filters: {
+          sessionId: scope.sessionId,
+          documentDomain:
+            domains.academic && domains.finance
+              ? 'all'
+              : domains.finance
+                ? 'finance'
+                : 'academic',
+        },
         searchQuery: search,
         page,
       },
@@ -142,6 +155,16 @@ function HistoryRows({
   );
 }
 function ArtifactRow({ artifact }: { artifact: DocumentArtifact }) {
+  const finance =
+    artifact.documentType === 'bill' ||
+    artifact.documentType === 'receipt' ||
+    artifact.documentType === 'statement';
+  const readAction = finance
+    ? SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_ARTIFACTS
+    : SCHOOL_ACTIONS.READ_DOCUMENT_ARTIFACTS;
+  const deleteAction = finance
+    ? SCHOOL_ACTIONS.DELETE_FINANCE_DOCUMENT_ARTIFACTS
+    : SCHOOL_ACTIONS.DELETE_DOCUMENT_ARTIFACTS;
   return (
     <article className="flex flex-col gap-4 rounded-xl border p-4 lg:flex-row lg:items-center lg:justify-between">
       <div className="flex min-w-0 items-start gap-3">
@@ -152,15 +175,17 @@ function ArtifactRow({ artifact }: { artifact: DocumentArtifact }) {
       </div>
       <div className="flex flex-wrap items-start gap-2">
         {artifact.status === 'ready' && (
-          <DocumentDownload
-            schoolId={artifact.schoolId}
-            artifactId={artifact.id}
-            documentType={artifact.documentType as Exclude<DocumentArtifact['documentType'], 'bill' | 'receipt' | 'statement'>}
-          />
+          <DocumentPermission schoolId={artifact.schoolId} action={readAction}>
+            <DocumentDownload
+              schoolId={artifact.schoolId}
+              artifactId={artifact.id}
+              documentType={artifact.documentType}
+            />
+          </DocumentPermission>
         )}
         <DocumentPermission
           schoolId={artifact.schoolId}
-          action={SCHOOL_ACTIONS.DELETE_DOCUMENT_ARTIFACTS}
+          action={deleteAction}
         >
           <DeleteArtifact artifact={artifact} />
         </DocumentPermission>

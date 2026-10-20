@@ -146,7 +146,7 @@ export const billingOperationsRouter = {
     .route({
       summary: "List billing runs",
       description:
-        "List paginated billing runs with explicit session, period, kind, recorder, and recorded-time filters.",
+        "List paginated billing runs with period search plus explicit session, period, kind, recorder, and recorded-time filters.",
       tags: ["School", "Billing"],
     })
     .input(listBillingRunsInputSchema)

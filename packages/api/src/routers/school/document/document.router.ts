@@ -70,12 +70,31 @@ function requireSourceTypePermission(
 }
 const requireArtifactListPermission = o.middleware<Record<never, never>, z.infer<typeof dto.listArtifactsSchema>>(
   async ({ context, next, signal }, input) => {
-    const finance = input.filters.documentDomain === "finance"
-      || Boolean(input.filters.documentType && isFinanceDocument(input.filters.documentType));
-    await assertPermission(context, {
-      action: finance ? SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_ARTIFACTS : SCHOOL_ACTIONS.READ_DOCUMENT_ARTIFACTS,
-      resource: { kind: "school", schoolId: input.schoolId },
-    }, signal);
+    const domain = input.filters.documentDomain;
+    const actions = domain === "all"
+      ? [
+          SCHOOL_ACTIONS.READ_DOCUMENT_ARTIFACTS,
+          SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_ARTIFACTS,
+        ]
+      : [
+          domain === "finance" ||
+          Boolean(
+            input.filters.documentType &&
+              isFinanceDocument(input.filters.documentType),
+          )
+            ? SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_ARTIFACTS
+            : SCHOOL_ACTIONS.READ_DOCUMENT_ARTIFACTS,
+        ];
+    for (const action of actions) {
+      await assertPermission(
+        context,
+        {
+          action,
+          resource: { kind: "school", schoolId: input.schoolId },
+        },
+        signal,
+      );
+    }
     return next();
   },
 );
@@ -528,7 +547,9 @@ export const schoolDocumentRouter = {
             ? eq(artifactTable.documentType, f.documentType)
             : f.documentDomain === "finance"
               ? inArray(artifactTable.documentType, ["bill", "receipt", "statement"])
-              : notInArray(artifactTable.documentType, ["bill", "receipt", "statement"]),
+              : f.documentDomain === "all"
+                ? undefined
+                : notInArray(artifactTable.documentType, ["bill", "receipt", "statement"]),
           f.sessionId ? eq(artifactTable.sessionId, f.sessionId) : undefined,
           f.classId ? eq(artifactTable.classId, f.classId) : undefined,
           f.examSlug ? eq(artifactTable.examSlug, f.examSlug) : undefined,

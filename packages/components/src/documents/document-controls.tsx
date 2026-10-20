@@ -18,9 +18,16 @@ import {
   ReceiptText,
   CreditCard,
   ScrollText,
+  type LucideIcon,
 } from "lucide-react";
 export type DocumentKind =
   "report_card" | "id_card" | "admit_card" | "timetable" | "bill" | "receipt" | "statement";
+type DocumentKindItem = {
+  value: DocumentKind;
+  label: string;
+  description: string;
+  icon: LucideIcon;
+};
 export const documentKinds = [
   {
     value: "report_card",
@@ -46,6 +53,13 @@ export const documentKinds = [
     description: "A clear examination schedule",
     icon: CalendarDays,
   },
+] as const;
+/** Session Documents exposes batch-friendly workflows. Statements remain
+ * contextual to an admission ledger because they require an account cutoff. */
+export const workspaceDocumentKinds = [
+  ...documentKinds,
+  { value: "bill", label: "Bills", description: "Posted fee charges", icon: CreditCard },
+  { value: "receipt", label: "Receipts", description: "Posted payment receipts", icon: ReceiptText },
 ] as const;
 export const allDocumentKinds = [
   ...documentKinds,
@@ -92,7 +106,7 @@ export function DocumentKindCards({
 }: {
   value?: DocumentKind;
   onChange: (value: DocumentKind) => void;
-  items?: readonly (typeof allDocumentKinds)[number][];
+  items?: readonly DocumentKindItem[];
 }) {
   const isSelection = value !== undefined;
   return (

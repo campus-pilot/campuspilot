@@ -57,10 +57,12 @@ and include the current resource, rather than leaving the trail at its parent.
 Session context already supplied by the shell and breadcrumb does not need another
 session heading in every examination screen.
 
-The session Documents create page starts with document-type cards only. Each card
-opens a wide responsive dialog for that type's settings, explicit preview, PDF
-creation, download, and history action. Contextual document links open the same
-dialog with applicable values preselected; closing it returns to a clean card view.
+The session Documents create page starts with document-type cards only. The four
+academic cards plus Bills and Receipts share this surface; account statements stay
+contextual to an admission ledger. Each card opens a wide responsive dialog for
+that type's settings, explicit preview, PDF creation, download, and history action.
+Contextual document links open the same dialog with applicable values preselected;
+closing it returns to a clean card view.
 
 Detail workspaces use left secondary navigation on desktop and a shared section
 Select on mobile. Sections have navigable routes. Follow the admission/classroom
@@ -230,10 +232,10 @@ deliberate and must remain visible in future redesigns:
   Preview navigates to a dedicated detail route; Use template creates and selects
   an immutable school revision.
 - When a document type has no selected school template, register one stable
-  school-scoped `AppShellAlert`. Viewers may see the warning, while only users with
-  template-management permission receive the configuration action. The generator
-  itself explains why creation is unavailable but does not provide an alternate
-  selector.
+  school-scoped `AppShellAlert` per authorized academic/finance domain. Viewers may
+  see the warning, while only users with the corresponding domain's template-
+  management permission receive the configuration action. The generator itself
+  explains why creation is unavailable but does not provide an alternate selector.
 - Choose document types with the shared visual cards, not a compact dropdown.
   Once selected, reveal that type's required fields and preview/generation flow.
 - Template editing is a split workspace on wide screens and a stacked workspace
@@ -246,7 +248,10 @@ deliberate and must remain visible in future redesigns:
   classroom. Do not add a classroom picker or serialize `classId` for a timetable,
   even when a contextual link contains one for other document types.
 - Document history is a unified session list. Show each artifact's document type
-  and template provenance rather than making the user select a type first.
+  and template provenance rather than making the user select a type first. Request
+  only the academic, finance, or combined domain the user is authorized to read.
+- Billing does not own a duplicate Documents section. Its legacy documents route
+  redirects to the session-wide Documents history.
 
 ## Corrections from the redesign
 

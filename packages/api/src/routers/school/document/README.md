@@ -24,7 +24,7 @@ Keep API operations in this package and expose them through the school router.
 Binary conversion and object storage remain server concerns; the management app
 uses normal typed oRPC calls and never receives raw S3 keys.
 
-Documents are available at `/school/:schoolId/sessions/:sessionId/documents` in management. This operational workspace creates PDFs and shows history only. School template settings own editing, while `/school/:schoolId/marketplace/templates` owns browsing, previews, and imports. Exam workspaces link directly to report cards, admit cards, and timetable exports with the exam preselected.
+Documents are available at `/school/:schoolId/sessions/:sessionId/documents` in management. This operational workspace creates academic PDFs plus bulk bills and receipts, and shows an explicitly authorized academic, finance, or combined history. Account statements remain contextual to an admission ledger. The old Billing documents route redirects here. School template settings own editing, while `/school/:schoolId/marketplace/templates` owns browsing, previews, and imports. Exam workspaces link directly to report cards, admit cards, and timetable exports with the exam preselected.
 
 ## Supported documents
 
@@ -40,6 +40,12 @@ Documents are available at `/school/:schoolId/sessions/:sessionId/documents` in 
   posting-time ledger identity plus per-admission high-water sequences protected
   by the preview review hash. Statement rows show the current month's opening
   balance, period activity, human document references, and closing balance.
+
+The session-global Receipts workflow sends the explicit
+`posted_unreversed_payments` selection policy. Finance context construction checks
+that policy inside preview/generation's repeatable-read transaction and rejects a
+payment if a reversal exists. Contextual historical payment/refund receipt actions
+omit the policy and retain immutable regeneration behavior.
 
 Exports support a whole examination, one class, or up to 500 explicitly selected students. Every export is limited to 500 students. Historical sessions remain exportable. Only registered admissions are eligible. Session, class, exam, student, and tenant relationships are validated independently.
 
@@ -95,6 +101,8 @@ administrators can read finance templates and artifacts but cannot generate,
 mutate templates, or delete. Teachers and exam coordinators receive no finance
 document access. Finance routes inspect the requested or persisted document type
 before applying these grants; generic academic history excludes finance artifacts.
+Combined history is explicit and requires both artifact-read grants before its
+query executes; callers with only one domain request that domain alone.
 
 Generation also requires independent source-domain read permissions. UI entry points check the corresponding export and selector permissions before mounting queries. The backend remains the authorization boundary. Shared system policy rejects school-vocabulary roles paired with malformed platform scope.
 

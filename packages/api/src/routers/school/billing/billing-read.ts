@@ -12,6 +12,7 @@ import {
   desc,
   eq,
   gte,
+  ilike,
   inArray,
   lte,
 } from "drizzle-orm";
@@ -71,6 +72,7 @@ export async function listBillingRuns(
   db: DatabaseExecutor,
   input: {
     schoolId: string;
+    searchQuery: string;
     filters?: {
       sessionId?: string;
       periodKey?: string;
@@ -91,6 +93,12 @@ export async function listBillingRuns(
   const { currentPage, pageSize, offset } = resolvePaginationInput(input);
   const where = and(
     eq(financeBillRunTable.schoolId, input.schoolId),
+    input.searchQuery
+      ? ilike(
+          financeBillRunTable.periodKey,
+          `%${input.searchQuery.replace(/[\\%_]/g, "\\$&")}%`,
+        )
+      : undefined,
     input.filters?.sessionId
       ? eq(financeBillRunTable.sessionId, input.filters.sessionId)
       : undefined,

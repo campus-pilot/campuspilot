@@ -1119,6 +1119,24 @@ describe("school billing operations", () => {
     expect(listed.items.map(({ id }) => id)).toEqual(
       expect.arrayContaining([regular.id, supplemental.id]),
     );
+    const searched =
+      await scenario.actors.platformAdmin.client.school.listBillingRuns({
+        schoolId: scenario.school.id,
+        searchQuery: regular.periodKey.slice(0, -1),
+        filters: { sessionId: scenario.activeSession.id },
+        orderBy: { field: "recordedAt", direction: "desc" },
+        limit: 20,
+      });
+    expect(searched.pagination.totalItems).toBe(2);
+    await expect(
+      scenario.actors.platformAdmin.client.school.listBillingRuns({
+        schoolId: scenario.school.id,
+        searchQuery: "period-that-does-not-exist",
+        filters: { sessionId: scenario.activeSession.id },
+        orderBy: { field: "recordedAt", direction: "desc" },
+        limit: 20,
+      }),
+    ).resolves.toMatchObject({ items: [], pagination: { totalItems: 0 } });
     const firstPage =
       await scenario.actors.platformAdmin.client.school.listBillingRuns({
         schoolId: scenario.school.id,

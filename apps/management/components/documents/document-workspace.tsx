@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useForm } from "@tanstack/react-form";
-import { useQueries } from "@tanstack/react-query";
+import { useQueries, useQuery } from "@tanstack/react-query";
 import { z } from "zod";
 import { FilePlus, Files, History } from "lucide-react";
 import { AppShellAlert } from "@campuspilot/components/app-shell";
@@ -12,7 +12,7 @@ import {
   DocumentKindCards,
   DocumentNotice,
   DocumentPanel,
-  documentKinds,
+  workspaceDocumentKinds,
 } from "@campuspilot/components/documents/document-controls";
 import { Button } from "@campuspilot/ui/components/button";
 import {
@@ -31,18 +31,21 @@ import {
 } from "@campuspilot/ui/components/select";
 import {
   type AcademicDocumentType,
+  type DocumentType,
 } from "@campuspilot/api/routers/school/document/document.dto";
 import { orpc } from "@/lib/orpc";
+import { RequirePermissions } from "@/components/require-permissions";
 import {
-  DocumentPermission,
+  DocumentLoading,
   SCHOOL_ACTIONS,
   type DocumentScope,
 } from "./document-common";
 import { DocumentGenerator } from "./document-generator";
+import { FinanceDocumentGenerator } from "./finance-document-generator";
 import { DocumentHistory } from "./document-history";
 
 export type DocumentInitialSelection = {
-  documentType?: AcademicDocumentType;
+  documentType?: Exclude<DocumentType, "statement">;
   classId?: string;
   examSlug?: string;
   studentId?: string;
@@ -55,31 +58,33 @@ const sections = [
     value: "generate",
     label: "Create document",
     icon: FilePlus,
-    action: SCHOOL_ACTIONS.GENERATE_DOCUMENTS,
   },
   {
     value: "history",
     label: "Document history",
     icon: History,
-    action: SCHOOL_ACTIONS.READ_DOCUMENT_ARTIFACTS,
   },
 ] as const;
 
 /** Settings slugs are existing product vocabulary, not a transformation of the
  * API enum. Keep this mapping exhaustive when adding a document type.
  */
-const templateSettingsSlugs: Record<AcademicDocumentType, string> = {
+const templateSettingsSlugs: Record<Exclude<DocumentType, "statement">, string> = {
   report_card: "examination",
   id_card: "id-card",
   admit_card: "admit-card",
   timetable: "timetable",
+  bill: "bill",
+  receipt: "receipt",
 };
 
-const documentCreateTitles: Record<AcademicDocumentType, string> = {
+const documentCreateTitles: Record<Exclude<DocumentType, "statement">, string> = {
   report_card: "Create report cards",
   id_card: "Create student IDs",
   admit_card: "Create admit cards",
   timetable: "Create exam timetables",
+  bill: "Create bills",
+  receipt: "Create receipts",
 };
 
 /** Contextual source values belong to the document type named by the link.
@@ -108,22 +113,76 @@ export function DocumentWorkspace({
   initial?: DocumentInitialSelection;
   section?: DocumentSection;
 }) {
+  const resource = { kind: "school" as const, schoolId: scope.schoolId };
   return (
-    <DocumentPermission
-      schoolId={scope.schoolId}
-      action={SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES}
+    <RequirePermissions
+      mode="any"
+      permissions={[
+        SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES,
+        SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_TEMPLATES,
+        SCHOOL_ACTIONS.READ_DOCUMENT_ARTIFACTS,
+        SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_ARTIFACTS,
+      ].map((action) => ({ action, resource }))}
       fallback={
         <DocumentNotice>
           Document access is unavailable for your account.
         </DocumentNotice>
       }
     >
-      <DocumentWorkspaceContent
-        scope={scope}
-        initial={initial}
-        section={section}
-      />
-    </DocumentPermission>
+      <DocumentWorkspaceAccess scope={scope} initial={initial} section={section} />
+    </RequirePermissions>
+  );
+}
+
+type DocumentAccess = {
+  academicTemplates: boolean;
+  financeTemplates: boolean;
+  academicHistory: boolean;
+  financeHistory: boolean;
+};
+
+function DocumentWorkspaceAccess({
+  scope,
+  initial,
+  section,
+}: {
+  scope: DocumentScope;
+  initial: DocumentInitialSelection;
+  section: DocumentSection;
+}) {
+  const resource = { kind: "school" as const, schoolId: scope.schoolId };
+  const actions = [
+    SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES,
+    SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_TEMPLATES,
+    SCHOOL_ACTIONS.READ_DOCUMENT_ARTIFACTS,
+    SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_ARTIFACTS,
+  ] as const;
+  const permissions = useQuery(
+    orpc.authorization.checkPermissions.queryOptions({
+      input: { permissions: actions.map((action) => ({ action, resource })) },
+    }),
+  );
+  if (permissions.isPending) return <DocumentLoading />;
+  if (permissions.isError || permissions.data.results.length !== actions.length)
+    return <DocumentNotice>Document access could not be checked.</DocumentNotice>;
+  const [
+    academicTemplates,
+    financeTemplates,
+    academicHistory,
+    financeHistory,
+  ] = permissions.data.results;
+  return (
+    <DocumentWorkspaceContent
+      scope={scope}
+      initial={initial}
+      section={section}
+      access={{
+        academicTemplates: Boolean(academicTemplates),
+        financeTemplates: Boolean(financeTemplates),
+        academicHistory: Boolean(academicHistory),
+        financeHistory: Boolean(financeHistory),
+      }}
+    />
   );
 }
 
@@ -131,9 +190,58 @@ export function DocumentWorkspace({
  * registration deliberately reuses the same slug so editors receive an action
  * without viewers seeing a duplicate alert.
  */
-function DocumentTemplateAlerts({ schoolId }: { schoolId: string }) {
+function DocumentTemplateAlerts({
+  schoolId,
+  access,
+}: {
+  schoolId: string;
+  access: DocumentAccess;
+}) {
+  const academicKinds = workspaceDocumentKinds.filter(
+    ({ value }) => value !== "bill" && value !== "receipt",
+  );
+  const financeKinds = workspaceDocumentKinds.filter(
+    ({ value }) => value === "bill" || value === "receipt",
+  );
+  return (
+    <>
+      {access.academicTemplates ? (
+        <DocumentTemplateDomainAlert
+          schoolId={schoolId}
+          domain="academic"
+          kinds={academicKinds}
+          manageAction={SCHOOL_ACTIONS.MANAGE_DOCUMENT_TEMPLATES}
+        />
+      ) : null}
+      {access.financeTemplates ? (
+        <DocumentTemplateDomainAlert
+          schoolId={schoolId}
+          domain="finance"
+          kinds={financeKinds}
+          manageAction={SCHOOL_ACTIONS.MANAGE_FINANCE_DOCUMENT_TEMPLATES}
+        />
+      ) : null}
+    </>
+  );
+}
+
+type WorkspaceDocumentKind = (typeof workspaceDocumentKinds)[number];
+
+function DocumentTemplateDomainAlert({
+  schoolId,
+  domain,
+  kinds,
+  manageAction,
+}: {
+  schoolId: string;
+  domain: "academic" | "finance";
+  kinds: readonly WorkspaceDocumentKind[];
+  manageAction:
+    | typeof SCHOOL_ACTIONS.MANAGE_DOCUMENT_TEMPLATES
+    | typeof SCHOOL_ACTIONS.MANAGE_FINANCE_DOCUMENT_TEMPLATES;
+}) {
   const templateQueries = useQueries({
-    queries: documentKinds.map(({ value }) =>
+    queries: kinds.map(({ value }) =>
       orpc.school.getActiveDocumentTemplate.queryOptions({
         input: { schoolId, documentType: value },
       }),
@@ -142,7 +250,7 @@ function DocumentTemplateAlerts({ schoolId }: { schoolId: string }) {
   if (templateQueries.some((query) => query.isPending || query.isError))
     return null;
 
-  const missing = documentKinds.filter(
+  const missing = kinds.filter(
     (_, index) => !templateQueries[index]?.data,
   );
   if (!missing.length) return null;
@@ -153,14 +261,16 @@ function DocumentTemplateAlerts({ schoolId }: { schoolId: string }) {
       ? `${first.label} do not have a school template yet.`
       : `${missing.length} document types do not have a school template yet.`;
 
-  const slug = `school/${schoolId}/documents/templates-missing`;
+  const slug = `school/${schoolId}/documents/${domain}-templates-missing`;
   const alertMessage = `${message} Configure templates before creating those PDFs.`;
   return (
     <>
       <AppShellAlert slug={slug} type="warning" message={alertMessage} />
-      <DocumentPermission
-        schoolId={schoolId}
-        action={SCHOOL_ACTIONS.MANAGE_DOCUMENT_TEMPLATES}
+      <RequirePermissions
+        permissions={{
+          action: manageAction,
+          resource: { kind: "school", schoolId },
+        }}
       >
         <AppShellAlert
           slug={slug}
@@ -170,7 +280,7 @@ function DocumentTemplateAlerts({ schoolId }: { schoolId: string }) {
           actionHref={`/school/${encodeURIComponent(schoolId)}/settings/templates/${templateSettingsSlugs[first.value]}`}
           onAction={closeAlertDialog}
         />
-      </DocumentPermission>
+      </RequirePermissions>
     </>
   );
 }
@@ -179,27 +289,41 @@ function DocumentWorkspaceContent({
   scope,
   initial,
   section,
+  access,
 }: {
   scope: DocumentScope;
   initial: DocumentInitialSelection;
   section: DocumentSection;
+  access: DocumentAccess;
 }) {
   const router = useRouter();
   const form = useForm({
     defaultValues: {
-      documentType: initial.documentType ?? ("" as AcademicDocumentType | ""),
+      documentType:
+        initial.documentType ??
+        ("" as Exclude<DocumentType, "statement"> | ""),
     },
     validators: {
       onChange: z.object({
         documentType: z.union([
           z.literal(""),
-          z.enum(["report_card", "id_card", "admit_card", "timetable"]),
+          z.enum([
+            "report_card",
+            "id_card",
+            "admit_card",
+            "timetable",
+            "bill",
+            "receipt",
+          ]),
         ]),
       }),
     },
   });
   const createHref = `/school/${encodeURIComponent(scope.schoolId)}/sessions/${encodeURIComponent(scope.sessionId)}/documents`;
-  const href = (target: DocumentSection, type?: AcademicDocumentType) => {
+  const href = (
+    target: DocumentSection,
+    type?: Exclude<DocumentType, "statement">,
+  ) => {
     const query = new URLSearchParams({
       ...(target === "generate" && type ? { type } : {}),
       ...(initial.classId ? { classId: initial.classId } : {}),
@@ -227,7 +351,7 @@ function DocumentWorkspaceContent({
         const active = sections.find((item) => item.value === section)!;
         return (
           <>
-            <DocumentTemplateAlerts schoolId={scope.schoolId} />
+            <DocumentTemplateAlerts schoolId={scope.schoolId} access={access} />
             <WorkspaceNavigationLayout
               heading={
                 <div className="flex min-w-0 items-center gap-3">
@@ -237,13 +361,14 @@ function DocumentWorkspaceContent({
               }
               actions={null}
               navigationLabel="Document sections"
-              navigation={sections.map((item) => (
-                <DocumentPermission
-                  key={item.value}
-                  schoolId={scope.schoolId}
-                  action={item.action}
-                >
+              navigation={sections.map((item) => {
+                const visible =
+                  item.value === "generate"
+                    ? access.academicTemplates || access.financeTemplates
+                    : access.academicHistory || access.financeHistory;
+                return visible ? (
                   <Button
+                    key={item.value}
                     asChild
                     variant={item.value === section ? "secondary" : "ghost"}
                     className="justify-start"
@@ -253,8 +378,8 @@ function DocumentWorkspaceContent({
                       {item.label}
                     </Link>
                   </Button>
-                </DocumentPermission>
-              ))}
+                ) : null;
+              })}
               mobileNavigation={
                 <Select
                   value={section}
@@ -269,40 +394,62 @@ function DocumentWorkspaceContent({
                     </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
-                    {sections.map((item) => (
-                      <DocumentPermission
-                        key={item.value}
-                        schoolId={scope.schoolId}
-                        action={item.action}
-                      >
-                        <SelectItem value={item.value}>{item.label}</SelectItem>
-                      </DocumentPermission>
-                    ))}
+                    {sections.map((item) => {
+                      const visible =
+                        item.value === "generate"
+                          ? access.academicTemplates || access.financeTemplates
+                          : access.academicHistory || access.financeHistory;
+                      return visible ? (
+                        <SelectItem key={item.value} value={item.value}>
+                          {item.label}
+                        </SelectItem>
+                      ) : null;
+                    })}
                   </SelectContent>
                 </Select>
               }
             >
               {section === "history" ? (
-                <DocumentPermission
-                  schoolId={scope.schoolId}
-                  action={SCHOOL_ACTIONS.READ_DOCUMENT_ARTIFACTS}
-                >
-                  <DocumentHistory scope={scope} />
-                </DocumentPermission>
-              ) : (
-                <DocumentPanel
-                  title="What would you like to create?"
-                  description="Choose a document type to configure, preview, and create its PDF."
-                >
-                  <DocumentKindCards
-                    onChange={(value) =>
-                      form.setFieldValue(
-                        "documentType",
-                        value as AcademicDocumentType,
-                      )
-                    }
+                access.academicHistory || access.financeHistory ? (
+                  <DocumentHistory
+                    scope={scope}
+                    domains={{
+                      academic: access.academicHistory,
+                      finance: access.financeHistory,
+                    }}
                   />
-                </DocumentPanel>
+                ) : (
+                  <DocumentNotice>
+                    Document history is unavailable for your account.
+                  </DocumentNotice>
+                )
+              ) : (
+                access.academicTemplates || access.financeTemplates ? (
+                  <DocumentPanel
+                    title="What would you like to create?"
+                    description="Choose a document type to configure, preview, and create its PDF."
+                  >
+                    <DocumentKindCards
+                      items={workspaceDocumentKinds.filter(({ value }) =>
+                        value === "bill" || value === "receipt"
+                          ? access.financeTemplates
+                          : access.academicTemplates,
+                      )}
+                      onChange={(value) =>
+                        form.setFieldValue(
+                          "documentType",
+                          value as Exclude<DocumentType, "statement">,
+                        )
+                      }
+                    />
+                  </DocumentPanel>
+                ) : (
+                  <DocumentNotice>
+                    Your account can view document history but cannot read
+                    document templates. Open Document history to view existing
+                    PDFs.
+                  </DocumentNotice>
+                )
               )}
             </WorkspaceNavigationLayout>
             {section === "generate" && documentType ? (
@@ -321,15 +468,14 @@ function DocumentWorkspaceContent({
                     </DialogDescription>
                   </DialogHeader>
                   <div className="min-h-0 overflow-y-auto p-4 sm:p-5">
-                    <DocumentPermission
-                      schoolId={scope.schoolId}
-                      action={SCHOOL_ACTIONS.GENERATE_DOCUMENTS}
-                      fallback={
-                        <DocumentNotice>
-                          Creating documents requires additional permission.
-                        </DocumentNotice>
-                      }
-                    >
+                    {documentType === "bill" || documentType === "receipt" ? (
+                      <FinanceDocumentGenerator
+                        key={documentType}
+                        scope={scope}
+                        documentType={documentType}
+                        onHistory={() => navigate("history")}
+                      />
+                    ) : (
                       <DocumentGenerator
                         key={documentType}
                         scope={scope}
@@ -337,7 +483,7 @@ function DocumentWorkspaceContent({
                         initial={initialForDocumentType(documentType, initial)}
                         onHistory={() => navigate("history")}
                       />
-                    </DocumentPermission>
+                    )}
                   </div>
                 </DialogContent>
               </Dialog>

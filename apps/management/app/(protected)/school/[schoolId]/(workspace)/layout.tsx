@@ -134,7 +134,7 @@ function navigationFor(
       id: 'operations',
       label: 'Operations',
       items: [
-        { type: 'item', id: 'documents', label: 'Documents', href: sessionHref('/documents'), icon: Files, wrap: children => <RequirePermissions permissions={{ action: SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES, resource: { kind: 'school', schoolId } }}>{children}</RequirePermissions> },
+        { type: 'item', id: 'documents', label: 'Documents', href: sessionHref('/documents'), icon: Files, wrap: children => <RequirePermissions mode="any" permissions={[SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES, SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_TEMPLATES, SCHOOL_ACTIONS.READ_DOCUMENT_ARTIFACTS, SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_ARTIFACTS].map(action => ({ action, resource: { kind: 'school' as const, schoolId } }))}>{children}</RequirePermissions> },
         {
           type: 'item',
           id: 'billing',
