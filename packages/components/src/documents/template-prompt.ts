@@ -1,5 +1,6 @@
 export type TemplatePromptKind =
   "report_card" | "id_card" | "admit_card" | "timetable" | "bill" | "receipt" | "statement";
+export type TemplatePromptPageSize = "full" | "half";
 const labels: Record<TemplatePromptKind, string> = {
   report_card: "student report card",
   id_card: "student ID card",
@@ -19,13 +20,16 @@ export function createTemplateEditingPrompt(input: {
   instructions: string;
   contextHelp: string;
   content?: string;
+  pageSize?: TemplatePromptPageSize;
 }) {
   const paper =
     input.documentType === "id_card"
       ? "Each card must fit exactly 86mm × 54mm. CampusPilot imposes the cards onto A4 sheets."
       : input.documentType === "timetable"
         ? "Use landscape A4."
-        : "Use portrait A4. Each student document starts on a new printed page.";
+        : input.pageSize === "half"
+          ? "Design one half-A4 document (210mm × 148.5mm). CampusPilot places two documents vertically on each portrait A4 sheet."
+          : "Use portrait A4. Each student document starts on a new printed page.";
   const sections = [
     `Edit my CampusPilot ${labels[input.documentType]} template.`,
     `Requested changes:\n${input.instructions.trim()}`,

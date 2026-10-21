@@ -313,11 +313,13 @@ export function DocumentSelect<T extends string>({
   label,
   options,
   disabled = false,
+  onValueChange,
 }: {
   field: DocumentStringField<T>;
   label: string;
   options: readonly OptionSelectOption<T>[];
   disabled?: boolean;
+  onValueChange?: (value: T) => void;
 }) {
   const id = useId();
   return (
@@ -329,7 +331,10 @@ export function DocumentSelect<T extends string>({
         name={field.name}
         value={field.state.value}
         options={options}
-        onValueChange={field.handleChange}
+        onValueChange={(value) => {
+          field.handleChange(value);
+          onValueChange?.(value);
+        }}
         disabled={disabled}
         triggerProps={{
           id,

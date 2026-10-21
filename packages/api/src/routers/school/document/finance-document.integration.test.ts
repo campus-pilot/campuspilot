@@ -85,7 +85,7 @@ describe("immutable finance document contexts", () => {
       await scenario.actors.accountant.client.school.selectMarketplaceTemplate({
         schoolId: scenario.school.id,
         documentType: "receipt",
-        slug: "receipt-modern",
+        slug: "receipt-default",
         expectedRevisionId: null,
       });
     const input = {
@@ -128,7 +128,7 @@ describe("immutable finance document contexts", () => {
     await expect(scenario.actors.platformAdmin.client.school.listMarketplaceTemplates(scope)).resolves.toMatchObject({ items: expect.any(Array) });
     await expect(scenario.actors.teacher.client.school.listMarketplaceTemplates(scope)).rejects.toMatchObject({ code: "FORBIDDEN" });
     await expect(scenario.actors.examCoordinator.client.school.listMarketplaceTemplates(scope)).rejects.toMatchObject({ code: "FORBIDDEN" });
-    await expect(scenario.actors.platformAdmin.client.school.selectMarketplaceTemplate({ ...scope, slug: "receipt-modern", expectedRevisionId: null })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(scenario.actors.platformAdmin.client.school.selectMarketplaceTemplate({ ...scope, slug: "receipt-default", expectedRevisionId: null })).rejects.toMatchObject({ code: "FORBIDDEN" });
 
     const [template] = await db.insert(artifactTable).values({ schoolId: scenario.school.id, kind: "template", documentType: "receipt", name: "Receipt template", s3Key: `test/finance-template-${Date.now()}.hbs`, contentType: "text/x-handlebars-template", byteSize: 8, sha256: "b".repeat(64), createdBy: scenario.actors.accountant.session.user.id }).returning();
     const [academicTemplate] = await db.insert(artifactTable).values({ schoolId: scenario.school.id, kind: "template", documentType: "id_card", name: "ID template", s3Key: `test/academic-template-${Date.now()}.hbs`, contentType: "text/x-handlebars-template", byteSize: 8, sha256: "d".repeat(64), createdBy: scenario.actors.accountant.session.user.id }).returning();
@@ -222,7 +222,7 @@ describe("immutable finance document contexts", () => {
       idempotencyKey: createFinanceIdempotencyKey("receipt-lifecycle"),
     });
     const selected = await scenario.actors.accountant.client.school.selectMarketplaceTemplate({
-      schoolId: scenario.school.id, documentType: "receipt", slug: "receipt-modern", expectedRevisionId: null,
+      schoolId: scenario.school.id, documentType: "receipt", slug: "receipt-default", expectedRevisionId: null,
     });
     const input = {
       schoolId: scenario.school.id,
@@ -261,7 +261,8 @@ describe("immutable finance document contexts", () => {
     const detail = await scenario.actors.accountant.client.school.getBillingRun({ schoolId: scenario.school.id, sessionId: scenario.activeSession.id, billRunId: run.id, page: 1, limit: 20 });
     expect(detail.bills.items).toHaveLength(1);
     const bill = detail.bills.items[0]!;
-    const selected = await scenario.actors.accountant.client.school.selectMarketplaceTemplate({ schoolId: scenario.school.id, documentType: "bill", slug: "bill-modern", expectedRevisionId: null });
+    const selected = await scenario.actors.accountant.client.school.selectMarketplaceTemplate({ schoolId: scenario.school.id, documentType: "bill", slug: "bill-default", expectedRevisionId: null });
+    expect(selected.artifact.pageSize).toBe("half");
     const input = { schoolId: scenario.school.id, source: { documentType: "bill" as const, sessionId: scenario.activeSession.id, billRunId: run.id }, templateRevisionId: selected.artifact.id };
     const before = await scenario.actors.accountant.client.school.previewDocument(input);
     expect(before.html).toContain(bill.billNumber);
@@ -276,6 +277,7 @@ describe("immutable finance document contexts", () => {
     expect(after.html).not.toContain(renamed);
 
     const generated = await scenario.actors.accountant.client.school.generateDocument(input);
+    expect(generated.artifact.pageSize).toBe("half");
     expect(generated.artifact.financeSource).toEqual({ kind: "bill", admissionIds: [scenario.admission.id], billIds: [bill.id], billRunId: run.id });
     const signed = await scenario.actors.accountant.client.school.getDocumentDownload({ schoolId: scenario.school.id, artifactId: generated.artifact.id, documentType: "bill" });
     await expectA4Pdf(signed.url, 1);
@@ -402,7 +404,7 @@ describe("immutable finance document contexts", () => {
       paymentId: payment.id, amountMinor: "300", method: "cash", reason: "Returned excess cash",
       effectiveAt: new Date("2026-10-03T10:00:00Z"), idempotencyKey: createFinanceIdempotencyKey("pdf-refund"),
     });
-    const receiptTemplate = await scenario.actors.accountant.client.school.selectMarketplaceTemplate({ schoolId: scenario.school.id, documentType: "receipt", slug: "receipt-modern", expectedRevisionId: null });
+    const receiptTemplate = await scenario.actors.accountant.client.school.selectMarketplaceTemplate({ schoolId: scenario.school.id, documentType: "receipt", slug: "receipt-default", expectedRevisionId: null });
     const receiptInput = { schoolId: scenario.school.id, source: { documentType: "receipt" as const, sessionId: scenario.activeSession.id, transactions: [{ kind: "refund" as const, id: refund.id }] }, templateRevisionId: receiptTemplate.artifact.id };
     const receiptPreview = await scenario.actors.accountant.client.school.previewDocument(receiptInput);
     expect(receiptPreview.html).toContain("REFUND RECEIPT");
@@ -413,7 +415,7 @@ describe("immutable finance document contexts", () => {
     const receiptDownload = await scenario.actors.accountant.client.school.getDocumentDownload({ schoolId: scenario.school.id, artifactId: receipt.artifact.id, documentType: "receipt" });
     await expectA4Pdf(receiptDownload.url, 1);
 
-    const statementTemplate = await scenario.actors.accountant.client.school.selectMarketplaceTemplate({ schoolId: scenario.school.id, documentType: "statement", slug: "statement-modern", expectedRevisionId: null });
+    const statementTemplate = await scenario.actors.accountant.client.school.selectMarketplaceTemplate({ schoolId: scenario.school.id, documentType: "statement", slug: "statement-default", expectedRevisionId: null });
     const statementSource = { documentType: "statement" as const, sessionId: scenario.activeSession.id, admissionIds: [scenario.admission.id], throughDate: "2026-10-03" };
     const statementPreview = await scenario.actors.accountant.client.school.previewDocument({ schoolId: scenario.school.id, source: statementSource, templateRevisionId: statementTemplate.artifact.id });
     expect(statementPreview.html).toContain("ACCOUNT STATEMENT");
@@ -433,7 +435,7 @@ describe("immutable finance document contexts", () => {
       idempotencyKey: createFinanceIdempotencyKey(suffix),
     });
     await post("statement-stale-first");
-    const selected = await scenario.actors.accountant.client.school.selectMarketplaceTemplate({ schoolId: scenario.school.id, documentType: "statement", slug: "statement-modern", expectedRevisionId: null });
+    const selected = await scenario.actors.accountant.client.school.selectMarketplaceTemplate({ schoolId: scenario.school.id, documentType: "statement", slug: "statement-default", expectedRevisionId: null });
     const source = { documentType: "statement" as const, sessionId: scenario.activeSession.id, admissionIds: [scenario.admission.id], throughDate: "2026-10-03" };
     const preview = await scenario.actors.accountant.client.school.previewDocument({ schoolId: scenario.school.id, source, templateRevisionId: selected.artifact.id });
     expect(preview.reviewHash).toMatch(/^[a-f0-9]{64}$/);

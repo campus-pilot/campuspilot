@@ -153,6 +153,8 @@ When a revision exists, an authorized editor sees:
   screens;
 - the template name and a Monaco Handlebars/HTML code editor with formatting,
   syntax highlighting, line numbers, wrapping, and theme support;
+- for admit cards, bills, receipts, and statements, an explicit paper footprint:
+  half A4 (two documents per physical sheet) or full A4 (one per sheet);
 - Save template and Reload saved revision actions;
 - a collapsible variable reference;
 - a sanitized sample preview on the right at wide widths and second in the stack
@@ -168,8 +170,9 @@ cache refreshes. Dirty navigation uses the application dialog and browser
 
 The code editor is dynamically loaded in a client-only boundary because Monaco
 depends on browser APIs and is unnecessary for empty or read-only states. The
-preview stays in an empty-sandbox iframe. A4 mode uses portrait A4 for report cards,
-portrait A4 imposition for student IDs and admit cards, and landscape A4 for
+preview stays in an empty-sandbox iframe. A4 mode uses portrait A4 for report
+cards and finance documents, shows half-A4 revisions in their two-up sheet
+placement, imposes student IDs on portrait A4, and uses landscape A4 for
 timetables; scrollable mode lets the rendered document use the full preview pane.
 
 Read-only users see the selected template preview but no source mutation controls.
@@ -241,8 +244,17 @@ results, students, classes, or sessions.
 `artifact` represents both template revisions and generated PDFs. Each row records
 its school, kind, document type, immutable S3 key, hash, size, creator, lifecycle
 status, and relevant provenance. PDF artifacts also retain the exact template
-revision, source identifiers, recipient identifiers, print options, and approval
-policy used at generation time.
+revision, source identifiers, recipient identifiers, template page footprint,
+print options, and approval policy used at generation time.
+
+Template `pageSize` is immutable revision metadata. `half` means one rendered
+document occupies 210 × 148.5 mm and the server places two documents vertically
+on each portrait A4 sheet. It is supported only for admit cards, bills, receipts,
+and statements. Report cards remain full portrait A4, timetables remain full
+landscape A4, and student IDs keep their dedicated 86 × 54 mm A4 imposition.
+Preview and generation read this value from the selected revision; a batch request
+cannot override it. Existing revisions migrate to `full`, avoiding a silent
+reinterpretation of historical templates.
 
 `school_document_template` is the mutable selection pointer: one active artifact ID
 per school and document type. Changing the pointer never mutates or removes an old
@@ -311,7 +323,8 @@ Keep those checks independent. UI omission alone is not an API invariant.
 ## Template authoring contract
 
 Marketplace source lives in
-`packages/api/src/routers/school/document/document.catalog.ts`. Each catalog entry
+`packages/api/src/routers/school/document/document.catalog.marketplace.ts`, with
+the imported legacy snapshot in `document.catalog.legacy.ts`. Each catalog entry
 has a globally unique slug, exact document type, human-readable name and
 description, and complete self-contained HTML.
 
@@ -322,8 +335,9 @@ Every bundled design must:
 - keep CSS and print dimensions inside the document;
 - use only the documented context fields and supported Handlebars helpers;
 - preserve missing values as missing and zero values as zero;
-- fit the correct output: portrait A4 for report/admit cards, 86 × 54 mm for each
-  student ID before A4 imposition, and landscape A4 for timetables;
+- fit the catalog entry's explicit output: portrait A4 for full revisions,
+  210 × 148.5 mm for half revisions, 86 × 54 mm for each student ID before A4
+  imposition, and landscape A4 for timetables;
 - render against `SAMPLE_DOCUMENT_CONTEXT` without reading live tenant data.
 
 The renderer allows standard Handlebars `each`, `if`, `unless`, `with`, and
@@ -374,16 +388,17 @@ Important shapes and semantics:
 
 ### Add a marketplace design
 
-1. Add a style or explicit per-type entry in `document.catalog.ts`.
+1. Add an explicit per-type entry in `document.catalog.marketplace.ts`.
 2. Choose a stable, descriptive slug. Never rename a published slug casually;
    artifact provenance stores it.
-3. Ensure all four document types receive an intentional design if the style is
-   presented as a catalog-wide family.
+3. Set an explicit `pageSize`; use `half` only for supported document types.
 4. Include the conditional school logo and self-contained print CSS.
 5. Render it with `SAMPLE_DOCUMENT_CONTEXT` and inspect the actual iframe/PDF.
 6. Extend `document.catalog.test.ts` for counts, slug uniqueness, branding, and any
    design-specific invariant.
-7. Check marketplace list and detail pages at desktop, 390 px, and 320 px.
+7. For a half design, verify two recipients produce one PDF page and three
+   recipients produce two pages.
+8. Check marketplace list and detail pages at desktop, 390 px, and 320 px.
 
 ### Add or change a template variable
 

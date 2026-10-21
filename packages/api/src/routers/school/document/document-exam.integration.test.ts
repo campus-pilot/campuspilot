@@ -428,7 +428,7 @@ describe("examination document parity", () => {
     const template = await manager.school.selectMarketplaceTemplate({
       schoolId,
       documentType: "report_card",
-      slug: "report_card-modern",
+      slug: "report_card-default",
       expectedRevisionId: null,
     });
     const sections = {
@@ -502,7 +502,7 @@ describe("examination document parity", () => {
         },
       })),
     };
-    for (const slug of ["report_card-modern", "report_card-classic"]) {
+    for (const slug of ["report_card-default", "report_card-default-attendance"]) {
       const template = DOCUMENT_MARKETPLACE.find((item) => item.slug === slug)!;
       const html = combineDocuments(
         [renderDocument(template.content, context)],
@@ -512,6 +512,28 @@ describe("examination document parity", () => {
         await convertDocumentPdf(html, "report_card"),
       );
       expect(pdf.getPageCount(), slug).toBe(1);
+      expect(pdf.getPage(0).getWidth()).toBeCloseTo(595, 0);
+      expect(pdf.getPage(0).getHeight()).toBeCloseTo(842, 0);
+    }
+  });
+  it("prints two half-A4 documents on one A4 sheet and rolls the third to a second sheet", async () => {
+    const template = DOCUMENT_MARKETPLACE.find(
+      (item) => item.slug === "admit_card-minimal",
+    )!;
+    const card = renderDocument(template.content, SAMPLE_DOCUMENT_CONTEXT);
+    for (const [count, pages] of [
+      [2, 1],
+      [3, 2],
+    ] as const) {
+      const html = combineDocuments(
+        Array.from({ length: count }, () => card),
+        "admit_card",
+        template.pageSize,
+      );
+      const pdf = await PDFDocument.load(
+        await convertDocumentPdf(html, "admit_card"),
+      );
+      expect(pdf.getPageCount()).toBe(pages);
       expect(pdf.getPage(0).getWidth()).toBeCloseTo(595, 0);
       expect(pdf.getPage(0).getHeight()).toBeCloseTo(842, 0);
     }

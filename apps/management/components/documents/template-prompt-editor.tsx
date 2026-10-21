@@ -28,10 +28,12 @@ export function TemplatePromptEditor({
   documentType,
   content,
   contextHelp,
+  pageSize,
 }: {
   documentType: TemplatePromptKind;
   content: string;
   contextHelp?: string;
+  pageSize: 'full' | 'half';
 }) {
   const form = useForm({
     defaultValues: { open: false, instructions: "" },
@@ -98,12 +100,14 @@ export function TemplatePromptEditor({
                       documentType,
                       instructions,
                       contextHelp: contextHelp ?? "",
+                      pageSize,
                     });
                     const combined = createTemplateEditingPrompt({
                       documentType,
                       instructions,
                       contextHelp: contextHelp ?? "",
                       content,
+                      pageSize,
                     });
                     return (
                       <div className="flex flex-col gap-4">

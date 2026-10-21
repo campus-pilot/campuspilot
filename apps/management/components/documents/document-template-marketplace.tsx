@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useForm } from '@tanstack/react-form';
 import { useQuery } from '@tanstack/react-query';
 import { Check, Eye, LayoutTemplate, Store } from 'lucide-react';
@@ -34,6 +35,7 @@ type MarketplaceItem = {
   documentType: DocumentType;
   name: string;
   description: string;
+  pageSize: 'full' | 'half';
 };
 
 /** Human-facing settings routes predate the API enum and stay explicitly mapped. */
@@ -51,6 +53,13 @@ function settingsHref(scope: DocumentTemplateScope) {
   return `/school/${encodeURIComponent(scope.schoolId)}/settings/templates/${settingsSlugs[scope.documentType]}`;
 }
 
+/** The selected marketplace type belongs in the URL so preview/back navigation
+ * restores the same catalog instead of the server default.
+ */
+function marketplaceHref(schoolId: string, documentType: DocumentType) {
+  return `/school/${encodeURIComponent(schoolId)}/marketplace/templates?type=${encodeURIComponent(documentType)}`;
+}
+
 export function DocumentTemplateMarketplace({
   schoolId,
   initialType = 'report_card',
@@ -58,6 +67,7 @@ export function DocumentTemplateMarketplace({
   schoolId: string;
   initialType?: DocumentType;
 }) {
+  const router = useRouter();
   const form = useForm({
     defaultValues: { documentType: initialType },
     validators: {
@@ -82,7 +92,14 @@ export function DocumentTemplateMarketplace({
           {(field) => (
             <DocumentKindCards
               value={field.state.value}
-              onChange={field.handleChange}
+              onChange={(documentType) => {
+                field.handleChange(documentType);
+                // Keep the route authoritative so a marketplace preview's Back
+                // navigation restores the document type the user selected.
+                router.replace(marketplaceHref(schoolId, documentType), {
+                  scroll: false,
+                });
+              }}
               items={allDocumentKinds}
             />
           )}
@@ -190,6 +207,11 @@ function MarketplaceCard({
       <TemplateThumbnail item={item} />
       <div className="flex min-h-16 flex-col gap-1">
         <h3 className="text-sm font-semibold">{item.name}</h3>
+        <p className="text-xs font-medium text-foreground/80">
+          {item.pageSize === 'half'
+            ? 'Half A4 · two per sheet'
+            : 'Full A4 · one per sheet'}
+        </p>
         <p className="text-xs leading-relaxed text-muted-foreground">
           {item.description}
         </p>

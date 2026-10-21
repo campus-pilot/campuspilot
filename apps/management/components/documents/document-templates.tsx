@@ -20,13 +20,17 @@ import {
   Store,
 } from 'lucide-react';
 import { z } from 'zod';
-import { type activeTemplateSchema } from '@campuspilot/api/routers/school/document/document.dto';
+import {
+  HALF_PAGE_DOCUMENT_TYPES,
+  type activeTemplateSchema,
+} from '@campuspilot/api/routers/school/document/document.dto';
 import {
   DocumentButton,
   DocumentErrors,
   DocumentField,
   DocumentPanel,
   DocumentPreview,
+  DocumentSelect,
 } from '@campuspilot/components/documents/document-controls';
 import {
   ResizableHandle,
@@ -75,18 +79,13 @@ const TEMPLATE_TITLES: Record<DocumentTemplateScope['documentType'], string> = {
   statement: 'Account Statement Template',
 };
 
-const TEMPLATE_DIMENSIONS: Record<
-  DocumentTemplateScope['documentType'],
-  { width: number; height: number }
-> = {
-  report_card: { width: 210, height: 297 },
-  id_card: { width: 85.6, height: 53.98 },
-  admit_card: { width: 210, height: 148.5 },
-  timetable: { width: 297, height: 210 },
-  bill: { width: 210, height: 297 },
-  receipt: { width: 210, height: 297 },
-  statement: { width: 210, height: 297 },
-};
+const halfPageDocumentTypes = new Set<DocumentTemplateScope['documentType']>(
+  HALF_PAGE_DOCUMENT_TYPES,
+);
+const pageSizeOptions = [
+  { value: 'half', label: 'Half A4 · two per sheet' },
+  { value: 'full', label: 'Full A4 · one per sheet' },
+] as const;
 
 const DESKTOP_WORKSPACE_QUERY = '(min-width: 1280px)';
 const MM_TO_PX = 96 / 25.4;
@@ -183,7 +182,11 @@ function SavedTemplatePreview({
 }) {
   const preview = useQuery(
     orpc.school.previewDocumentTemplate.queryOptions({
-      input: { ...scope, content: template.content },
+      input: {
+        ...scope,
+        content: template.content,
+        pageSize: template.artifact.pageSize,
+      },
     }),
   );
   return (
@@ -213,15 +216,21 @@ function useDocumentTemplateForm(
   const previewVersion = useRef(0);
   const initialPreview = useQuery(
     orpc.school.previewDocumentTemplate.queryOptions({
-      input: { ...scope, content: template.content },
+      input: {
+        ...scope,
+        content: template.content,
+        pageSize: template.artifact.pageSize,
+      },
     }),
   );
   const form = useForm({
     defaultValues: {
       name: template.artifact.name,
       content: template.content,
+      pageSize: template.artifact.pageSize,
       preview: '',
       previewContent: '',
+      previewPageSize: '' as '' | 'full' | 'half',
       error: '',
       previewing: false,
     },
@@ -229,8 +238,10 @@ function useDocumentTemplateForm(
       onChange: z.object({
         name: z.string().trim().min(1, 'Give this template a name').max(120),
         content: z.string().trim().min(1, 'Add template HTML').max(200_000),
+        pageSize: z.enum(['full', 'half']),
         preview: z.string(),
         previewContent: z.string(),
+        previewPageSize: z.enum(['', 'full', 'half']),
         error: z.string(),
         previewing: z.boolean(),
       }),
@@ -242,6 +253,7 @@ function useDocumentTemplateForm(
           ...scope,
           name: value.name,
           content: value.content,
+          pageSize: value.pageSize,
           expectedRevisionId: template.artifact.id,
         });
         await cache.templates(scope);
@@ -260,7 +272,7 @@ function useDocumentTemplateForm(
    * slower response for an older draft from replacing a newer render.
    */
   const renderPreview = useCallback(
-    async (content: string) => {
+    async (content: string, pageSize: 'full' | 'half') => {
       const version = previewVersion.current + 1;
       previewVersion.current = version;
       form.setFieldValue('error', '');
@@ -269,10 +281,12 @@ function useDocumentTemplateForm(
         const result = await client.school.previewDocumentTemplate({
           ...scope,
           content,
+          pageSize,
         });
         if (previewVersion.current !== version) return;
         form.setFieldValue('preview', result.html);
         form.setFieldValue('previewContent', content);
+        form.setFieldValue('previewPageSize', pageSize);
       } catch (error) {
         if (previewVersion.current !== version) return;
         form.setFieldValue(
@@ -337,20 +351,20 @@ function TemplateEditor({
   });
   const desktop = useDesktopWorkspace();
   const schedulePreview = useCallback(
-    (content: string) => {
+    (content: string, pageSize: 'full' | 'half') => {
       if (previewTimer.current) clearTimeout(previewTimer.current);
       previewTimer.current = setTimeout(() => {
         previewTimer.current = null;
-        void renderPreview(content);
+        void renderPreview(content, pageSize);
       }, 650);
     },
     [renderPreview],
   );
   const refreshPreview = useCallback(
-    (content: string) => {
+    (content: string, pageSize: 'full' | 'half') => {
       if (previewTimer.current) clearTimeout(previewTimer.current);
       previewTimer.current = null;
-      return renderPreview(content);
+      return renderPreview(content, pageSize);
     },
     [renderPreview],
   );
@@ -363,14 +377,20 @@ function TemplateEditor({
 
   return (
     <div className="flex min-w-0 flex-col gap-5">
-      <form.Subscribe selector={(state) => state.values.content}>
-        {(content) => (
+      <form.Subscribe
+        selector={(state) => ({
+          content: state.values.content,
+          pageSize: state.values.pageSize,
+        })}
+      >
+        {({ content, pageSize }) => (
           <TemplatePageHeader
             scope={scope}
             actions={
               <TemplatePromptEditor
                 documentType={scope.documentType}
                 content={content}
+                pageSize={pageSize}
                 contextHelp={initialPreview.data?.contextHelp}
               />
             }
@@ -382,7 +402,8 @@ function TemplateEditor({
           <DocumentDirtyGuard
             dirty={
               values.name !== template.artifact.name ||
-              values.content !== template.content
+              values.content !== template.content ||
+              values.pageSize !== template.artifact.pageSize
             }
           />
         )}
@@ -409,7 +430,7 @@ function TemplateEditor({
               form={form}
               template={template}
               onReload={onReload}
-              onContentChange={schedulePreview}
+              onDraftChange={schedulePreview}
               contextHelp={initialPreview.data?.contextHelp}
               onCollapse={() => sourcePanelRef.current?.collapse()}
             />
@@ -444,14 +465,14 @@ function TemplateSourceForm({
   form,
   template,
   onReload,
-  onContentChange,
+  onDraftChange,
   contextHelp,
   onCollapse,
 }: {
   form: TemplateForm;
   template: ActiveTemplate;
   onReload: () => Promise<void>;
-  onContentChange: (content: string) => void;
+  onDraftChange: (content: string, pageSize: 'full' | 'half') => void;
   contextHelp?: string;
   onCollapse: () => void;
 }) {
@@ -464,23 +485,43 @@ function TemplateSourceForm({
       }}
     >
       <div className="shrink-0 border-b p-3">
-        <form.Field name="name">
-          {(field) => <DocumentField field={field} label="Template name" />}
-        </form.Field>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <form.Field name="name">
+            {(field) => <DocumentField field={field} label="Template name" />}
+          </form.Field>
+          {halfPageDocumentTypes.has(template.artifact.documentType) ? (
+            <form.Field name="pageSize">
+              {(field) => (
+                <DocumentSelect
+                  field={field}
+                  label="Paper footprint"
+                  options={pageSizeOptions}
+                  onValueChange={(pageSize) =>
+                    onDraftChange(form.getFieldValue('content'), pageSize)
+                  }
+                />
+              )}
+            </form.Field>
+          ) : null}
+        </div>
       </div>
-      <form.Field name="content">
-        {(field) => (
-          <TemplateCodeEditor
-            value={field.state.value}
-            onBlur={field.handleBlur}
-            onCollapse={onCollapse}
-            onChange={(content) => {
-              field.handleChange(content);
-              onContentChange(content);
-            }}
-          />
+      <form.Subscribe selector={(state) => state.values.pageSize}>
+        {(pageSize) => (
+          <form.Field name="content">
+            {(field) => (
+              <TemplateCodeEditor
+                value={field.state.value}
+                onBlur={field.handleBlur}
+                onCollapse={onCollapse}
+                onChange={(content) => {
+                  field.handleChange(content);
+                  onDraftChange(content, pageSize);
+                }}
+              />
+            )}
+          </form.Field>
         )}
-      </form.Field>
+      </form.Subscribe>
       <form.Subscribe
         selector={(state) => ({
           values: state.values,
@@ -505,7 +546,8 @@ function TemplateSourceForm({
                   submitting ||
                   !canSubmit ||
                   (values.name === template.artifact.name &&
-                    values.content === template.content)
+                    values.content === template.content &&
+                    values.pageSize === template.artifact.pageSize)
                 }
               >
                 <Save />
@@ -549,7 +591,7 @@ function TemplateDraftPreview({
   scope: DocumentTemplateScope;
   template: ActiveTemplate;
   initialHtml?: string;
-  onRefresh: (content: string) => Promise<void>;
+  onRefresh: (content: string, pageSize: 'full' | 'half') => Promise<void>;
   sourceOpen: boolean;
   onExpand: () => void;
 }) {
@@ -585,7 +627,12 @@ function TemplateDraftPreview({
         const previewSource = values.preview
           ? values.previewContent
           : template.content;
-        const stale = previewSource !== values.content;
+        const previewPageSize = values.preview
+          ? values.previewPageSize
+          : template.artifact.pageSize;
+        const stale =
+          previewSource !== values.content ||
+          previewPageSize !== values.pageSize;
         return (
           <section className="flex h-full min-w-0 flex-col bg-muted/30">
             <header className="flex min-h-11 shrink-0 flex-wrap items-center justify-between gap-2 border-b bg-card px-3 py-1.5">
@@ -644,7 +691,9 @@ function TemplateDraftPreview({
                   variant="ghost"
                   aria-label="Refresh template preview"
                   disabled={values.previewing}
-                  onClick={() => void onRefresh(values.content)}
+                  onClick={() =>
+                    void onRefresh(values.content, values.pageSize)
+                  }
                 >
                   <RefreshCw
                     className={values.previewing ? 'animate-spin' : undefined}
@@ -702,12 +751,9 @@ function TemplatePreviewCanvas({
     );
   }
 
-  const template = TEMPLATE_DIMENSIONS[documentType];
   const landscape = documentType === 'timetable';
   const pageWidth = (landscape ? 297 : 210) * MM_TO_PX;
   const pageHeight = (landscape ? 210 : 297) * MM_TO_PX;
-  const templateWidth = template.width * MM_TO_PX;
-  const templateHeight = template.height * MM_TO_PX;
   const scale = Math.min(Math.max((width - 32) / pageWidth, 0.25), 1);
 
   return (
@@ -723,8 +769,6 @@ function TemplatePreviewCanvas({
             height: pageHeight,
             transform: `scale(${scale})`,
             transformOrigin: 'top left',
-            alignItems: documentType === 'id_card' ? 'center' : 'flex-start',
-            justifyContent: documentType === 'id_card' ? 'center' : 'flex-start',
           }}
         >
           <iframe
@@ -733,7 +777,7 @@ function TemplatePreviewCanvas({
             referrerPolicy="no-referrer"
             srcDoc={html}
             className="block shrink-0 border-0 bg-white"
-            style={{ width: templateWidth, height: templateHeight }}
+            style={{ width: pageWidth, height: pageHeight }}
           />
         </div>
       </div>

@@ -34,4 +34,13 @@ describe("portable template editing brief", () => {
       expect(prompt).not.toContain("86mm × 54mm");
     },
   );
+  it("describes two-up imposition for a half-A4 template", () => {
+    const prompt = createTemplateEditingPrompt({
+      ...input,
+      documentType: "receipt",
+      pageSize: "half",
+    });
+    expect(prompt).toContain("210mm × 148.5mm");
+    expect(prompt).toContain("two documents vertically");
+  });
 });

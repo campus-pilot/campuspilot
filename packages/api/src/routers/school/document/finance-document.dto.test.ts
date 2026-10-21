@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { documentSourceSchema, listArtifactsSchema } from "./document.dto";
+import {
+  documentSourceSchema,
+  listArtifactsSchema,
+  previewTemplateSchema,
+} from "./document.dto";
 import { DOCUMENT_MARKETPLACE, SAMPLE_DOCUMENT_CONTEXT } from "./document.catalog";
 import { renderDocument } from "./document.render";
 import { formatDocumentMoney } from "./finance-document.context";
@@ -63,6 +67,32 @@ describe("finance document contracts", () => {
         transactions: [{ kind: "refund", id: "refund" }],
       }).success,
     ).toBe(true);
+  });
+
+  it("allows half A4 only for supported template types and defaults older clients to full", () => {
+    expect(
+      previewTemplateSchema.parse({
+        schoolId: "school",
+        documentType: "bill",
+        content: "<p>Bill</p>",
+      }).pageSize,
+    ).toBe("full");
+    expect(
+      previewTemplateSchema.safeParse({
+        schoolId: "school",
+        documentType: "statement",
+        content: "<p>Statement</p>",
+        pageSize: "half",
+      }).success,
+    ).toBe(true);
+    expect(
+      previewTemplateSchema.safeParse({
+        schoolId: "school",
+        documentType: "report_card",
+        content: "<p>Report</p>",
+        pageSize: "half",
+      }).success,
+    ).toBe(false);
   });
 
   it("formats signed exact money without malformed negative fractions", () => {

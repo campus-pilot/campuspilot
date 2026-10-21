@@ -12,7 +12,9 @@ the backend contract for data, persistence, rendering, and authorization.
 | `document.dto.ts` | Strict request/output schemas and the discriminated document-source union |
 | `document.router.ts` | oRPC procedures, authorization composition, template selection, generation, history, and deletion |
 | `document.context.ts` | Independently validates source relationships and builds the explicit Handlebars context |
-| `document.catalog.ts` | Server-owned marketplace source, synthetic preview context, and user-facing variable reference |
+| `document.catalog.ts` | Synthetic preview context and user-facing variable reference |
+| `document.catalog.marketplace.ts` | Server-owned marketplace metadata, legacy adaptations, and statement designs |
+| `document.catalog.legacy.ts` | Faithful source snapshot imported from the legacy application |
 | `document.render.ts` | Handlebars restrictions, sanitization, batch layout, and Gotenberg conversion |
 | `document.storage.ts` | Immutable S3 persistence, image validation/embedding, and compensation |
 | `document.router.integration.test.ts` | Procedure, authorization, persistence, conflict, storage, and artifact lifecycle coverage |
@@ -55,7 +57,12 @@ The context retains v1 report fields, heterogeneous subject modes and grade thre
 
 ## Persistence
 
-`artifact` stores a unique S3 key, kind, document type, SHA-256, byte size, creator, explicit source identifiers, and the exact template revision used for a PDF, plus report-section choices and approval policy. HTML and PDF bytes remain in S3. Source identifiers are historical values rather than cascading foreign keys, so a generated document survives source enrollment/session removal.
+`artifact` stores a unique S3 key, kind, document type, SHA-256, byte size,
+creator, explicit source identifiers, template page footprint, and the exact
+template revision used for a PDF, plus report-section choices and approval policy.
+HTML and PDF bytes remain in S3. Source identifiers are historical values rather
+than cascading foreign keys, so a generated document survives source
+enrollment/session removal.
 
 `school_document_template` selects one immutable template artifact per school and document type. Marketplace selection copies server-owned source to a school-specific object. Saving a custom design creates another object and artifact; it never overwrites old HTML or PDFs. The client must supply `expectedRevisionId` (`null` for the first selection). A non-key tenant-row lock serializes selections without deadlocking concurrent artifact foreign-key inserts. A losing save removes its unused S3 upload and returns `CONFLICT`.
 
@@ -67,7 +74,16 @@ Deleting a PDF first records `deleting`, removes its object, then removes its ro
 
 ## Template editing and portable prompts
 
-The server-owned marketplace contains modern, classic, minimal, and logo-forward crest starting points for all four document types. Source and branded sample previews are available through normal oRPC procedures. `document.catalog.ts` defines the variable reference and synthetic preview data.
+The server-owned marketplace contains the legacy application's named report-card,
+ID-card, admit-card, timetable, bill, and receipt designs, plus matching account
+statement designs. Source and sample previews are available through normal oRPC
+procedures. `document.catalog.ts` defines the variable reference and synthetic
+preview data, while `document.catalog.marketplace.ts` owns the catalog.
+
+Admit-card and finance template revisions may use a `half` footprint. The batch
+renderer pairs those documents vertically on portrait A4 and starts a new sheet
+after every second context. `full` revisions remain one document per physical
+sheet. The immutable selected revision is the authority for preview and generation.
 
 Template editing uses TanStack Form, field-level Zod errors, explicit preview/save actions, and a callback-ref navigation guard. Users describe their edits and copy a context prompt, the latest unsaved HTML, or both together into their own AI application. The brief includes the document's print dimensions, rendering constraints, and server-owned variable reference. Returned HTML is pasted into the existing source editor, previewed, and explicitly saved as a new revision. Clipboard failures leave a selectable full prompt for manual copying.
 
@@ -77,8 +93,9 @@ There is no integrated AI provider, provider configuration, SDK, AI permission, 
 
 Existing `S3_*` and `GOTENBERG_URL` settings are reused. Server startup applies the
 document migrations through the existing migration runner, including
-`0021_finance-documents.sql` for finance sources and payment snapshots. Deploy the
-migrations with the server before using document generation.
+`0021_finance-documents.sql` for finance sources and payment snapshots and
+`0022_document-template-page-size.sql` for immutable full/half template metadata.
+Deploy the migrations with the server before using document generation.
 
 Sanitized HTML is wrapped in a restrictive CSP and displayed in an empty-sandbox iframe. School and student images are read directly from S3, validated, and embedded as raster data URIs. External assets, scripts, forms, navigation attributes, and prototype access are unavailable. The dev/test Gotenberg service disables JavaScript and both private/public outbound network access. Apply the same Chromium flags in hosted Gotenberg deployments:
 

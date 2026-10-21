@@ -3,7 +3,10 @@ import sanitizeHtml from "sanitize-html";
 import { env } from "@campuspilot/env/server";
 import { rpcError } from "../../../errors";
 import { ORPCError } from "@orpc/server";
-import type { DocumentType } from "./document.dto";
+import type {
+  DocumentTemplatePageSize,
+  DocumentType,
+} from "./document.dto";
 
 const handlebars = Handlebars.create();
 /** The v1 timetable's colspan helper accepts finite numeric operands only. */
@@ -77,14 +80,22 @@ export function renderDocument(content: string, context: object) {
     );
   }
 }
-/** Each report/admit card starts on a page; ID cards are imposed on A4 sheets.
- * The template controls card design while this wrapper controls batch layout.
+function chunks<T>(items: T[], size: number) {
+  const result: T[][] = [];
+  for (let index = 0; index < items.length; index += size)
+    result.push(items.slice(index, index + size));
+  return result;
+}
+
+/** Templates own the design inside one slot; this wrapper exclusively owns
+ * physical A4 imposition. Half templates are paired vertically, ID cards are
+ * placed eight-up, and every other document gets one physical sheet.
  */
-export function combineDocuments(documents: string[], type: DocumentType) {
-  const layout =
-    type === "id_card"
-      ? ".batch{display:grid;grid-template-columns:86mm 86mm;gap:5mm;align-content:start}.sheet-item{break-inside:avoid}"
-      : ".sheet-item{break-after:page}.sheet-item:last-child{break-after:auto}";
+export function combineDocuments(
+  documents: string[],
+  type: DocumentType,
+  pageSize: DocumentTemplatePageSize = "full",
+) {
   if (
     documents.reduce((size, doc) => size + Buffer.byteLength(doc, "utf8"), 0) >
     25_000_000
@@ -92,7 +103,25 @@ export function combineDocuments(documents: string[], type: DocumentType) {
     throw rpcError.badRequest(
       "This document exceeds the 25 MB rendering limit. Select fewer students or use smaller photos.",
     );
-  const html = `<style>@page{size:${type === "timetable" ? "A4 landscape" : "A4"};margin:12mm}${layout}</style><div class="batch">${documents.map((doc) => `<article class="sheet-item">${doc}</article>`).join("")}</div>`;
+  const landscape = type === "timetable";
+  const perSheet = type === "id_card" ? 8 : pageSize === "half" ? 2 : 1;
+  const sheets = chunks(documents, perSheet)
+    .map(
+      (sheet) =>
+        `<section class="print-sheet">${sheet
+          .map((doc) => `<article class="sheet-item">${doc}</article>`)
+          .join("")}</section>`,
+    )
+    .join("");
+  const layout =
+    type === "id_card"
+      ? ".print-sheet{padding:12mm;display:grid;grid-template-columns:86mm 86mm;grid-auto-rows:54mm;gap:5mm;align-content:start}"
+      : pageSize === "half"
+        ? ".print-sheet{display:grid;grid-template-rows:148.5mm 148.5mm}"
+        : "";
+  const width = landscape ? "297mm" : "210mm";
+  const height = landscape ? "210mm" : "297mm";
+  const html = `<div class="batch">${sheets}</div><style>@page{size:${landscape ? "A4 landscape" : "A4"};margin:0}html,body{margin:0!important;padding:0!important}.print-sheet{box-sizing:border-box;width:${width};height:${height};overflow:hidden;break-after:page}.print-sheet:last-child{break-after:auto}.sheet-item{width:100%;height:100%;min-width:0;min-height:0;overflow:hidden;break-inside:avoid}${layout}</style>`;
   return safeHtml(html);
 }
 export async function convertDocumentPdf(

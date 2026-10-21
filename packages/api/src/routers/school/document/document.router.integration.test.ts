@@ -262,7 +262,7 @@ describe('document templates, generation, and artifact lifecycle', () => {
       manager.school.getMarketplaceTemplate({
         schoolId,
         documentType: 'id_card',
-        slug: 'report_card-modern',
+        slug: 'report_card-default',
       }),
     ).rejects.toMatchObject({ code: 'NOT_FOUND' });
     await expect(

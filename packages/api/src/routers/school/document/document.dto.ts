@@ -23,6 +23,32 @@ export const documentTypeSchema = z.enum([
 ]);
 export type DocumentType = z.infer<typeof documentTypeSchema>;
 export type AcademicDocumentType = Exclude<DocumentType, "bill" | "receipt" | "statement">;
+export const documentTemplatePageSizeSchema = z.enum(["full", "half"]);
+export type DocumentTemplatePageSize = z.infer<
+  typeof documentTemplatePageSizeSchema
+>;
+export const HALF_PAGE_DOCUMENT_TYPES = [
+  "admit_card",
+  "bill",
+  "receipt",
+  "statement",
+] as const satisfies readonly DocumentType[];
+const halfPageDocumentTypes = new Set<DocumentType>(
+  HALF_PAGE_DOCUMENT_TYPES,
+);
+
+function validateTemplatePageSize(
+  value: { documentType: DocumentType; pageSize: DocumentTemplatePageSize },
+  context: z.RefinementCtx,
+) {
+  if (value.pageSize === "half" && !halfPageDocumentTypes.has(value.documentType)) {
+    context.addIssue({
+      code: "custom",
+      path: ["pageSize"],
+      message: "Half A4 is available for admit cards and finance documents only.",
+    });
+  }
+}
 export const DOCUMENT_LABELS: Record<DocumentType, string> = {
   report_card: "Report cards",
   id_card: "Student ID cards",
@@ -52,6 +78,7 @@ export const artifactDtoSchema = z.object({
   contentType: z.string(),
   byteSize: z.number().int(),
   sha256: z.string(),
+  pageSize: documentTemplatePageSizeSchema,
   templateRevisionId: z.string().nullable(),
   templateName: z.string().nullable(),
   marketplaceSlug: z.string().nullable(),
@@ -74,11 +101,14 @@ export const activeTemplateSchema = z.object({
   artifact: artifactDtoSchema,
   content: z.string(),
 });
-export const saveTemplateSchema = templateScopeSchema.extend({
-  name: z.string().trim().min(1).max(120),
-  content: templateContentSchema,
-  expectedRevisionId: id.nullable(),
-});
+export const saveTemplateSchema = templateScopeSchema
+  .extend({
+    name: z.string().trim().min(1).max(120),
+    content: templateContentSchema,
+    pageSize: documentTemplatePageSizeSchema.default("full"),
+    expectedRevisionId: id.nullable(),
+  })
+  .superRefine(validateTemplatePageSize);
 export const selectTemplateSchema = templateScopeSchema.extend({
   slug: z.string().trim().min(1).max(100),
   expectedRevisionId: id.nullable(),
@@ -88,6 +118,7 @@ export const marketplaceItemSchema = z.object({
   documentType: documentTypeSchema,
   name: z.string(),
   description: z.string(),
+  pageSize: documentTemplatePageSizeSchema,
 });
 export const listMarketplaceSchema = createListInputSchema({
   ...templateScopeSchema.shape,
@@ -96,9 +127,12 @@ export const listMarketplaceSchema = createListInputSchema({
 export const listMarketplaceOutputSchema = createPaginatedOutputSchema(
   marketplaceItemSchema,
 );
-export const previewTemplateSchema = templateScopeSchema.extend({
-  content: templateContentSchema,
-});
+export const previewTemplateSchema = templateScopeSchema
+  .extend({
+    content: templateContentSchema,
+    pageSize: documentTemplatePageSizeSchema.default("full"),
+  })
+  .superRefine(validateTemplatePageSize);
 export const previewOutputSchema = z.object({
   html: z.string(),
   studentCount: z.number().int(),

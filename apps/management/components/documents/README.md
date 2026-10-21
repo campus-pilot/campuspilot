@@ -77,8 +77,9 @@ the provider-neutral brief; and `copy-text-button.tsx` owns clipboard feedback.
 - Monaco is client-only and uses HTML language services for Handlebars-containing
   markup. Preserve line numbers, wrapping, theme support, and the format action.
 - Preview controls offer scrollable and A4-page modes. Report cards use portrait
-  A4, timetables use landscape A4, and smaller card formats are imposed on portrait
-  A4 without relaxing iframe sandboxing.
+  A4, timetables use landscape A4, ID cards are imposed on portrait A4, and
+  half-A4 admit/finance revisions visibly occupy one of two vertical sheet slots
+  without relaxing iframe sandboxing.
 - Edit with AI and Marketplace remain peer header actions. The marketplace should
   not visually dominate source editing when a template is already selected.
 - At desktop, source and preview share the workspace. At 390 px and 320 px they

@@ -77,6 +77,18 @@ describe('document rendering', () => {
     expect(html.match(/class="sheet-item"/g)).toHaveLength(2);
   });
 
+  it('packs half-A4 templates two-up and starts the third document on a new sheet', () => {
+    const html = combineDocuments(
+      ['<p>One</p>', '<p>Two</p>', '<p>Three</p>'],
+      'receipt',
+      'half',
+    );
+
+    expect(html).toContain('grid-template-rows:148.5mm 148.5mm');
+    expect(html.match(/class="print-sheet"/g)).toHaveLength(2);
+    expect(html.match(/class="sheet-item"/g)).toHaveLength(3);
+  });
+
   it('uses landscape pages for timetables and page breaks for reports', () => {
     expect(combineDocuments(['Timetable'], 'timetable')).toContain(
       '@page{size:A4 landscape;',

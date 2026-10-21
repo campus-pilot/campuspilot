@@ -183,6 +183,7 @@ async function saveTemplate(
       name: input.name,
       s3Key: `schools/${input.schoolId}/document-templates/${id}.hbs`,
       contentType: "text/x-handlebars-template",
+      pageSize: input.pageSize,
       marketplaceSlug,
       createdBy: userId,
     },
@@ -287,13 +288,13 @@ async function renderSelection(
       (tx) => buildFinanceDocumentContexts(tx, input.schoolId, input.source as Extract<dto.DocumentSource, { documentType: "bill" | "receipt" | "statement" }>),
       { isolationLevel: "repeatable read", accessMode: "read only" },
     );
-    return { ...data, studentIds: [] as string[], recipientCount: data.contexts.length, warnings: [] as string[], template, html: combineDocuments(data.contexts.map((context) => renderDocument(template.content, context)), input.source.documentType) };
+    return { ...data, studentIds: [] as string[], recipientCount: data.contexts.length, warnings: [] as string[], template, html: combineDocuments(data.contexts.map((context) => renderDocument(template.content, context)), input.source.documentType, template.row.pageSize) };
   }
   const data = await db.transaction(
     (tx) => buildDocumentContexts(tx, input.schoolId, input.source as Exclude<dto.DocumentSource, { documentType: "bill" | "receipt" | "statement" }>),
     { isolationLevel: "repeatable read", accessMode: "read only" },
   );
-  return { ...data, recipientCount: data.studentIds.length, financeSource: null, reviewHash: null, template, html: combineDocuments(data.contexts.map((context) => renderDocument(template.content, context)), input.source.documentType) };
+  return { ...data, recipientCount: data.studentIds.length, financeSource: null, reviewHash: null, template, html: combineDocuments(data.contexts.map((context) => renderDocument(template.content, context)), input.source.documentType, template.row.pageSize) };
 }
 export const schoolDocumentRouter = {
   listMarketplaceTemplates: protectedProcedure
@@ -342,7 +343,11 @@ export const schoolDocumentRouter = {
       if (!item) throw rpcError.notFound("Marketplace template");
       return {
         ...item,
-        html: renderDocument(item.content, SAMPLE_DOCUMENT_CONTEXT),
+        html: combineDocuments(
+          [renderDocument(item.content, SAMPLE_DOCUMENT_CONTEXT)],
+          item.documentType,
+          item.pageSize,
+        ),
         contextHelp: DOCUMENT_CONTEXT_HELP,
       };
     }),
@@ -394,7 +399,12 @@ export const schoolDocumentRouter = {
         return await saveTemplate(
           context.db,
           context.session.user.id,
-          { ...input, name: item.name, content: item.content },
+          {
+            ...input,
+            name: item.name,
+            content: item.content,
+            pageSize: item.pageSize,
+          },
           item.slug,
         );
       } catch (error) {
@@ -434,7 +444,11 @@ export const schoolDocumentRouter = {
     .use(requireDocumentTypePermission(SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES, SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_TEMPLATES))
     .output(z.object({ html: z.string(), contextHelp: z.string() }))
     .handler(async ({ input }) => ({
-      html: renderDocument(input.content, SAMPLE_DOCUMENT_CONTEXT),
+      html: combineDocuments(
+        [renderDocument(input.content, SAMPLE_DOCUMENT_CONTEXT)],
+        input.documentType,
+        input.pageSize,
+      ),
       contextHelp: DOCUMENT_CONTEXT_HELP,
     })),
   previewDocument: protectedProcedure
@@ -502,6 +516,7 @@ export const schoolDocumentRouter = {
             name: data.name,
             s3Key: `schools/${input.schoolId}/documents/${id}.pdf`,
             contentType: "application/pdf",
+            pageSize: data.template.row.pageSize,
             templateRevisionId: data.template.row.id,
             sessionId: input.source.sessionId,
             examSlug: "examSlug" in input.source ? input.source.examSlug : null,

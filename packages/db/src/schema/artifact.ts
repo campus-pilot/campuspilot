@@ -26,6 +26,10 @@ export const artifactStatusEnum = pgEnum("artifact_status", [
   "ready",
   "deleting",
 ]);
+export const documentTemplatePageSizeEnum = pgEnum(
+  "document_template_page_size",
+  ["full", "half"],
+);
 
 /** Immutable object references outlive the source enrollment, class, and session.
  * Source IDs are historical identifiers, not cascading foreign keys. The school
@@ -48,6 +52,13 @@ export const artifactTable = pgTable(
     contentType: text("content_type").notNull(),
     byteSize: integer("byte_size").notNull(),
     sha256: text("sha256").notNull(),
+    /** The footprint of one rendered document on its physical A4 sheet.
+     * Historical artifacts default to full so a migration never changes how
+     * an already-selected template is interpreted.
+     */
+    pageSize: documentTemplatePageSizeEnum("page_size")
+      .notNull()
+      .default("full"),
     templateRevisionId: text("template_revision_id"),
     marketplaceSlug: text("marketplace_slug"),
     sessionId: text("session_id"),
