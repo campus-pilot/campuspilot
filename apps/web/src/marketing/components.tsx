@@ -1,5 +1,4 @@
 import { BrandLogo } from "@campuspilot/components/brand-logo";
-import { env } from "@campuspilot/env/web.client";
 import { ArrowRight, Sparkles } from "lucide-react";
 import { Link } from "react-router";
 
@@ -18,7 +17,7 @@ export function FinalCta() {
       <div className="marketing-container final-cta-inner">
         <span className="final-cta-icon"><Sparkles aria-hidden="true" /></span>
         <div><small>SEE CAMPUSPILOT IN ACTION</small><h2>A calmer way to run your school.</h2><p>We’ll focus the walkthrough on the workflows that matter to you.</p></div>
-        <div><Link className="marketing-button marketing-button-light" to="/book-demo">Book a demo <ArrowRight /></Link><Link className="marketing-button marketing-button-outline-light" to={env.VITE_LOGIN_URL}>Log in</Link></div>
+        <div><Link className="marketing-button marketing-button-light" to="/book-demo">Book a demo <ArrowRight /></Link><Link className="marketing-button marketing-button-outline-light" to="/login">Log in</Link></div>
       </div>
     </section>
   );
@@ -27,7 +26,7 @@ export function FinalCta() {
 const footerLinks = [
   ["Platform", [["Overview", "/product"], ["Features", "/features"], ["AI ready", "/ai-ready"], ["Security", "/security"]]],
   ["Workflows", [["Admissions", "/features/admissions"], ["Billing", "/features/billing"], ["Examinations", "/features/examinations"], ["Documents", "/features/documents"]]],
-  ["Company", [["For schools", "/solutions"], ["Book a demo", "/book-demo"], ["Contact", "/contact"], ["Staff login", env.VITE_LOGIN_URL]]],
+  ["Company", [["For schools", "/solutions"], ["Book a demo", "/book-demo"], ["Contact", "/contact"], ["Log in", "/login"]]],
 ] as const;
 
 export function MarketingFooter() {

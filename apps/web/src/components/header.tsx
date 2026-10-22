@@ -1,6 +1,5 @@
 import { BrandLogo } from "@campuspilot/components/brand-logo";
 import { ThemeToggle } from "@campuspilot/components/theme-toggle";
-import { env } from "@campuspilot/env/web.client";
 import {
   ArrowRight,
   BarChart3,
@@ -56,6 +55,7 @@ const resourceLinks: readonly MenuLink[] = [
 
 function closeMenu(event: React.MouseEvent<HTMLAnchorElement>) {
   event.currentTarget.closest("details")?.removeAttribute("open");
+  event.currentTarget.closest(".marketing-mobile-menu")?.removeAttribute("open");
 }
 
 /** Opens desktop mega menus without requiring a click, while keeping details keyboard-operable. */
@@ -105,7 +105,10 @@ function MobileNavigation() {
       <details><summary>Product <ChevronDown /></summary><MenuItems links={productLinks} /></details>
       <details><summary>Solutions <ChevronDown /></summary><MenuItems links={solutionLinks} /></details>
       <details><summary>Resources <ChevronDown /></summary><MenuItems links={resourceLinks} /></details>
-      <Link className="marketing-mobile-demo" to="/book-demo">Book a demo <ArrowRight /></Link>
+      <div className="marketing-mobile-actions">
+        <Link className="marketing-mobile-login" to="/login" onClick={closeMenu}>Log in</Link>
+        <Link className="marketing-mobile-demo" to="/book-demo" onClick={closeMenu}>Book a demo <ArrowRight /></Link>
+      </div>
     </nav>
   );
 }
@@ -122,7 +125,7 @@ export default function Header() {
         </nav>
         <div className="marketing-header-actions">
           <ThemeToggle />
-          <Link className="marketing-login" to={env.VITE_LOGIN_URL}>Log in</Link>
+          <Link className="marketing-login" to="/login">Log in</Link>
           <Link className="marketing-button marketing-button-dark marketing-header-cta" to="/book-demo">Book a demo <ArrowRight /></Link>
           <details className="marketing-mobile-menu"><summary aria-label="Open navigation"><Menu aria-hidden="true" /></summary><MobileNavigation /></details>
         </div>

@@ -90,7 +90,7 @@ export default function Home() {
             <div className="hero-panel-copy">
               <h1>One school,<br /><span>one platform.</span></h1>
               <p>One shared place for leaders, teachers, staff, students, and families to see what matters and keep every school day moving.</p>
-              <div className="hero-actions"><Link className="marketing-button marketing-button-light" to="/book-demo">Book a demo <ArrowRight /></Link><Link className="marketing-button hero-product-link" to="/product">Explore CampusPilot <ArrowRight /></Link></div>
+              <div className="hero-actions"><Link className="marketing-button marketing-button-light" to="/book-demo">Book a demo <ArrowRight /></Link><Link className="marketing-button marketing-button-outline-light hero-login-link" to="/login">Log in <ArrowRight /></Link></div>
             </div>
             <div className="hero-system" aria-label="CampusPilot connected workflows"><span className="hero-system-core"><School /><b>CampusPilot</b></span>{heroWorkflows.map(([Icon, title], index) => <span className={`hero-system-item item-${index + 1}`} key={title}><Icon /><b>{title}</b></span>)}</div>
           </div>

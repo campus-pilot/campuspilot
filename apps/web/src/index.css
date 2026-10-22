@@ -73,3 +73,35 @@ html{scroll-behavior:smooth}body{margin:0;overflow-x:hidden;background:var(--m-b
 .nav-menu-popover::before{position:absolute;top:-10px;left:0;width:100%;height:10px;content:""}
 .nav-menu-grid>a b{color:var(--m-ink)}
 .nav-menu:focus-within>summary{background:color-mix(in srgb,var(--m-ink) 6%,transparent);color:var(--m-ink)}
+
+/* Login is a deliberate choice on mobile instead of a direct jump into one workspace. */
+.hero-login-link{display:none}
+.marketing-mobile-nav>details{border-bottom:1px solid var(--m-line)}
+.marketing-mobile-nav>details>summary{font-weight:700}
+.marketing-mobile-actions{display:grid;grid-template-columns:1fr 1.25fr;gap:8px;margin-top:8px;padding-top:10px}
+.marketing-mobile-nav .marketing-mobile-actions a{display:flex;min-height:44px;align-items:center;justify-content:center;gap:7px;padding:0 12px;text-align:center}
+.marketing-mobile-nav .marketing-mobile-login{border:1px solid var(--m-line);background:var(--m-surface);color:var(--m-ink)}
+.marketing-mobile-nav .marketing-mobile-demo{margin:0;background:var(--m-ink);color:var(--m-bg)}
+.marketing-mobile-actions svg{width:14px}
+
+.login-choice-page{min-height:calc(100vh - 72px);background:radial-gradient(circle at 18% 8%,color-mix(in srgb,var(--m-orange) 14%,transparent),transparent 32%),var(--m-bg);padding:96px 0 110px}
+.login-choice-shell{display:grid;grid-template-columns:minmax(0,.8fr) minmax(520px,1.2fr);gap:clamp(60px,8vw,120px);align-items:center}
+.login-choice-intro>span{display:inline-flex;align-items:center;gap:8px;color:var(--m-orange-dark);font-size:10px;font-weight:750;letter-spacing:.13em;text-transform:uppercase}
+.login-choice-intro>span svg{width:15px}
+.login-choice-intro h1{margin:20px 0;font-size:clamp(54px,6vw,82px);font-weight:650;letter-spacing:-.065em;line-height:.92}
+.login-choice-intro p{max-width:520px;margin:0;color:var(--m-muted);font-size:15px;line-height:1.7}
+.login-choice-grid{display:grid;gap:12px}
+.login-choice-grid>a{position:relative;display:grid;grid-template-columns:50px 1fr auto;gap:6px 18px;align-items:center;border:1px solid var(--m-line);border-radius:16px;background:color-mix(in srgb,var(--m-surface) 88%,transparent);padding:26px;box-shadow:0 16px 45px rgba(28,24,18,.05);transition:border-color .2s,transform .2s,box-shadow .2s}
+.login-choice-grid>a:hover{transform:translateY(-3px);border-color:color-mix(in srgb,var(--m-orange) 62%,var(--m-line));box-shadow:0 22px 55px rgba(28,24,18,.1)}
+.login-choice-grid>a>svg{grid-row:1/5;width:48px;height:48px;border-radius:13px;background:color-mix(in srgb,var(--m-orange) 13%,transparent);color:var(--m-orange-dark);padding:13px}
+.login-choice-grid small{color:var(--m-orange-dark);font-size:9px;font-weight:750;letter-spacing:.1em}
+.login-choice-grid h2{margin:0;font-size:22px;letter-spacing:-.035em}
+.login-choice-grid p{grid-column:2;margin:2px 0 0;color:var(--m-muted);font-size:12px;line-height:1.55}
+.login-choice-grid>a>span{grid-column:3;grid-row:1/5;display:flex;align-items:center;gap:7px;color:var(--m-ink);font-size:11px;font-weight:700}
+.login-choice-grid>a>span svg{width:14px;transition:transform .2s}
+.login-choice-grid>a:hover>span svg{transform:translateX(3px)}
+.login-back-link{grid-column:2;width:fit-content;color:var(--m-muted);font-size:11px;font-weight:650}
+.login-back-link:hover{color:var(--m-ink)}
+
+@media(max-width:960px){.login-choice-shell{grid-template-columns:1fr;gap:48px}.login-choice-intro{max-width:680px}.login-back-link{grid-column:1}}
+@media(max-width:700px){.hero-login-link{display:inline-flex}.marketing-mobile-nav{width:min(340px,calc(100vw - 24px));padding:12px}.login-choice-page{padding:66px 0 80px}.login-choice-shell{gap:38px}.login-choice-intro h1{font-size:clamp(48px,14vw,64px)}.login-choice-grid>a{grid-template-columns:44px 1fr;padding:22px 18px}.login-choice-grid>a>svg{width:42px;height:42px;padding:11px}.login-choice-grid>a>span{grid-column:2;grid-row:auto;margin-top:8px}.login-choice-grid p{grid-column:2}.login-choice-grid h2{font-size:20px}}
