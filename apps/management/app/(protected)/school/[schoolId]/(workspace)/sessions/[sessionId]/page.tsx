@@ -1,12 +1,10 @@
-import { LayoutDashboard } from 'lucide-react';
-import { ModulePlaceholder } from '@/components/module-placeholder';
+import { SchoolDashboard } from '@/components/dashboard/school-dashboard';
 
-export default function DashboardPage() {
-  return (
-    <ModulePlaceholder
-      icon={LayoutDashboard}
-      title="Dashboard"
-      description="Your school overview will bring the most important activity and actions together here."
-    />
-  );
+export default async function DashboardPage({
+  params,
+}: {
+  params: Promise<{ schoolId: string; sessionId: string }>;
+}) {
+  const { schoolId, sessionId } = await params;
+  return <SchoolDashboard schoolId={schoolId} sessionId={sessionId} />;
 }

@@ -1,4 +1,5 @@
 import { schoolDocumentRouter } from './document/document.router';
+import { schoolDashboardRouter } from './dashboard/dashboard.router';
 import { schoolMemberTable } from "@campuspilot/db/schema/school-member";
 import { schoolTable } from "@campuspilot/db/schema/school";
 import { SCHOOL_ACTIONS } from "@campuspilot/opa/policies/school";
@@ -27,6 +28,7 @@ import { schoolSessionRouter } from "./session/session.router";
 import { schoolStudentRouter } from "./student/student.router";
 
 export const schoolRouter = {
+  ...schoolDashboardRouter,
   ...schoolDocumentRouter,
   ...schoolExamRouter,
   listMySchools: protectedProcedure
