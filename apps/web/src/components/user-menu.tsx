@@ -12,6 +12,7 @@ import { Skeleton } from "@campuspilot/ui/components/skeleton";
 import { Link, useNavigate } from "react-router";
 
 import { authClient } from "@campuspilot/auth/client";
+import { env } from "@campuspilot/env/web.client";
 
 export default function UserMenu() {
   const navigate = useNavigate();
@@ -23,7 +24,7 @@ export default function UserMenu() {
 
   if (!session) {
     return (
-      <Link to="/login">
+      <Link to={env.VITE_LOGIN_URL}>
         <Button variant="outline">Sign In</Button>
       </Link>
     );

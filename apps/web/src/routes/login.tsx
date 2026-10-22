@@ -1,14 +1,6 @@
-import { useState } from "react";
-
-import SignInForm from "@/components/sign-in-form";
-import SignUpForm from "@/components/sign-up-form";
+import { ArrowRight, LockKeyhole } from "lucide-react";
+import { Link } from "react-router";
 
 export default function Login() {
-  const [showSignIn, setShowSignIn] = useState(false);
-
-  return showSignIn ? (
-    <SignInForm onSwitchToSignUp={() => setShowSignIn(false)} />
-  ) : (
-    <SignUpForm onSwitchToSignIn={() => setShowSignIn(true)} />
-  );
+  return <main id="main" className="standalone-message"><LockKeyhole /><h1>Sign in to your CampusPilot workspace.</h1><p>The public website stays independent from school data. Your organization’s workspace provides the secure sign-in route.</p><Link className="marketing-button marketing-button-primary" to="/contact">Contact CampusPilot <ArrowRight /></Link></main>;
 }
