@@ -261,6 +261,14 @@ export const admissionFinanceSummaryOutputSchema = z.object({
     broughtForwardMinor: signedFinanceCumulativeIntegerStringSchema,
     billCounts: z.object({ posted: z.number().int().nonnegative(), reversed: z.number().int().nonnegative() }),
   })),
+  monthlyActivity: z.array(z.object({
+    period: z.string().regex(/^\d{4}-(?:0[1-9]|1[0-2])$/),
+    currency: currencySchema,
+    billedMinor: signedFinanceCumulativeIntegerStringSchema,
+    collectedMinor: signedFinanceCumulativeIntegerStringSchema,
+    creditAdjustmentMinor: signedFinanceCumulativeIntegerStringSchema,
+    refundMinor: signedFinanceCumulativeIntegerStringSchema,
+  })),
 });
 
 const billListItemSchema = z.object({

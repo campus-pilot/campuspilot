@@ -248,13 +248,16 @@ export async function getAdmissionLedger(
   };
 }
 
+/** Returns lifetime balances plus optionally session-scoped activity. Monthly
+ * buckets follow each entry's session timezone; UTC is used only when a legacy
+ * session has no configured timezone. */
 export async function getAdmissionFinanceSummary(
   db: DatabaseExecutor,
   input: { schoolId: string; admissionId: string; sessionId?: string },
 ) {
   await assertAdmissionContext(db, input);
   const reversedBillExpression = sql<boolean>`exists (select 1 from ${financeLedgerEntryTable} br where br.school_id = ${financeBillTable.schoolId} and br.reversal_of_entry_id = ${financeBillTable.ledgerEntryId})`;
-  const [lifetime, activities, selectedSession, billCounts, activityTotals] = await Promise.all([
+  const [lifetime, activities, selectedSession, billCounts, activityTotals, monthlyActivity] = await Promise.all([
     db.select({
       currency: financeLedgerEntryTable.currency,
       debitTotalMinor: sql<string>`coalesce(sum(${financeLedgerEntryTable.amountMinor}) filter (where ${financeLedgerEntryTable.direction} = 'debit'), 0)::numeric`,
@@ -304,6 +307,50 @@ export async function getAdmissionFinanceSummary(
         ${input.sessionId ? sql`and entry.session_id = ${input.sessionId}` : sql``}
       group by entry.currency
     `).then((result) => result.rows),
+    db.execute<{
+      period: string;
+      currency: string;
+      billedMinor: string;
+      collectedMinor: string;
+      creditAdjustmentMinor: string;
+      refundMinor: string;
+    }>(sql`
+      select
+        to_char(
+          entry.effective_at at time zone coalesce(
+            nullif(session.finance_config ->> 'timeZone', ''),
+            'UTC'
+          ),
+          'YYYY-MM'
+        ) as period,
+        entry.currency,
+        coalesce(sum(case
+          when entry.type in ('bill', 'manual_debit_adjustment') then entry.amount_minor
+          when entry.type = 'reversal' and target.type in ('bill', 'manual_debit_adjustment') then -entry.amount_minor
+          else 0 end), 0)::numeric as "billedMinor",
+        coalesce(sum(case
+          when entry.type = 'payment' then entry.amount_minor
+          when entry.type = 'reversal' and target.type = 'payment' then -entry.amount_minor
+          else 0 end), 0)::numeric as "collectedMinor",
+        coalesce(sum(case
+          when entry.type in ('discount', 'waiver', 'write_off', 'credit_correction') then entry.amount_minor
+          when entry.type = 'reversal' and target.type in ('discount', 'waiver', 'write_off', 'credit_correction') then -entry.amount_minor
+          else 0 end), 0)::numeric as "creditAdjustmentMinor",
+        coalesce(sum(case
+          when entry.type = 'refund' then entry.amount_minor
+          when entry.type = 'reversal' and target.type = 'refund' then -entry.amount_minor
+          else 0 end), 0)::numeric as "refundMinor"
+      from finance_ledger_entry entry
+      inner join school_session session
+        on session.school_id = entry.school_id and session.id = entry.session_id
+      left join finance_ledger_entry target
+        on target.school_id = entry.school_id and target.id = entry.reversal_of_entry_id
+      where entry.school_id = ${input.schoolId}
+        and entry.admission_id = ${input.admissionId}
+        ${input.sessionId ? sql`and entry.session_id = ${input.sessionId}` : sql``}
+      group by entry.currency, period
+      order by period, entry.currency
+    `).then((result) => result.rows),
   ]);
   const selectedByCurrency = new Map(activities.filter((activity) => activity.sessionId === input.sessionId).map((activity) => [activity.currency, activity]));
   const selectedYears = selectedSession[0];
@@ -320,6 +367,7 @@ export async function getAdmissionFinanceSummary(
   const billCountsByCurrency = new Map(billCounts.map((row) => [row.currency, row]));
   const activityTotalsByCurrency = new Map(activityTotals.map((row) => [row.currency, row]));
   return {
+    monthlyActivity,
     currencies: lifetime.map((row) => {
       const lifetimeDebit = asBigInt(row.debitTotalMinor);
       const lifetimeCredit = asBigInt(row.creditTotalMinor);

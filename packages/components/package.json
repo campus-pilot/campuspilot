@@ -30,6 +30,7 @@
     "@tanstack/react-table": "^8.21.3",
     "lucide-react": "catalog:",
     "react": "catalog:",
+    "recharts": "3.8.0",
     "zod": "catalog:"
   },
   "devDependencies": {

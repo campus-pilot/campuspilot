@@ -53,6 +53,16 @@ describe("school finance ledger operations", () => {
 
     const summary = await scenario.actors.platformAdmin.client.school.getAdmissionFinanceSummary({ schoolId: scenario.school.id, admissionId: scenario.admission.id, sessionId: scenario.activeSession.id });
     expect(summary.currencies).toEqual([expect.objectContaining({ currency: "INR", balanceMinor: "3000", dueMinor: "3000", creditMinor: "0", billedMinor: "10000", collectedMinor: "12000", billCounts: { posted: 1, reversed: 0 } })]);
+    expect(summary.monthlyActivity).toEqual([
+      {
+        period: "2040-05",
+        currency: "INR",
+        billedMinor: "10000",
+        collectedMinor: "12000",
+        creditAdjustmentMinor: "0",
+        refundMinor: "0",
+      },
+    ]);
 
     const ledger = await scenario.actors.manager.client.school.getAdmissionLedger({ schoolId: scenario.school.id, admissionId: scenario.admission.id, limit: 20 });
     expect(ledger.entries.items.map((entry: { type: string }) => entry.type)).toEqual(["manual_debit_adjustment", "manual_debit_adjustment", "payment"]);

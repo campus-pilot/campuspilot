@@ -612,6 +612,9 @@ importers:
       react:
         specifier: 'catalog:'
         version: 19.3.0
+      recharts:
+        specifier: 3.8.0
+        version: 3.8.0(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react-is@19.3.0)(react@19.3.0)(redux@5.0.1)
       zod:
         specifier: 'catalog:'
         version: 4.6.1

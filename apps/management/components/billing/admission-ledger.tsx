@@ -7,6 +7,7 @@ import { z } from "zod";
 import { SCHOOL_ACTIONS } from "@campuspilot/api/routers/authorization/authorization.dto";
 import {
   FinanceLedgerTable,
+  FinanceMonthlyChart,
   FinanceSummaryCards,
   formatFinanceInstant,
   formatMinor,
@@ -30,6 +31,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@campuspilot/ui/components/select";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@campuspilot/ui/components/tabs";
 import {
   HandCoins,
   Percent,
@@ -736,6 +743,38 @@ function LedgerData({
       },
     }),
   );
+  const chartCurrencies = [
+    ...new Set(summaryQuery.data.monthlyActivity.map((item) => item.currency)),
+  ];
+  const ledgerTable = (
+    <div className="flex flex-col gap-2">
+      {ledgerQuery.data.pageOpeningBalances.map((balance) => (
+        <p key={balance.currency} className="text-xs text-muted-foreground">
+          Page opening balance:{" "}
+          {formatMinor(balance.balanceMinor, balance.currency)}
+        </p>
+      ))}
+      <FinanceLedgerTable rows={rows} />
+      <SimplePagination
+        currentPage={ledgerQuery.data.entries.pagination.currentPage}
+        totalPages={ledgerQuery.data.entries.pagination.totalPages}
+        onPageChange={(next) => {
+          setPage(next);
+          setDetailEntry(undefined);
+          setReversalEntry(undefined);
+          setDialog(null);
+        }}
+      />
+      {ledgerQuery.data.closingBalances.map((balance) => (
+        <p
+          key={balance.currency}
+          className="text-right text-xs text-muted-foreground"
+        >
+          Closing balance: {formatMinor(balance.balanceMinor, balance.currency)}
+        </p>
+      ))}
+    </div>
+  );
   return (
     <div className="flex min-w-0 flex-col gap-6">
       <RequirePermissions
@@ -758,116 +797,130 @@ function LedgerData({
           }}
         />
       </RequirePermissions>
-      {summaryQuery.data.currencies.length ? (
-        summaryQuery.data.currencies.map((summary) => (
-          <section key={summary.currency} className="flex flex-col gap-3">
-            <div className="flex items-center gap-2">
-              <h3 className="font-medium">{summary.currency}</h3>
-              {sessionId ? (
-                <Badge variant="outline">
-                  {sessionLabels.get(sessionId) ?? "Selected session activity"}
-                </Badge>
-              ) : (
-                <Badge variant="outline">Lifetime account</Badge>
-              )}
+      <Tabs defaultValue="graph">
+        <TabsList aria-label="Ledger view">
+          <TabsTrigger value="graph">Graph</TabsTrigger>
+          <TabsTrigger value="details">Details</TabsTrigger>
+        </TabsList>
+        <TabsContent value="graph" className="flex flex-col gap-6">
+          {chartCurrencies.length ? (
+            <div className="flex flex-col gap-4">
+              {chartCurrencies.map((currency) => (
+                <FinanceMonthlyChart
+                  key={currency}
+                  currency={currency}
+                  contextLabel={
+                    sessionId
+                      ? (sessionLabels.get(sessionId) ??
+                        "Selected session activity")
+                      : "Lifetime account"
+                  }
+                  activity={summaryQuery.data.monthlyActivity.filter(
+                    (item) => item.currency === currency,
+                  )}
+                />
+              ))}
             </div>
-            <FinanceSummaryCards
-              items={[
-                {
-                  label: "Lifetime amount due",
-                  value: formatMinor(summary.dueMinor, summary.currency),
-                },
-                {
-                  label: "Lifetime account credit",
-                  value: formatMinor(summary.creditMinor, summary.currency),
-                },
-                {
-                  label: sessionId
-                    ? "Selected-session billed"
-                    : "Lifetime billed",
-                  value: formatMinor(summary.billedMinor, summary.currency),
-                },
-                {
-                  label: sessionId
-                    ? "Selected-session collected"
-                    : "Lifetime collected",
-                  value: formatMinor(summary.collectedMinor, summary.currency),
-                },
-                {
-                  label: sessionId
-                    ? "Selected-session credit adjustments"
-                    : "Lifetime credit adjustments",
-                  value: formatMinor(
-                    summary.creditAdjustmentMinor,
-                    summary.currency,
-                  ),
-                },
-                {
-                  label: sessionId
-                    ? "Selected-session debit corrections"
-                    : "Lifetime debit corrections",
-                  value: formatMinor(
-                    summary.debitAdjustmentMinor,
-                    summary.currency,
-                  ),
-                },
-                {
-                  label: sessionId
-                    ? "Selected-session refunds"
-                    : "Lifetime refunds",
-                  value: formatMinor(summary.refundMinor, summary.currency),
-                },
-                {
-                  label: "Brought forward",
-                  value: sessionId
-                    ? formatMinor(summary.broughtForwardMinor, summary.currency)
-                    : "—",
-                  detail: sessionId
-                    ? "Lifetime balance before this session"
-                    : "Choose a session to calculate",
-                },
-                {
-                  label: "Bills",
-                  value: `${summary.billCounts.posted} posted`,
-                  detail: `${summary.billCounts.reversed} reversed`,
-                },
-              ]}
-            />
-          </section>
-        ))
-      ) : (
-        <p className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">
-          No financial activity has been recorded for this admission.
-        </p>
-      )}
-      <div className="flex flex-col gap-2">
-        {ledgerQuery.data.pageOpeningBalances.map((balance) => (
-          <p key={balance.currency} className="text-xs text-muted-foreground">
-            Page opening balance:{" "}
-            {formatMinor(balance.balanceMinor, balance.currency)}
-          </p>
-        ))}
-        <FinanceLedgerTable rows={rows} />
-        <SimplePagination
-          currentPage={ledgerQuery.data.entries.pagination.currentPage}
-          totalPages={ledgerQuery.data.entries.pagination.totalPages}
-          onPageChange={(next) => {
-            setPage(next);
-            setDetailEntry(undefined);
-            setReversalEntry(undefined);
-            setDialog(null);
-          }}
-        />
-        {ledgerQuery.data.closingBalances.map((balance) => (
-          <p
-            key={balance.currency}
-            className="text-right text-xs text-muted-foreground"
-          >
-            Closing balance:{" "}
-            {formatMinor(balance.balanceMinor, balance.currency)}
-          </p>
-        ))}
-      </div>
+          ) : (
+            <p className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">
+              No financial activity has been recorded for this admission.
+            </p>
+          )}
+          {ledgerTable}
+        </TabsContent>
+        <TabsContent value="details" className="flex flex-col gap-6">
+          {summaryQuery.data.currencies.length ? (
+            summaryQuery.data.currencies.map((summary) => (
+              <section key={summary.currency} className="flex flex-col gap-3">
+                <div className="flex items-center gap-2">
+                  <h3 className="font-medium">{summary.currency}</h3>
+                  {sessionId ? (
+                    <Badge variant="outline">
+                      {sessionLabels.get(sessionId) ??
+                        "Selected session activity"}
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline">Lifetime account</Badge>
+                  )}
+                </div>
+                <FinanceSummaryCards
+                  items={[
+                    {
+                      label: "Lifetime amount due",
+                      value: formatMinor(summary.dueMinor, summary.currency),
+                    },
+                    {
+                      label: "Lifetime account credit",
+                      value: formatMinor(summary.creditMinor, summary.currency),
+                    },
+                    {
+                      label: sessionId
+                        ? "Selected-session billed"
+                        : "Lifetime billed",
+                      value: formatMinor(summary.billedMinor, summary.currency),
+                    },
+                    {
+                      label: sessionId
+                        ? "Selected-session collected"
+                        : "Lifetime collected",
+                      value: formatMinor(
+                        summary.collectedMinor,
+                        summary.currency,
+                      ),
+                    },
+                    {
+                      label: sessionId
+                        ? "Selected-session credit adjustments"
+                        : "Lifetime credit adjustments",
+                      value: formatMinor(
+                        summary.creditAdjustmentMinor,
+                        summary.currency,
+                      ),
+                    },
+                    {
+                      label: sessionId
+                        ? "Selected-session debit corrections"
+                        : "Lifetime debit corrections",
+                      value: formatMinor(
+                        summary.debitAdjustmentMinor,
+                        summary.currency,
+                      ),
+                    },
+                    {
+                      label: sessionId
+                        ? "Selected-session refunds"
+                        : "Lifetime refunds",
+                      value: formatMinor(summary.refundMinor, summary.currency),
+                    },
+                    {
+                      label: "Brought forward",
+                      value: sessionId
+                        ? formatMinor(
+                            summary.broughtForwardMinor,
+                            summary.currency,
+                          )
+                        : "—",
+                      detail: sessionId
+                        ? "Lifetime balance before this session"
+                        : "Choose a session to calculate",
+                    },
+                    {
+                      label: "Bills",
+                      value: `${summary.billCounts.posted} posted`,
+                      detail: `${summary.billCounts.reversed} reversed`,
+                    },
+                  ]}
+                />
+              </section>
+            ))
+          ) : (
+            <p className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">
+              No financial activity has been recorded for this admission.
+            </p>
+          )}
+          {ledgerTable}
+        </TabsContent>
+      </Tabs>
       {detailEntry ? (
         <LedgerEntryDetail
           schoolId={schoolId}
