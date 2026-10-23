@@ -1,5 +1,27 @@
 **/node_modules
 .git
+.github
+
+# Agent state and local-only migration/rehearsal material are never build inputs.
+.sks
+/tmp
+/temp
+/artifact
+/artifacts
+/rehearsal
+/rehearsals
+
+# Keep production snapshots and generated migration manifests out even if they
+# are moved outside the local .sks workspace in a future rehearsal.
+**/*.dump
+**/writes.ndjson
+/migration/**/runs
+/migration/**/rehearsal
+/migration/**/rehearsals
+/migration/**/source-manifest.json
+/migration/**/source-object-manifest.json
+/migration/**/dispositions.ndjson
+/migration/**/exceptions.ndjson
 
 **/dist
 **/build
@@ -17,6 +39,14 @@
 **/.vercel
 *.log
 
+coverage
+**/coverage
+playwright-report
+**/playwright-report
+test-results
+**/test-results
+.DS_Store
+
 Dockerfile
 **/Dockerfile
 docker-compose.yml
@@ -25,7 +55,6 @@ docker-compose.yml
 # build-time public values come from compose build args
 **/.env
 **/.env.*
-!**/.env.example
 
 local.db
 local.db-*

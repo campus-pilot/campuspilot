@@ -1,0 +1,383 @@
+name: Release & Publish
+
+on:
+  push:
+    branches:
+      - main
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Prepare release version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      release_tag: ${{ steps.version.outputs.release_tag }}
+      sha_tag: ${{ steps.version.outputs.sha_tag }}
+      mode: ${{ steps.version.outputs.mode }}
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+
+      - name: Fetch release tags
+        run: git fetch --tags --force
+
+      - name: Resolve idempotent release version
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          semver_regex='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+          sha_regex='^[0-9a-f]{40}$'
+
+          if [[ ! "${GITHUB_SHA}" =~ ${sha_regex} ]]; then
+            echo "Invalid source commit SHA" >&2
+            exit 1
+          fi
+
+          points_at_output="$(git tag --points-at "${GITHUB_SHA}")"
+          existing_tags=()
+          while IFS= read -r candidate; do
+            if [[ "${candidate}" =~ ${semver_regex} ]]; then
+              existing_tags+=("${candidate}")
+            fi
+          done <<< "${points_at_output}"
+
+          if (( ${#existing_tags[@]} > 1 )); then
+            echo "Source commit already has multiple semver release tags" >&2
+            exit 1
+          fi
+
+          if (( ${#existing_tags[@]} == 1 )); then
+            release_tag="${existing_tags[0]}"
+            mode='reuse'
+          else
+            tag_output="$(git tag --list)"
+            release_tags=()
+            while IFS= read -r candidate; do
+              if [[ "${candidate}" =~ ${semver_regex} ]]; then
+                release_tags+=("${candidate}")
+              fi
+            done <<< "${tag_output}"
+
+            if (( ${#release_tags[@]} == 0 )); then
+              base_tag='v0.0.0'
+            else
+              base_tag="$(printf '%s\n' "${release_tags[@]}" | sort -V | tail -n 1)"
+            fi
+
+            if [[ ! "${base_tag}" =~ ${semver_regex} ]]; then
+              echo "Base release tag is not strict semver" >&2
+              exit 1
+            fi
+
+            labels="$({
+              gh api \
+                "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/pulls" \
+                --header 'Accept: application/vnd.github+json' \
+                --jq '.[].labels[].name'
+            })"
+
+            bump='patch'
+            if grep -Fxq 'major' <<< "${labels}"; then
+              bump='major'
+            elif grep -Fxq 'minor' <<< "${labels}"; then
+              bump='minor'
+            fi
+
+            version="${base_tag#v}"
+            IFS='.' read -r major minor patch <<< "${version}"
+            case "${bump}" in
+              major)
+                major=$((major + 1))
+                minor=0
+                patch=0
+                ;;
+              minor)
+                minor=$((minor + 1))
+                patch=0
+                ;;
+              patch)
+                patch=$((patch + 1))
+                ;;
+              *)
+                echo "Unsupported version bump" >&2
+                exit 1
+                ;;
+            esac
+
+            release_tag="v${major}.${minor}.${patch}"
+            mode='new'
+          fi
+
+          if [[ ! "${release_tag}" =~ ${semver_regex} ]]; then
+            echo "Resolved release tag is not strict semver" >&2
+            exit 1
+          fi
+
+          echo "release_tag=${release_tag}" >> "${GITHUB_OUTPUT}"
+          echo "sha_tag=sha-${GITHUB_SHA}" >> "${GITHUB_OUTPUT}"
+          echo "mode=${mode}" >> "${GITHUB_OUTPUT}"
+
+  build:
+    name: Build immutable ${{ matrix.name }} image
+    needs: prepare
+    if: ${{ needs.prepare.outputs.mode == 'new' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: management
+            file: apps/management/Dockerfile
+            image: ghcr.io/campus-pilot/campuspilot-plus-management
+            build_args: |
+              NEXT_PUBLIC_SERVER_URL=${{ vars.NEXT_PUBLIC_SERVER_URL }}
+          - name: admin
+            file: apps/admin/Dockerfile
+            image: ghcr.io/campus-pilot/campuspilot-plus-admin
+            build_args: |
+              NEXT_PUBLIC_SERVER_URL=${{ vars.NEXT_PUBLIC_SERVER_URL }}
+          - name: web
+            file: apps/web/Dockerfile
+            image: ghcr.io/campus-pilot/campuspilot-plus-web
+            build_args: |
+              VITE_SERVER_URL=${{ vars.VITE_SERVER_URL }}
+              VITE_CONTACT_EMAIL=${{ vars.VITE_CONTACT_EMAIL }}
+              VITE_CONTACT_PHONE_NUMBER=${{ vars.VITE_CONTACT_PHONE_NUMBER }}
+              VITE_CONTACT_PHONE_LABEL=${{ vars.VITE_CONTACT_PHONE_LABEL }}
+              VITE_WHATSAPP_NUMBER=${{ vars.VITE_WHATSAPP_NUMBER }}
+              VITE_WHATSAPP_LABEL=${{ vars.VITE_WHATSAPP_LABEL }}
+              VITE_CALENDAR_URL=${{ vars.VITE_CALENDAR_URL }}
+              VITE_STAFF_LOGIN_URL=${{ vars.VITE_STAFF_LOGIN_URL }}
+              VITE_STUDENT_LOGIN_URL=${{ vars.VITE_STUDENT_LOGIN_URL || '' }}
+          - name: api
+            file: apps/server/Dockerfile
+            image: ghcr.io/campus-pilot/campuspilot-plus-api
+            build_args: ""
+          - name: opa
+            file: packages/opa/Dockerfile
+            image: ghcr.io/campus-pilot/campuspilot-plus-opa
+            build_args: ""
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Build and push immutable tags
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          file: ${{ matrix.file }}
+          push: true
+          build-args: ${{ matrix.build_args }}
+          tags: |
+            ${{ matrix.image }}:${{ needs.prepare.outputs.release_tag }}
+            ${{ matrix.image }}:${{ needs.prepare.outputs.sha_tag }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ needs.prepare.outputs.release_tag }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+  verify_reuse:
+    name: Verify existing ${{ matrix.name }} image
+    needs: prepare
+    if: ${{ needs.prepare.outputs.mode == 'reuse' }}
+    runs-on: ubuntu-latest
+    permissions:
+      packages: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: management
+            image: ghcr.io/campus-pilot/campuspilot-plus-management
+          - name: admin
+            image: ghcr.io/campus-pilot/campuspilot-plus-admin
+          - name: web
+            image: ghcr.io/campus-pilot/campuspilot-plus-web
+          - name: api
+            image: ghcr.io/campus-pilot/campuspilot-plus-api
+          - name: opa
+            image: ghcr.io/campus-pilot/campuspilot-plus-opa
+
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Log in to GitHub Container Registry for verification
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Verify immutable tag pair
+        env:
+          IMAGE: ${{ matrix.image }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
+          SHA_TAG: ${{ needs.prepare.outputs.sha_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          semver_regex='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+          sha_tag_regex='^sha-[0-9a-f]{40}$'
+          digest_regex='^sha256:[0-9a-f]{64}$'
+
+          if [[ ! "${RELEASE_TAG}" =~ ${semver_regex} ]]; then
+            echo "Release tag is not strict semver" >&2
+            exit 1
+          fi
+          if [[ ! "${SHA_TAG}" =~ ${sha_tag_regex} ]]; then
+            echo "Commit-SHA image tag is invalid" >&2
+            exit 1
+          fi
+
+          release_manifest="$({
+            docker buildx imagetools inspect \
+              "${IMAGE}:${RELEASE_TAG}" \
+              --format '{{json .Manifest}}'
+          })"
+          sha_manifest="$({
+            docker buildx imagetools inspect \
+              "${IMAGE}:${SHA_TAG}" \
+              --format '{{json .Manifest}}'
+          })"
+          release_digest="$(jq -er '.digest' <<< "${release_manifest}")"
+          sha_digest="$(jq -er '.digest' <<< "${sha_manifest}")"
+
+          if [[ ! "${release_digest}" =~ ${digest_regex} ]]; then
+            echo "Semver image reference returned an invalid digest" >&2
+            exit 1
+          fi
+          if [[ ! "${sha_digest}" =~ ${digest_regex} ]]; then
+            echo "Commit-SHA image reference returned an invalid digest" >&2
+            exit 1
+          fi
+          if [[ "${release_digest}" != "${sha_digest}" ]]; then
+            echo "Immutable image tags resolve to different digests" >&2
+            exit 1
+          fi
+
+          echo "Verified ${IMAGE} at ${release_digest}"
+
+  release:
+    name: Publish git tag and GitHub release
+    needs:
+      - prepare
+      - build
+      - verify_reuse
+    if: >-
+      ${{
+        !cancelled() &&
+        needs.prepare.result == 'success' &&
+        (
+          (
+            needs.prepare.outputs.mode == 'new' &&
+            needs.build.result == 'success' &&
+            needs.verify_reuse.result == 'skipped'
+          ) ||
+          (
+            needs.prepare.outputs.mode == 'reuse' &&
+            needs.build.result == 'skipped' &&
+            needs.verify_reuse.result == 'success'
+          )
+        )
+      }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
+      SOURCE_SHA: ${{ github.sha }}
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+
+      - name: Create idempotent git tag
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          semver_regex='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+          sha_regex='^[0-9a-f]{40}$'
+
+          if [[ ! "${RELEASE_TAG}" =~ ${semver_regex} ]]; then
+            echo "Release tag is not strict semver" >&2
+            exit 1
+          fi
+          if [[ ! "${SOURCE_SHA}" =~ ${sha_regex} ]]; then
+            echo "Source commit SHA is invalid" >&2
+            exit 1
+          fi
+
+          git fetch --tags --force
+          if git show-ref --verify --quiet "refs/tags/${RELEASE_TAG}"; then
+            tagged_sha="$(git rev-list -n 1 "refs/tags/${RELEASE_TAG}")"
+            if [[ "${tagged_sha}" != "${SOURCE_SHA}" ]]; then
+              echo "Release tag already points to a different commit" >&2
+              exit 1
+            fi
+          else
+            git config user.name 'github-actions[bot]'
+            git config user.email 'github-actions[bot]@users.noreply.github.com'
+            git tag "${RELEASE_TAG}" "${SOURCE_SHA}"
+            git push origin "refs/tags/${RELEASE_TAG}"
+          fi
+
+      - name: Create idempotent GitHub release
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          semver_regex='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+          sha_regex='^[0-9a-f]{40}$'
+
+          if [[ ! "${RELEASE_TAG}" =~ ${semver_regex} ]]; then
+            echo "Release tag is not strict semver" >&2
+            exit 1
+          fi
+          if [[ ! "${SOURCE_SHA}" =~ ${sha_regex} ]]; then
+            echo "Source commit SHA is invalid" >&2
+            exit 1
+          fi
+
+          if gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            echo "GitHub release already exists for ${RELEASE_TAG}"
+          else
+            gh release create "${RELEASE_TAG}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --target "${SOURCE_SHA}" \
+              --generate-notes \
+              --title "Release ${RELEASE_TAG}"
+          fi
