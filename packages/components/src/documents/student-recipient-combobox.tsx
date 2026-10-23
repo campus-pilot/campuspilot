@@ -1,4 +1,5 @@
 "use client";
+import { useRef } from "react";
 import {
   Combobox,
   ComboboxChips,
@@ -20,7 +21,9 @@ export type StudentRecipient = {
 };
 
 /** Remote filtering and pagination belong to the caller. Selected recipients
- * remain explicit values even when they are absent from the current page.
+ * remain explicit values even when they are absent from the current page. The
+ * popup stays inside this component's DOM container so it remains interactive
+ * when the picker is mounted within a Radix modal dialog.
  */
 export function StudentRecipientCombobox(props: {
   options: StudentRecipient[];
@@ -39,8 +42,9 @@ export function StudentRecipientCombobox(props: {
   errors: readonly unknown[];
 }) {
   const anchor = useComboboxAnchor();
+  const popupContainer = useRef<HTMLDivElement>(null);
   return (
-    <div className="flex flex-col gap-2">
+    <div ref={popupContainer} className="flex flex-col gap-2">
       <label htmlFor="document-students" className="text-sm font-medium">
         Find students
       </label>
@@ -79,7 +83,7 @@ export function StudentRecipientCombobox(props: {
           />
           <ComboboxTrigger aria-label="Show students" />
         </ComboboxChips>
-        <ComboboxContent anchor={anchor}>
+        <ComboboxContent anchor={anchor} container={popupContainer}>
           <ComboboxList>
             {props.options.map((item) => (
               <ComboboxItem

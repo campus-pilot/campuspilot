@@ -14,6 +14,10 @@ for the management implementation.
   `useState` form state or `useEffect` synchronization.
 - `DocumentPermission` controls visibility and query mounting only. The backend is
   always the authorization boundary.
+- Document generators open in a Radix modal. Base UI combobox popups used by these
+  generators must portal into an element inside that modal rather than the default
+  `document.body`; otherwise modal containment prevents pointer selection. The
+  reusable student-recipient combobox owns this inner portal container.
 
 ## Source map
 

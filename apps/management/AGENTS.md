@@ -23,6 +23,16 @@ marketplace, or portable AI prompt flow, also read the canonical
 operational/configuration/marketplace separation and the examination-wide
 timetable export invariant.
 
+### Portalled controls inside dialogs
+
+Management dialogs currently use Radix focus and pointer containment, while shared
+comboboxes use Base UI portals. When a Base UI popup is rendered inside a dialog,
+give its portal a container ref whose element is inside `DialogContent`. A popup
+left in the default `document.body` portal is outside the Radix modal boundary, so
+pointer clicks can highlight an option without committing the selection. Keep this
+rule with the reusable popup component when it always owns its container; otherwise
+accept and forward an explicit container from the dialog-aware caller.
+
 ## Permission-gated UI
 
 Use `RequirePermissions` from `@/components/require-permissions` everywhere a
