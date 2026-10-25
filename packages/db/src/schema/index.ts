@@ -11,3 +11,4 @@ export * from "./exam";
 
 export * from "./artifact";
 export * from "./finance";
+export * from "./migration";

@@ -59,5 +59,6 @@ coverage
 .cache
 tmp
 temp
+.sks/
 
 .pnpm-store

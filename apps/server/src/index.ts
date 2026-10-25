@@ -1,5 +1,4 @@
 import { serve } from '@hono/node-server';
-import { runMigrations } from '@campuspilot/db/migrate';
 import { env } from '@campuspilot/env/server';
 
 import { app, mcpHandler, mcpTools } from './http';
@@ -24,7 +23,6 @@ async function main() {
   await phase('mcp.catalog', async () => {
     await mcpTools;
   });
-  await phase('db.migrate', () => runMigrations());
   // await phase('auth.seed', () => seedIamDatabase());
 
   const server = serve(

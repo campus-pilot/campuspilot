@@ -1,6 +1,5 @@
 import Handlebars from "handlebars";
 import sanitizeHtml from "sanitize-html";
-import { env } from "@campuspilot/env/server";
 import { rpcError } from "../../../errors";
 import { ORPCError } from "@orpc/server";
 import type {
@@ -129,6 +128,10 @@ export async function convertDocumentPdf(
   type: DocumentType,
   signal?: AbortSignal,
 ) {
+  /** Delay server-env validation until PDF conversion so pure template
+   * normalization/rendering remains reusable by the offline migration package.
+   */
+  const { env } = await import("@campuspilot/env/server");
   const form = new FormData();
   form.append("files", new Blob([html], { type: "text/html" }), "index.html");
   form.append("paperWidth", type === "timetable" ? "11.7" : "8.27");

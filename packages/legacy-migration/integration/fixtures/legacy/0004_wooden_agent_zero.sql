@@ -1,0 +1,1 @@
+ALTER TABLE "session" ADD COLUMN "is_student" boolean DEFAULT false NOT NULL;
