@@ -1,0 +1,2780 @@
+{
+  "schemaVersion": 1,
+  "source": "legacy Drizzle snapshot 0008_black_bishop",
+  "tables": [
+    {
+      "name": "public.account",
+      "columns": [
+        {
+          "name": "access_token",
+          "type": "text",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "access_token_expires_at",
+          "type": "timestamp",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "account_id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp",
+          "nullable": false,
+          "default": "now()"
+        },
+        {
+          "name": "id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "id_token",
+          "type": "text",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "password",
+          "type": "text",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "provider_id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "refresh_token",
+          "type": "text",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "refresh_token_expires_at",
+          "type": "timestamp",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "scope",
+          "type": "text",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "user_id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        }
+      ],
+      "constraints": [
+        {
+          "name": "account_pkey",
+          "kind": "p",
+          "columns": [
+            "id"
+          ],
+          "referencedTable": null,
+          "referencedColumns": [],
+          "onDelete": null,
+          "onUpdate": null
+        },
+        {
+          "name": "account_user_id_user_id_fk",
+          "kind": "f",
+          "columns": [
+            "user_id"
+          ],
+          "referencedTable": "public.user",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "account_userId_idx",
+          "unique": false,
+          "columns": [
+            "user_id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.admission",
+      "columns": [
+        {
+          "name": "address",
+          "type": "varchar",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "admission_class_id",
+          "type": "text",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "admissionNo",
+          "type": "varchar",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp",
+          "nullable": true,
+          "default": "now()"
+        },
+        {
+          "name": "dob",
+          "type": "date",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "email",
+          "type": "varchar",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "fatherName",
+          "type": "varchar",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "motherName",
+          "type": "varchar",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "name",
+          "type": "varchar",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "phoneNo",
+          "type": "varchar",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "photo_s3_key",
+          "type": "varchar",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "registered",
+          "type": "boolean",
+          "nullable": false,
+          "default": "true"
+        },
+        {
+          "name": "school_id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp",
+          "nullable": true,
+          "default": "now()"
+        }
+      ],
+      "constraints": [
+        {
+          "name": "admission_admission_class_id_class_id_fk",
+          "kind": "f",
+          "columns": [
+            "admission_class_id"
+          ],
+          "referencedTable": "public.class",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        {
+          "name": "admission_pkey",
+          "kind": "p",
+          "columns": [
+            "id"
+          ],
+          "referencedTable": null,
+          "referencedColumns": [],
+          "onDelete": null,
+          "onUpdate": null
+        },
+        {
+          "name": "admission_school_id_school_id_fk",
+          "kind": "f",
+          "columns": [
+            "school_id"
+          ],
+          "referencedTable": "public.school",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      ],
+      "indexes": []
+    },
+    {
+      "name": "public.ai_quota",
+      "columns": [
+        {
+          "name": "created_at",
+          "type": "timestamp",
+          "nullable": true,
+          "default": "now()"
+        },
+        {
+          "name": "id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "monthly_limit",
+          "type": "integer",
+          "nullable": false,
+          "default": "50"
+        },
+        {
+          "name": "school_id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp",
+          "nullable": true,
+          "default": "now()"
+        },
+        {
+          "name": "usage_type",
+          "type": "varchar",
+          "nullable": false,
+          "default": null
+        }
+      ],
+      "constraints": [
+        {
+          "name": "ai_quota_pkey",
+          "kind": "p",
+          "columns": [
+            "id"
+          ],
+          "referencedTable": null,
+          "referencedColumns": [],
+          "onDelete": null,
+          "onUpdate": null
+        },
+        {
+          "name": "ai_quota_school_id_school_id_fk",
+          "kind": "f",
+          "columns": [
+            "school_id"
+          ],
+          "referencedTable": "public.school",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        {
+          "name": "ai_quota_school_type_unique",
+          "kind": "u",
+          "columns": [
+            "school_id",
+            "usage_type"
+          ],
+          "referencedTable": null,
+          "referencedColumns": [],
+          "onDelete": null,
+          "onUpdate": null
+        }
+      ],
+      "indexes": []
+    },
+    {
+      "name": "public.ai_usage",
+      "columns": [
+        {
+          "name": "count",
+          "type": "integer",
+          "nullable": false,
+          "default": "0"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp",
+          "nullable": true,
+          "default": "now()"
+        },
+        {
+          "name": "id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "month",
+          "type": "integer",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "school_id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp",
+          "nullable": true,
+          "default": "now()"
+        },
+        {
+          "name": "usage_type",
+          "type": "varchar",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "year",
+          "type": "integer",
+          "nullable": false,
+          "default": null
+        }
+      ],
+      "constraints": [
+        {
+          "name": "ai_usage_pkey",
+          "kind": "p",
+          "columns": [
+            "id"
+          ],
+          "referencedTable": null,
+          "referencedColumns": [],
+          "onDelete": null,
+          "onUpdate": null
+        },
+        {
+          "name": "ai_usage_school_id_school_id_fk",
+          "kind": "f",
+          "columns": [
+            "school_id"
+          ],
+          "referencedTable": "public.school",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        {
+          "name": "ai_usage_school_type_month_unique",
+          "kind": "u",
+          "columns": [
+            "school_id",
+            "usage_type",
+            "year",
+            "month"
+          ],
+          "referencedTable": null,
+          "referencedColumns": [],
+          "onDelete": null,
+          "onUpdate": null
+        }
+      ],
+      "indexes": []
+    },
+    {
+      "name": "public.apikey",
+      "columns": [
+        {
+          "name": "config_id",
+          "type": "text",
+          "nullable": false,
+          "default": "'default'"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "enabled",
+          "type": "boolean",
+          "nullable": true,
+          "default": "true"
+        },
+        {
+          "name": "expires_at",
+          "type": "timestamp",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "key",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "last_refill_at",
+          "type": "timestamp",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "last_request",
+          "type": "timestamp",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "metadata",
+          "type": "text",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "name",
+          "type": "text",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "permissions",
+          "type": "text",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "prefix",
+          "type": "text",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "rate_limit_enabled",
+          "type": "boolean",
+          "nullable": true,
+          "default": "false"
+        },
+        {
+          "name": "rate_limit_max",
+          "type": "integer",
+          "nullable": true,
+          "default": "10"
+        },
+        {
+          "name": "rate_limit_time_window",
+          "type": "integer",
+          "nullable": true,
+          "default": "86400000"
+        },
+        {
+          "name": "reference_id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "refill_amount",
+          "type": "integer",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "refill_interval",
+          "type": "integer",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "remaining",
+          "type": "integer",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "request_count",
+          "type": "integer",
+          "nullable": true,
+          "default": "0"
+        },
+        {
+          "name": "start",
+          "type": "text",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp",
+          "nullable": false,
+          "default": null
+        }
+      ],
+      "constraints": [
+        {
+          "name": "apikey_pkey",
+          "kind": "p",
+          "columns": [
+            "id"
+          ],
+          "referencedTable": null,
+          "referencedColumns": [],
+          "onDelete": null,
+          "onUpdate": null
+        }
+      ],
+      "indexes": [
+        {
+          "name": "apikey_configId_idx",
+          "unique": false,
+          "columns": [
+            "config_id"
+          ]
+        },
+        {
+          "name": "apikey_key_idx",
+          "unique": false,
+          "columns": [
+            "key"
+          ]
+        },
+        {
+          "name": "apikey_referenceId_idx",
+          "unique": false,
+          "columns": [
+            "reference_id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.artifact",
+      "columns": [
+        {
+          "name": "content_type",
+          "type": "varchar",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp",
+          "nullable": true,
+          "default": "now()"
+        },
+        {
+          "name": "entity_id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "entity_type",
+          "type": "varchar",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "meta",
+          "type": "jsonb",
+          "nullable": true,
+          "default": "'{}'::jsonb"
+        },
+        {
+          "name": "s3_key",
+          "type": "varchar",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "school_id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "scope",
+          "type": "varchar",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "status",
+          "type": "varchar",
+          "nullable": false,
+          "default": "'current'"
+        },
+        {
+          "name": "type",
+          "type": "varchar",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp",
+          "nullable": true,
+          "default": "now()"
+        }
+      ],
+      "constraints": [
+        {
+          "name": "artifact_lookup_idx",
+          "kind": "u",
+          "columns": [
+            "school_id",
+            "entity_type",
+            "entity_id",
+            "type",
+            "scope"
+          ],
+          "referencedTable": null,
+          "referencedColumns": [],
+          "onDelete": null,
+          "onUpdate": null
+        },
+        {
+          "name": "artifact_pkey",
+          "kind": "p",
+          "columns": [
+            "id"
+          ],
+          "referencedTable": null,
+          "referencedColumns": [],
+          "onDelete": null,
+          "onUpdate": null
+        },
+        {
+          "name": "artifact_school_id_school_id_fk",
+          "kind": "f",
+          "columns": [
+            "school_id"
+          ],
+          "referencedTable": "public.school",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "artifact_entity_idx",
+          "unique": false,
+          "columns": [
+            "school_id",
+            "entity_type",
+            "entity_id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.bill_generation_event",
+      "columns": [
+        {
+          "name": "created_at",
+          "type": "timestamp",
+          "nullable": true,
+          "default": "now()"
+        },
+        {
+          "name": "generated_by",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "meta",
+          "type": "jsonb",
+          "nullable": true,
+          "default": "'{}'::jsonb"
+        },
+        {
+          "name": "school_id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "session_id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "type",
+          "type": "bill_generation_event_type",
+          "nullable": false,
+          "default": null
+        }
+      ],
+      "constraints": [
+        {
+          "name": "bill_generation_event_generated_by_staff_id_fk",
+          "kind": "f",
+          "columns": [
+            "generated_by"
+          ],
+          "referencedTable": "public.staff",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        {
+          "name": "bill_generation_event_pkey",
+          "kind": "p",
+          "columns": [
+            "id"
+          ],
+          "referencedTable": null,
+          "referencedColumns": [],
+          "onDelete": null,
+          "onUpdate": null
+        },
+        {
+          "name": "bill_generation_event_school_id_school_id_fk",
+          "kind": "f",
+          "columns": [
+            "school_id"
+          ],
+          "referencedTable": "public.school",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        {
+          "name": "bill_generation_event_session_id_school_session_id_fk",
+          "kind": "f",
+          "columns": [
+            "session_id"
+          ],
+          "referencedTable": "public.school_session",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      ],
+      "indexes": []
+    },
+    {
+      "name": "public.class",
+      "columns": [
+        {
+          "name": "attributes",
+          "type": "jsonb",
+          "nullable": true,
+          "default": "'{}'::jsonb"
+        },
+        {
+          "name": "config",
+          "type": "jsonb",
+          "nullable": true,
+          "default": "'{}'::jsonb"
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp",
+          "nullable": true,
+          "default": "now()"
+        },
+        {
+          "name": "finance_config",
+          "type": "jsonb",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "label",
+          "type": "varchar",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "school_id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "slug",
+          "type": "varchar",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp",
+          "nullable": true,
+          "default": "now()"
+        }
+      ],
+      "constraints": [
+        {
+          "name": "class_pkey",
+          "kind": "p",
+          "columns": [
+            "id"
+          ],
+          "referencedTable": null,
+          "referencedColumns": [],
+          "onDelete": null,
+          "onUpdate": null
+        },
+        {
+          "name": "class_school_id_school_id_fk",
+          "kind": "f",
+          "columns": [
+            "school_id"
+          ],
+          "referencedTable": "public.school",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        {
+          "name": "class_slug_unique",
+          "kind": "u",
+          "columns": [
+            "school_id",
+            "slug"
+          ],
+          "referencedTable": null,
+          "referencedColumns": [],
+          "onDelete": null,
+          "onUpdate": null
+        }
+      ],
+      "indexes": []
+    },
+    {
+      "name": "public.exam_plan",
+      "columns": [
+        {
+          "name": "class_id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp",
+          "nullable": true,
+          "default": "now()"
+        },
+        {
+          "name": "examSlug",
+          "type": "varchar",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "modeConfig",
+          "type": "jsonb",
+          "nullable": false,
+          "default": "'{}'::jsonb"
+        },
+        {
+          "name": "school_id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "session_id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "status",
+          "type": "exam_plan_status",
+          "nullable": false,
+          "default": "'draft'"
+        },
+        {
+          "name": "subjectSlug",
+          "type": "varchar",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "totalMarks",
+          "type": "integer",
+          "nullable": false,
+          "default": "100"
+        },
+        {
+          "name": "totalWorkingDays",
+          "type": "integer",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp",
+          "nullable": true,
+          "default": "now()"
+        }
+      ],
+      "constraints": [
+        {
+          "name": "exam_plan_class_id_class_id_fk",
+          "kind": "f",
+          "columns": [
+            "class_id"
+          ],
+          "referencedTable": "public.class",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        {
+          "name": "exam_plan_pkey",
+          "kind": "p",
+          "columns": [
+            "id"
+          ],
+          "referencedTable": null,
+          "referencedColumns": [],
+          "onDelete": null,
+          "onUpdate": null
+        },
+        {
+          "name": "exam_plan_school_id_school_id_fk",
+          "kind": "f",
+          "columns": [
+            "school_id"
+          ],
+          "referencedTable": "public.school",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        {
+          "name": "exam_plan_session_id_school_session_id_fk",
+          "kind": "f",
+          "columns": [
+            "session_id"
+          ],
+          "referencedTable": "public.school_session",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        {
+          "name": "exam_plan_unique",
+          "kind": "u",
+          "columns": [
+            "session_id",
+            "examSlug",
+            "class_id",
+            "subjectSlug"
+          ],
+          "referencedTable": null,
+          "referencedColumns": [],
+          "onDelete": null,
+          "onUpdate": null
+        }
+      ],
+      "indexes": []
+    },
+    {
+      "name": "public.exam_result",
+      "columns": [
+        {
+          "name": "approved",
+          "type": "boolean",
+          "nullable": false,
+          "default": "false"
+        },
+        {
+          "name": "coScholastics",
+          "type": "jsonb",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp",
+          "nullable": true,
+          "default": "now()"
+        },
+        {
+          "name": "days_attended",
+          "type": "integer",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "exam_plan_id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "marks",
+          "type": "jsonb",
+          "nullable": false,
+          "default": "'{}'::jsonb"
+        },
+        {
+          "name": "school_id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "session_id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "student_id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp",
+          "nullable": true,
+          "default": "now()"
+        }
+      ],
+      "constraints": [
+        {
+          "name": "exam_result_exam_plan_id_exam_plan_id_fk",
+          "kind": "f",
+          "columns": [
+            "exam_plan_id"
+          ],
+          "referencedTable": "public.exam_plan",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        {
+          "name": "exam_result_pkey",
+          "kind": "p",
+          "columns": [
+            "id"
+          ],
+          "referencedTable": null,
+          "referencedColumns": [],
+          "onDelete": null,
+          "onUpdate": null
+        },
+        {
+          "name": "exam_result_school_id_school_id_fk",
+          "kind": "f",
+          "columns": [
+            "school_id"
+          ],
+          "referencedTable": "public.school",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        {
+          "name": "exam_result_session_id_school_session_id_fk",
+          "kind": "f",
+          "columns": [
+            "session_id"
+          ],
+          "referencedTable": "public.school_session",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        {
+          "name": "exam_result_student_id_student_id_fk",
+          "kind": "f",
+          "columns": [
+            "student_id"
+          ],
+          "referencedTable": "public.student",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        {
+          "name": "exam_result_unique",
+          "kind": "u",
+          "columns": [
+            "exam_plan_id",
+            "student_id"
+          ],
+          "referencedTable": null,
+          "referencedColumns": [],
+          "onDelete": null,
+          "onUpdate": null
+        }
+      ],
+      "indexes": []
+    },
+    {
+      "name": "public.exam_timetable",
+      "columns": [
+        {
+          "name": "config",
+          "type": "jsonb",
+          "nullable": false,
+          "default": "'{}'::jsonb"
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp",
+          "nullable": true,
+          "default": "now()"
+        },
+        {
+          "name": "examSlug",
+          "type": "varchar",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "school_id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "session_id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp",
+          "nullable": true,
+          "default": "now()"
+        }
+      ],
+      "constraints": [
+        {
+          "name": "exam_timetable_pkey",
+          "kind": "p",
+          "columns": [
+            "id"
+          ],
+          "referencedTable": null,
+          "referencedColumns": [],
+          "onDelete": null,
+          "onUpdate": null
+        },
+        {
+          "name": "exam_timetable_school_id_school_id_fk",
+          "kind": "f",
+          "columns": [
+            "school_id"
+          ],
+          "referencedTable": "public.school",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        {
+          "name": "exam_timetable_session_id_school_session_id_fk",
+          "kind": "f",
+          "columns": [
+            "session_id"
+          ],
+          "referencedTable": "public.school_session",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        {
+          "name": "exam_timetable_unique",
+          "kind": "u",
+          "columns": [
+            "session_id",
+            "examSlug"
+          ],
+          "referencedTable": null,
+          "referencedColumns": [],
+          "onDelete": null,
+          "onUpdate": null
+        }
+      ],
+      "indexes": []
+    },
+    {
+      "name": "public.ledger_event",
+      "columns": [
+        {
+          "name": "amount",
+          "type": "numeric",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp",
+          "nullable": true,
+          "default": "now()"
+        },
+        {
+          "name": "discount",
+          "type": "numeric",
+          "nullable": false,
+          "default": "'0'"
+        },
+        {
+          "name": "id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "note",
+          "type": "varchar",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "recorded_by",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "ref_bill_event_id",
+          "type": "text",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "school_id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "student_id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "type",
+          "type": "ledger_event_type",
+          "nullable": false,
+          "default": "'PAYMENT'"
+        },
+        {
+          "name": "version",
+          "type": "integer",
+          "nullable": false,
+          "default": null
+        }
+      ],
+      "constraints": [
+        {
+          "name": "ledger_event_pkey",
+          "kind": "p",
+          "columns": [
+            "id"
+          ],
+          "referencedTable": null,
+          "referencedColumns": [],
+          "onDelete": null,
+          "onUpdate": null
+        },
+        {
+          "name": "ledger_event_recorded_by_staff_id_fk",
+          "kind": "f",
+          "columns": [
+            "recorded_by"
+          ],
+          "referencedTable": "public.staff",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        {
+          "name": "ledger_event_ref_bill_event_id_bill_generation_event_id_fk",
+          "kind": "f",
+          "columns": [
+            "ref_bill_event_id"
+          ],
+          "referencedTable": "public.bill_generation_event",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        {
+          "name": "ledger_event_school_id_school_id_fk",
+          "kind": "f",
+          "columns": [
+            "school_id"
+          ],
+          "referencedTable": "public.school",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        {
+          "name": "ledger_event_student_id_student_id_fk",
+          "kind": "f",
+          "columns": [
+            "student_id"
+          ],
+          "referencedTable": "public.student",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "ledger_event_student_version_idx",
+          "unique": false,
+          "columns": [
+            "student_id",
+            "version"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.ledger_projection",
+      "columns": [
+        {
+          "name": "last_bill_version",
+          "type": "integer",
+          "nullable": false,
+          "default": "0"
+        },
+        {
+          "name": "last_ledger_version",
+          "type": "integer",
+          "nullable": false,
+          "default": "0"
+        },
+        {
+          "name": "outstanding",
+          "type": "numeric",
+          "nullable": false,
+          "default": "'0'"
+        },
+        {
+          "name": "student_id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "total_discount",
+          "type": "numeric",
+          "nullable": false,
+          "default": "'0'"
+        },
+        {
+          "name": "total_paid",
+          "type": "numeric",
+          "nullable": false,
+          "default": "'0'"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp",
+          "nullable": true,
+          "default": "now()"
+        }
+      ],
+      "constraints": [
+        {
+          "name": "ledger_projection_pkey",
+          "kind": "p",
+          "columns": [
+            "student_id"
+          ],
+          "referencedTable": null,
+          "referencedColumns": [],
+          "onDelete": null,
+          "onUpdate": null
+        },
+        {
+          "name": "ledger_projection_student_id_student_id_fk",
+          "kind": "f",
+          "columns": [
+            "student_id"
+          ],
+          "referencedTable": "public.student",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      ],
+      "indexes": []
+    },
+    {
+      "name": "public.notice",
+      "columns": [
+        {
+          "name": "content",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp",
+          "nullable": true,
+          "default": "now()"
+        },
+        {
+          "name": "created_by",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "page_size",
+          "type": "varchar",
+          "nullable": false,
+          "default": "'half'"
+        },
+        {
+          "name": "school_id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "session_id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "title",
+          "type": "varchar",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp",
+          "nullable": true,
+          "default": "now()"
+        }
+      ],
+      "constraints": [
+        {
+          "name": "notice_pkey",
+          "kind": "p",
+          "columns": [
+            "id"
+          ],
+          "referencedTable": null,
+          "referencedColumns": [],
+          "onDelete": null,
+          "onUpdate": null
+        },
+        {
+          "name": "notice_school_id_school_id_fk",
+          "kind": "f",
+          "columns": [
+            "school_id"
+          ],
+          "referencedTable": "public.school",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        {
+          "name": "notice_session_id_school_session_id_fk",
+          "kind": "f",
+          "columns": [
+            "session_id"
+          ],
+          "referencedTable": "public.school_session",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "notice_school_session_idx",
+          "unique": false,
+          "columns": [
+            "school_id",
+            "session_id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.school",
+      "columns": [
+        {
+          "name": "active_session_id",
+          "type": "text",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp",
+          "nullable": true,
+          "default": "now()"
+        },
+        {
+          "name": "defaultSessionConfig",
+          "type": "jsonb",
+          "nullable": true,
+          "default": "'{}'::jsonb"
+        },
+        {
+          "name": "features",
+          "type": "jsonb",
+          "nullable": true,
+          "default": "'{}'::jsonb"
+        },
+        {
+          "name": "finance_schema",
+          "type": "jsonb",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "has_completed_onboarding",
+          "type": "boolean",
+          "nullable": false,
+          "default": "false"
+        },
+        {
+          "name": "id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "location",
+          "type": "varchar",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "logo_s3_key",
+          "type": "varchar",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "name",
+          "type": "varchar",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "registrationNo",
+          "type": "varchar",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "slug",
+          "type": "varchar",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp",
+          "nullable": true,
+          "default": "now()"
+        }
+      ],
+      "constraints": [
+        {
+          "name": "school_pkey",
+          "kind": "p",
+          "columns": [
+            "id"
+          ],
+          "referencedTable": null,
+          "referencedColumns": [],
+          "onDelete": null,
+          "onUpdate": null
+        },
+        {
+          "name": "school_slug_unique",
+          "kind": "u",
+          "columns": [
+            "slug"
+          ],
+          "referencedTable": null,
+          "referencedColumns": [],
+          "onDelete": null,
+          "onUpdate": null
+        }
+      ],
+      "indexes": []
+    },
+    {
+      "name": "public.school_onboarding",
+      "columns": [
+        {
+          "name": "attributes",
+          "type": "jsonb",
+          "nullable": true,
+          "default": "'{}'::jsonb"
+        },
+        {
+          "name": "classes_created",
+          "type": "boolean",
+          "nullable": false,
+          "default": "false"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp",
+          "nullable": true,
+          "default": "now()"
+        },
+        {
+          "name": "current_step",
+          "type": "integer",
+          "nullable": false,
+          "default": "1"
+        },
+        {
+          "name": "finance_completed",
+          "type": "boolean",
+          "nullable": false,
+          "default": "false"
+        },
+        {
+          "name": "id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "members_added",
+          "type": "boolean",
+          "nullable": false,
+          "default": "false"
+        },
+        {
+          "name": "school_details_completed",
+          "type": "boolean",
+          "nullable": false,
+          "default": "false"
+        },
+        {
+          "name": "school_id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "session_configured",
+          "type": "boolean",
+          "nullable": false,
+          "default": "false"
+        },
+        {
+          "name": "template_bill_configured",
+          "type": "boolean",
+          "nullable": false,
+          "default": "false"
+        },
+        {
+          "name": "template_exam_configured",
+          "type": "boolean",
+          "nullable": false,
+          "default": "false"
+        },
+        {
+          "name": "template_idcard_configured",
+          "type": "boolean",
+          "nullable": false,
+          "default": "false"
+        },
+        {
+          "name": "template_receipt_configured",
+          "type": "boolean",
+          "nullable": false,
+          "default": "false"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp",
+          "nullable": true,
+          "default": "now()"
+        }
+      ],
+      "constraints": [
+        {
+          "name": "school_onboarding_pkey",
+          "kind": "p",
+          "columns": [
+            "id"
+          ],
+          "referencedTable": null,
+          "referencedColumns": [],
+          "onDelete": null,
+          "onUpdate": null
+        },
+        {
+          "name": "school_onboarding_school_id_school_id_fk",
+          "kind": "f",
+          "columns": [
+            "school_id"
+          ],
+          "referencedTable": "public.school",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        {
+          "name": "school_onboarding_school_id_unique",
+          "kind": "u",
+          "columns": [
+            "school_id"
+          ],
+          "referencedTable": null,
+          "referencedColumns": [],
+          "onDelete": null,
+          "onUpdate": null
+        }
+      ],
+      "indexes": []
+    },
+    {
+      "name": "public.school_session",
+      "columns": [
+        {
+          "name": "createdAt",
+          "type": "timestamp",
+          "nullable": true,
+          "default": "now()"
+        },
+        {
+          "name": "finance_config",
+          "type": "jsonb",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "school_id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "sessionConfig",
+          "type": "jsonb",
+          "nullable": true,
+          "default": "'{}'::jsonb"
+        },
+        {
+          "name": "sessionEndYear",
+          "type": "integer",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "sessionStartYear",
+          "type": "integer",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "slug",
+          "type": "varchar",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp",
+          "nullable": true,
+          "default": "now()"
+        }
+      ],
+      "constraints": [
+        {
+          "name": "school_session_pkey",
+          "kind": "p",
+          "columns": [
+            "id"
+          ],
+          "referencedTable": null,
+          "referencedColumns": [],
+          "onDelete": null,
+          "onUpdate": null
+        },
+        {
+          "name": "school_session_school_id_school_id_fk",
+          "kind": "f",
+          "columns": [
+            "school_id"
+          ],
+          "referencedTable": "public.school",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        {
+          "name": "school_session_slug_unique",
+          "kind": "u",
+          "columns": [
+            "school_id",
+            "slug"
+          ],
+          "referencedTable": null,
+          "referencedColumns": [],
+          "onDelete": null,
+          "onUpdate": null
+        }
+      ],
+      "indexes": []
+    },
+    {
+      "name": "public.section",
+      "columns": [
+        {
+          "name": "attributes",
+          "type": "jsonb",
+          "nullable": true,
+          "default": "'{}'::jsonb"
+        },
+        {
+          "name": "class_id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp",
+          "nullable": true,
+          "default": "now()"
+        },
+        {
+          "name": "id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "label",
+          "type": "varchar",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "school_id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "slug",
+          "type": "varchar",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp",
+          "nullable": true,
+          "default": "now()"
+        }
+      ],
+      "constraints": [
+        {
+          "name": "section_class_id_class_id_fk",
+          "kind": "f",
+          "columns": [
+            "class_id"
+          ],
+          "referencedTable": "public.class",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        {
+          "name": "section_pkey",
+          "kind": "p",
+          "columns": [
+            "id"
+          ],
+          "referencedTable": null,
+          "referencedColumns": [],
+          "onDelete": null,
+          "onUpdate": null
+        },
+        {
+          "name": "section_school_id_school_id_fk",
+          "kind": "f",
+          "columns": [
+            "school_id"
+          ],
+          "referencedTable": "public.school",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        {
+          "name": "section_slug_unique",
+          "kind": "u",
+          "columns": [
+            "class_id",
+            "slug"
+          ],
+          "referencedTable": null,
+          "referencedColumns": [],
+          "onDelete": null,
+          "onUpdate": null
+        }
+      ],
+      "indexes": []
+    },
+    {
+      "name": "public.session",
+      "columns": [
+        {
+          "name": "created_at",
+          "type": "timestamp",
+          "nullable": false,
+          "default": "now()"
+        },
+        {
+          "name": "expires_at",
+          "type": "timestamp",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "ip_address",
+          "type": "text",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "is_student",
+          "type": "boolean",
+          "nullable": false,
+          "default": "false"
+        },
+        {
+          "name": "token",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "user_agent",
+          "type": "text",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "user_id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        }
+      ],
+      "constraints": [
+        {
+          "name": "session_pkey",
+          "kind": "p",
+          "columns": [
+            "id"
+          ],
+          "referencedTable": null,
+          "referencedColumns": [],
+          "onDelete": null,
+          "onUpdate": null
+        },
+        {
+          "name": "session_token_unique",
+          "kind": "u",
+          "columns": [
+            "token"
+          ],
+          "referencedTable": null,
+          "referencedColumns": [],
+          "onDelete": null,
+          "onUpdate": null
+        },
+        {
+          "name": "session_user_id_user_id_fk",
+          "kind": "f",
+          "columns": [
+            "user_id"
+          ],
+          "referencedTable": "public.user",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "session_userId_idx",
+          "unique": false,
+          "columns": [
+            "user_id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.staff",
+      "columns": [
+        {
+          "name": "attributes",
+          "type": "jsonb",
+          "nullable": true,
+          "default": "'{}'::jsonb"
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp",
+          "nullable": true,
+          "default": "now()"
+        },
+        {
+          "name": "email",
+          "type": "varchar",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "role",
+          "type": "staff_role",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "school_id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp",
+          "nullable": true,
+          "default": "now()"
+        }
+      ],
+      "constraints": [
+        {
+          "name": "staff_pkey",
+          "kind": "p",
+          "columns": [
+            "id"
+          ],
+          "referencedTable": null,
+          "referencedColumns": [],
+          "onDelete": null,
+          "onUpdate": null
+        },
+        {
+          "name": "staff_school_id_school_id_fk",
+          "kind": "f",
+          "columns": [
+            "school_id"
+          ],
+          "referencedTable": "public.school",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      ],
+      "indexes": []
+    },
+    {
+      "name": "public.student",
+      "columns": [
+        {
+          "name": "admission_id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "class_id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp",
+          "nullable": true,
+          "default": "now()"
+        },
+        {
+          "name": "finance_config",
+          "type": "jsonb",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "rollNo",
+          "type": "integer",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "school_id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "section_id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "session_id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp",
+          "nullable": true,
+          "default": "now()"
+        }
+      ],
+      "constraints": [
+        {
+          "name": "student_admission_id_admission_id_fk",
+          "kind": "f",
+          "columns": [
+            "admission_id"
+          ],
+          "referencedTable": "public.admission",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        {
+          "name": "student_class_id_class_id_fk",
+          "kind": "f",
+          "columns": [
+            "class_id"
+          ],
+          "referencedTable": "public.class",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        {
+          "name": "student_pkey",
+          "kind": "p",
+          "columns": [
+            "id"
+          ],
+          "referencedTable": null,
+          "referencedColumns": [],
+          "onDelete": null,
+          "onUpdate": null
+        },
+        {
+          "name": "student_school_id_school_id_fk",
+          "kind": "f",
+          "columns": [
+            "school_id"
+          ],
+          "referencedTable": "public.school",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        {
+          "name": "student_section_id_section_id_fk",
+          "kind": "f",
+          "columns": [
+            "section_id"
+          ],
+          "referencedTable": "public.section",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        {
+          "name": "student_session_id_school_session_id_fk",
+          "kind": "f",
+          "columns": [
+            "session_id"
+          ],
+          "referencedTable": "public.school_session",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        {
+          "name": "student_unique_rollno_per_section",
+          "kind": "u",
+          "columns": [
+            "session_id",
+            "class_id",
+            "section_id",
+            "rollNo"
+          ],
+          "referencedTable": null,
+          "referencedColumns": [],
+          "onDelete": null,
+          "onUpdate": null
+        },
+        {
+          "name": "student_unique_session",
+          "kind": "u",
+          "columns": [
+            "admission_id",
+            "session_id"
+          ],
+          "referencedTable": null,
+          "referencedColumns": [],
+          "onDelete": null,
+          "onUpdate": null
+        }
+      ],
+      "indexes": []
+    },
+    {
+      "name": "public.student_bill_event",
+      "columns": [
+        {
+          "name": "amount",
+          "type": "numeric",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "bill_event_id",
+          "type": "text",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp",
+          "nullable": true,
+          "default": "now()"
+        },
+        {
+          "name": "id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "line_items",
+          "type": "jsonb",
+          "nullable": false,
+          "default": "'{}'::jsonb"
+        },
+        {
+          "name": "student_id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "version",
+          "type": "integer",
+          "nullable": false,
+          "default": null
+        }
+      ],
+      "constraints": [
+        {
+          "name": "student_bill_event_bill_event_id_bill_generation_event_id_fk",
+          "kind": "f",
+          "columns": [
+            "bill_event_id"
+          ],
+          "referencedTable": "public.bill_generation_event",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        {
+          "name": "student_bill_event_pkey",
+          "kind": "p",
+          "columns": [
+            "id"
+          ],
+          "referencedTable": null,
+          "referencedColumns": [],
+          "onDelete": null,
+          "onUpdate": null
+        },
+        {
+          "name": "student_bill_event_student_id_student_id_fk",
+          "kind": "f",
+          "columns": [
+            "student_id"
+          ],
+          "referencedTable": "public.student",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "student_bill_event_bill_event_idx",
+          "unique": false,
+          "columns": [
+            "bill_event_id"
+          ]
+        },
+        {
+          "name": "student_bill_event_student_version_idx",
+          "unique": false,
+          "columns": [
+            "student_id",
+            "version"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.student_bill_projection",
+      "columns": [
+        {
+          "name": "last_event_id",
+          "type": "text",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "last_version",
+          "type": "integer",
+          "nullable": false,
+          "default": "0"
+        },
+        {
+          "name": "student_id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "total_billed",
+          "type": "numeric",
+          "nullable": false,
+          "default": "'0'"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp",
+          "nullable": true,
+          "default": "now()"
+        }
+      ],
+      "constraints": [
+        {
+          "name": "student_bill_projection_pkey",
+          "kind": "p",
+          "columns": [
+            "student_id"
+          ],
+          "referencedTable": null,
+          "referencedColumns": [],
+          "onDelete": null,
+          "onUpdate": null
+        },
+        {
+          "name": "student_bill_projection_student_id_student_id_fk",
+          "kind": "f",
+          "columns": [
+            "student_id"
+          ],
+          "referencedTable": "public.student",
+          "referencedColumns": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      ],
+      "indexes": []
+    },
+    {
+      "name": "public.user",
+      "columns": [
+        {
+          "name": "created_at",
+          "type": "timestamp",
+          "nullable": false,
+          "default": "now()"
+        },
+        {
+          "name": "email",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "email_verified",
+          "type": "boolean",
+          "nullable": false,
+          "default": "false"
+        },
+        {
+          "name": "id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "image",
+          "type": "text",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "name",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp",
+          "nullable": false,
+          "default": "now()"
+        }
+      ],
+      "constraints": [
+        {
+          "name": "user_email_unique",
+          "kind": "u",
+          "columns": [
+            "email"
+          ],
+          "referencedTable": null,
+          "referencedColumns": [],
+          "onDelete": null,
+          "onUpdate": null
+        },
+        {
+          "name": "user_pkey",
+          "kind": "p",
+          "columns": [
+            "id"
+          ],
+          "referencedTable": null,
+          "referencedColumns": [],
+          "onDelete": null,
+          "onUpdate": null
+        }
+      ],
+      "indexes": []
+    },
+    {
+      "name": "public.verification",
+      "columns": [
+        {
+          "name": "created_at",
+          "type": "timestamp",
+          "nullable": false,
+          "default": "now()"
+        },
+        {
+          "name": "expires_at",
+          "type": "timestamp",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "identifier",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp",
+          "nullable": false,
+          "default": "now()"
+        },
+        {
+          "name": "value",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        }
+      ],
+      "constraints": [
+        {
+          "name": "verification_pkey",
+          "kind": "p",
+          "columns": [
+            "id"
+          ],
+          "referencedTable": null,
+          "referencedColumns": [],
+          "onDelete": null,
+          "onUpdate": null
+        }
+      ],
+      "indexes": [
+        {
+          "name": "verification_identifier_idx",
+          "unique": false,
+          "columns": [
+            "identifier"
+          ]
+        }
+      ]
+    }
+  ],
+  "enums": [
+    {
+      "name": "public.bill_generation_event_type",
+      "values": [
+        "NEW"
+      ]
+    },
+    {
+      "name": "public.exam_plan_status",
+      "values": [
+        "draft",
+        "approved",
+        "active",
+        "completed"
+      ]
+    },
+    {
+      "name": "public.ledger_event_type",
+      "values": [
+        "PAYMENT"
+      ]
+    },
+    {
+      "name": "public.staff_role",
+      "values": [
+        "admin",
+        "manager",
+        "accountant",
+        "exam_coordinator",
+        "teacher"
+      ]
+    }
+  ],
+  "otherRelations": []
+}

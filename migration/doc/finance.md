@@ -2,10 +2,18 @@
 
 ## Status and boundary
 
-This document specifies a future, separately authorized migration of financial
-data from the legacy School app into CampusPilot. It is a contract for planning,
-dry runs, exception handling, and acceptance; it is **not** an executable
-production-data migration and this repository change does not copy legacy data.
+This document specifies the tracked, separately authorized legacy finance
+migration package. The package implements snapshot validation, dry run,
+checksum-bound approval, import, and verification. It is **not authorized to
+run against production** until frozen evidence and operator approval are
+supplied; this repository change itself copies no legacy data.
+
+The shared execution order, run artifacts, and cutover controls are in
+[`README.md`](README.md). Identity and enrollment mapping are governed by
+[`identity-access.md`](identity-access.md) and
+[`admissions-enrollments.md`](admissions-enrollments.md). Template and PDF
+handling is governed by [`documents-templates.md`](documents-templates.md), and
+open product decisions are tracked in [`decisions.md`](decisions.md).
 
 The distinction is deliberate:
 
@@ -13,7 +21,7 @@ The distinction is deliberate:
   migration**. It creates CampusPilot tables, constraints, indexes, immutable
   fact guards, and converts CampusPilot's own pre-posting JSON configuration to
   exact minor units. It runs through the normal deployment migration runner.
-- A future **legacy data migration** reads an independently identified legacy
+- The tracked **legacy data migration** reads an independently identified legacy
   database and imports historical configuration, bills, payments, discounts,
   projections, and document provenance. It requires its own tooling, reviewed
   mappings, dry-run artifacts, operator approval, cutover window, and rollback
@@ -37,10 +45,30 @@ run. The known source families are:
   admission's enrollment in one session, not the durable financial owner.
 - `bill_generation_event`: batch-generation header and period metadata.
 - `student_bill_event`: one enrollment-owned charge and its line snapshots.
-- Legacy ledger/payment event tables, where one `PAYMENT` event can contain
+- `ledger_event`, where one `PAYMENT` event can contain
   both cash received and an embedded discount.
-- Enrollment-owned billing/ledger projection tables.
+- Enrollment-owned `student_bill_projection` and `ledger_projection` tables.
 - Receipt, monthly-bill/statement, and billing template/object-storage records.
+
+The target finance table dispositions are explicit:
+
+| Target table | Import role |
+| --- | --- |
+| `finance_bill_run` | accepted legacy batch headers, after member reconciliation |
+| `finance_ledger_entry` | ordered admission-owned immutable debit/credit facts |
+| `finance_bill` | immutable imported charge headers |
+| `finance_bill_line` | ordered source line snapshots |
+| `finance_payment` | cash component of each accepted legacy payment event |
+| `finance_payment_allocation` | leave empty; account balance does not prove bill allocation |
+| `finance_adjustment` | separate accepted discount component and approved corrections |
+| `finance_refund` | no source refund fact exists; do not synthesize rows |
+| `finance_number_counter` | rebuild from approved target numbering after facts load |
+| `finance_admission_balance` | rebuild from the imported ledger; never copy source projections |
+| `finance_admission_session_activity` | rebuild from the imported ledger per explicit session |
+
+The import must follow the target database's posting/finalization and immutability
+triggers in migrations `0018` through `0020`; disabling those guards is not a
+migration strategy.
 
 The importer must account for confirmed source defects rather than reproduce
 them:
@@ -121,9 +149,9 @@ database `numeric`; it must never pass through binary floating point.
 For each source amount:
 
 1. Preserve its original text/numeric representation in the audit manifest.
-2. Resolve currency from an explicit, reviewed source configuration mapping.
-3. Resolve the ISO minor-unit exponent (for example JPY 0, INR 2, KWD 3,
-   CLF 4).
+2. Use the approved migration currency `INR`. Any explicit contradictory source
+   currency is blocking and must be shown to the user.
+3. Use INR's ISO minor-unit exponent of 2.
 4. Multiply exactly by `10^exponent`.
 5. Require the result to be an integer and fit PostgreSQL `bigint`.
 6. Reject rather than silently round values below one minor unit.
@@ -133,9 +161,9 @@ source rows and currency and use a documented rule. The finance domain's
 percentage-adjustment rule is round-half-up to the nearest minor unit; that
 rule does not authorize rounding arbitrary imported source amounts.
 
-Never aggregate or net different currencies. A source account containing more
-than one currency becomes separate admission/currency ledger streams. Missing,
-invalid, or conflicting currency is a blocking exception.
+Never aggregate or net different currencies. This migration expects only INR;
+an explicit different currency or multi-currency account is a blocking exception
+that requires a new user decision.
 
 ## Configuration mapping and precedence
 
@@ -155,9 +183,8 @@ because the legacy configuration labelled the element as required.
 The importer translates:
 
 - legacy session values to the mapped CampusPilot session;
-- legacy class values only through an explicit `(school, session, class)`
-  applicability mapping, because a global legacy class value does not prove it
-  applied identically in every session;
+- legacy school-global class values to the school's one mapped session, using an
+  explicit `(school, session, class)` entry in the mapping bundle;
 - legacy student/enrollment values to the durable admission's map under the
   mapped session ID.
 
@@ -171,16 +198,12 @@ configuration is an exception, not an opportunity to change precedence.
 
 ### Timezone and cycle start
 
-Legacy data does not establish CampusPilot's required IANA timezone or
-`cycleStartMonth`. These fields require an explicit per-session mapping approved
-by the school/operator. They must not be inferred from server timezone, locale,
-address, session years, currency, the first bill date, or another session.
-
-Fee elements and amounts may be preserved in an incomplete configuration while
-these facts are absent. Such a session is not ready for billing preview or
-posting. The import report lists every incomplete session and its missing
-fields; cutover approval must state whether historical read-only data may launch
-while future billing remains blocked.
+Set every migrated session finance configuration to timezone `Asia/Kolkata` and
+`cycleStartMonth=4` (April). Interpret legacy timestamp-without-time-zone values
+under `Asia/Kolkata`; calendar-only dates remain unchanged. If a school has more
+than one session, an explicit contradictory timezone/cycle fact, or no unique
+mapped session, stop that school's finance import and ask the user rather than
+spreading the global configuration across sessions.
 
 ## Registration and historical eligibility
 
@@ -214,8 +237,16 @@ fees. Preserve the source's customer-facing item/description as
 stable source line order separately, and preserve the source justification as
 both the bill/line manual reason and ledger note. A custom charge must not be mapped to a
 configured fee element merely because its wording or amount looks similar. A
-missing item title or missing justification is a blocking exception requiring
-an operator-approved value; neither may be inferred from the other.
+missing item title remains blocking. For the approved Prem Chandra import, a
+standalone bill with no source actor/justification is instead surfaced as typed
+`F_STANDALONE_MANUAL_FALLBACK` evidence; only that exact checksum-bound row may use the
+tracked migration actor and the exact reason
+`Legacy manual charge; source did not record a separate justification.`
+
+A bill-run header whose July count/total differs from its member bills is
+surfaced as typed `F_BILL_RUN_HEADER_REBUILD`. Only a tracked exact-match entry
+allows the target header to be computed from immutable member bills; the stale
+source header is retained in evidence but never copied as authority.
 
 Duplicate/forced same-period source runs are not discarded. The dry run labels
 each as regular, candidate supplemental with a required reason, duplicate, or
@@ -236,10 +267,17 @@ Each legacy payment event is decomposed:
 - a zero cash or zero discount component creates no zero-valued posting;
 - negative or internally contradictory components are exceptions.
 
-Discounts without source reasons use an explicitly approved migration reason
-code that says the reason was unavailable in the legacy source; they must not
-pretend to have a school-supplied rationale. Waivers, scholarships, and
-write-offs are not inferred from a generic legacy discount.
+One source payment/billing/ledger event may create multiple target facts, so its
+legacy primary key cannot also be the primary key of every target row. Decision
+G-14 binds the exact source ID in the frozen manifest and derives each target
+fact ID using the reviewed deterministic hash rule. Malformed inputs and any
+derived-ID collision block before writes.
+
+Discounts without source reasons use `reasonCode="-"` and `reasonNote="-"`.
+This satisfies the target's required non-blank audit fields while visibly
+remaining a migration placeholder; it must not be presented as a school-supplied
+rationale. Waivers, scholarships, and write-offs are not inferred from a generic
+legacy discount.
 
 ## Account-credit payments and overpayment
 
@@ -288,36 +326,26 @@ Missing historical labels are reported; current names are not substituted as if
 they were historical facts. Source timestamps retain their original timezone
 interpretation or remain blocked if that interpretation is unknown.
 
-Legacy human bill/receipt/refund numbers may be retained only if unique within
-the target school's namespace and format policy. Otherwise preserve the legacy
-number as provenance and allocate a target session-scoped number transactionally.
-The mapping file records both. Number counters start after the highest approved
-target sequence and are checked for gaps/collisions; preview never consumes a
-number.
+The approved mapping allocates bill and receipt numbers deterministically in
+stable timestamp/source-table/source-ID order, ending at `BILL/2026-2027/000362`
+and `RCP/2026-2027/000153`. The checksum-bound target counters are then imported with
+next values `363`, `154`, and `1` for bill, receipt, and refund respectively.
+The exact number map and counters are bound to the reviewed mapping before import and any
+execution-plan drift blocks. Legacy display/reference numbers, when present,
+remain provenance rather than target authority; preview never consumes a number.
 
 ## Documents, templates, and artifact provenance
 
-PDFs and templates are governed by the canonical CampusPilot document system,
-not copied into mutable finance columns. Inventory every legacy object with
-bucket/key, content type, byte size, checksum, source template identity, source
-financial fact, creation time, and availability.
+Templates are governed by the canonical CampusPilot document system and remain
+in scope. Legacy generated bill, receipt, and statement PDF artifact rows and
+objects are intentionally omitted and recorded only as counts by school/type.
+Do not download, hash, archive, copy, or link those PDF bytes.
 
-For an accepted historical document:
-
-- preserve the original bytes as an immutable artifact when legally and
-  technically allowed;
-- link it through explicit imported provenance to the mapped payment/refund,
-  bill, or as-of statement context;
-- do not claim it was rendered by a CampusPilot template revision when it was
-  not;
-- never regenerate an old document from current class, totals, currency, or
-  template settings and present it as the original;
-- record missing objects, checksum mismatches, unknown templates, and documents
-  that reference unmapped financial rows as exceptions.
-
-Future regenerated documents use immutable target snapshots and an explicit
-template revision. Template marketplace migration is a separate concern from
-financial-fact import.
+After financial facts and active templates are migrated, a download creates a
+fresh target artifact from the immutable target snapshot and selected template.
+The target artifact has a new identity and is never represented as the legacy
+original. There is no legacy statement template, so statement selection remains
+unconfigured.
 
 ## Idempotency, sequence, and deterministic ordering
 
@@ -428,7 +456,7 @@ for:
 - unmapped/ambiguous tenant, session, admission, student, class, or section;
 - exact and normalized admission-number duplicates;
 - orphan/cross-tenant relationships;
-- missing/conflicting currency, timezone, or cycle start;
+- explicit currency/timezone/cycle conflicts or schools without exactly one mapped session;
 - invalid, fractional-minor, negative, or overflow money;
 - unknown fee elements or incompatible scopes/required levels;
 - duplicate/forced billing periods and duplicate human numbers;
@@ -438,7 +466,8 @@ for:
 - missing/ambiguous timestamps and ordering ties;
 - source-event versus legacy-projection variance;
 - target-ledger versus rebuilt-projection variance;
-- missing/corrupt/unmapped documents and templates;
+- missing/corrupt/unmapped in-scope templates and unexpected PDF types outside
+  the count-only omission policy;
 - idempotency key or normalized-content collisions.
 
 Each exception has source identity, tenant, severity, blocking status, relevant
@@ -448,16 +477,16 @@ migration environment.
 
 ## Acceptance scenarios
 
-The future importer is acceptable only when all applicable scenarios pass:
+The versioned importer is acceptable only when all applicable scenarios pass:
 
 1. One admission with different legacy student IDs across sessions produces one
    durable target ledger and correct per-session activity.
 2. Exact/trim/case admission-number duplicates stop import until an approved
    identity mapping is supplied.
-3. INR, JPY, KWD, and a four-decimal currency convert exactly; sub-minor and
-   overflow values are rejected without rounding.
-4. Session/class/admission configuration preserves zero and precedence, while
-   missing timezone/cycle facts remain incomplete and block future posting.
+3. INR converts exactly to two-decimal minor units; sub-minor and overflow
+   values are rejected without rounding, and another currency blocks for review.
+4. The one session per school receives `Asia/Kolkata`, April cycle start, and
+   the approved global class configuration while preserving zero and precedence.
 5. A legacy generated bill becomes one debit, immutable bill snapshot, and
    matching ordered lines under the correct admission/session/tenant.
 6. A legacy payment with embedded discount becomes two independent credit facts
@@ -468,8 +497,9 @@ The future importer is acceptable only when all applicable scenarios pass:
    report rather than being silently dropped or posted as regular duplicates.
 9. Unsupported negative/refund/reversal rows are blocked; supported explicit
    corrections match original admission/currency and amount limits.
-10. Historical source documents retain byte checksum and honest template/source
-    provenance; regeneration never changes the claimed original artifact.
+10. Legacy generated PDFs are absent from target storage and tables, while a
+    fresh target download regenerates a valid artifact from migrated facts and
+    active templates.
 11. Two dry runs with identical inputs yield identical normalized facts,
     idempotency keys, ordering, and totals.
 12. Re-running an accepted import is idempotent and creates no duplicate facts
@@ -478,8 +508,8 @@ The future importer is acceptable only when all applicable scenarios pass:
     and rebuilt projections reconcile by tenant/admission/session/currency.
 14. Cross-school identifiers fail target constraints and appear in exception
     output without partial writes.
-15. A failed batch rolls back atomically before exposure; a resumed batch uses
-    checkpoints and idempotency without duplication.
+15. A failed pre-commit batch rolls back atomically before exposure; any retry
+    first checks durable run state and cannot duplicate facts.
 16. Unregistered admissions retain history and can settle it, but are excluded
     from later ordinary bulk billing.
 

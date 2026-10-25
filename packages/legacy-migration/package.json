@@ -1,0 +1,33 @@
+{
+  "name": "@campuspilot/legacy-migration",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "inventory": "tsx src/inventory.ts",
+    "snapshot": "tsx src/snapshot.ts",
+    "dry-run": "tsx src/dry-run.ts",
+    "import": "tsx src/import.ts",
+    "verify": "tsx src/verify.ts",
+    "provenance": "tsx src/print-provenance.ts",
+    "target-history-checksum": "tsx src/print-target-migration-history.ts",
+    "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "check-types": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1130.0",
+    "@campuspilot/api": "workspace:*",
+    "@campuspilot/db": "workspace:*",
+    "better-auth": "catalog:",
+    "pg": "catalog:"
+  },
+  "devDependencies": {
+    "@campuspilot/config": "workspace:*",
+    "@types/pg": "catalog:",
+    "drizzle-orm": "^0.45.2",
+    "tsx": "^4.23.1",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

@@ -1,0 +1,1 @@
+ALTER TABLE "student" ALTER COLUMN "rollNo" DROP NOT NULL;
