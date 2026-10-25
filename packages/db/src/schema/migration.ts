@@ -2,6 +2,7 @@ import {
   boolean,
   check,
   index,
+  integer,
   jsonb,
   pgEnum,
   pgTable,
@@ -64,6 +65,14 @@ export const legacyMigrationRunTable = pgTable(
     targetS3ForcePathStyle: boolean("target_s3_force_path_style").notNull(),
     targetPostgresRuntimeIdentity: jsonb("target_postgres_runtime_identity").notNull(),
     writerFence: jsonb("writer_fence").notNull(),
+    /**
+     * `none` is the normal state. Only a failure recorded before the importer
+     * issues BEGIN may be retried; later phases require manual investigation.
+     */
+    failureStage: text("failure_stage").notNull().default("none"),
+    /** Append-only evidence for explicit same-run pre-transaction retries. */
+    retryCount: integer("retry_count").notNull().default(0),
+    retryHistory: jsonb("retry_history").notNull().default(sql`'[]'::jsonb`),
     /** Durable verifier attestation used only for post-check finalization recovery. */
     verificationEvidenceSha256: text("verification_evidence_sha256"),
     /** Post-commit audit files must be durably attested before finalization. */
@@ -115,14 +124,19 @@ export const legacyMigrationRunTable = pgTable(
       (${table.runReportSha256} IS NULL OR ${table.runReportSha256} ~ '^[0-9a-f]{64}$')
     `),
     check('legacy_migration_run_lifecycle_check', sql`
-      (${table.status} = 'preparing' AND ${table.committedAt} IS NULL AND ${table.finalizedAt} IS NULL) OR
-      (${table.status} = 'committed' AND ${table.committedAt} IS NOT NULL AND ${table.finalizedAt} IS NULL) OR
-      (${table.status} = 'finalized' AND ${table.committedAt} IS NOT NULL AND ${table.finalizedAt} IS NOT NULL AND
+      (${table.status} = 'preparing' AND ${table.failureStage} = 'none' AND ${table.committedAt} IS NULL AND ${table.finalizedAt} IS NULL) OR
+      (${table.status} = 'committed' AND ${table.failureStage} = 'none' AND ${table.committedAt} IS NOT NULL AND ${table.finalizedAt} IS NULL) OR
+      (${table.status} = 'finalized' AND ${table.failureStage} = 'none' AND ${table.committedAt} IS NOT NULL AND ${table.finalizedAt} IS NOT NULL AND
         ${table.verificationEvidenceSha256} IS NOT NULL AND ${table.writesSha256} IS NOT NULL AND
         ${table.dispositionsSha256} IS NOT NULL AND ${table.auditExceptionsSha256} IS NOT NULL AND
         ${table.targetAfterSha256} IS NOT NULL AND ${table.reconciliationSha256} IS NOT NULL AND
         ${table.runReportSha256} IS NOT NULL) OR
-      (${table.status} = 'failed' AND ${table.failedAt} IS NOT NULL AND ${table.committedAt} IS NULL)
+      (${table.status} = 'failed' AND ${table.failureStage} IN ('pre_transaction', 'transaction_started') AND
+        ${table.failedAt} IS NOT NULL AND ${table.committedAt} IS NULL)
+    `),
+    check('legacy_migration_run_retry_check', sql`
+      ${table.retryCount} >= 0 AND jsonb_typeof(${table.retryHistory}) = 'array' AND
+      jsonb_array_length(${table.retryHistory}) = ${table.retryCount}
     `),
   ],
 );

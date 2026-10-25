@@ -17,6 +17,7 @@ describe('durable migration run schema', () => {
         'snapshotEvidenceSha256', 'exceptionsSha256', 'sourceDumpSha256', 'objectManifestSha256',
         'decisionSetSha256', 'writersDisabled', 'committedAt', 'finalizedAt',
         'targetPostgresRuntimeIdentity', 'writerFence', 'failedAt', 'errorSummary',
+        'failureStage', 'retryCount', 'retryHistory',
         'verificationEvidenceSha256',
         'writesSha256', 'dispositionsSha256', 'auditExceptionsSha256',
         'targetAfterSha256', 'reconciliationSha256', 'runReportSha256',
@@ -47,6 +48,28 @@ describe('durable migration run schema', () => {
     expect(authority).toContain('SECURITY DEFINER');
     expect(authority).toContain('session_user <> \'campuspilot-plus-migration\'');
     expect(authority).toContain('REVOKE ALL ON TABLE public.legacy_migration_run');
+    const retryGate = await readFile(path.resolve(packageRoot, '../db/src/migrations/0029_happy_owl.sql'), 'utf8');
+    expect(retryGate).toContain("failure_stage = CASE");
+    expect(retryGate).toContain("OLD.failure_stage <> 'pre_transaction'");
+    expect(retryGate).toContain("OLD.error_summary !~ '^Invalid preserved (user|account) ID: [A-Za-z0-9]{32}$'");
+    expect(retryGate).toContain("OLD.retry_count <> 0 OR OLD.retry_history <> '[]'::jsonb");
+    expect(retryGate).toContain("OLD.run_id <> 'prem-20261025t090000z'");
+    expect(retryGate).toContain("OLD.school_id <> 'sch_n6q4pmirqg7dpct1pr8pr'");
+    expect(retryGate).toContain("'{previousProvenance,trackedDecisionAndDocsSha256}'");
+    expect(retryGate).toContain("'{replacementProvenance,trackedDecisionAndDocsSha256}'");
+    expect(retryGate).toContain('legacy migration error summary is immutable outside its lifecycle transition');
+    expect(retryGate).toContain("OLD.status='preparing' AND NEW.status='failed'");
+    expect(retryGate).toContain("OLD.status='committed' AND NEW.status='committed'");
+    expect(retryGate).toContain('legacy migration retry evidence does not bind old and replacement provenance');
+    expect(retryGate).toContain("OLD.status='failed' AND NEW.status IN ('failed','preparing')");
+    const importer = await readFile(path.resolve(packageRoot, 'src/import.ts'), 'utf8');
+    expect(importer.indexOf('businessTransactionStarted = true')).toBeLessThan(
+      importer.indexOf('BEGIN ISOLATION LEVEL SERIALIZABLE', importer.indexOf('businessTransactionStarted = true')),
+    );
+    expect(importer).toContain("businessTransactionStarted ? 'transaction_started' : 'pre_transaction'");
+    expect(importer).toContain('failed_at=coalesce(failed_at,now())');
+    const verifier = await readFile(path.resolve(packageRoot, 'src/verify.ts'), 'utf8');
+    expect(verifier).not.toContain("status='finalized',finalized_at=now(),updated_at=now(),error_summary=NULL");
     const runtimeGrants = await readFile(path.resolve(packageRoot, '../db/src/runtime-grants.ts'), 'utf8');
     expect(runtimeGrants).toContain('GRANT CONNECT ON DATABASE');
     expect(runtimeGrants).toContain('GRANT SELECT, INSERT, UPDATE, DELETE');
