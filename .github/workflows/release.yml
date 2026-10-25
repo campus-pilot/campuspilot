@@ -1,6 +1,7 @@
 name: Release & Publish
 
 on:
+  pull_request:
   push:
     branches:
       - main
@@ -12,9 +13,101 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  migration_safety:
+    name: Legacy migration safety checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+      - name: Enable Corepack
+        run: corepack enable
+      - name: Install frozen workspace
+        run: pnpm install --frozen-lockfile
+      - name: Typecheck migration and affected contracts
+        run: |
+          pnpm --filter @campuspilot/legacy-migration check-types
+          pnpm exec tsc -p packages/db/tsconfig.json --noEmit
+          pnpm exec tsc -p packages/api/tsconfig.json --noEmit
+      - name: Run migration unit, mocked integration, and failure tests
+        run: pnpm --filter @campuspilot/legacy-migration test
+
+  migration_integration:
+    name: Legacy migration optional service integration
+    needs: migration_safety
+    runs-on: ubuntu-latest
+    continue-on-error: true # Temporary rollout exception: database-only migration has mandatory local gates.
+    permissions:
+      contents: read
+    services:
+      postgres:
+        # ubuntu-latest ships the matching PostgreSQL 16 client used by the
+        # fixture's pg_dump/pg_restore exact-cutoff evidence path.
+        image: postgres:16-alpine@sha256:f4610795587492cd4fb887c2dc3de301b813278bb6f616992061141b5f15ac36
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: campuspilot_integration
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d campuspilot_integration"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - name: Install migration fixture clients
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-client poppler-utils
+      - name: Bootstrap separate target owner, migration, and API roles
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U postgres -d postgres <<'SQL'
+          CREATE ROLE "campuspilot-plus-owner" NOLOGIN;
+          CREATE ROLE "campuspilot-plus-migration" LOGIN PASSWORD 'migration-fixture';
+          CREATE ROLE "campuspilot-plus" LOGIN PASSWORD 'app-fixture';
+          GRANT "campuspilot-plus-owner" TO "campuspilot-plus-migration";
+          ALTER DATABASE campuspilot_integration OWNER TO "campuspilot-plus-owner";
+          SQL
+      - name: Start pinned Gotenberg fixture
+        run: |
+          set -euo pipefail
+          docker run -d --name migration-gotenberg -p 3000:3000 \
+            gotenberg/gotenberg:8.23.1@sha256:6ae55a47fee9f95541aadb9af5a87548ebcc0603e8f6bf6af01ca82e594a78cc
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:3000/health >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          exit 1
+      - name: Apply target Drizzle history including durable run state
+        env:
+          DATABASE_URL: postgresql://campuspilot-plus-migration:migration-fixture@127.0.0.1:5432/campuspilot_integration?options=-c%20role%3Dcampuspilot-plus-owner
+        run: pnpm --filter server exec tsx src/migrate.ts
+      - name: Run temporarily suppressed DB-only integration gate
+        env:
+          MIGRATION_INTEGRATION_DATABASE_URL: postgresql://campuspilot-plus-migration:migration-fixture@127.0.0.1:5432/campuspilot_integration?options=-c%20role%3Dcampuspilot-plus-owner
+          MIGRATION_INTEGRATION_ADMIN_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
+          MIGRATION_INTEGRATION_APP_DATABASE_URL: postgresql://campuspilot-plus:app-fixture@127.0.0.1:5432/campuspilot_integration
+          MIGRATION_INTEGRATION_TARGET_ROLE: campuspilot-plus-owner
+          MIGRATION_INTEGRATION_TARGET_LOGIN_ROLE: campuspilot-plus-migration
+          MIGRATION_INTEGRATION_GOTENBERG_URL: http://127.0.0.1:3000
+        run: pnpm --filter @campuspilot/legacy-migration test:integration
+
   prepare:
     name: Prepare release version
     runs-on: ubuntu-latest
+    if: github.event_name == 'push'
     permissions:
       contents: read
       pull-requests: read
@@ -133,11 +226,13 @@ jobs:
 
   build:
     name: Build immutable ${{ matrix.name }} image
-    needs: prepare
+    needs: [prepare, migration_safety]
     if: ${{ needs.prepare.outputs.mode == 'new' }}
     runs-on: ubuntu-latest
     permissions:
+      attestations: write
       contents: read
+      id-token: write
       packages: write
     strategy:
       fail-fast: false
@@ -189,12 +284,15 @@ jobs:
           password: ${{ github.token }}
 
       - name: Build and push immutable tags
+        id: build
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           file: ${{ matrix.file }}
           push: true
-          build-args: ${{ matrix.build_args }}
+          build-args: |
+            ${{ matrix.build_args }}
+            SOURCE_REVISION=${{ github.sha }}
           tags: |
             ${{ matrix.image }}:${{ needs.prepare.outputs.release_tag }}
             ${{ matrix.image }}:${{ needs.prepare.outputs.sha_tag }}
@@ -205,12 +303,21 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
 
+      - name: Attest immutable image provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ matrix.image }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
   verify_reuse:
     name: Verify existing ${{ matrix.name }} image
-    needs: prepare
+    needs: [prepare, migration_safety]
     if: ${{ needs.prepare.outputs.mode == 'reuse' }}
     runs-on: ubuntu-latest
     permissions:
+      attestations: read
+      contents: read
       packages: read
     strategy:
       fail-fast: false
@@ -286,11 +393,19 @@ jobs:
             exit 1
           fi
 
-          echo "Verified ${IMAGE} at ${release_digest}"
+          GH_TOKEN="${{ github.token }}" gh attestation verify \
+            "oci://${IMAGE}:${RELEASE_TAG}@${release_digest}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/release.yml" \
+            --source-digest "${GITHUB_SHA}" \
+            --deny-self-hosted-runners >/dev/null
+
+          echo "Verified ${IMAGE} at ${release_digest} with matching build provenance"
 
   release:
     name: Publish git tag and GitHub release
     needs:
+      - migration_safety
       - prepare
       - build
       - verify_reuse
@@ -298,6 +413,7 @@ jobs:
       ${{
         !cancelled() &&
         needs.prepare.result == 'success' &&
+        needs.migration_safety.result == 'success' &&
         (
           (
             needs.prepare.outputs.mode == 'new' &&
