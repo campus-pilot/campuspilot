@@ -25,11 +25,12 @@ function assertFixtureDatabase(value: string): void {
 describeWithTlsPostgres('runtime TLS attestation on PostgreSQL 17', () => {
   it('observes the session TLS row and restores the active owner role', async () => {
     assertFixtureDatabase(connectionString!);
-    const client = new pg.Client({ connectionString });
-    await client.connect();
+    const admin = new pg.Client({ connectionString });
+    await admin.connect();
     const owner = `legacy_tls_owner_${randomUUID().replaceAll('-', '')}`;
+    let client: pg.Client | undefined;
     try {
-      const version = await client.query<{ server_version_num: string }>(
+      const version = await admin.query<{ server_version_num: string }>(
         'SHOW server_version_num',
       );
       expect(Number(version.rows[0]?.server_version_num)).toBeGreaterThanOrEqual(
@@ -37,17 +38,35 @@ describeWithTlsPostgres('runtime TLS attestation on PostgreSQL 17', () => {
       );
       expect(Number(version.rows[0]?.server_version_num)).toBeLessThan(180_000);
 
-      const initial = await client.query<{ session_user_name: string }>(
+      const initial = await admin.query<{ session_user_name: string }>(
         'SELECT session_user AS session_user_name',
       );
       const sessionUser = initial.rows[0]!.session_user_name;
-      await client.query('BEGIN');
-      await client.query(`CREATE ROLE ${quoteIdentifier(owner)} NOLOGIN`);
-      await client.query(`SET ROLE ${quoteIdentifier(owner)}`);
+      await admin.query(`CREATE ROLE ${quoteIdentifier(owner)} NOLOGIN`);
+      await admin.query(
+        `GRANT ${quoteIdentifier(owner)} TO ${quoteIdentifier(sessionUser)}`,
+      );
+
+      const startupRoleUrl = new URL(connectionString!);
+      startupRoleUrl.searchParams.set('options', `-c role=${owner}`);
+      client = new pg.Client({ connectionString: startupRoleUrl.toString() });
+      await client.connect();
+
+      await client.query('RESET ROLE');
+      const resetRoles = await client.query<{
+        current_user_name: string;
+        session_user_name: string;
+      }>(
+        'SELECT current_user AS current_user_name,session_user AS session_user_name',
+      );
+      expect(resetRoles.rows[0]).toEqual({
+        current_user_name: owner,
+        session_user_name: sessionUser,
+      });
 
       const identity = await postgresRuntimeIdentity(
         client,
-        connectionString!,
+        startupRoleUrl.toString(),
         {
           expectedCurrentUser: owner,
           expectedSessionUser: sessionUser,
@@ -69,9 +88,11 @@ describeWithTlsPostgres('runtime TLS attestation on PostgreSQL 17', () => {
         session_user_name: sessionUser,
       });
     } finally {
-      await client.query('RESET ROLE').catch(() => undefined);
-      await client.query('ROLLBACK').catch(() => undefined);
-      await client.end();
+      await client?.end().catch(() => undefined);
+      await admin
+        .query(`DROP ROLE IF EXISTS ${quoteIdentifier(owner)}`)
+        .catch(() => undefined);
+      await admin.end();
     }
   });
 });

@@ -107,13 +107,15 @@ async function readTlsWithRoleRestoration(
     | undefined;
   let observationError: unknown;
   try {
-    await client.query('RESET ROLE');
+    // RESET ROLE can restore a startup `options=-c role=...` value instead of
+    // session_user. SET ROLE NONE always selects the authenticated session role.
+    await client.query('SET ROLE NONE');
     const resetRoles = await readRoles(client);
     if (
       resetRoles.current_user_name !== initialRoles.session_user_name ||
       resetRoles.session_user_name !== initialRoles.session_user_name
     ) {
-      throw new Error('RESET ROLE did not restore the expected PostgreSQL session login');
+      throw new Error('SET ROLE NONE did not restore the expected PostgreSQL session login');
     }
     tls = await readTls(client);
   } catch (error) {
