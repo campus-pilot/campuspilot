@@ -62,6 +62,47 @@ const action = (code: string | null) => ({
   a: 'no action', r: 'restrict', c: 'cascade', n: 'set null', d: 'set default',
 }[code ?? ''] ?? null);
 
+/**
+ * Keep the catalog alias explicit and non-keyword. PostgreSQL 17 parses
+ * `constraint` as a reserved token, so using it as an unquoted alias makes
+ * this evidence query fail before any migration validation can run.
+ */
+export const LEGACY_CONSTRAINT_CATALOG_QUERY = `
+  SELECT catalog_constraint.conname AS name, catalog_constraint.contype AS kind,
+    ARRAY(SELECT attribute.attname FROM unnest(catalog_constraint.conkey) WITH ORDINALITY key(attnum,ordinality)
+      JOIN pg_catalog.pg_attribute AS attribute ON attribute.attrelid=catalog_constraint.conrelid AND attribute.attnum=key.attnum
+      ORDER BY key.ordinality) AS columns,
+    CASE WHEN catalog_constraint.contype='f' THEN target_namespace.nspname || '.' || target.relname END AS referenced_table,
+    CASE WHEN catalog_constraint.contype='f' THEN ARRAY(SELECT attribute.attname FROM unnest(catalog_constraint.confkey) WITH ORDINALITY key(attnum,ordinality)
+      JOIN pg_catalog.pg_attribute AS attribute ON attribute.attrelid=catalog_constraint.confrelid AND attribute.attnum=key.attnum
+      ORDER BY key.ordinality) ELSE ARRAY[]::text[] END AS referenced_columns,
+    CASE WHEN catalog_constraint.contype='f' THEN catalog_constraint.confdeltype::text END AS delete_action,
+    CASE WHEN catalog_constraint.contype='f' THEN catalog_constraint.confupdtype::text END AS update_action
+  FROM pg_catalog.pg_constraint AS catalog_constraint
+  JOIN pg_catalog.pg_class AS relation ON relation.oid=catalog_constraint.conrelid
+  JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid=relation.relnamespace
+  LEFT JOIN pg_catalog.pg_class AS target ON target.oid=catalog_constraint.confrelid
+  LEFT JOIN pg_catalog.pg_namespace AS target_namespace ON target_namespace.oid=target.relnamespace
+  WHERE namespace.nspname=$1 AND relation.relname=$2 AND catalog_constraint.contype IN ('f','p','u')
+  ORDER BY catalog_constraint.conname
+`;
+
+export const LEGACY_INDEX_CATALOG_QUERY = `
+  SELECT index_relation.relname AS name, index.indisunique AS unique,
+    ARRAY(SELECT attribute.attname
+      FROM unnest(index.indkey::smallint[]) WITH ORDINALITY key(attnum,ordinality)
+      JOIN pg_catalog.pg_attribute AS attribute
+        ON attribute.attrelid=index.indrelid AND attribute.attnum=key.attnum
+      WHERE key.ordinality<=index.indnatts ORDER BY key.ordinality) AS columns
+  FROM pg_catalog.pg_index AS index
+  JOIN pg_catalog.pg_class AS relation ON relation.oid=index.indrelid
+  JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid=relation.relnamespace
+  JOIN pg_catalog.pg_class AS index_relation ON index_relation.oid=index.indexrelid
+  LEFT JOIN pg_catalog.pg_constraint AS catalog_constraint ON catalog_constraint.conindid=index.indexrelid
+  WHERE namespace.nspname=$1 AND relation.relname=$2 AND catalog_constraint.oid IS NULL
+  ORDER BY index_relation.relname
+`;
+
 /** Capture all non-system public catalog objects used by the frozen legacy app. */
 export async function captureLegacyCatalog(client: Client): Promise<LegacyCatalogInventory> {
   const tableRows = (await client.query<{ name: string }>(`
@@ -99,25 +140,7 @@ export async function captureLegacyCatalog(client: Client): Promise<LegacyCatalo
       name: string; kind: 'f' | 'p' | 'u'; columns: string[];
       referenced_table: string | null; referenced_columns: string[];
       delete_action: string | null; update_action: string | null;
-    }>(`
-      SELECT constraint.conname AS name, constraint.contype AS kind,
-        ARRAY(SELECT attribute.attname FROM unnest(constraint.conkey) WITH ORDINALITY key(attnum,ordinality)
-          JOIN pg_catalog.pg_attribute AS attribute ON attribute.attrelid=constraint.conrelid AND attribute.attnum=key.attnum
-          ORDER BY key.ordinality) AS columns,
-        CASE WHEN constraint.contype='f' THEN target_namespace.nspname || '.' || target.relname END AS referenced_table,
-        CASE WHEN constraint.contype='f' THEN ARRAY(SELECT attribute.attname FROM unnest(constraint.confkey) WITH ORDINALITY key(attnum,ordinality)
-          JOIN pg_catalog.pg_attribute AS attribute ON attribute.attrelid=constraint.confrelid AND attribute.attnum=key.attnum
-          ORDER BY key.ordinality) ELSE ARRAY[]::text[] END AS referenced_columns,
-        CASE WHEN constraint.contype='f' THEN constraint.confdeltype::text END AS delete_action,
-        CASE WHEN constraint.contype='f' THEN constraint.confupdtype::text END AS update_action
-      FROM pg_catalog.pg_constraint AS constraint
-      JOIN pg_catalog.pg_class AS relation ON relation.oid=constraint.conrelid
-      JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid=relation.relnamespace
-      LEFT JOIN pg_catalog.pg_class AS target ON target.oid=constraint.confrelid
-      LEFT JOIN pg_catalog.pg_namespace AS target_namespace ON target_namespace.oid=target.relnamespace
-      WHERE namespace.nspname=$1 AND relation.relname=$2 AND constraint.contype IN ('f','p','u')
-      ORDER BY constraint.conname
-    `, [schema, table])).rows.map((constraint) => ({
+    }>(LEGACY_CONSTRAINT_CATALOG_QUERY, [schema, table])).rows.map((constraint) => ({
       name: constraint.name,
       kind: constraint.kind,
       columns: constraint.columns,
@@ -128,21 +151,7 @@ export async function captureLegacyCatalog(client: Client): Promise<LegacyCatalo
     }));
     const indexes = (await client.query<{
       name: string; unique: boolean; columns: string[];
-    }>(`
-      SELECT index_relation.relname AS name, index.indisunique AS unique,
-        ARRAY(SELECT attribute.attname
-          FROM unnest(index.indkey::smallint[]) WITH ORDINALITY key(attnum,ordinality)
-          JOIN pg_catalog.pg_attribute AS attribute
-            ON attribute.attrelid=index.indrelid AND attribute.attnum=key.attnum
-          WHERE key.ordinality<=index.indnatts ORDER BY key.ordinality) AS columns
-      FROM pg_catalog.pg_index AS index
-      JOIN pg_catalog.pg_class AS relation ON relation.oid=index.indrelid
-      JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid=relation.relnamespace
-      JOIN pg_catalog.pg_class AS index_relation ON index_relation.oid=index.indexrelid
-      LEFT JOIN pg_catalog.pg_constraint AS constraint ON constraint.conindid=index.indexrelid
-      WHERE namespace.nspname=$1 AND relation.relname=$2 AND constraint.oid IS NULL
-      ORDER BY index_relation.relname
-    `, [schema, table])).rows;
+    }>(LEGACY_INDEX_CATALOG_QUERY, [schema, table])).rows;
     tables.push({ name, columns, constraints, indexes });
   }
   const enums = (await client.query<{ name: string; values: string[] }>(`

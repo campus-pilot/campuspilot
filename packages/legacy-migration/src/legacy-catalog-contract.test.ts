@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   EXPECTED_LEGACY_CATALOG,
+  LEGACY_CONSTRAINT_CATALOG_QUERY,
+  LEGACY_INDEX_CATALOG_QUERY,
   assertExpectedLegacyCatalog,
 } from './legacy-catalog-contract.ts';
 
@@ -34,5 +36,15 @@ describe('tracked legacy catalog contract', () => {
     const catalog = clone();
     catalog.otherRelations.push({ name: 'public.unknown_view', kind: 'view' });
     expect(() => assertExpectedLegacyCatalog(catalog)).toThrow('differs');
+  });
+
+  it('does not use PostgreSQL reserved constraint aliases in catalog SQL', () => {
+    for (const query of [
+      LEGACY_CONSTRAINT_CATALOG_QUERY,
+      LEGACY_INDEX_CATALOG_QUERY,
+    ]) {
+      expect(query).not.toMatch(/\bAS\s+constraint\b/i);
+      expect(query).not.toMatch(/\bconstraint\.(?:con|oid)/i);
+    }
   });
 });
