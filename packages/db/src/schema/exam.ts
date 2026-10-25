@@ -128,8 +128,9 @@ export const examAssessmentSettingsTable = pgTable(
 );
 
 /** Attendance and activities belong to the student's whole exam, never a subject.
- * Legacy per-subject values remain preserved separately; they are not inferred
- * to be an exam-wide fact or copied automatically during migration.
+ * Legacy migration may promote repeated per-subject values only through its
+ * explicitly approved agreement-and-conflict rule; ordinary runtime code must
+ * not infer this row from a subject result.
  */
 export const examStudentAssessmentTable = pgTable(
   'exam_student_assessment',
