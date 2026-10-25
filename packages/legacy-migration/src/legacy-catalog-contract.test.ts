@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   EXPECTED_LEGACY_CATALOG,
   LEGACY_CONSTRAINT_CATALOG_QUERY,
+  LEGACY_ENUM_CATALOG_QUERY,
   LEGACY_INDEX_CATALOG_QUERY,
   assertExpectedLegacyCatalog,
   normalizeLegacyCatalogColumns,
@@ -53,6 +54,7 @@ describe('tracked legacy catalog contract', () => {
   it('uses JSON aggregation and accepts the legacy driver array shape defensively', () => {
     expect(LEGACY_CONSTRAINT_CATALOG_QUERY).toContain('jsonb_agg');
     expect(LEGACY_INDEX_CATALOG_QUERY).toContain('jsonb_agg');
+    expect(LEGACY_ENUM_CATALOG_QUERY).toContain('jsonb_agg');
     expect(normalizeLegacyCatalogColumns(['id'])).toEqual(['id']);
     expect(normalizeLegacyCatalogColumns('{id}')).toEqual(['id']);
     expect(normalizeLegacyCatalogColumns('{school_id,usage_type}')).toEqual([
@@ -80,7 +82,7 @@ describe('tracked legacy catalog contract', () => {
   it.each([
     ["'default'::text", "'default'"],
     ["('current'::character varying)", "'current'"],
-    ["'0'::numeric", '0'],
+    ["'0'::numeric", "'0'"],
     ["'draft'::exam_plan_status", "'draft'"],
     ["'{}'::jsonb", "'{}'::jsonb"],
     ['now()', 'now()'],
