@@ -338,7 +338,14 @@ try {
   const expectedDatabase = databaseIdentity(TARGET_DATABASE_URL).split("/").at(-1);
   if (targetDatabase.rows[0]?.database !== expectedDatabase)
     throw new Error("Connected target database does not match the allowlisted URL");
-  const targetRuntimeIdentity = await postgresRuntimeIdentity(target, TARGET_DATABASE_URL);
+  const targetRuntimeIdentity = await postgresRuntimeIdentity(
+    target,
+    TARGET_DATABASE_URL,
+    {
+      expectedCurrentUser: TARGET_DATABASE_ROLE,
+      expectedSessionUser: TARGET_DATABASE_LOGIN_ROLE,
+    },
+  );
   const sourceRuntimeIdentity = await postgresRuntimeIdentity(source, SOURCE_DATABASE_URL);
   if (targetRuntimeIdentity.currentUser !== TARGET_DATABASE_ROLE ||
     targetRuntimeIdentity.sessionUser !== TARGET_DATABASE_LOGIN_ROLE)
