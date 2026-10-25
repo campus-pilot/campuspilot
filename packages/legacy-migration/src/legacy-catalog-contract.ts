@@ -52,11 +52,61 @@ const normalizeType = (value: string) => value
   .replace(/^character varying$/, 'varchar')
   .replace(/^timestamp without time zone$/, 'timestamp');
 
-const normalizeDefault = (value: string | null) => value === null
-  ? null
-  : value
-      .replace(/^false$/, 'false')
-      .replace(/^true$/, 'true');
+function removeRedundantOuterParentheses(value: string): string {
+  let normalized = value.trim();
+  while (normalized.startsWith('(') && normalized.endsWith(')')) {
+    let depth = 0;
+    let quoted = false;
+    let wrapsExpression = true;
+    for (let index = 0; index < normalized.length; index += 1) {
+      const character = normalized[index];
+      if (character === "'") {
+        if (quoted && normalized[index + 1] === "'") index += 1;
+        else quoted = !quoted;
+      } else if (!quoted && character === '(') depth += 1;
+      else if (!quoted && character === ')') {
+        depth -= 1;
+        if (depth === 0 && index !== normalized.length - 1) {
+          wrapsExpression = false;
+          break;
+        }
+      }
+    }
+    if (!wrapsExpression || depth !== 0 || quoted) break;
+    normalized = normalized.slice(1, -1).trim();
+  }
+  return normalized;
+}
+
+/** Normalize only literal casts emitted by PostgreSQL's catalog printer. */
+export function normalizeLegacyDefaultExpression(value: string | null): string | null {
+  if (value === null) return null;
+  const normalized = removeRedundantOuterParentheses(value);
+  const cast = normalized.match(
+    /^(?<literal>'(?:[^']|'')*')::(?<type>(?:public\.)?(?:text|character varying|varchar|numeric|decimal|smallint|integer|bigint|bill_generation_event_type|exam_plan_status|ledger_event_type|staff_role))$/,
+  );
+  if (!cast?.groups) return normalized;
+  const { literal, type } = cast.groups;
+  if (!literal || !type) return normalized;
+  if (/^(?:public\.)?(?:numeric|decimal|smallint|integer|bigint)$/.test(type)) {
+    const numeric = literal.slice(1, -1).replaceAll("''", "'");
+    if (!/^-?(?:\d+\.?\d*|\.\d+)$/.test(numeric)) return normalized;
+    return numeric;
+  }
+  return literal;
+}
+
+/** Accept JSON aggregation and defensively normalize the legacy driver's array shape. */
+export function normalizeLegacyCatalogColumns(value: unknown): string[] {
+  if (Array.isArray(value) && value.every((item) => typeof item === 'string')) {
+    return value;
+  }
+  if (typeof value === 'string' && /^\{(?:[A-Za-z_][A-Za-z0-9_]*(?:,[A-Za-z_][A-Za-z0-9_]*)*)?\}$/.test(value)) {
+    const content = value.slice(1, -1);
+    return content ? content.split(',') : [];
+  }
+  throw new Error('Legacy catalog column aggregation has an unexpected driver shape');
+}
 
 const action = (code: string | null) => ({
   a: 'no action', r: 'restrict', c: 'cascade', n: 'set null', d: 'set default',
@@ -69,13 +119,15 @@ const action = (code: string | null) => ({
  */
 export const LEGACY_CONSTRAINT_CATALOG_QUERY = `
   SELECT catalog_constraint.conname AS name, catalog_constraint.contype AS kind,
-    ARRAY(SELECT attribute.attname FROM unnest(catalog_constraint.conkey) WITH ORDINALITY key(attnum,ordinality)
+    (SELECT COALESCE(jsonb_agg(attribute.attname ORDER BY key.ordinality), '[]'::jsonb)
+      FROM unnest(catalog_constraint.conkey) WITH ORDINALITY key(attnum,ordinality)
       JOIN pg_catalog.pg_attribute AS attribute ON attribute.attrelid=catalog_constraint.conrelid AND attribute.attnum=key.attnum
-      ORDER BY key.ordinality) AS columns,
+    ) AS columns,
     CASE WHEN catalog_constraint.contype='f' THEN target_namespace.nspname || '.' || target.relname END AS referenced_table,
-    CASE WHEN catalog_constraint.contype='f' THEN ARRAY(SELECT attribute.attname FROM unnest(catalog_constraint.confkey) WITH ORDINALITY key(attnum,ordinality)
+    CASE WHEN catalog_constraint.contype='f' THEN (SELECT COALESCE(jsonb_agg(attribute.attname ORDER BY key.ordinality), '[]'::jsonb)
+      FROM unnest(catalog_constraint.confkey) WITH ORDINALITY key(attnum,ordinality)
       JOIN pg_catalog.pg_attribute AS attribute ON attribute.attrelid=catalog_constraint.confrelid AND attribute.attnum=key.attnum
-      ORDER BY key.ordinality) ELSE ARRAY[]::text[] END AS referenced_columns,
+    ) ELSE '[]'::jsonb END AS referenced_columns,
     CASE WHEN catalog_constraint.contype='f' THEN catalog_constraint.confdeltype::text END AS delete_action,
     CASE WHEN catalog_constraint.contype='f' THEN catalog_constraint.confupdtype::text END AS update_action
   FROM pg_catalog.pg_constraint AS catalog_constraint
@@ -89,11 +141,11 @@ export const LEGACY_CONSTRAINT_CATALOG_QUERY = `
 
 export const LEGACY_INDEX_CATALOG_QUERY = `
   SELECT index_relation.relname AS name, index.indisunique AS unique,
-    ARRAY(SELECT attribute.attname
+    (SELECT COALESCE(jsonb_agg(attribute.attname ORDER BY key.ordinality), '[]'::jsonb)
       FROM unnest(index.indkey::smallint[]) WITH ORDINALITY key(attnum,ordinality)
       JOIN pg_catalog.pg_attribute AS attribute
         ON attribute.attrelid=index.indrelid AND attribute.attnum=key.attnum
-      WHERE key.ordinality<=index.indnatts ORDER BY key.ordinality) AS columns
+      WHERE key.ordinality<=index.indnatts) AS columns
   FROM pg_catalog.pg_index AS index
   JOIN pg_catalog.pg_class AS relation ON relation.oid=index.indrelid
   JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid=relation.relnamespace
@@ -130,11 +182,11 @@ export async function captureLegacyCatalog(client: Client): Promise<LegacyCatalo
         ON default_value.adrelid=relation.oid AND default_value.adnum=attribute.attnum
       WHERE namespace.nspname=$1 AND relation.relname=$2
         AND attribute.attnum>0 AND NOT attribute.attisdropped
-      ORDER BY attribute.attname
+      ORDER BY attribute.attnum
     `, [schema, table])).rows.map((column) => ({
       ...column,
       type: normalizeType(column.type),
-      default: normalizeDefault(column.default),
+      default: normalizeLegacyDefaultExpression(column.default),
     }));
     const constraints = (await client.query<{
       name: string; kind: 'f' | 'p' | 'u'; columns: string[];
@@ -143,15 +195,18 @@ export async function captureLegacyCatalog(client: Client): Promise<LegacyCatalo
     }>(LEGACY_CONSTRAINT_CATALOG_QUERY, [schema, table])).rows.map((constraint) => ({
       name: constraint.name,
       kind: constraint.kind,
-      columns: constraint.columns,
+      columns: normalizeLegacyCatalogColumns(constraint.columns),
       referencedTable: constraint.referenced_table,
-      referencedColumns: constraint.referenced_columns,
+      referencedColumns: normalizeLegacyCatalogColumns(constraint.referenced_columns),
       onDelete: action(constraint.delete_action),
       onUpdate: action(constraint.update_action),
     }));
     const indexes = (await client.query<{
       name: string; unique: boolean; columns: string[];
-    }>(LEGACY_INDEX_CATALOG_QUERY, [schema, table])).rows;
+    }>(LEGACY_INDEX_CATALOG_QUERY, [schema, table])).rows.map((index) => ({
+      ...index,
+      columns: normalizeLegacyCatalogColumns(index.columns),
+    }));
     tables.push({ name, columns, constraints, indexes });
   }
   const enums = (await client.query<{ name: string; values: string[] }>(`

@@ -14,7 +14,7 @@ const tables = Object.entries(snapshot.tables).map(([qualifiedName, table]) => (
     type: column.type,
     nullable: !column.notNull,
     default: normalizeDefault(column.default),
-  })).sort((left, right) => left.name.localeCompare(right.name)),
+  })),
   constraints: [
     ...(Object.values(table.columns).some((column) => column.primaryKey) ? [{
       name: `${table.name}_pkey`,

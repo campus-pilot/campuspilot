@@ -34,9 +34,24 @@ describeWithPostgres('legacy catalog query on PostgreSQL 17', () => {
 
       await client.query('BEGIN');
       await client.query(`
+        DO $$
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1
+            FROM pg_catalog.pg_type AS type
+            JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid=type.typnamespace
+            WHERE namespace.nspname='public' AND type.typname='exam_plan_status'
+          ) THEN
+            CREATE TYPE public.exam_plan_status AS ENUM ('draft', 'ready');
+          END IF;
+        END
+        $$;
         CREATE TABLE public.legacy_catalog_query_regression (
-          id text PRIMARY KEY,
-          parent_id text REFERENCES public.legacy_catalog_query_regression(id)
+          z_first text PRIMARY KEY DEFAULT 'default'::text,
+          a_second character varying NOT NULL DEFAULT 'current'::character varying,
+          numeric_value numeric NOT NULL DEFAULT '0'::numeric,
+          status public.exam_plan_status NOT NULL DEFAULT 'draft'::public.exam_plan_status,
+          parent_id text REFERENCES public.legacy_catalog_query_regression(z_first)
         )
       `);
 
@@ -47,6 +62,20 @@ describeWithPostgres('legacy catalog query on PostgreSQL 17', () => {
       expect(table?.constraints.map(({ kind }) => kind).toSorted()).toEqual([
         'f',
         'p',
+      ]);
+      expect(table?.columns.map(({ name }) => name)).toEqual([
+        'z_first',
+        'a_second',
+        'numeric_value',
+        'status',
+        'parent_id',
+      ]);
+      expect(table?.columns.map(({ default: value }) => value)).toEqual([
+        "'default'",
+        "'current'",
+        '0',
+        "'draft'",
+        null,
       ]);
     } finally {
       await client.query('ROLLBACK').catch(() => undefined);
