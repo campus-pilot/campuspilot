@@ -75,7 +75,8 @@ describe('durable migration run schema', () => {
     expect(secondRetryGate).toContain('legacy migration failed-state timestamp is immutable');
     expect(secondRetryGate).toContain("retry_kind := 'template-byte-size-v1'");
     expect(secondRetryGate).toContain("first_retry_evidence := OLD.retry_history -> 0");
-    expect(secondRetryGate).toContain("first_retry_evidence - 'retriedAt' - 'previousFailure'");
+    expect(secondRetryGate).toContain("(run.retry_history->0) - 'retriedAt' - 'previousFailure'");
+    expect(secondRetryGate).toContain("(first_retry_evidence) - 'retriedAt' - 'previousFailure'");
     expect(secondRetryGate).toContain('969b6935bc2f6041844eecf742c65ba2ff2e50b3ca468439e11f34d776658173');
     expect(secondRetryGate).toContain('73e9567e59afb9a249150b082d2b0961082ddc7d336ec0e4e516789be00165cb');
     expect(secondRetryGate).toContain("(first_retry_evidence->>'retriedAt')::timestamptz <= OLD.failed_at");
@@ -85,7 +86,9 @@ describe('durable migration run schema', () => {
     expect(secondRetryGate.indexOf('FOR business_relation IN')).toBeLessThan(
       secondRetryGate.indexOf('retry_evidence := NEW.retry_history'),
     );
-    expect(secondRetryGate).toContain("retry_evidence - 'recoveryKind' - 'retriedAt' - 'previousFailure'");
+    expect(secondRetryGate).toContain("(retry_evidence) - 'recoveryKind' - 'retriedAt' - 'previousFailure'");
+    expect(secondRetryGate).toContain("(retry_evidence) ? 'recoveryKind'");
+    expect(secondRetryGate).not.toContain("run.retry_history->0 - 'retriedAt'");
     expect(secondRetryGate).toContain("CASE WHEN retry_kind='template-byte-size-v1' THEN OLD.updated_at ELSE OLD.failed_at END");
     const importer = await readFile(path.resolve(packageRoot, 'src/import.ts'), 'utf8');
     expect(importer.indexOf('businessTransactionStarted = true')).toBeLessThan(

@@ -27,7 +27,7 @@ BEGIN
         run.importer_checksum_sha256='49ca2e792dde48d002095065c11795b79f6cd043b435b667c198cf6fff7fc1a4' AND
         run.approval_sha256='62bacb2466c46eb99c114a9bc6dcc07cd7db37b82948d1f810ab6e98eb70e605' AND
         run.decision_set_sha256='fd23a0ae59e5840e4896a3e6edc08a518ac5ccea0ff795441a0fc44a472164b4' AND
-        run.retry_history->0 - 'retriedAt' - 'previousFailure' - 'previousProvenance' - 'replacementProvenance' = '{}'::jsonb AND
+        (run.retry_history->0) - 'retriedAt' - 'previousFailure' - 'previousProvenance' - 'replacementProvenance' = '{}'::jsonb AND
         run.retry_history->0->>'retriedAt'='2026-10-25T10:00:55.651Z' AND
         (run.retry_history->0 #> '{previousFailure}') - 'failedAt' - 'errorSummary' = '{}'::jsonb AND
         run.retry_history->0 #>> '{previousFailure,failedAt}'='2026-10-25T09:31:27.709568+00:00' AND
@@ -138,7 +138,7 @@ BEGIN
       OLD.decision_set_sha256='fd23a0ae59e5840e4896a3e6edc08a518ac5ccea0ff795441a0fc44a472164b4'
     THEN
       first_retry_evidence := OLD.retry_history -> 0;
-      IF first_retry_evidence - 'retriedAt' - 'previousFailure' - 'previousProvenance' - 'replacementProvenance' <> '{}'::jsonb OR
+      IF (first_retry_evidence) - 'retriedAt' - 'previousFailure' - 'previousProvenance' - 'replacementProvenance' <> '{}'::jsonb OR
         first_retry_evidence->>'retriedAt' IS DISTINCT FROM '2026-10-25T10:00:55.651Z' OR
         (first_retry_evidence #> '{previousFailure}') - 'failedAt' - 'errorSummary' <> '{}'::jsonb OR
         first_retry_evidence #>> '{previousFailure,failedAt}' IS DISTINCT FROM '2026-10-25T09:31:27.709568+00:00' OR
@@ -177,10 +177,10 @@ BEGIN
     END LOOP;
 
     retry_evidence := NEW.retry_history -> (jsonb_array_length(NEW.retry_history) - 1);
-    IF (retry_kind='legacy-auth-id-v1' AND retry_evidence ? 'recoveryKind') OR
+    IF (retry_kind='legacy-auth-id-v1' AND (retry_evidence) ? 'recoveryKind') OR
       (retry_kind='template-byte-size-v1' AND retry_evidence->>'recoveryKind' IS DISTINCT FROM retry_kind) OR
       (retry_kind='template-byte-size-v1' AND (
-        retry_evidence - 'recoveryKind' - 'retriedAt' - 'previousFailure' - 'previousProvenance' - 'replacementProvenance' <> '{}'::jsonb OR
+        (retry_evidence) - 'recoveryKind' - 'retriedAt' - 'previousFailure' - 'previousProvenance' - 'replacementProvenance' <> '{}'::jsonb OR
         (retry_evidence #> '{previousFailure}') - 'failedAt' - 'errorSummary' <> '{}'::jsonb OR
         retry_evidence #> '{previousProvenance}' IS DISTINCT FROM jsonb_build_object(
           'targetMigrationHistorySha256',OLD.target_migration_history_sha256,
