@@ -1,8 +1,52 @@
+import { createHash } from 'node:crypto';
+
 import type { Client } from 'pg';
 
 import { APPROVED_SCHOOL_ID } from './migration-guards.ts';
 
 export const LEGACY_AUTH_ID_RETRY_RUN_ID = 'prem-20261025t090000z';
+export const TEMPLATE_BYTE_SIZE_RETRY_ERROR =
+  "Cannot read properties of undefined (reading 'byteLength')";
+export const TEMPLATE_BYTE_SIZE_FAILURE_UPDATED_AT =
+  '2026-10-25T10:01:03.478112+00:00';
+
+/**
+ * Exact executable provenance of the rolled-back template byte-size failure.
+ * This prevents unrelated future transaction failures from using its recovery.
+ */
+export const TEMPLATE_BYTE_SIZE_FAILURE_PROVENANCE = {
+  targetMigrationHistorySha256:
+    '6b1703a90f5dea5690e95e4f479a001287e8c9fc09b57f47c69a976462388e04',
+  importerGitCommit: '76debfaaf77ef8e71c2cb0892920e5d9809e5db7',
+  importerChecksumSha256:
+    '49ca2e792dde48d002095065c11795b79f6cd043b435b667c198cf6fff7fc1a4',
+  approvalSha256:
+    '62bacb2466c46eb99c114a9bc6dcc07cd7db37b82948d1f810ab6e98eb70e605',
+  trackedDecisionAndDocsSha256:
+    'fd23a0ae59e5840e4896a3e6edc08a518ac5ccea0ff795441a0fc44a472164b4',
+} as const;
+
+/** Exact sanitized binding for the immutable first recovery record. */
+export const FIRST_RETRY_EVIDENCE_BINDING = {
+  retriedAt: '2026-10-25T10:00:55.651Z',
+  previousFailure: {
+    failedAt: '2026-10-25T09:31:27.709568+00:00',
+    errorSummarySha256:
+      '969b6935bc2f6041844eecf742c65ba2ff2e50b3ca468439e11f34d776658173',
+  },
+  previousProvenance: {
+    targetMigrationHistorySha256:
+      '0e1e5e202dc7a7878c3ec51649c0c0df31dca9c37cd9a39c2fa8d05459067327',
+    importerGitCommit: 'c5f3da7548277e6fae10137e7b0b0c9069c1082c',
+    importerChecksumSha256:
+      '7943f31968482625236c8cdec9579cf9b450b1acea30b27af45e3c41a11d458d',
+    approvalSha256:
+      '73e9567e59afb9a249150b082d2b0961082ddc7d336ec0e4e516789be00165cb',
+    trackedDecisionAndDocsSha256:
+      '06dc1f56d8cf3f3527e75320d99392e21543326c3a87b3776098651512d0d814',
+  },
+  replacementProvenance: TEMPLATE_BYTE_SIZE_FAILURE_PROVENANCE,
+} as const;
 
 export type DurableMigrationRunInput = {
   runId: string;
@@ -37,6 +81,7 @@ type DurableRunRow = Record<string, unknown> & {
   failure_stage: string;
   failed_at: Date | string | null;
   failed_at_canonical: string | null;
+  updated_at_canonical: string | null;
   error_summary: string | null;
   retry_count: number;
   retry_history: unknown;
@@ -81,6 +126,10 @@ function stableJson(value: unknown): string {
   return JSON.stringify(value);
 }
 
+function sha256Text(value: string): string {
+  return createHash('sha256').update(value, 'utf8').digest('hex');
+}
+
 function inputAsRow(input: DurableMigrationRunInput): Record<string, unknown> {
   return {
     run_id: input.runId,
@@ -111,11 +160,59 @@ function inputAsRow(input: DurableMigrationRunInput): Record<string, unknown> {
   };
 }
 
+function existingExecutableProvenance(existing: DurableRunRow) {
+  return {
+    targetMigrationHistorySha256: existing.target_migration_history_sha256,
+    importerGitCommit: existing.importer_git_commit,
+    importerChecksumSha256: existing.importer_checksum_sha256,
+    approvalSha256: existing.approval_sha256,
+    trackedDecisionAndDocsSha256: existing.decision_set_sha256,
+  };
+}
+
+function replacementExecutableProvenance(input: DurableMigrationRunInput) {
+  return {
+    targetMigrationHistorySha256: input.targetMigrationHistorySha256,
+    importerGitCommit: input.importerGitCommit,
+    importerChecksumSha256: input.importerChecksumSha256,
+    approvalSha256: input.approvalSha256,
+    trackedDecisionAndDocsSha256: input.decisionSetSha256,
+  };
+}
+
+/** Validate the append-only auth-ID retry record before permitting recovery two. */
+function assertFirstRetryEvidence(existing: DurableRunRow) {
+  const history = existing.retry_history as Array<Record<string, any>>;
+  const first = history[0];
+  const firstRetriedAt = typeof first?.retriedAt === 'string' ? Date.parse(first.retriedAt) : NaN;
+  const originalFailedAt = Date.parse(String(existing.failed_at_canonical ?? ''));
+  const templateFailedAt = Date.parse(String(existing.updated_at_canonical ?? ''));
+  const errorSummary = String(first?.previousFailure?.errorSummary ?? '');
+  const normalizedPreviousFailure = first?.previousFailure
+    ? { ...first.previousFailure }
+    : {};
+  delete normalizedPreviousFailure.errorSummary;
+  const normalizedFirst = first ? {
+    ...first,
+    previousFailure: {
+      ...normalizedPreviousFailure,
+      errorSummarySha256: sha256Text(errorSummary),
+    },
+  } : null;
+  if (!first || !RETRYABLE_LEGACY_AUTH_ID_FAILURE.test(errorSummary) ||
+    stableJson(normalizedFirst) !== stableJson(FIRST_RETRY_EVIDENCE_BINDING) ||
+    first.previousFailure?.failedAt !== existing.failed_at_canonical ||
+    Number.isNaN(firstRetriedAt) || firstRetriedAt <= originalFailedAt || firstRetriedAt >= templateFailedAt ||
+    stableJson(first.replacementProvenance) !== stableJson(existingExecutableProvenance(existing))) {
+    throw new Error('Existing first retry evidence is invalid for template byte-size recovery');
+  }
+}
+
 /**
- * Validate the only supported retry: the exact failed run, before its business
- * transaction started, with no target effects and unchanged source/runtime
- * facts. Importer, approval, and target-history hashes may change because the
- * reviewed retry fix itself changes those artifacts.
+ * Validate one of the two release-scoped recoveries for the exact Prem run.
+ * Both require an empty target, no durable effects, and unchanged source/runtime
+ * facts. Recovery two additionally binds the rolled-back template byte-size
+ * failure and the complete first retry record.
  */
 export function buildRetryEvidence(options: {
   existing: DurableRunRow;
@@ -127,17 +224,15 @@ export function buildRetryEvidence(options: {
   if (existing.run_id !== LEGACY_AUTH_ID_RETRY_RUN_ID ||
     input.runId !== LEGACY_AUTH_ID_RETRY_RUN_ID ||
     existing.school_id !== APPROVED_SCHOOL_ID || input.schoolId !== APPROVED_SCHOOL_ID)
-    throw new Error('Legacy auth-ID retry is limited to the exact approved Prem migration run');
+    throw new Error('Migration recovery is limited to the exact approved Prem migration run');
   if (existing.run_id !== input.runId)
     throw new Error('A failed migration run may only resume with the same runId');
-  if (existing.status !== 'failed' || existing.failure_stage !== 'pre_transaction')
-    throw new Error('Migration run is not an explicitly retryable pre-transaction failure');
+  if (existing.status !== 'failed')
+    throw new Error('Migration run is not failed');
   if (!existing.failed_at || !existing.error_summary)
     throw new Error('Failed migration run is missing its durable failure evidence');
   if (!existing.failed_at_canonical)
     throw new Error('Failed migration run is missing its lossless database timestamp evidence');
-  if (!RETRYABLE_LEGACY_AUTH_ID_FAILURE.test(existing.error_summary))
-    throw new Error('Only the observed legacy auth-ID validation failure is retryable');
   if (targetBusinessRows !== 0)
     throw new Error(`Failed migration run cannot resume with ${targetBusinessRows} target business rows`);
   for (const field of effectFields) {
@@ -153,29 +248,48 @@ export function buildRetryEvidence(options: {
   if (!Array.isArray(existing.retry_history) ||
     existing.retry_history.length !== Number(existing.retry_count))
     throw new Error('Failed migration run retry history is malformed');
-  if (Number(existing.retry_count) !== 0 || existing.retry_history.length !== 0)
-    throw new Error('The legacy auth-ID compatibility retry is allowed exactly once');
+
+  let failedAt: string;
+  let recoveryKind: 'template-byte-size-v1' | undefined;
+  if (existing.failure_stage === 'pre_transaction' &&
+    Number(existing.retry_count) === 0 && existing.retry_history.length === 0) {
+    if (!RETRYABLE_LEGACY_AUTH_ID_FAILURE.test(existing.error_summary))
+      throw new Error('Only the observed legacy auth-ID validation failure is retryable');
+    failedAt = existing.failed_at_canonical;
+    recoveryKind = undefined;
+  } else if (existing.failure_stage === 'transaction_started' &&
+    Number(existing.retry_count) === 1 && existing.retry_history.length === 1) {
+    if (existing.error_summary !== TEMPLATE_BYTE_SIZE_RETRY_ERROR)
+      throw new Error('Only the exact rolled-back template byte-size failure is recoverable');
+    if (!existing.updated_at_canonical)
+      throw new Error('Template byte-size failure is missing its lossless database timestamp evidence');
+    if (existing.updated_at_canonical !== TEMPLATE_BYTE_SIZE_FAILURE_UPDATED_AT)
+      throw new Error('Template byte-size failure timestamp does not match the observed failure');
+    if (stableJson(existingExecutableProvenance(existing)) !==
+      stableJson(TEMPLATE_BYTE_SIZE_FAILURE_PROVENANCE))
+      throw new Error('Template byte-size failure does not match the known faulty importer provenance');
+    assertFirstRetryEvidence(existing);
+    failedAt = existing.updated_at_canonical;
+    recoveryKind = 'template-byte-size-v1';
+  } else {
+    throw new Error('Migration run is not in an explicitly recoverable failure state');
+  }
+
+  const retryTime = Date.parse(retriedAt);
+  const currentFailureTime = Date.parse(failedAt);
+  const firstRetryTime = recoveryKind ? Date.parse(FIRST_RETRY_EVIDENCE_BINDING.retriedAt) : -Infinity;
+  if (Number.isNaN(retryTime) || retryTime <= currentFailureTime || retryTime <= firstRetryTime)
+    throw new Error('Migration recovery timestamp must be strictly after its failure and prior retry');
 
   return {
+    ...(recoveryKind ? { recoveryKind } : {}),
     retriedAt,
     previousFailure: {
-      failedAt: existing.failed_at_canonical,
+      failedAt,
       errorSummary: existing.error_summary,
     },
-    previousProvenance: {
-      targetMigrationHistorySha256: existing.target_migration_history_sha256,
-      importerGitCommit: existing.importer_git_commit,
-      importerChecksumSha256: existing.importer_checksum_sha256,
-      approvalSha256: existing.approval_sha256,
-      trackedDecisionAndDocsSha256: existing.decision_set_sha256,
-    },
-    replacementProvenance: {
-      targetMigrationHistorySha256: input.targetMigrationHistorySha256,
-      importerGitCommit: input.importerGitCommit,
-      importerChecksumSha256: input.importerChecksumSha256,
-      approvalSha256: input.approvalSha256,
-      trackedDecisionAndDocsSha256: input.decisionSetSha256,
-    },
+    previousProvenance: existingExecutableProvenance(existing),
+    replacementProvenance: replacementExecutableProvenance(input),
   };
 }
 
@@ -210,7 +324,8 @@ async function observePreparationCommit(options: {
   try {
     await observer.connect();
     const result = await observer.query<DurableRunRow>(`
-      SELECT run.*,to_jsonb(run.failed_at)#>>'{}' AS failed_at_canonical
+      SELECT run.*,to_jsonb(run.failed_at)#>>'{}' AS failed_at_canonical,
+        to_jsonb(run.updated_at)#>>'{}' AS updated_at_canonical
       FROM public.legacy_migration_run run
       WHERE run_id=$1
     `, [options.input.runId]);
@@ -259,7 +374,8 @@ export async function prepareDurableMigrationRun(options: {
   await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
   try {
     const existingRuns = await client.query<DurableRunRow>(
-      `SELECT run.*,to_jsonb(run.failed_at)#>>'{}' AS failed_at_canonical
+      `SELECT run.*,to_jsonb(run.failed_at)#>>'{}' AS failed_at_canonical,
+        to_jsonb(run.updated_at)#>>'{}' AS updated_at_canonical
        FROM public.legacy_migration_run run ORDER BY run_id FOR UPDATE`,
     );
     const differentRun = existingRuns.rows.find((row) => row.run_id !== input.runId);
@@ -312,13 +428,17 @@ export async function prepareDurableMigrationRun(options: {
         decision_set_sha256=$6,retry_count=retry_count+1,
         retry_history=retry_history || jsonb_build_array($8::jsonb),
         updated_at=$7::timestamptz,error_summary=NULL
-      WHERE run_id=$1 AND status='failed' AND failure_stage='pre_transaction'
+      WHERE run_id=$1 AND status='failed' AND (
+        (failure_stage='pre_transaction' AND retry_count=0) OR
+        (failure_stage='transaction_started' AND retry_count=1 AND error_summary=$9)
+      )
       RETURNING run_id
     `, [
       input.runId, input.targetMigrationHistorySha256, input.importerGitCommit,
       input.importerChecksumSha256, input.approvalSha256, input.decisionSetSha256,
       evidence.retriedAt,
       JSON.stringify(evidence),
+      TEMPLATE_BYTE_SIZE_RETRY_ERROR,
     ]);
     if (resumed.rowCount !== 1)
       throw new Error('Failed migration run changed while preparing its retry');

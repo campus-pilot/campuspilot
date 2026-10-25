@@ -44,9 +44,10 @@ jobs:
       contents: read
     services:
       postgres:
-        # ubuntu-latest ships the matching PostgreSQL 16 client used by the
-        # fixture's pg_dump/pg_restore exact-cutoff evidence path.
-        image: postgres:16-alpine@sha256:f4610795587492cd4fb887c2dc3de301b813278bb6f616992061141b5f15ac36
+        # PostgreSQL 17 is required by the real catalog and durable-run trigger
+        # regression suites. The multi-arch digest was resolved from the
+        # official postgres image index.
+        image: postgres:17-alpine@sha256:eee6c6e1b0894fa4fe0075eb054af9fd1cf39a35321c2d4110626cfe506411fb
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -77,6 +78,8 @@ jobs:
           CREATE ROLE "campuspilot-plus" LOGIN PASSWORD 'app-fixture';
           GRANT "campuspilot-plus-owner" TO "campuspilot-plus-migration";
           ALTER DATABASE campuspilot_integration OWNER TO "campuspilot-plus-owner";
+          CREATE DATABASE campuspilot_migration_fixture OWNER "campuspilot-plus-owner";
+          CREATE DATABASE legacy_fixture OWNER postgres;
           SQL
       - name: Start pinned Gotenberg fixture
         run: |
@@ -94,6 +97,17 @@ jobs:
         env:
           DATABASE_URL: postgresql://campuspilot-plus-migration:migration-fixture@127.0.0.1:5432/campuspilot_integration?options=-c%20role%3Dcampuspilot-plus-owner
         run: pnpm --filter server exec tsx src/migrate.ts
+      - name: Apply target Drizzle history to isolated trigger fixture
+        env:
+          DATABASE_URL: postgresql://campuspilot-plus-migration:migration-fixture@127.0.0.1:5432/campuspilot_migration_fixture?options=-c%20role%3Dcampuspilot-plus-owner
+        run: pnpm --filter server exec tsx src/migrate.ts
+      - name: Run durable migration trigger suite without skip fallback
+        env:
+          LEGACY_MIGRATION_TEST_TARGET_POSTGRES_URL: postgresql://campuspilot-plus-migration:migration-fixture@127.0.0.1:5432/campuspilot_migration_fixture?options=-c%20role%3Dcampuspilot-plus-owner
+        run: >-
+          pnpm --filter @campuspilot/legacy-migration exec vitest run
+          --config vitest.integration.config.ts
+          integration/migration-run-postgres17.test.ts
       - name: Run temporarily suppressed DB-only integration gate
         env:
           MIGRATION_INTEGRATION_DATABASE_URL: postgresql://campuspilot-plus-migration:migration-fixture@127.0.0.1:5432/campuspilot_integration?options=-c%20role%3Dcampuspilot-plus-owner
@@ -102,6 +116,7 @@ jobs:
           MIGRATION_INTEGRATION_TARGET_ROLE: campuspilot-plus-owner
           MIGRATION_INTEGRATION_TARGET_LOGIN_ROLE: campuspilot-plus-migration
           MIGRATION_INTEGRATION_GOTENBERG_URL: http://127.0.0.1:3000
+          LEGACY_MIGRATION_TEST_POSTGRES_URL: postgresql://postgres:postgres@127.0.0.1:5432/legacy_fixture
         run: pnpm --filter @campuspilot/legacy-migration test:integration
 
   prepare:

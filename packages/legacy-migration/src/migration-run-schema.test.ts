@@ -62,12 +62,40 @@ describe('durable migration run schema', () => {
     expect(retryGate).toContain("OLD.status='committed' AND NEW.status='committed'");
     expect(retryGate).toContain('legacy migration retry evidence does not bind old and replacement provenance');
     expect(retryGate).toContain("OLD.status='failed' AND NEW.status IN ('failed','preparing')");
+    const secondRetryGate = await readFile(path.resolve(packageRoot, '../db/src/migrations/0030_dazzling_silver_sable.sql'), 'utf8');
+    expect(secondRetryGate).toContain('"legacy_migration_run"."retry_count" BETWEEN 0 AND 2');
+    expect(secondRetryGate).toContain('0030 recovery preflight found an unexpected durable migration row');
+    expect(secondRetryGate).toContain('(SELECT count(*) FROM public.legacy_migration_run) <> 1');
+    expect(secondRetryGate).toContain("run.status='failed' AND run.failure_stage='transaction_started'");
+    expect(secondRetryGate).toContain("OLD.run_id <> 'prem-20261025t090000z'");
+    expect(secondRetryGate).toContain("OLD.school_id <> 'sch_n6q4pmirqg7dpct1pr8pr'");
+    expect(secondRetryGate).toContain("OLD.failure_stage='transaction_started' AND OLD.retry_count=1");
+    expect(secondRetryGate).toContain("OLD.error_summary='Cannot read properties of undefined (reading ''byteLength'')'");
+    expect(secondRetryGate).toContain("OLD.updated_at='2026-10-25 10:01:03.478112+00'::timestamptz");
+    expect(secondRetryGate).toContain('legacy migration failed-state timestamp is immutable');
+    expect(secondRetryGate).toContain("retry_kind := 'template-byte-size-v1'");
+    expect(secondRetryGate).toContain("first_retry_evidence := OLD.retry_history -> 0");
+    expect(secondRetryGate).toContain("first_retry_evidence - 'retriedAt' - 'previousFailure'");
+    expect(secondRetryGate).toContain('969b6935bc2f6041844eecf742c65ba2ff2e50b3ca468439e11f34d776658173');
+    expect(secondRetryGate).toContain('73e9567e59afb9a249150b082d2b0961082ddc7d336ec0e4e516789be00165cb');
+    expect(secondRetryGate).toContain("(first_retry_evidence->>'retriedAt')::timestamptz <= OLD.failed_at");
+    expect(secondRetryGate).toContain("(retry_evidence->>'retriedAt')::timestamptz <=");
+    expect(secondRetryGate).toContain("tablename <> 'legacy_migration_run'");
+    expect(secondRetryGate).toContain('migration recovery requires every target business table to remain empty');
+    expect(secondRetryGate.indexOf('FOR business_relation IN')).toBeLessThan(
+      secondRetryGate.indexOf('retry_evidence := NEW.retry_history'),
+    );
+    expect(secondRetryGate).toContain("retry_evidence - 'recoveryKind' - 'retriedAt' - 'previousFailure'");
+    expect(secondRetryGate).toContain("CASE WHEN retry_kind='template-byte-size-v1' THEN OLD.updated_at ELSE OLD.failed_at END");
     const importer = await readFile(path.resolve(packageRoot, 'src/import.ts'), 'utf8');
     expect(importer.indexOf('businessTransactionStarted = true')).toBeLessThan(
       importer.indexOf('BEGIN ISOLATION LEVEL SERIALIZABLE', importer.indexOf('businessTransactionStarted = true')),
     );
     expect(importer).toContain("businessTransactionStarted ? 'transaction_started' : 'pre_transaction'");
     expect(importer).toContain('failed_at=coalesce(failed_at,now())');
+    expect(importer).toContain('byteSize: sourceBytes.byteLength');
+    expect(importer).toContain('byte_size: item.byteSize');
+    expect(importer).not.toContain('item.bytes.byteLength');
     const verifier = await readFile(path.resolve(packageRoot, 'src/verify.ts'), 'utf8');
     expect(verifier).not.toContain("status='finalized',finalized_at=now(),updated_at=now(),error_summary=NULL");
     const runtimeGrants = await readFile(path.resolve(packageRoot, '../db/src/runtime-grants.ts'), 'utf8');
@@ -80,5 +108,13 @@ describe('durable migration run schema', () => {
     const migrateEntrypoint = await readFile(path.resolve(packageRoot, '../db/src/migrate.ts'), 'utf8');
     expect(migrateEntrypoint).toContain('await migrate(client, { migrationsFolder });');
     expect(migrateEntrypoint).toContain('await applyRuntimeDatabasePrivileges(client);');
+    const releaseWorkflow = await readFile(
+      path.resolve(packageRoot, '../../.github/workflows/release.yml'),
+      'utf8',
+    );
+    expect(releaseWorkflow).toContain('postgres:17-alpine@sha256:eee6c6e1b0894fa4fe0075eb054af9fd1cf39a35321c2d4110626cfe506411fb');
+    expect(releaseWorkflow).toContain('CREATE DATABASE campuspilot_migration_fixture');
+    expect(releaseWorkflow).toContain('LEGACY_MIGRATION_TEST_TARGET_POSTGRES_URL: postgresql://campuspilot-plus-migration:migration-fixture@127.0.0.1:5432/campuspilot_migration_fixture');
+    expect(releaseWorkflow).toContain('integration/migration-run-postgres17.test.ts');
   });
 });

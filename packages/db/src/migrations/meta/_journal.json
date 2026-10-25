@@ -211,6 +211,13 @@
       "when": 1792920853104,
       "tag": "0029_happy_owl",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1792922661080,
+      "tag": "0030_dazzling_silver_sable",
+      "breakpoints": true
     }
   ]
 }

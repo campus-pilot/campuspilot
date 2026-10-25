@@ -324,15 +324,24 @@ importer Git commit. It also contains `targetObjectKeys`, the exact retained-key
 allowlist, and the complete shared S3 bucket/region/endpoint/path-style identity.
 No detached signature or signer configuration is used.
 
-The importer normally rejects a reused run ID. The only executable exception is
-the one-time retry of the existing pre-transaction legacy Better Auth ID
-validation failure. It must reuse the same run ID, start with retry count zero,
-match the exact 32-character base62 auth-ID failure shape, retain unchanged
-source/snapshot/object/decision/runtime/writer-fence facts, and prove that the
-target remains empty with no committed or audit effects. Its append-only retry
-evidence binds both the prior and replacement importer, approval, and target
-migration-history provenance, plus the prior and replacement combined tracked
-decision/documentation checksum. No other failed run is eligible.
+The importer normally rejects a reused run ID. Two executable exceptions are
+bound to run `prem-20261025t090000z` and the approved Prem school. Recovery one
+handles the existing pre-transaction legacy Better Auth ID validation failure:
+it starts with retry count zero and matches the exact 32-character base62
+auth-ID failure shape. Recovery two handles only the subsequent rolled-back
+template-size defect with exact error `Cannot read properties of undefined
+(reading 'byteLength')`: it starts with retry count one, requires the complete
+valid first retry record with its exact original and replacement provenance,
+and matches the exact known faulty importer,
+approval, target-history, and combined tracked decision/documentation hashes.
+The template failure timestamp is bound exactly to
+`2026-10-25T10:01:03.478112+00:00` and is immutable while failed.
+Each recovery timestamp must be strictly after its failure and prior retry.
+Both preserve immutable source/snapshot/object/runtime/writer-fence facts and
+require an empty target with no committed or audit effects. Each append-only
+record binds the current failure plus prior and replacement executable
+provenance. Retry count two is terminal; no third recovery or other failed run
+is eligible.
 
 ### Tracked implementation
 
@@ -380,8 +389,8 @@ every durable hash before it finalizes the run.
 
 - A deliberate interruption is classified from durable database state; no
   object mutation or blind write replay occurs.
-- A reused run ID or non-empty target is rejected, except for the single
-  narrowly defined and auditable auth-ID compatibility retry above;
+- A reused run ID or non-empty target is rejected, except for the two narrowly
+  defined, append-only recovery transitions above; retry count two is terminal;
   idempotence is fail-closed rather than a silent second import.
 - Source counts reconcile to imported + omitted + deferred + blocked counts,
   including count-only dispositions for generated PDFs, notices, onboarding,
