@@ -91,7 +91,6 @@ export function normalizeLegacyDefaultExpression(value: string | null): string |
   if (/^(?:public\.)?(?:numeric|decimal|smallint|integer|bigint)$/.test(type)) {
     const numeric = literal.slice(1, -1).replaceAll("''", "'");
     if (!/^-?(?:\d+\.?\d*|\.\d+)$/.test(numeric)) return normalized;
-    return numeric;
   }
   return literal;
 }
@@ -155,6 +154,17 @@ export const LEGACY_INDEX_CATALOG_QUERY = `
   ORDER BY index_relation.relname
 `;
 
+export const LEGACY_ENUM_CATALOG_QUERY = `
+  SELECT namespace.nspname || '.' || type.typname AS name,
+    jsonb_agg(enum.enumlabel ORDER BY enum.enumsortorder) AS values
+  FROM pg_catalog.pg_type AS type
+  JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid=type.typnamespace
+  JOIN pg_catalog.pg_enum AS enum ON enum.enumtypid=type.oid
+  WHERE namespace.nspname='public'
+  GROUP BY namespace.nspname,type.typname
+  ORDER BY name
+`;
+
 /** Capture all non-system public catalog objects used by the frozen legacy app. */
 export async function captureLegacyCatalog(client: Client): Promise<LegacyCatalogInventory> {
   const tableRows = (await client.query<{ name: string }>(`
@@ -209,16 +219,12 @@ export async function captureLegacyCatalog(client: Client): Promise<LegacyCatalo
     }));
     tables.push({ name, columns, constraints, indexes });
   }
-  const enums = (await client.query<{ name: string; values: string[] }>(`
-    SELECT namespace.nspname || '.' || type.typname AS name,
-      array_agg(enum.enumlabel ORDER BY enum.enumsortorder) AS values
-    FROM pg_catalog.pg_type AS type
-    JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid=type.typnamespace
-    JOIN pg_catalog.pg_enum AS enum ON enum.enumtypid=type.oid
-    WHERE namespace.nspname='public'
-    GROUP BY namespace.nspname,type.typname
-    ORDER BY name
-  `)).rows;
+  const enums = (await client.query<{ name: string; values: string[] }>(
+    LEGACY_ENUM_CATALOG_QUERY,
+  )).rows.map((catalogEnum) => ({
+    ...catalogEnum,
+    values: normalizeLegacyCatalogColumns(catalogEnum.values),
+  }));
   const otherRelations = (await client.query<{
     name: string; kind: LegacyCatalogInventory['otherRelations'][number]['kind'];
   }>(`

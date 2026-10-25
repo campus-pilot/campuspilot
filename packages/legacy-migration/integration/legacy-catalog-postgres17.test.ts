@@ -73,10 +73,15 @@ describeWithPostgres('legacy catalog query on PostgreSQL 17', () => {
       expect(table?.columns.map(({ default: value }) => value)).toEqual([
         "'default'",
         "'current'",
-        '0',
+        "'0'",
         "'draft'",
         null,
       ]);
+      const status = catalog.enums.find(
+        ({ name }) => name === 'public.exam_plan_status',
+      );
+      expect(Array.isArray(status?.values)).toBe(true);
+      expect(status?.values).toContain('draft');
     } finally {
       await client.query('ROLLBACK').catch(() => undefined);
       await client.end();
