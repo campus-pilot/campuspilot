@@ -628,7 +628,7 @@ try {
     throw new Error('Target Drizzle history changed immediately before finalization');
   if (writerFenceSha256(prefinalizationFence) !== writerFenceSha256(fence))
     throw new Error('Kubernetes writer fence changed immediately before finalization');
-  const finalized = await target.query(`UPDATE legacy_migration_run SET status='finalized',finalized_at=now(),updated_at=now(),error_summary=NULL WHERE run_id=$1 AND status='committed' RETURNING run_id`, [path.basename(RUN_DIRECTORY)]);
+  const finalized = await target.query(`UPDATE legacy_migration_run SET status='finalized',finalized_at=now(),updated_at=now() WHERE run_id=$1 AND status='committed' RETURNING run_id`, [path.basename(RUN_DIRECTORY)]);
   if (finalized.rowCount !== 1) throw new Error('Durable migration run could not transition from committed to finalized');
   console.log(JSON.stringify({ status: "verified", checks: checks.length, reconciliationPath, verificationPath }));
 } finally {

@@ -77,6 +77,10 @@ import {
   buildSourceDispositions,
 } from './dispositions.ts';
 import { assertSourceObjectManifest, type SourceObjectManifest } from './source-object-manifest.ts';
+import {
+  acquireMigrationAdvisoryLock,
+  prepareDurableMigrationRun,
+} from './migration-run.ts';
 
 export type ImportCoreDependencies = {
   verifyWriterFence: (
@@ -141,13 +145,15 @@ const targetIdentity = assertAllowedTarget({
 type Row = Record<string, any>;
 type Write = { kind: "row" | "object"; target: string; source: string };
 const source = new Client({ connectionString: SOURCE_DATABASE_URL });
-const target = new Client({ connectionString: TARGET_DATABASE_URL });
+let target = new Client({ connectionString: TARGET_DATABASE_URL });
 const writes: Write[] = [];
 const exceptions: Array<Record<string, unknown>> = [];
 const startedAt = new Date().toISOString();
 let targetCommitted = false;
 let commitOutcomeUnknown = false;
 let approvalRunId: string | undefined;
+let businessTransactionStarted = false;
+let durableRunPrepared = false;
 
 function hash(value: string | Buffer) {
   return createHash("sha256").update(value).digest("hex");
@@ -354,11 +360,7 @@ try {
     throw new Error('Production migration target PostgreSQL connection must use TLS');
   const verifiedWriterFence = await verifyWriterFence(writerFenceConfig);
 
-  const migrationLock = await target.query<{ acquired: boolean }>(
-    `SELECT pg_try_advisory_lock(hashtextextended('campuspilot-legacy-migration',0)) AS acquired`,
-  );
-  if (!migrationLock.rows[0]?.acquired)
-    throw new Error('Another legacy migration process holds the target advisory lock');
+  await acquireMigrationAdvisoryLock(target);
 
   const actualMigrationHistory = (
     await target.query<MigrationRecord>(`
@@ -463,24 +465,54 @@ try {
     String(prevalidatedPlan.schoolLogo.targetKey),
     ...prevalidatedPlan.templates.map((template: any) => String(template.targetKey)),
   ]);
-  await target.query(`
-    INSERT INTO legacy_migration_run (
-      run_id,school_id,status,source_database_identity,target_database_identity,source_version,
-      source_migration_history_sha256,target_migration_history_sha256,source_table_digests_sha256,importer_git_commit,
-      importer_checksum_sha256,mapping_sha256,approval_sha256,source_manifest_sha256,
-      snapshot_evidence_sha256,exceptions_sha256,source_dump_sha256,object_manifest_sha256,decision_set_sha256,
-      target_s3_endpoint,target_s3_region,target_s3_bucket,target_s3_force_path_style,
-      target_postgres_runtime_identity,writer_fence,writers_disabled
-    ) VALUES ($1,$2,'preparing',$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,true)
-  `, [
-    approvalRunId, SCHOOL_ID, databaseIdentity(SOURCE_DATABASE_URL), targetIdentity.identity,
-    SOURCE_VERSION, actualSourceManifest.migrationHistorySha256, targetMigrationHistorySha256,
-    actualSourceManifest.tableDigestsSha256,
-    importer.gitCommit, importer.checksumSha256, hash(mappingText), hash(approvalText), hash(sourceManifestText), hash(snapshotEvidenceText),
-    hash(exceptionsText), sourceDumpSha256, hash(objectManifestText), trackedContractChecksum,
-    targetS3Identity.endpoint, targetS3Identity.region, targetS3Identity.bucket, targetS3Identity.forcePathStyle,
-    targetRuntimeIdentity, verifiedWriterFence,
-  ]);
+  const durablePreparation = await prepareDurableMigrationRun({
+    client: target,
+    createObserver: () => new Client({ connectionString: TARGET_DATABASE_URL }),
+    input: {
+      runId: approvalRunId,
+      schoolId: SCHOOL_ID,
+      sourceDatabaseIdentity: databaseIdentity(SOURCE_DATABASE_URL),
+      targetDatabaseIdentity: targetIdentity.identity,
+      sourceVersion: SOURCE_VERSION,
+      sourceMigrationHistorySha256: actualSourceManifest.migrationHistorySha256,
+      targetMigrationHistorySha256,
+      sourceTableDigestsSha256: actualSourceManifest.tableDigestsSha256,
+      importerGitCommit: importer.gitCommit,
+      importerChecksumSha256: importer.checksumSha256,
+      mappingSha256: hash(mappingText),
+      approvalSha256: hash(approvalText),
+      sourceManifestSha256: hash(sourceManifestText),
+      snapshotEvidenceSha256: hash(snapshotEvidenceText),
+      exceptionsSha256: hash(exceptionsText),
+      sourceDumpSha256,
+      objectManifestSha256: hash(objectManifestText),
+      decisionSetSha256: trackedContractChecksum,
+      targetS3Endpoint: targetS3Identity.endpoint,
+      targetS3Region: targetS3Identity.region,
+      targetS3Bucket: targetS3Identity.bucket,
+      targetS3ForcePathStyle: targetS3Identity.forcePathStyle,
+      targetPostgresRuntimeIdentity: targetRuntimeIdentity,
+      writerFence: verifiedWriterFence,
+    },
+    countTargetBusinessRows: async () => (await targetPublicRowCount()).rowCount,
+  });
+  durableRunPrepared = true;
+  if (durablePreparation.replacementClient) {
+    await target.end().catch(() => undefined);
+    target = durablePreparation.replacementClient;
+    await acquireMigrationAdvisoryLock(target);
+    const replacementRuntimeIdentity = await postgresRuntimeIdentity(
+      target,
+      TARGET_DATABASE_URL,
+      {
+        expectedCurrentUser: TARGET_DATABASE_ROLE,
+        expectedSessionUser: TARGET_DATABASE_LOGIN_ROLE,
+      },
+    );
+    if (postgresRuntimeIdentitySha256(replacementRuntimeIdentity) !==
+      postgresRuntimeIdentitySha256(targetRuntimeIdentity))
+      throw new Error('Fresh preparation-COMMIT observer does not match the approved target runtime');
+  }
 
   {
     const schools = await queryRows(`SELECT * FROM school WHERE id=$1`, [SCHOOL_ID]);
@@ -668,6 +700,7 @@ try {
     const finalWriterFence = await verifyWriterFence(writerFenceConfig);
     if (writerFenceSha256(finalWriterFence) !== writerFenceSha256(verifiedWriterFence))
       throw new Error('Kubernetes writer fence identity changed during object preparation');
+    businessTransactionStarted = true;
     await target.query("BEGIN ISOLATION LEVEL SERIALIZABLE");
     try {
       await target.query(
@@ -1173,13 +1206,21 @@ try {
 } catch (error) {
   const failures: unknown[] = [error];
   if (!targetCommitted && !commitOutcomeUnknown) {
-    if (approvalRunId) {
+    if (approvalRunId && durableRunPrepared) {
       try {
-        await target.query(`
+        const recordedFailure = await target.query(`
           UPDATE legacy_migration_run
-          SET status='failed',failed_at=now(),updated_at=now(),error_summary=$2
+          SET status='failed',failed_at=coalesce(failed_at,now()),updated_at=now(),error_summary=$2,
+            failure_stage=$3
           WHERE run_id=$1 AND status='preparing'
-        `, [approvalRunId, error instanceof Error ? error.message.slice(0, 2000) : String(error).slice(0, 2000)]);
+          RETURNING run_id
+        `, [
+          approvalRunId,
+          error instanceof Error ? error.message.slice(0, 2000) : String(error).slice(0, 2000),
+          businessTransactionStarted ? 'transaction_started' : 'pre_transaction',
+        ]);
+        if (recordedFailure.rowCount !== 1)
+          throw new Error('Durable migration run did not accept its failure transition');
       } catch (stateError) {
         failures.push(stateError);
       }

@@ -229,13 +229,16 @@ for schools, users, staff roles, sessions, classes, sections, admissions,
 students, examinations, finance slugs/currencies, object destinations, and every
 operator decision named by [decisions.md](decisions.md).
 
-Preserve every source primary key exactly, including its prefix and 21-character
-suffix. `packages/db/src/id.ts` uses the legacy examination prefixes `expl`,
-`exrs`, and `ett` so both validation and newly generated post-migration IDs stay
-compatible. The mapping bundle still records source table/key to target
-table/key, but for preserved entities the IDs are identical. Any invalid source
-ID, duplicate, pre-existing target row, or object-key collision is blocking and
-must be shown to the user; the importer never creates a replacement ID.
+Preserve every source primary key exactly. CampusPilot entity IDs retain their
+documented prefix and 21-character lowercase suffix; `packages/db/src/id.ts`
+uses the legacy examination prefixes `expl`, `exrs`, and `ett` so both
+validation and newly generated post-migration IDs stay compatible. Legacy
+Better Auth `user.id` and `account.id` are a separate contract: exactly 32
+ASCII base62 characters (`A-Z`, `a-z`, `0-9`) with no CampusPilot prefix. The
+mapping bundle still records source table/key to target table/key, but for
+preserved entities the IDs are identical. Any invalid source ID, duplicate,
+pre-existing target row, or object-key collision is blocking and must be shown
+to the user; the importer never creates a replacement ID.
 
 Legacy identifiers whose entities do not exist in the target, such as `stf_*`,
 remain provenance only. A legacy staff ID must not be inserted where the target
@@ -321,6 +324,16 @@ importer Git commit. It also contains `targetObjectKeys`, the exact retained-key
 allowlist, and the complete shared S3 bucket/region/endpoint/path-style identity.
 No detached signature or signer configuration is used.
 
+The importer normally rejects a reused run ID. The only executable exception is
+the one-time retry of the existing pre-transaction legacy Better Auth ID
+validation failure. It must reuse the same run ID, start with retry count zero,
+match the exact 32-character base62 auth-ID failure shape, retain unchanged
+source/snapshot/object/decision/runtime/writer-fence facts, and prove that the
+target remains empty with no committed or audit effects. Its append-only retry
+evidence binds both the prior and replacement importer, approval, and target
+migration-history provenance, plus the prior and replacement combined tracked
+decision/documentation checksum. No other failed run is eligible.
+
 ### Tracked implementation
 
 The versioned entry points and their complete runtime configuration are in
@@ -367,7 +380,8 @@ every durable hash before it finalizes the run.
 
 - A deliberate interruption is classified from durable database state; no
   object mutation or blind write replay occurs.
-- A reused run ID or non-empty target is rejected;
+- A reused run ID or non-empty target is rejected, except for the single
+  narrowly defined and auditable auth-ID compatibility retry above;
   idempotence is fail-closed rather than a silent second import.
 - Source counts reconcile to imported + omitted + deferred + blocked counts,
   including count-only dispositions for generated PDFs, notices, onboarding,

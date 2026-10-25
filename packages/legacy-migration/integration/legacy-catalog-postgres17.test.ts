@@ -21,6 +21,23 @@ function assertFixtureDatabase(value: string): void {
 }
 
 describeWithPostgres('legacy catalog query on PostgreSQL 17', () => {
+  it('serializes retry timestamps without losing PostgreSQL microseconds', async () => {
+    assertFixtureDatabase(connectionString!);
+    const client = new pg.Client({ connectionString });
+    await client.connect();
+    try {
+      const result = await client.query<{ canonical: string; round_trip: boolean }>(`
+        SELECT to_jsonb('2026-10-25 09:00:00.123456+00'::timestamptz)#>>'{}' AS canonical,
+          '2026-10-25 09:00:00.123456+00'::timestamptz =
+            (to_jsonb('2026-10-25 09:00:00.123456+00'::timestamptz)#>>'{}')::timestamptz AS round_trip
+      `);
+      expect(result.rows[0]?.canonical).toContain('.123456');
+      expect(result.rows[0]?.round_trip).toBe(true);
+    } finally {
+      await client.end();
+    }
+  });
+
   it('executes constraint and index discovery without reserved-alias syntax errors', async () => {
     assertFixtureDatabase(connectionString!);
     const client = new pg.Client({ connectionString });

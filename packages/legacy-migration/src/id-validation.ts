@@ -6,9 +6,14 @@ const PRESERVED_ID_ENTITIES = {
   exam_result: 'examResult', exam_timetable: 'examTimetable', artifact: 'artifact',
 } as const satisfies Record<string, EntityName>;
 
-const AUTH_ID = /^(usr|acc)_[a-z0-9]{21}$/;
+/**
+ * The legacy app used Better Auth's default `generateId(32)`, whose alphabet
+ * is exactly ASCII base62 (`a-z`, `A-Z`, `0-9`). These identifiers were never
+ * CampusPilot entity IDs and must be preserved byte-for-byte.
+ */
+const LEGACY_BETTER_AUTH_ID = /^[A-Za-z0-9]{32}$/;
 
-/** Validate prefix, separator, lowercase alphabet, and exact 21-char suffix. */
+/** Validate each preserved ID against its source system's exact ID contract. */
 export function assertPreservedIds(rows: Record<string, Array<Record<string, unknown>>>) {
   for (const [table, entity] of Object.entries(PRESERVED_ID_ENTITIES)) {
     for (const row of rows[table] ?? []) {
@@ -18,7 +23,7 @@ export function assertPreservedIds(rows: Record<string, Array<Record<string, unk
   }
   for (const table of ['user', 'account']) {
     for (const row of rows[table] ?? []) {
-      if (typeof row.id !== 'string' || !AUTH_ID.test(row.id))
+      if (typeof row.id !== 'string' || !LEGACY_BETTER_AUTH_ID.test(row.id))
         throw new Error(`Invalid preserved ${table} ID: ${String(row.id)}`);
     }
   }

@@ -125,7 +125,15 @@ writer fence, migration history, and emptiness under an advisory lock and a
 serializable transaction.
 
 `legacy_migration_run` records preparing, committed, failed, and finalized
-states with immutable provenance. The database commit includes the committed
+states with immutable provenance. The sole exception is a one-time, same-run
+retry of the already-recorded pre-transaction legacy Better Auth ID validation
+failure. It requires an empty target, no committed or audit effects, an exact
+32-character base62 auth ID in the immutable failure summary, unchanged
+source/snapshot/object/decision/runtime/writer-fence facts, and an empty retry
+history. The append-only retry record binds the old and replacement importer,
+approval, target-history, and tracked decision/documentation provenance; no
+other failed run can be resumed.
+The database commit includes the committed
 run record. Six audit artifacts are written and checksum-attested before
 verification finalizes the run. A failed pre-commit database transaction is
 rolled back; S3 needs no rollback because it is never mutated.
