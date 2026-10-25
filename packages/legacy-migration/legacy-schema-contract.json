@@ -6,15 +6,9 @@
       "name": "public.account",
       "columns": [
         {
-          "name": "access_token",
+          "name": "id",
           "type": "text",
-          "nullable": true,
-          "default": null
-        },
-        {
-          "name": "access_token_expires_at",
-          "type": "timestamp",
-          "nullable": true,
+          "nullable": false,
           "default": null
         },
         {
@@ -24,15 +18,27 @@
           "default": null
         },
         {
-          "name": "created_at",
-          "type": "timestamp",
-          "nullable": false,
-          "default": "now()"
-        },
-        {
-          "name": "id",
+          "name": "provider_id",
           "type": "text",
           "nullable": false,
+          "default": null
+        },
+        {
+          "name": "user_id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "access_token",
+          "type": "text",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "refresh_token",
+          "type": "text",
+          "nullable": true,
           "default": null
         },
         {
@@ -42,20 +48,8 @@
           "default": null
         },
         {
-          "name": "password",
-          "type": "text",
-          "nullable": true,
-          "default": null
-        },
-        {
-          "name": "provider_id",
-          "type": "text",
-          "nullable": false,
-          "default": null
-        },
-        {
-          "name": "refresh_token",
-          "type": "text",
+          "name": "access_token_expires_at",
+          "type": "timestamp",
           "nullable": true,
           "default": null
         },
@@ -72,14 +66,20 @@
           "default": null
         },
         {
-          "name": "updated_at",
-          "type": "timestamp",
-          "nullable": false,
+          "name": "password",
+          "type": "text",
+          "nullable": true,
           "default": null
         },
         {
-          "name": "user_id",
-          "type": "text",
+          "name": "created_at",
+          "type": "timestamp",
+          "nullable": false,
+          "default": "now()"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp",
           "nullable": false,
           "default": null
         }
@@ -124,7 +124,25 @@
       "name": "public.admission",
       "columns": [
         {
-          "name": "address",
+          "name": "id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "school_id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "name",
+          "type": "varchar",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "admissionNo",
           "type": "varchar",
           "nullable": false,
           "default": null
@@ -136,49 +154,7 @@
           "default": null
         },
         {
-          "name": "admissionNo",
-          "type": "varchar",
-          "nullable": false,
-          "default": null
-        },
-        {
-          "name": "createdAt",
-          "type": "timestamp",
-          "nullable": true,
-          "default": "now()"
-        },
-        {
-          "name": "dob",
-          "type": "date",
-          "nullable": false,
-          "default": null
-        },
-        {
-          "name": "email",
-          "type": "varchar",
-          "nullable": true,
-          "default": null
-        },
-        {
-          "name": "fatherName",
-          "type": "varchar",
-          "nullable": false,
-          "default": null
-        },
-        {
-          "name": "id",
-          "type": "text",
-          "nullable": false,
-          "default": null
-        },
-        {
-          "name": "motherName",
-          "type": "varchar",
-          "nullable": false,
-          "default": null
-        },
-        {
-          "name": "name",
+          "name": "address",
           "type": "varchar",
           "nullable": false,
           "default": null
@@ -190,9 +166,27 @@
           "default": null
         },
         {
-          "name": "photo_s3_key",
+          "name": "email",
           "type": "varchar",
           "nullable": true,
+          "default": null
+        },
+        {
+          "name": "dob",
+          "type": "date",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "fatherName",
+          "type": "varchar",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "motherName",
+          "type": "varchar",
+          "nullable": false,
           "default": null
         },
         {
@@ -202,10 +196,16 @@
           "default": "true"
         },
         {
-          "name": "school_id",
-          "type": "text",
-          "nullable": false,
+          "name": "photo_s3_key",
+          "type": "varchar",
+          "nullable": true,
           "default": null
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp",
+          "nullable": true,
+          "default": "now()"
         },
         {
           "name": "updatedAt",
@@ -259,14 +259,20 @@
       "name": "public.ai_quota",
       "columns": [
         {
-          "name": "created_at",
-          "type": "timestamp",
-          "nullable": true,
-          "default": "now()"
-        },
-        {
           "name": "id",
           "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "school_id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "usage_type",
+          "type": "varchar",
           "nullable": false,
           "default": null
         },
@@ -277,22 +283,16 @@
           "default": "50"
         },
         {
-          "name": "school_id",
-          "type": "text",
-          "nullable": false,
-          "default": null
+          "name": "created_at",
+          "type": "timestamp",
+          "nullable": true,
+          "default": "now()"
         },
         {
           "name": "updated_at",
           "type": "timestamp",
           "nullable": true,
           "default": "now()"
-        },
-        {
-          "name": "usage_type",
-          "type": "varchar",
-          "nullable": false,
-          "default": null
         }
       ],
       "constraints": [
@@ -339,26 +339,8 @@
       "name": "public.ai_usage",
       "columns": [
         {
-          "name": "count",
-          "type": "integer",
-          "nullable": false,
-          "default": "0"
-        },
-        {
-          "name": "created_at",
-          "type": "timestamp",
-          "nullable": true,
-          "default": "now()"
-        },
-        {
           "name": "id",
           "type": "text",
-          "nullable": false,
-          "default": null
-        },
-        {
-          "name": "month",
-          "type": "integer",
           "nullable": false,
           "default": null
         },
@@ -367,12 +349,6 @@
           "type": "text",
           "nullable": false,
           "default": null
-        },
-        {
-          "name": "updated_at",
-          "type": "timestamp",
-          "nullable": true,
-          "default": "now()"
         },
         {
           "name": "usage_type",
@@ -385,6 +361,30 @@
           "type": "integer",
           "nullable": false,
           "default": null
+        },
+        {
+          "name": "month",
+          "type": "integer",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "count",
+          "type": "integer",
+          "nullable": false,
+          "default": "0"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp",
+          "nullable": true,
+          "default": "now()"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp",
+          "nullable": true,
+          "default": "now()"
         }
       ],
       "constraints": [
@@ -433,33 +433,39 @@
       "name": "public.apikey",
       "columns": [
         {
+          "name": "id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
           "name": "config_id",
           "type": "text",
           "nullable": false,
           "default": "'default'"
         },
         {
-          "name": "created_at",
-          "type": "timestamp",
-          "nullable": false,
-          "default": null
-        },
-        {
-          "name": "enabled",
-          "type": "boolean",
-          "nullable": true,
-          "default": "true"
-        },
-        {
-          "name": "expires_at",
-          "type": "timestamp",
+          "name": "name",
+          "type": "text",
           "nullable": true,
           "default": null
         },
         {
-          "name": "id",
+          "name": "start",
+          "type": "text",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "reference_id",
           "type": "text",
           "nullable": false,
+          "default": null
+        },
+        {
+          "name": "prefix",
+          "type": "text",
+          "nullable": true,
           "default": null
         },
         {
@@ -469,8 +475,56 @@
           "default": null
         },
         {
+          "name": "refill_interval",
+          "type": "integer",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "refill_amount",
+          "type": "integer",
+          "nullable": true,
+          "default": null
+        },
+        {
           "name": "last_refill_at",
           "type": "timestamp",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "enabled",
+          "type": "boolean",
+          "nullable": true,
+          "default": "true"
+        },
+        {
+          "name": "rate_limit_enabled",
+          "type": "boolean",
+          "nullable": true,
+          "default": "false"
+        },
+        {
+          "name": "rate_limit_time_window",
+          "type": "integer",
+          "nullable": true,
+          "default": "86400000"
+        },
+        {
+          "name": "rate_limit_max",
+          "type": "integer",
+          "nullable": true,
+          "default": "10"
+        },
+        {
+          "name": "request_count",
+          "type": "integer",
+          "nullable": true,
+          "default": "0"
+        },
+        {
+          "name": "remaining",
+          "type": "integer",
           "nullable": true,
           "default": null
         },
@@ -481,15 +535,21 @@
           "default": null
         },
         {
-          "name": "metadata",
-          "type": "text",
+          "name": "expires_at",
+          "type": "timestamp",
           "nullable": true,
           "default": null
         },
         {
-          "name": "name",
-          "type": "text",
-          "nullable": true,
+          "name": "created_at",
+          "type": "timestamp",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp",
+          "nullable": false,
           "default": null
         },
         {
@@ -499,69 +559,9 @@
           "default": null
         },
         {
-          "name": "prefix",
+          "name": "metadata",
           "type": "text",
           "nullable": true,
-          "default": null
-        },
-        {
-          "name": "rate_limit_enabled",
-          "type": "boolean",
-          "nullable": true,
-          "default": "false"
-        },
-        {
-          "name": "rate_limit_max",
-          "type": "integer",
-          "nullable": true,
-          "default": "10"
-        },
-        {
-          "name": "rate_limit_time_window",
-          "type": "integer",
-          "nullable": true,
-          "default": "86400000"
-        },
-        {
-          "name": "reference_id",
-          "type": "text",
-          "nullable": false,
-          "default": null
-        },
-        {
-          "name": "refill_amount",
-          "type": "integer",
-          "nullable": true,
-          "default": null
-        },
-        {
-          "name": "refill_interval",
-          "type": "integer",
-          "nullable": true,
-          "default": null
-        },
-        {
-          "name": "remaining",
-          "type": "integer",
-          "nullable": true,
-          "default": null
-        },
-        {
-          "name": "request_count",
-          "type": "integer",
-          "nullable": true,
-          "default": "0"
-        },
-        {
-          "name": "start",
-          "type": "text",
-          "nullable": true,
-          "default": null
-        },
-        {
-          "name": "updated_at",
-          "type": "timestamp",
-          "nullable": false,
           "default": null
         }
       ],
@@ -606,19 +606,13 @@
       "name": "public.artifact",
       "columns": [
         {
-          "name": "content_type",
-          "type": "varchar",
+          "name": "id",
+          "type": "text",
           "nullable": false,
           "default": null
         },
         {
-          "name": "createdAt",
-          "type": "timestamp",
-          "nullable": true,
-          "default": "now()"
-        },
-        {
-          "name": "entity_id",
+          "name": "school_id",
           "type": "text",
           "nullable": false,
           "default": null
@@ -630,26 +624,14 @@
           "default": null
         },
         {
-          "name": "id",
+          "name": "entity_id",
           "type": "text",
           "nullable": false,
           "default": null
         },
         {
-          "name": "meta",
-          "type": "jsonb",
-          "nullable": true,
-          "default": "'{}'::jsonb"
-        },
-        {
-          "name": "s3_key",
+          "name": "type",
           "type": "varchar",
-          "nullable": false,
-          "default": null
-        },
-        {
-          "name": "school_id",
-          "type": "text",
           "nullable": false,
           "default": null
         },
@@ -660,16 +642,34 @@
           "default": null
         },
         {
+          "name": "s3_key",
+          "type": "varchar",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "content_type",
+          "type": "varchar",
+          "nullable": false,
+          "default": null
+        },
+        {
           "name": "status",
           "type": "varchar",
           "nullable": false,
           "default": "'current'"
         },
         {
-          "name": "type",
-          "type": "varchar",
-          "nullable": false,
-          "default": null
+          "name": "meta",
+          "type": "jsonb",
+          "nullable": true,
+          "default": "'{}'::jsonb"
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp",
+          "nullable": true,
+          "default": "now()"
         },
         {
           "name": "updatedAt",
@@ -735,28 +735,10 @@
       "name": "public.bill_generation_event",
       "columns": [
         {
-          "name": "created_at",
-          "type": "timestamp",
-          "nullable": true,
-          "default": "now()"
-        },
-        {
-          "name": "generated_by",
-          "type": "text",
-          "nullable": false,
-          "default": null
-        },
-        {
           "name": "id",
           "type": "text",
           "nullable": false,
           "default": null
-        },
-        {
-          "name": "meta",
-          "type": "jsonb",
-          "nullable": true,
-          "default": "'{}'::jsonb"
         },
         {
           "name": "school_id",
@@ -775,6 +757,24 @@
           "type": "bill_generation_event_type",
           "nullable": false,
           "default": null
+        },
+        {
+          "name": "generated_by",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "meta",
+          "type": "jsonb",
+          "nullable": true,
+          "default": "'{}'::jsonb"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp",
+          "nullable": true,
+          "default": "now()"
         }
       ],
       "constraints": [
@@ -835,32 +835,14 @@
       "name": "public.class",
       "columns": [
         {
-          "name": "attributes",
-          "type": "jsonb",
-          "nullable": true,
-          "default": "'{}'::jsonb"
-        },
-        {
-          "name": "config",
-          "type": "jsonb",
-          "nullable": true,
-          "default": "'{}'::jsonb"
-        },
-        {
-          "name": "createdAt",
-          "type": "timestamp",
-          "nullable": true,
-          "default": "now()"
-        },
-        {
-          "name": "finance_config",
-          "type": "jsonb",
-          "nullable": true,
+          "name": "id",
+          "type": "text",
+          "nullable": false,
           "default": null
         },
         {
-          "name": "id",
-          "type": "text",
+          "name": "slug",
+          "type": "varchar",
           "nullable": false,
           "default": null
         },
@@ -877,10 +859,28 @@
           "default": null
         },
         {
-          "name": "slug",
-          "type": "varchar",
-          "nullable": false,
+          "name": "attributes",
+          "type": "jsonb",
+          "nullable": true,
+          "default": "'{}'::jsonb"
+        },
+        {
+          "name": "config",
+          "type": "jsonb",
+          "nullable": true,
+          "default": "'{}'::jsonb"
+        },
+        {
+          "name": "finance_config",
+          "type": "jsonb",
+          "nullable": true,
           "default": null
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp",
+          "nullable": true,
+          "default": "now()"
         },
         {
           "name": "updatedAt",
@@ -933,34 +933,10 @@
       "name": "public.exam_plan",
       "columns": [
         {
-          "name": "class_id",
-          "type": "text",
-          "nullable": false,
-          "default": null
-        },
-        {
-          "name": "createdAt",
-          "type": "timestamp",
-          "nullable": true,
-          "default": "now()"
-        },
-        {
-          "name": "examSlug",
-          "type": "varchar",
-          "nullable": false,
-          "default": null
-        },
-        {
           "name": "id",
           "type": "text",
           "nullable": false,
           "default": null
-        },
-        {
-          "name": "modeConfig",
-          "type": "jsonb",
-          "nullable": false,
-          "default": "'{}'::jsonb"
         },
         {
           "name": "school_id",
@@ -975,10 +951,16 @@
           "default": null
         },
         {
-          "name": "status",
-          "type": "exam_plan_status",
+          "name": "examSlug",
+          "type": "varchar",
           "nullable": false,
-          "default": "'draft'"
+          "default": null
+        },
+        {
+          "name": "class_id",
+          "type": "text",
+          "nullable": false,
+          "default": null
         },
         {
           "name": "subjectSlug",
@@ -993,10 +975,28 @@
           "default": "100"
         },
         {
+          "name": "modeConfig",
+          "type": "jsonb",
+          "nullable": false,
+          "default": "'{}'::jsonb"
+        },
+        {
           "name": "totalWorkingDays",
           "type": "integer",
           "nullable": true,
           "default": null
+        },
+        {
+          "name": "status",
+          "type": "exam_plan_status",
+          "nullable": false,
+          "default": "'draft'"
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp",
+          "nullable": true,
+          "default": "now()"
         },
         {
           "name": "updatedAt",
@@ -1077,27 +1077,9 @@
       "name": "public.exam_result",
       "columns": [
         {
-          "name": "approved",
-          "type": "boolean",
+          "name": "id",
+          "type": "text",
           "nullable": false,
-          "default": "false"
-        },
-        {
-          "name": "coScholastics",
-          "type": "jsonb",
-          "nullable": true,
-          "default": null
-        },
-        {
-          "name": "createdAt",
-          "type": "timestamp",
-          "nullable": true,
-          "default": "now()"
-        },
-        {
-          "name": "days_attended",
-          "type": "integer",
-          "nullable": true,
           "default": null
         },
         {
@@ -1107,16 +1089,10 @@
           "default": null
         },
         {
-          "name": "id",
+          "name": "student_id",
           "type": "text",
           "nullable": false,
           "default": null
-        },
-        {
-          "name": "marks",
-          "type": "jsonb",
-          "nullable": false,
-          "default": "'{}'::jsonb"
         },
         {
           "name": "school_id",
@@ -1131,10 +1107,34 @@
           "default": null
         },
         {
-          "name": "student_id",
-          "type": "text",
+          "name": "marks",
+          "type": "jsonb",
           "nullable": false,
+          "default": "'{}'::jsonb"
+        },
+        {
+          "name": "coScholastics",
+          "type": "jsonb",
+          "nullable": true,
           "default": null
+        },
+        {
+          "name": "days_attended",
+          "type": "integer",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "approved",
+          "type": "boolean",
+          "nullable": false,
+          "default": "false"
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp",
+          "nullable": true,
+          "default": "now()"
         },
         {
           "name": "updatedAt",
@@ -1226,24 +1226,6 @@
       "name": "public.exam_timetable",
       "columns": [
         {
-          "name": "config",
-          "type": "jsonb",
-          "nullable": false,
-          "default": "'{}'::jsonb"
-        },
-        {
-          "name": "createdAt",
-          "type": "timestamp",
-          "nullable": true,
-          "default": "now()"
-        },
-        {
-          "name": "examSlug",
-          "type": "varchar",
-          "nullable": false,
-          "default": null
-        },
-        {
           "name": "id",
           "type": "text",
           "nullable": false,
@@ -1260,6 +1242,24 @@
           "type": "text",
           "nullable": false,
           "default": null
+        },
+        {
+          "name": "examSlug",
+          "type": "varchar",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "config",
+          "type": "jsonb",
+          "nullable": false,
+          "default": "'{}'::jsonb"
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp",
+          "nullable": true,
+          "default": "now()"
         },
         {
           "name": "updatedAt",
@@ -1325,45 +1325,9 @@
       "name": "public.ledger_event",
       "columns": [
         {
-          "name": "amount",
-          "type": "numeric",
-          "nullable": false,
-          "default": null
-        },
-        {
-          "name": "created_at",
-          "type": "timestamp",
-          "nullable": true,
-          "default": "now()"
-        },
-        {
-          "name": "discount",
-          "type": "numeric",
-          "nullable": false,
-          "default": "'0'"
-        },
-        {
           "name": "id",
           "type": "text",
           "nullable": false,
-          "default": null
-        },
-        {
-          "name": "note",
-          "type": "varchar",
-          "nullable": true,
-          "default": null
-        },
-        {
-          "name": "recorded_by",
-          "type": "text",
-          "nullable": false,
-          "default": null
-        },
-        {
-          "name": "ref_bill_event_id",
-          "type": "text",
-          "nullable": true,
           "default": null
         },
         {
@@ -1385,10 +1349,46 @@
           "default": "'PAYMENT'"
         },
         {
+          "name": "amount",
+          "type": "numeric",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "discount",
+          "type": "numeric",
+          "nullable": false,
+          "default": "'0'"
+        },
+        {
+          "name": "ref_bill_event_id",
+          "type": "text",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "note",
+          "type": "varchar",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "recorded_by",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
           "name": "version",
           "type": "integer",
           "nullable": false,
           "default": null
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp",
+          "nullable": true,
+          "default": "now()"
         }
       ],
       "constraints": [
@@ -1471,10 +1471,10 @@
       "name": "public.ledger_projection",
       "columns": [
         {
-          "name": "last_bill_version",
-          "type": "integer",
+          "name": "student_id",
+          "type": "text",
           "nullable": false,
-          "default": "0"
+          "default": null
         },
         {
           "name": "last_ledger_version",
@@ -1483,16 +1483,16 @@
           "default": "0"
         },
         {
-          "name": "outstanding",
+          "name": "last_bill_version",
+          "type": "integer",
+          "nullable": false,
+          "default": "0"
+        },
+        {
+          "name": "total_paid",
           "type": "numeric",
           "nullable": false,
           "default": "'0'"
-        },
-        {
-          "name": "student_id",
-          "type": "text",
-          "nullable": false,
-          "default": null
         },
         {
           "name": "total_discount",
@@ -1501,7 +1501,7 @@
           "default": "'0'"
         },
         {
-          "name": "total_paid",
+          "name": "outstanding",
           "type": "numeric",
           "nullable": false,
           "default": "'0'"
@@ -1545,34 +1545,10 @@
       "name": "public.notice",
       "columns": [
         {
-          "name": "content",
-          "type": "text",
-          "nullable": false,
-          "default": null
-        },
-        {
-          "name": "created_at",
-          "type": "timestamp",
-          "nullable": true,
-          "default": "now()"
-        },
-        {
-          "name": "created_by",
-          "type": "text",
-          "nullable": false,
-          "default": null
-        },
-        {
           "name": "id",
           "type": "text",
           "nullable": false,
           "default": null
-        },
-        {
-          "name": "page_size",
-          "type": "varchar",
-          "nullable": false,
-          "default": "'half'"
         },
         {
           "name": "school_id",
@@ -1591,6 +1567,30 @@
           "type": "varchar",
           "nullable": false,
           "default": null
+        },
+        {
+          "name": "content",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "page_size",
+          "type": "varchar",
+          "nullable": false,
+          "default": "'half'"
+        },
+        {
+          "name": "created_by",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp",
+          "nullable": true,
+          "default": "now()"
         },
         {
           "name": "updated_at",
@@ -1653,61 +1653,25 @@
       "name": "public.school",
       "columns": [
         {
-          "name": "active_session_id",
-          "type": "text",
-          "nullable": true,
-          "default": null
-        },
-        {
-          "name": "createdAt",
-          "type": "timestamp",
-          "nullable": true,
-          "default": "now()"
-        },
-        {
-          "name": "defaultSessionConfig",
-          "type": "jsonb",
-          "nullable": true,
-          "default": "'{}'::jsonb"
-        },
-        {
-          "name": "features",
-          "type": "jsonb",
-          "nullable": true,
-          "default": "'{}'::jsonb"
-        },
-        {
-          "name": "finance_schema",
-          "type": "jsonb",
-          "nullable": true,
-          "default": null
-        },
-        {
-          "name": "has_completed_onboarding",
-          "type": "boolean",
-          "nullable": false,
-          "default": "false"
-        },
-        {
           "name": "id",
           "type": "text",
           "nullable": false,
           "default": null
         },
         {
-          "name": "location",
+          "name": "slug",
           "type": "varchar",
           "nullable": false,
           "default": null
         },
         {
-          "name": "logo_s3_key",
+          "name": "name",
           "type": "varchar",
-          "nullable": true,
+          "nullable": false,
           "default": null
         },
         {
-          "name": "name",
+          "name": "location",
           "type": "varchar",
           "nullable": false,
           "default": null
@@ -1719,16 +1683,52 @@
           "default": null
         },
         {
-          "name": "slug",
+          "name": "logo_s3_key",
           "type": "varchar",
-          "nullable": false,
+          "nullable": true,
           "default": null
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp",
+          "nullable": true,
+          "default": "now()"
         },
         {
           "name": "updatedAt",
           "type": "timestamp",
           "nullable": true,
           "default": "now()"
+        },
+        {
+          "name": "defaultSessionConfig",
+          "type": "jsonb",
+          "nullable": true,
+          "default": "'{}'::jsonb"
+        },
+        {
+          "name": "finance_schema",
+          "type": "jsonb",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "active_session_id",
+          "type": "text",
+          "nullable": true,
+          "default": null
+        },
+        {
+          "name": "has_completed_onboarding",
+          "type": "boolean",
+          "nullable": false,
+          "default": "false"
+        },
+        {
+          "name": "features",
+          "type": "jsonb",
+          "nullable": true,
+          "default": "'{}'::jsonb"
         }
       ],
       "constraints": [
@@ -1761,52 +1761,10 @@
       "name": "public.school_onboarding",
       "columns": [
         {
-          "name": "attributes",
-          "type": "jsonb",
-          "nullable": true,
-          "default": "'{}'::jsonb"
-        },
-        {
-          "name": "classes_created",
-          "type": "boolean",
-          "nullable": false,
-          "default": "false"
-        },
-        {
-          "name": "created_at",
-          "type": "timestamp",
-          "nullable": true,
-          "default": "now()"
-        },
-        {
-          "name": "current_step",
-          "type": "integer",
-          "nullable": false,
-          "default": "1"
-        },
-        {
-          "name": "finance_completed",
-          "type": "boolean",
-          "nullable": false,
-          "default": "false"
-        },
-        {
           "name": "id",
           "type": "text",
           "nullable": false,
           "default": null
-        },
-        {
-          "name": "members_added",
-          "type": "boolean",
-          "nullable": false,
-          "default": "false"
-        },
-        {
-          "name": "school_details_completed",
-          "type": "boolean",
-          "nullable": false,
-          "default": "false"
         },
         {
           "name": "school_id",
@@ -1815,13 +1773,31 @@
           "default": null
         },
         {
+          "name": "school_details_completed",
+          "type": "boolean",
+          "nullable": false,
+          "default": "false"
+        },
+        {
+          "name": "members_added",
+          "type": "boolean",
+          "nullable": false,
+          "default": "false"
+        },
+        {
+          "name": "classes_created",
+          "type": "boolean",
+          "nullable": false,
+          "default": "false"
+        },
+        {
           "name": "session_configured",
           "type": "boolean",
           "nullable": false,
           "default": "false"
         },
         {
-          "name": "template_bill_configured",
+          "name": "finance_completed",
           "type": "boolean",
           "nullable": false,
           "default": "false"
@@ -1833,7 +1809,7 @@
           "default": "false"
         },
         {
-          "name": "template_idcard_configured",
+          "name": "template_bill_configured",
           "type": "boolean",
           "nullable": false,
           "default": "false"
@@ -1843,6 +1819,30 @@
           "type": "boolean",
           "nullable": false,
           "default": "false"
+        },
+        {
+          "name": "template_idcard_configured",
+          "type": "boolean",
+          "nullable": false,
+          "default": "false"
+        },
+        {
+          "name": "current_step",
+          "type": "integer",
+          "nullable": false,
+          "default": "1"
+        },
+        {
+          "name": "attributes",
+          "type": "jsonb",
+          "nullable": true,
+          "default": "'{}'::jsonb"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp",
+          "nullable": true,
+          "default": "now()"
         },
         {
           "name": "updated_at",
@@ -1894,20 +1894,14 @@
       "name": "public.school_session",
       "columns": [
         {
-          "name": "createdAt",
-          "type": "timestamp",
-          "nullable": true,
-          "default": "now()"
-        },
-        {
-          "name": "finance_config",
-          "type": "jsonb",
-          "nullable": true,
+          "name": "id",
+          "type": "text",
+          "nullable": false,
           "default": null
         },
         {
-          "name": "id",
-          "type": "text",
+          "name": "slug",
+          "type": "varchar",
           "nullable": false,
           "default": null
         },
@@ -1916,12 +1910,6 @@
           "type": "text",
           "nullable": false,
           "default": null
-        },
-        {
-          "name": "sessionConfig",
-          "type": "jsonb",
-          "nullable": true,
-          "default": "'{}'::jsonb"
         },
         {
           "name": "sessionEndYear",
@@ -1936,10 +1924,22 @@
           "default": null
         },
         {
-          "name": "slug",
-          "type": "varchar",
-          "nullable": false,
+          "name": "sessionConfig",
+          "type": "jsonb",
+          "nullable": true,
+          "default": "'{}'::jsonb"
+        },
+        {
+          "name": "finance_config",
+          "type": "jsonb",
+          "nullable": true,
           "default": null
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp",
+          "nullable": true,
+          "default": "now()"
         },
         {
           "name": "updatedAt",
@@ -1992,26 +1992,14 @@
       "name": "public.section",
       "columns": [
         {
-          "name": "attributes",
-          "type": "jsonb",
-          "nullable": true,
-          "default": "'{}'::jsonb"
-        },
-        {
-          "name": "class_id",
+          "name": "id",
           "type": "text",
           "nullable": false,
           "default": null
         },
         {
-          "name": "createdAt",
-          "type": "timestamp",
-          "nullable": true,
-          "default": "now()"
-        },
-        {
-          "name": "id",
-          "type": "text",
+          "name": "slug",
+          "type": "varchar",
           "nullable": false,
           "default": null
         },
@@ -2022,16 +2010,28 @@
           "default": null
         },
         {
+          "name": "class_id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
           "name": "school_id",
           "type": "text",
           "nullable": false,
           "default": null
         },
         {
-          "name": "slug",
-          "type": "varchar",
-          "nullable": false,
-          "default": null
+          "name": "attributes",
+          "type": "jsonb",
+          "nullable": true,
+          "default": "'{}'::jsonb"
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp",
+          "nullable": true,
+          "default": "now()"
         },
         {
           "name": "updatedAt",
@@ -2097,10 +2097,10 @@
       "name": "public.session",
       "columns": [
         {
-          "name": "created_at",
-          "type": "timestamp",
+          "name": "id",
+          "type": "text",
           "nullable": false,
-          "default": "now()"
+          "default": null
         },
         {
           "name": "expires_at",
@@ -2109,8 +2109,20 @@
           "default": null
         },
         {
-          "name": "id",
+          "name": "token",
           "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp",
+          "nullable": false,
+          "default": "now()"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp",
           "nullable": false,
           "default": null
         },
@@ -2118,24 +2130,6 @@
           "name": "ip_address",
           "type": "text",
           "nullable": true,
-          "default": null
-        },
-        {
-          "name": "is_student",
-          "type": "boolean",
-          "nullable": false,
-          "default": "false"
-        },
-        {
-          "name": "token",
-          "type": "text",
-          "nullable": false,
-          "default": null
-        },
-        {
-          "name": "updated_at",
-          "type": "timestamp",
-          "nullable": false,
           "default": null
         },
         {
@@ -2149,6 +2143,12 @@
           "type": "text",
           "nullable": false,
           "default": null
+        },
+        {
+          "name": "is_student",
+          "type": "boolean",
+          "nullable": false,
+          "default": "false"
         }
       ],
       "constraints": [
@@ -2202,16 +2202,10 @@
       "name": "public.staff",
       "columns": [
         {
-          "name": "attributes",
-          "type": "jsonb",
-          "nullable": true,
-          "default": "'{}'::jsonb"
-        },
-        {
-          "name": "createdAt",
-          "type": "timestamp",
-          "nullable": true,
-          "default": "now()"
+          "name": "id",
+          "type": "text",
+          "nullable": false,
+          "default": null
         },
         {
           "name": "email",
@@ -2220,7 +2214,7 @@
           "default": null
         },
         {
-          "name": "id",
+          "name": "school_id",
           "type": "text",
           "nullable": false,
           "default": null
@@ -2232,10 +2226,16 @@
           "default": null
         },
         {
-          "name": "school_id",
-          "type": "text",
-          "nullable": false,
-          "default": null
+          "name": "attributes",
+          "type": "jsonb",
+          "nullable": true,
+          "default": "'{}'::jsonb"
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp",
+          "nullable": true,
+          "default": "now()"
         },
         {
           "name": "updatedAt",
@@ -2276,7 +2276,7 @@
       "name": "public.student",
       "columns": [
         {
-          "name": "admission_id",
+          "name": "id",
           "type": "text",
           "nullable": false,
           "default": null
@@ -2288,19 +2288,25 @@
           "default": null
         },
         {
-          "name": "createdAt",
-          "type": "timestamp",
-          "nullable": true,
-          "default": "now()"
-        },
-        {
-          "name": "finance_config",
-          "type": "jsonb",
-          "nullable": true,
+          "name": "section_id",
+          "type": "text",
+          "nullable": false,
           "default": null
         },
         {
-          "name": "id",
+          "name": "school_id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "admission_id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "session_id",
           "type": "text",
           "nullable": false,
           "default": null
@@ -2312,22 +2318,16 @@
           "default": null
         },
         {
-          "name": "school_id",
-          "type": "text",
-          "nullable": false,
+          "name": "finance_config",
+          "type": "jsonb",
+          "nullable": true,
           "default": null
         },
         {
-          "name": "section_id",
-          "type": "text",
-          "nullable": false,
-          "default": null
-        },
-        {
-          "name": "session_id",
-          "type": "text",
-          "nullable": false,
-          "default": null
+          "name": "createdAt",
+          "type": "timestamp",
+          "nullable": true,
+          "default": "now()"
         },
         {
           "name": "updatedAt",
@@ -2446,8 +2446,8 @@
       "name": "public.student_bill_event",
       "columns": [
         {
-          "name": "amount",
-          "type": "numeric",
+          "name": "id",
+          "type": "text",
           "nullable": false,
           "default": null
         },
@@ -2458,14 +2458,14 @@
           "default": null
         },
         {
-          "name": "created_at",
-          "type": "timestamp",
-          "nullable": true,
-          "default": "now()"
+          "name": "student_id",
+          "type": "text",
+          "nullable": false,
+          "default": null
         },
         {
-          "name": "id",
-          "type": "text",
+          "name": "amount",
+          "type": "numeric",
           "nullable": false,
           "default": null
         },
@@ -2476,16 +2476,16 @@
           "default": "'{}'::jsonb"
         },
         {
-          "name": "student_id",
-          "type": "text",
-          "nullable": false,
-          "default": null
-        },
-        {
           "name": "version",
           "type": "integer",
           "nullable": false,
           "default": null
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp",
+          "nullable": true,
+          "default": "now()"
         }
       ],
       "constraints": [
@@ -2549,6 +2549,12 @@
       "name": "public.student_bill_projection",
       "columns": [
         {
+          "name": "student_id",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
           "name": "last_event_id",
           "type": "text",
           "nullable": true,
@@ -2559,12 +2565,6 @@
           "type": "integer",
           "nullable": false,
           "default": "0"
-        },
-        {
-          "name": "student_id",
-          "type": "text",
-          "nullable": false,
-          "default": null
         },
         {
           "name": "total_billed",
@@ -2611,10 +2611,16 @@
       "name": "public.user",
       "columns": [
         {
-          "name": "created_at",
-          "type": "timestamp",
+          "name": "id",
+          "type": "text",
           "nullable": false,
-          "default": "now()"
+          "default": null
+        },
+        {
+          "name": "name",
+          "type": "text",
+          "nullable": false,
+          "default": null
         },
         {
           "name": "email",
@@ -2629,22 +2635,16 @@
           "default": "false"
         },
         {
-          "name": "id",
-          "type": "text",
-          "nullable": false,
-          "default": null
-        },
-        {
           "name": "image",
           "type": "text",
           "nullable": true,
           "default": null
         },
         {
-          "name": "name",
-          "type": "text",
+          "name": "created_at",
+          "type": "timestamp",
           "nullable": false,
-          "default": null
+          "default": "now()"
         },
         {
           "name": "updated_at",
@@ -2683,18 +2683,6 @@
       "name": "public.verification",
       "columns": [
         {
-          "name": "created_at",
-          "type": "timestamp",
-          "nullable": false,
-          "default": "now()"
-        },
-        {
-          "name": "expires_at",
-          "type": "timestamp",
-          "nullable": false,
-          "default": null
-        },
-        {
           "name": "id",
           "type": "text",
           "nullable": false,
@@ -2707,16 +2695,28 @@
           "default": null
         },
         {
-          "name": "updated_at",
+          "name": "value",
+          "type": "text",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "expires_at",
+          "type": "timestamp",
+          "nullable": false,
+          "default": null
+        },
+        {
+          "name": "created_at",
           "type": "timestamp",
           "nullable": false,
           "default": "now()"
         },
         {
-          "name": "value",
-          "type": "text",
+          "name": "updated_at",
+          "type": "timestamp",
           "nullable": false,
-          "default": null
+          "default": "now()"
         }
       ],
       "constraints": [
