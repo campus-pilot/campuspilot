@@ -59,12 +59,75 @@ describe('postgresRuntimeIdentity', () => {
     });
     expect(query.mock.calls.map(([sql]) => String(sql).trim())).toEqual([
       expect.stringContaining('pg_control_system'),
-      'RESET ROLE',
+      'SET ROLE NONE',
       expect.stringContaining('SELECT current_user AS current_user_name'),
       expect.stringContaining('FROM pg_stat_ssl'),
       'SET ROLE "owner""quoted"',
       expect.stringContaining('SELECT current_user AS current_user_name'),
     ]);
+  });
+
+  it('uses SET ROLE NONE because RESET ROLE may retain a startup-configured owner', async () => {
+    const owner = 'startup-owner';
+    const login = 'migration-login';
+    let currentUser = owner;
+    const query = vi.fn(async (sqlValue: unknown) => {
+      const sql = String(sqlValue).trim();
+      if (sql.includes('pg_control_system'))
+        return result([runtimeRow(currentUser, login)]);
+      if (sql === 'RESET ROLE') {
+        // PostgreSQL restores the startup `role` GUC, which is still owner.
+        currentUser = owner;
+        return result([]);
+      }
+      if (sql === 'SET ROLE NONE') {
+        currentUser = login;
+        return result([]);
+      }
+      if (sql === 'SET ROLE "startup-owner"') {
+        currentUser = owner;
+        return result([]);
+      }
+      if (sql.includes('SELECT current_user AS current_user_name')) {
+        return result([
+          { current_user_name: currentUser, session_user_name: login },
+        ]);
+      }
+      if (sql.includes('FROM pg_stat_ssl')) {
+        if (currentUser !== login) return result([]);
+        return result([
+          {
+            ssl: true,
+            version: 'TLSv1.3',
+            cipher: 'TLS_AES_256_GCM_SHA384',
+          },
+        ]);
+      }
+      throw new Error(`Unexpected SQL: ${sql}`);
+    });
+    const client = { query } as unknown as Client;
+
+    await client.query('RESET ROLE');
+    const afterReset = await client.query<{
+      current_user_name: string;
+      session_user_name: string;
+    }>('SELECT current_user AS current_user_name,session_user AS session_user_name');
+    expect(afterReset.rows[0]).toEqual({
+      current_user_name: owner,
+      session_user_name: login,
+    });
+    query.mockClear();
+
+    const identity = await postgresRuntimeIdentity(client, connectionString, {
+      expectedCurrentUser: owner,
+      expectedSessionUser: login,
+    });
+
+    const statements = query.mock.calls.map(([sql]) => String(sql).trim());
+    expect(statements).toContain('SET ROLE NONE');
+    expect(statements).not.toContain('RESET ROLE');
+    expect(identity.tls.active).toBe(true);
+    expect(currentUser).toBe(owner);
   });
 
   it('restores and verifies the owner before propagating a TLS observation error', async () => {
