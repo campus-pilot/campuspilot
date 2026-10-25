@@ -183,7 +183,10 @@ assertSourceEvidence(JSON.parse(sourceManifestText) as SourceEvidence, actualSou
 assertSourceObjectManifest(JSON.parse(objectManifestText) as SourceObjectManifest, actualSourceEvidence);
 const sourceRuntime = await postgresRuntimeIdentity(source, sourceUrl);
 assertSnapshotEvidence({ evidence: JSON.parse(snapshotEvidenceText) as SnapshotEvidence, sourceEvidence: actualSourceEvidence, dump: sourceDump, canonicalDatabaseIdentity: databaseIdentity(sourceUrl), canonicalRuntime: sourceRuntime });
-const targetRuntime = await postgresRuntimeIdentity(target, targetUrl);
+const targetRuntime = await postgresRuntimeIdentity(target, targetUrl, {
+  expectedCurrentUser: targetRole,
+  expectedSessionUser: targetLoginRole,
+});
 const expectedTargetHistory = await migrationHistory(targetMigrationDirectory);
 const readTargetHistory = async () => (await target.query<MigrationRecord>(
   'SELECT hash,created_at FROM drizzle.__drizzle_migrations ORDER BY created_at,id',
