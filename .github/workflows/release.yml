@@ -1,6 +1,7 @@
 name: Release & Publish
 
 on:
+  pull_request:
   push:
     branches:
       - main
@@ -12,9 +13,30 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  platform_safety:
+    name: Platform safety checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+      - name: Enable Corepack
+        run: corepack enable
+      - name: Install frozen workspace
+        run: pnpm install --frozen-lockfile
+      - name: Typecheck platform contracts
+        run: |
+          pnpm exec tsc -p packages/db/tsconfig.json --noEmit
+          pnpm exec tsc -p packages/api/tsconfig.json --noEmit
+          pnpm exec tsc -p apps/server/tsconfig.json --noEmit
+
   prepare:
     name: Prepare release version
     runs-on: ubuntu-latest
+    if: github.event_name == 'push'
     permissions:
       contents: read
       pull-requests: read
@@ -133,11 +155,13 @@ jobs:
 
   build:
     name: Build immutable ${{ matrix.name }} image
-    needs: prepare
+    needs: [prepare, platform_safety]
     if: ${{ needs.prepare.outputs.mode == 'new' }}
     runs-on: ubuntu-latest
     permissions:
+      attestations: write
       contents: read
+      id-token: write
       packages: write
     strategy:
       fail-fast: false
@@ -189,12 +213,15 @@ jobs:
           password: ${{ github.token }}
 
       - name: Build and push immutable tags
+        id: build
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           file: ${{ matrix.file }}
           push: true
-          build-args: ${{ matrix.build_args }}
+          build-args: |
+            ${{ matrix.build_args }}
+            SOURCE_REVISION=${{ github.sha }}
           tags: |
             ${{ matrix.image }}:${{ needs.prepare.outputs.release_tag }}
             ${{ matrix.image }}:${{ needs.prepare.outputs.sha_tag }}
@@ -205,12 +232,21 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
 
+      - name: Attest immutable image provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ matrix.image }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
   verify_reuse:
     name: Verify existing ${{ matrix.name }} image
-    needs: prepare
+    needs: [prepare, platform_safety]
     if: ${{ needs.prepare.outputs.mode == 'reuse' }}
     runs-on: ubuntu-latest
     permissions:
+      attestations: read
+      contents: read
       packages: read
     strategy:
       fail-fast: false
@@ -286,11 +322,19 @@ jobs:
             exit 1
           fi
 
-          echo "Verified ${IMAGE} at ${release_digest}"
+          GH_TOKEN="${{ github.token }}" gh attestation verify \
+            "oci://${IMAGE}:${RELEASE_TAG}@${release_digest}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/release.yml" \
+            --source-digest "${GITHUB_SHA}" \
+            --deny-self-hosted-runners >/dev/null
+
+          echo "Verified ${IMAGE} at ${release_digest} with matching build provenance"
 
   release:
     name: Publish git tag and GitHub release
     needs:
+      - platform_safety
       - prepare
       - build
       - verify_reuse
@@ -298,6 +342,7 @@ jobs:
       ${{
         !cancelled() &&
         needs.prepare.result == 'success' &&
+        needs.platform_safety.result == 'success' &&
         (
           (
             needs.prepare.outputs.mode == 'new' &&

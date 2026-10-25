@@ -5,9 +5,11 @@ const nanoid = customAlphabet("0123456789abcdefghijklmnopqrstuvwxyz", 21);
 
 export const PREFIX_MAP = {
   artifact: "art",
-  examPlan: "exp",
-  examResult: "exr",
-  examTimetable: "ext",
+  // Keep examination prefixes compatible with the legacy IDs so migration can
+  // preserve primary keys and every raw cross-reference without translation.
+  examPlan: "expl",
+  examResult: "exrs",
+  examTimetable: "ett",
   admission: "adm",
   financeAdjustment: "fadj",
   financeBill: "fbill",
