@@ -125,14 +125,23 @@ writer fence, migration history, and emptiness under an advisory lock and a
 serializable transaction.
 
 `legacy_migration_run` records preparing, committed, failed, and finalized
-states with immutable provenance. The sole exception is a one-time, same-run
-retry of the already-recorded pre-transaction legacy Better Auth ID validation
-failure. It requires an empty target, no committed or audit effects, an exact
-32-character base62 auth ID in the immutable failure summary, unchanged
-source/snapshot/object/decision/runtime/writer-fence facts, and an empty retry
-history. The append-only retry record binds the old and replacement importer,
-approval, target-history, and tracked decision/documentation provenance; no
-other failed run can be resumed.
+states with immutable provenance. It permits exactly two release-scoped,
+same-run recoveries for `prem-20261025t090000z` and the approved Prem school.
+The first is the already-recorded pre-transaction legacy Better Auth ID
+validation failure: it requires an exact 32-character base62 auth ID in the
+failure summary and empty retry history. The second is the already-recorded,
+rolled-back template-size defect whose exact error is
+`Cannot read properties of undefined (reading 'byteLength')`: it requires retry
+count one, valid immutable evidence for the first retry, and the exact known
+original and faulty replacement provenance recorded in that retry, plus the
+exact known faulty importer/approval/target-history/decision-document
+provenance and the observed template failure timestamp
+`2026-10-25T10:01:03.478112+00:00`. Recovery timestamps must be strictly later than the failure and
+any prior retry. Both
+require an empty target, no committed or audit effects, and unchanged
+source/snapshot/object/runtime/writer-fence facts. Each append-only retry record
+binds the old and replacement executable provenance and current failure. Retry
+count two is terminal; no third recovery or other failed run can be resumed.
 The database commit includes the committed
 run record. Six audit artifacts are written and checksum-attested before
 verification finalizes the run. A failed pre-commit database transaction is

@@ -4,8 +4,12 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   acquireMigrationAdvisoryLock,
   buildRetryEvidence,
+  FIRST_RETRY_EVIDENCE_BINDING,
   LEGACY_AUTH_ID_RETRY_RUN_ID,
   prepareDurableMigrationRun,
+  TEMPLATE_BYTE_SIZE_FAILURE_PROVENANCE,
+  TEMPLATE_BYTE_SIZE_FAILURE_UPDATED_AT,
+  TEMPLATE_BYTE_SIZE_RETRY_ERROR,
   type DurableMigrationRunInput,
 } from './migration-run.ts';
 
@@ -34,6 +38,7 @@ function failedRun(overrides: Record<string, unknown> = {}) {
     run_id: value.runId, school_id: value.schoolId, status: 'failed',
     failure_stage: 'pre_transaction', failed_at: new Date('2026-10-25T09:00:00.123Z'),
     failed_at_canonical: '2026-10-25T14:30:00.123456+05:30',
+    updated_at_canonical: '2026-10-25T14:31:00.123456+05:30',
     error_summary: `Invalid preserved user ID: ${'A'.repeat(32)}`,
     retry_count: 0, retry_history: [],
     source_database_identity: value.sourceDatabaseIdentity,
@@ -56,6 +61,34 @@ function failedRun(overrides: Record<string, unknown> = {}) {
     target_after_sha256: null, reconciliation_sha256: null, run_report_sha256: null,
     ...overrides,
   };
+}
+
+function firstRetryEvidence() {
+  return {
+    retriedAt: FIRST_RETRY_EVIDENCE_BINDING.retriedAt,
+    previousFailure: {
+      failedAt: FIRST_RETRY_EVIDENCE_BINDING.previousFailure.failedAt,
+      errorSummary: 'Invalid preserved user ID: 1qh1ymHCIWZZuwlgW2t9J4umhakPJ36E',
+    },
+    previousProvenance: { ...FIRST_RETRY_EVIDENCE_BINDING.previousProvenance },
+    replacementProvenance: { ...TEMPLATE_BYTE_SIZE_FAILURE_PROVENANCE },
+  };
+}
+
+function templateByteSizeFailure(overrides: Record<string, unknown> = {}) {
+  return failedRun({
+    failure_stage: 'transaction_started', error_summary: TEMPLATE_BYTE_SIZE_RETRY_ERROR,
+    retry_count: 1, retry_history: [firstRetryEvidence()],
+    failed_at: new Date('2026-10-25T09:31:27.709Z'),
+    failed_at_canonical: FIRST_RETRY_EVIDENCE_BINDING.previousFailure.failedAt,
+    target_migration_history_sha256: TEMPLATE_BYTE_SIZE_FAILURE_PROVENANCE.targetMigrationHistorySha256,
+    importer_git_commit: TEMPLATE_BYTE_SIZE_FAILURE_PROVENANCE.importerGitCommit,
+    importer_checksum_sha256: TEMPLATE_BYTE_SIZE_FAILURE_PROVENANCE.importerChecksumSha256,
+    approval_sha256: TEMPLATE_BYTE_SIZE_FAILURE_PROVENANCE.approvalSha256,
+    decision_set_sha256: TEMPLATE_BYTE_SIZE_FAILURE_PROVENANCE.trackedDecisionAndDocsSha256,
+    updated_at_canonical: TEMPLATE_BYTE_SIZE_FAILURE_UPDATED_AT,
+    ...overrides,
+  });
 }
 
 describe('same-run retry gate', () => {
@@ -81,21 +114,83 @@ describe('same-run retry gate', () => {
     expect(evidence.previousFailure.failedAt).toBe('2026-10-25T14:30:00.123456+05:30');
   });
 
+  it('binds the exact rolled-back template failure and appends recovery two', () => {
+    const replacement = input();
+    const evidence = buildRetryEvidence({
+      existing: templateByteSizeFailure(), input: replacement, targetBusinessRows: 0,
+      retriedAt: '2026-10-25T11:00:00.000Z',
+    });
+    expect(evidence).toMatchObject({
+      recoveryKind: 'template-byte-size-v1',
+      previousFailure: {
+        failedAt: TEMPLATE_BYTE_SIZE_FAILURE_UPDATED_AT,
+        errorSummary: TEMPLATE_BYTE_SIZE_RETRY_ERROR,
+      },
+      previousProvenance: TEMPLATE_BYTE_SIZE_FAILURE_PROVENANCE,
+      replacementProvenance: {
+        targetMigrationHistorySha256: replacement.targetMigrationHistorySha256,
+        importerGitCommit: replacement.importerGitCommit,
+        importerChecksumSha256: replacement.importerChecksumSha256,
+        approvalSha256: replacement.approvalSha256,
+        trackedDecisionAndDocsSha256: replacement.decisionSetSha256,
+      },
+    });
+  });
+
   it.each([
     [{ run_id: 'different-run' }, /exact approved Prem migration run/],
     [{ school_id: 'sch_bbbbbbbbbbbbbbbbbbbbb' }, /exact approved Prem migration run/],
-    [{ failure_stage: 'transaction_started' }, /not an explicitly retryable/],
+    [{ failure_stage: 'transaction_started' }, /not in an explicitly recoverable/],
     [{ committed_at: '2026-10-25T09:01:00.000Z' }, /durable effect/],
     [{ writes_sha256: hash('f') }, /durable effect/],
     [{ source_dump_sha256: hash('0') }, /changed immutable source_dump_sha256/],
     [{ writer_fence: { namespace: 'other', replicas: 0 } }, /changed immutable writer_fence/],
     [{ error_summary: 'Some other pre-transaction validation failed' }, /Only the observed legacy auth-ID/],
-    [{ retry_count: 1, retry_history: [{}] }, /allowed exactly once/],
+    [{ retry_count: 1, retry_history: [{}] }, /not in an explicitly recoverable/],
   ])('rejects unsafe failed-run state %#', (overrides, expected) => {
     expect(() => buildRetryEvidence({
       existing: failedRun(overrides), input: input(), targetBusinessRows: 0,
       retriedAt: '2026-10-25T10:00:00.000Z',
     })).toThrow(expected);
+  });
+
+  it.each([
+    [{ error_summary: 'another transaction failure' }, /exact rolled-back template byte-size/],
+    [{ retry_count: 2, retry_history: [firstRetryEvidence(), {}] }, /not in an explicitly recoverable/],
+    [{ updated_at_canonical: null }, /lossless database timestamp/],
+    [{ updated_at_canonical: '2026-10-25T10:01:03.478113+00:00' }, /timestamp does not match/],
+    [{ importer_checksum_sha256: hash('c') }, /known faulty importer provenance/],
+    [{ retry_history: [{ ...firstRetryEvidence(), recoveryKind: 'unexpected' }] }, /first retry evidence is invalid/],
+    [{ retry_history: [{ ...firstRetryEvidence(), replacementProvenance: {
+      ...TEMPLATE_BYTE_SIZE_FAILURE_PROVENANCE, approvalSha256: hash('c'),
+    } }] }, /first retry evidence is invalid/],
+    [{ retry_history: [{ ...firstRetryEvidence(), previousProvenance: {
+      ...FIRST_RETRY_EVIDENCE_BINDING.previousProvenance, approvalSha256: hash('c'),
+    } }] }, /first retry evidence is invalid/],
+    [{ retry_history: [{ ...firstRetryEvidence(), retriedAt: FIRST_RETRY_EVIDENCE_BINDING.previousFailure.failedAt }] }, /first retry evidence is invalid/],
+  ])('rejects unsafe template recovery state %#', (overrides, expected) => {
+    expect(() => buildRetryEvidence({
+      existing: templateByteSizeFailure(overrides), input: input(), targetBusinessRows: 0,
+      retriedAt: '2026-10-25T11:00:00.000Z',
+    })).toThrow(expected);
+  });
+
+  it('rejects a non-empty target during template recovery', () => {
+    expect(() => buildRetryEvidence({
+      existing: templateByteSizeFailure(), input: input(), targetBusinessRows: 1,
+      retriedAt: '2026-10-25T11:00:00.000Z',
+    })).toThrow(/cannot resume with 1 target business rows/);
+  });
+
+  it('requires both recovery timestamps to be strictly after their failures', () => {
+    expect(() => buildRetryEvidence({
+      existing: failedRun(), input: input(), targetBusinessRows: 0,
+      retriedAt: '2026-10-25T09:00:00.123Z',
+    })).toThrow(/strictly after its failure/);
+    expect(() => buildRetryEvidence({
+      existing: templateByteSizeFailure(), input: input(), targetBusinessRows: 0,
+      retriedAt: '2026-10-25T10:01:03.478Z',
+    })).toThrow(/strictly after its failure/);
   });
 
   it('rejects any target business row before retry', () => {
@@ -125,6 +220,32 @@ describe('same-run retry gate', () => {
     expect(queries[0]).toBe('BEGIN ISOLATION LEVEL SERIALIZABLE');
     expect(queries.at(-1)).toBe('COMMIT');
     expect(queries.some((sql) => sql.includes("status='preparing'"))).toBe(true);
+  });
+
+  it('atomically performs only the reviewed second recovery', async () => {
+    const queries: Array<{ sql: string; values?: unknown[] }> = [];
+    const query = vi.fn(async (sql: string, values?: unknown[]) => {
+      queries.push({ sql: sql.replace(/\s+/g, ' ').trim(), values });
+      if (sql.includes('FROM public.legacy_migration_run run ORDER BY'))
+        return { rows: [templateByteSizeFailure()], rowCount: 1 };
+      if (sql.includes('UPDATE public.legacy_migration_run'))
+        return { rows: [{ run_id: LEGACY_AUTH_ID_RETRY_RUN_ID }], rowCount: 1 };
+      return { rows: [], rowCount: null };
+    });
+    const result = await prepareDurableMigrationRun({
+      client: { query } as unknown as Client,
+      createObserver: () => ({}) as Client,
+      input: input(), countTargetBusinessRows: async () => 0,
+      now: () => new Date('2026-10-25T11:00:00.000Z'),
+    });
+    expect(result).toMatchObject({
+      kind: 'retried',
+      evidence: { recoveryKind: 'template-byte-size-v1' },
+    });
+    const update = queries.find(({ sql }) => sql.includes('UPDATE public.legacy_migration_run'));
+    expect(update?.sql).toContain("failure_stage='transaction_started' AND retry_count=1 AND error_summary=$9");
+    expect(update?.values?.[8]).toBe(TEMPLATE_BYTE_SIZE_RETRY_ERROR);
+    expect(queries.at(-1)?.sql).toBe('COMMIT');
   });
 
   it('rolls back rather than ignoring a different durable run', async () => {

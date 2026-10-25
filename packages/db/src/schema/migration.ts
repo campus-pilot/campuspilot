@@ -70,7 +70,7 @@ export const legacyMigrationRunTable = pgTable(
      * issues BEGIN may be retried; later phases require manual investigation.
      */
     failureStage: text("failure_stage").notNull().default("none"),
-    /** Append-only evidence for explicit same-run pre-transaction retries. */
+    /** Append-only evidence for the two exact, release-scoped same-run recoveries. */
     retryCount: integer("retry_count").notNull().default(0),
     retryHistory: jsonb("retry_history").notNull().default(sql`'[]'::jsonb`),
     /** Durable verifier attestation used only for post-check finalization recovery. */
@@ -135,7 +135,7 @@ export const legacyMigrationRunTable = pgTable(
         ${table.failedAt} IS NOT NULL AND ${table.committedAt} IS NULL)
     `),
     check('legacy_migration_run_retry_check', sql`
-      ${table.retryCount} >= 0 AND jsonb_typeof(${table.retryHistory}) = 'array' AND
+      ${table.retryCount} BETWEEN 0 AND 2 AND jsonb_typeof(${table.retryHistory}) = 'array' AND
       jsonb_array_length(${table.retryHistory}) = ${table.retryCount}
     `),
   ],

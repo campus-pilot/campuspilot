@@ -673,7 +673,7 @@ try {
       });
       preparedTemplates.push({
         artifact, documentType, marketplaceSlug: null, pageSize: approvedTemplate.pageSize,
-        sha256: hash(sourceBytes), targetKey: approvedTemplate.targetKey,
+        byteSize: sourceBytes.byteLength, sha256: hash(sourceBytes), targetKey: approvedTemplate.targetKey,
         contentType: approvedTemplate.targetContentType,
       });
     }
@@ -1059,7 +1059,7 @@ try {
           document_type: item.documentType, status: "ready",
           name: `Migrated ${item.documentType.replaceAll("_", " ")} template`,
           s3_key: item.targetKey, content_type: "text/x-handlebars-template; charset=utf-8",
-          byte_size: item.bytes.byteLength, sha256: item.sha256,
+          byte_size: item.byteSize, sha256: item.sha256,
           template_revision_id: null, marketplace_slug: item.marketplaceSlug,
           session_id: null, exam_slug: null, class_id: null, student_ids: JSON.stringify([]), student_count: 0,
           created_by: executionPlan.migrationActor, created_at: startedAt, generation_options: {},
