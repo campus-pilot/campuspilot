@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useForm } from '@tanstack/react-form';
-import { CheckCircle2, CircleAlert, Download, FileText, LoaderCircle, RefreshCw, Settings } from 'lucide-react';
+import { CheckCircle2, CircleAlert, Download, LoaderCircle, RefreshCw, Settings } from 'lucide-react';
 import { z } from 'zod';
 import type { DocumentSource } from '@campuspilot/api/routers/school/document/document.dto';
 import { SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
@@ -29,8 +29,8 @@ export type { StatementSession } from '@campuspilot/components/documents/stateme
 type FinanceSource = Extract<DocumentSource, { documentType: 'bill' | 'receipt' }>;
 
 /** Generates an immutable PDF and starts its download without relying on a
- * popup opened after the asynchronous render. The generated artifact remains
- * available for an explicit retry with a fresh short-lived URL. */
+ * popup opened after the asynchronous render. The completion indicator means
+ * the browser has received the handoff, not that the local download finished. */
 export function FinanceDocumentAction({ schoolId, source, label, iconOnly = false }: { schoolId: string; source: FinanceSource; label: string; iconOnly?: boolean }) {
   const resource = { kind: 'school' as const, schoolId };
   return (
@@ -57,12 +57,13 @@ export function FinanceDocumentAction({ schoolId, source, label, iconOnly = fals
 function FinanceDocumentActionInner({ schoolId, source, label, iconOnly }: { schoolId: string; source: FinanceSource; label: string; iconOnly: boolean }) {
   const template = useQuery(orpc.school.getActiveDocumentTemplate.queryOptions({ input: { schoolId, documentType: source.documentType } }));
   const form = useForm({
-    defaultValues: { artifactId: '', error: '' },
+    defaultValues: { completed: false, error: '' },
     validators: {
-      onChange: z.object({ artifactId: z.string(), error: z.string() }),
+      onChange: z.object({ completed: z.boolean(), error: z.string() }),
     },
     onSubmit: async () => {
       form.setFieldValue('error', '');
+      form.setFieldValue('completed', false);
       try {
         if (!template.data) {
           throw new Error(`Configure the ${source.documentType} template before generating a PDF.`);
@@ -72,7 +73,6 @@ function FinanceDocumentActionInner({ schoolId, source, label, iconOnly }: { sch
           source,
           templateRevisionId: template.data.artifact.id,
         });
-        form.setFieldValue('artifactId', generated.artifact.id);
         const { url } = await client.school.getDocumentDownload({
           schoolId,
           artifactId: generated.artifact.id,
@@ -82,6 +82,7 @@ function FinanceDocumentActionInner({ schoolId, source, label, iconOnly }: { sch
         link.href = url;
         link.rel = 'noopener noreferrer';
         link.click();
+        form.setFieldValue('completed', true);
       } catch (error) {
         form.setFieldValue(
           'error',
@@ -93,25 +94,17 @@ function FinanceDocumentActionInner({ schoolId, source, label, iconOnly }: { sch
   return (
     <form.Subscribe
       selector={(state) => ({
-        artifactId: state.values.artifactId,
+        completed: state.values.completed,
         error: state.values.error,
         submitting: state.isSubmitting,
       })}
     >
-      {({ artifactId, error, submitting }) => (
+      {({ completed, error, submitting }) => (
         <div className="flex flex-col items-start gap-1">
-          {artifactId ? (
-            <div className="flex flex-col items-start gap-2">
-              <p role="status" className="flex items-center gap-2 text-xs font-medium">
-                <CheckCircle2 className="size-4" aria-hidden />
-                PDF ready
-              </p>
-              <DocumentDownload
-                schoolId={schoolId}
-                artifactId={artifactId}
-                documentType={source.documentType}
-              />
-            </div>
+          {completed ? (
+            <span role="status" aria-label="PDF download started" title="PDF download started" className="flex size-7 items-center justify-center text-emerald-600">
+              <CheckCircle2 className="size-4" aria-hidden />
+            </span>
           ) : (
             <Button
               type="button"
@@ -122,7 +115,7 @@ function FinanceDocumentActionInner({ schoolId, source, label, iconOnly }: { sch
               disabled={template.isPending || template.isFetching || submitting || !template.data}
               onClick={() => void form.handleSubmit()}
             >
-              {submitting ? <FileText aria-hidden /> : <Download aria-hidden />}
+              {submitting ? <span className="size-2 rounded-full bg-amber-500" aria-hidden /> : <Download aria-hidden />}
               {iconOnly ? null : submitting ? 'Generating…' : label}
             </Button>
           )}
