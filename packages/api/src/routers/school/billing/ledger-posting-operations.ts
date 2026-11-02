@@ -49,6 +49,7 @@ type RecordPaymentCommand = {
   effectiveAt: Date;
   note?: string | null;
   idempotencyKey: string;
+  discount?: { amountMinor: string; reasonCode: string; reasonNote: string };
 };
 
 function sha256(value: unknown) {
@@ -69,6 +70,7 @@ function paymentCommandSnapshot(command: RecordPaymentCommand) {
     receivedAt: command.receivedAt.toISOString(),
     effectiveAt: command.effectiveAt.toISOString(),
     note: command.note ?? null,
+    discount: command.discount ?? null,
   };
 }
 
@@ -157,6 +159,29 @@ export async function recordPayment(db: Database, command: RecordPaymentCommand,
       commandHash, commandSnapshot: { command: commandSnapshot }, recordedBy,
     }).returning();
     if (!payment) throw new Error("Payment was not created");
+    if (command.discount) {
+      const discountAmount = BigInt(command.discount.amountMinor);
+      if (discountAmount > POSTGRES_BIGINT_MAX) throw rpcError.badRequest("The discount exceeds the supported exact amount range.");
+      const discountLedger = await appendFinanceLedgerEntry(transaction, {
+        schoolId: command.schoolId, admissionId: command.admissionId, sessionId: command.sessionId,
+        type: "discount", direction: "credit", amountMinor: discountAmount, currency: command.currency,
+        effectiveAt: command.effectiveAt, recordedBy, note: command.discount.reasonNote,
+        idempotencyKey: `payment-discount:${command.idempotencyKey}`,
+      });
+      await transaction.insert(financeAdjustmentTable).values({
+        schoolId: command.schoolId, admissionId: command.admissionId, sessionId: command.sessionId,
+        ledgerEntryId: discountLedger.id, billId: null, billLineId: null, kind: "discount",
+        amountMinor: discountAmount, currency: command.currency, reasonCode: command.discount.reasonCode,
+        reasonNote: command.discount.reasonNote, approvedBy: null,
+        idempotencyKey: `payment-discount:${command.idempotencyKey}`, recordedBy,
+        calculationSnapshot: {
+          input: { kind: "fixed", amountMinor: command.discount.amountMinor },
+          eligibleAmountMinor: null, fixedAmountMinor: command.discount.amountMinor,
+          rounding: null, targetBillNumber: null, targetLineName: null,
+          source: "payment_screen",
+        },
+      });
+    }
     const created = await readPaymentByKey(transaction, command.schoolId, command.idempotencyKey);
     if (!created) throw new Error("Payment could not be read after posting");
     return paymentTransport(created);

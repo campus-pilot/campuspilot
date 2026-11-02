@@ -23,6 +23,10 @@ const baseSchema = z.object({
   payerName: z.string(),
   reference: z.string(),
   note: z.string(),
+  discountAmount: z.string(),
+  discountReasonCode: z.string(),
+  discountReasonNote: z.string(),
+  addDiscount: z.boolean(),
   confirming: z.boolean(),
 });
 
@@ -35,7 +39,7 @@ function paymentAmountLabel(value: string, currency: string) {
 }
 
 function PaymentFields({ form }: { form: any }) {
-  return <><div className="grid gap-3 sm:grid-cols-2"><form.Field name="amount">{(field: any) => <div className="flex flex-col gap-1.5"><Label htmlFor="payment-amount">Amount</Label><Input id="payment-amount" inputMode="decimal" value={field.state.value} onChange={(event) => field.handleChange(event.target.value)} /><FieldErrors errors={field.state.meta.errors} /></div>}</form.Field><MethodField form={form} id="payment-method" /></div><form.Field name="receivedAt">{(field: any) => <div className="flex flex-col gap-1.5"><Label htmlFor="payment-received">Received at</Label><Input id="payment-received" type="datetime-local" value={field.state.value} onChange={(event) => field.handleChange(event.target.value)} /><FieldErrors errors={field.state.meta.errors} /></div>}</form.Field><div className="grid gap-3 sm:grid-cols-2"><form.Field name="payerName">{(field: any) => <div className="flex flex-col gap-1.5"><Label htmlFor="payment-payer">Payer name (optional)</Label><Input id="payment-payer" value={field.state.value} onChange={(event) => field.handleChange(event.target.value)} /><FieldErrors errors={field.state.meta.errors} /></div>}</form.Field><form.Field name="reference">{(field: any) => <div className="flex flex-col gap-1.5"><Label htmlFor="payment-reference">External reference (optional)</Label><Input id="payment-reference" value={field.state.value} onChange={(event) => field.handleChange(event.target.value)} /><FieldErrors errors={field.state.meta.errors} /></div>}</form.Field></div><form.Field name="note">{(field: any) => <div className="flex flex-col gap-1.5"><Label htmlFor="payment-note">Note (optional)</Label><Textarea id="payment-note" value={field.state.value} onChange={(event) => field.handleChange(event.target.value)} /><FieldErrors errors={field.state.meta.errors} /></div>}</form.Field></>;
+  return <><div className="grid gap-3 sm:grid-cols-2"><form.Field name="amount">{(field: any) => <div className="flex flex-col gap-1.5"><Label htmlFor="payment-amount">Amount</Label><Input id="payment-amount" inputMode="decimal" value={field.state.value} onChange={(event) => field.handleChange(event.target.value)} /><FieldErrors errors={field.state.meta.errors} /></div>}</form.Field><MethodField form={form} id="payment-method" /></div><form.Field name="receivedAt">{(field: any) => <div className="flex flex-col gap-1.5"><Label htmlFor="payment-received">Received at</Label><Input id="payment-received" type="datetime-local" value={field.state.value} onChange={(event) => field.handleChange(event.target.value)} /><FieldErrors errors={field.state.meta.errors} /></div>}</form.Field><div className="grid gap-3 sm:grid-cols-2"><form.Field name="payerName">{(field: any) => <div className="flex flex-col gap-1.5"><Label htmlFor="payment-payer">Payer name (optional)</Label><Input id="payment-payer" value={field.state.value} onChange={(event) => field.handleChange(event.target.value)} /><FieldErrors errors={field.state.meta.errors} /></div>}</form.Field><form.Field name="reference">{(field: any) => <div className="flex flex-col gap-1.5"><Label htmlFor="payment-reference">External reference (optional)</Label><Input id="payment-reference" value={field.state.value} onChange={(event) => field.handleChange(event.target.value)} /><FieldErrors errors={field.state.meta.errors} /></div>}</form.Field></div><form.Field name="note">{(field: any) => <div className="flex flex-col gap-1.5"><Label htmlFor="payment-note">Note (optional)</Label><Textarea id="payment-note" value={field.state.value} onChange={(event) => field.handleChange(event.target.value)} /><FieldErrors errors={field.state.meta.errors} /></div>}</form.Field><form.Field name="addDiscount">{(field: any) => <label className="flex items-center gap-2 text-sm"><Input type="checkbox" checked={field.state.value} onChange={(event) => field.handleChange(event.target.checked)} />Add an account discount with this payment</label>}</form.Field><form.Subscribe selector={(state: any) => state.values.addDiscount}>{(addDiscount: boolean) => addDiscount ? <div className="grid gap-3 rounded-lg border p-3 sm:grid-cols-2"><form.Field name="discountAmount">{(field: any) => <div className="flex flex-col gap-1.5"><Label htmlFor="payment-discount">Discount amount</Label><Input id="payment-discount" inputMode="decimal" value={field.state.value} onChange={(event) => field.handleChange(event.target.value)} /><FieldErrors errors={field.state.meta.errors} /></div>}</form.Field><form.Field name="discountReasonCode">{(field: any) => <div className="flex flex-col gap-1.5"><Label htmlFor="payment-discount-code">Discount reason code</Label><Input id="payment-discount-code" value={field.state.value} onChange={(event) => field.handleChange(event.target.value)} /><FieldErrors errors={field.state.meta.errors} /></div>}</form.Field><form.Field name="discountReasonNote">{(field: any) => <div className="flex flex-col gap-1.5 sm:col-span-2"><Label htmlFor="payment-discount-note">Discount reason</Label><Textarea id="payment-discount-note" value={field.state.value} onChange={(event) => field.handleChange(event.target.value)} /><FieldErrors errors={field.state.meta.errors} /></div>}</form.Field></div> : null}</form.Subscribe></>;
 }
 
 export function PaymentDialog(props: FinanceDialogBaseProps) {
@@ -46,10 +50,15 @@ export function PaymentDialog(props: FinanceDialogBaseProps) {
   const schema = baseSchema.superRefine((value, context) => {
     validateMoney(props.sessions, value.sessionId, value.amount, context, ["amount"]);
     validateDateTime(props.sessions, value.sessionId, value.receivedAt, context, "receivedAt");
+    if (value.addDiscount) {
+      validateMoney(props.sessions, value.sessionId, value.discountAmount, context, ["discountAmount"]);
+      if (!value.discountReasonCode.trim()) context.addIssue({ code: "custom", path: ["discountReasonCode"], message: "Enter a discount reason code." });
+      if (!value.discountReasonNote.trim()) context.addIssue({ code: "custom", path: ["discountReasonNote"], message: "Enter a discount reason." });
+    }
   });
   type Value = z.infer<typeof schema>;
   const form = useForm({
-    defaultValues: { sessionId: initial.id, amount: "", method: "cash" as PaymentMethod, receivedAt: civilDateTimeInTimeZone(initial.timeZone), payerName: "", reference: "", note: "", confirming: false },
+    defaultValues: { sessionId: initial.id, amount: "", method: "cash" as PaymentMethod, receivedAt: civilDateTimeInTimeZone(initial.timeZone), payerName: "", reference: "", note: "", addDiscount: false, discountAmount: "", discountReasonCode: "", discountReasonNote: "", confirming: false },
     validators: { onSubmit: schema },
     onSubmit: async () => form.setFieldValue("confirming", true),
   });
@@ -57,9 +66,14 @@ export function PaymentDialog(props: FinanceDialogBaseProps) {
   async function record(value: Value) {
     const session = sessionFor(props.sessions, value.sessionId);
     const receivedAt = instantFromCivilDateTime(value.receivedAt, session.timeZone);
-    const command = { schoolId: props.schoolId, admissionId: props.admissionId, sessionId: session.id, currency: session.currency, amountMinor: decimalToMinor(value.amount, session.currency), method: value.method, receivedAt, effectiveAt: receivedAt, payerName: value.payerName.trim() || null, externalReference: value.reference.trim() || null, note: value.note.trim() || null };
+    const command = { schoolId: props.schoolId, admissionId: props.admissionId, sessionId: session.id, currency: session.currency, amountMinor: decimalToMinor(value.amount, session.currency), method: value.method, receivedAt, effectiveAt: receivedAt, payerName: value.payerName.trim() || null, externalReference: value.reference.trim() || null, note: value.note.trim() || null, ...(value.addDiscount ? { discount: { amountMinor: decimalToMinor(value.discountAmount, session.currency), reasonCode: value.discountReasonCode.trim(), reasonNote: value.discountReasonNote.trim() } } : {}) };
     try {
-      await recordMutation.mutateAsync({ ...command, idempotencyKey: stableKey(keyRef, command) });
+      const input = { ...command, idempotencyKey: stableKey(keyRef, command) };
+      if (value.addDiscount) {
+        await client.school.recordPaymentWithDiscount({ ...input, discount: { amountMinor: decimalToMinor(value.discountAmount, session.currency), reasonCode: value.discountReasonCode.trim(), reasonNote: value.discountReasonNote.trim() } });
+      } else {
+        await recordMutation.mutateAsync(input);
+      }
       await invalidateFinanceReadModels(queryClient, "payment");
       props.onClose();
     } catch (error) {

@@ -41,6 +41,14 @@ export const getAdmissionLedgerInputSchema = createListInputSchema({
       types: z.array(ledgerTypeSchema).min(1).max(10).optional(),
     })
     .optional(),
+  /** The ledger is normally read newest-first, while still allowing an
+   * accountant to inspect the immutable posting order. */
+  orderBy: z
+    .object({
+      field: z.literal("effectiveAt"),
+      direction: z.enum(["asc", "desc"]).default("desc"),
+    })
+    .default({ field: "effectiveAt", direction: "desc" }),
 }).superRefine((value, context) => {
   const from = value.filters?.effectiveFrom;
   const to = value.filters?.effectiveTo;
@@ -142,6 +150,18 @@ export const recordPaymentInputSchema = z.object({
     idempotencyKey: idempotencyKeySchema,
   });
 
+/** A payment-screen discount is deliberately account-scoped. Percentages and
+ * bill allocation remain available only in the dedicated adjustment workflow. */
+export const recordPaymentWithDiscountInputSchema = recordPaymentInputSchema.extend({
+  discount: z.object({
+    amountMinor: financeIntegerStringSchema.refine((value) => BigInt(value) > BigInt(0), {
+      message: "Discount amount must be positive",
+    }),
+    reasonCode: z.string().trim().min(1).max(100),
+    reasonNote: reasonSchema,
+  }),
+});
+
 const percentageSchema = z
   .string()
   .regex(/^(?:100(?:\.0{1,4})?|(?:[1-9]\d?|0)\.\d{1,4}|[1-9]\d?)$/)
@@ -178,8 +198,8 @@ export const recordAdjustmentInputSchema = z
     if (value.billLineId && !value.billId) {
       context.addIssue({ code: "custom", path: ["billId"], message: "A bill line target requires its bill." });
     }
-    if (["discount", "waiver", "write_off", "debit_correction"].includes(value.kind) && !value.billId) {
-      context.addIssue({ code: "custom", path: ["billId"], message: "Discounts, waivers, write-offs, and debit corrections require a posted bill target." });
+    if (["waiver", "write_off", "debit_correction"].includes(value.kind) && !value.billId) {
+      context.addIssue({ code: "custom", path: ["billId"], message: "Waivers, write-offs, and debit corrections require a posted bill target." });
     }
     if (value.calculation.kind === "percentage" && !value.billId) {
       context.addIssue({ code: "custom", path: ["calculation"], message: "Percentage adjustments require a bill or bill-line target." });

@@ -65,14 +65,25 @@ describe("school finance ledger operations", () => {
     ]);
 
     const ledger = await scenario.actors.manager.client.school.getAdmissionLedger({ schoolId: scenario.school.id, admissionId: scenario.admission.id, limit: 20 });
-    expect(ledger.entries.items.map((entry: { type: string }) => entry.type)).toEqual(["manual_debit_adjustment", "manual_debit_adjustment", "payment"]);
-    expect(ledger.entries.items.at(-1)).toMatchObject({ detail: expect.objectContaining({ kind: "payment", paymentId: payment.id }), runningBalanceMinor: "3000" });
-    expect((ledger.entries.items.at(-1)?.detail as Record<string, unknown>)).not.toHaveProperty("allocations");
+    expect(ledger.entries.items.map((entry: { type: string }) => entry.type)).toEqual(["payment", "manual_debit_adjustment", "manual_debit_adjustment"]);
+    expect(ledger.entries.items[0]).toMatchObject({ detail: expect.objectContaining({ kind: "payment", paymentId: payment.id }), runningBalanceMinor: "3000" });
+    expect((ledger.entries.items[0]?.detail as Record<string, unknown>)).not.toHaveProperty("allocations");
 
     await expect(scenario.actors.manager.client.school.getPayment({ schoolId: scenario.school.id, admissionId: scenario.admission.id, paymentId: payment.id })).resolves.toMatchObject({ id: payment.id, refundedMinor: "0", refundableMinor: "12000", status: "recorded" });
     await expect(scenario.actors.manager.client.school.getAdmissionBill({ schoolId: scenario.school.id, admissionId: scenario.admission.id, billId: historical.id })).resolves.toMatchObject({ netAmountMinor: "5000", adjustedMinor: "0", reversed: false });
     await expect(scenario.actors.manager.client.school.listAdmissionBills({ schoolId: scenario.school.id, filters: { admissionId: scenario.admission.id, status: "posted" }, limit: 20 })).resolves.toMatchObject({ items: expect.arrayContaining([expect.objectContaining({ id: historical.id, status: "posted", netAmountMinor: "5000" })]) });
     await expect(scenario.actors.manager.client.school.getClassFinanceSnapshot({ schoolId: scenario.school.id, filters: { sessionId: scenario.activeSession.id }, limit: 20 })).resolves.toMatchObject({ items: [expect.objectContaining({ billedMinor: "10000", netChargeMinor: "10000" })] });
+  });
+
+  it("records an account discount with a payment atomically", async () => {
+    const payment = await scenario.actors.principal.client.school.recordPaymentWithDiscount({
+      ...paymentInput(scenario, "payment-with-discount", "1200"),
+      discount: { amountMinor: "200", reasonCode: "PROMPT", reasonNote: "Discount granted at collection" },
+    });
+    const ledger = await scenario.actors.manager.client.school.getAdmissionLedger({ schoolId: scenario.school.id, admissionId: scenario.admission.id, limit: 20 });
+    expect(payment.amountMinor).toBe("1200");
+    expect(ledger.entries.items.map(({ type }: { type: string }) => type)).toEqual(["discount", "payment"]);
+    expect(ledger.entries.items[0]).toMatchObject({ detail: expect.objectContaining({ adjustmentKind: "discount", billId: null }) });
   });
 
   it("enforces exact idempotency under retries and concurrent payload drift", async () => {

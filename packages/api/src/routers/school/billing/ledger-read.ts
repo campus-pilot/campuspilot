@@ -134,6 +134,7 @@ export async function getAdmissionLedger(
     cursor?: string;
     page?: number;
     limit: number;
+    orderBy: { field: "effectiveAt"; direction: "asc" | "desc" };
   },
 ) {
   await assertAdmissionContext(db, {
@@ -160,8 +161,9 @@ export async function getAdmissionLedger(
     input.filters?.sessionId ? eq(financeLedgerEntryTable.sessionId, input.filters.sessionId) : undefined,
     input.filters?.currency ? eq(financeLedgerEntryTable.currency, input.filters.currency) : undefined,
   );
+  const order = input.orderBy.direction === "desc" ? desc : asc;
   const [entries, totals, openingRows, closingRows, sessions] = await Promise.all([
-    db.select().from(financeLedgerEntryTable).where(window).orderBy(asc(financeLedgerEntryTable.effectiveAt), asc(financeLedgerEntryTable.sequence), asc(financeLedgerEntryTable.id)).limit(pageSize).offset(offset),
+    db.select().from(financeLedgerEntryTable).where(window).orderBy(order(financeLedgerEntryTable.effectiveAt), order(financeLedgerEntryTable.sequence), order(financeLedgerEntryTable.id)).limit(pageSize).offset(offset),
     db.select({ value: count() }).from(financeLedgerEntryTable).where(window),
     db.select({
       currency: financeLedgerEntryTable.currency,

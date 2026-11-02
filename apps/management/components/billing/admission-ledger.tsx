@@ -9,7 +9,6 @@ import {
   FinanceLedgerTable,
   FinanceMonthlyChart,
   FinanceSummaryCards,
-  formatFinanceInstant,
   formatMinor,
   reversalActionForEntry,
   type FinanceLedgerRow,
@@ -108,9 +107,11 @@ function entryReference(entry: LedgerEntry) {
   );
 }
 function financeInstantLabel(value: Date, timeZone: string | null) {
-  return timeZone
-    ? formatFinanceInstant(value, timeZone)
-    : "Timezone unavailable";
+  if (!timeZone) return "Timezone unavailable";
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeZone,
+  }).format(value);
 }
 
 function OperationMetadata({
@@ -692,6 +693,12 @@ function LedgerData({
   const [dialog, setDialog] = useState<ActionDialog>(null);
   const [reversalEntry, setReversalEntry] = useState<LedgerEntry>();
   const [detailEntry, setDetailEntry] = useState<LedgerEntry>();
+  const ledgerControls = useForm({
+    defaultValues: { type: "all", direction: "desc" as "asc" | "desc" },
+    validators: { onChange: z.object({ type: z.string(), direction: z.enum(["asc", "desc"]) }) },
+  });
+  const ledgerType = ledgerControls.state.values.type;
+  const direction = ledgerControls.state.values.direction;
   const selectedEntry = reversalEntry;
   const summaryQuery = useQuery(
     orpc.school.getAdmissionFinanceSummary.queryOptions({
@@ -705,7 +712,9 @@ function LedgerData({
         admissionId,
         page,
         limit: 20,
+        orderBy: { field: "effectiveAt", direction },
         ...(sessionId ? { filters: { sessionId } } : {}),
+        ...(!sessionId && ledgerType !== "all" ? { filters: { types: [ledgerType as any] } } : ledgerType !== "all" ? { filters: { sessionId, types: [ledgerType as any] } } : {}),
       },
     }),
   );
@@ -737,6 +746,14 @@ function LedgerData({
       reference: entryReference(entry),
       reversed: entry.reversed,
       recordedBy: entry.recordedBy,
+      download: detailString(entry.detail, "kind") === "bill" && detailString(entry.detail, "billId") ? (
+        <FinanceDocumentAction
+          schoolId={schoolId}
+          source={{ documentType: "bill", sessionId: entry.sessionId, billIds: [detailString(entry.detail, "billId")!] }}
+          label="Download bill PDF"
+          iconOnly
+        />
+      ) : null,
       onOpen: () => {
         setReversalEntry(undefined);
         setDetailEntry(entry);
@@ -748,9 +765,16 @@ function LedgerData({
   ];
   const ledgerTable = (
     <div className="flex flex-col gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm font-medium">Ledger entries</p>
+        <div className="flex flex-wrap gap-2">
+          <ledgerControls.Field name="type">{(field) => <Select value={field.state.value} onValueChange={(value) => { field.handleChange(value); setPage(1); }}><SelectTrigger aria-label="Filter ledger type" className="w-40"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All types</SelectItem>{["bill", "manual_debit_adjustment", "payment", "discount", "waiver", "write_off", "refund", "debit_correction", "credit_correction", "reversal"].map((type) => <SelectItem key={type} value={type}>{type.replaceAll("_", " ")}</SelectItem>)}</SelectContent></Select>}</ledgerControls.Field>
+          <ledgerControls.Field name="direction">{(field) => <Select value={field.state.value} onValueChange={(value) => { field.handleChange(value as "asc" | "desc"); setPage(1); }}><SelectTrigger aria-label="Ledger date order" className="w-44"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="desc">Newest first</SelectItem><SelectItem value="asc">Oldest first</SelectItem></SelectContent></Select>}</ledgerControls.Field>
+        </div>
+      </div>
       {ledgerQuery.data.pageOpeningBalances.map((balance) => (
         <p key={balance.currency} className="text-xs text-muted-foreground">
-          Page opening balance:{" "}
+          Balance before first displayed entry:{" "}
           {formatMinor(balance.balanceMinor, balance.currency)}
         </p>
       ))}
@@ -803,6 +827,16 @@ function LedgerData({
           <TabsTrigger value="details">Details</TabsTrigger>
         </TabsList>
         <TabsContent value="graph" className="flex flex-col gap-6">
+          {summaryQuery.data.currencies.length ? summaryQuery.data.currencies.map((summary) => (
+            <section key={summary.currency} className="flex flex-col gap-3">
+              <div className="flex items-center gap-2"><h3 className="font-medium">{summary.currency}</h3>{sessionId ? <Badge variant="outline">{sessionLabels.get(sessionId) ?? "Selected session activity"}</Badge> : <Badge variant="outline">All sessions</Badge>}</div>
+              <FinanceSummaryCards items={[
+                { label: "Total amount due", value: formatMinor(summary.dueMinor, summary.currency) },
+                { label: "Total account credit", value: formatMinor(summary.creditMinor, summary.currency) },
+                { label: "Total billed", value: formatMinor(summary.billedMinor, summary.currency) },
+              ]} />
+            </section>
+          )) : null}
           {chartCurrencies.length ? (
             <div className="flex flex-col gap-4">
               {chartCurrencies.map((currency) => (
@@ -846,17 +880,15 @@ function LedgerData({
                 <FinanceSummaryCards
                   items={[
                     {
-                      label: "Lifetime amount due",
+                      label: "Total amount due",
                       value: formatMinor(summary.dueMinor, summary.currency),
                     },
                     {
-                      label: "Lifetime account credit",
+                      label: "Total account credit",
                       value: formatMinor(summary.creditMinor, summary.currency),
                     },
                     {
-                      label: sessionId
-                        ? "Selected-session billed"
-                        : "Lifetime billed",
+                      label: "Total billed",
                       value: formatMinor(summary.billedMinor, summary.currency),
                     },
                     {

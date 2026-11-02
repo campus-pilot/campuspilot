@@ -31,7 +31,7 @@ type FinanceSource = Extract<DocumentSource, { documentType: 'bill' | 'receipt' 
 /** Generates an immutable PDF and starts its download without relying on a
  * popup opened after the asynchronous render. The generated artifact remains
  * available for an explicit retry with a fresh short-lived URL. */
-export function FinanceDocumentAction({ schoolId, source, label }: { schoolId: string; source: FinanceSource; label: string }) {
+export function FinanceDocumentAction({ schoolId, source, label, iconOnly = false }: { schoolId: string; source: FinanceSource; label: string; iconOnly?: boolean }) {
   const resource = { kind: 'school' as const, schoolId };
   return (
     <RequirePermissions
@@ -48,12 +48,13 @@ export function FinanceDocumentAction({ schoolId, source, label }: { schoolId: s
         schoolId={schoolId}
         source={source}
         label={label}
+        iconOnly={iconOnly}
       />
     </RequirePermissions>
   );
 }
 
-function FinanceDocumentActionInner({ schoolId, source, label }: { schoolId: string; source: FinanceSource; label: string }) {
+function FinanceDocumentActionInner({ schoolId, source, label, iconOnly }: { schoolId: string; source: FinanceSource; label: string; iconOnly: boolean }) {
   const template = useQuery(orpc.school.getActiveDocumentTemplate.queryOptions({ input: { schoolId, documentType: source.documentType } }));
   const form = useForm({
     defaultValues: { artifactId: '', error: '' },
@@ -115,11 +116,14 @@ function FinanceDocumentActionInner({ schoolId, source, label }: { schoolId: str
             <Button
               type="button"
               variant="outline"
+              size={iconOnly ? "icon" : undefined}
+              aria-label={label}
+              title={label}
               disabled={template.isPending || template.isFetching || submitting || !template.data}
               onClick={() => void form.handleSubmit()}
             >
               {submitting ? <FileText aria-hidden /> : <Download aria-hidden />}
-              {submitting ? 'Generating…' : label}
+              {iconOnly ? null : submitting ? 'Generating…' : label}
             </Button>
           )}
           {template.isError ? (

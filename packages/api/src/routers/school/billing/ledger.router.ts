@@ -19,6 +19,7 @@ import {
   paymentOutputSchema,
   recordAdjustmentInputSchema,
   recordPaymentInputSchema,
+  recordPaymentWithDiscountInputSchema,
   recordRefundInputSchema,
   recordedPaymentOutputSchema,
   reconcileAdmissionProjectionInputSchema,
@@ -161,6 +162,22 @@ export const ledgerOperationsRouter = {
     )
     .input(recordPaymentInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.RECORD_PAYMENT))
+    .output(recordedPaymentOutputSchema)
+    .handler(async ({ context, input }) => {
+      try { return await recordPayment(context.db, input, context.session.user.id); }
+      catch (error) { throw toRpcError(error); }
+    }),
+
+  recordPaymentWithDiscount: protectedProcedure
+    .route(
+      route(
+        "Record a payment with an account discount",
+        "Atomically record an idempotent payment and a fixed admission-account discount with separate immutable ledger entries.",
+      ),
+    )
+    .input(recordPaymentWithDiscountInputSchema)
+    .use(requireSchoolPermission(SCHOOL_ACTIONS.RECORD_PAYMENT))
+    .use(requireSchoolPermission(SCHOOL_ACTIONS.RECORD_FINANCE_ADJUSTMENT))
     .output(recordedPaymentOutputSchema)
     .handler(async ({ context, input }) => {
       try { return await recordPayment(context.db, input, context.session.user.id); }

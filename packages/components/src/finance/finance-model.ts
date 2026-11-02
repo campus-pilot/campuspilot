@@ -148,7 +148,7 @@ export function reversalActionForEntry(type: string): "bill" | "ledger_entry" {
 
 export function adjustmentTargetFields(input: { kind: string; target: "bill" | "account"; billId?: string; billLineId?: string }) {
   if (input.target === "account") {
-    if (input.kind !== "credit_correction") throw new Error("Only credit corrections can target the admission account.");
+    if (!(["discount", "credit_correction"] as string[]).includes(input.kind)) throw new Error("Only discounts and credit corrections can target the admission account.");
     return {};
   }
   if (!input.billId) throw new Error("Choose a posted bill.");

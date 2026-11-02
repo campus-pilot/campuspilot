@@ -116,8 +116,9 @@ describe("finance presentation model", () => {
 
   it("models account corrections, configuration issue groups, and payment deep links", () => {
     expect(adjustmentTargetFields({ kind: "credit_correction", target: "account" })).toEqual({});
+    expect(adjustmentTargetFields({ kind: "discount", target: "account" })).toEqual({});
     expect(adjustmentTargetFields({ kind: "discount", target: "bill", billId: "bill-1", billLineId: "line-1" })).toEqual({ billId: "bill-1", billLineId: "line-1" });
-    expect(() => adjustmentTargetFields({ kind: "discount", target: "account" })).toThrow();
+    expect(() => adjustmentTargetFields({ kind: "waiver", target: "account" })).toThrow();
     expect(groupFinanceIssues([{ scope: "configuration" as const, code: "missing" }, { scope: "admission" as const, code: "skipped" }]).map(({ scope }) => scope)).toEqual(["configuration", "admission"]);
     expect(paymentDeepLinkTarget("payment-1", "admission-1")).toEqual({ id: "payment-1", admissionId: "admission-1" });
     expect(paymentDeepLinkTarget("payment-1", undefined)).toEqual({ id: "payment-1", admissionId: undefined });
