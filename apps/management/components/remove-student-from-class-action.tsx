@@ -5,7 +5,7 @@ import { SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authoriza
 import { useForm } from '@tanstack/react-form';
 import { useQueryClient } from '@tanstack/react-query';
 import { Button } from '@campuspilot/ui/components/button';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@campuspilot/ui/components/dialog';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@campuspilot/ui/components/dialog';
 import { Input } from '@campuspilot/ui/components/input';
 import { Label } from '@campuspilot/ui/components/label';
 import { UserRoundMinus } from 'lucide-react';
@@ -15,18 +15,20 @@ import { client, orpc } from '@/lib/orpc';
 import { FormErrors } from './form-errors';
 import { RequirePermissions } from './require-permissions';
 
-export function RemoveStudentFromClassAction({ schoolId, sessionId, studentId, studentName, rollNo, onRemoved }: { schoolId: string; sessionId: string; studentId: string; studentName: string; rollNo: number; onRemoved?: () => void }) {
+export function RemoveStudentFromClassAction({ schoolId, sessionId, studentId, studentName, classroomName, rollNo, onRemoved }: { schoolId: string; sessionId: string; studentId: string; studentName: string; classroomName: string; rollNo: number; onRemoved?: () => void }) {
   const [open, setOpen] = useState(false);
   const queryClient = useQueryClient();
-  const schema = z.object({ confirmationRollNo: z.number().int().positive() }).refine(({ confirmationRollNo }) => confirmationRollNo === rollNo, { path: ['confirmationRollNo'], message: 'The roll number must match exactly.' });
+  const schema = z.object({ confirmationName: z.string().trim() }).refine(({ confirmationName }) => confirmationName.toLocaleLowerCase() === studentName.trim().toLocaleLowerCase(), { path: ['confirmationName'], message: 'The student name must match.' });
   const form = useForm({
-    defaultValues: { confirmationRollNo: Number.NaN },
+    defaultValues: { confirmationName: '' },
     validators: { onSubmit: schema },
     onSubmit: async ({ value }) => {
       form.setErrorMap({});
       try {
-        const parsed = schema.parse(value);
-        await client.school.removeStudentFromClass({ schoolId, sessionId, studentId, confirmationRollNo: parsed.confirmationRollNo });
+        schema.parse(value);
+        /** The API still verifies the current placement's roll number while
+         * the dialog uses the more recognizable student name for confirmation. */
+        await client.school.removeStudentFromClass({ schoolId, sessionId, studentId, confirmationRollNo: rollNo });
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: orpc.school.getStudent.queryKey({ input: { schoolId, sessionId, studentId } }) }),
           queryClient.invalidateQueries({ queryKey: orpc.school.listStudents.queryKey({ input: { schoolId, sessionId } }) }),
@@ -46,6 +48,6 @@ export function RemoveStudentFromClassAction({ schoolId, sessionId, studentId, s
   }
   return <RequirePermissions permissions={{ action: SCHOOL_ACTIONS.REMOVE_STUDENT_FROM_CLASS, resource: { kind: 'school', schoolId } }}>
     <Button type="button" size="icon-sm" variant="outline" aria-label="Remove from classroom" title="Remove from classroom" onClick={() => setOpen(true)}><UserRoundMinus aria-hidden /></Button>
-    <Dialog open={open} onOpenChange={handleOpenChange}><DialogContent><DialogHeader><DialogTitle>Remove {studentName} from this classroom?</DialogTitle><DialogDescription>This clears the class, section, and roll number for this session. The admission remains registered with the school.</DialogDescription></DialogHeader><form className="flex flex-col gap-4" onSubmit={(event) => { event.preventDefault(); event.stopPropagation(); void form.handleSubmit(); }}><div className="rounded-lg border bg-muted/40 p-3 text-sm">Current roll number: <span className="font-semibold">{rollNo}</span></div><form.Field name="confirmationRollNo">{(field) => <div className="flex flex-col gap-2"><Label htmlFor="remove-student-roll-no">Type the roll number to confirm</Label><Input id="remove-student-roll-no" type="number" min={1} value={Number.isNaN(field.state.value) ? '' : field.state.value} onBlur={field.handleBlur} onChange={(event) => field.handleChange(event.target.valueAsNumber)} /><FormErrors errors={field.state.meta.errors} /></div>}</form.Field><form.Subscribe selector={(state) => ({ canSubmit: state.canSubmit, errors: state.errors, isSubmitting: state.isSubmitting })}>{({ canSubmit, errors, isSubmitting }) => <div className="flex flex-col gap-3"><FormErrors errors={errors} /><DialogFooter><Button type="button" variant="outline" disabled={isSubmitting} onClick={() => handleOpenChange(false)}>Cancel</Button><Button type="submit" variant="destructive" disabled={!canSubmit || isSubmitting}>{isSubmitting ? 'Removing…' : 'Remove from classroom'}</Button></DialogFooter></div>}</form.Subscribe></form></DialogContent></Dialog>
+    <Dialog open={open} onOpenChange={handleOpenChange}><DialogContent aria-describedby={undefined}><DialogHeader><DialogTitle>Remove {studentName} from {classroomName} classroom?</DialogTitle></DialogHeader><form className="flex flex-col gap-4" onSubmit={(event) => { event.preventDefault(); event.stopPropagation(); void form.handleSubmit(); }}><form.Field name="confirmationName">{(field) => <div className="flex flex-col gap-2"><Label htmlFor="remove-student-name">Type -- {studentName} -- to confirm</Label><Input id="remove-student-name" value={field.state.value} onBlur={field.handleBlur} onChange={(event) => field.handleChange(event.target.value)} /><FormErrors errors={field.state.meta.errors} /></div>}</form.Field><form.Subscribe selector={(state) => ({ canSubmit: state.canSubmit, errors: state.errors, isSubmitting: state.isSubmitting })}>{({ canSubmit, errors, isSubmitting }) => <div className="flex flex-col gap-3"><FormErrors errors={errors} /><DialogFooter><Button type="button" variant="outline" disabled={isSubmitting} onClick={() => handleOpenChange(false)}>Cancel</Button><Button type="submit" variant="destructive" disabled={!canSubmit || isSubmitting}>{isSubmitting ? 'Removing…' : 'Remove'}</Button></DialogFooter></div>}</form.Subscribe></form></DialogContent></Dialog>
   </RequirePermissions>;
 }

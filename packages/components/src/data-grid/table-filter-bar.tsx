@@ -31,6 +31,9 @@ export type TableFilterConfig<
   options: TableFilterOption<TValue>[];
   icon?: ComponentType<SVGProps<SVGSVGElement>>;
   placeholder?: string;
+  /** Keep the selected count on the trigger without rendering removable
+   * badges, which is useful for ordering controls with a required default. */
+  showActiveBadge?: boolean;
 };
 
 export type TableFilterValues = Record<
@@ -232,6 +235,7 @@ export function TableFilterBar<
     const list: ActiveBadge[] = [];
 
     for (const config of filters) {
+      if (config.showActiveBadge === false) continue;
       const val = values[config.id];
       if (val === undefined) continue;
 
@@ -280,6 +284,7 @@ export function TableFilterBar<
   function handleClearAll() {
     const cleared: Partial<TFilters> = {};
     for (const config of filters) {
+      if (config.showActiveBadge === false) continue;
       cleared[config.id as keyof TFilters] = undefined as any;
     }
     onValuesChange({

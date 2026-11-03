@@ -1,8 +1,12 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { useForm } from "@tanstack/react-form";
-import { useQueries, useQuery } from "@tanstack/react-query";
+import { useForm, useStore } from "@tanstack/react-form";
+import {
+  keepPreviousData,
+  useQueries,
+  useQuery,
+} from "@tanstack/react-query";
 import { z } from "zod";
 import { SCHOOL_ACTIONS } from "@campuspilot/api/routers/authorization/authorization.dto";
 import {
@@ -708,8 +712,13 @@ function LedgerData({
     defaultValues: { type: "all", direction: "desc" as "asc" | "desc" },
     validators: { onChange: z.object({ type: z.string(), direction: z.enum(["asc", "desc"]) }) },
   });
-  const ledgerType = ledgerControls.state.values.type;
-  const direction = ledgerControls.state.values.direction;
+  /** Keep the query input subscribed to the form store. Reading
+   * `ledgerControls.state` directly only returns a snapshot and does not
+   * re-render this component when a filter changes. */
+  const { type: ledgerType, direction } = useStore(
+    ledgerControls.store,
+    (state) => state.values,
+  );
   const selectedEntry = reversalEntry;
   const summaryQuery = useQuery(
     orpc.school.getAdmissionFinanceSummary.queryOptions({
@@ -727,6 +736,10 @@ function LedgerData({
         ...(sessionId ? { filters: { sessionId } } : {}),
         ...(!sessionId && ledgerType !== "all" ? { filters: { types: [ledgerType as any] } } : ledgerType !== "all" ? { filters: { sessionId, types: [ledgerType as any] } } : {}),
       },
+      /** A filter or ordering change only refreshes the ledger rows. Retaining
+       * those rows during the request keeps the independent summary graph
+       * mounted instead of replacing the whole finance view with a loader. */
+      placeholderData: keepPreviousData,
     }),
   );
   if (summaryQuery.isPending || ledgerQuery.isPending)
@@ -812,6 +825,7 @@ function LedgerData({
       id: "direction",
       label: "Date order",
       type: "single",
+      showActiveBadge: false,
       options: [
         { value: "desc", label: "Newest first" },
         { value: "asc", label: "Oldest first" },

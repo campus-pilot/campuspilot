@@ -30,7 +30,7 @@ export function AdmissionDetails({ schoolId, admissionId, lockedSessionId, onRem
     selectedSessionId={selectedSessionId}
     sessionLocked={Boolean(lockedSessionId)}
     placement={student?.classId && student.sectionId ? { rollNo: student.rollNo, classLabel: classQuery.data?.label ?? null, sectionLabel: section?.label ?? null } : null}
-    academicAction={admission.registered && selectedSessionId && student?.classId && student.sectionId && student.rollNo ? <RemoveStudentFromClassAction schoolId={schoolId} sessionId={selectedSessionId} studentId={student.id} studentName={admission.name} rollNo={student.rollNo} onRemoved={onRemovedFromClass} /> : undefined}
+    academicAction={admission.registered && selectedSessionId && student?.classId && student.sectionId && student.rollNo && classQuery.data?.label ? <RemoveStudentFromClassAction schoolId={schoolId} sessionId={selectedSessionId} studentId={student.id} studentName={admission.name} classroomName={classQuery.data.label} rollNo={student.rollNo} onRemoved={onRemovedFromClass} /> : undefined}
     onSessionChange={setSelectedSessionOverride}
   />;
 }
