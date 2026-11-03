@@ -133,6 +133,6 @@ pnpm check-types
 pnpm --filter @campuspilot/api exec tsc --noEmit
 ```
 
-Document integration tests run real PostgreSQL, Redis, OPA, MinIO, and Gotenberg. Tests cover every procedure's authentication/tenant boundaries, validation, state persistence, missing data, approval requirements, signed downloads, immutable revisions, simultaneous saves, conversion/upload failure, interrupted deletion/retry, and PDF page counts and dimensions. Rego and OPA integration tests cover grants and malformed role/scope combinations.
+Document integration tests run real PostgreSQL, Redis, OPA, RustFS, and Gotenberg. Tests cover every procedure's authentication/tenant boundaries, validation, state persistence, missing data, approval requirements, signed downloads, immutable revisions, simultaneous saves, conversion/upload failure, interrupted deletion/retry, and PDF page counts and dimensions. Rego and OPA integration tests cover grants and malformed role/scope combinations.
 
 Classroom summaries accept an explicit session ID for enrollment counts. Omitting it returns `null`; they do not infer the active session. Registration status is independent of class membership. Document recipient selection uses a searchable, paginated multi-select combobox and retains explicit selections across searches.

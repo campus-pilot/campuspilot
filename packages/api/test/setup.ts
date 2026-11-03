@@ -1,4 +1,5 @@
 import { inject } from 'vitest';
+import { TEST_S3_ACCESS_KEY_ID, TEST_S3_SECRET_ACCESS_KEY } from './storage-config';
 
 process.env.DATABASE_URL = inject('DATABASE_URL');
 process.env.REDIS_URL = inject('REDIS_URL');
@@ -6,8 +7,8 @@ process.env.OPA_URL = inject('OPA_URL');
 process.env.S3_ENDPOINT = inject('S3_ENDPOINT');
 process.env.S3_BUCKET = inject('S3_BUCKET');
 process.env.S3_REGION = 'us-east-1';
-process.env.S3_ACCESS_KEY_ID = 'minioadmin';
-process.env.S3_SECRET_ACCESS_KEY = 'minioadmin';
+process.env.S3_ACCESS_KEY_ID = TEST_S3_ACCESS_KEY_ID;
+process.env.S3_SECRET_ACCESS_KEY = TEST_S3_SECRET_ACCESS_KEY;
 process.env.S3_FORCE_PATH_STYLE = 'true';
 
 process.env.NODE_ENV = 'test';

@@ -19,6 +19,7 @@ import {
   type StartedTestContainer,
 } from 'testcontainers';
 import type { TestProject } from 'vitest/node';
+import { TEST_S3_ACCESS_KEY_ID, TEST_S3_SECRET_ACCESS_KEY } from './storage-config';
 
 // Auto-detect Docker Desktop for Linux or host Docker socket
 if (!process.env.DOCKER_HOST && !fs.existsSync('/var/run/docker.sock')) {
@@ -42,7 +43,7 @@ declare module 'vitest' {
 let postgresContainer: StartedPostgreSqlContainer | undefined;
 let redisContainer: StartedRedisContainer | undefined;
 let opaContainer: StartedTestContainer | undefined;
-let minioContainer: StartedTestContainer | undefined;
+let rustfsContainer: StartedTestContainer | undefined;
 let gotenbergContainer: StartedTestContainer | undefined;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -58,7 +59,7 @@ const TEST_BUCKET = 'campuspilot';
 
 export default async function setup(project: TestProject) {
   // Spin up all dev-stack testcontainers in parallel
-  const [pgContainer, rdContainer, opContainer, mnContainer, pdfContainer] =
+  const [pgContainer, rdContainer, opContainer, storageContainer, pdfContainer] =
     await Promise.all([
       new PostgreSqlContainer('postgres:18.6')
         .withDatabase('campuspilot_test')
@@ -78,14 +79,16 @@ export default async function setup(project: TestProject) {
         ])
         .withWaitStrategy(Wait.forHttp('/health', 8181))
         .start(),
-      new GenericContainer('minio/minio:latest')
-        .withCommand(['server', '/data'])
+      new GenericContainer('rustfs/rustfs:1.0.0')
         .withEnvironment({
-          MINIO_ROOT_USER: 'minioadmin',
-          MINIO_ROOT_PASSWORD: 'minioadmin',
+          RUSTFS_ACCESS_KEY: TEST_S3_ACCESS_KEY_ID,
+          RUSTFS_SECRET_KEY: TEST_S3_SECRET_ACCESS_KEY,
+          RUSTFS_VOLUMES: '/data',
+          RUSTFS_OBS_LOG_DIRECTORY: '/logs',
+          RUSTFS_CONSOLE_ENABLE: 'false',
         })
         .withExposedPorts(9000)
-        .withWaitStrategy(Wait.forHttp('/minio/health/live', 9000))
+        .withWaitStrategy(Wait.forHttp('/health', 9000))
         .start(),
       new GenericContainer('gotenberg/gotenberg:8.36.0')
         .withEnvironment({
@@ -101,13 +104,13 @@ export default async function setup(project: TestProject) {
   postgresContainer = pgContainer;
   redisContainer = rdContainer;
   opaContainer = opContainer;
-  minioContainer = mnContainer;
+  rustfsContainer = storageContainer;
   gotenbergContainer = pdfContainer;
 
   const databaseUrl = pgContainer.getConnectionUri();
   const redisUrl = rdContainer.getConnectionUrl();
   const opaUrl = `http://${opContainer.getHost()}:${opContainer.getMappedPort(8181)}`;
-  const s3Endpoint = `http://${mnContainer.getHost()}:${mnContainer.getMappedPort(9000)}`;
+  const s3Endpoint = `http://${storageContainer.getHost()}:${storageContainer.getMappedPort(9000)}`;
 
   // 1. Run database migrations
   const pool = new pg.Pool({ connectionString: databaseUrl });
@@ -115,19 +118,18 @@ export default async function setup(project: TestProject) {
   await migrate(migrationDb, { migrationsFolder: MIGRATIONS_DIR });
   await pool.end();
 
-  // 2. Initialize S3 Bucket in MinIO
+  // 2. Initialize the isolated S3 bucket in RustFS through the AWS SDK.
   const s3 = new S3Client({
     endpoint: s3Endpoint,
     region: 'us-east-1',
     credentials: {
-      accessKeyId: 'minioadmin',
-      secretAccessKey: 'minioadmin',
+      accessKeyId: TEST_S3_ACCESS_KEY_ID,
+      secretAccessKey: TEST_S3_SECRET_ACCESS_KEY,
     },
     forcePathStyle: true,
   });
-  await s3
-    .send(new CreateBucketCommand({ Bucket: TEST_BUCKET }))
-    .catch(() => {});
+  await s3.send(new CreateBucketCommand({ Bucket: TEST_BUCKET }));
+  s3.destroy();
 
   // 3. Provide connection information to Vitest workers
   project.provide(
@@ -145,7 +147,7 @@ export default async function setup(project: TestProject) {
       postgresContainer?.stop(),
       redisContainer?.stop(),
       opaContainer?.stop(),
-      minioContainer?.stop(),
+      rustfsContainer?.stop(),
       gotenbergContainer?.stop(),
     ]);
   };

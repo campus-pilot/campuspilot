@@ -101,6 +101,32 @@ campuspilot/
 │   └── db/          # Database schema & queries
 ```
 
+## Local object storage
+
+Local object storage uses RustFS with the standard AWS S3 SDK configuration.
+Copy `apps/server/.env.example` to `apps/server/.env`, then start the development
+dependencies with the same file so RustFS and the app share credentials:
+
+```sh
+docker compose --env-file apps/server/.env -f docker/dev/compose.yml up -d
+```
+
+`pnpm run docker:up` uses this same environment file.
+
+The `rustfs-init` service creates `S3_BUCKET` through the official AWS CLI and is
+safe to rerun. The local S3 API is at `http://localhost:9000` and its console is at
+`http://localhost:9001`. Named volumes preserve objects and service logs.
+
+Keep the same `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_BUCKET`, `S3_REGION`,
+`S3_ENDPOINT`, and `S3_FORCE_PATH_STYLE` keys for production AWS S3. Production
+normally omits `S3_ENDPOINT` and sets `S3_FORCE_PATH_STYLE=false`. Credentials may
+be omitted together when using the AWS SDK's default credential chain, such as
+an IAM role. No RustFS-specific variables are required by the application.
+
+Existing object data must be copied through the S3 API into the new RustFS volume;
+the old storage volume is not a compatible RustFS data directory. Keep the old
+volume until migrated objects and downloads have been verified.
+
 ## Developer guides
 
 - [Management UI patterns](apps/management/docs/ui-patterns.md) documents shared

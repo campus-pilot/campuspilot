@@ -13,7 +13,7 @@ import {
 } from '../../../../test/fixtures';
 import { handleSchoolLogoUpload } from './school.http';
 
-describe('school.http Logo Handlers Integration with MinIO & PostgreSQL', () => {
+describe('school.http Logo Handlers Integration with RustFS & PostgreSQL', () => {
   let adminSession: UserSession;
   let regularSession: UserSession;
 
@@ -36,7 +36,7 @@ describe('school.http Logo Handlers Integration with MinIO & PostgreSQL', () => 
   });
 
   describe('handleSchoolLogoUpload', () => {
-    it('uploads valid PNG logo to MinIO and updates schoolTable', async () => {
+    it('uploads valid PNG logo to RustFS and updates schoolTable', async () => {
       const school = await createTestSchool();
 
       const formData = new FormData();

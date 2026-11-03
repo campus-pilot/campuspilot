@@ -731,7 +731,7 @@ pnpm --filter @campuspilot/api exec tsc --noEmit
 pnpm check-types
 ```
 
-Also run the finance-focused integration/concurrency/document suites with PostgreSQL, OPA, Redis, MinIO, and Gotenberg available. If Docker or browser authentication is unavailable, report those validations as unverified rather than treating type checks as equivalent.
+Also run the finance-focused integration/concurrency/document suites with PostgreSQL, OPA, Redis, RustFS, and Gotenberg available. If Docker or browser authentication is unavailable, report those validations as unverified rather than treating type checks as equivalent.
 
 Final anti-pattern scan:
 

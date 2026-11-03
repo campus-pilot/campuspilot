@@ -458,7 +458,7 @@ pnpm --filter @campuspilot/opa test:integration
 pnpm check-types
 ```
 
-API integration tests require PostgreSQL, Redis, OPA, MinIO, Gotenberg, and a
+API integration tests require PostgreSQL, Redis, OPA, RustFS, Gotenberg, and a
 working container runtime. Report an unavailable Testcontainers runtime as an
 environment block, not as a passing test and not as a source failure.
 

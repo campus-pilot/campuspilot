@@ -326,7 +326,7 @@ finance authority while keeping platform administrators read/pricing-only.
 ## Testing contract
 
 Finance integration tests use the repository's real PostgreSQL, Redis, OPA,
-MinIO, and Gotenberg harness. `packages/api/test/finance` supplies isolated
+RustFS, and Gotenberg harness. `packages/api/test/finance` supplies isolated
 multi-session scenarios and the complete actor matrix. Tests use fresh schools
 and admissions rather than a shared ledger, exercise routers rather than mocked
 services, distinguish authorization denial from tenant-ID not-found behavior,

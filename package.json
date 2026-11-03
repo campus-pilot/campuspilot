@@ -22,11 +22,11 @@
     "db:watch": "docker compose -f docker/dev/compose.yml up postgres",
     "db:stop": "docker compose -f docker/dev/compose.yml stop postgres",
     "db:down": "docker compose -f docker/dev/compose.yml down",
-    "docker:build": "docker compose -f docker/dev/compose.yml build",
-    "docker:up": "docker compose -f docker/dev/compose.yml up -d",
-    "docker:rebuild": "docker compose -f docker/dev/compose.yml up -d --build --force-recreate",
-    "docker:down": "docker compose -f docker/dev/compose.yml down",
-    "docker:logs": "docker compose -f docker/dev/compose.yml logs -f"
+    "docker:build": "docker compose --env-file apps/server/.env -f docker/dev/compose.yml build",
+    "docker:up": "docker compose --env-file apps/server/.env -f docker/dev/compose.yml up -d",
+    "docker:rebuild": "docker compose --env-file apps/server/.env -f docker/dev/compose.yml up -d --build --force-recreate",
+    "docker:down": "docker compose --env-file apps/server/.env -f docker/dev/compose.yml down",
+    "docker:logs": "docker compose --env-file apps/server/.env -f docker/dev/compose.yml logs -f"
   },
   "dependencies": {
     "@campuspilot/env": "workspace:*",

@@ -19,7 +19,7 @@ To launch a fresh preview when no preview is already running, enable Docker Desk
 pnpm --filter server exec tsx ../../scripts/document-preview.ts
 ```
 
-The script starts isolated PostgreSQL, Redis, OPA, MinIO, and Gotenberg containers, applies migrations, seeds the account and data, serves the API on 3090, and starts management on 3092. It requires those two ports to be available. Keep the parent process running while testing. Interrupting it shuts down the frontend and disposes the temporary containers and their data. Do not restart that parent just to refresh code if a user is testing or has unsaved work.
+The script starts isolated PostgreSQL, Redis, OPA, RustFS, and Gotenberg containers, applies migrations, seeds the account and data, serves the API on 3090, and starts management on 3092. It requires those two ports to be available. Keep the parent process running while testing. Interrupting it shuts down the frontend and disposes the temporary containers and their data. Do not restart that parent just to refresh code if a user is testing or has unsaved work.
 
 The harness is for interactive local testing; it is separate from normal development infrastructure and automated integration-test containers. Application code continues to read typed configuration from `@campuspilot/env`; the test harness supplies its isolated environment before importing the app.
 

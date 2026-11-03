@@ -30,7 +30,7 @@
   - **PostgreSQL** (with all Drizzle migrations applied via `@campuspilot/db/migrate`).
   - **Redis** (for session and caching storage).
   - **OPA** (mounting `packages/opa/src/policies` for live authorization evaluations).
-  - **MinIO** (S3-compatible object storage for files and logos with the `campuspilot` bucket created).
+  - **RustFS** (S3-compatible object storage for files and logos with the `campuspilot` bucket created).
 - Use `createTestClient(session)` from `test/fixtures` to test procedures directly and with full type safety via oRPC's `createRouterClient`:
   - `createTestClient(null)` for anonymous / public callers.
   - `createTestClient(await createAdminSession())` for platform administrators (`role: 'admin'`).

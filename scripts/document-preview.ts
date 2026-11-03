@@ -7,6 +7,7 @@ import { spawn } from "node:child_process";
 import { execPath } from "node:process";
 import { fileURLToPath } from "node:url";
 import setup from "../packages/api/test/global-setup";
+import { TEST_S3_ACCESS_KEY_ID, TEST_S3_SECRET_ACCESS_KEY } from "../packages/api/test/storage-config";
 
 const { values: options } = parseArgs({
   options: {
@@ -44,8 +45,8 @@ const previewEnvironment = {
   CORS_ORIGIN: `http://localhost:${appPort}`,
   SECURE_COOKIES: "false",
   S3_REGION: "us-east-1",
-  S3_ACCESS_KEY_ID: "minioadmin",
-  S3_SECRET_ACCESS_KEY: "minioadmin",
+  S3_ACCESS_KEY_ID: TEST_S3_ACCESS_KEY_ID,
+  S3_SECRET_ACCESS_KEY: TEST_S3_SECRET_ACCESS_KEY,
   S3_FORCE_PATH_STYLE: "true",
   RESTATE_ADMIN_URL: "http://localhost:9070",
   RESTATE_FABRIC_URL: "http://localhost:8080",
