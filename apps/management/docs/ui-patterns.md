@@ -17,7 +17,7 @@ APIs must be adapted to this application.
 | Need | Reference |
 | --- | --- |
 | Search, filters, operational tables and pagination | [Admission table](../components/admission-table.tsx), [staff table](../components/staff-table.tsx), [shared data grid](../../../packages/components/src/data-grid) |
-| Detail header, desktop secondary navigation and mobile section selector | [Admission workspace](../components/admission-workspace.tsx), [classroom workspace](../components/classroom-workspace.tsx) |
+| Detail header and responsive line-tab navigation | [Admission workspace](../components/admission-workspace.tsx), [classroom workspace](../components/classroom-workspace.tsx) |
 | Persistent setup warnings | [Classroom workspace](../components/classroom-workspace.tsx), [AppShellAlert](../../../packages/components/src/app-shell.tsx) |
 | Shared control sizing | [Button](../../../packages/ui/src/components/button.tsx), [Input](../../../packages/ui/src/components/input.tsx), [Select](../../../packages/ui/src/components/select.tsx) |
 | Typed permission gates | [RequirePermissions](../components/require-permissions.tsx), [management agent instructions](../AGENTS.md) |
@@ -64,10 +64,12 @@ that type's settings, explicit preview, PDF creation, download, and history acti
 Contextual document links open the same dialog with applicable values preselected;
 closing it returns to a clean card view.
 
-Detail workspaces use left secondary navigation on desktop and a shared section
-Select on mobile. Sections have navigable routes. Follow the admission/classroom
-layout instead of adding button-shaped tabs. Breadcrumbs provide parent navigation;
-do not add another feature-level back button.
+Detail workspaces use left-aligned line tabs on desktop and mobile. Sections have
+navigable routes. Keep labels short enough to fit without horizontal scrolling and
+do not put icons in tabs. When a workspace has more than three primary sections,
+keep the three most-used sections as tabs and place secondary sections in an
+adjacent overflow menu, following the classroom workspace. Breadcrumbs provide
+parent navigation; do not add another feature-level back button.
 
 Keep section navigation in the secondary sidebar, without duplicating it in the
 header's overflow menu. Examination sections are Results, Timetable and Settings.

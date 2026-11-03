@@ -190,19 +190,13 @@ function GenerationForm({
         })}
       >
         {({ canSubmit, isSubmitting, errors }) => (
-          <div className="sticky bottom-0 flex flex-col gap-3 border-t bg-background py-3">
+          <div className="sticky bottom-0 flex flex-col gap-3 border-t bg-popover py-3">
             <Issues errors={errors} />
             <p className="text-sm text-muted-foreground">
               {preview.planCount} subject plans · {preview.totalMarks} marks per
               subject. Classes without subjects are skipped.
             </p>
-            <div className="flex flex-wrap gap-3">
-              <ExamButton
-                type="submit"
-                disabled={!active || blocked || !canSubmit || isSubmitting}
-              >
-                {isSubmitting ? 'Creating plan…' : 'Create exam plan'}
-              </ExamButton>
+            <div className="flex flex-wrap justify-end gap-3">
               <ExamButton
                 type="button"
                 variant="outline"
@@ -210,6 +204,12 @@ function GenerationForm({
                 onClick={onCancel}
               >
                 Cancel
+              </ExamButton>
+              <ExamButton
+                type="submit"
+                disabled={!active || blocked || !canSubmit || isSubmitting}
+              >
+                {isSubmitting ? 'Creating plan…' : 'Create exam plan'}
               </ExamButton>
             </div>
           </div>

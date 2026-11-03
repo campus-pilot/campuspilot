@@ -1,11 +1,10 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useForm } from "@tanstack/react-form";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { z } from "zod";
-import { FilePlus, Files, History } from "lucide-react";
+import { Files } from "lucide-react";
 import { AppShellAlert } from "@campuspilot/components/app-shell";
 import { WorkspaceNavigationLayout } from "@campuspilot/components/workspace-navigation-layout";
 import {
@@ -14,7 +13,6 @@ import {
   DocumentPanel,
   workspaceDocumentKinds,
 } from "@campuspilot/components/documents/document-controls";
-import { Button } from "@campuspilot/ui/components/button";
 import {
   Dialog,
   DialogContent,
@@ -22,13 +20,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@campuspilot/ui/components/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@campuspilot/ui/components/select";
+import { Tabs, TabsList, TabsTrigger } from "@campuspilot/ui/components/tabs";
 import {
   type AcademicDocumentType,
   type DocumentType,
@@ -56,13 +48,11 @@ export type DocumentSection = "generate" | "history";
 const sections = [
   {
     value: "generate",
-    label: "Create document",
-    icon: FilePlus,
+    label: "New",
   },
   {
     value: "history",
-    label: "Document history",
-    icon: History,
+    label: "History",
   },
 ] as const;
 
@@ -348,7 +338,6 @@ function DocumentWorkspaceContent({
       {(documentType) => {
         const navigate = (target: DocumentSection) =>
           router.push(href(target, documentType || undefined));
-        const active = sections.find((item) => item.value === section)!;
         return (
           <>
             <DocumentTemplateAlerts schoolId={scope.schoolId} access={access} />
@@ -361,52 +350,27 @@ function DocumentWorkspaceContent({
               }
               actions={null}
               navigationLabel="Document sections"
-              navigation={sections.map((item) => {
-                const visible =
-                  item.value === "generate"
-                    ? access.academicTemplates || access.financeTemplates
-                    : access.academicHistory || access.financeHistory;
-                return visible ? (
-                  <Button
-                    key={item.value}
-                    asChild
-                    variant={item.value === section ? "secondary" : "ghost"}
-                    className="justify-start"
-                  >
-                    <Link href={href(item.value, documentType || undefined)}>
-                      <item.icon aria-hidden />
-                      {item.label}
-                    </Link>
-                  </Button>
-                ) : null;
-              })}
-              mobileNavigation={
-                <Select
+              navigation={
+                <Tabs
                   value={section}
                   onValueChange={(value) => {
                     if (value) navigate(value as DocumentSection);
                   }}
                 >
-                  <SelectTrigger aria-label="Document section" className="w-full">
-                    <SelectValue>
-                      <active.icon aria-hidden />
-                      {active.label}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
+                  <TabsList variant="line" className="h-auto">
                     {sections.map((item) => {
                       const visible =
                         item.value === "generate"
                           ? access.academicTemplates || access.financeTemplates
                           : access.academicHistory || access.financeHistory;
                       return visible ? (
-                        <SelectItem key={item.value} value={item.value}>
+                        <TabsTrigger key={item.value} value={item.value} className="h-9 flex-none px-3 text-sm">
                           {item.label}
-                        </SelectItem>
+                        </TabsTrigger>
                       ) : null;
                     })}
-                  </SelectContent>
-                </Select>
+                  </TabsList>
+                </Tabs>
               }
             >
               {section === "history" ? (

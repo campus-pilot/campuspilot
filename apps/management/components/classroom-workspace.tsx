@@ -5,22 +5,14 @@ import { useQuery } from "@tanstack/react-query";
 import { AppShellAlert } from "@campuspilot/components/app-shell";
 import { Button } from "@campuspilot/ui/components/button";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@campuspilot/ui/components/select";
-import {
-  BookOpen,
-  FileText,
-  GraduationCap,
-  Layers3,
-  Settings,
-  UserRound,
-  Users,
-  type LucideIcon,
-} from "lucide-react";
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@campuspilot/ui/components/dropdown-menu";
+import { Tabs, TabsList, TabsTrigger } from "@campuspilot/ui/components/tabs";
+import { GraduationCap, MoreHorizontal } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { orpc } from "@/lib/orpc";
@@ -31,7 +23,6 @@ import { AddTeacherDialog } from "./class-teachers";
 type WorkspaceItem = {
   id: string;
   label: string;
-  icon: LucideIcon;
 };
 
 function closeAlertDialog(closeDialog: () => void) {
@@ -69,13 +60,15 @@ function ClassroomTeacherAlert({ schoolId, classId }: { schoolId: string; classI
 }
 
 const items: WorkspaceItem[] = [
-  { id: "students", label: "Students", icon: UserRound },
-  { id: "teachers", label: "Teachers", icon: Users },
-  { id: "sections", label: "Sections", icon: Layers3 },
-  { id: "subjects", label: "Subjects", icon: BookOpen },
-  { id: "documents", label: "Documents", icon: FileText },
-  { id: "settings", label: "Settings", icon: Settings },
+  { id: "students", label: "Students" },
+  { id: "teachers", label: "Teachers" },
+  { id: "sections", label: "Sections" },
+  { id: "subjects", label: "Subjects" },
+  { id: "documents", label: "Documents" },
+  { id: "settings", label: "Settings" },
 ];
+const primaryItems = items.slice(0, 3);
+const overflowItems = items.slice(3);
 
 export function ClassroomWorkspace({
   children,
@@ -161,7 +154,7 @@ function ClassroomWorkspaceContent({
           onAction={closeAlertDialog}
         />
       ) : null}
-      <div className="flex items-center gap-3 border-b pb-4">
+      <div className="flex items-center gap-3">
         <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
           <GraduationCap className="size-5" aria-hidden />
         </span>
@@ -175,46 +168,43 @@ function ClassroomWorkspaceContent({
         </div>
       </div>
 
-      <div className="md:hidden">
-        <Select
+      <div className="flex min-w-0 items-end gap-1">
+        <Tabs
           value={activeItem.id}
           onValueChange={(value) => router.push(`${baseHref}/${value}`)}
+          className="min-w-0 flex-1"
         >
-          <SelectTrigger className="w-full" aria-label="Classroom section">
-            <SelectValue>
-              <activeItem.icon aria-hidden />
-              {activeItem.label}
-            </SelectValue>
-          </SelectTrigger>
-          <SelectContent align="start">
-            {items.map((item) => (
-              <SelectItem key={item.id} value={item.id}>
-                <item.icon aria-hidden />
+          <TabsList variant="line" className="h-auto">
+            {primaryItems.map((item) => (
+              <TabsTrigger key={item.id} value={item.id} className="h-9 flex-none px-2.5 text-sm sm:px-3">
                 {item.label}
-              </SelectItem>
+              </TabsTrigger>
             ))}
-          </SelectContent>
-        </Select>
-      </div>
-
-      <div className="flex min-w-0 items-start gap-6">
-        <aside className="hidden w-52 shrink-0 flex-col gap-1 md:flex">
-          {items.map((item) => (
+          </TabsList>
+        </Tabs>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
             <Button
-              key={item.id}
-              asChild
-              variant={activeItem.id === item.id ? "secondary" : "ghost"}
-              className="justify-start"
+              type="button"
+              variant={overflowItems.some(({ id }) => id === activeItem.id) ? "secondary" : "ghost"}
+              size="icon-sm"
+              aria-label="More classroom sections"
             >
-              <Link href={`${baseHref}/${item.id}`}>
-                <item.icon aria-hidden />
-                {item.label}
-              </Link>
+              <MoreHorizontal aria-hidden />
             </Button>
-          ))}
-        </aside>
-        <div className="min-w-0 flex-1">{children}</div>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start">
+            <DropdownMenuGroup>
+              {overflowItems.map((item) => (
+                <DropdownMenuItem key={item.id} asChild>
+                  <Link href={`${baseHref}/${item.id}`}>{item.label}</Link>
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
+      <div className="min-w-0 flex-1">{children}</div>
     </section>
   );
 }

@@ -4,13 +4,10 @@ import Link from 'next/link';
 import { useParams, usePathname, useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import {
-  CalendarDays,
   ClipboardCheck,
-  ClipboardList,
   FileDown,
   Files,
   MoreVertical,
-  Settings2,
 } from 'lucide-react';
 import { Badge } from '@campuspilot/ui/components/badge';
 import { Button } from '@campuspilot/ui/components/button';
@@ -21,13 +18,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@campuspilot/ui/components/dropdown-menu';
-import {
-  Select,
-  SelectTrigger,
-  SelectValue,
-  SelectContent,
-  SelectItem,
-} from '@campuspilot/ui/components/select';
+import { Tabs, TabsList, TabsTrigger } from '@campuspilot/ui/components/tabs';
 import { ExamNavigationLayout } from '@campuspilot/components/exam/exam-navigation-layout';
 import type { ExamContextDto } from '@campuspilot/api/routers/school/exam/exam.dto';
 import { SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
@@ -300,7 +291,6 @@ function WorkspaceLayout({
     {
       id: 'results',
       label: 'Results',
-      icon: ClipboardList,
       href: base,
       action: SCHOOL_ACTIONS.READ_EXAM_PLANS,
     },
@@ -309,12 +299,11 @@ function WorkspaceLayout({
           {
             id: 'timetable',
             label: 'Timetable',
-            icon: CalendarDays,
             href: `${base}/timetable`,
             action: SCHOOL_ACTIONS.READ_EXAM_TIMETABLE,
           },
           {
-            id: 'settings', label: 'Settings', icon: Settings2,
+            id: 'settings', label: 'More',
             href: `${base}/settings`, action: SCHOOL_ACTIONS.READ_EXAM_PLANS,
           },
         ]
@@ -343,55 +332,25 @@ function WorkspaceLayout({
       heading={heading}
       actions={actions}
       navigation={
-        overview.planCount > 0
-          ? items.map((item) => (
-              <RequirePermissions
-                key={item.id}
-                permissions={schoolPermission(scope.schoolId, item.action)}
-              >
-                <Button
-                  asChild
-                  variant={item.id === selected.id ? 'secondary' : 'ghost'}
-                  className="justify-start"
-                >
-                  <Link href={item.href}>
-                    <item.icon aria-hidden />
-                    {item.label}
-                  </Link>
-                </Button>
-              </RequirePermissions>
-            ))
-          : null
-      }
-      mobileNavigation={
         overview.planCount > 0 ? (
-          <Select
+          <Tabs
             value={selected.id}
             onValueChange={async (value) => {
               const item = items.find((item) => item.id === value);
               if (item && await confirmNavigation()) router.push(item.href);
             }}
           >
-            <SelectTrigger className="w-full" aria-label="Examination section">
-              <SelectValue>
-                <selected.icon aria-hidden />
-                {selected.label}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
+            <TabsList variant="line" className="h-auto">
               {items.map((item) => (
                 <RequirePermissions
                   key={item.id}
                   permissions={schoolPermission(scope.schoolId, item.action)}
                 >
-                  <SelectItem value={item.id}>
-                    <item.icon aria-hidden />
-                    {item.label}
-                  </SelectItem>
+                  <TabsTrigger value={item.id} className="h-9 flex-none px-3 text-sm">{item.label}</TabsTrigger>
                 </RequirePermissions>
               ))}
-            </SelectContent>
-          </Select>
+            </TabsList>
+          </Tabs>
         ) : null
       }
     >

@@ -23,7 +23,7 @@ import {
   YAxis,
 } from "recharts";
 
-import { currencyExponent, formatMinor } from "./finance-model";
+import { currencyExponent, currencySymbol, formatMinor } from "./finance-model";
 
 export type FinanceMonthlyActivity = {
   period: string;
@@ -89,10 +89,12 @@ export function FinanceMonthlyChart({
   currency,
   contextLabel,
   activity,
+  showContext = true,
 }: {
   currency: string;
   contextLabel: string;
   activity: FinanceMonthlyActivity[];
+  showContext?: boolean;
 }) {
   const data = activity.map((item) => ({
     ...item,
@@ -108,9 +110,11 @@ export function FinanceMonthlyChart({
     <Card>
       <CardHeader>
         <CardTitle className="text-base">Monthly overview</CardTitle>
-        <CardDescription>
-          {currency} · {contextLabel}
-        </CardDescription>
+        {showContext ? (
+          <CardDescription>
+            {currencySymbol(currency)} · {contextLabel}
+          </CardDescription>
+        ) : null}
       </CardHeader>
       <CardContent className="overflow-x-auto">
         <ChartContainer

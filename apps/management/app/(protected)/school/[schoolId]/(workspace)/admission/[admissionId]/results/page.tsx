@@ -1,6 +1,6 @@
-import { BookOpenCheck } from 'lucide-react';
-import { ModulePlaceholder } from '@/components/module-placeholder';
+import { redirect } from 'next/navigation';
 
-export default function AdmissionResultsPage() {
-  return <ModulePlaceholder icon={BookOpenCheck} title="Results" description="Student results will be available here." />;
+export default async function AdmissionResultsPage({ params }: { params: Promise<{ schoolId: string; admissionId: string }> }) {
+  const { schoolId, admissionId } = await params;
+  redirect(`/school/${encodeURIComponent(schoolId)}/admission/${encodeURIComponent(admissionId)}/details`);
 }

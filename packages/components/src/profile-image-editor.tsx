@@ -67,6 +67,7 @@ export function ProfileImageEditor({
   label = 'Profile image',
   description = 'JPEG, PNG, or WebP. Images are resized and compressed before upload.',
   canEdit = true,
+  compact = false,
 }: {
   imageUrl?: string | null;
   name: string;
@@ -75,6 +76,7 @@ export function ProfileImageEditor({
   label?: string;
   description?: string;
   canEdit?: boolean;
+  compact?: boolean;
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<number>();
@@ -141,22 +143,24 @@ export function ProfileImageEditor({
       <button
         type="button"
         className="group relative shrink-0 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-        aria-label={`Change ${subject}`}
+        aria-label={`${imageUrl ? 'Change' : 'Upload'} ${subject}`}
         disabled={!canEdit}
         onClick={() => setIsOpen(true)}
       >
-        <Avatar className="size-20!">
+        <Avatar className={compact ? "size-10!" : "size-20!"}>
           {imageUrl ? (
             <AvatarImage key={imageUrl} src={imageUrl} alt="" />
           ) : null}
-          <AvatarFallback className="text-lg">{initials(name)}</AvatarFallback>
+          <AvatarFallback className={compact ? "text-muted-foreground" : "text-lg"}>
+            {compact && canEdit ? <ImageUp className="size-4" aria-hidden /> : initials(name)}
+          </AvatarFallback>
         </Avatar>
         {canEdit ? <span className="absolute inset-0 flex items-center justify-center rounded-full bg-black/55 text-white opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
           <Pencil aria-hidden />
           <span className="sr-only">Change {subject}</span>
         </span> : null}
       </button>
-      <div className="min-w-0">
+      {compact ? null : <div className="min-w-0">
         <p className="text-sm font-medium">{label}</p>
         <p className="mt-1 text-xs text-muted-foreground">
           {description}
@@ -170,7 +174,7 @@ export function ProfileImageEditor({
         >
           <ImageUp /> Change image
         </Button> : null}
-      </div>
+      </div>}
       {canEdit ? <Dialog open={isOpen} onOpenChange={handleOpenChange}>
         <DialogContent>
           <DialogHeader>

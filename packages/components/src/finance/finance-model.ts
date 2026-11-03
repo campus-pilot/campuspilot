@@ -24,6 +24,36 @@ export function financeScopeIds(values: FinanceScopeSelection[]): string[] | und
 const INTEGER_MINOR = /^(0|[1-9]\d*)$/;
 const DECIMAL_MAJOR = /^(0|[1-9]\d*)(?:\.(\d+))?$/;
 
+/** Currency symbols used by operational UI amounts. ISO codes remain the
+ * fallback because some reviewed currencies do not have a distinct symbol. */
+export const CURRENCY_SYMBOLS: Partial<Record<CurrencyCode, string>> = {
+  AED: "د.إ",
+  AUD: "A$",
+  BDT: "৳",
+  CAD: "C$",
+  EUR: "€",
+  GBP: "£",
+  INR: "₹",
+  JPY: "¥",
+  KWD: "د.ك",
+  LKR: "Rs",
+  NPR: "रू",
+  PKR: "Rs",
+  QAR: "ر.ق",
+  SAR: "ر.س",
+  SGD: "S$",
+  USD: "$",
+};
+
+export function currencySymbol(currency: string): string {
+  return CURRENCY_SYMBOLS[currency as CurrencyCode] ?? currency;
+}
+
+function currencyPrefix(currency: string): string {
+  const symbol = CURRENCY_SYMBOLS[currency as CurrencyCode];
+  return symbol ? symbol : `${currency} `;
+}
+
 export function currencyExponent(currency: string): number {
   const exponent = SUPPORTED_CURRENCY_MINOR_UNITS[currency as CurrencyCode];
   if (exponent === undefined) throw new Error(`Unsupported currency: ${currency}`);
@@ -48,13 +78,14 @@ export function decimalToMinor(value: string, currency: string): string {
 export function formatMinor(value: string, currency: string): string {
   const negative = value.startsWith("-");
   const magnitude = negative ? value.slice(1) : value;
-  if (!INTEGER_MINOR.test(magnitude)) return `${currency} ${value}`;
+  const prefix = currencyPrefix(currency);
+  if (!INTEGER_MINOR.test(magnitude)) return `${prefix}${value}`;
   const exponent = currencyExponent(currency);
   const scale = BigInt(10) ** BigInt(exponent);
   const minor = BigInt(magnitude);
   const whole = (minor / scale).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
   const fraction = exponent === 0 ? "" : `.${(minor % scale).toString().padStart(exponent, "0")}`;
-  return `${negative ? "-" : ""}${currency} ${whole}${fraction}`;
+  return `${negative ? "-" : ""}${prefix}${whole}${fraction}`;
 }
 
 /** Returns the civil date observed in the configured IANA timezone. */

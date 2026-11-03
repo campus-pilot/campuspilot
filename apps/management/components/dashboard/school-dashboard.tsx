@@ -5,7 +5,7 @@ import Link from "next/link";
 import type { PermissionCheck } from "@campuspilot/api/routers/authorization/authorization.dto";
 import { SCHOOL_ACTIONS } from "@campuspilot/api/routers/authorization/authorization.dto";
 import type { DashboardDto } from "@campuspilot/api/routers/school/dashboard/dashboard.dto";
-import { formatBasisPoints, formatMinor } from "@campuspilot/components/finance";
+import { currencySymbol, formatBasisPoints, formatMinor } from "@campuspilot/components/finance";
 import { Badge } from "@campuspilot/ui/components/badge";
 import { Button } from "@campuspilot/ui/components/button";
 import {
@@ -540,7 +540,7 @@ function CollectionTrend({ summary, href }: { summary: CurrencySummary; href: st
   return (
     <SectionCard
       title="Fee collection trend"
-      description={`Monthly billed and net collected amounts in ${summary.currency}`}
+      description={`Monthly billed and net collected amounts in ${currencySymbol(summary.currency)}`}
       href={href}
     >
       {summary.monthly.length ? (
@@ -594,7 +594,7 @@ function BillingPosition({ summary, href }: { summary: CurrencySummary; href: st
   return (
     <SectionCard
       title="Billing position"
-      description={`${summary.billedAdmissions} admissions billed in ${summary.currency}`}
+      description={`${summary.billedAdmissions} admissions billed in ${currencySymbol(summary.currency)}`}
       href={href}
     >
       <div className="grid grid-cols-2 gap-2">
@@ -724,7 +724,7 @@ function DashboardContent({ data, schoolId, sessionId }: DashboardProps & { data
               <section key={summary.currency} className="flex flex-col gap-3">
                 {billingCurrencies.length > 1 ? (
                   <div className="flex items-center gap-2">
-                    <h2 className="text-sm font-semibold">{summary.currency} billing</h2>
+                    <h2 className="text-sm font-semibold">{currencySymbol(summary.currency)} billing</h2>
                     {summary.currency === data.billing?.primaryCurrency ? <Badge variant="outline">Session currency</Badge> : null}
                   </div>
                 ) : null}

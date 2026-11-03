@@ -1,10 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useForm } from "@tanstack/react-form";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { z } from "zod";
 import { SCHOOL_ACTIONS } from "@campuspilot/api/routers/authorization/authorization.dto";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@campuspilot/ui/components/dropdown-menu";
 import {
   FinanceLedgerTable,
   FinanceMonthlyChart,
@@ -13,6 +20,10 @@ import {
   reversalActionForEntry,
   type FinanceLedgerRow,
 } from "@campuspilot/components/finance";
+import {
+  TableFilterBar,
+  type TableFilterConfig,
+} from "@campuspilot/components/data-grid";
 import { Badge } from "@campuspilot/ui/components/badge";
 import { Button } from "@campuspilot/ui/components/button";
 import {
@@ -31,13 +42,8 @@ import {
   SelectValue,
 } from "@campuspilot/ui/components/select";
 import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@campuspilot/ui/components/tabs";
-import {
   HandCoins,
+  MoreHorizontal,
   Percent,
   Plus,
   ReceiptText,
@@ -464,24 +470,6 @@ function AdmissionFinanceActions({
   return (
     <>
       <div className="flex flex-wrap items-center justify-end gap-2">
-        {registered ? (
-          <RequirePermissions
-            permissions={{
-              action: SCHOOL_ACTIONS.CREATE_MANUAL_BILL,
-              resource: { kind: "school", schoolId },
-            }}
-          >
-            <Button
-              type="button"
-              variant="outline"
-              disabled={actionsDisabled}
-              onClick={() => onDialogChange("manual")}
-            >
-              <Plus aria-hidden />
-              Manual bill
-            </Button>
-          </RequirePermissions>
-        ) : null}
         <RequirePermissions
           permissions={{
             action: SCHOOL_ACTIONS.RECORD_PAYMENT,
@@ -497,21 +485,43 @@ function AdmissionFinanceActions({
             Record payment
           </Button>
         </RequirePermissions>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button type="button" variant="outline" size="icon" aria-label="More ledger actions">
+              <MoreHorizontal aria-hidden />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuGroup>
+        {registered ? (
+          <RequirePermissions
+            permissions={{
+              action: SCHOOL_ACTIONS.CREATE_MANUAL_BILL,
+              resource: { kind: "school", schoolId },
+            }}
+          >
+            <DropdownMenuItem
+              disabled={actionsDisabled}
+              onSelect={() => onDialogChange("manual")}
+            >
+              <Plus aria-hidden />
+              Manual bill
+            </DropdownMenuItem>
+          </RequirePermissions>
+        ) : null}
         <RequirePermissions
           permissions={{
             action: SCHOOL_ACTIONS.RECORD_FINANCE_ADJUSTMENT,
             resource: { kind: "school", schoolId },
           }}
         >
-          <Button
-            type="button"
-            variant="outline"
+          <DropdownMenuItem
             disabled={actionsDisabled}
-            onClick={() => onDialogChange("adjustment")}
+            onSelect={() => onDialogChange("adjustment")}
           >
             <Percent aria-hidden />
             Adjustment
-          </Button>
+          </DropdownMenuItem>
         </RequirePermissions>
         <RequirePermissions
           permissions={{
@@ -519,15 +529,13 @@ function AdmissionFinanceActions({
             resource: { kind: "school", schoolId },
           }}
         >
-          <Button
-            type="button"
-            variant="outline"
+          <DropdownMenuItem
             disabled={actionsDisabled}
-            onClick={() => onDialogChange("refund")}
+            onSelect={() => onDialogChange("refund")}
           >
             <Undo2 aria-hidden />
             Refund
-          </Button>
+          </DropdownMenuItem>
         </RequirePermissions>
         <RequirePermissions
           permissions={[
@@ -545,15 +553,16 @@ function AdmissionFinanceActions({
             },
           ]}
         >
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => onDialogChange("statement")}
+          <DropdownMenuItem
+            onSelect={() => onDialogChange("statement")}
           >
             <ReceiptText aria-hidden />
             Statement
-          </Button>
+          </DropdownMenuItem>
         </RequirePermissions>
+            </DropdownMenuGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
       {dialog === "manual" ? (
         <ManualBillDialog {...baseProps} />
@@ -680,6 +689,7 @@ function LedgerData({
   registered,
   sessions,
   defaultSessionId,
+  sessionControl,
 }: {
   schoolId: string;
   admissionId: string;
@@ -688,6 +698,7 @@ function LedgerData({
   registered: boolean;
   sessions: LedgerSession[];
   defaultSessionId: string;
+  sessionControl: ReactNode;
 }) {
   const [page, setPage] = useState(1);
   const [dialog, setDialog] = useState<ActionDialog>(null);
@@ -753,6 +764,19 @@ function LedgerData({
           label="Download bill PDF"
           iconOnly
         />
+      ) : detailString(entry.detail, "kind") === "payment" && detailString(entry.detail, "paymentId") ? (
+        <FinanceDocumentAction
+          schoolId={schoolId}
+          source={{
+            documentType: "receipt",
+            sessionId: entry.sessionId,
+            transactions: [
+              { kind: "payment", id: detailString(entry.detail, "paymentId")! },
+            ],
+          }}
+          label="Download receipt PDF"
+          iconOnly
+        />
       ) : null,
       onOpen: () => {
         setReversalEntry(undefined);
@@ -763,14 +787,56 @@ function LedgerData({
   const chartCurrencies = [
     ...new Set(summaryQuery.data.monthlyActivity.map((item) => item.currency)),
   ];
+  const ledgerFilters: TableFilterConfig<"type" | "direction">[] = [
+    {
+      id: "type",
+      label: "Type",
+      type: "single",
+      options: [
+        "bill",
+        "manual_debit_adjustment",
+        "payment",
+        "discount",
+        "waiver",
+        "write_off",
+        "refund",
+        "debit_correction",
+        "credit_correction",
+        "reversal",
+      ].map((type) => ({
+        value: type,
+        label: type.replaceAll("_", " "),
+      })),
+    },
+    {
+      id: "direction",
+      label: "Date order",
+      type: "single",
+      options: [
+        { value: "desc", label: "Newest first" },
+        { value: "asc", label: "Oldest first" },
+      ],
+    },
+  ];
   const ledgerTable = (
     <div className="flex flex-col gap-2">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <p className="text-sm font-medium">Ledger entries</p>
-        <div className="flex flex-wrap gap-2">
-          <ledgerControls.Field name="type">{(field) => <Select value={field.state.value} onValueChange={(value) => { field.handleChange(value); setPage(1); }}><SelectTrigger aria-label="Filter ledger type" className="w-40"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All types</SelectItem>{["bill", "manual_debit_adjustment", "payment", "discount", "waiver", "write_off", "refund", "debit_correction", "credit_correction", "reversal"].map((type) => <SelectItem key={type} value={type}>{type.replaceAll("_", " ")}</SelectItem>)}</SelectContent></Select>}</ledgerControls.Field>
-          <ledgerControls.Field name="direction">{(field) => <Select value={field.state.value} onValueChange={(value) => { field.handleChange(value as "asc" | "desc"); setPage(1); }}><SelectTrigger aria-label="Ledger date order" className="w-44"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="desc">Newest first</SelectItem><SelectItem value="asc">Oldest first</SelectItem></SelectContent></Select>}</ledgerControls.Field>
-        </div>
+        <TableFilterBar
+          filters={ledgerFilters}
+          values={{
+            type: ledgerType === "all" ? undefined : ledgerType,
+            direction,
+          }}
+          onValuesChange={(values) => {
+            ledgerControls.setFieldValue("type", String(values.type ?? "all"));
+            ledgerControls.setFieldValue(
+              "direction",
+              values.direction === "asc" ? "asc" : "desc",
+            );
+            setPage(1);
+          }}
+        />
       </div>
       {ledgerQuery.data.pageOpeningBalances.map((balance) => (
         <p key={balance.currency} className="text-xs text-muted-foreground">
@@ -801,158 +867,70 @@ function LedgerData({
   );
   return (
     <div className="flex min-w-0 flex-col gap-6">
-      <RequirePermissions
-        permissions={{
-          action: SCHOOL_ACTIONS.READ_SESSION_FINANCE,
-          resource: { kind: "school", schoolId },
-        }}
-      >
-        <AdmissionFinanceActionsLoader
-          schoolId={schoolId}
-          admissionId={admissionId}
-          registered={registered}
-          sessions={sessions}
-          defaultSessionId={sessionId ?? defaultSessionId}
-          selectedEntry={selectedEntry}
-          dialog={dialog}
-          onDialogChange={(next) => {
-            setDialog(next);
-            if (!next) setReversalEntry(undefined);
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        {sessionControl}
+        <RequirePermissions
+          permissions={{
+            action: SCHOOL_ACTIONS.READ_SESSION_FINANCE,
+            resource: { kind: "school", schoolId },
           }}
-        />
-      </RequirePermissions>
-      <Tabs defaultValue="graph">
-        <TabsList aria-label="Ledger view">
-          <TabsTrigger value="graph">Graph</TabsTrigger>
-          <TabsTrigger value="details">Details</TabsTrigger>
-        </TabsList>
-        <TabsContent value="graph" className="flex flex-col gap-6">
-          {summaryQuery.data.currencies.length ? summaryQuery.data.currencies.map((summary) => (
-            <section key={summary.currency} className="flex flex-col gap-3">
-              <div className="flex items-center gap-2"><h3 className="font-medium">{summary.currency}</h3>{sessionId ? <Badge variant="outline">{sessionLabels.get(sessionId) ?? "Selected session activity"}</Badge> : <Badge variant="outline">All sessions</Badge>}</div>
-              <FinanceSummaryCards items={[
-                { label: "Total amount due", value: formatMinor(summary.dueMinor, summary.currency) },
-                { label: "Total account credit", value: formatMinor(summary.creditMinor, summary.currency) },
-                { label: "Total billed", value: formatMinor(summary.billedMinor, summary.currency) },
-              ]} />
-            </section>
-          )) : null}
-          {chartCurrencies.length ? (
-            <div className="flex flex-col gap-4">
-              {chartCurrencies.map((currency) => (
-                <FinanceMonthlyChart
-                  key={currency}
-                  currency={currency}
-                  contextLabel={
-                    sessionId
-                      ? (sessionLabels.get(sessionId) ??
-                        "Selected session activity")
-                      : "Lifetime account"
-                  }
-                  activity={summaryQuery.data.monthlyActivity.filter(
-                    (item) => item.currency === currency,
-                  )}
-                />
-              ))}
-            </div>
-          ) : (
-            <p className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">
-              No financial activity has been recorded for this admission.
-            </p>
-          )}
-          {ledgerTable}
-        </TabsContent>
-        <TabsContent value="details" className="flex flex-col gap-6">
-          {summaryQuery.data.currencies.length ? (
-            summaryQuery.data.currencies.map((summary) => (
-              <section key={summary.currency} className="flex flex-col gap-3">
-                <div className="flex items-center gap-2">
-                  <h3 className="font-medium">{summary.currency}</h3>
-                  {sessionId ? (
-                    <Badge variant="outline">
-                      {sessionLabels.get(sessionId) ??
-                        "Selected session activity"}
-                    </Badge>
-                  ) : (
-                    <Badge variant="outline">Lifetime account</Badge>
-                  )}
-                </div>
-                <FinanceSummaryCards
-                  items={[
-                    {
-                      label: "Total amount due",
-                      value: formatMinor(summary.dueMinor, summary.currency),
-                    },
-                    {
-                      label: "Total account credit",
-                      value: formatMinor(summary.creditMinor, summary.currency),
-                    },
-                    {
-                      label: "Total billed",
-                      value: formatMinor(summary.billedMinor, summary.currency),
-                    },
-                    {
-                      label: sessionId
-                        ? "Selected-session collected"
-                        : "Lifetime collected",
-                      value: formatMinor(
-                        summary.collectedMinor,
-                        summary.currency,
-                      ),
-                    },
-                    {
-                      label: sessionId
-                        ? "Selected-session credit adjustments"
-                        : "Lifetime credit adjustments",
-                      value: formatMinor(
-                        summary.creditAdjustmentMinor,
-                        summary.currency,
-                      ),
-                    },
-                    {
-                      label: sessionId
-                        ? "Selected-session debit corrections"
-                        : "Lifetime debit corrections",
-                      value: formatMinor(
-                        summary.debitAdjustmentMinor,
-                        summary.currency,
-                      ),
-                    },
-                    {
-                      label: sessionId
-                        ? "Selected-session refunds"
-                        : "Lifetime refunds",
-                      value: formatMinor(summary.refundMinor, summary.currency),
-                    },
-                    {
-                      label: "Brought forward",
-                      value: sessionId
-                        ? formatMinor(
-                            summary.broughtForwardMinor,
-                            summary.currency,
-                          )
-                        : "—",
-                      detail: sessionId
-                        ? "Lifetime balance before this session"
-                        : "Choose a session to calculate",
-                    },
-                    {
-                      label: "Bills",
-                      value: `${summary.billCounts.posted} posted`,
-                      detail: `${summary.billCounts.reversed} reversed`,
-                    },
-                  ]}
-                />
-              </section>
-            ))
-          ) : (
-            <p className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">
-              No financial activity has been recorded for this admission.
-            </p>
-          )}
-          {ledgerTable}
-        </TabsContent>
-      </Tabs>
+        >
+          <AdmissionFinanceActionsLoader
+            schoolId={schoolId}
+            admissionId={admissionId}
+            registered={registered}
+            sessions={sessions}
+            defaultSessionId={sessionId ?? defaultSessionId}
+            selectedEntry={selectedEntry}
+            dialog={dialog}
+            onDialogChange={(next) => {
+              setDialog(next);
+              if (!next) setReversalEntry(undefined);
+            }}
+          />
+        </RequirePermissions>
+      </div>
+      {summaryQuery.data.currencies.length
+        ? summaryQuery.data.currencies.map((summary) => (
+            <FinanceSummaryCards
+              key={summary.currency}
+              items={[
+                {
+                  label: "Amount due",
+                  value: formatMinor(summary.dueMinor, summary.currency),
+                },
+                {
+                  label: "Account credit",
+                  value: formatMinor(summary.creditMinor, summary.currency),
+                },
+              ]}
+            />
+          ))
+        : null}
+      {chartCurrencies.length ? (
+        <div className="flex flex-col gap-4">
+          {chartCurrencies.map((currency) => (
+            <FinanceMonthlyChart
+              key={currency}
+              currency={currency}
+              showContext={false}
+              contextLabel={
+                sessionId
+                  ? (sessionLabels.get(sessionId) ?? "Selected session activity")
+                  : "Lifetime account"
+              }
+              activity={summaryQuery.data.monthlyActivity.filter(
+                (item) => item.currency === currency,
+              )}
+            />
+          ))}
+        </div>
+      ) : (
+        <p className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">
+          No financial activity has been recorded for this admission.
+        </p>
+      )}
+      {ledgerTable}
       {detailEntry ? (
         <LedgerEntryDetail
           schoolId={schoolId}
@@ -1026,39 +1004,12 @@ export function AdmissionLedger({
       }
     >
       <section className="flex min-w-0 flex-col gap-4">
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <h2 className="text-lg font-semibold">Admission ledger</h2>
-            <p className="text-xs text-muted-foreground">
-              One continuous account across academic sessions, with exact
-              running balances and immutable references.
-            </p>
-          </div>
-          <form.Field name="sessionId">
-            {(field) => (
-              <div className="flex flex-col gap-1">
-                <span className="text-xs text-muted-foreground">
-                  Session view
-                </span>
-                <Select
-                  value={field.state.value}
-                  onValueChange={field.handleChange}
-                >
-                  <SelectTrigger aria-label="Ledger session">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All sessions</SelectItem>
-                    {sessions.map((session) => (
-                      <SelectItem key={session.id} value={session.id}>
-                        {session.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-          </form.Field>
+        <div>
+          <h2 className="text-lg font-semibold">Admission ledger</h2>
+          <p className="text-xs text-muted-foreground">
+            One continuous account across academic sessions, with exact
+            running balances and immutable references.
+          </p>
         </div>
         <form.Subscribe selector={(state) => state.values.sessionId}>
           {(sessionId) => (
@@ -1071,6 +1022,28 @@ export function AdmissionLedger({
               registered={admissionQuery.data.registered}
               sessions={sessions}
               defaultSessionId={defaultSessionId}
+              sessionControl={
+                <form.Field name="sessionId">
+                  {(field) => (
+                    <Select
+                      value={field.state.value}
+                      onValueChange={field.handleChange}
+                    >
+                      <SelectTrigger aria-label="Ledger session">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All sessions</SelectItem>
+                        {sessions.map((session) => (
+                          <SelectItem key={session.id} value={session.id}>
+                            {session.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                </form.Field>
+              }
             />
           )}
         </form.Subscribe>

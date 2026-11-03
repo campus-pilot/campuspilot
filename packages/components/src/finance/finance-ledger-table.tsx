@@ -26,7 +26,9 @@ export function FinanceLedgerTable({ rows }: { rows: FinanceLedgerRow[] }) {
       <Table aria-label="Admission ledger" className="min-w-[1000px]">
         <TableHeader className="bg-muted/40">
           <TableRow>
-            <TableHead className="w-12">Download</TableHead>
+            <TableHead className="w-12">
+              <span className="sr-only">Document</span>
+            </TableHead>
             <TableHead>Effective date</TableHead>
             <TableHead>Type</TableHead>
             <TableHead className="text-right">Debit</TableHead>

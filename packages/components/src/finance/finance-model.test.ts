@@ -28,7 +28,7 @@ import {
 describe("finance presentation model", () => {
   it("converts and formats money without floating-point loss", () => {
     expect(decimalToMinor("90071992547409.91", "INR")).toBe("9007199254740991");
-    expect(formatMinor("9007199254740991", "INR")).toBe("INR 90,071,992,547,409.91");
+    expect(formatMinor("9007199254740991", "INR")).toBe("₹90,071,992,547,409.91");
     expect(decimalToMinor("0", "INR")).toBe("0");
     expect(formatBasisPoints("1234")).toBe("12.34%");
     expect(() => decimalToMinor("1.001", "INR")).toThrow();
@@ -36,7 +36,7 @@ describe("finance presentation model", () => {
 
   it("uses the reviewed currency exponent catalog", () => {
     expect(decimalToMinor("123", "JPY")).toBe("123");
-    expect(formatMinor("123", "JPY")).toBe("JPY 123");
+    expect(formatMinor("123", "JPY")).toBe("¥123");
     expect(decimalToMinor("1.234", "KWD")).toBe("1234");
     expect(formatMinor("1234", "BHD")).toBe("BHD 1.234");
     expect(decimalToMinor("1.2345", "CLF")).toBe("12345");

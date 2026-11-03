@@ -1,24 +1,21 @@
 "use client";
 
 import type { ReactNode } from "react";
-import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { SCHOOL_ACTIONS } from "@campuspilot/api/routers/authorization/authorization.dto";
 import { AppShellAlert } from "@campuspilot/components/app-shell";
 import { WorkspaceNavigationLayout } from "@campuspilot/components/workspace-navigation-layout";
-import { Button } from "@campuspilot/ui/components/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@campuspilot/ui/components/select";
-import { BarChart3, CreditCard, LayoutDashboard, PlaySquare, ReceiptText } from "lucide-react";
+import { Tabs, TabsList, TabsTrigger } from "@campuspilot/ui/components/tabs";
+import { CreditCard } from "lucide-react";
 import { orpc } from "@/lib/orpc";
 import { RequirePermissions } from "@/components/require-permissions";
 import { confirmNavigation } from "@/lib/navigation-guard";
 
 const sections = [
-  { id: "overview", label: "Overview", suffix: "", icon: LayoutDashboard, action: SCHOOL_ACTIONS.READ_BILLING_REPORTS },
-  { id: "runs", label: "Billing runs", suffix: "/runs", icon: PlaySquare, action: SCHOOL_ACTIONS.READ_BILLING_RUNS },
-  { id: "payments", label: "Payments", suffix: "/payments", icon: ReceiptText, action: SCHOOL_ACTIONS.READ_ADMISSION_LEDGER },
-  { id: "reports", label: "Reports", suffix: "/reports", icon: BarChart3, action: SCHOOL_ACTIONS.READ_BILLING_REPORTS },
+  { id: "overview", label: "Overview", suffix: "", action: SCHOOL_ACTIONS.READ_BILLING_REPORTS },
+  { id: "runs", label: "Cycle", suffix: "/runs", action: SCHOOL_ACTIONS.READ_BILLING_RUNS },
+  { id: "payments", label: "Payments", suffix: "/payments", action: SCHOOL_ACTIONS.READ_ADMISSION_LEDGER },
 ] as const;
 
 function closeAlertDialog(closeDialog: () => void) {
@@ -86,23 +83,19 @@ export function BillingWorkspace({
         )}
         actions={null}
         navigationLabel="Billing sections"
-        navigation={sections.map((section) => (
-          <RequirePermissions key={section.id} permissions={{ action: section.action, resource }}>
-            <Button asChild variant={section.id === active.id ? "secondary" : "ghost"} className="justify-start">
-              <Link href={`${baseHref}${section.suffix}`}><section.icon aria-hidden />{section.label}</Link>
-            </Button>
-          </RequirePermissions>
-        ))}
-        mobileNavigation={(
-          <Select value={active.id} onValueChange={async (value) => {
+        navigation={(
+          <Tabs value={active.id} onValueChange={async (value) => {
             const next = sections.find((section) => section.id === value);
             if (next && await confirmNavigation()) router.push(`${baseHref}${next.suffix}`);
           }}>
-            <SelectTrigger className="w-full" aria-label="Billing section"><SelectValue><active.icon aria-hidden />{active.label}</SelectValue></SelectTrigger>
-            <SelectContent align="start">
-              {sections.map((section) => <RequirePermissions key={section.id} permissions={{ action: section.action, resource }}><SelectItem value={section.id}><section.icon aria-hidden />{section.label}</SelectItem></RequirePermissions>)}
-            </SelectContent>
-          </Select>
+            <TabsList variant="line" className="h-auto">
+              {sections.map((section) => (
+                <RequirePermissions key={section.id} permissions={{ action: section.action, resource }}>
+                  <TabsTrigger value={section.id} className="h-9 flex-none px-3 text-sm">{section.label}</TabsTrigger>
+                </RequirePermissions>
+              ))}
+            </TabsList>
+          </Tabs>
         )}
       >
         {children}
