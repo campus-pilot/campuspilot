@@ -21,6 +21,11 @@ export const paymentMethods: PaymentMethod[] = ["cash", "bank_transfer", "card",
 export const idSchema = z.string().trim().min(1, "Choose an option.");
 export const dateTimeSchema = z.string().min(1, "Choose a date and time.");
 export const positiveDecimalSchema = z.string().regex(/^(?:0|[1-9]\d*)(?:\.\d+)?$/, "Enter a positive plain decimal amount.").refine((value) => /[1-9]/.test(value), "Amount must be greater than zero.");
+/**
+ * The API requires a reason code before schools can configure their own codes.
+ * Manual entries use this stable value until that school-level workflow exists.
+ */
+export const manualReasonCode = "MANUAL";
 
 export function sessionFor(sessions: FinanceSessionOption[], sessionId: string) {
   const session = sessions.find((item) => item.id === sessionId);
@@ -62,8 +67,8 @@ export function FormGuardedDialog({ form, onClose, children }: { form: any; onCl
   return <form.Subscribe selector={(state: any) => state.isDirty}>{(dirty: boolean) => <GuardedDialog dirty={dirty} onClose={onClose}>{children}</GuardedDialog>}</form.Subscribe>;
 }
 
-export function SessionField({ form, sessions, resetFields = [] }: { form: any; sessions: FinanceSessionOption[]; resetFields?: string[] }) {
-  return <form.Field name="sessionId">{(field: AnyFieldApi) => <div className="flex flex-col gap-1.5"><Label htmlFor="finance-session">Accounting session</Label><Select value={String(field.state.value)} onValueChange={(value) => { const session = sessionFor(sessions, value); field.handleChange(value); resetFields.forEach((name) => form.setFieldValue(name, "")); if (resetFields.includes("effectiveAt")) form.setFieldValue("effectiveAt", civilDateTimeInTimeZone(session.timeZone)); if (resetFields.includes("receivedAt")) form.setFieldValue("receivedAt", civilDateTimeInTimeZone(session.timeZone)); if (resetFields.includes("issueDate")) form.setFieldValue("issueDate", civilDateInTimeZone(session.timeZone)); }}><SelectTrigger id="finance-session" className="w-full"><SelectValue /></SelectTrigger><SelectContent>{sessions.map((session) => <SelectItem key={session.id} value={session.id}>{session.label} · {session.currency}</SelectItem>)}</SelectContent></Select><FieldErrors errors={field.state.meta.errors} /></div>}</form.Field>;
+export function SessionField({ form, sessions, resetFields = [], hideCurrency = false }: { form: any; sessions: FinanceSessionOption[]; resetFields?: string[]; hideCurrency?: boolean }) {
+  return <form.Field name="sessionId">{(field: AnyFieldApi) => <div className="flex flex-col gap-1.5"><Label htmlFor="finance-session">Accounting session</Label><Select value={String(field.state.value)} onValueChange={(value) => { const session = sessionFor(sessions, value); field.handleChange(value); resetFields.forEach((name) => form.setFieldValue(name, "")); if (resetFields.includes("effectiveAt")) form.setFieldValue("effectiveAt", civilDateTimeInTimeZone(session.timeZone)); if (resetFields.includes("receivedAt")) form.setFieldValue("receivedAt", civilDateTimeInTimeZone(session.timeZone)); if (resetFields.includes("issueDate")) form.setFieldValue("issueDate", civilDateInTimeZone(session.timeZone)); }}><SelectTrigger id="finance-session" className="w-full"><SelectValue /></SelectTrigger><SelectContent>{sessions.map((session) => <SelectItem key={session.id} value={session.id}>{hideCurrency ? session.label : `${session.label} · ${session.currency}`}</SelectItem>)}</SelectContent></Select><FieldErrors errors={field.state.meta.errors} /></div>}</form.Field>;
 }
 
 export function MethodField({ form, id }: { form: any; id: string }) {
