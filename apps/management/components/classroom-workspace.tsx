@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useCallback, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AppShellAlert } from "@campuspilot/components/app-shell";
 import { Button } from "@campuspilot/ui/components/button";
@@ -26,6 +26,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { orpc } from "@/lib/orpc";
 import { SCHOOL_ACTIONS } from "@campuspilot/api/routers/authorization/authorization.dto";
 import { RequirePermissions } from "./require-permissions";
+import { AddTeacherDialog } from "./class-teachers";
 
 type WorkspaceItem = {
   id: string;
@@ -35,6 +36,36 @@ type WorkspaceItem = {
 
 function closeAlertDialog(closeDialog: () => void) {
   closeDialog();
+}
+
+/** Own the picker outside the shell's closing alert dialog so it opens on any classroom section. */
+function ClassroomTeacherAlert({ schoolId, classId }: { schoolId: string; classId: string }) {
+  const [addOpen, setAddOpen] = useState(false);
+  const openPicker = useCallback((closeDialog: () => void) => {
+    closeDialog();
+    setAddOpen(true);
+  }, []);
+  const alert = {
+    slug: `school/${schoolId}/class/${classId}/teachers-missing`,
+    type: "warning" as const,
+    message: "No teachers are assigned to this classroom.",
+  };
+
+  return (
+    <>
+      <RequirePermissions
+        permissions={{ action: SCHOOL_ACTIONS.UPDATE_MEMBER_ROLES, resource: { kind: "school", schoolId } }}
+        fallback={<AppShellAlert {...alert} />}
+      >
+        <AppShellAlert
+          {...alert}
+          actionLabel="Add teachers"
+          onAction={openPicker}
+        />
+      </RequirePermissions>
+      {addOpen ? <AddTeacherDialog schoolId={schoolId} classId={classId} onClose={() => setAddOpen(false)} /> : null}
+    </>
+  );
 }
 
 const items: WorkspaceItem[] = [
@@ -110,13 +141,7 @@ function ClassroomWorkspaceContent({
   return (
     <section className="mx-auto flex w-full max-w-7xl flex-col gap-4">
       {classSummary?.teacherCount === 0 ? (
-        <AppShellAlert
-          slug="class/teacher/not-present"
-          message="No teachers are assigned to this classroom."
-          actionLabel="Add teachers"
-          actionHref={`${baseHref}/teachers`}
-          onAction={closeAlertDialog}
-        />
+        <ClassroomTeacherAlert schoolId={schoolId} classId={classId} />
       ) : null}
       {classSummary?.subjectCount === 0 ? (
         <AppShellAlert

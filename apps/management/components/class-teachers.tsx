@@ -52,7 +52,16 @@ function withClassAssignment(member: SchoolMemberDto, classId: string, assigned:
   });
 }
 
-function AddTeacherDialog({ classId, schoolId, onClose }: { classId: string; schoolId: string; onClose: () => void }) {
+/** Shared by the classroom alert and the Teachers page; both require the same grant. */
+export function AddTeacherDialog(props: { classId: string; schoolId: string; onClose: () => void }) {
+  return (
+    <RequirePermissions permissions={{ action: SCHOOL_ACTIONS.UPDATE_MEMBER_ROLES, resource: { kind: 'school', schoolId: props.schoolId } }}>
+      <AddTeacherDialogContent {...props} />
+    </RequirePermissions>
+  );
+}
+
+function AddTeacherDialogContent({ classId, schoolId, onClose }: { classId: string; schoolId: string; onClose: () => void }) {
   const [page, setPage] = useState(1);
   const queryClient = useQueryClient();
   const candidatesQuery = useQuery(

@@ -261,14 +261,18 @@ export function ClassSubjects({ classId, schoolId }: { classId: string; schoolId
       {subjects.length ? (
         <Accordion type="multiple" className="rounded-xl bg-card">
           {subjects.map(([slug, subject]) => (
-            <AccordionItem key={slug} value={slug} className="relative">
-              <AccordionTrigger className="min-h-12 pr-40">
-                <span>{subject.name} <span className="font-normal text-muted-foreground">({slug})</span></span>
-              </AccordionTrigger>
-              <div className="absolute right-2 top-2 flex items-center gap-1">
-                <span className="hidden text-xs text-muted-foreground sm:inline">{subject.books.length} books · {Object.keys(subject.examModes).length} exam modes</span>
-                <Button type="button" variant="ghost" size="icon-sm" aria-label={`Edit ${subject.name}`} onClick={() => setEditingSlug(slug)}><Pencil aria-hidden /></Button>
-                <Button type="button" variant="ghost" size="icon-sm" aria-label={`Delete ${subject.name}`} onClick={() => setDeleteSlug(slug)}><Trash2 aria-hidden /></Button>
+            <AccordionItem key={slug} value={slug}>
+              <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center">
+                <AccordionTrigger className="min-w-0 items-center gap-3">
+                  <span className="min-w-0 flex-1 break-words">{subject.name} <span className="font-normal text-muted-foreground">({slug})</span></span>
+                  <span className="hidden shrink-0 text-xs font-normal text-muted-foreground sm:inline">
+                    {subject.books.length} {subject.books.length === 1 ? 'book' : 'books'} · {Object.keys(subject.examModes).length} {Object.keys(subject.examModes).length === 1 ? 'exam mode' : 'exam modes'}
+                  </span>
+                </AccordionTrigger>
+                <div className="flex shrink-0 items-center gap-1 pr-2">
+                  <Button type="button" variant="ghost" size="icon-sm" aria-label={`Edit ${subject.name}`} onClick={() => setEditingSlug(slug)}><Pencil aria-hidden /></Button>
+                  <Button type="button" variant="ghost" size="icon-sm" aria-label={`Delete ${subject.name}`} onClick={() => setDeleteSlug(slug)}><Trash2 aria-hidden /></Button>
+                </div>
               </div>
               <AccordionContent className="flex flex-col gap-5 border-t pt-4">
                 <div className="flex flex-col gap-2">
