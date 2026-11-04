@@ -29,6 +29,14 @@ export const schoolExamResultRouter = {
         'Read saved results for one exam plan in student ID and result ID order.',
       ),
     )
+    .meta({
+      mcp: {
+        exposure: 'core',
+        access: 'read',
+        destructive: false,
+        module: 'exams',
+      },
+    })
     .input(dto.listExamResultsInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_EXAM_RESULTS))
     .output(dto.listExamResultsOutputSchema)
@@ -80,6 +88,14 @@ export const schoolExamResultRouter = {
         'Read currently registered students in the plan’s class and session alongside their optional result, ordered by student name and ID.',
       ),
     )
+    .meta({
+      mcp: {
+        exposure: 'advanced',
+        access: 'read',
+        destructive: false,
+        module: 'exams',
+      },
+    })
     .input(dto.listExamRosterInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_EXAM_RESULTS))
     .output(dto.listExamRosterOutputSchema)
@@ -149,6 +165,14 @@ export const schoolExamResultRouter = {
         'Read the saved result for an independently scoped plan and student.',
       ),
     )
+    .meta({
+      mcp: {
+        exposure: 'core',
+        access: 'read',
+        destructive: false,
+        module: 'exams',
+      },
+    })
     .input(dto.resultScopeSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_EXAM_RESULTS))
     .output(dto.examResultDtoSchema)
@@ -178,6 +202,14 @@ export const schoolExamResultRouter = {
         'Create or update a result while the plan is active. Teachers can enter any class; approved=true additionally requires the assigned class teacher or a school exam administrator.',
       ),
     )
+    .meta({
+      mcp: {
+        exposure: 'core',
+        access: 'write',
+        destructive: true,
+        module: 'exams',
+      },
+    })
     .input(dto.upsertExamResultInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.WRITE_EXAM_RESULTS))
     .use(requireExamResultPermissions)
@@ -200,6 +232,14 @@ export const schoolExamResultRouter = {
         'Atomically save up to 100 students with explicit approval flags and an additional assigned-class approval check. Any failure rolls back the complete batch.',
       ),
     )
+    .meta({
+      mcp: {
+        exposure: 'advanced',
+        access: 'write',
+        destructive: true,
+        module: 'exams',
+      },
+    })
     .input(dto.upsertExamResultsInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.WRITE_EXAM_RESULTS))
     .use(requireExamResultPermissions)
@@ -220,6 +260,14 @@ export const schoolExamResultRouter = {
         'Approve a saved result as its assigned class teacher or a school exam administrator. Only administrators can revoke or change an existing approval.',
       ),
     )
+    .meta({
+      mcp: {
+        exposure: 'advanced',
+        access: 'write',
+        destructive: true,
+        module: 'exams',
+      },
+    })
     .input(dto.approveExamResultInputSchema)
     .use(requireClassPermission(CLASS_ACTIONS.APPROVE_EXAM_RESULTS))
     .use(requireExamResultPermissions)
@@ -264,6 +312,14 @@ export const schoolExamResultRouter = {
         'Delete an active-plan result. Teachers may delete unapproved results across the school; approved results require a school exam administrator.',
       ),
     )
+    .meta({
+      mcp: {
+        exposure: 'advanced',
+        access: 'write',
+        destructive: true,
+        module: 'exams',
+      },
+    })
     .input(dto.resultScopeSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.DELETE_EXAM_RESULTS))
     .use(requireExamResultPermissions)

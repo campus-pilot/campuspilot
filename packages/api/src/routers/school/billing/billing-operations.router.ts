@@ -101,6 +101,14 @@ export const billingOperationsRouter = {
         "Resolve exact pricing and grouped readiness issues for an explicit school session and local billing period without writing financial facts.",
       tags: ["School", "Billing"],
     })
+    .meta({
+      mcp: {
+        exposure: "advanced",
+        access: "read",
+        destructive: false,
+        module: "billing",
+      },
+    })
     .input(previewBillingRunInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.PREVIEW_BILLING_RUN))
     .output(billingRunPreviewOutputSchema)
@@ -127,6 +135,14 @@ export const billingOperationsRouter = {
         "Recompute a reviewed billing command under deterministic locks and atomically post a regular or reasoned supplemental run with immutable bill, line, ledger, and projection facts.",
       tags: ["School", "Billing"],
     })
+    .meta({
+      mcp: {
+        exposure: "advanced",
+        access: "write",
+        destructive: false,
+        module: "billing",
+      },
+    })
     .input(postBillingRunInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.POST_BILLING_RUN))
     .output(billingRunDtoSchema)
@@ -149,6 +165,14 @@ export const billingOperationsRouter = {
         "List paginated billing runs with period search plus explicit session, period, kind, recorder, and recorded-time filters.",
       tags: ["School", "Billing"],
     })
+    .meta({
+      mcp: {
+        exposure: "advanced",
+        access: "read",
+        destructive: false,
+        module: "billing",
+      },
+    })
     .input(listBillingRunsInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_BILLING_RUNS))
     .output(listBillingRunsOutputSchema)
@@ -167,6 +191,14 @@ export const billingOperationsRouter = {
         "Read one billing run with immutable admission, enrollment, placement, pricing-source, configuration, and input snapshots.",
       tags: ["School", "Billing"],
     })
+    .meta({
+      mcp: {
+        exposure: "advanced",
+        access: "read",
+        destructive: false,
+        module: "billing",
+      },
+    })
     .input(getBillingRunInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_BILLING_RUNS))
     .output(billingRunDetailDtoSchema)
@@ -184,6 +216,14 @@ export const billingOperationsRouter = {
       description:
         "Post a reasoned ordinary manual bill for one registered admission enrolled in the explicitly supplied session.",
       tags: ["School", "Billing"],
+    })
+    .meta({
+      mcp: {
+        exposure: "core",
+        access: "write",
+        destructive: false,
+        module: "billing",
+      },
     })
     .input(createManualBillInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.CREATE_MANUAL_BILL))
@@ -207,6 +247,14 @@ export const billingOperationsRouter = {
         "Append one immutable opposite ledger fact for an unsettled bill. A reason and operation idempotency key are required.",
       tags: ["School", "Billing"],
     })
+    .meta({
+      mcp: {
+        exposure: "advanced",
+        access: "write",
+        destructive: true,
+        module: "billing",
+      },
+    })
     .input(reverseBillInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.REVERSE_BILL))
     .output(billReversalDtoSchema)
@@ -228,6 +276,14 @@ export const billingOperationsRouter = {
       description:
         "Atomically append opposite ledger facts for every bill in a run only when every member passes the settlement and prior-reversal guards.",
       tags: ["School", "Billing"],
+    })
+    .meta({
+      mcp: {
+        exposure: "advanced",
+        access: "write",
+        destructive: true,
+        module: "billing",
+      },
     })
     .input(reverseBillingRunInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.REVERSE_BILLING_RUN))

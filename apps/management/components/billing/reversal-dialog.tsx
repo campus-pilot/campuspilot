@@ -29,7 +29,7 @@ export function ReversalDialog(props: FinanceDialogBaseProps & { entry: { id: st
   async function confirm(value: Value) {
     const parsed = schema.safeParse(value);
     if (!parsed.success) return;
-    const base = { schoolId: props.schoolId, admissionId: props.admissionId, sessionId: props.entry.sessionId, reason: parsed.data.reason, effectiveAt: instantFromCivilDateTime(parsed.data.effectiveAt, session.timeZone) };
+    const base = { schoolId: props.schoolId, admissionId: props.admissionId, sessionId: props.entry.sessionId, reason: parsed.data.reason, effectiveAt: instantFromCivilDateTime(parsed.data.effectiveAt, session.timeZone).toISOString() };
     if (target === "bill" && !props.entry.billId) { form.setErrorMap({ onSubmit: { fields: {}, form: "The selected bill target is unavailable." } }); return; }
     const command = target === "bill" ? { ...base, billId: props.entry.billId! } : { ...base, ledgerEntryId: props.entry.id };
     try { await mutation.mutateAsync({ ...command, idempotencyKey: stableKey(keyRef, command) }); await invalidateFinanceReadModels(queryClient, "reversal"); props.onClose(); }

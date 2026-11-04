@@ -1,25 +1,43 @@
 import type { Context } from '@campuspilot/api/context';
 import { protectedProcedure } from '@campuspilot/api';
+import type {
+  McpProcedureMeta,
+  ProcedureMeta,
+} from '@campuspilot/api/mcp-metadata';
 import {
   Client,
   StreamableHTTPClientTransport,
 } from '@modelcontextprotocol/client';
 import { InMemoryTransport } from '@modelcontextprotocol/server';
-import { call, lazy, ORPCError, os } from '@orpc/server';
+import { call, lazy, ORPCError, os as baseOs } from '@orpc/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
 import {
-  buildMcpToolDefinitions,
+  buildMcpCatalog,
   createCampusPilotMcpHandler,
   createCampusPilotMcpServer,
-  normalizeMcpAuthRequest,
-  type McpToolDefinition,
+  type McpCatalog,
 } from './mcp';
 
 vi.mock('@campuspilot/auth/server', () => ({
   createAuth: vi.fn(),
 }));
+
+/** Synthetic procedures carry the same metadata type as CampusPilot's. */
+const os = baseOs.$meta<ProcedureMeta>({});
+
+function mcpMeta(overrides: Partial<McpProcedureMeta> = {}): ProcedureMeta {
+  return {
+    mcp: {
+      exposure: 'core',
+      access: 'read',
+      destructive: false,
+      module: 'system',
+      ...overrides,
+    },
+  };
+}
 
 type ConnectedMcp = {
   client: Client;
@@ -33,14 +51,12 @@ function asContext(value: unknown): Context {
 }
 
 async function connectMcp(
-  tools: readonly McpToolDefinition[],
+  catalog: McpCatalog,
   context: Context,
-  headers = new Headers(),
   reportError = vi.fn(),
 ): Promise<ConnectedMcp> {
   const server = createCampusPilotMcpServer({
-    tools,
-    headers,
+    catalog,
     createContext: async () => context,
     reportError,
   });
@@ -73,59 +89,10 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-describe('normalizeMcpAuthRequest', () => {
-  it('maps a bearer API key without mutating the original request', async () => {
-    const original = new Request('http://localhost/api/mcp', {
-      method: 'POST',
-      headers: { authorization: 'Bearer cp_user_key' },
-      body: '{"jsonrpc":"2.0"}',
-    });
-
-    const normalized = normalizeMcpAuthRequest(original);
-
-    expect(normalized).not.toBe(original);
-    expect(normalized.headers.get('x-api-key')).toBe('cp_user_key');
-    expect(normalized.headers.get('authorization')).toBe(
-      'Bearer cp_user_key',
-    );
-    expect(original.headers.has('x-api-key')).toBe(false);
-    expect(await normalized.text()).toBe('{"jsonrpc":"2.0"}');
-    expect(await original.text()).toBe('{"jsonrpc":"2.0"}');
-  });
-
-  it('preserves an explicit API-key header over bearer authorization', () => {
-    const normalized = normalizeMcpAuthRequest(
-      new Request('http://localhost/api/mcp', {
-        headers: {
-          authorization: 'Bearer cp_bearer_key',
-          'x-api-key': 'cp_explicit_key',
-        },
-      }),
-    );
-
-    expect(normalized.headers.get('x-api-key')).toBe('cp_explicit_key');
-  });
-
-  it.each([undefined, '', 'Basic abc', 'Bearer   '])(
-    'does not invent an API-key header for malformed authorization %s',
-    (authorization) => {
-      const headers = new Headers();
-      if (authorization !== undefined) {
-        headers.set('authorization', authorization);
-      }
-
-      const normalized = normalizeMcpAuthRequest(
-        new Request('http://localhost/api/mcp', { headers }),
-      );
-
-      expect(normalized.headers.has('x-api-key')).toBe(false);
-    },
-  );
-});
-
-describe('buildMcpToolDefinitions', () => {
+describe('buildMcpCatalog', () => {
   it('discovers nested and lazy procedures exactly once', async () => {
     const ping = os
+      .meta(mcpMeta())
       .route({
         summary: 'Ping',
         description: 'Return a public ping response.',
@@ -133,6 +100,7 @@ describe('buildMcpToolDefinitions', () => {
       })
       .handler(() => 'pong');
     const echo = os
+      .meta(mcpMeta())
       .route({
         summary: 'Echo',
         description: 'Return the supplied message.',
@@ -145,12 +113,12 @@ describe('buildMcpToolDefinitions', () => {
       nested: lazy(async () => ({ default: { echo } })),
     };
 
-    const tools = await buildMcpToolDefinitions(router);
+    const { core } = await buildMcpCatalog(router);
 
-    expect(tools.map(({ name }) => name)).toEqual(['ping', 'nested.echo']);
-    expect(new Set(tools.map(({ name }) => name)).size).toBe(tools.length);
+    expect(core.map(({ name }) => name)).toEqual(['ping', 'nested.echo']);
+    expect(new Set(core.map(({ name }) => name)).size).toBe(core.length);
     expect(
-      tools.every(
+      core.every(
         ({ description, inputSchema, title }) =>
           title.length > 0 &&
           description.length > 0 &&
@@ -162,6 +130,7 @@ describe('buildMcpToolDefinitions', () => {
   it('rejects procedures that cannot become self-describing MCP tools', async () => {
     const missingMetadata = os.handler(() => 'no metadata');
     const scalarInput = os
+      .meta(mcpMeta())
       .route({
         summary: 'Scalar',
         description: 'Uses an unsupported scalar input.',
@@ -170,36 +139,81 @@ describe('buildMcpToolDefinitions', () => {
       .input(z.string())
       .handler(({ input }) => input);
 
-    await expect(
-      buildMcpToolDefinitions({ missingMetadata }),
-    ).rejects.toThrow('summary and description');
-    await expect(buildMcpToolDefinitions({ scalarInput })).rejects.toThrow(
+    const missingSummary = os.meta(mcpMeta()).handler(() => 'no summary');
+
+    await expect(buildMcpCatalog({ missingMetadata })).rejects.toThrow(
+      'missingMetadata must declare .meta({ mcp',
+    );
+    await expect(buildMcpCatalog({ missingSummary })).rejects.toThrow(
+      'summary and description',
+    );
+    await expect(buildMcpCatalog({ scalarInput })).rejects.toThrow(
       'top-level Zod object',
     );
   });
 
-  it('covers every appRouter leaf while excluding direct binary upload handlers', async () => {
-    vi.stubEnv('SKIP_ENV_VALIDATION', 'true');
-    const { appRouter } = await import('@campuspilot/api/routers/index');
+  it('fails while building the catalog, naming the procedure and field that has no JSON Schema', async () => {
+    const listPayments = os
+      .meta(mcpMeta())
+      .route({
+        summary: 'List payments',
+        description: 'Uses a Date input that JSON clients cannot send.',
+        tags: ['Test'],
+      })
+      .input(
+        z.object({
+          schoolId: z.string(),
+          filters: z.object({ receivedFrom: z.date().optional() }).optional(),
+        }),
+      )
+      .handler(() => []);
 
-    const tools = await buildMcpToolDefinitions(appRouter);
-    const names = tools.map(({ name }) => name);
+    await expect(
+      buildMcpCatalog({ school: { listPayments } }),
+    ).rejects.toThrow(
+      /school\.listPayments .* at filters\.receivedFrom: Date cannot be represented/,
+    );
+  });
 
-    expect(names).toContain('healthCheck');
-    expect(names).toContain('auth.setPassword');
-    expect(names).toContain('school.getLogo');
-    expect(names).toContain('school.listMembers');
-    expect(names).toContain('school.activateSession');
-    expect(names).toContain('systemAdmin.listSchools');
-    expect(names).not.toContain('school.uploadLogo');
-    expect(names).not.toContain('auth.uploadProfileImage');
-    expect(names).not.toContain('auth.getProfileImage');
+  it('splits core from advanced tools and leaves hidden procedures out', async () => {
+    const handler = () => 'ok';
+    const catalog = await buildMcpCatalog({
+      listThings: os.meta(mcpMeta()).route({ summary: 'List', description: 'List things.' }).handler(handler),
+      deleteThing: os
+        .meta(mcpMeta({ exposure: 'advanced', access: 'write', destructive: true }))
+        .route({ summary: 'Delete', description: 'Delete a thing.' })
+        .handler(handler),
+      probe: os.meta(mcpMeta({ exposure: 'hidden' })).handler(handler),
+    });
+
+    expect(catalog.core.map(({ name }) => name)).toEqual(['listThings']);
+    expect(catalog.advanced.map(({ name }) => name)).toEqual(['deleteThing']);
+    expect([...catalog.advancedByName.keys()]).toEqual(['deleteThing']);
+  });
+
+  it('rejects contradictory or unknown metadata', async () => {
+    const readButDestructive = os
+      .meta(mcpMeta({ destructive: true }))
+      .route({ summary: 'Read', description: 'Reads.' })
+      .handler(() => 'ok');
+    const unknownModule = os
+      .meta({ mcp: { ...mcpMeta().mcp!, module: 'weather' as never } })
+      .route({ summary: 'Read', description: 'Reads.' })
+      .handler(() => 'ok');
+
+    await expect(buildMcpCatalog({ readButDestructive })).rejects.toThrow(
+      'cannot be both read-only and destructive',
+    );
+    await expect(buildMcpCatalog({ unknownModule })).rejects.toThrow(
+      'invalid MCP metadata',
+    );
   });
 });
 
 describe('MCP tool execution', () => {
   it('initializes, lists, and calls tools through stateless Streamable HTTP', async () => {
     const procedure = os
+      .meta(mcpMeta())
       .route({
         summary: 'HTTP echo',
         description: 'Echo a value through the HTTP MCP transport.',
@@ -207,20 +221,19 @@ describe('MCP tool execution', () => {
       })
       .input(z.object({ value: z.string() }))
       .handler(({ input }) => input);
-    const tools = buildMcpToolDefinitions({ httpEcho: procedure });
-    const observedHeaders: Headers[] = [];
+    const catalog = buildMcpCatalog({ httpEcho: procedure });
+    const servedRequests: boolean[] = [];
     const handler = createCampusPilotMcpHandler({
-      tools,
-      createContext: async (headers) => {
-        observedHeaders.push(headers);
-        return asContext({});
+      catalog,
+      currentContext: () => {
+        servedRequests.push(true);
+        return asContext({ principal: { authMethod: 'apiKey' } });
       },
       reportError: vi.fn(),
     });
     const transport = new StreamableHTTPClientTransport(
       new URL('http://localhost/api/mcp'),
       {
-        authProvider: { token: async () => 'cp_transport_key' },
         fetch: async (input, init) =>
           handler.fetch(new Request(input, init)),
       },
@@ -243,15 +256,81 @@ describe('MCP tool execution', () => {
 
     expect(listed.tools.map(({ name }) => name)).toEqual(['httpEcho']);
     expect(JSON.parse(textContent(result))).toEqual({ value: 'works' });
-    expect(observedHeaders).toHaveLength(1);
-    expect(observedHeaders[0]?.get('authorization')).toBe(
-      'Bearer cp_transport_key',
-    );
-    expect(observedHeaders[0]?.get('x-api-key')).toBe('cp_transport_key');
+    expect(servedRequests.length).toBeGreaterThan(0);
+  });
+
+  it('fails closed when a request reaches the handler without the auth gate', async () => {
+    const reportError = vi.fn();
+    const handler = createCampusPilotMcpHandler({
+      catalog: buildMcpCatalog({}),
+      currentContext: () => undefined,
+      reportError,
+    });
+    const client = new Client({ name: 'ungated', version: '0.1.0' });
+    openConnections.push({
+      client,
+      close: async () => {
+        await client.close();
+        await handler.close();
+      },
+    });
+
+    await expect(
+      client.connect(
+        new StreamableHTTPClientTransport(new URL('http://localhost/api/mcp'), {
+          fetch: async (input, init) => handler.fetch(new Request(input, init)),
+        }),
+      ),
+    ).rejects.toThrow();
+    expect(reportError).toHaveBeenCalled();
+  });
+
+  it('passes the JSON arguments to the procedure, whose own schema converts ISO strings to Dates', async () => {
+    const procedure = os
+      .meta(mcpMeta())
+      .route({
+        summary: 'Record instant',
+        description: 'Receive an ISO date-time and return what the handler saw.',
+        tags: ['Test'],
+      })
+      .input(
+        z.object({
+          receivedAt: z.iso
+            .datetime({ offset: true })
+            .transform((value) => new Date(value)),
+        }),
+      )
+      .handler(({ input }) => ({
+        isDate: input.receivedAt instanceof Date,
+        epochMs: input.receivedAt.getTime(),
+      }));
+    const catalog = await buildMcpCatalog({ recordInstant: procedure });
+    const { client } = await connectMcp(catalog, asContext({}));
+
+    const listed = await client.listTools();
+    const result = await client.callTool({
+      name: 'recordInstant',
+      arguments: { receivedAt: '2026-04-01T09:30:00+05:30' },
+    });
+    const invalid = await client.callTool({
+      name: 'recordInstant',
+      arguments: { receivedAt: 'yesterday' },
+    });
+
+    expect(listed.tools[0]?.inputSchema.properties).toMatchObject({
+      receivedAt: { type: 'string', format: 'date-time' },
+    });
+    expect(JSON.parse(textContent(result))).toEqual({
+      isDate: true,
+      epochMs: Date.parse('2026-04-01T04:00:00.000Z'),
+    });
+    expect(invalid.isError).toBe(true);
+    expect(textContent(invalid)).toContain('Input validation error');
   });
 
   it('lists and calls a public procedure with its JSON result', async () => {
     const procedure = os
+      .meta(mcpMeta())
       .route({
         summary: 'Public greeting',
         description: 'Return a public greeting.',
@@ -259,8 +338,8 @@ describe('MCP tool execution', () => {
       })
       .input(z.object({ name: z.string() }))
       .handler(({ input }) => ({ greeting: `Hello, ${input.name}` }));
-    const tools = await buildMcpToolDefinitions({ publicGreeting: procedure });
-    const { client } = await connectMcp(tools, asContext({}));
+    const catalog = await buildMcpCatalog({ publicGreeting: procedure });
+    const { client } = await connectMcp(catalog, asContext({}));
 
     const listed = await client.listTools();
     const result = await client.callTool({
@@ -280,6 +359,7 @@ describe('MCP tool execution', () => {
 
   it('retains protected-procedure behavior with and without a session', async () => {
     const procedure = protectedProcedure
+      .meta(mcpMeta())
       .route({
         summary: 'Read identity',
         description: 'Return the authenticated user identifier.',
@@ -287,11 +367,17 @@ describe('MCP tool execution', () => {
       })
       .input(z.object({}))
       .handler(({ context }) => ({ userId: context.session.user.id }));
-    const tools = await buildMcpToolDefinitions({ readIdentity: procedure });
-    const anonymous = await connectMcp(tools, asContext({ session: null }));
+    const catalog = await buildMcpCatalog({ readIdentity: procedure });
+    const anonymous = await connectMcp(
+      catalog,
+      asContext({ session: null, principal: { authMethod: 'anonymous' } }),
+    );
     const authenticated = await connectMcp(
-      tools,
-      asContext({ session: { user: { id: 'user-1' } } }),
+      catalog,
+      asContext({
+        session: { user: { id: 'user-1' } },
+        principal: { authMethod: 'apiKey' },
+      }),
     );
 
     const denied = await anonymous.client.callTool({
@@ -310,10 +396,43 @@ describe('MCP tool execution', () => {
     expect(JSON.parse(textContent(allowed))).toEqual({ userId: 'user-1' });
   });
 
+  it('enforces OAuth scopes in the procedure middleware by the procedure’s access', async () => {
+    const write = protectedProcedure
+      .meta(mcpMeta({ access: 'write', destructive: false }))
+      .route({ summary: 'Write', description: 'Create something.' })
+      .handler(() => ({ ok: true }));
+    const read = protectedProcedure
+      .meta(mcpMeta())
+      .route({ summary: 'Read', description: 'Read something.' })
+      .handler(() => ({ ok: true }));
+    const oauthContext = (scopes: string[]) =>
+      asContext({
+        session: { user: { id: 'user-1' } },
+        principal: {
+          authMethod: 'oauth',
+          oauthGrant: { clientId: 'client', scopes, grantId: 'grant' },
+        },
+      });
+
+    await expect(
+      call(write, undefined, { context: oauthContext(['mcp:read']) }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(
+      call(write, undefined, { context: oauthContext(['mcp:read', 'mcp:write']) }),
+    ).resolves.toEqual({ ok: true });
+    await expect(
+      call(read, undefined, { context: oauthContext(['mcp:read']) }),
+    ).resolves.toEqual({ ok: true });
+    await expect(
+      call(read, undefined, { context: oauthContext([]) }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+
   it('preserves ordinary-user and system-admin role behavior', async () => {
     type RoleContext = { session: { user: { role: string } } };
     const adminOnly = os
       .$context<RoleContext>()
+      .meta(mcpMeta())
       .route({
         summary: 'Admin operation',
         description: 'Perform an operation reserved for system administrators.',
@@ -326,13 +445,13 @@ describe('MCP tool execution', () => {
         }
         return { allowed: true };
       });
-    const tools = await buildMcpToolDefinitions({ adminOnly });
+    const catalog = await buildMcpCatalog({ adminOnly });
     const ordinaryContext = { session: { user: { role: 'user' } } };
     const adminContext = { session: { user: { role: 'admin' } } };
     const directOrdinary = call(adminOnly, {}, { context: ordinaryContext });
     const directAdmin = await call(adminOnly, {}, { context: adminContext });
-    const ordinary = await connectMcp(tools, asContext(ordinaryContext));
-    const admin = await connectMcp(tools, asContext(adminContext));
+    const ordinary = await connectMcp(catalog, asContext(ordinaryContext));
+    const admin = await connectMcp(catalog, asContext(adminContext));
 
     await expect(directOrdinary).rejects.toMatchObject({ code: 'FORBIDDEN' });
     expect(directAdmin).toEqual({ allowed: true });
@@ -354,6 +473,7 @@ describe('MCP tool execution', () => {
   it('reports validation failures and hides unexpected error details', async () => {
     const reportError = vi.fn();
     const procedure = os
+      .meta(mcpMeta())
       .route({
         summary: 'Fail safely',
         description: 'Validate input and exercise safe error reporting.',
@@ -368,13 +488,8 @@ describe('MCP tool execution', () => {
         }
         return { ok: true };
       });
-    const tools = await buildMcpToolDefinitions({ failSafely: procedure });
-    const { client } = await connectMcp(
-      tools,
-      asContext({}),
-      new Headers(),
-      reportError,
-    );
+    const catalog = await buildMcpCatalog({ failSafely: procedure });
+    const { client } = await connectMcp(catalog, asContext({}), reportError);
 
     const validationFailure = await client.callTool({
       name: 'failSafely',

@@ -13,6 +13,14 @@ export const authorizationRouter = {
         'Evaluate between one and one hundred ordered authorization requests for the authenticated user.',
       tags: ['Authorization'],
     })
+    .meta({
+      mcp: {
+        exposure: 'hidden',
+        access: 'read',
+        destructive: false,
+        module: 'account',
+      },
+    })
     .input(checkPermissionsInputSchema)
     .output(checkPermissionsOutputSchema)
     .handler(async ({ context, input, signal }) => ({

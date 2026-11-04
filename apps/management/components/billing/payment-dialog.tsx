@@ -84,7 +84,7 @@ export function PaymentDialog(props: FinanceDialogBaseProps) {
       return;
     }
     const session = sessionFor(props.sessions, value.sessionId);
-    const receivedAt = instantFromCivilDateTime(value.receivedAt, session.timeZone);
+    const receivedAt = instantFromCivilDateTime(value.receivedAt, session.timeZone).toISOString();
     const command = { schoolId: props.schoolId, admissionId: props.admissionId, sessionId: session.id, currency: session.currency, amountMinor: decimalToMinor(value.amount, session.currency), method: value.method, receivedAt, effectiveAt: receivedAt, payerName: value.payerName.trim() || null, externalReference: value.reference.trim() || null, note: value.note.trim() || null, ...(canRecordAdjustment && value.addDiscount ? { discount: { amountMinor: decimalToMinor(value.discountAmount, session.currency), reasonCode: value.discountReasonCode.trim(), reasonNote: value.discountReasonNote.trim() } } : {}) };
     try {
       const input = { ...command, idempotencyKey: stableKey(keyRef, command) };

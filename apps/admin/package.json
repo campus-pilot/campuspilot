@@ -9,7 +9,7 @@
     "check-types": "tsc --noEmit"
   },
   "dependencies": {
-    "@better-auth/api-key": "^1.7.1",
+    "@better-auth/api-key": "^1.7.16",
     "@campuspilot/api": "workspace:*",
     "@campuspilot/auth": "workspace:*",
     "@campuspilot/components": "workspace:*",

@@ -34,6 +34,14 @@ export const schoolExamStudentRouter = {
         'Paginated classes with saved exam plans, enrolled student counts, sections, subject/mode counts and lifecycle states.',
       ),
     )
+    .meta({
+      mcp: {
+        exposure: 'advanced',
+        access: 'read',
+        destructive: false,
+        module: 'exams',
+      },
+    })
     .input(dto.listExamClassesInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_EXAM_PLANS))
     .output(dto.listExamClassesOutputSchema)
@@ -143,6 +151,14 @@ export const schoolExamStudentRouter = {
         'Read a paginated registered class roster with explicit section and name filters and saved/approved subject progress, ordered by name then student ID.',
       ),
     )
+    .meta({
+      mcp: {
+        exposure: 'advanced',
+        access: 'read',
+        destructive: false,
+        module: 'exams',
+      },
+    })
     .input(dto.listExamStudentsInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_EXAM_RESULTS))
     .output(dto.listExamStudentsOutputSchema)
@@ -200,6 +216,14 @@ export const schoolExamStudentRouter = {
         'Read all subject scores and snapshots, shared attendance/activities, section, student identity and current assessment configuration for one enrolled student.',
       ),
     )
+    .meta({
+      mcp: {
+        exposure: 'advanced',
+        access: 'read',
+        destructive: false,
+        module: 'exams',
+      },
+    })
     .input(dto.examStudentScopeSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_EXAM_RESULTS))
     .output(dto.studentExamWorkspaceSchema)
@@ -220,6 +244,14 @@ export const schoolExamStudentRouter = {
         'Atomically save every subject plus one student-wide attendance/activity assessment. Explicit approved=true requires assigned class teacher or school exam administrator; changing any approved component requires elevated revision access.',
       ),
     )
+    .meta({
+      mcp: {
+        exposure: 'advanced',
+        access: 'write',
+        destructive: true,
+        module: 'exams',
+      },
+    })
     .input(dto.saveStudentExamInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.WRITE_EXAM_RESULTS))
     .use(requireExamResultPermissions)
@@ -240,6 +272,14 @@ export const schoolExamStudentRouter = {
         'Read the explicitly configured working-day limit for student-wide attendance. Legacy subject working days are independent and are never inferred.',
       ),
     )
+    .meta({
+      mcp: {
+        exposure: 'advanced',
+        access: 'read',
+        destructive: false,
+        module: 'exams',
+      },
+    })
     .input(dto.examScopeSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_EXAM_PLANS))
     .output(z.object({ totalWorkingDays: z.number().int().nullable() }))
@@ -262,6 +302,14 @@ export const schoolExamStudentRouter = {
         'School exam administrators configure one working-day limit while result entry is open. Reject limits below existing attendance and preserve subject configuration.',
       ),
     )
+    .meta({
+      mcp: {
+        exposure: 'advanced',
+        access: 'write',
+        destructive: true,
+        module: 'exams',
+      },
+    })
     .input(dto.examAssessmentSettingsSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.UPDATE_EXAM_PLAN))
     .output(z.object({ totalWorkingDays: z.number().int().nullable() }))
@@ -328,6 +376,14 @@ export const schoolExamStudentRouter = {
         'Change all subject plans together. Completion requires approved subject results for every registered enrollment and reviewed enabled student-wide assessments. Reopen preserves all saved values and approvals; also opens legacy draft/approved plans without per-subject approval.',
       ),
     )
+    .meta({
+      mcp: {
+        exposure: 'advanced',
+        access: 'write',
+        destructive: true,
+        module: 'exams',
+      },
+    })
     .input(dto.examLifecycleInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.TRANSITION_EXAM_PLAN))
     .output(z.object({ updatedCount: z.number().int().positive() }))

@@ -10,6 +10,8 @@
     "test": "tsx --tsconfig tsconfig.exam-tests.json --test components/**/*.test.ts components/**/*.test.tsx"
   },
   "dependencies": {
+    "@better-auth/api-key": "^1.7.16",
+    "@better-auth/oauth-provider": "^1.7.16",
     "@campuspilot/api": "workspace:*",
     "@campuspilot/auth": "workspace:*",
     "@campuspilot/components": "workspace:*",

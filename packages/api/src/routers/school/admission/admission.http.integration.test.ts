@@ -1,11 +1,11 @@
 import { GetObjectCommand } from '@aws-sdk/client-s3';
-import { db } from '@campuspilot/db';
 import { MAX_ADMISSION_DOCUMENT_SIZE_BYTES } from '@campuspilot/db/schema/jsonb/admission-config';
 import { env } from '@campuspilot/env/server';
 import { getS3Client } from '@campuspilot/s3/client';
 import { describe, expect, it } from 'vitest';
 
 import {
+  createHandlerContext,
   createSchoolStaffSession,
   createTestAdmission,
   createTestSchool,
@@ -41,7 +41,7 @@ describe('admission document HTTP handlers', () => {
     const admission = await createTestAdmission({ schoolId: school.id });
     const manager = await createSchoolStaffSession(school.id, [{ role: 'manager', meta: null }]);
     const teacher = await createSchoolStaffSession(school.id, [{ role: 'teacher', meta: { classIds: [] } }]);
-    const context = { db, headers: new Headers(), session: manager.session };
+    const context = createHandlerContext(manager.session);
     const baseInput = { schoolId: school.id, admissionId: admission.id, documentValue: 'aadhaar-card' };
 
     const firstResponse = await handleAdmissionDocumentUpload(
@@ -82,7 +82,7 @@ describe('admission document HTTP handlers', () => {
     expect(Buffer.from(await stored.Body!.transformToByteArray()).toString()).toBe('%PDF-1.7 front');
 
     const readResponse = await handleAdmissionDocumentRead(
-      { db, headers: new Headers(), session: teacher.session },
+      createHandlerContext(teacher.session),
       { schoolId: school.id, admissionId: admission.id, fileId: file.id },
     );
     expect(readResponse.status).toBe(302);
@@ -101,7 +101,7 @@ describe('admission document HTTP handlers', () => {
     const school = await createTestSchool();
     const admission = await createTestAdmission({ schoolId: school.id });
     const principal = await createSchoolStaffSession(school.id, [{ role: 'principal', meta: null }]);
-    const context = { db, headers: new Headers(), session: principal.session };
+    const context = createHandlerContext(principal.session);
     for (let index = 0; index < 10; index += 1) {
       const response = await handleAdmissionDocumentUpload(
         uploadRequest(`document-${index}`, `document-${index}.txt`, 'text/plain'),
@@ -124,16 +124,16 @@ describe('admission document HTTP handlers', () => {
     const inactiveAdmission = await createTestAdmission({ schoolId: school.id, registered: false });
     const manager = await createSchoolStaffSession(school.id, [{ role: 'manager', meta: null }]);
     const teacher = await createSchoolStaffSession(school.id, [{ role: 'teacher', meta: { classIds: [] } }]);
-    const context = { db, headers: new Headers(), session: manager.session };
+    const context = createHandlerContext(manager.session);
     const anonymous = await handleAdmissionPhotoUpload(
       photoRequest(),
-      { db, headers: new Headers(), session: null },
+      createHandlerContext(null),
       { schoolId: school.id, admissionId: admission.id },
     );
     expect(anonymous.status).toBe(401);
     const denied = await handleAdmissionPhotoUpload(
       photoRequest(),
-      { db, headers: new Headers(), session: teacher.session },
+      createHandlerContext(teacher.session),
       { schoolId: school.id, admissionId: admission.id },
     );
     expect(denied.status).toBe(403);
@@ -149,7 +149,7 @@ describe('admission document HTTP handlers', () => {
     expect(Buffer.from(await stored.Body!.transformToByteArray())).toEqual(VALID_PNG_BYTES);
 
     const read = await handleAdmissionPhotoRead(
-      { db, headers: new Headers(), session: teacher.session },
+      createHandlerContext(teacher.session),
       { schoolId: school.id, admissionId: admission.id },
     );
     expect(read.status).toBe(302);
@@ -172,14 +172,14 @@ describe('admission document HTTP handlers', () => {
 
     const denied = await handleAdmissionDocumentUpload(
       uploadRequest('notes', 'notes.txt', 'text/plain'),
-      { db, headers: new Headers(), session: teacher.session },
+      createHandlerContext(teacher.session),
       input,
     );
     expect(denied.status).toBe(403);
 
     const oversized = await handleAdmissionDocumentUpload(
       uploadRequest(new Uint8Array(MAX_ADMISSION_DOCUMENT_SIZE_BYTES + 1), 'large.bin', 'application/octet-stream'),
-      { db, headers: new Headers(), session: principal.session },
+      createHandlerContext(principal.session),
       input,
     );
     expect(oversized.status).toBe(413);

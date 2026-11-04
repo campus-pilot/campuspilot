@@ -14,14 +14,23 @@
 # MCP exposure
 
 - Every oRPC procedure must define `.route({ summary, description, tags })` with a useful human-readable summary and description. This metadata powers both OpenAPI documentation and automatic MCP tool discovery.
-- Register new procedures only in the normal application router. Every leaf under `appRouter` is exposed automatically as an MCP tool using its dot-joined router path; never add separate per-procedure MCP registration.
-- User-owned API keys must work as either `x-api-key: <key>` or `Authorization: Bearer <key>` across RPC, OpenAPI, direct authenticated handlers, and MCP. If both are supplied, the explicit `x-api-key` value takes precedence.
+- Register new procedures only in the normal application router; never add separate per-procedure MCP registration. Every leaf under `appRouter` must declare `.meta({ mcp: { exposure, access, destructive, module } })` (types in `src/mcp-metadata.ts`); the MCP catalog fails to build otherwise. Tools use their dot-joined router path as the name.
+  - `exposure`: `core` (listed directly; everyday work of principals, managers, teachers and the finance desk), `advanced` (setup, configuration, lifecycle transitions, deletion/reversal, bulk or corrective money operations, maintenance, platform administration, large rarely used inputs; reached through the meta tools), or `hidden` (no agent value or must stay a human action; still served over RPC/OpenAPI). Exposure never decides who may call a tool; OPA does. Keep `core` within the tested budget (36 tools, 38k characters for tools/list); promoting a tool means demoting another or raising the budget deliberately.
+  - `access`: `read` only if the handler never changes persisted state; otherwise `write`. Decide by reading the handler and the helpers it calls, not from the name.
+  - `destructive`: `true` when the procedure may overwrite, remove or cancel existing data (update, upsert, delete, reverse, reorder, replace a selection, change an existing record's state); `false` for reads and purely additive writes.
+  - `module`: the functional area used to filter the advanced index.
+- The four meta tools (`listAdvancedTools`, `describeAdvancedTools`, `runAdvancedReadTool`, `runAdvancedWriteTool`) are MCP-only and live in `apps/server/src/mcp-meta-tools.ts`. The runners accept only advanced tools of their own access class.
+- Give input fields a one-sentence `.describe()` when the name alone does not say what to send or where to get it (for example slugs, minor-unit amounts, idempotency keys, cursors). Every description is paid for in model tokens, so do not describe self-explanatory fields.
+- User-owned API keys must work as either `x-api-key: <key>` or `Authorization: Bearer <key>` across RPC, OpenAPI, direct authenticated handlers, and MCP. If both are supplied, the explicit `x-api-key` value takes precedence. On MCP a Bearer value is first verified as a CampusPilot OAuth access token and only then as an API key; never decide by prefix.
 - An MCP-exposed procedure must have either no input or a top-level Zod object input schema, because MCP tool arguments are named JSON object properties. Procedure outputs must be JSON-serializable.
+- Every input field must be representable in JSON Schema. Do not accept `z.date()`/`z.coerce.date()`; declare instants as ISO 8601 strings (for finance, `financeInstantInputSchema`) or calendar dates as `YYYY-MM-DD` strings and convert inside the schema. The MCP catalog converts every input once at boot and fails with the procedure and field path otherwise.
 - Direct HTTP handlers that depend on multipart uploads, binary request bodies, streaming mutations, or raw `Request`/`Response` behavior are not part of `appRouter` and do not need MCP exposure. This includes the school logo upload handler.
 
 # Auth route placement
 
 - Every authentication- or account-authentication-related application handler must be implemented as an oRPC procedure under `packages/api/src/router/auth/*.ts`. Do not add one-off auth handlers to `apps/server`.
+- Approved exception (MCP OAuth, decision D4): the OAuth discovery documents (`/.well-known/oauth-protected-resource[/api/mcp]`, `/.well-known/oauth-authorization-server/api/auth`, `/.well-known/openid-configuration/api/auth`) are served by Hono in `apps/server` at the origin root, and the OAuth endpoints (`/api/auth/oauth2/*`, JWKS) are Better Auth endpoints. Protocols fix their URLs and payloads, so they cannot be oRPC procedures. The `/api/mcp` credential gate (`apps/server/src/mcp-auth.ts`) is part of the MCP transport. Application data the OAuth screens need (for example the consent client facts) is still an oRPC procedure here.
+- `/api/mcp` accepts API keys (`x-api-key`, or `Authorization: Bearer` when the bearer value is not a CampusPilot OAuth access token) and OAuth access tokens issued for `MCP_RESOURCE_URL`; it never accepts session cookies. OAuth principals are limited by their grant's scopes (`mcp:read`, `mcp:write`) according to each procedure's `mcp.access`.
 
 # Integration testing with Testcontainers
 
@@ -31,7 +40,7 @@
   - **Redis** (for session and caching storage).
   - **OPA** (mounting `packages/opa/src/policies` for live authorization evaluations).
   - **RustFS** (S3-compatible object storage for files and logos with the `campuspilot` bucket created).
-- Use `createTestClient(session)` from `test/fixtures` to test procedures directly and with full type safety via oRPC's `createRouterClient`:
+- Use `createTestClient(session)` from `test/fixtures` to test procedures directly and with full type safety via oRPC's `createRouterClient`. Its inputs and outputs cross a JSON round trip, so send ISO strings rather than `Date` objects and expect dates back as strings, exactly as an MCP, OpenAPI or curl client would:
   - `createTestClient(null)` for anonymous / public callers.
   - `createTestClient(await createAdminSession())` for platform administrators (`role: 'admin'`).
   - `createTestClient((await createSchoolStaffSession(schoolId, roles)).session)` for tenant-scoped school roles (`principal`, `manager`, `teacher` with class metadata, etc.).

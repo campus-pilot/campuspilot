@@ -29,6 +29,14 @@ export const schoolDashboardRouter = {
         "Read one permission-composed school-session dashboard. Unauthorized domains are returned as null and unauthorized common jobs as false.",
       tags: ["School", "Dashboard"],
     })
+    .meta({
+      mcp: {
+        exposure: "core",
+        access: "read",
+        destructive: false,
+        module: "dashboard",
+      },
+    })
     .input(dashboardInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_SESSION))
     .output(dashboardOutputSchema)

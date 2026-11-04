@@ -51,6 +51,14 @@ export const schoolClassRouter = {
         "List every class in a school in its explicit display order, including section, teacher, subject, and explicitly session-scoped enrollment counts.",
       tags: ["School", "Classes"],
     })
+    .meta({
+      mcp: {
+        exposure: "core",
+        access: "read",
+        destructive: false,
+        module: "classes",
+      },
+    })
     .input(listClassesInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.LIST_CLASSES))
     .use(requireCountSessionPermission)
@@ -149,6 +157,14 @@ export const schoolClassRouter = {
       description: "Get one class by its school and class identifiers.",
       tags: ["School", "Classes"],
     })
+    .meta({
+      mcp: {
+        exposure: "core",
+        access: "read",
+        destructive: false,
+        module: "classes",
+      },
+    })
     .input(classIdInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_CLASS))
     .output(classDtoSchema)
@@ -177,6 +193,14 @@ export const schoolClassRouter = {
       description:
         "Atomically create a class and at least one initial section in a school.",
       tags: ["School", "Classes"],
+    })
+    .meta({
+      mcp: {
+        exposure: "advanced",
+        access: "write",
+        destructive: false,
+        module: "classes",
+      },
     })
     .input(createClassInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.CREATE_CLASS))
@@ -229,6 +253,14 @@ export const schoolClassRouter = {
       description:
         "Update a class slug or label. Any role in the school may perform this mutation.",
       tags: ["School", "Classes"],
+    })
+    .meta({
+      mcp: {
+        exposure: "advanced",
+        access: "write",
+        destructive: true,
+        module: "classes",
+      },
     })
     .input(updateClassInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.UPDATE_CLASS))
@@ -303,6 +335,14 @@ export const schoolClassRouter = {
         "Replace the complete class display order for a school. Requires permission to reorder classes.",
       tags: ["School", "Classes"],
     })
+    .meta({
+      mcp: {
+        exposure: "advanced",
+        access: "write",
+        destructive: true,
+        module: "classes",
+      },
+    })
     .input(reorderClassesInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.REORDER_CLASSES))
     .output(reorderClassesOutputSchema)
@@ -368,6 +408,14 @@ export const schoolClassRouter = {
         "Replace explicitly supplied class attributes or subject configuration. Any role in the school may perform this mutation.",
       tags: ["School", "Classes"],
     })
+    .meta({
+      mcp: {
+        exposure: "advanced",
+        access: "write",
+        destructive: true,
+        module: "classes",
+      },
+    })
     .input(updateClassConfigurationInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.UPDATE_CLASS_CONFIGURATION))
     .output(classDtoSchema)
@@ -394,6 +442,14 @@ export const schoolClassRouter = {
       description:
         "Delete a class and its sections from a school in one transaction.",
       tags: ["School", "Classes"],
+    })
+    .meta({
+      mcp: {
+        exposure: "advanced",
+        access: "write",
+        destructive: true,
+        module: "classes",
+      },
     })
     .input(classIdInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.DELETE_CLASS))

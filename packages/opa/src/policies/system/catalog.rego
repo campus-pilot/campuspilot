@@ -31,3 +31,27 @@ actions contains {
   "key": "DELETE_SCHOOL",
   "resourceKind": "system",
 } if { true }
+
+actions contains {
+  "id": "system.oauth_client.list",
+  "key": "LIST_OAUTH_CLIENTS",
+  "resourceKind": "system",
+} if { true }
+
+actions contains {
+  "id": "system.oauth_client.create",
+  "key": "CREATE_OAUTH_CLIENT",
+  "resourceKind": "system",
+} if { true }
+
+actions contains {
+  "id": "system.oauth_client.update",
+  "key": "UPDATE_OAUTH_CLIENT",
+  "resourceKind": "system",
+} if { true }
+
+actions contains {
+  "id": "system.oauth_client.delete",
+  "key": "DELETE_OAUTH_CLIENT",
+  "resourceKind": "system",
+} if { true }

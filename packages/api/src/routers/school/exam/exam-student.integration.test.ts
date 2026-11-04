@@ -279,7 +279,7 @@ describe('student-first examination lifecycle', () => {
       await client.school.transitionExam({ ...next, status: 'active' });
       expect(await teacher.school.getExamOverview(next)).toMatchObject({
         status: 'active',
-        startedAt: expect.any(Date),
+        startedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
         completedAt: null,
       });
       await expect(
@@ -291,8 +291,8 @@ describe('student-first examination lifecycle', () => {
       await client.school.transitionExam({ ...next, status: 'completed' });
       expect(await client.school.getExamOverview(next)).toMatchObject({
         status: 'completed',
-        startedAt: expect.any(Date),
-        completedAt: expect.any(Date),
+        startedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
+        completedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
       });
       expect(
         (await client.school.listExams(scope)).items.find(

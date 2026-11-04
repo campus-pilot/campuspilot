@@ -1,17 +1,17 @@
 import type { Role, RoleMeta } from '@campuspilot/db/schema/jsonb/role';
 
-import type { AppRouterClient } from '../../src/routers';
 import {
   createAdminSession,
   createRegularUserSession,
   createSchoolStaffSession,
   createTestClient,
+  type TestClient,
   type UserSession,
 } from '../fixtures';
 
 export type FinanceActor = {
   session: UserSession;
-  client: AppRouterClient;
+  client: TestClient;
 };
 
 export type FinanceActors = {
@@ -23,7 +23,7 @@ export type FinanceActors = {
   outsiderManager: FinanceActor;
   platformAdmin: FinanceActor;
   regularUser: FinanceActor;
-  anonymous: { session: null; client: AppRouterClient };
+  anonymous: { session: null; client: TestClient };
 };
 
 async function createSchoolActor(

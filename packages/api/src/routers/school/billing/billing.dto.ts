@@ -4,7 +4,7 @@ import {
   createListInputSchema,
   createPaginatedOutputSchema,
 } from "../../../paginations";
-import { financeIntegerStringSchema } from "./transport";
+import { financeInstantInputSchema, financeIntegerStringSchema } from "./transport";
 import { isValidLocalDate } from "./period";
 
 export const financeLocalDateSchema = z
@@ -12,7 +12,12 @@ export const financeLocalDateSchema = z
   .regex(/^\d{4}-\d{2}-\d{2}$/, "Expected a local date in YYYY-MM-DD format")
   .refine(isValidLocalDate, "Expected a real local calendar date");
 
-const idempotencyKeySchema = z.string().trim().min(1).max(200);
+const idempotencyKeySchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(200)
+  .describe("Unique per operation; resend the same key to retry safely.");
 const reasonSchema = z.string().trim().min(1).max(1000);
 const uniqueIdsSchema = z
   .array(z.string().min(1))
@@ -208,8 +213,8 @@ export const listBillingRunsInputSchema = createListInputSchema({
       periodKey: z.string().min(1).optional(),
       kind: z.enum(["regular", "supplemental"]).optional(),
       recordedBy: z.string().min(1).optional(),
-      recordedFrom: z.coerce.date().optional(),
-      recordedTo: z.coerce.date().optional(),
+      recordedFrom: financeInstantInputSchema.optional(),
+      recordedTo: financeInstantInputSchema.optional(),
     })
     .optional(),
   orderBy: z
@@ -326,7 +331,7 @@ export const createManualBillInputSchema = z.object({
 const reversalShape = {
   schoolId: z.string().min(1),
   sessionId: z.string().min(1),
-  effectiveAt: z.coerce.date(),
+  effectiveAt: financeInstantInputSchema,
   reason: reasonSchema,
   idempotencyKey: idempotencyKeySchema,
 };

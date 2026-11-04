@@ -54,6 +54,14 @@ export const admissionFinanceRouter = {
         'Read restricted admission-level pricing overrides for one explicit academic session.',
       tags: ['School', 'Billing'],
     })
+    .meta({
+      mcp: {
+        exposure: 'advanced',
+        access: 'read',
+        destructive: false,
+        module: 'billing',
+      },
+    })
     .input(admissionFinanceInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_ADMISSION_FINANCE))
     .output(admissionFinanceDtoSchema)
@@ -99,6 +107,14 @@ export const admissionFinanceRouter = {
       description:
         'Replace or remove admission-level pricing overrides for one explicit active academic session while preserving every other session.',
       tags: ['School', 'Billing'],
+    })
+    .meta({
+      mcp: {
+        exposure: 'advanced',
+        access: 'write',
+        destructive: true,
+        module: 'billing',
+      },
     })
     .input(updateAdmissionFinanceInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.UPDATE_ADMISSION_FINANCE))

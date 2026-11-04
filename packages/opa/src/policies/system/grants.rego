@@ -29,6 +29,26 @@ grants contains {
 
 grants contains {
   "role": "platform.admin",
+  "action": "system.oauth_client.list",
+} if { true }
+
+grants contains {
+  "role": "platform.admin",
+  "action": "system.oauth_client.create",
+} if { true }
+
+grants contains {
+  "role": "platform.admin",
+  "action": "system.oauth_client.update",
+} if { true }
+
+grants contains {
+  "role": "platform.admin",
+  "action": "system.oauth_client.delete",
+} if { true }
+
+grants contains {
+  "role": "platform.admin",
   "action": "school.member.invite",
 } if { true }
 

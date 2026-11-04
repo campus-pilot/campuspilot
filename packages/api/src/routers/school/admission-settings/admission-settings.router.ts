@@ -19,6 +19,14 @@ export const schoolAdmissionSettingsRouter = {
         "Get the school's advisory document types for admissions. These settings do not block admission creation.",
       tags: ["School", "Admission Settings"],
     })
+    .meta({
+      mcp: {
+        exposure: "advanced",
+        access: "read",
+        destructive: false,
+        module: "admissions",
+      },
+    })
     .input(admissionSettingsInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_ADMISSION_SETTINGS))
     .output(admissionSettingsDtoSchema)
@@ -45,6 +53,14 @@ export const schoolAdmissionSettingsRouter = {
       description:
         "Replace the school's advisory admission document types. Existing admissions and attachments are not constrained by this list.",
       tags: ["School", "Admission Settings"],
+    })
+    .meta({
+      mcp: {
+        exposure: "advanced",
+        access: "write",
+        destructive: true,
+        module: "admissions",
+      },
     })
     .input(updateAdmissionSettingsInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.UPDATE_ADMISSION_SETTINGS))

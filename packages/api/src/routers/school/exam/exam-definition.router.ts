@@ -20,6 +20,14 @@ export const schoolExamDefinitionRouter = {
         'Read configured exam definitions, ordered by their explicit display order and slug.',
       ),
     )
+    .meta({
+      mcp: {
+        exposure: 'core',
+        access: 'read',
+        destructive: false,
+        module: 'exams',
+      },
+    })
     .input(dto.listExamsInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_EXAMS))
     .output(dto.listExamsOutputSchema)
@@ -61,6 +69,14 @@ export const schoolExamDefinitionRouter = {
         'Read independent plan-generation count, explicitly controlled examination lifecycle and known start/completion timestamps. Generating a plan never starts the exam.',
       ),
     )
+    .meta({
+      mcp: {
+        exposure: 'core',
+        access: 'read',
+        destructive: false,
+        module: 'exams',
+      },
+    })
     .input(dto.examScopeSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_EXAMS))
     .output(dto.examOverviewSchema)
@@ -79,6 +95,14 @@ export const schoolExamDefinitionRouter = {
         'Read one configured examination in a school session.',
       ),
     )
+    .meta({
+      mcp: {
+        exposure: 'core',
+        access: 'read',
+        destructive: false,
+        module: 'exams',
+      },
+    })
     .input(dto.examScopeSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_EXAMS))
     .output(dto.examDtoSchema)
@@ -96,6 +120,14 @@ export const schoolExamDefinitionRouter = {
         'Read class subjects and assessment modes, attendance settings and co-scholastic areas for the exam workspace.',
       ),
     )
+    .meta({
+      mcp: {
+        exposure: 'advanced',
+        access: 'read',
+        destructive: false,
+        module: 'exams',
+      },
+    })
     .input(dto.examScopeSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_EXAMS))
     .output(dto.examContextDtoSchema)
@@ -128,6 +160,14 @@ export const schoolExamDefinitionRouter = {
         'Add a unique exam slug and definition to an active session. School exam administrators only.',
       ),
     )
+    .meta({
+      mcp: {
+        exposure: 'advanced',
+        access: 'write',
+        destructive: false,
+        module: 'exams',
+      },
+    })
     .input(dto.createExamInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.CREATE_EXAM))
     .output(dto.examDtoSchema)
@@ -166,6 +206,14 @@ export const schoolExamDefinitionRouter = {
         'Edit the name and display order of an exam without changing its stable slug.',
       ),
     )
+    .meta({
+      mcp: {
+        exposure: 'advanced',
+        access: 'write',
+        destructive: true,
+        module: 'exams',
+      },
+    })
     .input(dto.updateExamInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.UPDATE_EXAM))
     .output(dto.examDtoSchema)
@@ -207,6 +255,14 @@ export const schoolExamDefinitionRouter = {
         'Remove an exam definition only after all its plans and optional timetable have been deleted.',
       ),
     )
+    .meta({
+      mcp: {
+        exposure: 'advanced',
+        access: 'write',
+        destructive: true,
+        module: 'exams',
+      },
+    })
     .input(dto.examScopeSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.DELETE_EXAM))
     .output(dto.examDtoSchema)

@@ -304,6 +304,14 @@ export const schoolDocumentRouter = {
         "List the server-owned marketplace for a document type, ordered by name and slug with page pagination.",
       ),
     )
+    .meta({
+      mcp: {
+        exposure: "advanced",
+        access: "read",
+        destructive: false,
+        module: "documents",
+      },
+    })
     .input(dto.listMarketplaceSchema)
     .use(requireDocumentTypePermission(SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES, SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_TEMPLATES))
     .output(dto.listMarketplaceOutputSchema)
@@ -327,6 +335,14 @@ export const schoolDocumentRouter = {
         "Get template source, variable documentation, and a safe preview using synthetic sample data.",
       ),
     )
+    .meta({
+      mcp: {
+        exposure: "advanced",
+        access: "read",
+        destructive: false,
+        module: "documents",
+      },
+    })
     .input(dto.templateScopeSchema.extend({ slug: z.string().min(1).max(100) }))
     .use(requireDocumentTypePermission(SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES, SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_TEMPLATES))
     .output(
@@ -358,6 +374,14 @@ export const schoolDocumentRouter = {
         "Read the school’s immutable active template revision, or null when that document type has not been configured.",
       ),
     )
+    .meta({
+      mcp: {
+        exposure: "advanced",
+        access: "read",
+        destructive: false,
+        module: "documents",
+      },
+    })
     .input(dto.templateScopeSchema)
     .use(requireDocumentTypePermission(SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES, SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_TEMPLATES))
     .output(dto.activeTemplateSchema.nullable())
@@ -387,6 +411,14 @@ export const schoolDocumentRouter = {
         "Copy a server-owned template into an immutable school S3 object and atomically select that revision. Reject stale selection revisions.",
       ),
     )
+    .meta({
+      mcp: {
+        exposure: "advanced",
+        access: "write",
+        destructive: true,
+        module: "documents",
+      },
+    })
     .input(dto.selectTemplateSchema)
     .use(requireDocumentTypePermission(SCHOOL_ACTIONS.MANAGE_DOCUMENT_TEMPLATES, SCHOOL_ACTIONS.MANAGE_FINANCE_DOCUMENT_TEMPLATES))
     .output(dto.activeTemplateSchema)
@@ -418,6 +450,14 @@ export const schoolDocumentRouter = {
         "Validate Handlebars, upload a new immutable S3 blob, and atomically update the school selection with optimistic concurrency.",
       ),
     )
+    .meta({
+      mcp: {
+        exposure: "advanced",
+        access: "write",
+        destructive: true,
+        module: "documents",
+      },
+    })
     .input(dto.saveTemplateSchema)
     .use(requireDocumentTypePermission(SCHOOL_ACTIONS.MANAGE_DOCUMENT_TEMPLATES, SCHOOL_ACTIONS.MANAGE_FINANCE_DOCUMENT_TEMPLATES))
     .output(dto.activeTemplateSchema)
@@ -440,6 +480,14 @@ export const schoolDocumentRouter = {
         "Render unsaved Handlebars source with synthetic data in a sanitized, network-free HTML document. Does not change the selected school template.",
       ),
     )
+    .meta({
+      mcp: {
+        exposure: "advanced",
+        access: "read",
+        destructive: false,
+        module: "documents",
+      },
+    })
     .input(dto.previewTemplateSchema)
     .use(requireDocumentTypePermission(SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES, SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_TEMPLATES))
     .output(z.object({ html: z.string(), contextHelp: z.string() }))
@@ -458,6 +506,14 @@ export const schoolDocumentRouter = {
         "Build authorized live school contexts and preview the selected template revision before generating a PDF. Requires approved results for report cards.",
       ),
     )
+    .meta({
+      mcp: {
+        exposure: "advanced",
+        access: "read",
+        destructive: false,
+        module: "documents",
+      },
+    })
     .input(dto.generateDocumentSchema)
     .use(requireSourceTypePermission(SCHOOL_ACTIONS.GENERATE_DOCUMENTS, SCHOOL_ACTIONS.GENERATE_FINANCE_DOCUMENTS))
     .use(requireSourcePermissions)
@@ -482,6 +538,14 @@ export const schoolDocumentRouter = {
         "Render the selected template against independently validated school data, convert with Gotenberg, and persist the PDF in S3 with an immutable database reference and template provenance.",
       ),
     )
+    .meta({
+      mcp: {
+        exposure: "core",
+        access: "write",
+        destructive: false,
+        module: "documents",
+      },
+    })
     .input(dto.generateDocumentSchema)
     .use(requireSourceTypePermission(SCHOOL_ACTIONS.GENERATE_DOCUMENTS, SCHOOL_ACTIONS.GENERATE_FINANCE_DOCUMENTS))
     .use(requireSourcePermissions)
@@ -549,6 +613,14 @@ export const schoolDocumentRouter = {
         "Page through PDF history using explicit type, session, exam, class, and student filters. Sorting is allowlisted and has a stable ID tie-breaker.",
       ),
     )
+    .meta({
+      mcp: {
+        exposure: "core",
+        access: "read",
+        destructive: false,
+        module: "documents",
+      },
+    })
     .input(dto.listArtifactsSchema)
     .use(requireArtifactListPermission)
     .output(dto.listArtifactsOutputSchema)
@@ -636,6 +708,14 @@ export const schoolDocumentRouter = {
         "Authorize the school and artifact before issuing a five-minute S3 URL. Deleting artifacts cannot be downloaded.",
       ),
     )
+    .meta({
+      mcp: {
+        exposure: "core",
+        access: "read",
+        destructive: false,
+        module: "documents",
+      },
+    })
     .input(dto.artifactScopeSchema)
     .use(requireDocumentTypePermission(SCHOOL_ACTIONS.READ_DOCUMENT_ARTIFACTS, SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_ARTIFACTS))
     .output(z.object({ url: z.url(), expiresIn: z.number().int() }))
@@ -677,6 +757,14 @@ export const schoolDocumentRouter = {
         "Mark the tenant-scoped PDF for deletion, remove its S3 blob, then remove the reference. Failed storage deletion stays visible and can safely be retried. Template revisions are retained for provenance.",
       ),
     )
+    .meta({
+      mcp: {
+        exposure: "advanced",
+        access: "write",
+        destructive: true,
+        module: "documents",
+      },
+    })
     .input(dto.artifactScopeSchema)
     .use(requireDocumentTypePermission(SCHOOL_ACTIONS.DELETE_DOCUMENT_ARTIFACTS, SCHOOL_ACTIONS.DELETE_FINANCE_DOCUMENT_ARTIFACTS))
     .output(z.object({ deleted: z.literal(true) }))

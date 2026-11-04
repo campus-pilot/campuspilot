@@ -114,6 +114,14 @@ export const schoolStudentRouter = {
         "List student enrollments for the explicitly supplied session with pagination, admission search, placement filters, and deterministic sorting.",
       tags: ["School", "Students"],
     })
+    .meta({
+      mcp: {
+        exposure: "core",
+        access: "read",
+        destructive: false,
+        module: "students",
+      },
+    })
     .input(listStudentsInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.LIST_STUDENTS))
     .output(listStudentsOutputSchema)
@@ -226,6 +234,14 @@ export const schoolStudentRouter = {
         "Get one student enrollment by school, explicit session, and student identifiers.",
       tags: ["School", "Students"],
     })
+    .meta({
+      mcp: {
+        exposure: "core",
+        access: "read",
+        destructive: false,
+        module: "students",
+      },
+    })
     .input(studentIdInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_STUDENT))
     .output(studentDtoSchema)
@@ -245,6 +261,14 @@ export const schoolStudentRouter = {
       description:
         "Create a student in an explicit session and class. Principals and managers may enroll throughout their school; a teacher may enroll only into an assigned class.",
       tags: ["School", "Students"],
+    })
+    .meta({
+      mcp: {
+        exposure: "advanced",
+        access: "write",
+        destructive: false,
+        module: "students",
+      },
     })
     .input(createStudentInputSchema)
     // This membership gate prevents non-school users from probing section IDs;
@@ -336,6 +360,14 @@ export const schoolStudentRouter = {
         "Update a student's class, section, or roll number within the explicitly supplied session.",
       tags: ["School", "Students"],
     })
+    .meta({
+      mcp: {
+        exposure: "advanced",
+        access: "write",
+        destructive: true,
+        module: "students",
+      },
+    })
     .input(updateStudentInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.UPDATE_STUDENT))
     .output(studentDtoSchema)
@@ -394,6 +426,14 @@ export const schoolStudentRouter = {
         "Detach a student from class and section in the explicitly supplied session without deleting enrollment history.",
       tags: ["School", "Students"],
     })
+    .meta({
+      mcp: {
+        exposure: "advanced",
+        access: "write",
+        destructive: true,
+        module: "students",
+      },
+    })
     .input(removeStudentFromClassInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.REMOVE_STUDENT_FROM_CLASS))
     .output(studentDtoSchema)
@@ -446,6 +486,14 @@ export const schoolStudentRouter = {
       description:
         "Delete the student row for the explicitly supplied session while retaining the underlying admission.",
       tags: ["School", "Students"],
+    })
+    .meta({
+      mcp: {
+        exposure: "advanced",
+        access: "write",
+        destructive: true,
+        module: "students",
+      },
     })
     .input(studentIdInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.DELETE_STUDENT))

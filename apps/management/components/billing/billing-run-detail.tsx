@@ -258,13 +258,13 @@ function RunReversalForm({
     const effectiveAt = instantFromCivilDateTime(
       parsed.data.effectiveAt,
       timeZone,
-    );
+    ).toISOString();
     const fingerprint = JSON.stringify({
       schoolId,
       sessionId,
       billRunId,
       reason: parsed.data.reason.trim(),
-      effectiveAt: effectiveAt.toISOString(),
+      effectiveAt,
     });
     idempotency.current = idempotencyForDraft(
       idempotency.current,

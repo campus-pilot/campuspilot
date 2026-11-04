@@ -164,6 +164,14 @@ export const schoolSessionFinanceRouter = {
         'Read the finance schema and class-level overrides for one academic session. This restricted DTO is intentionally separate from the general session resource.',
       tags: ['School', 'Session Finance'],
     })
+    .meta({
+      mcp: {
+        exposure: 'advanced',
+        access: 'read',
+        destructive: false,
+        module: 'billing',
+      },
+    })
     .input(schoolSessionFinanceInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_SESSION_FINANCE))
     .output(schoolSessionFinanceDtoSchema)
@@ -211,6 +219,14 @@ export const schoolSessionFinanceRouter = {
       description:
         'Atomically update the restricted finance schema or class-level overrides for the active academic session. Inactive sessions are read-only.',
       tags: ['School', 'Session Finance'],
+    })
+    .meta({
+      mcp: {
+        exposure: 'advanced',
+        access: 'write',
+        destructive: true,
+        module: 'billing',
+      },
     })
     .input(updateSchoolSessionFinanceInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.UPDATE_SESSION_FINANCE))

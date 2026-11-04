@@ -102,3 +102,43 @@ test_admin_cannot_manage_classes_or_sections_without_explicit_grants if {
     }
   }
 }
+
+test_admin_can_manage_oauth_clients if {
+  every action in {
+    "system.oauth_client.list",
+    "system.oauth_client.create",
+    "system.oauth_client.update",
+    "system.oauth_client.delete",
+  } {
+    authorization.allow with input as {
+      "action": action,
+      "subject": {
+        "userId": "user-1",
+        "roleAssignments": [{"role": "platform.admin", "scope": {"kind": "platform"}}],
+      },
+      "resource": {"kind": "system"},
+    }
+  }
+}
+
+test_regular_user_cannot_manage_oauth_clients if {
+  not authorization.allow with input as {
+    "action": "system.oauth_client.create",
+    "subject": {
+      "userId": "user-2",
+      "roleAssignments": [{"role": "platform.user", "scope": {"kind": "platform"}}],
+    },
+    "resource": {"kind": "system"},
+  }
+}
+
+test_school_principal_cannot_manage_oauth_clients if {
+  not authorization.allow with input as {
+    "action": "system.oauth_client.list",
+    "subject": {
+      "userId": "user-3",
+      "roleAssignments": [{"role": "school.principal", "scope": {"kind": "school", "schoolId": "school-1"}}],
+    },
+    "resource": {"kind": "system"},
+  }
+}

@@ -44,7 +44,7 @@ export function RefundDialog(props: FinanceDialogBaseProps) {
     const parsed = schema.safeParse(value);
     if (!parsed.success) return;
     const session = sessionFor(props.sessions, parsed.data.paymentSessionId);
-    const command = { schoolId: props.schoolId, admissionId: props.admissionId, sessionId: parsed.data.paymentSessionId, paymentId: parsed.data.paymentId, amountMinor: decimalToMinor(parsed.data.amount, parsed.data.paymentCurrency), method: parsed.data.method, externalReference: parsed.data.reference.trim() || null, reason: parsed.data.reason, effectiveAt: instantFromCivilDateTime(parsed.data.effectiveAt, session.timeZone) };
+    const command = { schoolId: props.schoolId, admissionId: props.admissionId, sessionId: parsed.data.paymentSessionId, paymentId: parsed.data.paymentId, amountMinor: decimalToMinor(parsed.data.amount, parsed.data.paymentCurrency), method: parsed.data.method, externalReference: parsed.data.reference.trim() || null, reason: parsed.data.reason, effectiveAt: instantFromCivilDateTime(parsed.data.effectiveAt, session.timeZone).toISOString() };
     try { await mutation.mutateAsync({ ...command, idempotencyKey: stableKey(keyRef, command) }); await invalidateFinanceReadModels(queryClient, "refund"); props.onClose(); }
     catch (error) { await auditAmbiguous(keyRef, queryClient); form.setFieldValue("confirming", false); form.setErrorMap({ onSubmit: { fields: {}, form: error instanceof Error ? error.message : "Unable to record this refund." } }); }
   }

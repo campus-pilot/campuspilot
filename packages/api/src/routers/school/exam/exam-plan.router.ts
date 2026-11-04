@@ -35,6 +35,14 @@ export const schoolExamPlanRouter = {
         'Review every school class, subject and configured assessment mode before generating the initial plan. No data is written.',
       ),
     )
+    .meta({
+      mcp: {
+        exposure: 'advanced',
+        access: 'read',
+        destructive: false,
+        module: 'exams',
+      },
+    })
     .input(dto.examScopeSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_EXAM_PLANS))
     .output(dto.examPlanPreviewSchema)
@@ -52,6 +60,14 @@ export const schoolExamPlanRouter = {
         'Atomically create a ready-to-start plan for every configured class subject using its assessment modes and 100 total marks. Reject existing plans, invalid configuration or a changed preview. Timetable creation is a separate step.',
       ),
     )
+    .meta({
+      mcp: {
+        exposure: 'advanced',
+        access: 'write',
+        destructive: false,
+        module: 'exams',
+      },
+    })
     .input(dto.generateExamPlanInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.CREATE_EXAM_PLAN))
     .output(dto.generateExamPlanOutputSchema)
@@ -95,6 +111,14 @@ export const schoolExamPlanRouter = {
         'Read plans for an exam, with independent class and lifecycle status filters, ordered by class, subject and ID.',
       ),
     )
+    .meta({
+      mcp: {
+        exposure: 'advanced',
+        access: 'read',
+        destructive: false,
+        module: 'exams',
+      },
+    })
     .input(dto.listExamPlansInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_EXAM_PLANS))
     .output(dto.listExamPlansOutputSchema)
@@ -150,6 +174,14 @@ export const schoolExamPlanRouter = {
         'Read a plan by its independent school, session, class and plan identifiers.',
       ),
     )
+    .meta({
+      mcp: {
+        exposure: 'advanced',
+        access: 'read',
+        destructive: false,
+        module: 'exams',
+      },
+    })
     .input(dto.planScopeSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_EXAM_PLANS))
     .output(dto.examPlanDtoSchema)
@@ -167,6 +199,14 @@ export const schoolExamPlanRouter = {
         'Create a draft plan with assessment modes derived from the class subject or explicitly customized percentages.',
       ),
     )
+    .meta({
+      mcp: {
+        exposure: 'advanced',
+        access: 'write',
+        destructive: false,
+        module: 'exams',
+      },
+    })
     .input(dto.createExamPlanInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.CREATE_EXAM_PLAN))
     .output(dto.examPlanDtoSchema)
@@ -226,6 +266,14 @@ export const schoolExamPlanRouter = {
         'Edit marks and mode percentages before activation. Editing an approved plan resets it to draft for another review.',
       ),
     )
+    .meta({
+      mcp: {
+        exposure: 'advanced',
+        access: 'write',
+        destructive: true,
+        module: 'exams',
+      },
+    })
     .input(dto.updateExamPlanInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.UPDATE_EXAM_PLAN))
     .output(dto.examPlanDtoSchema)
@@ -303,6 +351,14 @@ export const schoolExamPlanRouter = {
         'Delete a draft or approved exam plan; active and completed plans cannot be deleted.',
       ),
     )
+    .meta({
+      mcp: {
+        exposure: 'advanced',
+        access: 'write',
+        destructive: true,
+        module: 'exams',
+      },
+    })
     .input(dto.planScopeSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.DELETE_EXAM_PLAN))
     .output(dto.examPlanDtoSchema)
@@ -328,6 +384,14 @@ export const schoolExamPlanRouter = {
         'Enforce draft → approved → active → completed, or completed → active to reopen. Completion requires approved results for all currently registered students enrolled in the class.',
       ),
     )
+    .meta({
+      mcp: {
+        exposure: 'advanced',
+        access: 'write',
+        destructive: true,
+        module: 'exams',
+      },
+    })
     .input(dto.transitionExamPlanInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.TRANSITION_EXAM_PLAN))
     .output(dto.examPlanDtoSchema)
