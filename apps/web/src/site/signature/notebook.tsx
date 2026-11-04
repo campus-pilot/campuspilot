@@ -10,7 +10,7 @@
  * `<Notebook leftKicker leftTitle chores rightKicker rightTitle chats roadmap? />`.
  * `NotebookSection` wraps it in a `cp-section` with a `SectionIntro`.
  *
- * Outside the book everything stays /1/1. On phones the pages stack and the
+ * Outside the book everything keeps the site style. On phones the pages stack and the
  * spiral moves to the top. Reduced motion shows the finished, ticked page.
  */
 import { BookOpenCheck, Lock, Sparkles } from "lucide-react";

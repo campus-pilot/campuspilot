@@ -1,6 +1,6 @@
 import type { FaqEntry } from "@/site/ui/faq";
 
-/** Home page FAQ, carried over from the approved /1/1 concept. */
+/** Home page FAQ. */
 export const homeFaqs: readonly FaqEntry[] = [
   {
     question: "Is CampusPilot built for schools in India?",

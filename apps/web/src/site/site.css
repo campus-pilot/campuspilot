@@ -1,6 +1,6 @@
 /*
  * CampusPilot public site — shared foundation (tokens, shell, primitives).
- * Ported from the approved `/1/1` concept: calm black-and-white surfaces with
+ * Calm black-and-white surfaces with
  * the platform primary reserved for primary actions and small accents.
  * Every class is prefixed `cp-`. Loaded once by the `_site` layout route, so it
  * owns `html`/`body` on every site page. Page-specific styles live in each
@@ -2827,7 +2827,7 @@ body {
 }
 
 /* ======================================================================
- * Site primitives added on top of the /1/1 port: page hero, final CTA,
+ * Site primitives on top of the foundation: page hero, final CTA,
  * centered button rows, active nav link. Matches the home hero's type scale.
  * ====================================================================== */
 

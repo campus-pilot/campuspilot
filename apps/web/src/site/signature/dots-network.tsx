@@ -1,5 +1,5 @@
 /**
- * DotsNetwork: the "everything connected" motif, drawn in clean /1/1 lines.
+ * DotsNetwork: the "everything connected" motif, drawn in the site's clean lines.
  * A hub sits in the centre with nodes on an ellipse around it; spokes draw
  * themselves when the diagram scrolls into view and small dots travel along them.
  *

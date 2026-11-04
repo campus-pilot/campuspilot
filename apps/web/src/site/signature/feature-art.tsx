@@ -1,5 +1,5 @@
 /**
- * Feature artworks: small animated, illustrative product-UI scenes in the /1/1
+ * Feature artworks: small animated, illustrative product-UI scenes in the site's
  * light style (white cards on a soft dotted plate, ink text, primary accents).
  *
  * Each artwork is self-contained and framed, so it works in three places:
