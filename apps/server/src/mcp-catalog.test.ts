@@ -64,6 +64,7 @@ const CORE_TOOLS = [
 
 const HIDDEN_TOOLS = [
   'auth.setPassword',
+  'auth.getOAuthConsentClient',
   'authorization.checkPermissions',
   'healthCheck',
   'school.getLogo',
@@ -107,7 +108,7 @@ afterEach(async () => {
 async function connect(): Promise<Client> {
   const handler = createCampusPilotMcpHandler({
     catalog: Promise.resolve(catalog),
-    createContext: async () => ({ session: null }) as Context,
+    currentContext: () => ({ session: null }) as Context,
     reportError: vi.fn(),
   });
   const client = new Client({ name: 'catalog-test', version: '0.1.0' });

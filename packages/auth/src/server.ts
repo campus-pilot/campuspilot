@@ -13,6 +13,11 @@ import { and, count, eq, gt, isNull, ne, or } from 'drizzle-orm';
 
 import { getRedisClient } from '@campuspilot/redis/client';
 import { log } from './log';
+import {
+  mcpOAuthPlugins,
+  type McpOAuthOptions,
+  recordDynamicClientRegistration,
+} from './mcp-oauth';
 
 import { redisStorage } from '@better-auth/redis-storage';
 import { apiKey } from '@better-auth/api-key';
@@ -30,7 +35,15 @@ import {
 
 const redis = getRedisClient();
 
-export function createAuth(db: DatabaseExecutor = createDb()) {
+/**
+ * Builds the Better Auth instance. `oauth` only injects transports for tests
+ * (for example a stub Client ID Metadata Document host); production uses the
+ * defaults.
+ */
+export function createAuth(
+  db: DatabaseExecutor = createDb(),
+  oauth: McpOAuthOptions = {},
+) {
   const roleForEmail = (email: string) =>
     email.toLowerCase() === env.SYSTEM_ADMIN_EMAIL ? 'admin' : 'user';
 
@@ -184,7 +197,10 @@ export function createAuth(db: DatabaseExecutor = createDb()) {
 
     secret: env.BETTER_AUTH_SECRET,
     baseURL: env.BETTER_AUTH_URL,
-    hooks: { before: apiKeyPolicy },
+    hooks: {
+      before: apiKeyPolicy,
+      after: recordDynamicClientRegistration(db),
+    },
     advanced: {
       cookiePrefix: 'cp_',
       defaultCookieAttributes: {
@@ -289,6 +305,7 @@ export function createAuth(db: DatabaseExecutor = createDb()) {
 
     plugins: [
       admin({ defaultRole: 'user', adminRoles: ['admin'] }),
+      ...mcpOAuthPlugins(oauth),
       apiKey({
         references: 'user',
         defaultPrefix: 'cp_',

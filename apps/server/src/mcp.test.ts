@@ -18,7 +18,6 @@ import {
   createCampusPilotMcpHandler,
   createCampusPilotMcpServer,
   type McpCatalog,
-  normalizeMcpAuthRequest,
 } from './mcp';
 
 vi.mock('@campuspilot/auth/server', () => ({
@@ -54,12 +53,10 @@ function asContext(value: unknown): Context {
 async function connectMcp(
   catalog: McpCatalog,
   context: Context,
-  headers = new Headers(),
   reportError = vi.fn(),
 ): Promise<ConnectedMcp> {
   const server = createCampusPilotMcpServer({
     catalog,
-    headers,
     createContext: async () => context,
     reportError,
   });
@@ -90,56 +87,6 @@ function textContent(result: Awaited<ReturnType<Client['callTool']>>): string {
 afterEach(async () => {
   await Promise.all(openConnections.splice(0).map(({ close }) => close()));
   vi.restoreAllMocks();
-});
-
-describe('normalizeMcpAuthRequest', () => {
-  it('maps a bearer API key without mutating the original request', async () => {
-    const original = new Request('http://localhost/api/mcp', {
-      method: 'POST',
-      headers: { authorization: 'Bearer cp_user_key' },
-      body: '{"jsonrpc":"2.0"}',
-    });
-
-    const normalized = normalizeMcpAuthRequest(original);
-
-    expect(normalized).not.toBe(original);
-    expect(normalized.headers.get('x-api-key')).toBe('cp_user_key');
-    expect(normalized.headers.get('authorization')).toBe(
-      'Bearer cp_user_key',
-    );
-    expect(original.headers.has('x-api-key')).toBe(false);
-    expect(await normalized.text()).toBe('{"jsonrpc":"2.0"}');
-    expect(await original.text()).toBe('{"jsonrpc":"2.0"}');
-  });
-
-  it('preserves an explicit API-key header over bearer authorization', () => {
-    const normalized = normalizeMcpAuthRequest(
-      new Request('http://localhost/api/mcp', {
-        headers: {
-          authorization: 'Bearer cp_bearer_key',
-          'x-api-key': 'cp_explicit_key',
-        },
-      }),
-    );
-
-    expect(normalized.headers.get('x-api-key')).toBe('cp_explicit_key');
-  });
-
-  it.each([undefined, '', 'Basic abc', 'Bearer   '])(
-    'does not invent an API-key header for malformed authorization %s',
-    (authorization) => {
-      const headers = new Headers();
-      if (authorization !== undefined) {
-        headers.set('authorization', authorization);
-      }
-
-      const normalized = normalizeMcpAuthRequest(
-        new Request('http://localhost/api/mcp', { headers }),
-      );
-
-      expect(normalized.headers.has('x-api-key')).toBe(false);
-    },
-  );
 });
 
 describe('buildMcpCatalog', () => {
@@ -275,11 +222,11 @@ describe('MCP tool execution', () => {
       .input(z.object({ value: z.string() }))
       .handler(({ input }) => input);
     const catalog = buildMcpCatalog({ httpEcho: procedure });
-    const observedHeaders: Headers[] = [];
+    const servedRequests: boolean[] = [];
     const handler = createCampusPilotMcpHandler({
       catalog,
-      createContext: async (headers) => {
-        observedHeaders.push(headers);
+      currentContext: () => {
+        servedRequests.push(true);
         return asContext({});
       },
       reportError: vi.fn(),
@@ -287,7 +234,6 @@ describe('MCP tool execution', () => {
     const transport = new StreamableHTTPClientTransport(
       new URL('http://localhost/api/mcp'),
       {
-        authProvider: { token: async () => 'cp_transport_key' },
         fetch: async (input, init) =>
           handler.fetch(new Request(input, init)),
       },
@@ -310,11 +256,33 @@ describe('MCP tool execution', () => {
 
     expect(listed.tools.map(({ name }) => name)).toEqual(['httpEcho']);
     expect(JSON.parse(textContent(result))).toEqual({ value: 'works' });
-    expect(observedHeaders).toHaveLength(1);
-    expect(observedHeaders[0]?.get('authorization')).toBe(
-      'Bearer cp_transport_key',
-    );
-    expect(observedHeaders[0]?.get('x-api-key')).toBe('cp_transport_key');
+    expect(servedRequests.length).toBeGreaterThan(0);
+  });
+
+  it('fails closed when a request reaches the handler without the auth gate', async () => {
+    const reportError = vi.fn();
+    const handler = createCampusPilotMcpHandler({
+      catalog: buildMcpCatalog({}),
+      currentContext: () => undefined,
+      reportError,
+    });
+    const client = new Client({ name: 'ungated', version: '0.1.0' });
+    openConnections.push({
+      client,
+      close: async () => {
+        await client.close();
+        await handler.close();
+      },
+    });
+
+    await expect(
+      client.connect(
+        new StreamableHTTPClientTransport(new URL('http://localhost/api/mcp'), {
+          fetch: async (input, init) => handler.fetch(new Request(input, init)),
+        }),
+      ),
+    ).rejects.toThrow();
+    expect(reportError).toHaveBeenCalled();
   });
 
   it('passes the JSON arguments to the procedure, whose own schema converts ISO strings to Dates', async () => {
@@ -400,10 +368,16 @@ describe('MCP tool execution', () => {
       .input(z.object({}))
       .handler(({ context }) => ({ userId: context.session.user.id }));
     const catalog = await buildMcpCatalog({ readIdentity: procedure });
-    const anonymous = await connectMcp(catalog, asContext({ session: null }));
+    const anonymous = await connectMcp(
+      catalog,
+      asContext({ session: null, principal: { authMethod: 'anonymous' } }),
+    );
     const authenticated = await connectMcp(
       catalog,
-      asContext({ session: { user: { id: 'user-1' } } }),
+      asContext({
+        session: { user: { id: 'user-1' } },
+        principal: { authMethod: 'apiKey' },
+      }),
     );
 
     const denied = await anonymous.client.callTool({
@@ -420,6 +394,38 @@ describe('MCP tool execution', () => {
       code: 'UNAUTHORIZED',
     });
     expect(JSON.parse(textContent(allowed))).toEqual({ userId: 'user-1' });
+  });
+
+  it('enforces OAuth scopes in the procedure middleware by the procedure’s access', async () => {
+    const write = protectedProcedure
+      .meta(mcpMeta({ access: 'write', destructive: false }))
+      .route({ summary: 'Write', description: 'Create something.' })
+      .handler(() => ({ ok: true }));
+    const read = protectedProcedure
+      .meta(mcpMeta())
+      .route({ summary: 'Read', description: 'Read something.' })
+      .handler(() => ({ ok: true }));
+    const oauthContext = (scopes: string[]) =>
+      asContext({
+        session: { user: { id: 'user-1' } },
+        principal: {
+          authMethod: 'oauth',
+          oauthGrant: { clientId: 'client', scopes, grantId: 'grant' },
+        },
+      });
+
+    await expect(
+      call(write, undefined, { context: oauthContext(['mcp:read']) }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(
+      call(write, undefined, { context: oauthContext(['mcp:read', 'mcp:write']) }),
+    ).resolves.toEqual({ ok: true });
+    await expect(
+      call(read, undefined, { context: oauthContext(['mcp:read']) }),
+    ).resolves.toEqual({ ok: true });
+    await expect(
+      call(read, undefined, { context: oauthContext([]) }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
   });
 
   it('preserves ordinary-user and system-admin role behavior', async () => {
@@ -483,12 +489,7 @@ describe('MCP tool execution', () => {
         return { ok: true };
       });
     const catalog = await buildMcpCatalog({ failSafely: procedure });
-    const { client } = await connectMcp(
-      catalog,
-      asContext({}),
-      new Headers(),
-      reportError,
-    );
+    const { client } = await connectMcp(catalog, asContext({}), reportError);
 
     const validationFailure = await client.callTool({
       name: 'failSafely',

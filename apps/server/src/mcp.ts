@@ -5,7 +5,6 @@ import {
   MCP_MODULES,
   type McpProcedureMeta,
 } from '@campuspilot/api/mcp-metadata';
-import { normalizeApiKeyRequest } from '@campuspilot/auth/api-key-headers';
 import {
   type CallToolResult,
   createMcpHandler,
@@ -65,7 +64,8 @@ export type McpCatalog = {
   advancedByName: ReadonlyMap<string, McpToolDefinition>;
 };
 
-type CreateMcpContext = (headers: Headers) => Promise<Context>;
+/** Returns the context the MCP gate verified for the current request. */
+type CreateMcpContext = () => Promise<Context>;
 
 type ReportMcpError = (error: unknown, toolName?: string) => void;
 
@@ -78,7 +78,6 @@ export type McpToolCallEvent = {
 };
 
 export type McpToolCallOptions = {
-  headers: Headers;
   createContext: CreateMcpContext;
   reportError: ReportMcpError;
   reportToolCall?: (event: McpToolCallEvent) => void;
@@ -86,7 +85,12 @@ export type McpToolCallOptions = {
 
 type CreateCampusPilotMcpHandlerOptions = {
   catalog: Promise<McpCatalog>;
-  createContext: CreateMcpContext;
+  /**
+   * Context the MCP gate verified for the request being served. Returning
+   * undefined means the request bypassed the gate; the handler then fails
+   * closed instead of serving it anonymously.
+   */
+  currentContext: () => Context | undefined;
   reportError: ReportMcpError;
   reportToolCall?: (event: McpToolCallEvent) => void;
 };
@@ -101,15 +105,6 @@ type McpErrorPayload = {
   /** Validation problems, so a model can correct its arguments. */
   issues?: Array<{ path: string; message: string }>;
 };
-
-/**
- * Adapts the standard MCP bearer credential to Better Auth's API-key header
- * without mutating the request supplied by Hono or changing other transports.
- * An explicit x-api-key wins so existing non-browser clients remain supported.
- */
-export function normalizeMcpAuthRequest(request: Request): Request {
-  return normalizeApiKeyRequest(request);
-}
 
 /** Returns the child schemas a Zod schema accepts as input, keyed by path segment. */
 function inputChildren(schema: z.ZodType): Array<[string, z.ZodType]> {
@@ -401,9 +396,10 @@ export function toolErrorResult(payload: McpErrorPayload): CallToolResult {
 }
 
 /**
- * Runs one procedure as an MCP tool call. Context is resolved per call so
- * protected procedures keep their oRPC authentication and OPA middleware;
- * direct core tools and advanced tools run through the meta tools share it.
+ * Runs one procedure as an MCP tool call with the gate-verified context, so
+ * protected procedures keep their oRPC authentication, scope and OPA
+ * middleware; direct core tools and advanced tools run through the meta
+ * tools share it.
  */
 export async function callMcpTool(
   tool: McpToolDefinition,
@@ -418,7 +414,7 @@ export async function callMcpTool(
     ...(via ? { via } : {}),
   });
   try {
-    const context = await options.createContext(options.headers);
+    const context = await options.createContext();
     const result = await call(
       tool.procedure,
       tool.acceptsInput ? input : undefined,
@@ -476,7 +472,7 @@ export function createCampusPilotMcpServer({
  */
 export function createCampusPilotMcpHandler({
   catalog,
-  createContext,
+  currentContext,
   reportError,
   reportToolCall,
 }: CreateCampusPilotMcpHandlerOptions): McpHttpHandler {
@@ -485,12 +481,14 @@ export function createCampusPilotMcpHandler({
       if (!requestInfo) {
         throw new TypeError('CampusPilot MCP is available only over HTTP.');
       }
+      const context = currentContext();
+      if (!context) {
+        throw new TypeError('MCP request reached the handler without the auth gate.');
+      }
 
-      const request = normalizeMcpAuthRequest(requestInfo);
       return createCampusPilotMcpServer({
         catalog: await catalog,
-        headers: request.headers,
-        createContext,
+        createContext: async () => context,
         reportError,
         reportToolCall,
       });

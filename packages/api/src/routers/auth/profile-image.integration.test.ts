@@ -8,6 +8,7 @@ import { eq } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  createHandlerContext,
   createRegularUserSession,
 } from '../../../test/fixtures';
 import {
@@ -46,7 +47,7 @@ describe('profile image integration', () => {
     const session = await createRegularUserSession();
     const response = await handleProfileImageUpload(
       profileImageRequest(),
-      { db, headers: new Headers(), session },
+      createHandlerContext(session),
     );
 
     expect(response.status).toBe(200);
@@ -80,17 +81,9 @@ describe('profile image integration', () => {
 
   it('redirects the authenticated image endpoint to the current private image', async () => {
     const session = await createRegularUserSession();
-    await handleProfileImageUpload(profileImageRequest(), {
-      db,
-      headers: new Headers(),
-      session,
-    });
+    await handleProfileImageUpload(profileImageRequest(), createHandlerContext(session));
 
-    const response = await handleProfileImageRead({
-      db,
-      headers: new Headers(),
-      session,
-    });
+    const response = await handleProfileImageRead(createHandlerContext(session));
 
     expect(response.status).toBe(302);
     expect(response.headers.get('cache-control')).toBe('private, no-store');
@@ -100,33 +93,21 @@ describe('profile image integration', () => {
   it('returns NOT_FOUND when the user has not selected a profile image', async () => {
     const session = await createRegularUserSession();
 
-    const response = await handleProfileImageRead({
-      db,
-      headers: new Headers(),
-      session,
-    });
+    const response = await handleProfileImageRead(createHandlerContext(session));
 
     expect(response.status).toBe(404);
   });
 
   it('rejects anonymous uploads and reads', async () => {
-    const upload = await handleProfileImageUpload(profileImageRequest(), {
-      db,
-      headers: new Headers(),
-      session: null,
-    });
+    const upload = await handleProfileImageUpload(profileImageRequest(), createHandlerContext(null));
     expect(upload.status).toBe(401);
-    const read = await handleProfileImageRead({
-      db,
-      headers: new Headers(),
-      session: null,
-    });
+    const read = await handleProfileImageRead(createHandlerContext(null));
     expect(read.status).toBe(401);
   });
 
   it('rejects unsupported or spoofed image uploads', async () => {
     const session = await createRegularUserSession();
-    const context = { db, headers: new Headers(), session };
+    const context = createHandlerContext(session);
 
     const unsupported = await handleProfileImageUpload(
       profileImageRequest('plain text', 'text/plain', 'profile.txt'),

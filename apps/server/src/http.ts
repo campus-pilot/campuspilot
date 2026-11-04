@@ -1,6 +1,8 @@
 import {
+  type Context,
   createContext,
   createContextFromHeaders,
+  createOAuthContext,
 } from '@campuspilot/api/context';
 import { toRpcError } from '@campuspilot/api/errors';
 import { appRouter } from '@campuspilot/api/routers/index';
@@ -17,10 +19,16 @@ import {
   handleAdmissionPhotoUpload,
 } from '@campuspilot/api/routers/school/admission/admission.http';
 import { normalizeApiKeyRequest } from '@campuspilot/auth/api-key-headers';
+import {
+  findLiveOAuthGrant,
+  verifyMcpAccessToken,
+} from '@campuspilot/auth/mcp-credential';
 import { auth } from '@campuspilot/auth/server';
+import { db } from '@campuspilot/db';
 import { env } from '@campuspilot/env/server';
 import type { Logger } from '@campuspilot/logger';
 import { OpenAPIHandler } from '@orpc/openapi/fetch';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { OpenAPIReferencePlugin } from '@orpc/openapi/plugins';
 import { onError } from '@orpc/server';
 import { RPCHandler } from '@orpc/server/fetch';
@@ -29,6 +37,7 @@ import { ZodToJsonSchemaConverter } from '@orpc/zod/zod4';
 import { createConfiguredApp } from './config';
 import { log } from './log';
 import { buildMcpCatalog, createCampusPilotMcpHandler } from './mcp';
+import { createMcpGate } from './mcp-auth';
 
 const app = createConfiguredApp();
 
@@ -147,9 +156,16 @@ app.get('/api/blob/users/me/profile-image', async (context) => {
 
 export const mcpCatalog = buildMcpCatalog(appRouter);
 
+/**
+ * The context the MCP gate verified, scoped to the async chain serving that
+ * request. The SDK serves a copy of the request on some paths, so the context
+ * cannot be keyed by the Request object itself.
+ */
+const mcpRequestContext = new AsyncLocalStorage<Context>();
+
 export const mcpHandler = createCampusPilotMcpHandler({
   catalog: mcpCatalog,
-  createContext: createContextFromHeaders,
+  currentContext: () => mcpRequestContext.getStore(),
   reportError: (error, toolName) => {
     log.error({ err: error, toolName }, 'mcp.error');
   },
@@ -159,7 +175,51 @@ export const mcpHandler = createCampusPilotMcpHandler({
   },
 });
 
-app.all('/api/mcp', (context) => mcpHandler.fetch(context.req.raw));
+const authenticateMcpRequest = createMcpGate({
+  catalog: mcpCatalog,
+  resource: env.MCP_RESOURCE_URL,
+  verifyAccessToken: (token) => verifyMcpAccessToken(auth, token),
+  findLiveGrant: (claims) => findLiveOAuthGrant(db, claims),
+  // Only the key authenticates: cookies and other credentials are dropped.
+  createApiKeyContext: (apiKey) =>
+    createContextFromHeaders(new Headers({ 'x-api-key': apiKey })),
+  createOAuthContext,
+});
+
+app.all('/api/mcp', async (context) => {
+  const request = context.req.raw;
+  const result = await authenticateMcpRequest(request);
+  if (!result.ok) return result.response;
+  return mcpRequestContext.run(result.credential.context, () =>
+    mcpHandler.fetch(
+      request,
+      result.credential.authInfo ? { authInfo: result.credential.authInfo } : {},
+    ),
+  );
+});
+
+/**
+ * OAuth discovery documents, public by protocol (D4). RFC 9728 protected
+ * resource metadata is served by the Better Auth `mcp()` plugin at the origin
+ * root and at the resource-path alias; RFC 8414 / OIDC discovery for the
+ * `/api/auth` issuer is also served at the path-inserted URLs clients try
+ * first. Better Auth itself serves `/api/auth/.well-known/*` (Gemini's
+ * append style) with the same issuer. These are Better Auth documents, not
+ * application auth handlers, so they live here rather than as oRPC
+ * procedures (recorded exception in packages/api/AGENTS.md).
+ */
+app.get('/.well-known/oauth-protected-resource', (context) =>
+  auth.handler(context.req.raw),
+);
+app.get('/.well-known/oauth-protected-resource/*', (context) =>
+  auth.handler(context.req.raw),
+);
+app.get('/.well-known/oauth-authorization-server/api/auth', async (context) =>
+  context.json(await auth.api.getOAuthServerConfig()),
+);
+app.get('/.well-known/openid-configuration/api/auth', async (context) =>
+  context.json(await auth.api.getOpenIdConfig()),
+);
 
 /** Serves the OpenAPI specification and interactive Scalar reference. */
 export const apiHandler = new OpenAPIHandler(appRouter, {

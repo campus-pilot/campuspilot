@@ -23,6 +23,11 @@ import { BrandLogo } from '@campuspilot/components/brand-logo';
 import { SiGoogle } from '@icons-pack/react-simple-icons';
 import { ArrowRight } from 'lucide-react';
 import { authClient } from '@/lib/auth-client';
+import {
+  isSignedOAuthRequest,
+  oauthAuthClient,
+  oauthRedirectUrl,
+} from '@/lib/oauth-auth-client';
 import { AuthLoading } from './auth-loading';
 
 const loginSchema = z
@@ -60,6 +65,11 @@ export function LoginForm() {
     searchParams.get(AUTH_REDIRECT_QUERY_PARAM),
     '/school',
   );
+  // An AI app's authorization sent the user here; signing in resumes it and
+  // the server answers with the next page (consent or the app's callback).
+  // Local redirect sanitisation is unchanged for every other sign-in.
+  const oauthRequest = isSignedOAuthRequest(searchParams);
+  const signInClient = oauthRequest ? oauthAuthClient : authClient;
   const form = useForm({
     defaultValues: {
       email: '',
@@ -71,7 +81,7 @@ export function LoginForm() {
       form.setErrorMap({});
 
       if (value.method === 'google') {
-        const result = await authClient.signIn.social({
+        const result = await signInClient.signIn.social({
           provider: 'google',
           callbackURL: buildAuthCallbackURL(window.location.origin, redirectPath),
           errorCallbackURL: buildAuthCallbackURL(
@@ -91,7 +101,7 @@ export function LoginForm() {
         return;
       }
 
-      const result = await authClient.signIn.email({
+      const result = await signInClient.signIn.email({
         email: value.email,
         password: value.password,
       });
@@ -106,12 +116,19 @@ export function LoginForm() {
         return;
       }
 
+      const oauthNext = oauthRequest ? oauthRedirectUrl(result.data) : null;
+      if (oauthNext) {
+        window.location.assign(oauthNext);
+        return;
+      }
       router.replace(redirectPath);
     },
   });
 
   if (isPending) return <AuthLoading fullScreen={false} />;
-  if (session) redirect('/school');
+  // The authorization server only sends a signed-in user here when the app
+  // asked for a fresh sign-in, so the form stays visible in that case.
+  if (session && !oauthRequest) redirect('/school');
 
   return (
     <div className="flex flex-col gap-8">

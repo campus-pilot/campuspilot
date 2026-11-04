@@ -19,7 +19,7 @@
     "@campuspilot/logger": "workspace:*",
     "@campuspilot/s3": "workspace:*",
     "@hono/node-server": "^2.0.12",
-    "@modelcontextprotocol/server": "^2.0.0",
+    "@modelcontextprotocol/server": "^2.4.0",
     "@orpc/openapi": "catalog:",
     "@orpc/server": "catalog:",
     "@orpc/zod": "catalog:",
@@ -30,7 +30,7 @@
   },
   "devDependencies": {
     "@campuspilot/config": "workspace:*",
-    "@modelcontextprotocol/client": "^2.0.0",
+    "@modelcontextprotocol/client": "^2.4.0",
     "@types/node": "catalog:",
     "drizzle-orm": "^0.45.2",
     "tsdown": "^0.22.14",

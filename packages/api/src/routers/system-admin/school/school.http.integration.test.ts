@@ -1,11 +1,11 @@
 import { GetObjectCommand } from '@aws-sdk/client-s3';
-import { db } from '@campuspilot/db';
 import { env } from '@campuspilot/env/server';
 import { getS3Client } from '@campuspilot/s3/client';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import {
   createAdminSession,
+  createHandlerContext,
   createRegularUserSession,
   createSchoolStaffSession,
   createTestSchool,
@@ -53,7 +53,7 @@ describe('school.http Logo Handlers Integration with RustFS & PostgreSQL', () =>
 
       const response = await handleSchoolLogoUpload(
         request,
-        { db, headers: new Headers(), session: adminSession },
+        createHandlerContext(adminSession),
         school.id,
       );
 
@@ -96,7 +96,7 @@ describe('school.http Logo Handlers Integration with RustFS & PostgreSQL', () =>
           method: 'POST',
           body: formData,
         }),
-        { db, headers: new Headers(), session: adminSession },
+        createHandlerContext(adminSession),
         school.id,
       );
       const json = (await response.json()) as { logoS3Key: string };
@@ -121,7 +121,7 @@ describe('school.http Logo Handlers Integration with RustFS & PostgreSQL', () =>
           method: 'POST',
           body: formData,
         }),
-        { db, headers: new Headers(), session: adminSession },
+        createHandlerContext(adminSession),
         school.id,
       );
 
@@ -145,7 +145,7 @@ describe('school.http Logo Handlers Integration with RustFS & PostgreSQL', () =>
 
       const response = await handleSchoolLogoUpload(
         request,
-        { db, headers: new Headers(), session: adminSession },
+        createHandlerContext(adminSession),
         school.id,
       );
 
@@ -169,7 +169,7 @@ describe('school.http Logo Handlers Integration with RustFS & PostgreSQL', () =>
 
       const response = await handleSchoolLogoUpload(
         request,
-        { db, headers: new Headers(), session: adminSession },
+        createHandlerContext(adminSession),
         school.id,
       );
 
@@ -193,7 +193,7 @@ describe('school.http Logo Handlers Integration with RustFS & PostgreSQL', () =>
 
       const response = await handleSchoolLogoUpload(
         request,
-        { db, headers: new Headers(), session: regularSession },
+        createHandlerContext(regularSession),
         school.id,
       );
 
@@ -219,7 +219,7 @@ describe('school.http Logo Handlers Integration with RustFS & PostgreSQL', () =>
             method: 'POST',
             body: formData,
           }),
-          { db, headers: new Headers(), session },
+          createHandlerContext(session),
           school.id,
         );
 
@@ -245,7 +245,7 @@ describe('school.http Logo Handlers Integration with RustFS & PostgreSQL', () =>
           method: 'POST',
           body: formData,
         }),
-        { db, headers: new Headers(), session },
+        createHandlerContext(session),
         school.id,
       );
 

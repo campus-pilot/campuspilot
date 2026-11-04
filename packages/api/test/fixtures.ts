@@ -39,6 +39,22 @@ function toSessionUser(
   };
 }
 
+/**
+ * Context for direct HTTP handler tests (uploads, downloads): authenticated by
+ * a browser session when one is given, anonymous otherwise.
+ */
+export function createHandlerContext(
+  session: Context['session'],
+  headers: Headers = new Headers(),
+): Context {
+  return {
+    db,
+    headers,
+    session,
+    principal: session ? { authMethod: 'session' } : { authMethod: 'anonymous' },
+  };
+}
+
 /** The value a JSON client (MCP, OpenAPI, curl) receives for an output. */
 export type JsonWire<T> = T extends Date
   ? string
@@ -77,11 +93,7 @@ export function createTestClient(
   headers: Headers = new Headers(),
 ): TestClient {
   const client: AppRouterClient = createRouterClient(appRouter, {
-    context: async () => ({
-      db,
-      headers,
-      session,
-    }),
+    context: async () => createHandlerContext(session, headers),
     interceptors: [
       async ({ next, ...options }) =>
         jsonRoundTrip(

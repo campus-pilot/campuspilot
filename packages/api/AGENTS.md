@@ -21,7 +21,7 @@
   - `module`: the functional area used to filter the advanced index.
 - The four meta tools (`listAdvancedTools`, `describeAdvancedTools`, `runAdvancedReadTool`, `runAdvancedWriteTool`) are MCP-only and live in `apps/server/src/mcp-meta-tools.ts`. The runners accept only advanced tools of their own access class.
 - Give input fields a one-sentence `.describe()` when the name alone does not say what to send or where to get it (for example slugs, minor-unit amounts, idempotency keys, cursors). Every description is paid for in model tokens, so do not describe self-explanatory fields.
-- User-owned API keys must work as either `x-api-key: <key>` or `Authorization: Bearer <key>` across RPC, OpenAPI, direct authenticated handlers, and MCP. If both are supplied, the explicit `x-api-key` value takes precedence.
+- User-owned API keys must work as either `x-api-key: <key>` or `Authorization: Bearer <key>` across RPC, OpenAPI, direct authenticated handlers, and MCP. If both are supplied, the explicit `x-api-key` value takes precedence. On MCP a Bearer value is first verified as a CampusPilot OAuth access token and only then as an API key; never decide by prefix.
 - An MCP-exposed procedure must have either no input or a top-level Zod object input schema, because MCP tool arguments are named JSON object properties. Procedure outputs must be JSON-serializable.
 - Every input field must be representable in JSON Schema. Do not accept `z.date()`/`z.coerce.date()`; declare instants as ISO 8601 strings (for finance, `financeInstantInputSchema`) or calendar dates as `YYYY-MM-DD` strings and convert inside the schema. The MCP catalog converts every input once at boot and fails with the procedure and field path otherwise.
 - Direct HTTP handlers that depend on multipart uploads, binary request bodies, streaming mutations, or raw `Request`/`Response` behavior are not part of `appRouter` and do not need MCP exposure. This includes the school logo upload handler.
@@ -29,6 +29,8 @@
 # Auth route placement
 
 - Every authentication- or account-authentication-related application handler must be implemented as an oRPC procedure under `packages/api/src/router/auth/*.ts`. Do not add one-off auth handlers to `apps/server`.
+- Approved exception (MCP OAuth, decision D4): the OAuth discovery documents (`/.well-known/oauth-protected-resource[/api/mcp]`, `/.well-known/oauth-authorization-server/api/auth`, `/.well-known/openid-configuration/api/auth`) are served by Hono in `apps/server` at the origin root, and the OAuth endpoints (`/api/auth/oauth2/*`, JWKS) are Better Auth endpoints. Protocols fix their URLs and payloads, so they cannot be oRPC procedures. The `/api/mcp` credential gate (`apps/server/src/mcp-auth.ts`) is part of the MCP transport. Application data the OAuth screens need (for example the consent client facts) is still an oRPC procedure here.
+- `/api/mcp` accepts API keys (`x-api-key`, or `Authorization: Bearer` when the bearer value is not a CampusPilot OAuth access token) and OAuth access tokens issued for `MCP_RESOURCE_URL`; it never accepts session cookies. OAuth principals are limited by their grant's scopes (`mcp:read`, `mcp:write`) according to each procedure's `mcp.access`.
 
 # Integration testing with Testcontainers
 

@@ -16,6 +16,7 @@ process.env.SYSTEM_ADMIN_EMAIL = 'admin@campuspilot.test';
 process.env.BETTER_AUTH_SECRET =
   'a-super-secret-key-that-is-at-least-32-chars-long!';
 process.env.BETTER_AUTH_URL = 'http://localhost:3000';
+process.env.MCP_RESOURCE_URL = 'http://localhost:3000/api/mcp';
 process.env.GOOGLE_CLIENT_ID = 'test-client-id';
 process.env.GOOGLE_CLIENT_SECRET = 'test-client-secret';
 process.env.PUBLIC_APP_URL = 'http://localhost:3001';

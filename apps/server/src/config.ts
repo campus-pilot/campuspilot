@@ -19,25 +19,43 @@ export function createConfiguredApp() {
     ),
   );
 
+  /**
+   * OAuth discovery documents and signing keys are public (D4): any origin may
+   * GET them without credentials, so browser-based MCP clients can discover
+   * the authorization server.
+   */
+  const publicDiscoveryCors = cors({
+    origin: '*',
+    allowMethods: ['GET', 'OPTIONS'],
+    credentials: false,
+  });
+  const isPublicDiscoveryPath = (path: string) =>
+    path.startsWith('/.well-known/') ||
+    path.startsWith('/api/auth/.well-known/') ||
+    path === '/api/auth/jwks';
+
+  const applicationCors = cors({
+    origin: (origin, context) => {
+      if (!origin) return null;
+      const host = context.req.header('host');
+      if (
+        host &&
+        (origin === `http://${host}` || origin === `https://${host}`)
+      ) {
+        return origin;
+      }
+      return allowedOrigins.has(origin) ? origin : null;
+    },
+    allowMethods: ['GET', 'POST', 'OPTIONS'],
+    allowHeaders: ['Content-Type', 'Authorization', 'X-API-Key', 'x-api-key'],
+    credentials: true,
+  });
+
   app.use(pinoLogger());
-  app.use(
-    '/*',
-    cors({
-      origin: (origin, context) => {
-        if (!origin) return null;
-        const host = context.req.header('host');
-        if (
-          host &&
-          (origin === `http://${host}` || origin === `https://${host}`)
-        ) {
-          return origin;
-        }
-        return allowedOrigins.has(origin) ? origin : null;
-      },
-      allowMethods: ['GET', 'POST', 'OPTIONS'],
-      allowHeaders: ['Content-Type', 'Authorization', 'X-API-Key', 'x-api-key'],
-      credentials: true,
-    }),
+  app.use('/*', async (context, next) =>
+    isPublicDiscoveryPath(context.req.path)
+      ? publicDiscoveryCors(context, next)
+      : applicationCors(context, next),
   );
 
   app.onError((error, context) => {

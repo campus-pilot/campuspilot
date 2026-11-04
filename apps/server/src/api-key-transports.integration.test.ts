@@ -94,12 +94,23 @@ async function viaMcp(
   schoolId: string,
 ): Promise<Outcome> {
   const client = new Client({ name: 'transport-test', version: '0.1.0' });
-  await client.connect(
-    new StreamableHTTPClientTransport(new URL(`${ORIGIN}/api/mcp`), {
-      requestInit: { headers },
-      fetch: async (input, init) => app.fetch(new Request(input, init)),
-    }),
-  );
+  let status: number | undefined;
+  try {
+    await client.connect(
+      new StreamableHTTPClientTransport(new URL(`${ORIGIN}/api/mcp`), {
+        requestInit: { headers },
+        fetch: async (input, init) => {
+          const response = await app.fetch(new Request(input, init));
+          status = response.status;
+          return response;
+        },
+      }),
+    );
+  } catch (error) {
+    // The endpoint refuses unauthenticated requests at the HTTP level.
+    if (status === 401) return { ok: false, code: 'UNAUTHORIZED' };
+    throw error;
+  }
   try {
     const result = await client.callTool({
       name: 'school.getSchool',
@@ -119,7 +130,7 @@ const transports = { rpc: viaRpc, openapi: viaOpenApi, mcp: viaMcp };
 
 describe('user API keys across transports', () => {
   it.each(Object.keys(transports) as Array<keyof typeof transports>)(
-    'gives %s the same OPA outcomes for a session, x-api-key and Bearer key',
+    'gives %s the same OPA outcomes for x-api-key, a Bearer key and (except MCP) a session',
     async (transport) => {
       const call = transports[transport];
       const credentials = {
@@ -129,6 +140,14 @@ describe('user API keys across transports', () => {
       };
 
       for (const [name, headers] of Object.entries(credentials)) {
+        if (transport === 'mcp' && name === 'session') {
+          // The MCP endpoint accepts API keys and OAuth tokens, never cookies.
+          expect(await call(headers, ownSchoolId), name).toEqual({
+            ok: false,
+            code: 'UNAUTHORIZED',
+          });
+          continue;
+        }
         expect(await call(headers, ownSchoolId), name).toEqual({
           ok: true,
           schoolId: ownSchoolId,
