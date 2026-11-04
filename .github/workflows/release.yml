@@ -15,12 +15,12 @@ concurrency:
 jobs:
   platform_safety:
     name: Platform safety checks
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
       - name: Enable Corepack
@@ -35,7 +35,7 @@ jobs:
 
   prepare:
     name: Prepare release version
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     if: github.event_name == 'push'
     permissions:
       contents: read
@@ -46,7 +46,7 @@ jobs:
       mode: ${{ steps.version.outputs.mode }}
 
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
@@ -157,8 +157,9 @@ jobs:
     name: Build immutable ${{ matrix.name }} image
     needs: [prepare, platform_safety]
     if: ${{ needs.prepare.outputs.mode == 'new' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
+      artifact-metadata: write
       attestations: write
       contents: read
       id-token: write
@@ -202,13 +203,13 @@ jobs:
             build_args: ""
 
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -216,7 +217,7 @@ jobs:
 
       - name: Build and push immutable tags
         id: build
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: ${{ matrix.file }}
@@ -245,7 +246,7 @@ jobs:
     name: Verify existing ${{ matrix.name }} image
     needs: [prepare, platform_safety]
     if: ${{ needs.prepare.outputs.mode == 'reuse' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       attestations: read
       contents: read
@@ -267,10 +268,10 @@ jobs:
 
     steps:
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Log in to GitHub Container Registry for verification
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -358,7 +359,7 @@ jobs:
           )
         )
       }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     env:
@@ -367,7 +368,7 @@ jobs:
       SOURCE_SHA: ${{ github.sha }}
 
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 

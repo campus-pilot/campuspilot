@@ -53,10 +53,13 @@ arguments.
 
 No Actions Secrets are required for image builds beyond GitHub's automatic
 `GITHUB_TOKEN`. Permissions are scoped per job: preparation reads repository and
-pull-request metadata, new image builds read contents and write packages, reuse
-verification only reads packages, and only the final release job writes
-repository contents. Third-party actions and production base images are pinned
-to verified immutable revisions. Private image pulls use separate cluster-side
+pull-request metadata, new image builds read contents, write packages, and write
+build-provenance attestations plus their artifact-metadata storage records,
+reuse verification only reads packages and attestations, and only the final
+release job writes repository contents. Third-party actions and production base
+images are pinned to verified immutable revisions, every pinned action runs on
+the Node 24 Actions runtime, and jobs run on the explicit `ubuntu-24.04` runner
+image rather than the moving `ubuntu-latest` label. Private image pulls use separate cluster-side
 GHCR credentials and are outside this workflow.
 
 Apply the `minor` or `major` label to a merged pull request to select that bump;
