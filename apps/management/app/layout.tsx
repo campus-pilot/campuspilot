@@ -1,4 +1,4 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import { Inter } from 'next/font/google';
 import type { ReactNode } from 'react';
 import { ThemeProvider } from '@campuspilot/components/theme-provider';
@@ -13,11 +13,21 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
+  applicationName: 'CampusPilot Management',
   title: {
     default: 'CampusPilot Management',
     template: '%s | CampusPilot',
   },
   description: 'Run your school from one secure CampusPilot workspace.',
+  appleWebApp: {
+    capable: true,
+    title: 'CampusPilot',
+    statusBarStyle: 'default',
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: '#c2580e',
 };
 
 export default function RootLayout({

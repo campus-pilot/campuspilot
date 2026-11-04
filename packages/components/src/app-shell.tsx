@@ -17,6 +17,7 @@ import {
   BookOpen,
   CircleAlert,
   CircleUserRound,
+  Download,
   LogOut,
   MessageCircle,
   MoreHorizontal,
@@ -189,6 +190,9 @@ type AppShellProps = {
   /** App-owned search trigger rendered after registered page actions. */
   navbarSearch?: ReactNode;
   onManageAccount?: () => void;
+  /** Kept separate from the handler because browser installability can change at runtime. */
+  isInstallAvailable?: boolean;
+  onInstallApp?: () => void | Promise<void>;
   onLogout?: () => void | Promise<void>;
   renderLink?: (props: AppShellLinkProps) => ReactNode;
 };
@@ -484,9 +488,18 @@ function NavigationItem({
 export function AppShellUserMenu({
   user,
   onManageAccount,
+  isInstallAvailable = false,
+  onInstallApp,
   onLogout,
   trigger = 'sidebar',
-}: Pick<AppShellProps, 'user' | 'onManageAccount' | 'onLogout'> & {
+}: Pick<
+  AppShellProps,
+  | 'user'
+  | 'onManageAccount'
+  | 'isInstallAvailable'
+  | 'onInstallApp'
+  | 'onLogout'
+> & {
   trigger?: 'avatar' | 'sidebar';
 }) {
   const { resolvedTheme, setTheme } = useTheme();
@@ -560,6 +573,12 @@ export function AppShellUserMenu({
             </DropdownMenuItem>
           </DropdownMenuSubContent>
         </DropdownMenuSub>
+        {isInstallAvailable && onInstallApp ? (
+          <DropdownMenuItem onClick={onInstallApp}>
+            <Download />
+            Install app
+          </DropdownMenuItem>
+        ) : null}
         <DropdownMenuSeparator />
         <DropdownMenuItem variant="destructive" onClick={onLogout}>
           <LogOut />
@@ -584,6 +603,8 @@ export function AppShell({
   navbarActions,
   navbarSearch,
   onManageAccount,
+  isInstallAvailable,
+  onInstallApp,
   onLogout,
   renderLink,
 }: AppShellProps) {
@@ -694,6 +715,8 @@ export function AppShell({
             <AppShellUserMenu
               user={user}
               onManageAccount={onManageAccount}
+              isInstallAvailable={isInstallAvailable}
+              onInstallApp={onInstallApp}
               onLogout={onLogout}
             />
           </SidebarFooter>
