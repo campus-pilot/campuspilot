@@ -222,6 +222,173 @@ describe("school admission and student router integration", () => {
     ]);
   });
 
+  it("fuzzy-searches registered admissions and applies stable relevance ranking", async () => {
+    const school = await createTestSchool();
+    const teacher = await createSchoolStaffSession(school.id, [
+      { role: "teacher", meta: { classIds: [] } },
+    ]);
+    const exactFirst = await createTestAdmission({
+      id: "fuzzy-rank-a",
+      schoolId: school.id,
+      name: "Clara",
+      admissionNo: "RANK-1",
+    });
+    const exactSecond = await createTestAdmission({
+      id: "fuzzy-rank-b",
+      schoolId: school.id,
+      name: "Clara",
+      admissionNo: "RANK-2",
+    });
+    const prefix = await createTestAdmission({
+      schoolId: school.id,
+      name: "Clara Barton",
+      admissionNo: "RANK-3",
+    });
+    const substring = await createTestAdmission({
+      schoolId: school.id,
+      name: "A Clara Student",
+      admissionNo: "RANK-4",
+    });
+    const typo = await createTestAdmission({
+      schoolId: school.id,
+      name: "Clora Candidate",
+      admissionNo: "RANK-5",
+    });
+    const inactive = await createTestAdmission({
+      schoolId: school.id,
+      name: "Clara Inactive",
+      admissionNo: "RANK-6",
+      registered: false,
+    });
+    const admissionNumberTypo = await createTestAdmission({
+      schoolId: school.id,
+      name: "Unrelated Name",
+      admissionNo: "ACD-2043",
+    });
+
+    const client = createTestClient(teacher.session);
+    await expect(
+      client.school.listAdmissions({
+        schoolId: school.id,
+        searchQuery: "Clara",
+        searchMode: "fuzzy",
+        filters: { registered: true },
+        orderBy: { field: "relevance", direction: "asc" },
+      }),
+    ).rejects.toThrow("Input validation failed");
+
+    const matches = await client.school.listAdmissions({
+      schoolId: school.id,
+      searchQuery: "Clara",
+      searchMode: "fuzzy",
+      filters: { registered: true },
+      orderBy: { field: "relevance", direction: "desc" },
+    });
+
+    expect(matches.items.map(({ id }) => id)).toEqual([
+      exactFirst.id,
+      exactSecond.id,
+      prefix.id,
+      substring.id,
+      typo.id,
+    ]);
+    expect(matches.items[0]).not.toHaveProperty("relevance");
+
+    const inactiveMatches = await client.school.listAdmissions({
+      schoolId: school.id,
+      searchQuery: "Clara",
+      searchMode: "fuzzy",
+      filters: { registered: false },
+      orderBy: { field: "relevance", direction: "desc" },
+    });
+    expect(inactiveMatches.items.map(({ id }) => id)).toEqual([inactive.id]);
+
+    const admissionNumberMatches = await client.school.listAdmissions({
+      schoolId: school.id,
+      searchQuery: "ACD-2042",
+      searchMode: "fuzzy",
+      orderBy: { field: "relevance", direction: "desc" },
+    });
+    expect(admissionNumberMatches.items.map(({ id }) => id)).toEqual([
+      admissionNumberTypo.id,
+    ]);
+  });
+
+  it("treats LIKE metacharacters literally in fuzzy admission search", async () => {
+    const school = await createTestSchool();
+    const teacher = await createSchoolStaffSession(school.id, [
+      { role: "teacher", meta: { classIds: [] } },
+    ]);
+    const percent = await createTestAdmission({
+      schoolId: school.id,
+      name: "Percent % Student",
+      admissionNo: "LITERAL-1",
+    });
+    const underscore = await createTestAdmission({
+      schoolId: school.id,
+      name: "Under_score Student",
+      admissionNo: "LITERAL-2",
+    });
+    const backslash = await createTestAdmission({
+      schoolId: school.id,
+      name: "Back\\slash Student",
+      admissionNo: "LITERAL-3",
+    });
+    await createTestAdmission({
+      schoolId: school.id,
+      name: "Ordinary Student",
+      admissionNo: "LITERAL-4",
+    });
+
+    const client = createTestClient(teacher.session);
+    for (const [searchQuery, expectedId] of [
+      ["%", percent.id],
+      ["_", underscore.id],
+      ["\\", backslash.id],
+    ] as const) {
+      const result = await client.school.listAdmissions({
+        schoolId: school.id,
+        searchQuery,
+        searchMode: "fuzzy",
+        orderBy: { field: "relevance", direction: "desc" },
+      });
+      expect(result.items.map(({ id }) => id)).toEqual([expectedId]);
+    }
+  });
+
+  it("preserves default contains search across non-name admission fields", async () => {
+    const school = await createTestSchool();
+    const teacher = await createSchoolStaffSession(school.id, [
+      { role: "teacher", meta: { classIds: [] } },
+    ]);
+    const admission = await createTestAdmission({ schoolId: school.id });
+    await db
+      .update(admissionTable)
+      .set({ phoneNo: "88005551234", email: "lookup@example.com" })
+      .where(eq(admissionTable.id, admission.id));
+    const client = createTestClient(teacher.session);
+
+    await expect(
+      client.school.listAdmissions({
+        schoolId: school.id,
+        searchQuery: "5551234",
+      }),
+    ).resolves.toMatchObject({ items: [{ id: admission.id }] });
+    await expect(
+      client.school.listAdmissions({
+        schoolId: school.id,
+        searchQuery: "lookup@example",
+      }),
+    ).resolves.toMatchObject({ items: [{ id: admission.id }] });
+    await expect(
+      client.school.listAdmissions({
+        schoolId: school.id,
+        searchQuery: "5551234",
+        searchMode: "fuzzy",
+      }),
+    ).resolves.toMatchObject({ items: [] });
+  });
+
   it("keeps restricted finance values out of general admission DTOs", async () => {
     const school = await createTestSchool();
     const teacher = await createSchoolStaffSession(school.id, [

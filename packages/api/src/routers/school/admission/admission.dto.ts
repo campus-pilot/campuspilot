@@ -38,6 +38,7 @@ export function toAdmissionDto(value: AdmissionDto): AdmissionDto {
 export const listAdmissionsInputSchema = createListInputSchema({
   schoolId: z.string().min(1),
   searchQuery: z.string().trim().min(1).max(200).optional(),
+  searchMode: z.enum(["contains", "fuzzy"]).default("contains"),
   filters: z
     .object({
       registered: z.boolean().optional(),
@@ -59,10 +60,36 @@ export const listAdmissionsInputSchema = createListInputSchema({
     .optional(),
   orderBy: z
     .object({
-      field: z.enum(["name", "admissionNo", "dob", "createdAt"]),
+      field: z.enum([
+        "name",
+        "admissionNo",
+        "dob",
+        "createdAt",
+        "relevance",
+      ]),
       direction: z.enum(["asc", "desc"]).default("asc"),
     })
     .default({ field: "name", direction: "asc" }),
+}).superRefine(({ orderBy, searchQuery }, context) => {
+  if (orderBy.field !== "relevance") {
+    return;
+  }
+
+  if (searchQuery === undefined) {
+    context.addIssue({
+      code: "custom",
+      message: "Relevance ordering requires a search query.",
+      path: ["orderBy", "field"],
+    });
+  }
+
+  if (orderBy.direction !== "desc") {
+    context.addIssue({
+      code: "custom",
+      message: "Relevance ordering has a fixed descending direction.",
+      path: ["orderBy", "direction"],
+    });
+  }
 });
 
 export const admissionPlacementSchema = z.object({

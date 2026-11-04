@@ -6,7 +6,8 @@
     "build": "next build",
     "dev": "next dev --port 3002",
     "start": "next start --port 3002",
-    "check-types": "tsc --noEmit"
+    "check-types": "tsc --noEmit",
+    "test": "tsx --tsconfig tsconfig.exam-tests.json --test components/**/*.test.ts components/**/*.test.tsx"
   },
   "dependencies": {
     "@campuspilot/api": "workspace:*",
@@ -35,6 +36,7 @@
     "@types/react-dom": "catalog:",
     "@types/three": "^0.186.0",
     "tailwindcss": "catalog:",
+    "tsx": "^4.23.1",
     "typescript": "catalog:"
   }
 }

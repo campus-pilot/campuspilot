@@ -41,6 +41,19 @@ import {
 } from "./admission.dto";
 import { assertAdmissionRegistered } from "./admission-registration";
 
+const ADMISSION_FUZZY_SEARCH_THRESHOLD = 0.2;
+
+/**
+ * Escapes PostgreSQL LIKE metacharacters so fuzzy search's substring and
+ * prefix ranks always interpret the user's query literally.
+ */
+function escapeLikePattern(value: string) {
+  return value
+    .replaceAll("\\", "\\\\")
+    .replaceAll("%", "\\%")
+    .replaceAll("_", "\\_");
+}
+
 async function findAdmission(
   db: DatabaseExecutor,
   schoolId: string,
@@ -121,13 +134,50 @@ export const schoolAdmissionRouter = {
         }
 
         const { currentPage, pageSize, offset } = resolvePaginationInput(input);
+        const escapedSearchQuery = input.searchQuery
+          ? escapeLikePattern(input.searchQuery)
+          : undefined;
+        const fuzzyNameSubstring = escapedSearchQuery
+          ? sql<boolean>`${admissionTable.name} ILIKE ${`%${escapedSearchQuery}%`} ESCAPE ${"\\"}`
+          : undefined;
+        const fuzzyAdmissionNoSubstring = escapedSearchQuery
+          ? sql<boolean>`${admissionTable.admissionNo} ILIKE ${`%${escapedSearchQuery}%`} ESCAPE ${"\\"}`
+          : undefined;
+        const nameSimilarity = input.searchQuery
+          ? sql<number>`similarity(${admissionTable.name}, ${input.searchQuery})`
+          : undefined;
+        const admissionNoSimilarity = input.searchQuery
+          ? sql<number>`similarity(${admissionTable.admissionNo}, ${input.searchQuery})`
+          : undefined;
+        const nameWordSimilarity = input.searchQuery
+          ? sql<number>`word_similarity(${input.searchQuery}, ${admissionTable.name})`
+          : undefined;
+        const admissionNoWordSimilarity = input.searchQuery
+          ? sql<number>`word_similarity(${input.searchQuery}, ${admissionTable.admissionNo})`
+          : undefined;
+        const fuzzyScore =
+          nameSimilarity &&
+          admissionNoSimilarity &&
+          nameWordSimilarity &&
+          admissionNoWordSimilarity
+            ? sql<number>`greatest(${nameSimilarity}, ${admissionNoSimilarity}, ${nameWordSimilarity}, ${admissionNoWordSimilarity})`
+            : undefined;
         const searchCondition = input.searchQuery
-          ? or(
-              ilike(admissionTable.name, `%${input.searchQuery}%`),
-              ilike(admissionTable.admissionNo, `%${input.searchQuery}%`),
-              ilike(admissionTable.phoneNo, `%${input.searchQuery}%`),
-              ilike(admissionTable.email, `%${input.searchQuery}%`),
-            )
+          ? input.searchMode === "fuzzy"
+            ? or(
+                fuzzyNameSubstring,
+                fuzzyAdmissionNoSubstring,
+                sql`${nameSimilarity} >= ${ADMISSION_FUZZY_SEARCH_THRESHOLD}`,
+                sql`${admissionNoSimilarity} >= ${ADMISSION_FUZZY_SEARCH_THRESHOLD}`,
+                sql`${nameWordSimilarity} >= ${ADMISSION_FUZZY_SEARCH_THRESHOLD}`,
+                sql`${admissionNoWordSimilarity} >= ${ADMISSION_FUZZY_SEARCH_THRESHOLD}`,
+              )
+            : or(
+                ilike(admissionTable.name, `%${input.searchQuery}%`),
+                ilike(admissionTable.admissionNo, `%${input.searchQuery}%`),
+                ilike(admissionTable.phoneNo, `%${input.searchQuery}%`),
+                ilike(admissionTable.email, `%${input.searchQuery}%`),
+              )
           : undefined;
         const unadmittedCondition = unadmittedForSessionId
           ? notExists(
@@ -157,11 +207,12 @@ export const schoolAdmissionRouter = {
                 ),
               )
           : undefined;
-        const placementCondition = assignedPlacement && input.filters?.placementStatus
-          ? input.filters?.placementStatus === "assigned"
-            ? exists(assignedPlacement)
-            : notExists(assignedPlacement)
-          : undefined;
+        const placementCondition =
+          assignedPlacement && input.filters?.placementStatus
+            ? input.filters?.placementStatus === "assigned"
+              ? exists(assignedPlacement)
+              : notExists(assignedPlacement)
+            : undefined;
         const where = and(
           eq(admissionTable.schoolId, input.schoolId),
           searchCondition,
@@ -177,13 +228,42 @@ export const schoolAdmissionRouter = {
           unadmittedCondition,
           placementCondition,
         );
-        const orderByColumn = {
-          name: admissionTable.name,
-          admissionNo: admissionTable.admissionNo,
-          dob: admissionTable.dob,
-          createdAt: admissionTable.createdAt,
-        }[input.orderBy.field];
+        const orderByColumn =
+          input.orderBy.field === "relevance"
+            ? undefined
+            : {
+                name: admissionTable.name,
+                admissionNo: admissionTable.admissionNo,
+                dob: admissionTable.dob,
+                createdAt: admissionTable.createdAt,
+              }[input.orderBy.field];
         const orderDirection = input.orderBy.direction === "asc" ? asc : desc;
+
+        /**
+         * Relevance has a fixed semantic order: exact, prefix, substring,
+         * trigram score, name, then ID. The final two keys keep pagination
+         * stable when multiple admissions have the same match quality.
+         */
+        const relevanceOrder =
+          input.orderBy.field === "relevance" &&
+          input.searchQuery &&
+          escapedSearchQuery &&
+          fuzzyScore
+            ? [
+                desc(
+                  sql<number>`case when lower(${admissionTable.name}) = lower(${input.searchQuery}) or lower(${admissionTable.admissionNo}) = lower(${input.searchQuery}) then 1 else 0 end`,
+                ),
+                desc(
+                  sql<number>`case when ${admissionTable.name} ILIKE ${`${escapedSearchQuery}%`} ESCAPE ${"\\"} or ${admissionTable.admissionNo} ILIKE ${`${escapedSearchQuery}%`} ESCAPE ${"\\"} then 1 else 0 end`,
+                ),
+                desc(
+                  sql<number>`case when ${fuzzyNameSubstring} or ${fuzzyAdmissionNoSubstring} then 1 else 0 end`,
+                ),
+                desc(fuzzyScore),
+                asc(admissionTable.name),
+                asc(admissionTable.id),
+              ]
+            : undefined;
 
         const [admissions, totalRows] = await Promise.all([
           context.db
@@ -191,8 +271,12 @@ export const schoolAdmissionRouter = {
             .from(admissionTable)
             .where(where)
             .orderBy(
-              orderDirection(orderByColumn),
-              orderDirection(admissionTable.id),
+              ...(
+                relevanceOrder ?? [
+                  orderDirection(orderByColumn!),
+                  orderDirection(admissionTable.id),
+                ]
+              ),
             )
             .limit(pageSize)
             .offset(offset),

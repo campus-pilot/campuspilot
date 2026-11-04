@@ -234,6 +234,11 @@ export default function SchoolSettingsLayout({
     sessionId: String(routeParams.sessionId ?? ''),
   };
   const state: ManagementShellState = {
+    commandContext: {
+      schoolId,
+      sessionId: selectedSessionId,
+      sessions,
+    },
     navigation: navigationFor(
       schoolId,
       sessionPermissionQuery.data?.results[0] === true,

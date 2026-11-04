@@ -177,6 +177,11 @@ export default function SchoolWorkspaceLayout({
     sessionId: routeSessionId ?? selectedSessionId ?? '',
   } as SchoolSessionRouteParams & Record<string, string>;
   const state: ManagementShellState = {
+    commandContext: {
+      schoolId,
+      sessionId: selectedSessionId,
+      sessions,
+    },
     navigation: navigationFor(schoolId, selectedSessionId),
     breadcrumbs: page?.breadcrumbs(params) ?? [],
     footerContent: (

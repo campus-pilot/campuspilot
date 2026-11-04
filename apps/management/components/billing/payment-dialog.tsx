@@ -2,8 +2,9 @@
 
 import { useRef } from "react";
 import { useForm } from "@tanstack/react-form";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
+import { SCHOOL_ACTIONS } from "@campuspilot/api/routers/authorization/authorization.dto";
 import { civilDateTimeInTimeZone, decimalToMinor, formatMinor, instantFromCivilDateTime, type IdempotencyDraftState } from "@campuspilot/components/finance";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@campuspilot/ui/components/alert-dialog";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@campuspilot/ui/components/accordion";
@@ -11,10 +12,11 @@ import { DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@ca
 import { Input } from "@campuspilot/ui/components/input";
 import { Label } from "@campuspilot/ui/components/label";
 import { Textarea } from "@campuspilot/ui/components/textarea";
-import { client } from "@/lib/orpc";
+import { client, orpc } from "@/lib/orpc";
 import { invalidateFinanceReadModels } from "./finance-invalidation";
 import { FieldErrors } from "./finance-ui";
 import { auditAmbiguous, dateTimeSchema, FormGuardedDialog, idSchema, manualReasonCode, MethodField, paymentMethods, positiveDecimalSchema, SessionField, sessionFor, stableKey, SubmitFooter, validateDateTime, validateMoney, type FinanceDialogBaseProps, type PaymentMethod } from "./finance-dialog-common";
+import { canOfferPaymentDiscount } from "./payment-dialog-permissions";
 
 const baseSchema = z.object({
   sessionId: idSchema,
@@ -40,19 +42,30 @@ function paymentAmountLabel(value: string, currency: string) {
   }
 }
 
-function PaymentFields({ form, sessions }: { form: any; sessions: FinanceDialogBaseProps["sessions"] }) {
-  return <><div className="grid gap-3 sm:grid-cols-2"><SessionField form={form} sessions={sessions} resetFields={["receivedAt"]} hideCurrency /><MethodField form={form} id="payment-method" /></div><form.Field name="amount">{(field: any) => <div className="flex flex-col gap-1.5"><Label htmlFor="payment-amount">Amount</Label><Input id="payment-amount" inputMode="decimal" value={field.state.value} onChange={(event) => field.handleChange(event.target.value)} /><FieldErrors errors={field.state.meta.errors} /></div>}</form.Field><div className="grid gap-3 sm:grid-cols-2"><form.Field name="receivedAt">{(field: any) => <div className="flex flex-col gap-1.5"><Label htmlFor="payment-received">Received at</Label><Input id="payment-received" type="datetime-local" value={field.state.value} onChange={(event) => field.handleChange(event.target.value)} /><FieldErrors errors={field.state.meta.errors} /></div>}</form.Field><form.Field name="payerName">{(field: any) => <div className="flex flex-col gap-1.5"><Label htmlFor="payment-payer">Payer name (optional)</Label><Input id="payment-payer" value={field.state.value} onChange={(event) => field.handleChange(event.target.value)} /><FieldErrors errors={field.state.meta.errors} /></div>}</form.Field></div><section aria-label="Optional payment details" className="rounded-lg border bg-card"><form.Subscribe selector={(state: any) => ({ addDiscount: state.values.addDiscount, addNote: state.values.addNote })}>{({ addDiscount, addNote }: { addDiscount: boolean; addNote: boolean }) => <Accordion type="multiple" value={[...(addNote ? ["note"] : []), ...(addDiscount ? ["discount"] : [])]} onValueChange={(value) => { form.setFieldValue("addNote", value.includes("note")); form.setFieldValue("addDiscount", value.includes("discount")); }} className="border-0"><AccordionItem value="note"><AccordionTrigger className="p-3 text-sm">Add note</AccordionTrigger><AccordionContent className="px-3"><form.Field name="note">{(field: any) => <div className="flex flex-col gap-1.5"><Label htmlFor="payment-note">Note</Label><Textarea id="payment-note" value={field.state.value} onChange={(event) => field.handleChange(event.target.value)} /><FieldErrors errors={field.state.meta.errors} /></div>}</form.Field></AccordionContent></AccordionItem><AccordionItem value="discount"><AccordionTrigger className="p-3 text-sm">Add discount</AccordionTrigger><AccordionContent className="px-3"><div className="grid gap-3 sm:grid-cols-2"><form.Field name="discountAmount">{(field: any) => <div className="flex flex-col gap-1.5"><Label htmlFor="payment-discount">Discount amount</Label><Input id="payment-discount" inputMode="decimal" value={field.state.value} onChange={(event) => field.handleChange(event.target.value)} /><FieldErrors errors={field.state.meta.errors} /></div>}</form.Field><form.Field name="discountReasonNote">{(field: any) => <div className="flex flex-col gap-1.5"><Label htmlFor="payment-discount-note">Discount reason</Label><Input id="payment-discount-note" value={field.state.value} onChange={(event) => field.handleChange(event.target.value)} /><FieldErrors errors={field.state.meta.errors} /></div>}</form.Field></div></AccordionContent></AccordionItem></Accordion>}</form.Subscribe></section></>;
+function PaymentFields({ form, sessions, canRecordAdjustment }: { form: any; sessions: FinanceDialogBaseProps["sessions"]; canRecordAdjustment: boolean }) {
+  return <><div className="grid gap-3 sm:grid-cols-2"><SessionField form={form} sessions={sessions} resetFields={["receivedAt"]} hideCurrency /><MethodField form={form} id="payment-method" /></div><form.Field name="amount">{(field: any) => <div className="flex flex-col gap-1.5"><Label htmlFor="payment-amount">Amount</Label><Input id="payment-amount" inputMode="decimal" value={field.state.value} onChange={(event) => field.handleChange(event.target.value)} /><FieldErrors errors={field.state.meta.errors} /></div>}</form.Field><div className="grid gap-3 sm:grid-cols-2"><form.Field name="receivedAt">{(field: any) => <div className="flex flex-col gap-1.5"><Label htmlFor="payment-received">Received at</Label><Input id="payment-received" type="datetime-local" value={field.state.value} onChange={(event) => field.handleChange(event.target.value)} /><FieldErrors errors={field.state.meta.errors} /></div>}</form.Field><form.Field name="payerName">{(field: any) => <div className="flex flex-col gap-1.5"><Label htmlFor="payment-payer">Payer name (optional)</Label><Input id="payment-payer" value={field.state.value} onChange={(event) => field.handleChange(event.target.value)} /><FieldErrors errors={field.state.meta.errors} /></div>}</form.Field></div><section aria-label="Optional payment details" className="rounded-lg border bg-card"><form.Subscribe selector={(state: any) => ({ addDiscount: state.values.addDiscount, addNote: state.values.addNote })}>{({ addDiscount, addNote }: { addDiscount: boolean; addNote: boolean }) => <Accordion type="multiple" value={[...(addNote ? ["note"] : []), ...(canRecordAdjustment && addDiscount ? ["discount"] : [])]} onValueChange={(value) => { form.setFieldValue("addNote", value.includes("note")); if (canRecordAdjustment) form.setFieldValue("addDiscount", value.includes("discount")); }} className="border-0"><AccordionItem value="note"><AccordionTrigger className="p-3 text-sm">Add note</AccordionTrigger><AccordionContent className="px-3"><form.Field name="note">{(field: any) => <div className="flex flex-col gap-1.5"><Label htmlFor="payment-note">Note</Label><Textarea id="payment-note" value={field.state.value} onChange={(event) => field.handleChange(event.target.value)} /><FieldErrors errors={field.state.meta.errors} /></div>}</form.Field></AccordionContent></AccordionItem>{canRecordAdjustment ? <AccordionItem value="discount"><AccordionTrigger className="p-3 text-sm">Add discount</AccordionTrigger><AccordionContent className="px-3"><div className="grid gap-3 sm:grid-cols-2"><form.Field name="discountAmount">{(field: any) => <div className="flex flex-col gap-1.5"><Label htmlFor="payment-discount">Discount amount</Label><Input id="payment-discount" inputMode="decimal" value={field.state.value} onChange={(event) => field.handleChange(event.target.value)} /><FieldErrors errors={field.state.meta.errors} /></div>}</form.Field><form.Field name="discountReasonNote">{(field: any) => <div className="flex flex-col gap-1.5"><Label htmlFor="payment-discount-note">Discount reason</Label><Input id="payment-discount-note" value={field.state.value} onChange={(event) => field.handleChange(event.target.value)} /><FieldErrors errors={field.state.meta.errors} /></div>}</form.Field></div></AccordionContent></AccordionItem> : null}</Accordion>}</form.Subscribe></section></>;
 }
 
 export function PaymentDialog(props: FinanceDialogBaseProps) {
   const queryClient = useQueryClient();
   const keyRef = useRef<IdempotencyDraftState>(undefined);
   const initial = sessionFor(props.sessions, props.defaultSessionId);
+  const adjustmentPermissionQuery = useQuery(orpc.authorization.checkPermissions.queryOptions({ input: { permissions: [{ action: SCHOOL_ACTIONS.RECORD_FINANCE_ADJUSTMENT, resource: { kind: "school", schoolId: props.schoolId } }] } }));
+  /** Pending, failed, incomplete, and denied checks must all hide and reject the
+   * optional discount path without affecting ordinary payment recording. */
+  const canRecordAdjustment = canOfferPaymentDiscount({
+    isSuccess: adjustmentPermissionQuery.isSuccess,
+    results: adjustmentPermissionQuery.data?.results,
+  });
   const recordMutation = useMutation({ mutationFn: (input: any) => client.school.recordPayment(input) });
   const schema = baseSchema.superRefine((value, context) => {
     validateMoney(props.sessions, value.sessionId, value.amount, context, ["amount"]);
     validateDateTime(props.sessions, value.sessionId, value.receivedAt, context, "receivedAt");
     if (value.addDiscount) {
+      if (!canRecordAdjustment) {
+        context.addIssue({ code: "custom", path: ["addDiscount"], message: "You do not have permission to add a discount." });
+        return;
+      }
       validateMoney(props.sessions, value.sessionId, value.discountAmount, context, ["discountAmount"]);
       if (!value.discountReasonNote.trim()) context.addIssue({ code: "custom", path: ["discountReasonNote"], message: "Enter a discount reason." });
     }
@@ -65,12 +78,17 @@ export function PaymentDialog(props: FinanceDialogBaseProps) {
   });
 
   async function record(value: Value) {
+    if (value.addDiscount && !canRecordAdjustment) {
+      form.setFieldValue("confirming", false);
+      form.setErrorMap({ onSubmit: { fields: {}, form: "You do not have permission to add a discount. Remove the discount and try again." } });
+      return;
+    }
     const session = sessionFor(props.sessions, value.sessionId);
     const receivedAt = instantFromCivilDateTime(value.receivedAt, session.timeZone);
-    const command = { schoolId: props.schoolId, admissionId: props.admissionId, sessionId: session.id, currency: session.currency, amountMinor: decimalToMinor(value.amount, session.currency), method: value.method, receivedAt, effectiveAt: receivedAt, payerName: value.payerName.trim() || null, externalReference: value.reference.trim() || null, note: value.note.trim() || null, ...(value.addDiscount ? { discount: { amountMinor: decimalToMinor(value.discountAmount, session.currency), reasonCode: value.discountReasonCode.trim(), reasonNote: value.discountReasonNote.trim() } } : {}) };
+    const command = { schoolId: props.schoolId, admissionId: props.admissionId, sessionId: session.id, currency: session.currency, amountMinor: decimalToMinor(value.amount, session.currency), method: value.method, receivedAt, effectiveAt: receivedAt, payerName: value.payerName.trim() || null, externalReference: value.reference.trim() || null, note: value.note.trim() || null, ...(canRecordAdjustment && value.addDiscount ? { discount: { amountMinor: decimalToMinor(value.discountAmount, session.currency), reasonCode: value.discountReasonCode.trim(), reasonNote: value.discountReasonNote.trim() } } : {}) };
     try {
       const input = { ...command, idempotencyKey: stableKey(keyRef, command) };
-      if (value.addDiscount) {
+      if (canRecordAdjustment && value.addDiscount) {
         await client.school.recordPaymentWithDiscount({ ...input, discount: { amountMinor: decimalToMinor(value.discountAmount, session.currency), reasonCode: value.discountReasonCode.trim(), reasonNote: value.discountReasonNote.trim() } });
       } else {
         await recordMutation.mutateAsync(input);
@@ -84,5 +102,5 @@ export function PaymentDialog(props: FinanceDialogBaseProps) {
     }
   }
 
-  return <FormGuardedDialog form={form} onClose={props.onClose}>{(requestClose) => <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl"><DialogHeader><DialogTitle>Record payment</DialogTitle><DialogDescription>Record money received as a credit on this admission account. The payment is not assigned to any individual bill.</DialogDescription></DialogHeader><form className="flex flex-col gap-4" onSubmit={(event) => { event.preventDefault(); event.stopPropagation(); void form.handleSubmit(); }}><PaymentFields form={form} sessions={props.sessions} /><SubmitFooter form={form} label="Review payment" pendingLabel="Reviewing…" requestClose={requestClose} /></form><form.Subscribe selector={(state) => ({ values: state.values, confirming: state.values.confirming })}>{({ values, confirming }) => { const session = sessionFor(props.sessions, values.sessionId); return <AlertDialog open={confirming} onOpenChange={(open) => form.setFieldValue("confirming", open)}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Record this payment?</AlertDialogTitle><AlertDialogDescription>{`${paymentAmountLabel(values.amount, session.currency)} will be added as an account credit. It will reduce the admission's total due balance without settling a specific bill.`}</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Keep editing</AlertDialogCancel><AlertDialogAction disabled={recordMutation.isPending} onClick={(event) => { event.preventDefault(); void record(values); }}>{recordMutation.isPending ? "Recording…" : "Record payment"}</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>; }}</form.Subscribe></DialogContent>}</FormGuardedDialog>;
+  return <FormGuardedDialog form={form} onClose={props.onClose}>{(requestClose) => <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl"><DialogHeader><DialogTitle>Record payment</DialogTitle><DialogDescription>Record money received as a credit on this admission account. The payment is not assigned to any individual bill.</DialogDescription></DialogHeader><form className="flex flex-col gap-4" onSubmit={(event) => { event.preventDefault(); event.stopPropagation(); void form.handleSubmit(); }}><PaymentFields form={form} sessions={props.sessions} canRecordAdjustment={canRecordAdjustment} /><SubmitFooter form={form} label="Review payment" pendingLabel="Reviewing…" requestClose={requestClose} /></form><form.Subscribe selector={(state) => ({ values: state.values, confirming: state.values.confirming })}>{({ values, confirming }) => { const session = sessionFor(props.sessions, values.sessionId); return <AlertDialog open={confirming} onOpenChange={(open) => form.setFieldValue("confirming", open)}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Record this payment?</AlertDialogTitle><AlertDialogDescription>{`${paymentAmountLabel(values.amount, session.currency)} will be added as an account credit. It will reduce the admission's total due balance without settling a specific bill.`}</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Keep editing</AlertDialogCancel><AlertDialogAction disabled={recordMutation.isPending} onClick={(event) => { event.preventDefault(); void record(values); }}>{recordMutation.isPending ? "Recording…" : "Record payment"}</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>; }}</form.Subscribe></DialogContent>}</FormGuardedDialog>;
 }

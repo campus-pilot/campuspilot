@@ -186,6 +186,8 @@ type AppShellProps = {
   /** App-owned links rendered between the shared Docs link and footer content. */
   footerLinks?: AppShellFooterLink[];
   navbarActions?: ReactNode;
+  /** App-owned search trigger rendered after registered page actions. */
+  navbarSearch?: ReactNode;
   onManageAccount?: () => void;
   onLogout?: () => void | Promise<void>;
   renderLink?: (props: AppShellLinkProps) => ReactNode;
@@ -580,6 +582,7 @@ export function AppShell({
   docsHref = '/docs',
   footerLinks = [],
   navbarActions,
+  navbarSearch,
   onManageAccount,
   onLogout,
   renderLink,
@@ -735,9 +738,10 @@ export function AppShell({
                 })}
               </BreadcrumbList>
             </Breadcrumb>
-            {navbarActions ? (
+            {navbarActions || navbarSearch ? (
               <div className="ml-auto flex items-center gap-1.5">
                 {navbarActions}
+                {navbarSearch}
               </div>
             ) : null}
           </header>
