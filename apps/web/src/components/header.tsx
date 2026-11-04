@@ -117,7 +117,7 @@ export default function Header() {
   return (
     <header className="marketing-header">
       <div className="marketing-container marketing-header-inner">
-        <Link to="/" aria-label="CampusPilot home" className="marketing-brand"><BrandLogo size="sm" /></Link>
+        <Link to="/" aria-label="CampusPilot home" className="marketing-brand"><BrandLogo product="campuspilot" size="sm" /></Link>
         <nav className="marketing-nav" aria-label="Main navigation">
           <DesktopMenu label="Product" links={productLinks} wide />
           <DesktopMenu label="Solutions" links={solutionLinks} wide />

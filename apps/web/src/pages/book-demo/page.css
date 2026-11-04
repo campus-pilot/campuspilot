@@ -1,0 +1,805 @@
+/*
+ * `/book-demo` — the site's most important conversion page. Prefix: `pg-book-`.
+ * Base styles are the finished state; keyframes animate from the initial state
+ * so `prefers-reduced-motion` (handled globally in site.css) simply skips them.
+ */
+
+/* ------------------------------------------------- hero: fast channels */
+
+.pg-book-fast {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 22px;
+  border: 1px solid var(--cp-line);
+  border-radius: 22px;
+  background:
+    radial-gradient(90% 60% at 100% 0%, color-mix(in oklch, var(--cp-accent-soft) 70%, transparent), transparent 70%),
+    var(--cp-soft);
+  box-shadow: 0 24px 60px -36px rgb(0 0 0 / 0.35);
+  animation: cp-fade-up 0.8s 0.15s var(--cp-ease) both;
+}
+
+.pg-book-fast-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pg-book-fast-head h2 {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.pg-book-fast-head p {
+  margin: 0;
+  color: var(--cp-muted);
+  font-size: 14px;
+}
+
+.pg-book-fast-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* WhatsApp message preview: an outgoing chat bubble. */
+.pg-book-bubble {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-self: flex-end;
+  max-width: min(100%, 380px);
+  margin: 0;
+  animation: pg-book-bubble-in 0.7s 0.7s var(--cp-ease) both;
+}
+
+.pg-book-bubble figcaption {
+  align-self: flex-end;
+  color: var(--cp-subtle);
+  font: 500 11px/1.3 var(--cp-mono);
+  letter-spacing: 0.02em;
+}
+
+.pg-book-bubble blockquote {
+  margin: 0;
+  padding: 12px 14px 22px;
+  border: 1px solid color-mix(in oklch, var(--cp-primary) 18%, var(--cp-line));
+  border-radius: 16px 16px 4px 16px;
+  background: var(--cp-surface);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.04);
+}
+
+.pg-book-bubble p {
+  margin: 0;
+  color: var(--cp-ink-2);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.pg-book-bubble-ticks {
+  position: absolute;
+  right: 10px;
+  bottom: 6px;
+  color: var(--cp-accent);
+}
+
+.pg-book-bubble-ticks svg {
+  width: 15px;
+  height: 15px;
+}
+
+/* ------------------------------------------------------------ scheduler */
+
+.pg-book-schedule.cp-section {
+  padding-top: 88px;
+}
+
+.pg-book-cal {
+  display: flex;
+  flex-direction: column;
+  max-width: 1040px;
+  margin: 0 auto;
+  border: 1px solid var(--cp-line);
+  border-radius: 22px;
+  background: var(--cp-surface);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.03), 0 40px 80px -56px rgb(0 0 0 / 0.4);
+  overflow: hidden;
+}
+
+.pg-book-cal-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 46px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--cp-line);
+  background: var(--cp-soft);
+}
+
+.pg-book-cal-dots {
+  display: flex;
+  gap: 6px;
+}
+
+.pg-book-cal-dots i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--cp-line-strong);
+}
+
+.pg-book-cal-bar b {
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.pg-book-cal-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  padding: 4px 10px;
+  border: 1px solid var(--cp-line);
+  border-radius: 99px;
+  background: var(--cp-surface);
+  color: var(--cp-muted);
+  font: 500 12px/1 var(--cp-mono);
+}
+
+.pg-book-cal-meta svg {
+  width: 13px;
+  height: 13px;
+}
+
+.pg-book-cal-body {
+  background: var(--cp-surface);
+}
+
+/* Tall enough for a month view plus time slots without an inner scrollbar on desktop. */
+.pg-book-cal-body iframe {
+  display: block;
+  width: 100%;
+  height: 720px;
+  border: 0;
+  background: var(--cp-surface);
+}
+
+.pg-book-cal-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 6px 10px;
+  margin: 0;
+  padding: 14px 16px;
+  border-top: 1px solid var(--cp-line);
+  background: var(--cp-soft);
+  color: var(--cp-muted);
+  font-size: 13.5px;
+  text-align: center;
+}
+
+.pg-book-cal-foot .cp-text-link {
+  font-size: 13.5px;
+}
+
+/* Reassurance strip under the calendar. */
+.pg-book-assure {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  max-width: 1040px;
+  margin: 20px auto 0;
+  padding: 0;
+  border: 1px dashed var(--cp-line-strong);
+  border-radius: 18px;
+  list-style: none;
+}
+
+.pg-book-assure li {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 18px 20px;
+}
+
+.pg-book-assure li + li {
+  border-left: 1px dashed var(--cp-line-strong);
+}
+
+.pg-book-assure-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  background: var(--cp-surface);
+  border: 1px solid var(--cp-line);
+  color: var(--cp-ink);
+}
+
+.pg-book-assure-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.pg-book-assure-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pg-book-assure-text b {
+  font-size: 14.5px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.pg-book-assure-text small {
+  color: var(--cp-muted);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+/* --------------------------------------------------------------- agenda */
+
+.pg-book-agenda {
+  display: grid;
+  grid-template-columns: minmax(0, 360px) minmax(0, 1fr);
+  align-items: start;
+  gap: 64px;
+}
+
+.pg-book-agenda-intro,
+.pg-book-prep-intro {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 18px;
+}
+
+.pg-book-agenda-intro {
+  position: sticky;
+  top: 100px;
+}
+
+.pg-book-agenda-intro h2,
+.pg-book-prep-intro h2 {
+  margin: 0;
+  font-size: clamp(32px, 3.8vw, 46px);
+  font-weight: 600;
+  letter-spacing: -0.042em;
+  line-height: 1.05;
+  text-wrap: balance;
+}
+
+.pg-book-agenda-intro p,
+.pg-book-prep-intro p {
+  margin: 0;
+  color: var(--cp-muted);
+  font-size: 16px;
+  line-height: 1.6;
+  text-wrap: pretty;
+}
+
+/* 30-minute dial: five 72° segments (one per topic) cut into a ring by a mask. */
+.pg-book-dial {
+  position: relative;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  width: 132px;
+  height: 132px;
+  margin-top: 12px;
+}
+
+.pg-book-dial-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: repeating-conic-gradient(from 2deg, var(--cp-line-strong) 0 68deg, transparent 68deg 72deg);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 10px), #000 calc(100% - 9px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 10px), #000 calc(100% - 9px));
+}
+
+.pg-book-dial-ring::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: conic-gradient(from 2deg, var(--cp-primary) 0 68deg, transparent 68deg);
+}
+
+/* Orbiting marker on the ring; the element spans the dial and rotates around its centre. */
+.pg-book-dial-hand {
+  position: absolute;
+  inset: 0;
+  animation: pg-book-sweep 14s linear infinite;
+}
+
+.pg-book-dial-hand::before {
+  content: "";
+  position: absolute;
+  top: -1px;
+  left: calc(50% - 6px);
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--cp-surface);
+  border-radius: 50%;
+  background: var(--cp-ink);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.25);
+}
+
+.pg-book-dial b {
+  font: 600 30px/1 var(--cp-font);
+  letter-spacing: -0.04em;
+}
+
+.pg-book-dial small {
+  color: var(--cp-subtle);
+  font: 500 11px/1.4 var(--cp-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.pg-book-agenda-list {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Track behind the topic nodes; the ::after fill grows as the list scrolls through view. */
+.pg-book-agenda-list::before,
+.pg-book-agenda-list::after {
+  content: "";
+  position: absolute;
+  top: 20px;
+  bottom: 20px;
+  left: 83px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--cp-line);
+}
+
+.pg-book-agenda-list::after {
+  background: linear-gradient(var(--cp-primary), var(--cp-accent-warm));
+  transform-origin: top;
+}
+
+.pg-book-agenda-item {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: 48px 40px minmax(0, 1fr);
+  align-items: start;
+  gap: 0 16px;
+  padding-bottom: 28px;
+}
+
+.pg-book-agenda-item:last-child {
+  padding-bottom: 0;
+}
+
+.pg-book-agenda-time {
+  padding-top: 11px;
+  color: var(--cp-subtle);
+  font: 500 13px/1 var(--cp-mono);
+  text-align: right;
+}
+
+.pg-book-agenda-time::after {
+  content: " min";
+  font-size: 11px;
+}
+
+.pg-book-agenda-node {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--cp-line);
+  border-radius: 12px;
+  background: var(--cp-surface);
+  color: var(--cp-ink);
+  box-shadow: 0 0 0 6px var(--cp-bg);
+}
+
+.pg-book-agenda-node svg {
+  width: 18px;
+  height: 18px;
+}
+
+.pg-book-agenda-body {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 18px 20px;
+  border: 1px solid var(--cp-line);
+  border-radius: 18px;
+  background: var(--cp-surface);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.03);
+  transition: border-color 0.2s ease, transform 0.3s var(--cp-ease);
+}
+
+.pg-book-agenda-item:hover .pg-book-agenda-body {
+  border-color: var(--cp-line-strong);
+  transform: translateX(3px);
+}
+
+.pg-book-agenda-body h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.pg-book-agenda-body p {
+  margin: 0;
+  color: var(--cp-muted);
+  font-size: 15px;
+  line-height: 1.55;
+  text-wrap: pretty;
+}
+
+.pg-book-agenda-see {
+  display: inline-flex;
+  max-width: 100%;
+  margin-top: 4px;
+  padding: 5px 10px;
+  border: 1px solid var(--cp-line);
+  border-radius: 8px;
+  background: var(--cp-soft);
+  color: var(--cp-ink-2);
+  font: 500 12px/1.4 var(--cp-mono);
+}
+
+.pg-book-agenda-roadmap {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-top: 4px;
+  padding: 10px 12px;
+  border: 1px dashed var(--cp-line-strong);
+  border-radius: 12px;
+  font-size: 13.5px;
+}
+
+.pg-book-agenda-roadmap span {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 99px;
+  background: var(--cp-accent-soft);
+  color: var(--cp-accent);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.pg-book-agenda-end .pg-book-agenda-node {
+  border-color: transparent;
+  background: var(--cp-ink);
+  color: #fff;
+}
+
+.pg-book-agenda-end .pg-book-agenda-body {
+  border-style: dashed;
+  background: transparent;
+  box-shadow: none;
+}
+
+/* ----------------------------------------------------------------- prep */
+
+.pg-book-prep {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+  align-items: center;
+  gap: 72px;
+}
+
+.pg-book-prep-intro {
+  max-width: 440px;
+}
+
+.pg-book-scribble {
+  margin-top: 4px;
+  color: var(--cp-accent);
+  font: 600 26px/1 "Caveat", cursive;
+  transform: rotate(-3deg);
+}
+
+.pg-book-pad {
+  position: relative;
+  padding: 40px 28px 28px;
+  border: 1px solid var(--cp-line);
+  border-radius: 6px 6px 18px 18px;
+  background: var(--cp-surface);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.04), 0 30px 60px -40px rgb(0 0 0 / 0.35);
+}
+
+/* Paper margin rule. */
+.pg-book-pad::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 62px;
+  width: 1px;
+  background: color-mix(in oklch, var(--cp-primary) 25%, transparent);
+}
+
+/* Board clip holding the pad. */
+.pg-book-pad-clip {
+  position: absolute;
+  top: -14px;
+  left: 50%;
+  width: 110px;
+  height: 28px;
+  border: 1px solid var(--cp-line-strong);
+  border-radius: 8px;
+  background: linear-gradient(var(--cp-soft), var(--cp-line));
+  box-shadow: 0 2px 4px rgb(0 0 0 / 0.08);
+  transform: translateX(-50%) rotate(-1.5deg);
+}
+
+.pg-book-pad-head {
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding-left: 48px;
+  margin-bottom: 8px;
+}
+
+.pg-book-pad-head b {
+  font: 700 28px/1 "Kalam", cursive;
+  letter-spacing: -0.01em;
+}
+
+.pg-book-pad-head small {
+  color: var(--cp-subtle);
+  font: 500 12px/1 var(--cp-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.pg-book-pad-list {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pg-book-pad-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 18px;
+  padding: 14px 0;
+  border-top: 1px dashed var(--cp-line);
+}
+
+.pg-book-tick {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  margin-top: 1px;
+  border: 1.5px solid var(--cp-ink);
+  border-radius: 7px;
+  background: var(--cp-surface);
+  color: var(--cp-accent);
+}
+
+.pg-book-tick svg {
+  width: 18px;
+  height: 18px;
+  stroke-width: 3;
+}
+
+.pg-book-pad-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pg-book-pad-text b {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.pg-book-pad-text small {
+  color: var(--cp-muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* ------------------------------------------------------- contact fallback */
+
+.pg-book-fallback .cp-hero-actions {
+  flex-wrap: wrap;
+}
+
+/* ---------------------------------------------------------- scroll motion */
+
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .pg-book-agenda-list::after {
+      animation: pg-book-fill linear both;
+      animation-timeline: view();
+      animation-range: entry 40% cover 70%;
+    }
+
+    .pg-book-agenda-item,
+    .pg-book-pad,
+    .pg-book-assure {
+      animation: cp-reveal linear both;
+      animation-timeline: view();
+      animation-range: entry 0% entry 40%;
+    }
+
+    .pg-book-pad .pg-book-tick svg {
+      animation: pg-book-tick linear both;
+      animation-timeline: view();
+      animation-range: entry calc(55% + var(--pg-i) * 8%) entry calc(75% + var(--pg-i) * 8%);
+    }
+  }
+}
+
+/* ----------------------------------------------------------- responsive */
+
+@media (max-width: 960px) {
+  .pg-book-agenda,
+  .pg-book-prep {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 40px;
+  }
+
+  .pg-book-agenda-intro {
+    position: static;
+  }
+
+  .pg-book-dial {
+    display: none;
+  }
+
+  .pg-book-prep-intro {
+    max-width: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .pg-book-fast {
+    padding: 16px;
+    border-radius: 18px;
+  }
+
+  .pg-book-schedule.cp-section {
+    padding-top: 56px;
+  }
+
+  .pg-book-cal {
+    border-radius: 16px;
+  }
+
+  .pg-book-cal-dots {
+    display: none;
+  }
+
+  /* Phones stack the month above the time slots; keep the page scrollable around it. */
+  .pg-book-cal-body iframe {
+    height: clamp(600px, 82svh, 720px);
+  }
+
+  .pg-book-assure {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .pg-book-assure li {
+    padding: 14px 16px;
+  }
+
+  .pg-book-assure li + li {
+    border-top: 1px dashed var(--cp-line-strong);
+    border-left: 0;
+  }
+
+  .pg-book-agenda-list::before,
+  .pg-book-agenda-list::after {
+    left: 19px;
+  }
+
+  .pg-book-agenda-item {
+    grid-template-columns: 40px minmax(0, 1fr);
+    grid-template-areas:
+      "node time"
+      "node body";
+    gap: 6px 14px;
+  }
+
+  .pg-book-agenda-time {
+    grid-area: time;
+    padding-top: 0;
+    text-align: left;
+  }
+
+  .pg-book-agenda-node {
+    grid-area: node;
+  }
+
+  .pg-book-agenda-body {
+    grid-area: body;
+    padding: 14px 16px;
+  }
+
+  .pg-book-agenda-roadmap {
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .pg-book-pad {
+    padding: 36px 16px 22px;
+  }
+
+  .pg-book-pad::before {
+    left: 34px;
+  }
+
+  .pg-book-pad-head {
+    padding-left: 30px;
+  }
+
+  .pg-book-pad-head b {
+    font-size: 24px;
+  }
+
+  .pg-book-pad-list li {
+    gap: 14px;
+  }
+
+  .pg-book-fallback .cp-btn {
+    width: 100%;
+  }
+}
+
+/* ------------------------------------------------------------ keyframes */
+
+@keyframes pg-book-bubble-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.96);
+  }
+}
+
+@keyframes pg-book-sweep {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes pg-book-fill {
+  from {
+    transform: scaleY(0);
+  }
+}
+
+@keyframes pg-book-tick {
+  from {
+    opacity: 0;
+    transform: scale(0.3) rotate(-20deg);
+  }
+}

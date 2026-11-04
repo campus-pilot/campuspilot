@@ -1,5 +1,5 @@
 import { apiKeyClient } from '@better-auth/api-key/client';
-import { env } from '@campuspilot/env/web.client';
+import { env } from '@campuspilot/env/web';
 import { createAuthClient } from 'better-auth/react';
 import { inferAdditionalFields } from 'better-auth/client/plugins';
 import type { auth } from './server';

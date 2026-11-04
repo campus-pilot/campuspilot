@@ -1,0 +1,1768 @@
+/*
+ * Solutions pages: `/solutions` and `/solutions/:slug`. Every class is
+ * prefixed `pg-sol-`. Monochrome surfaces; the accent marks only what is live
+ * or needs attention, as in the signature artworks.
+ *
+ * Motion: base styles are the finished state. `.pg-sol-rise` parts rise in once
+ * on load (staggered by `--i`); meters grow in. The site-wide reduced-motion
+ * rule switches all of it off.
+ */
+
+/* ===================================================== role console (hero) */
+
+.pg-sol-console {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: 1px solid var(--cp-line);
+  border-radius: 18px;
+  background:
+    radial-gradient(rgb(17 17 16 / 0.07) 1px, transparent 1.2px) 0 0 / 18px 18px,
+    var(--cp-soft);
+  box-shadow: 0 28px 56px -36px rgb(0 0 0 / 0.3);
+  color: var(--cp-ink);
+  font-size: 12.5px;
+  line-height: 1.45;
+  text-align: left;
+  overflow: hidden;
+}
+
+.pg-sol-console-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--cp-line);
+  background: var(--cp-surface);
+}
+
+.pg-sol-console-bar b {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12.5px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pg-sol-console-dots {
+  display: flex;
+  gap: 5px;
+}
+
+.pg-sol-console-dots i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--cp-line-strong);
+}
+
+.pg-sol-scope {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border: 1px solid color-mix(in oklch, var(--cp-accent) 30%, transparent);
+  border-radius: 999px;
+  background: var(--cp-accent-soft);
+  color: var(--cp-accent);
+  font-size: 11px;
+  font-weight: 550;
+  white-space: nowrap;
+}
+
+.pg-sol-scope svg {
+  width: 12px;
+  height: 12px;
+}
+
+.pg-sol-console-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+}
+
+/* Zero-specificity resets, so component classes (e.g. a `ul.pg-sol-card`) keep their own spacing. */
+:where(.pg-sol-console) :where(ul, ol) {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+:where(.pg-sol-console) :where(p) {
+  margin: 0;
+}
+
+.pg-sol-rise {
+  animation: pg-sol-rise 0.55s var(--cp-ease) both;
+  animation-delay: calc(var(--i, 0) * 70ms + 160ms);
+}
+
+.pg-sol-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--cp-line);
+  border-radius: 12px;
+  background: var(--cp-surface);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.04);
+}
+
+.pg-sol-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 2px 10px;
+}
+
+.pg-sol-card-head b {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.pg-sol-card-head > span {
+  color: var(--cp-subtle);
+  font: 400 10.5px/1.4 var(--cp-mono);
+}
+
+.pg-sol-card-head > .pg-sol-role {
+  color: #fff;
+  font: 550 10.5px/1.4 var(--cp-font);
+}
+
+.pg-sol-meter {
+  display: block;
+  height: 5px;
+  border-radius: 99px;
+  background: #ecece8;
+  overflow: hidden;
+}
+
+.pg-sol-meter i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--cp-primary);
+  transform-origin: left;
+  animation: cp-grow-x 1.1s var(--cp-ease) 0.6s both;
+}
+
+.pg-sol-who {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.pg-sol-who b {
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pg-sol-who small {
+  color: var(--cp-muted);
+  font-size: 11px;
+}
+
+.pg-sol-role {
+  align-self: flex-start;
+  padding: 2px 8px;
+  border-radius: 99px;
+  background: var(--cp-ink);
+  color: #fff;
+  font-size: 10.5px;
+  font-weight: 550;
+  white-space: nowrap;
+}
+
+/* --- school leaders --- */
+
+.pg-sol-tiles {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.pg-sol-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--cp-line);
+  border-radius: 12px;
+  background: var(--cp-surface);
+}
+
+.pg-sol-tile::after {
+  content: "";
+  position: absolute;
+  top: 13px;
+  right: 12px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--cp-ink);
+}
+
+.pg-sol-tile[data-tone="watch"]::after {
+  background: var(--cp-accent);
+  animation: cp-ping 2.2s ease-out infinite;
+}
+
+.pg-sol-tile small {
+  color: var(--cp-muted);
+  font-size: 11px;
+}
+
+.pg-sol-tile b {
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.pg-sol-tile-note {
+  color: var(--cp-subtle);
+  font: 400 10.5px/1.4 var(--cp-mono);
+}
+
+.pg-sol-tile .pg-sol-meter {
+  margin-top: 6px;
+}
+
+.pg-sol-attention {
+  display: flex;
+  flex-direction: column;
+}
+
+.pg-sol-attention li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 0;
+  border-top: 1px solid var(--cp-line);
+}
+
+.pg-sol-attention li:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.pg-sol-attention li > svg {
+  width: 14px;
+  height: 14px;
+  color: var(--cp-accent);
+}
+
+.pg-sol-attention span {
+  flex: 1;
+  min-width: 0;
+}
+
+.pg-sol-attention small {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--cp-subtle);
+  font: 400 10.5px/1.4 var(--cp-mono);
+}
+
+.pg-sol-attention small svg {
+  width: 11px;
+  height: 11px;
+}
+
+/* --- administrators --- */
+
+.pg-sol-journeys {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pg-sol-journey {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--cp-line);
+  border-radius: 12px;
+  background: var(--cp-surface);
+}
+
+.pg-sol-track {
+  display: flex;
+  align-items: center;
+}
+
+.pg-sol-track li {
+  position: relative;
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid var(--cp-line-strong);
+  border-radius: 50%;
+  background: var(--cp-surface);
+}
+
+.pg-sol-track li + li {
+  margin-left: 14px;
+}
+
+.pg-sol-track li + li::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: calc(100% + 1.5px);
+  width: 14px;
+  height: 1.5px;
+  background: var(--cp-line-strong);
+  translate: 0 -50%;
+}
+
+.pg-sol-track li[data-done="true"] {
+  border-color: var(--cp-ink);
+  background: var(--cp-ink);
+}
+
+.pg-sol-track li[data-done="true"] + li[data-done="true"]::before {
+  background: var(--cp-ink);
+}
+
+.pg-sol-stage {
+  justify-self: end;
+  color: var(--cp-muted);
+  font: 400 10.5px/1.3 var(--cp-mono);
+  text-align: right;
+}
+
+.pg-sol-stage[data-final="true"] {
+  color: var(--cp-ink);
+  font-weight: 600;
+}
+
+.pg-sol-job {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px 10px;
+}
+
+.pg-sol-job .pg-sol-meter {
+  grid-column: 1 / -1;
+}
+
+.pg-sol-job-icon,
+.pg-sol-flow-icon {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--cp-line);
+  border-radius: 9px;
+  background: var(--cp-soft);
+}
+
+.pg-sol-job-icon svg,
+.pg-sol-flow-icon svg {
+  width: 15px;
+  height: 15px;
+}
+
+.pg-sol-job-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.pg-sol-job-text b {
+  font-weight: 600;
+}
+
+.pg-sol-job-text small {
+  color: var(--cp-muted);
+  font-size: 11px;
+}
+
+/* --- teachers --- */
+
+.pg-sol-classes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.pg-sol-class {
+  gap: 8px;
+}
+
+.pg-sol-class-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+}
+
+.pg-sol-class-head svg {
+  width: 14px;
+  height: 14px;
+}
+
+.pg-sol-class-head b {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.pg-sol-class-head span {
+  flex-basis: 100%;
+  color: var(--cp-muted);
+  font-size: 11px;
+}
+
+.pg-sol-class small {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  color: var(--cp-ink-2);
+  font-size: 11px;
+}
+
+.pg-sol-class small svg {
+  width: 12px;
+  height: 12px;
+  margin-top: 2px;
+  color: var(--cp-accent);
+}
+
+.pg-sol-locked {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px dashed var(--cp-line-strong);
+  border-radius: 12px;
+}
+
+.pg-sol-locked small {
+  color: var(--cp-subtle);
+  font: 400 10.5px/1.4 var(--cp-mono);
+}
+
+.pg-sol-locked ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.pg-sol-locked li {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 9px;
+  border-radius: 8px;
+  background: #ecece8;
+  color: var(--cp-subtle);
+  font-size: 11.5px;
+}
+
+.pg-sol-locked li svg {
+  width: 11px;
+  height: 11px;
+}
+
+/* --- finance teams --- */
+
+.pg-sol-money {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.pg-sol-money li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--cp-line);
+  border-radius: 10px;
+  background: var(--cp-surface);
+}
+
+.pg-sol-money small {
+  color: var(--cp-muted);
+  font-size: 11px;
+}
+
+.pg-sol-money b {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.pg-sol-money li[data-tone="due"] b {
+  color: var(--cp-accent);
+}
+
+.pg-sol-receipts {
+  display: flex;
+  flex-direction: column;
+}
+
+.pg-sol-receipt {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 8px;
+  border-top: 1px solid var(--cp-line);
+}
+
+.pg-sol-receipt:first-child {
+  border-top: 0;
+}
+
+.pg-sol-receipt[data-new="true"] {
+  border-radius: 8px;
+  background: var(--cp-accent-soft);
+  animation: pg-sol-flash 1.4s ease-out 0.9s both;
+}
+
+.pg-sol-receipt code {
+  color: var(--cp-muted);
+  font: 400 10.5px/1.3 var(--cp-mono);
+}
+
+.pg-sol-receipt span {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.pg-sol-receipt span small {
+  color: var(--cp-subtle);
+  font-size: 11px;
+}
+
+.pg-sol-receipt b {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.pg-sol-toast {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--cp-line-strong);
+  color: var(--cp-ink-2);
+  font-size: 11.5px;
+}
+
+.pg-sol-toast svg {
+  width: 13px;
+  height: 13px;
+  color: var(--cp-accent);
+}
+
+/* --- exam teams --- */
+
+.pg-sol-lifecycle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.pg-sol-lifecycle li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 1px solid var(--cp-line);
+  border-radius: 99px;
+  background: var(--cp-surface);
+  font-size: 11.5px;
+  font-weight: 550;
+}
+
+.pg-sol-lifecycle li + li::before {
+  content: "→";
+  margin: 0 2px 0 -2px;
+  color: var(--cp-subtle);
+  font-weight: 400;
+}
+
+.pg-sol-lifecycle span {
+  display: none;
+}
+
+.pg-sol-lifecycle b {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 99px;
+  background: var(--cp-soft);
+  font: 500 10.5px/1.6 var(--cp-mono);
+  text-align: center;
+}
+
+.pg-sol-lifecycle li[data-status="plan"] {
+  border-style: dashed;
+  color: var(--cp-muted);
+}
+
+.pg-sol-lifecycle li[data-status="active"] b {
+  background: var(--cp-accent-soft);
+  color: var(--cp-accent);
+}
+
+.pg-sol-lifecycle li[data-status="approved"] b {
+  background: var(--cp-ink);
+  color: #fff;
+}
+
+.pg-sol-exam-rows {
+  gap: 0;
+  padding-block: 6px;
+  list-style: none;
+}
+
+.pg-sol-exam-row {
+  display: grid;
+  grid-template-columns: 74px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--cp-line);
+}
+
+.pg-sol-exam-row:first-child {
+  border-top: 0;
+}
+
+.pg-sol-exam-row > b {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.pg-sol-exam-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.pg-sol-exam-progress small {
+  color: var(--cp-muted);
+  font-size: 11px;
+}
+
+.pg-sol-status {
+  padding: 3px 9px;
+  border: 1px solid var(--cp-line);
+  border-radius: 99px;
+  color: var(--cp-muted);
+  font: 500 10.5px/1.3 var(--cp-mono);
+}
+
+.pg-sol-status[data-status="approved"] {
+  border-color: transparent;
+  background: var(--cp-ink);
+  color: #fff;
+}
+
+.pg-sol-status[data-status="completed"] {
+  border-color: transparent;
+  background: #ecece8;
+  color: var(--cp-ink);
+}
+
+.pg-sol-status[data-status="active"] {
+  border-color: color-mix(in oklch, var(--cp-accent) 35%, transparent);
+  background: var(--cp-accent-soft);
+  color: var(--cp-accent);
+}
+
+.pg-sol-exam-more {
+  padding-top: 8px;
+  border-top: 1px solid var(--cp-line);
+  color: var(--cp-subtle);
+  font: 400 10.5px/1.4 var(--cp-mono);
+}
+
+.pg-sol-outputs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.pg-sol-outputs li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--cp-line);
+  border-radius: 10px;
+  background: var(--cp-surface);
+  font-weight: 600;
+}
+
+.pg-sol-outputs li > svg {
+  width: 15px;
+  height: 15px;
+}
+
+.pg-sol-outputs small {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-basis: 100%;
+  color: var(--cp-muted);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.pg-sol-outputs small svg {
+  width: 11px;
+  height: 11px;
+}
+
+/* --- single campus --- */
+
+.pg-sol-record {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+}
+
+.pg-sol-record .pg-sol-who {
+  flex: 1;
+}
+
+.pg-sol-avatar {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--cp-ink);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.pg-sol-once {
+  padding: 3px 9px;
+  border-radius: 99px;
+  background: var(--cp-accent-soft);
+  color: var(--cp-accent);
+  font: 500 10.5px/1.3 var(--cp-mono);
+  white-space: nowrap;
+}
+
+/* The spine: a vertical line from the record down through every module that reads it. */
+.pg-sol-flows {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-left: 16px;
+  padding-left: 22px;
+}
+
+.pg-sol-flows::before {
+  content: "";
+  position: absolute;
+  top: -12px;
+  bottom: 22px;
+  left: 0;
+  width: 1.5px;
+  background: linear-gradient(var(--cp-ink), var(--cp-line-strong));
+  transform-origin: top;
+  animation: cp-grow-y 0.9s var(--cp-ease) 0.3s both;
+}
+
+.pg-sol-flow {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border: 1px solid var(--cp-line);
+  border-radius: 11px;
+  background: var(--cp-surface);
+}
+
+.pg-sol-flow::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: -22px;
+  width: 22px;
+  height: 1.5px;
+  background: var(--cp-line-strong);
+}
+
+.pg-sol-flow-icon {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+}
+
+.pg-sol-flow b {
+  font-weight: 600;
+}
+
+.pg-sol-flow small {
+  color: var(--cp-muted);
+  font: 400 10.5px/1.3 var(--cp-mono);
+  text-align: right;
+}
+
+/* --- multi-campus --- */
+
+.pg-sol-switch {
+  display: flex;
+  align-self: flex-start;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--cp-line);
+  border-radius: 12px;
+  background: var(--cp-surface);
+}
+
+.pg-sol-switch button {
+  min-height: 32px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--cp-muted);
+  font: 550 12.5px/1 var(--cp-font);
+  cursor: pointer;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.pg-sol-switch button:hover {
+  color: var(--cp-ink);
+}
+
+.pg-sol-switch button[aria-pressed="true"] {
+  background: var(--cp-ink);
+  color: #fff;
+}
+
+.pg-sol-campus-live {
+  display: flex;
+  flex-direction: column;
+}
+
+.pg-sol-campus-rows {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.pg-sol-campus-rows li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 9px 10px;
+  border-radius: 9px;
+  background: var(--cp-soft);
+}
+
+.pg-sol-campus-rows small {
+  color: var(--cp-muted);
+  font-size: 11px;
+}
+
+.pg-sol-campus-rows b {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 600;
+}
+
+.pg-sol-campus-rows li[data-locked="true"] {
+  border: 1px dashed var(--cp-line-strong);
+  background: transparent;
+}
+
+.pg-sol-campus-rows li[data-locked="true"] b {
+  color: var(--cp-subtle);
+  font-weight: 500;
+}
+
+.pg-sol-campus-rows b svg {
+  width: 12px;
+  height: 12px;
+}
+
+.pg-sol-boundary-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--cp-muted);
+  font-size: 11.5px;
+}
+
+.pg-sol-boundary-note svg {
+  width: 13px;
+  height: 13px;
+  color: var(--cp-accent);
+}
+
+/* ========================================================= detail sections */
+
+.pg-sol h3 {
+  margin: 0;
+}
+
+/* --- outcomes --- */
+
+.pg-sol-outcomes {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0;
+  padding: 0;
+  border-block: 1px solid var(--cp-line);
+  list-style: none;
+}
+
+.pg-sol-outcome {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 32px 28px 36px;
+}
+
+.pg-sol-outcome + .pg-sol-outcome {
+  border-left: 1px solid var(--cp-line);
+}
+
+.pg-sol-outcome-number {
+  color: var(--cp-accent);
+  font: 500 13px/1 var(--cp-mono);
+}
+
+.pg-sol-outcome h3 {
+  font-size: 21px;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  line-height: 1.2;
+}
+
+.pg-sol-outcome p {
+  margin: 0;
+  color: var(--cp-muted);
+  font-size: 15.5px;
+  line-height: 1.6;
+}
+
+/* --- workflow --- */
+
+.pg-sol-steps {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+  max-width: 960px;
+  margin: 0 auto 48px;
+  padding: 0;
+  list-style: none;
+}
+
+/* The rail behind the step dots, drawn left to right. */
+.pg-sol-steps::before {
+  content: "";
+  position: absolute;
+  top: 19px;
+  left: 12.5%;
+  right: 12.5%;
+  height: 1.5px;
+  background: var(--cp-line-strong);
+  transform-origin: left;
+}
+
+.pg-sol-steps li {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  text-align: center;
+}
+
+.pg-sol-step-dot {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--cp-line-strong);
+  border-radius: 50%;
+  background: var(--cp-surface);
+  font: 500 14px/1 var(--cp-mono);
+}
+
+.pg-sol-steps li:last-child .pg-sol-step-dot {
+  border-color: var(--cp-primary);
+  background: var(--cp-primary);
+  color: #fff;
+}
+
+.pg-sol-steps b {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.pg-sol-workflow-detail {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: 16px;
+  max-width: 1000px;
+  margin: 0 auto;
+}
+
+.pg-sol-spotlight,
+.pg-sol-included {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 32px;
+  border: 1px solid var(--cp-line);
+  border-radius: 20px;
+}
+
+.pg-sol-spotlight {
+  background: var(--cp-ink);
+  color: #fff;
+}
+
+.pg-sol-spotlight-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--cp-accent-warm);
+  font: 500 12px/1 var(--cp-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.pg-sol-spotlight-kicker svg {
+  width: 14px;
+  height: 14px;
+}
+
+.pg-sol-spotlight h3 {
+  font-size: clamp(24px, 2.6vw, 30px);
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1.12;
+  text-wrap: balance;
+}
+
+.pg-sol-spotlight p:last-child {
+  margin: 0;
+  color: rgb(255 255 255 / 0.7);
+  font-size: 16px;
+  line-height: 1.6;
+}
+
+.pg-sol-included {
+  background: var(--cp-surface);
+}
+
+.pg-sol-included h3 {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.pg-sol-included ul {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pg-sol-included li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 0;
+  border-top: 1px solid var(--cp-line);
+  color: var(--cp-ink-2);
+  font-size: 15px;
+}
+
+.pg-sol-included li svg {
+  width: 16px;
+  height: 16px;
+  margin-top: 3px;
+  color: var(--cp-accent);
+}
+
+/* --- features used most --- */
+
+.pg-sol-features {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pg-sol-feature {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  height: 100%;
+  padding: 22px;
+  border: 1px solid var(--cp-line);
+  border-radius: 16px;
+  background: var(--cp-surface);
+  color: var(--cp-ink);
+  text-decoration: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.25s var(--cp-ease);
+}
+
+.pg-sol-feature:hover {
+  border-color: var(--cp-line-strong);
+  box-shadow: 0 14px 30px -22px rgb(0 0 0 / 0.35);
+  transform: translateY(-2px);
+}
+
+.pg-sol-feature-icon {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  margin-bottom: 10px;
+  border: 1px solid var(--cp-line);
+  border-radius: 11px;
+  background: var(--cp-soft);
+}
+
+.pg-sol-feature-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.pg-sol-feature b {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.pg-sol-feature small {
+  color: var(--cp-muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.pg-sol-feature-arrow {
+  position: absolute;
+  top: 22px;
+  right: 20px;
+  width: 16px;
+  height: 16px;
+  color: var(--cp-subtle);
+  transition: color 0.2s ease, transform 0.25s var(--cp-ease);
+}
+
+.pg-sol-feature:hover .pg-sol-feature-arrow {
+  color: var(--cp-ink);
+  transform: translate(2px, -2px);
+}
+
+.pg-sol-others {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 10px 14px;
+  margin-top: 40px;
+}
+
+.pg-sol-others p {
+  margin: 0;
+  color: var(--cp-subtle);
+  font: 500 12px/1 var(--cp-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.pg-sol-others ul {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pg-sol-others a {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 7px 12px;
+  border: 1px solid var(--cp-line);
+  border-radius: 99px;
+  background: var(--cp-surface);
+  color: var(--cp-ink-2);
+  font-size: 13.5px;
+  text-decoration: none;
+  transition: border-color 0.2s ease, color 0.2s ease;
+}
+
+.pg-sol-others a:hover {
+  border-color: var(--cp-ink);
+  color: var(--cp-ink);
+}
+
+.pg-sol-others a svg {
+  width: 13px;
+  height: 13px;
+}
+
+/* ========================================================== index sections */
+
+/* --- by team roster --- */
+
+.pg-sol-roster {
+  display: flex;
+  flex-direction: column;
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 0;
+  border-top: 1px solid var(--cp-line);
+  list-style: none;
+}
+
+.pg-sol-roster li {
+  border-bottom: 1px solid var(--cp-line);
+}
+
+.pg-sol-roster-row {
+  display: grid;
+  grid-template-columns: 36px 44px minmax(0, 1fr) minmax(0, 0.8fr) 20px;
+  align-items: center;
+  gap: 18px;
+  padding: 22px 16px;
+  color: var(--cp-ink);
+  text-decoration: none;
+  transition: background-color 0.2s ease;
+}
+
+.pg-sol-roster-row:hover {
+  background: var(--cp-surface);
+}
+
+.pg-sol-roster-number {
+  color: var(--cp-subtle);
+  font: 500 13px/1 var(--cp-mono);
+}
+
+.pg-sol-roster-icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--cp-line);
+  border-radius: 12px;
+  background: var(--cp-surface);
+  transition: border-color 0.2s ease;
+}
+
+.pg-sol-roster-row:hover .pg-sol-roster-icon {
+  border-color: var(--cp-ink);
+}
+
+.pg-sol-roster-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.pg-sol-roster-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.pg-sol-roster-text b {
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.pg-sol-roster-text small {
+  color: var(--cp-muted);
+  font-size: 14.5px;
+  line-height: 1.5;
+}
+
+.pg-sol-roster-scope {
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
+  gap: 7px;
+  padding: 6px 12px;
+  border: 1px solid var(--cp-line);
+  border-radius: 99px;
+  background: var(--cp-surface);
+  color: var(--cp-ink-2);
+  font-size: 13px;
+}
+
+.pg-sol-roster-scope > svg {
+  width: 14px;
+  height: 14px;
+  color: var(--cp-accent);
+}
+
+.pg-sol-roster-arrow {
+  width: 18px;
+  height: 18px;
+  color: var(--cp-subtle);
+  transition: color 0.2s ease, transform 0.25s var(--cp-ease);
+}
+
+.pg-sol-roster-row:hover .pg-sol-roster-arrow {
+  color: var(--cp-ink);
+  transform: translateX(3px);
+}
+
+/* --- by institution comparison --- */
+
+.pg-sol-compare {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.pg-sol-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 14px;
+  min-width: 0;
+  padding: 32px;
+  border: 1px solid var(--cp-line);
+  border-radius: 20px;
+  background: var(--cp-surface);
+}
+
+.pg-sol-panel-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--cp-muted);
+  font: 500 12px/1 var(--cp-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.pg-sol-panel-kicker svg {
+  width: 14px;
+  height: 14px;
+}
+
+.pg-sol-panel h3 {
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+}
+
+.pg-sol-panel-text {
+  margin: 0;
+  color: var(--cp-muted);
+  font-size: 15.5px;
+  line-height: 1.6;
+}
+
+.pg-sol-diagram {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  align-self: stretch;
+  gap: 18px;
+  margin-block: 6px;
+  padding: 24px;
+  border-radius: 16px;
+  background:
+    radial-gradient(rgb(17 17 16 / 0.07) 1px, transparent 1.2px) 0 0 / 18px 18px,
+    var(--cp-soft);
+  font-size: 12.5px;
+}
+
+.pg-sol-diagram p {
+  margin: 0;
+}
+
+.pg-sol-diagram svg {
+  width: 14px;
+  height: 14px;
+}
+
+.pg-sol-boundary {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  align-self: stretch;
+  min-width: 0;
+  padding: 16px;
+  border: 1.5px dashed var(--cp-ink);
+  border-radius: 14px;
+  background: rgb(255 255 255 / 0.85);
+}
+
+.pg-sol-boundary-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+
+.pg-sol-boundary-foot {
+  color: var(--cp-subtle);
+  font: 400 10.5px/1.4 var(--cp-mono);
+}
+
+.pg-sol-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pg-sol-chips li {
+  padding: 4px 9px;
+  border: 1px solid var(--cp-line);
+  border-radius: 8px;
+  background: var(--cp-surface);
+  font-size: 11.5px;
+}
+
+.pg-sol-account {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 99px;
+  background: var(--cp-ink);
+  color: #fff;
+  font-weight: 550;
+}
+
+/* Two short drops from the account chip to each campus box. */
+.pg-sol-diagram-multi .pg-sol-campus-pair {
+  position: relative;
+}
+
+.pg-sol-diagram-multi .pg-sol-campus-pair::before {
+  content: "";
+  position: absolute;
+  top: -18px;
+  left: 25%;
+  right: 25%;
+  height: 18px;
+  border: 1.5px solid var(--cp-line-strong);
+  border-bottom: 0;
+  border-radius: 10px 10px 0 0;
+}
+
+.pg-sol-campus-pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: stretch;
+  gap: 10px;
+  align-self: stretch;
+}
+
+.pg-sol-wall {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  background: linear-gradient(var(--cp-line-strong), var(--cp-line-strong)) center / 1.5px 100% no-repeat;
+}
+
+.pg-sol-wall svg {
+  box-sizing: content-box;
+  padding: 6px;
+  border: 1px solid var(--cp-line);
+  border-radius: 50%;
+  background: var(--cp-surface);
+  color: var(--cp-accent);
+}
+
+.pg-sol-facts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pg-sol-facts li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--cp-ink-2);
+  font-size: 15px;
+}
+
+.pg-sol-facts svg {
+  width: 16px;
+  height: 16px;
+  margin-top: 3px;
+  color: var(--cp-accent);
+}
+
+.pg-sol-panel .pg-sol-diagram {
+  flex: 1;
+  justify-content: center;
+}
+
+.pg-sol-panel .cp-text-link {
+  margin-top: auto;
+}
+
+/* ============================================================ responsive */
+
+@media (max-width: 1100px) {
+  .pg-sol-features {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .pg-sol-roster-row {
+    grid-template-columns: 30px 44px minmax(0, 1fr) 20px;
+  }
+
+  .pg-sol-roster-scope {
+    grid-column: 3;
+    grid-row: 2;
+  }
+
+  .pg-sol-roster-arrow {
+    grid-column: 4;
+    grid-row: 1;
+  }
+}
+
+@media (max-width: 960px) {
+  .pg-sol-outcomes,
+  .pg-sol-workflow-detail,
+  .pg-sol-compare {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .pg-sol-outcome + .pg-sol-outcome {
+    border-top: 1px solid var(--cp-line);
+    border-left: 0;
+  }
+
+  .pg-sol-outcome {
+    padding: 28px 4px;
+  }
+}
+
+@media (max-width: 640px) {
+  .pg-sol-console-body {
+    padding: 12px;
+  }
+
+  .pg-sol-console-bar {
+    flex-wrap: wrap;
+    row-gap: 6px;
+  }
+
+  /* The title keeps its natural width, so a long scope chip wraps to its own line instead of truncating it. */
+  .pg-sol-console-bar b {
+    flex: 1 0 auto;
+    max-width: calc(100% - 48px);
+  }
+
+  .pg-sol-scope {
+    order: 3;
+  }
+
+  .pg-sol-money {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .pg-sol-classes,
+  .pg-sol-outputs {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .pg-sol-journey {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px 10px;
+  }
+
+  .pg-sol-stage {
+    grid-column: 1 / -1;
+    justify-self: start;
+    text-align: left;
+  }
+
+  .pg-sol-journey .pg-sol-track {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  /* Three status pills fit one line on phones; the plan step and arrows are implied. */
+  .pg-sol-lifecycle li[data-status="plan"],
+  .pg-sol-lifecycle li + li::before {
+    display: none;
+  }
+
+  .pg-sol-exam-row {
+    grid-template-columns: 64px minmax(0, 1fr) auto;
+    gap: 8px;
+  }
+
+  .pg-sol-flow {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .pg-sol-flow small {
+    grid-column: 2;
+    text-align: left;
+  }
+
+  .pg-sol-receipt code {
+    display: none;
+  }
+
+  .pg-sol-receipt {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .pg-sol-steps {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
+    margin-bottom: 32px;
+  }
+
+  .pg-sol-steps::before {
+    top: 20px;
+    bottom: 20px;
+    left: 19px;
+    right: auto;
+    width: 1.5px;
+    height: auto;
+  }
+
+  .pg-sol-steps li {
+    flex-direction: row;
+    text-align: left;
+  }
+
+  .pg-sol-spotlight,
+  .pg-sol-included,
+  .pg-sol-panel {
+    padding: 22px 18px;
+  }
+
+  .pg-sol-features {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .pg-sol-roster-row {
+    grid-template-columns: 40px minmax(0, 1fr) 18px;
+    gap: 10px 14px;
+    padding: 18px 4px;
+  }
+
+  .pg-sol-roster-number {
+    display: none;
+  }
+
+  .pg-sol-roster-icon {
+    width: 40px;
+    height: 40px;
+  }
+
+  .pg-sol-roster-text {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .pg-sol-roster-scope {
+    grid-column: 2 / -1;
+    grid-row: 2;
+  }
+
+  .pg-sol-roster-arrow {
+    grid-column: 3;
+    grid-row: 1;
+  }
+
+  .pg-sol-diagram {
+    padding: 16px 12px;
+  }
+
+  .pg-sol-campus-pair {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .pg-sol-wall {
+    width: auto;
+    height: 28px;
+    background-size: 100% 1.5px;
+  }
+
+  .pg-sol-diagram-multi .pg-sol-campus-pair::before {
+    display: none;
+  }
+}
+
+/* ============================================================ keyframes */
+
+@keyframes pg-sol-rise {
+  from {
+    opacity: 0;
+    translate: 0 10px;
+  }
+}
+
+@keyframes pg-sol-flash {
+  from {
+    background: transparent;
+  }
+}

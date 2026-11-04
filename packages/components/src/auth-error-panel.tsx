@@ -1,6 +1,6 @@
 import { AlertTriangle, ArrowLeft } from 'lucide-react';
 import { Button } from '@campuspilot/ui/components/button';
-import { BrandLogo } from './brand-logo';
+import { BrandLogo, type BrandProduct } from './brand-logo';
 
 type AuthErrorCopy = {
   title: string;
@@ -79,19 +79,22 @@ const DEFAULT_AUTH_ERROR_COPY: AuthErrorCopy = {
 /**
  * Translate OAuth callback codes into safe, actionable copy. Provider-supplied
  * descriptions are intentionally not rendered because they are untrusted.
+ * `product` selects which app's logo heads the panel.
  */
 export function AuthErrorPanel({
   errorCode,
   retryHref,
+  product,
 }: {
   errorCode: string;
   retryHref: string;
+  product: BrandProduct;
 }) {
   const copy = AUTH_ERROR_COPY[errorCode] ?? DEFAULT_AUTH_ERROR_COPY;
 
   return (
     <div className="flex w-full max-w-md flex-col gap-8">
-      <BrandLogo />
+      <BrandLogo product={product} />
 
       <div className="flex flex-col gap-5">
         <div className="flex size-12 items-center justify-center rounded-full bg-destructive/10 text-destructive">

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- G · Crest of modules: a school crest holding four organised modules. -->
+  <!-- Neutral parts use currentColor (flips with theme); accent parts use var(--mark-accent, currentColor), so the mark is monochrome unless an accent is set. -->
+  <path d="M32 7 52 13.5V31C52 43.5 43.5 51.5 32 57 20.5 51.5 12 43.5 12 31V13.5Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/>
+  <g style="fill:var(--mark-accent,currentColor)">
+    <rect x="21" y="18.5" width="9.5" height="9.5" rx="2.2"/>
+    <rect x="33.5" y="18.5" width="9.5" height="9.5" rx="2.2"/>
+    <rect x="21" y="31" width="9.5" height="9.5" rx="2.2"/>
+    <rect x="33.5" y="31" width="9.5" height="9.5" rx="2.2"/>
+  </g>
+</svg>

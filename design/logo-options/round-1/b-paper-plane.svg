@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- B · Paper plane: a folded school-paper plane climbing out of a C-shaped flight path. -->
+  <rect width="64" height="64" rx="15" fill="#c2580e"/>
+  <path d="M21 44.5C13.5 47 10.5 52 12.5 57" fill="none" stroke="#f8b563" stroke-width="3" stroke-linecap="round" stroke-dasharray="0.1 6"/>
+  <path d="M52 12 10 30.5 26.5 36.5Z" fill="#fff7ec"/>
+  <path d="M52 12 26.5 36.5 31 52Z" fill="#f8b563"/>
+  <path d="M26.5 36.5 31 52 35.6 41.5Z" fill="#8f3e08"/>
+</svg>

@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CampusPilot logo options</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&display=swap">
+<style>
+  :root { --bg:#f4f4f2; --surface:#fff; --ink:#111110; --paper:#f4f4f2; --muted:#6b6b66; --line:#e6e6e2; --primary:#c2580e; }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family:Geist, ui-sans-serif, system-ui, sans-serif; }
+  main { max-width:1280px; margin:0 auto; padding:40px 16px 64px; display:flex; flex-direction:column; gap:20px; }
+  h1 { margin:0; font-size:28px; letter-spacing:-.02em; }
+  .lede { margin:0; max-width:760px; color:var(--muted); line-height:1.5; }
+  .scroll { overflow-x:auto; background:var(--surface); border:1px solid var(--line); border-radius:16px; }
+  table { border-collapse:collapse; width:100%; min-width:1080px; }
+  th, td { padding:14px; border-bottom:1px solid var(--line); text-align:center; vertical-align:middle; }
+  th { font-size:12px; font-weight:500; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
+  tr:last-child td { border-bottom:0; }
+  td.name { text-align:left; width:220px; }
+  .name strong { display:block; font-size:15px; }
+  .name span { display:block; margin-top:4px; font-size:13px; color:var(--muted); line-height:1.45; }
+  .swatch { display:inline-grid; place-items:center; width:84px; height:84px; border-radius:14px; }
+  .swatch svg { width:56px; height:56px; }
+  .light { background:#fff; color:var(--ink); box-shadow:inset 0 0 0 1px var(--line); }
+  .dark { background:var(--ink); color:var(--paper); }
+  .mono { --mark-accent:currentColor; }
+  .duo { --mark-accent:var(--primary); }
+  .icon { background:var(--primary); color:#fff; --mark-accent:#fff; }
+  .icon svg { width:50px; height:50px; }
+  .sizes { display:inline-flex; align-items:center; gap:12px; color:var(--ink); --mark-accent:var(--primary); }
+  .sizes svg { width:100%; height:100%; }
+  .lockup { display:inline-flex; align-items:center; gap:8px; padding:10px 12px; border-radius:10px; font-weight:600; letter-spacing:-.02em; font-size:16px; --mark-accent:var(--primary); }
+  .lockup svg { width:26px; height:26px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>CampusPilot: logo options, round 3</h1>
+  <p class="lede">At most two colours per mark. The neutral shape follows the theme (black on light, white on dark), and the optional accent is the primary orange. "Mono" has no accent at all. The app icon is white on the primary orange.</p>
+  <div class="scroll">
+    <table>
+      <thead>
+        <tr><th>Option</th><th>Mono · light</th><th>Mono · dark</th><th>Two-tone · light</th><th>Two-tone · dark</th><th>App icon</th><th>32 · 16 px</th><th>Navbar</th></tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+</main>
+<script>
+  const options = [
+    { file: 'f-institution-bars.svg', name: 'F · Institution bars', note: 'School building whose columns rise like a bar chart. The roof takes the accent.' },
+    { file: 'g-crest-modules.svg', name: 'G · Crest of modules', note: 'School crest holding four organised modules. The modules take the accent.' },
+    { file: 'h-clipboard-cap.svg', name: 'H · Clipboard cap', note: 'Admin clipboard with a checklist, clipped by a graduation cap.' },
+    { file: 'i-book-ledger.svg', name: 'I · Book ledger', note: 'Open book: a guiding star on one page, records on the other. Grows out of round one’s C.' },
+    { file: 'j-cap-check.svg', name: 'J · Cap check', note: 'Graduation cap whose head is a completed check: school plus "done".' },
+    { file: 'k-pediment-modules.svg', name: 'K · Pediment modules', note: 'F and G combined: a school roof over four modules, like a building of departments.' },
+    { file: 'l-campus-c.svg', name: 'L · Campus C', note: 'The C of CampusPilot wrapped around a small school building.' },
+  ];
+  /** Raw SVG markup, inlined (not <img>) so currentColor and --mark-accent can be themed per cell. */
+  const svg = {"f-institution-bars.svg":"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\">\n  <!-- F · Institution bars: a school pediment whose columns rise like a bar chart. -->\n  <!-- Neutral parts use currentColor (flips with theme); accent parts use var(--mark-accent, currentColor), so the mark is monochrome unless an accent is set. -->\n  <path d=\"M8 22 32 8 56 22Z\" stroke-width=\"3\" stroke-linejoin=\"round\" style=\"fill:var(--mark-accent,currentColor);stroke:var(--mark-accent,currentColor)\"/>\n  <g fill=\"currentColor\">\n    <rect x=\"10\" y=\"39\" width=\"7\" height=\"8\" rx=\"1.75\"/>\n    <rect x=\"22.33\" y=\"34.5\" width=\"7\" height=\"12.5\" rx=\"1.75\"/>\n    <rect x=\"34.67\" y=\"30\" width=\"7\" height=\"17\" rx=\"1.75\"/>\n    <rect x=\"47\" y=\"26\" width=\"7\" height=\"21\" rx=\"1.75\"/>\n    <rect x=\"8\" y=\"50.5\" width=\"48\" height=\"5\" rx=\"2.5\"/>\n  </g>\n</svg>\n","g-crest-modules.svg":"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\">\n  <!-- G · Crest of modules: a school crest holding four organised modules. -->\n  <!-- Neutral parts use currentColor (flips with theme); accent parts use var(--mark-accent, currentColor), so the mark is monochrome unless an accent is set. -->\n  <path d=\"M32 7 52 13.5V31C52 43.5 43.5 51.5 32 57 20.5 51.5 12 43.5 12 31V13.5Z\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"4\" stroke-linejoin=\"round\"/>\n  <g style=\"fill:var(--mark-accent,currentColor)\">\n    <rect x=\"21\" y=\"18.5\" width=\"9.5\" height=\"9.5\" rx=\"2.2\"/>\n    <rect x=\"33.5\" y=\"18.5\" width=\"9.5\" height=\"9.5\" rx=\"2.2\"/>\n    <rect x=\"21\" y=\"31\" width=\"9.5\" height=\"9.5\" rx=\"2.2\"/>\n    <rect x=\"33.5\" y=\"31\" width=\"9.5\" height=\"9.5\" rx=\"2.2\"/>\n  </g>\n</svg>\n","h-clipboard-cap.svg":"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\">\n  <!-- H · Clipboard cap: an administration clipboard whose clip is a graduation cap. -->\n  <!-- Neutral parts use currentColor (flips with theme); accent parts use var(--mark-accent, currentColor), so the mark is monochrome unless an accent is set. -->\n  <path d=\"M22 16H20A6 6 0 0 0 14 22V52A6 6 0 0 0 20 58H44A6 6 0 0 0 50 52V22A6 6 0 0 0 44 16H42\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"4\" stroke-linecap=\"round\"/>\n  <g fill=\"none\" stroke=\"currentColor\" stroke-width=\"3.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\">\n    <path d=\"M20.5 33 23.5 36 28.5 31M33 33.5H43.5\"/>\n    <path d=\"M20.5 44 23.5 47 28.5 42M33 44.5H40\"/>\n  </g>\n  <path d=\"M32 4.5 47 11 32 17.5 17 11Z\" stroke-width=\"2\" stroke-linejoin=\"round\" style=\"fill:var(--mark-accent,currentColor);stroke:var(--mark-accent,currentColor)\"/>\n  <path d=\"M26.5 14V18.5C26.5 20.3 29 21.5 32 21.5S37.5 20.3 37.5 18.5V14Z\" style=\"fill:var(--mark-accent,currentColor)\"/>\n  <path d=\"M41 12.5V20\" fill=\"none\" stroke-width=\"2\" stroke-linecap=\"round\" style=\"stroke:var(--mark-accent,currentColor)\"/>\n</svg>\n","i-book-ledger.svg":"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\">\n  <!-- I · Book ledger: an open book; the left page holds the guiding star, the right page holds records. -->\n  <!-- Neutral parts use currentColor (flips with theme); accent parts use var(--mark-accent, currentColor), so the mark is monochrome unless an accent is set. -->\n  <path d=\"M32 52C26 47.5 17 46.5 8 47.5V18.5C17 17.5 26 18.5 32 23 38 18.5 47 17.5 56 18.5V47.5C47 46.5 38 47.5 32 52ZM32 23V52\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"3.5\" stroke-linejoin=\"round\"/>\n  <path d=\"M20 26 21.4 31.1 26.5 32.5 21.4 33.9 20 39 18.6 33.9 13.5 32.5 18.6 31.1Z\" style=\"fill:var(--mark-accent,currentColor)\"/>\n  <path d=\"M38.5 29H49.5M38.5 35.5H49.5M38.5 42H45\" fill=\"none\" stroke-width=\"3\" stroke-linecap=\"round\" style=\"stroke:var(--mark-accent,currentColor)\"/>\n</svg>\n","j-cap-check.svg":"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\">\n  <!-- J · Cap check: a graduation cap whose head is a completed check. -->\n  <!-- Neutral parts use currentColor (flips with theme); accent parts use var(--mark-accent, currentColor), so the mark is monochrome unless an accent is set. -->\n  <path d=\"M32 8 56 19 32 30 8 19Z\" fill=\"currentColor\" stroke=\"currentColor\" stroke-width=\"2.5\" stroke-linejoin=\"round\"/>\n  <path d=\"M51.5 21.5V33\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.5\" stroke-linecap=\"round\"/>\n  <path d=\"M19 40 28 49 45.5 31.5\" fill=\"none\" stroke-width=\"6\" stroke-linecap=\"round\" stroke-linejoin=\"round\" style=\"stroke:var(--mark-accent,currentColor)\"/>\n</svg>\n","k-pediment-modules.svg":"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\">\n  <!-- K · Pediment modules: a school roof over four organised modules (F and G combined). -->\n  <!-- Neutral parts use currentColor (flips with theme); accent parts use var(--mark-accent, currentColor), so the mark is monochrome unless an accent is set. -->\n  <path d=\"M8 22 32 8 56 22Z\" stroke-width=\"3\" stroke-linejoin=\"round\" style=\"fill:var(--mark-accent,currentColor);stroke:var(--mark-accent,currentColor)\"/>\n  <g fill=\"currentColor\">\n    <rect x=\"12\" y=\"27.5\" width=\"18.5\" height=\"12.5\" rx=\"3\"/>\n    <rect x=\"33.5\" y=\"27.5\" width=\"18.5\" height=\"12.5\" rx=\"3\"/>\n    <rect x=\"12\" y=\"43\" width=\"18.5\" height=\"12.5\" rx=\"3\"/>\n    <rect x=\"33.5\" y=\"43\" width=\"18.5\" height=\"12.5\" rx=\"3\"/>\n  </g>\n</svg>\n","l-campus-c.svg":"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\">\n  <!-- L · Campus C: the brand's C letterform enclosing a school building. -->\n  <!-- Neutral parts use currentColor (flips with theme); accent parts use var(--mark-accent, currentColor), so the mark is monochrome unless an accent is set. -->\n  <path d=\"M48.85 17.86A22 22 0 1 0 48.85 46.14\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"6\" stroke-linecap=\"round\"/>\n  <g style=\"fill:var(--mark-accent,currentColor)\">\n    <path d=\"M22 30 32 23.5 42 30Z\" stroke-width=\"2\" stroke-linejoin=\"round\" style=\"fill:var(--mark-accent,currentColor);stroke:var(--mark-accent,currentColor)\"/>\n    <rect x=\"23.5\" y=\"32\" width=\"4\" height=\"9\" rx=\"1\"/>\n    <rect x=\"30\" y=\"32\" width=\"4\" height=\"9\" rx=\"1\"/>\n    <rect x=\"36.5\" y=\"32\" width=\"4\" height=\"9\" rx=\"1\"/>\n    <rect x=\"22\" y=\"42.5\" width=\"20\" height=\"3.5\" rx=\"1.75\"/>\n  </g>\n</svg>\n"};
+  const swatch = (cls, s) => `<td><span class="swatch ${cls}">${s}</span></td>`;
+  const rows = document.getElementById('rows');
+  for (const o of options) {
+    const s = svg[o.file];
+    rows.insertAdjacentHTML('beforeend', `<tr>
+      <td class="name"><strong>${o.name}</strong><span>${o.note}</span></td>
+      ${swatch('light mono', s)}${swatch('dark mono', s)}${swatch('light duo', s)}${swatch('dark duo', s)}${swatch('icon', s)}
+      <td><span class="sizes"><span style="width:32px;height:32px;display:inline-flex">${s}</span><span style="width:16px;height:16px;display:inline-flex">${s}</span></span></td>
+      <td><span class="lockup light">${s}CampusPilot</span></td>
+    </tr>`);
+  }
+</script>
+</body>
+</html>

@@ -22,6 +22,7 @@ export function AuthErrorScreen() {
       <AuthErrorPanel
         errorCode={errorCode}
         retryHref={buildSignInRedirectPath(redirectPath, '/auth/login')}
+        product="campuspilot"
       />
     </AuthShell>
   );

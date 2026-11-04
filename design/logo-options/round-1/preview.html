@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CampusPilot logo options</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&display=swap">
+<style>
+  :root { --bg:#f4f4f2; --surface:#fff; --ink:#111110; --muted:#6b6b66; --line:#e6e6e2; --accent:#c2580e; }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family:Geist, ui-sans-serif, system-ui, sans-serif; }
+  main { max-width:1180px; margin:0 auto; padding:40px 16px 64px; display:flex; flex-direction:column; gap:24px; }
+  h1 { margin:0; font-size:28px; letter-spacing:-.02em; }
+  .lede { margin:0; color:var(--muted); }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(270px, 1fr)); gap:16px; }
+  .card { background:var(--surface); border:1px solid var(--line); border-radius:16px; padding:20px; display:flex; flex-direction:column; gap:16px; }
+  .card h2 { margin:0; font-size:16px; }
+  .card p { margin:0; color:var(--muted); font-size:14px; line-height:1.5; }
+  .hero { width:140px; height:140px; }
+  .sizes { display:flex; align-items:end; gap:14px; }
+  .bar { display:flex; align-items:center; gap:10px; padding:12px 14px; border-radius:12px; border:1px solid var(--line); }
+  .bar.dark { background:#111110; border-color:#111110; color:#f4f4f2; }
+  .word { font-weight:600; letter-spacing:-.02em; font-size:17px; }
+  .word span { color:var(--accent); }
+  .dark .word span { color:#f8b563; }
+</style>
+</head>
+<body>
+<main>
+  <h1>CampusPilot: logo options</h1>
+  <p class="lede">Each card shows the mark large, at 48, 32 and 16 px (favicon), and as a navbar lockup on light and dark.</p>
+  <div class="grid" id="grid"></div>
+</main>
+<script>
+  const options = [
+    { file: 'a-compass.svg', name: 'A · Compass C', note: 'The C opens toward the upper right and a compass needle points through the gap. Suggests navigation and direction. Ink tile with an orange needle.' },
+    { file: 'b-paper-plane.svg', name: 'B · Paper plane', note: 'A folded paper plane climbing along a dotted flight path. Friendly and school-flavoured, and it also says "pilot". Keeps today’s orange tile.' },
+    { file: 'c-north-star.svg', name: 'C · North star', note: 'A guiding star rising above an open book: learning plus guidance. The warmest and most "education" of the four.' },
+    { file: 'd-monogram.svg', name: 'D · cp monogram', note: 'Geometric lowercase c and p as a ligature. Quiet and typographic, closest to a modern SaaS wordmark.' },
+  ];
+  /** SVGs are embedded so the page also works as a standalone snapshot. Regenerate after editing an .svg. */
+  const svg = {"a-compass.svg":"data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+CiAgPCEtLSBBIMK3IENvbXBhc3MgQzogdGhlIEMgbGV0dGVyZm9ybSBvcGVucyB0b3dhcmQgdGhlIHVwcGVyIHJpZ2h0LCBhbmQgdGhlIG5lZWRsZSBwb2ludHMgdGhyb3VnaCB0aGUgZ2FwLiAtLT4KICA8cmVjdCB3aWR0aD0iNjQiIGhlaWdodD0iNjQiIHJ4PSIxNSIgZmlsbD0iIzExMTExMCIvPgogIDxwYXRoIGQ9Ik0zNC45NSAxNS4yNkExNyAxNyAwIDEgMCA0OC43NCAyOS4wNSIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZmJmN2YwIiBzdHJva2Utd2lkdGg9IjciIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPgogIDxwYXRoIGQ9Ik00NC40IDE5LjYgMzQuODMgMzQuODMgMjkuMTcgMjkuMTdaIiBmaWxsPSIjZTg3NDJhIi8+CiAgPHBhdGggZD0iTTI2LjMgMzcuNyAzNC44MyAzNC44MyAyOS4xNyAyOS4xN1oiIGZpbGw9IiNmYmY3ZjAiIGZpbGwtb3BhY2l0eT0iLjU1Ii8+Cjwvc3ZnPgo=","b-paper-plane.svg":"data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+CiAgPCEtLSBCIMK3IFBhcGVyIHBsYW5lOiBhIGZvbGRlZCBzY2hvb2wtcGFwZXIgcGxhbmUgY2xpbWJpbmcgb3V0IG9mIGEgQy1zaGFwZWQgZmxpZ2h0IHBhdGguIC0tPgogIDxyZWN0IHdpZHRoPSI2NCIgaGVpZ2h0PSI2NCIgcng9IjE1IiBmaWxsPSIjYzI1ODBlIi8+CiAgPHBhdGggZD0iTTIxIDQ0LjVDMTMuNSA0NyAxMC41IDUyIDEyLjUgNTciIGZpbGw9Im5vbmUiIHN0cm9rZT0iI2Y4YjU2MyIgc3Ryb2tlLXdpZHRoPSIzIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1kYXNoYXJyYXk9IjAuMSA2Ii8+CiAgPHBhdGggZD0iTTUyIDEyIDEwIDMwLjUgMjYuNSAzNi41WiIgZmlsbD0iI2ZmZjdlYyIvPgogIDxwYXRoIGQ9Ik01MiAxMiAyNi41IDM2LjUgMzEgNTJaIiBmaWxsPSIjZjhiNTYzIi8+CiAgPHBhdGggZD0iTTI2LjUgMzYuNSAzMSA1MiAzNS42IDQxLjVaIiBmaWxsPSIjOGYzZTA4Ii8+Cjwvc3ZnPgo=","c-north-star.svg":"data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+CiAgPCEtLSBDIMK3IE5vcnRoIHN0YXI6IGEgZ3VpZGluZyBzdGFyIHJpc2luZyBmcm9tIGFuIG9wZW4gYm9vay4gLS0+CiAgPHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTUiIGZpbGw9IiNmYmVlZTIiLz4KICA8cGF0aCBkPSJNMzIgNy41IDMzLjkgMTYuMSA0Mi41IDE4IDMzLjkgMTkuOSAzMiAyOC41IDMwLjEgMTkuOSAyMS41IDE4IDMwLjEgMTYuMVoiIGZpbGw9IiNjMjU4MGUiLz4KICA8cGF0aCBkPSJNMzIgNTBDMjYuNSA0NiAxOSA0NSAxMS41IDQ2VjMyQzE5IDMxIDI2LjUgMzIgMzIgMzZDMzcuNSAzMiA0NSAzMSA1Mi41IDMyVjQ2QzQ1IDQ1IDM3LjUgNDYgMzIgNTBaIiBmaWxsPSJub25lIiBzdHJva2U9IiMxMTExMTAiIHN0cm9rZS13aWR0aD0iMy41IiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+CiAgPHBhdGggZD0iTTMyIDM2VjUwIiBzdHJva2U9IiMxMTExMTAiIHN0cm9rZS13aWR0aD0iMy41IiBzdHJva2UtbGluZWNhcD0icm91bmQiLz4KPC9zdmc+Cg==","d-monogram.svg":"data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+CiAgPCEtLSBEIMK3IGNwIG1vbm9ncmFtOiB0d28gZ2VvbWV0cmljIHJpbmdzOyB0aGUgYydzIG9wZW4gc2lkZSBmYWNlcyB0aGUgcCdzIHN0ZW0uIC0tPgogIDxyZWN0IHg9Ii43NSIgeT0iLjc1IiB3aWR0aD0iNjIuNSIgaGVpZ2h0PSI2Mi41IiByeD0iMTQuMjUiIGZpbGw9IiNmZmZmZmYiIHN0cm9rZT0iI2U2ZTZlMiIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgxLjUgLTMuNSkiPgogICAgPHBhdGggZD0iTTI1LjM2IDIzLjY0QTkgOSAwIDEgMCAyNS4zNiAzNi4zNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMTExMTEwIiBzdHJva2Utd2lkdGg9IjYiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPgogICAgPGNpcmNsZSBjeD0iNDIiIGN5PSIzMCIgcj0iOSIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjYzI1ODBlIiBzdHJva2Utd2lkdGg9IjYiLz4KICAgIDxwYXRoIGQ9Ik0zMyAzMFY1MCIgc3Ryb2tlPSIjYzI1ODBlIiBzdHJva2Utd2lkdGg9IjYiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPgogIDwvZz4KPC9zdmc+Cg=="};
+  const grid = document.getElementById('grid');
+  for (const o of options) {
+    const word = '<span class="word">Campus<span>Pilot</span></span>';
+    grid.insertAdjacentHTML('beforeend', `
+      <section class="card">
+        <h2>${o.name}</h2>
+        <img class="hero" src="${svg[o.file]}" alt="">
+        <div class="sizes">
+          <img src="${svg[o.file]}" width="48" height="48" alt="">
+          <img src="${svg[o.file]}" width="32" height="32" alt="">
+          <img src="${svg[o.file]}" width="16" height="16" alt="">
+        </div>
+        <div class="bar"><img src="${svg[o.file]}" width="28" height="28" alt="">${word}</div>
+        <div class="bar dark"><img src="${svg[o.file]}" width="28" height="28" alt="">${word}</div>
+        <p>${o.note}</p>
+      </section>`);
+  }
+</script>
+</body>
+</html>

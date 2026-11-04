@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- F · Institution bars: a school pediment whose columns rise like a bar chart. -->
+  <!-- Neutral parts use currentColor (flips with theme); accent parts use var(--mark-accent, currentColor), so the mark is monochrome unless an accent is set. -->
+  <path d="M8 22 32 8 56 22Z" stroke-width="3" stroke-linejoin="round" style="fill:var(--mark-accent,currentColor);stroke:var(--mark-accent,currentColor)"/>
+  <g fill="currentColor">
+    <rect x="10" y="39" width="7" height="8" rx="1.75"/>
+    <rect x="22.33" y="34.5" width="7" height="12.5" rx="1.75"/>
+    <rect x="34.67" y="30" width="7" height="17" rx="1.75"/>
+    <rect x="47" y="26" width="7" height="21" rx="1.75"/>
+    <rect x="8" y="50.5" width="48" height="5" rx="2.5"/>
+  </g>
+</svg>

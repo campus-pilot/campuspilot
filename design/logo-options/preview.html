@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CampusPilot logo options</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&display=swap">
+<style>
+  :root { --bg:#f4f4f2; --surface:#fff; --ink:#111110; --paper:#f4f4f2; --muted:#6b6b66; --line:#e6e6e2; --primary:#c2580e; }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family:Geist, ui-sans-serif, system-ui, sans-serif; }
+  main { max-width:1280px; margin:0 auto; padding:40px 16px 64px; display:flex; flex-direction:column; gap:20px; }
+  h1 { margin:0; font-size:28px; letter-spacing:-.02em; }
+  .lede { margin:0; max-width:760px; color:var(--muted); line-height:1.5; }
+  .scroll { overflow-x:auto; background:var(--surface); border:1px solid var(--line); border-radius:16px; }
+  table { border-collapse:collapse; width:100%; min-width:1080px; }
+  th, td { padding:14px; border-bottom:1px solid var(--line); text-align:center; vertical-align:middle; }
+  th { font-size:12px; font-weight:500; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
+  tr:last-child td { border-bottom:0; }
+  td.name { text-align:left; width:220px; }
+  .name strong { display:block; font-size:15px; }
+  .name span { display:block; margin-top:4px; font-size:13px; color:var(--muted); line-height:1.45; }
+  .swatch { display:inline-grid; place-items:center; width:84px; height:84px; border-radius:14px; }
+  .swatch svg { width:56px; height:56px; }
+  .light { background:#fff; color:var(--ink); box-shadow:inset 0 0 0 1px var(--line); }
+  .dark { background:var(--ink); color:var(--paper); }
+  .mono { --mark-accent:currentColor; }
+  .duo { --mark-accent:var(--primary); }
+  .icon { background:var(--primary); color:#fff; --mark-accent:#fff; }
+  .icon svg { width:50px; height:50px; }
+  .sizes { display:inline-flex; align-items:center; gap:12px; color:var(--ink); --mark-accent:var(--primary); }
+  .sizes svg { width:100%; height:100%; }
+  .lockup { display:inline-flex; align-items:center; gap:8px; padding:10px 12px; border-radius:10px; font-weight:600; letter-spacing:-.02em; font-size:16px; --mark-accent:var(--primary); }
+  .lockup svg { width:26px; height:26px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>CampusPilot: logo options, round 5</h1>
+  <p class="lede">At most two colours per mark. The neutral shape follows the theme (black on light, white on dark), and the optional accent is the primary orange. "Mono" has no accent at all. The app icon is white on the primary orange.</p>
+  <div class="scroll">
+    <table>
+      <thead>
+        <tr><th>Option</th><th>Mono · light</th><th>Mono · dark</th><th>Two-tone · light</th><th>Two-tone · dark</th><th>App icon</th><th>32 · 16 px</th><th>Navbar</th></tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+</main>
+<script>
+  const options = [
+    { file: "l3-capped-c.svg", name: "L3 · Capped C", note: "New. The C wears a mortarboard, and the tassel drops beside the opening." },
+    { file: "l4-capped-c-tilted.svg", name: "L4 · Capped C, tilted", note: "New. L3 with the cap tipped a little for a lighter, celebratory feel." },
+    { file: "l5-cap-toss.svg", name: "L5 · Cap toss", note: "New. The C opens to the upper right and a cap flies out of the gap, like a graduation toss." },
+    { file: "l6-cap-in-c.svg", name: "L6 · Cap in C", note: "New. A graduation cap centred inside the C, the same layout as L." },
+    { file: "l-campus-c.svg", name: "L · Campus C", note: "For reference: the classical building inside the C." },
+    { file: "l2-campus-c-school.svg", name: "L2 · Campus C, schoolhouse", note: "For reference: the schoolhouse inside the C." },
+  ];
+  /** Raw SVG markup, inlined (not <img>) so currentColor and --mark-accent can be themed per cell. */
+  const svg = {"l-campus-c.svg":"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\">\n  <!-- L · Campus C: the brand's C letterform enclosing a classical building, centred on the ring's centre (32, 32). The group is nudged right so the open C sits optically centred in the canvas. -->\n  <!-- Neutral parts use currentColor (flips with theme); accent parts use var(--mark-accent, currentColor), so the mark is monochrome unless an accent is set. -->\n  <g transform=\"translate(2.5 0)\">\n    <path d=\"M48.85 17.86A22 22 0 1 0 48.85 46.14\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"6\" stroke-linecap=\"round\"/>\n    <g style=\"fill:var(--mark-accent,currentColor)\">\n      <path d=\"M22 27.75 32 21.25 42 27.75Z\" stroke-width=\"2\" stroke-linejoin=\"round\" style=\"fill:var(--mark-accent,currentColor);stroke:var(--mark-accent,currentColor)\"/>\n      <rect x=\"23.5\" y=\"29.75\" width=\"4\" height=\"9\" rx=\"1\"/>\n      <rect x=\"30\" y=\"29.75\" width=\"4\" height=\"9\" rx=\"1\"/>\n      <rect x=\"36.5\" y=\"29.75\" width=\"4\" height=\"9\" rx=\"1\"/>\n      <rect x=\"22\" y=\"40.25\" width=\"20\" height=\"3.5\" rx=\"1.75\"/>\n    </g>\n  </g>\n</svg>\n","l2-campus-c-school.svg":"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\">\n  <!-- L2 · Campus C, schoolhouse: the C letterform enclosing the schoolhouse from N, centred on the ring's centre. -->\n  <!-- Neutral parts use currentColor (flips with theme); accent parts use var(--mark-accent, currentColor), so the mark is monochrome unless an accent is set. -->\n  <g transform=\"translate(2.5 0)\">\n    <path d=\"M48.85 17.86A22 22 0 1 0 48.85 46.14\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"6\" stroke-linecap=\"round\"/>\n    <g transform=\"translate(32 32) scale(.52) translate(-32 -31.5)\" fill-rule=\"evenodd\" style=\"fill:var(--mark-accent,currentColor)\">\n      <path d=\"M21 56V15L32 7L43 15V56H36.5V47.5A4.5 4.5 0 0 0 27.5 47.5V56ZM27.5 24A4.5 4.5 0 1 0 36.5 24A4.5 4.5 0 1 0 27.5 24Z\"/>\n      <path d=\"M10.5 29H18.5V56H10.5A2.5 2.5 0 0 1 8 53.5V31.5A2.5 2.5 0 0 1 10.5 29ZM11 35H15.5V40H11ZM11 44H15.5V49H11ZM53.5 29H45.5V56H53.5A2.5 2.5 0 0 0 56 53.5V31.5A2.5 2.5 0 0 0 53.5 29ZM48.5 35H53V40H48.5ZM48.5 44H53V49H48.5Z\"/>\n    </g>\n  </g>\n</svg>\n","l3-capped-c.svg":"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\">\n  <!-- L3 · Capped C: the C wears a mortarboard; the tassel drops beside the C's opening. A 2-unit gap keeps cap and C apart in mono. -->\n  <!-- Neutral parts use currentColor (flips with theme); accent parts use var(--mark-accent, currentColor), so the mark is monochrome unless an accent is set. -->\n  <g transform=\"translate(2 0)\">\n    <path d=\"M42.26 30.72A16 16 0 1 0 42.26 51.28\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"6\" stroke-linecap=\"round\"/>\n    <path d=\"M30 6 50 12.5 30 19 10 12.5Z\" stroke-width=\"2\" stroke-linejoin=\"round\" style=\"fill:var(--mark-accent,currentColor);stroke:var(--mark-accent,currentColor)\"/>\n    <path d=\"M49 13.5V30\" fill=\"none\" stroke-width=\"2.2\" stroke-linecap=\"round\" style=\"stroke:var(--mark-accent,currentColor)\"/>\n    <rect x=\"47.25\" y=\"29\" width=\"3.5\" height=\"7\" rx=\"1.75\" style=\"fill:var(--mark-accent,currentColor)\"/>\n  </g>\n</svg>\n","l4-capped-c-tilted.svg":"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\">\n  <!-- L4 · Capped C, tilted: L3 with the mortarboard tipped 12° for a lighter, celebratory feel. The tassel still hangs straight. -->\n  <!-- Neutral parts use currentColor (flips with theme); accent parts use var(--mark-accent, currentColor), so the mark is monochrome unless an accent is set. -->\n  <g transform=\"translate(2 0)\">\n    <path d=\"M42.26 30.72A16 16 0 1 0 42.26 51.28\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"6\" stroke-linecap=\"round\"/>\n    <path d=\"M30 6 50 12.5 30 19 10 12.5Z\" transform=\"rotate(-12 30 12.5)\" stroke-width=\"2\" stroke-linejoin=\"round\" style=\"fill:var(--mark-accent,currentColor);stroke:var(--mark-accent,currentColor)\"/>\n    <path d=\"M49.4 9.5V30\" fill=\"none\" stroke-width=\"2.2\" stroke-linecap=\"round\" style=\"stroke:var(--mark-accent,currentColor)\"/>\n    <rect x=\"47.65\" y=\"29\" width=\"3.5\" height=\"7\" rx=\"1.75\" style=\"fill:var(--mark-accent,currentColor)\"/>\n  </g>\n</svg>\n","l5-cap-toss.svg":"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\">\n  <!-- L5 · Cap toss: a tilted mortarboard flies out through the C's opening, like a graduation toss. -->\n  <!-- Neutral parts use currentColor (flips with theme); accent parts use var(--mark-accent, currentColor), so the mark is monochrome unless an accent is set. -->\n  <path d=\"M38.79 20.43A18 18 0 1 0 38.79 43.57\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"6\" stroke-linecap=\"round\"/>\n  <g transform=\"translate(48 30) rotate(-20) scale(1.1)\" style=\"fill:var(--mark-accent,currentColor)\">\n    <path d=\"M-10 0 0-4.25 10 0 0 4.25Z\" stroke-width=\"2\" stroke-linejoin=\"round\" style=\"fill:var(--mark-accent,currentColor);stroke:var(--mark-accent,currentColor)\"/>\n    <path d=\"M-5.5 4.5 0 7 5.5 4.5V8C5.5 9.3 3 10.5 0 10.5S-5.5 9.3-5.5 8Z\"/>\n    <path d=\"M10 0V8\" fill=\"none\" stroke-width=\"1.8\" stroke-linecap=\"round\" style=\"stroke:var(--mark-accent,currentColor)\"/>\n  </g>\n</svg>\n","l6-cap-in-c.svg":"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\">\n  <!-- L6 · Cap in C: a graduation cap centred inside the C, like L but with the cap instead of a building. -->\n  <!-- Neutral parts use currentColor (flips with theme); accent parts use var(--mark-accent, currentColor), so the mark is monochrome unless an accent is set. -->\n  <g transform=\"translate(2.5 0)\">\n    <path d=\"M48.85 17.86A22 22 0 1 0 48.85 46.14\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"6\" stroke-linecap=\"round\"/>\n    <path d=\"M32 21.5 46.5 28 32 34.5 17.5 28Z\" stroke-width=\"2\" stroke-linejoin=\"round\" style=\"fill:var(--mark-accent,currentColor);stroke:var(--mark-accent,currentColor)\"/>\n    <path d=\"M24 35 32 39 40 35V40C40 42 36.5 44 32 44S24 42 24 40Z\" style=\"fill:var(--mark-accent,currentColor)\"/>\n    <path d=\"M44 29V37.5\" fill=\"none\" stroke-width=\"2\" stroke-linecap=\"round\" style=\"stroke:var(--mark-accent,currentColor)\"/>\n  </g>\n</svg>\n"};
+  const swatch = (cls, s) => `<td><span class="swatch ${cls}">${s}</span></td>`;
+  const rows = document.getElementById('rows');
+  for (const o of options) {
+    const s = svg[o.file];
+    rows.insertAdjacentHTML('beforeend', `<tr>
+      <td class="name"><strong>${o.name}</strong><span>${o.note}</span></td>
+      ${swatch('light mono', s)}${swatch('dark mono', s)}${swatch('light duo', s)}${swatch('dark duo', s)}${swatch('icon', s)}
+      <td><span class="sizes"><span style="width:32px;height:32px;display:inline-flex">${s}</span><span style="width:16px;height:16px;display:inline-flex">${s}</span></span></td>
+      <td><span class="lockup light">${s}CampusPilot</span></td>
+    </tr>`);
+  }
+</script>
+</body>
+</html>

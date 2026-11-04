@@ -116,7 +116,7 @@ export function LoginForm() {
   return (
     <div className="flex flex-col gap-8">
       <div className="flex flex-col gap-3">
-        <BrandLogo />
+        <BrandLogo product="campuspilot" />
         <p className="text-sm leading-6 text-muted-foreground">
           Enter your school account details to continue.
         </p>
