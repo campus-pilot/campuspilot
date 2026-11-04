@@ -1,0 +1,281 @@
+/* `/contact` — channel cards and the "which channel for what" switchboard. Prefix: `pg-contact-`. */
+
+/* --------------------------------------------------------- channel grid */
+
+.pg-contact-channels.cp-section {
+  padding-top: 72px;
+}
+
+.pg-contact-channels-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px 24px;
+  margin-bottom: 24px;
+}
+
+.pg-contact-channels-head h2 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+}
+
+.pg-contact-channels-head p {
+  margin: 0;
+  color: var(--cp-muted);
+  font-size: 15px;
+}
+
+.pg-contact-channels-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+/* ---------------------------------------------------------- switchboard */
+
+.pg-contact-board {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 0;
+  list-style: none;
+}
+
+.pg-contact-route {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(56px, 0.5fr) minmax(0, 1fr);
+  align-items: center;
+}
+
+.pg-contact-need {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 16px 20px;
+  border: 1px solid var(--cp-line);
+  border-radius: 16px;
+  background: var(--cp-surface);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.03);
+}
+
+.pg-contact-need b {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+
+.pg-contact-need small {
+  color: var(--cp-muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* Dashed wire between need and destination; a dot travels along it, staggered per row. */
+.pg-contact-wire {
+  position: relative;
+  height: 2px;
+  margin: 0 -1px;
+  background: repeating-linear-gradient(90deg, var(--cp-line-strong) 0 6px, transparent 6px 11px);
+}
+
+.pg-contact-wire::before,
+.pg-contact-wire::after {
+  content: "";
+  position: absolute;
+  top: -3px;
+  width: 8px;
+  height: 8px;
+  border: 1.5px solid var(--cp-line-strong);
+  border-radius: 50%;
+  background: var(--cp-bg);
+}
+
+.pg-contact-wire::before {
+  left: -4px;
+}
+
+.pg-contact-wire::after {
+  right: -4px;
+}
+
+.pg-contact-wire i {
+  position: absolute;
+  top: -2px;
+  left: calc(100% - 6px);
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--cp-primary);
+  opacity: 0;
+  animation: pg-contact-pulse 3.2s calc(var(--pg-i) * 0.45s) var(--cp-ease) infinite;
+}
+
+.pg-contact-target {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 64px;
+  padding: 12px 16px;
+  border: 1px solid var(--cp-line);
+  border-radius: 14px;
+  background: var(--cp-surface);
+  color: var(--cp-ink);
+  text-decoration: none;
+  transition: border-color 0.2s ease, box-shadow 0.25s ease, transform 0.25s var(--cp-ease);
+}
+
+.pg-contact-target:hover {
+  border-color: var(--cp-line-strong);
+  box-shadow: 0 10px 24px -16px rgb(0 0 0 / 0.3);
+  transform: translateX(3px);
+}
+
+.pg-contact-target > svg {
+  width: 18px;
+  height: 18px;
+  color: var(--cp-ink-2);
+}
+
+.pg-contact-target[data-channel="whatsapp"] > svg {
+  color: var(--cp-accent);
+}
+
+.pg-contact-target[data-page] {
+  background: var(--cp-soft);
+}
+
+/* The "Log in" destination is a button that opens the login dialog; match the page tiles. */
+button.pg-contact-target {
+  width: 100%;
+  background: var(--cp-soft);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* The demo is the page's main conversion, so its destination is the one dark tile. */
+.pg-contact-target[data-emphasis] {
+  background: var(--cp-ink);
+  border-color: var(--cp-ink);
+  color: #fff;
+}
+
+.pg-contact-target[data-emphasis] > svg {
+  color: rgb(255 255 255 / 0.8);
+}
+
+.pg-contact-target-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.pg-contact-target-text b {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.pg-contact-target-text small {
+  overflow: hidden;
+  color: var(--cp-muted);
+  font: 500 12.5px/1.4 var(--cp-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pg-contact-target .pg-contact-target-arrow {
+  width: 16px;
+  height: 16px;
+  transition: transform 0.25s var(--cp-ease);
+}
+
+.pg-contact-target:hover .pg-contact-target-arrow {
+  transform: translateX(3px);
+}
+
+/* ---------------------------------------------------------- scroll motion */
+
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .pg-contact-channels-grid > *,
+    .pg-contact-route {
+      animation: cp-reveal linear both;
+      animation-timeline: view();
+      animation-range: entry 0% entry 50%;
+    }
+  }
+}
+
+/* ----------------------------------------------------------- responsive */
+
+@media (max-width: 960px) {
+  .pg-contact-channels-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .pg-contact-channels.cp-section {
+    padding-top: 48px;
+  }
+
+  /* Phones stack need above destination, joined by a short vertical wire. */
+  .pg-contact-route {
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: start;
+  }
+
+  .pg-contact-wire {
+    width: 2px;
+    height: 22px;
+    margin: 0 0 0 28px;
+    background: repeating-linear-gradient(180deg, var(--cp-line-strong) 0 5px, transparent 5px 9px);
+  }
+
+  .pg-contact-wire::before,
+  .pg-contact-wire::after,
+  .pg-contact-wire i {
+    display: none;
+  }
+
+  .pg-contact-target {
+    justify-self: stretch;
+    min-height: 56px;
+  }
+
+  .pg-contact-need {
+    width: 100%;
+  }
+}
+
+/* ------------------------------------------------------------ keyframes */
+
+/* Base state is hidden at the far end of the wire; the dot runs left to right then fades. */
+@keyframes pg-contact-pulse {
+  0% {
+    left: 0;
+    opacity: 0;
+  }
+
+  15% {
+    opacity: 1;
+  }
+
+  55% {
+    left: calc(100% - 6px);
+    opacity: 1;
+  }
+
+  70%,
+  100% {
+    left: calc(100% - 6px);
+    opacity: 0;
+  }
+}

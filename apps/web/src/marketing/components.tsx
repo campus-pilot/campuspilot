@@ -40,19 +40,3 @@ export function MarketingFooter() {
     </footer>
   );
 }
-
-export function PageHero({ eyebrow, title, accent, description, children }: { eyebrow: string; title: string; accent: string; description: string; children?: React.ReactNode }) {
-  return (
-    <section className="page-hero">
-      <div className="hero-grid-pattern" />
-      <div className="marketing-container page-hero-grid">
-        <div><span className="hero-eyebrow"><Sparkles /> {eyebrow}</span><h1>{title}<br /><em>{accent}</em></h1><p>{description}</p><div className="hero-actions"><Link className="marketing-button marketing-button-primary" to="/book-demo">Book a demo <ArrowRight /></Link><Link className="marketing-button marketing-button-secondary" to="/contact">Talk to us <ArrowRight /></Link></div></div>
-        {children}
-      </div>
-    </section>
-  );
-}
-
-export function MarketingPage({ children }: { children: React.ReactNode }) {
-  return <><main id="main">{children}</main><MarketingFooter /></>;
-}

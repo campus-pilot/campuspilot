@@ -1,0 +1,682 @@
+/*
+ * `/security`: boundary rings, principles register, "who sees what" matrix
+ * and the AI link band. Prefix: `pg-sec-`.
+ *
+ * Motion follows the site rule: base styles are the finished state; keyframes
+ * start from the initial state and only run when motion is welcome.
+ */
+
+/* ------------------------------------------------------- boundary rings */
+
+.pg-sec-rings {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 56px;
+  max-width: 1040px;
+  margin: 0 auto;
+}
+
+.pg-sec-diagram {
+  position: relative;
+  justify-self: center;
+  width: min(100%, 460px);
+  aspect-ratio: 1;
+}
+
+.pg-sec-rings-art {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.pg-sec-rings-art circle {
+  fill: var(--cp-surface);
+  stroke: var(--cp-line-strong);
+  stroke-width: 1.2;
+  vector-effect: non-scaling-stroke;
+  transition: fill 0.35s ease, stroke 0.35s ease, stroke-width 0.35s ease;
+}
+
+/* Outside the selected boundary: faint, dashed, "kept out". */
+.pg-sec-rings-art circle[data-state="outside"] {
+  fill: var(--cp-bg);
+  stroke-dasharray: 4 5;
+}
+
+.pg-sec-rings-art circle[data-state="active"] {
+  fill: color-mix(in oklch, var(--cp-primary) 10%, var(--cp-surface));
+  stroke: var(--cp-primary);
+  stroke-width: 2;
+}
+
+/* Inside the selected boundary: lit, quieter than the boundary itself. */
+.pg-sec-rings-art circle[data-state="inside"] {
+  fill: color-mix(in oklch, var(--cp-primary) 5%, var(--cp-surface));
+  stroke: color-mix(in oklch, var(--cp-primary) 35%, var(--cp-line));
+}
+
+/* Finished state is invisible; the ripple only exists while animating. */
+.pg-sec-rings-art .pg-sec-rings-pulse {
+  fill: none;
+  stroke: var(--cp-primary);
+  stroke-width: 2;
+  opacity: 0;
+  transform-box: view-box;
+  transform-origin: 50% 50%;
+}
+
+.pg-sec-diagram-core {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: var(--cp-ink);
+  color: #fff;
+  translate: -50% -50%;
+}
+
+.pg-sec-diagram-core svg {
+  width: 18px;
+  height: 18px;
+}
+
+.pg-sec-ring-buttons {
+  position: absolute;
+  inset: 0;
+}
+
+/* Each label sits on the top edge of its circle (`--y`, set inline). */
+.pg-sec-ring-buttons button {
+  position: absolute;
+  top: var(--y);
+  left: 50%;
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--cp-line-strong);
+  border-radius: 999px;
+  background: var(--cp-surface);
+  color: var(--cp-ink-2);
+  font: 550 13px/1 var(--cp-font);
+  white-space: nowrap;
+  cursor: pointer;
+  translate: -50% -50%;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
+  transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+}
+
+.pg-sec-ring-buttons button:hover {
+  border-color: var(--cp-ink-2);
+  color: var(--cp-ink);
+}
+
+.pg-sec-ring-buttons button[data-state="outside"] {
+  color: var(--cp-muted);
+}
+
+.pg-sec-ring-buttons button[aria-pressed="true"] {
+  border-color: var(--cp-primary);
+  background: var(--cp-primary);
+  color: #fff;
+}
+
+.pg-sec-detail {
+  min-height: 400px;
+  padding: 30px;
+  border: 1px solid var(--cp-line);
+  border-radius: 22px;
+  background: var(--cp-surface);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.03);
+}
+
+.pg-sec-detail-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.pg-sec-detail-step {
+  color: var(--cp-subtle);
+  font: 500 11.5px/1 var(--cp-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.pg-sec-detail h3 {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.035em;
+  line-height: 1.1;
+}
+
+.pg-sec-detail-summary {
+  margin: 0;
+  color: var(--cp-muted);
+  font-size: 15.5px;
+  line-height: 1.6;
+}
+
+.pg-sec-keeps-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.pg-sec-keeps {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid var(--cp-line);
+  border-radius: 14px;
+}
+
+.pg-sec-keeps[data-kind="out"] {
+  border-style: dashed;
+  background: var(--cp-bg);
+}
+
+.pg-sec-keeps h4 {
+  margin: 0;
+  color: var(--cp-subtle);
+  font: 500 11px/1 var(--cp-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.pg-sec-keeps ul {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pg-sec-keeps li {
+  display: flex;
+  gap: 8px;
+  color: var(--cp-ink-2);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.pg-sec-keeps svg {
+  width: 15px;
+  height: 15px;
+  margin-top: 2px;
+  color: var(--cp-primary);
+}
+
+.pg-sec-keeps[data-kind="out"] svg {
+  color: var(--cp-subtle);
+}
+
+.pg-sec-example {
+  display: flex;
+  gap: 10px;
+  margin: 0;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: var(--cp-soft);
+  color: var(--cp-ink-2);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.pg-sec-example svg {
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  color: var(--cp-primary);
+}
+
+.pg-sec-example b {
+  color: var(--cp-ink);
+  font-weight: 600;
+}
+
+/* --------------------------------------------------- principles register */
+
+.pg-sec-register {
+  display: flex;
+  flex-direction: column;
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 0;
+  border-top: 1px solid var(--cp-ink);
+  list-style: none;
+}
+
+.pg-sec-rule {
+  display: grid;
+  grid-template-columns: 40px 44px minmax(0, 1fr) minmax(0, 220px);
+  align-items: center;
+  gap: 20px;
+  padding: 24px 8px;
+  border-bottom: 1px solid var(--cp-line);
+  transition: background-color 0.25s ease;
+}
+
+.pg-sec-rule:hover {
+  background: rgb(255 255 255 / 0.6);
+}
+
+.pg-sec-rule-num {
+  color: var(--cp-subtle);
+  font: 500 13px/1 var(--cp-mono);
+}
+
+.pg-sec-rule-icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--cp-line);
+  border-radius: 12px;
+  background: var(--cp-surface);
+  color: var(--cp-ink);
+}
+
+.pg-sec-rule-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.pg-sec-rule-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pg-sec-rule-copy h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.pg-sec-rule-copy p {
+  margin: 0;
+  color: var(--cp-muted);
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+.pg-sec-rule-practice {
+  justify-self: end;
+  margin: 0;
+  padding: 5px 10px;
+  border: 1px dashed var(--cp-line-strong);
+  border-radius: 999px;
+  color: var(--cp-ink-2);
+  font: 500 12px/1.4 var(--cp-mono);
+  text-align: right;
+}
+
+/* -------------------------------------------------------- who sees what */
+
+.pg-sec-matrix-scroll {
+  max-width: 1040px;
+  margin: 0 auto;
+  overflow-x: auto;
+  border: 1px solid var(--cp-line);
+  border-radius: 20px;
+  background: var(--cp-surface);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.03);
+}
+
+.pg-sec-matrix-scroll:focus-visible {
+  outline: 2px solid var(--cp-ink);
+  outline-offset: 3px;
+}
+
+.pg-sec-matrix {
+  width: 100%;
+  min-width: 640px;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 14px;
+}
+
+.pg-sec-matrix caption {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--cp-line);
+  color: var(--cp-muted);
+  font: 500 12px/1.4 var(--cp-mono);
+  letter-spacing: 0.04em;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.pg-sec-matrix th,
+.pg-sec-matrix td {
+  padding: 14px 18px;
+  border-top: 1px solid var(--cp-line);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.pg-sec-matrix thead th {
+  border-top: 0;
+  background: var(--cp-soft);
+  color: var(--cp-ink-2);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* Pinned area column while the matrix scrolls sideways on phones. */
+.pg-sec-matrix th:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--cp-surface);
+  box-shadow: inset -1px 0 0 var(--cp-line);
+}
+
+.pg-sec-matrix thead th:first-child {
+  background: var(--cp-soft);
+}
+
+.pg-sec-matrix tbody th {
+  font-weight: 600;
+}
+
+.pg-sec-matrix tbody tr:hover :is(th, td) {
+  background: var(--cp-soft);
+}
+
+.pg-sec-matrix td[data-level="none"] svg {
+  width: 15px;
+  height: 15px;
+  color: var(--cp-subtle);
+}
+
+.pg-sec-scope,
+.pg-sec-matrix-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.pg-sec-scope::before,
+.pg-sec-matrix-legend span:not([data-level="none"])::before {
+  content: "";
+  width: 9px;
+  height: 9px;
+  border: 1.5px solid var(--cp-primary);
+  border-radius: 50%;
+}
+
+.pg-sec-matrix td[data-level="full"] .pg-sec-scope {
+  color: var(--cp-ink);
+  font-weight: 550;
+}
+
+.pg-sec-matrix td[data-level="full"] .pg-sec-scope::before,
+.pg-sec-matrix-legend [data-level="full"]::before {
+  background: var(--cp-primary);
+}
+
+/* Half-filled dot: a narrower scope than the whole school. */
+.pg-sec-matrix td[data-level="scoped"] .pg-sec-scope {
+  color: var(--cp-ink-2);
+}
+
+.pg-sec-matrix td[data-level="scoped"] .pg-sec-scope::before,
+.pg-sec-matrix-legend [data-level="scoped"]::before {
+  background: linear-gradient(90deg, var(--cp-primary) 50%, transparent 50%);
+}
+
+.pg-sec-matrix-legend {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px 22px;
+  margin: 20px 0 0;
+  color: var(--cp-muted);
+  font-size: 13px;
+}
+
+.pg-sec-matrix-legend svg {
+  width: 13px;
+  height: 13px;
+  color: var(--cp-subtle);
+}
+
+/* --------------------------------------------------------- AI link band */
+
+.pg-sec-ai-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 48px;
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 44px 48px;
+  border: 1px solid var(--cp-line);
+  border-radius: 24px;
+  background:
+    radial-gradient(60% 100% at 100% 50%, var(--cp-accent-soft), transparent 70%),
+    var(--cp-surface);
+}
+
+.pg-sec-ai-copy {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.pg-sec-ai-copy h2 {
+  margin: 0;
+  font-size: clamp(26px, 3.2vw, 36px);
+  font-weight: 600;
+  letter-spacing: -0.04em;
+  line-height: 1.1;
+  text-wrap: balance;
+}
+
+.pg-sec-ai-copy p {
+  margin: 0;
+  color: var(--cp-muted);
+  font-size: 16px;
+  line-height: 1.6;
+}
+
+.pg-sec-ai-chips {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pg-sec-ai-chips li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--cp-line);
+  border-radius: 14px;
+  background: var(--cp-surface);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.04);
+  font-size: 14px;
+  font-weight: 550;
+}
+
+.pg-sec-ai-chips li:nth-child(2) {
+  margin-left: 24px;
+}
+
+.pg-sec-ai-chips li:nth-child(3) {
+  margin-left: 48px;
+}
+
+.pg-sec-ai-chips svg {
+  width: 26px;
+  height: 26px;
+  padding: 5px;
+  border-radius: 8px;
+  background: var(--cp-ink);
+  color: #fff;
+}
+
+.pg-sec-ai-chips b {
+  margin-left: auto;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--cp-accent-soft);
+  color: var(--cp-accent);
+  font: 500 12px/1.4 var(--cp-mono);
+}
+
+/* ---------------------------------------------------------- responsive */
+
+@media (max-width: 900px) {
+  .pg-sec-rings,
+  .pg-sec-ai-card {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 32px;
+  }
+
+  .pg-sec-detail {
+    min-height: 0;
+  }
+
+  .pg-sec-rule {
+    grid-template-columns: 32px 44px minmax(0, 1fr);
+  }
+
+  .pg-sec-rule-practice {
+    grid-column: 3;
+    justify-self: start;
+    text-align: left;
+  }
+}
+
+@media (max-width: 640px) {
+  .pg-sec-ring-buttons button {
+    height: 28px;
+    padding: 0 10px;
+    font-size: 12px;
+  }
+
+  .pg-sec-diagram-core {
+    width: 32px;
+    height: 32px;
+  }
+
+  .pg-sec-detail {
+    padding: 22px 18px;
+  }
+
+  .pg-sec-detail h3 {
+    font-size: 24px;
+  }
+
+  .pg-sec-keeps-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .pg-sec-rule {
+    grid-template-columns: 40px minmax(0, 1fr);
+    align-items: start;
+    gap: 6px 14px;
+    padding: 20px 0;
+  }
+
+  .pg-sec-rule-num {
+    display: none;
+  }
+
+  .pg-sec-rule-icon {
+    width: 40px;
+    height: 40px;
+  }
+
+  .pg-sec-rule-practice {
+    grid-column: 2;
+  }
+
+  .pg-sec-matrix th,
+  .pg-sec-matrix td {
+    padding: 12px 14px;
+  }
+
+  .pg-sec-matrix-legend {
+    justify-content: flex-start;
+  }
+
+  .pg-sec-ai-card {
+    padding: 28px 18px;
+    border-radius: 20px;
+  }
+
+  .pg-sec-ai-chips li:nth-child(n) {
+    margin-left: 0;
+  }
+}
+
+/* ------------------------------------------------------------- motion */
+
+@media (prefers-reduced-motion: no-preference) {
+  .pg-sec-rings-art .pg-sec-rings-pulse {
+    animation: pg-sec-ripple 0.9s ease-out both;
+  }
+
+  .pg-sec-detail-body {
+    animation: pg-sec-swap 0.45s var(--cp-ease) both;
+  }
+
+  .pg-sec-ai-chips li {
+    animation: cp-float 5s ease-in-out infinite;
+  }
+
+  .pg-sec-ai-chips li:nth-child(2) {
+    animation-delay: -1.6s;
+  }
+
+  .pg-sec-ai-chips li:nth-child(3) {
+    animation-delay: -3.2s;
+  }
+}
+
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .pg-sec-rule,
+    .pg-sec-matrix-scroll {
+      animation: cp-reveal linear both;
+      animation-timeline: view();
+      animation-range: entry 0% entry 40%;
+    }
+  }
+}
+
+@keyframes pg-sec-ripple {
+  from {
+    opacity: 0.7;
+    scale: 1;
+  }
+
+  to {
+    opacity: 0;
+    scale: 1.08;
+  }
+}
+
+@keyframes pg-sec-swap {
+  from {
+    opacity: 0;
+    translate: 0 8px;
+  }
+}

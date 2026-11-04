@@ -20,7 +20,7 @@
   <url><loc>https://campuspilot.in/solutions/multi-campus</loc><priority>0.8</priority></url>
   <url><loc>https://campuspilot.in/ai-ready</loc><priority>0.8</priority></url>
   <url><loc>https://campuspilot.in/security</loc><priority>0.8</priority></url>
-  <url><loc>https://campuspilot.in/contact</loc><priority>0.7</priority></url>
-  <url><loc>https://campuspilot.in/book-demo</loc><priority>0.8</priority></url>
-  <url><loc>https://campuspilot.in/documentation</loc><priority>0.6</priority></url>
+  <url><loc>https://campuspilot.in/contact</loc><priority>0.8</priority></url>
+  <url><loc>https://campuspilot.in/book-demo</loc><priority>0.9</priority></url>
+  <url><loc>https://campuspilot.in/documentation</loc><priority>0.5</priority></url>
 </urlset>

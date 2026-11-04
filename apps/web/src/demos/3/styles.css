@@ -1,0 +1,2050 @@
+/*
+ * /3 — "Sketchbook" experiment.
+ * Warm dot-grid paper, ink-dark pencil lines, CampusPilot orange as the marker.
+ * Loaded only by routes/3.tsx, so html/body rules here are unloaded on navigation.
+ * All motion lives inside `prefers-reduced-motion: no-preference`; the static
+ * (reduced-motion / pre-JS) state of every drawing is fully drawn.
+ */
+
+:root {
+  --d3-paper: #fbfaf7;
+  --d3-sheet: #fffdf7;
+  --d3-soft: #f3f0e9;
+  --d3-ink: #171713;
+  --d3-ink-soft: #3b3933;
+  --d3-pencil: #55524a;
+  --d3-muted: #6d6a62;
+  --d3-orange: #e48618;
+  --d3-orange-deep: #c2580e;
+  --d3-highlight: #f8b563;
+  --d3-sticky: #ffe6b3;
+  --d3-teal: #8fd2c7;
+  --d3-hand: "Caveat", "Segoe Print", cursive;
+  --d3-letter: "Kalam", "Comic Neue", cursive;
+  --d3-body: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  /* Uneven radii read as a hand-drawn rectangle rather than a rounded box. */
+  --d3-r-lg: 20px 7px 22px 8px / 8px 22px 7px 20px;
+  --d3-r-md: 13px 4px 15px 5px / 5px 15px 4px 13px;
+  --d3-r-blob: 52% 48% 55% 45% / 47% 55% 45% 53%;
+  --d3-shadow: 4px 5px 0 var(--d3-ink);
+}
+
+html {
+  scroll-behavior: smooth;
+  scroll-padding-top: 96px;
+}
+
+body {
+  margin: 0;
+  color: var(--d3-ink);
+  font-family: var(--d3-body);
+  font-size: 16px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  background-color: var(--d3-paper);
+  /* Paper grain (SVG noise) over a sketchbook dot grid. */
+  background-image:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .09 0 0 0 0 .09 0 0 0 0 .07 0 0 0 .08 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"),
+    radial-gradient(circle at 1px 1px, rgb(23 23 19 / 0.13) 1px, transparent 1.5px);
+  background-size: 220px 220px, 26px 26px;
+}
+
+.d3-page {
+  /* `clip` (not hidden) so rotated paper never causes sideways scroll yet the sticky header keeps working. */
+  overflow-x: clip;
+  min-height: 100vh;
+}
+
+.d3-page *,
+.d3-page *::before,
+.d3-page *::after {
+  box-sizing: border-box;
+}
+
+.d3-page img,
+.d3-page svg {
+  display: block;
+}
+
+.d3-page a {
+  color: inherit;
+}
+
+.d3-page :focus-visible {
+  outline: 3px solid var(--d3-orange-deep);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+.d3-defs {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+.d3-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.d3-skip {
+  position: absolute;
+  top: 8px;
+  left: 16px;
+  z-index: 100;
+  padding: 8px 14px;
+  background: var(--d3-ink);
+  color: var(--d3-paper) !important;
+  font-weight: 600;
+  text-decoration: none;
+  border-radius: var(--d3-r-md);
+  transform: translateY(-160%);
+}
+
+.d3-skip:focus {
+  transform: none;
+}
+
+.d3-wrap {
+  width: min(1200px, 100% - 32px);
+  margin-inline: auto;
+}
+
+.d3-hand {
+  font-family: var(--d3-hand);
+}
+
+/* Keeps a circled/underlined word glued to its trailing punctuation. */
+.d3-nowrap {
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------------------ */
+/* Doodle primitives                                                   */
+/* ------------------------------------------------------------------ */
+
+.d3-squiggle path,
+.d3-circle path,
+.d3-arrow path,
+.d3-star path,
+.d3-check path {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 0;
+}
+
+.d3-squiggle path {
+  stroke: var(--d3-orange);
+  stroke-width: 3.2;
+  vector-effect: non-scaling-stroke;
+}
+
+.d3-circle path {
+  stroke: var(--d3-orange);
+  stroke-width: 3;
+  vector-effect: non-scaling-stroke;
+}
+
+.d3-arrow path,
+.d3-star path {
+  stroke: currentColor;
+  stroke-width: 2.4;
+}
+
+.d3-check {
+  width: 30px;
+  height: 30px;
+  flex: none;
+}
+
+.d3-check .d3-check-box {
+  stroke: var(--d3-ink);
+  stroke-width: 1.8;
+  stroke-dasharray: none;
+}
+
+.d3-check .d3-check-tick {
+  stroke: var(--d3-orange-deep);
+  stroke-width: 3;
+}
+
+.d3-pencil-art {
+  filter: url(#d3-pencil);
+}
+
+.d3-circled {
+  position: relative;
+  display: inline-block;
+  white-space: nowrap;
+  z-index: 0;
+}
+
+.d3-circled .d3-circle {
+  position: absolute;
+  inset: -16% -14% -12% -12%;
+  width: 126%;
+  height: 128%;
+  overflow: visible;
+  pointer-events: none;
+  z-index: -1;
+}
+
+.d3-underlined {
+  position: relative;
+  display: inline-block;
+  white-space: nowrap;
+}
+
+.d3-underlined .d3-squiggle {
+  position: absolute;
+  left: -4%;
+  bottom: -0.12em;
+  width: 108%;
+  height: 0.32em;
+  overflow: visible;
+}
+
+.d3-highlight {
+  background-image: linear-gradient(100deg, rgb(248 181 99 / 0) 0.5%, rgb(248 181 99 / 0.8) 2.5%, rgb(248 181 99 / 0.62) 95%, rgb(248 181 99 / 0) 99%);
+  background-repeat: no-repeat;
+  background-position: 0 88%;
+  background-size: 100% 44%;
+  padding-inline: 0.1em;
+  margin-inline: -0.1em;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+
+.d3-tape {
+  position: absolute;
+  z-index: 3;
+  width: 96px;
+  height: 26px;
+  background: rgb(143 210 199 / 0.62);
+  box-shadow: 0 1px 2px rgb(23 23 19 / 0.1);
+  clip-path: polygon(3% 0, 97% 5%, 100% 28%, 97% 50%, 100% 76%, 96% 100%, 4% 95%, 0 72%, 3% 48%, 0 22%);
+  pointer-events: none;
+}
+
+.d3-tape-top {
+  top: -13px;
+  left: 50%;
+  translate: -50% 0;
+  rotate: -3deg;
+}
+
+.d3-tape-corner {
+  top: -12px;
+  right: 22px;
+  rotate: 7deg;
+  background: rgb(248 181 99 / 0.66);
+}
+
+.d3-sticky {
+  position: relative;
+  margin: 0;
+  padding: 24px 18px 16px;
+  background: var(--d3-sticky);
+  border-radius: 2px 3px 16px 2px;
+  box-shadow: 0 14px 20px -14px rgb(23 23 19 / 0.5), 0 1px 0 rgb(23 23 19 / 0.08);
+}
+
+/* ------------------------------------------------------------------ */
+/* Buttons                                                             */
+/* ------------------------------------------------------------------ */
+
+.d3-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 16px;
+  font-family: var(--d3-letter);
+  font-size: 1.02rem;
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--d3-ink) !important;
+  text-decoration: none;
+  white-space: nowrap;
+  border: 2px solid var(--d3-ink);
+  border-radius: var(--d3-r-md);
+  box-shadow: 3px 3px 0 var(--d3-ink);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.d3-btn svg {
+  width: 18px;
+  height: 18px;
+  transition: translate 0.2s ease;
+}
+
+.d3-btn:hover {
+  transform: translate(-1px, -1px);
+  box-shadow: 5px 5px 0 var(--d3-ink);
+}
+
+.d3-btn:hover svg {
+  translate: 3px 0;
+}
+
+.d3-btn:active {
+  transform: translate(2px, 2px);
+  box-shadow: 1px 1px 0 var(--d3-ink);
+}
+
+.d3-btn-marker {
+  background: var(--d3-orange);
+}
+
+.d3-btn-paper {
+  background: var(--d3-sheet);
+}
+
+.d3-btn-lg {
+  padding: 13px 22px;
+  font-size: 1.14rem;
+}
+
+/* ------------------------------------------------------------------ */
+/* Header                                                              */
+/* ------------------------------------------------------------------ */
+
+.d3-header {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  padding: 12px 16px 0;
+}
+
+.d3-header-bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  max-width: 1200px;
+  margin-inline: auto;
+  padding: 12px 4px;
+  border: 2px solid transparent;
+  border-radius: var(--d3-r-lg);
+  transition:
+    max-width 0.35s ease,
+    padding 0.35s ease,
+    background-color 0.35s ease,
+    border-color 0.35s ease,
+    box-shadow 0.35s ease;
+}
+
+.d3-header[data-scrolled="true"] .d3-header-bar {
+  max-width: 1000px;
+  padding: 6px 8px 6px 14px;
+  background: var(--d3-sheet);
+  border-color: var(--d3-ink);
+  box-shadow: var(--d3-shadow);
+}
+
+.d3-header-bar > .d3-tape {
+  width: 54px;
+  height: 20px;
+  top: 50%;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.d3-tape-left {
+  left: -26px;
+  translate: 0 -50%;
+  rotate: -62deg;
+}
+
+.d3-tape-right {
+  right: -26px;
+  translate: 0 -50%;
+  rotate: 58deg;
+  background: rgb(248 181 99 / 0.66);
+}
+
+.d3-header[data-scrolled="true"] .d3-header-bar > .d3-tape {
+  opacity: 1;
+}
+
+.d3-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  font-family: var(--d3-letter);
+  font-size: 1.32rem;
+  font-weight: 700;
+  text-decoration: none;
+  letter-spacing: -0.01em;
+}
+
+.d3-brand img {
+  rotate: -4deg;
+  transition: rotate 0.3s ease;
+}
+
+.d3-brand:hover img {
+  rotate: 6deg;
+}
+
+.d3-nav {
+  margin-inline: auto;
+}
+
+.d3-nav-list {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.d3-nav-item {
+  position: relative;
+}
+
+.d3-nav-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 12px;
+  font: 400 1.08rem/1.2 var(--d3-letter);
+  color: var(--d3-ink);
+  text-decoration: none;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.d3-nav-label {
+  position: relative;
+}
+
+.d3-nav-label .d3-squiggle,
+.d3-login .d3-squiggle {
+  position: absolute;
+  left: -3px;
+  bottom: -7px;
+  width: calc(100% + 6px);
+  height: 9px;
+  overflow: visible;
+}
+
+.d3-nav-label .d3-squiggle path,
+.d3-login .d3-squiggle path {
+  stroke-dashoffset: 1;
+  transition: stroke-dashoffset 0.35s ease;
+}
+
+.d3-nav-trigger:hover .d3-squiggle path,
+.d3-nav-trigger:focus-visible .d3-squiggle path,
+.d3-nav-trigger[aria-expanded="true"] .d3-squiggle path,
+.d3-login:hover .d3-squiggle path,
+.d3-login:focus-visible .d3-squiggle path {
+  stroke-dashoffset: 0;
+}
+
+.d3-chevron {
+  width: 16px;
+  height: 16px;
+  transition: rotate 0.25s ease;
+}
+
+.d3-nav-trigger[aria-expanded="true"] .d3-chevron {
+  rotate: 180deg;
+}
+
+.d3-drop {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  width: 560px;
+  padding-top: 14px;
+  translate: -50% 0;
+  visibility: hidden;
+  opacity: 0;
+  transform: translateY(8px) rotate(-0.8deg);
+  transition: opacity 0.2s ease, transform 0.2s ease, visibility 0s linear 0.2s;
+}
+
+.d3-drop[data-open="true"] {
+  visibility: visible;
+  opacity: 1;
+  transform: rotate(-0.4deg);
+  transition-delay: 0s;
+}
+
+.d3-drop-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 22px 16px 14px;
+  background: var(--d3-sheet);
+  border: 2px solid var(--d3-ink);
+  border-radius: var(--d3-r-lg);
+  box-shadow: 5px 6px 0 var(--d3-ink);
+}
+
+.d3-drop-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.d3-drop-link {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px;
+  text-decoration: none;
+  border-radius: var(--d3-r-md);
+  transition: background-color 0.2s ease;
+}
+
+.d3-drop-link:hover,
+.d3-drop-link:focus-visible {
+  background: rgb(248 181 99 / 0.28);
+}
+
+.d3-doodle-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 40px;
+  height: 40px;
+  background: var(--d3-paper);
+  border: 1.8px solid var(--d3-ink);
+  border-radius: var(--d3-r-blob);
+  transition: background-color 0.2s ease;
+}
+
+.d3-doodle-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.d3-drop-link:hover .d3-doodle-icon,
+.d3-drop-link:focus-visible .d3-doodle-icon {
+  background: var(--d3-orange);
+}
+
+.d3-drop-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.25;
+}
+
+.d3-drop-text b {
+  font-family: var(--d3-letter);
+  font-size: 1.02rem;
+}
+
+.d3-drop-text small {
+  font-size: 0.8rem;
+  color: var(--d3-muted);
+}
+
+.d3-drop-note {
+  margin: 0;
+  padding: 10px 10px 0;
+  font-family: var(--d3-hand);
+  font-size: 1.28rem;
+  line-height: 1.2;
+  color: var(--d3-orange-deep);
+  border-top: 2px dashed rgb(23 23 19 / 0.25);
+}
+
+.d3-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex: none;
+}
+
+.d3-login {
+  position: relative;
+  padding: 6px 4px;
+  font: 400 1.08rem/1.2 var(--d3-letter);
+  text-decoration: none;
+}
+
+.d3-header-cta {
+  padding: 8px 14px;
+}
+
+.d3-menu-toggle {
+  display: none;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin-left: auto;
+  color: var(--d3-ink);
+  background: var(--d3-sheet);
+  border: 2px solid var(--d3-ink);
+  border-radius: var(--d3-r-md);
+  box-shadow: 2px 2px 0 var(--d3-ink);
+  cursor: pointer;
+}
+
+.d3-menu-toggle svg {
+  width: 22px;
+  height: 22px;
+}
+
+.d3-sheet {
+  display: none;
+}
+
+@media (max-width: 959px) {
+  .d3-nav,
+  .d3-login {
+    display: none;
+  }
+
+  .d3-header-actions {
+    margin-left: auto;
+  }
+
+  .d3-menu-toggle {
+    display: grid;
+    margin-left: 0;
+  }
+
+  .d3-sheet {
+    position: absolute;
+    top: calc(100% + 10px);
+    left: 16px;
+    right: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    max-height: calc(100dvh - 100px);
+    overflow-y: auto;
+    padding: 20px 16px;
+    background: var(--d3-sheet);
+    border: 2px solid var(--d3-ink);
+    border-radius: var(--d3-r-lg);
+    box-shadow: 5px 6px 0 var(--d3-ink);
+    visibility: hidden;
+    opacity: 0;
+    transform: translateY(-8px);
+    transition: opacity 0.2s ease, transform 0.2s ease, visibility 0s linear 0.2s;
+  }
+
+  .d3-sheet[data-open="true"] {
+    visibility: visible;
+    opacity: 1;
+    transform: none;
+    transition-delay: 0s;
+  }
+
+  .d3-sheet-group h2 {
+    margin: 0 0 4px;
+    font: 700 1.5rem/1.1 var(--d3-hand);
+    color: var(--d3-orange-deep);
+  }
+
+  .d3-sheet-group ul {
+    display: grid;
+    gap: 2px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .d3-sheet-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding-top: 6px;
+  }
+
+  .d3-sheet-actions .d3-btn {
+    flex: 1 1 140px;
+  }
+}
+
+@media (min-width: 560px) and (max-width: 959px) {
+  .d3-sheet-group ul {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 519px) {
+  .d3-header-cta {
+    display: none;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Hero                                                                */
+/* ------------------------------------------------------------------ */
+
+.d3-hero {
+  padding: 48px 0 24px;
+}
+
+.d3-hero-grid {
+  display: grid;
+  grid-template-columns: 1.04fr 0.96fr;
+  align-items: center;
+  gap: 56px;
+}
+
+.d3-hero-copy {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 22px;
+}
+
+.d3-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 1.45rem;
+  line-height: 1.1;
+  color: var(--d3-orange-deep);
+  rotate: -1.5deg;
+}
+
+.d3-eyebrow .d3-star {
+  width: 24px;
+  height: 24px;
+}
+
+.d3-hero-title {
+  margin: 0;
+  font-family: var(--d3-letter);
+  font-size: clamp(2.6rem, 5.4vw, 4.6rem);
+  font-weight: 700;
+  line-height: 1.08;
+  letter-spacing: -0.015em;
+  text-wrap: balance;
+}
+
+.d3-lede {
+  max-width: 34rem;
+  margin: 0;
+  font-size: 1.12rem;
+  color: var(--d3-ink-soft);
+}
+
+.d3-lede em {
+  font-family: var(--d3-hand);
+  font-size: 1.4em;
+  font-style: normal;
+  font-weight: 700;
+  line-height: 0;
+  color: var(--d3-orange-deep);
+}
+
+.d3-hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+
+.d3-hero-aside {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 1.3rem;
+  line-height: 1.15;
+  color: var(--d3-pencil);
+}
+
+.d3-hero-aside .d3-arrow {
+  width: 46px;
+  height: 32px;
+  flex: none;
+  color: var(--d3-orange);
+  scale: -1 -1;
+  rotate: 20deg;
+}
+
+.d3-hero-sketch {
+  position: relative;
+  margin: 0;
+  padding: 54px 10px 54px 0;
+}
+
+.d3-sk-window {
+  position: relative;
+  background: var(--d3-sheet);
+  border: 2px solid var(--d3-ink);
+  border-radius: var(--d3-r-lg);
+  box-shadow: 7px 8px 0 var(--d3-ink);
+  rotate: 1.2deg;
+}
+
+.d3-sk-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  font-size: 1.22rem;
+  line-height: 1.1;
+  border-bottom: 2px dashed rgb(23 23 19 / 0.4);
+}
+
+.d3-sk-dots {
+  display: flex;
+  gap: 6px;
+}
+
+.d3-sk-dots i {
+  width: 11px;
+  height: 11px;
+  border: 1.6px solid var(--d3-ink);
+  border-radius: 50%;
+}
+
+.d3-sk-dots i:first-child {
+  background: var(--d3-orange);
+}
+
+.d3-sk-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+}
+
+.d3-sk-welcome {
+  margin: 0;
+  font: 700 1.3rem/1.2 var(--d3-letter);
+}
+
+.d3-sk-tiles {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.d3-sk-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 10px 12px;
+  line-height: 1.15;
+  border: 1.8px solid var(--d3-ink);
+  border-radius: var(--d3-r-md);
+}
+
+.d3-sk-tile:first-child {
+  background: rgb(248 181 99 / 0.3);
+}
+
+.d3-sk-tile small {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--d3-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.d3-sk-tile b {
+  font: 700 1.36rem/1.15 var(--d3-letter);
+  white-space: nowrap;
+}
+
+.d3-sk-tile span {
+  font-size: 1.08rem;
+  color: var(--d3-orange-deep);
+}
+
+.d3-sk-chart {
+  padding: 10px 12px 4px;
+  border: 1.8px dashed rgb(23 23 19 / 0.45);
+  border-radius: var(--d3-r-md);
+}
+
+.d3-sk-chart-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.d3-sk-chart-title span {
+  font-size: 1.05rem;
+  font-weight: 500;
+  color: var(--d3-muted);
+}
+
+.d3-sk-chart svg {
+  width: 100%;
+  height: auto;
+}
+
+.d3-sk-axis {
+  fill: none;
+  stroke: var(--d3-ink);
+  stroke-width: 1.8;
+}
+
+.d3-sk-billed {
+  fill: none;
+  stroke: var(--d3-ink);
+  stroke-width: 1.6;
+}
+
+.d3-sk-collected {
+  fill: url(#d3-hatch);
+  stroke: var(--d3-orange-deep);
+  stroke-width: 1.6;
+}
+
+.d3-sk-chart text {
+  font-family: var(--d3-hand);
+  font-size: 15px;
+  fill: var(--d3-muted);
+}
+
+.d3-sk-jobs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.d3-sk-jobs li {
+  padding: 3px 10px;
+  font: 400 0.92rem/1.4 var(--d3-letter);
+  border: 1.6px solid var(--d3-ink);
+  border-radius: 999px 900px 999px 880px / 880px 999px 900px 999px;
+}
+
+.d3-hero-sticky {
+  position: absolute;
+  right: -8px;
+  bottom: 8px;
+  width: 200px;
+  rotate: -4deg;
+}
+
+.d3-hero-sticky p {
+  margin: 0;
+  font-size: 1.3rem;
+  line-height: 1.1;
+}
+
+.d3-sticky-strong {
+  font-weight: 700;
+  color: var(--d3-orange-deep);
+}
+
+.d3-hero-note {
+  position: absolute;
+  top: 0;
+  left: 4%;
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  font-size: 1.3rem;
+  line-height: 1.1;
+  color: var(--d3-pencil);
+  rotate: -2deg;
+}
+
+.d3-hero-note .d3-arrow {
+  width: 52px;
+  height: 36px;
+  color: var(--d3-orange);
+  rotate: 50deg;
+  translate: 0 14px;
+}
+
+.d3-hero-rule {
+  display: block;
+  width: min(1200px, 100% - 32px);
+  height: 16px;
+  margin: 40px auto 0;
+  overflow: visible;
+}
+
+.d3-hero-rule path {
+  stroke: rgb(23 23 19 / 0.3);
+  stroke-width: 2;
+}
+
+@media (max-width: 959px) {
+  .d3-hero-grid {
+    grid-template-columns: 1fr;
+    gap: 28px;
+  }
+
+  .d3-hero-sketch {
+    width: 100%;
+    max-width: 580px;
+    margin-inline: auto;
+  }
+}
+
+@media (max-width: 559px) {
+  .d3-hero {
+    padding-top: 28px;
+  }
+
+  .d3-sk-tiles {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .d3-sk-tile:first-child {
+    grid-column: 1 / -1;
+  }
+
+  /* Below the window on phones so the note never hides the quick-job chips. */
+  .d3-hero-sketch {
+    padding-bottom: 112px;
+  }
+
+  .d3-hero-sticky {
+    width: 170px;
+    right: 4px;
+    bottom: 0;
+  }
+
+  .d3-hero-sticky p {
+    font-size: 1.15rem;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Sections                                                            */
+/* ------------------------------------------------------------------ */
+
+.d3-section {
+  padding: 88px 0;
+}
+
+.d3-section-head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  max-width: 760px;
+  margin: 0 auto 44px;
+  text-align: center;
+}
+
+.d3-section-head h2 {
+  margin: 0;
+  font-family: var(--d3-letter);
+  font-size: clamp(2.2rem, 4.6vw, 3.5rem);
+  font-weight: 700;
+  line-height: 1.12;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+
+.d3-section-head > p:last-child {
+  margin: 0;
+  font-size: 1.1rem;
+  color: var(--d3-ink-soft);
+}
+
+.d3-chapter {
+  margin: 0;
+  padding: 0 10px;
+  font-size: 1.55rem;
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--d3-orange-deep);
+  border-bottom: 2px solid var(--d3-orange);
+  rotate: -3deg;
+}
+
+/* ---- Connect the dots ---- */
+
+.d3-dots {
+  position: relative;
+  max-width: 1040px;
+  margin-inline: auto;
+  aspect-ratio: 1000 / 600;
+}
+
+.d3-dots-lines {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.d3-dots-tall {
+  display: none !important;
+}
+
+.d3-spoke,
+.d3-peer {
+  fill: none;
+  stroke-linecap: round;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 0;
+}
+
+.d3-spoke {
+  stroke: var(--d3-ink);
+  stroke-width: 2.3;
+}
+
+.d3-peer {
+  stroke: var(--d3-orange);
+  stroke-width: 2.8;
+}
+
+.d3-pulse {
+  display: none;
+  fill: none;
+  stroke: var(--d3-orange-deep);
+  stroke-width: 9;
+  stroke-linecap: round;
+  stroke-dasharray: 0 1;
+}
+
+.d3-hub {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  width: 218px;
+  padding: 22px 20px 18px;
+  text-align: center;
+  background: #fff1d6;
+  border: 2.5px solid var(--d3-ink);
+  border-radius: var(--d3-r-blob);
+  box-shadow: 5px 6px 0 var(--d3-ink);
+  translate: -50% -50%;
+}
+
+.d3-hub b {
+  font: 700 1.4rem/1.1 var(--d3-letter);
+}
+
+.d3-hub span {
+  font-size: 1.2rem;
+  line-height: 1.1;
+  color: var(--d3-orange-deep);
+}
+
+.d3-dots-roles {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/*
+ * The role's dot (not the card's centre) sits exactly on the line end:
+ * the dot is 58px tall, so the card is shifted up by half of that. Roles in
+ * the top half flip their label above the dot so incoming lines never cross text.
+ */
+.d3-node {
+  --dot: 58px;
+  position: absolute;
+  left: var(--wx);
+  top: var(--wy);
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  width: 168px;
+  text-align: center;
+  translate: -50% calc(var(--dot) / -2);
+}
+
+.d3-node:nth-child(1),
+.d3-node:nth-child(2),
+.d3-node:nth-child(8) {
+  flex-direction: column-reverse;
+  translate: -50% calc(-100% + var(--dot) / 2);
+}
+
+.d3-node-dot {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: var(--dot);
+  height: var(--dot);
+  background: var(--d3-sheet);
+  border: 2.2px solid var(--d3-ink);
+  border-radius: var(--d3-r-blob);
+  box-shadow: 3px 3px 0 var(--d3-orange);
+  transition: background-color 0.2s ease;
+}
+
+.d3-node-dot svg {
+  width: 26px;
+  height: 26px;
+}
+
+.d3-node:hover .d3-node-dot {
+  background: var(--d3-highlight);
+}
+
+.d3-node-number {
+  position: absolute;
+  top: -6px;
+  left: calc(50% - var(--dot) / 2 - 18px);
+  font-size: 1.35rem;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--d3-orange-deep);
+}
+
+.d3-node:nth-child(1) .d3-node-number,
+.d3-node:nth-child(2) .d3-node-number,
+.d3-node:nth-child(8) .d3-node-number {
+  top: auto;
+  bottom: calc(var(--dot) - 18px);
+}
+
+.d3-node b {
+  padding: 0 6px;
+  font: 700 1.14rem/1.2 var(--d3-letter);
+  background: rgb(251 250 247 / 0.9);
+  border-radius: 6px;
+}
+
+.d3-node-note {
+  padding: 0 6px;
+  font-size: 1.18rem;
+  line-height: 1.05;
+  color: var(--d3-pencil);
+  background: rgb(251 250 247 / 0.9);
+  border-radius: 6px;
+}
+
+/* Sits in the gutter beside the diagram, so it only shows where that gutter exists. */
+.d3-dots-margin {
+  position: absolute;
+  top: -36px;
+  left: -64px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 168px;
+  margin: 0;
+  font-size: 1.32rem;
+  line-height: 1.05;
+  color: var(--d3-orange-deep);
+  rotate: -4deg;
+}
+
+.d3-dots-margin .d3-arrow {
+  width: 64px;
+  height: 44px;
+  margin-left: 48px;
+  color: var(--d3-ink);
+}
+
+@media (max-width: 1239px) {
+  .d3-dots-margin {
+    display: none;
+  }
+}
+
+.d3-flows {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 32px;
+  margin: 56px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.d3-flow {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  rotate: calc((var(--i) - 1) * 1.4deg);
+  transition: rotate 0.25s ease, translate 0.25s ease;
+}
+
+.d3-flow:nth-child(2) {
+  background: #fde3c4;
+}
+
+.d3-flow:nth-child(2) .d3-tape {
+  background: rgb(248 181 99 / 0.66);
+}
+
+.d3-flow:hover {
+  rotate: 0deg;
+  translate: 0 -4px;
+}
+
+.d3-flow p {
+  margin: 0;
+  color: var(--d3-ink-soft);
+}
+
+.d3-flow .d3-flow-steps {
+  font-size: 1.45rem;
+  font-weight: 700;
+  line-height: 1.15;
+  color: var(--d3-orange-deep);
+}
+
+@media (max-width: 959px) {
+  .d3-dots-margin {
+    display: none;
+  }
+
+  .d3-node {
+    --dot: 50px;
+    width: 140px;
+  }
+
+  .d3-node-dot svg {
+    width: 22px;
+    height: 22px;
+  }
+
+  .d3-node b {
+    font-size: 1rem;
+  }
+
+  .d3-node-note {
+    font-size: 1.05rem;
+  }
+
+  .d3-hub {
+    width: 160px;
+    padding: 14px 10px 12px;
+  }
+}
+
+@media (max-width: 719px) {
+  .d3-section {
+    padding: 64px 0;
+  }
+
+  .d3-dots {
+    max-width: 440px;
+    aspect-ratio: 400 / 760;
+  }
+
+  .d3-dots-wide {
+    display: none !important;
+  }
+
+  .d3-dots-tall {
+    display: block !important;
+  }
+
+  .d3-node {
+    --dot: 46px;
+    left: var(--tx);
+    top: var(--ty);
+    width: 100px;
+  }
+
+  .d3-node-number {
+    left: calc(50% - var(--dot) / 2 - 15px);
+    font-size: 1.2rem;
+  }
+
+  .d3-node b {
+    font-size: 0.95rem;
+  }
+
+  .d3-node-note {
+    font-size: 1rem;
+  }
+
+  .d3-hub {
+    width: 118px;
+    padding: 12px 6px 10px;
+  }
+
+  .d3-hub img {
+    width: 34px;
+    height: 34px;
+  }
+
+  .d3-hub b {
+    font-size: 1.15rem;
+  }
+
+  .d3-hub span {
+    font-size: 1.05rem;
+  }
+
+  .d3-flows {
+    grid-template-columns: 1fr;
+    gap: 28px;
+  }
+}
+
+/* ---- Busywork, done once / AI-ready ---- */
+
+.d3-notebook {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  background: var(--d3-sheet);
+  border: 2px solid var(--d3-ink);
+  border-radius: var(--d3-r-lg);
+  box-shadow: 7px 9px 0 var(--d3-ink);
+}
+
+/* Spiral binding: a column of drawn rings down the spine of the spread. */
+.d3-notebook::before {
+  content: "";
+  position: absolute;
+  top: 18px;
+  bottom: 18px;
+  left: 50%;
+  z-index: 1;
+  width: 30px;
+  translate: -50% 0;
+  background: radial-gradient(circle, transparent 5px, var(--d3-ink) 5.5px, var(--d3-ink) 7.5px, transparent 8px) center top / 30px 34px repeat-y;
+}
+
+.d3-page-sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+  padding: 40px 44px 44px;
+  background-image: repeating-linear-gradient(to bottom, transparent 0 31px, rgb(23 23 19 / 0.075) 31px 32px);
+}
+
+.d3-page-left {
+  padding-left: 60px;
+  background-image:
+    linear-gradient(90deg, transparent 40px, rgb(228 134 24 / 0.5) 40px 42px, transparent 42px),
+    repeating-linear-gradient(to bottom, transparent 0 31px, rgb(23 23 19 / 0.075) 31px 32px);
+  border-right: 2px solid rgb(23 23 19 / 0.15);
+}
+
+.d3-page-right {
+  padding-left: 52px;
+}
+
+.d3-page-tag {
+  margin: 0;
+  font-size: 1.45rem;
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--d3-orange-deep);
+}
+
+.d3-page-sheet h3 {
+  margin: 0;
+  font: 700 clamp(1.5rem, 2.4vw, 1.85rem)/1.18 var(--d3-letter);
+  text-wrap: balance;
+}
+
+.d3-page-intro {
+  margin: 0;
+  color: var(--d3-ink-soft);
+}
+
+.d3-chores {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.d3-chore {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+/* Block (not flex) so the struck text stays inline and its strike can wrap line by line. */
+.d3-chore p {
+  margin: 0;
+}
+
+/* Pencil strike that wraps with the text: a background line cloned onto each line box. */
+.d3-strike {
+  font-size: 0.95rem;
+  color: var(--d3-muted);
+  text-decoration: none;
+  background-image: linear-gradient(var(--d3-orange-deep), var(--d3-orange-deep));
+  background-repeat: no-repeat;
+  background-position: 0 58%;
+  background-size: 100% 2px;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+
+.d3-chore-after {
+  display: block;
+  margin-top: 2px;
+  font: 400 1.08rem/1.35 var(--d3-letter);
+}
+
+.d3-chats {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.d3-chat {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.d3-chat-who {
+  margin: 0;
+  font-size: 1.3rem;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.d3-chat-who span {
+  font-weight: 500;
+  color: var(--d3-muted);
+}
+
+.d3-bubble {
+  margin: 0;
+  padding: 10px 14px;
+  font-size: 0.97rem;
+  line-height: 1.45;
+  border: 1.8px solid var(--d3-ink);
+  border-radius: var(--d3-r-md);
+}
+
+.d3-bubble-ask {
+  margin-right: 28px;
+  background: var(--d3-paper);
+}
+
+.d3-bubble-answer {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-left: 28px;
+  background: #fff1d6;
+  box-shadow: 3px 3px 0 var(--d3-ink);
+}
+
+.d3-bubble-answer svg {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  margin-top: 3px;
+  color: var(--d3-orange-deep);
+}
+
+.d3-chat[data-refused="true"] .d3-bubble-answer {
+  background: rgb(143 210 199 / 0.32);
+}
+
+.d3-chat[data-refused="true"] .d3-bubble-answer svg {
+  color: var(--d3-ink);
+}
+
+.d3-ai-margin {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 0;
+  font-size: 1.32rem;
+  line-height: 1.1;
+  color: var(--d3-orange-deep);
+  rotate: -1.5deg;
+}
+
+.d3-ai-margin .d3-arrow {
+  width: 44px;
+  height: 30px;
+  flex: none;
+  scale: -1 -1;
+  rotate: 15deg;
+}
+
+/* The roadmap page is pencil-only (dashed, greyer): drawn, not yet inked. */
+.d3-nextpage {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 780px;
+  margin: 56px auto 0;
+  padding: 36px 34px 30px;
+  color: var(--d3-pencil);
+  background: rgb(255 253 247 / 0.7);
+  border: 2px dashed rgb(23 23 19 / 0.45);
+  border-radius: var(--d3-r-lg);
+  rotate: -0.8deg;
+}
+
+.d3-nextpage::after {
+  content: "";
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 38px;
+  height: 38px;
+  background: linear-gradient(135deg, rgb(23 23 19 / 0.14) 50%, var(--d3-paper) 50%);
+  border-top-left-radius: 6px;
+}
+
+.d3-nextpage h3 {
+  margin: 0;
+  font: 700 clamp(1.45rem, 2.6vw, 1.8rem)/1.2 var(--d3-letter);
+  color: var(--d3-ink-soft);
+}
+
+.d3-nextpage p {
+  margin: 0;
+}
+
+.d3-nextpage ul {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 4px 0;
+  padding: 0;
+  list-style: none;
+}
+
+.d3-nextpage li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font: 400 1.05rem/1.35 var(--d3-letter);
+}
+
+.d3-nextpage li::before {
+  content: "";
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-top: 4px;
+  border: 1.8px dashed var(--d3-pencil);
+  border-radius: 3px 5px 3px 4px;
+}
+
+.d3-stamp {
+  position: absolute;
+  top: 16px;
+  right: 18px;
+  padding: 5px 10px;
+  font-size: 0.72rem !important;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--d3-orange-deep);
+  border: 2.5px solid var(--d3-orange-deep);
+  border-radius: 6px;
+  rotate: 5deg;
+  opacity: 0.92;
+}
+
+.d3-nextpage-foot {
+  font-size: 1.3rem;
+  line-height: 1.15;
+  color: var(--d3-orange-deep);
+}
+
+@media (max-width: 899px) {
+  .d3-notebook {
+    grid-template-columns: 1fr;
+  }
+
+  .d3-notebook::before {
+    display: none;
+  }
+
+  .d3-page-left {
+    border-right: 0;
+    border-bottom: 2px dashed rgb(23 23 19 / 0.3);
+  }
+
+  .d3-page-right {
+    padding-left: 44px;
+  }
+}
+
+@media (max-width: 559px) {
+  .d3-page-sheet {
+    padding: 28px 18px 30px;
+  }
+
+  .d3-page-left {
+    padding-left: 34px;
+    background-image:
+      linear-gradient(90deg, transparent 20px, rgb(228 134 24 / 0.5) 20px 22px, transparent 22px),
+      repeating-linear-gradient(to bottom, transparent 0 31px, rgb(23 23 19 / 0.075) 31px 32px);
+  }
+
+  .d3-page-right {
+    padding-left: 18px;
+  }
+
+  .d3-bubble-ask {
+    margin-right: 12px;
+  }
+
+  .d3-bubble-answer {
+    margin-left: 12px;
+  }
+
+  .d3-nextpage {
+    padding: 56px 18px 26px;
+    rotate: 0deg;
+  }
+
+  .d3-stamp {
+    left: 18px;
+    right: auto;
+    rotate: -3deg;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Footer                                                              */
+/* ------------------------------------------------------------------ */
+
+.d3-footer {
+  position: relative;
+  margin-top: 48px;
+  padding: 88px 0 32px;
+  color: var(--d3-paper);
+  background: var(--d3-ink);
+}
+
+/* Torn-paper top edge. */
+.d3-footer::before {
+  content: "";
+  position: absolute;
+  top: -15px;
+  left: 0;
+  right: 0;
+  height: 16px;
+  background: var(--d3-ink);
+  -webkit-mask: conic-gradient(from -45deg at bottom, #0000, #000 1deg 89deg, #0000 90deg) 50% / 22px 100%;
+  mask: conic-gradient(from -45deg at bottom, #0000, #000 1deg 89deg, #0000 90deg) 50% / 22px 100%;
+}
+
+.d3-footer :focus-visible {
+  outline-color: var(--d3-highlight);
+}
+
+.d3-footer-cta {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  max-width: 760px;
+  margin-inline: auto;
+  text-align: center;
+}
+
+.d3-footer-cta h2 {
+  margin: 0;
+  font: 700 clamp(2rem, 4.4vw, 3.2rem)/1.15 var(--d3-letter);
+  text-wrap: balance;
+}
+
+.d3-footer-cta p {
+  margin: 0;
+  font-size: 1.08rem;
+  color: #d4d0c5;
+}
+
+.d3-footer .d3-btn {
+  border-color: var(--d3-paper);
+  box-shadow: 3px 3px 0 var(--d3-highlight);
+}
+
+.d3-footer .d3-btn:hover {
+  box-shadow: 5px 5px 0 var(--d3-highlight);
+}
+
+.d3-footer-nav {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 32px;
+  margin-top: 72px;
+  padding-top: 40px;
+  border-top: 2px dashed rgb(251 250 247 / 0.22);
+}
+
+.d3-footer-col h3 {
+  margin: 0 0 10px;
+  font-size: 1.6rem;
+  line-height: 1;
+  color: var(--d3-highlight);
+}
+
+.d3-footer-col ul {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.d3-footer-col a {
+  font-size: 0.95rem;
+  color: #e6e2d8;
+  text-decoration: none;
+  text-underline-offset: 4px;
+  text-decoration-color: var(--d3-orange);
+  text-decoration-thickness: 2px;
+}
+
+.d3-footer-col a:hover {
+  text-decoration-line: underline;
+  text-decoration-style: wavy;
+}
+
+.d3-footer-base {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 24px;
+  margin-top: 48px;
+  padding-top: 24px;
+  font-size: 0.86rem;
+  color: #aaa69a;
+  border-top: 2px dashed rgb(251 250 247 / 0.22);
+}
+
+.d3-footer-base p {
+  margin: 0;
+}
+
+.d3-footer-base .d3-hand {
+  margin-left: auto;
+  font-size: 1.15rem;
+}
+
+.d3-brand-static {
+  font-size: 1.15rem;
+  color: var(--d3-paper);
+}
+
+@media (max-width: 719px) {
+  .d3-footer-nav {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .d3-footer-col:last-child {
+    grid-column: 1 / -1;
+  }
+
+  .d3-footer-base .d3-hand {
+    margin-left: 0;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Motion (only when the visitor has not asked for less)               */
+/* ------------------------------------------------------------------ */
+
+@keyframes d3-draw {
+  from { stroke-dashoffset: 1; }
+  to { stroke-dashoffset: 0; }
+}
+
+@keyframes d3-pop {
+  from { opacity: 0; scale: 0.6; }
+  to { opacity: 1; scale: 1; }
+}
+
+@keyframes d3-rise {
+  from { opacity: 0; transform: translateY(18px); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes d3-highlight-in {
+  from { background-size: 0% 44%; }
+  to { background-size: 100% 44%; }
+}
+
+@keyframes d3-strike-in {
+  from { background-size: 0% 2px; }
+  to { background-size: 100% 2px; }
+}
+
+@keyframes d3-wiggle {
+  0%, 100% { rotate: 0deg; }
+  25% { rotate: -14deg; }
+  50% { rotate: 10deg; }
+  75% { rotate: -5deg; }
+}
+
+@keyframes d3-sway {
+  from { rotate: -4deg; }
+  to { rotate: -2deg; }
+}
+
+@keyframes d3-travel {
+  from { stroke-dashoffset: 0; }
+  to { stroke-dashoffset: -1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  /* Hero plays on load. */
+  .d3-hero-copy > * {
+    animation: d3-rise 0.6s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  }
+
+  .d3-hero-copy > :nth-child(2) { animation-delay: 0.06s; }
+  .d3-hero-copy > :nth-child(3) { animation-delay: 0.14s; }
+  .d3-hero-copy > :nth-child(4) { animation-delay: 0.2s; }
+  .d3-hero-copy > :nth-child(5) { animation-delay: 0.26s; }
+
+  .d3-hero .d3-highlight {
+    animation: d3-highlight-in 0.7s 0.45s ease-out both;
+  }
+
+  .d3-hero .d3-circle path {
+    animation: d3-draw 0.9s 0.8s ease-in-out both;
+  }
+
+  .d3-hero .d3-arrow path,
+  .d3-hero .d3-star path {
+    animation: d3-draw 0.7s 1.2s ease-out both;
+  }
+
+  .d3-hero-rule path {
+    animation: d3-draw 1.4s 0.6s ease-in-out both;
+  }
+
+  .d3-sk-window {
+    animation: d3-rise 0.7s 0.2s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  }
+
+  .d3-hero-sticky {
+    animation: d3-pop 0.5s 1s cubic-bezier(0.3, 1.5, 0.5, 1) both, d3-sway 5s 1.5s ease-in-out infinite alternate;
+  }
+
+  .d3-hero-note {
+    animation: d3-rise 0.6s 1.1s ease-out both;
+  }
+
+  /* Header doodle icons wiggle on hover/focus. */
+  .d3-drop-link:hover .d3-doodle-icon svg,
+  .d3-drop-link:focus-visible .d3-doodle-icon svg,
+  .d3-node:hover .d3-node-dot svg {
+    animation: d3-wiggle 0.55s ease-in-out;
+  }
+
+  /* Scroll-revealed drawings: hidden only once armed by JS, drawn once in view. */
+  [data-armed]:not([data-inview]) :is(.d3-spoke, .d3-peer, .d3-circle path, .d3-squiggle path, .d3-arrow path, .d3-check-tick) {
+    stroke-dashoffset: 1;
+  }
+
+  [data-armed]:not([data-inview]) :is(.d3-node, .d3-hub, .d3-flow, .d3-dots-margin) {
+    opacity: 0;
+  }
+
+  [data-armed]:not([data-inview]) .d3-strike {
+    background-size: 0% 2px;
+  }
+
+  [data-inview] .d3-hub {
+    animation: d3-pop 0.5s cubic-bezier(0.3, 1.5, 0.5, 1) both;
+  }
+
+  [data-inview] .d3-node {
+    animation: d3-pop 0.45s cubic-bezier(0.3, 1.5, 0.5, 1) both;
+    animation-delay: calc(0.15s + var(--i) * 0.08s);
+  }
+
+  [data-inview] .d3-spoke {
+    animation: d3-draw 0.8s cubic-bezier(0.6, 0.1, 0.3, 1) both;
+    animation-delay: calc(0.5s + var(--i) * 0.11s);
+  }
+
+  [data-inview] .d3-peer {
+    animation: d3-draw 0.7s ease-out both;
+    animation-delay: calc(1.5s + var(--i) * 0.16s);
+  }
+
+  [data-inview] .d3-dots-margin {
+    animation: d3-rise 0.6s 2.1s ease-out both;
+  }
+
+  [data-inview] .d3-dots-margin .d3-arrow path {
+    animation: d3-draw 0.6s 2.4s ease-out both;
+  }
+
+  [data-inview] > .d3-flow,
+  [data-inview].d3-flows > .d3-flow {
+    animation: d3-rise 0.55s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+    animation-delay: calc(var(--i) * 0.14s);
+  }
+
+  [data-inview] .d3-circle path {
+    animation: d3-draw 0.9s 0.25s ease-in-out both;
+  }
+
+  [data-inview] .d3-squiggle path {
+    animation: d3-draw 0.7s 0.35s ease-out both;
+  }
+
+  [data-inview] .d3-strike {
+    animation: d3-strike-in 0.5s ease-in-out both;
+    animation-delay: calc(0.2s + var(--i, 0) * 0.35s);
+  }
+
+  /* A small orange dot keeps travelling from the hub out to each role. */
+  [data-inview] .d3-pulse {
+    display: block;
+    animation: d3-travel 3.6s linear infinite;
+    animation-delay: calc(2.4s + var(--i) * 0.45s);
+  }
+
+  [data-inview] .d3-check-tick {
+    animation: d3-draw 0.35s ease-out both;
+    animation-delay: calc(0.55s + var(--i) * 0.35s);
+  }
+}

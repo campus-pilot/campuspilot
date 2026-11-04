@@ -1,0 +1,21 @@
+/*
+ * Variant for `/1/1`: the same page as `/1`, with the black primary buttons
+ * (`.d1-btn-dark`) switched to the CampusPilot platform primary.
+ * Loaded after `styles.css` only by `routes/1_.1.tsx`, so equal specificity is
+ * enough for these rules to win, and `/1` is unaffected.
+ */
+
+:root {
+  /* Platform primary from packages/ui globals.css (light theme). */
+  --d1-primary: oklch(0.555 0.163 49);
+  --d1-primary-hover: oklch(0.505 0.15 48);
+}
+
+.d1-btn-dark {
+  background: var(--d1-primary);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.18), 0 1px 2px rgb(120 50 0 / 0.28);
+}
+
+.d1-btn-dark:hover {
+  background: var(--d1-primary-hover);
+}

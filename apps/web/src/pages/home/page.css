@@ -1,0 +1,255 @@
+/* Home page (`/`). Classes are prefixed `pg-home-`; shared `cp-` classes are only
+   refined under a page class. Base styles are the finished state; motion is
+   layered on under `prefers-reduced-motion: no-preference`. */
+
+/* ------------------------------------------------ AI: today → coming rail */
+
+.pg-home-ai-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 28px;
+  max-width: 860px;
+  margin: 56px auto 0;
+}
+
+.pg-home-ai-rail ol {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pg-home-ai-stage {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 30px 40px 0 0;
+}
+
+/* The rail segment running from this stage's marker towards the next one. */
+.pg-home-ai-stage::before {
+  content: "";
+  position: absolute;
+  top: 6px;
+  right: 16px;
+  left: 24px;
+  border-top: 1px solid var(--cp-line-strong);
+}
+
+.pg-home-ai-stage[data-stage="coming"]::before {
+  border-top-style: dashed;
+  mask-image: linear-gradient(90deg, #000 40%, transparent);
+}
+
+.pg-home-ai-marker {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--cp-primary);
+}
+
+.pg-home-ai-stage[data-stage="coming"] .pg-home-ai-marker {
+  border: 1.5px dashed var(--cp-subtle);
+  background: var(--cp-surface);
+}
+
+.pg-home-ai-tag {
+  color: var(--cp-accent);
+  font: 500 11.5px/1 var(--cp-mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.pg-home-ai-stage[data-stage="coming"] .pg-home-ai-tag {
+  padding: 4px 9px;
+  border-radius: 99px;
+  background: var(--cp-accent-soft);
+}
+
+.pg-home-ai-stage b {
+  color: var(--cp-ink);
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.pg-home-ai-stage p {
+  max-width: 360px;
+  margin: 0;
+  color: var(--cp-muted);
+  font-size: 14.5px;
+  line-height: 1.6;
+  text-wrap: pretty;
+}
+
+/* ------------------------------------------------------- teams band */
+
+.pg-home-teams {
+  display: grid;
+  grid-template-columns: minmax(0, 300px) minmax(0, 1fr);
+  align-items: start;
+  gap: 64px;
+}
+
+.pg-home-teams-head {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 18px;
+}
+
+.pg-home-teams-head h2 {
+  margin: 0;
+  font-size: clamp(28px, 3.2vw, 40px);
+  font-weight: 600;
+  letter-spacing: -0.04em;
+  line-height: 1.08;
+  text-wrap: balance;
+}
+
+.pg-home-teams-links {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 14px;
+  margin-top: 6px;
+}
+
+.pg-home-teams-sentence {
+  margin: 0;
+  color: var(--cp-muted);
+  font-size: clamp(22px, 2.5vw, 33px);
+  font-weight: 500;
+  letter-spacing: -0.025em;
+  line-height: 1.68;
+  text-wrap: pretty;
+}
+
+.pg-home-chip-wrap {
+  white-space: nowrap;
+}
+
+.pg-home-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.32em;
+  padding: 0.02em 0.5em 0.06em;
+  border: 1px solid var(--cp-line);
+  border-radius: 999px;
+  background: var(--cp-surface);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.04);
+  color: var(--cp-ink);
+  text-decoration: none;
+  white-space: nowrap;
+  transition:
+    border-color 0.2s ease,
+    transform 0.3s var(--cp-ease);
+}
+
+.pg-home-chip svg {
+  flex: none;
+  width: 0.68em;
+  height: 0.68em;
+  color: var(--cp-subtle);
+  transition: color 0.2s ease;
+}
+
+.pg-home-chip:hover {
+  border-color: var(--cp-line-strong);
+  transform: translateY(-2px);
+}
+
+.pg-home-chip:hover svg {
+  color: var(--cp-primary);
+}
+
+.cp-page .pg-home-chip:focus-visible {
+  border-radius: 999px;
+}
+
+/* ------------------------------------------------------------ motion */
+
+@media (prefers-reduced-motion: no-preference) {
+  .pg-home-ai-stage[data-stage="today"] .pg-home-ai-marker {
+    animation: cp-ping 2.4s ease-out infinite;
+  }
+
+  @supports (animation-timeline: view()) {
+    .pg-home-ai-stage,
+    .pg-home-chip {
+      animation: pg-home-rise linear both;
+      animation-timeline: view();
+      animation-range: entry 0% cover 28%;
+    }
+  }
+}
+
+@keyframes pg-home-rise {
+  from {
+    opacity: 0;
+    translate: 0 10px;
+  }
+}
+
+/* ------------------------------------------------------------ phones */
+
+@media (max-width: 960px) {
+  .pg-home-teams {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 32px;
+  }
+
+  .pg-home-teams-links {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 12px 24px;
+  }
+}
+
+@media (max-width: 640px) {
+  .pg-home-ai-rail {
+    align-items: flex-start;
+    max-width: 100%;
+    margin-top: 40px;
+  }
+
+  .pg-home-ai-rail ol {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 28px;
+  }
+
+  .pg-home-ai-stage {
+    padding: 0 0 0 30px;
+  }
+
+  /* The rail turns vertical: from "today" down to "coming". */
+  .pg-home-ai-stage::before {
+    top: 22px;
+    right: auto;
+    bottom: -25px;
+    left: 6px;
+    border-top: 0;
+    border-left: 1px solid var(--cp-line-strong);
+  }
+
+  .pg-home-ai-stage[data-stage="coming"]::before {
+    display: none;
+  }
+
+  .pg-home-ai-marker {
+    top: 1px;
+  }
+
+  .pg-home-teams-sentence {
+    font-size: 21px;
+    line-height: 1.75;
+  }
+}
