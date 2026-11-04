@@ -1,6 +1,7 @@
 import { serve } from '@hono/node-server';
 import { deleteUnusedDynamicOAuthClients } from '@campuspilot/auth/mcp-oauth';
 import { db } from '@campuspilot/db';
+import { runMigrations } from '@campuspilot/db/migrate';
 import { env } from '@campuspilot/env/server';
 
 import { app, mcpCatalog, mcpHandler } from './http';
@@ -30,6 +31,8 @@ async function removeUnusedDynamicClients() {
 }
 
 async function main() {
+  // Every later phase and request expects the current schema.
+  await phase('db.migrate', () => runMigrations());
   await phase('mcp.catalog', async () => {
     await mcpCatalog;
   });
