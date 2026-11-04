@@ -5,6 +5,7 @@ import {
   createMcpHandler,
   McpServer,
   type McpHttpHandler,
+  type StandardSchemaWithJSON,
 } from '@modelcontextprotocol/server';
 import {
   type AnyProcedure,
@@ -19,11 +20,24 @@ import { z } from 'zod';
 
 const EMPTY_INPUT_SCHEMA = z.object({});
 
+/** JSON Schema dialect the MCP SDK uses for tool input schemas. */
+const MCP_JSON_SCHEMA_TARGET = 'draft-2020-12';
+
+type JsonSchemaObject = Record<string, unknown>;
+
+/**
+ * Standard Schema handed to the MCP SDK: it advertises the input JSON Schema
+ * converted once at boot and validates with the procedure's Zod schema.
+ */
+type McpToolInputSchema = StandardSchemaWithJSON<unknown, unknown>;
+
 export type McpToolDefinition = {
   name: string;
   title: string;
   description: string;
   inputSchema: z.ZodObject;
+  /** Input JSON Schema converted once while the catalog is built. */
+  inputJsonSchema: JsonSchemaObject;
   acceptsInput: boolean;
   procedure: AnyProcedure;
 };
@@ -57,6 +71,130 @@ type McpErrorPayload = {
  */
 export function normalizeMcpAuthRequest(request: Request): Request {
   return normalizeApiKeyRequest(request);
+}
+
+/** Returns the child schemas a Zod schema accepts as input, keyed by path segment. */
+function inputChildren(schema: z.ZodType): Array<[string, z.ZodType]> {
+  const def = schema._zod.def as unknown as Record<string, unknown> & {
+    type: string;
+  };
+  switch (def.type) {
+    case 'object':
+      return Object.entries((schema as z.ZodObject).shape);
+    case 'optional':
+    case 'nullable':
+    case 'default':
+    case 'prefault':
+    case 'nonoptional':
+    case 'readonly':
+    case 'catch':
+      return [['', def.innerType as z.ZodType]];
+    case 'pipe':
+      return [['', def.in as z.ZodType]];
+    case 'array':
+      return [['[]', def.element as z.ZodType]];
+    case 'record':
+      return [['{}', def.valueType as z.ZodType]];
+    case 'union':
+      return (def.options as z.ZodType[]).map((option, index) => [
+        `|${index}`,
+        option,
+      ]);
+    case 'intersection':
+      return [
+        ['&left', def.left as z.ZodType],
+        ['&right', def.right as z.ZodType],
+      ];
+    default:
+      return [];
+  }
+}
+
+function convertsToJsonSchema(schema: z.ZodType): boolean {
+  try {
+    z.toJSONSchema(schema, { io: 'input', target: MCP_JSON_SCHEMA_TARGET });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Finds the deepest input field whose schema cannot be represented in JSON
+ * Schema, so a boot failure names the field instead of only the procedure.
+ */
+function findUnrepresentableField(
+  schema: z.ZodType,
+  path: string,
+): string {
+  for (const [segment, child] of inputChildren(schema)) {
+    if (convertsToJsonSchema(child)) continue;
+    const childPath = !segment
+      ? path
+      : segment.startsWith('[') ||
+          segment.startsWith('{') ||
+          segment.startsWith('|') ||
+          segment.startsWith('&')
+        ? `${path}${segment}`
+        : path
+          ? `${path}.${segment}`
+          : segment;
+    return findUnrepresentableField(child, childPath);
+  }
+  return path || '(root)';
+}
+
+/**
+ * Converts a procedure input to the JSON Schema advertised by tools/list.
+ * Conversion runs once while the catalog is built, so an unrepresentable
+ * field fails boot (and the catalog tests) naming the procedure and field,
+ * instead of failing every tools/list request at runtime.
+ */
+export function convertMcpInputSchema(
+  name: string,
+  schema: z.ZodObject,
+): JsonSchemaObject {
+  try {
+    return z.toJSONSchema(schema, {
+      io: 'input',
+      target: MCP_JSON_SCHEMA_TARGET,
+    }) as JsonSchemaObject;
+  } catch (error) {
+    const field = findUnrepresentableField(schema, '');
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new TypeError(
+      `oRPC procedure ${name} has an input field that cannot be represented in JSON Schema for MCP at ${field}: ${reason}`,
+      { cause: error },
+    );
+  }
+}
+
+/**
+ * Wraps a tool's Zod input for the MCP SDK. The SDK reads the precomputed JSON
+ * Schema instead of converting on every tools/list, and still rejects invalid
+ * arguments with Zod's messages. A successful validation returns the raw
+ * arguments rather than Zod's parsed output: the oRPC procedure parses them
+ * itself, and its transforms (for example ISO strings into Dates) must see the
+ * JSON values a client sent, not already-transformed values.
+ */
+function toMcpToolInputSchema(
+  tool: Pick<McpToolDefinition, 'inputSchema' | 'inputJsonSchema'>,
+): McpToolInputSchema {
+  const zodStandard = tool.inputSchema['~standard'];
+  return {
+    '~standard': {
+      version: 1,
+      vendor: 'campuspilot',
+      jsonSchema: {
+        input: () => tool.inputJsonSchema,
+        output: () => tool.inputJsonSchema,
+      },
+      validate: async (value) => {
+        const result = await zodStandard.validate(value);
+        return result.issues ? { issues: result.issues } : { value };
+      },
+    },
+  };
 }
 
 /**
@@ -99,12 +237,14 @@ export async function buildMcpToolDefinitions(
         );
       }
 
+      const inputSchema = definition.inputSchema ?? EMPTY_INPUT_SCHEMA;
       names.add(name);
       tools.push({
         name,
         title: summary,
         description,
-        inputSchema: definition.inputSchema ?? EMPTY_INPUT_SCHEMA,
+        inputSchema,
+        inputJsonSchema: convertMcpInputSchema(name, inputSchema),
         acceptsInput: definition.inputSchema !== undefined,
         procedure: contract,
       });
@@ -155,7 +295,7 @@ export function createCampusPilotMcpServer({
       {
         title: tool.title,
         description: tool.description,
-        inputSchema: tool.inputSchema,
+        inputSchema: toMcpToolInputSchema(tool),
       },
       async (input, requestContext): Promise<CallToolResult> => {
         try {

@@ -20,7 +20,17 @@ export const modeConfigSchema = z
           100,
       ) < 0.000001,
     'At least one mode is required and percentages must sum to 100%',
-  );
+  )
+  .meta({
+    description:
+      'Assessment modes keyed by mode slug; percentages must sum to 100.',
+    examples: [
+      {
+        theory: { percentage: 80, maxMarks: 80 },
+        practical: { percentage: 20, maxMarks: 20 },
+      },
+    ],
+  });
 export const resultMarksSchema = z.record(
   z.string().min(1),
   z.number().nonnegative(),

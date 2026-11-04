@@ -178,6 +178,28 @@ describe('buildMcpToolDefinitions', () => {
     );
   });
 
+  it('fails while building the catalog, naming the procedure and field that has no JSON Schema', async () => {
+    const listPayments = os
+      .route({
+        summary: 'List payments',
+        description: 'Uses a Date input that JSON clients cannot send.',
+        tags: ['Test'],
+      })
+      .input(
+        z.object({
+          schoolId: z.string(),
+          filters: z.object({ receivedFrom: z.date().optional() }).optional(),
+        }),
+      )
+      .handler(() => []);
+
+    await expect(
+      buildMcpToolDefinitions({ school: { listPayments } }),
+    ).rejects.toThrow(
+      /school\.listPayments .* at filters\.receivedFrom: Date cannot be represented/,
+    );
+  });
+
   it('covers every appRouter leaf while excluding direct binary upload handlers', async () => {
     vi.stubEnv('SKIP_ENV_VALIDATION', 'true');
     const { appRouter } = await import('@campuspilot/api/routers/index');
@@ -248,6 +270,48 @@ describe('MCP tool execution', () => {
       'Bearer cp_transport_key',
     );
     expect(observedHeaders[0]?.get('x-api-key')).toBe('cp_transport_key');
+  });
+
+  it('passes the JSON arguments to the procedure, whose own schema converts ISO strings to Dates', async () => {
+    const procedure = os
+      .route({
+        summary: 'Record instant',
+        description: 'Receive an ISO date-time and return what the handler saw.',
+        tags: ['Test'],
+      })
+      .input(
+        z.object({
+          receivedAt: z.iso
+            .datetime({ offset: true })
+            .transform((value) => new Date(value)),
+        }),
+      )
+      .handler(({ input }) => ({
+        isDate: input.receivedAt instanceof Date,
+        epochMs: input.receivedAt.getTime(),
+      }));
+    const tools = await buildMcpToolDefinitions({ recordInstant: procedure });
+    const { client } = await connectMcp(tools, asContext({}));
+
+    const listed = await client.listTools();
+    const result = await client.callTool({
+      name: 'recordInstant',
+      arguments: { receivedAt: '2026-04-01T09:30:00+05:30' },
+    });
+    const invalid = await client.callTool({
+      name: 'recordInstant',
+      arguments: { receivedAt: 'yesterday' },
+    });
+
+    expect(listed.tools[0]?.inputSchema.properties).toMatchObject({
+      receivedAt: { type: 'string', format: 'date-time' },
+    });
+    expect(JSON.parse(textContent(result))).toEqual({
+      isDate: true,
+      epochMs: Date.parse('2026-04-01T04:00:00.000Z'),
+    });
+    expect(invalid.isError).toBe(true);
+    expect(textContent(invalid)).toContain('Input validation error');
   });
 
   it('lists and calls a public procedure with its JSON result', async () => {

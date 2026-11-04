@@ -17,6 +17,7 @@
 - Register new procedures only in the normal application router. Every leaf under `appRouter` is exposed automatically as an MCP tool using its dot-joined router path; never add separate per-procedure MCP registration.
 - User-owned API keys must work as either `x-api-key: <key>` or `Authorization: Bearer <key>` across RPC, OpenAPI, direct authenticated handlers, and MCP. If both are supplied, the explicit `x-api-key` value takes precedence.
 - An MCP-exposed procedure must have either no input or a top-level Zod object input schema, because MCP tool arguments are named JSON object properties. Procedure outputs must be JSON-serializable.
+- Every input field must be representable in JSON Schema. Do not accept `z.date()`/`z.coerce.date()`; declare instants as ISO 8601 strings (for finance, `financeInstantInputSchema`) or calendar dates as `YYYY-MM-DD` strings and convert inside the schema. The MCP catalog converts every input once at boot and fails with the procedure and field path otherwise.
 - Direct HTTP handlers that depend on multipart uploads, binary request bodies, streaming mutations, or raw `Request`/`Response` behavior are not part of `appRouter` and do not need MCP exposure. This includes the school logo upload handler.
 
 # Auth route placement
@@ -31,7 +32,7 @@
   - **Redis** (for session and caching storage).
   - **OPA** (mounting `packages/opa/src/policies` for live authorization evaluations).
   - **RustFS** (S3-compatible object storage for files and logos with the `campuspilot` bucket created).
-- Use `createTestClient(session)` from `test/fixtures` to test procedures directly and with full type safety via oRPC's `createRouterClient`:
+- Use `createTestClient(session)` from `test/fixtures` to test procedures directly and with full type safety via oRPC's `createRouterClient`. Its inputs and outputs cross a JSON round trip, so send ISO strings rather than `Date` objects and expect dates back as strings, exactly as an MCP, OpenAPI or curl client would:
   - `createTestClient(null)` for anonymous / public callers.
   - `createTestClient(await createAdminSession())` for platform administrators (`role: 'admin'`).
   - `createTestClient((await createSchoolStaffSession(schoolId, roles)).session)` for tenant-scoped school roles (`principal`, `manager`, `teacher` with class metadata, etc.).

@@ -199,7 +199,7 @@ if (!run) {
 }
 for (const student of enrolled.filter((item) => item.studentIndex < 2)) {
   const amount = classDefinitions[student.classIndex]!.tuition + 35000 + (student.studentIndex === 0 ? 90000 : 0);
-  await accountant.school.recordPayment({ ...scope, admissionId: student.admissionId, currency: 'INR', amountMinor: String(student.studentIndex === 0 ? amount : amount / 2), method: student.studentIndex === 0 ? 'bank_transfer' : 'cash', externalReference: `DEMO-NOV-${student.classIndex + 1}-${student.studentIndex + 1}`, payerName: `Sample guardian of ${student.name}`, receivedAt: new Date('2026-11-02T04:30:00Z'), effectiveAt: new Date('2026-11-02T04:30:00Z'), note: 'Synthetic local demo payment; no real funds moved.', idempotencyKey: `demo-nov-payment-${student.admissionId}` });
+  await accountant.school.recordPayment({ ...scope, admissionId: student.admissionId, currency: 'INR', amountMinor: String(student.studentIndex === 0 ? amount : amount / 2), method: student.studentIndex === 0 ? 'bank_transfer' : 'cash', externalReference: `DEMO-NOV-${student.classIndex + 1}-${student.studentIndex + 1}`, payerName: `Sample guardian of ${student.name}`, receivedAt: '2026-11-02T04:30:00Z', effectiveAt: '2026-11-02T04:30:00Z', note: 'Synthetic local demo payment; no real funds moved.', idempotencyKey: `demo-nov-payment-${student.admissionId}` });
 }
 console.log('FINANCE_READY', run.id);
 

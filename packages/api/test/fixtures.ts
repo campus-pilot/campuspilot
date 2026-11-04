@@ -10,6 +10,7 @@ import { schoolUserRoleTable } from '@campuspilot/db/schema/school-user-role';
 import { schoolSessionTable } from '@campuspilot/db/schema/session';
 import { eq, max } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
+import type { Client } from '@orpc/client';
 import { createRouterClient } from '@orpc/server';
 
 import type { Context } from '../src/context';
@@ -38,20 +39,58 @@ function toSessionUser(
   };
 }
 
+/** The value a JSON client (MCP, OpenAPI, curl) receives for an output. */
+export type JsonWire<T> = T extends Date
+  ? string
+  : T extends readonly (infer Item)[]
+    ? JsonWire<Item>[]
+    : T extends object
+      ? { [Key in keyof T]: JsonWire<T[Key]> }
+      : T;
+
+/** A router client whose outputs are typed as they arrive over a JSON wire. */
+export type JsonWireRouterClient<T> =
+  T extends Client<infer ClientContext, infer Input, infer Output, infer Error>
+    ? Client<ClientContext, Input, JsonWire<Output>, Error>
+    : { [Key in keyof T]: JsonWireRouterClient<T[Key]> };
+
+/** The client type every integration suite uses; see {@link createTestClient}. */
+export type TestClient = JsonWireRouterClient<AppRouterClient>;
+
 /**
- * Creates a typed oRPC client bound to an optional user session and database executor.
+ * Sends a value through the same JSON encoding an MCP, OpenAPI or curl client
+ * uses. `Date`, `undefined` members, class instances and `bigint` therefore
+ * behave in tests exactly as they would for a real JSON caller.
+ */
+function jsonRoundTrip<T>(value: T): T {
+  return value === undefined ? value : JSON.parse(JSON.stringify(value));
+}
+
+/**
+ * Creates a typed oRPC client bound to an optional user session and database
+ * executor. Inputs and outputs cross a JSON round trip, so integration suites
+ * exercise the contract a JSON client can actually send and receive rather
+ * than in-process JavaScript values.
  */
 export function createTestClient(
   session: Context['session'] = null,
   headers: Headers = new Headers(),
-): AppRouterClient {
-  return createRouterClient(appRouter, {
+): TestClient {
+  const client: AppRouterClient = createRouterClient(appRouter, {
     context: async () => ({
       db,
       headers,
       session,
     }),
+    interceptors: [
+      async ({ next, ...options }) =>
+        jsonRoundTrip(
+          await next({ ...options, input: jsonRoundTrip(options.input) }),
+        ),
+    ],
   });
+  // The interceptor changes only the runtime encoding the types describe.
+  return client as unknown as TestClient;
 }
 
 /**

@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import {
   financeCumulativeIntegerStringSchema,
+  financeInstantInputSchema,
   financeIntegerStringSchema,
 } from "./transport";
 
@@ -36,8 +37,8 @@ export const getAdmissionLedgerInputSchema = createListInputSchema({
     .object({
       sessionId: z.string().min(1).optional(),
       currency: currencySchema.optional(),
-      effectiveFrom: z.coerce.date().optional(),
-      effectiveTo: z.coerce.date().optional(),
+      effectiveFrom: financeInstantInputSchema.optional(),
+      effectiveTo: financeInstantInputSchema.optional(),
       types: z.array(ledgerTypeSchema).min(1).max(10).optional(),
     })
     .optional(),
@@ -109,8 +110,8 @@ export const listPaymentsInputSchema = createListInputSchema({
       method: paymentMethodSchema.optional(),
       externalReference: z.string().trim().min(1).max(500).optional(),
       status: z.enum(["recorded", "partially_refunded", "refunded", "reversed"]).optional(),
-      receivedFrom: z.coerce.date().optional(),
-      receivedTo: z.coerce.date().optional(),
+      receivedFrom: financeInstantInputSchema.optional(),
+      receivedTo: financeInstantInputSchema.optional(),
     })
     .optional(),
 }).superRefine((value, context) => {
@@ -144,8 +145,8 @@ export const recordPaymentInputSchema = z.object({
     method: paymentMethodSchema,
     externalReference: z.string().trim().min(1).max(500).nullable().optional(),
     payerName: z.string().trim().min(1).max(300).nullable().optional(),
-    receivedAt: z.coerce.date(),
-    effectiveAt: z.coerce.date(),
+    receivedAt: financeInstantInputSchema,
+    effectiveAt: financeInstantInputSchema,
     note: z.string().trim().min(1).max(1000).nullable().optional(),
     idempotencyKey: idempotencyKeySchema,
   });
@@ -191,7 +192,7 @@ export const recordAdjustmentInputSchema = z
     reasonCode: z.string().trim().min(1).max(100),
     reasonNote: reasonSchema,
     approvedBy: z.string().trim().min(1).max(300).nullable().optional(),
-    effectiveAt: z.coerce.date(),
+    effectiveAt: financeInstantInputSchema,
     idempotencyKey: idempotencyKeySchema,
   })
   .superRefine((value, context) => {
@@ -215,7 +216,7 @@ export const recordRefundInputSchema = z.object({
   method: paymentMethodSchema,
   externalReference: z.string().trim().min(1).max(500).nullable().optional(),
   reason: reasonSchema,
-  effectiveAt: z.coerce.date(),
+  effectiveAt: financeInstantInputSchema,
   idempotencyKey: idempotencyKeySchema,
 });
 
@@ -225,7 +226,7 @@ export const reverseLedgerEntryInputSchema = z.object({
   sessionId: z.string().min(1),
   ledgerEntryId: z.string().min(1),
   reason: reasonSchema,
-  effectiveAt: z.coerce.date(),
+  effectiveAt: financeInstantInputSchema,
   idempotencyKey: idempotencyKeySchema,
 });
 

@@ -4,7 +4,7 @@ import {
   createListInputSchema,
   createPaginatedOutputSchema,
 } from "../../../paginations";
-import { financeIntegerStringSchema } from "./transport";
+import { financeInstantInputSchema, financeIntegerStringSchema } from "./transport";
 import { isValidLocalDate } from "./period";
 
 export const financeLocalDateSchema = z
@@ -208,8 +208,8 @@ export const listBillingRunsInputSchema = createListInputSchema({
       periodKey: z.string().min(1).optional(),
       kind: z.enum(["regular", "supplemental"]).optional(),
       recordedBy: z.string().min(1).optional(),
-      recordedFrom: z.coerce.date().optional(),
-      recordedTo: z.coerce.date().optional(),
+      recordedFrom: financeInstantInputSchema.optional(),
+      recordedTo: financeInstantInputSchema.optional(),
     })
     .optional(),
   orderBy: z
@@ -326,7 +326,7 @@ export const createManualBillInputSchema = z.object({
 const reversalShape = {
   schoolId: z.string().min(1),
   sessionId: z.string().min(1),
-  effectiveAt: z.coerce.date(),
+  effectiveAt: financeInstantInputSchema,
   reason: reasonSchema,
   idempotencyKey: idempotencyKeySchema,
 };

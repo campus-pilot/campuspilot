@@ -1,5 +1,17 @@
 import { z } from "zod";
 
+/**
+ * Wire contract for a finance instant (payment received, posting effective,
+ * filter bounds). Clients send an ISO 8601 date-time with an explicit offset
+ * such as `2026-04-01T09:30:00.000Z`; handlers receive a `Date`. Declaring the
+ * string on the input side gives RPC, OpenAPI and MCP the same JSON-
+ * representable contract instead of relying on `Date` coercion, which has no
+ * JSON Schema form.
+ */
+export const financeInstantInputSchema = z.iso
+  .datetime({ offset: true })
+  .transform((value) => new Date(value));
+
 export const POSTGRES_BIGINT_MAX = BigInt("9223372036854775807");
 
 export const financeIntegerStringSchema = z

@@ -23,7 +23,10 @@ export const financeTimeZoneSchema = z
     },
     { message: "Timezone must be a valid IANA timezone identifier" },
   )
-  .describe("IANA timezone used to calculate local billing boundaries");
+  .meta({
+    description: "IANA timezone used to calculate local billing boundaries",
+    examples: ["Asia/Kolkata"],
+  });
 
 export const financeScopeEnum = z
   .enum(["school", "class", "student"])

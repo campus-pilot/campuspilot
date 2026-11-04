@@ -30,8 +30,8 @@ function paymentInput(scenario: FinanceScenario, suffix: string, amountMinor = "
     amountMinor,
     currency: "INR",
     method: "cash" as const,
-    receivedAt: new Date("2040-05-02T10:00:00Z"),
-    effectiveAt: new Date("2040-05-02T10:00:00Z"),
+    receivedAt: "2040-05-02T10:00:00Z",
+    effectiveAt: "2040-05-02T10:00:00Z",
     idempotencyKey: createFinanceIdempotencyKey(suffix),
   };
 }
@@ -107,30 +107,30 @@ describe("school finance ledger operations", () => {
 
   it("keeps bill adjustments independent and caps refunds at the unrefunded payment amount", async () => {
     const bill = await createBill(scenario, { sessionId: scenario.activeSession.id, issueDate: "2040-05-01", amountMinor: "1001", suffix: "rounding" });
-    const adjustment = await scenario.actors.principal.client.school.recordAdjustment({ schoolId: scenario.school.id, admissionId: scenario.admission.id, sessionId: scenario.activeSession.id, currency: "INR", kind: "discount", billId: bill.id, calculation: { kind: "percentage", percentage: "50" }, reasonCode: "MERIT", reasonNote: "Approved merit discount", effectiveAt: new Date("2040-05-02T00:00:00Z"), idempotencyKey: createFinanceIdempotencyKey("discount") });
+    const adjustment = await scenario.actors.principal.client.school.recordAdjustment({ schoolId: scenario.school.id, admissionId: scenario.admission.id, sessionId: scenario.activeSession.id, currency: "INR", kind: "discount", billId: bill.id, calculation: { kind: "percentage", percentage: "50" }, reasonCode: "MERIT", reasonNote: "Approved merit discount", effectiveAt: "2040-05-02T00:00:00Z", idempotencyKey: createFinanceIdempotencyKey("discount") });
     expect(adjustment.amountMinor).toBe("501");
     await expect(scenario.actors.manager.client.school.getAdmissionBill({ schoolId: scenario.school.id, admissionId: scenario.admission.id, billId: bill.id })).resolves.toMatchObject({ totalAmountMinor: "1001", adjustedMinor: "501", netAmountMinor: "500" });
 
     const payment = await scenario.actors.accountant.client.school.recordPayment(paymentInput(scenario, "refundable-credit", "700"));
-    await expect(scenario.actors.accountant.client.school.recordRefund({ schoolId: scenario.school.id, admissionId: scenario.admission.id, sessionId: scenario.activeSession.id, paymentId: payment.id, amountMinor: "300", method: "cash", reason: "Returned cash", effectiveAt: new Date("2040-05-04T00:00:00Z"), idempotencyKey: createFinanceIdempotencyKey("refund") })).resolves.toMatchObject({ amountMinor: "300" });
+    await expect(scenario.actors.accountant.client.school.recordRefund({ schoolId: scenario.school.id, admissionId: scenario.admission.id, sessionId: scenario.activeSession.id, paymentId: payment.id, amountMinor: "300", method: "cash", reason: "Returned cash", effectiveAt: "2040-05-04T00:00:00Z", idempotencyKey: createFinanceIdempotencyKey("refund") })).resolves.toMatchObject({ amountMinor: "300" });
     await expect(scenario.actors.manager.client.school.getPayment({ schoolId: scenario.school.id, paymentId: payment.id })).resolves.toMatchObject({ refundedMinor: "300", refundableMinor: "400", status: "partially_refunded" });
-    await expect(scenario.actors.accountant.client.school.recordRefund({ schoolId: scenario.school.id, admissionId: scenario.admission.id, sessionId: scenario.activeSession.id, paymentId: payment.id, amountMinor: "401", method: "cash", reason: "Too much", effectiveAt: new Date("2040-05-04T00:00:00Z"), idempotencyKey: createFinanceIdempotencyKey("refund-too-much") })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(scenario.actors.accountant.client.school.recordRefund({ schoolId: scenario.school.id, admissionId: scenario.admission.id, sessionId: scenario.activeSession.id, paymentId: payment.id, amountMinor: "401", method: "cash", reason: "Too much", effectiveAt: "2040-05-04T00:00:00Z", idempotencyKey: createFinanceIdempotencyKey("refund-too-much") })).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 
   it("restores refundable credit after refund reversal and then permits payment reversal", async () => {
     const payment = await scenario.actors.accountant.client.school.recordPayment(paymentInput(scenario, "reversible-payment", "500"));
-    const refund = await scenario.actors.accountant.client.school.recordRefund({ schoolId: scenario.school.id, admissionId: scenario.admission.id, sessionId: scenario.activeSession.id, paymentId: payment.id, amountMinor: "200", method: "cash", reason: "Temporary refund", effectiveAt: new Date("2040-05-03T00:00:00Z"), idempotencyKey: createFinanceIdempotencyKey("temporary-refund") });
-    await expect(scenario.actors.accountant.client.school.reverseLedgerEntry({ schoolId: scenario.school.id, admissionId: scenario.admission.id, sessionId: scenario.activeSession.id, ledgerEntryId: payment.ledgerEntryId, reason: "Payment error", effectiveAt: new Date("2040-05-03T12:00:00Z"), idempotencyKey: createFinanceIdempotencyKey("blocked-payment-reversal") })).rejects.toMatchObject({ code: "CONFLICT" });
-    await scenario.actors.accountant.client.school.reverseLedgerEntry({ schoolId: scenario.school.id, admissionId: scenario.admission.id, sessionId: scenario.activeSession.id, ledgerEntryId: refund.ledgerEntryId, reason: "Refund cancelled", effectiveAt: new Date("2040-05-04T00:00:00Z"), idempotencyKey: createFinanceIdempotencyKey("refund-reversal") });
+    const refund = await scenario.actors.accountant.client.school.recordRefund({ schoolId: scenario.school.id, admissionId: scenario.admission.id, sessionId: scenario.activeSession.id, paymentId: payment.id, amountMinor: "200", method: "cash", reason: "Temporary refund", effectiveAt: "2040-05-03T00:00:00Z", idempotencyKey: createFinanceIdempotencyKey("temporary-refund") });
+    await expect(scenario.actors.accountant.client.school.reverseLedgerEntry({ schoolId: scenario.school.id, admissionId: scenario.admission.id, sessionId: scenario.activeSession.id, ledgerEntryId: payment.ledgerEntryId, reason: "Payment error", effectiveAt: "2040-05-03T12:00:00Z", idempotencyKey: createFinanceIdempotencyKey("blocked-payment-reversal") })).rejects.toMatchObject({ code: "CONFLICT" });
+    await scenario.actors.accountant.client.school.reverseLedgerEntry({ schoolId: scenario.school.id, admissionId: scenario.admission.id, sessionId: scenario.activeSession.id, ledgerEntryId: refund.ledgerEntryId, reason: "Refund cancelled", effectiveAt: "2040-05-04T00:00:00Z", idempotencyKey: createFinanceIdempotencyKey("refund-reversal") });
     await expect(scenario.actors.manager.client.school.getPayment({ schoolId: scenario.school.id, paymentId: payment.id })).resolves.toMatchObject({ refundedMinor: "0", refundableMinor: "500", status: "recorded" });
-    await expect(scenario.actors.accountant.client.school.reverseLedgerEntry({ schoolId: scenario.school.id, admissionId: scenario.admission.id, sessionId: scenario.activeSession.id, ledgerEntryId: payment.ledgerEntryId, reason: "Payment entered in error", effectiveAt: new Date("2040-05-05T00:00:00Z"), idempotencyKey: createFinanceIdempotencyKey("payment-reversal") })).resolves.toMatchObject({ type: "reversal", direction: "debit", amountMinor: "500" });
+    await expect(scenario.actors.accountant.client.school.reverseLedgerEntry({ schoolId: scenario.school.id, admissionId: scenario.admission.id, sessionId: scenario.activeSession.id, ledgerEntryId: payment.ledgerEntryId, reason: "Payment entered in error", effectiveAt: "2040-05-05T00:00:00Z", idempotencyKey: createFinanceIdempotencyKey("payment-reversal") })).resolves.toMatchObject({ type: "reversal", direction: "debit", amountMinor: "500" });
   });
 
   it("allows unregistered account operations and enforces finance permissions", async () => {
     await db.update(admissionTable).set({ registered: false, unregisteredAt: new Date() }).where(eq(admissionTable.id, scenario.admission.id));
     const input = paymentInput(scenario, "unregistered-payment", "100");
     const payment = await scenario.actors.accountant.client.school.recordPayment(input);
-    await expect(scenario.actors.accountant.client.school.recordRefund({ schoolId: scenario.school.id, admissionId: scenario.admission.id, sessionId: scenario.activeSession.id, paymentId: payment.id, amountMinor: "10", method: "cash", reason: "Unregistered account refund", effectiveAt: new Date("2040-05-05T00:00:00Z"), idempotencyKey: createFinanceIdempotencyKey("unregistered-refund") })).resolves.toMatchObject({ amountMinor: "10" });
+    await expect(scenario.actors.accountant.client.school.recordRefund({ schoolId: scenario.school.id, admissionId: scenario.admission.id, sessionId: scenario.activeSession.id, paymentId: payment.id, amountMinor: "10", method: "cash", reason: "Unregistered account refund", effectiveAt: "2040-05-05T00:00:00Z", idempotencyKey: createFinanceIdempotencyKey("unregistered-refund") })).resolves.toMatchObject({ amountMinor: "10" });
     await expect(scenario.actors.platformAdmin.client.school.recordPayment({ ...input, idempotencyKey: createFinanceIdempotencyKey("admin-denied") })).rejects.toMatchObject({ code: "FORBIDDEN" });
     await expect(scenario.actors.teacher.client.school.getAdmissionLedger({ schoolId: scenario.school.id, admissionId: scenario.admission.id, limit: 20 })).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
@@ -146,9 +146,9 @@ describe("school finance ledger operations", () => {
   });
 
   it("rejects inverted ledger and report date ranges", async () => {
-    await expect(scenario.actors.manager.client.school.getAdmissionLedger({ schoolId: scenario.school.id, admissionId: scenario.admission.id, filters: { effectiveFrom: new Date("2040-02-01"), effectiveTo: new Date("2040-01-01") }, limit: 20 })).rejects.toBeDefined();
+    await expect(scenario.actors.manager.client.school.getAdmissionLedger({ schoolId: scenario.school.id, admissionId: scenario.admission.id, filters: { effectiveFrom: "2040-02-01", effectiveTo: "2040-01-01" }, limit: 20 })).rejects.toBeDefined();
     await expect(scenario.actors.manager.client.school.listAdmissionBills({ schoolId: scenario.school.id, filters: { issueFrom: "2040-02-01", issueTo: "2040-01-01" }, limit: 20 })).rejects.toBeDefined();
-    await expect(scenario.actors.manager.client.school.listPayments({ schoolId: scenario.school.id, filters: { receivedFrom: new Date("2040-02-01"), receivedTo: new Date("2040-01-01") }, limit: 20 })).rejects.toBeDefined();
-    await expect(scenario.actors.manager.client.school.getCollectionRegister({ schoolId: scenario.school.id, filters: { from: new Date("2040-02-01"), to: new Date("2040-01-01") }, limit: 20 })).rejects.toBeDefined();
+    await expect(scenario.actors.manager.client.school.listPayments({ schoolId: scenario.school.id, filters: { receivedFrom: "2040-02-01", receivedTo: "2040-01-01" }, limit: 20 })).rejects.toBeDefined();
+    await expect(scenario.actors.manager.client.school.getCollectionRegister({ schoolId: scenario.school.id, filters: { from: "2040-02-01", to: "2040-01-01" }, limit: 20 })).rejects.toBeDefined();
   });
 });

@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { createListInputSchema, createPaginatedOutputSchema } from "../../../paginations";
-import { financeCumulativeIntegerStringSchema, financeIntegerStringSchema } from "./transport";
+import { financeCumulativeIntegerStringSchema, financeInstantInputSchema, financeIntegerStringSchema } from "./transport";
 
 const currencySchema = z.string().regex(/^[A-Z]{3}$/);
 const signedCumulativeSchema = z.string().regex(/^-?(0|[1-9]\d*)$/).refine((value) => value.replace("-", "").length <= 38);
@@ -38,7 +38,7 @@ export const sessionFinanceOverviewOutputSchema = z.object({
 
 const reportListInput = <const TShape extends z.ZodRawShape>(shape: TShape) => createListInputSchema({
   schoolId: z.string().min(1),
-  filters: z.object({ sessionId: z.string().min(1).optional(), currency: currencySchema.optional(), from: z.coerce.date().optional(), to: z.coerce.date().optional(), ...shape }).optional(),
+  filters: z.object({ sessionId: z.string().min(1).optional(), currency: currencySchema.optional(), from: financeInstantInputSchema.optional(), to: financeInstantInputSchema.optional(), ...shape }).optional(),
 }).superRefine((value, context) => dateRangeRefinement(value as { filters?: { from?: Date; to?: Date } }, context));
 
 export const collectionRegisterInputSchema = reportListInput({

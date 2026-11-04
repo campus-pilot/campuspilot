@@ -251,7 +251,8 @@ describe('automatic exam plan generation', () => {
         configurationVersion: preview.configurationVersion,
       }),
     ).rejects.toMatchObject({ code: 'CONFLICT' });
-    expect(await rows()).toEqual([active]);
+    // Database rows hold Dates; the API returns them as JSON strings.
+    expect(JSON.parse(JSON.stringify(await rows()))).toEqual([active]);
   });
   it.each(['principal', 'exam_coordinator'] as const)(
     'allows %s to generate the school plan',

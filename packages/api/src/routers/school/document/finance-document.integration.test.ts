@@ -40,8 +40,8 @@ describe("immutable finance document contexts", () => {
       currency: "INR",
       method: "cash",
       payerName: "Original payer",
-      receivedAt: new Date("2026-10-02T10:00:00Z"),
-      effectiveAt: new Date("2026-10-02T10:00:00Z"),
+      receivedAt: "2026-10-02T10:00:00Z",
+      effectiveAt: "2026-10-02T10:00:00Z",
       idempotencyKey: createFinanceIdempotencyKey("document-old-receipt"),
     });
     const source = { documentType: "receipt" as const, sessionId: scenario.activeSession.id, transactions: [{ kind: "payment" as const, id: payment.id }] };
@@ -52,7 +52,7 @@ describe("immutable finance document contexts", () => {
     await scenario.actors.accountant.client.school.recordPayment({
       schoolId: scenario.school.id, admissionId: scenario.admission.id, sessionId: scenario.activeSession.id,
       amountMinor: "500", currency: "INR", method: "cash",
-      receivedAt: new Date("2026-10-03T10:00:00Z"), effectiveAt: new Date("2026-10-03T10:00:00Z"),
+      receivedAt: "2026-10-03T10:00:00Z", effectiveAt: "2026-10-03T10:00:00Z",
       idempotencyKey: createFinanceIdempotencyKey("document-later-payment"),
     });
     const after = await buildFinanceDocumentContexts(db, scenario.school.id, source);
@@ -75,8 +75,8 @@ describe("immutable finance document contexts", () => {
       currency: "INR",
       method: "cash",
       payerName: "Original payer",
-      receivedAt: new Date("2026-10-02T10:00:00Z"),
-      effectiveAt: new Date("2026-10-02T10:00:00Z"),
+      receivedAt: "2026-10-02T10:00:00Z",
+      effectiveAt: "2026-10-02T10:00:00Z",
       idempotencyKey: createFinanceIdempotencyKey(
         "document-stale-global-receipt",
       ),
@@ -108,7 +108,7 @@ describe("immutable finance document contexts", () => {
       sessionId: scenario.activeSession.id,
       ledgerEntryId: payment.ledgerEntryId,
       reason: "Payment entered in error after receipt selection",
-      effectiveAt: new Date("2026-10-03T10:00:00Z"),
+      effectiveAt: "2026-10-03T10:00:00Z",
       idempotencyKey: createFinanceIdempotencyKey(
         "document-stale-global-receipt-reversal",
       ),
@@ -171,7 +171,7 @@ describe("immutable finance document contexts", () => {
     const post = (suffix: string, at: string) => scenario.actors.accountant.client.school.recordPayment({
       schoolId: scenario.school.id, admissionId: scenario.admission.id, sessionId: scenario.activeSession.id,
       amountMinor: "100", currency: "INR", method: "cash" as const,
-      receivedAt: new Date(at), effectiveAt: new Date(at),
+      receivedAt: at, effectiveAt: at,
       idempotencyKey: createFinanceIdempotencyKey(suffix),
     });
     await post("statement-first", "2026-10-02T10:00:00Z");
@@ -198,7 +198,7 @@ describe("immutable finance document contexts", () => {
       calculation: { kind: "fixed", amountMinor: "250" },
       reasonCode: "OPENING_CORRECTION",
       reasonNote: "Opening correction",
-      effectiveAt: new Date("2026-10-02T10:00:00Z"),
+      effectiveAt: "2026-10-02T10:00:00Z",
       idempotencyKey: createFinanceIdempotencyKey("statement-correction-only"),
     });
     const result = await buildFinanceDocumentContexts(db, scenario.school.id, {
@@ -218,7 +218,7 @@ describe("immutable finance document contexts", () => {
     const payment = await scenario.actors.accountant.client.school.recordPayment({
       schoolId: scenario.school.id, admissionId: scenario.admission.id, sessionId: scenario.activeSession.id,
       amountMinor: "500", currency: "INR", method: "cash",
-      receivedAt: new Date("2026-10-02T10:00:00Z"), effectiveAt: new Date("2026-10-02T10:00:00Z"),
+      receivedAt: "2026-10-02T10:00:00Z", effectiveAt: "2026-10-02T10:00:00Z",
       idempotencyKey: createFinanceIdempotencyKey("receipt-lifecycle"),
     });
     const selected = await scenario.actors.accountant.client.school.selectMarketplaceTemplate({
@@ -325,8 +325,8 @@ describe("immutable finance document contexts", () => {
       amountMinor: "7000",
       currency: "INR",
       method: "cash",
-      receivedAt: new Date("2026-10-01T10:00:00Z"),
-      effectiveAt: new Date("2026-10-20T10:00:00Z"),
+      receivedAt: "2026-10-01T10:00:00Z",
+      effectiveAt: "2026-10-20T10:00:00Z",
       idempotencyKey: createFinanceIdempotencyKey("document-future-effective-payment"),
     });
     await scenario.actors.accountant.client.school.createManualBill({
@@ -366,7 +366,7 @@ describe("immutable finance document contexts", () => {
       kind: "regular",
     });
     expect(run.issueDate).toBe(command.billingDate);
-    expect(run.recordedAt.toISOString().slice(0, 10)).not.toBe(command.billingDate);
+    expect(run.recordedAt.slice(0, 10)).not.toBe(command.billingDate);
 
     const result = await buildFinanceDocumentContexts(db, scenario.school.id, {
       documentType: "bill",
@@ -396,13 +396,13 @@ describe("immutable finance document contexts", () => {
     const payment = await scenario.actors.accountant.client.school.recordPayment({
       schoolId: scenario.school.id, admissionId: scenario.admission.id, sessionId: scenario.activeSession.id,
       amountMinor: "900", currency: "INR", method: "cash",
-      receivedAt: new Date("2026-10-02T10:00:00Z"), effectiveAt: new Date("2026-10-02T10:00:00Z"),
+      receivedAt: "2026-10-02T10:00:00Z", effectiveAt: "2026-10-02T10:00:00Z",
       idempotencyKey: createFinanceIdempotencyKey("pdf-refund-payment"),
     });
     const refund = await scenario.actors.accountant.client.school.recordRefund({
       schoolId: scenario.school.id, admissionId: scenario.admission.id, sessionId: scenario.activeSession.id,
       paymentId: payment.id, amountMinor: "300", method: "cash", reason: "Returned excess cash",
-      effectiveAt: new Date("2026-10-03T10:00:00Z"), idempotencyKey: createFinanceIdempotencyKey("pdf-refund"),
+      effectiveAt: "2026-10-03T10:00:00Z", idempotencyKey: createFinanceIdempotencyKey("pdf-refund"),
     });
     const receiptTemplate = await scenario.actors.accountant.client.school.selectMarketplaceTemplate({ schoolId: scenario.school.id, documentType: "receipt", slug: "receipt-default", expectedRevisionId: null });
     const receiptInput = { schoolId: scenario.school.id, source: { documentType: "receipt" as const, sessionId: scenario.activeSession.id, transactions: [{ kind: "refund" as const, id: refund.id }] }, templateRevisionId: receiptTemplate.artifact.id };
@@ -431,7 +431,7 @@ describe("immutable finance document contexts", () => {
     const post = (suffix: string) => scenario.actors.accountant.client.school.recordPayment({
       schoolId: scenario.school.id, admissionId: scenario.admission.id, sessionId: scenario.activeSession.id,
       amountMinor: "100", currency: "INR", method: "cash" as const,
-      receivedAt: new Date("2026-10-02T10:00:00Z"), effectiveAt: new Date("2026-10-02T10:00:00Z"),
+      receivedAt: "2026-10-02T10:00:00Z", effectiveAt: "2026-10-02T10:00:00Z",
       idempotencyKey: createFinanceIdempotencyKey(suffix),
     });
     await post("statement-stale-first");

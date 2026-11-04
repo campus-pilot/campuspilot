@@ -624,7 +624,7 @@ describe("school admission and student router integration", () => {
       confirmationName: admission.name,
     });
     expect(unregistered.registered).toBe(false);
-    expect(unregistered.unregisteredAt).toBeInstanceOf(Date);
+    expect(unregistered.unregisteredAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     const inactive = await client.school.listAdmissions({
       schoolId: school.id,
       filters: { registered: false },
