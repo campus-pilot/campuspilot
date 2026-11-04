@@ -1,5 +1,5 @@
 import { createContext, use, useRef } from "react";
-import { env } from "@campuspilot/env/web.client";
+import { env } from "@campuspilot/env/web";
 import { ArrowUpRight, GraduationCap, UsersRound, X, type LucideIcon } from "lucide-react";
 import { Link } from "react-router";
 

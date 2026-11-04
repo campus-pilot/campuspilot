@@ -1,4 +1,4 @@
-import { env } from "@campuspilot/env/web.client";
+import { env } from "@campuspilot/env/web";
 import { Mail, MessageCircle, Phone, type LucideIcon } from "lucide-react";
 
 /**
