@@ -25,6 +25,7 @@ export function AuthErrorScreen() {
         <AuthErrorPanel
           errorCode={errorCode}
           retryHref={buildSignInRedirectPath(redirectPath)}
+          product="admin"
         />
       </section>
     </main>

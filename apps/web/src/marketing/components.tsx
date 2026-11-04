@@ -33,7 +33,7 @@ export function MarketingFooter() {
   return (
     <footer className="marketing-footer">
       <div className="marketing-container footer-grid">
-        <div className="footer-brand"><Link to="/" aria-label="CampusPilot home"><BrandLogo /></Link><p>The connected school operating system built for modern teams—and ready for the AI era.</p></div>
+        <div className="footer-brand"><Link to="/" aria-label="CampusPilot home"><BrandLogo product="campuspilot" /></Link><p>The connected school operating system built for modern teams—and ready for the AI era.</p></div>
         {footerLinks.map(([heading, links]) => <div key={heading}><b>{heading}</b>{links.map(([label, href]) => <Link key={href} to={href}>{label}</Link>)}</div>)}
       </div>
       <div className="marketing-container footer-bottom"><span>© 2026 CampusPilot</span><span>Designed for modern schools in India.</span></div>

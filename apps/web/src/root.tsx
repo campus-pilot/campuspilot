@@ -15,7 +15,10 @@ import type { Route } from "./+types/root";
 import Header from "./components/header";
 
 export const links: Route.LinksFunction = () => [
-  { rel: "icon", href: "/icon.svg", type: "image/svg+xml" },
+  // Favicons come from the root `brand/campuspilot` set: the ICO is the fallback, the SVG wins where supported.
+  { rel: "icon", href: "/favicon.ico", sizes: "48x48" },
+  { rel: "icon", href: "/favicon.svg", type: "image/svg+xml" },
+  { rel: "apple-touch-icon", href: "/apple-touch-icon.png" },
   { rel: "preconnect", href: "https://fonts.googleapis.com" },
   { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
   {

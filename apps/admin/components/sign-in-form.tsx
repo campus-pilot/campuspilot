@@ -10,6 +10,7 @@ import {
   buildAuthErrorPath,
   sanitizeAuthRedirectPath,
 } from '@campuspilot/auth/redirects';
+import { BrandLogo } from '@campuspilot/components/brand-logo';
 import { ThemeToggle } from '@campuspilot/components/theme-toggle';
 import { Button } from '@campuspilot/ui/components/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@campuspilot/ui/components/card';
@@ -77,6 +78,7 @@ export function SignInForm() {
       <div className="absolute right-4 top-4"><ThemeToggle /></div>
       <Card className="w-full max-w-md">
         <CardHeader>
+          <BrandLogo product="admin" size="sm" />
           <CardTitle>Admin sign in</CardTitle>
           <CardDescription>Sign in with your CampusPilot account to continue.</CardDescription>
         </CardHeader>

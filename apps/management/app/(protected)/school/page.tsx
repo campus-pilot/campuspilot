@@ -2,6 +2,7 @@
 
 import { useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { BrandLogo } from '@campuspilot/components/brand-logo';
 import { Alert, AlertDescription, AlertTitle } from '@campuspilot/ui/components/alert';
 import { Building2, Clock3 } from 'lucide-react';
 import { AuthLoading } from '@/components/auth-loading';
@@ -16,12 +17,7 @@ import { orpc } from '@/lib/orpc';
 function SchoolPageNavbar() {
   return (
     <header className="flex h-16 items-center justify-between border-b bg-background px-5 sm:px-8">
-      <div className="flex items-center gap-2.5">
-        <span className="grid size-8 place-items-center rounded-lg bg-primary text-primary-foreground">
-          <Building2 className="size-4" aria-hidden="true" />
-        </span>
-        <span className="text-sm font-semibold">CampusPilot</span>
-      </div>
+      <BrandLogo product="campuspilot" size="sm" />
       <ManagementAccountMenu />
     </header>
   );
