@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { availableParallelism } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CreateBucketCommand, S3Client } from '@aws-sdk/client-s3';
@@ -57,6 +58,47 @@ const MIGRATIONS_DIR = path.resolve(
 );
 const TEST_BUCKET = 'campuspilot';
 
+/** pg's default Pool `max`, which every `drizzle(DATABASE_URL)` pool uses. */
+const PG_POOL_MAX = 10;
+/**
+ * Pools one test worker holds while a file runs: `@campuspilot/db`'s `db`
+ * and the auth singleton's `authDb` (both ended after each file by
+ * test/setup.ts).
+ */
+const POOLS_PER_WORKER = 2;
+/** Migrations, this setup's own clients and diagnostics such as psql. */
+const CONNECTION_HEADROOM = 40;
+
+/**
+ * Test workers Vitest will run: the configured `maxWorkers` when set,
+ * otherwise Vitest's run-mode default of one worker per core but one. Vitest
+ * resolves its own value only after global setup, so it is mirrored here.
+ */
+function testWorkerCount(project: TestProject): number {
+  const configured = project.config.maxWorkers;
+  return typeof configured === 'number' && configured > 0
+    ? configured
+    : Math.max(availableParallelism() - 1, 1);
+}
+
+/**
+ * Sizes Postgres for the suite's real concurrency: every Vitest worker can
+ * fill both of its pools at once (finance tests run concurrent transactions),
+ * so the default of 100 connections is exhausted on machines with many cores.
+ * Derived from the worker count rather than fixed, so it scales with the
+ * machine (31 workers → 660).
+ */
+function testMaxConnections(project: TestProject): number {
+  return testWorkerCount(project) * POOLS_PER_WORKER * PG_POOL_MAX + CONNECTION_HEADROOM;
+}
+
+/**
+ * Shared memory for the Postgres container. Docker's default /dev/shm is
+ * 64 MB, and Postgres uses it for dynamic shared memory, which grows with
+ * the number of backends; 256 MB keeps hundreds of connections safe.
+ */
+const POSTGRES_SHARED_MEMORY_BYTES = 256 * 1024 * 1024;
+
 export default async function setup(project: TestProject) {
   // Spin up all dev-stack testcontainers in parallel
   const [pgContainer, rdContainer, opContainer, storageContainer, pdfContainer] =
@@ -65,6 +107,12 @@ export default async function setup(project: TestProject) {
         .withDatabase('campuspilot_test')
         .withUsername('postgres')
         .withPassword('password')
+        .withCommand([
+          'postgres',
+          '-c',
+          `max_connections=${testMaxConnections(project)}`,
+        ])
+        .withSharedMemorySize(POSTGRES_SHARED_MEMORY_BYTES)
         .start(),
       new RedisContainer('redis:8.10.1-alpine').start(),
       new GenericContainer('openpolicyagent/opa:1.20.2')

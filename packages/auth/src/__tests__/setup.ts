@@ -1,4 +1,4 @@
-import { inject } from 'vitest';
+import { afterAll, inject } from 'vitest';
 
 process.env.DATABASE_URL = inject('DATABASE_URL');
 process.env.REDIS_URL = inject('REDIS_URL');
@@ -31,4 +31,19 @@ process.on('uncaughtException', (err: unknown) => {
     return;
   }
   console.error('Uncaught Exception:', err);
+});
+
+/**
+ * Vitest isolates test files, so every file re-imports `@campuspilot/db` and
+ * `@campuspilot/auth/server` and gets fresh pg pools (max 10 connections
+ * each). Nothing else ends them, so their idle connections would outlive the
+ * file and, with one worker per core, exhaust the test database's
+ * connections. The dynamic imports resolve to the instances this file used.
+ */
+afterAll(async () => {
+  const [{ db }, { authDb }] = await Promise.all([
+    import('@campuspilot/db'),
+    import('../server'),
+  ]);
+  await Promise.all([db.$client.end(), authDb.$client.end()]);
 });

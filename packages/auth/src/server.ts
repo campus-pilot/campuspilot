@@ -333,4 +333,11 @@ export function createAuth(
   });
 }
 
-export const auth = createAuth();
+/**
+ * The auth instance's own connection pool, separate from `@campuspilot/db`'s
+ * shared `db` as before. Exported so test setups can end it after each test
+ * file instead of leaking idle connections per file.
+ */
+export const authDb = createDb();
+
+export const auth = createAuth(authDb);

@@ -3,7 +3,7 @@ import * as schema from '@campuspilot/db/schema/auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { betterAuth } from 'better-auth';
 import { eq } from 'drizzle-orm';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   deleteUnusedDynamicOAuthClients,
@@ -36,12 +36,18 @@ import {
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 const metadataHost = new StubMetadataHost();
-const auth = createAuth(createDb(), {
+const authDb = createDb();
+const auth = createAuth(authDb, {
   fetchClientMetadataResource: metadataHost.fetch,
 });
 
 afterEach(() => {
   vi.useRealTimers();
+});
+
+// This file's own auth instance has its own pool; the setup file ends the shared ones.
+afterAll(async () => {
+  await authDb.$client.end();
 });
 
 async function tokensFor(
