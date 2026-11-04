@@ -16,6 +16,14 @@ export const appRouter = {
         'Return a simple availability response. This public procedure does not require authentication.',
       tags: ['System'],
     })
+    .meta({
+      mcp: {
+        exposure: 'hidden',
+        access: 'read',
+        destructive: false,
+        module: 'system',
+      },
+    })
     .handler(() => {
       return 'OK';
     }),

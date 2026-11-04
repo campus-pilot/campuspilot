@@ -140,6 +140,7 @@ export const previewOutputSchema = z.object({
   reviewHash: z.string().nullable(),
 });
 
+const examSlug = id.describe("Exam slug from school.listExams.");
 const selection = {
   sessionId: id,
   classId: id,
@@ -154,16 +155,18 @@ export const documentSourceSchema = z.discriminatedUnion("documentType", [
     documentType: z.literal("report_card"),
     ...selection,
     classId: id.optional(),
-    examSlug: id,
+    examSlug: examSlug,
     resultPolicy: reportResultPolicySchema.default("require_all"),
-    reportSections: reportSectionsSchema.default(DEFAULT_REPORT_SECTIONS),
+    /** `{}` parses to DEFAULT_REPORT_SECTIONS through the per-section
+     * defaults; prefaulting it keeps the advertised schema small. */
+    reportSections: reportSectionsSchema.prefault({}),
   }),
   z.object({
     documentType: z.literal("admit_card"),
     sessionId: id,
     classId: id.optional(),
     studentIds: selection.studentIds,
-    examSlug: id,
+    examSlug: examSlug,
   }),
   /** Timetable PDFs are school-wide examination schedules. This branch is
    * strict so stale clients cannot silently submit a class scope.
@@ -172,7 +175,7 @@ export const documentSourceSchema = z.discriminatedUnion("documentType", [
     .object({
       documentType: z.literal("timetable"),
       sessionId: id,
-      examSlug: id,
+      examSlug: examSlug,
     })
     .strict(),
   z.object({

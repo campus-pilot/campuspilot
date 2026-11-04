@@ -28,6 +28,14 @@ export const schoolRouter = {
         "List schools across the platform with pagination, text search, onboarding-status filtering, and deterministic sorting. Requires system-administrator permission.",
       tags: ["System Admin", "Schools"],
     })
+    .meta({
+      mcp: {
+        exposure: "advanced",
+        access: "read",
+        destructive: false,
+        module: "platform",
+      },
+    })
     .input(listSchoolsInputSchema)
     .use(requireSystemPermission(SYSTEM_ACTIONS.LIST_SCHOOLS))
     .output(listSchoolsOutputSchema)
@@ -91,6 +99,14 @@ export const schoolRouter = {
         "Get one school by its identifier. Requires system-administrator permission.",
       tags: ["System Admin", "Schools"],
     })
+    .meta({
+      mcp: {
+        exposure: "advanced",
+        access: "read",
+        destructive: false,
+        module: "platform",
+      },
+    })
     .input(schoolIdInputSchema)
     .use(requireSystemPermission(SYSTEM_ACTIONS.READ_SCHOOL))
     .output(schoolDtoSchema)
@@ -115,6 +131,14 @@ export const schoolRouter = {
         "Create a new school with its identity, location, registration, and optional logo-key data. Requires system-administrator permission.",
       tags: ["System Admin", "Schools"],
     })
+    .meta({
+      mcp: {
+        exposure: "advanced",
+        access: "write",
+        destructive: false,
+        module: "platform",
+      },
+    })
     .input(addSchoolInputSchema)
     .use(requireSystemPermission(SYSTEM_ACTIONS.CREATE_SCHOOL))
     .output(schoolDtoSchema)
@@ -134,6 +158,14 @@ export const schoolRouter = {
       description:
         "Update the explicitly supplied fields of an existing school. Requires system-administrator permission.",
       tags: ["System Admin", "Schools"],
+    })
+    .meta({
+      mcp: {
+        exposure: "advanced",
+        access: "write",
+        destructive: true,
+        module: "platform",
+      },
     })
     .input(updateSchoolInputSchema)
     .use(requireSystemPermission(SYSTEM_ACTIONS.UPDATE_SCHOOL))
@@ -159,6 +191,14 @@ export const schoolRouter = {
       description:
         "Permanently delete a school by its identifier. Requires system-administrator permission.",
       tags: ["System Admin", "Schools"],
+    })
+    .meta({
+      mcp: {
+        exposure: "advanced",
+        access: "write",
+        destructive: true,
+        module: "platform",
+      },
     })
     .input(schoolIdInputSchema)
     .use(requireSystemPermission(SYSTEM_ACTIONS.DELETE_SCHOOL))

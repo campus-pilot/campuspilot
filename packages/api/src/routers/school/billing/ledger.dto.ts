@@ -7,7 +7,12 @@ import {
   financeIntegerStringSchema,
 } from "./transport";
 
-const idempotencyKeySchema = z.string().trim().min(1).max(200);
+const idempotencyKeySchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(200)
+  .describe("Unique per operation; resend the same key to retry safely.");
 const reasonSchema = z.string().trim().min(1).max(1000);
 const currencySchema = z.string().regex(/^[A-Z]{3}$/);
 const paymentMethodSchema = z.enum([

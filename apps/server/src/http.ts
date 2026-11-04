@@ -28,7 +28,7 @@ import { ZodToJsonSchemaConverter } from '@orpc/zod/zod4';
 
 import { createConfiguredApp } from './config';
 import { log } from './log';
-import { buildMcpToolDefinitions, createCampusPilotMcpHandler } from './mcp';
+import { buildMcpCatalog, createCampusPilotMcpHandler } from './mcp';
 
 const app = createConfiguredApp();
 
@@ -145,13 +145,17 @@ app.get('/api/blob/users/me/profile-image', async (context) => {
   );
 });
 
-export const mcpTools = buildMcpToolDefinitions(appRouter);
+export const mcpCatalog = buildMcpCatalog(appRouter);
 
 export const mcpHandler = createCampusPilotMcpHandler({
-  tools: mcpTools,
+  catalog: mcpCatalog,
   createContext: createContextFromHeaders,
   reportError: (error, toolName) => {
     log.error({ err: error, toolName }, 'mcp.error');
+  },
+  // Usage data for revisiting the core/advanced split.
+  reportToolCall: (event) => {
+    log.info(event, 'mcp.tool.call');
   },
 });
 

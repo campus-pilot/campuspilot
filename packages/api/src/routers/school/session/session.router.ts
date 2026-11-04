@@ -49,6 +49,14 @@ export const schoolSessionRouter = {
         "List a school's academic sessions with pagination, active-status filtering, and deterministic sorting. Requires permission to list sessions in that school.",
       tags: ['School', 'Sessions'],
     })
+    .meta({
+      mcp: {
+        exposure: 'core',
+        access: 'read',
+        destructive: false,
+        module: 'sessions',
+      },
+    })
     .input(listSchoolSessionsInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.LIST_SESSIONS))
     .output(listSchoolSessionsOutputSchema)
@@ -124,6 +132,14 @@ export const schoolSessionRouter = {
         'Get one academic session by school and session identifier. Requires permission to read sessions in that school.',
       tags: ['School', 'Sessions'],
     })
+    .meta({
+      mcp: {
+        exposure: 'core',
+        access: 'read',
+        destructive: false,
+        module: 'sessions',
+      },
+    })
     .input(schoolSessionIdInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_SESSION))
     .output(schoolSessionDtoSchema)
@@ -152,6 +168,14 @@ export const schoolSessionRouter = {
       description:
         'Create an academic session for a school with explicit year boundaries and optional academic configuration. Finance configuration is managed through its dedicated restricted routes.',
       tags: ['School', 'Sessions'],
+    })
+    .meta({
+      mcp: {
+        exposure: 'advanced',
+        access: 'write',
+        destructive: false,
+        module: 'sessions',
+      },
     })
     .input(createSchoolSessionInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.CREATE_SESSION))
@@ -192,6 +216,14 @@ export const schoolSessionRouter = {
       description:
         'Update explicitly supplied fields on the active academic session while validating year boundaries against stored values. Inactive sessions are read-only.',
       tags: ['School', 'Sessions'],
+    })
+    .meta({
+      mcp: {
+        exposure: 'advanced',
+        access: 'write',
+        destructive: true,
+        module: 'sessions',
+      },
     })
     .input(updateSchoolSessionInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.UPDATE_SESSION))
@@ -321,6 +353,14 @@ export const schoolSessionRouter = {
         'Permanently delete an inactive academic session from a school. The active session must be replaced before it can be deleted.',
       tags: ['School', 'Sessions'],
     })
+    .meta({
+      mcp: {
+        exposure: 'advanced',
+        access: 'write',
+        destructive: true,
+        module: 'sessions',
+      },
+    })
     .input(schoolSessionIdInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.DELETE_SESSION))
     .output(schoolSessionDtoSchema)
@@ -366,6 +406,14 @@ export const schoolSessionRouter = {
       description:
         "Atomically activate one academic session and deactivate the school's currently active session.",
       tags: ['School', 'Sessions'],
+    })
+    .meta({
+      mcp: {
+        exposure: 'advanced',
+        access: 'write',
+        destructive: true,
+        module: 'sessions',
+      },
     })
     .input(schoolSessionIdInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.ACTIVATE_SESSION))
@@ -430,6 +478,14 @@ export const schoolSessionRouter = {
       description:
         'List distinct start and end years for academic sessions within a school. Requires permission to list sessions in that school.',
       tags: ['School', 'Sessions'],
+    })
+    .meta({
+      mcp: {
+        exposure: 'advanced',
+        access: 'read',
+        destructive: false,
+        module: 'sessions',
+      },
     })
     .input(z.object({ schoolId: z.string().min(1) }))
     .use(requireSchoolPermission(SCHOOL_ACTIONS.LIST_SESSIONS))

@@ -17,7 +17,12 @@ export const sessionScopeSchema = z.object({
   sessionId: z.string().min(1),
 });
 export const examScopeSchema = sessionScopeSchema.extend({
-  examSlug: z.string().trim().min(1).max(100),
+  examSlug: z
+    .string()
+    .trim()
+    .min(1)
+    .max(100)
+    .describe("Exam slug from school.listExams."),
 });
 export const planScopeSchema = sessionScopeSchema.extend({
   classId: z.string().min(1),

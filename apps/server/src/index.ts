@@ -1,7 +1,7 @@
 import { serve } from '@hono/node-server';
 import { env } from '@campuspilot/env/server';
 
-import { app, mcpHandler, mcpTools } from './http';
+import { app, mcpCatalog, mcpHandler } from './http';
 import { log } from './log';
 
 async function phase<T>(name: string, fn: () => Promise<T>): Promise<T> {
@@ -21,7 +21,7 @@ async function phase<T>(name: string, fn: () => Promise<T>): Promise<T> {
 
 async function main() {
   await phase('mcp.catalog', async () => {
-    await mcpTools;
+    await mcpCatalog;
   });
   // await phase('auth.seed', () => seedIamDatabase());
 

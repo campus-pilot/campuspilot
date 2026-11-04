@@ -2,8 +2,9 @@ import { os } from "@orpc/server";
 
 import type { Context } from "./context";
 import { rpcError } from "./errors";
+import type { ProcedureMeta } from "./mcp-metadata";
 
-export const o = os.$context<Context>();
+export const o = os.$context<Context>().$meta<ProcedureMeta>({});
 
 export const publicProcedure = o;
 

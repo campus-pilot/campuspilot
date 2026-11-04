@@ -107,6 +107,14 @@ export const schoolAdmissionRouter = {
         "List admissions with pagination, search, deterministic sorting, and an optional explicit-session filter for admissions which are not yet students.",
       tags: ["School", "Admissions"],
     })
+    .meta({
+      mcp: {
+        exposure: "core",
+        access: "read",
+        destructive: false,
+        module: "admissions",
+      },
+    })
     .input(listAdmissionsInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.LIST_ADMISSIONS))
     .output(listAdmissionsOutputSchema)
@@ -339,6 +347,14 @@ export const schoolAdmissionRouter = {
       description: "Get one admission by its school and admission identifiers.",
       tags: ["School", "Admissions"],
     })
+    .meta({
+      mcp: {
+        exposure: "core",
+        access: "read",
+        destructive: false,
+        module: "admissions",
+      },
+    })
     .input(admissionIdInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_ADMISSION))
     .output(admissionDtoSchema)
@@ -362,6 +378,14 @@ export const schoolAdmissionRouter = {
       description:
         "Create an admission. Document attachments are intentionally added after creation through the binary document workflow.",
       tags: ["School", "Admissions"],
+    })
+    .meta({
+      mcp: {
+        exposure: "core",
+        access: "write",
+        destructive: false,
+        module: "admissions",
+      },
     })
     .input(createAdmissionInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.CREATE_ADMISSION))
@@ -397,6 +421,14 @@ export const schoolAdmissionRouter = {
       description:
         "Update explicitly supplied admission fields. Attached documents remain separate from this general metadata mutation.",
       tags: ["School", "Admissions"],
+    })
+    .meta({
+      mcp: {
+        exposure: "core",
+        access: "write",
+        destructive: true,
+        module: "admissions",
+      },
     })
     .input(updateAdmissionInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.UPDATE_ADMISSION))
@@ -436,6 +468,14 @@ export const schoolAdmissionRouter = {
       description:
         "Delete an admission only when it has no student enrollment history.",
       tags: ["School", "Admissions"],
+    })
+    .meta({
+      mcp: {
+        exposure: "advanced",
+        access: "write",
+        destructive: true,
+        module: "admissions",
+      },
     })
     .input(admissionIdInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.DELETE_ADMISSION))
@@ -489,6 +529,14 @@ export const schoolAdmissionRouter = {
       description:
         "Irreversibly mark an admission as no longer associated with the school after confirming the student's exact name.",
       tags: ["School", "Admissions"],
+    })
+    .meta({
+      mcp: {
+        exposure: "advanced",
+        access: "write",
+        destructive: true,
+        module: "admissions",
+      },
     })
     .input(unregisterAdmissionInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.UNREGISTER_ADMISSION))

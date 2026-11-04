@@ -20,7 +20,8 @@ export const financeIntegerStringSchema = z
   .refine(
     (value) => BigInt(value) <= POSTGRES_BIGINT_MAX,
     "Finance integer exceeds the PostgreSQL bigint range",
-  );
+  )
+  .describe("Amount in minor currency units (e.g. paise) as a string.");
 
 /** Exact non-negative transport for cumulative NUMERIC(38,0) totals. */
 export const financeCumulativeIntegerStringSchema = z

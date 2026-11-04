@@ -1,4 +1,10 @@
 import type { Context } from '@campuspilot/api/context';
+import {
+  MCP_ACCESS_LEVELS,
+  MCP_EXPOSURES,
+  MCP_MODULES,
+  type McpProcedureMeta,
+} from '@campuspilot/api/mcp-metadata';
 import { normalizeApiKeyRequest } from '@campuspilot/auth/api-key-headers';
 import {
   type CallToolResult,
@@ -6,6 +12,7 @@ import {
   McpServer,
   type McpHttpHandler,
   type StandardSchemaWithJSON,
+  type ToolAnnotations,
 } from '@modelcontextprotocol/server';
 import {
   type AnyProcedure,
@@ -18,12 +25,14 @@ import {
 import { APIError } from 'better-auth';
 import { z } from 'zod';
 
+import { registerAdvancedToolMetaTools } from './mcp-meta-tools';
+
 const EMPTY_INPUT_SCHEMA = z.object({});
 
 /** JSON Schema dialect the MCP SDK uses for tool input schemas. */
 const MCP_JSON_SCHEMA_TARGET = 'draft-2020-12';
 
-type JsonSchemaObject = Record<string, unknown>;
+export type JsonSchemaObject = Record<string, unknown>;
 
 /**
  * Standard Schema handed to the MCP SDK: it advertises the input JSON Schema
@@ -39,29 +48,58 @@ export type McpToolDefinition = {
   /** Input JSON Schema converted once while the catalog is built. */
   inputJsonSchema: JsonSchemaObject;
   acceptsInput: boolean;
+  /** Explicit exposure/access/destructive/module facts from `.meta({ mcp })`. */
+  mcp: McpProcedureMeta & { exposure: 'core' | 'advanced' };
   procedure: AnyProcedure;
+};
+
+/**
+ * The tools a CampusPilot MCP server exposes, resolved once per process.
+ * Hidden procedures are validated but never enter the catalog.
+ */
+export type McpCatalog = {
+  /** Listed directly in tools/list. */
+  core: readonly McpToolDefinition[];
+  /** Reached through the advanced-tool meta tools. */
+  advanced: readonly McpToolDefinition[];
+  advancedByName: ReadonlyMap<string, McpToolDefinition>;
 };
 
 type CreateMcpContext = (headers: Headers) => Promise<Context>;
 
 type ReportMcpError = (error: unknown, toolName?: string) => void;
 
-type CreateCampusPilotMcpHandlerOptions = {
-  tools: Promise<readonly McpToolDefinition[]>;
-  createContext: CreateMcpContext;
-  reportError: ReportMcpError;
+/** One executed tool call, for usage analytics of the core/advanced split. */
+export type McpToolCallEvent = {
+  toolName: string;
+  exposure: 'core' | 'advanced';
+  /** The meta tool that ran an advanced tool, if any. */
+  via?: string;
 };
 
-type CreateCampusPilotMcpServerOptions = {
-  tools: readonly McpToolDefinition[];
+export type McpToolCallOptions = {
   headers: Headers;
   createContext: CreateMcpContext;
   reportError: ReportMcpError;
+  reportToolCall?: (event: McpToolCallEvent) => void;
+};
+
+type CreateCampusPilotMcpHandlerOptions = {
+  catalog: Promise<McpCatalog>;
+  createContext: CreateMcpContext;
+  reportError: ReportMcpError;
+  reportToolCall?: (event: McpToolCallEvent) => void;
+};
+
+type CreateCampusPilotMcpServerOptions = McpToolCallOptions & {
+  catalog: McpCatalog;
 };
 
 type McpErrorPayload = {
   code: string;
   message: string;
+  /** Validation problems, so a model can correct its arguments. */
+  issues?: Array<{ path: string; message: string }>;
 };
 
 /**
@@ -149,16 +187,32 @@ function findUnrepresentableField(
  * Conversion runs once while the catalog is built, so an unrepresentable
  * field fails boot (and the catalog tests) naming the procedure and field,
  * instead of failing every tools/list request at runtime.
+ *
+ * Three size reductions apply to every tool, because the catalog is paid for
+ * in model tokens on each conversation: the root `$schema` is dropped (MCP
+ * defaults to draft 2020-12); a `pattern` is dropped where `format`
+ * (`date-time`, `date`, `email`) already states the same rule; and Zod's
+ * implicit safe-integer bounds (±2^53−1 on every `.int()`) are dropped since
+ * they are not API limits. Explicit bounds are kept, and the procedure's Zod
+ * schema still validates every call.
  */
 export function convertMcpInputSchema(
   name: string,
   schema: z.ZodObject,
 ): JsonSchemaObject {
   try {
-    return z.toJSONSchema(schema, {
+    const { $schema: _dialect, ...jsonSchema } = z.toJSONSchema(schema, {
       io: 'input',
       target: MCP_JSON_SCHEMA_TARGET,
-    }) as JsonSchemaObject;
+      override: ({ jsonSchema: node }) => {
+        if (typeof node.format === 'string' && 'pattern' in node) {
+          delete node.pattern;
+        }
+        if (node.maximum === Number.MAX_SAFE_INTEGER) delete node.maximum;
+        if (node.minimum === Number.MIN_SAFE_INTEGER) delete node.minimum;
+      },
+    });
+    return jsonSchema as JsonSchemaObject;
   } catch (error) {
     const field = findUnrepresentableField(schema, '');
     const reason = error instanceof Error ? error.message : String(error);
@@ -197,14 +251,38 @@ function toMcpToolInputSchema(
   };
 }
 
+/** Rejects missing or malformed `.meta({ mcp })` with the procedure name. */
+function readMcpMetadata(name: string, meta: unknown): McpProcedureMeta {
+  const mcp = (meta as { mcp?: Partial<McpProcedureMeta> } | undefined)?.mcp;
+  if (!mcp) {
+    throw new TypeError(
+      `oRPC procedure ${name} must declare .meta({ mcp: { exposure, access, destructive, module } }).`,
+    );
+  }
+  if (
+    !MCP_EXPOSURES.includes(mcp.exposure as never) ||
+    !MCP_ACCESS_LEVELS.includes(mcp.access as never) ||
+    typeof mcp.destructive !== 'boolean' ||
+    !MCP_MODULES.includes(mcp.module as never)
+  ) {
+    throw new TypeError(
+      `oRPC procedure ${name} declares invalid MCP metadata: ${JSON.stringify(mcp)}.`,
+    );
+  }
+  if (mcp.access === 'read' && mcp.destructive) {
+    throw new TypeError(
+      `oRPC procedure ${name} cannot be both read-only and destructive.`,
+    );
+  }
+  return mcp as McpProcedureMeta;
+}
+
 /**
  * Resolves the router once into immutable MCP registration data. oRPC's
- * resolver follows lazy routers, so future procedures become tools merely by
- * being added to appRouter; no MCP registration list can drift out of sync.
+ * resolver follows lazy routers, so every appRouter leaf is visited; each
+ * must declare its MCP metadata, and hidden leaves are left out.
  */
-export async function buildMcpToolDefinitions(
-  router: AnyRouter,
-): Promise<readonly McpToolDefinition[]> {
+export async function buildMcpCatalog(router: AnyRouter): Promise<McpCatalog> {
   const tools: McpToolDefinition[] = [];
   const names = new Set<string>();
 
@@ -223,6 +301,10 @@ export async function buildMcpToolDefinitions(
 
       if (!name) throw new TypeError('MCP tool paths cannot be empty.');
       if (names.has(name)) throw new TypeError(`Duplicate MCP tool name: ${name}.`);
+      names.add(name);
+      const mcp = readMcpMetadata(name, definition.meta);
+      if (mcp.exposure === 'hidden') return;
+
       if (!summary?.trim() || !description?.trim()) {
         throw new TypeError(
           `oRPC procedure ${name} must define a non-empty route summary and description for MCP.`,
@@ -238,7 +320,6 @@ export async function buildMcpToolDefinitions(
       }
 
       const inputSchema = definition.inputSchema ?? EMPTY_INPUT_SCHEMA;
-      names.add(name);
       tools.push({
         name,
         title: summary,
@@ -246,15 +327,32 @@ export async function buildMcpToolDefinitions(
         inputSchema,
         inputJsonSchema: convertMcpInputSchema(name, inputSchema),
         acceptsInput: definition.inputSchema !== undefined,
+        mcp: { ...mcp, exposure: mcp.exposure },
         procedure: contract,
       });
     },
   );
 
-  return Object.freeze(tools);
+  const advanced = Object.freeze(
+    tools.filter(({ mcp }) => mcp.exposure === 'advanced'),
+  );
+  return Object.freeze({
+    core: Object.freeze(tools.filter(({ mcp }) => mcp.exposure === 'core')),
+    advanced,
+    advancedByName: new Map(advanced.map((tool) => [tool.name, tool])),
+  });
 }
 
-function serializeJson(value: unknown): string {
+/** MCP tool annotations derived from the procedure's explicit metadata. */
+export function toolAnnotations(tool: McpToolDefinition): ToolAnnotations {
+  return {
+    readOnlyHint: tool.mcp.access === 'read',
+    destructiveHint: tool.mcp.destructive,
+    openWorldHint: false,
+  };
+}
+
+export function serializeJson(value: unknown): string {
   return (
     JSON.stringify(value ?? null, (_key, item) =>
       typeof item === 'bigint' ? item.toString() : item,
@@ -262,10 +360,28 @@ function serializeJson(value: unknown): string {
   );
 }
 
+function validationIssues(error: ORPCError<string, unknown>) {
+  const issues = (error.data as { issues?: unknown } | undefined)?.issues;
+  if (!Array.isArray(issues)) return undefined;
+  return issues.map((issue: { path?: unknown[]; message?: string }) => ({
+    path: (issue.path ?? [])
+      .map((segment) =>
+        typeof segment === 'object' && segment !== null && 'key' in segment
+          ? String((segment as { key: unknown }).key)
+          : String(segment),
+      )
+      .join('.'),
+    message: issue.message ?? 'Invalid value',
+  }));
+}
+
 function expectedMcpError(error: unknown): McpErrorPayload | null {
   if (error instanceof ORPCError) {
     if (error.status >= 500) return null;
-    return { code: error.code, message: error.message };
+    const issues = validationIssues(error);
+    return issues
+      ? { code: error.code, message: error.message, issues }
+      : { code: error.code, message: error.message };
   }
 
   if (error instanceof APIError) {
@@ -276,64 +392,78 @@ function expectedMcpError(error: unknown): McpErrorPayload | null {
   return null;
 }
 
+/** A tool error result with a JSON payload the model can act on. */
+export function toolErrorResult(payload: McpErrorPayload): CallToolResult {
+  return {
+    isError: true,
+    content: [{ type: 'text', text: serializeJson(payload) }],
+  };
+}
+
 /**
- * Creates one stateless MCP server instance for a protocol request. Context is
- * resolved inside each tool callback so discovery stays public and protected
- * procedures retain their existing oRPC authentication and OPA middleware.
+ * Runs one procedure as an MCP tool call. Context is resolved per call so
+ * protected procedures keep their oRPC authentication and OPA middleware;
+ * direct core tools and advanced tools run through the meta tools share it.
+ */
+export async function callMcpTool(
+  tool: McpToolDefinition,
+  input: unknown,
+  signal: AbortSignal,
+  options: McpToolCallOptions,
+  via?: string,
+): Promise<CallToolResult> {
+  options.reportToolCall?.({
+    toolName: tool.name,
+    exposure: tool.mcp.exposure,
+    ...(via ? { via } : {}),
+  });
+  try {
+    const context = await options.createContext(options.headers);
+    const result = await call(
+      tool.procedure,
+      tool.acceptsInput ? input : undefined,
+      { context, signal },
+    );
+
+    return {
+      content: [{ type: 'text', text: serializeJson(result) }],
+    };
+  } catch (error) {
+    options.reportError(error, tool.name);
+    return toolErrorResult(
+      expectedMcpError(error) ?? {
+        code: 'INTERNAL_SERVER_ERROR',
+        message: 'An unexpected server error occurred.',
+      },
+    );
+  }
+}
+
+/**
+ * Creates one stateless MCP server instance for a protocol request: the core
+ * tools directly, plus the advanced-tool meta tools when advanced tools exist.
  */
 export function createCampusPilotMcpServer({
-  tools,
-  headers,
-  createContext,
-  reportError,
+  catalog,
+  ...options
 }: CreateCampusPilotMcpServerOptions): McpServer {
   const server = new McpServer({ name: 'campuspilot', version: '0.1.0' });
 
-  for (const tool of tools) {
+  for (const tool of catalog.core) {
     server.registerTool(
       tool.name,
       {
         title: tool.title,
         description: tool.description,
         inputSchema: toMcpToolInputSchema(tool),
+        annotations: toolAnnotations(tool),
       },
-      async (input, requestContext): Promise<CallToolResult> => {
-        try {
-          const context = await createContext(headers);
-          const result = await call(
-            tool.procedure,
-            tool.acceptsInput ? input : undefined,
-            { context, signal: requestContext.mcpReq.signal },
-          );
-
-          return {
-            content: [{ type: 'text', text: serializeJson(result) }],
-          };
-        } catch (error) {
-          reportError(error, tool.name);
-          const expected = expectedMcpError(error);
-          if (expected) {
-            return {
-              isError: true,
-              content: [{ type: 'text', text: serializeJson(expected) }],
-            };
-          }
-
-          return {
-            isError: true,
-            content: [
-              {
-                type: 'text',
-                text: serializeJson({
-                  code: 'INTERNAL_SERVER_ERROR',
-                  message: 'An unexpected server error occurred.',
-                }),
-              },
-            ],
-          };
-        }
-      },
+      async (input, requestContext) =>
+        callMcpTool(tool, input, requestContext.mcpReq.signal, options),
     );
+  }
+  if (catalog.advanced.length > 0) {
+    registerAdvancedToolMetaTools(server, catalog, options);
   }
 
   return server;
@@ -345,9 +475,10 @@ export function createCampusPilotMcpServer({
  * clients from this single tool definition source.
  */
 export function createCampusPilotMcpHandler({
-  tools,
+  catalog,
   createContext,
   reportError,
+  reportToolCall,
 }: CreateCampusPilotMcpHandlerOptions): McpHttpHandler {
   return createMcpHandler(
     async ({ requestInfo }) => {
@@ -357,10 +488,11 @@ export function createCampusPilotMcpHandler({
 
       const request = normalizeMcpAuthRequest(requestInfo);
       return createCampusPilotMcpServer({
-        tools: await tools,
+        catalog: await catalog,
         headers: request.headers,
         createContext,
         reportError,
+        reportToolCall,
       });
     },
     {

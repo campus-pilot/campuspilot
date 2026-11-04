@@ -11,7 +11,8 @@ const paginationInputShape = {
       (value) => Number.isSafeInteger(Number(value)),
       "Cursor must identify a safe positive page.",
     )
-    .optional(),
+    .optional()
+    .describe("nextCursor from the previous page; send cursor or page, not both."),
   page: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
   limit: z.number().int().positive().max(MAX_LIST_LIMIT).default(DEFAULT_LIST_LIMIT),
 };

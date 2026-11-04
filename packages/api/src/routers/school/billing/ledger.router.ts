@@ -69,6 +69,14 @@ export const ledgerOperationsRouter = {
         "List immutable ledger entries for one admission, optionally scoped to an academic session, with deterministic pagination and running balances.",
       ),
     )
+    .meta({
+      mcp: {
+        exposure: "core",
+        access: "read",
+        destructive: false,
+        module: "billing",
+      },
+    })
     .input(getAdmissionLedgerInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_ADMISSION_LEDGER))
     .output(admissionLedgerOutputSchema)
@@ -81,6 +89,14 @@ export const ledgerOperationsRouter = {
         "Read projected billed, paid, adjusted, refunded, due, and credit totals for one admission in either session or lifetime scope.",
       ),
     )
+    .meta({
+      mcp: {
+        exposure: "core",
+        access: "read",
+        destructive: false,
+        module: "billing",
+      },
+    })
     .input(getAdmissionFinanceSummaryInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_ADMISSION_LEDGER))
     .output(admissionFinanceSummaryOutputSchema)
@@ -93,6 +109,14 @@ export const ledgerOperationsRouter = {
         "Compare one admission's stored finance projections with totals recomputed from its immutable ledger and report any mismatch without changing financial facts.",
       ),
     )
+    .meta({
+      mcp: {
+        exposure: "advanced",
+        access: "read",
+        destructive: false,
+        module: "billing",
+      },
+    })
     .input(reconcileAdmissionProjectionInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_BILLING_REPORTS))
     .output(reconciliationOutputSchema)
@@ -112,6 +136,14 @@ export const ledgerOperationsRouter = {
         "List immutable bills for one admission with explicit session and status filters, stable ordering, and pagination.",
       ),
     )
+    .meta({
+      mcp: {
+        exposure: "core",
+        access: "read",
+        destructive: false,
+        module: "billing",
+      },
+    })
     .input(listAdmissionBillsInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_ADMISSION_LEDGER))
     .output(admissionBillListOutputSchema)
@@ -124,6 +156,14 @@ export const ledgerOperationsRouter = {
         "Read one tenant-scoped bill with its snapshotted lines, bill-specific adjustments, and reversal history.",
       ),
     )
+    .meta({
+      mcp: {
+        exposure: "core",
+        access: "read",
+        destructive: false,
+        module: "billing",
+      },
+    })
     .input(getAdmissionBillInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_ADMISSION_LEDGER))
     .output(admissionBillOutputSchema)
@@ -136,6 +176,14 @@ export const ledgerOperationsRouter = {
         "List immutable payments for one admission with optional session filtering, stable ordering, and pagination.",
       ),
     )
+    .meta({
+      mcp: {
+        exposure: "core",
+        access: "read",
+        destructive: false,
+        module: "billing",
+      },
+    })
     .input(listPaymentsInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_ADMISSION_LEDGER))
     .output(paymentListOutputSchema)
@@ -148,6 +196,14 @@ export const ledgerOperationsRouter = {
         "Read one tenant-scoped account-credit payment with its receipt number, refundable balance, refund history, and reversal state.",
       ),
     )
+    .meta({
+      mcp: {
+        exposure: "core",
+        access: "read",
+        destructive: false,
+        module: "billing",
+      },
+    })
     .input(getPaymentInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_ADMISSION_LEDGER))
     .output(paymentOutputSchema)
@@ -160,6 +216,14 @@ export const ledgerOperationsRouter = {
         "Atomically record an idempotent payment and receipt number as an admission-level account credit without linking it to a bill.",
       ),
     )
+    .meta({
+      mcp: {
+        exposure: "core",
+        access: "write",
+        destructive: false,
+        module: "billing",
+      },
+    })
     .input(recordPaymentInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.RECORD_PAYMENT))
     .output(recordedPaymentOutputSchema)
@@ -175,6 +239,14 @@ export const ledgerOperationsRouter = {
         "Atomically record an idempotent payment and a fixed admission-account discount with separate immutable ledger entries.",
       ),
     )
+    .meta({
+      mcp: {
+        exposure: "core",
+        access: "write",
+        destructive: false,
+        module: "billing",
+      },
+    })
     .input(recordPaymentWithDiscountInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.RECORD_PAYMENT))
     .use(requireSchoolPermission(SCHOOL_ACTIONS.RECORD_FINANCE_ADJUSTMENT))
@@ -191,6 +263,14 @@ export const ledgerOperationsRouter = {
         "Append an idempotent discount, waiver, write-off, correction, or debit adjustment with an explicit reason and immutable audit provenance.",
       ),
     )
+    .meta({
+      mcp: {
+        exposure: "core",
+        access: "write",
+        destructive: false,
+        module: "billing",
+      },
+    })
     .input(recordAdjustmentInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.RECORD_FINANCE_ADJUSTMENT))
     .output(adjustmentOutputSchema)
@@ -206,6 +286,14 @@ export const ledgerOperationsRouter = {
         "Atomically append an idempotent refund against a recorded payment while enforcing its refundable balance and preserving an immutable audit trail.",
       ),
     )
+    .meta({
+      mcp: {
+        exposure: "advanced",
+        access: "write",
+        destructive: false,
+        module: "billing",
+      },
+    })
     .input(recordRefundInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.RECORD_REFUND))
     .output(refundRecordOutputSchema)
@@ -221,6 +309,14 @@ export const ledgerOperationsRouter = {
         "Append an idempotent opposite entry for an eligible payment, refund, or adjustment; the original immutable ledger fact remains preserved.",
       ),
     )
+    .meta({
+      mcp: {
+        exposure: "advanced",
+        access: "write",
+        destructive: true,
+        module: "billing",
+      },
+    })
     .input(reverseLedgerEntryInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.REVERSE_LEDGER_ENTRY))
     .output(reversalOutputSchema)

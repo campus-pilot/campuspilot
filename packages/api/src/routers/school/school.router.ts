@@ -38,6 +38,14 @@ export const schoolRouter = {
         "List every school the authenticated user currently belongs to in deterministic name order.",
       tags: ["School"],
     })
+    .meta({
+      mcp: {
+        exposure: "core",
+        access: "read",
+        destructive: false,
+        module: "schools",
+      },
+    })
     // This intentionally is not paginated: a user's tenant memberships are a
     // small bounded set and the client needs the complete set for switching.
     .output(z.array(mySchoolDtoSchema))
@@ -69,6 +77,14 @@ export const schoolRouter = {
         "Get the identity and organization details for a school. Requires permission to read that school's details.",
       tags: ["School"],
     })
+    .meta({
+      mcp: {
+        exposure: "core",
+        access: "read",
+        destructive: false,
+        module: "schools",
+      },
+    })
     .input(schoolDetailsInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_DETAILS))
     .output(schoolDetailsDtoSchema)
@@ -98,6 +114,14 @@ export const schoolRouter = {
       description:
         "Update editable identity and organization details for a school. Requires permission to update that school's details.",
       tags: ["School"],
+    })
+    .meta({
+      mcp: {
+        exposure: "advanced",
+        access: "write",
+        destructive: true,
+        module: "schools",
+      },
     })
     .input(updateSchoolDetailsInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.UPDATE_DETAILS))

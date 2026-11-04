@@ -24,6 +24,14 @@ export const schoolLogoRouter = {
         'Create a short-lived presigned URL for previewing a private school logo. Requires permission to read the logo for that school.',
       tags: ['Schools', 'Files'],
     })
+    .meta({
+      mcp: {
+        exposure: 'hidden',
+        access: 'read',
+        destructive: false,
+        module: 'schools',
+      },
+    })
     .input(getSchoolLogoInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_LOGO))
     .output(getSchoolLogoOutputSchema)

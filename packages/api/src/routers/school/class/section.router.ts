@@ -26,6 +26,14 @@ export const schoolSectionRouter = {
         "List every section in a class in its explicit display order.",
       tags: ["School", "Classes", "Sections"],
     })
+    .meta({
+      mcp: {
+        exposure: "core",
+        access: "read",
+        destructive: false,
+        module: "classes",
+      },
+    })
     .input(listSectionsInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.LIST_SECTIONS))
     .output(listSectionsOutputSchema)
@@ -68,6 +76,14 @@ export const schoolSectionRouter = {
         "Get one section by its school, class, and section identifiers.",
       tags: ["School", "Classes", "Sections"],
     })
+    .meta({
+      mcp: {
+        exposure: "advanced",
+        access: "read",
+        destructive: false,
+        module: "classes",
+      },
+    })
     .input(sectionIdInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_SECTION))
     .output(sectionDtoSchema)
@@ -97,6 +113,14 @@ export const schoolSectionRouter = {
       description:
         "Create an additional section after validating that its class belongs to the requested school.",
       tags: ["School", "Classes", "Sections"],
+    })
+    .meta({
+      mcp: {
+        exposure: "advanced",
+        access: "write",
+        destructive: false,
+        module: "classes",
+      },
     })
     .input(createSectionInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.CREATE_SECTION))
@@ -151,6 +175,14 @@ export const schoolSectionRouter = {
         "Update a section slug or label. Any role in the school may perform this mutation.",
       tags: ["School", "Classes", "Sections"],
     })
+    .meta({
+      mcp: {
+        exposure: "advanced",
+        access: "write",
+        destructive: true,
+        module: "classes",
+      },
+    })
     .input(updateSectionInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.UPDATE_SECTION))
     .output(sectionDtoSchema)
@@ -181,6 +213,14 @@ export const schoolSectionRouter = {
       description:
         "Replace the complete section display order for a class. Requires permission to reorder sections.",
       tags: ["School", "Classes", "Sections"],
+    })
+    .meta({
+      mcp: {
+        exposure: "advanced",
+        access: "write",
+        destructive: true,
+        module: "classes",
+      },
     })
     .input(reorderSectionsInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.REORDER_SECTIONS))
@@ -266,6 +306,14 @@ export const schoolSectionRouter = {
         "Replace a section's attributes. Any role in the school may perform this mutation.",
       tags: ["School", "Classes", "Sections"],
     })
+    .meta({
+      mcp: {
+        exposure: "advanced",
+        access: "write",
+        destructive: true,
+        module: "classes",
+      },
+    })
     .input(updateSectionAttributesInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.UPDATE_SECTION_ATTRIBUTES))
     .output(sectionDtoSchema)
@@ -296,6 +344,14 @@ export const schoolSectionRouter = {
       description:
         "Delete a section while preserving the class's minimum of one section.",
       tags: ["School", "Classes", "Sections"],
+    })
+    .meta({
+      mcp: {
+        exposure: "advanced",
+        access: "write",
+        destructive: true,
+        module: "classes",
+      },
     })
     .input(sectionIdInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.DELETE_SECTION))

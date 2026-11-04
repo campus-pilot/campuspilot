@@ -14,6 +14,14 @@ export const authRouter = {
         'Create the credential password for the authenticated account when it does not already have one.',
       tags: ['Authentication'],
     })
+    .meta({
+      mcp: {
+        exposure: 'hidden',
+        access: 'write',
+        destructive: false,
+        module: 'account',
+      },
+    })
     .input(setPasswordInputSchema)
     .output(setPasswordOutputSchema)
     .handler(async ({ context, input }) => {

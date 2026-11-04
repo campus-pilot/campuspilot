@@ -19,6 +19,14 @@ export const schoolExamTimetableRouter = {
         "Read the optional shared date and local-time grid for an exam. Absence is returned explicitly as null.",
       ),
     )
+    .meta({
+      mcp: {
+        exposure: "advanced",
+        access: "read",
+        destructive: false,
+        module: "exams",
+      },
+    })
     .input(dto.examScopeSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_EXAM_TIMETABLE))
     .output(dto.timetableDtoSchema.nullable())
@@ -48,6 +56,14 @@ export const schoolExamTimetableRouter = {
         "Create or replace the optional shared grid, validating school classes, configured subjects and modes, dates and non-overlapping local time slots. Completed exams are read-only.",
       ),
     )
+    .meta({
+      mcp: {
+        exposure: "advanced",
+        access: "write",
+        destructive: true,
+        module: "exams",
+      },
+    })
     .input(dto.saveExamTimetableInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.UPDATE_EXAM_TIMETABLE))
     .output(dto.timetableDtoSchema)
@@ -117,6 +133,14 @@ export const schoolExamTimetableRouter = {
         "Remove an optional shared timetable while the exam is still editable.",
       ),
     )
+    .meta({
+      mcp: {
+        exposure: "advanced",
+        access: "write",
+        destructive: true,
+        module: "exams",
+      },
+    })
     .input(dto.examScopeSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.DELETE_EXAM_TIMETABLE))
     .output(dto.timetableDtoSchema)
