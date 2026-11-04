@@ -15,6 +15,7 @@ import { env } from '@campuspilot/env/management.client';
 import { Button } from '@campuspilot/ui/components/button';
 import { Command, Search } from 'lucide-react';
 import { authClient } from '@/lib/auth-client';
+import { useInstallApp } from '@/lib/install-app.client';
 import { AccountDialog } from './account-dialog';
 import { ManagementCommandPalette } from './management-command-palette';
 import { commandPaletteContextKey } from './management-command-model';
@@ -64,6 +65,7 @@ export function ManagementShell({
   const pathname = usePathname();
   const router = useRouter();
   const { data: session } = authClient.useSession();
+  const { isInstallAvailable, installApp } = useInstallApp();
 
   /** The global shortcut is the one approved lifecycle listener for this feature. */
   useEffect(() => {
@@ -127,6 +129,8 @@ export function ManagementShell({
           ) : null
         }
         onManageAccount={() => setIsAccountDialogOpen(true)}
+        isInstallAvailable={isInstallAvailable}
+        onInstallApp={installApp}
         onLogout={logout}
         renderLink={({
           href,
