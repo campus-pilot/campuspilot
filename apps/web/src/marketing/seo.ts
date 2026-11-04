@@ -1,9 +1,10 @@
 export const SITE_URL = "https://campuspilot.in";
-export const SOCIAL_IMAGE = `${SITE_URL}/social-card.svg`;
+/** The `/0` comparison page shares the generated home social card. */
+export const SOCIAL_IMAGE = `${SITE_URL}/og/home.png`;
 export const SOCIAL_IMAGE_ALT = "CampusPilot — one connected operating system for modern schools";
 
 export const landingRoutes = [
-  ["/", "School Management Software for India | CampusPilot", "CampusPilot is an AI-ready school management platform for admissions, academics, fees, examinations, documents, dashboards, and student access."],
+  ["/", "School Management Software for All Schools | CampusPilot", "CampusPilot is an AI-ready school management platform for admissions, academics, fees, examinations, documents, dashboards, and student access."],
 ] as const;
 
 export type LandingPath = (typeof landingRoutes)[number][0];
@@ -21,7 +22,6 @@ export function createMeta(path: LandingPath) {
     { name: "robots", content: "index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" },
     { tagName: "link", rel: "canonical", href: canonical },
     { property: "og:type", content: "website" },
-    { property: "og:locale", content: "en_IN" },
     { property: "og:site_name", content: "CampusPilot" },
     { property: "og:title", content: title },
     { property: "og:description", content: description },
@@ -41,8 +41,8 @@ export function createMeta(path: LandingPath) {
 export const structuredData = {
   "@context": "https://schema.org",
   "@graph": [
-    { "@type": "Organization", "@id": `${SITE_URL}/#organization`, name: "CampusPilot", url: SITE_URL, logo: `${SITE_URL}/icon.svg`, areaServed: { "@type": "Country", name: "India" } },
-    { "@type": "WebSite", "@id": `${SITE_URL}/#website`, name: "CampusPilot", url: SITE_URL, inLanguage: "en-IN", publisher: { "@id": `${SITE_URL}/#organization` } },
-    { "@type": "SoftwareApplication", "@id": `${SITE_URL}/#software`, name: "CampusPilot", url: `${SITE_URL}/product`, applicationCategory: "EducationalApplication", applicationSubCategory: "School management software", operatingSystem: "Web", inLanguage: "en-IN", provider: { "@id": `${SITE_URL}/#organization` } },
+    { "@type": "Organization", "@id": `${SITE_URL}/#organization`, name: "CampusPilot", url: SITE_URL, logo: `${SITE_URL}/icon.svg`},
+    { "@type": "WebSite", "@id": `${SITE_URL}/#website`, name: "CampusPilot", url: SITE_URL, inLanguage: "en", publisher: { "@id": `${SITE_URL}/#organization` } },
+    { "@type": "SoftwareApplication", "@id": `${SITE_URL}/#software`, name: "CampusPilot", url: `${SITE_URL}/product`, applicationCategory: "EducationalApplication", applicationSubCategory: "School management software", operatingSystem: "Web", inLanguage: "en", provider: { "@id": `${SITE_URL}/#organization` } },
   ],
 };

@@ -7,6 +7,8 @@ import {
   ScrollRestoration,
 } from "react-router";
 
+import { SITE_LANGUAGE, SITE_LOGO } from "@/site/seo";
+
 import type { Route } from "./+types/root";
 
 /**
@@ -20,16 +22,18 @@ export const links: Route.LinksFunction = () => [
   { rel: "icon", href: "/favicon.ico", sizes: "48x48" },
   { rel: "icon", href: "/favicon.svg", type: "image/svg+xml" },
   { rel: "apple-touch-icon", href: "/apple-touch-icon.png" },
+  { rel: "manifest", href: "/site.webmanifest" },
 ];
 
 export function Layout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang={SITE_LANGUAGE} suppressHydrationWarning>
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <meta name="theme-color" content="#f4f4f2" />
         <Meta />
-        <meta property="og:logo" content="https://campuspilot.in/icon.svg" />
+        <meta property="og:logo" content={SITE_LOGO} />
         <Links />
       </head>
       <body>

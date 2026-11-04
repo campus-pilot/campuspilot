@@ -1,8 +1,0 @@
-User-agent: *
-Allow: /
-Disallow: /dashboard
-Disallow: /login
-Disallow: /api/
-Disallow: /rpc/
-
-Sitemap: https://campuspilot.in/sitemap.xml
