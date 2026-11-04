@@ -21,6 +21,10 @@ import {
   ORPCError,
   resolveContractProcedures,
 } from '@orpc/server';
+import {
+  MCP_READ_SCOPE,
+  MCP_WRITE_SCOPE,
+} from '@campuspilot/auth/mcp-oauth-policy';
 import { APIError } from 'better-auth';
 import { z } from 'zod';
 
@@ -52,16 +56,24 @@ export type McpToolDefinition = {
   procedure: AnyProcedure;
 };
 
-/**
- * The tools a CampusPilot MCP server exposes, resolved once per process.
- * Hidden procedures are validated but never enter the catalog.
- */
-export type McpCatalog = {
+/** The tools one credential may see. */
+export type McpCatalogView = {
   /** Listed directly in tools/list. */
   core: readonly McpToolDefinition[];
   /** Reached through the advanced-tool meta tools. */
   advanced: readonly McpToolDefinition[];
   advancedByName: ReadonlyMap<string, McpToolDefinition>;
+};
+
+/**
+ * The tools a CampusPilot MCP server exposes, resolved once per process.
+ * Hidden procedures are validated but never enter the catalog. `readOnly` is
+ * the precomputed view for credentials without write access (B6): listing
+ * filters in memory only, while calls are still enforced by the gate (403),
+ * the scope middleware and OPA.
+ */
+export type McpCatalog = McpCatalogView & {
+  readOnly: McpCatalogView;
 };
 
 /** Returns the context the MCP gate verified for the current request. */
@@ -97,6 +109,11 @@ type CreateCampusPilotMcpHandlerOptions = {
 
 type CreateCampusPilotMcpServerOptions = McpToolCallOptions & {
   catalog: McpCatalog;
+  /**
+   * Whether the credential may use write tools; read-only credentials are
+   * not shown them. Defaults to true (sessions and API keys).
+   */
+  writeAccess?: boolean;
 };
 
 type McpErrorPayload = {
@@ -328,14 +345,50 @@ export async function buildMcpCatalog(router: AnyRouter): Promise<McpCatalog> {
     },
   );
 
-  const advanced = Object.freeze(
-    tools.filter(({ mcp }) => mcp.exposure === 'advanced'),
-  );
+  const view = (included: (tool: McpToolDefinition) => boolean): McpCatalogView => {
+    const advanced = Object.freeze(
+      tools.filter((tool) => tool.mcp.exposure === 'advanced' && included(tool)),
+    );
+    return Object.freeze({
+      core: Object.freeze(
+        tools.filter((tool) => tool.mcp.exposure === 'core' && included(tool)),
+      ),
+      advanced,
+      advancedByName: new Map(advanced.map((tool) => [tool.name, tool])),
+    });
+  };
   return Object.freeze({
-    core: Object.freeze(tools.filter(({ mcp }) => mcp.exposure === 'core')),
-    advanced,
-    advancedByName: new Map(advanced.map((tool) => [tool.name, tool])),
+    ...view(() => true),
+    readOnly: view((tool) => tool.mcp.access === 'read'),
   });
+}
+
+/**
+ * Whether a request's credential may use write tools. OAuth grants need the
+ * `mcp:write` scope; sessions and API keys carry the user's full rights
+ * (scoped keys may come later).
+ */
+export function credentialWriteAccess(context: Context): boolean {
+  return context.principal.authMethod === 'oauth'
+    ? context.principal.oauthGrant.scopes.includes(MCP_WRITE_SCOPE)
+    : true;
+}
+
+/** OAuth scopes a tool call needs: read for everything, write for writes. */
+export function requiredScopes(access: 'read' | 'write'): string[] {
+  return access === 'write'
+    ? [MCP_READ_SCOPE, MCP_WRITE_SCOPE]
+    : [MCP_READ_SCOPE];
+}
+
+/**
+ * Per-tool auth requirements in the form ChatGPT's Apps SDK reads from
+ * `_meta.securitySchemes`, derived from the tool's explicit access.
+ */
+export function securitySchemesMeta(access: 'read' | 'write') {
+  return {
+    securitySchemes: [{ type: 'oauth2', scopes: requiredScopes(access) }],
+  };
 }
 
 /** MCP tool annotations derived from the procedure's explicit metadata. */
@@ -441,11 +494,13 @@ export async function callMcpTool(
  */
 export function createCampusPilotMcpServer({
   catalog,
+  writeAccess = true,
   ...options
 }: CreateCampusPilotMcpServerOptions): McpServer {
   const server = new McpServer({ name: 'campuspilot', version: '0.1.0' });
+  const view = writeAccess ? catalog : catalog.readOnly;
 
-  for (const tool of catalog.core) {
+  for (const tool of view.core) {
     server.registerTool(
       tool.name,
       {
@@ -453,13 +508,14 @@ export function createCampusPilotMcpServer({
         description: tool.description,
         inputSchema: toMcpToolInputSchema(tool),
         annotations: toolAnnotations(tool),
+        _meta: securitySchemesMeta(tool.mcp.access),
       },
       async (input, requestContext) =>
         callMcpTool(tool, input, requestContext.mcpReq.signal, options),
     );
   }
-  if (catalog.advanced.length > 0) {
-    registerAdvancedToolMetaTools(server, catalog, options);
+  if (view.advanced.length > 0) {
+    registerAdvancedToolMetaTools(server, view, options);
   }
 
   return server;
@@ -488,6 +544,7 @@ export function createCampusPilotMcpHandler({
 
       return createCampusPilotMcpServer({
         catalog: await catalog,
+        writeAccess: credentialWriteAccess(context),
         createContext: async () => context,
         reportError,
         reportToolCall,

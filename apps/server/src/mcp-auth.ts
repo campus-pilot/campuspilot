@@ -4,14 +4,10 @@ import type {
   LiveOAuthGrant,
   McpAccessTokenClaims,
 } from '@campuspilot/auth/mcp-credential';
-import {
-  MCP_DEFAULT_SCOPES,
-  MCP_READ_SCOPE,
-  MCP_WRITE_SCOPE,
-} from '@campuspilot/auth/mcp-oauth-policy';
+import { MCP_DEFAULT_SCOPES } from '@campuspilot/auth/mcp-oauth-policy';
 import type { AuthInfo } from '@modelcontextprotocol/server';
 
-import type { McpCatalog } from './mcp';
+import { type McpCatalog, requiredScopes } from './mcp';
 import { META_TOOL_NAMES } from './mcp-meta-tools';
 
 /** What the gate verified for one MCP request, handed to the tool layer. */
@@ -105,10 +101,6 @@ function requiredAccess(catalog: McpCatalog, message: JsonRpcMessage): McpAccess
   return core?.mcp.access ?? 'read';
 }
 
-function scopesFor(access: McpAccess): string[] {
-  return access === 'write' ? [MCP_READ_SCOPE, MCP_WRITE_SCOPE] : [MCP_READ_SCOPE];
-}
-
 /**
  * Creates the authentication gate in front of the MCP handler. Every request
  * needs a credential (D4); without one the response is the 401 challenge that
@@ -179,7 +171,7 @@ export function createMcpGate(options: McpGateOptions) {
   ): Promise<Response | null> {
     const catalog = await options.catalog;
     for (const message of await jsonRpcMessages(request)) {
-      const needed = scopesFor(requiredAccess(catalog, message));
+      const needed = requiredScopes(requiredAccess(catalog, message));
       if (needed.every((scope) => scopes.includes(scope))) continue;
       const header = challenge({
         error: 'insufficient_scope',

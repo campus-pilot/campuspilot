@@ -14,7 +14,8 @@ import { z } from 'zod';
 import {
   callMcpTool,
   convertMcpInputSchema,
-  type McpCatalog,
+  type McpCatalogView,
+  securitySchemesMeta,
   type McpToolCallOptions,
   type McpToolDefinition,
   serializeJson,
@@ -93,7 +94,7 @@ function jsonResult(value: unknown): CallToolResult {
  * "always allow" on the read runner can never trigger a write.
  */
 function resolveRunnableTool(
-  catalog: McpCatalog,
+  catalog: McpCatalogView,
   name: string,
   access: McpAccess,
 ): { tool: McpToolDefinition } | { error: CallToolResult } {
@@ -126,7 +127,7 @@ function resolveRunnableTool(
 
 function registerRunner(
   server: McpServer,
-  catalog: McpCatalog,
+  catalog: McpCatalogView,
   options: McpToolCallOptions,
   access: McpAccess,
 ) {
@@ -146,6 +147,7 @@ function registerRunner(
         access === 'read'
           ? READ_ONLY
           : { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+      _meta: securitySchemesMeta(access),
     },
     async (input, requestContext) => {
       const { name: toolName, arguments: args } = input as z.infer<
@@ -165,14 +167,14 @@ function registerRunner(
 }
 
 /**
- * Registers the four MCP-only tools that make advanced procedures reachable
+ * Registers the MCP-only tools that make advanced procedures reachable
  * without listing their schemas upfront: a compact index, on-demand schemas,
  * and separate runners for read and write tools. They call the same oRPC
  * procedures with the same context, so validation and OPA are unchanged.
  */
 export function registerAdvancedToolMetaTools(
   server: McpServer,
-  catalog: McpCatalog,
+  catalog: McpCatalogView,
   options: McpToolCallOptions,
 ) {
   server.registerTool(
@@ -183,6 +185,7 @@ export function registerAdvancedToolMetaTools(
         'List CampusPilot tools beyond the directly available ones (setup, configuration, lifecycle, deletion, billing runs, reports). Returns names only; use describeAdvancedTools for arguments.',
       inputSchema: metaInputSchema(META_TOOL_NAMES.list, listInput),
       annotations: READ_ONLY,
+      _meta: securitySchemesMeta('read'),
     },
     async (input) => {
       const { module, access } = input as z.infer<typeof listInput>;
@@ -210,6 +213,7 @@ export function registerAdvancedToolMetaTools(
       description: `Get the description and input JSON Schema of up to ${MAX_DESCRIBED_TOOLS} advanced tools before running them.`,
       inputSchema: metaInputSchema(META_TOOL_NAMES.describe, describeInput),
       annotations: READ_ONLY,
+      _meta: securitySchemesMeta('read'),
     },
     async (input) => {
       const { names } = input as z.infer<typeof describeInput>;
@@ -238,5 +242,8 @@ export function registerAdvancedToolMetaTools(
   );
 
   registerRunner(server, catalog, options, 'read');
-  registerRunner(server, catalog, options, 'write');
+  // A read-only view has no advanced write tools, so it gets no write runner.
+  if (catalog.advanced.some((tool) => tool.mcp.access === 'write')) {
+    registerRunner(server, catalog, options, 'write');
+  }
 }

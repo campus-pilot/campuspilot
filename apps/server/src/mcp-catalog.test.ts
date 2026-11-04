@@ -71,9 +71,12 @@ const HIDDEN_TOOLS = [
 ];
 
 /**
- * Upper bound for everything tools/list returns (core + meta tools), in
- * characters of serialized JSON. It is paid in model tokens on every
- * conversation, so growing it must be a deliberate decision.
+ * Upper bound for what the model reads from tools/list (core + meta tools):
+ * each tool's name, title, description and input schema as serialized JSON,
+ * the same measure the plan's budget uses. Annotations and `_meta` (for
+ * example ChatGPT's securitySchemes) are client metadata and not counted. It
+ * is paid in model tokens on every conversation, so growing it must be a
+ * deliberate decision.
  */
 const CORE_LISTING_BUDGET_CHARS = 38_000;
 
@@ -104,11 +107,25 @@ afterEach(async () => {
   await Promise.all(connections.splice(0).map(({ close }) => close()));
 });
 
-/** Connects to the real catalog over the Streamable HTTP transport. */
-async function connect(): Promise<Client> {
+/**
+ * Connects to the real catalog over the Streamable HTTP transport, as an
+ * anonymous caller or as an OAuth grant with the given scopes.
+ */
+async function connect(oauthScopes?: string[]): Promise<Client> {
+  const context = (
+    oauthScopes
+      ? {
+          session: null,
+          principal: {
+            authMethod: 'oauth',
+            oauthGrant: { clientId: 'test', scopes: oauthScopes, grantId: 'g' },
+          },
+        }
+      : { session: null, principal: { authMethod: 'anonymous' } }
+  ) as Context;
   const handler = createCampusPilotMcpHandler({
     catalog: Promise.resolve(catalog),
-    currentContext: () => ({ session: null }) as Context,
+    currentContext: () => context,
     reportError: vi.fn(),
   });
   const client = new Client({ name: 'catalog-test', version: '0.1.0' });
@@ -187,11 +204,55 @@ describe('real appRouter over Streamable HTTP', () => {
     }
   });
 
+  it('shows read-only credentials no write tools, and gives every tool its OAuth security scheme', async () => {
+    const readOnly = await (await connect(['mcp:read'])).listTools();
+    const readWrite = await (await connect(['mcp:read', 'mcp:write'])).listTools();
+    const readOnlyAdvanced = textJson(
+      await (await connect(['mcp:read'])).callTool({
+        name: META_TOOL_NAMES.list,
+        arguments: {},
+      }),
+    ) as Array<{ access: string }>;
+    const coreReads = catalog.core.filter(({ mcp }) => mcp.access === 'read');
+
+    expect(readOnly.tools.map(({ name }) => name).sort()).toEqual(
+      [
+        ...coreReads.map(({ name }) => name),
+        META_TOOL_NAMES.list,
+        META_TOOL_NAMES.describe,
+        META_TOOL_NAMES.runRead,
+      ].sort(),
+    );
+    expect(readOnly.tools.every(({ annotations }) => annotations?.readOnlyHint)).toBe(true);
+    expect(readOnlyAdvanced.every(({ access }) => access === 'read')).toBe(true);
+    expect(readWrite.tools).toHaveLength(CORE_TOOLS.length + 4);
+    for (const tool of readWrite.tools) {
+      const write = tool.annotations?.readOnlyHint === false;
+      expect(tool._meta, tool.name).toEqual({
+        securitySchemes: [
+          {
+            type: 'oauth2',
+            scopes: write ? ['mcp:read', 'mcp:write'] : ['mcp:read'],
+          },
+        ],
+      });
+    }
+  });
+
   it('keeps the listing within the token budget', async () => {
     const client = await connect();
     const listed = await client.listTools();
 
-    expect(JSON.stringify(listed.tools).length).toBeLessThanOrEqual(
+    const modelVisible = listed.tools.map(
+      ({ name, title, description, inputSchema }) => ({
+        name,
+        title,
+        description,
+        inputSchema,
+      }),
+    );
+
+    expect(JSON.stringify(modelVisible).length).toBeLessThanOrEqual(
       CORE_LISTING_BUDGET_CHARS,
     );
   });

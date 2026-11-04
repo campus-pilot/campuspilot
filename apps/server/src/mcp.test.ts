@@ -227,7 +227,7 @@ describe('MCP tool execution', () => {
       catalog,
       currentContext: () => {
         servedRequests.push(true);
-        return asContext({});
+        return asContext({ principal: { authMethod: 'apiKey' } });
       },
       reportError: vi.fn(),
     });

@@ -277,6 +277,19 @@ describe('MCP endpoint authentication', () => {
     expect(toolResult(read.json).body).toMatchObject({ id: schoolId });
   });
 
+  it('lists write tools only for connections that may write', async () => {
+    const readOnly = await mcp(bearer(reader.tokens.access_token), 'tools/list');
+    const readWrite = await mcp(bearer(writer.tokens.access_token), 'tools/list');
+    const names = (json: { result: { tools: Array<{ name: string }> } }) =>
+      json.result.tools.map(({ name }) => name);
+
+    expect(names(readOnly.json)).not.toContain('school.recordPayment');
+    expect(names(readOnly.json)).not.toContain('runAdvancedWriteTool');
+    expect(names(readOnly.json)).toContain('school.getSchool');
+    expect(names(readWrite.json)).toContain('school.recordPayment');
+    expect(names(readWrite.json)).toContain('runAdvancedWriteTool');
+  });
+
   it('stops a connection immediately when the user disconnects it', async () => {
     const grant = await connectClient();
     await createTestSchoolMember({
