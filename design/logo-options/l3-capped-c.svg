@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- L3 · Capped C: the C wears a mortarboard; the tassel drops beside the C's opening. A 2-unit gap keeps cap and C apart in mono. -->
+  <!-- Neutral parts use currentColor (flips with theme); accent parts use var(--mark-accent, currentColor), so the mark is monochrome unless an accent is set. -->
+  <g transform="translate(2 0)">
+    <path d="M42.26 30.72A16 16 0 1 0 42.26 51.28" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round"/>
+    <path d="M30 6 50 12.5 30 19 10 12.5Z" stroke-width="2" stroke-linejoin="round" style="fill:var(--mark-accent,currentColor);stroke:var(--mark-accent,currentColor)"/>
+    <path d="M49 13.5V30" fill="none" stroke-width="2.2" stroke-linecap="round" style="stroke:var(--mark-accent,currentColor)"/>
+    <rect x="47.25" y="29" width="3.5" height="7" rx="1.75" style="fill:var(--mark-accent,currentColor)"/>
+  </g>
+</svg>

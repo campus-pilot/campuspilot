@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- D · cp monogram: two geometric rings; the c's open side faces the p's stem. -->
+  <rect x=".75" y=".75" width="62.5" height="62.5" rx="14.25" fill="#ffffff" stroke="#e6e6e2" stroke-width="1.5"/>
+  <g transform="translate(1.5 -3.5)">
+    <path d="M25.36 23.64A9 9 0 1 0 25.36 36.36" fill="none" stroke="#111110" stroke-width="6" stroke-linecap="round"/>
+    <circle cx="42" cy="30" r="9" fill="none" stroke="#c2580e" stroke-width="6"/>
+    <path d="M33 30V50" stroke="#c2580e" stroke-width="6" stroke-linecap="round"/>
+  </g>
+</svg>

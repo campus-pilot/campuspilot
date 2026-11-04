@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- A · Compass C: the C letterform opens toward the upper right, and the needle points through the gap. -->
+  <rect width="64" height="64" rx="15" fill="#111110"/>
+  <path d="M34.95 15.26A17 17 0 1 0 48.74 29.05" fill="none" stroke="#fbf7f0" stroke-width="7" stroke-linecap="round"/>
+  <path d="M44.4 19.6 34.83 34.83 29.17 29.17Z" fill="#e8742a"/>
+  <path d="M26.3 37.7 34.83 34.83 29.17 29.17Z" fill="#fbf7f0" fill-opacity=".55"/>
+</svg>

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- L6 · Cap in C: a graduation cap centred inside the C, like L but with the cap instead of a building. -->
+  <!-- Neutral parts use currentColor (flips with theme); accent parts use var(--mark-accent, currentColor), so the mark is monochrome unless an accent is set. -->
+  <g transform="translate(2.5 0)">
+    <path d="M48.85 17.86A22 22 0 1 0 48.85 46.14" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round"/>
+    <path d="M32 21.5 46.5 28 32 34.5 17.5 28Z" stroke-width="2" stroke-linejoin="round" style="fill:var(--mark-accent,currentColor);stroke:var(--mark-accent,currentColor)"/>
+    <path d="M24 35 32 39 40 35V40C40 42 36.5 44 32 44S24 42 24 40Z" style="fill:var(--mark-accent,currentColor)"/>
+    <path d="M44 29V37.5" fill="none" stroke-width="2" stroke-linecap="round" style="stroke:var(--mark-accent,currentColor)"/>
+  </g>
+</svg>

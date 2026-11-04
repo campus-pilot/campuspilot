@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- L5 · Cap toss: a tilted mortarboard flies out through the C's opening, like a graduation toss. -->
+  <!-- Neutral parts use currentColor (flips with theme); accent parts use var(--mark-accent, currentColor), so the mark is monochrome unless an accent is set. -->
+  <path d="M38.79 20.43A18 18 0 1 0 38.79 43.57" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round"/>
+  <g transform="translate(48 30) rotate(-20) scale(1.1)" style="fill:var(--mark-accent,currentColor)">
+    <path d="M-10 0 0-4.25 10 0 0 4.25Z" stroke-width="2" stroke-linejoin="round" style="fill:var(--mark-accent,currentColor);stroke:var(--mark-accent,currentColor)"/>
+    <path d="M-5.5 4.5 0 7 5.5 4.5V8C5.5 9.3 3 10.5 0 10.5S-5.5 9.3-5.5 8Z"/>
+    <path d="M10 0V8" fill="none" stroke-width="1.8" stroke-linecap="round" style="stroke:var(--mark-accent,currentColor)"/>
+  </g>
+</svg>

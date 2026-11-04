@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- H · Clipboard cap: an administration clipboard whose clip is a graduation cap. -->
+  <rect width="64" height="64" rx="15" fill="#c2580e"/>
+  <rect x="15.5" y="17" width="33" height="38" rx="5" fill="#fff7ec"/>
+  <path d="M24.5 16.5V20C24.5 21.8 28 23.5 32 23.5S39.5 21.8 39.5 20V16.5" fill="#111110"/>
+  <path d="M32 7.5 46.5 14 32 20.5 17.5 14Z" fill="#111110" stroke="#111110" stroke-width="1.5" stroke-linejoin="round"/>
+  <path d="M43.5 15.5V22" stroke="#111110" stroke-width="2" stroke-linecap="round"/>
+  <circle cx="22.5" cy="32" r="2.2" fill="#c2580e"/>
+  <path d="M27.5 32H41.5" stroke="#111110" stroke-width="2.8" stroke-linecap="round"/>
+  <circle cx="22.5" cy="39.5" r="2.2" fill="#c2580e"/>
+  <path d="M27.5 39.5H41.5" stroke="#111110" stroke-width="2.8" stroke-linecap="round"/>
+  <circle cx="22.5" cy="47" r="2.2" fill="#c2580e"/>
+  <path d="M27.5 47H36.5" stroke="#111110" stroke-width="2.8" stroke-linecap="round"/>
+</svg>

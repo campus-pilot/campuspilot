@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CampusPilot logo options</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&display=swap">
+<style>
+  :root { --bg:#f4f4f2; --surface:#fff; --ink:#111110; --muted:#6b6b66; --line:#e6e6e2; --accent:#c2580e; }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family:Geist, ui-sans-serif, system-ui, sans-serif; }
+  main { max-width:1180px; margin:0 auto; padding:40px 16px 64px; display:flex; flex-direction:column; gap:24px; }
+  h1 { margin:0; font-size:28px; letter-spacing:-.02em; }
+  .lede { margin:0; color:var(--muted); }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(270px, 1fr)); gap:16px; }
+  .card { background:var(--surface); border:1px solid var(--line); border-radius:16px; padding:20px; display:flex; flex-direction:column; gap:16px; }
+  .card h2 { margin:0; font-size:16px; }
+  .card p { margin:0; color:var(--muted); font-size:14px; line-height:1.5; }
+  .hero { width:140px; height:140px; }
+  .sizes { display:flex; align-items:end; gap:14px; }
+  .bar { display:flex; align-items:center; gap:10px; padding:12px 14px; border-radius:12px; border:1px solid var(--line); }
+  .bar.dark { background:#111110; border-color:#111110; color:#f4f4f2; }
+  .word { font-weight:600; letter-spacing:-.02em; font-size:17px; }
+  .word span { color:var(--accent); }
+  .dark .word span { color:#f8b563; }
+</style>
+</head>
+<body>
+<main>
+  <h1>CampusPilot: logo options</h1>
+  <p class="lede">Each card shows the mark large, at 48, 32 and 16 px (favicon), and as a navbar lockup on light and dark.</p>
+  <div class="grid" id="grid"></div>
+</main>
+<script>
+  const options = [
+    { file: 'e-book-roof.svg', name: 'E · Book-roof schoolhouse', note: 'An open book forms the roof of a schoolhouse, and the building carries a completed check. Learning on top, things getting done underneath.' },
+    { file: 'f-institution-bars.svg', name: 'F · Institution bars', note: 'A classical school pediment whose columns rise like a bar chart. Reads as an institution and as reporting or insight.' },
+    { file: 'g-crest-modules.svg', name: 'G · Crest of modules', note: 'A traditional school crest divided into four organised modules (admissions, finance, exams, staff), with one highlighted. Formal and trustworthy.' },
+    { file: 'h-clipboard-cap.svg', name: 'H · Clipboard cap', note: 'An administration clipboard whose clip is a graduation cap, with a checklist below. The most literal of the four.' },
+  ];
+  /** SVGs are embedded so the page also works as a standalone snapshot. Regenerate after editing an .svg. */
+  const svg = __SVG__;
+  const grid = document.getElementById('grid');
+  for (const o of options) {
+    const word = '<span class="word">Campus<span>Pilot</span></span>';
+    grid.insertAdjacentHTML('beforeend', `
+      <section class="card">
+        <h2>${o.name}</h2>
+        <img class="hero" src="${svg[o.file]}" alt="">
+        <div class="sizes">
+          <img src="${svg[o.file]}" width="48" height="48" alt="">
+          <img src="${svg[o.file]}" width="32" height="32" alt="">
+          <img src="${svg[o.file]}" width="16" height="16" alt="">
+        </div>
+        <div class="bar"><img src="${svg[o.file]}" width="28" height="28" alt="">${word}</div>
+        <div class="bar dark"><img src="${svg[o.file]}" width="28" height="28" alt="">${word}</div>
+        <p>${o.note}</p>
+      </section>`);
+  }
+</script>
+</body>
+</html>

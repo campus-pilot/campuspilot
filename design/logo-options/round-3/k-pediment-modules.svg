@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- K · Pediment modules: a school roof over four organised modules (F and G combined). -->
+  <!-- Neutral parts use currentColor (flips with theme); accent parts use var(--mark-accent, currentColor), so the mark is monochrome unless an accent is set. -->
+  <path d="M8 22 32 8 56 22Z" stroke-width="3" stroke-linejoin="round" style="fill:var(--mark-accent,currentColor);stroke:var(--mark-accent,currentColor)"/>
+  <g fill="currentColor">
+    <rect x="12" y="27.5" width="18.5" height="12.5" rx="3"/>
+    <rect x="33.5" y="27.5" width="18.5" height="12.5" rx="3"/>
+    <rect x="12" y="43" width="18.5" height="12.5" rx="3"/>
+    <rect x="33.5" y="43" width="18.5" height="12.5" rx="3"/>
+  </g>
+</svg>

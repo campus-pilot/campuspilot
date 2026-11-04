@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CampusPilot logo options</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&display=swap">
+<style>
+  :root { --bg:#f4f4f2; --surface:#fff; --ink:#111110; --paper:#f4f4f2; --muted:#6b6b66; --line:#e6e6e2; --primary:#c2580e; }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family:Geist, ui-sans-serif, system-ui, sans-serif; }
+  main { max-width:1280px; margin:0 auto; padding:40px 16px 64px; display:flex; flex-direction:column; gap:20px; }
+  h1 { margin:0; font-size:28px; letter-spacing:-.02em; }
+  .lede { margin:0; max-width:760px; color:var(--muted); line-height:1.5; }
+  .scroll { overflow-x:auto; background:var(--surface); border:1px solid var(--line); border-radius:16px; }
+  table { border-collapse:collapse; width:100%; min-width:1080px; }
+  th, td { padding:14px; border-bottom:1px solid var(--line); text-align:center; vertical-align:middle; }
+  th { font-size:12px; font-weight:500; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
+  tr:last-child td { border-bottom:0; }
+  td.name { text-align:left; width:220px; }
+  .name strong { display:block; font-size:15px; }
+  .name span { display:block; margin-top:4px; font-size:13px; color:var(--muted); line-height:1.45; }
+  .swatch { display:inline-grid; place-items:center; width:84px; height:84px; border-radius:14px; }
+  .swatch svg { width:56px; height:56px; }
+  .light { background:#fff; color:var(--ink); box-shadow:inset 0 0 0 1px var(--line); }
+  .dark { background:var(--ink); color:var(--paper); }
+  .mono { --mark-accent:currentColor; }
+  .duo { --mark-accent:var(--primary); }
+  .icon { background:var(--primary); color:#fff; --mark-accent:#fff; }
+  .icon svg { width:50px; height:50px; }
+  .sizes { display:inline-flex; align-items:center; gap:12px; color:var(--ink); --mark-accent:var(--primary); }
+  .sizes svg { width:100%; height:100%; }
+  .lockup { display:inline-flex; align-items:center; gap:8px; padding:10px 12px; border-radius:10px; font-weight:600; letter-spacing:-.02em; font-size:16px; --mark-accent:var(--primary); }
+  .lockup svg { width:26px; height:26px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>CampusPilot: logo options, round 5</h1>
+  <p class="lede">At most two colours per mark. The neutral shape follows the theme (black on light, white on dark), and the optional accent is the primary orange. "Mono" has no accent at all. The app icon is white on the primary orange.</p>
+  <div class="scroll">
+    <table>
+      <thead>
+        <tr><th>Option</th><th>Mono · light</th><th>Mono · dark</th><th>Two-tone · light</th><th>Two-tone · dark</th><th>App icon</th><th>32 · 16 px</th><th>Navbar</th></tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+</main>
+<script>
+  const options = [
+    { file: "l3-capped-c.svg", name: "L3 · Capped C", note: "New. The C wears a mortarboard, and the tassel drops beside the opening." },
+    { file: "l4-capped-c-tilted.svg", name: "L4 · Capped C, tilted", note: "New. L3 with the cap tipped a little for a lighter, celebratory feel." },
+    { file: "l5-cap-toss.svg", name: "L5 · Cap toss", note: "New. The C opens to the upper right and a cap flies out of the gap, like a graduation toss." },
+    { file: "l6-cap-in-c.svg", name: "L6 · Cap in C", note: "New. A graduation cap centred inside the C, the same layout as L." },
+    { file: "l-campus-c.svg", name: "L · Campus C", note: "For reference: the classical building inside the C." },
+    { file: "l2-campus-c-school.svg", name: "L2 · Campus C, schoolhouse", note: "For reference: the schoolhouse inside the C." },
+  ];
+  /** Raw SVG markup, inlined (not <img>) so currentColor and --mark-accent can be themed per cell. */
+  const svg = __SVG__;
+  const swatch = (cls, s) => `<td><span class="swatch ${cls}">${s}</span></td>`;
+  const rows = document.getElementById('rows');
+  for (const o of options) {
+    const s = svg[o.file];
+    rows.insertAdjacentHTML('beforeend', `<tr>
+      <td class="name"><strong>${o.name}</strong><span>${o.note}</span></td>
+      ${swatch('light mono', s)}${swatch('dark mono', s)}${swatch('light duo', s)}${swatch('dark duo', s)}${swatch('icon', s)}
+      <td><span class="sizes"><span style="width:32px;height:32px;display:inline-flex">${s}</span><span style="width:16px;height:16px;display:inline-flex">${s}</span></span></td>
+      <td><span class="lockup light">${s}CampusPilot</span></td>
+    </tr>`);
+  }
+</script>
+</body>
+</html>

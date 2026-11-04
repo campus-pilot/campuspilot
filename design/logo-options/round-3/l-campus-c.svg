@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- L · Campus C: the brand's C letterform enclosing a school building. -->
+  <!-- Neutral parts use currentColor (flips with theme); accent parts use var(--mark-accent, currentColor), so the mark is monochrome unless an accent is set. -->
+  <path d="M48.85 17.86A22 22 0 1 0 48.85 46.14" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round"/>
+  <g style="fill:var(--mark-accent,currentColor)">
+    <path d="M22 30 32 23.5 42 30Z" stroke-width="2" stroke-linejoin="round" style="fill:var(--mark-accent,currentColor);stroke:var(--mark-accent,currentColor)"/>
+    <rect x="23.5" y="32" width="4" height="9" rx="1"/>
+    <rect x="30" y="32" width="4" height="9" rx="1"/>
+    <rect x="36.5" y="32" width="4" height="9" rx="1"/>
+    <rect x="22" y="42.5" width="20" height="3.5" rx="1.75"/>
+  </g>
+</svg>

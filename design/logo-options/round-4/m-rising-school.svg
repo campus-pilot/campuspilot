@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- M · Rising school: chart bars climb into a school tower (gable, clock, arched door). -->
+  <!-- Neutral parts use currentColor (flips with theme); accent parts use var(--mark-accent, currentColor), so the mark is monochrome unless an accent is set. -->
+  <g fill="currentColor">
+    <rect x="8" y="42" width="9" height="14" rx="2"/>
+    <rect x="20" y="31" width="9" height="25" rx="2"/>
+  </g>
+  <path d="M32 56V18L44 8L56 18V56H48.5V49A4.5 4.5 0 0 0 39.5 49V56ZM39.5 27.5A4.5 4.5 0 1 0 48.5 27.5A4.5 4.5 0 1 0 39.5 27.5Z" fill-rule="evenodd" style="fill:var(--mark-accent,currentColor)"/>
+</svg>

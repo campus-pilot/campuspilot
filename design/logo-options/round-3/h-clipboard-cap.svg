@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- H · Clipboard cap: an administration clipboard whose clip is a graduation cap. -->
+  <!-- Neutral parts use currentColor (flips with theme); accent parts use var(--mark-accent, currentColor), so the mark is monochrome unless an accent is set. -->
+  <path d="M22 16H20A6 6 0 0 0 14 22V52A6 6 0 0 0 20 58H44A6 6 0 0 0 50 52V22A6 6 0 0 0 44 16H42" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/>
+  <g fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M20.5 33 23.5 36 28.5 31M33 33.5H43.5"/>
+    <path d="M20.5 44 23.5 47 28.5 42M33 44.5H40"/>
+  </g>
+  <path d="M32 4.5 47 11 32 17.5 17 11Z" stroke-width="2" stroke-linejoin="round" style="fill:var(--mark-accent,currentColor);stroke:var(--mark-accent,currentColor)"/>
+  <path d="M26.5 14V18.5C26.5 20.3 29 21.5 32 21.5S37.5 20.3 37.5 18.5V14Z" style="fill:var(--mark-accent,currentColor)"/>
+  <path d="M41 12.5V20" fill="none" stroke-width="2" stroke-linecap="round" style="stroke:var(--mark-accent,currentColor)"/>
+</svg>

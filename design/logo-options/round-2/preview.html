@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CampusPilot logo options</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&display=swap">
+<style>
+  :root { --bg:#f4f4f2; --surface:#fff; --ink:#111110; --muted:#6b6b66; --line:#e6e6e2; --accent:#c2580e; }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family:Geist, ui-sans-serif, system-ui, sans-serif; }
+  main { max-width:1180px; margin:0 auto; padding:40px 16px 64px; display:flex; flex-direction:column; gap:24px; }
+  h1 { margin:0; font-size:28px; letter-spacing:-.02em; }
+  .lede { margin:0; color:var(--muted); }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(270px, 1fr)); gap:16px; }
+  .card { background:var(--surface); border:1px solid var(--line); border-radius:16px; padding:20px; display:flex; flex-direction:column; gap:16px; }
+  .card h2 { margin:0; font-size:16px; }
+  .card p { margin:0; color:var(--muted); font-size:14px; line-height:1.5; }
+  .hero { width:140px; height:140px; }
+  .sizes { display:flex; align-items:end; gap:14px; }
+  .bar { display:flex; align-items:center; gap:10px; padding:12px 14px; border-radius:12px; border:1px solid var(--line); }
+  .bar.dark { background:#111110; border-color:#111110; color:#f4f4f2; }
+  .word { font-weight:600; letter-spacing:-.02em; font-size:17px; }
+  .word span { color:var(--accent); }
+  .dark .word span { color:#f8b563; }
+</style>
+</head>
+<body>
+<main>
+  <h1>CampusPilot: logo options</h1>
+  <p class="lede">Each card shows the mark large, at 48, 32 and 16 px (favicon), and as a navbar lockup on light and dark.</p>
+  <div class="grid" id="grid"></div>
+</main>
+<script>
+  const options = [
+    { file: 'e-book-roof.svg', name: 'E · Book-roof schoolhouse', note: 'An open book forms the roof of a schoolhouse, and the building carries a completed check. Learning on top, things getting done underneath.' },
+    { file: 'f-institution-bars.svg', name: 'F · Institution bars', note: 'A classical school pediment whose columns rise like a bar chart. Reads as an institution and as reporting or insight.' },
+    { file: 'g-crest-modules.svg', name: 'G · Crest of modules', note: 'A traditional school crest divided into four organised modules (admissions, finance, exams, staff), with one highlighted. Formal and trustworthy.' },
+    { file: 'h-clipboard-cap.svg', name: 'H · Clipboard cap', note: 'An administration clipboard whose clip is a graduation cap, with a checklist below. The most literal of the four.' },
+  ];
+  /** SVGs are embedded so the page also works as a standalone snapshot. Regenerate after editing an .svg. */
+  const svg = {"e-book-roof.svg":"data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+CiAgPCEtLSBFIMK3IEJvb2stcm9vZiBzY2hvb2xob3VzZTogYW4gb3BlbiBib29rIGZvcm1zIHRoZSByb29mOyB0aGUgYnVpbGRpbmcgY2FycmllcyBhIGNvbXBsZXRlZCBjaGVjay4gLS0+CiAgPHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTUiIGZpbGw9IiNjMjU4MGUiLz4KICA8cGF0aCBkPSJNOS41IDI5QzE3IDIxIDI1IDE2LjUgMzIgMTQuNUMzOSAxNi41IDQ3IDIxIDU0LjUgMjkiIGZpbGw9Im5vbmUiIHN0cm9rZT0iI2ZmZjdlYyIgc3Ryb2tlLXdpZHRoPSI0IiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz4KICA8cGF0aCBkPSJNMzIgMTQuNVYyMSIgc3Ryb2tlPSIjZmZmN2VjIiBzdHJva2Utd2lkdGg9IjMiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPgogIDxwYXRoIGQ9Ik0xOCAzMC41QzIyLjUgMjYuNSAyNy41IDIyLjggMzIgMjFDMzYuNSAyMi44IDQxLjUgMjYuNSA0NiAzMC41VjQ5LjVBMi41IDIuNSAwIDAgMSA0My41IDUySDIwLjVBMi41IDIuNSAwIDAgMSAxOCA0OS41WiIgZmlsbD0iI2ZmZjdlYyIvPgogIDxwYXRoIGQ9Ik0yNSAzOS41IDI5LjggNDQuMyAzOS41IDM0LjUiIGZpbGw9Im5vbmUiIHN0cm9rZT0iI2MyNTgwZSIgc3Ryb2tlLXdpZHRoPSI0LjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIvPgo8L3N2Zz4K","f-institution-bars.svg":"data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+CiAgPCEtLSBGIMK3IEluc3RpdHV0aW9uIGJhcnM6IGEgY2xhc3NpY2FsIHNjaG9vbCBwZWRpbWVudCB3aG9zZSBjb2x1bW5zIHJpc2UgbGlrZSBhIGJhciBjaGFydC4gLS0+CiAgPHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTUiIGZpbGw9IiNmYmVlZTIiLz4KICA8cGF0aCBkPSJNMTEgMjMuNSAzMiAxMS41IDUzIDIzLjVaIiBmaWxsPSIjMTExMTEwIiBzdHJva2U9IiMxMTExMTAiIHN0cm9rZS13aWR0aD0iMyIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIvPgogIDxyZWN0IHg9IjE0IiB5PSIzNyIgd2lkdGg9IjYiIGhlaWdodD0iOSIgcng9IjEuNSIgZmlsbD0iIzExMTExMCIvPgogIDxyZWN0IHg9IjI0IiB5PSIzMyIgd2lkdGg9IjYiIGhlaWdodD0iMTMiIHJ4PSIxLjUiIGZpbGw9IiMxMTExMTAiLz4KICA8cmVjdCB4PSIzNCIgeT0iMjkuNSIgd2lkdGg9IjYiIGhlaWdodD0iMTYuNSIgcng9IjEuNSIgZmlsbD0iIzExMTExMCIvPgogIDxyZWN0IHg9IjQ0IiB5PSIyNyIgd2lkdGg9IjYiIGhlaWdodD0iMTkiIHJ4PSIxLjUiIGZpbGw9IiNjMjU4MGUiLz4KICA8cmVjdCB4PSIxMCIgeT0iNDkiIHdpZHRoPSI0NCIgaGVpZ2h0PSI0LjUiIHJ4PSIyLjI1IiBmaWxsPSIjMTExMTEwIi8+Cjwvc3ZnPgo=","g-crest-modules.svg":"data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+CiAgPCEtLSBHIMK3IENyZXN0IG9mIG1vZHVsZXM6IGEgc2Nob29sIGNyZXN0IGRpdmlkZWQgaW50byBmb3VyIG9yZ2FuaXNlZCBtb2R1bGVzLCBvbmUgaGlnaGxpZ2h0ZWQuIC0tPgogIDxyZWN0IHdpZHRoPSI2NCIgaGVpZ2h0PSI2NCIgcng9IjE1IiBmaWxsPSIjMTExMTEwIi8+CiAgPHBhdGggZD0iTTMyIDkuNSA1MC41IDE1LjVWMzEuNUM1MC41IDQyLjUgNDIuNSA1MCAzMiA1NC41IDIxLjUgNTAgMTMuNSA0Mi41IDEzLjUgMzEuNVYxNS41WiIgZmlsbD0iI2ZiZjdmMCIgc3Ryb2tlPSIjZmJmN2YwIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz4KICA8cmVjdCB4PSIyMS41IiB5PSIyMCIgd2lkdGg9IjkuNSIgaGVpZ2h0PSI5LjUiIHJ4PSIyLjIiIGZpbGw9IiMxMTExMTAiLz4KICA8cmVjdCB4PSIzMyIgeT0iMjAiIHdpZHRoPSI5LjUiIGhlaWdodD0iOS41IiByeD0iMi4yIiBmaWxsPSIjYzI1ODBlIi8+CiAgPHJlY3QgeD0iMjEuNSIgeT0iMzEuNSIgd2lkdGg9IjkuNSIgaGVpZ2h0PSI5LjUiIHJ4PSIyLjIiIGZpbGw9IiMxMTExMTAiLz4KICA8cmVjdCB4PSIzMyIgeT0iMzEuNSIgd2lkdGg9IjkuNSIgaGVpZ2h0PSI5LjUiIHJ4PSIyLjIiIGZpbGw9IiMxMTExMTAiLz4KPC9zdmc+Cg==","h-clipboard-cap.svg":"data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+CiAgPCEtLSBIIMK3IENsaXBib2FyZCBjYXA6IGFuIGFkbWluaXN0cmF0aW9uIGNsaXBib2FyZCB3aG9zZSBjbGlwIGlzIGEgZ3JhZHVhdGlvbiBjYXAuIC0tPgogIDxyZWN0IHdpZHRoPSI2NCIgaGVpZ2h0PSI2NCIgcng9IjE1IiBmaWxsPSIjYzI1ODBlIi8+CiAgPHJlY3QgeD0iMTUuNSIgeT0iMTciIHdpZHRoPSIzMyIgaGVpZ2h0PSIzOCIgcng9IjUiIGZpbGw9IiNmZmY3ZWMiLz4KICA8cGF0aCBkPSJNMjQuNSAxNi41VjIwQzI0LjUgMjEuOCAyOCAyMy41IDMyIDIzLjVTMzkuNSAyMS44IDM5LjUgMjBWMTYuNSIgZmlsbD0iIzExMTExMCIvPgogIDxwYXRoIGQ9Ik0zMiA3LjUgNDYuNSAxNCAzMiAyMC41IDE3LjUgMTRaIiBmaWxsPSIjMTExMTEwIiBzdHJva2U9IiMxMTExMTAiIHN0cm9rZS13aWR0aD0iMS41IiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+CiAgPHBhdGggZD0iTTQzLjUgMTUuNVYyMiIgc3Ryb2tlPSIjMTExMTEwIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPgogIDxjaXJjbGUgY3g9IjIyLjUiIGN5PSIzMiIgcj0iMi4yIiBmaWxsPSIjYzI1ODBlIi8+CiAgPHBhdGggZD0iTTI3LjUgMzJINDEuNSIgc3Ryb2tlPSIjMTExMTEwIiBzdHJva2Utd2lkdGg9IjIuOCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+CiAgPGNpcmNsZSBjeD0iMjIuNSIgY3k9IjM5LjUiIHI9IjIuMiIgZmlsbD0iI2MyNTgwZSIvPgogIDxwYXRoIGQ9Ik0yNy41IDM5LjVINDEuNSIgc3Ryb2tlPSIjMTExMTEwIiBzdHJva2Utd2lkdGg9IjIuOCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+CiAgPGNpcmNsZSBjeD0iMjIuNSIgY3k9IjQ3IiByPSIyLjIiIGZpbGw9IiNjMjU4MGUiLz4KICA8cGF0aCBkPSJNMjcuNSA0N0gzNi41IiBzdHJva2U9IiMxMTExMTAiIHN0cm9rZS13aWR0aD0iMi44IiBzdHJva2UtbGluZWNhcD0icm91bmQiLz4KPC9zdmc+Cg=="};
+  const grid = document.getElementById('grid');
+  for (const o of options) {
+    const word = '<span class="word">Campus<span>Pilot</span></span>';
+    grid.insertAdjacentHTML('beforeend', `
+      <section class="card">
+        <h2>${o.name}</h2>
+        <img class="hero" src="${svg[o.file]}" alt="">
+        <div class="sizes">
+          <img src="${svg[o.file]}" width="48" height="48" alt="">
+          <img src="${svg[o.file]}" width="32" height="32" alt="">
+          <img src="${svg[o.file]}" width="16" height="16" alt="">
+        </div>
+        <div class="bar"><img src="${svg[o.file]}" width="28" height="28" alt="">${word}</div>
+        <div class="bar dark"><img src="${svg[o.file]}" width="28" height="28" alt="">${word}</div>
+        <p>${o.note}</p>
+      </section>`);
+  }
+</script>
+</body>
+</html>
