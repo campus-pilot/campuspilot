@@ -65,9 +65,16 @@ const CORE_TOOLS = [
 const HIDDEN_TOOLS = [
   'auth.setPassword',
   'auth.getOAuthConsentClient',
+  'auth.listOAuthConnections',
+  'auth.disconnectOAuthConnection',
   'authorization.checkPermissions',
   'healthCheck',
   'school.getLogo',
+  'systemAdmin.listOAuthClients',
+  'systemAdmin.createOAuthClient',
+  'systemAdmin.rotateOAuthClientSecret',
+  'systemAdmin.deleteOAuthClient',
+  'systemAdmin.setOAuthClientDisabled',
 ];
 
 /**

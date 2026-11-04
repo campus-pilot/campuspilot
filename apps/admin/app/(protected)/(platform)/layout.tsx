@@ -8,12 +8,14 @@ import {
   ChartNoAxesColumn,
   ClipboardList,
   House,
+  KeyRound,
 } from 'lucide-react';
 import { AdminShell, type AdminShellState } from '@/components/admin-shell';
 import { resolveAdminPageActions } from '@/components/admin-route';
 import { NewSchoolAction } from '@/components/new-school-action';
 import { demoRequestsPage } from './demo-requests/_route';
 import { homePage } from './_route';
+import { oauthClientsPage } from './oauth-clients/_route';
 import { organizationsPage } from './organizations/_route';
 import { platformUsagePage } from './platform-usage/_route';
 
@@ -47,6 +49,13 @@ const navigation: AppShellNavigationEntry[] = [
       },
       {
         type: 'item',
+        id: 'oauth-clients',
+        label: 'OAuth clients',
+        href: '/oauth-clients',
+        icon: KeyRound,
+      },
+      {
+        type: 'item',
         id: 'platform-usage',
         label: 'Platform Usage',
         href: '/platform-usage',
@@ -56,7 +65,13 @@ const navigation: AppShellNavigationEntry[] = [
   },
 ];
 
-const pages = [homePage, demoRequestsPage, organizationsPage, platformUsagePage];
+const pages = [
+  homePage,
+  demoRequestsPage,
+  organizationsPage,
+  oauthClientsPage,
+  platformUsagePage,
+];
 
 export default function PlatformLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();

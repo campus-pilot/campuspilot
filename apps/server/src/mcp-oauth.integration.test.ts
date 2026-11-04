@@ -290,6 +290,37 @@ describe('MCP endpoint authentication', () => {
     expect(names(readWrite.json)).toContain('runAdvancedWriteTool');
   });
 
+  it('records when a connection was last used', async () => {
+    const grant = await connectClient();
+    const consent = () =>
+      db
+        .select({ lastUsedAt: schema.oauthConsent.lastUsedAt })
+        .from(schema.oauthConsent)
+        .where(
+          and(
+            eq(schema.oauthConsent.clientId, grant.clientId),
+            eq(schema.oauthConsent.userId, grant.userId),
+          ),
+        );
+    expect((await consent())[0]?.lastUsedAt).toBeNull();
+
+    await mcp(bearer(grant.tokens.access_token), 'tools/list');
+
+    expect((await consent())[0]?.lastUsedAt).toBeInstanceOf(Date);
+  });
+
+  it('stops every connection of a client an administrator disables', async () => {
+    const grant = await connectClient();
+    await db
+      .update(schema.oauthClient)
+      .set({ disabled: true })
+      .where(eq(schema.oauthClient.clientId, grant.clientId));
+
+    const { response } = await mcp(bearer(grant.tokens.access_token), 'tools/list');
+
+    expect(response.status).toBe(401);
+  });
+
   it('stops a connection immediately when the user disconnects it', async () => {
     const grant = await connectClient();
     await createTestSchoolMember({

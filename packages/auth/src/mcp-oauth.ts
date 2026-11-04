@@ -18,6 +18,7 @@ import {
   OAUTH_CONSENT_PATH,
   OAUTH_LOGIN_PATH,
   OAUTH_SUPPORTED_SCOPES,
+  PLATFORM_OAUTH_CLIENT_OWNER,
 } from './mcp-oauth-policy';
 
 /**
@@ -87,6 +88,10 @@ export function mcpOAuthPlugins(options: McpOAuthOptions = {}) {
        * connect clients through CIMD, DCR or a pre-registered client.
        */
       clientPrivileges: ({ user }) => user?.role === 'admin',
+      // Clients an administrator creates belong to the platform, not to that
+      // administrator, so every platform administrator can manage them.
+      clientReference: ({ user }) =>
+        user?.role === 'admin' ? PLATFORM_OAUTH_CLIENT_OWNER : undefined,
     }),
     cimd({
       fetchClientMetadataResource:

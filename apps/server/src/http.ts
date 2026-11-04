@@ -21,6 +21,7 @@ import {
 import { normalizeApiKeyRequest } from '@campuspilot/auth/api-key-headers';
 import {
   findLiveOAuthGrant,
+  recordOAuthGrantUse,
   verifyMcpAccessToken,
 } from '@campuspilot/auth/mcp-credential';
 import { auth } from '@campuspilot/auth/server';
@@ -184,6 +185,7 @@ const authenticateMcpRequest = createMcpGate({
   createApiKeyContext: (apiKey) =>
     createContextFromHeaders(new Headers({ 'x-api-key': apiKey })),
   createOAuthContext,
+  recordGrantUse: (grantId) => recordOAuthGrantUse(db, grantId),
 });
 
 app.all('/api/mcp', async (context) => {

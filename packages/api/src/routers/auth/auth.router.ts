@@ -1,38 +1,23 @@
 import { auth } from '@campuspilot/auth/server';
 import { oauthClient } from '@campuspilot/db/schema/auth';
 import { eq } from 'drizzle-orm';
-import type { z } from 'zod';
 
 import { rpcError } from '../../errors';
 import { protectedProcedure } from '../../index';
 import {
+  oauthClientRegistrationMethod,
+  oauthClientVerifiedHost,
+} from '../../oauth/oauth-client-facts';
+import { oauthConnectionRouter } from './oauth-connection.router';
+import {
   getOAuthConsentClientInputSchema,
-  type oauthClientRegistrationMethodSchema,
   oauthConsentClientSchema,
   setPasswordInputSchema,
   setPasswordOutputSchema,
 } from './auth.dto';
 
-type RegistrationMethod = z.infer<typeof oauthClientRegistrationMethodSchema>;
-
-/**
- * Reads the registration method from the facts recorded at registration: the
- * CIMD plugin's `clientDiscoveryId`, or `metadata.registrationMethod` written
- * by DCR and by administrators. Unrecorded clients stay `unknown`.
- */
-export function oauthClientRegistrationMethod(client: {
-  clientDiscoveryId: string | null;
-  metadata: unknown;
-}): RegistrationMethod {
-  if (client.clientDiscoveryId === 'cimd') return 'client_id_metadata_document';
-  const recorded = (client.metadata as { registrationMethod?: unknown } | null)
-    ?.registrationMethod;
-  return recorded === 'pre_registered' || recorded === 'dynamic'
-    ? recorded
-    : 'unknown';
-}
-
 export const authRouter = {
+  ...oauthConnectionRouter,
   setPassword: protectedProcedure
     .route({
       summary: 'Set an account password',
@@ -101,10 +86,7 @@ export const authRouter = {
         name: client.name,
         uri: client.uri,
         registrationMethod,
-        verifiedHost:
-          registrationMethod === 'client_id_metadata_document'
-            ? new URL(client.clientId).host
-            : null,
+        verifiedHost: oauthClientVerifiedHost(client.clientId, registrationMethod),
       };
     }),
 };

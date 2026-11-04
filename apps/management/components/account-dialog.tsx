@@ -17,15 +17,17 @@ import {
 } from '@campuspilot/ui/components/dialog';
 import { Input } from '@campuspilot/ui/components/input';
 import { Label } from '@campuspilot/ui/components/label';
-import { KeyRound, LoaderCircle, UserRound } from 'lucide-react';
+import { Bot, KeyRound, LoaderCircle, UserRound } from 'lucide-react';
 import { authClient } from '@/lib/auth-client';
 import { AccountApiKeys } from './account-api-keys';
+import { AccountConnectedApps } from './account-connected-apps';
 import { AccountProfileImage } from './account-profile-image';
 
-type AccountSectionId = 'profile' | 'api-keys';
+type AccountSectionId = 'profile' | 'connected-apps' | 'api-keys';
 
 const sections: readonly AccountSection<AccountSectionId>[] = [
   { id: 'profile', label: 'Profile', icon: UserRound },
+  { id: 'connected-apps', label: 'Connected apps', icon: Bot },
   { id: 'api-keys', label: 'API keys', icon: KeyRound },
 ];
 
@@ -152,6 +154,7 @@ export function AccountDialog({
                 onSaved={() => onOpenChange(false)}
               />
             ) : null}
+            {activeSection === 'connected-apps' ? <AccountConnectedApps /> : null}
             {activeSection === 'api-keys' ? <AccountApiKeys /> : null}
           </div>
         </div>

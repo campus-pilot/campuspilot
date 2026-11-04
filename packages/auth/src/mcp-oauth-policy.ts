@@ -48,3 +48,12 @@ export const OAUTH_CONSENT_PATH = '/oauth/consent';
 
 /** Management route that signs the user in (and resumes an authorization). */
 export const OAUTH_LOGIN_PATH = '/auth/login';
+
+/**
+ * Owner (`referenceId`) of OAuth clients that platform administrators
+ * pre-register. Any platform administrator may rotate or delete them.
+ */
+export const PLATFORM_OAUTH_CLIENT_OWNER = 'campuspilot-platform';
+
+/** How often the MCP gate refreshes a connection's last-used time. */
+export const OAUTH_GRANT_USE_RECORD_INTERVAL_MS = 5 * 60 * 1000;

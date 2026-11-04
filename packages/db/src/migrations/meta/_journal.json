@@ -169,6 +169,13 @@
       "when": 1793802565574,
       "tag": "0023_mcp-oauth-authorization-server",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1793804476721,
+      "tag": "0024_oauth-consent-last-used",
+      "breakpoints": true
     }
   ]
 }

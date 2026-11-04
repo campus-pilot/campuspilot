@@ -26,6 +26,8 @@ export type McpGateOptions = {
   /** Builds the context for an API key; anonymous when the key is invalid. */
   createApiKeyContext: (apiKey: string) => Promise<Context>;
   createOAuthContext: (input: OAuthContextInput) => Promise<Context | null>;
+  /** Records that the grant was used (throttled by the implementation). */
+  recordGrantUse: (grantId: string) => Promise<void>;
 };
 
 export type McpGateResult =
@@ -153,6 +155,7 @@ export function createMcpGate(options: McpGateOptions) {
       expiresAt: claims.expiresAt,
     });
     if (!context) return 'revoked';
+    await options.recordGrantUse(grant.grantId);
     return {
       context,
       authInfo: {

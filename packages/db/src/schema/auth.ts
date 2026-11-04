@@ -320,6 +320,12 @@ export const oauthConsent = pgTable(
     scopes: text("scopes").array().notNull(),
     createdAt: timestamp("created_at"),
     updatedAt: timestamp("updated_at"),
+    /**
+     * CampusPilot column, not Better Auth's: when the connection last made an
+     * MCP request. The MCP gate records it (at most every few minutes) so
+     * users can see which connections are in use.
+     */
+    lastUsedAt: timestamp("last_used_at"),
   },
   (table) => [
     index("oauthConsent_clientId_idx").on(table.clientId),

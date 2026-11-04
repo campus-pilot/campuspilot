@@ -2,9 +2,10 @@ import type { DatabaseExecutor } from '@campuspilot/db';
 import * as schema from '@campuspilot/db/schema/auth';
 import { env } from '@campuspilot/env/server';
 import { getJwks, verifyJwsAccessToken } from 'better-auth/oauth2';
-import { and, eq, or, isNull } from 'drizzle-orm';
+import { and, eq, isNull, lt, or } from 'drizzle-orm';
 
 import { oauthIssuer } from './mcp-oauth';
+import { OAUTH_GRANT_USE_RECORD_INTERVAL_MS } from './mcp-oauth-policy';
 
 /** The claims CampusPilot relies on from a verified MCP access token. */
 export type McpAccessTokenClaims = {
@@ -99,4 +100,29 @@ export async function findLiveOAuthGrant(
     )
     .limit(1);
   return grant ?? null;
+}
+
+/**
+ * Records that a connection was used, at most once per
+ * OAUTH_GRANT_USE_RECORD_INTERVAL_MS, so a busy connection does not write on
+ * every request.
+ */
+export async function recordOAuthGrantUse(
+  db: DatabaseExecutor,
+  grantId: string,
+  now = new Date(),
+): Promise<void> {
+  const stale = new Date(now.getTime() - OAUTH_GRANT_USE_RECORD_INTERVAL_MS);
+  await db
+    .update(schema.oauthConsent)
+    .set({ lastUsedAt: now })
+    .where(
+      and(
+        eq(schema.oauthConsent.id, grantId),
+        or(
+          isNull(schema.oauthConsent.lastUsedAt),
+          lt(schema.oauthConsent.lastUsedAt, stale),
+        ),
+      ),
+    );
 }

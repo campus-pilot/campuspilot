@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { oauthClientRegistrationMethodSchema } from '../../oauth/oauth-client-facts';
+
 export const setPasswordInputSchema = z.object({
   newPassword: z.string().min(8, 'Password must contain at least 8 characters.'),
 });
@@ -7,14 +9,6 @@ export const setPasswordInputSchema = z.object({
 export const setPasswordOutputSchema = z.object({
   success: z.literal(true),
 });
-
-/** How an OAuth client was registered, from its explicitly recorded facts. */
-export const oauthClientRegistrationMethodSchema = z.enum([
-  'client_id_metadata_document',
-  'pre_registered',
-  'dynamic',
-  'unknown',
-]);
 
 export const getOAuthConsentClientInputSchema = z.object({
   clientId: z.string().min(1).max(2048),
