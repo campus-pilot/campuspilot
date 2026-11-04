@@ -172,11 +172,13 @@ jobs:
             image: ghcr.io/campus-pilot/campuspilot-plus-management
             build_args: |
               NEXT_PUBLIC_SERVER_URL=${{ vars.NEXT_PUBLIC_SERVER_URL }}
+              NEXT_PUBLIC_MCP_URL=${{ vars.NEXT_PUBLIC_MCP_URL }}
           - name: admin
             file: apps/admin/Dockerfile
             image: ghcr.io/campus-pilot/campuspilot-plus-admin
             build_args: |
               NEXT_PUBLIC_SERVER_URL=${{ vars.NEXT_PUBLIC_SERVER_URL }}
+              NEXT_PUBLIC_MCP_URL=${{ vars.NEXT_PUBLIC_MCP_URL }}
           - name: web
             file: apps/web/Dockerfile
             image: ghcr.io/campus-pilot/campuspilot-plus-web

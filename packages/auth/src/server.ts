@@ -3,14 +3,26 @@ import * as schema from '@campuspilot/db/schema/auth';
 import { env } from '@campuspilot/env/server';
 import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
+import {
+  APIError,
+  createAuthMiddleware,
+  getSessionFromCtx,
+} from 'better-auth/api';
 import { admin } from 'better-auth/plugins';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, count, eq, gt, isNull, ne, or } from 'drizzle-orm';
 
 import { getRedisClient } from '@campuspilot/redis/client';
 import { log } from './log';
 
 import { redisStorage } from '@better-auth/redis-storage';
 import { apiKey } from '@better-auth/api-key';
+import {
+  API_KEY_DEFAULT_EXPIRES_IN_SECONDS,
+  API_KEY_MAX_ACTIVE_PER_USER,
+  API_KEY_MAX_EXPIRY_DAYS,
+  API_KEY_MIN_EXPIRY_DAYS,
+  API_KEY_NAME_MAX_LENGTH,
+} from './api-key-policy';
 import {
   googlePictureFromIdToken,
   importGoogleProfileImage,
@@ -58,6 +70,57 @@ export function createAuth(db: DatabaseExecutor = createDb()) {
       log.warn({ err: error, userId }, 'auth.google.profile-image.import-failed');
     }
   };
+
+  /** Counts a user's keys that can still authenticate (enabled, unexpired). */
+  const countActiveApiKeys = async (userId: string) => {
+    const [result] = await db
+      .select({ value: count() })
+      .from(schema.apikey)
+      .where(
+        and(
+          eq(schema.apikey.referenceId, userId),
+          or(isNull(schema.apikey.enabled), ne(schema.apikey.enabled, false)),
+          or(
+            isNull(schema.apikey.expiresAt),
+            gt(schema.apikey.expiresAt, new Date()),
+          ),
+        ),
+      );
+    return result?.value ?? 0;
+  };
+
+  /**
+   * Enforces the API-key policy the plugin has no option for. Creating a key
+   * is refused once the owner holds API_KEY_MAX_ACTIVE_PER_USER active keys;
+   * this check-then-insert is a per-user cap, not a lock, so simultaneous
+   * creates can briefly exceed it by the number of racing requests. Updating
+   * a key to `expiresIn: null` is refused because it would make the key
+   * permanent, which the plugin's update endpoint otherwise allows.
+   */
+  const apiKeyPolicy = createAuthMiddleware(async (ctx) => {
+    if (ctx.path === '/api-key/update' && ctx.body?.expiresIn === null) {
+      throw new APIError('BAD_REQUEST', {
+        code: 'API_KEY_EXPIRY_REQUIRED',
+        message: `API keys must expire within ${API_KEY_MAX_EXPIRY_DAYS} days.`,
+      });
+    }
+    if (ctx.path !== '/api-key/create') return;
+
+    const session = await getSessionFromCtx(ctx);
+    // Server-side calls without a request may name the owner explicitly,
+    // exactly as the plugin itself accepts.
+    const ownerId =
+      session?.user.id ??
+      (ctx.request || ctx.headers ? undefined : ctx.body?.userId);
+    if (typeof ownerId !== 'string') return;
+
+    if ((await countActiveApiKeys(ownerId)) >= API_KEY_MAX_ACTIVE_PER_USER) {
+      throw new APIError('BAD_REQUEST', {
+        code: 'API_KEY_LIMIT_REACHED',
+        message: `You can have at most ${API_KEY_MAX_ACTIVE_PER_USER} active API keys. Delete one you no longer use first.`,
+      });
+    }
+  });
 
   return betterAuth({
     logger: {
@@ -121,6 +184,7 @@ export function createAuth(db: DatabaseExecutor = createDb()) {
 
     secret: env.BETTER_AUTH_SECRET,
     baseURL: env.BETTER_AUTH_URL,
+    hooks: { before: apiKeyPolicy },
     advanced: {
       cookiePrefix: 'cp_',
       defaultCookieAttributes: {
@@ -229,11 +293,24 @@ export function createAuth(db: DatabaseExecutor = createDb()) {
         references: 'user',
         defaultPrefix: 'cp_',
         enableSessionForAPIKeys: true,
-        rateLimit: {
-          enabled: true,
-          timeWindow: 1000, // 1 sec
-          maxRequests: 100, // 10 requests per day
+        maximumNameLength: API_KEY_NAME_MAX_LENGTH,
+        /**
+         * Every key expires. `defaultExpiresIn` is in seconds (the plugin's
+         * doc comment says milliseconds, but it is applied as seconds) and
+         * applies when a client sends no expiry; min/max are in days.
+         */
+        keyExpiration: {
+          defaultExpiresIn: API_KEY_DEFAULT_EXPIRES_IN_SECONDS,
+          minExpiresIn: API_KEY_MIN_EXPIRY_DAYS,
+          maxExpiresIn: API_KEY_MAX_EXPIRY_DAYS,
         },
+        /**
+         * No per-key rate limiting. This global switch is checked before each
+         * key's own flag, so it also covers keys created while limiting was
+         * on. Request limits, if ever needed, belong at the API or gateway
+         * level rather than in a per-request key counter.
+         */
+        rateLimit: { enabled: false },
       }),
     ],
   });

@@ -227,6 +227,7 @@ const next = spawn(
       Object.entries({
         ...env,
         NEXT_PUBLIC_SERVER_URL: env.BETTER_AUTH_URL,
+        NEXT_PUBLIC_MCP_URL: new URL("/api/mcp", env.BETTER_AUTH_URL).toString(),
       })
         .filter(([, value]) => value !== undefined)
         .map(([key, value]) => [key, String(value)]),

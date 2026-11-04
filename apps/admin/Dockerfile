@@ -6,6 +6,8 @@ COPY . .
 
 ARG NEXT_PUBLIC_SERVER_URL
 ENV NEXT_PUBLIC_SERVER_URL=${NEXT_PUBLIC_SERVER_URL}
+ARG NEXT_PUBLIC_MCP_URL
+ENV NEXT_PUBLIC_MCP_URL=${NEXT_PUBLIC_MCP_URL}
 
 RUN --mount=type=cache,target=/pnpm-store pnpm install --frozen-lockfile --store-dir /pnpm-store
 RUN pnpm --filter admin build

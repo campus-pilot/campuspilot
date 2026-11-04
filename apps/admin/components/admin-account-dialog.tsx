@@ -1,20 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useForm } from '@tanstack/react-form';
 import { z } from 'zod';
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from '@campuspilot/ui/components/alert-dialog';
-import { Badge } from '@campuspilot/ui/components/badge';
+  type AccountSection,
+  AccountSectionNavigation,
+} from '@campuspilot/components/account-section-navigation';
 import { Button } from '@campuspilot/ui/components/button';
 import {
   Dialog,
@@ -25,30 +17,13 @@ import {
 } from '@campuspilot/ui/components/dialog';
 import { Input } from '@campuspilot/ui/components/input';
 import { Label } from '@campuspilot/ui/components/label';
-import { Separator } from '@campuspilot/ui/components/separator';
-import {
-  Check,
-  Clipboard,
-  KeyRound,
-  LoaderCircle,
-  ShieldCheck,
-  Trash2,
-  UserRound,
-} from 'lucide-react';
+import { KeyRound, LoaderCircle, ShieldCheck, UserRound } from 'lucide-react';
 import { authClient } from '@/lib/auth-client';
 import { client } from '@/lib/orpc';
+import { AccountApiKeys } from './account-api-keys';
 import { AccountProfileImage } from './account-profile-image';
 
-type AccountSection = 'profile' | 'security' | 'api-keys';
-
-type ApiKey = {
-  id: string;
-  name: string | null;
-  start: string | null;
-  prefix: string | null;
-  createdAt: Date;
-  lastRequest: Date | null;
-};
+type AccountSectionId = 'profile' | 'security' | 'api-keys';
 
 type AdminAccountDialogProps = {
   email: string;
@@ -57,10 +32,10 @@ type AdminAccountDialogProps = {
   onOpenChange: (open: boolean) => void;
 };
 
-const sections = [
-  { id: 'profile' as const, label: 'Profile', icon: UserRound },
-  { id: 'security' as const, label: 'Security', icon: ShieldCheck },
-  { id: 'api-keys' as const, label: 'API keys', icon: KeyRound },
+const sections: readonly AccountSection<AccountSectionId>[] = [
+  { id: 'profile', label: 'Profile', icon: UserRound },
+  { id: 'security', label: 'Security', icon: ShieldCheck },
+  { id: 'api-keys', label: 'API keys', icon: KeyRound },
 ];
 
 function errorMessage(error: unknown, fallback: string) {
@@ -69,31 +44,6 @@ function errorMessage(error: unknown, fallback: string) {
     if (typeof message === 'string') return message;
   }
   return fallback;
-}
-
-function SectionNavigation({
-  activeSection,
-  onChange,
-}: {
-  activeSection: AccountSection;
-  onChange: (section: AccountSection) => void;
-}) {
-  return (
-    <nav className="flex gap-1 overflow-x-auto border-b p-2 md:w-44 md:shrink-0 md:flex-col md:border-r md:border-b-0 md:p-3">
-      {sections.map(({ id, label, icon: Icon }) => (
-        <Button
-          key={id}
-          type="button"
-          variant={activeSection === id ? 'secondary' : 'ghost'}
-          className="shrink-0 justify-start rounded-lg"
-          onClick={() => onChange(id)}
-        >
-          <Icon />
-          {label}
-        </Button>
-      ))}
-    </nav>
-  );
 }
 
 function ProfileSection({
@@ -410,230 +360,14 @@ function SecuritySection({ active }: { active: boolean }) {
   );
 }
 
-function ApiKeyRow({
-  apiKey,
-  onDelete,
-}: {
-  apiKey: ApiKey;
-  onDelete: (id: string) => void;
-}) {
-  const visibleKey = [apiKey.start].filter(Boolean).join('') || 'Key';
-
-  return (
-    <div className="flex items-center gap-3 rounded-xl border p-3">
-      <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-muted">
-        <KeyRound className="size-4" />
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <p className="truncate text-sm font-medium">
-            {apiKey.name || 'Unnamed key'}
-          </p>
-          <Badge variant="outline">{visibleKey}…</Badge>
-        </div>
-        <p className="mt-1 text-[11px] text-muted-foreground">
-          Created {new Date(apiKey.createdAt).toLocaleDateString()}
-          {apiKey.lastRequest
-            ? ` · Last used ${new Date(apiKey.lastRequest).toLocaleDateString()}`
-            : ' · Never used'}
-        </p>
-      </div>
-      <AlertDialog>
-        <AlertDialogTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label="Delete API key"
-          >
-            <Trash2 />
-          </Button>
-        </AlertDialogTrigger>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete API key?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Any integration using this key will immediately stop working.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              variant="destructive"
-              onClick={() => onDelete(apiKey.id)}
-            >
-              Delete key
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </div>
-  );
-}
-
-function ApiKeysSection({ active }: { active: boolean }) {
-  const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
-  const [createdKey, setCreatedKey] = useState<string>();
-  const [isLoading, setIsLoading] = useState(false);
-  const [message, setMessage] = useState<string>();
-  const [copied, setCopied] = useState(false);
-
-  const loadApiKeys = useCallback(async () => {
-    setIsLoading(true);
-    const { data, error } = await authClient.apiKey.list();
-    setIsLoading(false);
-    if (error) setMessage(error.message);
-    else setApiKeys(data.apiKeys);
-  }, []);
-
-  useEffect(() => {
-    if (active) void loadApiKeys();
-  }, [active, loadApiKeys]);
-
-  const form = useForm({
-    defaultValues: { name: '' },
-    validators: {
-      onSubmit: z.object({
-        name: z.string().trim().min(1, 'Key name is required.'),
-      }),
-    },
-    onSubmit: async ({ value }) => {
-      setMessage(undefined);
-      const { data, error } = await authClient.apiKey.create({
-        name: value.name.trim(),
-      });
-      if (error) {
-        setMessage(error.message);
-        return;
-      }
-      form.reset();
-      setCopied(false);
-      setCreatedKey(data.key);
-      await loadApiKeys();
-    },
-  });
-
-  async function deleteApiKey(id: string) {
-    const { error } = await authClient.apiKey.delete({ keyId: id });
-    if (error) setMessage(error.message);
-    else setApiKeys((current) => current.filter((apiKey) => apiKey.id !== id));
-  }
-
-  async function copyCreatedKey() {
-    if (!createdKey) return;
-    await navigator.clipboard.writeText(createdKey);
-    setCopied(true);
-  }
-
-  return (
-    <section className="flex flex-col gap-5">
-      <div>
-        <h2 className="text-base font-semibold">API keys</h2>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Create credentials for scripts and integrations accessing your
-          account.
-        </p>
-      </div>
-      <form
-        className="flex max-w-lg items-end gap-2"
-        onSubmit={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          void form.handleSubmit();
-        }}
-      >
-        <div className="flex flex-1 flex-col gap-2">
-          <form.Field name="name">
-            {(field) => (
-              <>
-                <Label htmlFor="api-key-name">Key name</Label>
-                <Input
-                  id="api-key-name"
-                  name={field.name}
-                  value={field.state.value}
-                  placeholder="Production integration"
-                  onBlur={field.handleBlur}
-                  onChange={(event) => field.handleChange(event.target.value)}
-                />
-                {field.state.meta.errors.map((error) =>
-                  error?.message ? (
-                    <p key={error.message} className="text-xs text-destructive">
-                      {error.message}
-                    </p>
-                  ) : null,
-                )}
-              </>
-            )}
-          </form.Field>
-        </div>
-        <form.Subscribe
-          selector={(state) => ({
-            canSubmit: state.canSubmit,
-            isSubmitting: state.isSubmitting,
-          })}
-        >
-          {({ canSubmit, isSubmitting }) => (
-            <Button type="submit" disabled={!canSubmit || isSubmitting}>
-              {isSubmitting ? (
-                <LoaderCircle className="animate-spin" />
-              ) : (
-                <KeyRound />
-              )}
-              Create key
-            </Button>
-          )}
-        </form.Subscribe>
-      </form>
-      {createdKey ? (
-        <div className="flex flex-col gap-3 rounded-xl border border-primary/30 bg-primary/5 p-4">
-          <div>
-            <p className="text-sm font-medium">Copy your new API key</p>
-            <p className="mt-1 text-[11px] text-muted-foreground">
-              This key is only shown once. Store it somewhere secure.
-            </p>
-          </div>
-          <div className="flex gap-2">
-            <Input value={createdKey} readOnly className="font-mono" />
-            <Button
-              type="button"
-              variant="outline"
-              size="icon"
-              onClick={copyCreatedKey}
-            >
-              {copied ? <Check /> : <Clipboard />}
-              <span className="sr-only">Copy API key</span>
-            </Button>
-          </div>
-        </div>
-      ) : null}
-      <Separator />
-      <div className="flex flex-col gap-3">
-        <h3 className="text-sm font-medium">Active keys</h3>
-        {isLoading ? (
-          <p className="flex items-center gap-2 text-xs text-muted-foreground">
-            <LoaderCircle className="size-4 animate-spin" /> Loading keys…
-          </p>
-        ) : null}
-        {!isLoading && apiKeys.length === 0 ? (
-          <p className="rounded-xl border border-dashed p-6 text-center text-xs text-muted-foreground">
-            You have not created any API keys.
-          </p>
-        ) : null}
-        {apiKeys.map((apiKey) => (
-          <ApiKeyRow key={apiKey.id} apiKey={apiKey} onDelete={deleteApiKey} />
-        ))}
-        {message ? <p className="text-xs text-destructive">{message}</p> : null}
-      </div>
-    </section>
-  );
-}
-
 export function AdminAccountDialog({
   email,
   name,
   open,
   onOpenChange,
 }: AdminAccountDialogProps) {
-  const [activeSection, setActiveSection] = useState<AccountSection>('profile');
+  const [activeSection, setActiveSection] =
+    useState<AccountSectionId>('profile');
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -645,7 +379,8 @@ export function AdminAccountDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="flex min-h-0 flex-1 flex-col md:flex-row">
-          <SectionNavigation
+          <AccountSectionNavigation
+            sections={sections}
             activeSection={activeSection}
             onChange={setActiveSection}
           />
@@ -654,7 +389,7 @@ export function AdminAccountDialog({
               <ProfileSection key={name} email={email} initialName={name} />
             ) : null}
             {activeSection === 'security' ? <SecuritySection active /> : null}
-            {activeSection === 'api-keys' ? <ApiKeysSection active /> : null}
+            {activeSection === 'api-keys' ? <AccountApiKeys /> : null}
           </div>
         </div>
       </DialogContent>
