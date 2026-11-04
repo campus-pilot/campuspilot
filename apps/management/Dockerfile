@@ -22,6 +22,7 @@ ENV PORT=3002
 
 COPY --from=builder /app/apps/management/.next/standalone ./
 COPY --from=builder /app/apps/management/.next/static ./apps/management/.next/static
+COPY --from=builder /app/apps/management/public ./apps/management/public
 
 EXPOSE 3002
 
