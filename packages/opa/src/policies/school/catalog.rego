@@ -338,6 +338,15 @@ actions contains {
   "resourceKind": "school",
 } if { true }
 
+# Starting and continuing in-app assistant conversations. Granting this never
+# widens what the assistant can do: every tool call is still authorized as the
+# user, action by action.
+actions contains {
+  "id": "school.assistant.use",
+  "key": "USE_ASSISTANT",
+  "resourceKind": "school",
+} if { true }
+
 actions contains {
   "id": "school.student.create",
   "key": "CREATE_STUDENT",

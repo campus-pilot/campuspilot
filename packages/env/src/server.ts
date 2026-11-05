@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { createEnv } from '@t3-oss/env-core';
 import { z } from 'zod';
 import { DB_ENV_SHAPE } from './server/api-db.env';
+import { ASSISTANT_DELEGATION_ENV_SHAPE } from './server/assistant.env';
 import { AUTH_ENV_SHAPE } from './server/auth.env';
 import { S3_ENV_SHAPE } from './server/s3.env';
 import { SERVICES_ENV_SHAPE } from './server/services.env';
@@ -20,6 +21,7 @@ export const env = createEnv({
     ...DB_ENV_SHAPE,
     ...S3_ENV_SHAPE,
     ...SERVICES_ENV_SHAPE,
+    ...ASSISTANT_DELEGATION_ENV_SHAPE,
   },
   runtimeEnv: process.env,
   skipValidation: !!process.env.SKIP_ENV_VALIDATION,

@@ -1,9 +1,11 @@
 import {
   type Context,
   createContext,
+  createAssistantContext,
   createContextFromHeaders,
   createOAuthContext,
 } from '@campuspilot/api/context';
+import { verifyAssistantToken } from '@campuspilot/auth/assistant-token';
 import { toRpcError } from '@campuspilot/api/errors';
 import { appRouter } from '@campuspilot/api/routers/index';
 import {
@@ -185,6 +187,8 @@ const authenticateMcpRequest = createMcpGate({
   createApiKeyContext: (apiKey) =>
     createContextFromHeaders(new Headers({ 'x-api-key': apiKey })),
   createOAuthContext,
+  verifyAssistantToken,
+  createAssistantContext,
   recordGrantUse: (grantId) => recordOAuthGrantUse(db, grantId),
 });
 

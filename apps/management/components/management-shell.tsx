@@ -17,6 +17,7 @@ import { Command, Search } from 'lucide-react';
 import { authClient } from '@/lib/auth-client';
 import { useInstallApp } from '@/lib/install-app.client';
 import { AccountDialog } from './account-dialog';
+import { AssistantPanel } from './assistant/assistant-panel';
 import { ManagementCommandPalette } from './management-command-palette';
 import { commandPaletteContextKey } from './management-command-model';
 import { SchoolSwitcher } from './school-switcher';
@@ -116,16 +117,19 @@ export function ManagementShell({
         navbarActions={state.navbarActions}
         navbarSearch={
           showSearch ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="md:hidden"
-              aria-label="Search actions and students"
-              onClick={() => setIsCommandPaletteOpen(true)}
-            >
-              <Search aria-hidden />
-            </Button>
+            <>
+              <AssistantPanel schoolId={state.commandContext.schoolId} />
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="md:hidden"
+                aria-label="Search actions and students"
+                onClick={() => setIsCommandPaletteOpen(true)}
+              >
+                <Search aria-hidden />
+              </Button>
+            </>
           ) : null
         }
         onManageAccount={() => setIsAccountDialogOpen(true)}

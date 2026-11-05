@@ -37,8 +37,7 @@ import {
 import { buildDocumentContexts } from "./document.context";
 import { buildFinanceDocumentContexts } from "./finance-document.context";
 
-const FINANCE_DOCUMENT_TYPES = new Set<dto.DocumentType>(["bill", "receipt", "statement"]);
-const isFinanceDocument = (type: dto.DocumentType) => FINANCE_DOCUMENT_TYPES.has(type);
+const isFinanceDocument = dto.isFinanceDocumentType;
 
 function requireDocumentTypePermission(
   academicAction: Parameters<typeof assertPermission>[1]["action"],

@@ -1,4 +1,9 @@
-import type { Context, OAuthContextInput } from '@campuspilot/api/context';
+import type {
+  AssistantContextInput,
+  Context,
+  OAuthContextInput,
+} from '@campuspilot/api/context';
+import type { AssistantTokenClaims } from '@campuspilot/auth/assistant-token';
 import type { McpAccess } from '@campuspilot/api/mcp-metadata';
 import type {
   LiveOAuthGrant,
@@ -26,6 +31,9 @@ export type McpGateOptions = {
   /** Builds the context for an API key; anonymous when the key is invalid. */
   createApiKeyContext: (apiKey: string) => Promise<Context>;
   createOAuthContext: (input: OAuthContextInput) => Promise<Context | null>;
+  /** Verifies a bearer value as a delegated assistant-service token. */
+  verifyAssistantToken: (token: string) => Promise<AssistantTokenClaims | null>;
+  createAssistantContext: (input: AssistantContextInput) => Promise<Context | null>;
   /** Records that the grant was used (throttled by the implementation). */
   recordGrantUse: (grantId: string) => Promise<void>;
 };
@@ -110,8 +118,9 @@ function requiredAccess(catalog: McpCatalog, message: JsonRpcMessage): McpAccess
  * on its own evidence:
  * 1. `x-api-key` present → API key only.
  * 2. `Authorization: Bearer` → CampusPilot OAuth access token (signature,
- *    issuer, audience, expiry, then a live grant); if it is not one, the same
- *    value is tried as an API key.
+ *    issuer, audience, expiry, then a live grant); if it is not one, as a
+ *    delegated assistant-service token (its own key, type and claims); if it
+ *    is neither, the same value is tried as an API key.
  * 3. Otherwise, or when both fail → 401.
  * Cookies are never accepted here. OAuth requests then need the scopes of
  * the tools they call; API keys carry the user's full rights.
@@ -166,6 +175,20 @@ export function createMcpGate(options: McpGateOptions) {
         resource: new URL(options.resource),
       },
     };
+  }
+
+  async function assistantCredential(token: string): Promise<McpRequestCredential | null> {
+    const claims = await options.verifyAssistantToken(token);
+    if (!claims) return null;
+    const context = await options.createAssistantContext({
+      userId: claims.userId,
+      assistantRun: {
+        conversationId: claims.conversationId,
+        runId: claims.runId,
+        schoolId: claims.schoolId,
+      },
+    });
+    return context ? { context } : null;
   }
 
   async function insufficientScope(
@@ -237,6 +260,9 @@ export function createMcpGate(options: McpGateOptions) {
       const denied = await insufficientScope(request, scopes);
       return denied ? { ok: false, response: denied } : { ok: true, credential: oauth };
     }
+
+    const assistant = await assistantCredential(token);
+    if (assistant) return { ok: true, credential: assistant };
 
     const keyCredential = await apiKeyCredential(token);
     return keyCredential

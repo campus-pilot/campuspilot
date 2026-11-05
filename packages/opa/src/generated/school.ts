@@ -86,6 +86,7 @@ export const SCHOOL_ACTIONS = {
   UPDATE_SESSION: 'school.session.update',
   UPDATE_SESSION_FINANCE: 'school.session.finance.update',
   UPDATE_STUDENT: 'school.student.update',
+  USE_ASSISTANT: 'school.assistant.use',
   WRITE_EXAM_RESULTS: 'school.exam.result.write',
 } as const;
 

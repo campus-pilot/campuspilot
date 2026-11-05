@@ -8,6 +8,7 @@ import {
   oauthClientRegistrationMethod,
   oauthClientVerifiedHost,
 } from '../../oauth/oauth-client-facts';
+import { assistantTokenRouter } from './assistant-token.router';
 import { oauthConnectionRouter } from './oauth-connection.router';
 import {
   getOAuthConsentClientInputSchema,
@@ -17,6 +18,7 @@ import {
 } from './auth.dto';
 
 export const authRouter = {
+  ...assistantTokenRouter,
   ...oauthConnectionRouter,
   setPassword: protectedProcedure
     .route({

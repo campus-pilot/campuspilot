@@ -1,0 +1,186 @@
+import type Anthropic from '@anthropic-ai/sdk';
+import { ASSISTANT_TOOL_META } from '@campuspilot/assistant-contract/protocol';
+import { env } from '@campuspilot/env/assistant';
+import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
+
+/**
+ * CampusPilot tools, reached only through the API's MCP endpoint with the
+ * run's delegated token. The API decides which tools the assistant sees
+ * (its assistant view) and enforces every rule again on each call; this
+ * module only adapts them for the model and adds the assistant's own
+ * behaviour: which calls wait for the user's approval.
+ */
+
+/** Claude API tool names allow only `[a-zA-Z0-9_-]`; MCP names use dots. */
+export const toModelToolName = (mcpName: string) => mcpName.replaceAll('.', '_');
+
+/** Characters of a tool result the model reads; longer results are cut. */
+const MODEL_OUTPUT_LIMIT = 24_000;
+/** Characters of a tool result stored on the visible item. */
+const STORED_OUTPUT_LIMIT = 4_000;
+
+export type AssistantTool = {
+  modelName: string;
+  mcpName: string;
+  title: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+  /** From the MCP `readOnlyHint` annotation. */
+  readOnly: boolean;
+  /** From the MCP `destructiveHint` annotation. */
+  destructive: boolean;
+  /** `core` tools are loaded up front, the rest through tool search. */
+  exposure: string;
+  module: string;
+};
+
+export type AssistantToolCatalog = {
+  tools: ReadonlyMap<string, AssistantTool>;
+  /** Claude API tool definitions in the API's stable listing order. */
+  modelTools: Anthropic.Beta.Messages.BetaToolUnion[];
+};
+
+/**
+ * Approval policy: every write waits for the user's explicit decision; reads
+ * run immediately. One function so a finer policy changes exactly here.
+ */
+export function requiresApproval(tool: AssistantTool): boolean {
+  return !tool.readOnly;
+}
+
+async function withMcpClient<T>(token: string, work: (client: Client) => Promise<T>): Promise<T> {
+  const client = new Client({ name: 'campuspilot-assistant', version: '0.1.0' });
+  await client.connect(
+    new StreamableHTTPClientTransport(new URL(env.CAMPUSPILOT_MCP_URL), {
+      requestInit: { headers: { authorization: `Bearer ${token}` } },
+    }),
+  );
+  try {
+    return await work(client);
+  } finally {
+    await client.close();
+  }
+}
+
+function modelDescription(tool: AssistantTool): string {
+  const approval = requiresApproval(tool)
+    ? '\n\nThis changes school data. When you call it, the user is asked to approve it before it runs.'
+    : '';
+  return `${tool.title}. ${tool.description}${approval}`;
+}
+
+/**
+ * The assistant view is the same for every assistant token (the API filters
+ * it by policy, not by user; OPA decides per call), so one listing serves
+ * every run for a while. A stable catalog also keeps the prompt cache warm.
+ */
+const CATALOG_TTL_MS = 5 * 60_000;
+let cached: { catalog: AssistantToolCatalog; until: number } | null = null;
+
+export async function loadToolCatalog(token: string): Promise<AssistantToolCatalog> {
+  if (cached && cached.until > Date.now()) return cached.catalog;
+
+  const listed = await withMcpClient(token, async (client) => {
+    const all: Awaited<ReturnType<Client['listTools']>>['tools'] = [];
+    let cursor: string | undefined;
+    do {
+      const page = await client.listTools(cursor ? { cursor } : {});
+      all.push(...page.tools);
+      cursor = page.nextCursor;
+    } while (cursor);
+    return all;
+  });
+
+  const tools = new Map<string, AssistantTool>();
+  const modelTools: Anthropic.Beta.Messages.BetaToolUnion[] = [];
+  for (const listedTool of listed) {
+    const meta = (listedTool._meta ?? {}) as Record<string, unknown>;
+    const tool: AssistantTool = {
+      modelName: toModelToolName(listedTool.name),
+      mcpName: listedTool.name,
+      title: listedTool.title ?? listedTool.name,
+      description: listedTool.description ?? '',
+      inputSchema: listedTool.inputSchema as Record<string, unknown>,
+      // Fails closed: a tool that does not say it is read-only is a write.
+      readOnly: listedTool.annotations?.readOnlyHint === true,
+      destructive: listedTool.annotations?.destructiveHint === true,
+      exposure: String(meta[ASSISTANT_TOOL_META.exposure] ?? 'advanced'),
+      module: String(meta[ASSISTANT_TOOL_META.module] ?? 'unknown'),
+    };
+    if (tools.has(tool.modelName)) {
+      throw new Error(`Assistant tool name collision: ${tool.modelName}.`);
+    }
+    tools.set(tool.modelName, tool);
+    modelTools.push({
+      name: tool.modelName,
+      description: modelDescription(tool),
+      input_schema: tool.inputSchema as Anthropic.Beta.Messages.BetaTool.InputSchema,
+      ...(tool.exposure === 'core' ? {} : { defer_loading: true }),
+    });
+  }
+  if (modelTools.some((tool) => 'defer_loading' in tool && tool.defer_loading)) {
+    modelTools.push({ type: 'tool_search_tool_bm25_20251119', name: 'tool_search_tool_bm25' });
+  }
+
+  const catalog = { tools, modelTools };
+  cached = { catalog, until: Date.now() + CATALOG_TTL_MS };
+  return catalog;
+}
+
+export type ToolError = { code: string; message: string };
+
+export type ToolOutcome =
+  | { ok: true; modelContent: string; storedOutput: string; outputTruncated: boolean }
+  | { ok: false; error: ToolError };
+
+function truncate(text: string, limit: number) {
+  return text.length > limit
+    ? { text: `${text.slice(0, limit)}…`, truncated: true }
+    : { text, truncated: false };
+}
+
+function parseError(text: string): ToolError {
+  try {
+    const parsed = JSON.parse(text) as Partial<ToolError>;
+    if (typeof parsed.code === 'string' && typeof parsed.message === 'string') {
+      return { code: parsed.code, message: parsed.message };
+    }
+  } catch {
+    // Not a CampusPilot error payload.
+  }
+  return { code: 'TOOL_ERROR', message: text.slice(0, 500) };
+}
+
+/**
+ * Calls one tool as the run's user. Failures come back as outcomes, never as
+ * throws, except when the API cannot be reached at all, which the caller's
+ * durable step may retry.
+ */
+export async function callTool(
+  token: string,
+  tool: AssistantTool,
+  input: unknown,
+): Promise<ToolOutcome> {
+  const result = await withMcpClient(token, (client) =>
+    client.callTool({
+      name: tool.mcpName,
+      arguments: (input ?? {}) as Record<string, unknown>,
+    }),
+  );
+  const text = (result.content as Array<{ type: string; text?: string }>)
+    .filter((block) => block.type === 'text' && typeof block.text === 'string')
+    .map((block) => block.text!)
+    .join('\n');
+  if (result.isError) return { ok: false, error: parseError(text) };
+
+  const forModel = truncate(text, MODEL_OUTPUT_LIMIT);
+  const stored = truncate(text, STORED_OUTPUT_LIMIT);
+  return {
+    ok: true,
+    modelContent: forModel.truncated
+      ? `${forModel.text}\n[Result truncated; request a narrower page or filter.]`
+      : forModel.text,
+    storedOutput: stored.text,
+    outputTruncated: stored.truncated,
+  };
+}

@@ -22,6 +22,16 @@ export const documentTypeSchema = z.enum([
   "statement",
 ]);
 export type DocumentType = z.infer<typeof documentTypeSchema>;
+
+/** Document types whose content is finance data; each has its own permissions. */
+export const FINANCE_DOCUMENT_TYPES: ReadonlySet<DocumentType> = new Set<DocumentType>([
+  "bill",
+  "receipt",
+  "statement",
+]);
+
+export const isFinanceDocumentType = (type: DocumentType) =>
+  FINANCE_DOCUMENT_TYPES.has(type);
 export type AcademicDocumentType = Exclude<DocumentType, "bill" | "receipt" | "statement">;
 export const documentTemplatePageSizeSchema = z.enum(["full", "half"]);
 export type DocumentTemplatePageSize = z.infer<

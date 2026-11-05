@@ -20,6 +20,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@campuspilot/assistant-contract": "workspace:*",
     "@campuspilot/auth": "workspace:*",
     "@campuspilot/db": "workspace:*",
     "@campuspilot/ui": "workspace:*",
@@ -30,7 +31,9 @@
     "@tanstack/react-table": "^8.21.3",
     "lucide-react": "catalog:",
     "react": "catalog:",
+    "react-markdown": "^10.1.0",
     "recharts": "3.8.0",
+    "remark-gfm": "^4.0.1",
     "zod": "catalog:"
   },
   "devDependencies": {

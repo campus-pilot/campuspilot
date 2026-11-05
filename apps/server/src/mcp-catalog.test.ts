@@ -15,6 +15,8 @@ import {
   type McpToolDefinition,
 } from './mcp';
 import { MAX_DESCRIBED_TOOLS, META_TOOL_NAMES } from './mcp-meta-tools';
+import { assistantToolDecision } from '@campuspilot/api/assistant/tool-policy';
+import { ASSISTANT_TOOL_META } from '@campuspilot/assistant-contract/protocol';
 
 vi.mock('@campuspilot/auth/server', () => ({
   createAuth: vi.fn(),
@@ -63,6 +65,7 @@ const CORE_TOOLS = [
 ];
 
 const HIDDEN_TOOLS = [
+  'auth.issueAssistantToken',
   'auth.setPassword',
   'auth.getOAuthConsentClient',
   'auth.listOAuthConnections',
@@ -118,9 +121,17 @@ afterEach(async () => {
  * Connects to the real catalog over the Streamable HTTP transport, as an
  * anonymous caller or as an OAuth grant with the given scopes.
  */
-async function connect(oauthScopes?: string[]): Promise<Client> {
+async function connect(oauthScopes?: string[] | 'assistant'): Promise<Client> {
   const context = (
-    oauthScopes
+    oauthScopes === 'assistant'
+      ? {
+          session: null,
+          principal: {
+            authMethod: 'assistant',
+            assistantRun: { conversationId: 'c', runId: 'r', schoolId: 's' },
+          },
+        }
+      : oauthScopes
       ? {
           session: null,
           principal: {
@@ -545,5 +556,25 @@ describe('schema-sample round trip', () => {
     }
 
     expect(failures).toEqual([]);
+  });
+});
+
+describe('assistant service view', () => {
+  it('lists every tool the assistant policy allows, tagged, without meta tools', async () => {
+    const client = await connect('assistant');
+    const { tools } = await client.listTools();
+    const names = tools.map((tool) => tool.name);
+    const allowed = exposedTools().filter((tool) => assistantToolDecision(tool.mcp).allowed);
+
+    expect(names.sort()).toEqual(allowed.map((tool) => tool.name).sort());
+    expect(names).not.toContain(META_TOOL_NAMES.list);
+    expect(names.some((name) => name.startsWith('systemAdmin.'))).toBe(false);
+    expect(names).not.toContain('school.listPayments');
+    expect(names).not.toContain('school.getDashboard');
+    for (const tool of tools) {
+      expect(tool._meta?.[ASSISTANT_TOOL_META.exposure]).toMatch(/^(core|advanced)$/);
+      expect(typeof tool._meta?.[ASSISTANT_TOOL_META.module]).toBe('string');
+    }
+    expect(allowed.some((tool) => tool.mcp.exposure === 'advanced')).toBe(true);
   });
 });

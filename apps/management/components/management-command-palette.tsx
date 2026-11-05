@@ -45,6 +45,7 @@ import { z } from 'zod';
 import { client, orpc } from '@/lib/orpc';
 import { confirmNavigation } from '@/lib/navigation-guard';
 import { getAdmissionPhotoUrl } from '@/lib/admission-photo';
+import { AskAssistantCommand, PaletteAssistantView } from './assistant/assistant-palette';
 import { RequirePermissions } from './require-permissions';
 import { schoolHref, schoolSessionHref } from './school-route';
 import {
@@ -751,6 +752,10 @@ export function ManagementCommandPalette({
     useState<AdmissionListItemDto>();
   const [financeDialog, setFinanceDialog] =
     useState<FinanceDialogSelection>();
+  /** Set once a palette question started an assistant conversation. */
+  const [assistantConversationId, setAssistantConversationId] = useState<
+    string | null
+  >(null);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const commands = createManagementCommandRegistry(context);
   const selectedSession = sessions.find((session) => session.id === sessionId);
@@ -762,6 +767,7 @@ export function ManagementCommandPalette({
     setRemoteQuery('');
     setIsStudentSearchDebouncing(false);
     setSelectedAdmission(undefined);
+    setAssistantConversationId(null);
   }
 
   function changeOpen(nextOpen: boolean) {
@@ -808,6 +814,13 @@ export function ManagementCommandPalette({
         description="Search actions and students"
         className="sm:max-w-2xl"
       >
+        {assistantConversationId ? (
+          <PaletteAssistantView
+            schoolId={schoolId}
+            conversationId={assistantConversationId}
+            onBack={() => setAssistantConversationId(null)}
+          />
+        ) : (
         <Command
           shouldFilter={false}
           className="p-0 [&_[data-slot=command-input-wrapper]]:border-b [&_[data-slot=command-input-wrapper]]:px-1 [&_[data-slot=command-input-wrapper]]:py-1 [&_[data-slot=input-group]]:h-8! [&_[data-slot=input-group]]:border-0! [&_[data-slot=input-group]]:bg-transparent! [&_[data-slot=input-group]]:shadow-none [&_[data-slot=input-group]]:ring-0!"
@@ -951,6 +964,12 @@ export function ManagementCommandPalette({
                         query={remoteQuery}
                         onSelect={setSelectedAdmission}
                       />
+                      <AskAssistantCommand
+                        schoolId={schoolId}
+                        query={query}
+                        itemClassName={paletteItemClassName}
+                        onStarted={setAssistantConversationId}
+                      />
                     </>
                   );
                 }}
@@ -961,6 +980,7 @@ export function ManagementCommandPalette({
             {selectedAdmission ? 'Choose action' : 'Search actions and students'}
           </div>
         </Command>
+        )}
       </CommandDialog>
       {financeDialog?.kind === 'payment' ? (
         <RequirePermissions

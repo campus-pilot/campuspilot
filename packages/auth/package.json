@@ -19,6 +19,7 @@
     "@better-auth/mcp": "^1.7.16",
     "@better-auth/oauth-provider": "^1.7.16",
     "@better-auth/redis-storage": "^1.7.16",
+    "@campuspilot/assistant-contract": "workspace:*",
     "@campuspilot/db": "workspace:*",
     "@campuspilot/env": "workspace:*",
     "@campuspilot/logger": "workspace:*",
@@ -27,6 +28,7 @@
     "better-auth": "catalog:",
     "dotenv": "catalog:",
     "drizzle-orm": "^0.45.2",
+    "jose": "^6.2.12",
     "zod": "catalog:"
   },
   "devDependencies": {

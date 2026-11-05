@@ -75,6 +75,7 @@ grants contains {
     "school.admission.read",
     "school.student.list",
     "school.student.read",
+    "school.assistant.use",
   }
 }
 
