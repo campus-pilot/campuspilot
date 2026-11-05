@@ -10,6 +10,12 @@
  */
 
 @theme inline {
+  /* The composer's surface (kept from the first polish pass). */
+  --color-surface-outline: var(--surface-outline);
+  --shadow-composer: var(--composer-shadow);
+  --inset-shadow-control-highlight: 0 1px rgb(255 255 255 / 16%);
+  --inset-shadow-control-pressed: 0 1px rgb(0 0 0 / 8%);
+  --inset-shadow-surface-highlight: inset 0 1px var(--surface-highlight);
   --color-assistant-dim: var(--assistant-dim);
   --color-assistant-hairline: var(--assistant-hairline);
   --color-assistant-warning: var(--assistant-warning);
@@ -30,9 +36,16 @@
   --assistant-success: var(--color-emerald-600);
   --assistant-well-header: color-mix(in oklab, var(--muted) 50%, transparent);
   --assistant-inline-code: var(--muted);
+
+  --surface-outline: rgb(0 0 0 / 8%);
+  --surface-highlight: transparent;
+  --composer-shadow: 0 1px 2px rgb(0 0 0 / 5%);
 }
 
 .dark {
+  --surface-outline: rgb(255 255 255 / 7%);
+  --surface-highlight: rgb(255 255 255 / 3%);
+  --composer-shadow: 0 14px 32px -18px rgb(0 0 0 / 75%);
   --assistant-warning: var(--color-amber-500);
   --assistant-info: var(--color-blue-400);
   --assistant-success: var(--color-emerald-400);

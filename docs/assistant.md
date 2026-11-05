@@ -161,10 +161,9 @@ recipes live in `packages/ui/src/styles/assistant.css`; components pick one
 (`assistant-well`, `assistant-raised`, `assistant-bubble`) rather than
 painting their own.
 
-- **Composer**: one bordered surface, painted and focused like the app's
-  inputs, never a box inside a box. The send control is muted until there is
-  something to send, then takes the primary colour; Queue and Stop share its
-  place. The trust cue is a caption under the box.
+- **Composer**: one rounded surface with a hairline outline and a toolbar row
+  holding the trust cue and a round send button (Queue and Stop share its
+  place).
 - **Requests in the composer**: a change waiting for approval is decided in
   a section above the message field (Enter approves and Escape declines when no field has focus);
   its timeline row only names it, in amber. Messages sent while a run works
