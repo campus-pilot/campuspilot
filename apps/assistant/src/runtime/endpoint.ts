@@ -1,9 +1,9 @@
-import Anthropic from '@anthropic-ai/sdk';
 import { env } from '@campuspilot/env/assistant';
 import * as restate from '@restatedev/restate-sdk';
 
 import { log } from '../log';
 import { createAssistantConversationObject } from './conversation';
+import { providerRegistry } from './providers/registry';
 
 /**
  * Registers this service's Restate endpoint. `force` replaces the previous
@@ -26,16 +26,17 @@ async function registerDeployment(serviceUrl: string) {
 
 /** Serves the conversation object to Restate; returns the bound port. */
 export async function startRestateEndpoint(): Promise<number> {
-  const conversationObject = createAssistantConversationObject({
-    client: env.ANTHROPIC_API_KEY ? new Anthropic({ apiKey: env.ANTHROPIC_API_KEY }) : null,
-    model: env.ASSISTANT_MODEL,
-    log,
-  });
+  const providers = providerRegistry();
+  const conversationObject = createAssistantConversationObject({ providers, log });
   const port = await restate.serve({
     services: [conversationObject],
     port: env.RESTATE_SERVICE_PORT,
   });
   if (env.RESTATE_SERVICE_URL) await registerDeployment(env.RESTATE_SERVICE_URL);
-  if (!env.ANTHROPIC_API_KEY) log.warn('assistant.not-configured');
+  if (providers.current) {
+    log.info({ provider: providers.current.id, model: providers.current.model }, 'assistant.provider');
+  } else {
+    log.warn({ reason: providers.unavailableReason }, 'assistant.not-configured');
+  }
   return port;
 }

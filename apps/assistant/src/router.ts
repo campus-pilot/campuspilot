@@ -4,7 +4,6 @@ import {
   ASSISTANT_TERMINAL_RUN_STATUSES,
   type AssistantStreamEvent,
 } from '@campuspilot/assistant-contract/dto';
-import { env } from '@campuspilot/env/assistant';
 import { implement, ORPCError } from '@orpc/server';
 import { and, count, desc, eq } from 'drizzle-orm';
 
@@ -21,6 +20,7 @@ import {
   type SessionUser,
 } from './platform';
 import { restateDispatcher, type RunDispatcher } from './runtime/contract';
+import { providerRegistry } from './runtime/providers/registry';
 import * as store from './store';
 import { userMessageItemKey } from './transcript';
 
@@ -65,11 +65,12 @@ function rethrowPlatformError(error: unknown): never {
 }
 
 async function availability(schoolId: string, userId: string) {
-  if (!env.ANTHROPIC_API_KEY) {
+  const providers = providerRegistry();
+  if (!providers.current) {
     return {
       configured: false,
       available: false,
-      unavailableReason: 'The assistant is not configured for this deployment.',
+      unavailableReason: providers.unavailableReason ?? 'The assistant is not configured for this deployment.',
     };
   }
   const decision = await entitlements().checkRunAllowed({ schoolId, userId });
@@ -206,8 +207,15 @@ export const assistantRouter = os.router({
         message: status.unavailableReason ?? 'The assistant is unavailable.',
       });
     }
-    if (input.conversationId) {
-      await ownedConversation(context, input.schoolId, input.conversationId);
+    // A conversation stays on the provider it started with; new ones use the
+    // currently selected provider.
+    const provider = input.conversationId
+      ? providerRegistry().get((await ownedConversation(context, input.schoolId, input.conversationId)).provider)
+      : providerRegistry().current;
+    if (!provider) {
+      throw new ORPCError('PRECONDITION_FAILED', {
+        message: 'This conversation runs on a model provider that is not configured now. Start a new conversation.',
+      });
     }
 
     const conversationId = input.conversationId ?? generateId('conversation');
@@ -227,6 +235,8 @@ export const assistantRouter = os.router({
           schoolId: input.schoolId,
           userId,
           title: titleFromMessage(input.text),
+          provider: provider.id,
+          model: provider.model,
         });
       }
       const run = await store.insertRun(tx, emit, {

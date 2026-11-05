@@ -31,6 +31,12 @@ export const assistantSchema = pgSchema("assistant");
  * Neither is derived from the other.
  */
 
+/** Model provider a conversation runs on (see runtime/providers). */
+export const assistantModelProviderEnum = assistantSchema.enum("assistant_model_provider", [
+  "anthropic",
+  "gemini",
+]);
+
 /** Which management surface started a run, recorded to compare the variants. */
 export const assistantSurfaceEnum = assistantSchema.enum("assistant_surface", [
   "panel",
@@ -137,6 +143,12 @@ export const assistantConversationTable = assistantSchema.table(
     /** Conversations are private to the user who started them. */
     userId: text("user_id").notNull(),
     title: text("title"),
+    /**
+     * The provider and model the conversation started on. Its transcript is
+     * in that provider's format, so the conversation stays on it.
+     */
+    provider: assistantModelProviderEnum("provider").notNull(),
+    model: text("model").notNull(),
     /** Monotonic change counter; every item or run change takes the next value. */
     lastSequence: integer("last_sequence").notNull().default(0),
     /** Monotonic display-order counter for items. */
@@ -177,7 +189,8 @@ export const assistantRunTable = assistantSchema.table(
     clientRequestId: text("client_request_id").notNull(),
     surface: assistantSurfaceEnum("surface").notNull(),
     status: assistantRunStatusEnum("status").notNull().default("queued"),
-    /** Model the run called; null until the first model request. */
+    /** Provider and model the run called; null until the run starts. */
+    provider: assistantModelProviderEnum("provider"),
     model: text("model"),
     stopRequestedAt: timestamp("stop_requested_at"),
     errorCode: text("error_code"),

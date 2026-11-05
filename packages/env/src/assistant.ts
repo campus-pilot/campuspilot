@@ -40,11 +40,23 @@ export const env = createEnv({
     RESTATE_SERVICE_URL: z.url().optional(),
 
     /**
-     * Anthropic API key. Optional so the service still boots and serves
-     * history without one; new runs then report it as unconfigured.
+     * Model provider for new conversations. Existing conversations keep the
+     * provider they started with, since each provider has its own transcript
+     * format. Swapping providers is this setting plus that provider's key.
      */
+    ASSISTANT_PROVIDER: z.enum(['anthropic', 'gemini']).default('anthropic'),
+
+    /** Anthropic API key; optional so the service boots without one. */
     ANTHROPIC_API_KEY: z.string().min(1).optional(),
-    ASSISTANT_MODEL: z.string().min(1).default('claude-opus-5-5'),
+    ANTHROPIC_MODEL: z.string().min(1).default('claude-opus-5-5'),
+
+    /** Gemini API key (Google AI Studio); optional like the Anthropic key. */
+    GEMINI_API_KEY: z.string().min(1).optional(),
+    /**
+     * Gemini model id, for example a current Gemini Pro model. No default:
+     * Gemini model names change often, so it is chosen explicitly.
+     */
+    GEMINI_MODEL: z.string().min(1).optional(),
   },
   runtimeEnv: process.env,
   skipValidation: !!process.env.SKIP_ENV_VALIDATION,

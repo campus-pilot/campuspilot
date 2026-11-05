@@ -1,4 +1,3 @@
-import type Anthropic from '@anthropic-ai/sdk';
 import { ASSISTANT_TERMINAL_RUN_STATUSES } from '@campuspilot/assistant-contract/dto';
 import type { Logger } from '@campuspilot/logger';
 import * as restate from '@restatedev/restate-sdk';
@@ -10,7 +9,6 @@ import { getRunToken } from '../platform';
 import * as store from '../store';
 import {
   assistantMessageItemKey,
-  buildUserTranscriptContent,
   interruptedTranscriptKey,
   modelTranscriptKey,
   toolCallItemKey,
@@ -24,12 +22,9 @@ import {
   type AssistantConversationHandlers,
   type ProcessRunInput,
 } from './contract';
-import {
-  buildSystemPrompt,
-  isPermanentModelError,
-  streamAssistantResponse,
-  type AssistantConversationFacts,
-} from './model';
+import { buildAssistantPrompt, type AssistantConversationFacts } from './prompt';
+import type { ProviderRegistry } from './providers/registry';
+import type { ModelProvider, ModelToolResult, TranscriptEntry } from './providers/types';
 import { callTool, loadToolCatalog, requiresApproval, toModelToolName } from './tools';
 
 /** Model requests one run may make before it stops to protect against loops. */
@@ -42,9 +37,7 @@ const DECLINED_RESULT = 'The user declined this action. Do not retry it; ask wha
 const CANCELLED_RESULT = 'The user stopped the assistant before this action ran.';
 
 export type AssistantConversationDeps = {
-  /** Null when no model credential is configured. */
-  client: Anthropic | null;
-  model: string;
+  providers: ProviderRegistry;
   log: Logger;
 };
 
@@ -88,6 +81,8 @@ type RunFacts = {
   conversationId: string;
   schoolId: string;
   userId: string;
+  /** The provider the conversation runs on. */
+  providerId: ModelProvider['id'];
   facts: AssistantConversationFacts;
 };
 
@@ -97,15 +92,8 @@ type ModelStepOutcome =
   | { kind: 'stopped' }
   | { kind: 'response'; toolUses: ToolUse[]; paused: boolean };
 
-type ToolResultBlock = {
-  type: 'tool_result';
-  tool_use_id: string;
-  content: string;
-  is_error?: boolean;
-};
-
 type PreparedToolCall =
-  | { action: 'result'; result: ToolResultBlock }
+  | { action: 'result'; result: ModelToolResult }
   | { action: 'execute'; itemId: string }
   | { action: 'approve'; itemId: string };
 
@@ -134,32 +122,26 @@ async function finishRun(
  * ends mid-loop (stop or failure), the unanswered calls get error results.
  */
 async function closeToolLoop(
+  provider: ModelProvider,
   run: RunFacts,
   toolUses: ToolUse[],
-  answered: ToolResultBlock[],
+  answered: ModelToolResult[],
   entryKey: string,
   reason: string,
 ) {
-  const answeredIds = new Set(answered.map((result) => result.tool_use_id));
-  const results = [
+  const answeredIds = new Set(answered.map((result) => result.toolUseId));
+  const results: ModelToolResult[] = [
     ...answered,
     ...toolUses
       .filter((toolUse) => !answeredIds.has(toolUse.id))
-      .map(
-        (toolUse): ToolResultBlock => ({
-          type: 'tool_result',
-          tool_use_id: toolUse.id,
-          content: reason,
-          is_error: true,
-        }),
-      ),
+      .map((toolUse) => ({ toolUseId: toolUse.id, toolName: toolUse.name, content: reason, isError: true })),
   ];
   await tx((t) =>
     store.appendTranscriptEntry(t, {
       conversationId: run.conversationId,
       runId: run.runId,
       role: 'user',
-      content: results,
+      content: provider.toolResultsContent(results),
       entryKey,
     }),
   );
@@ -170,6 +152,15 @@ function runRef(run: RunFacts) {
 }
 
 export function createAssistantConversationObject(deps: AssistantConversationDeps) {
+  /** The provider a run uses; it was checked when the run began. */
+  const providerFor = (run: RunFacts): ModelProvider => {
+    const provider = deps.providers.get(run.providerId);
+    if (!provider) {
+      throw runFailure('provider_unavailable', `The ${run.providerId} model provider is no longer configured.`);
+    }
+    return provider;
+  };
+
   /** Loads the run and marks it running, or ends it when it must not run. */
   async function beginRun({ runId, user }: ProcessRunInput): Promise<RunFacts | null> {
     const run = await store.findRun(db, runId);
@@ -178,18 +169,22 @@ export function createAssistantConversationObject(deps: AssistantConversationDep
       await finishRun(run, 'cancelled');
       return null;
     }
-    if (!deps.client) {
-      await finishRun(run, 'failed', {
-        code: 'not_configured',
-        message: 'The assistant is not configured for this deployment.',
-      });
-      return null;
-    }
-    const item = await store.findItemByKey(db, run.conversationId, userMessageItemKey(run.id));
-    if (!item) {
+    const [item, conversation] = await Promise.all([
+      store.findItemByKey(db, run.conversationId, userMessageItemKey(run.id)),
+      store.findConversation(db, run.conversationId),
+    ]);
+    if (!item || !conversation) {
       await finishRun(run, 'failed', {
         code: 'missing_context',
         message: 'This conversation no longer exists.',
+      });
+      return null;
+    }
+    const provider = deps.providers.get(conversation.provider);
+    if (!provider) {
+      await finishRun(run, 'failed', {
+        code: 'provider_unavailable',
+        message: `This conversation runs on ${conversation.provider}, which is not configured now. Start a new conversation.`,
       });
       return null;
     }
@@ -199,13 +194,14 @@ export function createAssistantConversationObject(deps: AssistantConversationDep
         conversationId: run.conversationId,
         runId: run.id,
         role: 'user',
-        content: buildUserTranscriptContent(item.body as AssistantUserMessageBody),
+        content: provider.userContent(item.body as AssistantUserMessageBody),
         entryKey: userTranscriptKey(run.id),
       });
       await store.updateRun(t, emit, run, {
         status: 'running',
         startedAt: run.startedAt ?? new Date(),
-        model: deps.model,
+        provider: provider.id,
+        model: conversation.model,
       });
     });
 
@@ -214,6 +210,7 @@ export function createAssistantConversationObject(deps: AssistantConversationDep
       conversationId: run.conversationId,
       schoolId: run.schoolId,
       userId: run.userId,
+      providerId: provider.id,
       facts: {
         schoolId: run.schoolId,
         schoolName: await lookUpSchoolName(run.id, run.schoolId),
@@ -251,11 +248,11 @@ export function createAssistantConversationObject(deps: AssistantConversationDep
   async function modelStep(run: RunFacts, step: number): Promise<ModelStepOutcome> {
     const entryKey = modelTranscriptKey(run.runId, step);
     const saved = await store.findTranscriptEntry(db, run.conversationId, entryKey);
+    const provider = providerFor(run);
     if (saved) {
-      return { kind: 'response', toolUses: toolUsesOf(saved.content), paused: false };
+      return { kind: 'response', toolUses: provider.toolUsesOf(saved.content), paused: false };
     }
 
-    const client = deps.client!;
     const catalog = await loadToolCatalog(await requireToken(run.runId));
     const transcript = await store.loadTranscript(db, run.conversationId);
     const itemKey = assistantMessageItemKey(run.runId, step);
@@ -281,20 +278,18 @@ export function createAssistantConversationObject(deps: AssistantConversationDep
         .catch((err) => deps.log.warn({ err, runId: run.runId }, 'assistant.text.publish.failed'));
     };
 
-    let result: Awaited<ReturnType<typeof streamAssistantResponse>>;
+    let result: Awaited<ReturnType<ModelProvider['step']>>;
     try {
-      result = await streamAssistantResponse({
-        client,
-        model: deps.model,
-        system: buildSystemPrompt(run.facts),
-        tools: catalog.modelTools,
-        messages: transcript as Anthropic.Beta.Messages.BetaMessageParam[],
+      result = await provider.step({
+        prompt: buildAssistantPrompt(run.facts),
+        tools: catalog.ordered,
+        transcript: transcript as TranscriptEntry[],
         onText,
         isStopRequested: () => isAssistantRunStopSignalled(run.runId),
       });
     } catch (error) {
-      deps.log.error({ err: error, runId: run.runId, step }, 'assistant.model.error');
-      if (isPermanentModelError(error)) {
+      deps.log.error({ err: error, runId: run.runId, step, provider: provider.id }, 'assistant.model.error');
+      if (provider.isPermanentError(error)) {
         throw runFailure(
           'model_rejected',
           'The assistant could not process this request. Please try rephrasing it.',
@@ -313,7 +308,7 @@ export function createAssistantConversationObject(deps: AssistantConversationDep
             conversationId: run.conversationId,
             runId: run.runId,
             role: 'assistant',
-            content: [{ type: 'text', text }],
+            content: provider.assistantTextContent(text),
             entryKey,
           });
         });
@@ -321,9 +316,7 @@ export function createAssistantConversationObject(deps: AssistantConversationDep
       return { kind: 'stopped' };
     }
 
-    const { response } = result;
-    const refusal = response.stopReason === 'refusal';
-    const text = result.text || (refusal ? 'I can’t help with that request.' : '');
+    const text = result.text || (result.refusal ? 'I can’t help with that request.' : '');
     const item = text ? await ensureItem() : itemPromise ? await itemPromise : null;
     await tx(async (t, emit) => {
       if (item) {
@@ -333,18 +326,13 @@ export function createAssistantConversationObject(deps: AssistantConversationDep
         conversationId: run.conversationId,
         runId: run.runId,
         role: 'assistant',
-        content: response.content,
+        content: result.content,
         entryKey,
       });
-      await store.updateRun(t, emit, runRef(run), {}, response.usage);
+      await store.updateRun(t, emit, runRef(run), {}, result.usage);
     });
 
-    return {
-      kind: 'response',
-      // A refusal can cut a tool call off mid-input; never run that turn's tools.
-      toolUses: refusal ? [] : toolUsesOf(response.content),
-      paused: response.stopReason === 'pause_turn',
-    };
+    return { kind: 'response', toolUses: result.toolUses, paused: result.paused };
   }
 
   /** Records the tool call and decides whether it runs or waits for approval. */
@@ -355,10 +343,10 @@ export function createAssistantConversationObject(deps: AssistantConversationDep
       return {
         action: 'result',
         result: {
-          type: 'tool_result',
-          tool_use_id: toolUse.id,
+          toolUseId: toolUse.id,
+          toolName: toolUse.name,
           content: JSON.stringify({ code: 'NOT_FOUND', message: `Unknown tool ${toolUse.name}.` }),
-          is_error: true,
+          isError: true,
         },
       };
     }
@@ -443,7 +431,7 @@ export function createAssistantConversationObject(deps: AssistantConversationDep
     run: RunFacts,
     toolUse: ToolUse,
     itemId: string,
-  ): Promise<ToolResultBlock> {
+  ): Promise<ModelToolResult> {
     const token = await requireToken(run.runId);
     const catalog = await loadToolCatalog(token);
     const tool = catalog.tools.get(toolUse.name)!;
@@ -463,13 +451,8 @@ export function createAssistantConversationObject(deps: AssistantConversationDep
         : { status: 'failed', body: { ...body, error: outcome.error } });
     });
     return outcome.ok
-      ? { type: 'tool_result', tool_use_id: toolUse.id, content: outcome.modelContent }
-      : {
-          type: 'tool_result',
-          tool_use_id: toolUse.id,
-          content: JSON.stringify(outcome.error),
-          is_error: true,
-        };
+      ? { toolUseId: toolUse.id, toolName: toolUse.name, content: outcome.modelContent, isError: false }
+      : { toolUseId: toolUse.id, toolName: toolUse.name, content: JSON.stringify(outcome.error), isError: true };
   }
 
   async function processRun(ctx: restate.ObjectContext, input: ProcessRunInput) {
@@ -477,7 +460,7 @@ export function createAssistantConversationObject(deps: AssistantConversationDep
     if (!run) return;
 
     /** Tool calls of the latest model response still waiting for results. */
-    let open: { toolUses: ToolUse[]; answered: ToolResultBlock[] } | null = null;
+    let open: { toolUses: ToolUse[]; answered: ModelToolResult[] } | null = null;
 
     try {
       for (let step = 0; step < MAX_MODEL_STEPS; step++) {
@@ -524,10 +507,10 @@ export function createAssistantConversationObject(deps: AssistantConversationDep
             }
             if (decision === 'decline') {
               open.answered.push({
-                type: 'tool_result',
-                tool_use_id: toolUse.id,
+                toolUseId: toolUse.id,
+                toolName: toolUse.name,
                 content: DECLINED_RESULT,
-                is_error: true,
+                isError: true,
               });
               continue;
             }
@@ -546,7 +529,7 @@ export function createAssistantConversationObject(deps: AssistantConversationDep
           await ctx.run(
             'cancelled',
             async () => {
-              await closeToolLoop(run, answered.toolUses, answered.answered, toolResultsTranscriptKey(run.runId, step), CANCELLED_RESULT);
+              await closeToolLoop(providerFor(run), run, answered.toolUses, answered.answered, toolResultsTranscriptKey(run.runId, step), CANCELLED_RESULT);
               await finishRun(runRef(run), 'cancelled');
             },
             DB_STEP_RETRY,
@@ -555,7 +538,7 @@ export function createAssistantConversationObject(deps: AssistantConversationDep
         }
         await ctx.run(
           `tool-results-${step}`,
-          () => closeToolLoop(run, answered.toolUses, answered.answered, toolResultsTranscriptKey(run.runId, step), CANCELLED_RESULT),
+          () => closeToolLoop(providerFor(run), run, answered.toolUses, answered.answered, toolResultsTranscriptKey(run.runId, step), CANCELLED_RESULT),
           DB_STEP_RETRY,
         );
         open = null;
@@ -587,7 +570,7 @@ export function createAssistantConversationObject(deps: AssistantConversationDep
         'failed',
         async () => {
           if (unanswered) {
-            await closeToolLoop(run, unanswered.toolUses, unanswered.answered, interruptedTranscriptKey(run.runId), 'This action did not run because the assistant hit an error.');
+            await closeToolLoop(providerFor(run), run, unanswered.toolUses, unanswered.answered, interruptedTranscriptKey(run.runId), 'This action did not run because the assistant hit an error.');
           }
           await finishRun(runRef(run), 'failed', readRunFailure(error));
         },
@@ -604,14 +587,5 @@ export function createAssistantConversationObject(deps: AssistantConversationDep
       inactivityTimeout: 10 * 60_000,
       abortTimeout: 10 * 60_000,
     },
-  });
-}
-
-function toolUsesOf(content: unknown[]): ToolUse[] {
-  return content.flatMap((block) => {
-    const candidate = block as { type?: string; id?: string; name?: string; input?: unknown };
-    return candidate.type === 'tool_use' && candidate.id && candidate.name
-      ? [{ id: candidate.id, name: candidate.name, input: candidate.input }]
-      : [];
   });
 }

@@ -39,6 +39,29 @@ endpoint, as the signed-in user, with the same permissions.
    When an assistant write succeeds, the management app refreshes its
    CampusPilot queries so open screens show the change.
 
+## Model providers
+
+The agent loop talks to models only through `ModelProvider`
+(`apps/assistant/src/runtime/providers/types.ts`). Each adapter owns its
+provider's request shape, native features and transcript format, so nothing is
+reduced to a common subset:
+
+- **Anthropic** (`providers/anthropic.ts`): exactly the Claude-only build's
+  requests: core tools up front, advanced tools deferred behind BM25 tool search,
+  automatic prompt caching, explicit effort, server-side refusal fallback. A test
+  pins the request parameters and the prompt hash against that build.
+- **Gemini** (`providers/gemini.ts`): Gemini `Part` transcripts kept exactly as
+  returned (thought signatures included), every tool declared on each request
+  (Gemini has no server-side tool search), model-default thinking and implicit
+  caching.
+
+`ASSISTANT_PROVIDER` picks the provider for **new** conversations; each
+conversation records its `provider` and `model` and stays on them, because
+transcripts are provider-specific. Runs record the provider and model they used,
+and usage is normalised to one shape (`inputTokens` excludes cache reads), so
+benchmarks and limits compare like with like. Add a provider by implementing
+`ModelProvider` and registering it in `providers/registry.ts`.
+
 ## Rules and where they live
 
 - **Security policy, enforced by the API** (`packages/api/src/assistant/tool-policy.ts`,
@@ -78,7 +101,8 @@ Each run records the surface it started from (`assistant_run.surface`).
    `ASSISTANT_TOKEN_SIGNING_SECRET` (32+ characters each, different values).
 2. Copy `apps/assistant/.env.example` to `.env`. Use the same
    `ASSISTANT_SERVICE_SECRET`, point it at the API, Postgres, Redis and Restate,
-   and set `ANTHROPIC_API_KEY`. `RESTATE_SERVICE_URL` must be reachable from the
+   and set `ASSISTANT_PROVIDER` with that provider's key (and `GEMINI_MODEL`
+   for Gemini). `RESTATE_SERVICE_URL` must be reachable from the
    Restate container (locally `http://host.docker.internal:9081`); when set, the
    service registers itself with Restate at boot.
 3. In `apps/management/.env`, set `NEXT_PUBLIC_ASSISTANT_URL`. Without it the

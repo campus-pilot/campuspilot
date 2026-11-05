@@ -103,7 +103,14 @@ async function allocate(
 
 export async function createConversation(
   tx: AssistantExecutor,
-  input: { id: string; schoolId: string; userId: string; title: string | null },
+  input: {
+    id: string;
+    schoolId: string;
+    userId: string;
+    title: string | null;
+    provider: ConversationRow['provider'];
+    model: string;
+  },
 ): Promise<ConversationRow> {
   const [row] = await tx.insert(assistantConversationTable).values(input).returning();
   return row!;
@@ -190,6 +197,7 @@ export async function findRunByClientRequest(
 
 export type AssistantRunPatch = Partial<{
   status: AssistantRunStatus;
+  provider: RunRow['provider'];
   model: string;
   stopRequestedAt: Date;
   errorCode: string | null;

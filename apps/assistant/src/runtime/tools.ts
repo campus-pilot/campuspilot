@@ -1,4 +1,3 @@
-import type Anthropic from '@anthropic-ai/sdk';
 import { ASSISTANT_TOOL_META } from '@campuspilot/assistant-contract/protocol';
 import { env } from '@campuspilot/env/assistant';
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
@@ -11,7 +10,10 @@ import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/cli
  * behaviour: which calls wait for the user's approval.
  */
 
-/** Claude API tool names allow only `[a-zA-Z0-9_-]`; MCP names use dots. */
+/**
+ * Model-facing tool names. The Claude API allows only `[a-zA-Z0-9_-]` and MCP
+ * names use dots, so dots become underscores; Gemini accepts the same names.
+ */
 export const toModelToolName = (mcpName: string) => mcpName.replaceAll('.', '_');
 
 /** Characters of a tool result the model reads; longer results are cut. */
@@ -36,8 +38,8 @@ export type AssistantTool = {
 
 export type AssistantToolCatalog = {
   tools: ReadonlyMap<string, AssistantTool>;
-  /** Claude API tool definitions in the API's stable listing order. */
-  modelTools: Anthropic.Beta.Messages.BetaToolUnion[];
+  /** Every tool in the API's stable listing order, for model requests. */
+  ordered: readonly AssistantTool[];
 };
 
 /**
@@ -62,7 +64,8 @@ async function withMcpClient<T>(token: string, work: (client: Client) => Promise
   }
 }
 
-function modelDescription(tool: AssistantTool): string {
+/** The description every provider shows the model for a tool. */
+export function modelToolDescription(tool: AssistantTool): string {
   const approval = requiresApproval(tool)
     ? '\n\nThis changes school data. When you call it, the user is asked to approve it before it runs.'
     : '';
@@ -72,7 +75,9 @@ function modelDescription(tool: AssistantTool): string {
 /**
  * The assistant view is the same for every assistant token (the API filters
  * it by policy, not by user; OPA decides per call), so one listing serves
- * every run for a while. A stable catalog also keeps the prompt cache warm.
+ * every run for a while. A stable catalog also keeps prompt caches warm.
+ * How tools reach the model (deferred, searched, all at once) is each
+ * provider adapter's choice.
  */
 const CATALOG_TTL_MS = 5 * 60_000;
 let cached: { catalog: AssistantToolCatalog; until: number } | null = null;
@@ -92,7 +97,7 @@ export async function loadToolCatalog(token: string): Promise<AssistantToolCatal
   });
 
   const tools = new Map<string, AssistantTool>();
-  const modelTools: Anthropic.Beta.Messages.BetaToolUnion[] = [];
+  const ordered: AssistantTool[] = [];
   for (const listedTool of listed) {
     const meta = (listedTool._meta ?? {}) as Record<string, unknown>;
     const tool: AssistantTool = {
@@ -111,18 +116,10 @@ export async function loadToolCatalog(token: string): Promise<AssistantToolCatal
       throw new Error(`Assistant tool name collision: ${tool.modelName}.`);
     }
     tools.set(tool.modelName, tool);
-    modelTools.push({
-      name: tool.modelName,
-      description: modelDescription(tool),
-      input_schema: tool.inputSchema as Anthropic.Beta.Messages.BetaTool.InputSchema,
-      ...(tool.exposure === 'core' ? {} : { defer_loading: true }),
-    });
-  }
-  if (modelTools.some((tool) => 'defer_loading' in tool && tool.defer_loading)) {
-    modelTools.push({ type: 'tool_search_tool_bm25_20251119', name: 'tool_search_tool_bm25' });
+    ordered.push(tool);
   }
 
-  const catalog = { tools, modelTools };
+  const catalog = { tools, ordered };
   cached = { catalog, until: Date.now() + CATALOG_TTL_MS };
   return catalog;
 }

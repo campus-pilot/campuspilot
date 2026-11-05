@@ -1,0 +1,824 @@
+{
+  "id": "d446e336-6cd6-457f-9858-c474092e7ecf",
+  "prevId": "4a0ea575-a214-491d-9339-f38393423680",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "assistant.assistant_approval": {
+      "name": "assistant_approval",
+      "schema": "assistant",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "conversation_id": {
+          "name": "conversation_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "item_id": {
+          "name": "item_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "school_id": {
+          "name": "school_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tool_name": {
+          "name": "tool_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "assistant_approval_status",
+          "typeSchema": "assistant",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        },
+        "awakeable_id": {
+          "name": "awakeable_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "decided_at": {
+          "name": "decided_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "assistant_approval_run_idx": {
+          "name": "assistant_approval_run_idx",
+          "columns": [
+            {
+              "expression": "run_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "assistant_approval_conversation_id_assistant_conversation_id_fk": {
+          "name": "assistant_approval_conversation_id_assistant_conversation_id_fk",
+          "tableFrom": "assistant_approval",
+          "tableTo": "assistant_conversation",
+          "schemaTo": "assistant",
+          "columnsFrom": [
+            "conversation_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "assistant_approval_run_id_assistant_run_id_fk": {
+          "name": "assistant_approval_run_id_assistant_run_id_fk",
+          "tableFrom": "assistant_approval",
+          "tableTo": "assistant_run",
+          "schemaTo": "assistant",
+          "columnsFrom": [
+            "run_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "assistant_approval_item_id_assistant_item_id_fk": {
+          "name": "assistant_approval_item_id_assistant_item_id_fk",
+          "tableFrom": "assistant_approval",
+          "tableTo": "assistant_item",
+          "schemaTo": "assistant",
+          "columnsFrom": [
+            "item_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "assistant_approval_item_id_unique": {
+          "name": "assistant_approval_item_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "item_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "assistant.assistant_conversation": {
+      "name": "assistant_conversation",
+      "schema": "assistant",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "school_id": {
+          "name": "school_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "provider": {
+          "name": "provider",
+          "type": "assistant_model_provider",
+          "typeSchema": "assistant",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "model": {
+          "name": "model",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "last_sequence": {
+          "name": "last_sequence",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "last_position": {
+          "name": "last_position",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "last_transcript_position": {
+          "name": "last_transcript_position",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "assistant_conversation_school_user_updated_idx": {
+          "name": "assistant_conversation_school_user_updated_idx",
+          "columns": [
+            {
+              "expression": "school_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "updated_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "assistant.assistant_item": {
+      "name": "assistant_item",
+      "schema": "assistant",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "conversation_id": {
+          "name": "conversation_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "assistant_item_kind",
+          "typeSchema": "assistant",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "assistant_item_status",
+          "typeSchema": "assistant",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "position": {
+          "name": "position",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sequence": {
+          "name": "sequence",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "body": {
+          "name": "body",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "item_key": {
+          "name": "item_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "assistant_item_conversation_sequence_idx": {
+          "name": "assistant_item_conversation_sequence_idx",
+          "columns": [
+            {
+              "expression": "conversation_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "sequence",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "assistant_item_conversation_id_assistant_conversation_id_fk": {
+          "name": "assistant_item_conversation_id_assistant_conversation_id_fk",
+          "tableFrom": "assistant_item",
+          "tableTo": "assistant_conversation",
+          "schemaTo": "assistant",
+          "columnsFrom": [
+            "conversation_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "assistant_item_run_id_assistant_run_id_fk": {
+          "name": "assistant_item_run_id_assistant_run_id_fk",
+          "tableFrom": "assistant_item",
+          "tableTo": "assistant_run",
+          "schemaTo": "assistant",
+          "columnsFrom": [
+            "run_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "assistant_item_conversation_position_unique": {
+          "name": "assistant_item_conversation_position_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "conversation_id",
+            "position"
+          ]
+        },
+        "assistant_item_conversation_key_unique": {
+          "name": "assistant_item_conversation_key_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "conversation_id",
+            "item_key"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "assistant.assistant_run": {
+      "name": "assistant_run",
+      "schema": "assistant",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "conversation_id": {
+          "name": "conversation_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "school_id": {
+          "name": "school_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "client_request_id": {
+          "name": "client_request_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "surface": {
+          "name": "surface",
+          "type": "assistant_surface",
+          "typeSchema": "assistant",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "assistant_run_status",
+          "typeSchema": "assistant",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'queued'"
+        },
+        "provider": {
+          "name": "provider",
+          "type": "assistant_model_provider",
+          "typeSchema": "assistant",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "model": {
+          "name": "model",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "stop_requested_at": {
+          "name": "stop_requested_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "error_code": {
+          "name": "error_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "error_message": {
+          "name": "error_message",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "model_request_count": {
+          "name": "model_request_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "input_tokens": {
+          "name": "input_tokens",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "output_tokens": {
+          "name": "output_tokens",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "cache_read_input_tokens": {
+          "name": "cache_read_input_tokens",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "cache_creation_input_tokens": {
+          "name": "cache_creation_input_tokens",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "sequence": {
+          "name": "sequence",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "started_at": {
+          "name": "started_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "completed_at": {
+          "name": "completed_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "assistant_run_conversation_idx": {
+          "name": "assistant_run_conversation_idx",
+          "columns": [
+            {
+              "expression": "conversation_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "assistant_run_school_created_idx": {
+          "name": "assistant_run_school_created_idx",
+          "columns": [
+            {
+              "expression": "school_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "assistant_run_conversation_id_assistant_conversation_id_fk": {
+          "name": "assistant_run_conversation_id_assistant_conversation_id_fk",
+          "tableFrom": "assistant_run",
+          "tableTo": "assistant_conversation",
+          "schemaTo": "assistant",
+          "columnsFrom": [
+            "conversation_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "assistant_run_user_client_request_unique": {
+          "name": "assistant_run_user_client_request_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "user_id",
+            "client_request_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "assistant.assistant_transcript_entry": {
+      "name": "assistant_transcript_entry",
+      "schema": "assistant",
+      "columns": {
+        "conversation_id": {
+          "name": "conversation_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "position": {
+          "name": "position",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "role": {
+          "name": "role",
+          "type": "assistant_transcript_role",
+          "typeSchema": "assistant",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "content": {
+          "name": "content",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "entry_key": {
+          "name": "entry_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "assistant_transcript_entry_conversation_id_assistant_conversation_id_fk": {
+          "name": "assistant_transcript_entry_conversation_id_assistant_conversation_id_fk",
+          "tableFrom": "assistant_transcript_entry",
+          "tableTo": "assistant_conversation",
+          "schemaTo": "assistant",
+          "columnsFrom": [
+            "conversation_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "assistant_transcript_entry_run_id_assistant_run_id_fk": {
+          "name": "assistant_transcript_entry_run_id_assistant_run_id_fk",
+          "tableFrom": "assistant_transcript_entry",
+          "tableTo": "assistant_run",
+          "schemaTo": "assistant",
+          "columnsFrom": [
+            "run_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "assistant_transcript_entry_conversation_id_position_pk": {
+          "name": "assistant_transcript_entry_conversation_id_position_pk",
+          "columns": [
+            "conversation_id",
+            "position"
+          ]
+        }
+      },
+      "uniqueConstraints": {
+        "assistant_transcript_entry_key_unique": {
+          "name": "assistant_transcript_entry_key_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "conversation_id",
+            "entry_key"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {
+    "assistant.assistant_approval_status": {
+      "name": "assistant_approval_status",
+      "schema": "assistant",
+      "values": [
+        "pending",
+        "approved",
+        "declined",
+        "cancelled"
+      ]
+    },
+    "assistant.assistant_item_kind": {
+      "name": "assistant_item_kind",
+      "schema": "assistant",
+      "values": [
+        "user_message",
+        "assistant_message",
+        "tool_call"
+      ]
+    },
+    "assistant.assistant_item_status": {
+      "name": "assistant_item_status",
+      "schema": "assistant",
+      "values": [
+        "streaming",
+        "complete",
+        "awaiting_approval",
+        "running",
+        "succeeded",
+        "failed",
+        "declined",
+        "cancelled"
+      ]
+    },
+    "assistant.assistant_model_provider": {
+      "name": "assistant_model_provider",
+      "schema": "assistant",
+      "values": [
+        "anthropic",
+        "gemini"
+      ]
+    },
+    "assistant.assistant_run_status": {
+      "name": "assistant_run_status",
+      "schema": "assistant",
+      "values": [
+        "queued",
+        "running",
+        "awaiting_approval",
+        "completed",
+        "failed",
+        "cancelled"
+      ]
+    },
+    "assistant.assistant_surface": {
+      "name": "assistant_surface",
+      "schema": "assistant",
+      "values": [
+        "panel",
+        "page",
+        "palette"
+      ]
+    },
+    "assistant.assistant_transcript_role": {
+      "name": "assistant_transcript_role",
+      "schema": "assistant",
+      "values": [
+        "user",
+        "assistant"
+      ]
+    }
+  },
+  "schemas": {
+    "assistant": "assistant"
+  },
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}
