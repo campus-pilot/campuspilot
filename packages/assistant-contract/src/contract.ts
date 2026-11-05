@@ -13,6 +13,7 @@ import {
   sendAssistantMessageInputSchema,
   sendAssistantMessageOutputSchema,
   stopAssistantRunInputSchema,
+  subscribeAssistantConversationInputSchema,
 } from './dto';
 
 /**
@@ -32,7 +33,7 @@ export const assistantContract = {
    * client disconnects.
    */
   subscribeConversation: oc
-    .input(assistantConversationInputSchema)
+    .input(subscribeAssistantConversationInputSchema)
     .output(eventIterator(assistantStreamEventSchema)),
   sendMessage: oc
     .input(sendAssistantMessageInputSchema)

@@ -9,6 +9,8 @@ import {
   unique,
 } from "drizzle-orm/pg-core";
 
+import type { AssistantView } from "@campuspilot/assistant-contract/views";
+
 import { generateId } from "../ids";
 
 /**
@@ -57,6 +59,7 @@ export const assistantItemKindEnum = assistantSchema.enum("assistant_item_kind",
   "user_message",
   "assistant_message",
   "tool_call",
+  "view",
 ]);
 
 /**
@@ -128,10 +131,14 @@ export type AssistantToolCallBody = {
   approvalId?: string;
 };
 
+/** A view the assistant showed (see @campuspilot/assistant-contract/views). */
+export type AssistantViewBody = { view: AssistantView };
+
 export type AssistantItemBody =
   | AssistantUserMessageBody
   | AssistantAssistantMessageBody
-  | AssistantToolCallBody;
+  | AssistantToolCallBody
+  | AssistantViewBody;
 
 export const assistantConversationTable = assistantSchema.table(
   "assistant_conversation",

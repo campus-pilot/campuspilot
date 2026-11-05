@@ -116,3 +116,24 @@ export async function isAssistantRunStopSignalled(runId: string): Promise<boolea
   const client = await connectedRedis();
   return (await client.exists(stopKey(runId))) === 1;
 }
+
+const streamingTextKey = (itemId: string) => `assistant:item:${itemId}:text`;
+
+/** How long in-progress text is kept for reconnecting viewers. */
+const STREAMING_TEXT_TTL_SECONDS = 10 * 60;
+
+/**
+ * Keeps a streaming message's text so far. Postgres holds a message only
+ * once it completes; a viewer who connects mid-stream gets this instead.
+ */
+export async function rememberStreamingText(itemId: string, text: string): Promise<void> {
+  const client = await connectedRedis();
+  await client.set(streamingTextKey(itemId), text, 'EX', STREAMING_TEXT_TTL_SECONDS);
+}
+
+export async function streamingTexts(itemIds: readonly string[]): Promise<Map<string, string>> {
+  if (itemIds.length === 0) return new Map();
+  const client = await connectedRedis();
+  const values = await client.mget(...itemIds.map(streamingTextKey));
+  return new Map(itemIds.flatMap((id, index) => (values[index] ? [[id, values[index]!] as const] : [])));
+}

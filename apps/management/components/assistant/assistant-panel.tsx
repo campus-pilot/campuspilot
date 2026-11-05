@@ -27,9 +27,9 @@ function PanelHeader({
   onNewConversation: () => void;
 }) {
   return (
-    <SheetHeader className="flex-row items-center gap-1 border-b py-2 pr-12">
+    <SheetHeader className="h-14 flex-row items-center gap-0.5 border-b py-0 ps-4 pe-12">
       <div className="min-w-0 flex-1">
-        <SheetTitle>Assistant</SheetTitle>
+        <SheetTitle className="text-sm font-medium">Assistant</SheetTitle>
         <SheetDescription className="sr-only">Ask the CampusPilot assistant</SheetDescription>
       </div>
       <Button type="button" variant="ghost" size="icon-sm" aria-label="New conversation" onClick={onNewConversation}>
@@ -57,8 +57,15 @@ export function AssistantPanel({ schoolId }: { schoolId: string }) {
       <Button type="button" variant="ghost" size="icon" aria-label="Open assistant" onClick={() => setOpen(true)}>
         <Sparkles />
       </Button>
-      <Sheet open={open} onOpenChange={setOpen}>
-        <SheetContent side="right" className="w-full gap-0 p-0 data-[side=right]:sm:max-w-md">
+      {/* Non-modal: the page stays visible and usable beside the panel, so
+          a change the assistant makes can be watched as it lands. Clicking
+          the page keeps the panel open; Escape or the close button closes it. */}
+      <Sheet open={open} onOpenChange={setOpen} modal={false}>
+        <SheetContent
+          side="right"
+          className="w-full gap-0 bg-background p-0 shadow-2xl data-[side=right]:sm:max-w-md"
+          onInteractOutside={(event) => event.preventDefault()}
+        >
           <PanelHeader
             schoolId={schoolId}
             conversationId={conversationId}
@@ -72,6 +79,7 @@ export function AssistantPanel({ schoolId }: { schoolId: string }) {
               surface="panel"
               compact
               autoFocus
+              gutterClassName="px-4"
               onConversationStarted={setConversationId}
             />
           </div>

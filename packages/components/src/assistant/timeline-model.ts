@@ -3,6 +3,7 @@ import type {
   AssistantRunDto,
   AssistantToolCallItemDto,
   AssistantUserMessageItemDto,
+  AssistantViewItemDto,
 } from '@campuspilot/assistant-contract/dto';
 
 /**
@@ -17,6 +18,10 @@ export type AssistantTimelineRow =
   | { kind: 'activity'; id: string; calls: AssistantToolCallItemDto[] }
   /** A write that waited for, or still waits for, the user's decision. */
   | { kind: 'approval'; id: string; call: AssistantToolCallItemDto }
+  /** Platform UI the assistant showed. */
+  | { kind: 'view'; id: string; item: AssistantViewItemDto }
+  /** The live status while a run works and nothing else shows progress. */
+  | { kind: 'live'; id: string; label: 'Waiting' | 'Thinking' | 'Working'; since: Date }
   | { kind: 'notice'; id: string; run: AssistantRunDto };
 
 /** Whether a tool call is shown as a decision card rather than activity. */
@@ -59,6 +64,9 @@ export function buildAssistantTimeline(
       if (item.status === 'complete' && !item.body.text.trim()) continue;
       flushActivity();
       rows.push({ kind: 'reply', id: item.id, itemId: item.id });
+    } else if (item.kind === 'view') {
+      flushActivity();
+      rows.push({ kind: 'view', id: item.id, item });
     } else if (isDecisionCall(item)) {
       flushActivity();
       rows.push({ kind: 'approval', id: item.id, call: item });
@@ -68,7 +76,30 @@ export function buildAssistantTimeline(
   }
   flushActivity();
   closeRun(currentRunId);
+
+  const live = liveRow(items, runs);
+  if (live) rows.push(live);
   return rows;
+}
+
+/**
+ * The live line, shown while a run works and nothing else is visibly
+ * progressing: not while a reply streams (the text is the progress) and not
+ * while an approval waits (the card is the next step).
+ */
+function liveRow(
+  items: readonly AssistantItemDto[],
+  runs: readonly AssistantRunDto[],
+): AssistantTimelineRow | null {
+  const run = activeRun(runs);
+  if (!run || run.status === 'awaiting_approval') return null;
+  const runItems = items.filter((item) => item.runId === run.id);
+  const last = runItems.at(-1);
+  if (last?.kind === 'assistant_message' && last.status === 'streaming') return null;
+  if (runItems.some((item) => item.kind === 'tool_call' && item.status === 'awaiting_approval')) return null;
+  const label =
+    run.status === 'queued' ? 'Waiting' : runItems.some((item) => item.kind === 'tool_call') ? 'Working' : 'Thinking';
+  return { kind: 'live', id: `live:${run.id}`, label, since: run.startedAt ?? run.createdAt };
 }
 
 const VERB_BY_ACCESS = { read: 'Looked up', write: 'Updated' } as const;

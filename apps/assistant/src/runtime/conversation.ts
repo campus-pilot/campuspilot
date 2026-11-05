@@ -4,7 +4,8 @@ import * as restate from '@restatedev/restate-sdk';
 
 import { db } from '../db/client';
 import type { AssistantToolCallBody, AssistantUserMessageBody } from '../db/schema';
-import { isAssistantRunStopSignalled, publishAssistantEvent } from '../events';
+import { isAssistantRunStopSignalled, publishAssistantEvent, rememberStreamingText } from '../events';
+import { createTextRelease } from './text-release';
 import { getRunToken } from '../platform';
 import * as store from '../store';
 import {
@@ -25,6 +26,8 @@ import {
 import { buildAssistantPrompt, type AssistantConversationFacts } from './prompt';
 import type { ProviderRegistry } from './providers/registry';
 import type { ModelProvider, ModelToolResult, TranscriptEntry } from './providers/types';
+import { showViewInputSchema } from '@campuspilot/assistant-contract/views';
+
 import { callTool, loadToolCatalog, requiresApproval, toModelToolName } from './tools';
 
 /** Model requests one run may make before it stops to protect against loops. */
@@ -270,13 +273,19 @@ export function createAssistantConversationObject(deps: AssistantConversationDep
         }),
       ));
 
-    const onText = (text: string) => {
-      void ensureItem()
-        .then((item) =>
-          publishAssistantEvent(run.conversationId, { type: 'text', itemId: item.id, text }),
-        )
-        .catch((err) => deps.log.warn({ err, runId: run.runId }, 'assistant.text.publish.failed'));
-    };
+    // One chain keeps deltas in order; a failed publish never blocks the rest.
+    let publishing: Promise<unknown> = Promise.resolve();
+    const onText = createTextRelease({
+      publish: ({ offset, delta, text }) => {
+        publishing = publishing
+          .then(() => ensureItem())
+          .then(async (item) => {
+            await rememberStreamingText(item.id, text);
+            await publishAssistantEvent(run.conversationId, { type: 'text', itemId: item.id, offset, delta });
+          })
+          .catch((err) => deps.log.warn({ err, runId: run.runId }, 'assistant.text.publish.failed'));
+      },
+    });
 
     let result: Awaited<ReturnType<ModelProvider['step']>>;
     try {
@@ -351,6 +360,8 @@ export function createAssistantConversationObject(deps: AssistantConversationDep
       };
     }
 
+    if (tool.source === 'local') return showView(run, toolUse);
+
     const needsApproval = requiresApproval(tool);
     const body: AssistantToolCallBody = {
       toolUseId: toolUse.id,
@@ -374,6 +385,43 @@ export function createAssistantConversationObject(deps: AssistantConversationDep
     return needsApproval
       ? { action: 'approve', itemId: item.id }
       : { action: 'execute', itemId: item.id };
+  }
+
+  /**
+   * Shows a view: validated against the contract, saved as a timeline item,
+   * acknowledged to the model. A view that does not validate goes back to the
+   * model with the problems, so it can correct and call again.
+   */
+  async function showView(run: RunFacts, toolUse: ToolUse): Promise<PreparedToolCall> {
+    const result = (content: string, isError: boolean): PreparedToolCall => ({
+      action: 'result',
+      result: { toolUseId: toolUse.id, toolName: toolUse.name, content, isError },
+    });
+    const parsed = showViewInputSchema.safeParse(toolUse.input ?? {});
+    if (!parsed.success) {
+      return result(
+        JSON.stringify({
+          code: 'BAD_REQUEST',
+          message: 'The view does not match the schema.',
+          issues: parsed.error.issues.slice(0, 8).map((issue) => ({
+            path: issue.path.map(String).join('.'),
+            message: issue.message,
+          })),
+        }),
+        true,
+      );
+    }
+    await tx((t, emit) =>
+      store.insertItem(t, emit, {
+        conversationId: run.conversationId,
+        runId: run.runId,
+        kind: 'view',
+        status: 'complete',
+        body: { view: parsed.data.view },
+        itemKey: toolCallItemKey(run.runId, toolUse.id),
+      }),
+    );
+    return result('Shown to the user. Do not repeat its contents in text.', false);
   }
 
   /**

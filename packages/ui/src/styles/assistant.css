@@ -1,0 +1,226 @@
+/*
+ * Assistant chat surface. Values follow T3 Code's chat (a 46rem lane, a
+ * hairline-outlined composer with a near-invisible shadow, restrained
+ * markdown rhythm, row-only tables), adapted to CampusPilot's palette.
+ */
+
+@theme inline {
+  --color-message: var(--message-surface);
+  --color-surface-outline: var(--surface-outline);
+  --shadow-composer: var(--composer-shadow);
+  --inset-shadow-control-highlight: 0 1px rgb(255 255 255 / 16%);
+  --inset-shadow-control-pressed: 0 1px rgb(0 0 0 / 8%);
+  --inset-shadow-surface-highlight: inset 0 1px var(--surface-highlight);
+}
+
+:root {
+  /* Width of the conversation and the composer, shared so they line up. */
+  --assistant-lane: 46rem;
+  --message-surface: color-mix(in oklab, var(--color-zinc-200) 55%, var(--color-zinc-100));
+  --surface-outline: rgb(0 0 0 / 8%);
+  --surface-highlight: transparent;
+  --composer-shadow: 0 1px 2px rgb(0 0 0 / 5%);
+}
+
+.dark {
+  --message-surface: color-mix(in oklab, var(--background) 88%, white);
+  --surface-outline: rgb(255 255 255 / 7%);
+  --surface-highlight: rgb(255 255 255 / 3%);
+  --composer-shadow: 0 14px 32px -18px rgb(0 0 0 / 75%);
+}
+
+@layer components {
+  .assistant-markdown {
+    font-size: 0.875rem;
+    line-height: 1.625;
+    color: color-mix(in oklab, var(--foreground) 90%, transparent);
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .assistant-markdown > :first-child {
+    margin-top: 0;
+  }
+
+  .assistant-markdown > :last-child {
+    margin-bottom: 0;
+  }
+
+  .assistant-markdown :is(p, ul, ol, blockquote, pre, .assistant-markdown-table) {
+    margin: 0.65rem 0;
+  }
+
+  .assistant-markdown :is(h1, h2, h3, h4, h5, h6) {
+    margin: 1.25rem 0 0.5rem;
+    font-weight: 600;
+    line-height: 1.3;
+    color: var(--foreground);
+  }
+
+  .assistant-markdown h1 { font-size: 1.25rem; }
+  .assistant-markdown h2 { font-size: 1.125rem; }
+  .assistant-markdown h3 { font-size: 1rem; }
+  .assistant-markdown :is(h4, h5, h6) { font-size: 0.875rem; }
+
+  .assistant-markdown :is(strong, b) {
+    font-weight: 600;
+    color: var(--foreground);
+  }
+
+  .assistant-markdown ul {
+    padding-inline-start: 1.25rem;
+    list-style-type: disc;
+  }
+
+  .assistant-markdown ol {
+    padding-inline-start: 1.25rem;
+    list-style-type: decimal;
+  }
+
+  .assistant-markdown ol > li::marker {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .assistant-markdown li + li {
+    margin-top: 0.25rem;
+  }
+
+  .assistant-markdown ul ul { list-style-type: circle; }
+  .assistant-markdown ul ul ul { list-style-type: square; }
+  .assistant-markdown :is(ul, ol) :is(ul, ol) { margin: 0.25rem 0; }
+
+  .assistant-markdown :not(pre) > code {
+    border-radius: 0.25rem;
+    background: color-mix(in oklab, var(--foreground) 9%, transparent);
+    padding: 0.1em 0.35em;
+    font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+    font-size: 0.85em;
+  }
+
+  .assistant-markdown pre {
+    overflow-x: auto;
+    border-radius: var(--radius-lg);
+    border: 1px solid color-mix(in oklab, var(--border) 70%, transparent);
+    background: var(--secondary);
+    padding: 0.75rem;
+    font-size: 0.8125rem;
+    line-height: 1.5;
+  }
+
+  .dark .assistant-markdown pre {
+    border-color: transparent;
+    background: color-mix(in oklab, var(--input) 32%, transparent);
+  }
+
+  .assistant-markdown a {
+    color: var(--primary);
+    text-decoration: none;
+  }
+
+  .assistant-markdown a:hover {
+    text-decoration: underline dotted;
+    text-underline-offset: 3px;
+  }
+
+  .assistant-markdown blockquote {
+    border-inline-start: 2px solid var(--border);
+    padding-inline-start: 0.75rem;
+    color: var(--muted-foreground);
+  }
+
+  .assistant-markdown hr {
+    margin: 1rem 0;
+    border-color: var(--border);
+  }
+
+  /* Row separators only; the outer columns sit flush with the prose. */
+  .assistant-markdown-table {
+    overflow-x: auto;
+  }
+
+  .assistant-markdown table {
+    width: 100%;
+    border-collapse: collapse;
+    overflow-wrap: normal;
+    word-break: normal;
+    font-size: 0.8125rem;
+  }
+
+  .assistant-markdown :is(th, td) {
+    max-width: 24rem;
+    padding: 0.45rem 0.75rem;
+    text-align: start;
+    text-wrap: pretty;
+    vertical-align: top;
+  }
+
+  /* Centred columns read as misaligned in a reading lane; keep start/end only. */
+  .assistant-markdown :is(th, td)[style*='center'] {
+    text-align: start !important;
+  }
+
+  .assistant-markdown :is(th, td):first-child { padding-inline-start: 0; }
+  .assistant-markdown :is(th, td):last-child { padding-inline-end: 0; }
+
+  .assistant-markdown thead th {
+    border-bottom: 1px solid color-mix(in oklab, var(--border) 100%, transparent);
+    padding-block: 0.55rem;
+    font-weight: 600;
+    color: var(--foreground);
+  }
+
+  .assistant-markdown tbody td {
+    border-bottom: 1px solid color-mix(in oklab, var(--border) 60%, transparent);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .assistant-markdown tbody tr:last-child td {
+    border-bottom: 0;
+  }
+
+  /* New blocks of a streaming reply fade in instead of popping. */
+  .assistant-markdown[data-streaming] > * {
+    transition: opacity 600ms ease-out;
+    @starting-style {
+      opacity: 0;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .assistant-markdown[data-streaming] > * {
+      transition: none;
+    }
+  }
+}
+
+/* "Working" shimmer: a band of full colour sweeping across muted text. */
+@keyframes assistant-shimmer {
+  from { background-position: 100% 0; }
+  to { background-position: -100% 0; }
+}
+
+@utility assistant-shimmer {
+  background-image: linear-gradient(
+    90deg,
+    var(--muted-foreground) 0%,
+    var(--muted-foreground) 40%,
+    var(--foreground) 50%,
+    var(--muted-foreground) 60%,
+    var(--muted-foreground) 100%
+  );
+  background-size: 200% 100%;
+  background-clip: text;
+  color: transparent;
+  animation: assistant-shimmer 2.2s steps(30) infinite;
+
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+    color: var(--muted-foreground);
+    background: none;
+  }
+}
+
+/* Delayed reveal: keeps fast transitions from flashing interim states. */
+@keyframes assistant-reveal {
+  to { opacity: 1; }
+}

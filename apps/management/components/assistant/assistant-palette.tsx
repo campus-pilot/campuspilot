@@ -2,11 +2,11 @@
 
 import { Button } from '@campuspilot/ui/components/button';
 import { CommandGroup, CommandItem } from '@campuspilot/ui/components/command';
-import { Spinner } from '@campuspilot/ui/components/spinner';
 import { toast } from '@campuspilot/ui/lib/toast';
-import { ChevronLeft, Maximize2, Sparkles } from 'lucide-react';
+import { ChevronLeft, Loader2, Maximize2, Sparkles } from 'lucide-react';
 import Link from 'next/link';
 
+import { CommandRow } from '@/components/command-row';
 import { schoolHref } from '@/components/school-route';
 
 import { AssistantAccess } from './assistant-access';
@@ -44,8 +44,11 @@ export function AskAssistantCommand({
               .catch((error: Error) => toast.error(error.message || 'The assistant could not start.'))
           }
         >
-          {isPending ? <Spinner /> : <Sparkles aria-hidden />}
-          <span className="truncate">Ask the assistant: “{question}”</span>
+          <CommandRow
+            icon={isPending ? Loader2 : Sparkles}
+            label={`Ask “${question}”`}
+            description={isPending ? 'Starting…' : 'The assistant answers here, with your permissions'}
+          />
         </CommandItem>
       </CommandGroup>
     </AssistantAccess>

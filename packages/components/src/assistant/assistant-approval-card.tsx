@@ -1,8 +1,8 @@
 import type { AssistantToolCallItemDto } from '@campuspilot/assistant-contract/dto';
-import { Badge } from '@campuspilot/ui/components/badge';
 import { Button } from '@campuspilot/ui/components/button';
 import { Spinner } from '@campuspilot/ui/components/spinner';
-import { AlertCircle, Check, ShieldQuestion, X } from 'lucide-react';
+import { cn } from '@campuspilot/ui/lib/utils';
+import { AlertCircle, Check, CircleSlash, ShieldQuestion, X } from 'lucide-react';
 
 export type AssistantApprovalDecision = 'approve' | 'decline';
 
@@ -21,54 +21,54 @@ function humanizeKey(key: string): string {
 
 function displayValue(value: unknown): string {
   if (value === null || value === undefined || value === '') return '—';
-  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
-    return String(value);
-  }
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return String(value);
   return JSON.stringify(value);
 }
 
-function ApprovalInput({ input }: { input: unknown }) {
+function ChangeList({ input }: { input: unknown }) {
   const entries =
     typeof input === 'object' && input !== null
       ? Object.entries(input as Record<string, unknown>).filter(([key]) => !HIDDEN_INPUT_KEYS.has(key))
       : [];
   if (entries.length === 0) return null;
   return (
-    <dl className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1 text-xs">
+    <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-xs/relaxed">
       {entries.map(([key, value]) => (
         <div key={key} className="contents">
           <dt className="text-muted-foreground">{humanizeKey(key)}</dt>
-          <dd className="min-w-0 break-words">{displayValue(value)}</dd>
+          <dd className="min-w-0 break-words font-medium text-foreground">{displayValue(value)}</dd>
         </div>
       ))}
     </dl>
   );
 }
 
-const OUTCOME: Partial<Record<AssistantToolCallItemDto['status'], { label: string; icon: typeof Check }>> = {
-  running: { label: 'Approved, running…', icon: Check },
-  succeeded: { label: 'Approved and done', icon: Check },
-  failed: { label: 'Approved, but it failed', icon: AlertCircle },
+const OUTCOME: Partial<Record<AssistantToolCallItemDto['status'], { label: string; icon: typeof Check; tone?: string }>> = {
+  running: { label: 'Approved', icon: Check },
+  succeeded: { label: 'Approved', icon: Check },
+  failed: { label: 'Approved, but it failed', icon: AlertCircle, tone: 'text-destructive' },
   declined: { label: 'Declined', icon: X },
-  cancelled: { label: 'Cancelled', icon: X },
+  cancelled: { label: 'Cancelled', icon: CircleSlash },
 };
 
-function ApprovalOutcome({ call }: { call: AssistantToolCallItemDto }) {
+/** After the decision, the card folds to one quiet line in the history. */
+function DecidedChange({ call }: { call: AssistantToolCallItemDto }) {
   const outcome = OUTCOME[call.status];
   if (!outcome) return null;
   const Icon = outcome.icon;
   return (
-    <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-      <Icon className="size-3.5" aria-hidden />
-      {outcome.label}
-      {call.body.error ? <span className="text-destructive">: {call.body.error.message}</span> : null}
-    </p>
+    <div className={cn('flex min-h-6 min-w-0 items-center gap-1.5 px-1 text-sm/relaxed text-muted-foreground', outcome.tone)}>
+      {call.status === 'running' ? <Spinner className="size-3.5" /> : <Icon className="size-4 shrink-0" aria-hidden />}
+      <span className="shrink-0">{outcome.label}</span>
+      <span className="truncate text-foreground/80">{call.body.title}</span>
+      {call.body.error ? <span className="truncate">· {call.body.error.message}</span> : null}
+    </div>
   );
 }
 
 /**
- * A change the assistant wants to make. While it waits, the user approves or
- * declines it here; afterwards the card records what happened.
+ * A change the assistant wants to make. While it waits the user approves or
+ * declines it here; afterwards it records what happened in one line.
  */
 export function AssistantApprovalCard({
   call,
@@ -80,31 +80,33 @@ export function AssistantApprovalCard({
   pendingDecision?: AssistantApprovalDecision;
   onDecide: (decision: AssistantApprovalDecision) => void;
 }) {
-  const waiting = call.status === 'awaiting_approval';
+  if (call.status !== 'awaiting_approval') return <DecidedChange call={call} />;
   return (
-    <section className="flex flex-col gap-2 rounded-lg border bg-card p-3" aria-label={`Approve: ${call.body.title}`}>
-      <header className="flex items-center gap-2">
-        <ShieldQuestion className="size-4 text-muted-foreground" aria-hidden />
-        <h3 className="text-xs font-medium">{call.body.title}</h3>
-        <Badge variant={call.body.destructive ? 'destructive' : 'outline'} className="ml-auto">
-          {call.body.destructive ? 'Changes existing data' : 'Adds data'}
-        </Badge>
+    <section
+      aria-label={`Approve: ${call.body.title}`}
+      className="relative flex flex-col gap-3 rounded-xl bg-card p-3.5 shadow-composer after:pointer-events-none after:absolute after:inset-0 after:rounded-[inherit] after:border after:border-surface-outline"
+    >
+      <header className="flex items-baseline justify-between gap-3">
+        <h3 className="text-sm font-medium text-foreground">{call.body.title}</h3>
+        {call.body.destructive ? (
+          <span className="shrink-0 text-xs text-muted-foreground">Changes existing data</span>
+        ) : null}
       </header>
-      <ApprovalInput input={call.body.input} />
-      {waiting ? (
-        <div className="flex justify-end gap-2">
-          <Button type="button" variant="outline" disabled={Boolean(pendingDecision)} onClick={() => onDecide('decline')}>
-            {pendingDecision === 'decline' ? <Spinner /> : null}
-            Decline
-          </Button>
-          <Button type="button" disabled={Boolean(pendingDecision)} onClick={() => onDecide('approve')}>
-            {pendingDecision === 'approve' ? <Spinner /> : null}
-            Approve
-          </Button>
-        </div>
-      ) : (
-        <ApprovalOutcome call={call} />
-      )}
+      <ChangeList input={call.body.input} />
+      <footer className="flex items-center gap-2">
+        <p className="flex min-w-0 flex-1 items-center gap-1.5 text-xs text-amber-600 dark:text-amber-500">
+          <ShieldQuestion className="size-3.5 shrink-0" aria-hidden />
+          Waiting for your approval
+        </p>
+        <Button type="button" variant="ghost" size="sm" disabled={Boolean(pendingDecision)} onClick={() => onDecide('decline')}>
+          {pendingDecision === 'decline' ? <Spinner /> : null}
+          Decline
+        </Button>
+        <Button type="button" size="sm" disabled={Boolean(pendingDecision)} onClick={() => onDecide('approve')}>
+          {pendingDecision === 'approve' ? <Spinner /> : null}
+          Approve
+        </Button>
+      </footer>
     </section>
   );
 }

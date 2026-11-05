@@ -29,7 +29,7 @@ test('snapshot orders items by position', () => {
 });
 
 test('text frames leave items and runs untouched', () => {
-  const next = applyAssistantEvent(snapshot, { type: 'text', itemId: 'i2', text: 'Hel' });
+  const next = applyAssistantEvent(snapshot, { type: 'text', itemId: 'i2', offset: 0, delta: 'Hel' });
   assert.equal(next.items, snapshot.items);
   assert.equal(next.runs, snapshot.runs);
   assert.equal(next.text.i2, 'Hel');
@@ -41,8 +41,28 @@ test('stale upserts are ignored', () => {
 });
 
 test('completing a message drops its streamed text and late frames', () => {
-  const streaming = applyAssistantEvent(snapshot, { type: 'text', itemId: 'i2', text: 'Hel' });
+  const streaming = applyAssistantEvent(snapshot, { type: 'text', itemId: 'i2', offset: 0, delta: 'Hel' });
   const done = applyAssistantEvent(streaming, { type: 'item', item: reply(4, 'complete', 'Hello') });
   assert.equal(done.text.i2, undefined);
-  assert.equal(applyAssistantEvent(done, { type: 'text', itemId: 'i2', text: 'He' }), done);
+  assert.equal(applyAssistantEvent(done, { type: 'text', itemId: 'i2', offset: 3, delta: 'lo' }), done);
+});
+
+test('text deltas append in order and ignore duplicates and gaps', () => {
+  let state = applyAssistantEvent(snapshot, { type: 'text', itemId: 'i2', offset: 0, delta: 'Hel' });
+  state = applyAssistantEvent(state, { type: 'text', itemId: 'i2', offset: 3, delta: 'lo ' });
+  assert.equal(state.text.i2, 'Hello ');
+  assert.equal(applyAssistantEvent(state, { type: 'text', itemId: 'i2', offset: 0, delta: 'Hel' }), state);
+  assert.equal(applyAssistantEvent(state, { type: 'text', itemId: 'i2', offset: 9, delta: 'x' }), state);
+  // A reconnect re-sends the whole text from offset 0: only the new tail lands.
+  state = applyAssistantEvent(state, { type: 'text', itemId: 'i2', offset: 0, delta: 'Hello world' });
+  assert.equal(state.text.i2, 'Hello world');
+});
+
+test('resume merges changes and advances the cursor', () => {
+  const resumed = applyAssistantEvent(snapshot, {
+    type: 'resume', conversation: { ...conversation, lastSequence: 6 }, items: [reply(5, 'complete', 'Done')], runs: [run(6, 'completed')],
+  });
+  assert.equal(resumed.items.length, 2);
+  assert.equal(resumed.runs[0]?.status, 'completed');
+  assert.equal(resumed.sequence, 6);
 });

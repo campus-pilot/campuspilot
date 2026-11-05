@@ -16,6 +16,10 @@ export type AssistantConversationState = {
   runs: readonly AssistantRunDto[];
   /** Latest streamed text of messages that are still streaming. */
   text: Readonly<Record<string, string>>;
+  /** Highest change sequence held: the cursor a reconnect resumes from. */
+  sequence: number;
+  /** Whether the stream has caught up (after its snapshot or resume). */
+  synchronized: boolean;
 };
 
 export const EMPTY_CONVERSATION_STATE: AssistantConversationState = {
@@ -23,7 +27,23 @@ export const EMPTY_CONVERSATION_STATE: AssistantConversationState = {
   items: [],
   runs: [],
   text: {},
+  sequence: 0,
+  synchronized: false,
 };
+
+function highestSequence(
+  conversation: AssistantConversationDto,
+  items: readonly AssistantItemDto[],
+  runs: readonly AssistantRunDto[],
+  floor = 0,
+): number {
+  return Math.max(
+    floor,
+    conversation.lastSequence,
+    ...items.map((item) => item.sequence),
+    ...runs.map((run) => run.sequence),
+  );
+}
 
 function upsertBySequence<T extends { id: string; sequence: number }>(
   list: readonly T[],
@@ -61,26 +81,55 @@ export function applyAssistantEvent(
         items: [...event.items].sort(byPosition),
         runs: [...event.runs].sort(byCreation),
         text: {},
+        sequence: highestSequence(event.conversation, event.items, event.runs),
+        synchronized: false,
       };
+    case 'resume': {
+      // Changes since our cursor, merged over what is already on screen.
+      const items = event.items.reduce((list, item) => upsertBySequence(list, item, byPosition), state.items);
+      const runs = event.runs.reduce((list, run) => upsertBySequence(list, run, byCreation), state.runs);
+      const finished = event.items.filter((item) => item.status !== 'streaming').map((item) => item.id);
+      return {
+        conversation: event.conversation,
+        items,
+        runs,
+        text: finished.reduce(withoutText, state.text),
+        sequence: highestSequence(event.conversation, event.items, event.runs, state.sequence),
+        synchronized: false,
+      };
+    }
+    case 'synchronized':
+      return state.synchronized ? state : { ...state, synchronized: true };
+    case 'heartbeat':
+      return state;
     case 'conversation':
       return { ...state, conversation: event.conversation };
     case 'run': {
       const runs = upsertBySequence(state.runs, event.run, byCreation);
-      return runs === state.runs ? state : { ...state, runs };
+      return runs === state.runs ? state : { ...state, runs, sequence: Math.max(state.sequence, event.run.sequence) };
     }
     case 'item': {
       const items = upsertBySequence(state.items, event.item, byPosition);
       if (items === state.items) return state;
       const finished = event.item.status !== 'streaming';
-      return { ...state, items, text: finished ? withoutText(state.text, event.item.id) : state.text };
+      return {
+        ...state,
+        items,
+        text: finished ? withoutText(state.text, event.item.id) : state.text,
+        sequence: Math.max(state.sequence, event.item.sequence),
+      };
     }
     case 'text': {
       const item = state.items.find((entry) => entry.id === event.itemId);
-      // Frames can outrun the item they belong to; keep them until it arrives,
-      // and drop late frames for a message that has already completed.
+      // Drop frames for a message that already completed: its full text is saved.
       if (item && item.status !== 'streaming') return state;
-      if (state.text[event.itemId] === event.text) return state;
-      return { ...state, text: { ...state.text, [event.itemId]: event.text } };
+      const current = state.text[event.itemId] ?? '';
+      const end = event.offset + event.delta.length;
+      // A duplicate (already have it) or a gap (missed a frame): ignore; the
+      // completed message carries the full text either way.
+      if (end <= current.length || event.offset > current.length) return state;
+      const next = current.slice(0, event.offset) + event.delta;
+      return { ...state, text: { ...state.text, [event.itemId]: next } };
     }
   }
 }

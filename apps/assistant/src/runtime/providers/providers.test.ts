@@ -15,6 +15,7 @@ import {
 } from './gemini';
 
 const tool = (name: string, exposure: 'core' | 'advanced', readOnly: boolean): AssistantTool => ({
+  source: 'mcp',
   modelName: name, mcpName: name.replace('_', '.'), title: 'Title', description: 'Description.',
   inputSchema: { type: 'object', properties: {} }, readOnly, destructive: false, exposure, module: 'students',
 });
@@ -43,7 +44,7 @@ describe('anthropic adapter (must match the Claude-only build)', () => {
   it('keeps the prompt text', () => {
     // Pinned against the Claude-only build; changing the prompt changes this.
     const system = JSON.stringify(buildAnthropicSystem(buildAssistantPrompt(facts)));
-    expect(createHash('sha256').update(system).digest('hex').slice(0, 16)).toMatchInlineSnapshot(`"5e2ec5c5e4399f92"`);
+    expect(createHash('sha256').update(system).digest('hex').slice(0, 16)).toMatchInlineSnapshot(`"15b709eb2b923a11"`);
   });
 
   it('defers advanced tools behind tool search and labels writes', () => {

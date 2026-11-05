@@ -10,7 +10,7 @@ import { and, count, desc, eq } from 'drizzle-orm';
 import { db } from './db/client';
 import { assistantConversationTable } from './db/schema';
 import { entitlements } from './entitlements';
-import { signalAssistantRunStop, subscribeAssistantEvents } from './events';
+import { signalAssistantRunStop, streamingTexts, subscribeAssistantEvents } from './events';
 import { generateId } from './ids';
 import { log } from './log';
 import {
@@ -79,6 +79,9 @@ async function availability(schoolId: string, userId: string) {
     : { configured: true, available: false, unavailableReason: decision.reason };
 }
 
+/** Idle interval after which the stream sends a heartbeat. */
+const HEARTBEAT_MS = 15_000;
+
 /** Longest conversation title derived from the first message. */
 const TITLE_MAX_LENGTH = 80;
 
@@ -145,8 +148,13 @@ export const assistantRouter = os.router({
   }),
 
   /**
-   * The subscription opens before the snapshot is read, so nothing committed
-   * in between can be missed; clients drop upserts not newer than their state.
+   * The subscription opens before state is read, so nothing committed in
+   * between can be missed; clients drop upserts not newer than their state.
+   * A client that already holds data passes `afterSequence` and gets only
+   * what changed (a `resume`), falling back to a snapshot when that is large.
+   * Text already streamed for unfinished messages follows, then a
+   * `synchronized` marker; while idle, a heartbeat every 15s lets the client
+   * tell a quiet stream from a dead connection.
    */
   subscribeConversation: authed.subscribeConversation.handler(async function* ({
     context,
@@ -160,11 +168,33 @@ export const assistantRouter = os.router({
     const onAbort = () => void subscription.close();
     signal?.addEventListener('abort', onAbort, { once: true });
     try {
-      const snapshot = await store.loadSnapshot(db, owned.id);
-      if (!snapshot) throw new ORPCError('NOT_FOUND');
-      yield { type: 'snapshot', ...snapshot } satisfies AssistantStreamEvent;
+      const resumed =
+        input.afterSequence === undefined ? null : await store.loadChangesSince(db, owned.id, input.afterSequence);
+      const state = resumed ?? (await store.loadSnapshot(db, owned.id));
+      if (!state) throw new ORPCError('NOT_FOUND');
+      yield { type: resumed ? 'resume' : 'snapshot', ...state } satisfies AssistantStreamEvent;
+
+      const streaming = (resumed ? (await store.loadSnapshot(db, owned.id))?.items ?? [] : state.items).filter(
+        (item) => item.kind === 'assistant_message' && item.status === 'streaming',
+      );
+      for (const [itemId, text] of await streamingTexts(streaming.map((item) => item.id))) {
+        yield { type: 'text', itemId, offset: 0, delta: text } satisfies AssistantStreamEvent;
+      }
+      yield { type: 'synchronized' } satisfies AssistantStreamEvent;
+
       while (true) {
-        const event = await subscription.next();
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const event = await Promise.race([
+          subscription.next(),
+          new Promise<'heartbeat'>((resolve) => {
+            timer = setTimeout(() => resolve('heartbeat'), HEARTBEAT_MS);
+          }),
+        ]);
+        clearTimeout(timer);
+        if (event === 'heartbeat') {
+          yield { type: 'heartbeat' } satisfies AssistantStreamEvent;
+          continue;
+        }
         if (!event) return;
         yield event;
       }

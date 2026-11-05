@@ -1,4 +1,4 @@
-import { and, asc, eq, sql } from 'drizzle-orm';
+import { and, asc, eq, gt, sql } from 'drizzle-orm';
 
 import {
   assistantConversationSchema,
@@ -539,4 +539,43 @@ export async function completeStreamingItems(
   for (const row of rows) {
     await updateItem(tx, emit, row, { status: 'complete' });
   }
+}
+
+
+/**
+ * What changed after `afterSequence`: the entities whose latest change is
+ * newer, for a resume instead of a full snapshot. Returns null when the
+ * change set is larger than `limit` or the cursor is ahead of the
+ * conversation (a stale or foreign cursor), so the caller sends a snapshot.
+ */
+export async function loadChangesSince(
+  db: AssistantDatabase,
+  conversationId: string,
+  afterSequence: number,
+  limit = 200,
+): Promise<AssistantSnapshot | null> {
+  return db.transaction(async (tx) => {
+    const conversation = await findConversation(tx, conversationId);
+    if (!conversation || afterSequence > conversation.lastSequence) return null;
+    const [items, runs] = await Promise.all([
+      tx
+        .select()
+        .from(assistantItemTable)
+        .where(and(eq(assistantItemTable.conversationId, conversationId), gt(assistantItemTable.sequence, afterSequence)))
+        .orderBy(asc(assistantItemTable.position))
+        .limit(limit + 1),
+      tx
+        .select()
+        .from(assistantRunTable)
+        .where(and(eq(assistantRunTable.conversationId, conversationId), gt(assistantRunTable.sequence, afterSequence)))
+        .orderBy(asc(assistantRunTable.createdAt), asc(assistantRunTable.id))
+        .limit(limit + 1),
+    ]);
+    if (items.length + runs.length > limit) return null;
+    return {
+      conversation: toConversationDto(conversation),
+      items: items.map(toItemDto),
+      runs: runs.map(toRunDto),
+    };
+  });
 }

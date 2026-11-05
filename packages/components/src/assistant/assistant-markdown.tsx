@@ -1,5 +1,5 @@
-import { memo } from 'react';
-import ReactMarkdown from 'react-markdown';
+import { memo, type ComponentProps } from 'react';
+import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
 /**
@@ -24,14 +24,33 @@ export function splitMarkdownBlocks(text: string): string[] {
   return blocks;
 }
 
+const components: Components = {
+  // Wide tables scroll inside their own box instead of widening the lane.
+  table: (props: ComponentProps<'table'>) => (
+    <div className="assistant-markdown-table">
+      <table {...props} />
+    </div>
+  ),
+  a: ({ href, ...props }: ComponentProps<'a'>) => (
+    <a href={href} target="_blank" rel="noreferrer noopener" {...props} />
+  ),
+};
+
 const MarkdownBlock = memo(function MarkdownBlock({ source }: { source: string }) {
-  return <ReactMarkdown remarkPlugins={[remarkGfm]}>{source}</ReactMarkdown>;
+  return (
+    <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+      {source}
+    </ReactMarkdown>
+  );
 });
 
-/** Assistant markdown. Raw HTML is not rendered (react-markdown's default). */
-export function AssistantMarkdown({ text }: { text: string }) {
+/**
+ * Assistant prose. Raw HTML is never rendered (react-markdown's default).
+ * While `streaming`, each newly appended block fades in (see assistant.css).
+ */
+export function AssistantMarkdown({ text, streaming = false }: { text: string; streaming?: boolean }) {
   return (
-    <div className="assistant-markdown flex min-w-0 flex-col gap-2 text-xs/relaxed [&_a]:underline [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_li]:ml-4 [&_ol]:list-decimal [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-muted [&_pre]:p-2 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:bg-muted [&_th]:px-2 [&_th]:py-1 [&_th]:text-left [&_ul]:list-disc">
+    <div className="assistant-markdown" data-streaming={streaming ? '' : undefined}>
       {splitMarkdownBlocks(text).map((block, index) => (
         <MarkdownBlock key={index} source={block} />
       ))}

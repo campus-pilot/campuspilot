@@ -1,0 +1,113 @@
+'use client';
+
+import { SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
+import type {
+  AssistantExamResultView,
+  AssistantRecordEntity,
+  AssistantView,
+} from '@campuspilot/assistant-contract/views';
+import {
+  AssistantBarsViewBlock,
+  AssistantDetailsViewBlock,
+  AssistantNoticeViewBlock,
+  AssistantStatsViewBlock,
+  AssistantTableViewBlock,
+  AssistantViewFrame,
+} from '@campuspilot/components/assistant';
+import { StudentExamPreview } from '@campuspilot/components/exam/student-exam-preview';
+import { Skeleton } from '@campuspilot/ui/components/skeleton';
+import { useQuery } from '@tanstack/react-query';
+
+import { RequirePermissions } from '@/components/require-permissions';
+import { orpc } from '@/lib/orpc';
+
+import { AssistantRecordsViewBlock } from './assistant-record-views';
+
+/** The read permission the API checks for each record type. */
+function recordPermission(entity: AssistantRecordEntity, schoolId: string) {
+  const resource = { kind: 'school' as const, schoolId };
+  switch (entity) {
+    case 'admission':
+      return { action: SCHOOL_ACTIONS.READ_ADMISSION, resource };
+    case 'student':
+      return { action: SCHOOL_ACTIONS.READ_STUDENT, resource };
+    case 'class':
+      return { action: SCHOOL_ACTIONS.READ_CLASS, resource };
+    case 'exam':
+      return { action: SCHOOL_ACTIONS.READ_EXAMS, resource };
+    case 'staff':
+      return { action: SCHOOL_ACTIONS.READ_MEMBER, resource };
+  }
+}
+
+function NotAvailable({ title }: { title?: string }) {
+  return (
+    <AssistantViewFrame title={title}>
+      <p className="text-sm text-muted-foreground">You don’t have access to these records.</p>
+    </AssistantViewFrame>
+  );
+}
+
+function ExamResultBlock({ schoolId, view }: { schoolId: string; view: AssistantExamResultView }) {
+  const result = useQuery(
+    orpc.school.getStudentExam.queryOptions({
+      input: {
+        schoolId,
+        sessionId: view.sessionId,
+        examSlug: view.examSlug,
+        classId: view.classId,
+        studentId: view.studentId,
+      },
+    }),
+  );
+  return (
+    <AssistantViewFrame title={view.title}>
+      {result.data ? (
+        <StudentExamPreview data={result.data} />
+      ) : result.isPending ? (
+        <Skeleton className="h-40 w-full rounded-lg" />
+      ) : (
+        <p className="text-sm text-muted-foreground">This result is not available.</p>
+      )}
+    </AssistantViewFrame>
+  );
+}
+
+/**
+ * Renders a view the assistant showed, with the app's own components. Every
+ * record and result is fetched here with the user's session, behind the same
+ * permission the API enforces.
+ */
+export function AssistantViewBlock({ schoolId, view }: { schoolId: string; view: AssistantView }) {
+  const resource = { kind: 'school' as const, schoolId };
+  switch (view.type) {
+    case 'table':
+      return <AssistantTableViewBlock view={view} />;
+    case 'stats':
+      return <AssistantStatsViewBlock view={view} />;
+    case 'details':
+      return <AssistantDetailsViewBlock view={view} />;
+    case 'bars':
+      return <AssistantBarsViewBlock view={view} />;
+    case 'notice':
+      return <AssistantNoticeViewBlock view={view} />;
+    case 'records':
+      return (
+        <RequirePermissions permissions={recordPermission(view.entity, schoolId)} fallback={<NotAvailable title={view.title} />}>
+          <AssistantRecordsViewBlock schoolId={schoolId} view={view} />
+        </RequirePermissions>
+      );
+    case 'exam_result':
+      return (
+        <RequirePermissions
+          permissions={[
+            { action: SCHOOL_ACTIONS.READ_EXAMS, resource },
+            { action: SCHOOL_ACTIONS.READ_EXAM_RESULTS, resource },
+          ]}
+          fallback={<NotAvailable title={view.title} />}
+        >
+          <ExamResultBlock schoolId={schoolId} view={view} />
+        </RequirePermissions>
+      );
+  }
+}

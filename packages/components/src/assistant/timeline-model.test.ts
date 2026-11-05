@@ -44,6 +44,34 @@ describe('buildAssistantTimeline', () => {
   });
 });
 
+describe('live row', () => {
+  const streaming = (id: string, position: number): AssistantItemDto => ({
+    ...base, id, position, kind: 'assistant_message', status: 'streaming', body: { text: '' },
+  });
+  const view = (id: string, position: number): AssistantItemDto => ({
+    ...base, id, position, kind: 'view', status: 'complete',
+    body: { view: { type: 'notice', tone: 'neutral', text: 'Heads up' } },
+  });
+
+  it('shows Thinking before any tool, Working after one', () => {
+    expect(buildAssistantTimeline([user('u', 1)], [run('r1', 'running')]).at(-1)).toMatchObject({ kind: 'live', label: 'Thinking' });
+    expect(buildAssistantTimeline([user('u', 1), call('a', 2)], [run('r1', 'running')]).at(-1)).toMatchObject({ kind: 'live', label: 'Working' });
+    expect(buildAssistantTimeline([user('u', 1)], [run('r1', 'queued')]).at(-1)).toMatchObject({ kind: 'live', label: 'Waiting' });
+  });
+
+  it('hides while a reply streams, an approval waits, or nothing runs', () => {
+    const kinds = (items: AssistantItemDto[], status: AssistantRunDto['status']) =>
+      buildAssistantTimeline(items, [run('r1', status)]).map((row) => row.kind);
+    expect(kinds([user('u', 1), streaming('s', 2)], 'running')).not.toContain('live');
+    expect(kinds([user('u', 1), call('w', 2, { access: 'write', approvalId: 'ap' }, 'awaiting_approval')], 'awaiting_approval')).not.toContain('live');
+    expect(kinds([user('u', 1)], 'completed')).not.toContain('live');
+  });
+
+  it('renders views as their own rows', () => {
+    expect(buildAssistantTimeline([user('u', 1), view('v', 2)], [run('r1', 'completed')]).map((row) => row.kind)).toEqual(['user', 'view']);
+  });
+});
+
 describe('helpers', () => {
   it('summarises activity', () => {
     const calls = [call('a', 1), call('b', 2)].filter((item) => item.kind === 'tool_call');

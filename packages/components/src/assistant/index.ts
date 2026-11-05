@@ -5,3 +5,4 @@ export * from './assistant-markdown';
 export * from './assistant-rows';
 export * from './assistant-timeline';
 export * from './timeline-model';
+export * from './views';

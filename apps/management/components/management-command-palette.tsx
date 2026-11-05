@@ -46,6 +46,7 @@ import { client, orpc } from '@/lib/orpc';
 import { confirmNavigation } from '@/lib/navigation-guard';
 import { getAdmissionPhotoUrl } from '@/lib/admission-photo';
 import { AskAssistantCommand, PaletteAssistantView } from './assistant/assistant-palette';
+import { CommandRow } from './command-row';
 import { RequirePermissions } from './require-permissions';
 import { schoolHref, schoolSessionHref } from './school-route';
 import {
@@ -94,32 +95,6 @@ function initials(name: string) {
     .toUpperCase();
 }
 
-function CommandRow({
-  icon: Icon,
-  label,
-  description,
-}: {
-  icon: Icon;
-  label: string;
-  description: string;
-}) {
-  return (
-    <>
-      <span className="flex size-7 shrink-0 items-center justify-center text-muted-foreground transition-colors group-data-selected/command-item:text-foreground">
-        <Icon className="size-4" aria-hidden />
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block truncate font-medium">{label}</span>
-        <span className="block truncate text-[11px] text-muted-foreground">
-          {description}
-        </span>
-      </span>
-      <CommandShortcut className="flex">
-        <ChevronRight className="size-3.5" aria-hidden />
-      </CommandShortcut>
-    </>
-  );
-}
 
 function ProviderStatus({
   heading,

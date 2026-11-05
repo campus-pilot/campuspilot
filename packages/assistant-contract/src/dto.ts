@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { assistantViewSchema } from './views';
+
 
 /** Longest message a user may send; long pastes belong in documents. */
 export const ASSISTANT_MESSAGE_MAX_LENGTH = 8000;
@@ -87,15 +89,25 @@ export const assistantToolCallItemSchema = z.object({
   }),
 });
 
+/** A view the assistant showed: platform UI rendered from a structured spec. */
+export const assistantViewItemSchema = z.object({
+  ...itemBaseShape,
+  kind: z.literal('view'),
+  status: z.literal('complete'),
+  body: z.object({ view: assistantViewSchema }),
+});
+
 export const assistantItemSchema = z.discriminatedUnion('kind', [
   assistantUserMessageItemSchema,
   assistantAssistantMessageItemSchema,
   assistantToolCallItemSchema,
+  assistantViewItemSchema,
 ]);
 export type AssistantItemDto = z.infer<typeof assistantItemSchema>;
 export type AssistantToolCallItemDto = z.infer<typeof assistantToolCallItemSchema>;
 export type AssistantUserMessageItemDto = z.infer<typeof assistantUserMessageItemSchema>;
 export type AssistantReplyItemDto = z.infer<typeof assistantAssistantMessageItemSchema>;
+export type AssistantViewItemDto = z.infer<typeof assistantViewItemSchema>;
 
 export const assistantRunSchema = z.object({
   id: z.string(),
@@ -123,16 +135,27 @@ export const assistantConversationSchema = z.object({
 export type AssistantConversationDto = z.infer<typeof assistantConversationSchema>;
 
 /**
- * Stream envelope, after T3 Code's thread subscription: one snapshot with the
- * sequence it reflects, then sequenced upserts of whole entities. A client
- * ignores any upsert whose sequence is not newer than what it holds, so
- * events that raced the snapshot are harmless. `text` frames are ephemeral:
- * the accumulated text of a streaming message, never persisted mid-stream
- * and carrying no sequence.
+ * Stream envelope, after T3 Code's thread subscription:
+ * - `snapshot`: the whole visible state, sent on a first subscribe or when a
+ *   resume would be too large.
+ * - `resume`: only the entities changed since the client's `afterSequence`.
+ * - `item`/`run`/`conversation`: sequenced upserts of whole entities; a client
+ *   ignores any whose sequence is not newer than what it holds.
+ * - `text`: a streaming message's new text as `{offset, delta}` (not the
+ *   whole text each time); ephemeral and unsequenced.
+ * - `synchronized`: the snapshot or resume is complete; live from here.
+ * - `heartbeat`: sent while idle so a client can tell a quiet stream from a
+ *   dead connection.
  */
 export const assistantStreamEventSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('snapshot'),
+    conversation: assistantConversationSchema,
+    items: z.array(assistantItemSchema),
+    runs: z.array(assistantRunSchema),
+  }),
+  z.object({
+    type: z.literal('resume'),
     conversation: assistantConversationSchema,
     items: z.array(assistantItemSchema),
     runs: z.array(assistantRunSchema),
@@ -143,7 +166,15 @@ export const assistantStreamEventSchema = z.discriminatedUnion('type', [
     type: z.literal('conversation'),
     conversation: assistantConversationSchema,
   }),
-  z.object({ type: z.literal('text'), itemId: z.string(), text: z.string() }),
+  z.object({
+    type: z.literal('text'),
+    itemId: z.string(),
+    /** Where `delta` starts in the message's full text. */
+    offset: z.number().int().nonnegative(),
+    delta: z.string(),
+  }),
+  z.object({ type: z.literal('synchronized') }),
+  z.object({ type: z.literal('heartbeat') }),
 ]);
 export type AssistantStreamEvent = z.infer<typeof assistantStreamEventSchema>;
 
@@ -187,6 +218,14 @@ export type AssistantSnapshot = z.infer<typeof assistantSnapshotSchema>;
 export const assistantConversationInputSchema = z.object({
   ...schoolScopeShape,
   conversationId: z.string().min(1),
+});
+
+export const subscribeAssistantConversationInputSchema = assistantConversationInputSchema.extend({
+  /**
+   * The highest sequence the client already holds. When set, the stream starts
+   * with a `resume` of what changed since, instead of a full snapshot.
+   */
+  afterSequence: z.number().int().nonnegative().optional(),
 });
 
 export const sendAssistantMessageInputSchema = z.object({

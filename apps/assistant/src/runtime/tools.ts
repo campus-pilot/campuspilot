@@ -1,4 +1,10 @@
 import { ASSISTANT_TOOL_META } from '@campuspilot/assistant-contract/protocol';
+import {
+  SHOW_VIEW_TOOL_DESCRIPTION,
+  SHOW_VIEW_TOOL_NAME,
+  showViewInputSchema,
+} from '@campuspilot/assistant-contract/views';
+import { z } from 'zod';
 import { env } from '@campuspilot/env/assistant';
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 
@@ -22,6 +28,12 @@ const MODEL_OUTPUT_LIMIT = 24_000;
 const STORED_OUTPUT_LIMIT = 4_000;
 
 export type AssistantTool = {
+  /**
+   * `mcp`: a CampusPilot procedure, run through the API's MCP endpoint.
+   * `local`: handled by the assistant itself (showing a view); it changes
+   * nothing and reaches nothing.
+   */
+  source: 'mcp' | 'local';
   modelName: string;
   mcpName: string;
   title: string;
@@ -47,8 +59,25 @@ export type AssistantToolCatalog = {
  * run immediately. One function so a finer policy changes exactly here.
  */
 export function requiresApproval(tool: AssistantTool): boolean {
-  return !tool.readOnly;
+  return tool.source === 'mcp' && !tool.readOnly;
 }
+
+/** The display tool: always loaded, so the model can show views from the start. */
+const SHOW_VIEW_TOOL: AssistantTool = {
+  source: 'local',
+  modelName: SHOW_VIEW_TOOL_NAME,
+  mcpName: SHOW_VIEW_TOOL_NAME,
+  title: 'Show a view',
+  description: SHOW_VIEW_TOOL_DESCRIPTION,
+  inputSchema: (() => {
+    const { $schema: _dialect, ...schema } = z.toJSONSchema(showViewInputSchema, { io: 'input' });
+    return schema as Record<string, unknown>;
+  })(),
+  readOnly: true,
+  destructive: false,
+  exposure: 'core',
+  module: 'assistant',
+};
 
 async function withMcpClient<T>(token: string, work: (client: Client) => Promise<T>): Promise<T> {
   const client = new Client({ name: 'campuspilot-assistant', version: '0.1.0' });
@@ -96,11 +125,12 @@ export async function loadToolCatalog(token: string): Promise<AssistantToolCatal
     return all;
   });
 
-  const tools = new Map<string, AssistantTool>();
-  const ordered: AssistantTool[] = [];
+  const tools = new Map<string, AssistantTool>([[SHOW_VIEW_TOOL.modelName, SHOW_VIEW_TOOL]]);
+  const ordered: AssistantTool[] = [SHOW_VIEW_TOOL];
   for (const listedTool of listed) {
     const meta = (listedTool._meta ?? {}) as Record<string, unknown>;
     const tool: AssistantTool = {
+      source: 'mcp',
       modelName: toModelToolName(listedTool.name),
       mcpName: listedTool.name,
       title: listedTool.title ?? listedTool.name,
