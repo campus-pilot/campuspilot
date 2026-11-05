@@ -52,18 +52,26 @@ function runFailure(code: string, message: string) {
   return new restate.TerminalError(JSON.stringify({ code, message }));
 }
 
-function readRunFailure(error: restate.TerminalError): { code: string; message: string } {
+type RunFailure = { code: string; message: string; detail?: string };
+
+/**
+ * Our own failures carry their code and message. Anything else (for example
+ * ctx.run giving up after its retries on a provider error) gets the generic
+ * message, and its raw text is kept as `detail` for developers.
+ */
+function readRunFailure(error: restate.TerminalError): RunFailure {
   try {
     const parsed = JSON.parse(error.message) as { code?: unknown; message?: unknown };
     if (typeof parsed.code === 'string' && typeof parsed.message === 'string') {
       return { code: parsed.code, message: parsed.message };
     }
   } catch {
-    // Not one of ours (for example ctx.run giving up after its retries).
+    // Not one of ours.
   }
   return {
     code: 'model_error',
     message: 'The assistant could not finish this request. Please try again.',
+    detail: error.message,
   };
 }
 
@@ -107,14 +115,14 @@ const tx = <T>(work: Parameters<typeof store.assistantTransaction<T>>[1]) =>
 async function finishRun(
   run: { id: string; conversationId: string },
   status: 'completed' | 'failed' | 'cancelled',
-  error?: { code: string; message: string },
+  error?: RunFailure,
 ) {
   await tx(async (t, emit) => {
     await store.completeStreamingItems(t, emit, run);
     await store.updateRun(t, emit, run, {
       status,
       completedAt: new Date(),
-      ...(error ? { errorCode: error.code, errorMessage: error.message } : {}),
+      ...(error ? { errorCode: error.code, errorMessage: error.message, errorDetail: error.detail ?? null } : {}),
     });
   });
 }

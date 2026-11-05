@@ -109,6 +109,28 @@ export type AssistantUserMessageItemDto = z.infer<typeof assistantUserMessageIte
 export type AssistantReplyItemDto = z.infer<typeof assistantAssistantMessageItemSchema>;
 export type AssistantViewItemDto = z.infer<typeof assistantViewItemSchema>;
 
+/**
+ * What a run cost and why it failed, for developers. The service sends it
+ * only when ASSISTANT_DIAGNOSTICS is on; for everyone else it is null.
+ * Token counts are totals over the run's model calls; `inputTokens`
+ * excludes cache reads and cache writes, which are counted separately.
+ */
+export const assistantRunDiagnosticsSchema = z.object({
+  /** Null until the run starts. */
+  provider: z.string().nullable(),
+  model: z.string().nullable(),
+  modelRequestCount: z.number().int(),
+  inputTokens: z.number().int(),
+  outputTokens: z.number().int(),
+  cacheReadInputTokens: z.number().int(),
+  cacheCreationInputTokens: z.number().int(),
+  /** Estimate from list prices; null when the model's prices are unknown. */
+  estimatedCostUsd: z.number().nullable(),
+  /** The raw provider or runtime error behind `errorMessage`, if any. */
+  errorDetail: z.string().nullable(),
+});
+export type AssistantRunDiagnosticsDto = z.infer<typeof assistantRunDiagnosticsSchema>;
+
 export const assistantRunSchema = z.object({
   id: z.string(),
   conversationId: z.string(),
@@ -121,6 +143,8 @@ export const assistantRunSchema = z.object({
   createdAt: z.date(),
   startedAt: z.date().nullable(),
   completedAt: z.date().nullable(),
+  /** Developer diagnostics; null unless the service has them switched on. */
+  diagnostics: assistantRunDiagnosticsSchema.nullable(),
 });
 export type AssistantRunDto = z.infer<typeof assistantRunSchema>;
 

@@ -1,5 +1,7 @@
 import { and, asc, eq, gt, sql } from 'drizzle-orm';
 
+import { env } from '@campuspilot/env/assistant';
+
 import {
   assistantConversationSchema,
   assistantItemSchema,
@@ -23,6 +25,7 @@ import {
 } from './db/schema';
 import { publishAssistantEvent } from './events';
 import { log } from './log';
+import { estimateCostUsd } from './runtime/providers/pricing';
 
 type ConversationRow = typeof assistantConversationTable.$inferSelect;
 type RunRow = typeof assistantRunTable.$inferSelect;
@@ -36,8 +39,27 @@ export function toConversationDto(row: ConversationRow): AssistantConversationDt
   return assistantConversationSchema.parse(row);
 }
 
+/** A run's usage, cost estimate and raw error, for developer diagnostics. */
+function runDiagnostics(row: RunRow): AssistantRunDto['diagnostics'] {
+  return {
+    provider: row.provider,
+    model: row.model,
+    modelRequestCount: row.modelRequestCount,
+    inputTokens: row.inputTokens,
+    outputTokens: row.outputTokens,
+    cacheReadInputTokens: row.cacheReadInputTokens,
+    cacheCreationInputTokens: row.cacheCreationInputTokens,
+    estimatedCostUsd: estimateCostUsd(row.model, row),
+    errorDetail: row.errorDetail,
+  };
+}
+
+/**
+ * Runs reach clients only through here, so diagnostics are attached in one
+ * place and only while ASSISTANT_DIAGNOSTICS is on.
+ */
 export function toRunDto(row: RunRow): AssistantRunDto {
-  return assistantRunSchema.parse(row);
+  return assistantRunSchema.parse({ ...row, diagnostics: env.ASSISTANT_DIAGNOSTICS ? runDiagnostics(row) : null });
 }
 
 export function toItemDto(row: ItemRow): AssistantItemDto {
@@ -202,6 +224,7 @@ export type AssistantRunPatch = Partial<{
   stopRequestedAt: Date;
   errorCode: string | null;
   errorMessage: string | null;
+  errorDetail: string | null;
   startedAt: Date;
   completedAt: Date;
 }>;

@@ -89,7 +89,14 @@ function TimelineRow({ row, ...renderers }: RowRenderers & { row: AssistantTimel
       return <AssistantRunNotice run={row.run} />;
     case 'work':
       return (
-        <AssistantWorkBar state={row.state} since={row.since} until={row.until} pending={row.pending} changes={row.changes}>
+        <AssistantWorkBar
+          state={row.state}
+          since={row.since}
+          until={row.until}
+          pending={row.pending}
+          changes={row.changes}
+          diagnostics={row.diagnostics ? { runId: row.runId, usage: row.diagnostics } : null}
+        >
           {row.folded.length
             ? row.folded.map((child) => (
                 <div key={child.id} className={FOLDED_SPACING[child.kind]}>

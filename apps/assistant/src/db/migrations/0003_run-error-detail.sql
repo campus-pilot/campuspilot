@@ -1,0 +1,1 @@
+ALTER TABLE "assistant"."assistant_run" ADD COLUMN "error_detail" text;

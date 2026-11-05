@@ -202,6 +202,11 @@ export const assistantRunTable = assistantSchema.table(
     stopRequestedAt: timestamp("stop_requested_at"),
     errorCode: text("error_code"),
     errorMessage: text("error_message"),
+    /**
+     * The raw provider or runtime error behind a failure. Users see
+     * `errorMessage`; this is for developers (diagnostics, logs).
+     */
+    errorDetail: text("error_detail"),
     modelRequestCount: integer("model_request_count").notNull().default(0),
     inputTokens: integer("input_tokens").notNull().default(0),
     outputTokens: integer("output_tokens").notNull().default(0),

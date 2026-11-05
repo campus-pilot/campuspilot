@@ -57,6 +57,13 @@ export const env = createEnv({
      * Gemini model names change often, so it is chosen explicitly.
      */
     GEMINI_MODEL: z.string().min(1).optional(),
+
+    /**
+     * Developer diagnostics in the chat: each turn shows its model, token
+     * usage, estimated cost and the raw error behind a failure. Off by
+     * default and never meant for real users, who would see internals.
+     */
+    ASSISTANT_DIAGNOSTICS: z.stringbool().default(false),
   },
   runtimeEnv: process.env,
   skipValidation: !!process.env.SKIP_ENV_VALIDATION,

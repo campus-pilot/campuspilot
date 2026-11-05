@@ -1,4 +1,5 @@
 import type {
+  AssistantRunDiagnosticsDto,
   AssistantRunDto,
   AssistantToolCallItemDto,
   AssistantUserMessageItemDto,
@@ -23,6 +24,7 @@ import {
 import { useState, type ReactNode } from 'react';
 
 import { AssistantCopyButton } from './assistant-copy-button';
+import { AssistantRunDiagnostics } from './assistant-diagnostics';
 import { AssistantMarkdown } from './assistant-markdown';
 import { summarizeActivity, type AssistantWorkState } from './timeline-model';
 
@@ -244,6 +246,7 @@ export function AssistantWorkBar({
   until,
   pending,
   changes,
+  diagnostics,
   children,
 }: {
   state: AssistantWorkState;
@@ -251,6 +254,8 @@ export function AssistantWorkBar({
   until: Date | null;
   pending: AssistantToolCallItemDto | null;
   changes: number;
+  /** Developer diagnostics, shown at the far right when present. */
+  diagnostics?: { runId: string; usage: AssistantRunDiagnosticsDto } | null;
   /** The folded work, if there is any. */
   children?: ReactNode;
 }) {
@@ -291,6 +296,7 @@ export function AssistantWorkBar({
         </CollapsibleTrigger>
         <span className="min-w-0 flex-1" />
         <WorkBarStatus pending={pending} changes={changes} />
+        {diagnostics ? <AssistantRunDiagnostics runId={diagnostics.runId} diagnostics={diagnostics.usage} /> : null}
       </div>
       {foldable ? (
         <CollapsibleContent data-assistant-fold-content="" className="flex flex-col pt-2">

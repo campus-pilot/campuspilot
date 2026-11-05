@@ -20,6 +20,7 @@ const run = (id: string, status: AssistantRunDto['status'], startedAt: Date | nu
   id, conversationId: 'c', status, surface: 'page', stopRequestedAt: null, errorCode: null,
   errorMessage: status === 'failed' ? 'Boom' : null, sequence: 1, createdAt: at, startedAt,
   completedAt: startedAt && ['completed', 'failed', 'cancelled'].includes(status) ? new Date(startedAt.getTime() + 18_000) : null,
+  diagnostics: null,
 });
 
 describe('buildAssistantTimeline', () => {

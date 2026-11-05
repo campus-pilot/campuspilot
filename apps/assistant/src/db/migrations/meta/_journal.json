@@ -22,6 +22,13 @@
       "when": 1793847598267,
       "tag": "0002_view-items",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1793886716783,
+      "tag": "0003_run-error-detail",
+      "breakpoints": true
     }
   ]
 }

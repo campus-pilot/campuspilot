@@ -17,7 +17,7 @@ const user: AssistantItemDto = {
 };
 const run = (sequence: number, status: AssistantRunDto['status']): AssistantRunDto => ({
   id: 'r', conversationId: 'c', status, surface: 'panel', stopRequestedAt: null, errorCode: null,
-  errorMessage: null, sequence, createdAt: at, startedAt: null, completedAt: null,
+  errorMessage: null, sequence, createdAt: at, startedAt: null, completedAt: null, diagnostics: null,
 });
 
 const snapshot = applyAssistantEvent(EMPTY_CONVERSATION_STATE, {

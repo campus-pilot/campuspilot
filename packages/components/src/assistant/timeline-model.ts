@@ -39,6 +39,8 @@ export type AssistantTimelineRow =
       pending: AssistantToolCallItemDto | null;
       /** Writes that went through, for the bar's right side. */
       changes: number;
+      /** Developer diagnostics of the run; null unless the service sends them. */
+      diagnostics: AssistantRunDto['diagnostics'];
     }
   /** `meta`: time and copy under it; only the final answer of a finished turn has them. */
   | { kind: 'reply'; id: string; itemId: string; meta: boolean }
@@ -140,6 +142,7 @@ function turnRows(run: AssistantRunDto | undefined, items: readonly AssistantIte
     until: state === 'paused' ? (pending?.createdAt ?? null) : run.completedAt,
     pending: state === 'paused' ? pending : null,
     changes: calls.filter((call) => call.body.access === 'write' && call.status === 'succeeded').length,
+    diagnostics: run.diagnostics,
   };
 
   if (state === 'working' || state === 'paused') {

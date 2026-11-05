@@ -7,6 +7,7 @@ import type {
 import {
   activeRun,
   buildAssistantTimeline,
+  sumAssistantUsage,
   pendingApprovals,
   queuedMessages,
 } from '@campuspilot/components/assistant';
@@ -220,6 +221,17 @@ export function useAssistantPendingApprovals(schoolId: string, conversationId: s
 /** Messages queued behind the working run, for the composer tray. */
 export function useAssistantQueuedMessages(schoolId: string, conversationId: string | null) {
   return useConversationSelect(schoolId, conversationId, (state) => queuedMessages(state.items, state.runs)) ?? [];
+}
+
+/**
+ * Token usage and estimated cost over the conversation's runs, for the
+ * developer diagnostics chip. Null when the service sends no diagnostics.
+ */
+export function useAssistantConversationUsage(schoolId: string, conversationId: string | null) {
+  return useConversationSelect(schoolId, conversationId, (state) => {
+    const usage = state.runs.flatMap((run) => (run.diagnostics ? [run.diagnostics] : []));
+    return usage.length ? sumAssistantUsage(usage) : null;
+  }) ?? null;
 }
 
 /** Ids of the items the server has confirmed, as a stable string. */

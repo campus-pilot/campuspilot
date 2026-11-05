@@ -5,6 +5,7 @@ import {
   ASSISTANT_LANE_CLASS,
   AssistantApprovalRequest,
   AssistantComposer,
+  AssistantConversationUsage,
   AssistantLiveStatus,
   AssistantQueuedMessages,
   AssistantReply,
@@ -27,6 +28,7 @@ import { AssistantViewBlock } from './assistant-view';
 import {
   useAssistantActiveRun,
   useAssistantConnection,
+  useAssistantConversationUsage,
   useAssistantPendingApprovals,
   useAssistantQueuedMessages,
   useAssistantReply,
@@ -160,13 +162,20 @@ function ConversationTimeline({
   );
 }
 
-/** A quiet trust cue on the composer's toolbar. */
-const trustCue = (
-  <>
-    <ShieldCheck className="size-3.5 shrink-0" aria-hidden />
-    <span className="truncate">Asks before changing anything</span>
-  </>
-);
+/**
+ * The composer toolbar's left side: a quiet trust cue, then the
+ * conversation's developer diagnostics when the service sends them.
+ */
+function ComposerToolbar({ schoolId, conversationId }: { schoolId: string; conversationId: string | null }) {
+  const usage = useAssistantConversationUsage(schoolId, conversationId);
+  return (
+    <>
+      <ShieldCheck className="size-3.5 shrink-0" aria-hidden />
+      <span className="min-w-0 flex-1 truncate">Asks before changing anything</span>
+      {usage ? <AssistantConversationUsage totals={usage} /> : null}
+    </>
+  );
+}
 
 /**
  * What sits in the tray above the message box: the first change waiting for
@@ -253,7 +262,7 @@ export function AssistantChat({
       onSend={sendText}
       lastSentText={lastSentText}
       requests={requests}
-      leading={trustCue}
+      leading={<ComposerToolbar schoolId={schoolId} conversationId={conversationId} />}
       stopping={stop.isPending}
       onStop={
         running
