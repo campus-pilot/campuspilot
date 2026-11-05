@@ -11,10 +11,10 @@ export function AssistantNoticeViewBlock({ view }: { view: AssistantNoticeView }
   const Icon = ICONS[view.tone];
   return (
     <div className="px-1">
-      <div role="note" className="flex gap-2.5 rounded-lg border p-3 text-sm/relaxed">
+      <div role="note" className="flex gap-2.5 rounded-[10px] assistant-well px-3 py-2.5 text-[13px]/5">
         <Icon className={cn('mt-0.5 size-4 shrink-0', TONE_TEXT[view.tone])} aria-hidden />
         <div className="flex min-w-0 flex-col gap-0.5">
-          {view.title ? <p className="font-medium">{view.title}</p> : null}
+          {view.title ? <p className="font-medium text-foreground">{view.title}</p> : null}
           <p className="text-muted-foreground">{view.text}</p>
         </div>
       </div>

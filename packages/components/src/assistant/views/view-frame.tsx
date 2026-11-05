@@ -4,7 +4,7 @@ import type { ReactNode } from 'react';
 export function AssistantViewFrame({ title, children }: { title?: string; children: ReactNode }) {
   return (
     <section className="flex min-w-0 flex-col gap-2 px-1" aria-label={title}>
-      {title ? <h3 className="text-sm font-medium text-foreground">{title}</h3> : null}
+      {title ? <h3 className="text-[13px]/5 font-medium text-foreground">{title}</h3> : null}
       {children}
     </section>
   );

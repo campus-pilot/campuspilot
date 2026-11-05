@@ -3,12 +3,14 @@
 import { Button } from '@campuspilot/ui/components/button';
 import {
   Sheet,
+  SheetClose,
   SheetContent,
   SheetDescription,
   SheetHeader,
   SheetTitle,
 } from '@campuspilot/ui/components/sheet';
-import { Maximize2, Plus, Sparkles } from 'lucide-react';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@campuspilot/ui/components/tooltip';
+import { Maximize2, SquarePen, Sparkles, X } from 'lucide-react';
 import Link from 'next/link';
 import { useState } from 'react';
 
@@ -27,19 +29,35 @@ function PanelHeader({
   onNewConversation: () => void;
 }) {
   return (
-    <SheetHeader className="h-14 flex-row items-center gap-0.5 border-b py-0 ps-4 pe-12">
-      <div className="min-w-0 flex-1">
-        <SheetTitle className="text-sm font-medium">Assistant</SheetTitle>
+    <SheetHeader className="h-12 flex-row items-center gap-0.5 border-b border-assistant-hairline py-0 ps-4 pe-2">
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        <Sparkles className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+        <SheetTitle className="text-[13px] font-medium">Assistant</SheetTitle>
         <SheetDescription className="sr-only">Ask the CampusPilot assistant</SheetDescription>
       </div>
-      <Button type="button" variant="ghost" size="icon-sm" aria-label="New conversation" onClick={onNewConversation}>
-        <Plus />
-      </Button>
-      <Button asChild variant="ghost" size="icon-sm" aria-label="Open full page">
-        <Link href={schoolHref(schoolId, conversationId ? `/assistant/${conversationId}` : '/assistant')}>
-          <Maximize2 />
-        </Link>
-      </Button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button type="button" variant="ghost" size="icon" className="text-muted-foreground" aria-label="New conversation" onClick={onNewConversation}>
+            <SquarePen />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>New conversation</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button asChild variant="ghost" size="icon" className="text-muted-foreground" aria-label="Open full page">
+            <Link href={schoolHref(schoolId, conversationId ? `/assistant/${conversationId}` : '/assistant')}>
+              <Maximize2 />
+            </Link>
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>Open full page</TooltipContent>
+      </Tooltip>
+      <SheetClose asChild>
+        <Button type="button" variant="ghost" size="icon" className="text-muted-foreground" aria-label="Close assistant">
+          <X />
+        </Button>
+      </SheetClose>
     </SheetHeader>
   );
 }
@@ -63,8 +81,11 @@ export function AssistantPanel({ schoolId }: { schoolId: string }) {
       <Sheet open={open} onOpenChange={setOpen} modal={false}>
         <SheetContent
           side="right"
+          showCloseButton={false}
           className="w-full gap-0 bg-background p-0 shadow-2xl data-[side=right]:sm:max-w-md"
           onInteractOutside={(event) => event.preventDefault()}
+          // Opening lands in the message box (its autoFocus), not on the first header button.
+          onOpenAutoFocus={(event) => event.preventDefault()}
         >
           <PanelHeader
             schoolId={schoolId}

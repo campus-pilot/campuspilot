@@ -1,7 +1,7 @@
 'use client';
 
 import type { AssistantConversationDto } from '@campuspilot/assistant-contract/dto';
-import { Button } from '@campuspilot/ui/components/button';
+import { Skeleton } from '@campuspilot/ui/components/skeleton';
 import { cn } from '@campuspilot/ui/lib/utils';
 import { SquarePen, Sparkles } from 'lucide-react';
 import Link from 'next/link';
@@ -44,34 +44,87 @@ function ConversationLink({
       href={conversationHref(schoolId, conversation.id)}
       aria-current={active ? 'page' : undefined}
       className={cn(
-        'flex h-8 shrink-0 items-center gap-2 rounded-md px-2 text-sm text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground md:shrink',
-        active && 'bg-accent text-foreground',
+        'group/conversation flex h-8 shrink-0 items-center gap-2 rounded-lg px-2.5 text-[13px] text-muted-foreground outline-none transition-colors hover:text-foreground hover:assistant-ghost-hover focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60 md:shrink',
+        active && 'font-medium text-foreground assistant-selected hover:assistant-selected',
       )}
     >
-      <span className="min-w-0 flex-1 truncate">{conversation.title ?? 'Conversation'}</span>
-      <time className="hidden shrink-0 text-xs text-muted-foreground tabular-nums md:block" dateTime={conversation.updatedAt.toISOString()}>
+      <span className="min-w-0 flex-1 truncate">{conversation.title ?? 'Untitled conversation'}</span>
+      <time
+        className="hidden shrink-0 text-xs font-normal text-assistant-dim tabular-nums md:block"
+        dateTime={conversation.updatedAt.toISOString()}
+      >
         {relativeAge(conversation.updatedAt)}
       </time>
     </Link>
   );
 }
 
-/** History: a quiet column on desktop, a scrolling row on mobile. */
+const DAY_MS = 86_400_000;
+
+/** History groups by last activity, in plain words (no spaced capitals). */
+function historyGroup(at: Date, now: Date): string {
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const time = at.getTime();
+  if (time >= startOfToday) return 'Today';
+  if (time >= startOfToday - DAY_MS) return 'Yesterday';
+  if (time >= startOfToday - 7 * DAY_MS) return 'Previous 7 days';
+  return 'Earlier';
+}
+
+function groupConversations(conversations: readonly AssistantConversationDto[]) {
+  const now = new Date();
+  const groups: { label: string; conversations: AssistantConversationDto[] }[] = [];
+  for (const conversation of conversations) {
+    const label = historyGroup(conversation.updatedAt, now);
+    const group = groups.at(-1);
+    if (group?.label === label) group.conversations.push(conversation);
+    else groups.push({ label, conversations: [conversation] });
+  }
+  return groups;
+}
+
+function HistorySkeleton() {
+  return (
+    <div className="hidden flex-col gap-1 px-2.5 pt-3 md:flex" aria-hidden>
+      {['w-3/4', 'w-1/2', 'w-2/3'].map((width) => (
+        <Skeleton key={width} className={cn('my-2 h-3', width)} />
+      ))}
+    </div>
+  );
+}
+
+/** History: a quiet column on desktop (slim rows grouped by day), a scrolling row on mobile. */
 function ConversationList({ schoolId, conversationId }: { schoolId: string; conversationId: string | null }) {
   const conversations = useAssistantConversations(schoolId);
+  const groups = groupConversations(conversations.data?.items ?? []);
   return (
     <nav
       aria-label="Conversations"
-      className="flex shrink-0 gap-1 overflow-x-auto border-b px-3 py-2 md:w-64 md:flex-col md:overflow-x-visible md:overflow-y-auto md:border-e md:border-b-0 md:py-3"
+      className="flex shrink-0 gap-1 overflow-x-auto border-b border-assistant-hairline px-2 py-2 md:w-64 md:flex-col md:gap-0 md:overflow-x-visible md:overflow-y-auto md:border-e md:border-b-0"
     >
-      <Button asChild variant="ghost" className="h-8 shrink-0 justify-start gap-2 px-2 text-sm md:mb-2">
-        <Link href={conversationHref(schoolId)}>
-          <SquarePen /> New conversation
-        </Link>
-      </Button>
-      {conversations.data?.items.map((conversation) => (
-        <ConversationLink key={conversation.id} schoolId={schoolId} conversation={conversation} active={conversation.id === conversationId} />
+      <Link
+        href={conversationHref(schoolId)}
+        aria-current={conversationId ? undefined : 'page'}
+        className={cn(
+          'group/new flex h-8 shrink-0 items-center gap-2.5 rounded-lg px-2.5 text-[13px] text-foreground outline-none transition-colors hover:assistant-ghost-hover focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60',
+          !conversationId && 'assistant-selected',
+        )}
+      >
+        <SquarePen className="size-[15px] shrink-0 text-muted-foreground transition-colors group-hover/new:text-foreground" aria-hidden />
+        New conversation
+      </Link>
+      {conversations.isPending ? <HistorySkeleton /> : null}
+      {groups.map((group) => (
+        <section key={group.label} aria-label={group.label} className="contents md:flex md:flex-col md:gap-px">
+          <h3 className="hidden px-2.5 pt-4 pb-1 text-xs text-assistant-dim md:block">{group.label}</h3>
+          {group.conversations.map((conversation) => (
+            <ConversationLink key={conversation.id} schoolId={schoolId} conversation={conversation} active={conversation.id === conversationId} />
+          ))}
+        </section>
       ))}
+      {conversations.isSuccess && groups.length === 0 ? (
+        <p className="hidden px-2.5 pt-4 text-xs text-assistant-dim md:block">Your conversations will show here.</p>
+      ) : null}
     </nav>
   );
 }

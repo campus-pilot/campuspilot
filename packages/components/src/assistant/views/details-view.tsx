@@ -6,11 +6,11 @@ import { AssistantViewFrame } from './view-frame';
 export function AssistantDetailsViewBlock({ view }: { view: AssistantDetailsView }) {
   return (
     <AssistantViewFrame title={view.title}>
-      <dl className="grid grid-cols-[minmax(0,11rem)_minmax(0,1fr)] gap-x-4 rounded-lg border px-3 text-sm/relaxed">
+      <dl className="grid grid-cols-[minmax(0,11rem)_minmax(0,1fr)] gap-x-4 rounded-[10px] assistant-well px-3 text-[13px]/5">
         {view.fields.map((field) => (
-          <div key={field.label} className="contents [&:not(:last-child)>*]:border-b [&>*]:border-border/60 [&>*]:py-2">
+          <div key={field.label} className="contents [&:not(:last-child)>*]:border-b [&>*]:border-assistant-hairline [&>*]:py-2">
             <dt className="truncate text-muted-foreground">{field.label}</dt>
-            <dd className="min-w-0 break-words tabular-nums">
+            <dd className="min-w-0 break-words text-foreground tabular-nums">
               {typeof field.value === 'number' ? field.value.toLocaleString() : field.value || '—'}
             </dd>
           </div>

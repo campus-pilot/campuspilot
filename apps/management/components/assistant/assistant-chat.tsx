@@ -3,26 +3,32 @@
 import type { AssistantSurface, AssistantToolCallItemDto, AssistantViewItemDto } from '@campuspilot/assistant-contract/dto';
 import {
   ASSISTANT_LANE_CLASS,
+  AssistantApprovalRequest,
   AssistantComposer,
   AssistantLiveStatus,
+  AssistantQueuedMessages,
   AssistantReply,
   AssistantSuggestions,
   AssistantTimeline,
   AssistantUserMessage,
   AssistantWelcome,
+  AssistantWorkBar,
   type AssistantApprovalDecision,
   type AssistantSuggestion,
 } from '@campuspilot/components/assistant';
+import { Button } from '@campuspilot/ui/components/button';
 import { Spinner } from '@campuspilot/ui/components/spinner';
 import { toast } from '@campuspilot/ui/lib/toast';
 import { cn } from '@campuspilot/ui/lib/utils';
-import { ShieldCheck } from 'lucide-react';
+import { ClipboardList, RotateCcw, ShieldCheck, UserPlus, UserRoundX } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 import { AssistantViewBlock } from './assistant-view';
 import {
   useAssistantActiveRun,
   useAssistantConnection,
+  useAssistantPendingApprovals,
+  useAssistantQueuedMessages,
   useAssistantReply,
   useAssistantStatus,
   useAssistantTimeline,
@@ -36,9 +42,24 @@ import {
 } from './use-assistant';
 
 const SUGGESTIONS: readonly AssistantSuggestion[] = [
-  { id: 'teachers', label: 'Which classes have no class teacher?', prompt: 'Which classes in the current session have no class teacher assigned?' },
-  { id: 'admissions', label: 'Show admissions that are not registered yet', prompt: 'Show me the admissions that are not registered yet.' },
-  { id: 'exams', label: 'Where does each examination stand?', prompt: 'Give me an overview of this session’s examinations and where each one stands.' },
+  {
+    id: 'teachers',
+    icon: UserRoundX,
+    label: 'Which classes have no class teacher?',
+    prompt: 'Which classes in the current session have no class teacher assigned?',
+  },
+  {
+    id: 'admissions',
+    icon: UserPlus,
+    label: 'Show admissions that are not registered yet',
+    prompt: 'Show me the admissions that are not registered yet.',
+  },
+  {
+    id: 'exams',
+    icon: ClipboardList,
+    label: 'Where does each examination stand?',
+    prompt: 'Give me an overview of this session’s examinations and where each one stands.',
+  },
 ];
 
 export type AssistantChatProps = {
@@ -54,9 +75,19 @@ export type AssistantChatProps = {
   gutterClassName?: string;
 };
 
-function ReplyRow({ schoolId, conversationId, itemId }: { schoolId: string; conversationId: string; itemId: string }) {
+function ReplyRow({
+  schoolId,
+  conversationId,
+  itemId,
+  meta,
+}: {
+  schoolId: string;
+  conversationId: string;
+  itemId: string;
+  meta: boolean;
+}) {
   const reply = useAssistantReply(schoolId, conversationId, itemId);
-  return <AssistantReply text={reply?.text ?? ''} streaming={reply?.streaming ?? false} at={reply?.at ?? new Date()} />;
+  return <AssistantReply text={reply?.text ?? ''} streaming={reply?.streaming ?? false} at={reply?.at ?? new Date()} meta={meta} />;
 }
 
 function useApprovals(schoolId: string) {
@@ -73,30 +104,28 @@ function useApprovals(schoolId: string) {
   return { decide, pendingDecision };
 }
 
-/** Messages not confirmed by the server yet, then a live line while the first one is on its way. */
-function OptimisticRows({
-  messages,
-  onRetry,
-  showLive,
-}: {
-  messages: OptimisticMessage[];
-  onRetry: (message: OptimisticMessage) => void;
-  showLive: boolean;
-}) {
-  const first = messages[0];
+/**
+ * A first message on its way while nothing runs yet: the bubble, then the
+ * same work bar and "Thinking" line the server's rows will show, so the
+ * confirmed rows replace these without the conversation moving.
+ */
+function OptimisticTurn({ messages, onRetry }: { messages: OptimisticMessage[]; onRetry: (message: OptimisticMessage) => void }) {
+  const sending = messages.find((message) => message.delivery === 'sending');
   return (
     <>
       {messages.map((message) => (
-        <div key={message.clientRequestId} className="pb-3">
-          <AssistantUserMessage
-            text={message.text}
-            at={message.submittedAt}
-            delivery={message.delivery}
-            onRetry={() => onRetry(message)}
-          />
+        <div key={message.clientRequestId} className="pb-1">
+          <AssistantUserMessage text={message.text} at={message.submittedAt} delivery={message.delivery} onRetry={() => onRetry(message)} />
         </div>
       ))}
-      {showLive && first && first.delivery === 'sending' ? <AssistantLiveStatus label="Thinking" since={first.submittedAt} /> : null}
+      {sending ? (
+        <>
+          <div className="pb-2.5">
+            <AssistantWorkBar state="working" since={sending.submittedAt} until={null} pending={null} changes={0} />
+          </div>
+          <AssistantLiveStatus label="Thinking" />
+        </>
+      ) : null}
     </>
   );
 }
@@ -113,7 +142,6 @@ function ConversationTimeline({
   gutterClassName?: string;
 }) {
   const timeline = useAssistantTimeline(schoolId, conversationId);
-  const approvals = useApprovals(schoolId);
   if (!timeline.data) {
     return (
       <div className="flex h-full items-center justify-center">
@@ -126,21 +154,64 @@ function ConversationTimeline({
       rows={timeline.data}
       trailing={trailing}
       gutterClassName={gutterClassName}
-      renderReply={(itemId) => <ReplyRow schoolId={schoolId} conversationId={conversationId} itemId={itemId} />}
+      renderReply={(itemId, meta) => <ReplyRow schoolId={schoolId} conversationId={conversationId} itemId={itemId} meta={meta} />}
       renderView={(item: AssistantViewItemDto) => <AssistantViewBlock schoolId={schoolId} view={item.body.view} />}
-      onDecide={approvals.decide}
-      pendingDecision={approvals.pendingDecision}
     />
   );
 }
 
-/** A quiet trust cue on the composer's toolbar. */
-const composerLeading = (
+/** A quiet trust cue on the composer's tray row. */
+const trustCue = (
   <>
-    <ShieldCheck className="size-3.5 shrink-0" aria-hidden />
+    <ShieldCheck className="size-3 shrink-0" aria-hidden />
     <span className="truncate">Asks before changing anything</span>
   </>
 );
+
+/**
+ * What sits in the tray above the message box: the first change waiting for
+ * a decision, then messages queued behind the working run (confirmed ones
+ * and ones still on their way).
+ */
+function useTrayRequests(schoolId: string, conversationId: string | null, queuedOptimistic: OptimisticMessage[], onRetry: (message: OptimisticMessage) => void) {
+  const approvals = useApprovals(schoolId);
+  const pending = useAssistantPendingApprovals(schoolId, conversationId);
+  const queued = useAssistantQueuedMessages(schoolId, conversationId);
+  const first = pending[0];
+  const queue = [
+    ...queued.map((item) => ({ id: item.id, text: item.body.text })),
+    ...queuedOptimistic.map((message) => ({
+      id: message.clientRequestId,
+      text: message.text,
+      status:
+        message.delivery === 'failed' ? (
+          <span className="flex items-center gap-1 text-destructive">
+            Not sent
+            <Button type="button" variant="ghost" size="icon-sm" aria-label="Retry" className="text-destructive" onClick={() => onRetry(message)}>
+              <RotateCcw />
+            </Button>
+          </span>
+        ) : (
+          'Sending…'
+        ),
+    })),
+  ];
+  if (!first && queue.length === 0) return null;
+  return (
+    <>
+      {first ? (
+        <AssistantApprovalRequest
+          key={first.id}
+          call={first}
+          waiting={pending.length}
+          pendingDecision={approvals.pendingDecision(first.body.approvalId)}
+          onDecide={(decision) => approvals.decide(first, decision)}
+        />
+      ) : null}
+      <AssistantQueuedMessages messages={queue} />
+    </>
+  );
+}
 
 /**
  * A conversation with the assistant. New conversations start as a centred
@@ -164,6 +235,9 @@ export function AssistantChat({
   const optimistic = useOptimisticMessages(schoolId, conversationId, confirmed);
   const lastSentText = useLastUserText(schoolId, conversationId);
   const connection = useAssistantConnection(schoolId, conversationId);
+  const retry = (message: OptimisticMessage) => resend(message.mutation);
+  // While a run works, a new message waits in the tray; otherwise it starts a turn.
+  const requests = useTrayRequests(schoolId, conversationId, running ? optimistic : [], retry);
 
   async function sendText(text: string) {
     const result = await send(text, conversationId);
@@ -175,9 +249,11 @@ export function AssistantChat({
     <AssistantComposer
       autoFocus={autoFocus}
       disabledReason={disabledReason}
+      placeholder={running ? 'Queue a follow-up…' : undefined}
       onSend={sendText}
       lastSentText={lastSentText}
-      leading={composerLeading}
+      requests={requests}
+      trayStart={trustCue}
       stopping={stop.isPending}
       onStop={
         running
@@ -191,20 +267,20 @@ export function AssistantChat({
     />
   );
 
-  const trailing = optimistic.length ? (
-    <OptimisticRows messages={optimistic} onRetry={(message) => resend(message.mutation)} showLive={!conversationId || !running} />
-  ) : null;
+  const trailing = !running && optimistic.length ? <OptimisticTurn messages={optimistic} onRetry={retry} /> : null;
 
   if (!conversationId && optimistic.length === 0) {
     return (
       <div className={cn('flex h-full min-h-0 flex-col justify-center overflow-y-auto py-8', gutterClassName)}>
         <div className={cn(ASSISTANT_LANE_CLASS, 'flex flex-col gap-6', compact ? 'max-w-xl' : 'max-w-2xl')}>
           <AssistantWelcome compact={compact} />
-          {composer}
-          <AssistantSuggestions
-            suggestions={SUGGESTIONS}
-            onPick={(prompt) => void sendText(prompt).catch((error: Error) => toast.error(error.message || 'The message could not be sent.'))}
-          />
+          <div className="flex flex-col gap-3">
+            {composer}
+            <AssistantSuggestions
+              suggestions={SUGGESTIONS}
+              onPick={(prompt) => void sendText(prompt).catch((error: Error) => toast.error(error.message || 'The message could not be sent.'))}
+            />
+          </div>
         </div>
       </div>
     );
@@ -226,8 +302,9 @@ export function AssistantChat({
         {connection.reconnecting ? (
           <p
             role="status"
-            className="absolute inset-x-0 -top-7 mx-auto w-fit rounded-full border bg-background/90 px-3 py-1 text-xs text-muted-foreground opacity-0 shadow-composer backdrop-blur animate-[assistant-reveal_0s_2s_forwards]"
+            className="absolute inset-x-0 -top-8 mx-auto flex h-7 w-fit items-center gap-1.5 rounded-full border border-border/60 bg-background px-2.5 text-xs text-assistant-warning opacity-0 shadow-sm animate-[assistant-reveal_0s_2s_forwards]"
           >
+            <Spinner className="size-3" />
             Reconnecting…
           </p>
         ) : null}

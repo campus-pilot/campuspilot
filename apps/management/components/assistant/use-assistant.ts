@@ -4,7 +4,12 @@ import type {
   AssistantStreamEvent,
   AssistantSurface,
 } from '@campuspilot/assistant-contract/dto';
-import { activeRun, buildAssistantTimeline } from '@campuspilot/components/assistant';
+import {
+  activeRun,
+  buildAssistantTimeline,
+  pendingApprovals,
+  queuedMessages,
+} from '@campuspilot/components/assistant';
 import {
   experimental_streamedQuery as streamedQuery,
   queryOptions,
@@ -205,6 +210,16 @@ function useConversationSelect<T>(
     enabled: Boolean(conversationId),
     select,
   }).data;
+}
+
+/** Changes waiting for the user's decision, for the composer tray. */
+export function useAssistantPendingApprovals(schoolId: string, conversationId: string | null) {
+  return useConversationSelect(schoolId, conversationId, (state) => pendingApprovals(state.items)) ?? [];
+}
+
+/** Messages queued behind the working run, for the composer tray. */
+export function useAssistantQueuedMessages(schoolId: string, conversationId: string | null) {
+  return useConversationSelect(schoolId, conversationId, (state) => queuedMessages(state.items, state.runs)) ?? [];
 }
 
 /** Ids of the items the server has confirmed, as a stable string. */

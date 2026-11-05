@@ -1,6 +1,8 @@
-import { memo, type ComponentProps } from 'react';
+import { isValidElement, memo, type ComponentProps, type ReactNode } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+
+import { AssistantCopyButton } from './assistant-copy-button';
 
 /**
  * Splits markdown at blank lines that close every open block (outside code
@@ -24,13 +26,36 @@ export function splitMarkdownBlocks(text: string): string[] {
   return blocks;
 }
 
+/** The fenced code's language and source, read from the `<code>` react-markdown nests in `<pre>`. */
+function fencedCode(children: ReactNode): { language: string | null; source: string } {
+  const code = isValidElement<{ className?: string; children?: ReactNode }>(children) ? children.props : null;
+  const language = code?.className?.match(/language-([\w-]+)/)?.[1] ?? null;
+  const source = typeof code?.children === 'string' ? code.children.replace(/\n$/, '') : '';
+  return { language, source };
+}
+
+/** Code in an inset well under a 32px header: language on the left, copy on the right (T3 Code). */
+function CodeBlock({ children, ...props }: ComponentProps<'pre'>) {
+  const { language, source } = fencedCode(children);
+  return (
+    <div className="assistant-codeblock overflow-hidden rounded-lg assistant-well">
+      <div className="flex h-8 items-center justify-between gap-2 bg-[var(--assistant-well-header)] ps-3.5 pe-1 shadow-[inset_0_-1px_var(--assistant-hairline)] select-none">
+        <span className="truncate font-mono text-[11px] text-muted-foreground">{language ?? 'text'}</span>
+        {source ? <AssistantCopyButton text={source} label="Copy code" /> : null}
+      </div>
+      <pre {...props}>{children}</pre>
+    </div>
+  );
+}
+
 const components: Components = {
-  // Wide tables scroll inside their own box instead of widening the lane.
+  // Wide tables scroll inside their own well instead of widening the lane.
   table: (props: ComponentProps<'table'>) => (
-    <div className="assistant-markdown-table">
+    <div className="assistant-markdown-table assistant-well">
       <table {...props} />
     </div>
   ),
+  pre: CodeBlock,
   a: ({ href, ...props }: ComponentProps<'a'>) => (
     <a href={href} target="_blank" rel="noreferrer noopener" {...props} />
   ),

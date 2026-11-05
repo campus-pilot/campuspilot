@@ -15,21 +15,21 @@ function Cell({ value, format }: { value: string | number | null | undefined; fo
   return <>{typeof value === 'number' ? value.toLocaleString() : value}</>;
 }
 
-/** Rows of data with row hairlines only, flush with the prose (T3 Code tables). */
+/** Rows of data in an inset well: tinted header, hairline rows and columns (T3 Code tables). */
 export function AssistantTableViewBlock({ view }: { view: AssistantTableView }) {
   const end = (format?: string) => format === 'number' || format === 'date';
   return (
     <AssistantViewFrame title={view.title}>
-      <div className="overflow-x-auto">
-        <table className="w-full border-collapse text-[0.8125rem]/relaxed">
+      <div className="overflow-x-auto rounded-[10px] assistant-well [scrollbar-width:thin]">
+        <table className="w-full border-separate border-spacing-0 text-[13px]/5">
           <thead>
-            <tr className="border-b">
+            <tr>
               {view.columns.map((column) => (
                 <th
                   key={column.key}
                   scope="col"
                   className={cn(
-                    'px-3 py-2 font-medium whitespace-nowrap text-muted-foreground first:ps-0 last:pe-0',
+                    'border-b border-border bg-[var(--assistant-well-header)] px-3 py-2 font-medium whitespace-nowrap text-foreground [&:not(:last-child)]:border-e [&:not(:last-child)]:border-e-assistant-hairline',
                     end(column.format) ? 'text-end' : 'text-start',
                   )}
                 >
@@ -40,12 +40,12 @@ export function AssistantTableViewBlock({ view }: { view: AssistantTableView }) 
           </thead>
           <tbody>
             {view.rows.map((row, index) => (
-              <tr key={index} className="border-b border-border/60 last:border-b-0">
+              <tr key={index} className="[&:not(:last-child)>td]:border-b [&>td]:border-assistant-hairline">
                 {view.columns.map((column) => (
                   <td
                     key={column.key}
                     className={cn(
-                      'max-w-80 px-3 py-2 align-top text-pretty first:ps-0 last:pe-0',
+                      'max-w-80 px-3 py-2 align-top text-pretty [&:not(:last-child)]:border-e',
                       end(column.format) ? 'text-end tabular-nums' : 'text-start',
                     )}
                   >
@@ -57,8 +57,8 @@ export function AssistantTableViewBlock({ view }: { view: AssistantTableView }) 
           </tbody>
         </table>
       </div>
-      {view.rows.length === 0 ? <p className="text-sm text-muted-foreground">No rows.</p> : null}
-      {view.footnote ? <p className="text-xs text-muted-foreground">{view.footnote}</p> : null}
+      {view.rows.length === 0 ? <p className="text-[13px] text-muted-foreground">Nothing to show.</p> : null}
+      {view.footnote ? <p className="text-xs text-assistant-dim">{view.footnote}</p> : null}
     </AssistantViewFrame>
   );
 }

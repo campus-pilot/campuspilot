@@ -67,12 +67,13 @@ export function PaletteAssistantView({
 }) {
   return (
     <div className="flex h-[min(32rem,65vh)] flex-col">
-      <header className="flex items-center gap-1 border-b px-2 py-1.5">
-        <Button type="button" variant="ghost" size="icon-sm" aria-label="Back to search" onClick={onBack}>
+      <header className="flex h-10 items-center gap-1 border-b border-assistant-hairline px-1.5">
+        <Button type="button" variant="ghost" size="icon" className="text-muted-foreground" aria-label="Back to search" onClick={onBack}>
           <ChevronLeft />
         </Button>
-        <span className="flex-1 text-xs font-medium">Assistant</span>
-        <Button asChild variant="ghost" size="icon-sm" aria-label="Open full page">
+        <Sparkles className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+        <span className="flex-1 text-[13px] font-medium">Assistant</span>
+        <Button asChild variant="ghost" size="icon" className="text-muted-foreground" aria-label="Open full page">
           <Link href={schoolHref(schoolId, `/assistant/${conversationId}`)}>
             <Maximize2 />
           </Link>

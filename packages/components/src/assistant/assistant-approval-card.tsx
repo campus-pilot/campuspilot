@@ -1,8 +1,9 @@
 import type { AssistantToolCallItemDto } from '@campuspilot/assistant-contract/dto';
 import { Button } from '@campuspilot/ui/components/button';
+import { Kbd } from '@campuspilot/ui/components/kbd';
 import { Spinner } from '@campuspilot/ui/components/spinner';
 import { cn } from '@campuspilot/ui/lib/utils';
-import { AlertCircle, Check, CircleSlash, ShieldQuestion, X } from 'lucide-react';
+import { AlertCircle, Check, CircleSlash, CornerDownLeft, Shield, ShieldQuestionMark, SquarePen, X } from 'lucide-react';
 
 export type AssistantApprovalDecision = 'approve' | 'decline';
 
@@ -25,22 +26,16 @@ function displayValue(value: unknown): string {
   return JSON.stringify(value);
 }
 
-function ChangeList({ input }: { input: unknown }) {
-  const entries =
-    typeof input === 'object' && input !== null
-      ? Object.entries(input as Record<string, unknown>).filter(([key]) => !HIDDEN_INPUT_KEYS.has(key))
-      : [];
-  if (entries.length === 0) return null;
-  return (
-    <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-xs/relaxed">
-      {entries.map(([key, value]) => (
-        <div key={key} className="contents">
-          <dt className="text-muted-foreground">{humanizeKey(key)}</dt>
-          <dd className="min-w-0 break-words font-medium text-foreground">{displayValue(value)}</dd>
-        </div>
-      ))}
-    </dl>
-  );
+/**
+ * Keys that name which record changes rather than what changes (`classId`).
+ * They stay visible, as a quiet reference, so the change reads first.
+ */
+const isReference = (key: string) => /Ids?$/.test(key);
+
+function changeEntries(input: unknown): [string, unknown][] {
+  return typeof input === 'object' && input !== null
+    ? Object.entries(input as Record<string, unknown>).filter(([key]) => !HIDDEN_INPUT_KEYS.has(key))
+    : [];
 }
 
 const OUTCOME: Partial<Record<AssistantToolCallItemDto['status'], { label: string; icon: typeof Check; tone?: string }>> = {
@@ -51,61 +46,139 @@ const OUTCOME: Partial<Record<AssistantToolCallItemDto['status'], { label: strin
   cancelled: { label: 'Cancelled', icon: CircleSlash },
 };
 
-/** After the decision, the card folds to one quiet line in the history. */
-function DecidedChange({ call }: { call: AssistantToolCallItemDto }) {
+/**
+ * A change on its timeline row. While it waits, the row names it and says
+ * so in amber; the decision itself is made in the composer tray. Afterwards
+ * it records what happened in one line.
+ */
+export function AssistantApprovalCard({ call }: { call: AssistantToolCallItemDto }) {
+  if (call.status === 'awaiting_approval') {
+    return (
+      <div className="flex flex-col px-0.5">
+        <span className="flex min-h-6 min-w-0 items-center gap-1.5 text-[13px] text-foreground">
+          <span className="flex size-5 shrink-0 items-center justify-center text-muted-foreground">
+            <SquarePen className="size-3.5" aria-hidden />
+          </span>
+          <span className="truncate">{call.body.title}</span>
+        </span>
+        <span className="ms-6.5 flex items-center gap-1 text-xs text-assistant-warning">
+          <Shield className="size-3" aria-hidden />
+          Waiting for approval
+        </span>
+      </div>
+    );
+  }
   const outcome = OUTCOME[call.status];
   if (!outcome) return null;
   const Icon = outcome.icon;
   return (
-    <div className={cn('flex min-h-6 min-w-0 items-center gap-1.5 px-1 text-sm/relaxed text-muted-foreground', outcome.tone)}>
-      {call.status === 'running' ? <Spinner className="size-3.5" /> : <Icon className="size-4 shrink-0" aria-hidden />}
+    <div className={cn('flex min-h-6 min-w-0 items-center gap-1.5 px-0.5 text-[13px] text-muted-foreground', outcome.tone)}>
+      <span className="flex size-5 shrink-0 items-center justify-center">
+        {call.status === 'running' ? <Spinner className="size-3.5" /> : <Icon className="size-3.5" aria-hidden />}
+      </span>
       <span className="shrink-0">{outcome.label}</span>
       <span className="truncate text-foreground/80">{call.body.title}</span>
-      {call.body.error ? <span className="truncate">· {call.body.error.message}</span> : null}
+      {call.body.error ? <span className="truncate">{call.body.error.message}</span> : null}
     </div>
   );
 }
 
+/** Targets that keep their own Enter and Escape (T3 Code's approval keys). */
+const OWNS_KEYS =
+  'input, textarea, select, button, a[href], [role=button], [role=link], summary, [contenteditable]:not([contenteditable=false]), [role=dialog], [role=menu], [role=listbox]';
+
 /**
- * A change the assistant wants to make. While it waits the user approves or
- * declines it here; afterwards it records what happened in one line.
+ * Enter approves and Escape declines, but only when nothing that uses those
+ * keys has focus: typing in the message box, a menu or a dialog keeps its
+ * own keys. Attached through a ref callback so it lives exactly as long as
+ * the card does.
  */
-export function AssistantApprovalCard({
+function decisionKeys(onDecide: (decision: AssistantApprovalDecision) => void, enabled: boolean) {
+  return (element: HTMLElement | null) => {
+    if (!element || !enabled) return;
+    const document = element.ownerDocument;
+    const handle = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.isComposing || event.repeat) return;
+      if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+      if (event.key !== 'Enter' && event.key !== 'Escape') return;
+      const target = event.target instanceof Element ? event.target : null;
+      if (target?.closest(OWNS_KEYS)) return;
+      event.preventDefault();
+      onDecide(event.key === 'Enter' ? 'approve' : 'decline');
+    };
+    document.addEventListener('keydown', handle);
+    return () => document.removeEventListener('keydown', handle);
+  };
+}
+
+/**
+ * The decision, in the composer tray above the message box (T3 Code's
+ * request card): what will change, in an inset well, then Decline and
+ * Approve. One change at a time; a counter says how many wait.
+ */
+export function AssistantApprovalRequest({
   call,
+  waiting,
   pendingDecision,
   onDecide,
 }: {
   call: AssistantToolCallItemDto;
+  /** How many changes wait, including this one. */
+  waiting: number;
   /** The decision being sent, while it is in flight. */
   pendingDecision?: AssistantApprovalDecision;
   onDecide: (decision: AssistantApprovalDecision) => void;
 }) {
-  if (call.status !== 'awaiting_approval') return <DecidedChange call={call} />;
+  const entries = changeEntries(call.body.input);
+  const busy = Boolean(pendingDecision);
   return (
     <section
-      aria-label={`Approve: ${call.body.title}`}
-      className="relative flex flex-col gap-3 rounded-xl bg-card p-3.5 shadow-composer after:pointer-events-none after:absolute after:inset-0 after:rounded-[inherit] after:border after:border-surface-outline"
+      ref={decisionKeys(onDecide, !busy)}
+      aria-label={`Approve ${call.body.title}`}
+      className="flex min-w-0 flex-col gap-1 p-1 text-xs"
     >
-      <header className="flex items-baseline justify-between gap-3">
-        <h3 className="text-sm font-medium text-foreground">{call.body.title}</h3>
-        {call.body.destructive ? (
-          <span className="shrink-0 text-xs text-muted-foreground">Changes existing data</span>
-        ) : null}
+      <header className="flex min-h-8 min-w-0 items-center gap-2 px-2.5">
+        <ShieldQuestionMark className="size-[13px] shrink-0 text-assistant-warning" aria-hidden />
+        <h3 className="shrink-0 text-sm font-medium text-foreground">Approval needed</h3>
+        <span className="min-w-0 flex-1 truncate text-assistant-dim">{call.body.title}</span>
+        {waiting > 1 ? <span className="shrink-0 text-assistant-dim tabular-nums">1 of {waiting}</span> : null}
       </header>
-      <ChangeList input={call.body.input} />
-      <footer className="flex items-center gap-2">
-        <p className="flex min-w-0 flex-1 items-center gap-1.5 text-xs text-amber-600 dark:text-amber-500">
-          <ShieldQuestion className="size-3.5 shrink-0" aria-hidden />
-          Waiting for your approval
+      {entries.length ? (
+        <div className="px-1.5">
+          <dl className="grid max-h-40 grid-cols-[max-content_1fr] gap-x-4 gap-y-1 overflow-y-auto rounded-lg assistant-well px-3 py-2.5 text-xs/relaxed">
+            {entries.map(([key, value]) => (
+              <div key={key} className="contents">
+                <dt className="text-muted-foreground">{humanizeKey(key)}</dt>
+                <dd
+                  className={cn(
+                    'min-w-0 break-words',
+                    isReference(key) ? 'font-mono text-[11px]/5 text-assistant-dim' : 'font-medium text-foreground',
+                  )}
+                >
+                  {displayValue(value)}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+      ) : null}
+      <footer className="flex min-w-0 flex-wrap items-center justify-end gap-2 py-1.5 ps-2.5 pe-1.5">
+        <p className="min-w-0 flex-1 truncate text-assistant-dim">
+          {call.body.destructive ? 'This changes existing data.' : 'Nothing changes until you approve.'}
         </p>
-        <Button type="button" variant="ghost" size="sm" disabled={Boolean(pendingDecision)} onClick={() => onDecide('decline')}>
-          {pendingDecision === 'decline' ? <Spinner /> : null}
-          Decline
-        </Button>
-        <Button type="button" size="sm" disabled={Boolean(pendingDecision)} onClick={() => onDecide('approve')}>
-          {pendingDecision === 'approve' ? <Spinner /> : null}
-          Approve
-        </Button>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button type="button" variant="outline" disabled={busy} onClick={() => onDecide('decline')}>
+            {pendingDecision === 'decline' ? <Spinner /> : null}
+            Decline
+          </Button>
+          <Button type="button" disabled={busy} onClick={() => onDecide('approve')}>
+            {pendingDecision === 'approve' ? <Spinner /> : null}
+            Approve
+            <Kbd className="-me-0.5 h-4 min-w-4 bg-black/10 text-current dark:bg-white/15">
+              <CornerDownLeft className="size-2.5" aria-hidden />
+            </Kbd>
+          </Button>
+        </div>
       </footer>
     </section>
   );

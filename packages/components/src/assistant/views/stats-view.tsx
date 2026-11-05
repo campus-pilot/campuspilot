@@ -15,15 +15,15 @@ export function AssistantStatsViewBlock({ view }: { view: AssistantStatsView }) 
         )}
       >
         {view.stats.map((stat) => (
-          <div key={stat.label} className="flex min-w-0 flex-col gap-0.5 rounded-lg border p-3">
+          <div key={stat.label} className="flex min-w-0 flex-col gap-1 rounded-[10px] assistant-well px-3 py-2.5">
             <dt className="flex items-center gap-1.5 text-xs text-muted-foreground">
               {stat.tone ? <span className={cn('size-1.5 shrink-0 rounded-full', TONE_DOT[stat.tone])} aria-hidden /> : null}
               <span className="truncate">{stat.label}</span>
             </dt>
-            <dd className="text-xl font-semibold tabular-nums tracking-tight">
+            <dd className="text-xl/7 font-semibold text-foreground tabular-nums tracking-tight">
               {typeof stat.value === 'number' ? stat.value.toLocaleString() : stat.value}
             </dd>
-            {stat.detail ? <dd className="truncate text-xs text-muted-foreground">{stat.detail}</dd> : null}
+            {stat.detail ? <dd className="truncate text-xs text-assistant-dim">{stat.detail}</dd> : null}
           </div>
         ))}
       </dl>

@@ -150,3 +150,27 @@ Adapted from T3 Code's data layer:
 - **Sending**: messages appear at once (read from the mutation cache), retry
   automatically with the same request id on network or server errors, and show
   "Not sent · Retry" if they still fail; the draft is restored.
+
+## Look and feel
+
+The chat follows T3 Code's redesign (maria-rcks, pingdotgg/t3code #28839 to
+#28845, plus #26155, #26255, #27305, #27978 and #25299). Tokens and surface
+recipes live in `packages/ui/src/styles/assistant.css`; components pick a
+recipe (`assistant-tray`, `assistant-input`, `assistant-well`,
+`assistant-raised`, `assistant-pill`, `assistant-bubble`) rather than painting
+their own fill, rim and shadow.
+
+- **Composer**: one tray (16px radius) holding requests, the queue and a 30px
+  context row, with a raised 48px input surface (14px). Send, Queue and Stop
+  share one neutral pill.
+- **Requests in the tray**: a change waiting for approval is decided above the
+  message box (Enter approves and Escape declines when no field has focus);
+  its timeline row only names it, in amber. Messages sent while a run works
+  wait in the tray as queued rows, not in the timeline.
+- **Turns**: each run has a 32px work bar over a hairline ("Working for 12s",
+  "Paused at 8s", "Worked for 18s"). A finished turn folds its tool calls,
+  decisions and interim replies into the bar; views and the final answer stay
+  visible, and only that answer shows time and copy on hover.
+- **Content**: tables, record lists, stats, details, bars and code sit in an
+  inset well with hairline separators; no middle-dot joined metadata and no
+  spaced capitals.

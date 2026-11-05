@@ -1,10 +1,10 @@
 import { ASSISTANT_MESSAGE_MAX_LENGTH } from '@campuspilot/assistant-contract/dto';
-import { InputGroup, InputGroupAddon, InputGroupTextarea } from '@campuspilot/ui/components/input-group';
+import { InputGroupTextarea } from '@campuspilot/ui/components/input-group';
 import { Spinner } from '@campuspilot/ui/components/spinner';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@campuspilot/ui/components/tooltip';
 import { cn } from '@campuspilot/ui/lib/utils';
 import { useForm } from '@tanstack/react-form';
-import { ListPlus } from 'lucide-react';
+import { ArrowUp, ListPlus } from 'lucide-react';
 import type { KeyboardEvent, PointerEvent, ReactNode } from 'react';
 import { z } from 'zod';
 
@@ -17,66 +17,77 @@ const composerSchema = z.object({
 /** Buttons never take focus from the message box when clicked (T3 Code). */
 const keepComposerFocus = (event: PointerEvent) => event.preventDefault();
 
-const roundButtonClassName =
-  'relative isolate flex size-9 shrink-0 items-center justify-center rounded-full shadow-xs transition-[scale,background-color,box-shadow] duration-150 enabled:cursor-pointer active:shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:ring-offset-2 focus-visible:ring-offset-card disabled:pointer-events-none sm:size-8 [&_svg]:pointer-events-none';
-
-/** The send arrow, drawn at 14px with a 1.8 stroke so it reads crisply at this size. */
-function SendGlyph() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-      <path d="M7 11.5V2.5M7 2.5L3 6.5M7 2.5L11 6.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
+/**
+ * A press on the input surface's padding focuses the message box instead of
+ * blurring it, so the whole surface behaves like the field.
+ */
+function focusPromptFromPadding(event: PointerEvent<HTMLDivElement>) {
+  const target = event.target as Element;
+  if (target.closest('textarea, button, a')) return;
+  event.preventDefault();
+  event.currentTarget.querySelector('textarea')?.focus();
 }
 
-function StopButton({ onStop, stopping }: { onStop: () => void; stopping: boolean }) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <button
-          type="button"
-          aria-label="Stop"
-          disabled={stopping}
-          onPointerDown={keepComposerFocus}
-          onClick={onStop}
-          className={cn(
-            roundButtonClassName,
-            'bg-destructive/90 text-white shadow-destructive/25 inset-shadow-control-highlight enabled:hover:bg-destructive active:inset-shadow-control-pressed disabled:opacity-60',
-          )}
-        >
-          {stopping ? (
-            <Spinner className="size-3.5" />
-          ) : (
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true">
-              <rect x="2" y="2" width="8" height="8" rx="1.5" />
-            </svg>
-          )}
-        </button>
-      </TooltipTrigger>
-      <TooltipContent>Stop</TooltipContent>
-    </Tooltip>
-  );
-}
+const slotClassName =
+  'relative isolate flex h-full shrink-0 items-center justify-center gap-1 rounded-[7px] transition-colors duration-150 outline-none enabled:cursor-pointer enabled:hover:bg-foreground/8 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:pointer-events-none [&_svg]:pointer-events-none';
 
-function SendButton({ disabled, busy, queue }: { disabled: boolean; busy: boolean; queue: boolean }) {
-  const label = busy ? 'Sending message' : queue ? 'Queue message' : 'Send message';
+/**
+ * Send, queue and stop share one neutral pill, one shape in every state
+ * (T3 Code), so the control never jumps or changes colour under the cursor.
+ */
+function PrimaryAction({
+  mode,
+  disabled,
+  busy,
+  stopping,
+  onStop,
+}: {
+  mode: 'send' | 'queue' | 'stop';
+  disabled: boolean;
+  busy: boolean;
+  stopping: boolean;
+  onStop?: () => void;
+}) {
+  const tooltip = mode === 'stop' ? 'Stop' : mode === 'queue' ? 'Queue: sends when the assistant is done' : 'Send';
+  const button =
+    mode === 'stop' ? (
+      <button
+        type="button"
+        aria-label="Stop"
+        disabled={stopping}
+        onPointerDown={keepComposerFocus}
+        onClick={onStop}
+        className={cn(slotClassName, 'w-[30px] disabled:opacity-64')}
+      >
+        {stopping ? <Spinner className="size-3.5" /> : <span className="size-2.5 rounded-[2px] bg-destructive" aria-hidden />}
+      </button>
+    ) : (
+      <button
+        type="submit"
+        aria-label={busy ? 'Sending message' : mode === 'queue' ? 'Queue message' : 'Send message'}
+        disabled={disabled || busy}
+        onPointerDown={keepComposerFocus}
+        className={cn(slotClassName, mode === 'queue' ? 'ps-1.5 pe-2.5 text-sm font-medium' : 'w-[30px]', 'disabled:opacity-64')}
+      >
+        {busy ? (
+          <Spinner className="size-3.5" />
+        ) : mode === 'queue' ? (
+          <>
+            <ListPlus className="size-3.5" aria-hidden />
+            Queue
+          </>
+        ) : (
+          <ArrowUp className="size-3.5" strokeWidth={2.25} aria-hidden />
+        )}
+      </button>
+    );
   return (
     <Tooltip>
+      {/* The trigger is the pill, not the button, so the tooltip still shows while sending is disabled. */}
       <TooltipTrigger asChild>
-        <button
-          type="submit"
-          aria-label={label}
-          disabled={disabled || busy}
-          onPointerDown={keepComposerFocus}
-          className={cn(
-            roundButtonClassName,
-            'bg-primary text-primary-foreground shadow-primary/25 inset-shadow-control-highlight enabled:hover:scale-105 enabled:hover:bg-primary/90 active:inset-shadow-control-pressed disabled:bg-foreground/12 disabled:text-muted-foreground disabled:shadow-none disabled:inset-shadow-none',
-          )}
-        >
-          {busy ? <Spinner className="size-3.5" /> : queue ? <ListPlus className="size-4" /> : <SendGlyph />}
-        </button>
+        <span className="relative isolate inline-flex h-8 shrink-0 items-center rounded-lg assistant-pill">{button}</span>
       </TooltipTrigger>
-      <TooltipContent>{queue ? 'Queue — sends when the assistant is done' : 'Send'}</TooltipContent>
+      <TooltipContent>{tooltip}</TooltipContent>
     </Tooltip>
   );
 }
@@ -87,7 +98,7 @@ export type AssistantComposerProps = {
    * elsewhere); a rejection puts the text back and shows the error.
    */
   onSend: (text: string) => Promise<void>;
-  /** Present while a run is working; an empty box then shows Stop. */
+  /** Present while a run is working; an empty box then shows Stop, a typed one Queue. */
   onStop?: () => void;
   stopping?: boolean;
   /** Why sending is unavailable, when it is. */
@@ -96,8 +107,14 @@ export type AssistantComposerProps = {
   autoFocus?: boolean;
   /** Up arrow in an empty box recalls this (the last message sent). */
   lastSentText?: string;
-  /** Left side of the toolbar, e.g. the page the assistant will see. */
-  leading?: ReactNode;
+  /**
+   * Cards that live in the tray above the message box: a change waiting for
+   * approval, queued messages. They sit on the tray, the box stays raised.
+   */
+  requests?: ReactNode;
+  /** The tray row under the box, start and end. */
+  trayStart?: ReactNode;
+  trayEnd?: ReactNode;
 };
 
 function errorText(errors: unknown[]): string | null {
@@ -108,8 +125,10 @@ function errorText(errors: unknown[]): string | null {
 }
 
 /**
- * The message box: one surface (shadcn InputGroup) with a hairline outline,
- * an auto-growing field and a toolbar row, after T3 Code's composer.
+ * The message box, after T3 Code's redesigned composer: one tray (16px
+ * radius, hairline painted on top so it adds no size) holding any requests,
+ * a raised 48px input surface (14px radius, concentric with the tray) with
+ * the send pill on its first line, and a 30px context row below.
  */
 export function AssistantComposer({
   onSend,
@@ -119,7 +138,9 @@ export function AssistantComposer({
   placeholder = 'Ask about students, classes, exams…',
   autoFocus = false,
   lastSentText,
-  leading,
+  requests,
+  trayStart,
+  trayEnd,
 }: AssistantComposerProps) {
   const form = useForm({
     defaultValues: { text: '' },
@@ -163,57 +184,88 @@ export function AssistantComposer({
         void form.handleSubmit();
       }}
     >
-      <InputGroup
+      <div
         className={cn(
-          'relative h-auto flex-col rounded-2xl border-0 bg-card shadow-composer dark:bg-card',
-          'after:pointer-events-none after:absolute after:inset-0 after:rounded-[inherit] after:border after:border-surface-outline dark:after:inset-shadow-surface-highlight',
-          'has-[[data-slot=input-group-control]:focus-visible]:border-0 has-[[data-slot=input-group-control]:focus-visible]:ring-0',
-          'has-[textarea]:rounded-2xl has-[>[data-align=block-end]]:rounded-2xl',
-          disabled && 'opacity-70',
+          'relative isolate flex min-w-0 flex-col rounded-2xl assistant-tray',
+          'after:pointer-events-none after:absolute after:inset-0 after:z-20 after:rounded-[inherit] after:border after:border-[var(--assistant-tray-stroke)]',
         )}
       >
-        <form.Field name="text">
-          {(field) => (
-            <InputGroupTextarea
-              aria-label="Message"
-              autoFocus={autoFocus}
-              disabled={disabled}
-              rows={2}
-              maxLength={ASSISTANT_MESSAGE_MAX_LENGTH}
-              placeholder={disabledReason ?? placeholder}
-              className="max-h-52 min-h-[calc(2lh+0.875rem)] px-4 pt-3.5 pb-0 text-base/relaxed placeholder:text-muted-foreground sm:text-sm/relaxed md:text-sm/relaxed"
-              value={field.state.value}
-              onBlur={field.handleBlur}
-              onChange={(event) => field.handleChange(event.target.value)}
-              onKeyDown={(event) => handleKeyDown(event, field.state.value)}
-            />
-          )}
-        </form.Field>
-        <InputGroupAddon align="block-end" className="cursor-default gap-2 px-2 pt-1 pb-2">
-          <div className="flex min-w-0 flex-1 items-center gap-1.5 ps-2 text-xs font-normal text-muted-foreground">
-            {leading}
+        {requests}
+        <div
+          className={cn('relative z-10 cursor-text rounded-[14px] assistant-input', disabled && 'opacity-70')}
+          onPointerDown={focusPromptFromPadding}
+        >
+          <div className="flex min-h-12 items-start gap-1.5 py-2 ps-3.5 pe-2">
+            <form.Field name="text">
+              {(field) => (
+                <InputGroupTextarea
+                  aria-label="Message the assistant"
+                  autoFocus={autoFocus}
+                  disabled={disabled}
+                  rows={1}
+                  maxLength={ASSISTANT_MESSAGE_MAX_LENGTH}
+                  placeholder={disabledReason ?? placeholder}
+                  className="max-h-42 min-h-8 px-0 py-1.5 text-base/5 text-foreground placeholder:text-assistant-dim sm:text-sm/5 md:text-sm/5"
+                  value={field.state.value}
+                  onBlur={field.handleBlur}
+                  onChange={(event) => field.handleChange(event.target.value)}
+                  onKeyDown={(event) => handleKeyDown(event, field.state.value)}
+                />
+              )}
+            </form.Field>
+            <form.Subscribe selector={(state) => [state.values.text.trim().length > 0, state.isSubmitting] as const}>
+              {([hasText, isSubmitting]) => (
+                <PrimaryAction
+                  mode={onStop ? (hasText ? 'queue' : 'stop') : 'send'}
+                  disabled={disabled || !hasText}
+                  busy={isSubmitting}
+                  stopping={stopping}
+                  onStop={onStop}
+                />
+              )}
+            </form.Subscribe>
           </div>
-          <form.Subscribe selector={(state) => [state.values.text.trim().length > 0, state.isSubmitting] as const}>
-            {([hasText, isSubmitting]) =>
-              onStop && !hasText ? (
-                <StopButton onStop={onStop} stopping={stopping} />
-              ) : (
-                <SendButton disabled={disabled || !hasText} busy={isSubmitting} queue={Boolean(onStop)} />
-              )
-            }
-          </form.Subscribe>
-        </InputGroupAddon>
-      </InputGroup>
+        </div>
+        <div className="flex h-7.5 min-w-0 items-center gap-2 ps-3.5 pe-3 text-xs text-muted-foreground">
+          <div className="flex min-w-0 flex-1 items-center gap-1.5">{trayStart}</div>
+          {trayEnd ? <div className="flex shrink-0 items-center gap-1.5">{trayEnd}</div> : null}
+        </div>
+      </div>
       <form.Subscribe selector={(state) => [state.errors, state.fieldMeta.text?.errors ?? []] as const}>
         {([formErrors, fieldErrors]) => {
           const message = errorText([...fieldErrors, ...formErrors]);
           return message ? (
-            <p role="alert" className="px-3 text-xs text-destructive">
+            <p role="alert" className="px-3.5 text-xs text-destructive">
               {message}
             </p>
           ) : null;
         }}
       </form.Subscribe>
     </form>
+  );
+}
+
+/**
+ * Messages waiting behind the working run, as compact rows in the tray
+ * (T3 Code moved its queue out of the timeline for the same reason: they
+ * have not been answered yet, so they do not belong in the conversation).
+ */
+export function AssistantQueuedMessages({
+  messages,
+}: {
+  /** `status` replaces the "Queued" label, e.g. while a message is still on its way. */
+  messages: readonly { id: string; text: string; status?: ReactNode }[];
+}) {
+  if (messages.length === 0) return null;
+  return (
+    <ul aria-label="Queued messages" className="flex min-w-0 flex-col px-2 py-1 text-xs">
+      {messages.map((message) => (
+        <li key={message.id} className="flex min-h-7 min-w-0 items-center gap-2 rounded-lg px-1.5 text-assistant-dim">
+          <ListPlus className="size-3.5 shrink-0" aria-hidden />
+          <span className="min-w-0 flex-1 truncate text-muted-foreground">{message.text}</span>
+          <span className="shrink-0">{message.status ?? 'Queued'}</span>
+        </li>
+      ))}
+    </ul>
   );
 }

@@ -2,7 +2,7 @@ import type { AssistantItemDto, AssistantRunDto } from '@campuspilot/assistant-c
 import { describe, expect, it } from 'vitest';
 
 import { splitMarkdownBlocks } from './assistant-markdown';
-import { activeRun, buildAssistantTimeline, summarizeActivity } from './timeline-model';
+import { activeRun, buildAssistantTimeline, pendingApprovals, queuedMessages, summarizeActivity } from './timeline-model';
 
 const at = new Date('2026-11-05T00:00:00Z');
 const base = { conversationId: 'c', runId: 'r1', sequence: 1, createdAt: at, updatedAt: at };
@@ -16,9 +16,10 @@ const call = (id: string, position: number, extra: Partial<Extract<AssistantItem
 const reply = (id: string, position: number, text: string): AssistantItemDto => ({
   ...base, id, position, kind: 'assistant_message', status: 'complete', body: { text },
 });
-const run = (id: string, status: AssistantRunDto['status']): AssistantRunDto => ({
+const run = (id: string, status: AssistantRunDto['status'], startedAt: Date | null = null): AssistantRunDto => ({
   id, conversationId: 'c', status, surface: 'page', stopRequestedAt: null, errorCode: null,
-  errorMessage: status === 'failed' ? 'Boom' : null, sequence: 1, createdAt: at, startedAt: null, completedAt: null,
+  errorMessage: status === 'failed' ? 'Boom' : null, sequence: 1, createdAt: at, startedAt,
+  completedAt: startedAt && ['completed', 'failed', 'cancelled'].includes(status) ? new Date(startedAt.getTime() + 18_000) : null,
 });
 
 describe('buildAssistantTimeline', () => {
@@ -34,8 +35,27 @@ describe('buildAssistantTimeline', () => {
       ],
       [run('r1', 'running')],
     );
-    expect(rows.map((row) => row.kind)).toEqual(['user', 'activity', 'approval', 'reply']);
-    expect(rows[1]).toMatchObject({ kind: 'activity', calls: [{ id: 'a' }, { id: 'b' }] });
+    expect(rows.map((row) => row.kind)).toEqual(['user', 'work', 'activity', 'approval', 'reply']);
+    expect(rows[2]).toMatchObject({ kind: 'activity', calls: [{ id: 'a' }, { id: 'b' }] });
+  });
+
+  it('folds a finished turn under its bar, keeping views and the final answer', () => {
+    const view = { ...base, id: 'v', position: 4, kind: 'view', status: 'complete', body: { view: { type: 'notice', tone: 'neutral', text: 'x' } } } as AssistantItemDto;
+    const rows = buildAssistantTimeline(
+      [user('u', 1), call('a', 2), reply('interim', 3, 'Looking'), view, reply('final', 5, 'Done')],
+      [run('r1', 'completed', at)],
+    );
+    expect(rows.map((row) => row.kind)).toEqual(['user', 'work', 'view', 'reply']);
+    expect(rows[1]).toMatchObject({ state: 'done', since: at, folded: [{ kind: 'activity' }, { kind: 'reply', itemId: 'interim' }] });
+    expect(rows[3]).toMatchObject({ itemId: 'final', meta: true });
+  });
+
+  it('pauses the bar on a change waiting for approval', () => {
+    const rows = buildAssistantTimeline(
+      [user('u', 1), call('w', 2, { access: 'write', approvalId: 'ap' }, 'awaiting_approval')],
+      [run('r1', 'awaiting_approval', at)],
+    );
+    expect(rows[1]).toMatchObject({ kind: 'work', state: 'paused', pending: { id: 'w' } });
   });
 
   it('adds a notice where a failed run ends', () => {
@@ -53,10 +73,16 @@ describe('live row', () => {
     body: { view: { type: 'notice', tone: 'neutral', text: 'Heads up' } },
   });
 
-  it('shows Thinking before any tool, Working after one', () => {
-    expect(buildAssistantTimeline([user('u', 1)], [run('r1', 'running')]).at(-1)).toMatchObject({ kind: 'live', label: 'Thinking' });
-    expect(buildAssistantTimeline([user('u', 1), call('a', 2)], [run('r1', 'running')]).at(-1)).toMatchObject({ kind: 'live', label: 'Working' });
-    expect(buildAssistantTimeline([user('u', 1)], [run('r1', 'queued')]).at(-1)).toMatchObject({ kind: 'live', label: 'Waiting' });
+  it('shows Thinking while the model works between tools', () => {
+    expect(buildAssistantTimeline([user('u', 1)], [run('r1', 'running', at)]).map((row) => row.kind)).toEqual(['user', 'work', 'live']);
+    expect(buildAssistantTimeline([user('u', 1), call('a', 2)], [run('r1', 'running', at)]).at(-1)).toMatchObject({ kind: 'live', label: 'Thinking' });
+  });
+
+  it('keeps queued messages out of the timeline', () => {
+    const items = [user('u1', 1), user('u2', 2, 'r2')];
+    const runs = [run('r1', 'running', at), run('r2', 'queued')];
+    expect(buildAssistantTimeline(items, runs).map((row) => row.id)).toEqual(['u1', 'work:r1', 'live:r1']);
+    expect(queuedMessages(items, runs).map((item) => item.id)).toEqual(['u2']);
   });
 
   it('hides while a reply streams, an approval waits, or nothing runs', () => {
@@ -68,7 +94,7 @@ describe('live row', () => {
   });
 
   it('renders views as their own rows', () => {
-    expect(buildAssistantTimeline([user('u', 1), view('v', 2)], [run('r1', 'completed')]).map((row) => row.kind)).toEqual(['user', 'view']);
+    expect(buildAssistantTimeline([user('u', 1), view('v', 2)], [run('r1', 'completed', at)]).map((row) => row.kind)).toEqual(['user', 'work', 'view']);
   });
 });
 
@@ -76,10 +102,17 @@ describe('helpers', () => {
   it('summarises activity', () => {
     const calls = [call('a', 1), call('b', 2)].filter((item) => item.kind === 'tool_call');
     expect(summarizeActivity(calls as never)).toBe('Looked up 2 records');
+    const mixed = [call('a', 1), call('b', 2, { access: 'write' })].filter((item) => item.kind === 'tool_call');
+    expect(summarizeActivity(mixed as never)).toBe('Looked up 1 record and updated 1 record');
+  });
+
+  it('lists changes waiting for a decision', () => {
+    expect(pendingApprovals([call('a', 1), call('w', 2, { access: 'write' }, 'awaiting_approval')]).map((item) => item.id)).toEqual(['w']);
   });
 
   it('finds the run still working', () => {
     expect(activeRun([run('r1', 'completed'), run('r2', 'awaiting_approval')])?.id).toBe('r2');
+    expect(activeRun([run('r1', 'running'), run('r2', 'queued')])?.id).toBe('r1');
     expect(activeRun([run('r1', 'completed')])).toBeNull();
   });
 

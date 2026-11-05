@@ -9,17 +9,17 @@ export function AssistantBarsViewBlock({ view }: { view: AssistantBarsView }) {
   const max = Math.max(...view.bars.map((bar) => bar.value), 1);
   return (
     <AssistantViewFrame title={view.title}>
-      <ul className="flex flex-col gap-2">
+      <ul className="flex flex-col gap-2.5 rounded-[10px] assistant-well px-3 py-3">
         {view.bars.map((bar) => (
           <li key={bar.label} className="flex flex-col gap-1.5">
-            <div className="flex items-baseline justify-between gap-3 text-sm/relaxed">
-              <span className="truncate">{bar.label}</span>
+            <div className="flex items-baseline justify-between gap-3 text-[13px]/5">
+              <span className="truncate text-foreground">{bar.label}</span>
               <span className="shrink-0 text-muted-foreground tabular-nums">
                 {bar.value.toLocaleString()}
                 {view.unit ? ` ${view.unit}` : ''}
               </span>
             </div>
-            <div className="h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden>
+            <div className="h-1.5 overflow-hidden rounded-full bg-foreground/8" aria-hidden>
               <div
                 className={cn('h-full rounded-full', TONE_BAR[bar.tone ?? 'neutral'])}
                 style={{ width: `${Math.max((bar.value / max) * 100, bar.value > 0 ? 2 : 0)}%` }}

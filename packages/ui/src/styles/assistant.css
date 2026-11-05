@@ -1,32 +1,151 @@
 /*
- * Assistant chat surface. Values follow T3 Code's chat (a 46rem lane, a
- * hairline-outlined composer with a near-invisible shadow, restrained
- * markdown rhythm, row-only tables), adapted to CampusPilot's palette.
+ * Assistant surfaces, after T3 Code's redesign (maria-rcks, #28839/#28840):
+ * a 45rem lane, a composer that is a raised input sitting on a tray, inset
+ * "wells" for tables, records and code, and a neutral send pill. Values are
+ * retuned to CampusPilot's zinc palette (white / zinc-950 backgrounds).
+ *
+ * Surfaces are recipes, not one-off paint: each is a fill, a 1px rim lit
+ * from above (dark-to-light alpha, drawn as a gradient border), and a shadow.
+ * Components pick a recipe; they never rebuild one.
  */
 
 @theme inline {
-  --color-message: var(--message-surface);
-  --color-surface-outline: var(--surface-outline);
-  --shadow-composer: var(--composer-shadow);
-  --inset-shadow-control-highlight: 0 1px rgb(255 255 255 / 16%);
-  --inset-shadow-control-pressed: 0 1px rgb(0 0 0 / 8%);
-  --inset-shadow-surface-highlight: inset 0 1px var(--surface-highlight);
+  --color-assistant-dim: var(--assistant-dim);
+  --color-assistant-hairline: var(--assistant-hairline);
+  --color-assistant-warning: var(--assistant-warning);
+  --color-assistant-info: var(--assistant-info);
+  --color-assistant-success: var(--assistant-success);
+  --color-assistant-pill-foreground: var(--assistant-pill-foreground);
 }
 
 :root {
-  /* Width of the conversation and the composer, shared so they line up. */
-  --assistant-lane: 46rem;
-  --message-surface: color-mix(in oklab, var(--color-zinc-200) 55%, var(--color-zinc-100));
-  --surface-outline: rgb(0 0 0 / 8%);
-  --surface-highlight: transparent;
-  --composer-shadow: 0 1px 2px rgb(0 0 0 / 5%);
+  /* Width of the conversation and the composer, shared so their edges line up. */
+  --assistant-lane: 45rem;
+
+  /* Text tiers below muted: meta, captions, carets. */
+  --assistant-dim: #85858d;
+  --assistant-hairline: rgb(0 0 0 / 6%);
+  --assistant-warning: #a86d0b;
+  --assistant-info: #1d4ed8;
+  --assistant-success: #1a7f37;
+
+  --assistant-tray-fill: linear-gradient(180deg, #fbfbfb, #f7f7f8);
+  --assistant-tray-stroke: rgb(0 0 0 / 7%);
+  --assistant-tray-shadow: 0 1px 2px rgb(0 0 0 / 4%), 0 6px 18px rgb(0 0 0 / 4%);
+
+  --assistant-input-fill: linear-gradient(180deg, #ffffff, #fdfdfd);
+  --assistant-input-shadow: 0 0 0 1px rgb(0 0 0 / 5%), 0 1px 2px rgb(0 0 0 / 6%), 0 3px 10px rgb(0 0 0 / 4%);
+
+  --assistant-bubble-fill: linear-gradient(180deg, #f4f4f5, #f0f0f2);
+
+  --assistant-well-fill: linear-gradient(180deg, #f7f7f8, #fafafa);
+  --assistant-well-rim: linear-gradient(180deg, rgb(0 0 0 / 12%), rgb(0 0 0 / 6%));
+  --assistant-well-header: rgb(0 0 0 / 2.5%);
+
+  --assistant-raised-fill: linear-gradient(#ffffff, #ffffff);
+  --assistant-raised-rim: linear-gradient(180deg, rgb(0 0 0 / 13%), rgb(0 0 0 / 2%));
+  --assistant-raised-shadow: 0 1px 2px rgb(0 0 0 / 5%);
+
+  --assistant-pill-fill: linear-gradient(#efeff0, #efeff0);
+  --assistant-pill-rim: linear-gradient(180deg, rgb(0 0 0 / 13%), rgb(0 0 0 / 1%));
+  --assistant-pill-shadow: 0 1px 3px rgb(0 0 0 / 7%);
+  --assistant-pill-foreground: #27272a;
+
+  --assistant-ghost-hover: linear-gradient(180deg, rgb(0 0 0 / 6%), rgb(0 0 0 / 3%));
+  --assistant-selected: linear-gradient(180deg, rgb(0 0 0 / 6%), rgb(0 0 0 / 4%));
+  --assistant-selected-ring: inset 0 0 0 1px rgb(0 0 0 / 5%);
+  --assistant-inline-code: rgb(0 0 0 / 5%);
 }
 
 .dark {
-  --message-surface: color-mix(in oklab, var(--background) 88%, white);
-  --surface-outline: rgb(255 255 255 / 7%);
-  --surface-highlight: rgb(255 255 255 / 3%);
-  --composer-shadow: 0 14px 32px -18px rgb(0 0 0 / 75%);
+  --assistant-dim: #71717a;
+  --assistant-hairline: rgb(255 255 255 / 7%);
+  --assistant-warning: #d29922;
+  --assistant-info: #8aa4ff;
+  --assistant-success: #3fb950;
+
+  --assistant-tray-fill: linear-gradient(#111113, #111113);
+  --assistant-tray-stroke: rgb(255 255 255 / 6%);
+  --assistant-tray-shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 3px 10px rgb(0 0 0 / 20%);
+
+  --assistant-input-fill: linear-gradient(180deg, #1d1d20, #19191c);
+  --assistant-input-shadow: 0 1px 2px rgb(0 0 0 / 45%), 0 3px 10px rgb(0 0 0 / 30%), inset 0 1px rgb(255 255 255 / 4%);
+
+  --assistant-bubble-fill: linear-gradient(180deg, #222225, #1d1d20);
+
+  --assistant-well-fill: linear-gradient(180deg, #0c0c0e, #0f0f11);
+  --assistant-well-rim: linear-gradient(180deg, rgb(255 255 255 / 4%), rgb(255 255 255 / 10%));
+  --assistant-well-header: rgb(255 255 255 / 2.5%);
+
+  --assistant-raised-fill: linear-gradient(#1d1d20, #1d1d20);
+  --assistant-raised-rim: linear-gradient(180deg, rgb(255 255 255 / 20%), rgb(255 255 255 / 3%));
+  --assistant-raised-shadow: 0 1px 2px rgb(0 0 0 / 40%);
+
+  --assistant-pill-fill: linear-gradient(#0d0d0f, #0d0d0f);
+  --assistant-pill-rim: linear-gradient(180deg, rgb(255 255 255 / 20%), rgb(255 255 255 / 2%));
+  --assistant-pill-shadow: none;
+  --assistant-pill-foreground: #d4d4d8;
+
+  --assistant-ghost-hover: linear-gradient(180deg, rgb(255 255 255 / 7%), rgb(255 255 255 / 4%));
+  --assistant-selected: linear-gradient(180deg, rgb(255 255 255 / 7%), rgb(255 255 255 / 4%));
+  --assistant-selected-ring: none;
+  --assistant-inline-code: rgb(255 255 255 / 7%);
+}
+
+/* The tray: the composer's outer surface, holding requests, the queue and the context row. */
+@utility assistant-tray {
+  background: var(--assistant-tray-fill);
+  box-shadow: var(--assistant-tray-shadow);
+}
+
+/* The prompt's own surface, raised on the tray. */
+@utility assistant-input {
+  background: var(--assistant-input-fill);
+  box-shadow: var(--assistant-input-shadow);
+}
+
+@utility assistant-bubble {
+  background: var(--assistant-bubble-fill);
+}
+
+/* Inset content: tables, record lists, code, the change list of an approval. */
+@utility assistant-well {
+  border: 1px solid transparent;
+  background:
+    var(--assistant-well-fill) padding-box,
+    var(--assistant-well-rim) border-box,
+    var(--assistant-well-fill) border-box;
+}
+
+/* Small raised objects: key caps, the empty-state disc. */
+@utility assistant-raised {
+  border: 1px solid transparent;
+  background:
+    var(--assistant-raised-fill) padding-box,
+    var(--assistant-raised-rim) border-box,
+    var(--assistant-raised-fill) border-box;
+  box-shadow: var(--assistant-raised-shadow);
+}
+
+/* Send / stop / queue: one pill, one shape in every state. */
+@utility assistant-pill {
+  border: 1px solid transparent;
+  background:
+    var(--assistant-pill-fill) padding-box,
+    var(--assistant-pill-rim) border-box,
+    var(--assistant-pill-fill) border-box;
+  box-shadow: var(--assistant-pill-shadow);
+  color: var(--assistant-pill-foreground);
+}
+
+/* Neutral hover: a faint gradient, never a colour. */
+@utility assistant-ghost-hover {
+  background: var(--assistant-ghost-hover);
+}
+
+@utility assistant-selected {
+  background: var(--assistant-selected);
+  box-shadow: var(--assistant-selected-ring);
 }
 
 @layer components {
@@ -46,7 +165,7 @@
     margin-bottom: 0;
   }
 
-  .assistant-markdown :is(p, ul, ol, blockquote, pre, .assistant-markdown-table) {
+  .assistant-markdown :is(p, ul, ol, blockquote, .assistant-codeblock, .assistant-markdown-table) {
     margin: 0.65rem 0;
   }
 
@@ -59,8 +178,9 @@
 
   .assistant-markdown h1 { font-size: 1.25rem; }
   .assistant-markdown h2 { font-size: 1.125rem; }
-  .assistant-markdown h3 { font-size: 1rem; }
+  .assistant-markdown h3 { font-size: 0.9375rem; }
   .assistant-markdown :is(h4, h5, h6) { font-size: 0.875rem; }
+  .assistant-markdown h6 { color: var(--muted-foreground); }
 
   .assistant-markdown :is(strong, b) {
     font-weight: 600;
@@ -77,6 +197,10 @@
     list-style-type: decimal;
   }
 
+  .assistant-markdown li::marker {
+    color: var(--muted-foreground);
+  }
+
   .assistant-markdown ol > li::marker {
     font-variant-numeric: tabular-nums;
   }
@@ -90,68 +214,71 @@
   .assistant-markdown :is(ul, ol) :is(ul, ol) { margin: 0.25rem 0; }
 
   .assistant-markdown :not(pre) > code {
-    border-radius: 0.25rem;
-    background: color-mix(in oklab, var(--foreground) 9%, transparent);
-    padding: 0.1em 0.35em;
+    border-radius: 5px;
+    background: var(--assistant-inline-code);
+    padding: calc(0.1rem + 1px) calc(0.35rem + 1px);
+    color: var(--foreground);
     font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-    font-size: 0.85em;
+    font-size: 0.8125em;
   }
 
-  .assistant-markdown pre {
+  /* Code: an inset well with a 32px header (language, copy). */
+  .assistant-codeblock pre {
     overflow-x: auto;
-    border-radius: var(--radius-lg);
-    border: 1px solid color-mix(in oklab, var(--border) 70%, transparent);
-    background: var(--secondary);
-    padding: 0.75rem;
+    padding: 0.75rem 0.875rem;
+    font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
     font-size: 0.8125rem;
     line-height: 1.5;
+    scrollbar-width: thin;
   }
 
-  .dark .assistant-markdown pre {
-    border-color: transparent;
-    background: color-mix(in oklab, var(--input) 32%, transparent);
-  }
-
+  /* Links read as links without underlining every word; a dotted rule on hover. */
   .assistant-markdown a {
-    color: var(--primary);
+    color: var(--assistant-info);
     text-decoration: none;
   }
 
-  .assistant-markdown a:hover {
-    text-decoration: underline dotted;
-    text-underline-offset: 3px;
+  .assistant-markdown a:is(:hover, :focus-visible) {
+    background: radial-gradient(circle, currentcolor 0.75px, transparent 1px) bottom / 4px 2px repeat-x;
   }
 
   .assistant-markdown blockquote {
-    border-inline-start: 2px solid var(--border);
-    padding-inline-start: 0.75rem;
+    border-inline-start: 2px solid color-mix(in oklab, currentcolor 35%, transparent);
+    padding-inline-start: 0.8rem;
     color: var(--muted-foreground);
   }
 
   .assistant-markdown hr {
     margin: 1rem 0;
-    border-color: var(--border);
+    border-color: var(--assistant-hairline);
   }
 
-  /* Row separators only; the outer columns sit flush with the prose. */
+  /* Tables: an inset well with a tinted header, hairline rows and columns. */
   .assistant-markdown-table {
     overflow-x: auto;
+    border-radius: 10px;
+    scrollbar-width: thin;
   }
 
   .assistant-markdown table {
     width: 100%;
-    border-collapse: collapse;
+    border-collapse: separate;
+    border-spacing: 0;
     overflow-wrap: normal;
     word-break: normal;
-    font-size: 0.8125rem;
   }
 
   .assistant-markdown :is(th, td) {
     max-width: 24rem;
-    padding: 0.45rem 0.75rem;
+    padding: 0.5rem 0.75rem;
     text-align: start;
     text-wrap: pretty;
     vertical-align: top;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .assistant-markdown :is(th, td):not(:last-child) {
+    border-inline-end: 1px solid var(--assistant-hairline);
   }
 
   /* Centred columns read as misaligned in a reading lane; keep start/end only. */
@@ -159,28 +286,21 @@
     text-align: start !important;
   }
 
-  .assistant-markdown :is(th, td):first-child { padding-inline-start: 0; }
-  .assistant-markdown :is(th, td):last-child { padding-inline-end: 0; }
-
   .assistant-markdown thead th {
-    border-bottom: 1px solid color-mix(in oklab, var(--border) 100%, transparent);
-    padding-block: 0.55rem;
-    font-weight: 600;
+    border-bottom: 1px solid var(--border);
+    background: var(--assistant-well-header);
+    font-weight: 500;
     color: var(--foreground);
+    white-space: nowrap;
   }
 
-  .assistant-markdown tbody td {
-    border-bottom: 1px solid color-mix(in oklab, var(--border) 60%, transparent);
-    font-variant-numeric: tabular-nums;
-  }
-
-  .assistant-markdown tbody tr:last-child td {
-    border-bottom: 0;
+  .assistant-markdown tbody tr:not(:last-child) td {
+    border-bottom: 1px solid var(--assistant-hairline);
   }
 
   /* New blocks of a streaming reply fade in instead of popping. */
   .assistant-markdown[data-streaming] > * {
-    transition: opacity 600ms ease-out;
+    transition: opacity 200ms ease-out;
     @starting-style {
       opacity: 0;
     }
@@ -188,6 +308,20 @@
 
   @media (prefers-reduced-motion: reduce) {
     .assistant-markdown[data-streaming] > * {
+      transition: none;
+    }
+  }
+
+  /* Rows revealed by opening a fold fade in rather than pop. */
+  [data-assistant-fold-content] > * {
+    transition: opacity 200ms ease-out;
+    @starting-style {
+      opacity: 0;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    [data-assistant-fold-content] > * {
       transition: none;
     }
   }
