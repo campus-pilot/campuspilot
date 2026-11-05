@@ -18,8 +18,8 @@ const composerSchema = z.object({
 const keepComposerFocus = (event: PointerEvent) => event.preventDefault();
 
 /**
- * A press on the input surface's padding focuses the message box instead of
- * blurring it, so the whole surface behaves like the field.
+ * A press on the input row's padding focuses the message box instead of
+ * blurring it, so the whole row behaves like the field.
  */
 function focusPromptFromPadding(event: PointerEvent<HTMLDivElement>) {
   const target = event.target as Element;
@@ -28,66 +28,83 @@ function focusPromptFromPadding(event: PointerEvent<HTMLDivElement>) {
   event.currentTarget.querySelector('textarea')?.focus();
 }
 
-const slotClassName =
-  'relative isolate flex h-full shrink-0 items-center justify-center gap-1 rounded-[7px] transition-colors duration-150 outline-none enabled:cursor-pointer enabled:hover:bg-foreground/8 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:pointer-events-none [&_svg]:pointer-events-none';
+const actionClassName =
+  'inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-lg text-sm font-medium transition-colors duration-150 outline-none focus-visible:ring-2 focus-visible:ring-ring/50 disabled:pointer-events-none [&_svg]:pointer-events-none';
 
 /**
- * Send, queue and stop share one neutral pill, one shape in every state
- * (T3 Code), so the control never jumps or changes colour under the cursor.
+ * Send, queue or stop: the composer's one coloured element. It is quiet
+ * (muted) while there is nothing to send and takes the app's primary colour
+ * the moment there is, so the box says when Enter will do something.
  */
 function PrimaryAction({
   mode,
-  disabled,
+  ready,
   busy,
   stopping,
   onStop,
 }: {
   mode: 'send' | 'queue' | 'stop';
-  disabled: boolean;
+  /** Whether there is something to send. */
+  ready: boolean;
   busy: boolean;
   stopping: boolean;
   onStop?: () => void;
 }) {
-  const tooltip = mode === 'stop' ? 'Stop' : mode === 'queue' ? 'Queue: sends when the assistant is done' : 'Send';
-  const button =
-    mode === 'stop' ? (
-      <button
-        type="button"
-        aria-label="Stop"
-        disabled={stopping}
-        onPointerDown={keepComposerFocus}
-        onClick={onStop}
-        className={cn(slotClassName, 'w-[30px] disabled:opacity-64')}
-      >
-        {stopping ? <Spinner className="size-3.5" /> : <span className="size-2.5 rounded-[2px] bg-destructive" aria-hidden />}
-      </button>
-    ) : (
-      <button
-        type="submit"
-        aria-label={busy ? 'Sending message' : mode === 'queue' ? 'Queue message' : 'Send message'}
-        disabled={disabled || busy}
-        onPointerDown={keepComposerFocus}
-        className={cn(slotClassName, mode === 'queue' ? 'ps-1.5 pe-2.5 text-sm font-medium' : 'w-[30px]', 'disabled:opacity-64')}
-      >
-        {busy ? (
-          <Spinner className="size-3.5" />
-        ) : mode === 'queue' ? (
-          <>
-            <ListPlus className="size-3.5" aria-hidden />
-            Queue
-          </>
-        ) : (
-          <ArrowUp className="size-3.5" strokeWidth={2.25} aria-hidden />
-        )}
-      </button>
+  if (mode === 'stop') {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            aria-label="Stop"
+            disabled={stopping}
+            onPointerDown={keepComposerFocus}
+            onClick={onStop}
+            className={cn(actionClassName, 'w-8 bg-muted text-foreground hover:bg-muted/70 disabled:opacity-60')}
+          >
+            {stopping ? <Spinner className="size-3.5" /> : <span className="size-2.5 rounded-[2px] bg-destructive" aria-hidden />}
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>Stop</TooltipContent>
+      </Tooltip>
     );
+  }
+  const label = busy ? 'Sending message' : mode === 'queue' ? 'Queue message' : 'Send message';
   return (
     <Tooltip>
-      {/* The trigger is the pill, not the button, so the tooltip still shows while sending is disabled. */}
       <TooltipTrigger asChild>
-        <span className="relative isolate inline-flex h-8 shrink-0 items-center rounded-lg assistant-pill">{button}</span>
+        {/* aria-disabled rather than disabled, so the tooltip still explains an empty box. */}
+        <button
+          type="submit"
+          aria-label={label}
+          aria-disabled={!ready || busy}
+          onPointerDown={keepComposerFocus}
+          onClick={(event) => {
+            if (!ready || busy) event.preventDefault();
+          }}
+          className={cn(
+            actionClassName,
+            mode === 'queue' ? 'ps-2 pe-2.5' : 'w-8',
+            ready && !busy
+              ? 'cursor-pointer bg-primary text-primary-foreground hover:bg-primary/90'
+              : 'cursor-default bg-muted text-muted-foreground',
+          )}
+        >
+          {busy ? (
+            <Spinner className="size-3.5" />
+          ) : mode === 'queue' ? (
+            <>
+              <ListPlus className="size-3.5" aria-hidden />
+              Queue
+            </>
+          ) : (
+            <ArrowUp className="size-4" strokeWidth={2.25} aria-hidden />
+          )}
+        </button>
       </TooltipTrigger>
-      <TooltipContent>{tooltip}</TooltipContent>
+      <TooltipContent>
+        {mode === 'queue' ? 'Queue: sends when the assistant is done' : ready ? 'Send' : 'Type a message to send'}
+      </TooltipContent>
     </Tooltip>
   );
 }
@@ -108,13 +125,12 @@ export type AssistantComposerProps = {
   /** Up arrow in an empty box recalls this (the last message sent). */
   lastSentText?: string;
   /**
-   * Cards that live in the tray above the message box: a change waiting for
-   * approval, queued messages. They sit on the tray, the box stays raised.
+   * Sections at the top of the box, above the message field: a change
+   * waiting for approval, queued messages. Each is divided by one rule.
    */
   requests?: ReactNode;
-  /** The tray row under the box, start and end. */
-  trayStart?: ReactNode;
-  trayEnd?: ReactNode;
+  /** A quiet line under the box, e.g. the trust cue. */
+  caption?: ReactNode;
 };
 
 function errorText(errors: unknown[]): string | null {
@@ -125,10 +141,11 @@ function errorText(errors: unknown[]): string | null {
 }
 
 /**
- * The message box, after T3 Code's redesigned composer: one tray (the app's
- * 2xl radius and border) holding any requests, a 48px input surface (xl
- * radius, the app's card) with the send pill on its first line, and a 30px
- * context row below.
+ * The message box: one bordered surface, painted and focused like the app's
+ * inputs, so nothing is a box inside a box. Requests (approval, queue) are
+ * sections of the same surface above the field; nested content uses fills,
+ * never a second border. The 48px field row grows to eight lines with the
+ * send control on its last line, and a caption sits outside, under it.
  */
 export function AssistantComposer({
   onSend,
@@ -139,8 +156,7 @@ export function AssistantComposer({
   autoFocus = false,
   lastSentText,
   requests,
-  trayStart,
-  trayEnd,
+  caption,
 }: AssistantComposerProps) {
   const form = useForm({
     defaultValues: { text: '' },
@@ -177,53 +193,54 @@ export function AssistantComposer({
 
   return (
     <form
-      className="flex flex-col gap-1.5"
+      className="flex flex-col gap-2"
       onSubmit={(event) => {
         event.preventDefault();
         event.stopPropagation();
         void form.handleSubmit();
       }}
     >
-      <div className="relative isolate flex min-w-0 flex-col rounded-2xl assistant-tray">
-        {requests}
-        <div
-          className={cn('relative z-10 cursor-text rounded-xl assistant-input', disabled && 'opacity-70')}
-          onPointerDown={focusPromptFromPadding}
-        >
-          <div className="flex min-h-12 items-start gap-1.5 py-2 ps-3.5 pe-2">
-            <form.Field name="text">
-              {(field) => (
-                <InputGroupTextarea
-                  aria-label="Message the assistant"
-                  autoFocus={autoFocus}
-                  disabled={disabled}
-                  rows={1}
-                  maxLength={ASSISTANT_MESSAGE_MAX_LENGTH}
-                  placeholder={disabledReason ?? placeholder}
-                  className="max-h-42 min-h-8 px-0 py-1.5 text-base/5 text-foreground placeholder:text-assistant-dim sm:text-sm/5 md:text-sm/5"
-                  value={field.state.value}
-                  onBlur={field.handleBlur}
-                  onChange={(event) => field.handleChange(event.target.value)}
-                  onKeyDown={(event) => handleKeyDown(event, field.state.value)}
-                />
-              )}
-            </form.Field>
-            <form.Subscribe selector={(state) => [state.values.text.trim().length > 0, state.isSubmitting] as const}>
-              {([hasText, isSubmitting]) => (
-                <PrimaryAction
-                  mode={onStop ? (hasText ? 'queue' : 'stop') : 'send'}
-                  disabled={disabled || !hasText}
-                  busy={isSubmitting}
-                  stopping={stopping}
-                  onStop={onStop}
-                />
-              )}
-            </form.Subscribe>
-          </div>
-        </div>
-        <div className="flex h-7.5 min-w-0 items-center gap-2 ps-3.5 pe-3 text-xs text-muted-foreground">
-          <div className="flex min-w-0 flex-1 items-center gap-1.5">{trayStart}</div>
-          {trayEnd ? <div className="flex shrink-0 items-center gap-1.5">{trayEnd}</div> : null}
+      <div
+        className={cn(
+          'flex min-w-0 flex-col overflow-hidden rounded-xl border border-input bg-card transition-[border-color,box-shadow] duration-150 dark:bg-input/30',
+          // A docked composer floats over the conversation: one soft shadow in light, none in dark.
+          'shadow-[0_10px_24px_-18px_rgb(0_0_0/0.35)] dark:shadow-none',
+          // The app's input focus colour on the border only: the box is focused nearly
+          // all the time, so a halo would read as a second outline.
+          'has-[textarea:focus-visible]:border-ring/70',
+          disabled && 'opacity-70',
+        )}
+      >
+        {requests ? <div className="flex min-w-0 flex-col divide-y divide-border border-b border-border">{requests}</div> : null}
+        <div className="flex min-h-12 cursor-text items-end gap-2 py-2 ps-3.5 pe-2" onPointerDown={focusPromptFromPadding}>
+          <form.Field name="text">
+            {(field) => (
+              <InputGroupTextarea
+                aria-label="Message the assistant"
+                autoFocus={autoFocus}
+                disabled={disabled}
+                rows={1}
+                maxLength={ASSISTANT_MESSAGE_MAX_LENGTH}
+                placeholder={disabledReason ?? placeholder}
+                className="max-h-42 min-h-8 px-0 py-1.5 text-base/5 text-foreground placeholder:text-muted-foreground sm:text-sm/5 md:text-sm/5"
+                value={field.state.value}
+                onBlur={field.handleBlur}
+                onChange={(event) => field.handleChange(event.target.value)}
+                onKeyDown={(event) => handleKeyDown(event, field.state.value)}
+              />
+            )}
+          </form.Field>
+          <form.Subscribe selector={(state) => [state.values.text.trim().length > 0, state.isSubmitting] as const}>
+            {([hasText, isSubmitting]) => (
+              <PrimaryAction
+                mode={onStop ? (hasText ? 'queue' : 'stop') : 'send'}
+                ready={!disabled && hasText}
+                busy={isSubmitting}
+                stopping={stopping}
+                onStop={onStop}
+              />
+            )}
+          </form.Subscribe>
         </div>
       </div>
       <form.Subscribe selector={(state) => [state.errors, state.fieldMeta.text?.errors ?? []] as const}>
@@ -233,6 +250,8 @@ export function AssistantComposer({
             <p role="alert" className="px-3.5 text-xs text-destructive">
               {message}
             </p>
+          ) : caption ? (
+            <div className="flex min-w-0 items-center gap-1.5 px-3.5 text-xs text-assistant-dim">{caption}</div>
           ) : null;
         }}
       </form.Subscribe>
@@ -241,9 +260,9 @@ export function AssistantComposer({
 }
 
 /**
- * Messages waiting behind the working run, as compact rows in the tray
- * (T3 Code moved its queue out of the timeline for the same reason: they
- * have not been answered yet, so they do not belong in the conversation).
+ * Messages waiting behind the working run, as compact rows at the top of
+ * the composer (T3 Code moved its queue out of the timeline: they have not
+ * been answered yet, so they do not belong in the conversation).
  */
 export function AssistantQueuedMessages({
   messages,
@@ -253,9 +272,9 @@ export function AssistantQueuedMessages({
 }) {
   if (messages.length === 0) return null;
   return (
-    <ul aria-label="Queued messages" className="flex min-w-0 flex-col px-2 py-1 text-xs">
+    <ul aria-label="Queued messages" className="flex min-w-0 flex-col px-2 py-1.5 text-xs">
       {messages.map((message) => (
-        <li key={message.id} className="flex min-h-7 min-w-0 items-center gap-2 rounded-lg px-1.5 text-assistant-dim">
+        <li key={message.id} className="flex min-h-7 min-w-0 items-center gap-2 px-1.5 text-assistant-dim">
           <ListPlus className="size-3.5 shrink-0" aria-hidden />
           <span className="min-w-0 flex-1 truncate text-muted-foreground">{message.text}</span>
           <span className="shrink-0">{message.status ?? 'Queued'}</span>

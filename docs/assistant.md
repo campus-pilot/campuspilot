@@ -158,16 +158,17 @@ pingdotgg/t3code #28839 to #28845, plus #26155, #26255, #27305, #27978 and
 #25299); its paint is the app's own flat shadcn language (solid `card` and
 `muted` fills, 1px `border`, the app's radius scale, no gradients). Surface
 recipes live in `packages/ui/src/styles/assistant.css`; components pick one
-(`assistant-tray`, `assistant-input`, `assistant-well`, `assistant-raised`,
-`assistant-pill`, `assistant-bubble`) rather than painting their own.
+(`assistant-well`, `assistant-raised`, `assistant-bubble`) rather than
+painting their own.
 
-- **Composer**: one tray (16px radius) holding requests, the queue and a 30px
-  context row, with a raised 48px input surface (14px). Send, Queue and Stop
-  share one neutral pill.
-- **Requests in the tray**: a change waiting for approval is decided above the
-  message box (Enter approves and Escape declines when no field has focus);
+- **Composer**: one bordered surface, painted and focused like the app's
+  inputs, never a box inside a box. The send control is muted until there is
+  something to send, then takes the primary colour; Queue and Stop share its
+  place. The trust cue is a caption under the box.
+- **Requests in the composer**: a change waiting for approval is decided in
+  a section above the message field (Enter approves and Escape declines when no field has focus);
   its timeline row only names it, in amber. Messages sent while a run works
-  wait in the tray as queued rows, not in the timeline.
+  wait there as queued rows, not in the timeline.
 - **Turns**: each run has a 32px work bar over a hairline ("Working for 12s",
   "Paused at 8s", "Worked for 18s"). A finished turn folds its tool calls,
   decisions and interim replies into the bar; views and the final answer stay

@@ -1,7 +1,7 @@
 /*
  * Assistant surfaces. The structure follows T3 Code's redesign (maria-rcks,
- * #28839/#28840): a 45rem lane, a composer that is an input sitting on a
- * tray, inset boxes for tables, records and code, and one send pill. The
+ * #28839/#28840): a 45rem lane, requests that live in the composer, and
+ * contained boxes for tables, records and code. The
  * paint is CampusPilot's own flat shadcn language: solid app tokens
  * (card, muted, border), 1px borders, no gradients and no decorative shadows,
  * the same as the app's `rounded-xl border bg-card` data containers.
@@ -15,7 +15,6 @@
   --color-assistant-warning: var(--assistant-warning);
   --color-assistant-info: var(--assistant-info);
   --color-assistant-success: var(--assistant-success);
-  --color-assistant-pill-foreground: var(--assistant-pill-foreground);
 }
 
 :root {
@@ -29,7 +28,6 @@
   --assistant-warning: var(--color-amber-600);
   --assistant-info: var(--color-blue-600);
   --assistant-success: var(--color-emerald-600);
-  --assistant-pill-foreground: var(--foreground);
   --assistant-well-header: color-mix(in oklab, var(--muted) 50%, transparent);
   --assistant-inline-code: var(--muted);
 }
@@ -38,18 +36,6 @@
   --assistant-warning: var(--color-amber-500);
   --assistant-info: var(--color-blue-400);
   --assistant-success: var(--color-emerald-400);
-}
-
-/* The tray: the composer's outer surface, holding requests, the queue and the context row. */
-@utility assistant-tray {
-  background: color-mix(in oklab, var(--muted) 45%, var(--background));
-  border: 1px solid var(--border);
-}
-
-/* The prompt's own surface on the tray: the app's card, bordered like its inputs. */
-@utility assistant-input {
-  background: var(--card);
-  box-shadow: 0 0 0 1px var(--border);
 }
 
 @utility assistant-bubble {
@@ -66,13 +52,6 @@
 @utility assistant-raised {
   background: var(--card);
   border: 1px solid var(--border);
-}
-
-/* Send / stop / queue: one pill, one shape in every state. */
-@utility assistant-pill {
-  background: var(--muted);
-  border: 1px solid transparent;
-  color: var(--assistant-pill-foreground);
 }
 
 /* Neutral hover, the same as the app's table rows. */

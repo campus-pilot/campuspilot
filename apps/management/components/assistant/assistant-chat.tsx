@@ -160,7 +160,7 @@ function ConversationTimeline({
   );
 }
 
-/** A quiet trust cue on the composer's tray row. */
+/** A quiet trust cue under the composer. */
 const trustCue = (
   <>
     <ShieldCheck className="size-3 shrink-0" aria-hidden />
@@ -253,7 +253,7 @@ export function AssistantChat({
       onSend={sendText}
       lastSentText={lastSentText}
       requests={requests}
-      trayStart={trustCue}
+      caption={trustCue}
       stopping={stop.isPending}
       onStop={
         running

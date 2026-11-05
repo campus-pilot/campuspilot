@@ -112,8 +112,8 @@ function decisionKeys(onDecide: (decision: AssistantApprovalDecision) => void, e
 }
 
 /**
- * The decision, in the composer tray above the message box (T3 Code's
- * request card): what will change, in an inset well, then Decline and
+ * The decision, as the top section of the composer, above the message box
+ * (T3 Code's request card): what will change, in an inset well, then Decline and
  * Approve. One change at a time; a counter says how many wait.
  */
 export function AssistantApprovalRequest({
@@ -145,7 +145,7 @@ export function AssistantApprovalRequest({
       </header>
       {entries.length ? (
         <div className="px-1.5">
-          <dl className="grid max-h-40 grid-cols-[max-content_1fr] gap-x-4 gap-y-1 overflow-y-auto rounded-lg assistant-well px-3 py-2.5 text-xs/relaxed">
+          <dl className="grid max-h-40 grid-cols-[max-content_1fr] gap-x-4 gap-y-1 overflow-y-auto rounded-lg bg-muted/60 px-3 py-2.5 text-xs/relaxed dark:bg-muted/40">
             {entries.map(([key, value]) => (
               <div key={key} className="contents">
                 <dt className="text-muted-foreground">{humanizeKey(key)}</dt>
