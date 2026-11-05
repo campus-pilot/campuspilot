@@ -114,3 +114,39 @@ Each run records the surface it started from (`assistant_run.surface`).
 The browser sends the CampusPilot session cookie to the service, so in
 production the service must be on a host covered by `COOKIE_DOMAIN` (for
 example `assistant.campuspilot.in` with `COOKIE_DOMAIN=.campuspilot.in`).
+
+## Views: platform UI in the conversation
+
+The model never writes markup. It calls one tool, `show_view`, with a structured
+view from `packages/assistant-contract/src/views.ts`; the service validates it
+and stores it as a `view` item, and the app renders it with its own components:
+
+- `records`: admissions, students, classes, exams or staff by id. The app fetches
+  each record itself with the user's session, behind the same permission the API
+  checks (`apps/management/components/assistant/assistant-view.tsx`), so the
+  assistant can name records but never decides what a user sees.
+- `exam_result`: the platform's student result preview.
+- `table`, `stats`, `details`, `bars`, `notice`: composed from design-system
+  pieces in `packages/components/src/assistant/views` (dashboard tiles and bar
+  lists, row-hairline tables, the app's badge tones).
+
+To add a view, extend the contract's union, render it in `assistant-view.tsx`,
+and describe it in `SHOW_VIEW_TOOL_DESCRIPTION`.
+
+## Streaming and weak networks
+
+Adapted from T3 Code's data layer:
+
+- **Text** streams as ordered `{offset, delta}` frames, released a line at a time
+  (whole words after a short hold; whole lines inside code fences). New blocks
+  fade in. The text so far is kept in Redis for viewers who reconnect.
+- **Resume**: the client tracks the highest sequence it holds and reconnects
+  with `afterSequence`; the service sends only what changed (a `resume`), or a
+  snapshot when that is over 200 changes. Data stays on screen meanwhile.
+- **Liveness**: a heartbeat every 15s when idle; the client treats 40s of
+  silence as a dead connection, reconnects with equal-jitter backoff, and
+  catches up at once when the tab becomes visible or the network returns. A
+  "Reconnecting…" notice appears only after a 2s grace.
+- **Sending**: messages appear at once (read from the mutation cache), retry
+  automatically with the same request id on network or server errors, and show
+  "Not sent · Retry" if they still fail; the draft is restored.
