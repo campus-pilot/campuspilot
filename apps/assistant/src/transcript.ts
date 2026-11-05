@@ -20,7 +20,7 @@ export const toolResultsTranscriptKey = (runId: string, step: number) =>
 export const interruptedTranscriptKey = (runId: string) => `${runId}:interrupted`;
 
 /**
- * The Claude API content for a user message. The page the user was on is a
+ * A user message as text blocks; the page the user was on is a
  * separate, labelled block: it is context, not part of what they asked.
  */
 export function buildUserTranscriptContent(body: AssistantUserMessageBody): unknown[] {

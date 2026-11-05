@@ -25,8 +25,8 @@ export const assistantSchema = pgSchema("assistant");
  * - `assistant_item` is what people see: messages and tool calls, each with an
  *   explicit status and the conversation sequence of its latest change, so a
  *   reconnecting client can resume from a cursor.
- * - `assistant_transcript_entry` is what the model sees: the exact Claude API
- *   content blocks, appended in order and keyed for idempotent replay when a
+ * - `assistant_transcript_entry` is what the model sees: the provider's own
+ *   content (Claude blocks or Gemini parts), appended in order and keyed for idempotent replay when a
  *   Restate step is retried.
  * Neither is derived from the other.
  */
@@ -297,7 +297,7 @@ export const assistantApprovalTable = assistantSchema.table(
   (table) => [index("assistant_approval_run_idx").on(table.runId)],
 );
 
-/** The Claude API conversation, one message per entry, in model order. */
+/** The model conversation, one message per entry, in model order. */
 export const assistantTranscriptEntryTable = assistantSchema.table(
   "assistant_transcript_entry",
   {
@@ -309,7 +309,7 @@ export const assistantTranscriptEntryTable = assistantSchema.table(
       .notNull()
       .references(() => assistantRunTable.id, { onDelete: "cascade" }),
     role: assistantTranscriptRoleEnum("role").notNull(),
-    /** Claude API content blocks, stored exactly as sent or received. */
+    /** Provider-native content, stored exactly as sent or received. */
     content: jsonb("content").$type<unknown[]>().notNull(),
     /** Idempotency key, e.g. `<runId>:model:<step>`. */
     entryKey: text("entry_key").notNull(),

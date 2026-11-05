@@ -324,7 +324,7 @@ export async function findItem(db: AssistantExecutor, itemId: string): Promise<I
 }
 
 /**
- * Appends one Claude API message to the model transcript once per
+ * Appends one model message to the transcript once per
  * `entryKey`; returns false when the entry already existed.
  */
 export async function appendTranscriptEntry(

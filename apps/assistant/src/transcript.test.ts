@@ -19,7 +19,7 @@ describe('transcript', () => {
     expect(modelTranscriptKey('r', 0)).not.toBe(modelTranscriptKey('r', 1));
   });
 
-  it('maps MCP tool names to Claude API names', () => {
+  it('maps MCP tool names to model tool names', () => {
     expect(toModelToolName('school.listStudents')).toBe('school_listStudents');
   });
 });
