@@ -123,7 +123,7 @@ export function AssistantUserMessage({
       <h3 className="sr-only">You</h3>
       <div
         className={cn(
-          'min-w-0 max-w-[min(80%,32.5rem)] rounded-[14px] assistant-bubble px-3.5 py-2.5 text-sm/relaxed text-foreground',
+          'min-w-0 max-w-[min(80%,32.5rem)] rounded-2xl assistant-bubble px-3.5 py-2.5 text-sm/relaxed text-foreground',
           delivery === 'failed' && 'opacity-70',
         )}
       >

@@ -36,7 +36,7 @@ export function AssistantRecordList({
 }) {
   return (
     <AssistantViewFrame title={title}>
-      <ul className="flex flex-col overflow-hidden rounded-[10px] assistant-well">
+      <ul className="flex flex-col overflow-hidden rounded-xl assistant-well">
         {records.map((record) => {
           const content = (
             <>

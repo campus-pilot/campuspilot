@@ -6,7 +6,7 @@ import { AssistantViewFrame } from './view-frame';
 export function AssistantDetailsViewBlock({ view }: { view: AssistantDetailsView }) {
   return (
     <AssistantViewFrame title={view.title}>
-      <dl className="grid grid-cols-[minmax(0,11rem)_minmax(0,1fr)] gap-x-4 rounded-[10px] assistant-well px-3 text-[13px]/5">
+      <dl className="grid grid-cols-[minmax(0,11rem)_minmax(0,1fr)] gap-x-4 rounded-xl assistant-well px-3 text-[13px]/5">
         {view.fields.map((field) => (
           <div key={field.label} className="contents [&:not(:last-child)>*]:border-b [&>*]:border-assistant-hairline [&>*]:py-2">
             <dt className="truncate text-muted-foreground">{field.label}</dt>

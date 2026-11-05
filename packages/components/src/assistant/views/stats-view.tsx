@@ -15,7 +15,7 @@ export function AssistantStatsViewBlock({ view }: { view: AssistantStatsView }) 
         )}
       >
         {view.stats.map((stat) => (
-          <div key={stat.label} className="flex min-w-0 flex-col gap-1 rounded-[10px] assistant-well px-3 py-2.5">
+          <div key={stat.label} className="flex min-w-0 flex-col gap-1 rounded-xl assistant-well px-3 py-2.5">
             <dt className="flex items-center gap-1.5 text-xs text-muted-foreground">
               {stat.tone ? <span className={cn('size-1.5 shrink-0 rounded-full', TONE_DOT[stat.tone])} aria-hidden /> : null}
               <span className="truncate">{stat.label}</span>

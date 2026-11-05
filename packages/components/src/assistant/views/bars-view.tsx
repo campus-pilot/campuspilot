@@ -9,7 +9,7 @@ export function AssistantBarsViewBlock({ view }: { view: AssistantBarsView }) {
   const max = Math.max(...view.bars.map((bar) => bar.value), 1);
   return (
     <AssistantViewFrame title={view.title}>
-      <ul className="flex flex-col gap-2.5 rounded-[10px] assistant-well px-3 py-3">
+      <ul className="flex flex-col gap-2.5 rounded-xl assistant-well px-3 py-3">
         {view.bars.map((bar) => (
           <li key={bar.label} className="flex flex-col gap-1.5">
             <div className="flex items-baseline justify-between gap-3 text-[13px]/5">

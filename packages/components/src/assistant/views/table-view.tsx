@@ -20,7 +20,7 @@ export function AssistantTableViewBlock({ view }: { view: AssistantTableView }) 
   const end = (format?: string) => format === 'number' || format === 'date';
   return (
     <AssistantViewFrame title={view.title}>
-      <div className="overflow-x-auto rounded-[10px] assistant-well [scrollbar-width:thin]">
+      <div className="overflow-x-auto rounded-xl assistant-well [scrollbar-width:thin]">
         <table className="w-full border-separate border-spacing-0 text-[13px]/5">
           <thead>
             <tr>

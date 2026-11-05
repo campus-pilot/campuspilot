@@ -1,12 +1,12 @@
 /*
- * Assistant surfaces, after T3 Code's redesign (maria-rcks, #28839/#28840):
- * a 45rem lane, a composer that is a raised input sitting on a tray, inset
- * "wells" for tables, records and code, and a neutral send pill. Values are
- * retuned to CampusPilot's zinc palette (white / zinc-950 backgrounds).
+ * Assistant surfaces. The structure follows T3 Code's redesign (maria-rcks,
+ * #28839/#28840): a 45rem lane, a composer that is an input sitting on a
+ * tray, inset boxes for tables, records and code, and one send pill. The
+ * paint is CampusPilot's own flat shadcn language: solid app tokens
+ * (card, muted, border), 1px borders, no gradients and no decorative shadows,
+ * the same as the app's `rounded-xl border bg-card` data containers.
  *
- * Surfaces are recipes, not one-off paint: each is a fill, a 1px rim lit
- * from above (dark-to-light alpha, drawn as a gradient border), and a shadow.
- * Components pick a recipe; they never rebuild one.
+ * Components pick a recipe below; they never paint their own surface.
  */
 
 @theme inline {
@@ -22,130 +22,66 @@
   /* Width of the conversation and the composer, shared so their edges line up. */
   --assistant-lane: 45rem;
 
-  /* Text tiers below muted: meta, captions, carets. */
-  --assistant-dim: #85858d;
-  --assistant-hairline: rgb(0 0 0 / 6%);
-  --assistant-warning: #a86d0b;
-  --assistant-info: #1d4ed8;
-  --assistant-success: #1a7f37;
-
-  --assistant-tray-fill: linear-gradient(180deg, #fbfbfb, #f7f7f8);
-  --assistant-tray-stroke: rgb(0 0 0 / 7%);
-  --assistant-tray-shadow: 0 1px 2px rgb(0 0 0 / 4%), 0 6px 18px rgb(0 0 0 / 4%);
-
-  --assistant-input-fill: linear-gradient(180deg, #ffffff, #fdfdfd);
-  --assistant-input-shadow: 0 0 0 1px rgb(0 0 0 / 5%), 0 1px 2px rgb(0 0 0 / 6%), 0 3px 10px rgb(0 0 0 / 4%);
-
-  --assistant-bubble-fill: linear-gradient(180deg, #f4f4f5, #f0f0f2);
-
-  --assistant-well-fill: linear-gradient(180deg, #f7f7f8, #fafafa);
-  --assistant-well-rim: linear-gradient(180deg, rgb(0 0 0 / 12%), rgb(0 0 0 / 6%));
-  --assistant-well-header: rgb(0 0 0 / 2.5%);
-
-  --assistant-raised-fill: linear-gradient(#ffffff, #ffffff);
-  --assistant-raised-rim: linear-gradient(180deg, rgb(0 0 0 / 13%), rgb(0 0 0 / 2%));
-  --assistant-raised-shadow: 0 1px 2px rgb(0 0 0 / 5%);
-
-  --assistant-pill-fill: linear-gradient(#efeff0, #efeff0);
-  --assistant-pill-rim: linear-gradient(180deg, rgb(0 0 0 / 13%), rgb(0 0 0 / 1%));
-  --assistant-pill-shadow: 0 1px 3px rgb(0 0 0 / 7%);
-  --assistant-pill-foreground: #27272a;
-
-  --assistant-ghost-hover: linear-gradient(180deg, rgb(0 0 0 / 6%), rgb(0 0 0 / 3%));
-  --assistant-selected: linear-gradient(180deg, rgb(0 0 0 / 6%), rgb(0 0 0 / 4%));
-  --assistant-selected-ring: inset 0 0 0 1px rgb(0 0 0 / 5%);
-  --assistant-inline-code: rgb(0 0 0 / 5%);
+  /* Text tier below muted: meta, captions, carets. */
+  --assistant-dim: color-mix(in oklab, var(--muted-foreground) 78%, var(--background));
+  /* Separators inside a surface: lighter than its border. */
+  --assistant-hairline: color-mix(in oklab, var(--border) 65%, transparent);
+  --assistant-warning: var(--color-amber-600);
+  --assistant-info: var(--color-blue-600);
+  --assistant-success: var(--color-emerald-600);
+  --assistant-pill-foreground: var(--foreground);
+  --assistant-well-header: color-mix(in oklab, var(--muted) 50%, transparent);
+  --assistant-inline-code: var(--muted);
 }
 
 .dark {
-  --assistant-dim: #71717a;
-  --assistant-hairline: rgb(255 255 255 / 7%);
-  --assistant-warning: #d29922;
-  --assistant-info: #8aa4ff;
-  --assistant-success: #3fb950;
-
-  --assistant-tray-fill: linear-gradient(#111113, #111113);
-  --assistant-tray-stroke: rgb(255 255 255 / 6%);
-  --assistant-tray-shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 3px 10px rgb(0 0 0 / 20%);
-
-  --assistant-input-fill: linear-gradient(180deg, #1d1d20, #19191c);
-  --assistant-input-shadow: 0 1px 2px rgb(0 0 0 / 45%), 0 3px 10px rgb(0 0 0 / 30%), inset 0 1px rgb(255 255 255 / 4%);
-
-  --assistant-bubble-fill: linear-gradient(180deg, #222225, #1d1d20);
-
-  --assistant-well-fill: linear-gradient(180deg, #0c0c0e, #0f0f11);
-  --assistant-well-rim: linear-gradient(180deg, rgb(255 255 255 / 4%), rgb(255 255 255 / 10%));
-  --assistant-well-header: rgb(255 255 255 / 2.5%);
-
-  --assistant-raised-fill: linear-gradient(#1d1d20, #1d1d20);
-  --assistant-raised-rim: linear-gradient(180deg, rgb(255 255 255 / 20%), rgb(255 255 255 / 3%));
-  --assistant-raised-shadow: 0 1px 2px rgb(0 0 0 / 40%);
-
-  --assistant-pill-fill: linear-gradient(#0d0d0f, #0d0d0f);
-  --assistant-pill-rim: linear-gradient(180deg, rgb(255 255 255 / 20%), rgb(255 255 255 / 2%));
-  --assistant-pill-shadow: none;
-  --assistant-pill-foreground: #d4d4d8;
-
-  --assistant-ghost-hover: linear-gradient(180deg, rgb(255 255 255 / 7%), rgb(255 255 255 / 4%));
-  --assistant-selected: linear-gradient(180deg, rgb(255 255 255 / 7%), rgb(255 255 255 / 4%));
-  --assistant-selected-ring: none;
-  --assistant-inline-code: rgb(255 255 255 / 7%);
+  --assistant-warning: var(--color-amber-500);
+  --assistant-info: var(--color-blue-400);
+  --assistant-success: var(--color-emerald-400);
 }
 
 /* The tray: the composer's outer surface, holding requests, the queue and the context row. */
 @utility assistant-tray {
-  background: var(--assistant-tray-fill);
-  box-shadow: var(--assistant-tray-shadow);
+  background: color-mix(in oklab, var(--muted) 45%, var(--background));
+  border: 1px solid var(--border);
 }
 
-/* The prompt's own surface, raised on the tray. */
+/* The prompt's own surface on the tray: the app's card, bordered like its inputs. */
 @utility assistant-input {
-  background: var(--assistant-input-fill);
-  box-shadow: var(--assistant-input-shadow);
+  background: var(--card);
+  box-shadow: 0 0 0 1px var(--border);
 }
 
 @utility assistant-bubble {
-  background: var(--assistant-bubble-fill);
+  background: var(--muted);
 }
 
-/* Inset content: tables, record lists, code, the change list of an approval. */
+/* Contained content (tables, record lists, code, a change list): the app's card container. */
 @utility assistant-well {
-  border: 1px solid transparent;
-  background:
-    var(--assistant-well-fill) padding-box,
-    var(--assistant-well-rim) border-box,
-    var(--assistant-well-fill) border-box;
+  background: var(--card);
+  border: 1px solid var(--border);
 }
 
-/* Small raised objects: key caps, the empty-state disc. */
+/* Small objects: key caps, the empty-state disc. */
 @utility assistant-raised {
-  border: 1px solid transparent;
-  background:
-    var(--assistant-raised-fill) padding-box,
-    var(--assistant-raised-rim) border-box,
-    var(--assistant-raised-fill) border-box;
-  box-shadow: var(--assistant-raised-shadow);
+  background: var(--card);
+  border: 1px solid var(--border);
 }
 
 /* Send / stop / queue: one pill, one shape in every state. */
 @utility assistant-pill {
+  background: var(--muted);
   border: 1px solid transparent;
-  background:
-    var(--assistant-pill-fill) padding-box,
-    var(--assistant-pill-rim) border-box,
-    var(--assistant-pill-fill) border-box;
-  box-shadow: var(--assistant-pill-shadow);
   color: var(--assistant-pill-foreground);
 }
 
-/* Neutral hover: a faint gradient, never a colour. */
+/* Neutral hover, the same as the app's table rows. */
 @utility assistant-ghost-hover {
-  background: var(--assistant-ghost-hover);
+  background: color-mix(in oklab, var(--muted) 50%, transparent);
 }
 
 @utility assistant-selected {
-  background: var(--assistant-selected);
-  box-shadow: var(--assistant-selected-ring);
+  background: var(--muted);
 }
 
 @layer components {
@@ -256,7 +192,7 @@
   /* Tables: an inset well with a tinted header, hairline rows and columns. */
   .assistant-markdown-table {
     overflow-x: auto;
-    border-radius: 10px;
+    border-radius: var(--radius-xl);
     scrollbar-width: thin;
   }
 

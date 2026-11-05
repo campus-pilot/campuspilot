@@ -128,7 +128,7 @@ export function AssistantTimeline({ rows, trailing, gutterClassName = 'px-4 sm:p
         <MessageScrollerButton
           variant="outline"
           size="sm"
-          className="h-7 gap-1 rounded-full border-border/60 bg-background px-2.5 text-xs text-foreground shadow-sm hover:border-border hover:bg-background data-[direction=end]:bottom-3"
+          className="h-7 gap-1 rounded-full border-border/60 bg-background px-2.5 text-xs text-foreground shadow-sm hover:border-border hover:bg-background dark:bg-background dark:hover:bg-background data-[direction=end]:bottom-3"
         >
           <ChevronDown aria-hidden />
           Scroll to end

@@ -153,12 +153,13 @@ Adapted from T3 Code's data layer:
 
 ## Look and feel
 
-The chat follows T3 Code's redesign (maria-rcks, pingdotgg/t3code #28839 to
-#28845, plus #26155, #26255, #27305, #27978 and #25299). Tokens and surface
-recipes live in `packages/ui/src/styles/assistant.css`; components pick a
-recipe (`assistant-tray`, `assistant-input`, `assistant-well`,
-`assistant-raised`, `assistant-pill`, `assistant-bubble`) rather than painting
-their own fill, rim and shadow.
+The chat's structure follows T3 Code's redesign (maria-rcks,
+pingdotgg/t3code #28839 to #28845, plus #26155, #26255, #27305, #27978 and
+#25299); its paint is the app's own flat shadcn language (solid `card` and
+`muted` fills, 1px `border`, the app's radius scale, no gradients). Surface
+recipes live in `packages/ui/src/styles/assistant.css`; components pick one
+(`assistant-tray`, `assistant-input`, `assistant-well`, `assistant-raised`,
+`assistant-pill`, `assistant-bubble`) rather than painting their own.
 
 - **Composer**: one tray (16px radius) holding requests, the queue and a 30px
   context row, with a raised 48px input surface (14px). Send, Queue and Stop

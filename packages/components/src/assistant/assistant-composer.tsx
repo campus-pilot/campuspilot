@@ -125,10 +125,10 @@ function errorText(errors: unknown[]): string | null {
 }
 
 /**
- * The message box, after T3 Code's redesigned composer: one tray (16px
- * radius, hairline painted on top so it adds no size) holding any requests,
- * a raised 48px input surface (14px radius, concentric with the tray) with
- * the send pill on its first line, and a 30px context row below.
+ * The message box, after T3 Code's redesigned composer: one tray (the app's
+ * 2xl radius and border) holding any requests, a 48px input surface (xl
+ * radius, the app's card) with the send pill on its first line, and a 30px
+ * context row below.
  */
 export function AssistantComposer({
   onSend,
@@ -184,15 +184,10 @@ export function AssistantComposer({
         void form.handleSubmit();
       }}
     >
-      <div
-        className={cn(
-          'relative isolate flex min-w-0 flex-col rounded-2xl assistant-tray',
-          'after:pointer-events-none after:absolute after:inset-0 after:z-20 after:rounded-[inherit] after:border after:border-[var(--assistant-tray-stroke)]',
-        )}
-      >
+      <div className="relative isolate flex min-w-0 flex-col rounded-2xl assistant-tray">
         {requests}
         <div
-          className={cn('relative z-10 cursor-text rounded-[14px] assistant-input', disabled && 'opacity-70')}
+          className={cn('relative z-10 cursor-text rounded-xl assistant-input', disabled && 'opacity-70')}
           onPointerDown={focusPromptFromPadding}
         >
           <div className="flex min-h-12 items-start gap-1.5 py-2 ps-3.5 pe-2">
