@@ -128,6 +128,15 @@ export const createAdmissionInputSchema = z.object({
   motherName: requiredTextSchema,
   /** Pricing moved to the restricted billing router; reject stale clients. */
   financeValue: z.never().optional(),
+  /**
+   * Also issue a Cadet Portal password in the same transaction. Requires the
+   * cadet password permission in addition to admission creation; the
+   * password is returned once in `cadetPassword`.
+   */
+  generateCadetPassword: z
+    .boolean()
+    .default(false)
+    .describe("Also issue a Cadet Portal (student portal) password; it is returned once."),
 });
 
 export const updateAdmissionInputSchema = admissionIdInputSchema

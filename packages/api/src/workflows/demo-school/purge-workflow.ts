@@ -1,9 +1,11 @@
 import { DeleteObjectsCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
+import { revokeCadetLoginAccess } from '@campuspilot/auth/cadet';
 import { auth } from '@campuspilot/auth/server';
 import { db } from '@campuspilot/db';
 import { admissionTable } from '@campuspilot/db/schema/admission';
 import { artifactTable } from '@campuspilot/db/schema/artifact';
 import { user } from '@campuspilot/db/schema/auth';
+import { cadetUser } from '@campuspilot/db/schema/cadet';
 import {
   demoSchoolJobTable,
   demoSchoolPurgeTable,
@@ -136,23 +138,47 @@ async function revokeSessions(userIds: string[]) {
   for (const userId of userIds) await authContext.internalAdapter.deleteUserSessions(userId);
 }
 
-/** Revokes the demo logins of a school whose data still exists. */
+/** The Cadet Portal logins of a school's admissions. */
+async function schoolCadetLoginIds(executor: Pick<typeof db, 'select'>, schoolId: string): Promise<string[]> {
+  const logins = await executor
+    .select({ id: cadetUser.id })
+    .from(cadetUser)
+    .innerJoin(admissionTable, eq(admissionTable.id, cadetUser.admissionId))
+    .where(eq(admissionTable.schoolId, schoolId));
+  return logins.map((item) => item.id);
+}
+
+/**
+ * Revokes the demo logins of a school whose data still exists: staff demo
+ * accounts, and every Cadet Portal login of its admissions (sessions through
+ * the cadet instance so Redis copies go too, plus cadet MCP grants and
+ * tokens).
+ */
 export async function revokeDemoSchoolSessions(schoolId: string) {
   const demoUsers = await db.select({ id: user.id }).from(user).where(eq(user.demoSchoolId, schoolId));
   await revokeSessions(demoUsers.map((item) => item.id));
+  await revokeCadetLoginAccess(await schoolCadetLoginIds(db, schoolId));
 }
 
-/** Revokes the manifest's demo users' sessions again, for logins made meanwhile. */
+/**
+ * Revokes the manifest's demo users' and cadet logins' sessions again, for
+ * logins made meanwhile (their rows are gone; Redis copies may not be).
+ */
 export async function revokeManifestSessions(schoolId: string) {
-  const [purge] = await db.select({ demoUserIds: demoSchoolPurgeTable.demoUserIds }).from(demoSchoolPurgeTable).where(eq(demoSchoolPurgeTable.schoolId, schoolId));
+  const [purge] = await db
+    .select({ demoUserIds: demoSchoolPurgeTable.demoUserIds, cadetUserIds: demoSchoolPurgeTable.cadetUserIds })
+    .from(demoSchoolPurgeTable)
+    .where(eq(demoSchoolPurgeTable.schoolId, schoolId));
   await revokeSessions(purge?.demoUserIds ?? []);
+  await revokeCadetLoginAccess(purge?.cadetUserIds ?? []);
 }
 
 /**
  * The data purge, in one transaction: lock the purge row and the school,
  * record the manifest of every S3 key and demo user the school owns, run
- * `purge_demo_school()` (which deletes every row the school owns and its
- * demo-only users) and record `data_deleted_at`. A replay after commit finds
+ * `purge_demo_school()` (which deletes every row the school owns, its
+ * demo-only users and its admissions' Cadet Portal logins) and record
+ * `data_deleted_at`. A replay after commit finds
  * `data_deleted_at` and does nothing. The requesting admin has no
  * `demo_school_id` and survives; accounts invited with a real address keep
  * their account and lose only the membership.
@@ -182,6 +208,7 @@ export async function deleteDemoSchoolData(schoolId: string, attempt: number): P
       .from(admissionTable)
       .where(eq(admissionTable.schoolId, schoolId));
     const artifacts = await transaction.select({ s3Key: artifactTable.s3Key }).from(artifactTable).where(eq(artifactTable.schoolId, schoolId));
+    const cadetUserIds = await schoolCadetLoginIds(transaction, schoolId);
     // Recorded as-is; the file stage accepts only keys under this school's
     // or its demo users' prefixes (demoSchoolPurgeScope).
     const objectKeys = [...new Set([
@@ -194,7 +221,7 @@ export async function deleteDemoSchoolData(schoolId: string, attempt: number): P
     const result = await transaction.execute<{ counts: Record<string, number> }>(sql`SELECT purge_demo_school(${schoolId}) AS counts`);
     await transaction
       .update(demoSchoolPurgeTable)
-      .set({ objectKeys, demoUserIds: demoUsers.map((item) => item.id), dataDeletedAt: new Date() })
+      .set({ objectKeys, demoUserIds: demoUsers.map((item) => item.id), cadetUserIds, dataDeletedAt: new Date() })
       .where(eq(demoSchoolPurgeTable.schoolId, schoolId));
     return { deletedRows: result.rows[0]?.counts ?? {}, fileCount: objectKeys.length };
   });

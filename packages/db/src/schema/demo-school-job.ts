@@ -142,7 +142,7 @@ export type DemoSchoolPurgeStage = (typeof DEMO_SCHOOL_PURGE_STAGES)[number];
  * `DemoSchoolPurge` workflow runs it and records each stage here.
  * `status`: `pending` (not yet accepted by Restate), `scheduled` (accepted),
  * `completed`, `failed`.
- * The manifest (`object_keys`, `demo_user_ids`) is written inside the data
+ * The manifest (`object_keys`, `demo_user_ids`, `cadet_user_ids`) is written inside the data
  * purge transaction and is the only source of what may be deleted from S3:
  * only keys under `schools/{schoolId}/` and `users/{demoUserId}/` for the
  * users recorded here. Deliberately no foreign keys: the school and users are
@@ -159,6 +159,11 @@ export const demoSchoolPurgeTable = pgTable("demo_school_purge", {
   objectKeys: jsonb("object_keys").$type<string[]>().notNull().default([]),
   /** Deleted demo-only accounts whose `users/{id}/` prefix is cleaned up. */
   demoUserIds: jsonb("demo_user_ids").$type<string[]>().notNull().default([]),
+  /**
+   * Deleted Cadet Portal logins (`cadet_user.id`) of the school's admissions,
+   * so the second session revoke can reach sessions created meanwhile.
+   */
+  cadetUserIds: jsonb("cadet_user_ids").$type<string[]>().notNull().default([]),
   status: demoSchoolPurgeStatusEnum("status").notNull().default("pending"),
   /** The stage running now, or where a failed attempt stopped; null before the first stage and once completed. */
   stage: text("stage").$type<DemoSchoolPurgeStage>(),
