@@ -11,9 +11,15 @@ the slug, the staff email domain or the existence of a job.
    (`is_demo = true`, `demo_created_by = admin`), the admin's membership with
    the `principal` role, and a `demo_school_job` row (`queued`).
 2. The dialog uploads the optional logo through the normal logo endpoint, then
-   calls `systemAdmin.startDemoSchoolJob`, which submits the Restate workflow
-   `DemoSchool` with key `{jobId}.{attempt}`. Submitting again attaches to the
-   same run; `retryDemoSchoolJob` (failed jobs only) starts a new attempt.
+   calls `systemAdmin.startDemoSchoolJob`. The API calls the ingress-public
+   service `DemoSchoolControl.startSeed({ jobId, attempt })`, which checks the
+   job row (that attempt, still queued or running) and starts the
+   ingress-private workflow `DemoSchool` with key `{jobId}.{attempt}`.
+   Starting again while the run is alive reuses it; if the recorded run has
+   ended without finishing the job, a new attempt is started.
+   `retryDemoSchoolJob` (failed jobs only) also starts a new attempt. The
+   workflow refuses a finished job and any attempt other than the current one,
+   and every status write is fenced by attempt.
 3. `apps/worker` runs the workflow. Every step builds a `system-job` router
    context acting as the requesting admin (`workflows/demo-school/job-context.ts`)
    and calls the real procedures, so OPA checks every write. The context factory
@@ -29,7 +35,11 @@ Exam state and billing months follow from `asOf` (see `dates.ts`, `plan.ts`).
 
 ### Credentials
 
-The `credentials` step generates a password per demo staff account, stores
+Demo staff accounts are created, made members and marked
+`demo_school_id = schoolId` in one transaction; a replay recognises an account
+only by that marker, and any other existing account with the address fails the
+step. The `credentials` step generates an 80-bit password per account
+(`XXXX-XXXX-XXXX-XXXX`, Crockford base32 from `node:crypto`), stores
 only its hash through Better Auth's server adapter and writes
 `schools/{schoolId}/demo/credentials.csv` to private S3. It returns only that
 key: passwords never reach the Restate journal, the job row or logs. Download
@@ -43,19 +53,32 @@ is sent; the app has no mail transport.
 **Purge demo school** (admin school settings, demo schools only) calls
 `purgeDemoSchool({ schoolId, confirmation: slug })`, which:
 
-1. cancels any running seed invocation (Restate admin API);
-2. collects the school's S3 keys and the `schools/{id}/` and `users/{demoUser}/`
-   prefixes, and revokes demo users' sessions (including Redis);
-3. runs `purge_demo_school(schoolId)` in one transaction. That SQL function
-   deletes every row the school owns and its demo-only users, using the
-   demo-only finance exception: finance trigger functions allow `DELETE` only
-   when the transaction-local `campuspilot.demo_purge_school_id` names the row's
-   school **and** that school `is_demo` (`finance_demo_purge_allows`). `UPDATE`
-   rules are unchanged and real schools stay append-only;
-4. after commit submits `DemoSchoolPurge` (keyed by school ID), which lists the
-   prefixes again and deletes objects in retried batches.
+1. cancels any running seed invocation and waits until it has ended (it
+   refuses with "still stopping" after a minute);
+2. revokes demo users' sessions (including Redis);
+3. in one transaction locks the school, records a purge manifest
+   (`demo_school_purge`: the S3 keys the database references and the demo
+   user IDs) and runs `purge_demo_school(schoolId)`. That SQL function deletes
+   every row the school owns and its demo-only users, using the demo-only
+   finance exception: the finance trigger functions allow `DELETE` only while
+   `purge_demo_school()` itself runs for that demo school in the same
+   transaction (a per-transaction marker row it inserts and removes, plus the
+   function on the PL/pgSQL call stack, plus `is_demo`;
+   `finance_demo_purge_allows`). `UPDATE` rules are unchanged, real schools
+   stay append-only, and every function pins `search_path`;
+4. after commit asks `DemoSchoolControl.startPurgeCleanup({ schoolId })` to
+   start the private `DemoSchoolPurge` workflow. The workflow takes only the
+   school ID, refuses while the school still exists, reads the manifest, and
+   accepts only keys under `schools/{schoolId}/` and `users/{demoUserId}/`
+   (never an empty or root prefix). It waits 30 s for any in-flight upload,
+   lists the prefixes again and deletes in retried batches. The manifest is an
+   outbox: if Restate is unavailable it stays `pending` and the API server
+   resubmits it on start and every 10 minutes.
 
-The requesting admin's account is never deleted; only its memberships go. The
+The requesting admin's account is never deleted; only its memberships go.
+Accounts invited into a demo with a real address (by the admin or by a
+prospect using a demo login) are not demo-owned: they keep their account and
+lose only their access to the demo. The
 general **Delete school** UI is commented out: deleting a school with data fails
 because of `NO ACTION` foreign keys and append-only finance.
 
@@ -78,8 +101,15 @@ pnpm --filter worker register [--force]
 The `campuspilot-plus-worker` image runs `node dist/src/index.mjs` on
 `WORKER_PORT` with the API server's environment plus `RESTATE_WORKER_URL`.
 After each deploy, register it: `node dist/scripts/restate-register.mjs`.
-The endpoint does not yet verify Restate request signatures; restrict network
-access to the worker to the Restate server (or configure identity keys).
+Set `RESTATE_IDENTITY_KEYS` (comma-separated `publickeyv1_…` keys of your
+Restate server); the worker then rejects unsigned requests. It is required when
+`NODE_ENV=production`. When it is absent outside production (local dev), the
+worker accepts unsigned requests and logs `worker.identity-keys.absent`.
+
+**Restate ingress and the admin API must never be publicly reachable.** Restate
+OSS does not authenticate ingress callers, which is why the workflows are
+ingress-private and only `DemoSchoolControl` (which takes IDs and validates
+them against the database) is callable through ingress.
 
 ## Extending
 

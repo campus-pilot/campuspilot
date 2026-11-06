@@ -55,3 +55,23 @@ Branch: `feature-demo`. Plan: `.sks/demo-request/plan.md`.
 - Browser verification NOT done: the user's own management dev server on
   :3002 fails with missing NEXT_PUBLIC_MCP_URL, and admin needs an admin login.
 - Pending confirmation: marketplace default selector bugs (see final report).
+
+## Review 1 fixes
+- H1: workflows `ingressPrivate`; public `DemoSchoolControl` validates IDs
+  against the DB; purge takes only schoolId and reads `demo_school_purge`;
+  prefix allow-list; seed refuses finished jobs/stale attempts; worker
+  `identityKeys` from `RESTATE_IDENTITY_KEYS` (required in production).
+- M1: 80-bit Crockford base32 passwords + unit test. M2: manifest allow-list;
+  `updateSchool` drops `logoS3Key` (no caller used it).
+- L1/L2: new migration 0026 (0025 was already applied locally): pinned
+  search_path, qualified calls, per-transaction marker + call-stack check.
+- L3/L4: atomic demo staff creation; replay only by demo_school_id.
+- L5: attempt-fenced writes, early failures terminal, dead-run restart.
+- L6: manifest outbox, API sweep on boot and every 10 min, wait for cancel,
+  30 s settle sleep before listing.
+- L7: invited real accounts keep their account (copy + docs). L8: table
+  status from the job. Info: requested_by ON DELETE SET NULL.
+- Verified: demo tests 29/29, related API tests 75/75, server unit 23/23,
+  OPA 65/65, check-types 11/11; local e2e seed (146 students) + purge →
+  0 rows/0 objects/0 demo users; ingress probes: private workflows 400,
+  control refuses a succeeded job and an existing school (409).
