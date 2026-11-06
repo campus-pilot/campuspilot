@@ -11,10 +11,12 @@ import {
 import { Button } from '@campuspilot/ui/components/button';
 import { DialogFooter } from '@campuspilot/ui/components/dialog';
 import { Input } from '@campuspilot/ui/components/input';
+import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '@campuspilot/ui/components/input-group';
 import { Label } from '@campuspilot/ui/components/label';
-import { LoaderCircle } from 'lucide-react';
+import { Dices, LoaderCircle } from 'lucide-react';
 import { client, orpc } from '@/lib/orpc';
 import { showDemoJobToast } from './demo-job-toast';
+import { randomSchoolName } from './random-school-name';
 import { uploadSchoolLogo } from '@/lib/school-image';
 import {
   DemoClassPicker,
@@ -124,24 +126,41 @@ function useDemoSchoolForm(catalogue: DemoClassOption[], onCreated: () => void) 
 
 type DemoSchoolFormApi = ReturnType<typeof useDemoSchoolForm>;
 
-/** School name; the slug follows it until the admin edits the slug. */
+/**
+ * School name; the slug follows it until the admin edits the slug. The dice
+ * button inside the input fills in a random "… Public School" name.
+ */
 function NameField({ form }: { form: DemoSchoolFormApi }) {
+  const setName = (value: string) => {
+    form.setFieldValue('name', value);
+    if (!form.getFieldValue('slugEdited')) {
+      form.setFieldValue('slug', slugifySchoolName(value));
+    }
+  };
   return (
     <form.Field name="name">
       {(field) => (
         <div className="flex flex-col gap-2">
           <Label htmlFor="demo-school-name">School name</Label>
-          <Input
-            id="demo-school-name"
-            value={field.state.value}
-            onBlur={field.handleBlur}
-            onChange={(event) => {
-              field.handleChange(event.target.value);
-              if (!form.getFieldValue('slugEdited')) {
-                form.setFieldValue('slug', slugifySchoolName(event.target.value));
-              }
-            }}
-          />
+          <InputGroup>
+            <InputGroupInput
+              id="demo-school-name"
+              value={field.state.value}
+              aria-invalid={field.state.meta.errors.length > 0}
+              onBlur={field.handleBlur}
+              onChange={(event) => setName(event.target.value)}
+            />
+            <InputGroupAddon align="inline-end">
+              <InputGroupButton
+                size="icon-xs"
+                aria-label="Random school name"
+                title="Random school name"
+                onClick={() => setName(randomSchoolName(field.state.value))}
+              >
+                <Dices />
+              </InputGroupButton>
+            </InputGroupAddon>
+          </InputGroup>
           <FieldErrors errors={field.state.meta.errors} />
         </div>
       )}
