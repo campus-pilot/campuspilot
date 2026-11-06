@@ -12,6 +12,8 @@ export const schoolDtoSchema = z.object({
   createdAt: z.date().nullable(),
   updatedAt: z.date().nullable(),
   hasCompletedOnboarding: z.boolean(),
+  /** Explicit demo fact (`school.is_demo`); never inferred from slug or email. */
+  isDemo: z.boolean(),
 });
 
 export type SchoolDto = z.infer<typeof schoolDtoSchema>;

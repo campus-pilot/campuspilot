@@ -6,6 +6,8 @@ export const mySchoolDtoSchema = z.object({
   name: z.string(),
   location: z.string(),
   logoS3Key: z.string().nullable(),
+  /** Demo schools show a permanent sample-data banner in management. */
+  isDemo: z.boolean(),
 });
 
 export type MySchoolDto = z.infer<typeof mySchoolDtoSchema>;

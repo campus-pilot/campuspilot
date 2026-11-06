@@ -58,6 +58,7 @@ export const schoolRouter = {
             name: schoolTable.name,
             location: schoolTable.location,
             logoS3Key: schoolTable.logoS3Key,
+            isDemo: schoolTable.isDemo,
           })
           .from(schoolMemberTable)
           .innerJoin(
@@ -98,6 +99,7 @@ export const schoolRouter = {
             location: schoolTable.location,
             registrationNo: schoolTable.registrationNo,
             logoS3Key: schoolTable.logoS3Key,
+            isDemo: schoolTable.isDemo,
           })
           .from(schoolTable)
           .where(eq(schoolTable.id, input.schoolId))
@@ -140,6 +142,7 @@ export const schoolRouter = {
             location: schoolTable.location,
             registrationNo: schoolTable.registrationNo,
             logoS3Key: schoolTable.logoS3Key,
+            isDemo: schoolTable.isDemo,
           });
         if (!school) throw rpcError.notFound("School");
         return schoolDetailsDtoSchema.parse(school);

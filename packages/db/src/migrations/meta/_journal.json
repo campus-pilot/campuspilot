@@ -176,6 +176,13 @@
       "when": 1793804476721,
       "tag": "0024_oauth-consent-last-used",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1793924915129,
+      "tag": "0025_demo-school",
+      "breakpoints": true
     }
   ]
 }

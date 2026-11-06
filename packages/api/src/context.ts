@@ -26,12 +26,16 @@ export type OAuthGrant = {
  * - `apiKey`: user-owned API key (`x-api-key` or `Authorization: Bearer`).
  * - `oauth`: OAuth access token issued to an MCP connector; only accepted on
  *   the MCP endpoint, whose resource it is bound to.
+ * - `system-job`: a durable background job acting as the admin who requested
+ *   it. Created only by the worker's job context factory
+ *   (`workflows/demo-school/job-context.ts`); no HTTP path can produce it.
  */
 export type AuthPrincipal =
   | { authMethod: 'anonymous' }
   | { authMethod: 'session' }
   | { authMethod: 'apiKey' }
-  | { authMethod: 'oauth'; oauthGrant: OAuthGrant };
+  | { authMethod: 'oauth'; oauthGrant: OAuthGrant }
+  | { authMethod: 'system-job'; jobId: string };
 
 export type Context = {
   db: typeof db;
