@@ -121,6 +121,178 @@ function useDemoSchoolForm(catalogue: DemoClassOption[], onCreated: (created: Cr
   return form;
 }
 
+type DemoSchoolFormApi = ReturnType<typeof useDemoSchoolForm>;
+
+/** School name; the slug follows it until the admin edits the slug. */
+function NameField({ form }: { form: DemoSchoolFormApi }) {
+  return (
+    <form.Field name="name">
+      {(field) => (
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="demo-school-name">School name</Label>
+          <Input
+            id="demo-school-name"
+            value={field.state.value}
+            onBlur={field.handleBlur}
+            onChange={(event) => {
+              field.handleChange(event.target.value);
+              if (!form.getFieldValue('slugEdited')) {
+                form.setFieldValue('slug', slugifySchoolName(event.target.value));
+              }
+            }}
+          />
+          <FieldErrors errors={field.state.meta.errors} />
+        </div>
+      )}
+    </form.Field>
+  );
+}
+
+function SlugField({ form }: { form: DemoSchoolFormApi }) {
+  return (
+    <form.Field name="slug">
+      {(field) => (
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="demo-school-slug">Slug</Label>
+          <Input
+            id="demo-school-slug"
+            value={field.state.value}
+            onBlur={field.handleBlur}
+            onChange={(event) => {
+              form.setFieldValue('slugEdited', true);
+              field.handleChange(event.target.value);
+            }}
+          />
+          <p className="text-xs text-muted-foreground">A -2, -3… suffix is added if it is taken.</p>
+          <FieldErrors errors={field.state.meta.errors} />
+        </div>
+      )}
+    </form.Field>
+  );
+}
+
+/** A plain text field of the demo form. */
+function TextField({
+  form,
+  name,
+  label,
+  placeholder,
+}: {
+  form: DemoSchoolFormApi;
+  name: 'location' | 'registrationNo';
+  label: string;
+  placeholder?: string;
+}) {
+  return (
+    <form.Field name={name}>
+      {(field) => (
+        <div className="flex flex-col gap-2">
+          <Label htmlFor={`demo-school-${name}`}>{label}</Label>
+          <Input
+            id={`demo-school-${name}`}
+            placeholder={placeholder}
+            value={field.state.value}
+            onBlur={field.handleBlur}
+            onChange={(event) => field.handleChange(event.target.value)}
+          />
+          <FieldErrors errors={field.state.meta.errors} />
+        </div>
+      )}
+    </form.Field>
+  );
+}
+
+/** Session start year; the single session ends the following year. */
+function SessionYearField({ form }: { form: DemoSchoolFormApi }) {
+  return (
+    <form.Field name="sessionStartYear">
+      {(field) => (
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="demo-school-session">Session start year</Label>
+          <Input
+            id="demo-school-session"
+            type="number"
+            inputMode="numeric"
+            value={Number.isNaN(field.state.value) ? '' : field.state.value}
+            onBlur={field.handleBlur}
+            onChange={(event) => field.handleChange(event.target.valueAsNumber)}
+          />
+          <p className="text-xs text-muted-foreground">
+            {Number.isNaN(field.state.value) ? 'One session.' : `One session: ${field.state.value}–${field.state.value + 1}.`}
+          </p>
+          <FieldErrors errors={field.state.meta.errors} />
+        </div>
+      )}
+    </form.Field>
+  );
+}
+
+function CycleMonthField({ form }: { form: DemoSchoolFormApi }) {
+  return (
+    <form.Field name="cycleStartMonth">
+      {(field) => (
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="demo-school-cycle">Billing cycle start</Label>
+          <MonthSelect id="demo-school-cycle" value={field.state.value} onValueChange={field.handleChange} />
+          <FieldErrors errors={field.state.meta.errors} />
+        </div>
+      )}
+    </form.Field>
+  );
+}
+
+function ClassesField({ form, catalogue }: { form: DemoSchoolFormApi; catalogue: DemoClassOption[] }) {
+  return (
+    <form.Field name="classSlugs">
+      {(field) => (
+        <div className="flex flex-col gap-2">
+          <DemoClassPicker catalogue={catalogue} value={field.state.value} onChange={field.handleChange} />
+          <FieldErrors errors={field.state.meta.errors} />
+        </div>
+      )}
+    </form.Field>
+  );
+}
+
+function LogoField({ form }: { form: DemoSchoolFormApi }) {
+  return (
+    <form.Subscribe selector={(state) => state.isSubmitting}>
+      {(isSubmitting) => (
+        <form.Field name="logo">
+          {(field) => (
+            <div className="flex flex-col gap-2">
+              <DemoLogoField value={field.state.value} disabled={isSubmitting} onBlur={field.handleBlur} onChange={field.handleChange} />
+              <FieldErrors errors={field.state.meta.errors} />
+            </div>
+          )}
+        </form.Field>
+      )}
+    </form.Subscribe>
+  );
+}
+
+/** Form-level errors and the submit/cancel buttons, driven by `form.Subscribe`. */
+function DemoSchoolFormFooter({ form, onCancel }: { form: DemoSchoolFormApi; onCancel: () => void }) {
+  return (
+    <form.Subscribe selector={(state) => ({ canSubmit: state.canSubmit, isSubmitting: state.isSubmitting, errors: state.errors })}>
+      {({ canSubmit, isSubmitting, errors }) => (
+        <div className="flex flex-col gap-3">
+          <FieldErrors errors={errors} />
+          <DialogFooter>
+            <Button type="button" variant="outline" disabled={isSubmitting} onClick={onCancel}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={!canSubmit || isSubmitting}>
+              {isSubmitting ? <LoaderCircle className="animate-spin" aria-hidden /> : null}
+              {isSubmitting ? 'Creating…' : 'Create demo school'}
+            </Button>
+          </DialogFooter>
+        </div>
+      )}
+    </form.Subscribe>
+  );
+}
+
 export function DemoSchoolForm({
   catalogue,
   onCreated,
@@ -142,127 +314,16 @@ export function DemoSchoolForm({
       }}
     >
       <div className="grid gap-4 sm:grid-cols-2">
-        <form.Field name="name">
-          {(field) => (
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="demo-school-name">School name</Label>
-              <Input
-                id="demo-school-name"
-                value={field.state.value}
-                onBlur={field.handleBlur}
-                onChange={(event) => {
-                  field.handleChange(event.target.value);
-                  // The slug follows the name until the admin edits it.
-                  if (!form.getFieldValue('slugEdited')) {
-                    form.setFieldValue('slug', slugifySchoolName(event.target.value));
-                  }
-                }}
-              />
-              <FieldErrors errors={field.state.meta.errors} />
-            </div>
-          )}
-        </form.Field>
-        <form.Field name="slug">
-          {(field) => (
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="demo-school-slug">Slug</Label>
-              <Input
-                id="demo-school-slug"
-                value={field.state.value}
-                onBlur={field.handleBlur}
-                onChange={(event) => {
-                  form.setFieldValue('slugEdited', true);
-                  field.handleChange(event.target.value);
-                }}
-              />
-              <p className="text-xs text-muted-foreground">A -2, -3… suffix is added if it is taken.</p>
-              <FieldErrors errors={field.state.meta.errors} />
-            </div>
-          )}
-        </form.Field>
-        <form.Field name="location">
-          {(field) => (
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="demo-school-location">Location</Label>
-              <Input id="demo-school-location" value={field.state.value} onBlur={field.handleBlur} onChange={(event) => field.handleChange(event.target.value)} />
-              <FieldErrors errors={field.state.meta.errors} />
-            </div>
-          )}
-        </form.Field>
-        <form.Field name="registrationNo">
-          {(field) => (
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="demo-school-registration">Registration number</Label>
-              <Input id="demo-school-registration" placeholder="Random 12 digits if blank" value={field.state.value} onBlur={field.handleBlur} onChange={(event) => field.handleChange(event.target.value)} />
-              <FieldErrors errors={field.state.meta.errors} />
-            </div>
-          )}
-        </form.Field>
-        <form.Field name="sessionStartYear">
-          {(field) => (
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="demo-school-session">Session start year</Label>
-              <Input
-                id="demo-school-session"
-                type="number"
-                inputMode="numeric"
-                value={Number.isNaN(field.state.value) ? '' : field.state.value}
-                onBlur={field.handleBlur}
-                onChange={(event) => field.handleChange(event.target.valueAsNumber)}
-              />
-              <p className="text-xs text-muted-foreground">
-                {Number.isNaN(field.state.value) ? 'One session.' : `One session: ${field.state.value}–${field.state.value + 1}.`}
-              </p>
-              <FieldErrors errors={field.state.meta.errors} />
-            </div>
-          )}
-        </form.Field>
-        <form.Field name="cycleStartMonth">
-          {(field) => (
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="demo-school-cycle">Billing cycle start</Label>
-              <MonthSelect id="demo-school-cycle" value={field.state.value} onValueChange={field.handleChange} />
-              <FieldErrors errors={field.state.meta.errors} />
-            </div>
-          )}
-        </form.Field>
+        <NameField form={form} />
+        <SlugField form={form} />
+        <TextField form={form} name="location" label="Location" />
+        <TextField form={form} name="registrationNo" label="Registration number" placeholder="Random 12 digits if blank" />
+        <SessionYearField form={form} />
+        <CycleMonthField form={form} />
       </div>
-      <form.Field name="classSlugs">
-        {(field) => (
-          <div className="flex flex-col gap-2">
-            <DemoClassPicker catalogue={catalogue} value={field.state.value} onChange={field.handleChange} />
-            <FieldErrors errors={field.state.meta.errors} />
-          </div>
-        )}
-      </form.Field>
-      <form.Subscribe selector={(state) => state.isSubmitting}>
-        {(isSubmitting) => (
-          <form.Field name="logo">
-            {(field) => (
-              <div className="flex flex-col gap-2">
-                <DemoLogoField value={field.state.value} disabled={isSubmitting} onBlur={field.handleBlur} onChange={field.handleChange} />
-                <FieldErrors errors={field.state.meta.errors} />
-              </div>
-            )}
-          </form.Field>
-        )}
-      </form.Subscribe>
-      <form.Subscribe selector={(state) => ({ canSubmit: state.canSubmit, isSubmitting: state.isSubmitting, errors: state.errors })}>
-        {({ canSubmit, isSubmitting, errors }) => (
-          <div className="flex flex-col gap-3">
-            <FieldErrors errors={errors} />
-            <DialogFooter>
-              <Button type="button" variant="outline" disabled={isSubmitting} onClick={onCancel}>
-                Cancel
-              </Button>
-              <Button type="submit" disabled={!canSubmit || isSubmitting}>
-                {isSubmitting ? <LoaderCircle className="animate-spin" aria-hidden /> : null}
-                {isSubmitting ? 'Creating…' : 'Create demo school'}
-              </Button>
-            </DialogFooter>
-          </div>
-        )}
-      </form.Subscribe>
+      <ClassesField form={form} catalogue={catalogue} />
+      <LogoField form={form} />
+      <DemoSchoolFormFooter form={form} onCancel={onCancel} />
     </form>
   );
 }
