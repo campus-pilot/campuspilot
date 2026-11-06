@@ -102,4 +102,9 @@ workflow's journaled `asOf`. Never copy data from a real or imported school into
 seed files. Any new school-owned table or S3 object must also be covered by
 `purge_demo_school` and the demo purge workflow. If an email transport is
 added, demo users (`user.demo_school_id` set) must be excluded explicitly.
+Demo kick-offs (start, retry, purge) return immediately and hand work to
+Restate through the outbox (`demo-school.outbox.ts`); never make an API request
+wait for the worker. Every call to `DemoSchoolControl` must be signed with
+`DEMO_CONTROL_SECRET` (`control-auth.ts`). Progress is streamed with oRPC
+event iterators and consumed in a TanStack Query function, not an effect.
 See [Demo schools](docs/demo-school.md) for operations.

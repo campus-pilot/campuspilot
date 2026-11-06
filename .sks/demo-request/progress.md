@@ -92,3 +92,44 @@ Branch: `feature-demo`. Plan: `.sks/demo-request/plan.md`.
   control inputs → 400, no retrying invocations; purge → 0 rows/objects/users.
 - Left for the user: "Green Valley Public School" (green-valley-public-school),
   CSV at schools/sch_x9gqzlde3pq7r2pmjq3n6/demo/credentials.csv.
+
+## Round 3: async kick-off, SSE progress, durable purge, control auth, templates
+- Start/retry/purge return immediately (start measured 6–10 ms, purge 11–13 ms
+  over HTTP). The job/purge row is the outbox; the API hands it over in the
+  background with a signed, idempotent `/send` to `DemoSchoolControl`, and a
+  chained 30 s sweep re-sends, fails starts not accepted within 10 min, and
+  fails accepted runs that Restate paused or that ended early (fenced by the
+  checked invocation). Migration 0028 (outbox + purge progress columns).
+- `watchDemoSchoolJob` / `watchDemoSchoolPurge`: oRPC event iterators (SSE),
+  1 s bounded polling, change-only events, abortable sleep, 10 min cap,
+  200 streams/process. Plus `getDemoSchoolPurge`, `listDemoSchoolPurges`,
+  `retryDemoSchoolPurge` (all MCP hidden).
+- `DemoSchoolPurge` is now the whole purge as a durable workflow: stop seed
+  runs (cancel + `attach`, no timeout; found by workflow key in
+  `sys_invocation`), revoke sessions, data transaction + manifest, revoke
+  again, files. Failed purges: automatic retry with backoff (≤5 attempts),
+  then an `AppShellAlert` per purge with permission-gated Retry.
+- HMAC-SHA256 caller auth on `DemoSchoolControl` (`DEMO_CONTROL_SECRET`,
+  server + worker env, required in production); freshness anchored to
+  Restate's `sys_invocation.created_at` so durable hand-overs survive a long
+  worker outage.
+- Admin: Sonner toaster (client wrapper) in the root layout; dialog closes on
+  create; persistent progress toasts (seed + purge) driven by live queries;
+  table rows share the job stream; progress dialog view removed.
+- DB role check: runtime login == owner locally (superuser) and is a member
+  of the owner role in deployment → runtime role is effectively the owner.
+  Reported, roles not changed (docs/demo-school.md).
+- Templates (delegated, committed separately): @root report flags,
+  attendance-design colspans, whole-path finance renames, `body`-only CSS
+  scoping, border-box reset; local-demo.ts patches removed.
+- Verified: check-types 11/11; demo + system-admin + catalog + authorization
+  + pagination suites 113/113; server 47/47; OPA vitest 25/25, rego 65/65.
+  E2E over HTTP (:3000): create → SSE to succeeded → CSV (8 rows) → purge →
+  SSE to completed → 0 rows / 0 objects / 0 demo users; real school
+  fingerprint unchanged. Worker paused 150 s: start returned in 6 ms, ran when
+  the worker resumed (beyond the 2 min signature window). Purge mid-seed:
+  journal shows cancel + AttachInvocation, then data deletion. Ingress probes:
+  unsigned / wrong secret / stale / rebound → 401; valid signature for an
+  unknown job → 409.
+- Not done: browser check of the admin toast/alerts (needs an admin sign-in);
+  Restate itself stopped (covered by the outbox integration tests only).
