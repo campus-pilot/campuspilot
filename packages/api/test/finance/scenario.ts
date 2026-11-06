@@ -26,6 +26,8 @@ export type FinanceScenarioOptions = {
   /** Override only for date-boundary tests; normal finance fixtures remain in
    * their intentionally isolated future sessions. */
   activeStartYear?: number;
+  /** Create the scenario school as a demo school (`is_demo` is fixed at insert). */
+  isDemo?: boolean;
 };
 
 export type FinanceScenario = {
@@ -52,7 +54,7 @@ export async function createFinanceScenario(
 ): Promise<FinanceScenario> {
   const activeStartYear = options.activeStartYear ?? 2040;
   const [school, outsiderSchool] = await Promise.all([
-    createTestSchool(),
+    createTestSchool({ isDemo: options.isDemo ?? false }),
     createTestSchool(),
   ]);
   const [activeSession, historicalSession] = await Promise.all([

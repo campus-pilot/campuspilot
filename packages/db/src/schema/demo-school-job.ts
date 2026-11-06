@@ -85,6 +85,12 @@ export const demoSchoolJobTable = pgTable(
      * response so a purge can cancel exactly that run.
      */
     invocationId: text("invocation_id"),
+    /**
+     * Set under the school lock when a purge starts, before any seed run is
+     * cancelled. Its own fact: start, retry, the control service and every
+     * seed step refuse to run once it is set, and uploads delete their object.
+     */
+    purgeRequestedAt: timestamp("purge_requested_at", { withTimezone: true }),
     /** Incremented by every retry; part of the Restate workflow key. */
     attempt: integer("attempt").notNull().default(1),
     createdAt: timestamp("created_at", { withTimezone: true })
@@ -100,6 +106,7 @@ export const demoSchoolPurgeStatusEnum = pgEnum("demo_school_purge_status", [
   "pending",
   "scheduled",
   "completed",
+  "failed",
 ]);
 
 /**
@@ -118,6 +125,14 @@ export const demoSchoolPurgeTable = pgTable("demo_school_purge", {
   status: demoSchoolPurgeStatusEnum("status").notNull().default("pending"),
   /** Submissions of the cleanup workflow (outbox retries). */
   submitAttempts: integer("submit_attempts").notNull().default(0),
+  /**
+   * Cleanup attempt, part of the workflow key `{schoolId}.{attempt}`. A
+   * workflow key runs once, so a cleanup that failed terminally is retried
+   * under the next attempt.
+   */
+  cleanupAttempt: integer("cleanup_attempt").notNull().default(1),
+  /** Safe summary of the last terminal cleanup failure (status `failed`). */
+  lastError: text("last_error"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   scheduledAt: timestamp("scheduled_at", { withTimezone: true }),
   completedAt: timestamp("completed_at", { withTimezone: true }),

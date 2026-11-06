@@ -69,8 +69,7 @@ describe('purge_demo_school and the demo-only finance exception', () => {
   let real: FinanceScenario;
 
   beforeEach(async () => {
-    [demo, real] = await Promise.all([createFinanceScenario(), createFinanceScenario()]);
-    await db.update(schoolTable).set({ isDemo: true }).where(eq(schoolTable.id, demo.school.id));
+    [demo, real] = await Promise.all([createFinanceScenario({ isDemo: true }), createFinanceScenario()]);
     // Serializable finance postings conflict when run concurrently; post in turn.
     await postFinanceHistory(demo, 'demo');
     await postFinanceHistory(real, 'real');
@@ -95,6 +94,12 @@ describe('purge_demo_school and the demo-only finance exception', () => {
     // The real school is untouched.
     const realRows = await rowsReferencingSchool(real.school.id);
     expect(realRows.finance_payment).toBe(1);
+  });
+
+  it('keeps is_demo immutable after insert', async () => {
+    await expect(db.update(schoolTable).set({ isDemo: true }).where(eq(schoolTable.id, real.school.id))).rejects.toThrow();
+    await expect(db.update(schoolTable).set({ isDemo: false }).where(eq(schoolTable.id, demo.school.id))).rejects.toThrow();
+    await expect(db.update(schoolTable).set({ name: 'Renamed demo' }).where(eq(schoolTable.id, demo.school.id))).resolves.toBeDefined();
   });
 
   it('refuses to purge a real school', async () => {
