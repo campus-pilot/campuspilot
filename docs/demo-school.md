@@ -173,9 +173,9 @@ refuses to send, the worker refuses every call). Unsigned, wrongly signed,
 stale or rebound (signed for the other handler or another input) calls get
 `401`.
 
-Restate-native options were considered: request identity keys
-(`RESTATE_IDENTITY_KEYS`) authenticate Restate to the worker, not callers to
-Restate, and ingress-private services cannot be called from outside Restate,
+Restate-native options were considered: request identity keys would only
+authenticate Restate to the worker, not callers to Restate (and are not used,
+see below), and ingress-private services cannot be called from outside Restate,
 so caller authentication has to live in the handler.
 
 ### Database roles and the finance triggers
@@ -239,15 +239,16 @@ Environment variables for this feature:
 | `DEMO_CONTROL_SECRET` | API server **and** worker (same value) | New. Required when `NODE_ENV=production`; at least 32 characters |
 | `RESTATE_INGRESS_URL` | API server | Hand-over sends |
 | `RESTATE_ADMIN_URL` | API server and worker | Never publicly reachable |
-| `RESTATE_WORKER_URL`, `WORKER_PORT`, `RESTATE_IDENTITY_KEYS` | worker | Unchanged |
+| `RESTATE_WORKER_URL`, `WORKER_PORT` | worker | Unchanged |
 
 The `campuspilot-plus-worker` image runs `node dist/src/index.mjs` on
 `WORKER_PORT` with the API server's environment plus `RESTATE_WORKER_URL`.
 After each deploy, register it: `node dist/scripts/restate-register.mjs`.
-Set `RESTATE_IDENTITY_KEYS` (comma-separated `publickeyv1_…` keys of your
-Restate server); the worker then rejects unsigned requests. It is required when
-`NODE_ENV=production`. When it is absent outside production (local dev), the
-worker accepts unsigned requests and logs `worker.identity-keys.absent`.
+Restate request signing (identity keys) is not used: Restate and the worker
+run in the same private cluster and the worker is never routed from outside
+it, so anything that can reach the worker's port is already inside the
+cluster. Keep it that way: do not expose the worker through an Ingress or
+tunnel.
 
 **Restate ingress and the admin API must never be publicly reachable.** Restate
 OSS does not authenticate ingress callers, which is why the workflows are

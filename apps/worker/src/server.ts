@@ -16,13 +16,8 @@ import { log } from './log';
  * their current step, then exit. Restate resumes anything interrupted.
  */
 export function startWorker() {
-  // Request signing: with identity keys the endpoint rejects any request not
-  // signed by our Restate server. They are optional only outside production
-  // (see @campuspilot/env/worker), where an absent value means unsigned dev.
-  if (!env.RESTATE_IDENTITY_KEYS) log.warn('worker.identity-keys.absent');
   const handler = createEndpointHandler({
     services: [demoSchoolControlService, demoSchoolWorkflow, demoSchoolPurgeWorkflow],
-    identityKeys: env.RESTATE_IDENTITY_KEYS,
   });
   const server = createServer(handler);
   const ready = new Promise<void>((resolve) => {
