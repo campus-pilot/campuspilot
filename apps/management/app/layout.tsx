@@ -1,6 +1,7 @@
-import type { Metadata, Viewport } from 'next';
+import type { Metadata } from 'next';
 import { Inter } from 'next/font/google';
 import type { ReactNode } from 'react';
+import { ThemeColorMeta } from '@campuspilot/components/theme-color-meta';
 import { ThemeProvider } from '@campuspilot/components/theme-provider';
 import { TooltipProvider } from '@campuspilot/ui/components/tooltip';
 import { ExamNotifications } from '@/components/exam/exam-notifications';
@@ -28,9 +29,14 @@ export const metadata: Metadata = {
   },
 };
 
-export const viewport: Viewport = {
-  themeColor: '#c2580e',
-};
+/**
+ * Bar colors for the browser and the installed app, matching `--background`
+ * in `@campuspilot/ui` globals.css (light `oklch(1 0 0)`, dark
+ * `oklch(0.141 0.005 285.823)`). `ThemeColorMeta` picks one from the app's
+ * light/dark setting; no static `viewport.themeColor` is set, because a
+ * second theme-color tag would win over the dynamic one.
+ */
+const THEME_COLORS = { light: '#ffffff', dark: '#09090b' };
 
 export default function RootLayout({
   children,
@@ -49,6 +55,7 @@ export default function RootLayout({
             enableSystem
             disableTransitionOnChange
           >
+            <ThemeColorMeta {...THEME_COLORS} />
             <TooltipProvider>
               {children}
               <ExamNotifications />
