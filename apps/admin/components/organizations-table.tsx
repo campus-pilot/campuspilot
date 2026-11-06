@@ -67,10 +67,10 @@ const organizationColumns: DataTableColumnDef<SchoolDto>[] = [
     id: 'status',
     header: 'Status',
     enableSorting: false,
-    // A demo school finishes onboarding when its seed succeeds; until then the
-    // row shows the seeding job's own status.
+    // Demo rows always show their seeding job's own status (which reads
+    // "Onboarded" once it succeeded); other rows show onboarding.
     cell: ({ row }) =>
-      row.original.isDemo && !row.original.hasCompletedOnboarding ? (
+      row.original.isDemo ? (
         <DemoSchoolJobStatus schoolId={row.original.id} />
       ) : (
         <Badge

@@ -87,7 +87,8 @@ function PurgeDemoSchoolDialog({
           <AlertDialogTitle>Purge {school.name}?</AlertDialogTitle>
           <AlertDialogDescription>
             All demo data, the demo staff accounts and their logins, and all files are removed. Your own
-            account stays. File cleanup finishes in the background. This cannot be undone.
+            account stays. People invited into the demo with their own email keep their account but lose
+            access to this school. File cleanup finishes in the background. This cannot be undone.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <form

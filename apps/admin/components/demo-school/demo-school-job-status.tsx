@@ -5,8 +5,8 @@ import { useSchoolDemoJob } from './demo-job-hooks';
 import { DemoJobCommandButton } from './demo-school-progress';
 
 /**
- * Seeding status of a demo school row that has not finished onboarding:
- * "Seeding…", "Queued" with Start seeding, or "Failed" with Retry.
+ * Seeding status of a demo school row, decided by the job's own status:
+ * "Onboarded", "Seeding…", "Queued" with Start seeding, or "Failed" with Retry.
  */
 export function DemoSchoolJobStatus({ schoolId }: { schoolId: string }) {
   const jobQuery = useSchoolDemoJob(schoolId);
