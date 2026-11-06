@@ -14,6 +14,7 @@ import { Input } from '@campuspilot/ui/components/input';
 import { Label } from '@campuspilot/ui/components/label';
 import { LoaderCircle } from 'lucide-react';
 import { client, orpc } from '@/lib/orpc';
+import { showDemoJobToast } from './demo-job-toast';
 import { uploadSchoolLogo } from '@/lib/school-image';
 import {
   DemoClassPicker,
@@ -22,13 +23,6 @@ import {
   MonthSelect,
   type DemoClassOption,
 } from './demo-school-fields';
-
-export type CreatedDemoSchool = {
-  jobId: string;
-  schoolId: string;
-  /** A non-blocking problem after the school was created (logo or start). */
-  notice: string | null;
-};
 
 const demoSchoolFormSchema = z.object({
   name: z.string().trim().min(1, 'Enter the school name.'),
@@ -61,11 +55,14 @@ function errorMessage(error: unknown, fallback: string) {
 }
 
 /**
- * Creates the demo school (synchronously), uploads the optional logo through
- * the existing logo endpoint, then starts seeding. A logo or start failure
- * does not undo the school: the progress view reports it and offers a retry.
+ * Creates the demo school, then closes the dialog and shows the progress
+ * toast at once. The optional logo upload and the start request continue
+ * after that; both return quickly (starting only records the request and
+ * hands it to the workflow engine in the background). A logo or start
+ * failure does not undo the school: the toast shows a notice and Start
+ * seeding.
  */
-function useDemoSchoolForm(catalogue: DemoClassOption[], onCreated: (created: CreatedDemoSchool) => void) {
+function useDemoSchoolForm(catalogue: DemoClassOption[], onCreated: () => void) {
   const queryClient = useQueryClient();
   const form = useForm({
     defaultValues: {
@@ -82,8 +79,9 @@ function useDemoSchoolForm(catalogue: DemoClassOption[], onCreated: (created: Cr
     validators: { onSubmit: demoSchoolFormSchema },
     onSubmit: async ({ value }) => {
       form.setErrorMap({});
+      let created: Awaited<ReturnType<typeof client.systemAdmin.createDemoSchool>>;
       try {
-        const { school, job } = await client.systemAdmin.createDemoSchool({
+        created = await client.systemAdmin.createDemoSchool({
           name: value.name.trim(),
           slug: value.slug.trim(),
           location: value.location.trim(),
@@ -94,28 +92,31 @@ function useDemoSchoolForm(catalogue: DemoClassOption[], onCreated: (created: Cr
           // Catalogue order, which is also the order classes are created in.
           classSlugs: catalogue.map((item) => item.slug).filter((slug) => value.classSlugs.includes(slug)),
         });
-        let notice: string | null = null;
-        if (value.logo) {
-          try {
-            await uploadSchoolLogo(school.id, value.logo);
-          } catch (error) {
-            notice = `The logo was not uploaded (${errorMessage(error, 'upload failed')}); a generated monogram is used instead.`;
-          }
-        }
-        try {
-          await client.systemAdmin.startDemoSchoolJob({ jobId: job.id });
-        } catch (error) {
-          notice = `Seeding has not started: ${errorMessage(error, 'the workflow engine is unavailable')}. Use Start seeding to try again.`;
-        }
-        await queryClient.invalidateQueries({
-          queryKey: orpc.systemAdmin.listSchools.queryKey({ input: {} }),
-        });
-        onCreated({ jobId: job.id, schoolId: school.id, notice });
       } catch (error) {
         form.setErrorMap({
           onSubmit: { form: errorMessage(error, 'Unable to create the demo school.'), fields: {} },
         });
+        return;
       }
+      const { school, job } = created;
+      showDemoJobToast({ jobId: job.id, schoolName: school.name });
+      onCreated();
+      await queryClient.invalidateQueries({ queryKey: orpc.systemAdmin.listSchools.key() });
+      let notice: string | null = null;
+      if (value.logo) {
+        try {
+          await uploadSchoolLogo(school.id, value.logo);
+        } catch (error) {
+          notice = `The logo was not uploaded (${errorMessage(error, 'upload failed')}); a generated monogram is used instead.`;
+        }
+      }
+      try {
+        await client.systemAdmin.startDemoSchoolJob({ jobId: job.id });
+      } catch (error) {
+        notice = `Seeding has not started: ${errorMessage(error, 'the request failed')}. Use Start seeding to try again.`;
+      }
+      // The open stream already follows the start; a notice re-renders the same toast.
+      if (notice) showDemoJobToast({ jobId: job.id, schoolName: school.name, notice });
     },
   });
   return form;
@@ -299,7 +300,7 @@ export function DemoSchoolForm({
   onCancel,
 }: {
   catalogue: DemoClassOption[];
-  onCreated: (created: CreatedDemoSchool) => void;
+  onCreated: () => void;
   onCancel: () => void;
 }) {
   const form = useDemoSchoolForm(catalogue, onCreated);

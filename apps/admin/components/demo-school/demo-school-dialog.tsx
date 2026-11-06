@@ -1,6 +1,5 @@
 'use client';
 
-import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   Dialog,
@@ -10,12 +9,12 @@ import {
   DialogTitle,
 } from '@campuspilot/ui/components/dialog';
 import { orpc } from '@/lib/orpc';
-import { DemoSchoolForm, type CreatedDemoSchool } from './demo-school-form';
-import { DemoSchoolProgress } from './demo-school-progress';
+import { DemoSchoolForm } from './demo-school-form';
 
 /**
- * Creates a demo school, then shows its seeding progress. The dialog may be
- * closed while the job runs; the organizations table keeps showing its status.
+ * Creates a demo school. The dialog closes as soon as the school exists;
+ * seeding progress continues in a persistent toast and in the organizations
+ * table.
  */
 export function DemoSchoolDialog({
   open,
@@ -24,37 +23,23 @@ export function DemoSchoolDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const [created, setCreated] = useState<CreatedDemoSchool | null>(null);
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>{created ? 'Seeding demo school' : 'Create a demo school'}</DialogTitle>
+          <DialogTitle>Create a demo school</DialogTitle>
           <DialogDescription>
-            {created
-              ? 'You can close this dialog; seeding continues in the background.'
-              : 'A complete school with sample staff, students, exams and finance, created as you (principal).'}
+            A complete school with sample staff, students, exams and finance, created as you (principal).
           </DialogDescription>
         </DialogHeader>
-        {created ? (
-          <DemoSchoolProgress jobId={created.jobId} schoolId={created.schoolId} notice={created.notice} />
-        ) : (
-          <DemoSchoolFormLoader onCreated={setCreated} onCancel={() => onOpenChange(false)} />
-        )}
+        <DemoSchoolFormLoader onDone={() => onOpenChange(false)} />
       </DialogContent>
     </Dialog>
   );
 }
 
 /** Loads the class catalogue first so the form starts with every class selected. */
-function DemoSchoolFormLoader({
-  onCreated,
-  onCancel,
-}: {
-  onCreated: (created: CreatedDemoSchool) => void;
-  onCancel: () => void;
-}) {
+function DemoSchoolFormLoader({ onDone }: { onDone: () => void }) {
   const catalogueQuery = useQuery(
     orpc.systemAdmin.listDemoClassCatalogue.queryOptions({ input: {} }),
   );
@@ -69,5 +54,5 @@ function DemoSchoolFormLoader({
       </p>
     );
   }
-  return <DemoSchoolForm catalogue={catalogueQuery.data.items} onCreated={onCreated} onCancel={onCancel} />;
+  return <DemoSchoolForm catalogue={catalogueQuery.data.items} onCreated={onDone} onCancel={onDone} />;
 }

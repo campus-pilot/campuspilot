@@ -28,6 +28,7 @@ import { Label } from '@campuspilot/ui/components/label';
 import { LoaderCircle, Trash2 } from 'lucide-react';
 import { client, orpc } from '@/lib/orpc';
 import { DemoCredentialsButton } from './demo-credentials-button';
+import { showDemoPurgeToast } from './demo-job-toast';
 import { FieldErrors } from './demo-school-fields';
 
 function purgeFormSchema(slug: string) {
@@ -40,8 +41,9 @@ function purgeFormSchema(slug: string) {
 
 /**
  * Type-the-slug confirmation for `purgeDemoSchool`, following the existing
- * delete dialog pattern. The database purge commits before the dialog
- * reports success; file cleanup continues in the background.
+ * delete dialog pattern. The request only records the purge and returns; the
+ * dialog then closes, the admin goes back to the organizations list and a
+ * persistent toast follows the durable purge workflow through its stages.
  */
 function PurgeDemoSchoolDialog({
   school,
@@ -62,9 +64,12 @@ function PurgeDemoSchoolDialog({
       form.setErrorMap({});
       try {
         await client.systemAdmin.purgeDemoSchool({ schoolId: school.id, confirmation: value.confirmation });
-        await queryClient.invalidateQueries({ queryKey: orpc.systemAdmin.listSchools.queryKey({ input: {} }) });
+        showDemoPurgeToast({ schoolId: school.id, schoolName: school.name });
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: orpc.systemAdmin.listSchools.key() }),
+          queryClient.invalidateQueries({ queryKey: orpc.systemAdmin.getSchoolDemoJob.queryKey({ input: { schoolId: school.id } }) }),
+        ]);
         router.replace('/organizations');
-        router.refresh();
       } catch (error) {
         form.setErrorMap({
           onSubmit: { form: error instanceof Error ? error.message : 'Unable to purge the demo school.', fields: {} },
@@ -88,7 +93,8 @@ function PurgeDemoSchoolDialog({
           <AlertDialogDescription>
             All demo data, the demo staff accounts and their logins, and all files are removed. Your own
             account stays. People invited into the demo with their own email keep their account but lose
-            access to this school. File cleanup finishes in the background. This cannot be undone.
+            access to this school. The purge runs in the background; a notification shows its progress. This
+            cannot be undone.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <form
@@ -137,7 +143,7 @@ function PurgeDemoSchoolDialog({
                     disabled={!canSubmit || confirmation !== school.slug || isSubmitting}
                   >
                     {isSubmitting ? <LoaderCircle className="animate-spin" aria-hidden /> : <Trash2 aria-hidden />}
-                    {isSubmitting ? 'Purging…' : 'Purge demo school'}
+                    {isSubmitting ? 'Requesting…' : 'Purge demo school'}
                   </Button>
                 </AlertDialogFooter>
               </div>
