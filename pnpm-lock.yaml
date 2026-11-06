@@ -317,6 +317,9 @@ importers:
       ioredis:
         specifier: ^5.11.1
         version: 5.11.1
+      sharp:
+        specifier: ^0.34.5
+        version: 0.34.5
       zod:
         specifier: 'catalog:'
         version: 4.6.1
