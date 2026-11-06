@@ -43,9 +43,56 @@ export type McpOAuthOptions = {
 /** Better Auth's base path; the issuer is the auth base URL plus this. */
 export const AUTH_BASE_PATH = '/api/auth';
 
+/** Issuer of a Better Auth instance mounted at `basePath`. */
+export function issuerFor(basePath: string): string {
+  return `${env.BETTER_AUTH_URL.replace(/\/$/, '')}${basePath}`;
+}
+
 /** OAuth issuer (`${BETTER_AUTH_URL}/api/auth`), identical in every document. */
 export function oauthIssuer(): string {
-  return `${env.BETTER_AUTH_URL.replace(/\/$/, '')}${AUTH_BASE_PATH}`;
+  return issuerFor(AUTH_BASE_PATH);
+}
+
+type ClientPolicyContext = { user?: Record<string, unknown> };
+
+/**
+ * What differs between the staff and the cadet MCP authorization servers.
+ * Everything else (token lifetimes, PKCE, DCR rate limit, CIMD) is the same
+ * decided policy for both.
+ */
+export type McpOAuthServerConfig = {
+  /** Canonical MCP URL: the protected resource and access-token audience. */
+  resource: string;
+  loginPage: string;
+  consentPage: string;
+  /** Every scope the authorization server accepts. */
+  scopes: readonly string[];
+  /** Scopes a dynamically registered client gets when it asks for none. */
+  defaultScopes: readonly string[];
+  /** Who may create, list, update and delete clients through OAuth endpoints. */
+  clientPrivileges: (context: ClientPolicyContext) => boolean;
+  /** Owner (`referenceId`) recorded on clients created through those endpoints. */
+  clientReference: (context: ClientPolicyContext) => string | undefined;
+};
+
+/**
+ * The staff MCP authorization server: resource `MCP_RESOURCE_URL`, pages on
+ * the management app, and client CRUD for platform administrators only
+ * (school users connect clients through CIMD, DCR or a pre-registered
+ * client). Clients an administrator creates belong to the platform, not to
+ * that administrator, so every platform administrator can manage them.
+ */
+export function staffMcpOAuthConfig(): McpOAuthServerConfig {
+  return {
+    resource: env.MCP_RESOURCE_URL,
+    loginPage: new URL(OAUTH_LOGIN_PATH, env.PUBLIC_APP_URL).toString(),
+    consentPage: new URL(OAUTH_CONSENT_PATH, env.PUBLIC_APP_URL).toString(),
+    scopes: OAUTH_SUPPORTED_SCOPES,
+    defaultScopes: MCP_DEFAULT_SCOPES,
+    clientPrivileges: ({ user }) => user?.role === 'admin',
+    clientReference: ({ user }) =>
+      user?.role === 'admin' ? PLATFORM_OAUTH_CLIENT_OWNER : undefined,
+  };
 }
 
 /**
@@ -55,7 +102,10 @@ export function oauthIssuer(): string {
  * policy: CIMD + pre-registered + open DCR (rate-limited), user-wide grants
  * without a school step, 1 h access tokens, 90-day rotating refresh tokens.
  */
-export function mcpOAuthPlugins(options: McpOAuthOptions = {}) {
+export function mcpOAuthPlugins(
+  config: McpOAuthServerConfig,
+  options: McpOAuthOptions = {},
+) {
   return [
     jwt({
       // Session responses must not carry a JWT; access tokens come only from
@@ -63,10 +113,10 @@ export function mcpOAuthPlugins(options: McpOAuthOptions = {}) {
       disableSettingJwtHeader: true,
     }),
     mcp({
-      resource: env.MCP_RESOURCE_URL,
-      loginPage: new URL(OAUTH_LOGIN_PATH, env.PUBLIC_APP_URL).toString(),
-      consentPage: new URL(OAUTH_CONSENT_PATH, env.PUBLIC_APP_URL).toString(),
-      scopes: [...OAUTH_SUPPORTED_SCOPES],
+      resource: config.resource,
+      loginPage: config.loginPage,
+      consentPage: config.consentPage,
+      scopes: [...config.scopes],
       // Only user-facing flows; no machine-to-machine client_credentials.
       grantTypes: ['authorization_code', 'refresh_token'],
       accessTokenExpiresIn: MCP_ACCESS_TOKEN_TTL_SECONDS,
@@ -78,20 +128,12 @@ export function mcpOAuthPlugins(options: McpOAuthOptions = {}) {
       allowDynamicClientRegistration: true,
       allowUnauthenticatedClientRegistration: true,
       clientRegistrationDefaultApplicationType: 'infer',
-      clientRegistrationDefaultScopes: [...MCP_DEFAULT_SCOPES],
-      clientRegistrationAllowedScopes: [...OAUTH_SUPPORTED_SCOPES],
+      clientRegistrationDefaultScopes: [...config.defaultScopes],
+      clientRegistrationAllowedScopes: [...config.scopes],
       clientRegistrationRequirePKCE: true,
       rateLimit: { register: { window: 60, max: 5 } },
-      /**
-       * Client CRUD through the OAuth endpoints (create/list/update/delete,
-       * secret rotation) is for platform administrators only; school users
-       * connect clients through CIMD, DCR or a pre-registered client.
-       */
-      clientPrivileges: ({ user }) => user?.role === 'admin',
-      // Clients an administrator creates belong to the platform, not to that
-      // administrator, so every platform administrator can manage them.
-      clientReference: ({ user }) =>
-        user?.role === 'admin' ? PLATFORM_OAUTH_CLIENT_OWNER : undefined,
+      clientPrivileges: config.clientPrivileges,
+      clientReference: config.clientReference,
     }),
     cimd({
       fetchClientMetadataResource:

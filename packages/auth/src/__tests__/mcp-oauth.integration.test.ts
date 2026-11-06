@@ -8,6 +8,7 @@ import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import {
   deleteUnusedDynamicOAuthClients,
   mcpOAuthPlugins,
+  staffMcpOAuthConfig,
 } from '../mcp-oauth';
 import {
   MCP_ACCESS_TOKEN_TTL_SECONDS,
@@ -301,7 +302,7 @@ describe('Dynamic Client Registration', () => {
       secret: 'a-super-secret-key-that-is-at-least-32-chars-long!',
       baseURL: 'http://localhost:3000',
       rateLimit: { enabled: true },
-      plugins: mcpOAuthPlugins({
+      plugins: mcpOAuthPlugins(staffMcpOAuthConfig(), {
         fetchClientMetadataResource: metadataHost.fetch,
       }),
     }) as unknown as TestAuth;
