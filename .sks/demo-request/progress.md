@@ -75,3 +75,20 @@ Branch: `feature-demo`. Plan: `.sks/demo-request/plan.md`.
   OPA 65/65, check-types 11/11; local e2e seed (146 students) + purge →
   0 rows/0 objects/0 demo users; ingress probes: private workflows 400,
   control refuses a succeeded job and an existing school (409).
+
+## Review 2 fixes (final round)
+- M1: Zod-validated control + workflow inputs (TerminalError before any
+  ctx.run); `toSafeError` keeps SQL/params/hashes out of Restate failure text.
+- M2: control calls with idempotency keys + 10 s timeout → SERVICE_UNAVAILABLE;
+  chained, bounded, SKIP LOCKED outbox sweep; manifest `failed` → re-pending
+  under next cleanup attempt (max 5); purge workflow key `{schoolId}.{attempt}`.
+- L1 status filter; L2 `purge_requested_at` fence + self-deleting uploads, no
+  settle sleep; L3 0027 is_demo immutability trigger + corrected wording;
+  L4 post-commit session revoke; L5 conditional `scheduled`; L6 0027
+  `SET LOCAL lock_timeout`, lock note in docs; L7 form split.
+- Verified: demo suites 32/32, related API 85/85, server unit 23/23, OPA 65/65,
+  check-types 11/11. E2E: worker down → start fails in ~10 s with
+  SERVICE_UNAVAILABLE; queued call ran once the worker returned; malformed
+  control inputs → 400, no retrying invocations; purge → 0 rows/objects/users.
+- Left for the user: "Green Valley Public School" (green-valley-public-school),
+  CSV at schools/sch_x9gqzlde3pq7r2pmjq3n6/demo/credentials.csv.

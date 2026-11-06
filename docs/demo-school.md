@@ -53,27 +53,46 @@ is sent; the app has no mail transport.
 **Purge demo school** (admin school settings, demo schools only) calls
 `purgeDemoSchool({ schoolId, confirmation: slug })`, which:
 
-1. cancels any running seed invocation and waits until it has ended (it
-   refuses with "still stopping" after a minute);
-2. revokes demo users' sessions (including Redis);
-3. in one transaction locks the school, records a purge manifest
-   (`demo_school_purge`: the S3 keys the database references and the demo
-   user IDs) and runs `purge_demo_school(schoolId)`. That SQL function deletes
-   every row the school owns and its demo-only users, using the demo-only
-   finance exception: the finance trigger functions allow `DELETE` only while
-   `purge_demo_school()` itself runs for that demo school in the same
-   transaction (a per-transaction marker row it inserts and removes, plus the
-   function on the PL/pgSQL call stack, plus `is_demo`;
-   `finance_demo_purge_allows`). `UPDATE` rules are unchanged, real schools
-   stay append-only, and every function pins `search_path`;
-4. after commit asks `DemoSchoolControl.startPurgeCleanup({ schoolId })` to
-   start the private `DemoSchoolPurge` workflow. The workflow takes only the
-   school ID, refuses while the school still exists, reads the manifest, and
-   accepts only keys under `schools/{schoolId}/` and `users/{demoUserId}/`
-   (never an empty or root prefix). It waits 30 s for any in-flight upload,
-   lists the prefixes again and deletes in retried batches. The manifest is an
-   outbox: if Restate is unavailable it stays `pending` and the API server
-   resubmits it on start and every 10 minutes.
+1. records purge intent: under the school lock it sets
+   `demo_school_job.purge_requested_at`. From then on start, retry,
+   `DemoSchoolControl.startSeed`, the job context guard and every seed step
+   refuse, and a seed step that uploaded a file deletes it again
+   (`assertUploadsKept`);
+2. cancels any running seed invocation and waits until it has ended (it
+   refuses with "still stopping" after a minute; the intent stays recorded, so
+   the school stays frozen until the purge is repeated);
+3. revokes demo users' sessions (including Redis);
+4. in one transaction locks the school, records the purge manifest
+   (`demo_school_purge`: the S3 keys the database references and the demo user
+   IDs) and runs `purge_demo_school(schoolId)`, which deletes every row the
+   school owns and its demo-only users. Finance trigger functions allow those
+   `DELETE`s only for a demo school (`is_demo`, immutable after insert since
+   0027) that has a `demo_purge_marker` row for the current transaction, which
+   only `purge_demo_school()` writes; the marker table is not writable by
+   PUBLIC. The function-name check on the call stack is defence in depth only
+   (a same-named function could spoof it). `UPDATE` rules are unchanged, real
+   schools stay append-only, and every function pins `search_path`;
+5. revokes the manifest users' sessions again after commit;
+6. asks `DemoSchoolControl.startPurgeCleanup({ schoolId, attempt })` to start
+   the private `DemoSchoolPurge` workflow (key `{schoolId}.{attempt}`). It
+   takes only IDs, refuses while the school exists, reads the manifest, and
+   deletes only keys under `schools/{schoolId}/` and `users/{demoUserId}/`
+   (never an empty or root prefix). There is no timed wait: step 2 waited for
+   cancelled runs and late uploads delete themselves. A terminal failure marks
+   the manifest `failed` with `last_error`.
+
+The manifest is an outbox. If Restate or the worker is unavailable it stays
+`pending`; the API server sweeps it on start and then 10 minutes after each
+sweep ends (chained, bounded to 20 rows, rows claimed with `FOR UPDATE SKIP
+LOCKED`, so replicas never overlap). `failed` cleanups are retried under the
+next attempt up to 5 attempts, then left `failed` for an operator.
+
+Calls to `DemoSchoolControl` use an idempotency key (`demo-seed:{jobId}.{attempt}`,
+`demo-purge:{schoolId}.{attempt}`) and a 10 s timeout: if the worker is down,
+admin requests fail fast with "The demo worker is unavailable" and a repeated
+call joins the same Restate invocation. All control and workflow inputs are
+validated with Zod before any journal entry; database errors reach Restate only
+as a generic message (details, without SQL parameters, are in the worker log).
 
 The requesting admin's account is never deleted; only its memberships go.
 Accounts invited into a demo with a real address (by the admin or by a
@@ -95,6 +114,15 @@ pnpm --filter worker register [--force]
 `RESTATE_WORKER_URL` is the URI Restate (in Docker) uses to reach the worker;
 `RESTATE_ADMIN_URL` comes from the server env. The API needs
 `RESTATE_INGRESS_URL` to submit workflows and `RESTATE_ADMIN_URL` to cancel them.
+
+## Migrations
+
+0025 and 0026 add columns and foreign keys on `"user"` and `"school"` and
+replace finance trigger functions; they take brief exclusive locks on those
+tables while the migration batch runs. 0027 starts with
+`SET LOCAL lock_timeout = '5s'`, so a deploy fails fast instead of queueing
+behind a long transaction (and blocking auth and school queries). Applied
+migrations are never edited.
 
 ## Deploying
 
