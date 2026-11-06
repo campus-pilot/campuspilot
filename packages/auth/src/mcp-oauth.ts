@@ -1,5 +1,11 @@
 import type { DatabaseExecutor } from '@campuspilot/db';
 import * as schema from '@campuspilot/db/schema/auth';
+import {
+  cadetOauthAccessToken,
+  cadetOauthClient,
+  cadetOauthConsent,
+  cadetOauthRefreshToken,
+} from '@campuspilot/db/schema/cadet';
 import { env } from '@campuspilot/env/server';
 import { cimd } from '@better-auth/cimd';
 import { fetchClientMetadataResource as fetchClientMetadataResourceOverNetwork } from '@better-auth/cimd/node';
@@ -145,21 +151,53 @@ export function mcpOAuthPlugins(
 }
 
 /**
+ * The OAuth tables of one authorization server. Staff and Cadet Portal
+ * clients and grants live in separate tables; the cadet tables are
+ * column-for-column copies of the staff ones (the same Better Auth models),
+ * so queries are typed against the staff shape while Drizzle builds the SQL
+ * from the runtime table objects actually passed.
+ */
+export type OAuthServerTables = {
+  client: typeof schema.oauthClient;
+  consent: typeof schema.oauthConsent;
+  refreshToken: typeof schema.oauthRefreshToken;
+  accessToken: typeof schema.oauthAccessToken;
+};
+
+export const STAFF_OAUTH_SERVER_TABLES: OAuthServerTables = {
+  client: schema.oauthClient,
+  consent: schema.oauthConsent,
+  refreshToken: schema.oauthRefreshToken,
+  accessToken: schema.oauthAccessToken,
+};
+
+export const CADET_OAUTH_SERVER_TABLES = {
+  client: cadetOauthClient,
+  consent: cadetOauthConsent,
+  refreshToken: cadetOauthRefreshToken,
+  accessToken: cadetOauthAccessToken,
+} as unknown as OAuthServerTables;
+
+/**
  * Records that a client was created through Dynamic Client Registration, so
  * cleanup and the admin client list never have to guess it from other fields.
  * Any `registrationMethod` the registrant sent is overwritten.
  */
-export function recordDynamicClientRegistration(db: DatabaseExecutor) {
+export function recordDynamicClientRegistration(
+  db: DatabaseExecutor,
+  tables: OAuthServerTables = STAFF_OAUTH_SERVER_TABLES,
+) {
+  const { client } = tables;
   return createAuthMiddleware(async (ctx) => {
     if (ctx.path !== '/oauth2/register') return;
     const returned = ctx.context.returned as { client_id?: unknown } | undefined;
     if (!returned || typeof returned.client_id !== 'string') return;
     await db
-      .update(schema.oauthClient)
+      .update(client)
       .set({
-        metadata: sql`coalesce(${schema.oauthClient.metadata}, '{}'::jsonb) || ${JSON.stringify({ registrationMethod: 'dynamic' satisfies OAuthClientRegistrationMethod })}::jsonb`,
+        metadata: sql`coalesce(${client.metadata}, '{}'::jsonb) || ${JSON.stringify({ registrationMethod: 'dynamic' satisfies OAuthClientRegistrationMethod })}::jsonb`,
       })
-      .where(eq(schema.oauthClient.clientId, returned.client_id));
+      .where(eq(client.clientId, returned.client_id));
   });
 }
 
@@ -168,16 +206,18 @@ export function recordDynamicClientRegistration(db: DatabaseExecutor) {
  * MCP_UNUSED_DYNAMIC_CLIENT_TTL_DAYS and never received a grant (no consent,
  * no access or refresh token). DCR creates a client per connection attempt,
  * so abandoned registrations would otherwise accumulate. Idempotent; safe to
- * run on several server instances.
+ * run on several server instances. Runs against one server's tables (staff
+ * by default).
  */
 export async function deleteUnusedDynamicOAuthClients(
   db: DatabaseExecutor,
   now = new Date(),
+  tables: OAuthServerTables = STAFF_OAUTH_SERVER_TABLES,
 ): Promise<number> {
   const cutoff = new Date(
     now.getTime() - MCP_UNUSED_DYNAMIC_CLIENT_TTL_DAYS * 24 * 60 * 60 * 1000,
   );
-  const client = schema.oauthClient;
+  const { client, consent, refreshToken, accessToken } = tables;
   const deleted = await db
     .delete(client)
     .where(
@@ -187,21 +227,21 @@ export async function deleteUnusedDynamicOAuthClients(
         lt(client.createdAt, cutoff),
         notExists(
           db
-            .select({ id: schema.oauthConsent.id })
-            .from(schema.oauthConsent)
-            .where(eq(schema.oauthConsent.clientId, client.clientId)),
+            .select({ id: consent.id })
+            .from(consent)
+            .where(eq(consent.clientId, client.clientId)),
         ),
         notExists(
           db
-            .select({ id: schema.oauthRefreshToken.id })
-            .from(schema.oauthRefreshToken)
-            .where(eq(schema.oauthRefreshToken.clientId, client.clientId)),
+            .select({ id: refreshToken.id })
+            .from(refreshToken)
+            .where(eq(refreshToken.clientId, client.clientId)),
         ),
         notExists(
           db
-            .select({ id: schema.oauthAccessToken.id })
-            .from(schema.oauthAccessToken)
-            .where(eq(schema.oauthAccessToken.clientId, client.clientId)),
+            .select({ id: accessToken.id })
+            .from(accessToken)
+            .where(eq(accessToken.clientId, client.clientId)),
         ),
       ),
     )

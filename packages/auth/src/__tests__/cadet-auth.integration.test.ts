@@ -252,6 +252,15 @@ describe('cadet admission sign-in', () => {
     }
   });
 
+  it('trusts only the cadet app origin', async () => {
+    // Better Auth skips its origin check under NODE_ENV=test, so the
+    // configuration itself is asserted.
+    const context = await cadetAuth.$context;
+    expect(context.trustedOrigins).toEqual(expect.arrayContaining([CADET_ORIGIN]));
+    expect(context.trustedOrigins).not.toContain('http://localhost:3001');
+    expect((await staffAuth.$context).trustedOrigins).not.toContain(CADET_ORIGIN);
+  });
+
   it('never stores the admission number at the auth level', async () => {
     const { admission, userId } = await createAdmissionWithLogin();
     const [login] = await db.select().from(cadetSchema.cadetUser).where(eq(cadetSchema.cadetUser.id, userId));

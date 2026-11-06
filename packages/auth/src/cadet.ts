@@ -38,8 +38,10 @@ import {
   type SignInLimiter,
 } from './cadet-sign-in-limits';
 import {
+  CADET_OAUTH_SERVER_TABLES,
   issuerFor,
   mcpOAuthPlugins,
+  recordDynamicClientRegistration,
   type McpOAuthOptions,
   type McpOAuthServerConfig,
 } from './mcp-oauth';
@@ -143,6 +145,9 @@ export function createCadetAuth(
 
     advanced: sharedCookieOptions(CADET_COOKIE_PREFIX),
     session: SHARED_SESSION_OPTIONS,
+    hooks: {
+      after: recordDynamicClientRegistration(db, CADET_OAUTH_SERVER_TABLES),
+    },
 
     /**
      * CampusPilot columns of `cadet_user`. Declared so Better Auth reads them

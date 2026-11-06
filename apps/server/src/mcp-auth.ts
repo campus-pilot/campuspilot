@@ -1,4 +1,4 @@
-import type { Context, OAuthContextInput } from '@campuspilot/api/context';
+import type { OAuthGrant } from '@campuspilot/api/context';
 import type { McpAccess } from '@campuspilot/api/mcp-metadata';
 import type {
   LiveOAuthGrant,
@@ -7,25 +7,40 @@ import type {
 import { MCP_DEFAULT_SCOPES } from '@campuspilot/auth/mcp-oauth-policy';
 import type { AuthInfo } from '@modelcontextprotocol/server';
 
-import { type McpCatalog, requiredScopes } from './mcp';
+import { type McpCatalog, type McpContext, requiredScopes } from './mcp';
 import { META_TOOL_NAMES } from './mcp-meta-tools';
 
 /** What the gate verified for one MCP request, handed to the tool layer. */
 export type McpRequestCredential = {
-  context: Context;
+  context: McpContext;
   /** SDK auth info, set for OAuth access tokens only. */
   authInfo?: AuthInfo;
 };
 
+/** What the gate hands the context factory for a verified OAuth access token. */
+export type McpOAuthContextInput = {
+  headers: Headers;
+  userId: string;
+  oauthGrant: OAuthGrant;
+  /** Access-token expiry, which bounds the request-scoped session. */
+  expiresAt: Date;
+};
+
 export type McpGateOptions = {
   catalog: Promise<McpCatalog>;
-  /** Canonical MCP URL (MCP_RESOURCE_URL). */
+  /** Canonical MCP URL (MCP_RESOURCE_URL or CADET_MCP_RESOURCE_URL). */
   resource: string;
+  /** Scopes advertised in the 401 challenge; defaults to MCP_DEFAULT_SCOPES. */
+  challengeScopes?: readonly string[];
   verifyAccessToken: (token: string) => Promise<McpAccessTokenClaims | null>;
   findLiveGrant: (claims: McpAccessTokenClaims) => Promise<LiveOAuthGrant | null>;
-  /** Builds the context for an API key; anonymous when the key is invalid. */
-  createApiKeyContext: (apiKey: string) => Promise<Context>;
-  createOAuthContext: (input: OAuthContextInput) => Promise<Context | null>;
+  /**
+   * Builds the context for an API key; anonymous when the key is invalid.
+   * Omitted on endpoints that accept OAuth only (the cadet MCP): API keys are
+   * then refused, and a bearer value that is not an access token is too.
+   */
+  createApiKeyContext?: (apiKey: string) => Promise<McpContext>;
+  createOAuthContext: (input: McpOAuthContextInput) => Promise<McpContext | null>;
   /** Records that the grant was used (throttled by the implementation). */
   recordGrantUse: (grantId: string) => Promise<void>;
 };
@@ -118,12 +133,13 @@ function requiredAccess(catalog: McpCatalog, message: JsonRpcMessage): McpAccess
  */
 export function createMcpGate(options: McpGateOptions) {
   const metadataUrl = protectedResourceMetadataUrl(options.resource);
+  const challengeScopes = options.challengeScopes ?? MCP_DEFAULT_SCOPES;
   const unauthorized = (description?: string) =>
     jsonRpcError(
       401,
       challenge({
         resource_metadata: metadataUrl,
-        scope: MCP_DEFAULT_SCOPES.join(' '),
+        scope: challengeScopes.join(' '),
         ...(description
           ? { error: 'invalid_token', error_description: description }
           : {}),
@@ -132,6 +148,7 @@ export function createMcpGate(options: McpGateOptions) {
     );
 
   async function apiKeyCredential(apiKey: string): Promise<McpRequestCredential | null> {
+    if (!options.createApiKeyContext) return null;
     const context = await options.createApiKeyContext(apiKey);
     return context.principal.authMethod === 'apiKey' ? { context } : null;
   }

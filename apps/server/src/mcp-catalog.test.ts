@@ -1,4 +1,5 @@
 import type { Context } from '@campuspilot/api/context';
+import { cadetRouter } from '@campuspilot/api/routers/cadet/cadet.router';
 import {
   Client,
   StreamableHTTPClientTransport,
@@ -70,6 +71,8 @@ const HIDDEN_TOOLS = [
   'authorization.checkPermissions',
   'healthCheck',
   'school.getLogo',
+  // Returns a credential and signs a student out everywhere: a human action.
+  'school.issueAdmissionCadetPassword',
   'systemAdmin.listOAuthClients',
   'systemAdmin.createOAuthClient',
   'systemAdmin.rotateOAuthClientSecret',
@@ -189,6 +192,16 @@ describe('catalog metadata', () => {
  * Runs the real catalog through the Streamable HTTP transport a remote client
  * uses, so a single unconvertible schema fails here instead of in production.
  */
+describe('cadet catalog', () => {
+  it('builds from cadetRouter alone: read-only core tools and no staff tools', async () => {
+    const cadetCatalog = await buildMcpCatalog(cadetRouter);
+    expect(cadetCatalog.core.map(({ name }) => name)).toEqual(['getAdmission']);
+    expect(cadetCatalog.advanced).toEqual([]);
+    expect(cadetCatalog.core.every((tool) => tool.mcp.access === 'read')).toBe(true);
+    expect(catalog.core.map(({ name }) => name)).not.toContain('getAdmission');
+  });
+});
+
 describe('real appRouter over Streamable HTTP', () => {
   it('lists exactly the core tools and the four meta tools, with annotations', async () => {
     const client = await connect();
