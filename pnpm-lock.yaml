@@ -443,6 +443,40 @@ importers:
         specifier: ^8.1.5
         version: 8.3.0(@types/node@26.5.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)(yaml@2.9.1)
 
+  apps/worker:
+    dependencies:
+      '@campuspilot/api':
+        specifier: workspace:*
+        version: link:../../packages/api
+      '@campuspilot/env':
+        specifier: workspace:*
+        version: link:../../packages/env
+      '@campuspilot/logger':
+        specifier: workspace:*
+        version: link:../../packages/logger
+      '@restatedev/restate-sdk':
+        specifier: ~1.17.4
+        version: 1.17.4
+      dotenv:
+        specifier: 'catalog:'
+        version: 17.4.2
+    devDependencies:
+      '@campuspilot/config':
+        specifier: workspace:*
+        version: link:../../packages/config
+      '@types/node':
+        specifier: 'catalog:'
+        version: 26.5.1
+      tsdown:
+        specifier: ^0.22.14
+        version: 0.22.14(tsx@4.23.13)(typescript@6.0.3)
+      tsx:
+        specifier: ^4.23.1
+        version: 4.23.13
+      typescript:
+        specifier: 'catalog:'
+        version: 6.0.3
+
   packages/api:
     dependencies:
       '@aws-sdk/client-s3':
@@ -460,9 +494,15 @@ importers:
       '@campuspilot/env':
         specifier: workspace:*
         version: link:../env
+      '@campuspilot/logger':
+        specifier: workspace:*
+        version: link:../logger
       '@campuspilot/opa':
         specifier: workspace:*
         version: link:../opa
+      '@campuspilot/restate':
+        specifier: workspace:*
+        version: link:../restate
       '@campuspilot/s3':
         specifier: workspace:*
         version: link:../s3
@@ -478,6 +518,9 @@ importers:
       '@orpc/zod':
         specifier: 'catalog:'
         version: 1.15.0(@opentelemetry/api@1.9.1)(@orpc/contract@1.15.0(@opentelemetry/api@1.9.1))(@orpc/server@1.15.0(@opentelemetry/api@1.9.1))(zod@4.6.1)
+      '@restatedev/restate-sdk':
+        specifier: ~1.17.4
+        version: 1.17.4
       busboy:
         specifier: ^1.6.0
         version: 1.6.0
@@ -813,8 +856,8 @@ importers:
         specifier: workspace:*
         version: link:../env
       '@restatedev/restate-sdk-clients':
-        specifier: ^1.17.0
-        version: 1.17.0
+        specifier: ~1.17.4
+        version: 1.17.4
     devDependencies:
       '@campuspilot/config':
         specifier: workspace:*
@@ -3006,11 +3049,14 @@ packages:
   '@remix-run/node-fetch-server@0.14.1':
     resolution: {integrity: sha512-pKenF5ysIN5lDCnCyvoUxDhKP0tfnGagvGbZh01xxHG6DJXSIXWVC9NpLSDGjxcxd1CKdCOKuZFleXBF3pChIg==}
 
-  '@restatedev/restate-sdk-clients@1.17.0':
-    resolution: {integrity: sha512-5gz4x9PP/KV5HD/8VUZTVQaX/YsGocOkZ8dLX1q7Pb+Km9sU4wMytciFCJ9SlyH33o0s5iRcpFNR0Soaz+B42g==}
+  '@restatedev/restate-sdk-clients@1.17.4':
+    resolution: {integrity: sha512-rJi3cBJx2z80c3XW9Kt4ZMAzloerp+ffusyj+Uc1uQ4jPAQq98FCNIVU1J3z9N5Gt/1Cu9Piiu4rtR/wB075PQ==}
 
-  '@restatedev/restate-sdk-core@1.17.0':
-    resolution: {integrity: sha512-439ONo+YDoG4YBZnQ0wXaWkJDdOqDJ0AjqOwUAYZolxoC5JoaHqWzEFWkeRXiSNpsOc1+ODRUUGupDQ7qxcvJg==}
+  '@restatedev/restate-sdk-core@1.17.4':
+    resolution: {integrity: sha512-CEuffSwTiaa5FWGcoWCx15wpgnLvA2pxULaMLYrHfqWLZSC/yAKSlPD5DG1Sya2DDkomK3GTq32gmU0GPciZKw==}
+
+  '@restatedev/restate-sdk@1.17.4':
+    resolution: {integrity: sha512-uuMOjtcXrcowBCsA2S3J8yuzxdrc9KJPZatlW7N3QiPz9VKfUSL7JIIPsWG6v7vmohli8JzoWdJGN8YtqVW8jA==}
 
   '@resvg/resvg-js-android-arm-eabi@2.6.2':
     resolution: {integrity: sha512-FrJibrAk6v29eabIPgcTUMPXiEz8ssrAk7TXxsiZzww9UTQ1Z5KAbFJs+Z0Ez+VZTYgnE5IQJqBcoSiMebtPHA==}
@@ -8827,11 +8873,15 @@ snapshots:
 
   '@remix-run/node-fetch-server@0.14.1': {}
 
-  '@restatedev/restate-sdk-clients@1.17.0':
+  '@restatedev/restate-sdk-clients@1.17.4':
     dependencies:
-      '@restatedev/restate-sdk-core': 1.17.0
+      '@restatedev/restate-sdk-core': 1.17.4
 
-  '@restatedev/restate-sdk-core@1.17.0': {}
+  '@restatedev/restate-sdk-core@1.17.4': {}
+
+  '@restatedev/restate-sdk@1.17.4':
+    dependencies:
+      '@restatedev/restate-sdk-core': 1.17.4
 
   '@resvg/resvg-js-android-arm-eabi@2.6.2':
     optional: true

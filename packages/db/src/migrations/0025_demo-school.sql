@@ -11,6 +11,7 @@ CREATE TABLE "demo_school_job" (
 	"completed_steps" jsonb DEFAULT '[]'::jsonb NOT NULL,
 	"result" jsonb,
 	"error" jsonb,
+	"invocation_id" text,
 	"attempt" integer DEFAULT 1 NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"started_at" timestamp with time zone,

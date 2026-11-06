@@ -1,0 +1,31 @@
+{
+  "exams": [
+    { "slug": "first-term-examination", "name": "First Term Examination", "order": 1, "monthOffset": 4, "startDay": 12, "slots": 8 },
+    { "slug": "second-term-examination", "name": "Second Term Examination", "order": 2, "monthOffset": 8, "startDay": 8, "slots": 8 },
+    { "slug": "annual-examination", "name": "Annual Examination", "order": 3, "monthOffset": 11, "startDay": 2, "slots": 10 }
+  ],
+  "activeWithinDaysAfterWindow": 30,
+  "gradingScale": {
+    "a1": { "label": "A1", "minScore": 91 },
+    "a2": { "label": "A2", "minScore": 81 },
+    "b1": { "label": "B1", "minScore": 71 },
+    "b2": { "label": "B2", "minScore": 61 },
+    "c1": { "label": "C1", "minScore": 51 },
+    "c2": { "label": "C2", "minScore": 41 },
+    "d": { "label": "D", "minScore": 33 },
+    "e": { "label": "E", "minScore": 0 }
+  },
+  "coScholasticAreas": {
+    "work-education": { "name": "Work Education" },
+    "art-education": { "name": "Art Education" },
+    "health-and-physical-education": { "name": "Health and Physical Education" },
+    "discipline": { "name": "Discipline" }
+  },
+  "coScholasticGrades": ["A1", "A2", "B1", "B2", "C1"],
+  "attendanceTracking": { "enabled": true },
+  "admissionDocumentTypes": [
+    { "value": "birth_certificate", "label": "Birth certificate" },
+    { "value": "aadhaar_card", "label": "Aadhaar card" },
+    { "value": "transfer_certificate", "label": "Transfer certificate" }
+  ]
+}

@@ -5,6 +5,7 @@ import { eq, sql } from 'drizzle-orm';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { createTestUser } from '../../../test/fixtures';
+import { retryFinanceConflict } from '../../../test/finance/assertions';
 import { createFinanceIdempotencyKey } from '../../../test/finance/factories';
 import { createFinanceScenario, type FinanceScenario } from '../../../test/finance/scenario';
 
@@ -28,7 +29,7 @@ async function rowsReferencingSchool(schoolId: string) {
 
 async function postFinanceHistory(scenario: FinanceScenario, suffix: string) {
   const client = scenario.actors.accountant.client.school;
-  const bill = await client.createManualBill({
+  const bill = await retryFinanceConflict(() => client.createManualBill({
     schoolId: scenario.school.id,
     sessionId: scenario.activeSession.id,
     admissionId: scenario.admission.id,
@@ -36,8 +37,8 @@ async function postFinanceHistory(scenario: FinanceScenario, suffix: string) {
     reason: `Purge test ${suffix}`,
     idempotencyKey: createFinanceIdempotencyKey(`bill-${suffix}`),
     lines: [{ title: 'Tuition charge', amountMinor: '10000' }],
-  });
-  await client.recordPayment({
+  }));
+  await retryFinanceConflict(() => client.recordPayment({
     schoolId: scenario.school.id,
     admissionId: scenario.admission.id,
     sessionId: scenario.activeSession.id,
@@ -47,8 +48,8 @@ async function postFinanceHistory(scenario: FinanceScenario, suffix: string) {
     receivedAt: '2040-05-02T10:00:00Z',
     effectiveAt: '2040-05-02T10:00:00Z',
     idempotencyKey: createFinanceIdempotencyKey(`payment-${suffix}`),
-  });
-  await client.recordAdjustment({
+  }));
+  await retryFinanceConflict(() => client.recordAdjustment({
     schoolId: scenario.school.id,
     admissionId: scenario.admission.id,
     sessionId: scenario.activeSession.id,
@@ -59,7 +60,7 @@ async function postFinanceHistory(scenario: FinanceScenario, suffix: string) {
     reasonNote: 'Sibling discount',
     effectiveAt: '2040-05-03T10:00:00Z',
     idempotencyKey: createFinanceIdempotencyKey(`adjustment-${suffix}`),
-  });
+  }));
   return bill;
 }
 

@@ -32,6 +32,7 @@ jobs:
           pnpm exec tsc -p packages/db/tsconfig.json --noEmit
           pnpm exec tsc -p packages/api/tsconfig.json --noEmit
           pnpm exec tsc -p apps/server/tsconfig.json --noEmit
+          pnpm exec tsc -p apps/worker/tsconfig.json --noEmit
 
   prepare:
     name: Prepare release version
@@ -197,6 +198,10 @@ jobs:
             file: apps/server/Dockerfile
             image: ghcr.io/campus-pilot/campuspilot-plus-api
             build_args: ""
+          - name: worker
+            file: apps/worker/Dockerfile
+            image: ghcr.io/campus-pilot/campuspilot-plus-worker
+            build_args: ""
           - name: opa
             file: packages/opa/Dockerfile
             image: ghcr.io/campus-pilot/campuspilot-plus-opa
@@ -263,6 +268,8 @@ jobs:
             image: ghcr.io/campus-pilot/campuspilot-plus-web
           - name: api
             image: ghcr.io/campus-pilot/campuspilot-plus-api
+          - name: worker
+            image: ghcr.io/campus-pilot/campuspilot-plus-worker
           - name: opa
             image: ghcr.io/campus-pilot/campuspilot-plus-opa
 

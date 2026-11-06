@@ -1,0 +1,17 @@
+{
+  "childFirstNames": {
+    "female": ["Aadhya", "Aanya", "Advika", "Ananya", "Anika", "Avni", "Diya", "Ira", "Ishita", "Jiya", "Kavya", "Kiara", "Meera", "Myra", "Navya", "Nisha", "Pari", "Prisha", "Riya", "Saanvi", "Sara", "Shanaya", "Siya", "Tara", "Trisha", "Vanya", "Zara", "Aarohi", "Bhavya", "Charvi", "Divya", "Gauri", "Hiya", "Ishani", "Kashvi", "Larisa", "Mahi", "Nitya", "Ojasvi", "Pihu", "Ritika", "Sneha", "Tanvi", "Urvi", "Vedika", "Yashvi"],
+    "male": ["Aarav", "Advik", "Arjun", "Aryan", "Ayaan", "Dhruv", "Ishaan", "Kabir", "Krish", "Laksh", "Madhav", "Neil", "Om", "Pranav", "Reyansh", "Rudra", "Sai", "Shaurya", "Shivansh", "Vihaan", "Vivaan", "Yash", "Atharv", "Daksh", "Eshan", "Hridaan", "Jai", "Kian", "Moksh", "Nirav", "Parth", "Rehaan", "Samar", "Tanay", "Udit", "Ved", "Advait", "Aniket", "Darsh", "Garv", "Harsh", "Kushal", "Mihir", "Rohan", "Siddharth", "Veer"]
+  },
+  "adultFirstNames": {
+    "female": ["Anita", "Asha", "Deepa", "Geeta", "Jyoti", "Kavita", "Lakshmi", "Meena", "Neha", "Nirmala", "Pooja", "Preeti", "Radha", "Rekha", "Ritu", "Sangeeta", "Seema", "Shalini", "Sunita", "Swati", "Usha", "Vandana", "Archana", "Bhavna", "Chitra", "Hema", "Madhuri", "Pallavi", "Rashmi", "Smita"],
+    "male": ["Ajay", "Amit", "Anil", "Ashok", "Deepak", "Gaurav", "Harish", "Manoj", "Mukesh", "Naveen", "Pankaj", "Rajesh", "Rakesh", "Ramesh", "Sanjay", "Satish", "Suresh", "Vijay", "Vikas", "Vinod", "Alok", "Arvind", "Dinesh", "Girish", "Kiran", "Mahesh", "Prakash", "Rahul", "Sandeep", "Tarun"]
+  },
+  "surnames": ["Agarwal", "Bansal", "Bhat", "Chatterjee", "Das", "Desai", "Gupta", "Iyer", "Jain", "Joshi", "Kapoor", "Khan", "Kulkarni", "Kumar", "Malhotra", "Mehta", "Menon", "Mishra", "Nair", "Patel", "Pillai", "Rao", "Reddy", "Saxena", "Shah", "Sharma", "Singh", "Sinha", "Srivastava", "Verma", "Yadav", "Banerjee", "Chauhan", "Dubey", "Ghosh", "Hegde", "Kamath", "Naidu", "Pandey", "Tiwari"],
+  "staffTitles": { "female": "Mrs.", "male": "Mr." },
+  "streets": ["Main Road", "Cross Road", "Temple Street", "Park Avenue", "Lake View Road", "Station Road", "Market Street", "Garden Lane", "School Road", "Church Street"],
+  "localities": ["Shanti Nagar", "Gandhi Colony", "Vidya Vihar", "Green Park", "Sunrise Enclave", "Lotus Layout", "Rose Garden", "Ashok Vihar", "Indira Nagar", "Model Town", "Saraswati Puram", "Hill View Colony"],
+  "sampleCity": "Sample City",
+  "postalCodePrefix": "000",
+  "phonePrefix": "00000"
+}

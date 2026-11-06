@@ -1,13 +1,15 @@
 # Container release workflow
 
 `release.yml` assigns a strict `vMAJOR.MINOR.PATCH` version to each successful
-push to `main`. For a new version, it publishes all five images with immutable
+push to `main`. For a new version, it publishes all six images with immutable
 semver and `sha-<commit>` tags. Only after every image succeeds does it push the
 Git tag and create the GitHub release. No mutable image tag is published;
 deployments must pin a semver or commit-SHA tag.
 
-The five images are `campuspilot-plus-management`, `campuspilot-plus-admin`,
-`campuspilot-plus-web`, `campuspilot-plus-api`, and `campuspilot-plus-opa`. The
+The six images are `campuspilot-plus-management`, `campuspilot-plus-admin`,
+`campuspilot-plus-web`, `campuspilot-plus-api`, `campuspilot-plus-worker`
+(the Restate workflow host, see `docs/demo-school.md`), and
+`campuspilot-plus-opa`. The
 admin image serves `https://admin.campuspilot.in`; its sign-in route is
 `https://admin.campuspilot.in/sign-in`.
 
@@ -46,7 +48,9 @@ The workflow passes an empty `VITE_STUDENT_LOGIN_URL` build argument when the
 repository Variable is unset. The web environment normalizes that empty string
 to `undefined`; it is not replaced with a placeholder or admin URL.
 
-The API and OPA images consume no build variables. Runtime database, auth,
+The API, worker and OPA images consume no build variables. After a worker
+deploy, register it with Restate (`node dist/scripts/restate-register.mjs`
+with `RESTATE_ADMIN_URL` and `RESTATE_WORKER_URL` set). Runtime database, auth,
 Google OAuth, S3, Redis, OPA, Restate, and service credentials must be supplied
 only by the deployment environment; they must never be passed as image build
 arguments.

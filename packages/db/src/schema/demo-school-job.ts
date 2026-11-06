@@ -75,6 +75,11 @@ export const demoSchoolJobTable = pgTable(
     completedSteps: jsonb("completed_steps").$type<string[]>().notNull().default([]),
     result: jsonb("result").$type<DemoSchoolJobResult>(),
     error: jsonb("error").$type<DemoSchoolJobError>(),
+    /**
+     * Restate invocation of the current attempt, recorded from the submit
+     * response so a purge can cancel exactly that run.
+     */
+    invocationId: text("invocation_id"),
     /** Incremented by every retry; part of the Restate workflow key. */
     attempt: integer("attempt").notNull().default(1),
     createdAt: timestamp("created_at", { withTimezone: true })

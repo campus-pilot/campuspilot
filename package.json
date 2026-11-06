@@ -14,6 +14,7 @@
     "dev:web": "turbo run dev -F web --",
     "dev:management": "turbo run dev -F management --",
     "dev:server": "turbo run dev -F server --",
+    "dev:worker": "turbo run dev -F worker --",
     "db:push": "turbo run db:push -F @campuspilot/db --",
     "db:studio": "turbo run db:studio -F @campuspilot/db --",
     "db:generate": "turbo run db:generate -F @campuspilot/db --",

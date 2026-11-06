@@ -1,5 +1,5 @@
 {
-  "id": "8d884b42-06c0-4ae5-b4c5-6d0d60f8fb5f",
+  "id": "06c7d380-baaa-4c17-b4bc-bd87dfd5328c",
   "prevId": "2074f872-c689-48e0-b536-a393295e85a2",
   "version": "7",
   "dialect": "postgresql",
@@ -2607,6 +2607,12 @@
         "error": {
           "name": "error",
           "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "invocation_id": {
+          "name": "invocation_id",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
