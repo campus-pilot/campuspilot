@@ -3,7 +3,6 @@
 import { useRef, useState } from 'react';
 import { useForm } from '@tanstack/react-form';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useRouter } from 'next/navigation';
 import { z } from 'zod';
 import { SCHOOL_LOGO_MIME_TYPES } from '@campuspilot/api/routers/system-admin/school/school.constants';
 import {
@@ -14,21 +13,11 @@ import {
   Dropzone,
   formatFileSize,
 } from '@campuspilot/components/dropzone';
-import {
-  AlertDialog,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@campuspilot/ui/components/alert-dialog';
 import { Button } from '@campuspilot/ui/components/button';
 import {
   Card,
   CardContent,
   CardDescription,
-  CardFooter,
   CardHeader,
   CardTitle,
 } from '@campuspilot/ui/components/card';
@@ -43,9 +32,13 @@ import {
 import { Input } from '@campuspilot/ui/components/input';
 import { Label } from '@campuspilot/ui/components/label';
 import { Progress } from '@campuspilot/ui/components/progress';
-import { ImageUp, LoaderCircle, Pencil, Trash2 } from 'lucide-react';
+import { ImageUp, LoaderCircle, Pencil } from 'lucide-react';
 import { client, orpc } from '@/lib/orpc';
 import { uploadSchoolLogo } from '@/lib/school-image';
+import {
+  DemoSchoolCredentialsCard,
+  PurgeDemoSchoolCard,
+} from './demo-school/purge-demo-school-card';
 import { SchoolAvatar } from './school-avatar';
 
 const schoolDetailsFormSchema = z.object({
@@ -64,13 +57,26 @@ const schoolLogoFormSchema = z.object({
     ),
 });
 
-function deleteSchoolFormSchema(slug: string) {
-  return z.object({
-    confirmation: z.string().refine((value) => value === slug, {
-      message: `Enter ${slug} exactly to confirm deletion.`,
-    }),
-  });
-}
+/*
+ * Delete school UI — commented out, not removed (demo-school plan §9.1, D10).
+ * Deleting any school that has data fails today: apart from memberships and
+ * role assignments, every table referencing `school` uses NO ACTION foreign
+ * keys, and finance facts are append-only by database trigger. The UI should
+ * return only together with a real-school offboarding/archival policy.
+ * Demo schools are removed with "Purge demo school" instead. The
+ * `systemAdmin.deleteSchool` procedure itself is unchanged.
+ *
+ * Restoring it also needs the imports it used: useRouter, AlertDialog*,
+ * CardFooter and Trash2. Its confirmation schema:
+ *
+ * function deleteSchoolFormSchema(slug: string) {
+ *   return z.object({
+ *     confirmation: z.string().refine((value) => value === slug, {
+ *       message: `Enter ${slug} exactly to confirm deletion.`,
+ *     }),
+ *   });
+ * }
+ */
 
 function FieldErrors({ errors }: { errors: unknown[] }) {
   return errors.map((error, index) => {
@@ -478,160 +484,164 @@ function SchoolProfileCard({ school }: { school: SchoolDto }) {
   );
 }
 
-function DeleteSchoolDialog({
-  school,
-  open,
-  onOpenChange,
-}: {
-  school: SchoolDto;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-}) {
-  const router = useRouter();
-  const queryClient = useQueryClient();
-  const schema = deleteSchoolFormSchema(school.slug);
-  const form = useForm({
-    defaultValues: { confirmation: '' },
-    validators: { onChange: schema, onSubmit: schema },
-    onSubmit: async () => {
-      form.setErrorMap({});
-      try {
-        await client.systemAdmin.deleteSchool({ id: school.id });
-        await queryClient.invalidateQueries({
-          queryKey: orpc.systemAdmin.listSchools.queryKey({ input: {} }),
-        });
-        router.replace('/organizations');
-        router.refresh();
-      } catch (error) {
-        form.setErrorMap({
-          onSubmit: {
-            form:
-              error instanceof Error
-                ? error.message
-                : 'Unable to delete the school.',
-            fields: {},
-          },
-        });
-      }
-    },
-  });
-
-  /** Prevents dismissal during deletion and clears confirmation between opens. */
-  function handleOpenChange(nextOpen: boolean) {
-    if (!nextOpen && form.state.isSubmitting) return;
-    if (!nextOpen) form.reset();
-    onOpenChange(nextOpen);
-  }
-
-  return (
-    <AlertDialog open={open} onOpenChange={handleOpenChange}>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>Delete {school.name}?</AlertDialogTitle>
-          <AlertDialogDescription>
-            This permanently deletes the school. This action cannot be undone.
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <form
-          className="flex flex-col gap-4"
-          onSubmit={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            void form.handleSubmit();
-          }}
-        >
-          <form.Field name="confirmation">
-            {(field) => (
-              <div className="flex flex-col gap-2">
-                <Label htmlFor="school-delete-confirmation">
-                  Enter{' '}
-                  <span className="font-mono font-semibold">
-                    {school.slug}
-                  </span>{' '}
-                  to confirm
-                </Label>
-                <Input
-                  id="school-delete-confirmation"
-                  name={field.name}
-                  autoComplete="off"
-                  spellCheck={false}
-                  value={field.state.value}
-                  onBlur={field.handleBlur}
-                  onChange={(event) => field.handleChange(event.target.value)}
-                />
-                <FieldErrors errors={field.state.meta.errors} />
-              </div>
-            )}
-          </form.Field>
-          <form.Subscribe
-            selector={(state) => ({
-              canSubmit: state.canSubmit,
-              confirmation: state.values.confirmation,
-              isSubmitting: state.isSubmitting,
-              errors: state.errors,
-            })}
-          >
-            {({ canSubmit, confirmation, isSubmitting, errors }) => (
-              <div className="flex flex-col gap-3">
-                <FieldErrors errors={errors} />
-                <AlertDialogFooter>
-                  <AlertDialogCancel disabled={isSubmitting}>
-                    Cancel
-                  </AlertDialogCancel>
-                  <Button
-                    type="submit"
-                    variant="destructive"
-                    disabled={
-                      !canSubmit ||
-                      confirmation !== school.slug ||
-                      isSubmitting
-                    }
-                  >
-                    {isSubmitting ? (
-                      <LoaderCircle className="animate-spin" aria-hidden />
-                    ) : (
-                      <Trash2 aria-hidden />
-                    )}
-                    {isSubmitting ? 'Deleting…' : 'Delete school'}
-                  </Button>
-                </AlertDialogFooter>
-              </div>
-            )}
-          </form.Subscribe>
-        </form>
-      </AlertDialogContent>
-    </AlertDialog>
-  );
-}
-
-function DeleteSchoolCard({ school }: { school: SchoolDto }) {
-  const [isOpen, setIsOpen] = useState(false);
-
-  return (
-    <Card className="ring-destructive/30">
-      <CardHeader>
-        <CardTitle className="text-destructive">Danger zone</CardTitle>
-        <CardDescription>Permanently delete this school.</CardDescription>
-      </CardHeader>
-      <CardFooter className="border-t">
-        <Button
-          type="button"
-          variant="destructive"
-          onClick={() => setIsOpen(true)}
-        >
-          <Trash2 aria-hidden />
-          Delete school
-        </Button>
-      </CardFooter>
-      <DeleteSchoolDialog
-        key={`${school.id}-${school.slug}`}
-        school={school}
-        open={isOpen}
-        onOpenChange={setIsOpen}
-      />
-    </Card>
-  );
-}
+/*
+ * Delete school UI, commented out with deleteSchoolFormSchema above:
+ *
+ * function DeleteSchoolDialog({
+ *   school,
+ *   open,
+ *   onOpenChange,
+ * }: {
+ *   school: SchoolDto;
+ *   open: boolean;
+ *   onOpenChange: (open: boolean) => void;
+ * }) {
+ *   const router = useRouter();
+ *   const queryClient = useQueryClient();
+ *   const schema = deleteSchoolFormSchema(school.slug);
+ *   const form = useForm({
+ *     defaultValues: { confirmation: '' },
+ *     validators: { onChange: schema, onSubmit: schema },
+ *     onSubmit: async () => {
+ *       form.setErrorMap({});
+ *       try {
+ *         await client.systemAdmin.deleteSchool({ id: school.id });
+ *         await queryClient.invalidateQueries({
+ *           queryKey: orpc.systemAdmin.listSchools.queryKey({ input: {} }),
+ *         });
+ *         router.replace('/organizations');
+ *         router.refresh();
+ *       } catch (error) {
+ *         form.setErrorMap({
+ *           onSubmit: {
+ *             form:
+ *               error instanceof Error
+ *                 ? error.message
+ *                 : 'Unable to delete the school.',
+ *             fields: {},
+ *           },
+ *         });
+ *       }
+ *     },
+ *   });
+ *
+ *   /** Prevents dismissal during deletion and clears confirmation between opens. * /
+ *   function handleOpenChange(nextOpen: boolean) {
+ *     if (!nextOpen && form.state.isSubmitting) return;
+ *     if (!nextOpen) form.reset();
+ *     onOpenChange(nextOpen);
+ *   }
+ *
+ *   return (
+ *     <AlertDialog open={open} onOpenChange={handleOpenChange}>
+ *       <AlertDialogContent>
+ *         <AlertDialogHeader>
+ *           <AlertDialogTitle>Delete {school.name}?</AlertDialogTitle>
+ *           <AlertDialogDescription>
+ *             This permanently deletes the school. This action cannot be undone.
+ *           </AlertDialogDescription>
+ *         </AlertDialogHeader>
+ *         <form
+ *           className="flex flex-col gap-4"
+ *           onSubmit={(event) => {
+ *             event.preventDefault();
+ *             event.stopPropagation();
+ *             void form.handleSubmit();
+ *           }}
+ *         >
+ *           <form.Field name="confirmation">
+ *             {(field) => (
+ *               <div className="flex flex-col gap-2">
+ *                 <Label htmlFor="school-delete-confirmation">
+ *                   Enter{' '}
+ *                   <span className="font-mono font-semibold">
+ *                     {school.slug}
+ *                   </span>{' '}
+ *                   to confirm
+ *                 </Label>
+ *                 <Input
+ *                   id="school-delete-confirmation"
+ *                   name={field.name}
+ *                   autoComplete="off"
+ *                   spellCheck={false}
+ *                   value={field.state.value}
+ *                   onBlur={field.handleBlur}
+ *                   onChange={(event) => field.handleChange(event.target.value)}
+ *                 />
+ *                 <FieldErrors errors={field.state.meta.errors} />
+ *               </div>
+ *             )}
+ *           </form.Field>
+ *           <form.Subscribe
+ *             selector={(state) => ({
+ *               canSubmit: state.canSubmit,
+ *               confirmation: state.values.confirmation,
+ *               isSubmitting: state.isSubmitting,
+ *               errors: state.errors,
+ *             })}
+ *           >
+ *             {({ canSubmit, confirmation, isSubmitting, errors }) => (
+ *               <div className="flex flex-col gap-3">
+ *                 <FieldErrors errors={errors} />
+ *                 <AlertDialogFooter>
+ *                   <AlertDialogCancel disabled={isSubmitting}>
+ *                     Cancel
+ *                   </AlertDialogCancel>
+ *                   <Button
+ *                     type="submit"
+ *                     variant="destructive"
+ *                     disabled={
+ *                       !canSubmit ||
+ *                       confirmation !== school.slug ||
+ *                       isSubmitting
+ *                     }
+ *                   >
+ *                     {isSubmitting ? (
+ *                       <LoaderCircle className="animate-spin" aria-hidden />
+ *                     ) : (
+ *                       <Trash2 aria-hidden />
+ *                     )}
+ *                     {isSubmitting ? 'Deleting…' : 'Delete school'}
+ *                   </Button>
+ *                 </AlertDialogFooter>
+ *               </div>
+ *             )}
+ *           </form.Subscribe>
+ *         </form>
+ *       </AlertDialogContent>
+ *     </AlertDialog>
+ *   );
+ * }
+ *
+ * function DeleteSchoolCard({ school }: { school: SchoolDto }) {
+ *   const [isOpen, setIsOpen] = useState(false);
+ *
+ *   return (
+ *     <Card className="ring-destructive/30">
+ *       <CardHeader>
+ *         <CardTitle className="text-destructive">Danger zone</CardTitle>
+ *         <CardDescription>Permanently delete this school.</CardDescription>
+ *       </CardHeader>
+ *       <CardFooter className="border-t">
+ *         <Button
+ *           type="button"
+ *           variant="destructive"
+ *           onClick={() => setIsOpen(true)}
+ *         >
+ *           <Trash2 aria-hidden />
+ *           Delete school
+ *         </Button>
+ *       </CardFooter>
+ *       <DeleteSchoolDialog
+ *         key={`${school.id}-${school.slug}`}
+ *         school={school}
+ *         open={isOpen}
+ *         onOpenChange={setIsOpen}
+ *       />
+ *     </Card>
+ *   );
+ * }
+ */
 
 function SchoolSettingsContent({ school }: { school: SchoolDto }) {
   return (
@@ -639,11 +649,13 @@ function SchoolSettingsContent({ school }: { school: SchoolDto }) {
       <div className="flex flex-col gap-1">
         <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
         <p className="text-sm text-muted-foreground">
-          Manage school information, branding, and deletion.
+          Manage school information and branding.
         </p>
       </div>
       <SchoolProfileCard school={school} />
-      <DeleteSchoolCard school={school} />
+      {/* <DeleteSchoolCard school={school} /> — see the note above deleteSchoolFormSchema. */}
+      {school.isDemo ? <DemoSchoolCredentialsCard schoolId={school.id} /> : null}
+      {school.isDemo ? <PurgeDemoSchoolCard school={school} /> : null}
     </section>
   );
 }
