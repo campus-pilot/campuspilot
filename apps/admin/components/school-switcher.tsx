@@ -19,7 +19,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@campuspilot/ui/components/popover';
-import { Building2, ChevronsUpDown, Plus } from 'lucide-react';
+import { Building2, ChevronsUpDown, LayoutDashboard, Plus } from 'lucide-react';
 import { orpc } from '@/lib/orpc';
 import { AddSchoolDialog } from './add-school-dialog';
 import { SchoolAvatar } from './school-avatar';
@@ -48,6 +48,32 @@ function SearchFieldErrors({ errors }: { errors: unknown[] }) {
 function schoolIdFromPath(pathname: string): string | undefined {
   const match = /^\/school\/([^/]+)/.exec(pathname);
   return match?.[1] ? decodeURIComponent(match[1]) : undefined;
+}
+
+/**
+ * Leaves school context for the platform home. Breadcrumbs also link there,
+ * but the switcher is where admins change context, so it offers the way out.
+ */
+function PlatformDashboardItem({
+  isCurrent,
+  onSelect,
+}: {
+  isCurrent: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <CommandGroup heading="Platform">
+      <CommandItem
+        value="platform-dashboard"
+        data-checked={isCurrent}
+        onSelect={onSelect}
+        forceMount
+      >
+        <LayoutDashboard />
+        Platform dashboard
+      </CommandItem>
+    </CommandGroup>
+  );
 }
 
 function SchoolResultsFallback() {
@@ -216,6 +242,13 @@ export function SchoolSwitcher() {
               )}
             </searchForm.Field>
             <CommandList>
+              <PlatformDashboardItem
+                isCurrent={pathname === '/'}
+                onSelect={() => {
+                  handleSwitcherOpenChange(false);
+                  router.push('/');
+                }}
+              />
               <SchoolResultsErrorBoundary key={searchQuery ?? ''}>
                 <Suspense fallback={<SchoolResultsFallback />}>
                   <SchoolResults

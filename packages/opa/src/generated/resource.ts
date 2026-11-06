@@ -112,6 +112,7 @@ export type AuthorizationResourceByAction = {
   [SYSTEM_ACTIONS.DELETE_OAUTH_CLIENT]: SystemResource;
   [SYSTEM_ACTIONS.LIST_OAUTH_CLIENTS]: SystemResource;
   [SYSTEM_ACTIONS.UPDATE_OAUTH_CLIENT]: SystemResource;
+  [SYSTEM_ACTIONS.READ_PLATFORM_STATS]: SystemResource;
   [SYSTEM_ACTIONS.CREATE_SCHOOL]: SystemResource;
   [SYSTEM_ACTIONS.DELETE_SCHOOL]: SystemResource;
   [SYSTEM_ACTIONS.CREATE_DEMO_SCHOOL]: SystemResource;
@@ -120,6 +121,7 @@ export type AuthorizationResourceByAction = {
   [SYSTEM_ACTIONS.READ_DEMO_SCHOOL]: SystemResource;
   [SYSTEM_ACTIONS.LIST_SCHOOLS]: SystemResource;
   [SYSTEM_ACTIONS.READ_SCHOOL]: SystemResource;
+  [SYSTEM_ACTIONS.READ_SCHOOL_STATS]: SystemResource;
   [SYSTEM_ACTIONS.UPDATE_SCHOOL]: SystemResource;
 };
 

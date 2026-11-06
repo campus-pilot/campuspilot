@@ -12,7 +12,9 @@ export const SYSTEM_ACTIONS = {
   PURGE_DEMO_SCHOOL: 'system.school.demo.purge',
   READ_DEMO_SCHOOL: 'system.school.demo.read',
   READ_DEMO_SCHOOL_CREDENTIALS: 'system.school.demo.credentials.read',
+  READ_PLATFORM_STATS: 'system.platform.stats.read',
   READ_SCHOOL: 'system.school.read',
+  READ_SCHOOL_STATS: 'system.school.stats.read',
   UPDATE_OAUTH_CLIENT: 'system.oauth_client.update',
   UPDATE_SCHOOL: 'system.school.update',
 } as const;
