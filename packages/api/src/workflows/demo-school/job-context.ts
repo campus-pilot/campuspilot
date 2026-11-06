@@ -38,6 +38,8 @@ export async function createDemoSchoolJobContext(jobId: string): Promise<Context
     .limit(1);
   if (!job) throw new DemoJobGuardError('The demo job or its school no longer exists.');
   if (!job.isDemo) throw new DemoJobGuardError('Only demo schools can be seeded by a system job.');
+  const requestedBy = job.requestedBy;
+  if (!requestedBy) throw new DemoJobGuardError('The requesting admin no longer exists.');
 
   const [principalRole] = await db
     .select({ role: schoolUserRoleTable.role })
@@ -45,7 +47,7 @@ export async function createDemoSchoolJobContext(jobId: string): Promise<Context
     .where(
       and(
         eq(schoolUserRoleTable.schoolId, job.schoolId),
-        eq(schoolUserRoleTable.userId, job.requestedBy),
+        eq(schoolUserRoleTable.userId, requestedBy),
         eq(schoolUserRoleTable.role, 'principal'),
       ),
     )
@@ -55,7 +57,7 @@ export async function createDemoSchoolJobContext(jobId: string): Promise<Context
   }
 
   const user = await db.query.user.findFirst({
-    where: (table, { eq: equals }) => equals(table.id, job.requestedBy),
+    where: (table, { eq: equals }) => equals(table.id, requestedBy),
   });
   if (!user) throw new DemoJobGuardError('The requesting admin no longer exists.');
   if (user.banned && (!user.banExpires || user.banExpires > new Date())) {

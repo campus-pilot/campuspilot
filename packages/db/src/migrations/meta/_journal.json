@@ -183,6 +183,13 @@
       "when": 1793925659799,
       "tag": "0025_demo-school",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1793928423779,
+      "tag": "0026_demo-school-hardening",
+      "breakpoints": true
     }
   ]
 }

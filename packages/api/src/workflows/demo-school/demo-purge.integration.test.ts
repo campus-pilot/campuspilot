@@ -102,33 +102,55 @@ describe('purge_demo_school and the demo-only finance exception', () => {
     expect((await rowsReferencingSchool(real.school.id)).finance_bill).toBe(1);
   });
 
-  it('keeps real-school finance facts append-only even with the purge setting', async () => {
+  it('keeps real-school finance facts append-only even with a forged purge marker', async () => {
     await expect(
       db.transaction(async (tx) => {
-        await tx.execute(sql`SELECT set_config('campuspilot.demo_purge_school_id', ${real.school.id}, true)`);
+        await tx.execute(sql`INSERT INTO demo_purge_marker (transaction_id, school_id) VALUES (txid_current(), ${real.school.id})`);
         await tx.execute(sql`DELETE FROM finance_payment WHERE school_id = ${real.school.id}`);
       }),
     ).rejects.toThrow();
     await expect(
       db.transaction(async (tx) => {
-        await tx.execute(sql`SELECT set_config('campuspilot.demo_purge_school_id', ${real.school.id}, true)`);
+        await tx.execute(sql`INSERT INTO demo_purge_marker (transaction_id, school_id) VALUES (txid_current(), ${real.school.id})`);
         await tx.execute(sql`DELETE FROM finance_bill WHERE school_id = ${real.school.id}`);
       }),
     ).rejects.toThrow();
+  });
+
+  it('binds the exception to purge_demo_school, not to a marker or the old setting', async () => {
+    // A hand-written marker outside purge_demo_school() is not enough: the
+    // helper also requires the function on the call stack.
+    await expect(
+      db.transaction(async (tx) => {
+        await tx.execute(sql`INSERT INTO demo_purge_marker (transaction_id, school_id) VALUES (txid_current(), ${demo.school.id})`);
+        await tx.execute(sql`DELETE FROM finance_payment WHERE school_id = ${demo.school.id}`);
+      }),
+    ).rejects.toThrow();
+    // The former placeholder setting no longer grants anything.
+    await expect(
+      db.transaction(async (tx) => {
+        await tx.execute(sql`SET LOCAL campuspilot.demo_purge_school_id = ${sql.raw(`'${demo.school.id}'`)}`);
+        await tx.execute(sql`DELETE FROM finance_payment WHERE school_id = ${demo.school.id}`);
+      }),
+    ).rejects.toThrow();
+    // The function leaves no marker behind.
+    await db.execute(sql`SELECT purge_demo_school(${demo.school.id})`);
+    const markers = await db.execute<{ count: string }>(sql`SELECT count(*)::text AS count FROM demo_purge_marker`);
+    expect(markers.rows[0]!.count).toBe('0');
   });
 
   it('rejects demo finance deletes outside a purge and all updates even inside one', async () => {
     await expect(db.execute(sql`DELETE FROM finance_payment WHERE school_id = ${demo.school.id}`)).rejects.toThrow();
     await expect(
       db.transaction(async (tx) => {
-        await tx.execute(sql`SELECT set_config('campuspilot.demo_purge_school_id', ${demo.school.id}, true)`);
+        await tx.execute(sql`INSERT INTO demo_purge_marker (transaction_id, school_id) VALUES (txid_current(), ${demo.school.id})`);
         await tx.execute(sql`UPDATE finance_payment SET note = 'changed' WHERE school_id = ${demo.school.id}`);
       }),
     ).rejects.toThrow();
-    // A purge setting for another school never unlocks this demo school's facts.
+    // A marker for another school never unlocks this demo school's facts.
     await expect(
       db.transaction(async (tx) => {
-        await tx.execute(sql`SELECT set_config('campuspilot.demo_purge_school_id', ${real.school.id}, true)`);
+        await tx.execute(sql`INSERT INTO demo_purge_marker (transaction_id, school_id) VALUES (txid_current(), ${real.school.id})`);
         await tx.execute(sql`DELETE FROM finance_payment WHERE school_id = ${demo.school.id}`);
       }),
     ).rejects.toThrow();
