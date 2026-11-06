@@ -22,7 +22,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { app } from './http';
 
 const ORIGIN = 'http://localhost:3000';
-const PRM_URL = `${ORIGIN}/.well-known/oauth-protected-resource/api/mcp`;
+const PRM_URL = `${ORIGIN}/.well-known/oauth-protected-resource/mcp`;
 const testAuth = auth as unknown as TestAuth;
 
 type Grant = {
@@ -69,14 +69,14 @@ beforeAll(async () => {
 
 let nextId = 1;
 
-/** Posts one JSON-RPC request to /api/mcp through the real Hono app. */
+/** Posts one JSON-RPC request to /mcp through the real Hono app. */
 async function mcp(
   headers: Record<string, string>,
   method: string,
   params: Record<string, unknown> = {},
 ) {
   const response = await app.fetch(
-    new Request(`${ORIGIN}/api/mcp`, {
+    new Request(`${ORIGIN}/mcp`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -129,7 +129,7 @@ describe('discovery documents', () => {
   it('serves protected-resource metadata at both URLs, publicly', async () => {
     for (const path of [
       '/.well-known/oauth-protected-resource',
-      '/.well-known/oauth-protected-resource/api/mcp',
+      '/.well-known/oauth-protected-resource/mcp',
     ]) {
       const response = await app.fetch(
         new Request(`${ORIGIN}${path}`, {
@@ -215,7 +215,7 @@ describe('MCP endpoint authentication', () => {
   });
 
   it.each([
-    ['another audience', { aud: 'https://other.example/api/mcp' }],
+    ['another audience', { aud: 'https://other.example/mcp' }],
     ['another issuer', { iss: 'https://evil.example/api/auth' }],
     ['an expired token', { exp: Math.floor(Date.now() / 1000) - 60 }],
   ])('rejects %s with 401 invalid_token', async (_label, claims) => {

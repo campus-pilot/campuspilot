@@ -151,7 +151,7 @@ async function connect(oauthScopes?: string[]): Promise<Client> {
   });
   const client = new Client({ name: 'catalog-test', version: '0.1.0' });
   await client.connect(
-    new StreamableHTTPClientTransport(new URL('http://localhost/api/mcp'), {
+    new StreamableHTTPClientTransport(new URL('http://localhost/mcp'), {
       fetch: async (input, init) => handler.fetch(new Request(input, init)),
     }),
   );

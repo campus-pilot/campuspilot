@@ -5,7 +5,7 @@ export const AUTH_ENV_SHAPE = {
   BETTER_AUTH_SECRET: z.string().min(32),
   BETTER_AUTH_URL: z.url(),
   /**
-   * Canonical URL of the MCP endpoint (`<API origin>/api/mcp`): the OAuth
+   * Canonical URL of the MCP endpoint (`<API origin>/mcp`): the OAuth
    * protected resource, published in its metadata and required as the access
    * token audience. Its own value, never derived from BETTER_AUTH_URL, because
    * it must equal the URL users paste into their AI client, which can sit
