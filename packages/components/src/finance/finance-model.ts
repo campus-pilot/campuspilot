@@ -88,6 +88,55 @@ export function formatMinor(value: string, currency: string): string {
   return `${negative ? "-" : ""}${prefix}${whole}${fraction}`;
 }
 
+/** Groups a non-negative integer string in the Indian system: the first comma
+ * after three digits from the right, then after every two (12,34,567). */
+function groupIndian(digits: string): string {
+  if (digits.length <= 3) return digits;
+  const head = digits.slice(0, -3).replace(/\B(?=(\d{2})+(?!\d))/g, ",");
+  return `${head},${digits.slice(-3)}`;
+}
+
+/** Formats exact minor units with Indian digit grouping (₹12,34,567.00). */
+export function formatMinorIndian(value: string, currency: string): string {
+  const negative = value.startsWith("-");
+  const magnitude = negative ? value.slice(1) : value;
+  const prefix = currencyPrefix(currency);
+  if (!INTEGER_MINOR.test(magnitude)) return `${prefix}${value}`;
+  const exponent = currencyExponent(currency);
+  const scale = BigInt(10) ** BigInt(exponent);
+  const minor = BigInt(magnitude);
+  const whole = groupIndian((minor / scale).toString());
+  const fraction = exponent === 0 ? "" : `.${(minor % scale).toString().padStart(exponent, "0")}`;
+  return `${negative ? "-" : ""}${prefix}${whole}${fraction}`;
+}
+
+const INDIAN_COMPACT_UNITS = [
+  { suffix: "Cr", scale: BigInt(10_000_000) },
+  { suffix: "L", scale: BigInt(100_000) },
+  { suffix: "K", scale: BigInt(1_000) },
+] as const;
+
+/** Formats minor units as a compact Indian amount: K (thousand), L (lakh) and
+ * Cr (crore), e.g. ₹1.23L. Values are truncated toward zero to two decimals so
+ * a glance never overstates an amount and 99,999 stays 99.99K rather than
+ * rounding up into the next unit. Amounts below one thousand keep their whole
+ * major-unit value; crores are Indian-grouped beyond 999Cr. Use
+ * `formatMinorIndian` where the exact amount is needed. */
+export function formatCompactMinorIndian(value: string, currency: string): string {
+  const negative = value.startsWith("-");
+  const magnitude = negative ? value.slice(1) : value;
+  const prefix = currencyPrefix(currency);
+  if (!INTEGER_MINOR.test(magnitude)) return `${prefix}${value}`;
+  const major = BigInt(magnitude) / BigInt(10) ** BigInt(currencyExponent(currency));
+  const sign = negative && major > BigInt(0) ? "-" : "";
+  const unit = INDIAN_COMPACT_UNITS.find(({ scale }) => major >= scale);
+  if (!unit) return `${sign}${prefix}${major}`;
+  const hundredths = (major * BigInt(100)) / unit.scale;
+  const whole = groupIndian((hundredths / BigInt(100)).toString());
+  const fraction = (hundredths % BigInt(100)).toString().padStart(2, "0").replace(/0+$/, "");
+  return `${sign}${prefix}${whole}${fraction ? `.${fraction}` : ""}${unit.suffix}`;
+}
+
 /** Returns the civil date observed in the configured IANA timezone. */
 export function civilDateInTimeZone(timeZone: string, instant = new Date()): string {
   const parts = new Intl.DateTimeFormat("en-CA", {

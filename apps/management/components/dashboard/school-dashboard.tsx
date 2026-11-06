@@ -5,7 +5,7 @@ import Link from "next/link";
 import type { PermissionCheck } from "@campuspilot/api/routers/authorization/authorization.dto";
 import { SCHOOL_ACTIONS } from "@campuspilot/api/routers/authorization/authorization.dto";
 import type { DashboardDto } from "@campuspilot/api/routers/school/dashboard/dashboard.dto";
-import { currencySymbol, formatBasisPoints, formatMinor } from "@campuspilot/components/finance";
+import { currencySymbol, formatBasisPoints, formatMinorIndian } from "@campuspilot/components/finance";
 import { Badge } from "@campuspilot/ui/components/badge";
 import { Button } from "@campuspilot/ui/components/button";
 import {
@@ -34,6 +34,14 @@ import { authClient } from "@/lib/auth-client";
 import { orpc } from "@/lib/orpc";
 import { RequirePermissions } from "@/components/require-permissions";
 import { schoolHref, schoolSessionHref } from "@/components/school-route";
+import {
+  AmountVisibilityProvider,
+  AmountVisibilityToggle,
+  GlobalAmountVisibilityToggle,
+  MaskedAmount,
+  MaskedText,
+  useAmountRevealed,
+} from "./amount-visibility";
 
 type SchoolPermissionAction = Extract<
   PermissionCheck,
@@ -125,20 +133,23 @@ function DashboardError({ retry }: { retry: () => void }) {
   );
 }
 
-function Greeting({ name }: { name?: string | null }) {
+function Greeting({ name, action }: { name?: string | null; action?: ReactNode }) {
   const firstName = name?.trim().split(/\s+/)[0];
   return (
-    <header>
-      <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-        Session dashboard
-      </p>
-      <h1 className="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">
-        Welcome back{firstName ? `, ${firstName}` : ""}
-      </h1>
-      <p className="mt-1 text-sm text-muted-foreground">
-        Your most important permitted work is first; broader school detail
-        follows below.
-      </p>
+    <header className="flex items-start justify-between gap-4">
+      <div>
+        <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+          Session dashboard
+        </p>
+        <h1 className="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">
+          Welcome back{firstName ? `, ${firstName}` : ""}
+        </h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Your most important permitted work is first; broader school detail
+          follows below.
+        </p>
+      </div>
+      {action}
     </header>
   );
 }
@@ -165,15 +176,25 @@ function FocusCard({ data, schoolId, sessionId }: DashboardProps & { data: Dashb
                 <CreditCard className="size-5" aria-hidden />
               </span>
               <div className="min-w-0">
-                <p className="text-xs text-background/65">Session collections</p>
+                <div className="flex items-center gap-1">
+                  <p className="text-xs text-background/65">Session collections</p>
+                  <AmountVisibilityToggle
+                    scope="focus"
+                    label="session collections"
+                    className="size-5 text-background/65 hover:bg-background/10 hover:text-background"
+                  />
+                </div>
                 <h2 className="mt-1 truncate text-xl font-semibold">
-                  {formatMinor(currency.netCashMinor, currency.currency)} collected
+                  <MaskedAmount scope="focus" minor={currency.netCashMinor} currency={currency.currency} /> collected
                 </h2>
                 <p className="mt-1 text-xs text-background/65">
-                  {currency.collectionRateBasisPoints === null
-                    ? "No billed amount yet"
-                    : `${formatBasisPoints(currency.collectionRateBasisPoints)} realized`}
-                  {` · ${formatMinor(currency.dueMinor, currency.currency)} outstanding`}
+                  {currency.collectionRateBasisPoints === null ? (
+                    "No billed amount yet"
+                  ) : (
+                    <><MaskedText scope="focus">{formatBasisPoints(currency.collectionRateBasisPoints)}</MaskedText> realized</>
+                  )}
+                  {" · "}
+                  <MaskedAmount scope="focus" minor={currency.dueMinor} currency={currency.currency} /> outstanding
                 </p>
               </div>
             </div>
@@ -243,11 +264,13 @@ function MetricCard({
   label,
   value,
   detail,
+  action,
 }: {
   icon: typeof CreditCard;
   label: string;
-  value: string;
-  detail: string;
+  value: ReactNode;
+  detail: ReactNode;
+  action?: ReactNode;
 }) {
   return (
     <Card size="sm">
@@ -255,8 +278,11 @@ function MetricCard({
         <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
           <Icon className="size-4" aria-hidden />
         </span>
-        <div className="min-w-0">
-          <p className="text-xs text-muted-foreground">{label}</p>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs text-muted-foreground">{label}</p>
+            {action}
+          </div>
           <p className="truncate text-xl font-semibold tabular-nums">{value}</p>
           <p className="truncate text-[11px] text-muted-foreground">{detail}</p>
         </div>
@@ -274,11 +300,14 @@ function OverviewMetrics({ data, schoolId }: { data: DashboardDto; schoolId: str
           <MetricCard
             icon={CreditCard}
             label="Collected"
-            value={formatMinor(currency.netCashMinor, currency.currency)}
+            action={<AmountVisibilityToggle scope="collected" label="collected amount" className="size-5 text-muted-foreground" />}
+            value={<MaskedAmount scope="collected" minor={currency.netCashMinor} currency={currency.currency} />}
             detail={
-              currency.collectionRateBasisPoints === null
-                ? "No billed amount yet"
-                : `${formatBasisPoints(currency.collectionRateBasisPoints)} of billed fees`
+              currency.collectionRateBasisPoints === null ? (
+                "No billed amount yet"
+              ) : (
+                <><MaskedText scope="collected">{formatBasisPoints(currency.collectionRateBasisPoints)}</MaskedText> of billed fees</>
+              )
             }
           />
         </PermissionSection>
@@ -314,19 +343,22 @@ function DomainRow({
   primary,
   context,
   href,
+  action,
 }: {
   icon: typeof CreditCard;
   label: string;
   status: string;
-  primary: string;
-  context: string;
+  primary: ReactNode;
+  context: ReactNode;
   href: string;
+  action?: ReactNode;
 }) {
   return (
     <div className="grid items-center gap-3 border-t px-4 py-3 first:border-t-0 sm:grid-cols-[1.1fr_.7fr_1fr_1.2fr_auto]">
       <span className="flex items-center gap-2 font-medium">
         <Icon className="size-4 text-muted-foreground" aria-hidden />
         {label}
+        {action}
       </span>
       <Badge variant="outline" className="w-fit">{status}</Badge>
       <span className="font-medium tabular-nums">{primary}</span>
@@ -380,8 +412,14 @@ function CrossDomainStatus({ data, schoolId, sessionId }: DashboardProps & { dat
               icon={CreditCard}
               label="Billing"
               status="Session"
-              primary={`${formatMinor(currency.netCashMinor, currency.currency)} collected`}
-              context={`${formatMinor(currency.dueMinor, currency.currency)} outstanding${data.billing && data.billing.currencies.length > 1 ? ` · ${data.billing.currencies.length} currencies` : ""}`}
+              action={<AmountVisibilityToggle scope="billing-status" label="billing status" className="size-5 text-muted-foreground" />}
+              primary={<><MaskedAmount scope="billing-status" minor={currency.netCashMinor} currency={currency.currency} /> collected</>}
+              context={
+                <>
+                  <MaskedAmount scope="billing-status" minor={currency.dueMinor} currency={currency.currency} /> outstanding
+                  {data.billing && data.billing.currencies.length > 1 ? ` · ${data.billing.currencies.length} currencies` : ""}
+                </>
+              }
               href={schoolSessionHref(schoolId, sessionId, "/billing")}
             />
           </PermissionSection>
@@ -506,11 +544,13 @@ function SectionCard({
   title,
   description,
   href,
+  action,
   children,
 }: {
   title: string;
   description: string;
   href?: string;
+  action?: ReactNode;
   children: ReactNode;
 }) {
   return (
@@ -518,11 +558,14 @@ function SectionCard({
       <CardHeader>
         <CardTitle>{title}</CardTitle>
         <CardDescription>{description}</CardDescription>
-        {href ? (
-          <CardAction>
-            <Button asChild type="button" variant="ghost" size="sm">
-              <Link href={href}>Open <ArrowRight aria-hidden /></Link>
-            </Button>
+        {href || action ? (
+          <CardAction className="flex items-center gap-1">
+            {action}
+            {href ? (
+              <Button asChild type="button" variant="ghost" size="sm">
+                <Link href={href}>Open <ArrowRight aria-hidden /></Link>
+              </Button>
+            ) : null}
           </CardAction>
         ) : null}
       </CardHeader>
@@ -531,7 +574,11 @@ function SectionCard({
   );
 }
 
+/** Bar heights reveal the collection pattern, so while hidden the chart is
+ * blurred and its exact per-month tooltips are dropped. */
 function CollectionTrend({ summary, href }: { summary: CurrencySummary; href: string }) {
+  const scope = `trend:${summary.currency}`;
+  const revealed = useAmountRevealed(scope);
   const max = summary.monthly.reduce((current, month) => {
     const billed = BigInt(month.billedMinor);
     const collected = BigInt(month.netCashMinor);
@@ -542,21 +589,25 @@ function CollectionTrend({ summary, href }: { summary: CurrencySummary; href: st
       title="Fee collection trend"
       description={`Monthly billed and net collected amounts in ${currencySymbol(summary.currency)}`}
       href={href}
+      action={<AmountVisibilityToggle scope={scope} label="fee collection trend" />}
     >
       {summary.monthly.length ? (
         <>
-          <div className="flex h-52 items-end gap-3 border-b border-dashed sm:gap-5">
+          <div
+            aria-hidden={!revealed}
+            className={`flex h-52 items-end gap-3 border-b border-dashed sm:gap-5 ${revealed ? "" : "blur-md select-none"}`}
+          >
             {summary.monthly.map((month) => (
               <div key={month.month} className="flex h-full flex-1 items-end gap-1">
                 <div
                   className="min-h-0.5 w-1/2 rounded-t-sm bg-muted"
                   style={{ height: `${ratioPercent(month.billedMinor, max.toString())}%` }}
-                  title={`${month.month}: ${formatMinor(month.billedMinor, summary.currency)} billed`}
+                  title={revealed ? `${month.month}: ${formatMinorIndian(month.billedMinor, summary.currency)} billed` : undefined}
                 />
                 <div
                   className="min-h-0.5 w-1/2 rounded-t-sm bg-primary"
                   style={{ height: `${ratioPercent(month.netCashMinor, max.toString())}%` }}
-                  title={`${month.month}: ${formatMinor(month.netCashMinor, summary.currency)} collected`}
+                  title={revealed ? `${month.month}: ${formatMinorIndian(month.netCashMinor, summary.currency)} collected` : undefined}
                 />
               </div>
             ))}
@@ -585,6 +636,8 @@ function CollectionTrend({ summary, href }: { summary: CurrencySummary; href: st
 }
 
 function BillingPosition({ summary, href }: { summary: CurrencySummary; href: string }) {
+  const scope = `position:${summary.currency}`;
+  const revealed = useAmountRevealed(scope);
   const items = [
     ["Billed", summary.billedMinor],
     ["Net collected", summary.netCashMinor],
@@ -596,11 +649,12 @@ function BillingPosition({ summary, href }: { summary: CurrencySummary; href: st
       title="Billing position"
       description={`${summary.billedAdmissions} admissions billed in ${currencySymbol(summary.currency)}`}
       href={href}
+      action={<AmountVisibilityToggle scope={scope} label="billing position" />}
     >
       <div className="grid grid-cols-2 gap-2">
         {items.map(([label, value]) => (
           <div key={label} className="rounded-lg border p-3">
-            <p className="text-lg font-semibold tabular-nums">{formatMinor(value, summary.currency)}</p>
+            <p className="text-lg font-semibold tabular-nums"><MaskedAmount scope={scope} minor={value} currency={summary.currency} /></p>
             <p className="text-[10px] text-muted-foreground">{label}</p>
           </div>
         ))}
@@ -609,11 +663,11 @@ function BillingPosition({ summary, href }: { summary: CurrencySummary; href: st
         <div className="mb-1.5 flex justify-between text-[11px]">
           <span className="text-muted-foreground">Collection rate</span>
           <span className="font-medium">
-            {summary.collectionRateBasisPoints === null ? "—" : formatBasisPoints(summary.collectionRateBasisPoints)}
+            {summary.collectionRateBasisPoints === null ? "—" : <MaskedText scope={scope}>{formatBasisPoints(summary.collectionRateBasisPoints)}</MaskedText>}
           </span>
         </div>
         <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-          <div className="h-full rounded-full bg-primary" style={{ width: `${ratioPercent(summary.netCashMinor, summary.billedMinor)}%` }} />
+          <div className="h-full rounded-full bg-primary" style={{ width: `${revealed ? ratioPercent(summary.netCashMinor, summary.billedMinor) : 0}%` }} />
         </div>
       </div>
     </SectionCard>
@@ -712,7 +766,16 @@ function DashboardContent({ data, schoolId, sessionId }: DashboardProps & { data
   const billingHref = schoolSessionHref(schoolId, sessionId, "/billing/reports");
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
-      <Greeting name={authClient.useSession().data?.user.name} />
+      <Greeting
+        name={authClient.useSession().data?.user.name}
+        action={
+          data.billing ? (
+            <PermissionSection action={SCHOOL_ACTIONS.READ_BILLING_REPORTS} schoolId={schoolId}>
+              <GlobalAmountVisibilityToggle />
+            </PermissionSection>
+          ) : null
+        }
+      />
       <FocusCard data={data} schoolId={schoolId} sessionId={sessionId} />
       <OverviewMetrics data={data} schoolId={schoolId} />
       <CrossDomainStatus data={data} schoolId={schoolId} sessionId={sessionId} />
@@ -769,10 +832,12 @@ export function SchoolDashboard({ schoolId, sessionId }: DashboardProps) {
     return <DashboardError retry={() => void dashboardQuery.refetch()} />;
   }
   return (
-    <DashboardContent
-      data={dashboardQuery.data}
-      schoolId={schoolId}
-      sessionId={sessionId}
-    />
+    <AmountVisibilityProvider>
+      <DashboardContent
+        data={dashboardQuery.data}
+        schoolId={schoolId}
+        sessionId={sessionId}
+      />
+    </AmountVisibilityProvider>
   );
 }

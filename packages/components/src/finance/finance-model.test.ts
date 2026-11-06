@@ -3,6 +3,8 @@ import {
   calculatePercentageMinor,
   decimalToMinor,
   formatMinor,
+  formatMinorIndian,
+  formatCompactMinorIndian,
   formatBasisPoints,
   retainDraftAfterStaleReview,
   visibleFinanceActions,
@@ -41,6 +43,21 @@ describe("finance presentation model", () => {
     expect(formatMinor("1234", "BHD")).toBe("BHD 1.234");
     expect(decimalToMinor("1.2345", "CLF")).toBe("12345");
     expect(formatMinor("12345", "CLF")).toBe("CLF 1.2345");
+  });
+
+  it("formats amounts with Indian grouping and compact units", () => {
+    expect(formatMinorIndian("123456789", "INR")).toBe("₹12,34,567.89");
+    expect(formatMinorIndian("99900", "INR")).toBe("₹999.00");
+    expect(formatMinorIndian("-10000000", "INR")).toBe("-₹1,00,000.00");
+    expect(formatCompactMinorIndian("99900", "INR")).toBe("₹999");
+    expect(formatCompactMinorIndian("123456", "INR")).toBe("₹1.23K");
+    expect(formatCompactMinorIndian("9999999", "INR")).toBe("₹99.99K");
+    expect(formatCompactMinorIndian("10000000", "INR")).toBe("₹1L");
+    expect(formatCompactMinorIndian("1234567800", "INR")).toBe("₹1.23Cr");
+    expect(formatCompactMinorIndian("1234567800000", "INR")).toBe("₹1,234.56Cr");
+    expect(formatCompactMinorIndian("-150000000", "INR")).toBe("-₹15L");
+    expect(formatCompactMinorIndian("-50", "INR")).toBe("₹0");
+    expect(formatCompactMinorIndian("150000", "JPY")).toBe("¥1.5L");
   });
 
   it("previews percentages with the same half-up integer rule as the server", () => {
