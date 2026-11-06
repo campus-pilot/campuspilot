@@ -32,6 +32,20 @@ actions contains {
   "resourceKind": "system",
 } if { true }
 
+# Aggregate, platform-admin-only metrics. Counts never expose individual
+# student records, so they are granted separately from school student actions.
+actions contains {
+  "id": "system.platform.stats.read",
+  "key": "READ_PLATFORM_STATS",
+  "resourceKind": "system",
+} if { true }
+
+actions contains {
+  "id": "system.school.stats.read",
+  "key": "READ_SCHOOL_STATS",
+  "resourceKind": "system",
+} if { true }
+
 actions contains {
   "id": "system.oauth_client.list",
   "key": "LIST_OAUTH_CLIENTS",

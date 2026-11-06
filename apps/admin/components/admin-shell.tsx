@@ -10,8 +10,6 @@ import {
 } from '@campuspilot/components/app-shell';
 import { getProfileImageUrl } from '@campuspilot/auth/profile-image.client';
 import { env } from '@campuspilot/env/admin.client';
-import { Button } from '@campuspilot/ui/components/button';
-import { Command, Search } from 'lucide-react';
 import { authClient } from '@/lib/auth-client';
 import { AdminAccountDialog } from './admin-account-dialog';
 import { SchoolSwitcher } from './school-switcher';
@@ -21,18 +19,6 @@ export type AdminShellState = {
   breadcrumbs: AppShellBreadcrumb[];
   navbarActions?: ReactNode;
 };
-
-function AdminSearch() {
-  return (
-    <Button variant="ghost" className="justify-start rounded-lg px-2">
-      <Search />
-      Search
-      <span className="ml-auto flex items-center gap-1 text-[10px] text-muted-foreground">
-        <Command className="size-3" />K
-      </span>
-    </Button>
-  );
-}
 
 export function AdminShell({
   children,
@@ -67,7 +53,7 @@ export function AdminShell({
         navigation={state.navigation}
         breadcrumbs={state.breadcrumbs}
         sidebarHeader={<SchoolSwitcher />}
-        search={<AdminSearch />}
+        search={null}
         user={user}
         navbarActions={state.navbarActions}
         onManageAccount={() => setIsAccountDialogOpen(true)}

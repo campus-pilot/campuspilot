@@ -29,6 +29,13 @@ grants contains {
 
 grants contains {"role": "platform.admin", "action": action} if {
   some action in {
+    "system.platform.stats.read",
+    "system.school.stats.read",
+  }
+}
+
+grants contains {"role": "platform.admin", "action": action} if {
+  some action in {
     "system.school.demo.create",
     "system.school.demo.read",
     "system.school.demo.credentials.read",

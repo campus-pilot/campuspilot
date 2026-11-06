@@ -202,3 +202,33 @@ test_demo_actions_reject_school_resources if {
     "resource": {"kind": "school", "schoolId": "school-1"},
   }
 }
+
+test_admin_can_read_aggregate_stats if {
+  every action in {"system.platform.stats.read", "system.school.stats.read"} {
+    authorization.allow with input as {
+      "action": action,
+      "subject": {
+        "userId": "user-1",
+        "roleAssignments": [{"role": "platform.admin", "scope": {"kind": "platform"}}],
+      },
+      "resource": {"kind": "system"},
+    }
+  }
+}
+
+test_school_principal_cannot_read_aggregate_stats if {
+  every action in {"system.platform.stats.read", "system.school.stats.read"} {
+    not authorization.allow with input as {
+      "action": action,
+      "subject": {
+        "userId": "user-1",
+        "roleAssignments": [{
+          "role": "school.principal",
+          "scope": {"kind": "school", "schoolId": "school-1"},
+          "meta": {},
+        }],
+      },
+      "resource": {"kind": "system"},
+    }
+  }
+}
