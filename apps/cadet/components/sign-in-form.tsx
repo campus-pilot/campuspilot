@@ -6,7 +6,7 @@ import { Button } from '@campuspilot/ui/components/button';
 import { Field, FieldError, FieldGroup, FieldLabel } from '@campuspilot/ui/components/field';
 import { Input } from '@campuspilot/ui/components/input';
 import { useForm } from '@tanstack/react-form';
-import { redirect, useRouter, useSearchParams } from 'next/navigation';
+import { redirect, useSearchParams } from 'next/navigation';
 import { z } from 'zod';
 
 import { authClient, isSignedOAuthRequest, oauthAuthClient, oauthRedirectUrl } from '@/lib/auth-client';
@@ -31,7 +31,6 @@ const fields = [
  * answers with the next URL (consent or the app's callback).
  */
 function useSignInForm() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const oauthRequest = isSignedOAuthRequest(searchParams);
   const redirectPath = sanitizeAuthRedirectPath(searchParams.get(AUTH_REDIRECT_QUERY_PARAM));
@@ -54,7 +53,9 @@ function useSignInForm() {
         window.location.assign(next);
         return;
       }
-      router.replace(redirectPath);
+      // A full navigation, because the sign-in went through a custom
+      // endpoint that the auth client's cached session does not observe.
+      window.location.assign(redirectPath);
     },
   });
   return { form, oauthRequest };
