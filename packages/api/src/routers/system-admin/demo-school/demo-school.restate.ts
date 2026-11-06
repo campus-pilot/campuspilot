@@ -2,8 +2,8 @@ import { env } from "@campuspilot/env/server";
 import { getRestateClient, rpc } from "@campuspilot/restate/client";
 
 import { DEMO_SCHOOL_CONTROL_SERVICE_NAME } from "../../../workflows/demo-school/constants";
-import { signDemoControlCall, type DemoControlHandler } from "../../../workflows/demo-school/control-auth";
-import type { DemoSchoolControlService } from "../../../workflows/demo-school/control-service";
+import { signWorkerControlCall } from "../../../workflows/control-auth";
+import type { DemoSchoolControlHandler, DemoSchoolControlService } from "../../../workflows/demo-school/control-service";
 
 /**
  * API-side hand-over to Restate. Both workflows are private to ingress, so the
@@ -28,10 +28,11 @@ function controlSend() {
 }
 
 /** Signed send options; refuses to send unsigned (the worker would refuse it anyway). */
-function signedSendOptions<I>(handler: DemoControlHandler, input: I, idempotencyKey: string) {
-  const secret = env.DEMO_CONTROL_SECRET;
-  if (!secret) throw new Error("DEMO_CONTROL_SECRET is not set, so demo control calls cannot be signed.");
-  return rpc.sendOpts<I>({ idempotencyKey, headers: signDemoControlCall(secret, handler, input), timeout: SEND_TIMEOUT_MS });
+function signedSendOptions<I>(handler: DemoSchoolControlHandler, input: I, idempotencyKey: string) {
+  const secret = env.WORKER_CONTROL_SECRET;
+  if (!secret) throw new Error("WORKER_CONTROL_SECRET is not set, so worker control calls cannot be signed.");
+  const headers = signWorkerControlCall(secret, { service: DEMO_SCHOOL_CONTROL_SERVICE_NAME, handler }, input);
+  return rpc.sendOpts<I>({ idempotencyKey, headers, timeout: SEND_TIMEOUT_MS });
 }
 
 /** Hands one attempt of a demo seed to Restate; returns the control invocation. */

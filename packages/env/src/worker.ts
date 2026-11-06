@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { createEnv } from '@t3-oss/env-core';
 import { z } from 'zod';
-import { DEMO_CONTROL_ENV_SHAPE, requireDemoControlSecretInProduction } from './server/services.env';
+import { WORKER_CONTROL_ENV_SHAPE, requireWorkerControlSecretInProduction } from './server/services.env';
 
 /**
  * Environment of `apps/worker`, the Restate endpoint host. The workflows it
@@ -11,7 +11,7 @@ import { DEMO_CONTROL_ENV_SHAPE, requireDemoControlSecretInProduction } from './
  * Restate request signing (identity keys) is deliberately not used: Restate
  * and the worker run inside the same private cluster network and the worker
  * is never routed from outside it. Calls that matter for safety are
- * authenticated in the handler instead (`DEMO_CONTROL_SECRET`).
+ * authenticated in the handler instead (`WORKER_CONTROL_SECRET`).
  */
 export const env = createEnv({
   server: {
@@ -25,12 +25,12 @@ export const env = createEnv({
     RESTATE_WORKER_URL: z.url(),
     RESTATE_ADMIN_URL: z.url(),
     NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
-    /** Verifies `DemoSchoolControl` calls; the same value as the API server's. */
-    ...DEMO_CONTROL_ENV_SHAPE,
+    /** Verifies calls to worker services through Restate ingress; the same value as the API server's. */
+    ...WORKER_CONTROL_ENV_SHAPE,
   },
   createFinalSchema: (shape) =>
     z.object(shape).superRefine((value, context) => {
-      requireDemoControlSecretInProduction(value, context);
+      requireWorkerControlSecretInProduction(value, context);
     }),
   runtimeEnv: process.env,
   skipValidation: !!process.env.SKIP_ENV_VALIDATION,

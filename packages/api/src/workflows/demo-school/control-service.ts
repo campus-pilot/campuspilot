@@ -6,7 +6,7 @@ import * as restate from '@restatedev/restate-sdk';
 import { and, eq, inArray, isNull } from 'drizzle-orm';
 
 import { DEMO_SCHOOL_CONTROL_SERVICE_NAME, demoSchoolWorkflowKey } from './constants';
-import { verifyDemoControlCall, type DemoControlHandler } from './control-auth';
+import { verifyWorkerControlCall } from '../control-auth';
 import { log } from './log';
 import {
   demoSchoolPurgeInputSchema,
@@ -17,6 +17,9 @@ import {
 import { getRestateInvocation } from './restate-admin';
 import { toSafeError } from './safe-error';
 import { demoSchoolWorkflow, demoSchoolWorkflowInputSchema, type DemoSchoolWorkflowInput } from './workflow';
+
+/** Handlers of `DemoSchoolControl`; each signature is bound to one. */
+export type DemoSchoolControlHandler = 'startSeed' | 'startPurge';
 
 /** Runs a database step with a safe failure text (no SQL or parameters). */
 function safeRun<T>(ctx: restate.Context, name: string, action: () => Promise<T>) {
@@ -30,23 +33,23 @@ function safeRun<T>(ctx: restate.Context, name: string, action: () => Promise<T>
 }
 
 /**
- * Refuses a call that the API did not sign (see `control-auth.ts`). Runs
+ * Refuses a call that the API did not sign (see `../control-auth.ts`). Runs
  * before any journal entry and before the database is read. It is not
  * journaled: it reads only the invocation's immutable headers and Restate's
  * immutable acceptance time, so every retry reaches the same verdict. A
  * missing secret fails closed. An unreachable admin API is retried (a plain
  * error), never treated as authenticated.
  */
-async function authenticate(ctx: restate.Context, handler: DemoControlHandler, input: unknown) {
-  const secret = env.DEMO_CONTROL_SECRET;
+async function authenticate(ctx: restate.Context, handler: DemoSchoolControlHandler, input: unknown) {
+  const secret = env.WORKER_CONTROL_SECRET;
   if (!secret) {
     log.error({ handler }, 'demo-school.control.secret-missing');
-    throw new restate.TerminalError('Demo control calls are disabled: DEMO_CONTROL_SECRET is not configured.', { errorCode: 503 });
+    throw new restate.TerminalError('Demo control calls are disabled: WORKER_CONTROL_SECRET is not configured.', { errorCode: 503 });
   }
   const request = ctx.request();
   const invocation = await getRestateInvocation(request.id);
   if (!invocation) throw new Error('Restate does not report this invocation yet.');
-  const verdict = verifyDemoControlCall({ secret, handler, input, headers: request.headers, acceptedAt: invocation.createdAt });
+  const verdict = verifyWorkerControlCall({ secret, target: { service: DEMO_SCHOOL_CONTROL_SERVICE_NAME, handler }, input, headers: request.headers, acceptedAt: invocation.createdAt });
   if (!verdict.ok) {
     log.warn({ handler, reason: verdict.reason, invocationId: request.id }, 'demo-school.control.unauthenticated');
     throw new restate.TerminalError('Unauthenticated demo control call.', { errorCode: 401 });

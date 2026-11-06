@@ -158,9 +158,12 @@ purge) with **Retry purge** for admins allowed to purge
 
 Restate OSS ingress does not authenticate callers, and `DemoSchoolControl` is
 the only demo service ingress exposes. The API signs every control call:
-headers `x-demo-control-timestamp` and `x-demo-control-signature`, an
-HMAC-SHA256 with `DEMO_CONTROL_SECRET` over `v1`, the handler name, the
-timestamp and the canonical JSON of the input (`control-auth.ts`). Before any
+headers `x-worker-control-timestamp` and `x-worker-control-signature`, an
+HMAC-SHA256 with `WORKER_CONTROL_SECRET` over `v1`, `{service}/{handler}`, the
+timestamp and the canonical JSON of the input
+(`packages/api/src/workflows/control-auth.ts`). The secret and the signing
+module belong to the worker as a whole: any future workflow entry point on
+ingress uses the same ones. Before any
 journal entry or database read, the handler verifies it with a constant-time
 compare and requires the timestamp to lie within 2 minutes of **when Restate
 accepted the invocation** (`sys_invocation.created_at`, read from the admin
@@ -208,7 +211,7 @@ pnpm --filter worker register [--force]
 ```
 
 Both `apps/server/.env` and `apps/worker/.env` need the same
-`DEMO_CONTROL_SECRET` (`openssl rand -hex 32`); without it no demo can be
+`WORKER_CONTROL_SECRET` (`openssl rand -hex 32`); without it no demo can be
 started or purged.
 
 `RESTATE_WORKER_URL` is the URI Restate (in Docker) uses to reach the worker;
@@ -236,7 +239,7 @@ Environment variables for this feature:
 
 | Variable | Read by | Notes |
 | --- | --- | --- |
-| `DEMO_CONTROL_SECRET` | API server **and** worker (same value) | New. Required when `NODE_ENV=production`; at least 32 characters |
+| `WORKER_CONTROL_SECRET` | API server **and** worker (same value) | New. Required when `NODE_ENV=production`; at least 32 characters. Worker-wide, not demo-specific |
 | `RESTATE_INGRESS_URL` | API server | Hand-over sends |
 | `RESTATE_ADMIN_URL` | API server and worker | Never publicly reachable |
 | `RESTATE_WORKER_URL`, `WORKER_PORT` | worker | Unchanged |

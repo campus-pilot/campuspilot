@@ -43,7 +43,7 @@ const MESSAGES = {
 /** Safe one-line description of a hand-over failure (no URLs or secrets). */
 function describeHandoverError(error: unknown) {
   if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) return "Restate did not answer in time.";
-  if (error instanceof Error && /DEMO_CONTROL_SECRET/.test(error.message)) return error.message;
+  if (error instanceof Error && /WORKER_CONTROL_SECRET/.test(error.message)) return error.message;
   return "Restate is unreachable.";
 }
 
