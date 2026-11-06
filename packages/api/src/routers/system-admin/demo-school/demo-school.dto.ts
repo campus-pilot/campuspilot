@@ -4,6 +4,8 @@ import {
   createListInputSchema,
   createPaginatedOutputSchema,
 } from "../../../paginations";
+import { DEMO_SCHOOL_PURGE_STAGES } from "@campuspilot/db/schema/demo-school-job";
+
 import { DEMO_SCHOOL_STEPS } from "../../../workflows/demo-school/constants";
 import { demoSeedInputSchema } from "../../../workflows/demo-school/plan";
 import { addSchoolInputSchema, schoolDtoSchema } from "../school/school.dto";
@@ -104,6 +106,14 @@ export const demoSchoolJobDtoSchema = z.object({
     .nullable(),
   asOf: z.date().nullable(),
   createdAt: z.date(),
+  /** When the admin asked to start this attempt; null while only created (e.g. during the logo upload). */
+  startRequestedAt: z.date().nullable(),
+  /** When Restate durably accepted this attempt's start; a worker may not have picked it up yet. */
+  submittedAt: z.date().nullable(),
+  /** Why the last hand-over to Restate failed, while it is retried. */
+  lastSubmitError: z.string().nullable(),
+  /** Set once a purge of this school was requested; the job can no longer run. */
+  purgeRequestedAt: z.date().nullable(),
   startedAt: z.date().nullable(),
   finishedAt: z.date().nullable(),
 });
@@ -137,12 +147,50 @@ export const purgeDemoSchoolInputSchema = z.object({
     .describe("The school's slug, typed exactly to confirm the purge."),
 });
 
-export const purgeDemoSchoolOutputSchema = z.object({
+export const demoSchoolPurgeStageSchema = z.enum(DEMO_SCHOOL_PURGE_STAGES);
+
+/** One demo purge request and its progress. Survives the school it purged. */
+export const demoSchoolPurgeDtoSchema = z.object({
   schoolId: z.string(),
-  /** Rows removed per table by purge_demo_school(). */
-  deletedRows: z.record(z.string(), z.number().int().nonnegative()),
-  /** Known S3 objects handed to the DemoSchoolPurge workflow (prefixes are listed again there). */
-  fileCount: z.number().int().nonnegative(),
-  /** Whether the background file cleanup could be scheduled after the database purge. */
-  fileCleanupScheduled: z.boolean(),
+  /** The school's name and slug when the purge was requested (null for purges from before 0028). */
+  schoolName: z.string().nullable(),
+  schoolSlug: z.string().nullable(),
+  /** `pending`: not yet accepted by Restate; `scheduled`: accepted and running. */
+  status: z.enum(["pending", "scheduled", "completed", "failed"]),
+  /** Every stage in order, for the progress view. */
+  stages: z.array(demoSchoolPurgeStageSchema),
+  /** The running stage, or where a failed attempt stopped. */
+  stage: demoSchoolPurgeStageSchema.nullable(),
+  attempt: z.number().int().positive(),
+  /** True while a failed purge will still be retried automatically. */
+  automaticRetryPending: z.boolean(),
+  error: z.string().nullable(),
+  /** Why the last hand-over to Restate failed, while it is retried. */
+  lastSubmitError: z.string().nullable(),
+  dataDeletedAt: z.date().nullable(),
+  createdAt: z.date(),
+  scheduledAt: z.date().nullable(),
+  completedAt: z.date().nullable(),
 });
+
+export type DemoSchoolPurgeDto = z.infer<typeof demoSchoolPurgeDtoSchema>;
+
+/** The purge request as recorded; the work runs in the background (watchDemoSchoolPurge). */
+export const purgeDemoSchoolOutputSchema = demoSchoolPurgeDtoSchema;
+
+export const listDemoSchoolPurgesInputSchema = createListInputSchema({
+  filters: z
+    .object({
+      /** Only purges that need an admin: failed, or not yet handed over with an error. */
+      needsAttention: z.boolean().default(true),
+    })
+    .default({ needsAttention: true }),
+  orderBy: z
+    .object({
+      field: z.enum(["createdAt"]),
+      direction: z.enum(["asc", "desc"]).default("desc"),
+    })
+    .default({ field: "createdAt", direction: "desc" }),
+});
+
+export const listDemoSchoolPurgesOutputSchema = createPaginatedOutputSchema(demoSchoolPurgeDtoSchema);

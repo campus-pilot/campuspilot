@@ -3,7 +3,7 @@ import { deleteUnusedDynamicOAuthClients } from '@campuspilot/auth/mcp-oauth';
 import { db } from '@campuspilot/db';
 import { runMigrations } from '@campuspilot/db/migrate';
 import { env } from '@campuspilot/env/server';
-import { resubmitPendingDemoPurges } from '@campuspilot/api/routers/system-admin/demo-school/demo-school.purge';
+import { sweepDemoSchoolOutbox } from '@campuspilot/api/routers/system-admin/demo-school/demo-school.outbox';
 
 import { app, mcpCatalog, mcpHandler } from './http';
 import { log } from './log';
@@ -24,13 +24,17 @@ async function phase<T>(name: string, fn: () => Promise<T>): Promise<T> {
 }
 
 const DCR_CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
-/** How often the demo purge outbox resubmits S3 cleanups Restate never accepted. */
-const DEMO_PURGE_OUTBOX_INTERVAL_MS = 10 * 60 * 1000;
+/**
+ * How often the demo outbox re-sends starts and purges Restate has not
+ * accepted and checks accepted runs for pauses. Kick-offs hand over
+ * immediately; this is the fallback, so it bounds the delay after an outage.
+ */
+const DEMO_OUTBOX_INTERVAL_MS = 30 * 1000;
 
-/** Resubmits pending demo-school S3 cleanups; failures are retried next sweep. */
-async function sweepDemoPurgeOutbox() {
-  const result = await resubmitPendingDemoPurges();
-  if (result.pending > 0) log.info(result, 'demo-school.purge-outbox.ok');
+/** One demo outbox sweep; failures are retried next sweep. */
+async function sweepDemoOutbox() {
+  const result = await sweepDemoSchoolOutbox();
+  if (Object.values(result).some((value) => value > 0)) log.info(result, 'demo-school.outbox.ok');
 }
 
 /** Removes dynamically registered OAuth clients that never got a grant. */
@@ -57,17 +61,17 @@ async function main() {
   // Chained, not setInterval: the next sweep is scheduled only after the
   // previous one finished, so slow sweeps never overlap on this instance.
   // Across replicas, the sweep claims rows with FOR UPDATE SKIP LOCKED.
-  let demoPurgeOutbox: NodeJS.Timeout | undefined;
+  let demoOutbox: NodeJS.Timeout | undefined;
   let stopped = false;
   const sweepOutbox = async () => {
     try {
-      await sweepDemoPurgeOutbox();
+      await sweepDemoOutbox();
     } catch (err) {
-      log.error({ err }, 'demo-school.purge-outbox.error');
+      log.error({ err }, 'demo-school.outbox.error');
     }
     if (stopped) return;
-    demoPurgeOutbox = setTimeout(() => void sweepOutbox(), DEMO_PURGE_OUTBOX_INTERVAL_MS);
-    demoPurgeOutbox.unref();
+    demoOutbox = setTimeout(() => void sweepOutbox(), DEMO_OUTBOX_INTERVAL_MS);
+    demoOutbox.unref();
   };
   void sweepOutbox();
 
@@ -88,7 +92,7 @@ async function main() {
     log.info({ signal }, 'boot.shutdown.start');
     clearInterval(dcrCleanup);
     stopped = true;
-    clearTimeout(demoPurgeOutbox);
+    clearTimeout(demoOutbox);
     void mcpHandler.close().catch((err) => {
       log.error({ err }, 'mcp.shutdown.error');
     });

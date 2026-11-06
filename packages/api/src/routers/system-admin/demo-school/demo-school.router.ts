@@ -1,19 +1,19 @@
 import { GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { auth } from "@campuspilot/auth/server";
 import type { DatabaseExecutor } from "@campuspilot/db";
-import { admissionTable } from "@campuspilot/db/schema/admission";
-import { artifactTable } from "@campuspilot/db/schema/artifact";
-import { user } from "@campuspilot/db/schema/auth";
-import { demoSchoolJobTable, demoSchoolPurgeTable } from "@campuspilot/db/schema/demo-school-job";
+import {
+  DEMO_SCHOOL_PURGE_STAGES,
+  demoSchoolJobTable,
+  demoSchoolPurgeTable,
+} from "@campuspilot/db/schema/demo-school-job";
 import { schoolTable } from "@campuspilot/db/schema/school";
 import { schoolMemberTable } from "@campuspilot/db/schema/school-member";
 import { schoolUserRoleTable } from "@campuspilot/db/schema/school-user-role";
 import { env } from "@campuspilot/env/server";
 import { SYSTEM_ACTIONS } from "@campuspilot/opa/policies/system";
 import { getS3Client } from "@campuspilot/s3/client";
-import { ORPCError } from "@orpc/server";
-import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { eventIterator } from "@orpc/server";
+import { and, asc, count, desc, eq, isNotNull, isNull, or, sql } from "drizzle-orm";
 
 import { rpcError, toRpcError } from "../../../errors";
 import { protectedProcedure } from "../../../index";
@@ -23,13 +23,12 @@ import {
   resolvePaginationInput,
 } from "../../../paginations";
 import { requireSystemPermission } from "../../../permissions/system";
-import { DEMO_SCHOOL_STEPS, demoCredentialsS3Key } from "../../../workflows/demo-school/constants";
+import { DEMO_SCHOOL_STEPS } from "../../../workflows/demo-school/constants";
 import {
   generateRegistrationNumber,
   slugifySchoolName,
   uniqueSlug,
 } from "../../../workflows/demo-school/identity";
-import { log } from "../../../workflows/demo-school/log";
 import { demoClassCatalogue } from "../../../workflows/demo-school/seed";
 import { toSchoolDto } from "../school/school.dto";
 import {
@@ -39,18 +38,23 @@ import {
   demoSchoolIdInputSchema,
   demoSchoolJobDtoSchema,
   demoSchoolJobIdInputSchema,
+  demoSchoolPurgeDtoSchema,
   listDemoClassCatalogueInputSchema,
   listDemoClassCatalogueOutputSchema,
+  listDemoSchoolPurgesInputSchema,
+  listDemoSchoolPurgesOutputSchema,
   purgeDemoSchoolInputSchema,
   purgeDemoSchoolOutputSchema,
   type DemoSchoolJobDto,
+  type DemoSchoolPurgeDto,
 } from "./demo-school.dto";
-import { scheduleDemoSchoolPurgeCleanup } from "./demo-school.purge";
 import {
-  cancelRestateInvocationAndWait,
-  getRestateInvocationStatus,
-  submitDemoSchoolWorkflow,
-} from "./demo-school.restate";
+  dispatchDemoSchoolPurge,
+  dispatchDemoSchoolStart,
+  handOff,
+  MAX_AUTOMATIC_PURGE_ATTEMPTS,
+} from "./demo-school.outbox";
+import { watchUntilFinal } from "./demo-school.watch";
 
 const CREDENTIALS_URL_TTL_SECONDS = 5 * 60;
 const MCP_HIDDEN_PLATFORM = {
@@ -61,6 +65,7 @@ const MCP_HIDDEN_PLATFORM = {
 } as const;
 
 type DemoJobRow = typeof demoSchoolJobTable.$inferSelect;
+type DemoPurgeRow = typeof demoSchoolPurgeTable.$inferSelect;
 
 function toDemoSchoolJobDto(row: DemoJobRow): DemoSchoolJobDto {
   return demoSchoolJobDtoSchema.parse({
@@ -77,8 +82,31 @@ function toDemoSchoolJobDto(row: DemoJobRow): DemoSchoolJobDto {
       : null,
     asOf: row.asOf,
     createdAt: row.createdAt,
+    startRequestedAt: row.startRequestedAt,
+    submittedAt: row.submittedAt,
+    lastSubmitError: row.lastSubmitError,
+    purgeRequestedAt: row.purgeRequestedAt,
     startedAt: row.startedAt,
     finishedAt: row.finishedAt,
+  });
+}
+
+function toDemoSchoolPurgeDto(row: DemoPurgeRow): DemoSchoolPurgeDto {
+  return demoSchoolPurgeDtoSchema.parse({
+    schoolId: row.schoolId,
+    schoolName: row.schoolName,
+    schoolSlug: row.schoolSlug,
+    status: row.status,
+    stages: [...DEMO_SCHOOL_PURGE_STAGES],
+    stage: row.stage,
+    attempt: row.attempt,
+    automaticRetryPending: row.status === "failed" && row.attempt < MAX_AUTOMATIC_PURGE_ATTEMPTS,
+    error: row.lastError,
+    lastSubmitError: row.lastSubmitError,
+    dataDeletedAt: row.dataDeletedAt,
+    createdAt: row.createdAt,
+    scheduledAt: row.scheduledAt,
+    completedAt: row.completedAt,
   });
 }
 
@@ -88,24 +116,17 @@ async function findJob(db: DatabaseExecutor, jobId: string) {
   return job;
 }
 
-/** Submits the job's current attempt and records its Restate invocation. */
-async function submitJob(db: DatabaseExecutor, job: DemoJobRow) {
-  let invocationId: string;
-  try {
-    ({ invocationId } = await submitDemoSchoolWorkflow(job.id, job.attempt));
-  } catch (error) {
-    log.error({ err: error instanceof Error ? { name: error.name, message: error.message } : String(error), jobId: job.id }, "demo-school.submit.failed");
-    // A refusal or "worker unavailable" keeps its own code and message.
-    if (error instanceof ORPCError) throw error;
-    throw rpcError.internal(error);
-  }
-  const [updated] = await db
-    .update(demoSchoolJobTable)
-    .set({ invocationId })
-    .where(eq(demoSchoolJobTable.id, job.id))
-    .returning();
-  return updated ?? job;
+async function findPurge(db: DatabaseExecutor, schoolId: string) {
+  const [purge] = await db.select().from(demoSchoolPurgeTable).where(eq(demoSchoolPurgeTable.schoolId, schoolId)).limit(1);
+  if (!purge) throw rpcError.notFound("Demo school purge");
+  return purge;
 }
+
+/** A purge needs an admin when it failed, or while its hand-over to Restate keeps failing. */
+const purgeNeedsAttention = or(
+  eq(demoSchoolPurgeTable.status, "failed"),
+  and(eq(demoSchoolPurgeTable.status, "pending"), isNotNull(demoSchoolPurgeTable.lastSubmitError)),
+);
 
 export const demoSchoolRouter = {
   listDemoClassCatalogue: protectedProcedure
@@ -204,44 +225,38 @@ export const demoSchoolRouter = {
     .route({
       summary: "Start a demo school job",
       description:
-        "Submit a queued demo seeding job to the workflow engine. Safe to repeat: a running attempt is reused. Requires permission to create demo schools.",
+        "Request the start of a queued demo seeding job and return at once; the hand-over to the workflow engine happens in the background and is retried until it is accepted (or fails visibly after 10 minutes). Follow progress with watchDemoSchoolJob. Safe to repeat. Requires permission to create demo schools.",
       tags: ["System Admin", "Demo schools"],
     })
     .meta({ mcp: { ...MCP_HIDDEN_PLATFORM, access: "write", destructive: true } })
     .input(demoSchoolJobIdInputSchema)
     .use(requireSystemPermission(SYSTEM_ACTIONS.CREATE_DEMO_SCHOOL))
     .output(demoSchoolJobDtoSchema)
-    .handler(async ({ context, input, signal }) => {
+    .handler(async ({ context, input }) => {
       try {
         const job = await findJob(context.db, input.jobId);
         if (job.purgeRequestedAt) throw rpcError.badRequest("This demo school is being purged.");
         if (job.status === "failed") {
           throw rpcError.badRequest("This demo job failed. Retry it instead of starting it again.");
         }
-        if (job.status === "succeeded") return toDemoSchoolJobDto(job);
-        if (job.invocationId) {
-          const status = await getRestateInvocationStatus(job.invocationId, signal);
-          // A live run is reused. A run that ended without finishing the job
-          // (it crashed before marking it, or Restate dropped it) cannot be
-          // restarted under the same key, so a new attempt is started.
-          if (status !== null && status !== "completed") return toDemoSchoolJobDto(job);
-          const [next] = await context.db
-            .update(demoSchoolJobTable)
-            .set({ attempt: sql`${demoSchoolJobTable.attempt} + 1`, status: "queued", invocationId: null, error: null })
-            .where(
-              and(
-                eq(demoSchoolJobTable.id, job.id),
-                eq(demoSchoolJobTable.attempt, job.attempt),
-                // A run may have just succeeded; never reset a finished job.
-                inArray(demoSchoolJobTable.status, ["queued", "running"]),
-                isNull(demoSchoolJobTable.purgeRequestedAt),
-              ),
-            )
-            .returning();
-          if (!next) throw rpcError.conflict("The demo job changed meanwhile. Refresh and try again.");
-          return toDemoSchoolJobDto(await submitJob(context.db, next));
-        }
-        return toDemoSchoolJobDto(await submitJob(context.db, job));
+        if (job.status !== "queued") return toDemoSchoolJobDto(job);
+        // The outbox entry: written before the hand-over, so the sweep sends
+        // it if this process stops before Restate accepted it.
+        const [requested] = await context.db
+          .update(demoSchoolJobTable)
+          .set({ startRequestedAt: sql`COALESCE(${demoSchoolJobTable.startRequestedAt}, now())` })
+          .where(
+            and(
+              eq(demoSchoolJobTable.id, job.id),
+              eq(demoSchoolJobTable.attempt, job.attempt),
+              eq(demoSchoolJobTable.status, "queued"),
+              isNull(demoSchoolJobTable.purgeRequestedAt),
+            ),
+          )
+          .returning();
+        if (!requested) throw rpcError.conflict("The demo job changed meanwhile. Refresh and try again.");
+        handOff("start.handover", () => dispatchDemoSchoolStart(context.db, job.id));
+        return toDemoSchoolJobDto(requested);
       } catch (error) {
         throw toRpcError(error);
       }
@@ -251,7 +266,7 @@ export const demoSchoolRouter = {
     .route({
       summary: "Retry a failed demo school job",
       description:
-        "Start a new attempt of a failed demo seeding job. Completed steps are found again and skipped, so the attempt resumes. Requires permission to create demo schools.",
+        "Start a new attempt of a failed demo seeding job and return at once. Completed steps are found again and skipped, so the attempt resumes. Requires permission to create demo schools.",
       tags: ["System Admin", "Demo schools"],
     })
     .meta({ mcp: { ...MCP_HIDDEN_PLATFORM, access: "write", destructive: true } })
@@ -268,6 +283,11 @@ export const demoSchoolRouter = {
             error: null,
             finishedAt: null,
             invocationId: null,
+            startRequestedAt: new Date(),
+            submittedAt: null,
+            submitInvocationId: null,
+            submitAttempts: 0,
+            lastSubmitError: null,
           })
           .where(and(eq(demoSchoolJobTable.id, input.jobId), eq(demoSchoolJobTable.status, "failed"), isNull(demoSchoolJobTable.purgeRequestedAt)))
           .returning();
@@ -275,7 +295,8 @@ export const demoSchoolRouter = {
           await findJob(context.db, input.jobId);
           throw rpcError.badRequest("Only a failed demo job can be retried.");
         }
-        return toDemoSchoolJobDto(await submitJob(context.db, job));
+        handOff("start.handover", () => dispatchDemoSchoolStart(context.db, job.id));
+        return toDemoSchoolJobDto(job);
       } catch (error) {
         throw toRpcError(error);
       }
@@ -295,6 +316,29 @@ export const demoSchoolRouter = {
     .handler(async ({ context, input }) => {
       try {
         return toDemoSchoolJobDto(await findJob(context.db, input.jobId));
+      } catch (error) {
+        throw toRpcError(error);
+      }
+    }),
+
+  watchDemoSchoolJob: protectedProcedure
+    .route({
+      summary: "Watch a demo school job",
+      description:
+        "Stream a demo seeding job as server-sent events: the current state first, then every change (step, status, error), ending when the job succeeded or failed. Requires permission to read demo schools.",
+      tags: ["System Admin", "Demo schools"],
+    })
+    .meta({ mcp: { ...MCP_HIDDEN_PLATFORM, access: "read", destructive: false } })
+    .input(demoSchoolJobIdInputSchema)
+    .use(requireSystemPermission(SYSTEM_ACTIONS.READ_DEMO_SCHOOL))
+    .output(eventIterator(demoSchoolJobDtoSchema))
+    .handler(async function* ({ context, input, signal }) {
+      try {
+        yield* watchUntilFinal({
+          load: async () => toDemoSchoolJobDto(await findJob(context.db, input.jobId)),
+          isFinal: (job) => job.status === "succeeded" || job.status === "failed",
+          signal,
+        });
       } catch (error) {
         throw toRpcError(error);
       }
@@ -375,14 +419,14 @@ export const demoSchoolRouter = {
     .route({
       summary: "Purge a demo school",
       description:
-        "Permanently remove a demo school, all its data, its demo staff accounts and its files. Refuses real schools. The confirmation must equal the school's slug. Requires permission to purge demo schools.",
+        "Request the permanent removal of a demo school, all its data, its demo staff accounts and its files, and return at once. The purge runs as a durable background workflow; follow it with watchDemoSchoolPurge. Refuses real schools. The confirmation must equal the school's slug. Requires permission to purge demo schools.",
       tags: ["System Admin", "Demo schools"],
     })
     .meta({ mcp: { ...MCP_HIDDEN_PLATFORM, access: "write", destructive: true } })
     .input(purgeDemoSchoolInputSchema)
     .use(requireSystemPermission(SYSTEM_ACTIONS.PURGE_DEMO_SCHOOL))
     .output(purgeDemoSchoolOutputSchema)
-    .handler(async ({ context, input, signal }) => {
+    .handler(async ({ context, input }) => {
       try {
         const [school] = await context.db.select().from(schoolTable).where(eq(schoolTable.id, input.schoolId)).limit(1);
         if (!school) throw rpcError.notFound("School");
@@ -391,80 +435,141 @@ export const demoSchoolRouter = {
           throw rpcError.badRequest(`Enter ${school.slug} exactly to confirm the purge.`);
         }
 
-        // Purge intent first, under the school lock: from here on start,
-        // retry, the control service and every seed step refuse to run, and
-        // seed uploads delete their own objects (assertUploadsKept).
-        await context.db.transaction(async (transaction) => {
+        // One transaction under the school lock: record purge intent on the
+        // jobs (from here on start, retry, the control service and every
+        // seed step refuse, and seed uploads delete their own objects) and
+        // the purge request, which is also its outbox entry. A repeated
+        // request finds the existing purge and returns it.
+        const purge = await context.db.transaction(async (transaction) => {
           await transaction.select({ id: schoolTable.id }).from(schoolTable).where(eq(schoolTable.id, school.id)).for("update");
           await transaction
             .update(demoSchoolJobTable)
             .set({ purgeRequestedAt: new Date() })
             .where(and(eq(demoSchoolJobTable.schoolId, school.id), isNull(demoSchoolJobTable.purgeRequestedAt)));
+          await transaction
+            .insert(demoSchoolPurgeTable)
+            .values({ schoolId: school.id, schoolName: school.name, schoolSlug: school.slug, requestedBy: context.session.user.id })
+            .onConflictDoNothing();
+          return findPurge(transaction, school.id);
         });
+        handOff("purge.handover", () => dispatchDemoSchoolPurge(context.db, school.id));
+        return toDemoSchoolPurgeDto(purge);
+      } catch (error) {
+        throw toRpcError(error);
+      }
+    }),
 
-        // 5. Then stop any seed still running and wait until it has ended, so
-        // no step that passed its guard earlier is still writing. Invocation
-        // IDs are read after the intent is recorded, so a start that raced
-        // the purge is included.
-        const jobs = await context.db
-          .select({ invocationId: demoSchoolJobTable.invocationId })
-          .from(demoSchoolJobTable)
-          .where(and(eq(demoSchoolJobTable.schoolId, school.id), inArray(demoSchoolJobTable.status, ["queued", "running"])));
-        for (const { invocationId } of jobs) {
-          if (invocationId && !(await cancelRestateInvocationAndWait(invocationId, { signal }))) {
-            throw rpcError.conflict("The demo seed is still stopping. Try the purge again in a minute.");
-          }
+  retryDemoSchoolPurge: protectedProcedure
+    .route({
+      summary: "Retry a failed demo school purge",
+      description:
+        "Start a new attempt of a failed demo purge and return at once. Every stage is idempotent, so the attempt resumes where the last one stopped. Requires permission to purge demo schools.",
+      tags: ["System Admin", "Demo schools"],
+    })
+    .meta({ mcp: { ...MCP_HIDDEN_PLATFORM, access: "write", destructive: true } })
+    .input(demoSchoolIdInputSchema)
+    .use(requireSystemPermission(SYSTEM_ACTIONS.PURGE_DEMO_SCHOOL))
+    .output(demoSchoolPurgeDtoSchema)
+    .handler(async ({ context, input }) => {
+      try {
+        const [purge] = await context.db
+          .update(demoSchoolPurgeTable)
+          .set({
+            status: "pending",
+            attempt: sql`${demoSchoolPurgeTable.attempt} + 1`,
+            invocationId: null,
+            submitInvocationId: null,
+            scheduledAt: null,
+            lastSubmitError: null,
+          })
+          .where(and(eq(demoSchoolPurgeTable.schoolId, input.schoolId), eq(demoSchoolPurgeTable.status, "failed")))
+          .returning();
+        if (!purge) {
+          await findPurge(context.db, input.schoolId);
+          throw rpcError.badRequest("Only a failed demo purge can be retried.");
         }
+        handOff("purge.handover", () => dispatchDemoSchoolPurge(context.db, input.schoolId));
+        return toDemoSchoolPurgeDto(purge);
+      } catch (error) {
+        throw toRpcError(error);
+      }
+    }),
 
-        // Revoke demo logins (including sessions cached in Redis); repeated
-        // after commit for any login made in between.
-        const authContext = await auth.$context;
-        const demoUsersBefore = await context.db.select({ id: user.id }).from(user).where(eq(user.demoSchoolId, school.id));
-        for (const demoUser of demoUsersBefore) await authContext.internalAdapter.deleteUserSessions(demoUser.id);
+  getDemoSchoolPurge: protectedProcedure
+    .route({
+      summary: "Get a demo school purge",
+      description: "Get the status and stage of a demo school purge. Requires permission to read demo schools.",
+      tags: ["System Admin", "Demo schools"],
+    })
+    .meta({ mcp: { ...MCP_HIDDEN_PLATFORM, access: "read", destructive: false } })
+    .input(demoSchoolIdInputSchema)
+    .use(requireSystemPermission(SYSTEM_ACTIONS.READ_DEMO_SCHOOL))
+    .output(demoSchoolPurgeDtoSchema)
+    .handler(async ({ context, input }) => {
+      try {
+        return toDemoSchoolPurgeDto(await findPurge(context.db, input.schoolId));
+      } catch (error) {
+        throw toRpcError(error);
+      }
+    }),
 
-        // 1–3. One transaction: lock the school, record the purge manifest of
-        // every S3 key and demo user it owns, then purge_demo_school(), which
-        // also removes the demo users. The requesting admin has no
-        // demo_school_id and survives. Accounts invited into the demo with a
-        // real address keep their account and lose only the membership.
-        const { deletedRows, fileCount, demoUserIds } = await context.db.transaction(async (transaction) => {
-          await transaction.select({ id: schoolTable.id }).from(schoolTable).where(eq(schoolTable.id, school.id)).for("update");
-          const [locked] = await transaction.select({ logoS3Key: schoolTable.logoS3Key }).from(schoolTable).where(eq(schoolTable.id, school.id));
-          const demoUsers = await transaction
-            .select({ id: user.id, profileImageS3Key: user.profileImageS3Key })
-            .from(user)
-            .where(eq(user.demoSchoolId, school.id));
-          const admissions = await transaction
-            .select({ photoS3Key: admissionTable.photoS3Key, documents: admissionTable.documents })
-            .from(admissionTable)
-            .where(eq(admissionTable.schoolId, school.id));
-          const artifacts = await transaction.select({ s3Key: artifactTable.s3Key }).from(artifactTable).where(eq(artifactTable.schoolId, school.id));
-          // Recorded as-is; the cleanup workflow accepts only keys under this
-          // school's or its demo users' prefixes (demoSchoolPurgeScope).
-          const objectKeys = [...new Set([
-            locked?.logoS3Key,
-            demoCredentialsS3Key(school.id),
-            ...demoUsers.map((item) => item.profileImageS3Key),
-            ...admissions.flatMap((item) => [item.photoS3Key, ...item.documents.flatMap((document) => document.files.map((file) => file.s3Key))]),
-            ...artifacts.map((item) => item.s3Key),
-          ].filter((key): key is string => Boolean(key)))];
-          const result = await transaction.execute<{ counts: Record<string, number> }>(
-            sql`SELECT purge_demo_school(${school.id}) AS counts`,
-          );
-          await transaction.insert(demoSchoolPurgeTable).values({
-            schoolId: school.id,
-            objectKeys,
-            demoUserIds: demoUsers.map((item) => item.id),
-          });
-          return { deletedRows: result.rows[0]?.counts ?? {}, fileCount: objectKeys.length, demoUserIds: demoUsers.map((item) => item.id) };
+  watchDemoSchoolPurge: protectedProcedure
+    .route({
+      summary: "Watch a demo school purge",
+      description:
+        "Stream a demo purge as server-sent events: the current state first, then every change (stage, status, error), ending when it completed or failed. Requires permission to read demo schools.",
+      tags: ["System Admin", "Demo schools"],
+    })
+    .meta({ mcp: { ...MCP_HIDDEN_PLATFORM, access: "read", destructive: false } })
+    .input(demoSchoolIdInputSchema)
+    .use(requireSystemPermission(SYSTEM_ACTIONS.READ_DEMO_SCHOOL))
+    .output(eventIterator(demoSchoolPurgeDtoSchema))
+    .handler(async function* ({ context, input, signal }) {
+      try {
+        yield* watchUntilFinal({
+          load: async () => toDemoSchoolPurgeDto(await findPurge(context.db, input.schoolId)),
+          isFinal: (purge) => purge.status === "completed" || purge.status === "failed",
+          signal,
         });
-        for (const userId of demoUserIds) await authContext.internalAdapter.deleteUserSessions(userId);
+      } catch (error) {
+        throw toRpcError(error);
+      }
+    }),
 
-        // 4. After commit, durable S3 cleanup: the manifest is an outbox the
-        // API resubmits until Restate accepts it (resubmitPendingDemoPurges).
-        const fileCleanupScheduled = await scheduleDemoSchoolPurgeCleanup(context.db, school.id);
-        log.info({ schoolId: school.id, deletedRows, s3Objects: fileCount, fileCleanupScheduled }, "demo-school.purge.ok");
-        return { schoolId: school.id, deletedRows, fileCount, fileCleanupScheduled };
+  listDemoSchoolPurges: protectedProcedure
+    .route({
+      summary: "List demo school purges",
+      description:
+        "List demo purges, newest first; by default only those that need an admin (failed, or not yet handed over with an error). Requires permission to read demo schools.",
+      tags: ["System Admin", "Demo schools"],
+    })
+    .meta({ mcp: { ...MCP_HIDDEN_PLATFORM, access: "read", destructive: false } })
+    .input(listDemoSchoolPurgesInputSchema)
+    .use(requireSystemPermission(SYSTEM_ACTIONS.READ_DEMO_SCHOOL))
+    .output(listDemoSchoolPurgesOutputSchema)
+    .handler(async ({ context, input }) => {
+      try {
+        const { currentPage, pageSize, offset } = resolvePaginationInput(input);
+        const where = input.filters.needsAttention ? purgeNeedsAttention : undefined;
+        const [total] = await context.db.select({ value: count() }).from(demoSchoolPurgeTable).where(where);
+        const order = input.orderBy.direction === "asc" ? asc : desc;
+        const rows = await context.db
+          .select()
+          .from(demoSchoolPurgeTable)
+          .where(where)
+          .orderBy(order(demoSchoolPurgeTable.createdAt), order(demoSchoolPurgeTable.schoolId))
+          .limit(pageSize)
+          .offset(offset);
+        const totalItems = total?.value ?? 0;
+        const totalPages = Math.ceil(totalItems / pageSize);
+        return createPaginatedResult({
+          items: rows.map(toDemoSchoolPurgeDto),
+          nextCursor: createNextPageCursor(currentPage, totalPages),
+          currentPage,
+          totalPages,
+          totalItems,
+          pageSize,
+        });
       } catch (error) {
         throw toRpcError(error);
       }

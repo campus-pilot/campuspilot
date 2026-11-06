@@ -84,6 +84,11 @@ const HIDDEN_TOOLS = [
   'systemAdmin.getSchoolDemoJob',
   'systemAdmin.getDemoCredentialsDownload',
   'systemAdmin.purgeDemoSchool',
+  'systemAdmin.watchDemoSchoolJob',
+  'systemAdmin.retryDemoSchoolPurge',
+  'systemAdmin.getDemoSchoolPurge',
+  'systemAdmin.watchDemoSchoolPurge',
+  'systemAdmin.listDemoSchoolPurges',
 ];
 
 /**
