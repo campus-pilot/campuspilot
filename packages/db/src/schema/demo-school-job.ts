@@ -86,6 +86,24 @@ export const demoSchoolJobTable = pgTable(
      */
     invocationId: text("invocation_id"),
     /**
+     * When the admin asked to start the current attempt: the start outbox
+     * entry. Null while the job only exists (for example during the logo
+     * upload); the outbox sweep hands over only requested starts.
+     */
+    startRequestedAt: timestamp("start_requested_at", { withTimezone: true }),
+    /**
+     * When Restate durably accepted the current attempt's start (a one-way
+     * `/send` to `DemoSchoolControl.startSeed`). Its own fact: accepted does
+     * not mean a worker has picked it up.
+     */
+    submittedAt: timestamp("submitted_at", { withTimezone: true }),
+    /** Restate invocation of that `DemoSchoolControl.startSeed` send. */
+    submitInvocationId: text("submit_invocation_id"),
+    /** Hand-over attempts of the current attempt's start, successful or not. */
+    submitAttempts: integer("submit_attempts").notNull().default(0),
+    /** Safe summary of the last failed hand-over, shown while it is retried. */
+    lastSubmitError: text("last_submit_error"),
+    /**
      * Set under the school lock when a purge starts, before any seed run is
      * cancelled. Its own fact: start, retry, the control service and every
      * seed step refuse to run once it is set, and uploads delete their object.
@@ -109,31 +127,61 @@ export const demoSchoolPurgeStatusEnum = pgEnum("demo_school_purge_status", [
   "failed",
 ]);
 
+/** Stages of the `DemoSchoolPurge` workflow, in order. */
+export const DEMO_SCHOOL_PURGE_STAGES = [
+  "stopping-seed",
+  "revoking-sessions",
+  "deleting-data",
+  "deleting-files",
+] as const;
+export type DemoSchoolPurgeStage = (typeof DEMO_SCHOOL_PURGE_STAGES)[number];
+
 /**
- * Purge manifest and S3-cleanup outbox, written inside the purge transaction.
- * It is the only source of what the `DemoSchoolPurge` workflow may delete:
- * the workflow takes just the school ID and accepts keys only under
- * `schools/{schoolId}/` and `users/{demoUserId}/` for the users recorded
- * here. Deliberately no foreign keys: the school and users are gone by then.
+ * One demo purge request: its status store, its outbox and, once the data
+ * is deleted, its manifest. Written when the admin requests the purge; the
+ * `DemoSchoolPurge` workflow runs it and records each stage here.
+ * `status`: `pending` (not yet accepted by Restate), `scheduled` (accepted),
+ * `completed`, `failed`.
+ * The manifest (`object_keys`, `demo_user_ids`) is written inside the data
+ * purge transaction and is the only source of what may be deleted from S3:
+ * only keys under `schools/{schoolId}/` and `users/{demoUserId}/` for the
+ * users recorded here. Deliberately no foreign keys: the school and users are
+ * gone once the data is deleted, so the school's name and slug are copied.
  */
 export const demoSchoolPurgeTable = pgTable("demo_school_purge", {
   schoolId: text("school_id").primaryKey(),
-  /** S3 keys the database referenced when the purge committed. */
-  objectKeys: jsonb("object_keys").$type<string[]>().notNull(),
+  /** The school's name and slug when the purge was requested (null on rows from before 0028). */
+  schoolName: text("school_name"),
+  schoolSlug: text("school_slug"),
+  /** The admin who requested the purge; no foreign key, the account may go. */
+  requestedBy: text("requested_by"),
+  /** S3 keys the database referenced when the data purge committed. */
+  objectKeys: jsonb("object_keys").$type<string[]>().notNull().default([]),
   /** Deleted demo-only accounts whose `users/{id}/` prefix is cleaned up. */
-  demoUserIds: jsonb("demo_user_ids").$type<string[]>().notNull(),
+  demoUserIds: jsonb("demo_user_ids").$type<string[]>().notNull().default([]),
   status: demoSchoolPurgeStatusEnum("status").notNull().default("pending"),
-  /** Submissions of the cleanup workflow (outbox retries). */
+  /** The stage running now, or where a failed attempt stopped; null before the first stage and once completed. */
+  stage: text("stage").$type<DemoSchoolPurgeStage>(),
+  /** When the data purge transaction committed (the school row is gone from then on). */
+  dataDeletedAt: timestamp("data_deleted_at", { withTimezone: true }),
+  /** Hand-over attempts to Restate (outbox retries), successful or not. */
   submitAttempts: integer("submit_attempts").notNull().default(0),
+  /** Safe summary of the last failed hand-over, shown while it is retried. */
+  lastSubmitError: text("last_submit_error"),
+  /** Restate invocation of the `DemoSchoolControl.startPurge` send. */
+  submitInvocationId: text("submit_invocation_id"),
+  /** Restate invocation of the current attempt's `DemoSchoolPurge` workflow. */
+  invocationId: text("invocation_id"),
   /**
-   * Cleanup attempt, part of the workflow key `{schoolId}.{attempt}`. A
-   * workflow key runs once, so a cleanup that failed terminally is retried
-   * under the next attempt.
+   * Purge attempt, part of the workflow key `{schoolId}.{attempt}`. A
+   * workflow key runs once, so a purge that failed terminally is retried
+   * under the next attempt; every stage is idempotent.
    */
-  cleanupAttempt: integer("cleanup_attempt").notNull().default(1),
-  /** Safe summary of the last terminal cleanup failure (status `failed`). */
+  attempt: integer("attempt").notNull().default(1),
+  /** Safe summary of the last terminal failure (status `failed`). */
   lastError: text("last_error"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  /** When Restate accepted the current attempt. */
   scheduledAt: timestamp("scheduled_at", { withTimezone: true }),
   completedAt: timestamp("completed_at", { withTimezone: true }),
 });

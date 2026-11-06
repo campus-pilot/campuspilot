@@ -197,6 +197,13 @@
       "when": 1793929666168,
       "tag": "0027_demo-school-fences",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1793958922758,
+      "tag": "0028_demo-async-purge",
+      "breakpoints": true
     }
   ]
 }
