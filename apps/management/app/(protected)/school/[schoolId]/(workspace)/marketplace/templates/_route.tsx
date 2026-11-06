@@ -7,6 +7,7 @@ export const templateMarketplacePages = [
   defineManagementPage<SchoolRouteParams>({
     matches: (pathname) =>
       /^\/school\/[^/]+\/marketplace\/templates$/.test(pathname),
+    title: 'Template marketplace',
     breadcrumbs: ({ schoolId }) =>
       schoolPageBreadcrumbs(schoolId, {
         id: 'template-marketplace',
@@ -19,6 +20,7 @@ export const templateMarketplacePages = [
       /^\/school\/[^/]+\/marketplace\/templates\/[^/]+\/[^/]+$/.test(
         pathname,
       ),
+    title: 'Template preview',
     breadcrumbs: ({ schoolId }) => [
       ...schoolPageBreadcrumbs(schoolId, {
         id: 'template-marketplace',

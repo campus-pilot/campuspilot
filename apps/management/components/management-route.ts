@@ -5,6 +5,11 @@ export type ManagementPageDescriptor<
   TParams extends Record<string, string> = Record<string, never>,
 > = {
   matches: (pathname: string) => boolean;
+  /**
+   * Plain-text page name for the browser tab, shown as "{title} · {school}".
+   * Kept separate from breadcrumbs because crumb labels may be rich nodes.
+   */
+  title: string;
   breadcrumbs: (params: TParams) => AppShellBreadcrumb[];
   actions?: (params: TParams) => ReactNode;
 };
