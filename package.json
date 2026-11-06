@@ -13,6 +13,7 @@
     "check-types": "turbo run check-types",
     "dev:web": "turbo run dev -F web --",
     "dev:management": "turbo run dev -F management --",
+    "dev:cadet": "turbo run dev -F cadet --",
     "dev:server": "turbo run dev -F server --",
     "dev:worker": "turbo run dev -F worker --",
     "db:push": "turbo run db:push -F @campuspilot/db --",
