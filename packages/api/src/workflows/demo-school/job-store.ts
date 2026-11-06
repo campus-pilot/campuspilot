@@ -5,7 +5,7 @@ import {
   type DemoSchoolJobResult,
 } from '@campuspilot/db/schema/demo-school-job';
 import { schoolTable } from '@campuspilot/db/schema/school';
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 
 import type { DemoSchoolStep } from './constants';
 import { demoSeedInputSchema, type DemoSeedInput } from './plan';
@@ -21,6 +21,7 @@ export type DemoJobSnapshot = {
   schoolId: string;
   requestedBy: string | null;
   status: 'queued' | 'running' | 'succeeded' | 'failed';
+  purgeRequestedAt: string | null;
   input: DemoSeedInput;
   seed: string | null;
   asOf: string | null;
@@ -41,6 +42,7 @@ export async function loadDemoJob(jobId: string): Promise<DemoJobSnapshot | null
     schoolId: row.job.schoolId,
     requestedBy: row.job.requestedBy,
     status: row.job.status,
+    purgeRequestedAt: row.job.purgeRequestedAt?.toISOString() ?? null,
     input: demoSeedInputSchema.parse(row.job.input),
     seed: row.job.seed,
     asOf: row.job.asOf?.toISOString() ?? null,
@@ -59,6 +61,7 @@ function currentAttempt(jobId: string, attempt: number) {
     eq(demoSchoolJobTable.id, jobId),
     eq(demoSchoolJobTable.attempt, attempt),
     inArray(demoSchoolJobTable.status, ['queued', 'running']),
+    isNull(demoSchoolJobTable.purgeRequestedAt),
   );
 }
 

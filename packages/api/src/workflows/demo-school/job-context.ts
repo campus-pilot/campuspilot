@@ -1,7 +1,10 @@
+import { DeleteObjectsCommand } from '@aws-sdk/client-s3';
 import { db } from '@campuspilot/db';
 import { demoSchoolJobTable } from '@campuspilot/db/schema/demo-school-job';
 import { schoolTable } from '@campuspilot/db/schema/school';
 import { schoolUserRoleTable } from '@campuspilot/db/schema/school-user-role';
+import { env } from '@campuspilot/env/server';
+import { getS3Client } from '@campuspilot/s3/client';
 import { and, eq } from 'drizzle-orm';
 
 import type { Context } from '../../context';
@@ -22,6 +25,7 @@ export class DemoJobGuardError extends Error {
  * permission is widened. Guards, re-checked on every step:
  * - the job exists and its school is still a demo school (`is_demo = true`);
  *   once a purge has removed the school, the next step stops here;
+ * - no purge has been requested (`purge_requested_at` is null);
  * - the requesting admin still holds `school.principal` in that school;
  * - the requesting admin still exists and is not banned.
  */
@@ -30,6 +34,7 @@ export async function createDemoSchoolJobContext(jobId: string): Promise<Context
     .select({
       schoolId: demoSchoolJobTable.schoolId,
       requestedBy: demoSchoolJobTable.requestedBy,
+      purgeRequestedAt: demoSchoolJobTable.purgeRequestedAt,
       isDemo: schoolTable.isDemo,
     })
     .from(demoSchoolJobTable)
@@ -38,6 +43,7 @@ export async function createDemoSchoolJobContext(jobId: string): Promise<Context
     .limit(1);
   if (!job) throw new DemoJobGuardError('The demo job or its school no longer exists.');
   if (!job.isDemo) throw new DemoJobGuardError('Only demo schools can be seeded by a system job.');
+  if (job.purgeRequestedAt) throw new DemoJobGuardError('The demo school is being purged.');
   const requestedBy = job.requestedBy;
   if (!requestedBy) throw new DemoJobGuardError('The requesting admin no longer exists.');
 
@@ -103,4 +109,29 @@ export async function createDemoSchoolJobContext(jobId: string): Promise<Context
     session,
     principal: { authMethod: 'system-job', jobId },
   };
+}
+
+/**
+ * Upload fence (review 2, L2). Called after a step wrote S3 objects: if the
+ * school is gone or a purge was requested meanwhile, the step deletes its own
+ * objects and stops. Together with the purge waiting for cancelled runs, this
+ * is what guarantees a purge never leaves objects behind, without any timed
+ * wait: an object written after the cleanup listed the prefixes is removed by
+ * the step that wrote it, because the purge request precedes that listing.
+ */
+export async function assertUploadsKept(jobId: string, schoolId: string, keys: string[]) {
+  const [row] = await db
+    .select({ purgeRequestedAt: demoSchoolJobTable.purgeRequestedAt })
+    .from(demoSchoolJobTable)
+    .innerJoin(schoolTable, eq(schoolTable.id, demoSchoolJobTable.schoolId))
+    .where(and(eq(demoSchoolJobTable.id, jobId), eq(schoolTable.id, schoolId)))
+    .limit(1);
+  if (row && !row.purgeRequestedAt) return;
+  const objects = keys.filter(Boolean);
+  if (objects.length > 0) {
+    await getS3Client().send(
+      new DeleteObjectsCommand({ Bucket: env.S3_BUCKET, Delete: { Objects: objects.map((Key) => ({ Key })), Quiet: true } }),
+    );
+  }
+  throw new DemoJobGuardError('The demo school is being purged.');
 }

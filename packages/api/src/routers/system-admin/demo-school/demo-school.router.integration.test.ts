@@ -20,6 +20,8 @@ import {
 } from '../../../../test/fixtures';
 import { expectRpcCode } from '../../../../test/finance/assertions';
 import { demoSchoolPurgeTable } from '@campuspilot/db/schema/demo-school-job';
+import { ORPCError } from '@orpc/server';
+import { assertUploadsKept, createDemoSchoolJobContext } from '../../../workflows/demo-school/job-context';
 import {
   collectDemoSchoolObjectKeys,
   deleteDemoSchoolObjectBatch,
@@ -170,7 +172,7 @@ describe('systemAdmin demo school procedures', () => {
     expect(result).toMatchObject({ schoolId: created.school.id, fileCleanupScheduled: true });
     expect(result.deletedRows).toMatchObject({ user: 1, demo_school_job: 1, school_member: 1 });
     expect(vi.mocked(cancelRestateInvocationAndWait).mock.calls.map(([invocationId]) => invocationId)).toEqual([`inv_${created.job.id}_1`]);
-    expect(vi.mocked(submitDemoSchoolPurgeWorkflow)).toHaveBeenCalledWith(created.school.id);
+    expect(vi.mocked(submitDemoSchoolPurgeWorkflow)).toHaveBeenCalledWith(created.school.id, 1);
     expect(await db.select().from(schoolTable).where(eq(schoolTable.id, created.school.id))).toHaveLength(0);
     expect(await db.select().from(user).where(eq(user.id, demoUser.id))).toHaveLength(0);
     expect(await db.select().from(user).where(eq(user.id, admin.user.id))).toHaveLength(1);
@@ -209,5 +211,42 @@ describe('systemAdmin demo school procedures', () => {
     await resubmitPendingDemoPurges();
     const [scheduled] = await db.select().from(demoSchoolPurgeTable).where(eq(demoSchoolPurgeTable.schoolId, created.school.id));
     expect(scheduled).toMatchObject({ status: 'scheduled', submitAttempts: 2 });
+
+    // A terminal cleanup failure goes back to pending under the next attempt.
+    await db.update(demoSchoolPurgeTable).set({ status: 'failed', lastError: 'x' }).where(eq(demoSchoolPurgeTable.schoolId, created.school.id));
+    vi.mocked(submitDemoSchoolPurgeWorkflow).mockClear();
+    await resubmitPendingDemoPurges();
+    const [retried] = await db.select().from(demoSchoolPurgeTable).where(eq(demoSchoolPurgeTable.schoolId, created.school.id));
+    expect(retried).toMatchObject({ status: 'scheduled', cleanupAttempt: 2 });
+    expect(vi.mocked(submitDemoSchoolPurgeWorkflow)).toHaveBeenCalledWith(created.school.id, 2);
+    // A completed cleanup is never overwritten by a late resubmission.
+    await db.update(demoSchoolPurgeTable).set({ status: 'completed' }).where(eq(demoSchoolPurgeTable.schoolId, created.school.id));
+    await resubmitPendingDemoPurges();
+    const [done] = await db.select().from(demoSchoolPurgeTable).where(eq(demoSchoolPurgeTable.schoolId, created.school.id));
+    expect(done!.status).toBe('completed');
+  });
+
+  it('refuses start and retry once a purge was requested, and keeps finished jobs finished', async () => {
+    const created = await adminClient.systemAdmin.createDemoSchool({ ...validInput, name: 'Fenced School' });
+    await adminClient.systemAdmin.startDemoSchoolJob({ jobId: created.job.id });
+    // A run that just succeeded is not reset even if Restate says it completed.
+    await db.update(demoSchoolJobTable).set({ status: 'succeeded' }).where(eq(demoSchoolJobTable.id, created.job.id));
+    vi.mocked(getRestateInvocationStatus).mockResolvedValueOnce('completed');
+    expect(await adminClient.systemAdmin.startDemoSchoolJob({ jobId: created.job.id })).toMatchObject({ status: 'succeeded', attempt: 1 });
+
+    await db.update(demoSchoolJobTable).set({ status: 'failed', purgeRequestedAt: new Date() }).where(eq(demoSchoolJobTable.id, created.job.id));
+    await expectRpcCode(adminClient.systemAdmin.startDemoSchoolJob({ jobId: created.job.id }), 'BAD_REQUEST');
+    await expectRpcCode(adminClient.systemAdmin.retryDemoSchoolJob({ jobId: created.job.id }), 'BAD_REQUEST');
+    await expect(createDemoSchoolJobContext(created.job.id)).rejects.toThrow(/being purged/);
+    const key = `schools/${created.school.id}/logo/fenced.png`;
+    await getS3Client().send(new PutObjectCommand({ Bucket: env.S3_BUCKET, Key: key, Body: 'x' }));
+    await expect(assertUploadsKept(created.job.id, created.school.id, [key])).rejects.toThrow(/being purged/);
+    expect(await collectDemoSchoolObjectKeys({ keys: [], prefixes: [`schools/${created.school.id}/`] })).toEqual([]);
+  });
+
+  it('passes a worker-unavailable error through unchanged', async () => {
+    const created = await adminClient.systemAdmin.createDemoSchool({ ...validInput, name: 'Unavailable School' });
+    vi.mocked(submitDemoSchoolWorkflow).mockRejectedValueOnce(new ORPCError('SERVICE_UNAVAILABLE', { message: 'The demo worker is unavailable right now. Try again in a moment.' }));
+    await expectRpcCode(adminClient.systemAdmin.startDemoSchoolJob({ jobId: created.job.id }), 'SERVICE_UNAVAILABLE');
   });
 });

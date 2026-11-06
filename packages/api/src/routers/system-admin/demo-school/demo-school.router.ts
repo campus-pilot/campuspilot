@@ -12,7 +12,8 @@ import { schoolUserRoleTable } from "@campuspilot/db/schema/school-user-role";
 import { env } from "@campuspilot/env/server";
 import { SYSTEM_ACTIONS } from "@campuspilot/opa/policies/system";
 import { getS3Client } from "@campuspilot/s3/client";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { ORPCError } from "@orpc/server";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 
 import { rpcError, toRpcError } from "../../../errors";
 import { protectedProcedure } from "../../../index";
@@ -93,7 +94,9 @@ async function submitJob(db: DatabaseExecutor, job: DemoJobRow) {
   try {
     ({ invocationId } = await submitDemoSchoolWorkflow(job.id, job.attempt));
   } catch (error) {
-    log.error({ err: error, jobId: job.id }, "demo-school.submit.failed");
+    log.error({ err: error instanceof Error ? { name: error.name, message: error.message } : String(error), jobId: job.id }, "demo-school.submit.failed");
+    // A refusal or "worker unavailable" keeps its own code and message.
+    if (error instanceof ORPCError) throw error;
     throw rpcError.internal(error);
   }
   const [updated] = await db
@@ -211,6 +214,7 @@ export const demoSchoolRouter = {
     .handler(async ({ context, input, signal }) => {
       try {
         const job = await findJob(context.db, input.jobId);
+        if (job.purgeRequestedAt) throw rpcError.badRequest("This demo school is being purged.");
         if (job.status === "failed") {
           throw rpcError.badRequest("This demo job failed. Retry it instead of starting it again.");
         }
@@ -224,7 +228,15 @@ export const demoSchoolRouter = {
           const [next] = await context.db
             .update(demoSchoolJobTable)
             .set({ attempt: sql`${demoSchoolJobTable.attempt} + 1`, status: "queued", invocationId: null, error: null })
-            .where(and(eq(demoSchoolJobTable.id, job.id), eq(demoSchoolJobTable.attempt, job.attempt)))
+            .where(
+              and(
+                eq(demoSchoolJobTable.id, job.id),
+                eq(demoSchoolJobTable.attempt, job.attempt),
+                // A run may have just succeeded; never reset a finished job.
+                inArray(demoSchoolJobTable.status, ["queued", "running"]),
+                isNull(demoSchoolJobTable.purgeRequestedAt),
+              ),
+            )
             .returning();
           if (!next) throw rpcError.conflict("The demo job changed meanwhile. Refresh and try again.");
           return toDemoSchoolJobDto(await submitJob(context.db, next));
@@ -257,7 +269,7 @@ export const demoSchoolRouter = {
             finishedAt: null,
             invocationId: null,
           })
-          .where(and(eq(demoSchoolJobTable.id, input.jobId), eq(demoSchoolJobTable.status, "failed")))
+          .where(and(eq(demoSchoolJobTable.id, input.jobId), eq(demoSchoolJobTable.status, "failed"), isNull(demoSchoolJobTable.purgeRequestedAt)))
           .returning();
         if (!job) {
           await findJob(context.db, input.jobId);
@@ -379,8 +391,21 @@ export const demoSchoolRouter = {
           throw rpcError.badRequest(`Enter ${school.slug} exactly to confirm the purge.`);
         }
 
-        // 5. Stop any seed still running and wait until it has ended, so no
-        // step can write rows or upload files into a school being removed.
+        // Purge intent first, under the school lock: from here on start,
+        // retry, the control service and every seed step refuse to run, and
+        // seed uploads delete their own objects (assertUploadsKept).
+        await context.db.transaction(async (transaction) => {
+          await transaction.select({ id: schoolTable.id }).from(schoolTable).where(eq(schoolTable.id, school.id)).for("update");
+          await transaction
+            .update(demoSchoolJobTable)
+            .set({ purgeRequestedAt: new Date() })
+            .where(and(eq(demoSchoolJobTable.schoolId, school.id), isNull(demoSchoolJobTable.purgeRequestedAt)));
+        });
+
+        // 5. Then stop any seed still running and wait until it has ended, so
+        // no step that passed its guard earlier is still writing. Invocation
+        // IDs are read after the intent is recorded, so a start that raced
+        // the purge is included.
         const jobs = await context.db
           .select({ invocationId: demoSchoolJobTable.invocationId })
           .from(demoSchoolJobTable)
@@ -391,10 +416,10 @@ export const demoSchoolRouter = {
           }
         }
 
-        // Revoke demo logins first, including sessions cached in Redis that a
-        // database cascade alone would not remove.
-        const demoUsersBefore = await context.db.select({ id: user.id }).from(user).where(eq(user.demoSchoolId, school.id));
+        // Revoke demo logins (including sessions cached in Redis); repeated
+        // after commit for any login made in between.
         const authContext = await auth.$context;
+        const demoUsersBefore = await context.db.select({ id: user.id }).from(user).where(eq(user.demoSchoolId, school.id));
         for (const demoUser of demoUsersBefore) await authContext.internalAdapter.deleteUserSessions(demoUser.id);
 
         // 1–3. One transaction: lock the school, record the purge manifest of
@@ -402,7 +427,7 @@ export const demoSchoolRouter = {
         // also removes the demo users. The requesting admin has no
         // demo_school_id and survives. Accounts invited into the demo with a
         // real address keep their account and lose only the membership.
-        const { deletedRows, fileCount } = await context.db.transaction(async (transaction) => {
+        const { deletedRows, fileCount, demoUserIds } = await context.db.transaction(async (transaction) => {
           await transaction.select({ id: schoolTable.id }).from(schoolTable).where(eq(schoolTable.id, school.id)).for("update");
           const [locked] = await transaction.select({ logoS3Key: schoolTable.logoS3Key }).from(schoolTable).where(eq(schoolTable.id, school.id));
           const demoUsers = await transaction
@@ -431,8 +456,9 @@ export const demoSchoolRouter = {
             objectKeys,
             demoUserIds: demoUsers.map((item) => item.id),
           });
-          return { deletedRows: result.rows[0]?.counts ?? {}, fileCount: objectKeys.length };
+          return { deletedRows: result.rows[0]?.counts ?? {}, fileCount: objectKeys.length, demoUserIds: demoUsers.map((item) => item.id) };
         });
+        for (const userId of demoUserIds) await authContext.internalAdapter.deleteUserSessions(userId);
 
         // 4. After commit, durable S3 cleanup: the manifest is an outbox the
         // API resubmits until Restate accepts it (resubmitPendingDemoPurges).

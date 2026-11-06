@@ -54,14 +54,22 @@ async function main() {
     });
   }, DCR_CLEANUP_INTERVAL_MS);
   dcrCleanup.unref();
-  const sweepOutbox = () => {
-    void sweepDemoPurgeOutbox().catch((err) => {
+  // Chained, not setInterval: the next sweep is scheduled only after the
+  // previous one finished, so slow sweeps never overlap on this instance.
+  // Across replicas, the sweep claims rows with FOR UPDATE SKIP LOCKED.
+  let demoPurgeOutbox: NodeJS.Timeout | undefined;
+  let stopped = false;
+  const sweepOutbox = async () => {
+    try {
+      await sweepDemoPurgeOutbox();
+    } catch (err) {
       log.error({ err }, 'demo-school.purge-outbox.error');
-    });
+    }
+    if (stopped) return;
+    demoPurgeOutbox = setTimeout(() => void sweepOutbox(), DEMO_PURGE_OUTBOX_INTERVAL_MS);
+    demoPurgeOutbox.unref();
   };
-  sweepOutbox();
-  const demoPurgeOutbox = setInterval(sweepOutbox, DEMO_PURGE_OUTBOX_INTERVAL_MS);
-  demoPurgeOutbox.unref();
+  void sweepOutbox();
 
   const server = serve(
     {
@@ -79,7 +87,8 @@ async function main() {
   const shutdown = (signal: string) => {
     log.info({ signal }, 'boot.shutdown.start');
     clearInterval(dcrCleanup);
-    clearInterval(demoPurgeOutbox);
+    stopped = true;
+    clearTimeout(demoPurgeOutbox);
     void mcpHandler.close().catch((err) => {
       log.error({ err }, 'mcp.shutdown.error');
     });

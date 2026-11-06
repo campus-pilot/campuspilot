@@ -1,5 +1,6 @@
 import { env } from "@campuspilot/env/server";
-import { getRestateClient } from "@campuspilot/restate/client";
+import { getRestateClient, rpc } from "@campuspilot/restate/client";
+import { ORPCError } from "@orpc/server";
 
 import { DEMO_SCHOOL_CONTROL_SERVICE_NAME } from "../../../workflows/demo-school/constants";
 import type { DemoSchoolControlService } from "../../../workflows/demo-school/control-service";
@@ -11,20 +12,54 @@ import type { DemoSchoolControlService } from "../../../workflows/demo-school/co
  * importing their implementation here would import the router itself.
  */
 
+/**
+ * Bound for one control call. Restate holds a call open while the worker is
+ * down; this makes the admin request fail fast instead of hanging.
+ */
+const CONTROL_CALL_TIMEOUT_MS = 10_000;
+
 function control() {
   return getRestateClient().serviceClient<DemoSchoolControlService>({
     name: DEMO_SCHOOL_CONTROL_SERVICE_NAME,
   });
 }
 
-/** Starts one attempt of a demo seed and returns its workflow invocation. */
-export async function submitDemoSchoolWorkflow(jobId: string, attempt: number) {
-  return control().startSeed({ jobId, attempt });
+/** True for the abort raised by a call `timeout`. */
+function isTimeout(error: unknown) {
+  return error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
 }
 
-/** Starts S3 cleanup for a committed purge manifest; keyed by school ID. */
-export async function submitDemoSchoolPurgeWorkflow(schoolId: string) {
-  return control().startPurgeCleanup({ schoolId });
+/**
+ * Calls a control handler with an idempotency key, so a repeated or timed-out
+ * call is one invocation in Restate, never a new one. A timeout becomes a
+ * clear SERVICE_UNAVAILABLE error; the call itself may still complete later
+ * under the same key.
+ */
+async function callControl<T>(call: (options: { idempotencyKey: string; timeout: number }) => PromiseLike<T>, idempotencyKey: string): Promise<T> {
+  try {
+    return await call({ idempotencyKey, timeout: CONTROL_CALL_TIMEOUT_MS });
+  } catch (error) {
+    if (isTimeout(error)) {
+      throw new ORPCError("SERVICE_UNAVAILABLE", {
+        message: "The demo worker is unavailable right now. Try again in a moment.",
+        cause: error,
+      });
+    }
+    throw error;
+  }
+}
+
+/** Starts one attempt of a demo seed and returns its workflow invocation. */
+export async function submitDemoSchoolWorkflow(jobId: string, attempt: number) {
+  return callControl((options) => control().startSeed({ jobId, attempt }, rpc.opts(options)), `demo-seed:${jobId}.${attempt}`);
+}
+
+/** Starts one S3 cleanup attempt for a committed purge manifest. */
+export async function submitDemoSchoolPurgeWorkflow(schoolId: string, attempt: number) {
+  return callControl(
+    (options) => control().startPurgeCleanup({ schoolId, attempt }, rpc.opts(options)),
+    `demo-purge:${schoolId}.${attempt}`,
+  );
 }
 
 /** Invocation states from Restate's `sys_invocation` (`completed` is final). */

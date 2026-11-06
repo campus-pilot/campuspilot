@@ -1,7 +1,7 @@
 import * as restate from '@restatedev/restate-sdk';
 import { ORPCError } from '@orpc/server';
 import { randomBytes } from 'node:crypto';
-import { ZodError } from 'zod';
+import { ZodError, z } from 'zod';
 
 import { isRetryableTransactionError } from '../../errors';
 import { DEMO_SCHOOL_WORKFLOW_NAME, demoSchoolWorkflowKey, type DemoSchoolStep } from './constants';
@@ -17,6 +17,7 @@ import {
   type DemoJobSnapshot,
 } from './job-store';
 import { log } from './log';
+import { toSafeError } from './safe-error';
 import { buildDemoPlan } from './plan';
 import {
   createSeedContext,
@@ -75,12 +76,18 @@ function step<T>(ctx: restate.WorkflowContext, name: string, action: () => Promi
       try {
         return await action();
       } catch (error) {
-        throw classify(error);
+        throw toSafeError(classify(error), { workflow: DEMO_SCHOOL_WORKFLOW_NAME, key: ctx.key, step: name });
       }
     },
     STEP_OPTIONS,
   );
 }
+
+/** Workflow input; parsed before any journal entry so bad input is terminal at once. */
+export const demoSchoolWorkflowInputSchema = z.object({
+  jobId: z.string().regex(/^dsj_[a-z0-9]{21}$/),
+  attempt: z.number().int().positive().max(1_000),
+});
 
 /** Runs one named, idempotent unit of work; Restate journals it, tests call it directly. */
 export type DemoStepRunner = <T>(name: string, action: () => Promise<T>) => Promise<T>;
@@ -190,8 +197,10 @@ export const demoSchoolWorkflow = restate.workflow({
   name: DEMO_SCHOOL_WORKFLOW_NAME,
   options: { ingressPrivate: true },
   handlers: {
-    run: async (ctx: restate.WorkflowContext, input: DemoSchoolWorkflowInput): Promise<DemoSchoolWorkflowOutput> => {
-      const { jobId, attempt } = input;
+    run: async (ctx: restate.WorkflowContext, rawInput: DemoSchoolWorkflowInput): Promise<DemoSchoolWorkflowOutput> => {
+      const parsed = demoSchoolWorkflowInputSchema.safeParse(rawInput);
+      if (!parsed.success) throw new restate.TerminalError('Invalid demo seed input.', { errorCode: 400 });
+      const { jobId, attempt } = parsed.data;
       if (ctx.key !== demoSchoolWorkflowKey(jobId, attempt)) {
         throw new restate.TerminalError('The workflow key does not match the job attempt.');
       }
@@ -204,7 +213,7 @@ export const demoSchoolWorkflow = restate.workflow({
           return loaded;
         });
         schoolId = job.schoolId;
-        if (job.attempt !== attempt || job.status === 'succeeded' || job.status === 'failed') {
+        if (job.attempt !== attempt || job.status === 'succeeded' || job.status === 'failed' || job.purgeRequestedAt) {
           log.warn({ jobId, attempt, currentAttempt: job.attempt, status: job.status }, 'demo-school.seed.refused');
           return { status: 'refused' };
         }

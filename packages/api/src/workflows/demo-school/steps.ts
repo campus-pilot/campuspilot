@@ -2,6 +2,7 @@ import { PutObjectCommand } from '@aws-sdk/client-s3';
 import { auth, createAuth } from '@campuspilot/auth/server';
 import { db } from '@campuspilot/db';
 import { admissionTable } from '@campuspilot/db/schema/admission';
+import { artifactTable } from '@campuspilot/db/schema/artifact';
 import { user } from '@campuspilot/db/schema/auth';
 import {
   financeAdjustmentTable,
@@ -34,7 +35,7 @@ import { demoCredentialsS3Key } from './constants';
 import { localTimeInstant } from './dates';
 import { generateDemoPassword } from './identity';
 import { renderAvatar, renderMonogramLogo } from './images';
-import { createDemoSchoolJobContext } from './job-context';
+import { assertUploadsKept, createDemoSchoolJobContext } from './job-context';
 import {
   billedMonthIndexes,
   buildDemoPlan,
@@ -101,10 +102,10 @@ function imageRequest(url: string, fieldName: string, bytes: Buffer, filename: s
   return new Request(url, { method: 'POST', body: form });
 }
 
-/** Fails the step when an HTTP upload handler returned an error response. */
-async function assertUploaded(response: Response, subject: string) {
-  if (response.ok) return;
-  const body = (await response.json().catch(() => null)) as { message?: string } | null;
+/** Fails the step when an HTTP upload handler returned an error, else returns its JSON body. */
+async function assertUploaded<T>(response: Response, subject: string): Promise<T> {
+  const body = (await response.json().catch(() => null)) as (T & { message?: string }) | null;
+  if (response.ok && body) return body;
   throw new DemoSeedError(`Uploading the ${subject} failed: ${body?.message ?? response.status}`);
 }
 
@@ -121,7 +122,8 @@ export async function seedSchoolLogo(ctx: SeedContext): Promise<{ generated: boo
     ctx.context,
     ctx.schoolId,
   );
-  await assertUploaded(response, 'school logo');
+  const uploaded = await assertUploaded<{ logoS3Key: string | null }>(response, 'school logo');
+  await assertUploadsKept(ctx.jobId, ctx.schoolId, [uploaded.logoS3Key ?? '']);
   return { generated: true };
 }
 
@@ -166,6 +168,7 @@ export async function seedStaffMember(ctx: SeedContext, member: DemoStaffMember)
     const key = `users/${userId}/profile-image/${randomUUID()}.png`;
     const png = renderAvatar(createRandom(ctx.seed, 'avatar', member.key), { style: 'adult', gender: member.gender });
     await getS3Client().send(new PutObjectCommand({ Bucket: env.S3_BUCKET, Key: key, Body: png, ContentLength: png.byteLength, ContentType: 'image/png' }));
+    await assertUploadsKept(ctx.jobId, ctx.schoolId, [key]);
     await db.update(user).set({ profileImageS3Key: key }).where(eq(user.id, userId));
   }
   return { userId };
@@ -281,7 +284,8 @@ export async function seedClassStudents(
           ctx.context,
           { schoolId, admissionId },
         );
-        await assertUploaded(response, 'student photo');
+        const uploaded = await assertUploaded<{ photoS3Key: string | null }>(response, 'student photo');
+        await assertUploadsKept(ctx.jobId, ctx.schoolId, [uploaded.photoS3Key ?? '']);
       }
       photos += 1;
     }
@@ -626,12 +630,14 @@ export async function seedTemplates(ctx: SeedContext): Promise<{ templates: numb
   for (const documentType of DOCUMENT_TYPES) {
     const active = await ctx.rpc.school.getActiveDocumentTemplate({ schoolId: ctx.schoolId, documentType });
     if (!active) {
-      await ctx.rpc.school.selectMarketplaceTemplate({
+      const selected = await ctx.rpc.school.selectMarketplaceTemplate({
         schoolId: ctx.schoolId,
         documentType,
         slug: `${documentType}-default`,
         expectedRevisionId: null,
       });
+      const [artifact] = await db.select({ s3Key: artifactTable.s3Key }).from(artifactTable).where(eq(artifactTable.id, selected.artifact.id)).limit(1);
+      await assertUploadsKept(ctx.jobId, ctx.schoolId, [artifact?.s3Key ?? '']);
     }
   }
   return { templates: DOCUMENT_TYPES.length };
@@ -674,6 +680,7 @@ export async function seedCredentials(ctx: SeedContext): Promise<{ credentialsS3
   await getS3Client().send(
     new PutObjectCommand({ Bucket: env.S3_BUCKET, Key: key, Body: body, ContentType: 'text/csv; charset=utf-8', CacheControl: 'private, no-store' }),
   );
+  await assertUploadsKept(ctx.jobId, ctx.schoolId, [key]);
   return { credentialsS3Key: key };
 }
 
