@@ -326,6 +326,15 @@ actions contains {
   "resourceKind": "school",
 } if { true }
 
+# Issuing a Cadet Portal password (first password or any later reset). Its own
+# action, so granting admission creation to another role never silently grants
+# password issuing.
+actions contains {
+  "id": "school.admission.cadet_password.issue",
+  "key": "ISSUE_ADMISSION_CADET_PASSWORD",
+  "resourceKind": "school",
+} if { true }
+
 actions contains {
   "id": "school.student.list",
   "key": "LIST_STUDENTS",

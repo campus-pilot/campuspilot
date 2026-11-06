@@ -37,6 +37,7 @@ grants contains {
     "school.admission.update",
     "school.admission.unregister",
     "school.admission.delete",
+    "school.admission.cadet_password.issue",
     "school.student.create",
     "school.student.update",
     "school.student.class.remove",

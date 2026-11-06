@@ -66,6 +66,40 @@ describe('isAuthorized Integration with OPA Container', () => {
   });
 
   describe('School Actions', () => {
+    it('grants Cadet Portal password issuing to principals and managers only', async () => {
+      const decide = (role: string) =>
+        isAuthorized(
+          {
+            action: SCHOOL_ACTIONS.ISSUE_ADMISSION_CADET_PASSWORD,
+            subject: {
+              userId: 'user-1',
+              roleAssignments: [
+                {
+                  role,
+                  scope: { kind: 'school', schoolId: 'school-1' },
+                  meta: null,
+                },
+              ],
+            },
+            resource: { kind: 'school', schoolId: 'school-1' },
+          } as AuthorizationInput,
+          { client },
+        );
+
+      const [principal, manager, teacher, accountant] = await Promise.all([
+        decide('school.principal'),
+        decide('school.manager'),
+        decide('school.teacher'),
+        decide('school.accountant'),
+      ]);
+      expect({ principal, manager, teacher, accountant }).toEqual({
+        principal: true,
+        manager: true,
+        teacher: false,
+        accountant: false,
+      });
+    });
+
     it('allows school principals and platform admins to manage a school logo', async () => {
       const [principalReadAllowed, principalUpdateAllowed, adminAllowed] =
         await Promise.all([
