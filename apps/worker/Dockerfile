@@ -20,8 +20,8 @@ ENV NODE_ENV=production
 COPY --from=builder /runtime/node_modules /app/node_modules
 COPY --from=builder /app/apps/worker/dist /app/dist
 
-# Restate calls the worker on this port (WORKER_PORT). Register the
-# deployment after start with `node dist/scripts/restate-register.mjs`.
+# Restate calls the worker on this port (WORKER_PORT). The worker registers
+# itself with Restate on every start, so no separate deploy step is needed.
 EXPOSE 9080
 
 CMD ["node", "dist/src/index.mjs"]

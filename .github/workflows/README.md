@@ -48,9 +48,9 @@ The workflow passes an empty `VITE_STUDENT_LOGIN_URL` build argument when the
 repository Variable is unset. The web environment normalizes that empty string
 to `undefined`; it is not replaced with a placeholder or admin URL.
 
-The API, worker and OPA images consume no build variables. After a worker
-deploy, register it with Restate (`node dist/scripts/restate-register.mjs`
-with `RESTATE_ADMIN_URL` and `RESTATE_WORKER_URL` set). Runtime database, auth,
+The API, worker and OPA images consume no build variables. The worker
+registers itself with Restate on every start (it needs `RESTATE_ADMIN_URL` and
+`RESTATE_WORKER_URL` at runtime). Runtime database, auth,
 Google OAuth, S3, Redis, OPA, Restate, and service credentials must be supplied
 only by the deployment environment; they must never be passed as image build
 arguments.

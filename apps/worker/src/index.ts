@@ -1,8 +1,8 @@
 import { log } from './log';
 import { startWorker } from './server';
 
-// Production entry. Deployments register the worker with Restate separately
-// (`node dist/restate-register.mjs` or `pnpm --filter worker register`).
+// Entry for production and `pnpm dev`. The worker registers itself with
+// Restate once it is listening (see server.ts).
 startWorker().catch((err) => {
   log.fatal({ err }, 'worker.boot.failed');
   process.exit(1);

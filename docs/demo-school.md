@@ -205,8 +205,8 @@ because of `NO ACTION` foreign keys and append-only finance.
 ```sh
 cp apps/server/.env apps/worker/.env
 printf 'WORKER_PORT=9080\nRESTATE_WORKER_URL=http://host.docker.internal:9080\n' >> apps/worker/.env
-pnpm dev:worker            # starts the worker and registers it (force) with Restate
-# or, for an already running worker:
+pnpm dev:worker            # starts the worker; it registers itself (force) with Restate
+# only if Restate lost its data while the worker kept running:
 pnpm --filter worker register [--force]
 ```
 
@@ -246,7 +246,15 @@ Environment variables for this feature:
 
 The `campuspilot-plus-worker` image runs `node dist/src/index.mjs` on
 `WORKER_PORT` with the API server's environment plus `RESTATE_WORKER_URL`.
-After each deploy, register it: `node dist/scripts/restate-register.mjs`.
+Once listening, it registers that URL with Restate's admin API
+(`RESTATE_ADMIN_URL`) with `force`, retrying with backoff (1 s doubling to
+30 s) until Restate accepts; it keeps serving meanwhile and logs
+`worker.register.retry` / `worker.registered`. Every start and every replica
+does this, which is harmless because the URL is stable. There is no deploy-time
+registration step and so no automatic rollback when registration fails: watch
+for repeated `worker.register.retry`. `force` replaces the service definitions
+at that URL, so release changes to an existing workflow only when none of its
+runs is in flight.
 Restate request signing (identity keys) is not used: Restate and the worker
 run in the same private cluster and the worker is never routed from outside
 it, so anything that can reach the worker's port is already inside the
