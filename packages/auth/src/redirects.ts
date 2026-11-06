@@ -1,6 +1,10 @@
 export const AUTH_REDIRECT_QUERY_PARAM = 'redirect';
 export const AUTH_ERROR_PATH = '/auth/error';
-export const DEFAULT_POST_SIGN_IN_PATH = '/dashboard';
+/**
+ * Where a sign-in lands when no safe `redirect` was requested. Every app serves
+ * its own root (`/`) and routes onward from there; no app has `/dashboard`.
+ */
+export const DEFAULT_POST_SIGN_IN_PATH = '/';
 
 const UNSAFE_PATH = /[\\\u0000-\u001f\u007f]|%(?:2f|5c)/i;
 
