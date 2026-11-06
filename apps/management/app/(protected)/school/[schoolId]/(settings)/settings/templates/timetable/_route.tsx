@@ -5,6 +5,7 @@ import { settingsBreadcrumbs } from '../../settings-breadcrumbs';
 
 export const timetableTemplatePage = defineManagementPage<SchoolRouteParams>({
   matches: (pathname) => /^\/school\/[^/]+\/settings\/templates\/timetable$/.test(pathname),
+  title: 'Timetable template',
   breadcrumbs: ({ schoolId }) => settingsBreadcrumbs(schoolId, { id: 'timetable-template', label: 'Timetable', icon: CalendarRange }),
 });
 

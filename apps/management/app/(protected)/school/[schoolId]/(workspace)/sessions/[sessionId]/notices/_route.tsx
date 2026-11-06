@@ -6,6 +6,7 @@ import type { SchoolSessionRouteParams } from '@/components/school-route';
 export const noticesPage = defineManagementPage<SchoolSessionRouteParams>({
   matches: (pathname) =>
     /^\/school\/[^/]+\/sessions\/[^/]+\/notices$/.test(pathname),
+  title: 'Notices',
   breadcrumbs: ({ schoolId, sessionId }) =>
     sessionPageBreadcrumbs(schoolId, sessionId, { id: 'notices', label: 'Notices', icon: Bell }),
 });

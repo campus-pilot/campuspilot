@@ -46,6 +46,23 @@ Any reusable components / layouts should live in @campuspilot/components, in the
 
 For reusable compopnents / layouts that need api calls they should be placed in apps/-the app-/src(if src)/components folder
 
+# Public, non-expiring blobs (`/blob/*`)
+
+The API server's `/blob/*` routes serve files at stable URLs that never expire,
+with no session or permission check (for example
+`/blob/school/{schoolId}/logo?size=192|512`, used for favicons and installed-app
+icons that browsers re-fetch in the background without credentials). Use
+`/blob/*` only when a URL genuinely must not expire and the file is safe for
+anyone to read. The school logo blob is for browser icons only (favicon,
+web-app manifest and apple-touch icons). Logos shown inside pages, such as the
+school avatar or switcher, keep using the permissioned `school.getLogo`
+presigned URL. `/blob/school/{schoolId}/manifest.webmanifest` installs a
+school as its own app. School name, logo and registration number are public
+school details; nothing else about a school belongs on `/blob/*`. Everything else, including student photos and documents, stays
+on the authenticated `/api/blob/*` routes or short-lived presigned URLs from
+permissioned procedures. Validate every query parameter against an explicit
+allowlist (sizes, formats) so callers cannot request unbounded work.
+
 # USING ENV
 
 use env directly from `@campuspilot/env` never use `import.meta` or `process.env`

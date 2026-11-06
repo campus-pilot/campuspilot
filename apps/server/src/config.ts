@@ -22,7 +22,7 @@ export function createConfiguredApp() {
   /**
    * OAuth discovery documents and signing keys are public (D4): any origin may
    * GET them without credentials, so browser-based MCP clients can discover
-   * the authorization server.
+   * the authorization server. Public `/blob/*` assets follow the same rule.
    */
   const publicDiscoveryCors = cors({
     origin: '*',
@@ -32,7 +32,8 @@ export function createConfiguredApp() {
   const isPublicDiscoveryPath = (path: string) =>
     path.startsWith('/.well-known/') ||
     path.startsWith('/api/auth/.well-known/') ||
-    path === '/api/auth/jwks';
+    path === '/api/auth/jwks' ||
+    path.startsWith('/blob/');
 
   const applicationCors = cors({
     origin: (origin, context) => {

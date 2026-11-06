@@ -11,6 +11,7 @@ export const documentPages = [undefined, "history"].map(
         new RegExp(
           `^/school/[^/]+/sessions/[^/]+/documents${section ? `/${section}` : ""}$`,
         ).test(pathname),
+      title: section ? "Document history" : "Documents",
       breadcrumbs: ({ schoolId, sessionId }) => {
         const breadcrumbs = sessionPageBreadcrumbs(schoolId, sessionId, {
           id: "documents",

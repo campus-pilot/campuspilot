@@ -37,6 +37,7 @@ import {
   useSchoolSessions,
   useStoredSchoolSessionId,
 } from '@/components/session-selection';
+import { SchoolDocumentHead } from '@/components/school-document-head';
 import { SessionSwitcher } from '@/components/session-switcher';
 import { orpc } from '@/lib/orpc';
 import { RequirePermissions } from '@/components/require-permissions';
@@ -265,5 +266,10 @@ export default function SchoolSettingsLayout({
     navbarActions: resolveManagementPageActions(page, params),
   };
 
-  return <ManagementShell state={state}>{children}</ManagementShell>;
+  return (
+    <>
+      <SchoolDocumentHead schoolId={schoolId} pageTitle={page?.title} />
+      <ManagementShell state={state}>{children}</ManagementShell>
+    </>
+  );
 }

@@ -13,6 +13,7 @@ export const sessionDetailPage =
   defineManagementPage<SessionDetailRouteParams>({
     matches: (pathname) =>
       /^\/school\/[^/]+\/settings\/session\/[^/]+$/.test(pathname),
+    title: 'Session',
     breadcrumbs: ({ schoolId, sessionId }) => [
       ...settingsBreadcrumbs(schoolId, {
         id: 'session-settings',

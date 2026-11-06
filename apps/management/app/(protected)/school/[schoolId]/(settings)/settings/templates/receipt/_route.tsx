@@ -5,6 +5,7 @@ import { settingsBreadcrumbs } from '../../settings-breadcrumbs';
 
 export const receiptTemplatePage = defineManagementPage<SchoolRouteParams>({
   matches: (pathname) => /^\/school\/[^/]+\/settings\/templates\/receipt$/.test(pathname),
+  title: 'Receipt template',
   breadcrumbs: ({ schoolId }) => settingsBreadcrumbs(schoolId, { id: 'receipt-template', label: 'Receipt', icon: ReceiptText }),
 });
 
