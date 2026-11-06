@@ -33,7 +33,7 @@ They are browser-public build settings embedded into frontend assets.
 | Variable | Image | Production value or owner input |
 | --- | --- | --- |
 | `NEXT_PUBLIC_SERVER_URL` | `campuspilot-plus-management`, `campuspilot-plus-admin` | `https://api.campuspilot.in` |
-| `NEXT_PUBLIC_MCP_URL` | `campuspilot-plus-management`, `campuspilot-plus-admin` | `https://api.campuspilot.in/api/mcp` (must equal the server's `MCP_RESOURCE_URL`) |
+| `NEXT_PUBLIC_MCP_URL` | `campuspilot-plus-management`, `campuspilot-plus-admin` | `https://api.campuspilot.in/mcp` (must equal the server's `MCP_RESOURCE_URL`) |
 | `VITE_SERVER_URL` | `campuspilot-plus-web` | `https://api.campuspilot.in` |
 | `VITE_CONTACT_EMAIL` | `campuspilot-plus-web` | `shubhaman47@gmail.com` |
 | `VITE_CONTACT_PHONE_NUMBER` | `campuspilot-plus-web` | `+917023908472` |

@@ -188,7 +188,7 @@ const authenticateMcpRequest = createMcpGate({
   recordGrantUse: (grantId) => recordOAuthGrantUse(db, grantId),
 });
 
-app.all('/api/mcp', async (context) => {
+app.all('/mcp', async (context) => {
   const request = context.req.raw;
   const result = await authenticateMcpRequest(request);
   if (!result.ok) return result.response;

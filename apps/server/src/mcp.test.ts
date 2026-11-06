@@ -232,7 +232,7 @@ describe('MCP tool execution', () => {
       reportError: vi.fn(),
     });
     const transport = new StreamableHTTPClientTransport(
-      new URL('http://localhost/api/mcp'),
+      new URL('http://localhost/mcp'),
       {
         fetch: async (input, init) =>
           handler.fetch(new Request(input, init)),
@@ -277,7 +277,7 @@ describe('MCP tool execution', () => {
 
     await expect(
       client.connect(
-        new StreamableHTTPClientTransport(new URL('http://localhost/api/mcp'), {
+        new StreamableHTTPClientTransport(new URL('http://localhost/mcp'), {
           fetch: async (input, init) => handler.fetch(new Request(input, init)),
         }),
       ),

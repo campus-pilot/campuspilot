@@ -39,7 +39,7 @@ const previewEnvironment = {
   SYSTEM_ADMIN_EMAIL: "admin@preview.test",
   BETTER_AUTH_SECRET: "test-document-preview-secret-at-least-32-characters",
   BETTER_AUTH_URL: `http://localhost:${apiPort}`,
-  MCP_RESOURCE_URL: `http://localhost:${apiPort}/api/mcp`,
+  MCP_RESOURCE_URL: `http://localhost:${apiPort}/mcp`,
   GOOGLE_CLIENT_ID: "fixture",
   GOOGLE_CLIENT_SECRET: "fixture",
   PUBLIC_APP_URL: `http://localhost:${appPort}`,
@@ -53,7 +53,7 @@ const previewEnvironment = {
   RESTATE_FABRIC_URL: "http://localhost:8080",
   RESTATE_INGRESS_URL: "http://localhost:8080",
   NEXT_PUBLIC_SERVER_URL: `http://localhost:${apiPort}`,
-  NEXT_PUBLIC_MCP_URL: `http://localhost:${apiPort}/api/mcp`,
+  NEXT_PUBLIC_MCP_URL: `http://localhost:${apiPort}/mcp`,
 };
 const child = spawn(
   execPath,

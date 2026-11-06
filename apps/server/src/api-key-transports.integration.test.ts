@@ -97,7 +97,7 @@ async function viaMcp(
   let status: number | undefined;
   try {
     await client.connect(
-      new StreamableHTTPClientTransport(new URL(`${ORIGIN}/api/mcp`), {
+      new StreamableHTTPClientTransport(new URL(`${ORIGIN}/mcp`), {
         requestInit: { headers },
         fetch: async (input, init) => {
           const response = await app.fetch(new Request(input, init));

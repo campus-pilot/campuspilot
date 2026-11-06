@@ -197,7 +197,7 @@ describe('Client ID Metadata Documents', () => {
       auth,
       authorizeUrl({
         ...client,
-        resource: 'https://evil.example/api/mcp',
+        resource: 'https://evil.example/mcp',
         codeChallenge: pkce().challenge,
       }),
       user.cookie,
@@ -207,7 +207,7 @@ describe('Client ID Metadata Documents', () => {
     const completed = await authorizeWithConsent(auth, client);
     const token = await exchangeCode(auth, completed, {
       ...client,
-      resource: 'https://evil.example/api/mcp',
+      resource: 'https://evil.example/mcp',
     });
     expect(token.status).toBe(400);
   });

@@ -4,7 +4,7 @@ import { MCP_DEFAULT_SCOPES } from '../mcp-oauth-policy';
 import { createAuth } from '../server';
 
 export const AUTH_ORIGIN = 'http://localhost:3000';
-export const MCP_RESOURCE = 'http://localhost:3000/api/mcp';
+export const MCP_RESOURCE = 'http://localhost:3000/mcp';
 export const ISSUER = `${AUTH_ORIGIN}/api/auth`;
 export const APP_ORIGIN = 'http://localhost:3001';
 
