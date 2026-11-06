@@ -1,10 +1,25 @@
 {
   "singleHolders": [
-    { "role": "manager", "emailRole": "manager", "label": "Manager" },
-    { "role": "accountant", "emailRole": "accountant", "label": "Accountant" },
-    { "role": "exam_coordinator", "emailRole": "exam-coordinator", "label": "Exam coordinator" }
+    {
+      "role": "manager",
+      "emailRole": "manager",
+      "label": "Manager"
+    },
+    {
+      "role": "accountant",
+      "emailRole": "accountant",
+      "label": "Accountant"
+    },
+    {
+      "role": "exam_coordinator",
+      "emailRole": "exam-coordinator",
+      "label": "Exam coordinator"
+    }
   ],
-  "teacher": { "role": "teacher", "emailRole": "teacher", "label": "Class teacher" },
-  "emailDomain": "campuspilot.in",
-  "passwordWords": ["amber", "banyan", "cedar", "delta", "ember", "falcon", "garnet", "harbor", "indigo", "jasmine", "kestrel", "lotus", "maple", "nectar", "orchid", "pebble", "quartz", "river", "saffron", "tamarind", "umber", "velvet", "willow", "zephyr"]
+  "teacher": {
+    "role": "teacher",
+    "emailRole": "teacher",
+    "label": "Class teacher"
+  },
+  "emailDomain": "campuspilot.in"
 }

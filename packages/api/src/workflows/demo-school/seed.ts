@@ -148,7 +148,6 @@ const staffSeedSchema = z.object({
   singleHolders: z.array(staffRoleSchema).min(1),
   teacher: staffRoleSchema,
   emailDomain: z.string().regex(/^[a-z0-9.-]+\.[a-z]{2,}$/),
-  passwordWords: z.array(z.string().regex(/^[a-z]+$/)).min(16),
 });
 
 export const demoSeed = {

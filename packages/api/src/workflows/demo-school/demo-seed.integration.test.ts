@@ -59,12 +59,12 @@ describe('demo school seed steps (2 classes, without Restate)', () => {
       sessionEndYear: 2027,
       classSlugs: ['ukg', 'class-1'],
     });
-    await startDemoJob(created.job.id, run);
+    await startDemoJob(created.job.id, 1, run);
     job = (await loadDemoJob(created.job.id))!;
   }, 120_000);
 
   it('seeds a coherent school that reconciles and records the job result', async () => {
-    const result = await runDemoSeedSteps({ job, run, step });
+    const result = await runDemoSeedSteps({ job, attempt: 1, run, step });
     const plan = buildDemoPlan({ input: job.input, seed: SEED, asOf: new Date(AS_OF), school: job.school });
     const plannedStudents = plan.classes.reduce((sum, item) => sum + item.students.length, 0);
 
@@ -134,7 +134,7 @@ describe('demo school seed steps (2 classes, without Restate)', () => {
 
   it('changes nothing when every step runs again', async () => {
     const before = await snapshotCounts(job.schoolId);
-    await runDemoSeedSteps({ job, run, step });
+    await runDemoSeedSteps({ job, attempt: 1, run, step });
     expect(await snapshotCounts(job.schoolId)).toEqual(before);
     const memberCount = await db.select({ value: count() }).from(schoolMemberTable).where(eq(schoolMemberTable.schoolId, job.schoolId));
     expect(memberCount[0]!.value).toBe(6);
@@ -148,7 +148,7 @@ describe('demo school seed steps (2 classes, without Restate)', () => {
       sessionEndYear: 2027,
       classSlugs: ['nursery'],
     });
-    await startDemoJob(created.job.id, run);
+    await startDemoJob(created.job.id, 1, run);
     const other = (await loadDemoJob(created.job.id))!;
     await createTestUser({ email: `manager.${other.school.slug}@campuspilot.in` });
     const context = await createSeedContext(other, run);

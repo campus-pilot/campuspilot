@@ -58,7 +58,9 @@ export const updateSchoolInputSchema = z
     name: addSchoolInputSchema.shape.name.optional(),
     location: addSchoolInputSchema.shape.location.optional(),
     registrationNo: optionalNullableText,
-    logoS3Key: optionalNullableText,
+    // No `logoS3Key`: the logo upload handler is the only writer of a
+    // school's logo key, so it always points under `schools/{id}/logo/`.
+    // An arbitrary key would let a later demo purge target foreign objects.
     hasCompletedOnboarding: z.boolean().optional(),
   })
   .refine(

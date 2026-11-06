@@ -5,7 +5,7 @@ import {
   type DemoSchoolJobResult,
 } from '@campuspilot/db/schema/demo-school-job';
 import { schoolTable } from '@campuspilot/db/schema/school';
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 
 import type { DemoSchoolStep } from './constants';
 import { demoSeedInputSchema, type DemoSeedInput } from './plan';
@@ -19,7 +19,8 @@ import { demoSeedInputSchema, type DemoSeedInput } from './plan';
 export type DemoJobSnapshot = {
   jobId: string;
   schoolId: string;
-  requestedBy: string;
+  requestedBy: string | null;
+  status: 'queued' | 'running' | 'succeeded' | 'failed';
   input: DemoSeedInput;
   seed: string | null;
   asOf: string | null;
@@ -39,6 +40,7 @@ export async function loadDemoJob(jobId: string): Promise<DemoJobSnapshot | null
     jobId,
     schoolId: row.job.schoolId,
     requestedBy: row.job.requestedBy,
+    status: row.job.status,
     input: demoSeedInputSchema.parse(row.job.input),
     seed: row.job.seed,
     asOf: row.job.asOf?.toISOString() ?? null,
@@ -48,11 +50,24 @@ export async function loadDemoJob(jobId: string): Promise<DemoJobSnapshot | null
 }
 
 /**
+ * Every status write below is fenced by attempt: only the job's current
+ * attempt, while it is not finished, may change it. A stale or replayed run
+ * of an earlier attempt therefore matches no row and changes nothing.
+ */
+function currentAttempt(jobId: string, attempt: number) {
+  return and(
+    eq(demoSchoolJobTable.id, jobId),
+    eq(demoSchoolJobTable.attempt, attempt),
+    inArray(demoSchoolJobTable.status, ['queued', 'running']),
+  );
+}
+
+/**
  * Records the seed and `asOf` the first time any attempt runs. Later attempts
  * keep the stored values (the `COALESCE`s), so a retry regenerates the same
  * people, dates and amounts and every idempotent step finds its earlier work.
  */
-export async function startDemoJob(jobId: string, candidate: { seed: string; asOf: string }) {
+export async function startDemoJob(jobId: string, attempt: number, candidate: { seed: string; asOf: string }) {
   const [row] = await db
     .update(demoSchoolJobTable)
     .set({
@@ -63,36 +78,36 @@ export async function startDemoJob(jobId: string, candidate: { seed: string; asO
       error: null,
       finishedAt: null,
     })
-    .where(eq(demoSchoolJobTable.id, jobId))
+    .where(currentAttempt(jobId, attempt))
     .returning({ seed: demoSchoolJobTable.seed, asOf: demoSchoolJobTable.asOf });
   if (!row?.seed || !row.asOf) return null;
   return { seed: row.seed, asOf: row.asOf.toISOString() };
 }
 
-export async function markDemoStepStarted(jobId: string, step: DemoSchoolStep) {
-  await db.update(demoSchoolJobTable).set({ currentStep: step }).where(eq(demoSchoolJobTable.id, jobId));
+export async function markDemoStepStarted(jobId: string, attempt: number, step: DemoSchoolStep) {
+  await db.update(demoSchoolJobTable).set({ currentStep: step }).where(currentAttempt(jobId, attempt));
 }
 
 /** Appends a finished step once; replays do not duplicate it. */
-export async function markDemoStepCompleted(jobId: string, step: DemoSchoolStep) {
+export async function markDemoStepCompleted(jobId: string, attempt: number, step: DemoSchoolStep) {
   await db
     .update(demoSchoolJobTable)
     .set({
       completedSteps: sql`CASE WHEN ${demoSchoolJobTable.completedSteps} ? ${step} THEN ${demoSchoolJobTable.completedSteps} ELSE ${demoSchoolJobTable.completedSteps} || ${JSON.stringify([step])}::jsonb END`,
     })
-    .where(eq(demoSchoolJobTable.id, jobId));
+    .where(currentAttempt(jobId, attempt));
 }
 
-export async function markDemoJobSucceeded(jobId: string, result: DemoSchoolJobResult) {
+export async function markDemoJobSucceeded(jobId: string, attempt: number, result: DemoSchoolJobResult) {
   await db
     .update(demoSchoolJobTable)
     .set({ status: 'succeeded', result, currentStep: null, error: null, finishedAt: new Date() })
-    .where(eq(demoSchoolJobTable.id, jobId));
+    .where(currentAttempt(jobId, attempt));
 }
 
-export async function markDemoJobFailed(jobId: string, error: DemoSchoolJobError) {
+export async function markDemoJobFailed(jobId: string, attempt: number, error: DemoSchoolJobError) {
   await db
     .update(demoSchoolJobTable)
     .set({ status: 'failed', error, finishedAt: new Date() })
-    .where(eq(demoSchoolJobTable.id, jobId));
+    .where(currentAttempt(jobId, attempt));
 }

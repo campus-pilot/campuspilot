@@ -99,3 +99,18 @@ describe('demo seed data and plan', () => {
     expect(encodePng(1, 1, new Uint8Array([0, 0, 0, 255])).byteLength).toBeGreaterThan(40);
   });
 });
+
+describe('demo passwords', () => {
+  it('are 4×4 base32 groups with at least 64 bits of entropy', async () => {
+    const { DEMO_PASSWORD_ALPHABET, DEMO_PASSWORD_ENTROPY_BITS, generateDemoPassword } = await import('./identity');
+    expect(DEMO_PASSWORD_ALPHABET).toHaveLength(32);
+    expect(new Set(DEMO_PASSWORD_ALPHABET).size).toBe(32);
+    expect(DEMO_PASSWORD_ENTROPY_BITS).toBeGreaterThanOrEqual(64);
+    const pattern = new RegExp(`^[${DEMO_PASSWORD_ALPHABET}]{4}(?:-[${DEMO_PASSWORD_ALPHABET}]{4}){3}$`);
+    const samples = Array.from({ length: 500 }, () => generateDemoPassword());
+    for (const password of samples) expect(password).toMatch(pattern);
+    expect(new Set(samples).size).toBe(samples.length);
+    // Every symbol of the alphabet is reachable.
+    expect(new Set(samples.join('').replaceAll('-', '')).size).toBe(32);
+  });
+});

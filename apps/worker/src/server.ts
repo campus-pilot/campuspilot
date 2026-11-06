@@ -1,5 +1,9 @@
 import { createServer } from 'node:http2';
-import { demoSchoolPurgeWorkflow, demoSchoolWorkflow } from '@campuspilot/api/workflows/demo-school';
+import {
+  demoSchoolControlService,
+  demoSchoolPurgeWorkflow,
+  demoSchoolWorkflow,
+} from '@campuspilot/api/workflows/demo-school';
 import { env } from '@campuspilot/env/worker';
 import { createEndpointHandler } from '@restatedev/restate-sdk';
 
@@ -12,7 +16,14 @@ import { log } from './log';
  * their current step, then exit. Restate resumes anything interrupted.
  */
 export function startWorker() {
-  const handler = createEndpointHandler({ services: [demoSchoolWorkflow, demoSchoolPurgeWorkflow] });
+  // Request signing: with identity keys the endpoint rejects any request not
+  // signed by our Restate server. They are optional only outside production
+  // (see @campuspilot/env/worker), where an absent value means unsigned dev.
+  if (!env.RESTATE_IDENTITY_KEYS) log.warn('worker.identity-keys.absent');
+  const handler = createEndpointHandler({
+    services: [demoSchoolControlService, demoSchoolWorkflow, demoSchoolPurgeWorkflow],
+    identityKeys: env.RESTATE_IDENTITY_KEYS,
+  });
   const server = createServer(handler);
   const ready = new Promise<void>((resolve) => {
     server.listen(env.WORKER_PORT, () => {

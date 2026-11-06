@@ -1,5 +1,5 @@
 import { PutObjectCommand } from '@aws-sdk/client-s3';
-import { auth } from '@campuspilot/auth/server';
+import { auth, createAuth } from '@campuspilot/auth/server';
 import { db } from '@campuspilot/db';
 import { admissionTable } from '@campuspilot/db/schema/admission';
 import { user } from '@campuspilot/db/schema/auth';
@@ -20,7 +20,10 @@ import { createRouterClient, type RouterClient } from '@orpc/server';
 import { and, count, eq, inArray, sql, sum } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 
+import { SCHOOL_ACTIONS } from '@campuspilot/opa/policies/school';
+
 import type { Context } from '../../context';
+import { assertPermission } from '../../permissions/authorization';
 import { appRouter } from '../../routers';
 import { ADMISSION_PHOTO_FIELD_NAME } from '../../routers/school/admission/admission.constants';
 import { handleAdmissionPhotoUpload } from '../../routers/school/admission/admission.http';
@@ -123,36 +126,39 @@ export async function seedSchoolLogo(ctx: SeedContext): Promise<{ generated: boo
 }
 
 /**
- * Creates one demo staff account through `inviteMember`, then records its
- * display name, `demo_school_id` and profile image. An existing address is
- * reused only when it is already this school's member with the planned role
- * (a replay of this step); any other existing account fails the step instead
- * of borrowing someone else's user.
+ * Creates one demo staff account, its school membership and role, and marks
+ * it `demo_school_id = schoolId`, all in one transaction. This is the
+ * `inviteMember` write path (same OPA action, same Better Auth provisioning),
+ * done here so the demo marker can never be missing from an account the seed
+ * created. A replay recognises its own account only by that marker; any other
+ * existing account with the address fails the step instead of being adopted.
  */
 export async function seedStaffMember(ctx: SeedContext, member: DemoStaffMember): Promise<{ userId: string }> {
-  const existing = await db.query.user.findFirst({ where: eq(user.email, member.email) });
+  await assertPermission(ctx.context, { action: SCHOOL_ACTIONS.INVITE_MEMBER, resource: { kind: 'school', schoolId: ctx.schoolId } });
+  const existing = await db.query.user.findFirst({ columns: { id: true, demoSchoolId: true }, where: eq(user.email, member.email) });
   let userId: string;
   if (existing) {
-    const [role] = await db
-      .select({ role: schoolUserRoleTable.role })
-      .from(schoolUserRoleTable)
-      .where(and(eq(schoolUserRoleTable.schoolId, ctx.schoolId), eq(schoolUserRoleTable.userId, existing.id), eq(schoolUserRoleTable.role, member.role)))
-      .limit(1);
-    const ownedByThisDemo = existing.demoSchoolId === ctx.schoolId || (existing.demoSchoolId === null && role !== undefined);
-    if (!ownedByThisDemo || !role) {
+    if (existing.demoSchoolId !== ctx.schoolId) {
       throw new DemoSeedError(`The account ${member.email} already exists and is not part of this demo school.`);
     }
     userId = existing.id;
   } else {
-    const invited = await ctx.rpc.school.inviteMember({
-      schoolId: ctx.schoolId,
-      email: member.email,
-      roles: [{ role: member.role, meta: member.role === 'teacher' ? { classIds: [] } : null }],
+    userId = await db.transaction(async (transaction) => {
+      const created = await createAuth(transaction).api.createUser({
+        body: { email: member.email, name: member.name, data: { emailVerified: true } },
+      });
+      await transaction.update(user).set({ demoSchoolId: ctx.schoolId }).where(eq(user.id, created.user.id));
+      await transaction.insert(schoolMemberTable).values({ schoolId: ctx.schoolId, userId: created.user.id });
+      await transaction.insert(schoolUserRoleTable).values({
+        schoolId: ctx.schoolId,
+        userId: created.user.id,
+        role: member.role,
+        meta: member.role === 'teacher' ? { classIds: [] } : null,
+      });
+      return created.user.id;
     });
-    userId = invited.userId;
   }
 
-  await db.update(user).set({ name: member.name, demoSchoolId: ctx.schoolId, updatedAt: new Date() }).where(eq(user.id, userId));
   const [current] = await db.select({ profileImageS3Key: user.profileImageS3Key }).from(user).where(eq(user.id, userId)).limit(1);
   if (!current?.profileImageS3Key) {
     // There is no procedure for setting another user's image; this mirrors
@@ -194,7 +200,10 @@ export async function seedSession(ctx: SeedContext): Promise<{ sessionId: string
 
 async function findStaffUserId(ctx: SeedContext, key: string) {
   const member = ctx.plan.staff.find((item) => item.key === key)!;
-  const found = await db.query.user.findFirst({ columns: { id: true }, where: eq(user.email, member.email) });
+  const found = await db.query.user.findFirst({
+    columns: { id: true },
+    where: and(eq(user.email, member.email), eq(user.demoSchoolId, ctx.schoolId)),
+  });
   if (!found) throw new DemoSeedError(`Staff account ${member.email} is missing; the staff step must run first.`);
   return found.id;
 }

@@ -1,9 +1,10 @@
 import * as restate from '@restatedev/restate-sdk';
 import { ORPCError } from '@orpc/server';
 import { randomBytes } from 'node:crypto';
+import { ZodError } from 'zod';
 
 import { isRetryableTransactionError } from '../../errors';
-import { DEMO_SCHOOL_WORKFLOW_NAME, type DemoSchoolStep } from './constants';
+import { DEMO_SCHOOL_WORKFLOW_NAME, demoSchoolWorkflowKey, type DemoSchoolStep } from './constants';
 import { DemoJobGuardError } from './job-context';
 import type { DemoSchoolJobResult } from '@campuspilot/db/schema/demo-school-job';
 import {
@@ -57,6 +58,10 @@ function classify(error: unknown): unknown {
   if (error instanceof DemoSeedError || error instanceof DemoJobGuardError) {
     return new restate.TerminalError(error.message, { errorCode: SAFE_FAILURE_CODE });
   }
+  // Invalid stored input or seed data never fixes itself on retry.
+  if (error instanceof ZodError) {
+    return new restate.TerminalError('The demo job input or seed data is invalid.', { errorCode: SAFE_FAILURE_CODE });
+  }
   if (error instanceof ORPCError && error.status >= 400 && error.status < 500 && !isRetryableTransactionError(error.cause)) {
     return new restate.TerminalError(error.message, { errorCode: SAFE_FAILURE_CODE });
   }
@@ -87,19 +92,21 @@ export type DemoStepRunner = <T>(name: string, action: () => Promise<T>) => Prom
  */
 export async function runDemoSeedSteps(options: {
   job: DemoJobSnapshot;
+  /** The attempt this run belongs to; every status write is fenced by it. */
+  attempt: number;
   run: { seed: string; asOf: string };
   step: DemoStepRunner;
   onPhase?: (name: DemoSchoolStep) => void;
 }): Promise<DemoSchoolJobResult> {
-  const { job, run, step } = options;
+  const { job, run, step, attempt } = options;
   const jobId = job.jobId;
   const plan = buildDemoPlan({ input: job.input, seed: run.seed, asOf: new Date(run.asOf), school: job.school });
   const seed = () => createSeedContext(job, run);
   const phase = async (name: DemoSchoolStep, body: () => Promise<void>) => {
     options.onPhase?.(name);
-    await step(`begin:${name}`, () => markDemoStepStarted(jobId, name));
+    await step(`begin:${name}`, () => markDemoStepStarted(jobId, attempt, name));
     await body();
-    await step(`end:${name}`, () => markDemoStepCompleted(jobId, name));
+    await step(`end:${name}`, () => markDemoStepCompleted(jobId, attempt, name));
   };
 
   await phase('staff', async () => {
@@ -160,47 +167,64 @@ export async function runDemoSeedSteps(options: {
 
   return step('finish', async () => {
     const result = await finishDemoSchool(await seed(), credentialsS3Key);
-    await markDemoJobSucceeded(jobId, result);
+    await markDemoJobSucceeded(jobId, attempt, result);
     return result;
   });
 }
 
-export type DemoSchoolWorkflowInput = { jobId: string };
-export type DemoSchoolWorkflowOutput = { status: 'succeeded' | 'missing' };
+export type DemoSchoolWorkflowInput = { jobId: string; attempt: number };
+export type DemoSchoolWorkflowOutput = { status: 'succeeded' | 'refused' };
 
 /**
  * `DemoSchool` provisions one demo school (plan §6). The key is
- * `{jobId}.{attempt}` (see `demoSchoolWorkflowKey`), so a repeat submit
- * attaches to the running attempt and a retry starts a new one that resumes
- * through idempotent steps. The seed and `asOf` are drawn once and stored on
- * the job, so every attempt rebuilds the same plan; only IDs and counts are
- * journaled. Progress and failures are written to `demo_school_job`.
+ * `{jobId}.{attempt}` and must match the input, so a run can only act for the
+ * attempt it was started as. It refuses a missing or finished job and any
+ * attempt other than the job's current one, so it can never re-run a
+ * succeeded seed. It is private to ingress: only `DemoSchoolControl`, which
+ * validates the job row first, starts it. The seed and `asOf` are drawn once
+ * and stored on the job, so every attempt rebuilds the same plan; only IDs and
+ * counts are journaled. Progress and failures are written to
+ * `demo_school_job`, fenced by attempt.
  */
 export const demoSchoolWorkflow = restate.workflow({
   name: DEMO_SCHOOL_WORKFLOW_NAME,
+  options: { ingressPrivate: true },
   handlers: {
     run: async (ctx: restate.WorkflowContext, input: DemoSchoolWorkflowInput): Promise<DemoSchoolWorkflowOutput> => {
-      const { jobId } = input;
-      const job = await step(ctx, 'load-job', () => loadDemoJob(jobId));
-      if (!job) return { status: 'missing' };
-      const candidateSeed = await ctx.run('draw-seed', async () => randomBytes(16).toString('hex'));
-      const now = await ctx.date.now();
-      const run = await step(ctx, 'start-job', async () => {
-        const started = await startDemoJob(jobId, { seed: candidateSeed, asOf: new Date(now).toISOString() });
-        if (!started) throw new DemoSeedError('The demo job no longer exists.');
-        return started;
-      });
+      const { jobId, attempt } = input;
+      if (ctx.key !== demoSchoolWorkflowKey(jobId, attempt)) {
+        throw new restate.TerminalError('The workflow key does not match the job attempt.');
+      }
       let current: DemoSchoolStep = 'staff';
+      let schoolId: string | null = null;
       try {
+        const job = await step(ctx, 'load-job', async () => {
+          const loaded = await loadDemoJob(jobId);
+          if (!loaded) throw new DemoSeedError('The demo job no longer exists.');
+          return loaded;
+        });
+        schoolId = job.schoolId;
+        if (job.attempt !== attempt || job.status === 'succeeded' || job.status === 'failed') {
+          log.warn({ jobId, attempt, currentAttempt: job.attempt, status: job.status }, 'demo-school.seed.refused');
+          return { status: 'refused' };
+        }
+        const candidateSeed = await ctx.run('draw-seed', async () => randomBytes(16).toString('hex'));
+        const now = await ctx.date.now();
+        const run = await step(ctx, 'start-job', async () => {
+          const started = await startDemoJob(jobId, attempt, { seed: candidateSeed, asOf: new Date(now).toISOString() });
+          if (!started) throw new DemoSeedError('This attempt is no longer the current one.');
+          return started;
+        });
         const result = await runDemoSeedSteps({
           job,
+          attempt,
           run,
           step: (name, action) => step(ctx, name, action),
           onPhase: (name) => {
             current = name;
           },
         });
-        log.info({ jobId, schoolId: job.schoolId, counts: result.counts }, 'demo-school.seed.succeeded');
+        log.info({ jobId, schoolId, counts: result.counts }, 'demo-school.seed.succeeded');
         return { status: 'succeeded' };
       } catch (error) {
         if (error instanceof restate.TerminalError) {
@@ -211,8 +235,9 @@ export const demoSchoolWorkflow = restate.workflow({
               ? error.message
               : 'An unexpected error stopped this step. Retry the job; if it fails again, check the worker logs.';
           const failedStep = current;
-          await ctx.run('mark-failed', () => markDemoJobFailed(jobId, { step: failedStep, message }));
-          log.warn({ jobId, schoolId: job.schoolId, step: failedStep, safe }, 'demo-school.seed.failed');
+          // Fenced by attempt: a no-op unless this is still the current attempt.
+          await ctx.run('mark-failed', () => markDemoJobFailed(jobId, attempt, { step: failedStep, message }));
+          log.warn({ jobId, schoolId, attempt, step: failedStep, safe }, 'demo-school.seed.failed');
         }
         throw error;
       }

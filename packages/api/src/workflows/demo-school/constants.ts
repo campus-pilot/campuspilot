@@ -5,6 +5,8 @@
  */
 export const DEMO_SCHOOL_WORKFLOW_NAME = 'DemoSchool';
 export const DEMO_SCHOOL_PURGE_WORKFLOW_NAME = 'DemoSchoolPurge';
+/** The only ingress-callable demo service; it validates IDs before starting a workflow. */
+export const DEMO_SCHOOL_CONTROL_SERVICE_NAME = 'DemoSchoolControl';
 
 /** The steps the admin progress view shows, in execution order. */
 export const DEMO_SCHOOL_STEPS = [

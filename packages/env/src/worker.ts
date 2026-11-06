@@ -18,8 +18,33 @@ export const env = createEnv({
      */
     RESTATE_WORKER_URL: z.url(),
     RESTATE_ADMIN_URL: z.url(),
+    /**
+     * Comma-separated Restate request identity public keys
+     * (`publickeyv1_…`). When set, the worker accepts only requests signed by
+     * that Restate server. Required in production; when absent outside
+     * production (local dev), requests are accepted unsigned.
+     */
+    RESTATE_IDENTITY_KEYS: z
+      .string()
+      .optional()
+      .transform((value) =>
+        value
+          ? value.split(',').map((key) => key.trim()).filter(Boolean)
+          : undefined,
+      )
+      .pipe(z.array(z.string().regex(/^publickeyv1_[A-Za-z0-9]+$/)).min(1).optional()),
     NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   },
+  createFinalSchema: (shape) =>
+    z.object(shape).superRefine((value, context) => {
+      if (value.NODE_ENV === 'production' && !value.RESTATE_IDENTITY_KEYS) {
+        context.addIssue({
+          code: 'custom',
+          path: ['RESTATE_IDENTITY_KEYS'],
+          message: 'RESTATE_IDENTITY_KEYS is required in production so the worker accepts only signed Restate requests.',
+        });
+      }
+    }),
   runtimeEnv: process.env,
   skipValidation: !!process.env.SKIP_ENV_VALIDATION,
   emptyStringAsUndefined: true,

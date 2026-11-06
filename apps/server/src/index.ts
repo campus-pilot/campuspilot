@@ -3,6 +3,7 @@ import { deleteUnusedDynamicOAuthClients } from '@campuspilot/auth/mcp-oauth';
 import { db } from '@campuspilot/db';
 import { runMigrations } from '@campuspilot/db/migrate';
 import { env } from '@campuspilot/env/server';
+import { resubmitPendingDemoPurges } from '@campuspilot/api/routers/system-admin/demo-school/demo-school.purge';
 
 import { app, mcpCatalog, mcpHandler } from './http';
 import { log } from './log';
@@ -23,6 +24,14 @@ async function phase<T>(name: string, fn: () => Promise<T>): Promise<T> {
 }
 
 const DCR_CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
+/** How often the demo purge outbox resubmits S3 cleanups Restate never accepted. */
+const DEMO_PURGE_OUTBOX_INTERVAL_MS = 10 * 60 * 1000;
+
+/** Resubmits pending demo-school S3 cleanups; failures are retried next sweep. */
+async function sweepDemoPurgeOutbox() {
+  const result = await resubmitPendingDemoPurges();
+  if (result.pending > 0) log.info(result, 'demo-school.purge-outbox.ok');
+}
 
 /** Removes dynamically registered OAuth clients that never got a grant. */
 async function removeUnusedDynamicClients() {
@@ -45,6 +54,14 @@ async function main() {
     });
   }, DCR_CLEANUP_INTERVAL_MS);
   dcrCleanup.unref();
+  const sweepOutbox = () => {
+    void sweepDemoPurgeOutbox().catch((err) => {
+      log.error({ err }, 'demo-school.purge-outbox.error');
+    });
+  };
+  sweepOutbox();
+  const demoPurgeOutbox = setInterval(sweepOutbox, DEMO_PURGE_OUTBOX_INTERVAL_MS);
+  demoPurgeOutbox.unref();
 
   const server = serve(
     {
@@ -62,6 +79,7 @@ async function main() {
   const shutdown = (signal: string) => {
     log.info({ signal }, 'boot.shutdown.start');
     clearInterval(dcrCleanup);
+    clearInterval(demoPurgeOutbox);
     void mcpHandler.close().catch((err) => {
       log.error({ err }, 'mcp.shutdown.error');
     });

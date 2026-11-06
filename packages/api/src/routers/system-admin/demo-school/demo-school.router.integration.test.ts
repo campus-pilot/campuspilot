@@ -19,13 +19,26 @@ import {
   type UserSession,
 } from '../../../../test/fixtures';
 import { expectRpcCode } from '../../../../test/finance/assertions';
-import { collectDemoSchoolObjectKeys, deleteDemoSchoolObjectBatch, type DemoSchoolPurgeInput } from '../../../workflows/demo-school/purge-workflow';
-import { cancelRestateInvocation, submitDemoSchoolPurgeWorkflow, submitDemoSchoolWorkflow } from './demo-school.restate';
+import { demoSchoolPurgeTable } from '@campuspilot/db/schema/demo-school-job';
+import {
+  collectDemoSchoolObjectKeys,
+  deleteDemoSchoolObjectBatch,
+  demoSchoolPurgeScope,
+  loadDemoSchoolPurgeScope,
+} from '../../../workflows/demo-school/purge-workflow';
+import { resubmitPendingDemoPurges } from './demo-school.purge';
+import {
+  cancelRestateInvocationAndWait,
+  getRestateInvocationStatus,
+  submitDemoSchoolPurgeWorkflow,
+  submitDemoSchoolWorkflow,
+} from './demo-school.restate';
 
 vi.mock('./demo-school.restate', () => ({
   submitDemoSchoolWorkflow: vi.fn(async (jobId: string, attempt: number) => ({ invocationId: `inv_${jobId}_${attempt}` })),
   submitDemoSchoolPurgeWorkflow: vi.fn(async () => ({ invocationId: 'inv_purge' })),
-  cancelRestateInvocation: vi.fn(async () => undefined),
+  cancelRestateInvocationAndWait: vi.fn(async () => true),
+  getRestateInvocationStatus: vi.fn(async () => 'running'),
 }));
 
 const validInput = {
@@ -50,7 +63,8 @@ describe('systemAdmin demo school procedures', () => {
   beforeEach(() => {
     vi.mocked(submitDemoSchoolWorkflow).mockClear();
     vi.mocked(submitDemoSchoolPurgeWorkflow).mockClear();
-    vi.mocked(cancelRestateInvocation).mockClear();
+    vi.mocked(cancelRestateInvocationAndWait).mockClear();
+    vi.mocked(getRestateInvocationStatus).mockReset().mockResolvedValue('running');
   });
 
   it('rejects anonymous callers and users without the demo grants', async () => {
@@ -102,16 +116,23 @@ describe('systemAdmin demo school procedures', () => {
     const created = await adminClient.systemAdmin.createDemoSchool({ ...validInput, name: 'Start Test School' });
     await adminClient.systemAdmin.startDemoSchoolJob({ jobId: created.job.id });
     await adminClient.systemAdmin.startDemoSchoolJob({ jobId: created.job.id });
-    expect(vi.mocked(submitDemoSchoolWorkflow).mock.calls).toEqual([[created.job.id, 1], [created.job.id, 1]]);
+    // The second start finds the first run alive and reuses it.
+    expect(vi.mocked(submitDemoSchoolWorkflow).mock.calls).toEqual([[created.job.id, 1]]);
     const [row] = await db.select().from(demoSchoolJobTable).where(eq(demoSchoolJobTable.id, created.job.id));
     expect(row!.invocationId).toBe(`inv_${created.job.id}_1`);
+
+    // A run that ended without finishing the job is replaced by a new attempt.
+    vi.mocked(getRestateInvocationStatus).mockResolvedValueOnce('completed');
+    const restarted = await adminClient.systemAdmin.startDemoSchoolJob({ jobId: created.job.id });
+    expect(restarted).toMatchObject({ status: 'queued', attempt: 2 });
+    expect(vi.mocked(submitDemoSchoolWorkflow)).toHaveBeenLastCalledWith(created.job.id, 2);
 
     await expectRpcCode(adminClient.systemAdmin.retryDemoSchoolJob({ jobId: created.job.id }), 'BAD_REQUEST');
     await db.update(demoSchoolJobTable).set({ status: 'failed', error: { step: 'finance', message: 'x' } }).where(eq(demoSchoolJobTable.id, created.job.id));
     await expectRpcCode(adminClient.systemAdmin.startDemoSchoolJob({ jobId: created.job.id }), 'BAD_REQUEST');
     const retried = await adminClient.systemAdmin.retryDemoSchoolJob({ jobId: created.job.id });
-    expect(retried).toMatchObject({ status: 'queued', attempt: 2, error: null });
-    expect(vi.mocked(submitDemoSchoolWorkflow)).toHaveBeenLastCalledWith(created.job.id, 2);
+    expect(retried).toMatchObject({ status: 'queued', attempt: 3, error: null });
+    expect(vi.mocked(submitDemoSchoolWorkflow)).toHaveBeenLastCalledWith(created.job.id, 3);
   });
 
   it('offers credentials only for a demo school whose seed succeeded', async () => {
@@ -137,26 +158,56 @@ describe('systemAdmin demo school procedures', () => {
     const demoUser = await createTestUser({ email: `manager.${created.school.slug}@campuspilot.in` });
     const profileKey = `users/${demoUser.id}/profile-image/test.png`;
     const orphanKey = `schools/${created.school.id}/orphan/file.txt`;
+    // A key outside the demo's prefixes (e.g. another school's object) must survive.
+    const foreignKey = `schools/sch_${'f'.repeat(21)}/logo/keep.png`;
     await db.update(user).set({ demoSchoolId: created.school.id, profileImageS3Key: profileKey }).where(eq(user.id, demoUser.id));
-    for (const key of [profileKey, orphanKey]) {
+    await db.update(schoolTable).set({ logoS3Key: foreignKey }).where(eq(schoolTable.id, created.school.id));
+    for (const key of [profileKey, orphanKey, foreignKey]) {
       await getS3Client().send(new PutObjectCommand({ Bucket: env.S3_BUCKET, Key: key, Body: 'x' }));
     }
 
     const result = await adminClient.systemAdmin.purgeDemoSchool({ schoolId: created.school.id, confirmation: created.school.slug });
     expect(result).toMatchObject({ schoolId: created.school.id, fileCleanupScheduled: true });
     expect(result.deletedRows).toMatchObject({ user: 1, demo_school_job: 1, school_member: 1 });
-    expect(vi.mocked(cancelRestateInvocation).mock.calls.map(([invocationId]) => invocationId)).toEqual([`inv_${created.job.id}_1`]);
+    expect(vi.mocked(cancelRestateInvocationAndWait).mock.calls.map(([invocationId]) => invocationId)).toEqual([`inv_${created.job.id}_1`]);
+    expect(vi.mocked(submitDemoSchoolPurgeWorkflow)).toHaveBeenCalledWith(created.school.id);
     expect(await db.select().from(schoolTable).where(eq(schoolTable.id, created.school.id))).toHaveLength(0);
     expect(await db.select().from(user).where(eq(user.id, demoUser.id))).toHaveLength(0);
     expect(await db.select().from(user).where(eq(user.id, admin.user.id))).toHaveLength(1);
 
-    // The S3 workflow input covers the recorded keys and both prefixes.
-    const purgeInput = vi.mocked(submitDemoSchoolPurgeWorkflow).mock.calls[0]![0] as DemoSchoolPurgeInput;
-    expect(purgeInput.keys).toContain(profileKey);
-    expect(purgeInput.prefixes).toEqual([`schools/${created.school.id}/`, `users/${demoUser.id}/`]);
-    const keys = await collectDemoSchoolObjectKeys(purgeInput);
+    // The workflow reads only the committed manifest and keeps foreign keys out.
+    const [manifest] = await db.select().from(demoSchoolPurgeTable).where(eq(demoSchoolPurgeTable.schoolId, created.school.id));
+    expect(manifest).toMatchObject({ status: 'scheduled', demoUserIds: [demoUser.id] });
+    expect(manifest!.objectKeys).toEqual(expect.arrayContaining([profileKey, foreignKey]));
+    const scope = (await loadDemoSchoolPurgeScope(created.school.id))!;
+    expect(scope.prefixes).toEqual([`schools/${created.school.id}/`, `users/${demoUser.id}/`]);
+    expect(scope.keys).toContain(profileKey);
+    expect(scope.keys).not.toContain(foreignKey);
+    const keys = await collectDemoSchoolObjectKeys(scope);
     expect(keys).toEqual(expect.arrayContaining([profileKey, orphanKey]));
+    expect(keys).not.toContain(foreignKey);
     await deleteDemoSchoolObjectBatch(keys);
-    expect(await collectDemoSchoolObjectKeys({ ...purgeInput, keys: [] })).toEqual([]);
+    expect(await collectDemoSchoolObjectKeys({ ...scope, keys: [] })).toEqual([]);
+    expect(await collectDemoSchoolObjectKeys({ keys: [], prefixes: [`schools/sch_${'f'.repeat(21)}/`] })).toEqual([foreignKey]);
+  });
+
+  it('refuses cleanup scopes for existing schools or malformed IDs', async () => {
+    const created = await adminClient.systemAdmin.createDemoSchool({ ...validInput, name: 'Scope Guard School' });
+    await expect(loadDemoSchoolPurgeScope(created.school.id)).rejects.toThrow(/still exists/);
+    expect(() => demoSchoolPurgeScope({ schoolId: '', objectKeys: [], demoUserIds: [] })).toThrow();
+    expect(() => demoSchoolPurgeScope({ schoolId: `sch_${'a'.repeat(21)}`, objectKeys: [], demoUserIds: [''] })).toThrow();
+    expect(demoSchoolPurgeScope({ schoolId: `sch_${'a'.repeat(21)}`, objectKeys: ['', 'schools/', `schools/sch_${'a'.repeat(21)}/`, `schools/sch_${'a'.repeat(21)}/../x`], demoUserIds: [] }).keys).toEqual([]);
+  });
+
+  it('resubmits purges whose cleanup Restate did not accept', async () => {
+    const created = await adminClient.systemAdmin.createDemoSchool({ ...validInput, name: 'Outbox School' });
+    vi.mocked(submitDemoSchoolPurgeWorkflow).mockRejectedValueOnce(new Error('Restate down'));
+    const result = await adminClient.systemAdmin.purgeDemoSchool({ schoolId: created.school.id, confirmation: created.school.slug });
+    expect(result.fileCleanupScheduled).toBe(false);
+    const [pending] = await db.select().from(demoSchoolPurgeTable).where(eq(demoSchoolPurgeTable.schoolId, created.school.id));
+    expect(pending).toMatchObject({ status: 'pending', submitAttempts: 1 });
+    await resubmitPendingDemoPurges();
+    const [scheduled] = await db.select().from(demoSchoolPurgeTable).where(eq(demoSchoolPurgeTable.schoolId, created.school.id));
+    expect(scheduled).toMatchObject({ status: 'scheduled', submitAttempts: 2 });
   });
 });

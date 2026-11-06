@@ -34,17 +34,24 @@ export function demoStaffEmail(emailRole: string, schoolSlug: string, teacherNum
 }
 
 /**
- * A 16+ character password of two words and digits, e.g. `Cedar-Lotus-4821`.
- * Uses `node:crypto`; never derived from the journaled seed, so it cannot be
+ * Crockford base32 without the easily confused I, L, O and U: 32 symbols,
+ * exactly 5 bits each, so `randomInt` draws them without bias.
+ */
+export const DEMO_PASSWORD_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+const DEMO_PASSWORD_GROUPS = 4;
+const DEMO_PASSWORD_GROUP_LENGTH = 4;
+
+/** Entropy of a generated demo password: 16 symbols × 5 bits = 80 bits. */
+export const DEMO_PASSWORD_ENTROPY_BITS =
+  DEMO_PASSWORD_GROUPS * DEMO_PASSWORD_GROUP_LENGTH * Math.log2(DEMO_PASSWORD_ALPHABET.length);
+
+/**
+ * A readable 80-bit password such as `7KQ2-MX9D-H4TC-0VNR`, drawn with
+ * `node:crypto`. Never derived from the journaled seed, so it cannot be
  * reconstructed from workflow state.
  */
-export function generateDemoPassword(): string {
-  const words = demoSeed.staff.passwordWords;
-  const word = () => {
-    const picked = words[randomInt(words.length)]!;
-    return picked[0]!.toUpperCase() + picked.slice(1);
-  };
-  let password = `${word()}-${word()}-${String(randomInt(1000, 10000))}`;
-  while (password.length < 16) password += String(randomInt(10));
-  return password;
+export function generateDemoPassword(draw: (max: number) => number = randomInt): string {
+  return Array.from({ length: DEMO_PASSWORD_GROUPS }, () =>
+    Array.from({ length: DEMO_PASSWORD_GROUP_LENGTH }, () => DEMO_PASSWORD_ALPHABET[draw(DEMO_PASSWORD_ALPHABET.length)]!).join(''),
+  ).join('-');
 }

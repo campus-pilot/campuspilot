@@ -5,7 +5,7 @@ import type { DatabaseExecutor } from "@campuspilot/db";
 import { admissionTable } from "@campuspilot/db/schema/admission";
 import { artifactTable } from "@campuspilot/db/schema/artifact";
 import { user } from "@campuspilot/db/schema/auth";
-import { demoSchoolJobTable } from "@campuspilot/db/schema/demo-school-job";
+import { demoSchoolJobTable, demoSchoolPurgeTable } from "@campuspilot/db/schema/demo-school-job";
 import { schoolTable } from "@campuspilot/db/schema/school";
 import { schoolMemberTable } from "@campuspilot/db/schema/school-member";
 import { schoolUserRoleTable } from "@campuspilot/db/schema/school-user-role";
@@ -44,9 +44,10 @@ import {
   purgeDemoSchoolOutputSchema,
   type DemoSchoolJobDto,
 } from "./demo-school.dto";
+import { scheduleDemoSchoolPurgeCleanup } from "./demo-school.purge";
 import {
-  cancelRestateInvocation,
-  submitDemoSchoolPurgeWorkflow,
+  cancelRestateInvocationAndWait,
+  getRestateInvocationStatus,
   submitDemoSchoolWorkflow,
 } from "./demo-school.restate";
 
@@ -207,13 +208,27 @@ export const demoSchoolRouter = {
     .input(demoSchoolJobIdInputSchema)
     .use(requireSystemPermission(SYSTEM_ACTIONS.CREATE_DEMO_SCHOOL))
     .output(demoSchoolJobDtoSchema)
-    .handler(async ({ context, input }) => {
+    .handler(async ({ context, input, signal }) => {
       try {
         const job = await findJob(context.db, input.jobId);
         if (job.status === "failed") {
           throw rpcError.badRequest("This demo job failed. Retry it instead of starting it again.");
         }
         if (job.status === "succeeded") return toDemoSchoolJobDto(job);
+        if (job.invocationId) {
+          const status = await getRestateInvocationStatus(job.invocationId, signal);
+          // A live run is reused. A run that ended without finishing the job
+          // (it crashed before marking it, or Restate dropped it) cannot be
+          // restarted under the same key, so a new attempt is started.
+          if (status !== null && status !== "completed") return toDemoSchoolJobDto(job);
+          const [next] = await context.db
+            .update(demoSchoolJobTable)
+            .set({ attempt: sql`${demoSchoolJobTable.attempt} + 1`, status: "queued", invocationId: null, error: null })
+            .where(and(eq(demoSchoolJobTable.id, job.id), eq(demoSchoolJobTable.attempt, job.attempt)))
+            .returning();
+          if (!next) throw rpcError.conflict("The demo job changed meanwhile. Refresh and try again.");
+          return toDemoSchoolJobDto(await submitJob(context.db, next));
+        }
         return toDemoSchoolJobDto(await submitJob(context.db, job));
       } catch (error) {
         throw toRpcError(error);
@@ -364,60 +379,66 @@ export const demoSchoolRouter = {
           throw rpcError.badRequest(`Enter ${school.slug} exactly to confirm the purge.`);
         }
 
-        // 5. Stop any seed still running, so it cannot write into a school
-        // being removed. The system-job guard also refuses once it is gone.
+        // 5. Stop any seed still running and wait until it has ended, so no
+        // step can write rows or upload files into a school being removed.
         const jobs = await context.db
           .select({ invocationId: demoSchoolJobTable.invocationId })
           .from(demoSchoolJobTable)
           .where(and(eq(demoSchoolJobTable.schoolId, school.id), inArray(demoSchoolJobTable.status, ["queued", "running"])));
         for (const { invocationId } of jobs) {
-          if (invocationId) await cancelRestateInvocation(invocationId, signal);
+          if (invocationId && !(await cancelRestateInvocationAndWait(invocationId, { signal }))) {
+            throw rpcError.conflict("The demo seed is still stopping. Try the purge again in a minute.");
+          }
         }
-
-        // 1–2. Every S3 key the school and its demo users own, plus prefixes
-        // to list again for orphans.
-        const demoUsers = await context.db
-          .select({ id: user.id, profileImageS3Key: user.profileImageS3Key })
-          .from(user)
-          .where(eq(user.demoSchoolId, school.id));
-        const admissions = await context.db
-          .select({ photoS3Key: admissionTable.photoS3Key, documents: admissionTable.documents })
-          .from(admissionTable)
-          .where(eq(admissionTable.schoolId, school.id));
-        const artifacts = await context.db.select({ s3Key: artifactTable.s3Key }).from(artifactTable).where(eq(artifactTable.schoolId, school.id));
-        const keys = [
-          school.logoS3Key,
-          demoCredentialsS3Key(school.id),
-          ...demoUsers.map((item) => item.profileImageS3Key),
-          ...admissions.flatMap((item) => [item.photoS3Key, ...item.documents.flatMap((document) => document.files.map((file) => file.s3Key))]),
-          ...artifacts.map((item) => item.s3Key),
-        ].filter((key): key is string => Boolean(key));
-        const prefixes = [`schools/${school.id}/`, ...demoUsers.map((item) => `users/${item.id}/`)];
 
         // Revoke demo logins first, including sessions cached in Redis that a
         // database cascade alone would not remove.
+        const demoUsersBefore = await context.db.select({ id: user.id }).from(user).where(eq(user.demoSchoolId, school.id));
         const authContext = await auth.$context;
-        for (const demoUser of demoUsers) await authContext.internalAdapter.deleteUserSessions(demoUser.id);
+        for (const demoUser of demoUsersBefore) await authContext.internalAdapter.deleteUserSessions(demoUser.id);
 
-        // 3. One transaction: the database purge, which also removes the demo
-        // users. The requesting admin has no demo_school_id and survives.
-        const deletedRows = await context.db.transaction(async (transaction) => {
+        // 1–3. One transaction: lock the school, record the purge manifest of
+        // every S3 key and demo user it owns, then purge_demo_school(), which
+        // also removes the demo users. The requesting admin has no
+        // demo_school_id and survives. Accounts invited into the demo with a
+        // real address keep their account and lose only the membership.
+        const { deletedRows, fileCount } = await context.db.transaction(async (transaction) => {
+          await transaction.select({ id: schoolTable.id }).from(schoolTable).where(eq(schoolTable.id, school.id)).for("update");
+          const [locked] = await transaction.select({ logoS3Key: schoolTable.logoS3Key }).from(schoolTable).where(eq(schoolTable.id, school.id));
+          const demoUsers = await transaction
+            .select({ id: user.id, profileImageS3Key: user.profileImageS3Key })
+            .from(user)
+            .where(eq(user.demoSchoolId, school.id));
+          const admissions = await transaction
+            .select({ photoS3Key: admissionTable.photoS3Key, documents: admissionTable.documents })
+            .from(admissionTable)
+            .where(eq(admissionTable.schoolId, school.id));
+          const artifacts = await transaction.select({ s3Key: artifactTable.s3Key }).from(artifactTable).where(eq(artifactTable.schoolId, school.id));
+          // Recorded as-is; the cleanup workflow accepts only keys under this
+          // school's or its demo users' prefixes (demoSchoolPurgeScope).
+          const objectKeys = [...new Set([
+            locked?.logoS3Key,
+            demoCredentialsS3Key(school.id),
+            ...demoUsers.map((item) => item.profileImageS3Key),
+            ...admissions.flatMap((item) => [item.photoS3Key, ...item.documents.flatMap((document) => document.files.map((file) => file.s3Key))]),
+            ...artifacts.map((item) => item.s3Key),
+          ].filter((key): key is string => Boolean(key)))];
           const result = await transaction.execute<{ counts: Record<string, number> }>(
             sql`SELECT purge_demo_school(${school.id}) AS counts`,
           );
-          return result.rows[0]?.counts ?? {};
+          await transaction.insert(demoSchoolPurgeTable).values({
+            schoolId: school.id,
+            objectKeys,
+            demoUserIds: demoUsers.map((item) => item.id),
+          });
+          return { deletedRows: result.rows[0]?.counts ?? {}, fileCount: objectKeys.length };
         });
 
-        // 4. After commit, durable S3 cleanup.
-        let fileCleanupScheduled = true;
-        try {
-          await submitDemoSchoolPurgeWorkflow({ schoolId: school.id, keys: [...new Set(keys)], prefixes });
-        } catch (error) {
-          fileCleanupScheduled = false;
-          log.error({ err: error, schoolId: school.id }, "demo-school.purge.s3-schedule.failed");
-        }
-        log.info({ schoolId: school.id, deletedRows, s3Objects: keys.length, fileCleanupScheduled }, "demo-school.purge.ok");
-        return { schoolId: school.id, deletedRows, fileCount: new Set(keys).size, fileCleanupScheduled };
+        // 4. After commit, durable S3 cleanup: the manifest is an outbox the
+        // API resubmits until Restate accepts it (resubmitPendingDemoPurges).
+        const fileCleanupScheduled = await scheduleDemoSchoolPurgeCleanup(context.db, school.id);
+        log.info({ schoolId: school.id, deletedRows, s3Objects: fileCount, fileCleanupScheduled }, "demo-school.purge.ok");
+        return { schoolId: school.id, deletedRows, fileCount, fileCleanupScheduled };
       } catch (error) {
         throw toRpcError(error);
       }
