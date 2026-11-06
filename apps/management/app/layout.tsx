@@ -5,6 +5,7 @@ import { ThemeProvider } from '@campuspilot/components/theme-provider';
 import { TooltipProvider } from '@campuspilot/ui/components/tooltip';
 import { ExamNotifications } from '@/components/exam/exam-notifications';
 import { QueryProvider } from '@/components/query-provider';
+import { DEFAULT_APP_ICONS } from '@/components/app-icons';
 import './globals.css';
 
 const inter = Inter({
@@ -19,6 +20,7 @@ export const metadata: Metadata = {
     template: '%s | CampusPilot',
   },
   description: 'Run your school from one secure CampusPilot workspace.',
+  icons: DEFAULT_APP_ICONS,
   appleWebApp: {
     capable: true,
     title: 'CampusPilot',

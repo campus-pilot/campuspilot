@@ -11,6 +11,7 @@ import { StudentBreadcrumbValue } from '@/components/student-breadcrumb-value';
 export const classroomPage = defineManagementPage<SchoolSessionRouteParams>({
   matches: (pathname) =>
     /^\/school\/[^/]+\/sessions\/[^/]+\/classroom$/.test(pathname),
+  title: 'Classroom',
   breadcrumbs: ({ schoolId, sessionId }) =>
     sessionPageBreadcrumbs(schoolId, sessionId, { id: 'classroom', label: 'Classroom', icon: GraduationCap }),
   actions: ({ schoolId }) => (
@@ -30,6 +31,7 @@ export const classroomDetailsPage = defineManagementPage<SchoolSessionRouteParam
     /^\/school\/[^/]+\/sessions\/[^/]+\/classroom\/[^/]+(?:\/.*)?$/.test(
       pathname,
     ),
+  title: 'Classroom',
   breadcrumbs: ({ schoolId, sessionId }) =>
     sessionPageBreadcrumbs(schoolId, sessionId, {
       id: 'classroom',
@@ -42,6 +44,7 @@ type ClassStudentsRouteParams = SchoolSessionRouteParams & { classId: string };
 
 export const classStudentsPage = defineManagementPage<ClassStudentsRouteParams>({
   matches: (pathname) => /^\/school\/[^/]+\/sessions\/[^/]+\/classroom\/[^/]+\/students$/.test(pathname),
+  title: 'Students',
   breadcrumbs: classroomDetailsPage.breadcrumbs,
   actions: ({ schoolId, sessionId, classId }) => <AddStudentAction schoolId={schoolId} sessionId={sessionId} classId={classId} />,
 });
@@ -50,6 +53,7 @@ type ClassStudentDetailsRouteParams = ClassStudentsRouteParams & { studentId: st
 
 export const classStudentDetailsPage = defineManagementPage<ClassStudentDetailsRouteParams>({
   matches: (pathname) => /^\/school\/[^/]+\/sessions\/[^/]+\/classroom\/[^/]+\/students\/[^/]+$/.test(pathname),
+  title: 'Student',
   breadcrumbs: ({ schoolId, sessionId, classId, studentId }) => [
     ...sessionPageBreadcrumbs(schoolId, sessionId, { id: 'classroom', label: 'Classroom', icon: GraduationCap }).map((breadcrumb) => breadcrumb.id === 'classroom' ? { ...breadcrumb, href: schoolSessionHref(schoolId, sessionId, `/classroom/${encodeURIComponent(classId)}/students`) } : breadcrumb),
     { id: 'student-name', label: <StudentBreadcrumbValue schoolId={schoolId} sessionId={sessionId} studentId={studentId} />, href: schoolSessionHref(schoolId, sessionId, `/classroom/${encodeURIComponent(classId)}/students/${encodeURIComponent(studentId)}`) },

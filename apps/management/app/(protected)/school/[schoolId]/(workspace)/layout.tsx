@@ -32,6 +32,7 @@ import {
   useSchoolSessions,
   useStoredSchoolSessionId,
 } from '@/components/session-selection';
+import { SchoolDocumentHead } from '@/components/school-document-head';
 import { SessionSwitcher } from '@/components/session-switcher';
 import { admissionPage } from './admission/_route';
 import { admissionDetailsPage } from './admission/[admissionId]/_route';
@@ -202,7 +203,12 @@ export default function SchoolWorkspaceLayout({
     navbarActions: resolveManagementPageActions(page, params),
   };
 
-  const shell = <ManagementShell state={state}>{children}</ManagementShell>;
+  const shell = (
+    <>
+      <SchoolDocumentHead schoolId={schoolId} pageTitle={page?.title} />
+      <ManagementShell state={state}>{children}</ManagementShell>
+    </>
+  );
   return routeSessionId ? (
     <PersistSchoolSessionSelection
       schoolId={schoolId}

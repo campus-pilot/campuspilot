@@ -11,6 +11,8 @@ import {
   handleProfileImageUpload,
 } from '@campuspilot/api/routers/auth/auth.http';
 import { handleSchoolLogoUpload } from '@campuspilot/api/routers/system-admin/school/school.http';
+import { handleSchoolLogoBlob } from '@campuspilot/api/routers/school/logo/logo.blob';
+import { handleSchoolManifestBlob } from '@campuspilot/api/routers/school/manifest/manifest.blob';
 import {
   handleAdmissionDocumentDelete,
   handleAdmissionDocumentRead,
@@ -39,6 +41,7 @@ import { createConfiguredApp } from './config';
 import { log } from './log';
 import { buildMcpCatalog, createCampusPilotMcpHandler } from './mcp';
 import { createMcpGate } from './mcp-auth';
+import { createRateLimit } from './rate-limit';
 
 const app = createConfiguredApp();
 
@@ -58,6 +61,32 @@ function reportUploadError(
 app.on(['POST', 'GET'], '/api/auth/*', (context) =>
   auth.handler(normalizeApiKeyRequest(context.req.raw)),
 );
+
+/**
+ * `/blob/*` serves public assets at URLs that never expire, without session
+ * or permission checks. Use it only for assets that must outlive a presigned
+ * URL and are safe for anyone to read (see the root AGENTS.md). Private files
+ * stay on the authenticated `/api/blob/*` routes. Each client IP may make 20
+ * `/blob/*` requests per second, since no session bounds who can call them.
+ */
+app.use('/blob/*', createRateLimit({ id: 'blob', limit: 20, windowMs: 1_000 }));
+
+app.get('/blob/school/:schoolId/logo', (context) => {
+  const input = {
+    schoolId: context.req.param('schoolId'),
+    size: context.req.query('size'),
+  };
+  return handleSchoolLogoBlob({ db }, input, context.req.raw, (error) =>
+    reportUploadError(context.var.logger, 'school.logo.blob.error', input, error),
+  );
+});
+
+app.get('/blob/school/:schoolId/manifest.webmanifest', (context) => {
+  const input = { schoolId: context.req.param('schoolId') };
+  return handleSchoolManifestBlob({ db }, input, (error) =>
+    reportUploadError(context.var.logger, 'school.manifest.blob.error', input, error),
+  );
+});
 
 app.post('/api/blob/schools/:schoolId/logo', async (context) => {
   const schoolId = context.req.param('schoolId');

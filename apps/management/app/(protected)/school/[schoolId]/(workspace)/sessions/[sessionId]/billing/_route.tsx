@@ -7,6 +7,7 @@ import { sessionPageBreadcrumbs } from '@/components/session-page-breadcrumbs';
 import type { SchoolSessionRouteParams } from '@/components/school-route';
 
 const labels: Record<string, string> = { runs: 'Cycle', payments: 'Payments', reports: 'Overview' };
+const titles: Record<string, string> = { runs: 'Billing cycle', payments: 'Payments', reports: 'Billing overview' };
 export const billingPages = [undefined, 'runs', 'payments', 'reports'].map((section) => defineManagementPage<SchoolSessionRouteParams>({
   matches: (pathname) => new RegExp(`^/school/[^/]+/sessions/[^/]+/billing${section ? `/${section}` : ''}$`).test(pathname),
   ...(section === undefined ? {
@@ -20,6 +21,7 @@ export const billingPages = [undefined, 'runs', 'payments', 'reports'].map((sect
       </RequirePermissions>
     ),
   } : {}),
+  title: section ? titles[section]! : 'Billing',
   breadcrumbs: ({ schoolId, sessionId }) => {
     const crumbs = sessionPageBreadcrumbs(schoolId, sessionId, { id: 'billing', label: 'Billing', icon: CreditCard });
     if (section) { crumbs[crumbs.length - 1]!.href = `/school/${schoolId}/sessions/${sessionId}/billing`; crumbs.push({ id: section, label: labels[section]! }); }
@@ -28,6 +30,7 @@ export const billingPages = [undefined, 'runs', 'payments', 'reports'].map((sect
 }));
 export const billingRunDetailPage = defineManagementPage<SchoolSessionRouteParams & { billRunId: string }>({
   matches: (pathname) => /^\/school\/[^/]+\/sessions\/[^/]+\/billing\/runs\/[^/]+$/.test(pathname),
+  title: 'Billing run',
   breadcrumbs: ({ schoolId, sessionId, billRunId }) => {
     const crumbs = sessionPageBreadcrumbs(schoolId, sessionId, { id: 'billing', label: 'Billing', icon: CreditCard });
     crumbs[crumbs.length - 1]!.href = `/school/${schoolId}/sessions/${sessionId}/billing`;
