@@ -1,0 +1,39 @@
+{
+  "currency": "INR",
+  "timeZone": "Asia/Kolkata",
+  "recurring": "monthly",
+  "elements": {
+    "tuition_fee": { "name": "Tuition Fee", "scopes": ["class", "student"], "requiredAtLevel": "class" },
+    "smart_class_fee": { "name": "Smart Class and Computer Lab Fee", "scopes": ["class", "student"], "requiredAtLevel": "class" },
+    "transport_fee": { "name": "Transport Fee", "scopes": ["student"], "requiredAtLevel": "student", "defaultAmountMinor": 0 },
+    "examination_fee": { "name": "Examination Fee", "scopes": ["school"], "requiredAtLevel": "bill_generation" },
+    "miscellaneous": { "name": "Miscellaneous", "scopes": ["school"], "requiredAtLevel": "bill_generation" }
+  },
+  "examinationFeeElement": "examination_fee",
+  "examinationFeeMinor": 30000,
+  "transport": { "element": "transport_fee", "share": 0.25, "amountsMinor": [60000, 80000, 100000] },
+  "paymentProfiles": [
+    { "kind": "punctual", "share": 0.45 },
+    { "kind": "late", "share": 0.25 },
+    { "kind": "partial", "share": 0.15 },
+    { "kind": "defaulter", "share": 0.1 },
+    { "kind": "advance", "share": 0.05 }
+  ],
+  "paymentMethods": [
+    { "method": "cash", "weight": 45 },
+    { "method": "bank_transfer", "weight": 35 },
+    { "method": "cheque", "weight": 12 },
+    { "method": "card", "weight": 8 }
+  ],
+  "discounts": {
+    "share": 0.1,
+    "reasons": [
+      { "code": "sibling", "note": "Sibling concession for the session", "calculation": { "kind": "fixed", "amountMinor": 50000 } },
+      { "code": "staff_ward", "note": "Staff ward concession on the first bill", "calculation": { "kind": "percentage", "percentage": "25" } },
+      { "code": "merit", "note": "Merit scholarship from the previous session", "calculation": { "kind": "fixed", "amountMinor": 100000 } }
+    ],
+    "paymentDiscountShare": 0.04,
+    "paymentDiscount": { "code": "prompt_payment", "note": "Prompt payment rebate at the counter", "amountMinor": 5000 }
+  },
+  "unregisterShare": 0.06
+}

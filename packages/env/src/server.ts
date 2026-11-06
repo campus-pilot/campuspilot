@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { DB_ENV_SHAPE } from './server/api-db.env';
 import { AUTH_ENV_SHAPE } from './server/auth.env';
 import { S3_ENV_SHAPE } from './server/s3.env';
-import { SERVICES_ENV_SHAPE } from './server/services.env';
+import { requireWorkerControlSecretInProduction, SERVICES_ENV_SHAPE } from './server/services.env';
 
 export const env = createEnv({
   server: {
@@ -21,6 +21,7 @@ export const env = createEnv({
     ...S3_ENV_SHAPE,
     ...SERVICES_ENV_SHAPE,
   },
+  createFinalSchema: (shape) => z.object(shape).superRefine(requireWorkerControlSecretInProduction),
   runtimeEnv: process.env,
   skipValidation: !!process.env.SKIP_ENV_VALIDATION,
   emptyStringAsUndefined: true,

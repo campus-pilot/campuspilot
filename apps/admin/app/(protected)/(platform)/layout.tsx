@@ -13,6 +13,7 @@ import {
 import { AdminShell, type AdminShellState } from '@/components/admin-shell';
 import { resolveAdminPageActions } from '@/components/admin-route';
 import { NewSchoolAction } from '@/components/new-school-action';
+import { DemoPurgeAlerts } from '@/components/demo-school/demo-purge-alerts';
 import { demoRequestsPage } from './demo-requests/_route';
 import { homePage } from './_route';
 import { oauthClientsPage } from './oauth-clients/_route';
@@ -83,5 +84,10 @@ export default function PlatformLayout({ children }: { children: ReactNode }) {
     navbarActions: resolveAdminPageActions(page, params, <NewSchoolAction />),
   };
 
-  return <AdminShell state={state}>{children}</AdminShell>;
+  return (
+    <AdminShell state={state}>
+      <DemoPurgeAlerts />
+      {children}
+    </AdminShell>
+  );
 }

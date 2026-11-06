@@ -75,6 +75,20 @@ const HIDDEN_TOOLS = [
   'systemAdmin.rotateOAuthClientSecret',
   'systemAdmin.deleteOAuthClient',
   'systemAdmin.setOAuthClientDisabled',
+  // Demo provisioning, credentials and purge stay human admin actions.
+  'systemAdmin.listDemoClassCatalogue',
+  'systemAdmin.createDemoSchool',
+  'systemAdmin.startDemoSchoolJob',
+  'systemAdmin.retryDemoSchoolJob',
+  'systemAdmin.getDemoSchoolJob',
+  'systemAdmin.getSchoolDemoJob',
+  'systemAdmin.getDemoCredentialsDownload',
+  'systemAdmin.purgeDemoSchool',
+  'systemAdmin.watchDemoSchoolJob',
+  'systemAdmin.retryDemoSchoolPurge',
+  'systemAdmin.getDemoSchoolPurge',
+  'systemAdmin.watchDemoSchoolPurge',
+  'systemAdmin.listDemoSchoolPurges',
 ];
 
 /**

@@ -1,0 +1,58 @@
+{
+  "subjectSets": {
+    "preschool": {
+      "english": { "name": "English", "book": "My First English Book", "modes": "oralWritten" },
+      "hindi": { "name": "Hindi", "book": "Akshar Gyan", "modes": "oralWritten" },
+      "maths": { "name": "Number Work", "book": "Fun with Numbers", "modes": "oralWritten" },
+      "general-awareness": { "name": "General Awareness", "book": "World Around Me", "modes": "oralWritten" }
+    },
+    "primary": {
+      "english": { "name": "English", "book": "English Reader", "modes": "writtenOral" },
+      "hindi": { "name": "Hindi", "book": "Hindi Vatika", "modes": "writtenOral" },
+      "mathematics": { "name": "Mathematics", "book": "Maths Magic", "modes": "writtenOral" },
+      "evs": { "name": "Environmental Studies", "book": "Looking Around", "modes": "writtenOral" },
+      "computer": { "name": "Computer Studies", "book": "Cyber Kids", "modes": "writtenPractical" }
+    },
+    "middle": {
+      "english": { "name": "English", "book": "Honeysuckle Reader", "modes": "writtenOral" },
+      "hindi": { "name": "Hindi", "book": "Vasant", "modes": "writtenOral" },
+      "sanskrit": { "name": "Sanskrit", "book": "Ruchira", "modes": "writtenOral" },
+      "mathematics": { "name": "Mathematics", "book": "Mathematics Textbook", "modes": "writtenOral" },
+      "science": { "name": "Science", "book": "Science Explorer", "modes": "writtenPractical" },
+      "social-science": { "name": "Social Science", "book": "Our Pasts and Present", "modes": "writtenProject" },
+      "computer": { "name": "Computer Science", "book": "Computer Masti", "modes": "writtenPractical" }
+    },
+    "secondary": {
+      "english": { "name": "English Language and Literature", "book": "Beehive", "modes": "theoryInternal" },
+      "hindi": { "name": "Hindi Course B", "book": "Sparsh", "modes": "theoryInternal" },
+      "mathematics": { "name": "Mathematics", "book": "Mathematics Standard", "modes": "theoryInternal" },
+      "science": { "name": "Science", "book": "Science Textbook", "modes": "theoryInternal" },
+      "social-science": { "name": "Social Science", "book": "Contemporary India", "modes": "theoryInternal" },
+      "computer-applications": { "name": "Computer Applications", "book": "Computer Applications", "modes": "theoryPractical" }
+    }
+  },
+  "examModeSets": {
+    "oralWritten": { "oral": { "name": "Oral", "percentage": 40 }, "written": { "name": "Written", "percentage": 60 } },
+    "writtenOral": { "written": { "name": "Written", "percentage": 80 }, "oral": { "name": "Oral", "percentage": 20 } },
+    "writtenPractical": { "written": { "name": "Written", "percentage": 70 }, "practical": { "name": "Practical", "percentage": 30 } },
+    "writtenProject": { "written": { "name": "Written", "percentage": 80 }, "project": { "name": "Project", "percentage": 20 } },
+    "theoryInternal": { "theory": { "name": "Theory", "percentage": 80 }, "internal": { "name": "Internal Assessment", "percentage": 20 } },
+    "theoryPractical": { "theory": { "name": "Theory", "percentage": 50 }, "practical": { "name": "Practical", "percentage": 50 } }
+  },
+  "bookPublication": "CampusPilot Sample Publications",
+  "classes": [
+    { "slug": "nursery", "label": "Nursery", "subjectSet": "preschool", "ageAtSessionStart": 3, "tuitionMinor": 120000, "smartClassMinor": 0 },
+    { "slug": "lkg", "label": "LKG", "subjectSet": "preschool", "ageAtSessionStart": 4, "tuitionMinor": 130000, "smartClassMinor": 0 },
+    { "slug": "ukg", "label": "UKG", "subjectSet": "preschool", "ageAtSessionStart": 5, "tuitionMinor": 140000, "smartClassMinor": 0 },
+    { "slug": "class-1", "label": "Class 1", "subjectSet": "primary", "ageAtSessionStart": 6, "tuitionMinor": 160000, "smartClassMinor": 25000 },
+    { "slug": "class-2", "label": "Class 2", "subjectSet": "primary", "ageAtSessionStart": 7, "tuitionMinor": 170000, "smartClassMinor": 25000 },
+    { "slug": "class-3", "label": "Class 3", "subjectSet": "primary", "ageAtSessionStart": 8, "tuitionMinor": 180000, "smartClassMinor": 25000 },
+    { "slug": "class-4", "label": "Class 4", "subjectSet": "primary", "ageAtSessionStart": 9, "tuitionMinor": 190000, "smartClassMinor": 25000 },
+    { "slug": "class-5", "label": "Class 5", "subjectSet": "primary", "ageAtSessionStart": 10, "tuitionMinor": 200000, "smartClassMinor": 25000 },
+    { "slug": "class-6", "label": "Class 6", "subjectSet": "middle", "ageAtSessionStart": 11, "tuitionMinor": 230000, "smartClassMinor": 35000 },
+    { "slug": "class-7", "label": "Class 7", "subjectSet": "middle", "ageAtSessionStart": 12, "tuitionMinor": 240000, "smartClassMinor": 35000 },
+    { "slug": "class-8", "label": "Class 8", "subjectSet": "middle", "ageAtSessionStart": 13, "tuitionMinor": 250000, "smartClassMinor": 35000 },
+    { "slug": "class-9", "label": "Class 9", "subjectSet": "secondary", "ageAtSessionStart": 14, "tuitionMinor": 290000, "smartClassMinor": 35000 },
+    { "slug": "class-10", "label": "Class 10", "subjectSet": "secondary", "ageAtSessionStart": 15, "tuitionMinor": 300000, "smartClassMinor": 35000 }
+  ]
+}

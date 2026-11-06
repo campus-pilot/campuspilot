@@ -8,6 +8,7 @@ import {
 } from "drizzle-orm/pg-core";
 
 import { generateId } from "../id";
+import { user } from "./auth";
 import { admissionSettingsSchema } from "./jsonb";
 import type { AdmissionSettings } from "./jsonb";
 
@@ -29,4 +30,17 @@ export const schoolTable = pgTable("school", {
   hasCompletedOnboarding: boolean("has_completed_onboarding")
     .notNull()
     .default(false),
+  /**
+   * Demo status is its own explicit fact. It drives the management banner,
+   * admin badges, the worker's `system-job` guard and the demo purge. It is
+   * never inferred from the slug, staff email domain or a provisioning job.
+   */
+  isDemo: boolean("is_demo").notNull().default(false),
+  /**
+   * The platform admin who requested the demo. Recorded independently from
+   * that admin's principal role, which can change after creation.
+   */
+  demoCreatedBy: text("demo_created_by").references(() => user.id, {
+    onDelete: "set null",
+  }),
 });

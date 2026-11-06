@@ -217,16 +217,12 @@ const types: DocumentType[] = ['report_card', 'id_card', 'admit_card', 'timetabl
 for (const documentType of types) {
   let active = await rpc.school.getActiveDocumentTemplate({ schoolId, documentType });
   if (!active) active = await rpc.school.selectMarketplaceTemplate({ schoolId, documentType, slug: `${documentType}-default`, expectedRevisionId: null });
-  /** Preserve the catalog designs while repairing their imported context/CSS
-   * selectors in this school's own revisions. Full admit cards accommodate all
-   * ten assessment slots. Custom revisions are left alone on later runs. */
-  if (active.artifact.marketplaceSlug === `${documentType}-default` && ['report_card', 'id_card', 'admit_card'].includes(documentType)) {
-    const content = documentType === 'report_card'
-      ? active.content.replaceAll('reportSections.includeModeMarks', '@root.reportSections.includeModeMarks')
-      : documentType === 'id_card'
-        ? active.content.replaceAll('..legacy-template', '.body')
-        : `${active.content.replaceAll('.ac-.legacy-template', '.ac-body')}<style>.ac{box-sizing:border-box}</style>`;
-    active = await rpc.school.saveDocumentTemplate({ schoolId, documentType, name: `Maple Grove ${documentType === 'report_card' ? 'Report Card' : documentType === 'id_card' ? 'Student ID' : 'Admit Card (Full A4)'}`, content, pageSize: 'full', expectedRevisionId: active.artifact.id });
+  /** The catalog admit card is a half-A4 design; this demo prints it on full A4
+   * so a card accommodates all ten assessment slots. Its source is saved
+   * unchanged as a school revision with the full footprint. Custom revisions
+   * are left alone on later runs. */
+  if (documentType === 'admit_card' && active.artifact.marketplaceSlug === 'admit_card-default') {
+    active = await rpc.school.saveDocumentTemplate({ schoolId, documentType, name: 'Maple Grove Admit Card (Full A4)', content: active.content, pageSize: 'full', expectedRevisionId: active.artifact.id });
   }
   templates.set(documentType, active.artifact.id);
 }

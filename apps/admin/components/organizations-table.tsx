@@ -13,6 +13,7 @@ import {
 } from '@campuspilot/components/data-grid';
 import { Badge } from '@campuspilot/ui/components/badge';
 import { orpc } from '@/lib/orpc';
+import { DemoSchoolJobStatus } from './demo-school/demo-school-job-status';
 import { SchoolAvatar } from './school-avatar';
 
 type OrganizationOrderField = 'name' | 'location' | 'createdAt' | 'updatedAt';
@@ -37,8 +38,11 @@ const organizationColumns: DataTableColumnDef<SchoolDto>[] = [
         >
           <SchoolAvatar school={row.original} />
           <span className="flex min-w-0 flex-col gap-0.5">
-            <span className="truncate font-medium underline decoration-border underline-offset-4 group-hover:decoration-foreground">
-              {row.original.name}
+            <span className="flex min-w-0 items-center gap-1.5">
+              <span className="truncate font-medium underline decoration-border underline-offset-4 group-hover:decoration-foreground">
+                {row.original.name}
+              </span>
+              {row.original.isDemo ? <Badge variant="outline">Demo</Badge> : null}
             </span>
             <span className="truncate text-[11px] text-muted-foreground">
               {row.original.slug}
@@ -63,13 +67,18 @@ const organizationColumns: DataTableColumnDef<SchoolDto>[] = [
     id: 'status',
     header: 'Status',
     enableSorting: false,
-    cell: ({ row }) => (
-      <Badge
-        variant={row.original.hasCompletedOnboarding ? 'secondary' : 'outline'}
-      >
-        {row.original.hasCompletedOnboarding ? 'Onboarded' : 'Setup pending'}
-      </Badge>
-    ),
+    // Demo rows always show their seeding job's own status (which reads
+    // "Onboarded" once it succeeded); other rows show onboarding.
+    cell: ({ row }) =>
+      row.original.isDemo ? (
+        <DemoSchoolJobStatus schoolId={row.original.id} />
+      ) : (
+        <Badge
+          variant={row.original.hasCompletedOnboarding ? 'secondary' : 'outline'}
+        >
+          {row.original.hasCompletedOnboarding ? 'Onboarded' : 'Setup pending'}
+        </Badge>
+      ),
   },
   {
     accessorKey: 'createdAt',

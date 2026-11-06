@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 import { ThemeProvider } from '@campuspilot/components/theme-provider';
 import { TooltipProvider } from '@campuspilot/ui/components/tooltip';
+import { AppToaster } from '@/components/app-toaster';
 import { QueryProvider } from '@/components/query-provider';
 import './globals.css';
 import { Inter } from "next/font/google";
@@ -28,6 +29,8 @@ export default function RootLayout({
             disableTransitionOnChange
           >
             <TooltipProvider>{children}</TooltipProvider>
+            {/* Inside the query provider: demo progress toasts follow live queries. */}
+            <AppToaster />
           </ThemeProvider>
         </QueryProvider>
       </body>

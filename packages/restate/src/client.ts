@@ -15,3 +15,6 @@ export const getRestateClient = (): Ingress => {
 
   return restateClient;
 };
+
+/** Per-call options (`idempotencyKey`, `timeout`) for ingress client calls. */
+export { rpc } from '@restatedev/restate-sdk-clients';

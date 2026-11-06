@@ -30,33 +30,62 @@ function wrapSection(
 /** Legacy report designs predate independent print flags. These targeted
  * adaptations preserve their markup while making each optional section obey
  * the current report-card contract.
+ *
+ * Every flag is addressed through `@root`: the per-subject mode columns are
+ * wrapped inside `{{#each subjects}}`, where a bare `reportSections` path would
+ * resolve against the subject and silently hide the body cells while the
+ * header (rendered at the root) still showed them.
  */
 function adaptReportFlags(source: string) {
   let adapted = source.replace(
     /{{#each (subjects\.\[0\]\.modeConfig|this\.modeConfig)}}([\s\S]*?){{\/each}}/g,
-    "{{#if reportSections.includeModeMarks}}{{#each $1}}$2{{/each}}{{/if}}",
+    "{{#if @root.reportSections.includeModeMarks}}{{#each $1}}$2{{/each}}{{/if}}",
   );
+  // The attendance-focus design groups its mode columns under one header and
+  // spans the summary labels across them; both must follow the same flag as
+  // the mode columns or the table loses its column alignment.
+  adapted = adapted
+    .replace(
+      '<th colspan="2">Obtained Marks</th>',
+      '{{#if @root.reportSections.includeModeMarks}}<th colspan="2">Obtained Marks</th>{{/if}}',
+    )
+    .replaceAll(
+      '<td colspan="4" style="text-align:right;">',
+      '<td colspan="{{#if @root.reportSections.includeModeMarks}}4{{else}}2{{/if}}" style="text-align:right;">',
+    );
   adapted = wrapSection(
     adapted,
     "<!-- Co-Scholastic Areas -->",
     "<!-- Attendance -->",
-    "reportSections.includeCoScholastics",
+    "@root.reportSections.includeCoScholastics",
   );
   adapted = wrapSection(
     adapted,
     "<!-- Grading Scale -->",
     "<!-- Footer -->",
-    "reportSections.includeGradingScale",
+    "@root.reportSections.includeGradingScale",
   );
   adapted = adapted.replace(
     /(<!-- CO-SCHOLASTIC \+ ATTENDANCE -->[\s\S]*?<div class="section flex">\s*)(<div class="box">[\s\S]*?<\/div>)(\s*{{#if attendance}})/,
-    "$1{{#if reportSections.includeCoScholastics}}$2{{/if}}$3",
+    "$1{{#if @root.reportSections.includeCoScholastics}}$2{{/if}}$3",
   );
   return wrapSection(
     adapted,
     "<!-- GRADING SCALE -->",
     "<!-- SIGNATURES -->",
-    "reportSections.includeGradingScale",
+    "@root.reportSections.includeGradingScale",
+  );
+}
+
+/** Replace one legacy context path with its current name. Only whole paths are
+ * replaced, so renaming `bill.period` cannot also rewrite an already-current
+ * `bill.periodKey` (or any other path that merely starts with the same text).
+ */
+function renameContextPath(source: string, from: string, to: string) {
+  const escaped = from.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return source.replace(
+    new RegExp(`(?<![\\w.$@-])${escaped}(?![\\w$-])`, "g"),
+    to,
   );
 }
 
@@ -91,7 +120,7 @@ function adaptFinanceContext(source: string, type: "bill" | "receipt") {
     );
   }
   let adapted = replacements.reduce(
-    (value, [from, to]) => value.replaceAll(from, to),
+    (value, [from, to]) => renameContextPath(value, from, to),
     source,
   );
   if (type === "bill") {
@@ -111,6 +140,41 @@ function adaptFinanceContext(source: string, type: "bill" | "receipt") {
       );
   }
   return adapted;
+}
+
+const LEGACY_ROOT = ".legacy-template";
+
+/** Rewrite the document-root type selectors of one selector (no commas) to the
+ * slot wrapper. Only standalone `html`/`body` type selectors match: the
+ * lookbehind rejects class (`.body`), ID (`#body`), hyphenated (`.ac-body`),
+ * longer (`tbody`) and pseudo/escaped names, and attribute selectors or quoted
+ * strings are skipped verbatim. `html body` and `html > body` collapse to one
+ * wrapper because both elements map to the same slot element.
+ */
+function scopeSelector(selector: string) {
+  return selector
+    .replace(/(^|[\s>+~(])html\s*>?\s*body(?![\w-])/gi, "$1body")
+    .replace(
+      /(\[[^\]]*\]|"[^"]*"|'[^']*')|(?<![\w\\.#:-])(?:html|body)(?![\w-])/gi,
+      (_match, skipped: string | undefined) => skipped ?? LEGACY_ROOT,
+    );
+}
+
+/** Scope legacy stylesheet rules written for a whole HTML page to one slot.
+ * Only rule selector preludes (text immediately before `{`) are rewritten, so
+ * declarations, comments and at-rule preludes (`@media …`) are never touched.
+ * Comments are removed first so commented-out text cannot be mistaken for a
+ * selector. Exported for focused unit tests.
+ */
+export function scopeLegacyDocumentCss(css: string) {
+  return css
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/(^|[{};])([^{};@]+)(?=\{)/g, (_match, lead: string, list: string) => {
+      const selectors = [
+        ...new Set(list.split(",").map((part) => scopeSelector(part.trim()))),
+      ];
+      return `${lead}${selectors.join(", ")} `;
+    });
 }
 
 /** Convert a complete legacy HTML document into one self-contained slot. The
@@ -140,13 +204,12 @@ function normalizeLegacyTemplate(
 
   const pageRule = source.match(/@page\s*\{[\s\S]*?\}/i)?.[0] ?? "";
   const pageMargin = pageRule.match(/margin\s*:\s*([^;}]*)/i)?.[1]?.trim();
-  const styles = [...source.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/gi)]
-    .map((match) => match[1])
-    .join("\n")
-    .replace(/@page\s*\{[\s\S]*?\}/gi, "")
-    .replace(/\bhtml\s*,\s*body(?=\s*\{)/gi, ".legacy-template")
-    .replace(/\bbody(?=\s*\{)/gi, ".legacy-template")
-    .replace(/(?:page-)?break-after\s*:\s*always\s*;?/gi, "");
+  const styles = scopeLegacyDocumentCss(
+    [...source.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/gi)]
+      .map((match) => match[1])
+      .join("\n")
+      .replace(/@page\s*\{[\s\S]*?\}/gi, ""),
+  ).replace(/(?:page-)?break-after\s*:\s*always\s*;?/gi, "");
   const bodyMatch = source.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
   let body = bodyMatch?.[1]
     ? bodyMatch[1]
@@ -162,7 +225,12 @@ function normalizeLegacyTemplate(
     : documentType === "admit_card"
       ? "padding:8mm;"
       : "";
-  return `<style>${styles}\n.legacy-template{box-sizing:border-box;width:100%;height:100%;overflow:hidden;${padding}}.legacy-school-logo{display:block;width:14mm;height:14mm;object-fit:contain;margin:0 auto 3mm}</style><div class="legacy-template">${body}</div>`;
+  // The border-box reset has zero specificity (:where) and precedes the
+  // design's own rules, so any explicit box-sizing in the design still wins. Complete legacy documents declare it
+  // globally already; the admit-card fragments do not, yet size their root at
+  // height:100% plus padding and border, which overflows (and is clipped by)
+  // the slot under content-box sizing.
+  return `<style>:where(${LEGACY_ROOT},${LEGACY_ROOT} *,${LEGACY_ROOT} *::before,${LEGACY_ROOT} *::after){box-sizing:border-box}\n${styles}\n.legacy-template{box-sizing:border-box;width:100%;height:100%;overflow:hidden;${padding}}.legacy-school-logo{display:block;width:14mm;height:14mm;object-fit:contain;margin:0 auto 3mm}</style><div class="legacy-template">${body}</div>`;
 }
 
 function legacyPageSize(

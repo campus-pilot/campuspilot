@@ -87,3 +87,26 @@ actionLabel/onAction (or actionHref). onAction receives closeDialog; close the
 alert list before opening the relevant editor. Remove the registration when the
 condition is resolved. Use adjacent field errors and transient save feedback for
 validation/submission errors rather than adding them to the shell warning list.
+
+## Demo schools
+
+Demo schools (`school.is_demo`) are provisioned by `DemoSchoolWorkflow`
+(`packages/api/src/workflows/demo-school`, served by `apps/worker` through
+Restate) from the seed data in its `seed/` folder. When you add or change a
+feature a school user would see, check whether a fresh demo school shows it empty
+or broken; if so, extend the seed JSON and the matching workflow step so a new
+demo shows the feature with realistic data. Seed steps call the real
+permission-checked procedures as the demo's principal, are idempotent on natural
+keys or `demo:{jobId}:…` idempotency keys, and derive every date from the
+workflow's journaled `asOf`. Never copy data from a real or imported school into
+seed files. Any new school-owned table or S3 object must also be covered by
+`purge_demo_school` and the demo purge workflow. If an email transport is
+added, demo users (`user.demo_school_id` set) must be excluded explicitly.
+Demo kick-offs (start, retry, purge) return immediately and hand work to
+Restate through the outbox (`demo-school.outbox.ts`); never make an API request
+wait for the worker. Every call to a worker service exposed on Restate
+ingress (today `DemoSchoolControl`) must be signed with the worker-wide
+`WORKER_CONTROL_SECRET` (`packages/api/src/workflows/control-auth.ts`); new
+workflows stay ingress-private and are started through such a signed service. Progress is streamed with oRPC
+event iterators and consumed in a TanStack Query function, not an effect.
+See [Demo schools](docs/demo-school.md) for operations.

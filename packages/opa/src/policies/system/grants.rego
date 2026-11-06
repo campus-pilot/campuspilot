@@ -27,6 +27,15 @@ grants contains {
   "action": "system.school.delete",
 } if { true }
 
+grants contains {"role": "platform.admin", "action": action} if {
+  some action in {
+    "system.school.demo.create",
+    "system.school.demo.read",
+    "system.school.demo.credentials.read",
+    "system.school.demo.purge",
+  }
+}
+
 grants contains {
   "role": "platform.admin",
   "action": "system.oauth_client.list",
