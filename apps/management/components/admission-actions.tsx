@@ -117,7 +117,7 @@ function AdmissionOverflowMenu({ admission }: { admission: AdmissionDto }) {
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         <DropdownMenuGroup>
-          <DropdownMenuItem onSelect={() => { reset.reset(); setConfirming(true); }}><KeyRound aria-hidden />Reset Cadet Portal password</DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => { reset.reset(); setConfirming(true); }}><KeyRound aria-hidden />Issue portal password</DropdownMenuItem>
         </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>
