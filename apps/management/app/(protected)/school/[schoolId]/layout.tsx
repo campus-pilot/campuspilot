@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
+import { SchoolInstallGate } from '@/components/school-install-gate';
 import { SchoolAccessBoundary } from '@/components/school-selection';
 
 /**
@@ -19,7 +20,9 @@ export default async function SelectedSchoolLayout({
 }) {
   const { schoolId } = await params;
   return (
-    <SchoolAccessBoundary schoolId={schoolId}>{children}</SchoolAccessBoundary>
+    <SchoolAccessBoundary schoolId={schoolId}>
+      <SchoolInstallGate schoolId={schoolId}>{children}</SchoolInstallGate>
+    </SchoolAccessBoundary>
   );
 }
 
