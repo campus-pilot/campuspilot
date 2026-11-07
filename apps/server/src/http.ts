@@ -1,4 +1,5 @@
 import {
+  type Context,
   createContext,
   createContextFromHeaders,
   createOAuthContext,
@@ -47,7 +48,7 @@ import { ZodToJsonSchemaConverter } from '@orpc/zod/zod4';
 
 import { createConfiguredApp } from './config';
 import { log } from './log';
-import { buildMcpCatalog, createCampusPilotMcpHandler, type McpContext } from './mcp';
+import { buildMcpCatalog, createCampusPilotMcpHandler } from './mcp';
 import { createMcpGate } from './mcp-auth';
 import { createRateLimit } from './rate-limit';
 
@@ -233,9 +234,9 @@ export const mcpCatalog = buildMcpCatalog(appRouter);
  * request. The SDK serves a copy of the request on some paths, so the context
  * cannot be keyed by the Request object itself.
  */
-const mcpRequestContext = new AsyncLocalStorage<McpContext>();
+const mcpRequestContext = new AsyncLocalStorage<Context>();
 
-export const mcpHandler = createCampusPilotMcpHandler({
+export const mcpHandler = createCampusPilotMcpHandler<Context>({
   catalog: mcpCatalog,
   currentContext: () => mcpRequestContext.getStore(),
   reportError: (error, toolName) => {
@@ -247,7 +248,7 @@ export const mcpHandler = createCampusPilotMcpHandler({
   },
 });
 
-const authenticateMcpRequest = createMcpGate({
+const authenticateMcpRequest = createMcpGate<Context>({
   catalog: mcpCatalog,
   resource: env.MCP_RESOURCE_URL,
   verifyAccessToken: (token) => verifyMcpAccessToken(auth, token),
@@ -280,10 +281,13 @@ app.all('/mcp', async (context) => {
  */
 export const cadetMcpCatalog = buildMcpCatalog(cadetRouter);
 
-export const cadetMcpHandler = createCampusPilotMcpHandler({
+/** The cadet MCP's own verified context, separate from the staff store. */
+const cadetMcpRequestContext = new AsyncLocalStorage<CadetContext>();
+
+export const cadetMcpHandler = createCampusPilotMcpHandler<CadetContext>({
   catalog: cadetMcpCatalog,
   serverName: 'campuspilot-cadet',
-  currentContext: () => mcpRequestContext.getStore(),
+  currentContext: () => cadetMcpRequestContext.getStore(),
   reportError: (error, toolName) => {
     log.error({ err: error, toolName }, 'cadet.mcp.error');
   },
@@ -292,7 +296,7 @@ export const cadetMcpHandler = createCampusPilotMcpHandler({
   },
 });
 
-const authenticateCadetMcpRequest = createMcpGate({
+const authenticateCadetMcpRequest = createMcpGate<CadetContext>({
   catalog: cadetMcpCatalog,
   resource: env.CADET_MCP_RESOURCE_URL,
   challengeScopes: CADET_MCP_DEFAULT_SCOPES,
@@ -312,7 +316,7 @@ app.all('/api/cadet/mcp', async (context) => {
   const request = context.req.raw;
   const result = await authenticateCadetMcpRequest(request);
   if (!result.ok) return result.response;
-  return mcpRequestContext.run(result.credential.context, () =>
+  return cadetMcpRequestContext.run(result.credential.context, () =>
     cadetMcpHandler.fetch(
       request,
       result.credential.authInfo ? { authInfo: result.credential.authInfo } : {},

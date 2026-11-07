@@ -1,5 +1,4 @@
 import type { Context } from '@campuspilot/api/context';
-import { cadetRouter } from '@campuspilot/api/routers/cadet/cadet.router';
 import {
   Client,
   StreamableHTTPClientTransport,
@@ -19,6 +18,12 @@ import { MAX_DESCRIBED_TOOLS, META_TOOL_NAMES } from './mcp-meta-tools';
 
 vi.mock('@campuspilot/auth/server', () => ({
   createAuth: vi.fn(),
+}));
+// The catalog never runs auth; like the staff instance, the cadet instance
+// (which needs CADET_APP_URL) is not built in this env-less unit test.
+vi.mock('@campuspilot/auth/cadet', () => ({
+  cadetAuth: {},
+  revokeCadetLoginAccess: vi.fn(),
 }));
 
 type JsonSchema = Record<string, unknown>;
@@ -188,12 +193,9 @@ describe('catalog metadata', () => {
   });
 });
 
-/**
- * Runs the real catalog through the Streamable HTTP transport a remote client
- * uses, so a single unconvertible schema fails here instead of in production.
- */
 describe('cadet catalog', () => {
   it('builds from cadetRouter alone: read-only core tools and no staff tools', async () => {
+    const { cadetRouter } = await import('@campuspilot/api/routers/cadet/cadet.router');
     const cadetCatalog = await buildMcpCatalog(cadetRouter);
     expect(cadetCatalog.core.map(({ name }) => name)).toEqual(['getAdmission']);
     expect(cadetCatalog.advanced).toEqual([]);
@@ -202,6 +204,10 @@ describe('cadet catalog', () => {
   });
 });
 
+/**
+ * Runs the real catalog through the Streamable HTTP transport a remote client
+ * uses, so a single unconvertible schema fails here instead of in production.
+ */
 describe('real appRouter over Streamable HTTP', () => {
   it('lists exactly the core tools and the four meta tools, with annotations', async () => {
     const client = await connect();

@@ -104,14 +104,14 @@ export type McpToolCallOptions = {
   reportToolCall?: (event: McpToolCallEvent) => void;
 };
 
-type CreateCampusPilotMcpHandlerOptions = {
+type CreateCampusPilotMcpHandlerOptions<TContext extends McpContext> = {
   catalog: Promise<McpCatalog>;
   /**
    * Context the MCP gate verified for the request being served. Returning
    * undefined means the request bypassed the gate; the handler then fails
    * closed instead of serving it anonymously.
    */
-  currentContext: () => McpContext | undefined;
+  currentContext: () => TContext | undefined;
   reportError: ReportMcpError;
   reportToolCall?: (event: McpToolCallEvent) => void;
   /** MCP server name reported to clients; defaults to `campuspilot`. */
@@ -539,13 +539,13 @@ export function createCampusPilotMcpServer({
  * fresh server per request and serves both modern MCP and stateless legacy MCP
  * clients from this single tool definition source.
  */
-export function createCampusPilotMcpHandler({
+export function createCampusPilotMcpHandler<TContext extends McpContext>({
   catalog,
   currentContext,
   reportError,
   reportToolCall,
   serverName,
-}: CreateCampusPilotMcpHandlerOptions): McpHttpHandler {
+}: CreateCampusPilotMcpHandlerOptions<TContext>): McpHttpHandler {
   return createMcpHandler(
     async ({ requestInfo }) => {
       if (!requestInfo) {

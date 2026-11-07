@@ -11,8 +11,8 @@ import { type McpCatalog, type McpContext, requiredScopes } from './mcp';
 import { META_TOOL_NAMES } from './mcp-meta-tools';
 
 /** What the gate verified for one MCP request, handed to the tool layer. */
-export type McpRequestCredential = {
-  context: McpContext;
+export type McpRequestCredential<TContext extends McpContext = McpContext> = {
+  context: TContext;
   /** SDK auth info, set for OAuth access tokens only. */
   authInfo?: AuthInfo;
 };
@@ -26,7 +26,7 @@ export type McpOAuthContextInput = {
   expiresAt: Date;
 };
 
-export type McpGateOptions = {
+export type McpGateOptions<TContext extends McpContext> = {
   catalog: Promise<McpCatalog>;
   /** Canonical MCP URL (MCP_RESOURCE_URL or CADET_MCP_RESOURCE_URL). */
   resource: string;
@@ -39,14 +39,14 @@ export type McpGateOptions = {
    * Omitted on endpoints that accept OAuth only (the cadet MCP): API keys are
    * then refused, and a bearer value that is not an access token is too.
    */
-  createApiKeyContext?: (apiKey: string) => Promise<McpContext>;
-  createOAuthContext: (input: McpOAuthContextInput) => Promise<McpContext | null>;
+  createApiKeyContext?: (apiKey: string) => Promise<TContext>;
+  createOAuthContext: (input: McpOAuthContextInput) => Promise<TContext | null>;
   /** Records that the grant was used (throttled by the implementation). */
   recordGrantUse: (grantId: string) => Promise<void>;
 };
 
-export type McpGateResult =
-  | { ok: true; credential: McpRequestCredential }
+export type McpGateResult<TContext extends McpContext = McpContext> =
+  | { ok: true; credential: McpRequestCredential<TContext> }
   | { ok: false; response: Response };
 
 /**
@@ -131,7 +131,11 @@ function requiredAccess(catalog: McpCatalog, message: JsonRpcMessage): McpAccess
  * Cookies are never accepted here. OAuth requests then need the scopes of
  * the tools they call; API keys carry the user's full rights.
  */
-export function createMcpGate(options: McpGateOptions) {
+/**
+ * Generic over the endpoint's context type, so `/mcp` yields the staff
+ * `Context` and `/api/cadet/mcp` the `CadetContext`, never either one.
+ */
+export function createMcpGate<TContext extends McpContext>(options: McpGateOptions<TContext>) {
   const metadataUrl = protectedResourceMetadataUrl(options.resource);
   const challengeScopes = options.challengeScopes ?? MCP_DEFAULT_SCOPES;
   const unauthorized = (description?: string) =>
@@ -147,7 +151,7 @@ export function createMcpGate(options: McpGateOptions) {
       description ?? 'Authentication required.',
     );
 
-  async function apiKeyCredential(apiKey: string): Promise<McpRequestCredential | null> {
+  async function apiKeyCredential(apiKey: string): Promise<McpRequestCredential<TContext> | null> {
     if (!options.createApiKeyContext) return null;
     const context = await options.createApiKeyContext(apiKey);
     return context.principal.authMethod === 'apiKey' ? { context } : null;
@@ -156,7 +160,7 @@ export function createMcpGate(options: McpGateOptions) {
   async function oauthCredential(
     token: string,
     request: Request,
-  ): Promise<McpRequestCredential | 'revoked' | null> {
+  ): Promise<McpRequestCredential<TContext> | 'revoked' | null> {
     const claims = await options.verifyAccessToken(token);
     if (!claims) return null;
     const grant = await options.findLiveGrant(claims);
@@ -229,7 +233,7 @@ export function createMcpGate(options: McpGateOptions) {
     return null;
   }
 
-  return async function authenticate(request: Request): Promise<McpGateResult> {
+  return async function authenticate(request: Request): Promise<McpGateResult<TContext>> {
     const apiKey = request.headers.get('x-api-key')?.trim();
     if (apiKey) {
       const credential = await apiKeyCredential(apiKey);
