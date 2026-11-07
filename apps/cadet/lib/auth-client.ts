@@ -27,6 +27,18 @@ export function isSignedOAuthRequest(searchParams: URLSearchParams): boolean {
   return searchParams.has('sig');
 }
 
+/**
+ * True when the signed query's `exp` (Unix seconds) is at or before `now`
+ * (ms). Better Auth signs the authorize query with
+ * `exp = issuedAt + codeExpiresIn` and refuses it after that, so a sign-in
+ * with it can only fail. A query without a readable `exp` is not treated as
+ * expired; the server stays the authority.
+ */
+export function isOAuthRequestExpired(searchParams: URLSearchParams, now: number): boolean {
+  const exp = Number(searchParams.get('exp'));
+  return Number.isFinite(exp) && exp > 0 && exp * 1000 <= now;
+}
+
 /** Better Auth answers OAuth-flow requests with the next URL to open. */
 export function oauthRedirectUrl(data: unknown): string | null {
   const url = (data as { url?: unknown } | null)?.url;
