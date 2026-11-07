@@ -158,6 +158,24 @@ describe('/api/cadet/rpc and /api/cadet/auth', () => {
     expect((await rpc('/api/cadet/rpc/school/getAdmission', { cookie: staffCookie }, { schoolId, admissionId })).status).toBe(404);
   });
 
+  it('allows the cadet origin on /api/cadet/* only, never on staff routes', async () => {
+    const preflight = (path: string) =>
+      app.fetch(
+        new Request(`${ORIGIN}${path}`, {
+          method: 'OPTIONS',
+          headers: { origin: CADET_ORIGIN, 'access-control-request-method': 'POST' },
+        }),
+      );
+    for (const path of ['/rpc/school/getAdmission', '/mcp', `/api/blob/schools/${schoolId}/logo`, '/api/auth/sign-in/email']) {
+      expect((await preflight(path)).headers.get('access-control-allow-origin'), path).toBeNull();
+      const actual = await rpc(path, { origin: CADET_ORIGIN, cookie: cadetCookie }, {});
+      expect(actual.headers.get('access-control-allow-origin'), path).toBeNull();
+    }
+    for (const path of ['/api/cadet/rpc/getAdmission', '/api/cadet/auth/sign-in/admission', '/api/cadet/mcp']) {
+      expect((await preflight(path)).headers.get('access-control-allow-origin'), path).toBe(CADET_ORIGIN);
+    }
+  });
+
   it('rejects a cadet cookie on staff RPC', async () => {
     const response = await rpc('/rpc/school/getAdmission', { cookie: cadetCookie }, { schoolId, admissionId });
     expect(response.status).toBe(401);
