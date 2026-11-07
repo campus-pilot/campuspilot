@@ -64,6 +64,24 @@ function useSignInForm() {
   return { form, signIn, oauthRequest };
 }
 
+/**
+ * When an AI app's authorization opened the page (the signed OAuth query is
+ * in the URL), says so, so the student knows why they are signing in. The
+ * app's name is not shown: it is only looked up for a signed-in student, on
+ * the consent screen that follows.
+ */
+function SignInHeading({ oauthRequest }: { oauthRequest: boolean }) {
+  return (
+    <div className="flex flex-col gap-1">
+      <h1 className="text-2xl font-semibold tracking-tight">Cadet Portal</h1>
+      <p className="text-sm text-muted-foreground">Sign in with the details your school gave you.</p>
+      {oauthRequest ? (
+        <p className="text-sm text-muted-foreground">An app is asking to connect to your Cadet Portal. Sign in to continue.</p>
+      ) : null}
+    </div>
+  );
+}
+
 export function SignInForm() {
   const { data: session, isPending } = authClient.useSession();
   const { form, signIn, oauthRequest } = useSignInForm();
@@ -73,10 +91,7 @@ export function SignInForm() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold tracking-tight">Cadet Portal</h1>
-        <p className="text-sm text-muted-foreground">Sign in with the details your school gave you.</p>
-      </div>
+      <SignInHeading oauthRequest={oauthRequest} />
       <form
         className="flex flex-col gap-6"
         onSubmit={(event) => {
