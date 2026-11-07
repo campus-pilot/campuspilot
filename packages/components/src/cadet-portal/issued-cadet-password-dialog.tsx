@@ -34,7 +34,7 @@ function detailsText(details: IssuedCadetPasswordDetails) {
  * Uses TanStack Query's `useMutation`, so it must render inside a
  * `QueryClientProvider` (see {@link IssuedCadetPasswordDialog}).
  */
-function CopyDetailsButton({ details }: { details: IssuedCadetPasswordDetails }) {
+function useCopyDetails(details: IssuedCadetPasswordDetails) {
   const text = detailsText(details);
   const copy = useMutation({
     mutationFn: async (value: string) => {
@@ -42,15 +42,27 @@ function CopyDetailsButton({ details }: { details: IssuedCadetPasswordDetails })
       return value;
     },
   });
-  const copied = copy.isSuccess && copy.data === text;
+  return { copy, text, copied: copy.isSuccess && copy.data === text };
+}
+
+/**
+ * The dialog's footer actions. A clipboard failure is shown above the footer
+ * row rather than under the Copy button, so its message never widens the
+ * button.
+ */
+function IssuedPasswordActions({ details, onClose }: { details: IssuedCadetPasswordDetails; onClose: () => void }) {
+  const { copy, text, copied } = useCopyDetails(details);
   return (
-    <div className="flex flex-col gap-1">
-      <Button type="button" variant="outline" disabled={copy.isPending} onClick={() => copy.mutate(text)}>
-        {copied ? <Check aria-hidden /> : <Copy aria-hidden />}
-        {copied ? 'Copied' : 'Copy details'}
-      </Button>
+    <>
       {copy.isError ? <p className="text-xs text-destructive">Clipboard access is unavailable. Write the details down instead.</p> : null}
-    </div>
+      <DialogFooter>
+        <Button type="button" variant="outline" disabled={copy.isPending} onClick={() => copy.mutate(text)}>
+          {copied ? <Check aria-hidden /> : <Copy aria-hidden />}
+          {copied ? 'Copied' : 'Copy details'}
+        </Button>
+        <Button type="button" onClick={onClose}>Done</Button>
+      </DialogFooter>
+    </>
   );
 }
 
@@ -99,10 +111,13 @@ export function IssuedCadetPasswordDialog({
             <DetailRow label="Password" value={details.password} emphasis />
           </dl>
         ) : null}
-        <DialogFooter>
-          {details ? <CopyDetailsButton details={details} /> : null}
-          <Button type="button" onClick={onClose}>Done</Button>
-        </DialogFooter>
+        {details ? (
+          <IssuedPasswordActions details={details} onClose={onClose} />
+        ) : (
+          <DialogFooter>
+            <Button type="button" onClick={onClose}>Done</Button>
+          </DialogFooter>
+        )}
       </DialogContent>
     </Dialog>
   );
