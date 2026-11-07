@@ -115,8 +115,10 @@ export type CadetAdmissionSignInOptions = {
  * Failed attempts are limited per resolved admission id (5 failures in 15
  * minutes lock that admission's sign-in for 15 minutes) and, more loosely,
  * per client IP. A lock is checked before the password, so a locked
- * admission cannot be probed further. Attempts that match no login hash the
- * password anyway, so timing does not reveal which admissions have one.
+ * admission cannot be probed further. An admission without a cadet login
+ * counts failures and locks exactly like one with a login, and attempts
+ * that match no login hash the password anyway, so neither the lockout nor
+ * timing reveals which admissions have a login.
  */
 export function cadetAdmissionSignIn(options: CadetAdmissionSignInOptions) {
   const { db, limiter } = options;
@@ -147,21 +149,30 @@ export function cadetAdmissionSignIn(options: CadetAdmissionSignInOptions) {
           }
 
           const login = await findCadetLogin(db, schoolSlug, admissionNo);
-          if (!login?.userId || !login.passwordHash) {
+          if (!login) {
             await ctx.context.password.hash(password);
             if (ipKey) await limiter.recordFailure(ipKey, IP_LIMIT);
             throw new APIError('UNAUTHORIZED', INVALID_CREDENTIALS);
           }
 
+          // A resolved admission is limited and locked the same way whether
+          // or not it has a cadet login, so the lockout never reveals which
+          // admissions have one.
           const admissionKey = `sign-in:admission:${login.admissionId}`;
           const admissionLock = await limiter.lockedFor(admissionKey);
           if (admissionLock > 0) throw tooManyAttempts(admissionLock);
 
-          const valid = await ctx.context.password.verify({
-            hash: login.passwordHash,
-            password,
-          });
-          if (!valid) {
+          let valid = false;
+          if (login.userId && login.passwordHash) {
+            valid = await ctx.context.password.verify({
+              hash: login.passwordHash,
+              password,
+            });
+          } else {
+            // No login: spend the same hashing time, then fail like a wrong password.
+            await ctx.context.password.hash(password);
+          }
+          if (!valid || !login.userId) {
             if (ipKey) await limiter.recordFailure(ipKey, IP_LIMIT);
             await limiter.recordFailure(admissionKey, ADMISSION_LIMIT);
             throw new APIError('UNAUTHORIZED', INVALID_CREDENTIALS);

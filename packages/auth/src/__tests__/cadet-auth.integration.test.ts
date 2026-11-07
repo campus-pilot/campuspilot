@@ -221,6 +221,30 @@ describe('cadet admission sign-in', () => {
     expect(((await locked.json()) as { code: string }).code).toBe('CADET_SIGN_IN_LOCKED');
   });
 
+  it('locks an admission without a cadet login exactly like one with a login', async () => {
+    const { school } = await createAdmissionWithLogin();
+    const [withoutLogin] = await db
+      .insert(admissionTable)
+      .values({
+        id: generateId('admission'),
+        schoolId: school.id,
+        name: 'No Login',
+        admissionNo: `NOLOGIN-${randomUUID().slice(0, 6)}`,
+        address: 'Main road',
+        phoneNo: '9999999999',
+        dob: '2018-04-01',
+        fatherName: 'Father',
+        motherName: 'Mother',
+      })
+      .returning();
+    const body = { schoolSlug: school.slug, admissionNo: withoutLogin!.admissionNo, password: 'wrong-word-11' };
+    const statuses: number[] = [];
+    for (let index = 0; index <= CADET_ADMISSION_MAX_FAILURES; index += 1) {
+      statuses.push((await signIn(body)).status);
+    }
+    expect(statuses).toEqual([...Array(CADET_ADMISSION_MAX_FAILURES).fill(401), 429]);
+  });
+
   it('follows the live admission number: the new one works and the old one stops', async () => {
     const { school, admission, password } = await createAdmissionWithLogin();
     const renamed = `${admission.admissionNo}-R`;
