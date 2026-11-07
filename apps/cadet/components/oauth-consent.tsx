@@ -3,12 +3,11 @@
 import type { oauthConsentClientSchema } from '@campuspilot/api/routers/auth/auth.dto';
 import { CADET_OAUTH_LOGIN_PATH } from '@campuspilot/auth/cadet-policy';
 import { Button } from '@campuspilot/ui/components/button';
-import { useForm } from '@tanstack/react-form';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { BadgeCheck, LoaderCircle, ShieldAlert } from 'lucide-react';
 import Link from 'next/link';
 import { redirect, useSearchParams } from 'next/navigation';
-import { z } from 'zod';
+import type { z } from 'zod';
 
 import { authClient, isSignedOAuthRequest, oauthAuthClient, oauthRedirectUrl } from '@/lib/auth-client';
 import { orpc } from '@/lib/orpc';
@@ -82,54 +81,39 @@ function ConsentSummary({ client, request }: { client: ConsentClient; request: C
   );
 }
 
-const consentSchema = z.object({});
-
-/** Allow submits through the form; Cancel denies with its own mutation. */
-function ConsentForm() {
-  const deny = useMutation({ mutationFn: () => submitConsent(false) });
-  const form = useForm({
-    defaultValues: {},
-    validators: { onSubmit: consentSchema },
-    onSubmit: async () => {
-      try {
-        await submitConsent(true);
-      } catch (error) {
-        form.setErrorMap({ onSubmit: { fields: {}, form: error instanceof Error ? error.message : 'Unable to connect.' } });
-      }
-    },
-  });
+/**
+ * The student's decision. The consent screen has no inputs (the cadet
+ * authorization server only grants read access, so there is no scope to
+ * choose), so it is two buttons sharing one mutation rather than a form.
+ * The variables record which button was pressed, so only that one spins.
+ * After success the browser is already leaving, so both stay disabled.
+ */
+function ConsentDecision() {
+  const decide = useMutation({ mutationFn: submitConsent });
+  const busy = decide.isPending || decide.isSuccess;
+  const pendingChoice = decide.isPending ? decide.variables : null;
   return (
-    <form
-      className="flex flex-col gap-5"
-      onSubmit={(event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        void form.handleSubmit();
-      }}
-    >
-      <ul className="flex flex-col gap-2 rounded-xl border p-4 text-sm">
-        <li>Read your admission details</li>
-      </ul>
-      <form.Subscribe selector={(state) => ({ submitting: state.isSubmitting, submitError: state.errorMap.onSubmit })}>
-        {({ submitting, submitError }) => (
-          <div className="flex flex-col gap-3">
-            {[...(typeof submitError === 'string' ? [submitError] : []), ...(deny.error ? [deny.error.message] : [])].map((error) => (
-              <p key={error} className="text-xs text-destructive">{error}</p>
-            ))}
-            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-              <Button type="button" variant="outline" disabled={submitting || deny.isPending} onClick={() => deny.mutate()}>
-                {deny.isPending ? <LoaderCircle className="animate-spin" /> : null}
-                Cancel
-              </Button>
-              <Button type="submit" disabled={submitting || deny.isPending}>
-                {submitting ? <LoaderCircle className="animate-spin" /> : null}
-                Allow access
-              </Button>
-            </div>
-          </div>
-        )}
-      </form.Subscribe>
-    </form>
+    <div className="flex flex-col gap-3">
+      {decide.error ? <p className="text-xs text-destructive">{decide.error.message}</p> : null}
+      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+        <Button type="button" variant="outline" disabled={busy} onClick={() => decide.mutate(false)}>
+          {pendingChoice === false ? <LoaderCircle className="animate-spin" /> : null}
+          Cancel
+        </Button>
+        <Button type="button" disabled={busy} onClick={() => decide.mutate(true)}>
+          {pendingChoice === true ? <LoaderCircle className="animate-spin" /> : null}
+          Allow access
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function ConsentScopes() {
+  return (
+    <ul className="flex flex-col gap-2 rounded-xl border p-4 text-sm">
+      <li>Read your admission details</li>
+    </ul>
   );
 }
 
@@ -174,7 +158,10 @@ export function OAuthConsent() {
   return (
     <div className="flex flex-col gap-8">
       <ConsentSummary client={client.data} request={request} />
-      <ConsentForm />
+      <div className="flex flex-col gap-5">
+        <ConsentScopes />
+        <ConsentDecision />
+      </div>
     </div>
   );
 }
