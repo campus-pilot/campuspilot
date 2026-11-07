@@ -758,6 +758,9 @@ importers:
       '@tanstack/react-form':
         specifier: ^1.33.2
         version: 1.33.5(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+      '@tanstack/react-query':
+        specifier: ^5.101.4
+        version: 5.102.8(react@19.3.0)
       '@tanstack/react-table':
         specifier: ^8.21.3
         version: 8.21.3(react-dom@19.3.0(react@19.3.0))(react@19.3.0)

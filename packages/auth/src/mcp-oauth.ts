@@ -164,6 +164,28 @@ export type OAuthServerTables = {
   accessToken: typeof schema.oauthAccessToken;
 };
 
+/** True only when A and B are mutually assignable. */
+type SameShape<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+type Assert<T extends true> = T;
+
+/**
+ * Compile-time guard for the casts below and in `mcp-credential.ts`: each
+ * cadet OAuth table must have exactly the staff table's row shape (select)
+ * and insert shape (required/optional columns and their types). A column
+ * added to or changed in only one of them fails typecheck here instead of
+ * silently producing queries against a mismatched table.
+ */
+export type CadetOAuthTableShapeChecks = [
+  Assert<SameShape<typeof cadetOauthClient.$inferSelect, typeof schema.oauthClient.$inferSelect>>,
+  Assert<SameShape<typeof cadetOauthClient.$inferInsert, typeof schema.oauthClient.$inferInsert>>,
+  Assert<SameShape<typeof cadetOauthConsent.$inferSelect, typeof schema.oauthConsent.$inferSelect>>,
+  Assert<SameShape<typeof cadetOauthConsent.$inferInsert, typeof schema.oauthConsent.$inferInsert>>,
+  Assert<SameShape<typeof cadetOauthRefreshToken.$inferSelect, typeof schema.oauthRefreshToken.$inferSelect>>,
+  Assert<SameShape<typeof cadetOauthRefreshToken.$inferInsert, typeof schema.oauthRefreshToken.$inferInsert>>,
+  Assert<SameShape<typeof cadetOauthAccessToken.$inferSelect, typeof schema.oauthAccessToken.$inferSelect>>,
+  Assert<SameShape<typeof cadetOauthAccessToken.$inferInsert, typeof schema.oauthAccessToken.$inferInsert>>,
+];
+
 export const STAFF_OAUTH_SERVER_TABLES: OAuthServerTables = {
   client: schema.oauthClient,
   consent: schema.oauthConsent,

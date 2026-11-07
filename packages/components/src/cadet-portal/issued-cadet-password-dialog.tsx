@@ -9,7 +9,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@campuspilot/ui/components/dialog';
-import { useForm } from '@tanstack/react-form';
+import { useMutation } from '@tanstack/react-query';
 import { Check, Copy } from 'lucide-react';
 
 /** The three values a student types to sign in to the Cadet Portal. */
@@ -28,35 +28,26 @@ function detailsText(details: IssuedCadetPasswordDetails) {
 }
 
 /**
- * Copies all three sign-in details on a user action. The copied text is
- * remembered so a different password is never shown as already copied.
+ * Copies all three sign-in details on a user action. The mutation remembers
+ * the text it copied, so a different password is never shown as copied.
  */
 function CopyDetailsButton({ details }: { details: IssuedCadetPasswordDetails }) {
   const text = detailsText(details);
-  const form = useForm({
-    defaultValues: { copiedText: '', error: '' },
-    onSubmit: async () => {
-      form.setFieldValue('error', '');
-      try {
-        await navigator.clipboard.writeText(text);
-        form.setFieldValue('copiedText', text);
-      } catch {
-        form.setFieldValue('error', 'Clipboard access is unavailable. Write the details down instead.');
-      }
+  const copy = useMutation({
+    mutationFn: async (value: string) => {
+      await navigator.clipboard.writeText(value);
+      return value;
     },
   });
+  const copied = copy.isSuccess && copy.data === text;
   return (
-    <form.Subscribe selector={(state) => state.values}>
-      {({ copiedText, error }) => (
-        <div className="flex flex-col gap-1">
-          <Button type="button" variant="outline" onClick={() => void form.handleSubmit()}>
-            {copiedText === text ? <Check aria-hidden /> : <Copy aria-hidden />}
-            {copiedText === text ? 'Copied' : 'Copy details'}
-          </Button>
-          {error ? <p className="text-xs text-destructive">{error}</p> : null}
-        </div>
-      )}
-    </form.Subscribe>
+    <div className="flex flex-col gap-1">
+      <Button type="button" variant="outline" disabled={copy.isPending} onClick={() => copy.mutate(text)}>
+        {copied ? <Check aria-hidden /> : <Copy aria-hidden />}
+        {copied ? 'Copied' : 'Copy details'}
+      </Button>
+      {copy.isError ? <p className="text-xs text-destructive">Clipboard access is unavailable. Write the details down instead.</p> : null}
+    </div>
   );
 }
 

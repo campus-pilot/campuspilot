@@ -102,8 +102,9 @@ export const CADET_OAUTH_GRANT_TABLES: OAuthGrantTables = {
 /**
  * Types either table pair as the staff pair for query building. The cadet
  * tables are column-for-column copies of the staff ones (both store the same
- * Better Auth models), and Drizzle builds the SQL from the runtime table
- * object, so queries still run against the tables actually passed.
+ * Better Auth models; `CadetOAuthTableShapeChecks` in `mcp-oauth.ts` fails
+ * typecheck if they drift), and Drizzle builds the SQL from the runtime
+ * table object, so queries still run against the tables actually passed.
  */
 function asStaffShape(tables: OAuthGrantTables) {
   return tables as {
