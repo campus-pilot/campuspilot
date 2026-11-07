@@ -30,6 +30,9 @@ function detailsText(details: IssuedCadetPasswordDetails) {
 /**
  * Copies all three sign-in details on a user action. The mutation remembers
  * the text it copied, so a different password is never shown as copied.
+ *
+ * Uses TanStack Query's `useMutation`, so it must render inside a
+ * `QueryClientProvider` (see {@link IssuedCadetPasswordDialog}).
  */
 function CopyDetailsButton({ details }: { details: IssuedCadetPasswordDetails }) {
   const text = detailsText(details);
@@ -64,6 +67,10 @@ function DetailRow({ label, value, emphasis = false }: { label: string; value: s
  * Shows a newly issued Cadet Portal password exactly once, with the school
  * code and admission number the student signs in with. The password cannot
  * be viewed again after this dialog closes; staff can only issue a new one.
+ *
+ * Requires a TanStack Query `QueryClientProvider` above it in every consumer:
+ * the copy button keeps its clipboard state in a `useMutation`. No query or
+ * API call is made through that client.
  */
 export function IssuedCadetPasswordDialog({
   details,
