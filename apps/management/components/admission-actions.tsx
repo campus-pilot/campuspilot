@@ -98,6 +98,8 @@ function UnregisterAdmissionAction({ admission }: { admission: AdmissionDto }) {
  * Issues a new Cadet Portal password after an app confirmation, then shows it
  * once. Issuing also covers the first password of an admission created
  * without one. The server revokes the student's sessions and AI app grants.
+ * The admission DTO does not say whether a login exists yet, so the
+ * confirmation copy is worded to be true in both cases.
  */
 function useResetCadetPassword(admission: AdmissionDto) {
   const [confirming, setConfirming] = useState(false);
@@ -123,14 +125,14 @@ function AdmissionOverflowMenu({ admission }: { admission: AdmissionDto }) {
     </DropdownMenu>
     <ConfirmationDialog
       open={confirming}
-      title="Reset Cadet Portal password?"
-      description={`The current password stops working and ${admission.name} is signed out of the Cadet Portal everywhere, including connected AI apps.`}
-      confirmLabel={reset.isPending ? 'Resetting…' : 'Reset password'}
+      title="Issue a new Cadet Portal password?"
+      description={`${admission.name} gets a new Cadet Portal password. If one was issued before, it stops working and ${admission.name} is signed out of the Cadet Portal everywhere, including connected AI apps.`}
+      confirmLabel={reset.isPending ? 'Issuing…' : 'Issue password'}
       pending={reset.isPending}
       onOpenChange={setConfirming}
       onConfirm={() => reset.mutate()}
     >
-      {reset.error ? <p className="text-sm text-destructive">{reset.error.message || 'Unable to reset the password.'}</p> : null}
+      {reset.error ? <p className="text-sm text-destructive">{reset.error.message || 'Unable to issue the password.'}</p> : null}
     </ConfirmationDialog>
     <IssuedCadetPasswordDialog details={reset.data ?? null} studentName={admission.name} onClose={() => reset.reset()} />
   </RequirePermissions>;
