@@ -19,6 +19,12 @@ type ConsentRequest = {
   clientId: string;
   /** Where the browser returns after the decision. */
   redirectHost: string | null;
+  /**
+   * Whether the app asked for `offline_access` (a refresh token), so it can
+   * keep reading after the student stops using it. Read from the signed
+   * `scope` the app requested.
+   */
+  staysConnected: boolean;
 };
 
 /** The authorization the server sent the student to decide on, from the URL. */
@@ -31,7 +37,8 @@ function consentRequestFrom(searchParams: URLSearchParams): ConsentRequest | nul
   } catch {
     redirectHost = null;
   }
-  return { clientId, redirectHost };
+  const scopes = (searchParams.get('scope') ?? '').split(' ');
+  return { clientId, redirectHost, staysConnected: scopes.includes('offline_access') };
 }
 
 /**
@@ -109,10 +116,11 @@ function ConsentDecision() {
   );
 }
 
-function ConsentScopes() {
+function ConsentScopes({ request }: { request: ConsentRequest }) {
   return (
     <ul className="flex flex-col gap-2 rounded-xl border p-4 text-sm">
       <li>Read your admission details</li>
+      {request.staysConnected ? <li>Stay connected when you're not using it</li> : null}
     </ul>
   );
 }
@@ -159,7 +167,7 @@ export function OAuthConsent() {
     <div className="flex flex-col gap-8">
       <ConsentSummary client={client.data} request={request} />
       <div className="flex flex-col gap-5">
-        <ConsentScopes />
+        <ConsentScopes request={request} />
         <ConsentDecision />
       </div>
     </div>
