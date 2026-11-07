@@ -457,7 +457,7 @@ export const schoolAdmissionRouter = {
     .route({
       summary: "Issue a Cadet Portal password",
       description:
-        "Issue a new Cadet Portal password for a registered admission, creating the student's login on first use. The previous password stops working, and the student is signed out everywhere, including connected AI apps. The new password is returned once and can never be viewed again.",
+        "Issue a new Cadet Portal password for an admission (registered or unregistered), creating the student's login on first use. The previous password stops working, and the student is signed out everywhere, including connected AI apps. The new password is returned once and can never be viewed again.",
       tags: ["School", "Admissions"],
     })
     .meta({
@@ -483,7 +483,11 @@ export const schoolAdmissionRouter = {
               input.admissionId,
             );
             if (!admission) throw rpcError.notFound("Admission");
-            await assertAdmissionRegistered(transaction, input);
+            // Deliberately no registration check: registration and portal
+            // access are separate facts. An unregistered student keeps
+            // signing in and seeing their records, so staff must be able to
+            // issue them a new password too. This writes only the cadet
+            // login, never the admission row.
             return issueAdmissionCadetPassword(transaction, {
               schoolId: input.schoolId,
               admission,

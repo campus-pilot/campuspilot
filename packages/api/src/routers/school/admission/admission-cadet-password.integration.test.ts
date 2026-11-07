@@ -150,7 +150,7 @@ describe("issueAdmissionCadetPassword", () => {
     expect(await loginRows(admission.id)).toEqual([]);
   });
 
-  it("validates input and refuses unknown or unregistered admissions", async () => {
+  it("validates input and refuses unknown admissions", async () => {
     const { school, principal } = await setup();
     await expectRpcCode(
       principal.client.school.issueAdmissionCadetPassword({ schoolId: school.id, admissionId: "" }),
@@ -159,11 +159,6 @@ describe("issueAdmissionCadetPassword", () => {
     await expectRpcCode(
       principal.client.school.issueAdmissionCadetPassword({ schoolId: school.id, admissionId: "adm_missing" }),
       "NOT_FOUND",
-    );
-    const unregistered = await createTestAdmission({ schoolId: school.id, registered: false });
-    await expectRpcCode(
-      principal.client.school.issueAdmissionCadetPassword({ schoolId: school.id, admissionId: unregistered.id }),
-      "BAD_REQUEST",
     );
     // An admission of another school is not found through this school.
     const elsewhere = await createTestAdmission({ schoolId: (await createTestSchool()).id });
@@ -223,6 +218,20 @@ describe("admission lifecycle and Cadet Portal access", () => {
 
     expect(await sessionOf(browser.cookie)).not.toBeNull();
     expect((await signInCadet(created.cadetPassword!)).response.status).toBe(200);
+  });
+
+  it("lets staff issue and reset a password for an unregistered admission", async () => {
+    const { school, principal } = await setup();
+    const unregistered = await createTestAdmission({ schoolId: school.id, registered: false });
+    const input = { schoolId: school.id, admissionId: unregistered.id };
+    const first = await principal.client.school.issueAdmissionCadetPassword(input);
+    expect((await signInCadet(first)).response.status).toBe(200);
+    const second = await principal.client.school.issueAdmissionCadetPassword(input);
+    expect((await signInCadet(first)).response.status).toBe(401);
+    expect((await signInCadet(second)).response.status).toBe(200);
+    // The admission itself is untouched.
+    const [row] = await db.select().from(admissionTable).where(eq(admissionTable.id, unregistered.id));
+    expect(row?.registered).toBe(false);
   });
 
   it("signs the student out and removes the login when the admission is deleted", async () => {

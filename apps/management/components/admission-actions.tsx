@@ -136,7 +136,11 @@ function AdmissionOverflowMenu({ admission }: { admission: AdmissionDto }) {
   </RequirePermissions>;
 }
 
+/**
+ * Edit and unregister apply to registered admissions only. The overflow menu
+ * (Cadet Portal password) is shown for unregistered admissions too, because
+ * portal access is a separate fact from registration.
+ */
 export function AdmissionActions({ admission }: { admission: AdmissionDto }) {
-  if (!admission.registered) return null;
-  return <div className="flex flex-wrap items-center gap-2"><EditAdmissionAction admission={admission} /><UnregisterAdmissionAction admission={admission} /><AdmissionOverflowMenu admission={admission} /></div>;
+  return <div className="flex flex-wrap items-center gap-2">{admission.registered ? <><EditAdmissionAction admission={admission} /><UnregisterAdmissionAction admission={admission} /></> : null}<AdmissionOverflowMenu admission={admission} /></div>;
 }
