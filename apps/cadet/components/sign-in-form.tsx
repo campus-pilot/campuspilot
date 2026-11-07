@@ -105,10 +105,15 @@ export function SignInForm() {
             </form.Field>
           ))}
         </FieldGroup>
-        <form.Subscribe selector={(state) => ({ canSubmit: state.canSubmit, isSubmitting: state.isSubmitting, errors: state.errors })}>
-          {({ canSubmit, isSubmitting, errors }) => (
+        {/*
+          Only the server's sign-in error is shown here. Schema errors are
+          per field and shown under their inputs; the form-level error state
+          also holds that field map, which is not a message.
+        */}
+        <form.Subscribe selector={(state) => ({ canSubmit: state.canSubmit, isSubmitting: state.isSubmitting, submitError: state.errorMap.onSubmit })}>
+          {({ canSubmit, isSubmitting, submitError }) => (
             <div className="flex flex-col gap-3">
-              {errors.map((error, index) => error ? <p key={index} className="text-sm text-destructive">{String(error)}</p> : null)}
+              {typeof submitError === 'string' ? <p className="text-sm text-destructive">{submitError}</p> : null}
               <Button type="submit" disabled={!canSubmit || isSubmitting}>
                 {isSubmitting ? 'Signing in…' : 'Sign in'}
               </Button>
