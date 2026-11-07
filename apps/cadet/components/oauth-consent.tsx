@@ -1,5 +1,6 @@
 'use client';
 
+import { CADET_OAUTH_LOGIN_PATH } from '@campuspilot/auth/cadet-policy';
 import { Button } from '@campuspilot/ui/components/button';
 import { useForm } from '@tanstack/react-form';
 import { useMutation, useQuery } from '@tanstack/react-query';
@@ -165,8 +166,10 @@ export function OAuthConsent() {
     return <ConsentProblem message="This page is opened by an app that asks to connect. Start the connection again from that app." />;
   }
   if (isPending) return <p className="text-sm text-muted-foreground">Loading…</p>;
-  // The server only sends a signed-in student here; a lost session restarts sign-in.
-  if (!session) redirect('/sign-in');
+  // The server only sends a signed-in student here. A lost session restarts
+  // sign-in with the same signed query: the sign-in page forwards it, and
+  // Better Auth resumes this authorization once the student is signed in.
+  if (!session) redirect(`${CADET_OAUTH_LOGIN_PATH}?${searchParams.toString()}`);
   if (client.isPending) return <p className="text-sm text-muted-foreground">Loading…</p>;
   if (client.isError) {
     return <ConsentProblem message="This app is not known to the Cadet Portal or has been disabled. Start the connection again from the app." />;
