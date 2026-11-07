@@ -1,5 +1,6 @@
 'use client';
 
+import type { oauthConsentClientSchema } from '@campuspilot/api/routers/auth/auth.dto';
 import { CADET_OAUTH_LOGIN_PATH } from '@campuspilot/auth/cadet-policy';
 import { Button } from '@campuspilot/ui/components/button';
 import { useForm } from '@tanstack/react-form';
@@ -12,12 +13,8 @@ import { z } from 'zod';
 import { authClient, isSignedOAuthRequest, oauthAuthClient, oauthRedirectUrl } from '@/lib/auth-client';
 import { orpc } from '@/lib/orpc';
 
-type ConsentClient = {
-  clientId: string;
-  name: string | null;
-  registrationMethod: 'client_id_metadata_document' | 'pre_registered' | 'dynamic' | 'unknown';
-  verifiedHost: string | null;
-};
+/** The client facts `getOAuthConsentClient` returns. */
+type ConsentClient = z.infer<typeof oauthConsentClientSchema>;
 
 type ConsentRequest = {
   clientId: string;
