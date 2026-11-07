@@ -10,7 +10,7 @@ import { Checkbox } from '@campuspilot/ui/components/checkbox';
 import { Label } from '@campuspilot/ui/components/label';
 import { useForm } from '@tanstack/react-form';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { BadgeCheck, LoaderCircle, ShieldAlert } from 'lucide-react';
+import { BadgeCheck, KeyRound, LoaderCircle, ShieldAlert } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { z } from 'zod';
@@ -241,7 +241,7 @@ function ConsentForm({ request }: { request: ConsentRequest }) {
         })}
       >
         {({ submitting, submitError }) => (
-          <ConsentButtons
+          <ConsentActions
             submitting={submitting}
             denying={deny.isPending}
             errors={[
@@ -256,7 +256,12 @@ function ConsentForm({ request }: { request: ConsentRequest }) {
   );
 }
 
-function ConsentButtons({
+/**
+ * Allow is the one primary action. Cancel stays available as a quiet text
+ * link below it, because denying tells the app right away instead of leaving
+ * it waiting for an authorization that never completes.
+ */
+function ConsentActions({
   submitting,
   denying,
   errors,
@@ -268,27 +273,29 @@ function ConsentButtons({
   onDeny: () => void;
 }) {
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col items-start gap-3">
       {errors.map((error) => (
         <p key={error} className="text-xs text-destructive">
           {error}
         </p>
       ))}
-      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-        <Button
-          type="button"
-          variant="outline"
-          disabled={submitting || denying}
-          onClick={onDeny}
-        >
-          {denying ? <LoaderCircle className="animate-spin" /> : null}
-          Cancel
-        </Button>
-        <Button type="submit" disabled={submitting || denying}>
-          {submitting ? <LoaderCircle className="animate-spin" /> : null}
-          Allow access
-        </Button>
-      </div>
+      <Button type="submit" variant="outline" disabled={submitting || denying}>
+        {submitting ? (
+          <LoaderCircle className="animate-spin" />
+        ) : (
+          <KeyRound aria-hidden="true" />
+        )}
+        Allow access
+      </Button>
+      <Button
+        type="button"
+        variant="link"
+        className="h-auto p-0 text-xs text-muted-foreground underline"
+        disabled={submitting || denying}
+        onClick={onDeny}
+      >
+        {denying ? 'Cancelling…' : 'Cancel'}
+      </Button>
     </div>
   );
 }
