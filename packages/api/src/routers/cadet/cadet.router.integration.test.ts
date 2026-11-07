@@ -1,4 +1,5 @@
 import { cadetAuth } from '@campuspilot/auth/cadet';
+import { registerDynamicClient, type TestAuth } from '@campuspilot/auth/__tests__/oauth-test-utils';
 import { auth as staffAuth } from '@campuspilot/auth/server';
 import { db } from '@campuspilot/db';
 import { admissionTable } from '@campuspilot/db/schema/admission';
@@ -92,6 +93,26 @@ describe('cadetRouter.getAdmission', () => {
   });
 });
 
+describe('cadetRouter.getOAuthConsentClient', () => {
+  it('returns a cadet client for a signed-in student and never a staff client', async () => {
+    const { created, cookie } = await cadetWithLogin();
+    const { claims } = await connectCadetMcp(created.cadetPassword!);
+    const client = createCadetTestClient(new Headers({ cookie }));
+    expect(await client.getOAuthConsentClient({ clientId: claims.clientId })).toMatchObject({
+      clientId: claims.clientId,
+      name: 'Cadet test app',
+      registrationMethod: 'dynamic',
+      verifiedHost: null,
+    });
+
+    const staffClient = await registerDynamicClient(staffAuth as unknown as TestAuth);
+    await expectRpcCode(client.getOAuthConsentClient({ clientId: staffClient.clientId }), 'NOT_FOUND');
+    await expectRpcCode(client.getOAuthConsentClient({ clientId: 'unknown-client' }), 'NOT_FOUND');
+    await expectRpcCode(createCadetTestClient(new Headers()).getOAuthConsentClient({ clientId: claims.clientId }), 'UNAUTHORIZED');
+    await expectRpcCode(client.getOAuthConsentClient({ clientId: '' }), 'BAD_REQUEST');
+  });
+});
+
 describe('cadet and staff sessions are isolated', () => {
   it('staff procedures reject a cadet session', async () => {
     const { school, created, cookie } = await cadetWithLogin();
@@ -124,8 +145,9 @@ describe('cadet and staff sessions are isolated', () => {
   });
 
   it('keeps cadet procedures out of the staff router and staff procedures out of the cadet router', () => {
-    expect(Object.keys(cadetRouter)).toEqual(['getAdmission']);
+    expect(Object.keys(cadetRouter)).toEqual(['getAdmission', 'getOAuthConsentClient']);
     expect(appRouter).not.toHaveProperty('getAdmission');
+    expect(appRouter).not.toHaveProperty('getOAuthConsentClient');
     expect(Object.values(appRouter)).not.toContain(cadetRouter);
   });
 });
