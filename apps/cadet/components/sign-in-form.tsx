@@ -6,6 +6,7 @@ import { Button } from '@campuspilot/ui/components/button';
 import { Field, FieldError, FieldGroup, FieldLabel } from '@campuspilot/ui/components/field';
 import { Input } from '@campuspilot/ui/components/input';
 import { useForm } from '@tanstack/react-form';
+import { useMutation } from '@tanstack/react-query';
 import { redirect, useSearchParams } from 'next/navigation';
 import { z } from 'zod';
 
@@ -29,41 +30,43 @@ const fields = [
  * Posts the admission sign-in. When an AI app's authorization sent the
  * student here, the OAuth client forwards the signed query and the server
  * answers with the next URL (consent or the app's callback).
+ *
+ * The request is a mutation rather than a form error: a rejected sign-in is
+ * not a field validation error, and storing it in the form's error map would
+ * make `canSubmit` false until a field changed, so the student could not
+ * simply try again. The form only validates; the mutation owns the outcome.
  */
 function useSignInForm() {
   const searchParams = useSearchParams();
   const oauthRequest = isSignedOAuthRequest(searchParams);
   const redirectPath = sanitizeAuthRedirectPath(searchParams.get(AUTH_REDIRECT_QUERY_PARAM));
+  const signIn = useMutation({
+    mutationFn: async (values: SignInValues) => {
+      const client = oauthRequest ? oauthAuthClient : authClient;
+      const result = await client.$fetch(CADET_ADMISSION_SIGN_IN_PATH, { method: 'POST', body: values });
+      if (result.error) throw new Error(result.error.message ?? 'Unable to sign in.');
+      return result.data;
+    },
+    onSuccess: (data) => {
+      // A full navigation, because the sign-in went through a custom
+      // endpoint that the auth client's cached session does not observe.
+      window.location.assign((oauthRequest ? oauthRedirectUrl(data) : null) ?? redirectPath);
+    },
+  });
   const form = useForm({
     defaultValues: { schoolSlug: '', admissionNo: '', password: '' } satisfies SignInValues,
     validators: { onSubmit: signInSchema },
     onSubmit: async ({ value }) => {
-      form.setErrorMap({});
-      const client = oauthRequest ? oauthAuthClient : authClient;
-      const result = await client.$fetch(CADET_ADMISSION_SIGN_IN_PATH, {
-        method: 'POST',
-        body: signInSchema.parse(value),
-      });
-      if (result.error) {
-        form.setErrorMap({ onSubmit: { form: result.error.message ?? 'Unable to sign in.', fields: {} } });
-        return;
-      }
-      const next = oauthRequest ? oauthRedirectUrl(result.data) : null;
-      if (next) {
-        window.location.assign(next);
-        return;
-      }
-      // A full navigation, because the sign-in went through a custom
-      // endpoint that the auth client's cached session does not observe.
-      window.location.assign(redirectPath);
+      // Failures surface through `signIn.error`.
+      await signIn.mutateAsync(signInSchema.parse(value)).catch(() => undefined);
     },
   });
-  return { form, oauthRequest };
+  return { form, signIn, oauthRequest };
 }
 
 export function SignInForm() {
   const { data: session, isPending } = authClient.useSession();
-  const { form, oauthRequest } = useSignInForm();
+  const { form, signIn, oauthRequest } = useSignInForm();
   if (isPending) return <p className="text-sm text-muted-foreground">Loading…</p>;
   // An AI app may ask for a fresh sign-in, so the form stays visible then.
   if (session && !oauthRequest) redirect('/');
@@ -105,17 +108,14 @@ export function SignInForm() {
             </form.Field>
           ))}
         </FieldGroup>
-        {/*
-          Only the server's sign-in error is shown here. Schema errors are
-          per field and shown under their inputs; the form-level error state
-          also holds that field map, which is not a message.
-        */}
-        <form.Subscribe selector={(state) => ({ canSubmit: state.canSubmit, isSubmitting: state.isSubmitting, submitError: state.errorMap.onSubmit })}>
-          {({ canSubmit, isSubmitting, submitError }) => (
+        {/* Schema errors are per field and shown under their inputs. */}
+        <form.Subscribe selector={(state) => ({ canSubmit: state.canSubmit, isSubmitting: state.isSubmitting })}>
+          {({ canSubmit, isSubmitting }) => (
             <div className="flex flex-col gap-3">
-              {typeof submitError === 'string' ? <p className="text-sm text-destructive">{submitError}</p> : null}
-              <Button type="submit" disabled={!canSubmit || isSubmitting}>
-                {isSubmitting ? 'Signing in…' : 'Sign in'}
+              {signIn.error ? <p className="text-sm text-destructive">{signIn.error.message}</p> : null}
+              {/* After success the browser is already leaving, so it stays disabled. */}
+              <Button type="submit" disabled={!canSubmit || isSubmitting || signIn.isSuccess}>
+                {isSubmitting || signIn.isSuccess ? 'Signing in…' : 'Sign in'}
               </Button>
             </div>
           )}
