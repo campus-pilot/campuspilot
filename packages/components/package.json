@@ -37,8 +37,12 @@
   "devDependencies": {
     "@campuspilot/config": "workspace:*",
     "@tailwindcss/postcss": "^4.3.3",
+    "@testing-library/dom": "catalog:",
+    "@testing-library/react": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
+    "jsdom": "catalog:",
+    "react-dom": "catalog:",
     "tailwindcss": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
