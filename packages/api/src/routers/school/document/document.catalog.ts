@@ -1,7 +1,8 @@
 export { DOCUMENT_MARKETPLACE } from "./document.catalog.marketplace";
+import { withReportModeLayout } from "./document.report-modes";
 
 /** Synthetic editor data never reads another school's students or results. */
-export const SAMPLE_DOCUMENT_CONTEXT = {
+const SAMPLE_DOCUMENT_SOURCE = {
   school: {
     name: "Greenwood Public School",
     location: "School Road, Bengaluru",
@@ -112,10 +113,12 @@ export const SAMPLE_DOCUMENT_CONTEXT = {
   statement: { periodStartDate: "2026-10-01", throughDate: "2026-10-20", asOfSequence: "12", openingBalance: "3000.00", openingBalanceMinor: "300000", closingBalance: "1500.00", closingBalanceMinor: "150000" },
   entries: [{ sequence: "12", effectiveAt: "2026-10-15", reference: "R/2026/000001", description: "Payment", debit: "", credit: "1500.00", balance: "1500.00" }],
 };
+/** The sample carries the same derived report mode columns as live contexts. */
+export const SAMPLE_DOCUMENT_CONTEXT = withReportModeLayout(SAMPLE_DOCUMENT_SOURCE);
 export const DOCUMENT_CONTEXT_HELP = `All documents: school.{name,location,registrationNo,logoUrl}, session.{startYear,endYear}, generatedAt.
 Student documents: student.{name,admissionNo,rollNo,className,sectionName,dob,fatherName,motherName,address,phoneNo,photoUrl}.
 Examination documents: exam.{name,slug,order,status,startedAt,completedAt}; unknown historical lifecycle/timestamps are null.
-Report cards: subjects[] with slug,name,total,totalMarks,percentage,grade,marks[modeSlug],modeConfig[modeSlug].{name,percentage,maxMarks}; grandTotal,grandMaxMarks,overallPercentage,overallGrade; gradingScale[gradeKey].{label,minScore}, sorted highest threshold first.
+Report cards: subjects[] with slug,name,total,totalMarks,percentage,grade,marks[modeSlug],modeConfig[modeSlug].{name,percentage,maxMarks}, modeCells[] aligned with modeColumns, each {slug,applicable,mark,maxMarks} (applicable is false and mark/maxMarks null when the subject has no such mode); modeColumns[] is the union of every subject's modes ordered by name then slug, each {slug,name,maxMarks} where maxMarks is null unless every subject with the mode shares one maximum. Build mode-mark tables from modeColumns and subjects[].modeCells, never from one subject's modeConfig; grandTotal,grandMaxMarks,overallPercentage,overallGrade; gradingScale[gradeKey].{label,minScore}, sorted highest threshold first.
 Exam-wide assessment: attendanceEnabled is the session configuration flag; attendance is nullable or {daysAttended,totalWorkingDays,percentage}; coScholastics[areaSlug].{areaName,grade} is nullable; coScholasticAreas[areaSlug].{name} holds configured definitions; assessmentApproved is true/false/null. Missing values stay null; zero attendance/marks remain zero. Shared values come only from the approved student exam assessment and exam working-day settings. Never infer shared values from legacy subject metadata.
 Report printing flags: reportSections.{includeModeMarks,includeAttendance,includeCoScholastics,includeGradingScale}. Templates must honor these independent print choices; they do not change configuration, grading, or approval facts. Subjects may retain legacy per-subject attendance/coScholastics for older templates; these are not the exam-wide values.
 Admit cards: exam, timetable[] with date (ISO),displayDate,dayOfWeek,startTime,endTime (HH:mm),displayStartTime,displayEndTime,subjectSlug,subjectName,modeSlug,modeName; may be empty.

@@ -5,6 +5,7 @@ import {
 } from './document.catalog';
 import { scopeLegacyDocumentCss } from './document.catalog.marketplace';
 import { renderDocument } from './document.render';
+import { withReportModeLayout } from './document.report-modes';
 
 function template(slug: string) {
   const item = DOCUMENT_MARKETPLACE.find((entry) => entry.slug === slug);
@@ -21,7 +22,7 @@ function cssOf(html: string) {
 /** Sample context with two assessment modes, so a mode column cannot be
  * confused with the single total column, and explicit print choices. */
 function reportContext(includeModeMarks: boolean) {
-  return {
+  return withReportModeLayout({
     ...SAMPLE_DOCUMENT_CONTEXT,
     subjects: SAMPLE_DOCUMENT_CONTEXT.subjects.map((subject, index) => ({
       ...subject,
@@ -35,7 +36,34 @@ function reportContext(includeModeMarks: boolean) {
       ...SAMPLE_DOCUMENT_CONTEXT.reportSections,
       includeModeMarks,
     },
-  };
+  });
+}
+
+/** Mathematics has Written and Oral, English only Written (with a different
+ * maximum), as when a school configures modes per subject. */
+function mixedModeContext() {
+  const [mathematics, english] = SAMPLE_DOCUMENT_CONTEXT.subjects;
+  const subjects: Array<
+    Record<string, unknown> & {
+      marks: Record<string, number>;
+      modeConfig: Record<string, { name: string; percentage: number; maxMarks: number }>;
+    }
+  > = [
+    {
+      ...english!,
+      marks: { written: 0 },
+      modeConfig: { written: { name: 'Written', percentage: 100, maxMarks: 100 } },
+    },
+    {
+      ...mathematics!,
+      marks: { oral: 18, written: 70 },
+      modeConfig: {
+        oral: { name: 'Oral', percentage: 20, maxMarks: 20 },
+        written: { name: 'Written', percentage: 80, maxMarks: 80 },
+      },
+    },
+  ];
+  return withReportModeLayout({ ...SAMPLE_DOCUMENT_CONTEXT, subjects });
 }
 
 function rowCellCounts(html: string) {
@@ -166,6 +194,30 @@ describe('document template marketplace', () => {
       expect(html.includes('Obtained Marks'), String(includeModeMarks)).toBe(
         includeModeMarks,
       );
+    }
+  });
+
+  it('builds mode columns from every subject and leaves a blank cell where a subject lacks a mode', () => {
+    const context = mixedModeContext();
+    expect(context.modeColumns).toEqual([
+      { slug: 'oral', name: 'Oral', maxMarks: 20 },
+      { slug: 'written', name: 'Written', maxMarks: null },
+    ]);
+    for (const slug of [
+      'report_card-default',
+      'report_card-default-attendance',
+      'report_card-minimal',
+    ]) {
+      const html = renderDocument(template(slug).content, context);
+      const header = html.match(/<thead>([\s\S]*?)<\/thead>/)![1]!;
+      expect(header.indexOf('Oral'), slug).toBeGreaterThan(-1);
+      expect(header.indexOf('Oral'), slug).toBeLessThan(header.indexOf('Written'));
+      const rows = [...html.match(/<tbody>([\s\S]*?)<\/tbody>/)![1]!.matchAll(/<tr>([\s\S]*?)<\/tr>/g)]
+        .map((row) => [...row[1]!.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map((cell) => cell[1]!.trim()));
+      // English: blank Oral cell, zero Written mark kept as zero.
+      expect(rows[0]!.slice(1, 3), slug).toEqual(['', '0']);
+      // Mathematics: Oral then Written, under their own headers.
+      expect(rows[1]!.slice(1, 3), slug).toEqual(['18', '70']);
     }
   });
 

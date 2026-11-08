@@ -17,6 +17,7 @@ import { and, asc, eq, inArray } from "drizzle-orm";
 import { rpcError } from "../../../errors";
 import type { DocumentSource } from "./document.dto";
 import { documentImage } from "./document.storage";
+import { withReportModeLayout } from "./document.report-modes";
 
 export function documentGrade(
   percentage: number,
@@ -583,7 +584,7 @@ export async function buildDocumentContexts(
           )
         : null;
     includedStudentIds.push(student.id);
-    contexts.push({
+    contexts.push(withReportModeLayout({
       ...common,
       student: identity,
       timetable,
@@ -606,7 +607,7 @@ export async function buildDocumentContexts(
       reportSections:
         source.documentType === "report_card" ? source.reportSections : null,
       attendanceEnabled: config.attendanceTracking.enabled,
-    });
+    }));
   }
   if (!contexts.length)
     throw rpcError.badRequest(
