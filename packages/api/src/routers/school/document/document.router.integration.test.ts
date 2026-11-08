@@ -362,7 +362,7 @@ describe('document templates, generation, and artifact lifecycle', () => {
       active ??= await manager.school.selectMarketplaceTemplate({
         schoolId,
         documentType,
-        slug: `${documentType}-modern`,
+        slug: `${documentType}-default`,
         expectedRevisionId: null,
       });
       const source =
@@ -566,7 +566,7 @@ describe('document templates, generation, and artifact lifecycle', () => {
     );
     expect(html).toContain('{{unknown helper}}');
     expect(documentGrade(20, { a: { label: 'A', minScore: 80 } })).toBe('—');
-    expect(DOCUMENT_MARKETPLACE).toHaveLength(28);
+    expect(DOCUMENT_MARKETPLACE).toHaveLength(21);
   });
   it('cleans losing concurrent uploads and preserves exactly one active revision', async () => {
     const current = await manager.school.getActiveDocumentTemplate({
