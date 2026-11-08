@@ -361,7 +361,12 @@ describe("school admission and student router integration", () => {
     const teacher = await createSchoolStaffSession(school.id, [
       { role: "teacher", meta: { classIds: [] } },
     ]);
-    const admission = await createTestAdmission({ schoolId: school.id });
+    // A fixed admission number: the fixture's random UUID default can share
+    // enough digit trigrams with the phone query to pass the fuzzy threshold.
+    const admission = await createTestAdmission({
+      schoolId: school.id,
+      admissionNo: "ADM-LOOKUP",
+    });
     await db
       .update(admissionTable)
       .set({ phoneNo: "88005551234", email: "lookup@example.com" })
