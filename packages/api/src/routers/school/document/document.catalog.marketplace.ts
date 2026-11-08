@@ -27,6 +27,30 @@ function wrapSection(
   return `${source.slice(0, startIndex + start.length)}\n{{#if ${flag}}}${source.slice(startIndex + start.length, endIndex)}{{/if}}\n${source.slice(endIndex)}`;
 }
 
+/** Legacy report designs took their mode columns from the first subject
+ * (`subjects.[0].modeConfig`) and each row's cells from that row's own
+ * `modeConfig`, which only lines up when every subject has the same modes.
+ * Headers and the total row now iterate the report-wide `modeColumns`, and
+ * rows iterate `modeCells` (one per column, blank where the subject lacks the
+ * mode). A column's maximum is printed only when all its subjects share it.
+ *
+ * Catalog source is copied into immutable school revisions on import, so this
+ * changes only future imports; revisions already imported keep their markup,
+ * and `marks`/`modeConfig` stay in the context for them.
+ */
+function adaptReportModeColumns(source: string) {
+  return source
+    .replaceAll("{{#each subjects.[0].modeConfig}}", "{{#each @root.modeColumns}}")
+    .replaceAll(
+      "{{this.name}} ({{this.maxMarks}})",
+      "{{this.name}}{{#if this.maxMarks}} ({{this.maxMarks}}){{/if}}",
+    )
+    .replace(
+      /{{#each this\.modeConfig}}(\s*)<td>{{lookup \.\.\/marks @key}}<\/td>(\s*){{\/each}}/g,
+      "{{#each this.modeCells}}$1<td>{{#if this.applicable}}{{this.mark}}{{/if}}</td>$2{{/each}}",
+    );
+}
+
 /** Legacy report designs predate independent print flags. These targeted
  * adaptations preserve their markup while making each optional section obey
  * the current report-card contract.
@@ -37,8 +61,8 @@ function wrapSection(
  * header (rendered at the root) still showed them.
  */
 function adaptReportFlags(source: string) {
-  let adapted = source.replace(
-    /{{#each (subjects\.\[0\]\.modeConfig|this\.modeConfig)}}([\s\S]*?){{\/each}}/g,
+  let adapted = adaptReportModeColumns(source).replace(
+    /{{#each (@root\.modeColumns|this\.modeCells)}}([\s\S]*?){{\/each}}/g,
     "{{#if @root.reportSections.includeModeMarks}}{{#each $1}}$2{{/each}}{{/if}}",
   );
   // The attendance-focus design groups its mode columns under one header and
@@ -47,11 +71,11 @@ function adaptReportFlags(source: string) {
   adapted = adapted
     .replace(
       '<th colspan="2">Obtained Marks</th>',
-      '{{#if @root.reportSections.includeModeMarks}}<th colspan="2">Obtained Marks</th>{{/if}}',
+      '{{#if @root.reportSections.includeModeMarks}}<th colspan="{{@root.modeColumns.length}}">Obtained Marks</th>{{/if}}',
     )
     .replaceAll(
       '<td colspan="4" style="text-align:right;">',
-      '<td colspan="{{#if @root.reportSections.includeModeMarks}}4{{else}}2{{/if}}" style="text-align:right;">',
+      '<td colspan="{{#if @root.reportSections.includeModeMarks}}{{add @root.modeColumns.length 2}}{{else}}2{{/if}}" style="text-align:right;">',
     );
   adapted = wrapSection(
     adapted,

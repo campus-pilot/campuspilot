@@ -370,6 +370,14 @@ Important shapes and semantics:
 - `subjects[]` includes `slug`, `name`, `marks[modeSlug]`,
   `modeConfig[modeSlug].{name,percentage,maxMarks}`, `total`, `totalMarks`,
   `percentage`, and `grade`.
+- `modeColumns[]` is the union of every subject's assessment modes, ordered by
+  name then slug, each `{slug,name,maxMarks}`; `maxMarks` is `null` unless every
+  subject with that mode shares one maximum. Each subject's `modeCells[]` is
+  aligned with `modeColumns`, each `{slug,applicable,mark,maxMarks}`, with
+  `applicable: false` and null values where the subject lacks the mode. Build
+  mode-mark tables from these, never from one subject's `modeConfig`: subjects
+  may use different modes. Bundled report designs were adapted in place under
+  their slugs; already imported school revisions keep their old markup.
 - `attendance` is nullable or
   `{daysAttended,totalWorkingDays,percentage}`. `attendanceEnabled` reports the
   session configuration independently of whether approved attendance exists.

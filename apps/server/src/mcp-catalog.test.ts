@@ -189,7 +189,7 @@ describe('catalog metadata', () => {
     expect(classified).toEqual([...leafNames].sort());
     expect(catalog.core.map(({ name }) => name).sort()).toEqual(CORE_TOOLS);
     expect(catalog.core).toHaveLength(36);
-    expect(catalog.advanced).toHaveLength(83);
+    expect(catalog.advanced).toHaveLength(85);
   });
 });
 
