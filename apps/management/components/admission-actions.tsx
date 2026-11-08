@@ -23,6 +23,7 @@ import { KeyRound, MoreHorizontal, Pencil, UserRoundX } from 'lucide-react';
 import { z } from 'zod';
 
 import { client, orpc } from '@/lib/orpc';
+import { admissionActionsFor, issuePortalPasswordConfirmation, issuePortalPasswordPermission } from './admission-actions-model';
 import { FormErrors } from './form-errors';
 import { RequirePermissions } from './require-permissions';
 
@@ -112,7 +113,8 @@ function useResetCadetPassword(admission: AdmissionDto) {
 
 function AdmissionOverflowMenu({ admission }: { admission: AdmissionDto }) {
   const { confirming, setConfirming, reset } = useResetCadetPassword(admission);
-  return <RequirePermissions permissions={{ action: SCHOOL_ACTIONS.ISSUE_ADMISSION_CADET_PASSWORD, resource: { kind: 'school', schoolId: admission.schoolId } }}>
+  const confirmation = issuePortalPasswordConfirmation(admission.name, reset.isPending);
+  return <RequirePermissions permissions={issuePortalPasswordPermission(admission.schoolId)}>
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button type="button" size="icon-sm" variant="ghost" aria-label="More admission actions"><MoreHorizontal aria-hidden /></Button>
@@ -125,9 +127,9 @@ function AdmissionOverflowMenu({ admission }: { admission: AdmissionDto }) {
     </DropdownMenu>
     <ConfirmationDialog
       open={confirming}
-      title="Issue a new Cadet Portal password?"
-      description={`${admission.name} gets a new Cadet Portal password. If one was issued before, it stops working and ${admission.name} is signed out of the Cadet Portal everywhere, including connected AI apps.`}
-      confirmLabel={reset.isPending ? 'Issuing…' : 'Issue password'}
+      title={confirmation.title}
+      description={confirmation.description}
+      confirmLabel={confirmation.confirmLabel}
       pending={reset.isPending}
       onOpenChange={setConfirming}
       onConfirm={() => reset.mutate()}
@@ -138,11 +140,8 @@ function AdmissionOverflowMenu({ admission }: { admission: AdmissionDto }) {
   </RequirePermissions>;
 }
 
-/**
- * Edit and unregister apply to registered admissions only. The overflow menu
- * (Cadet Portal password) is shown for unregistered admissions too, because
- * portal access is a separate fact from registration.
- */
+/** Header actions of an admission; see {@link admissionActionsFor} for which apply. */
 export function AdmissionActions({ admission }: { admission: AdmissionDto }) {
-  return <div className="flex flex-wrap items-center gap-2">{admission.registered ? <><EditAdmissionAction admission={admission} /><UnregisterAdmissionAction admission={admission} /></> : null}<AdmissionOverflowMenu admission={admission} /></div>;
+  const actions = admissionActionsFor(admission);
+  return <div className="flex flex-wrap items-center gap-2">{actions.edit ? <EditAdmissionAction admission={admission} /> : null}{actions.unregister ? <UnregisterAdmissionAction admission={admission} /> : null}{actions.issuePortalPassword ? <AdmissionOverflowMenu admission={admission} /> : null}</div>;
 }

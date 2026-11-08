@@ -4,6 +4,7 @@ import type { ReactNode } from 'react';
 import type { PermissionCheck } from '@campuspilot/api/routers/authorization/authorization.dto';
 import { useQuery } from '@tanstack/react-query';
 import { orpc } from '@/lib/orpc';
+import { permissionsSatisfied } from './require-permissions-model';
 
 export type RequirePermissionsProps = {
   children: ReactNode;
@@ -31,15 +32,16 @@ export function RequirePermissions({
     }),
   );
 
-  if (
-    permissionsQuery.isPending ||
-    permissionsQuery.isError ||
-    permissionsQuery.data.results.length !== permissionList.length ||
-    !(mode === 'any'
-      ? permissionsQuery.data.results.some(Boolean)
-      : permissionsQuery.data.results.every(Boolean))
-  )
-    return fallback;
+  const satisfied = permissionsSatisfied(
+    {
+      isPending: permissionsQuery.isPending,
+      isError: permissionsQuery.isError,
+      results: permissionsQuery.data?.results,
+    },
+    permissionList.length,
+    mode,
+  );
+  if (!satisfied) return fallback;
 
   return children;
 }
