@@ -20,6 +20,9 @@ import {
   sql,
 } from "drizzle-orm";
 
+import { findCadetLoginId } from "@campuspilot/auth/cadet-login";
+import { revokeCadetLoginAccess } from "@campuspilot/auth/cadet";
+
 import { rpcError, toRpcError } from "../../../errors";
 import { protectedProcedure } from "../../../index";
 import {
@@ -27,6 +30,7 @@ import {
   createPaginatedResult,
   resolvePaginationInput,
 } from "../../../paginations";
+import { assertPermission } from "../../../permissions/authorization";
 import { requireSchoolPermission } from "../../../permissions/school";
 import {
   admissionDtoSchema,
@@ -40,6 +44,16 @@ import {
   type AdmissionDto,
 } from "./admission.dto";
 import { assertAdmissionRegistered } from "./admission-registration";
+import {
+  issueAdmissionCadetPassword,
+  issuedCadetPasswordSchema,
+} from "./admission-cadet-password";
+
+/** `createAdmission`'s output: the admission plus a password issued with it. */
+const createAdmissionOutputSchema = admissionDtoSchema.extend({
+  /** Set only when `generateCadetPassword` was true; shown to staff once. */
+  cadetPassword: issuedCadetPasswordSchema.nullable(),
+});
 
 const ADMISSION_FUZZY_SEARCH_THRESHOLD = 0.2;
 
@@ -376,7 +390,7 @@ export const schoolAdmissionRouter = {
     .route({
       summary: "Create a school admission",
       description:
-        "Create an admission. Document attachments are intentionally added after creation through the binary document workflow.",
+        "Create an admission. Document attachments are intentionally added after creation through the binary document workflow. With generateCadetPassword the student's Cadet Portal login is created in the same step and its password is returned once in cadetPassword.",
       tags: ["School", "Admissions"],
     })
     .meta({
@@ -389,9 +403,22 @@ export const schoolAdmissionRouter = {
     })
     .input(createAdmissionInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.CREATE_ADMISSION))
-    .output(admissionDtoSchema)
-    .handler(async ({ context, input }) => {
+    .output(createAdmissionOutputSchema)
+    .handler(async ({ context, input, signal }) => {
       try {
+        const { generateCadetPassword, ...values } = input;
+        // Issuing a password is its own permission, checked in addition to
+        // admission creation and only when one is requested.
+        if (generateCadetPassword) {
+          await assertPermission(
+            context,
+            {
+              action: SCHOOL_ACTIONS.ISSUE_ADMISSION_CADET_PASSWORD,
+              resource: { kind: "school", schoolId: input.schoolId },
+            },
+            signal,
+          );
+        }
         return await context.db.transaction(async (transaction) => {
           const [school] = await transaction
             .select({ id: schoolTable.id })
@@ -400,16 +427,80 @@ export const schoolAdmissionRouter = {
             .limit(1);
           if (!school) throw rpcError.notFound("School");
 
-          await validateAdmissionReferences(transaction, input.schoolId, input);
+          await validateAdmissionReferences(transaction, input.schoolId, values);
           const [admission] = await transaction
             .insert(admissionTable)
             // Registration is a backend-owned initial state. Clients cannot
             // create an inactive admission or revive an old one.
-            .values({ ...input, registered: true })
+            .values({ ...values, registered: true })
             .returning();
           if (!admission) throw rpcError.internal();
-          return toAdmissionDto(admission);
+          // The login and its hash commit or roll back with the admission.
+          // A new admission has no sessions, so nothing needs revoking.
+          const cadetPassword = generateCadetPassword
+            ? (
+                await issueAdmissionCadetPassword(transaction, {
+                  schoolId: input.schoolId,
+                  admission,
+                  issuedBy: context.session.user.id,
+                })
+              ).issued
+            : null;
+          return { ...toAdmissionDto(admission), cadetPassword };
         });
+      } catch (error) {
+        throw toRpcError(error);
+      }
+    }),
+
+  issueAdmissionCadetPassword: protectedProcedure
+    .route({
+      summary: "Issue a Cadet Portal password",
+      description:
+        "Issue a new Cadet Portal password for an admission (registered or unregistered), creating the student's login on first use. The previous password stops working, and the student is signed out everywhere, including connected AI apps. The new password is returned once and can never be viewed again.",
+      tags: ["School", "Admissions"],
+    })
+    .meta({
+      // Must stay a human action: it returns a credential and signs a
+      // student out everywhere.
+      mcp: {
+        exposure: "hidden",
+        access: "write",
+        destructive: true,
+        module: "admissions",
+      },
+    })
+    .input(admissionIdInputSchema)
+    .use(requireSchoolPermission(SCHOOL_ACTIONS.ISSUE_ADMISSION_CADET_PASSWORD))
+    .output(issuedCadetPasswordSchema)
+    .handler(async ({ context, input }) => {
+      try {
+        const { userId, issued } = await context.db.transaction(
+          async (transaction) => {
+            const admission = await findAdmission(
+              transaction,
+              input.schoolId,
+              input.admissionId,
+            );
+            if (!admission) throw rpcError.notFound("Admission");
+            // Deliberately no registration check: registration and portal
+            // access are separate facts. An unregistered student keeps
+            // signing in and seeing their records, so staff must be able to
+            // issue them a new password too. This writes only the cadet
+            // login, never the admission row.
+            return issueAdmissionCadetPassword(transaction, {
+              schoolId: input.schoolId,
+              admission,
+              issuedBy: context.session.user.id,
+            });
+          },
+        );
+        // Revoked after the new password committed, so no session created
+        // with the old password can survive. If revoking fails the error
+        // reaches staff without the password, and issuing again revokes
+        // again.
+        await revokeCadetLoginAccess([userId]);
+        return issued;
       } catch (error) {
         throw toRpcError(error);
       }
@@ -507,6 +598,15 @@ export const schoolAdmissionRouter = {
               "An admission with student enrollment history cannot be deleted.",
             );
           }
+
+          // Sign the student out through the cadet instance first, so the
+          // Redis session copies go too; the cadet rows then cascade with
+          // the admission.
+          const cadetLoginId = await findCadetLoginId(
+            transaction,
+            input.admissionId,
+          );
+          if (cadetLoginId) await revokeCadetLoginAccess([cadetLoginId]);
 
           await transaction
             .delete(admissionTable)

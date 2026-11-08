@@ -4,16 +4,26 @@ import { useState } from 'react';
 import type { AdmissionDto } from '@campuspilot/api/routers/school/admission/admission.dto';
 import { SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
 import { AdmissionFormDialog, type AdmissionFormValue } from '@campuspilot/components/admission';
+import { IssuedCadetPasswordDialog } from '@campuspilot/components/cadet-portal';
+import { ConfirmationDialog } from '@campuspilot/components/confirmation-dialog';
 import { useForm } from '@tanstack/react-form';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@campuspilot/ui/components/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@campuspilot/ui/components/dropdown-menu';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@campuspilot/ui/components/dialog';
 import { Input } from '@campuspilot/ui/components/input';
 import { Label } from '@campuspilot/ui/components/label';
-import { Pencil, UserRoundX } from 'lucide-react';
+import { KeyRound, MoreHorizontal, Pencil, UserRoundX } from 'lucide-react';
 import { z } from 'zod';
 
 import { client, orpc } from '@/lib/orpc';
+import { admissionActionsFor, issuePortalPasswordConfirmation, issuePortalPasswordPermission } from './admission-actions-model';
 import { FormErrors } from './form-errors';
 import { RequirePermissions } from './require-permissions';
 
@@ -85,7 +95,53 @@ function UnregisterAdmissionAction({ admission }: { admission: AdmissionDto }) {
   </RequirePermissions>;
 }
 
+/**
+ * Issues a new Cadet Portal password after an app confirmation, then shows it
+ * once. Issuing also covers the first password of an admission created
+ * without one. The server revokes the student's sessions and AI app grants.
+ * The admission DTO does not say whether a login exists yet, so the
+ * confirmation copy is worded to be true in both cases.
+ */
+function useResetCadetPassword(admission: AdmissionDto) {
+  const [confirming, setConfirming] = useState(false);
+  const reset = useMutation({
+    mutationFn: () => client.school.issueAdmissionCadetPassword({ schoolId: admission.schoolId, admissionId: admission.id }),
+    onSuccess: () => setConfirming(false),
+  });
+  return { confirming, setConfirming, reset };
+}
+
+function AdmissionOverflowMenu({ admission }: { admission: AdmissionDto }) {
+  const { confirming, setConfirming, reset } = useResetCadetPassword(admission);
+  const confirmation = issuePortalPasswordConfirmation(admission.name, reset.isPending);
+  return <RequirePermissions permissions={issuePortalPasswordPermission(admission.schoolId)}>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button type="button" size="icon-sm" variant="ghost" aria-label="More admission actions"><MoreHorizontal aria-hidden /></Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuGroup>
+          <DropdownMenuItem onSelect={() => { reset.reset(); setConfirming(true); }}><KeyRound aria-hidden />Issue portal password</DropdownMenuItem>
+        </DropdownMenuGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+    <ConfirmationDialog
+      open={confirming}
+      title={confirmation.title}
+      description={confirmation.description}
+      confirmLabel={confirmation.confirmLabel}
+      pending={reset.isPending}
+      onOpenChange={setConfirming}
+      onConfirm={() => reset.mutate()}
+    >
+      {reset.error ? <p className="text-sm text-destructive">{reset.error.message || 'Unable to issue the password.'}</p> : null}
+    </ConfirmationDialog>
+    <IssuedCadetPasswordDialog details={reset.data ?? null} studentName={admission.name} onClose={() => reset.reset()} />
+  </RequirePermissions>;
+}
+
+/** Header actions of an admission; see {@link admissionActionsFor} for which apply. */
 export function AdmissionActions({ admission }: { admission: AdmissionDto }) {
-  if (!admission.registered) return null;
-  return <div className="flex flex-wrap items-center gap-2"><EditAdmissionAction admission={admission} /><UnregisterAdmissionAction admission={admission} /></div>;
+  const actions = admissionActionsFor(admission);
+  return <div className="flex flex-wrap items-center gap-2">{actions.edit ? <EditAdmissionAction admission={admission} /> : null}{actions.unregister ? <UnregisterAdmissionAction admission={admission} /> : null}{actions.issuePortalPassword ? <AdmissionOverflowMenu admission={admission} /> : null}</div>;
 }

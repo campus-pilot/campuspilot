@@ -40,6 +40,8 @@ const previewEnvironment = {
   BETTER_AUTH_SECRET: "test-document-preview-secret-at-least-32-characters",
   BETTER_AUTH_URL: `http://localhost:${apiPort}`,
   MCP_RESOURCE_URL: `http://localhost:${apiPort}/mcp`,
+  CADET_APP_URL: "http://localhost:3004",
+  CADET_MCP_RESOURCE_URL: `http://localhost:${apiPort}/api/cadet/mcp`,
   GOOGLE_CLIENT_ID: "fixture",
   GOOGLE_CLIENT_SECRET: "fixture",
   PUBLIC_APP_URL: `http://localhost:${appPort}`,

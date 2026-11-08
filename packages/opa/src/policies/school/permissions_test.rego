@@ -283,6 +283,7 @@ test_admission_and_student_mutations_are_allowed_for_principals_and_managers if 
       "school.admission.update",
       "school.admission.unregister",
       "school.admission.delete",
+      "school.admission.cadet_password.issue",
       "school.student.create",
       "school.student.update",
       "school.student.class.remove",
@@ -310,6 +311,7 @@ test_admission_and_student_mutations_are_denied_for_other_school_roles if {
       "school.admission.update",
       "school.admission.unregister",
       "school.admission.delete",
+      "school.admission.cadet_password.issue",
       "school.student.create",
       "school.student.update",
       "school.student.class.remove",
@@ -351,6 +353,7 @@ test_platform_admin_can_govern_admission_settings_only if {
     "school.admission.update",
     "school.admission.unregister",
     "school.admission.delete",
+    "school.admission.cadet_password.issue",
   } {
     not authorization.allow with input as {
       "action": action,

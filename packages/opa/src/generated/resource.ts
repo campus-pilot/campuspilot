@@ -23,6 +23,7 @@ export type ClassResource = {
 export type AuthorizationResourceByAction = {
   [CLASS_ACTIONS.APPROVE_EXAM_RESULTS]: ClassResource;
   [CLASS_ACTIONS.ADD_STUDENT]: ClassResource;
+  [SCHOOL_ACTIONS.ISSUE_ADMISSION_CADET_PASSWORD]: SchoolResource;
   [SCHOOL_ACTIONS.CREATE_ADMISSION]: SchoolResource;
   [SCHOOL_ACTIONS.DELETE_ADMISSION]: SchoolResource;
   [SCHOOL_ACTIONS.READ_ADMISSION_FINANCE]: SchoolResource;

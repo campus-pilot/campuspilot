@@ -1,5 +1,11 @@
 import type { DatabaseExecutor } from '@campuspilot/db';
 import * as schema from '@campuspilot/db/schema/auth';
+import {
+  cadetOauthAccessToken,
+  cadetOauthClient,
+  cadetOauthConsent,
+  cadetOauthRefreshToken,
+} from '@campuspilot/db/schema/cadet';
 import { env } from '@campuspilot/env/server';
 import { cimd } from '@better-auth/cimd';
 import { fetchClientMetadataResource as fetchClientMetadataResourceOverNetwork } from '@better-auth/cimd/node';
@@ -43,9 +49,56 @@ export type McpOAuthOptions = {
 /** Better Auth's base path; the issuer is the auth base URL plus this. */
 export const AUTH_BASE_PATH = '/api/auth';
 
+/** Issuer of a Better Auth instance mounted at `basePath`. */
+export function issuerFor(basePath: string): string {
+  return `${env.BETTER_AUTH_URL.replace(/\/$/, '')}${basePath}`;
+}
+
 /** OAuth issuer (`${BETTER_AUTH_URL}/api/auth`), identical in every document. */
 export function oauthIssuer(): string {
-  return `${env.BETTER_AUTH_URL.replace(/\/$/, '')}${AUTH_BASE_PATH}`;
+  return issuerFor(AUTH_BASE_PATH);
+}
+
+type ClientPolicyContext = { user?: Record<string, unknown> };
+
+/**
+ * What differs between the staff and the cadet MCP authorization servers.
+ * Everything else (token lifetimes, PKCE, DCR rate limit, CIMD) is the same
+ * decided policy for both.
+ */
+export type McpOAuthServerConfig = {
+  /** Canonical MCP URL: the protected resource and access-token audience. */
+  resource: string;
+  loginPage: string;
+  consentPage: string;
+  /** Every scope the authorization server accepts. */
+  scopes: readonly string[];
+  /** Scopes a dynamically registered client gets when it asks for none. */
+  defaultScopes: readonly string[];
+  /** Who may create, list, update and delete clients through OAuth endpoints. */
+  clientPrivileges: (context: ClientPolicyContext) => boolean;
+  /** Owner (`referenceId`) recorded on clients created through those endpoints. */
+  clientReference: (context: ClientPolicyContext) => string | undefined;
+};
+
+/**
+ * The staff MCP authorization server: resource `MCP_RESOURCE_URL`, pages on
+ * the management app, and client CRUD for platform administrators only
+ * (school users connect clients through CIMD, DCR or a pre-registered
+ * client). Clients an administrator creates belong to the platform, not to
+ * that administrator, so every platform administrator can manage them.
+ */
+export function staffMcpOAuthConfig(): McpOAuthServerConfig {
+  return {
+    resource: env.MCP_RESOURCE_URL,
+    loginPage: new URL(OAUTH_LOGIN_PATH, env.PUBLIC_APP_URL).toString(),
+    consentPage: new URL(OAUTH_CONSENT_PATH, env.PUBLIC_APP_URL).toString(),
+    scopes: OAUTH_SUPPORTED_SCOPES,
+    defaultScopes: MCP_DEFAULT_SCOPES,
+    clientPrivileges: ({ user }) => user?.role === 'admin',
+    clientReference: ({ user }) =>
+      user?.role === 'admin' ? PLATFORM_OAUTH_CLIENT_OWNER : undefined,
+  };
 }
 
 /**
@@ -55,7 +108,10 @@ export function oauthIssuer(): string {
  * policy: CIMD + pre-registered + open DCR (rate-limited), user-wide grants
  * without a school step, 1 h access tokens, 90-day rotating refresh tokens.
  */
-export function mcpOAuthPlugins(options: McpOAuthOptions = {}) {
+export function mcpOAuthPlugins(
+  config: McpOAuthServerConfig,
+  options: McpOAuthOptions = {},
+) {
   return [
     jwt({
       // Session responses must not carry a JWT; access tokens come only from
@@ -63,10 +119,10 @@ export function mcpOAuthPlugins(options: McpOAuthOptions = {}) {
       disableSettingJwtHeader: true,
     }),
     mcp({
-      resource: env.MCP_RESOURCE_URL,
-      loginPage: new URL(OAUTH_LOGIN_PATH, env.PUBLIC_APP_URL).toString(),
-      consentPage: new URL(OAUTH_CONSENT_PATH, env.PUBLIC_APP_URL).toString(),
-      scopes: [...OAUTH_SUPPORTED_SCOPES],
+      resource: config.resource,
+      loginPage: config.loginPage,
+      consentPage: config.consentPage,
+      scopes: [...config.scopes],
       // Only user-facing flows; no machine-to-machine client_credentials.
       grantTypes: ['authorization_code', 'refresh_token'],
       accessTokenExpiresIn: MCP_ACCESS_TOKEN_TTL_SECONDS,
@@ -78,20 +134,12 @@ export function mcpOAuthPlugins(options: McpOAuthOptions = {}) {
       allowDynamicClientRegistration: true,
       allowUnauthenticatedClientRegistration: true,
       clientRegistrationDefaultApplicationType: 'infer',
-      clientRegistrationDefaultScopes: [...MCP_DEFAULT_SCOPES],
-      clientRegistrationAllowedScopes: [...OAUTH_SUPPORTED_SCOPES],
+      clientRegistrationDefaultScopes: [...config.defaultScopes],
+      clientRegistrationAllowedScopes: [...config.scopes],
       clientRegistrationRequirePKCE: true,
       rateLimit: { register: { window: 60, max: 5 } },
-      /**
-       * Client CRUD through the OAuth endpoints (create/list/update/delete,
-       * secret rotation) is for platform administrators only; school users
-       * connect clients through CIMD, DCR or a pre-registered client.
-       */
-      clientPrivileges: ({ user }) => user?.role === 'admin',
-      // Clients an administrator creates belong to the platform, not to that
-      // administrator, so every platform administrator can manage them.
-      clientReference: ({ user }) =>
-        user?.role === 'admin' ? PLATFORM_OAUTH_CLIENT_OWNER : undefined,
+      clientPrivileges: config.clientPrivileges,
+      clientReference: config.clientReference,
     }),
     cimd({
       fetchClientMetadataResource:
@@ -103,21 +151,75 @@ export function mcpOAuthPlugins(options: McpOAuthOptions = {}) {
 }
 
 /**
+ * The OAuth tables of one authorization server. Staff and Cadet Portal
+ * clients and grants live in separate tables; the cadet tables are
+ * column-for-column copies of the staff ones (the same Better Auth models),
+ * so queries are typed against the staff shape while Drizzle builds the SQL
+ * from the runtime table objects actually passed.
+ */
+export type OAuthServerTables = {
+  client: typeof schema.oauthClient;
+  consent: typeof schema.oauthConsent;
+  refreshToken: typeof schema.oauthRefreshToken;
+  accessToken: typeof schema.oauthAccessToken;
+};
+
+/** True only when A and B are mutually assignable. */
+type SameShape<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+type Assert<T extends true> = T;
+
+/**
+ * Compile-time guard for the casts below and in `mcp-credential.ts`: each
+ * cadet OAuth table must have exactly the staff table's row shape (select)
+ * and insert shape (required/optional columns and their types). A column
+ * added to or changed in only one of them fails typecheck here instead of
+ * silently producing queries against a mismatched table.
+ */
+export type CadetOAuthTableShapeChecks = [
+  Assert<SameShape<typeof cadetOauthClient.$inferSelect, typeof schema.oauthClient.$inferSelect>>,
+  Assert<SameShape<typeof cadetOauthClient.$inferInsert, typeof schema.oauthClient.$inferInsert>>,
+  Assert<SameShape<typeof cadetOauthConsent.$inferSelect, typeof schema.oauthConsent.$inferSelect>>,
+  Assert<SameShape<typeof cadetOauthConsent.$inferInsert, typeof schema.oauthConsent.$inferInsert>>,
+  Assert<SameShape<typeof cadetOauthRefreshToken.$inferSelect, typeof schema.oauthRefreshToken.$inferSelect>>,
+  Assert<SameShape<typeof cadetOauthRefreshToken.$inferInsert, typeof schema.oauthRefreshToken.$inferInsert>>,
+  Assert<SameShape<typeof cadetOauthAccessToken.$inferSelect, typeof schema.oauthAccessToken.$inferSelect>>,
+  Assert<SameShape<typeof cadetOauthAccessToken.$inferInsert, typeof schema.oauthAccessToken.$inferInsert>>,
+];
+
+export const STAFF_OAUTH_SERVER_TABLES: OAuthServerTables = {
+  client: schema.oauthClient,
+  consent: schema.oauthConsent,
+  refreshToken: schema.oauthRefreshToken,
+  accessToken: schema.oauthAccessToken,
+};
+
+export const CADET_OAUTH_SERVER_TABLES = {
+  client: cadetOauthClient,
+  consent: cadetOauthConsent,
+  refreshToken: cadetOauthRefreshToken,
+  accessToken: cadetOauthAccessToken,
+} as unknown as OAuthServerTables;
+
+/**
  * Records that a client was created through Dynamic Client Registration, so
  * cleanup and the admin client list never have to guess it from other fields.
  * Any `registrationMethod` the registrant sent is overwritten.
  */
-export function recordDynamicClientRegistration(db: DatabaseExecutor) {
+export function recordDynamicClientRegistration(
+  db: DatabaseExecutor,
+  tables: OAuthServerTables = STAFF_OAUTH_SERVER_TABLES,
+) {
+  const { client } = tables;
   return createAuthMiddleware(async (ctx) => {
     if (ctx.path !== '/oauth2/register') return;
     const returned = ctx.context.returned as { client_id?: unknown } | undefined;
     if (!returned || typeof returned.client_id !== 'string') return;
     await db
-      .update(schema.oauthClient)
+      .update(client)
       .set({
-        metadata: sql`coalesce(${schema.oauthClient.metadata}, '{}'::jsonb) || ${JSON.stringify({ registrationMethod: 'dynamic' satisfies OAuthClientRegistrationMethod })}::jsonb`,
+        metadata: sql`coalesce(${client.metadata}, '{}'::jsonb) || ${JSON.stringify({ registrationMethod: 'dynamic' satisfies OAuthClientRegistrationMethod })}::jsonb`,
       })
-      .where(eq(schema.oauthClient.clientId, returned.client_id));
+      .where(eq(client.clientId, returned.client_id));
   });
 }
 
@@ -126,16 +228,18 @@ export function recordDynamicClientRegistration(db: DatabaseExecutor) {
  * MCP_UNUSED_DYNAMIC_CLIENT_TTL_DAYS and never received a grant (no consent,
  * no access or refresh token). DCR creates a client per connection attempt,
  * so abandoned registrations would otherwise accumulate. Idempotent; safe to
- * run on several server instances.
+ * run on several server instances. Runs against one server's tables (staff
+ * by default).
  */
 export async function deleteUnusedDynamicOAuthClients(
   db: DatabaseExecutor,
   now = new Date(),
+  tables: OAuthServerTables = STAFF_OAUTH_SERVER_TABLES,
 ): Promise<number> {
   const cutoff = new Date(
     now.getTime() - MCP_UNUSED_DYNAMIC_CLIENT_TTL_DAYS * 24 * 60 * 60 * 1000,
   );
-  const client = schema.oauthClient;
+  const { client, consent, refreshToken, accessToken } = tables;
   const deleted = await db
     .delete(client)
     .where(
@@ -145,21 +249,21 @@ export async function deleteUnusedDynamicOAuthClients(
         lt(client.createdAt, cutoff),
         notExists(
           db
-            .select({ id: schema.oauthConsent.id })
-            .from(schema.oauthConsent)
-            .where(eq(schema.oauthConsent.clientId, client.clientId)),
+            .select({ id: consent.id })
+            .from(consent)
+            .where(eq(consent.clientId, client.clientId)),
         ),
         notExists(
           db
-            .select({ id: schema.oauthRefreshToken.id })
-            .from(schema.oauthRefreshToken)
-            .where(eq(schema.oauthRefreshToken.clientId, client.clientId)),
+            .select({ id: refreshToken.id })
+            .from(refreshToken)
+            .where(eq(refreshToken.clientId, client.clientId)),
         ),
         notExists(
           db
-            .select({ id: schema.oauthAccessToken.id })
-            .from(schema.oauthAccessToken)
-            .where(eq(schema.oauthAccessToken.clientId, client.clientId)),
+            .select({ id: accessToken.id })
+            .from(accessToken)
+            .where(eq(accessToken.clientId, client.clientId)),
         ),
       ),
     )

@@ -1,8 +1,7 @@
-import { createDb, type DatabaseExecutor } from '@campuspilot/db';
+import type { DatabaseExecutor } from '@campuspilot/db';
 import * as schema from '@campuspilot/db/schema/auth';
 import { env } from '@campuspilot/env/server';
 import { betterAuth } from 'better-auth';
-import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import {
   APIError,
   createAuthMiddleware,
@@ -11,15 +10,21 @@ import {
 import { admin } from 'better-auth/plugins';
 import { and, count, eq, gt, isNull, ne, or } from 'drizzle-orm';
 
-import { getRedisClient } from '@campuspilot/redis/client';
+import {
+  authDb,
+  authFoundation,
+  SHARED_SESSION_OPTIONS,
+  sharedCookieOptions,
+} from './auth-foundation';
 import { log } from './log';
 import {
+  AUTH_BASE_PATH,
   mcpOAuthPlugins,
   type McpOAuthOptions,
   recordDynamicClientRegistration,
+  staffMcpOAuthConfig,
 } from './mcp-oauth';
 
-import { redisStorage } from '@better-auth/redis-storage';
 import { apiKey } from '@better-auth/api-key';
 import {
   API_KEY_DEFAULT_EXPIRES_IN_SECONDS,
@@ -33,15 +38,13 @@ import {
   importGoogleProfileImage,
 } from './profile-image';
 
-const redis = getRedisClient();
-
 /**
  * Builds the Better Auth instance. `oauth` only injects transports for tests
  * (for example a stub Client ID Metadata Document host); production uses the
  * defaults.
  */
 export function createAuth(
-  db: DatabaseExecutor = createDb(),
+  db: DatabaseExecutor = authDb,
   oauth: McpOAuthOptions = {},
 ) {
   const roleForEmail = (email: string) =>
@@ -136,36 +139,13 @@ export function createAuth(
   });
 
   return betterAuth({
-    logger: {
-      disabled: false,
-      level: 'info',
-      log: (level, message, ...args) => {
-        const payload = args.length > 0 ? { args } : {};
-        switch (level) {
-          case 'error':
-            log.error(payload, message);
-            break;
-          case 'warn':
-            log.warn(payload, message);
-            break;
-          case 'info':
-            log.info(payload, message);
-            break;
-          case 'debug':
-            log.debug(payload, message);
-            break;
-          default:
-            log.info(payload, message);
-        }
-      },
-    },
-
-    database: drizzleAdapter(db, {
-      provider: 'pg',
-      schema: schema,
+    ...authFoundation({
+      db,
+      schema,
+      basePath: AUTH_BASE_PATH,
+      redisKeyPrefix: 'server:auth:',
+      trustedOrigins: env.CORS_ORIGIN.split(','),
     }),
-
-    trustedOrigins: env.CORS_ORIGIN.split(','),
 
     // System roles are derived exclusively from SYSTEM_ADMIN_EMAIL, while
     // provisioning is exposed through the school-scoped oRPC mutation. Keep
@@ -195,20 +175,12 @@ export function createAuth(
       },
     }),
 
-    secret: env.BETTER_AUTH_SECRET,
-    baseURL: env.BETTER_AUTH_URL,
     hooks: {
       before: apiKeyPolicy,
       after: recordDynamicClientRegistration(db),
     },
     advanced: {
-      cookiePrefix: 'cp_',
-      defaultCookieAttributes: {
-        sameSite: env.SAME_SITE_COOKIE,
-        secure: env.SECURE_COOKIES,
-        httpOnly: true,
-        domain: env.COOKIE_DOMAIN,
-      },
+      ...sharedCookieOptions('cp_'),
       cookies: {
         // The OAuth state cookie must survive the full IdP round-trip: the
         // redirect back is a cross-site navigation after an interactive login,
@@ -285,9 +257,7 @@ export function createAuth(
       },
     },
     session: {
-      // For some use cases we query db for retrieving session data,
-      // ref: revokeOrganizationScopedSessions @gos1/auth/src/revoke-sessions.ts
-      storeSessionInDatabase: true,
+      ...SHARED_SESSION_OPTIONS,
 
       additionalFields: {
         authMethod: { type: 'string', required: false, input: false },
@@ -298,14 +268,9 @@ export function createAuth(
       },
     },
 
-    secondaryStorage: redisStorage({
-      client: redis,
-      keyPrefix: 'server:auth:',
-    }),
-
     plugins: [
       admin({ defaultRole: 'user', adminRoles: ['admin'] }),
-      ...mcpOAuthPlugins(oauth),
+      ...mcpOAuthPlugins(staffMcpOAuthConfig(), oauth),
       apiKey({
         references: 'user',
         defaultPrefix: 'cp_',
@@ -333,11 +298,6 @@ export function createAuth(
   });
 }
 
-/**
- * The auth instance's own connection pool, separate from `@campuspilot/db`'s
- * shared `db` as before. Exported so test setups can end it after each test
- * file instead of leaking idle connections per file.
- */
-export const authDb = createDb();
+export { authDb };
 
 export const auth = createAuth(authDb);

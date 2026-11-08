@@ -1,11 +1,14 @@
 import { serve } from '@hono/node-server';
-import { deleteUnusedDynamicOAuthClients } from '@campuspilot/auth/mcp-oauth';
+import {
+  CADET_OAUTH_SERVER_TABLES,
+  deleteUnusedDynamicOAuthClients,
+} from '@campuspilot/auth/mcp-oauth';
 import { db } from '@campuspilot/db';
 import { runMigrations } from '@campuspilot/db/migrate';
 import { env } from '@campuspilot/env/server';
 import { sweepDemoSchoolOutbox } from '@campuspilot/api/routers/system-admin/demo-school/demo-school.outbox';
 
-import { app, mcpCatalog, mcpHandler } from './http';
+import { app, cadetMcpCatalog, cadetMcpHandler, mcpCatalog, mcpHandler } from './http';
 import { log } from './log';
 
 async function phase<T>(name: string, fn: () => Promise<T>): Promise<T> {
@@ -37,10 +40,14 @@ async function sweepDemoOutbox() {
   if (Object.values(result).some((value) => value > 0)) log.info(result, 'demo-school.outbox.ok');
 }
 
-/** Removes dynamically registered OAuth clients that never got a grant. */
+/**
+ * Removes dynamically registered OAuth clients that never got a grant, for
+ * the staff and the cadet authorization servers.
+ */
 async function removeUnusedDynamicClients() {
   const deleted = await deleteUnusedDynamicOAuthClients(db);
-  log.info({ deleted }, 'oauth.dcr-cleanup.ok');
+  const cadetDeleted = await deleteUnusedDynamicOAuthClients(db, new Date(), CADET_OAUTH_SERVER_TABLES);
+  log.info({ deleted, cadetDeleted }, 'oauth.dcr-cleanup.ok');
 }
 
 async function main() {
@@ -48,6 +55,9 @@ async function main() {
   await phase('db.migrate', () => runMigrations());
   await phase('mcp.catalog', async () => {
     await mcpCatalog;
+  });
+  await phase('cadet.mcp.catalog', async () => {
+    await cadetMcpCatalog;
   });
   // await phase('auth.seed', () => seedIamDatabase());
   await phase('oauth.dcr-cleanup', removeUnusedDynamicClients);
@@ -95,6 +105,9 @@ async function main() {
     clearTimeout(demoOutbox);
     void mcpHandler.close().catch((err) => {
       log.error({ err }, 'mcp.shutdown.error');
+    });
+    void cadetMcpHandler.close().catch((err) => {
+      log.error({ err }, 'cadet.mcp.shutdown.error');
     });
     server.close((err) => {
       if (err) log.error({ err }, 'boot.shutdown.error');

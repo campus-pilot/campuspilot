@@ -19,6 +19,12 @@ import { MAX_DESCRIBED_TOOLS, META_TOOL_NAMES } from './mcp-meta-tools';
 vi.mock('@campuspilot/auth/server', () => ({
   createAuth: vi.fn(),
 }));
+// The catalog never runs auth; like the staff instance, the cadet instance
+// (which needs CADET_APP_URL) is not built in this env-less unit test.
+vi.mock('@campuspilot/auth/cadet', () => ({
+  cadetAuth: {},
+  revokeCadetLoginAccess: vi.fn(),
+}));
 
 type JsonSchema = Record<string, unknown>;
 
@@ -70,6 +76,8 @@ const HIDDEN_TOOLS = [
   'authorization.checkPermissions',
   'healthCheck',
   'school.getLogo',
+  // Returns a credential and signs a student out everywhere: a human action.
+  'school.issueAdmissionCadetPassword',
   'systemAdmin.listOAuthClients',
   'systemAdmin.createOAuthClient',
   'systemAdmin.rotateOAuthClientSecret',
@@ -182,6 +190,17 @@ describe('catalog metadata', () => {
     expect(catalog.core.map(({ name }) => name).sort()).toEqual(CORE_TOOLS);
     expect(catalog.core).toHaveLength(36);
     expect(catalog.advanced).toHaveLength(83);
+  });
+});
+
+describe('cadet catalog', () => {
+  it('builds from cadetRouter alone: read-only core tools and no staff tools', async () => {
+    const { cadetRouter } = await import('@campuspilot/api/routers/cadet/cadet.router');
+    const cadetCatalog = await buildMcpCatalog(cadetRouter);
+    expect(cadetCatalog.core.map(({ name }) => name)).toEqual(['getAdmission']);
+    expect(cadetCatalog.advanced).toEqual([]);
+    expect(cadetCatalog.core.every((tool) => tool.mcp.access === 'read')).toBe(true);
+    expect(catalog.core.map(({ name }) => name)).not.toContain('getAdmission');
   });
 });
 

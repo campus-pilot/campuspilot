@@ -1,3 +1,4 @@
+import type { CadetContext } from '@campuspilot/api/cadet/context';
 import type { Context } from '@campuspilot/api/context';
 import {
   MCP_ACCESS_LEVELS,
@@ -76,8 +77,16 @@ export type McpCatalog = McpCatalogView & {
   readOnly: McpCatalogView;
 };
 
+/**
+ * The oRPC context an MCP request runs with: the staff `Context` on `/mcp`,
+ * the `CadetContext` on `/api/cadet/mcp`. Each endpoint has its own catalog
+ * built from its own router, so a tool only ever receives the context type
+ * its router was built for.
+ */
+export type McpContext = Context | CadetContext;
+
 /** Returns the context the MCP gate verified for the current request. */
-type CreateMcpContext = () => Promise<Context>;
+type CreateMcpContext = () => Promise<McpContext>;
 
 type ReportMcpError = (error: unknown, toolName?: string) => void;
 
@@ -95,20 +104,23 @@ export type McpToolCallOptions = {
   reportToolCall?: (event: McpToolCallEvent) => void;
 };
 
-type CreateCampusPilotMcpHandlerOptions = {
+type CreateCampusPilotMcpHandlerOptions<TContext extends McpContext> = {
   catalog: Promise<McpCatalog>;
   /**
    * Context the MCP gate verified for the request being served. Returning
    * undefined means the request bypassed the gate; the handler then fails
    * closed instead of serving it anonymously.
    */
-  currentContext: () => Context | undefined;
+  currentContext: () => TContext | undefined;
   reportError: ReportMcpError;
   reportToolCall?: (event: McpToolCallEvent) => void;
+  /** MCP server name reported to clients; defaults to `campuspilot`. */
+  serverName?: string;
 };
 
 type CreateCampusPilotMcpServerOptions = McpToolCallOptions & {
   catalog: McpCatalog;
+  serverName?: string;
   /**
    * Whether the credential may use write tools; read-only credentials are
    * not shown them. Defaults to true (sessions and API keys).
@@ -368,7 +380,7 @@ export async function buildMcpCatalog(router: AnyRouter): Promise<McpCatalog> {
  * `mcp:write` scope; sessions and API keys carry the user's full rights
  * (scoped keys may come later).
  */
-export function credentialWriteAccess(context: Context): boolean {
+export function credentialWriteAccess(context: McpContext): boolean {
   return context.principal.authMethod === 'oauth'
     ? context.principal.oauthGrant.scopes.includes(MCP_WRITE_SCOPE)
     : true;
@@ -495,9 +507,10 @@ export async function callMcpTool(
 export function createCampusPilotMcpServer({
   catalog,
   writeAccess = true,
+  serverName = 'campuspilot',
   ...options
 }: CreateCampusPilotMcpServerOptions): McpServer {
-  const server = new McpServer({ name: 'campuspilot', version: '0.1.0' });
+  const server = new McpServer({ name: serverName, version: '0.1.0' });
   const view = writeAccess ? catalog : catalog.readOnly;
 
   for (const tool of view.core) {
@@ -526,12 +539,13 @@ export function createCampusPilotMcpServer({
  * fresh server per request and serves both modern MCP and stateless legacy MCP
  * clients from this single tool definition source.
  */
-export function createCampusPilotMcpHandler({
+export function createCampusPilotMcpHandler<TContext extends McpContext>({
   catalog,
   currentContext,
   reportError,
   reportToolCall,
-}: CreateCampusPilotMcpHandlerOptions): McpHttpHandler {
+  serverName,
+}: CreateCampusPilotMcpHandlerOptions<TContext>): McpHttpHandler {
   return createMcpHandler(
     async ({ requestInfo }) => {
       if (!requestInfo) {
@@ -545,6 +559,7 @@ export function createCampusPilotMcpHandler({
       return createCampusPilotMcpServer({
         catalog: await catalog,
         writeAccess: credentialWriteAccess(context),
+        serverName,
         createContext: async () => context,
         reportError,
         reportToolCall,
