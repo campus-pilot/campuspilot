@@ -1,4 +1,4 @@
-import { cadetAuth } from "@campuspilot/auth/cadet";
+import { cadetAuth, revokeCadetLoginAccess } from "@campuspilot/auth/cadet";
 import {
   CADET_OAUTH_GRANT_TABLES,
   findLiveOAuthGrant,
@@ -12,7 +12,7 @@ import {
   cadetUser,
 } from "@campuspilot/db/schema/cadet";
 import { eq } from "drizzle-orm";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { connectCadetMcp, signInCadet } from "../../../../test/cadet";
 import { expectRpcCode } from "../../../../test/finance/assertions";
@@ -24,6 +24,15 @@ import {
   createTestStudent,
   createTestSession,
 } from "../../../../test/fixtures";
+
+/**
+ * Revocation runs for real; the spy only lets one test make it fail after
+ * the new password has committed, the way Redis or the database might.
+ */
+vi.mock(import("@campuspilot/auth/cadet"), async (importOriginal) => {
+  const actual = await importOriginal();
+  return { ...actual, revokeCadetLoginAccess: vi.fn(actual.revokeCadetLoginAccess) };
+});
 
 function admissionInput(schoolId: string, admissionNo: string) {
   return {
@@ -198,6 +207,34 @@ describe("issueAdmissionCadetPassword", () => {
 
     expect((await signInCadet(first)).response.status).toBe(401);
     expect((await signInCadet(second)).response.status).toBe(200);
+  });
+  it("gives staff an error and no password when revocation fails after the reset commits", async () => {
+    const { school, principal } = await setup();
+    const admission = await createTestAdmission({ schoolId: school.id });
+    const input = { schoolId: school.id, admissionId: admission.id };
+    const first = await principal.client.school.issueAdmissionCadetPassword(input);
+    const browser = await signInCadet(first);
+    const [before] = await db.select().from(cadetAccount).innerJoin(cadetUser, eq(cadetUser.id, cadetAccount.userId)).where(eq(cadetUser.admissionId, admission.id));
+
+    vi.mocked(revokeCadetLoginAccess).mockRejectedValueOnce(new Error("session store unavailable"));
+    const failed = principal.client.school.issueAdmissionCadetPassword(input);
+    await expectRpcCode(failed, "INTERNAL_SERVER_ERROR");
+    const error = await failed.catch((caught: unknown) => caught);
+    // Nothing about the new credential reaches staff.
+    expect(JSON.stringify(error)).not.toMatch(/[a-z]+-[a-z]+-[1-9]\d/);
+    expect(error).not.toHaveProperty("data.password");
+
+    // The new password committed (the old one no longer works) and the
+    // un-revoked session is still alive, which is why staff must issue again.
+    const [after] = await db.select().from(cadetAccount).innerJoin(cadetUser, eq(cadetUser.id, cadetAccount.userId)).where(eq(cadetUser.admissionId, admission.id));
+    expect(after!.cadet_account.password).not.toBe(before!.cadet_account.password);
+    expect((await signInCadet(first)).response.status).toBe(401);
+    expect(await sessionOf(browser.cookie)).not.toBeNull();
+
+    // Issuing again returns a password and revokes everything.
+    const retried = await principal.client.school.issueAdmissionCadetPassword(input);
+    expect(await sessionOf(browser.cookie)).toBeNull();
+    expect((await signInCadet(retried)).response.status).toBe(200);
   });
 });
 
