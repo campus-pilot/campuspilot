@@ -395,6 +395,31 @@ describe("school admission and student router integration", () => {
     ).resolves.toMatchObject({ items: [] });
   });
 
+  it("finds an E.164 phone however staff type it", async () => {
+    const school = await createTestSchool();
+    const teacher = await createSchoolStaffSession(school.id, [
+      { role: "teacher", meta: { classIds: [] } },
+    ]);
+    const admission = await createTestAdmission({
+      schoolId: school.id,
+      admissionNo: "ADM-PHONE",
+    });
+    await db
+      .update(admissionTable)
+      .set({ phoneNo: "+919876543210" })
+      .where(eq(admissionTable.id, admission.id));
+    const client = createTestClient(teacher.session);
+    for (const searchQuery of ["98765 43210", "098765 43210", "+91 98765 43210", "9876543210", "43210"]) {
+      await expect(
+        client.school.listAdmissions({ schoolId: school.id, searchQuery }),
+        searchQuery,
+      ).resolves.toMatchObject({ items: [{ id: admission.id }] });
+    }
+    await expect(
+      client.school.listAdmissions({ schoolId: school.id, searchQuery: "98765 00000" }),
+    ).resolves.toMatchObject({ items: [] });
+  });
+
   it("keeps restricted finance values out of general admission DTOs", async () => {
     const school = await createTestSchool();
     const teacher = await createSchoolStaffSession(school.id, [

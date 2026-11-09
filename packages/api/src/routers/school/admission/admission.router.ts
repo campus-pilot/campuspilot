@@ -45,6 +45,7 @@ import {
   updateAdmissionInputSchema,
   type AdmissionDto,
 } from "./admission.dto";
+import { phoneSearchDigits } from "./admission-phone-search";
 import { assertAdmissionRegistered } from "./admission-registration";
 import {
   AdmissionContactError,
@@ -214,6 +215,7 @@ export const schoolAdmissionRouter = {
           admissionNoWordSimilarity
             ? sql<number>`greatest(${nameSimilarity}, ${admissionNoSimilarity}, ${nameWordSimilarity}, ${admissionNoWordSimilarity})`
             : undefined;
+        const phoneDigits = input.searchQuery ? phoneSearchDigits(input.searchQuery) : null;
         const searchCondition = input.searchQuery
           ? input.searchMode === "fuzzy"
             ? or(
@@ -228,6 +230,10 @@ export const schoolAdmissionRouter = {
                 ilike(admissionTable.name, `%${input.searchQuery}%`),
                 ilike(admissionTable.admissionNo, `%${input.searchQuery}%`),
                 ilike(admissionTable.phoneNo, `%${input.searchQuery}%`),
+                // Typed as staff say it (spaces, trunk 0, +91): match digits only.
+                phoneDigits
+                  ? sql`regexp_replace(${admissionTable.phoneNo}, '[^0-9]', '', 'g') like ${`%${phoneDigits}%`}`
+                  : undefined,
                 ilike(admissionTable.email, `%${input.searchQuery}%`),
               )
           : undefined;
