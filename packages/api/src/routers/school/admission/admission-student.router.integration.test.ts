@@ -21,6 +21,7 @@ function admissionInput(schoolId: string, admissionNo: string) {
     admissionNo,
     address: "Test address",
     phoneNo: "9999999999",
+    whatsappSameAsPhone: true,
     email: `${admissionNo.toLowerCase()}@example.com`,
     dob: "2015-01-01",
     fatherName: "Test Father",

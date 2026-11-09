@@ -35,6 +35,7 @@ async function cadetWithLogin() {
     admissionNo: `CAD-${randomUUID().slice(0, 6)}`,
     address: 'Test address',
     phoneNo: '9999999999',
+    whatsappSameAsPhone: true,
     dob: '2017-02-03',
     fatherName: 'Father',
     motherName: 'Mother',

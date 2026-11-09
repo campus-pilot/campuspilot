@@ -10,20 +10,56 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@campuspilot/ui/components/textarea';
 import { z } from 'zod';
 
+import {
+  PhoneInput,
+  phoneInputValueFromStored,
+  phoneInputValueSchema,
+  phoneInputValueToE164,
+  requiredPhoneInputSchema,
+} from '../phone-input';
 import { FormErrors } from './form-errors';
-import type { AdmissionFormValue } from './types';
+import type { AdmissionFormSubmitValue, AdmissionFormValue } from './types';
 
-const admissionFormSchema = z.object({
+/** Personal details of the admission. */
+const detailsSchema = z.object({
   name: z.string().trim().min(1, 'Student name is required.').max(500),
   admissionNo: z.string().trim().min(1, 'Admission number is required.').max(500),
   admissionClassId: z.string().nullable(),
   address: z.string().trim().min(1, 'Address is required.').max(500),
-  phoneNo: z.string().trim().min(1, 'Phone number is required.').max(500),
   email: z.union([z.literal(''), z.email('Enter a valid email address.')]),
   dob: z.iso.date('Enter a valid date of birth.'),
   fatherName: z.string().trim().min(1, "Father's name is required.").max(500),
   motherName: z.string().trim().min(1, "Mother's name is required.").max(500),
 });
+
+/**
+ * Contact and WhatsApp choices (D-4, D-8). While "same as phone" is ticked
+ * the WhatsApp number is the phone number and counts as verified (staff
+ * asked the guardian); otherwise staff type the WhatsApp number (optional)
+ * and tick "verified" themselves.
+ */
+const contactSchema = z
+  .object({
+    phone: requiredPhoneInputSchema('Phone number is required.'),
+    whatsappSameAsPhone: z.boolean(),
+    whatsapp: phoneInputValueSchema,
+    whatsappVerified: z.boolean(),
+    whatsappConsent: z.boolean(),
+  })
+  .superRefine((value, context) => {
+    if (value.whatsappSameAsPhone) return;
+    const typed = value.whatsapp.number.trim();
+    if (typed && !phoneInputValueToE164(value.whatsapp)) {
+      context.addIssue({ code: 'custom', path: ['whatsapp'], message: 'Enter a valid WhatsApp number for the selected country.' });
+    }
+    if (!typed && value.whatsappVerified) {
+      context.addIssue({ code: 'custom', path: ['whatsappVerified'], message: 'Enter the WhatsApp number before marking it verified.' });
+    }
+  });
+
+const dialogSchema = detailsSchema.and(contactSchema).and(z.object({ generateCadetPassword: z.boolean() }));
+
+type DialogValues = z.input<typeof dialogSchema>;
 
 /** Choices made in the dialog that are not admission fields. */
 export type AdmissionFormOptions = {
@@ -31,9 +67,118 @@ export type AdmissionFormOptions = {
   generateCadetPassword: boolean;
 };
 
-const admissionDialogSchema = admissionFormSchema.extend({
-  generateCadetPassword: z.boolean(),
-});
+/** Dialog field values for stored admission values. */
+function toDialogValues(value: AdmissionFormValue): DialogValues {
+  return {
+    name: value.name,
+    admissionNo: value.admissionNo,
+    admissionClassId: value.admissionClassId,
+    address: value.address,
+    email: value.email ?? '',
+    dob: value.dob,
+    fatherName: value.fatherName,
+    motherName: value.motherName,
+    phone: phoneInputValueFromStored(value.phoneNo),
+    // Checked by default in the form only (D-4); a recorded choice wins.
+    whatsappSameAsPhone: value.whatsappSameAsPhone ?? true,
+    whatsapp: phoneInputValueFromStored(value.whatsappNo),
+    whatsappVerified: value.whatsappVerified,
+    whatsappConsent: value.whatsappConsent,
+    generateCadetPassword: false,
+  };
+}
+
+/** The submitted admission: E.164 numbers, the WhatsApp number resolved from the choice. */
+function toSubmitValue(value: z.output<typeof dialogSchema>): AdmissionFormSubmitValue {
+  const whatsappNo = value.whatsappSameAsPhone
+    ? value.phone
+    : phoneInputValueToE164(value.whatsapp);
+  return {
+    name: value.name,
+    admissionNo: value.admissionNo,
+    admissionClassId: value.admissionClassId,
+    address: value.address,
+    email: value.email || null,
+    dob: value.dob,
+    fatherName: value.fatherName,
+    motherName: value.motherName,
+    phoneNo: value.phone,
+    whatsappSameAsPhone: value.whatsappSameAsPhone,
+    whatsappNo,
+    whatsappVerified: value.whatsappSameAsPhone ? true : value.whatsappVerified && whatsappNo !== null,
+    whatsappConsent: value.whatsappConsent,
+  };
+}
+
+/** The admission dialog's form: one TanStack Form for every field. */
+function useAdmissionForm({ defaultValues, showCadetPasswordOption, onSubmit, onSaved }: {
+  defaultValues: AdmissionFormValue;
+  showCadetPasswordOption: boolean;
+  onSubmit: (value: AdmissionFormSubmitValue, options: AdmissionFormOptions) => Promise<void>;
+  onSaved: () => void;
+}) {
+  const form = useForm({
+    defaultValues: toDialogValues(defaultValues),
+    validators: { onSubmit: dialogSchema },
+    onSubmit: async ({ value }) => {
+      form.setErrorMap({});
+      try {
+        const parsed = dialogSchema.parse(value);
+        await onSubmit(toSubmitValue(parsed), {
+          generateCadetPassword: showCadetPasswordOption && parsed.generateCadetPassword,
+        });
+        onSaved();
+      } catch (error) {
+        form.setErrorMap({ onSubmit: { form: error instanceof Error ? error.message : 'Unable to save the admission.', fields: {} } });
+      }
+    },
+  });
+  return form;
+}
+
+type AdmissionForm = ReturnType<typeof useAdmissionForm>;
+
+const TEXT_FIELDS = [
+  ['name', 'Student name'], ['admissionNo', 'Admission number'], ['dob', 'Date of birth'],
+  ['fatherName', "Father's name"], ['motherName', "Mother's name"], ['email', 'Email'],
+] as const;
+
+/** Name, numbers, family, class and address. */
+function AdmissionDetailsFields({ form, classes }: { form: AdmissionForm; classes: Array<{ id: string; label: string }> }) {
+  return <>
+    {TEXT_FIELDS.map(([name, label]) => <form.Field key={name} name={name}>{(field) => <div className="flex flex-col gap-2"><Label htmlFor={`admission-${name}`}>{label}</Label><Input id={`admission-${name}`} type={name === 'dob' ? 'date' : name === 'email' ? 'email' : 'text'} value={String(field.state.value ?? '')} onBlur={field.handleBlur} onChange={(event) => field.handleChange(event.target.value)} /><FormErrors errors={field.state.meta.errors} /></div>}</form.Field>)}
+    <form.Field name="admissionClassId">{(field) => <div className="flex flex-col gap-2"><Label>Admission class</Label><Select value={field.state.value ?? 'none'} onValueChange={(value) => field.handleChange(value === 'none' ? null : value)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="none">Not selected</SelectItem>{classes.map((schoolClass) => <SelectItem key={schoolClass.id} value={schoolClass.id}>{schoolClass.label}</SelectItem>)}</SelectContent></Select><FormErrors errors={field.state.meta.errors} /></div>}</form.Field>
+    <form.Field name="address">{(field) => <div className="flex flex-col gap-2 sm:col-span-2"><Label htmlFor="admission-address">Address</Label><Textarea id="admission-address" value={field.state.value} onBlur={field.handleBlur} onChange={(event) => field.handleChange(event.target.value)} /><FormErrors errors={field.state.meta.errors} /></div>}</form.Field>
+  </>;
+}
+
+/** A labelled checkbox with an optional hint. */
+function CheckboxRow({ id, label, hint, checked, disabled, onCheckedChange }: {
+  id: string;
+  label: string;
+  hint?: string;
+  checked: boolean;
+  disabled?: boolean;
+  onCheckedChange: (checked: boolean) => void;
+}) {
+  return <div className="flex items-start gap-2 sm:col-span-2"><Checkbox id={id} checked={checked} disabled={disabled} onCheckedChange={(next) => onCheckedChange(next === true)} /><div className="flex flex-col gap-1"><Label htmlFor={id} className="font-normal">{label}</Label>{hint ? <p className="text-xs text-muted-foreground">{hint}</p> : null}</div></div>;
+}
+
+/** The WhatsApp number: the phone number (locked) while "same as phone" is ticked. */
+function WhatsappNumberField({ form }: { form: AdmissionForm }) {
+  return <form.Subscribe selector={(state) => ({ same: state.values.whatsappSameAsPhone, phone: state.values.phone })}>{({ same, phone }) => <form.Field name="whatsapp">{(field) => <div className="flex flex-col gap-2 sm:col-span-2"><Label htmlFor="admission-whatsapp">WhatsApp number</Label><PhoneInput id="admission-whatsapp" value={same ? phone : field.state.value} disabled={same} invalid={field.state.meta.errors.length > 0} onBlur={field.handleBlur} onChange={field.handleChange} /><FormErrors errors={field.state.meta.errors} /></div>}</form.Field>}</form.Subscribe>;
+}
+
+/** Phone number and WhatsApp choices (D-4, D-8). */
+function AdmissionContactFields({ form }: { form: AdmissionForm }) {
+  return <>
+    <form.Field name="phone">{(field) => <div className="flex flex-col gap-2 sm:col-span-2"><Label htmlFor="admission-phone">Phone number</Label><PhoneInput id="admission-phone" value={field.state.value} invalid={field.state.meta.errors.length > 0} onBlur={field.handleBlur} onChange={field.handleChange} /><FormErrors errors={field.state.meta.errors} /></div>}</form.Field>
+    <form.Field name="whatsappSameAsPhone">{(field) => <CheckboxRow id="admission-whatsapp-same" label="WhatsApp number is the same as phone number" checked={field.state.value} onCheckedChange={field.handleChange} />}</form.Field>
+    <WhatsappNumberField form={form} />
+    <form.Subscribe selector={(state) => state.values.whatsappSameAsPhone}>{(same) => <form.Field name="whatsappVerified">{(field) => <div className="flex flex-col gap-1 sm:col-span-2"><CheckboxRow id="admission-whatsapp-verified" label="WhatsApp number verified" hint={same ? 'The phone number was confirmed with the guardian.' : 'Tick once the guardian confirmed this WhatsApp number.'} checked={same || field.state.value} disabled={same} onCheckedChange={field.handleChange} /><FormErrors errors={field.state.meta.errors} /></div>}</form.Field>}</form.Subscribe>
+    <form.Field name="whatsappConsent">{(field) => <CheckboxRow id="admission-whatsapp-consent" label="Guardian consented to WhatsApp notifications" hint="Bills, receipts and results are sent on WhatsApp only with consent. Untick to stop them." checked={field.state.value} onCheckedChange={field.handleChange} />}</form.Field>
+  </>;
+}
 
 /**
  * Create or edit an admission. `cadetPasswordOption` shows the "Generate
@@ -47,37 +192,16 @@ export function AdmissionFormDialog({ open, mode, defaultValues, classes, cadetP
   classes: Array<{ id: string; label: string }>;
   cadetPasswordOption?: boolean;
   onOpenChange: (open: boolean) => void;
-  onSubmit: (value: AdmissionFormValue, options: AdmissionFormOptions) => Promise<void>;
+  onSubmit: (value: AdmissionFormSubmitValue, options: AdmissionFormOptions) => Promise<void>;
 }) {
   const showCadetPasswordOption = mode === 'create' && cadetPasswordOption;
-  const form = useForm({
-    defaultValues: { ...defaultValues, email: defaultValues.email ?? '', generateCadetPassword: false },
-    validators: { onSubmit: admissionDialogSchema },
-    onSubmit: async ({ value }) => {
-      form.setErrorMap({});
-      try {
-        const { generateCadetPassword, ...parsed } = admissionDialogSchema.parse(value);
-        await onSubmit(
-          { ...parsed, email: parsed.email || null },
-          { generateCadetPassword: showCadetPasswordOption && generateCadetPassword },
-        );
-        onOpenChange(false);
-      } catch (error) {
-        form.setErrorMap({ onSubmit: { form: error instanceof Error ? error.message : 'Unable to save the admission.', fields: {} } });
-      }
-    },
-  });
-  const textFields = [
-    ['name', 'Student name'], ['admissionNo', 'Admission number'], ['dob', 'Date of birth'],
-    ['fatherName', "Father's name"], ['motherName', "Mother's name"], ['phoneNo', 'Phone number'], ['email', 'Email'],
-  ] as const;
+  const form = useAdmissionForm({ defaultValues, showCadetPasswordOption, onSubmit, onSaved: () => onOpenChange(false) });
 
   return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl"><DialogHeader><DialogTitle>{mode === 'create' ? 'Create admission' : 'Edit admission'}</DialogTitle><DialogDescription>Record personal and contact information. Documents are attached after the admission is saved.</DialogDescription></DialogHeader>
     <form className="grid gap-4 sm:grid-cols-2" onSubmit={(event) => { event.preventDefault(); event.stopPropagation(); void form.handleSubmit(); }}>
-      {textFields.map(([name, label]) => <form.Field key={name} name={name}>{(field) => <div className="flex flex-col gap-2"><Label htmlFor={`admission-${name}`}>{label}</Label><Input id={`admission-${name}`} type={name === 'dob' ? 'date' : name === 'email' ? 'email' : 'text'} value={String(field.state.value ?? '')} onBlur={field.handleBlur} onChange={(event) => field.handleChange(event.target.value)} /><FormErrors errors={field.state.meta.errors} /></div>}</form.Field>)}
-      <form.Field name="admissionClassId">{(field) => <div className="flex flex-col gap-2"><Label>Admission class</Label><Select value={field.state.value ?? 'none'} onValueChange={(value) => field.handleChange(value === 'none' ? null : value)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="none">Not selected</SelectItem>{classes.map((schoolClass) => <SelectItem key={schoolClass.id} value={schoolClass.id}>{schoolClass.label}</SelectItem>)}</SelectContent></Select><FormErrors errors={field.state.meta.errors} /></div>}</form.Field>
-      <form.Field name="address">{(field) => <div className="flex flex-col gap-2 sm:col-span-2"><Label htmlFor="admission-address">Address</Label><Textarea id="admission-address" value={field.state.value} onBlur={field.handleBlur} onChange={(event) => field.handleChange(event.target.value)} /><FormErrors errors={field.state.meta.errors} /></div>}</form.Field>
-      {showCadetPasswordOption ? <form.Field name="generateCadetPassword">{(field) => <div className="flex items-start gap-2 sm:col-span-2"><Checkbox id="admission-generate-cadet-password" checked={field.state.value} onCheckedChange={(checked) => field.handleChange(checked === true)} /><div className="flex flex-col gap-1"><Label htmlFor="admission-generate-cadet-password" className="font-normal">Generate Cadet Portal password</Label><p className="text-xs text-muted-foreground">The student can sign in to the Cadet Portal with it. It is shown once after the admission is created.</p></div></div>}</form.Field> : null}
+      <AdmissionDetailsFields form={form} classes={classes} />
+      <AdmissionContactFields form={form} />
+      {showCadetPasswordOption ? <form.Field name="generateCadetPassword">{(field) => <CheckboxRow id="admission-generate-cadet-password" label="Generate Cadet Portal password" hint="The student can sign in to the Cadet Portal with it. It is shown once after the admission is created." checked={field.state.value} onCheckedChange={field.handleChange} />}</form.Field> : null}
       <form.Subscribe selector={(state) => ({ canSubmit: state.canSubmit, errors: state.errors, isSubmitting: state.isSubmitting })}>{({ canSubmit, errors, isSubmitting }) => <div className="flex flex-col gap-3 sm:col-span-2"><FormErrors errors={errors} /><DialogFooter><Button type="button" variant="outline" disabled={isSubmitting} onClick={() => onOpenChange(false)}>Cancel</Button><Button type="submit" disabled={!canSubmit || isSubmitting}>{isSubmitting ? 'Saving…' : mode === 'create' ? 'Create admission' : 'Save changes'}</Button></DialogFooter></div>}</form.Subscribe>
     </form>
   </DialogContent></Dialog>;

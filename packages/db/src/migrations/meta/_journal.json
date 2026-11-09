@@ -225,6 +225,13 @@
       "when": 1794231452162,
       "tag": "0031_data-migration",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1794231998594,
+      "tag": "0032_admission-whatsapp",
+      "breakpoints": true
     }
   ]
 }

@@ -70,6 +70,7 @@ async function createAdmissionWithLogin(schoolId: string, issuedBy: string) {
       admissionNo: `ADM-${randomUUID().slice(0, 6)}`,
       address: 'Main road',
       phoneNo: '9999999999',
+      whatsappSameAsPhone: true,
       dob: '2018-04-01',
       fatherName: 'Father',
       motherName: 'Mother',

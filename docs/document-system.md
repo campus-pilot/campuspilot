@@ -360,7 +360,7 @@ executable source of truth.
 | Applies to | Context |
 | --- | --- |
 | Every document | `school.{name,location,registrationNo,logoUrl}`, `session.{startYear,endYear}`, nullable `exam`, ISO `generatedAt` |
-| Student documents | `student.{name,admissionNo,rollNo,className,sectionName,dob,fatherName,motherName,address,phoneNo,photoUrl}` |
+| Student documents | `student.{name,admissionNo,rollNo,className,sectionName,dob,fatherName,motherName,address,phoneNo,whatsappNo,photoUrl}` (phone numbers display-formatted with country code; `whatsappNo` nullable) |
 | Report cards | `subjects[]`, totals, overall percentage/grade, grading scale, attendance, co-scholastic data, approval/configuration flags, and independent report-section flags |
 | Admit cards | `timetable[]` entries for the student's class with ISO/display date, weekday, raw/display time, subject, and mode |
 | Timetables | `columns[]` plus `rows[]`; every row has ordered `entries[]` matching columns and a legacy keyed `cells` object |

@@ -45,6 +45,11 @@ import {
 } from "./admission.dto";
 import { assertAdmissionRegistered } from "./admission-registration";
 import {
+  AdmissionContactError,
+  resolveAdmissionWhatsapp,
+  type AdmissionContactChanges,
+} from "./admission-whatsapp";
+import {
   issueAdmissionCadetPassword,
   issuedCadetPasswordSchema,
 } from "./admission-cadet-password";
@@ -111,6 +116,29 @@ async function validateAdmissionReferences(
       .limit(1);
     if (!schoolClass) throw rpcError.notFound("Admission class");
   }
+}
+
+/** Resolves the WhatsApp facts to store, refusing inconsistent input as a bad request. */
+function resolveWhatsappOrThrow(
+  ...args: Parameters<typeof resolveAdmissionWhatsapp>
+) {
+  try {
+    return resolveAdmissionWhatsapp(...args);
+  } catch (error) {
+    if (error instanceof AdmissionContactError) throw rpcError.badRequest(error.message);
+    throw error;
+  }
+}
+
+/** Whether an update touches the phone number or any WhatsApp fact. */
+function changesContact(changes: AdmissionContactChanges) {
+  return (
+    changes.phoneNo !== undefined ||
+    changes.whatsappNo !== undefined ||
+    changes.whatsappSameAsPhone !== undefined ||
+    changes.whatsappVerified !== undefined ||
+    changes.whatsappConsent !== undefined
+  );
 }
 
 export const schoolAdmissionRouter = {
@@ -406,7 +434,21 @@ export const schoolAdmissionRouter = {
     .output(createAdmissionOutputSchema)
     .handler(async ({ context, input, signal }) => {
       try {
-        const { generateCadetPassword, ...values } = input;
+        const {
+          generateCadetPassword,
+          whatsappNo,
+          whatsappSameAsPhone,
+          whatsappVerified,
+          whatsappConsent,
+          ...values
+        } = input;
+        const whatsapp = resolveWhatsappOrThrow(null, {
+          phoneNo: values.phoneNo,
+          whatsappNo,
+          whatsappSameAsPhone,
+          whatsappVerified,
+          whatsappConsent,
+        });
         // Issuing a password is its own permission, checked in addition to
         // admission creation and only when one is requested.
         if (generateCadetPassword) {
@@ -432,7 +474,7 @@ export const schoolAdmissionRouter = {
             .insert(admissionTable)
             // Registration is a backend-owned initial state. Clients cannot
             // create an inactive admission or revive an old one.
-            .values({ ...values, registered: true })
+            .values({ ...values, ...whatsapp, registered: true })
             .returning();
           if (!admission) throw rpcError.internal();
           // The login and its hash commit or roll back with the admission.
@@ -530,9 +572,33 @@ export const schoolAdmissionRouter = {
           const { schoolId, admissionId, ...changes } = input;
           await assertAdmissionRegistered(transaction, { schoolId, admissionId });
           await validateAdmissionReferences(transaction, schoolId, changes);
+          let whatsapp = {};
+          if (changesContact(changes)) {
+            // Locked so a concurrent phone change cannot leave the WhatsApp
+            // number following a stale phone number.
+            const [current] = await transaction
+              .select({
+                phoneNo: admissionTable.phoneNo,
+                whatsappNo: admissionTable.whatsappNo,
+                whatsappSameAsPhone: admissionTable.whatsappSameAsPhone,
+                whatsappVerified: admissionTable.whatsappVerified,
+                whatsappConsent: admissionTable.whatsappConsent,
+              })
+              .from(admissionTable)
+              .where(
+                and(
+                  eq(admissionTable.schoolId, schoolId),
+                  eq(admissionTable.id, admissionId),
+                ),
+              )
+              .limit(1)
+              .for("update");
+            if (!current) throw rpcError.notFound("Admission");
+            whatsapp = resolveWhatsappOrThrow(current, changes);
+          }
           const [admission] = await transaction
             .update(admissionTable)
-            .set({ ...changes, updatedAt: new Date() })
+            .set({ ...changes, ...whatsapp, updatedAt: new Date() })
             .where(
               and(
                 eq(admissionTable.schoolId, schoolId),

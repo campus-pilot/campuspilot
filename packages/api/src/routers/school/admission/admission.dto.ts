@@ -1,3 +1,4 @@
+import { phoneNumberSchema } from "@campuspilot/db/phone";
 import { admissionDocumentsSchema } from "@campuspilot/db/schema/jsonb/admission-config";
 import { z } from "zod";
 
@@ -16,7 +17,16 @@ export const admissionDtoSchema = z.object({
   admissionNo: z.string(),
   admissionClassId: z.string().nullable(),
   address: z.string(),
+  /**
+   * E.164 for new and migrated values; a value the phone backfill could not
+   * parse is returned as stored (tolerant read).
+   */
   phoneNo: z.string(),
+  whatsappNo: z.string().nullable(),
+  /** Null: no WhatsApp choice was recorded yet (admission predates the field). */
+  whatsappSameAsPhone: z.boolean().nullable(),
+  whatsappVerified: z.boolean(),
+  whatsappConsent: z.boolean(),
   email: z.string().nullable(),
   dob: z.iso.date(),
   fatherName: z.string(),
@@ -115,13 +125,40 @@ export const admissionIdInputSchema = z.object({
   admissionId: z.string().min(1),
 });
 
+/** WhatsApp facts accepted on create and update (D-4, D-8). */
+const whatsappInputFields = {
+  whatsappNo: phoneNumberSchema
+    .nullable()
+    .optional()
+    .describe("WhatsApp number (E.164, or a national Indian number). Must be omitted or equal phoneNo while whatsappSameAsPhone is true; null for no WhatsApp number."),
+  whatsappVerified: z
+    .boolean()
+    .describe("Staff confirmed the WhatsApp number with the guardian. Requires a WhatsApp number."),
+  whatsappConsent: z
+    .boolean()
+    .describe("The guardian consented to receive WhatsApp notifications."),
+};
+
+const PHONE_DESCRIPTION =
+  "Household phone number. Accepts E.164 (+919876543210) or a national Indian number; stored as E.164.";
+
 export const createAdmissionInputSchema = z.object({
   schoolId: z.string().min(1),
   name: requiredTextSchema,
   admissionNo: requiredTextSchema,
   admissionClassId: z.string().min(1).nullable().optional(),
   address: requiredTextSchema,
-  phoneNo: requiredTextSchema,
+  phoneNo: phoneNumberSchema.describe(PHONE_DESCRIPTION),
+  /**
+   * Explicit choice (D-4): when true the WhatsApp number is the phone number
+   * and follows it on later phone changes.
+   */
+  whatsappSameAsPhone: z
+    .boolean()
+    .describe("Whether the WhatsApp number is the phone number. When true, whatsappNo is set to phoneNo."),
+  whatsappNo: whatsappInputFields.whatsappNo,
+  whatsappVerified: whatsappInputFields.whatsappVerified.default(false),
+  whatsappConsent: whatsappInputFields.whatsappConsent.default(false),
   email: optionalEmailSchema.optional(),
   dob: z.iso.date(),
   fatherName: requiredTextSchema,
@@ -137,6 +174,22 @@ export const createAdmissionInputSchema = z.object({
     .boolean()
     .default(false)
     .describe("Also issue a Cadet Portal (student portal) password; it is returned once."),
+}).superRefine((value, context) => {
+  if (value.whatsappSameAsPhone && value.whatsappNo != null && value.whatsappNo !== value.phoneNo) {
+    context.addIssue({
+      code: "custom",
+      path: ["whatsappNo"],
+      message: "The WhatsApp number must equal the phone number while it is the same as the phone number.",
+    });
+  }
+  const hasWhatsappNo = value.whatsappSameAsPhone || value.whatsappNo != null;
+  if (value.whatsappVerified && !hasWhatsappNo) {
+    context.addIssue({
+      code: "custom",
+      path: ["whatsappVerified"],
+      message: "A WhatsApp number can only be verified when there is one.",
+    });
+  }
 });
 
 export const updateAdmissionInputSchema = admissionIdInputSchema
@@ -145,7 +198,14 @@ export const updateAdmissionInputSchema = admissionIdInputSchema
     admissionNo: requiredTextSchema.optional(),
     admissionClassId: z.string().min(1).nullable().optional(),
     address: requiredTextSchema.optional(),
-    phoneNo: requiredTextSchema.optional(),
+    phoneNo: phoneNumberSchema.optional().describe(PHONE_DESCRIPTION),
+    whatsappSameAsPhone: z
+      .boolean()
+      .optional()
+      .describe("Whether the WhatsApp number is the phone number. While true, the WhatsApp number follows phoneNo."),
+    whatsappNo: whatsappInputFields.whatsappNo,
+    whatsappVerified: whatsappInputFields.whatsappVerified.optional(),
+    whatsappConsent: whatsappInputFields.whatsappConsent.optional(),
     email: optionalEmailSchema.optional(),
     dob: z.iso.date().optional(),
     fatherName: requiredTextSchema.optional(),

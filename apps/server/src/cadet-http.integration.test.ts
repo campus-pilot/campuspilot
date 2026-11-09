@@ -42,6 +42,7 @@ beforeAll(async () => {
     admissionNo: `SRV-${randomUUID().slice(0, 6)}`,
     address: 'Test address',
     phoneNo: '9999999999',
+    whatsappSameAsPhone: true,
     dob: '2016-05-06',
     fatherName: 'Father',
     motherName: 'Mother',

@@ -41,6 +41,7 @@ function admissionInput(schoolId: string, admissionNo: string) {
     admissionNo,
     address: "Test address",
     phoneNo: "9999999999",
+    whatsappSameAsPhone: true,
     dob: "2016-01-01",
     fatherName: "Test Father",
     motherName: "Test Mother",
