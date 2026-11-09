@@ -11,3 +11,7 @@ grants contains {"role": role, "action": action} if {
   some role in {"school.principal", "school.manager", "school.exam_coordinator", "school.teacher"}
   some action in {"class.exam.result.approve"}
 }
+
+grants contains {"role": role, "action": "class.notification.result.send"} if {
+  some role in {"school.principal", "school.manager", "school.exam_coordinator", "school.accountant", "school.teacher"}
+}

@@ -10,6 +10,7 @@ import { sweepDemoSchoolOutbox } from '@campuspilot/api/routers/system-admin/dem
 import { sweepDataMigrationOutbox } from '@campuspilot/api/data-migrations/data-migration.outbox';
 import { sweepNotificationOutbox } from '@campuspilot/api/notifications/notification.outbox';
 import { sweepNotificationRetention } from '@campuspilot/api/notifications/retention';
+import { sweepResultPublications } from '@campuspilot/api/notifications/emitters/results';
 
 import { app, cadetMcpCatalog, cadetMcpHandler, mcpCatalog, mcpHandler } from './http';
 import { log } from './log';
@@ -62,6 +63,9 @@ async function sweepDataMigrations(register: boolean) {
 async function sweepNotifications() {
   const result = await sweepNotificationOutbox();
   if (Object.values(result).some((value) => value > 0)) log.info(result, 'notification.outbox.ok');
+  // Finishes result publications whose deliveries settled (publisher notified once).
+  const publications = await sweepResultPublications();
+  if (publications.finished > 0) log.info(publications, 'notification.results.sweep.ok');
 }
 
 /** How often old notifications are deleted (see `@campuspilot/api/notifications/retention`). */

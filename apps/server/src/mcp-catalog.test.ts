@@ -199,7 +199,8 @@ describe('catalog metadata', () => {
     expect(classified).toEqual([...leafNames].sort());
     expect(catalog.core.map(({ name }) => name).sort()).toEqual(CORE_TOOLS);
     expect(catalog.core).toHaveLength(36);
-    expect(catalog.advanced).toHaveLength(85);
+    // +5 result notification tools (publication read/preview/publish, single preview/send).
+    expect(catalog.advanced).toHaveLength(90);
   });
 });
 

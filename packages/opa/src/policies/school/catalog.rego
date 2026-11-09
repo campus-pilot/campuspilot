@@ -467,3 +467,8 @@ actions contains {"id": "school.document.generate", "key": "GENERATE_DOCUMENTS",
 actions contains {"id": "school.document.artifacts.read", "key": "READ_DOCUMENT_ARTIFACTS", "resourceKind": "school"} if { true }
 
 actions contains {"id": "school.document.artifacts.delete", "key": "DELETE_DOCUMENT_ARTIFACTS", "resourceKind": "school"} if { true }
+
+# Notifications (Phase 6). Publishing an examination's results to every
+# student is school-wide; sending one student's result is class-scoped
+# (class/catalog.rego) so teacher assignments can restrict it.
+actions contains {"id": "school.notification.send", "key": "SEND_NOTIFICATIONS", "resourceKind": "school"} if { true }

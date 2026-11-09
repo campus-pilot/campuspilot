@@ -69,6 +69,7 @@ export const SCHOOL_ACTIONS = {
   REVERSE_BILLING_RUN: 'school.billing.run.reverse',
   REVERSE_LEDGER_ENTRY: 'school.admission.ledger.reverse',
   REVISE_EXAM_RESULTS: 'school.exam.result.revise',
+  SEND_NOTIFICATIONS: 'school.notification.send',
   TRANSITION_EXAM_PLAN: 'school.exam.plan.transition',
   UNREGISTER_ADMISSION: 'school.admission.unregister',
   UPDATE_ADMISSION: 'school.admission.update',

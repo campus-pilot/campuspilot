@@ -23,6 +23,15 @@ A persistent AppShellAlert links to the working-days editor when
 attendance is enabled but not configured. Shared compact control sizes are used
 without feature height overrides. Old subject-first URLs redirect to the new class/student routes.
 
+Result notifications are lifecycle actions in the same overflow. At the
+examination root, "Publish results" (school `SEND_NOTIFICATIONS`) is enabled
+only for a completed examination that was not published yet and then reads
+"Results published". On a student page, "Send result" (class-scoped
+`SEND_RESULT_NOTIFICATION`, so teachers only for assigned classes) is enabled
+once the examination has started. Both open a confirmation dialog that shows the
+per-channel forecast (copies to send, skips by reason) read when it opens; the
+server snapshots its own at press time. Class pages have neither.
+
 The student workspace previews all subject scores plus one shared attendance/activity
 assessment. Opening a student URL during an active examination goes directly to
 the result form when the user has write access (and revision access if any saved

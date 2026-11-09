@@ -9,6 +9,7 @@ export const PREFIX_MAP = {
   // preserve primary keys and every raw cross-reference without translation.
   examPlan: "expl",
   examResult: "exrs",
+  examResultPublication: "expub",
   examTimetable: "ett",
   admission: "adm",
   financeAdjustment: "fadj",

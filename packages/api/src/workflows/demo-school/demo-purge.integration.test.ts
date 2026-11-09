@@ -20,6 +20,7 @@ import { connectCadetMcp, signInCadet } from '../../../test/cadet';
 import { createCadetOAuthContext } from '../../cadet/context';
 import { deleteDemoSchoolData, revokeDemoSchoolSessions, revokeManifestSessions } from './purge-workflow';
 
+import { examResultPublicationTable } from '@campuspilot/db/schema/exam-result-publication';
 import { createTestUser } from '../../../test/fixtures';
 import { retryFinanceConflict } from '../../../test/finance/assertions';
 import { billIssuedData, billingRunPostedData, emitAndDispatch } from '../../../test/notifications';
@@ -100,11 +101,21 @@ describe('purge_demo_school and the demo-only finance exception', () => {
     await emitAndDispatch({ type: 'bill.issued', data: billIssuedData(demo.admission.id), schoolId: demo.school.id, recipients: { kind: 'admissions', admissionIds: [demo.admission.id] } });
     await emitAndDispatch({ type: 'billing.run_posted', data: billingRunPostedData(), schoolId: demo.school.id, recipients: { kind: 'staff_users', userIds: [principalId] } });
 
+    await db.insert(examResultPublicationTable).values({
+      schoolId: demo.school.id,
+      sessionId: demo.activeSession.id,
+      examSlug: 'term-1',
+      examName: 'Term 1',
+      publishedBy: principalId,
+      admissionIds: [demo.admission.id],
+      snapshot: { recipientCount: 1, channels: {} },
+    });
+
     const result = await db.execute<{ counts: Record<string, number> }>(
       sql`SELECT purge_demo_school(${demo.school.id}) AS counts`,
     );
     // Events: the two emitted above plus the bill's and the payment's own (Phase 5); only the two above were fanned out.
-    expect(result.rows[0]!.counts).toMatchObject({ finance_payment: 1, finance_bill: 1, user: 1, school_member: expect.any(Number), notification_event: 4, notification: 2, notification_delivery: 2 });
+    expect(result.rows[0]!.counts).toMatchObject({ finance_payment: 1, finance_bill: 1, user: 1, school_member: expect.any(Number), notification_event: 4, notification: 2, notification_delivery: 2, exam_result_publication: 1 });
 
     const remaining = await rowsReferencingSchool(demo.school.id);
     expect(Object.values(remaining).every((count) => count === 0)).toBe(true);

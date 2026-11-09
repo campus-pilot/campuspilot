@@ -133,3 +133,26 @@ with completion. Batches validate every row before upserting in one transaction.
 Result entry also locks the referenced student and admission rows for the duration
 of the write. Completion evaluates the current roster; student placement after
 completion does not automatically create or rewrite historical results.
+
+## Result notifications
+
+`exam-result-notification.router.ts` (service in
+`packages/api/src/notifications/emitters/results.ts`):
+
+- `getExamResultPublication` (read exams) returns the publication or `null`.
+- `previewExamResultPublication` / `publishExamResults` (`school.notification.send`
+  plus result read): once per examination (`exam_result_publication`, unique per
+  school/session/exam), only while the examination is `completed`. Every
+  registered student of the examination's classes gets one
+  `exam.results_published` event (key `exam-results:<publicationId>:<admissionId>`)
+  in the same transaction, which locks the lifecycle row so the exam cannot be
+  reopened in between. Recipients and the per-channel forecast are stored and
+  returned. Reopening later retracts nothing.
+- `previewStudentResultNotification` / `sendStudentResultNotification`
+  (`class.notification.result.send`, teachers only for assigned classes): any
+  started examination, independent of publication. The student's report card
+  must be buildable (registered, every included subject approved); otherwise
+  BAD_REQUEST. Each new client idempotency key sends again.
+- The API sweep finishes a publication once every delivery settled (or 48 h
+  passed) and notifies the publisher with `exam.results_publish_finished`
+  (WhatsApp outcome per student: sent, skipped, failed = the rest).

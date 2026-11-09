@@ -114,6 +114,21 @@ export async function resolveNotificationRecipients(db: DatabaseExecutor, event:
     const memberIds = new Set(members.map((member) => member.userId));
     return spec.userIds.filter((userId) => memberIds.has(userId)).map((userId) => ({ kind: 'staff_user', id: userId }));
   }
+  return resolveAdmissionRecipients(db, event.schoolId, spec.admissionIds);
+}
+
+/**
+ * Admissions of a school as recipients with their channel facts (WhatsApp
+ * number, verification, consent, active push subscriptions), in the order
+ * given; IDs outside the school are dropped. Shared by the fan-out and by
+ * button sends that forecast deliveries before emitting (D-26).
+ */
+export async function resolveAdmissionRecipients(
+  db: DatabaseExecutor,
+  schoolId: string,
+  admissionIds: readonly string[],
+): Promise<Extract<ResolvedRecipient, { kind: 'admission' }>[]> {
+  if (admissionIds.length === 0) return [];
   const admissions = await db
     .select({
       id: admissionTable.id,
@@ -122,13 +137,47 @@ export async function resolveNotificationRecipients(db: DatabaseExecutor, event:
       whatsappConsent: admissionTable.whatsappConsent,
     })
     .from(admissionTable)
-    .where(and(eq(admissionTable.schoolId, event.schoolId), inArray(admissionTable.id, spec.admissionIds)));
+    .where(and(eq(admissionTable.schoolId, schoolId), inArray(admissionTable.id, [...admissionIds])));
   const byId = new Map(admissions.map((admission) => [admission.id, admission]));
   const subscriptions = await activePushSubscriptionIdsByAdmission(db, admissions.map((admission) => admission.id));
-  return spec.admissionIds.flatMap((admissionId) => {
+  return admissionIds.flatMap((admissionId) => {
     const admission = byId.get(admissionId);
     return admission ? [{ kind: 'admission' as const, ...admission, pushSubscriptionIds: subscriptions.get(admissionId) ?? [] }] : [];
   });
+}
+
+/** Per remote channel: copies that would be owed, and skips by reason. */
+export type DeliveryForecast = {
+  recipientCount: number;
+  channels: Record<RemoteNotificationChannel, { owed: number; skipped: Partial<Record<NotificationSkipReason, number>> }>;
+};
+
+/**
+ * What a fan-out of `type` to these recipients would decide right now, by
+ * the same rules ({@link planNotificationRows}): copies owed per channel and
+ * skips per reason. Shown to staff before a button send and stored with it
+ * (D-26). The fan-out decides again when it runs, so a number or consent
+ * changed in between is honoured; the recipients are what is snapshotted.
+ * Web push counts copies (one per subscription), WhatsApp one per student.
+ */
+export function forecastDeliveries(
+  type: NotificationType,
+  isDemoSchool: boolean,
+  recipients: readonly ResolvedRecipient[],
+  adapters: Record<RemoteNotificationChannel, NotificationChannelAdapter> = notificationChannelAdapters,
+): DeliveryForecast {
+  const channels = Object.fromEntries(
+    REMOTE_NOTIFICATION_CHANNELS.map((channel) => [channel, { owed: 0, skipped: {} }]),
+  ) as DeliveryForecast['channels'];
+  const planned = planNotificationRows({ id: 'forecast', type, isDemoSchool }, recipients, adapters);
+  for (const notification of planned) {
+    for (const delivery of notification.deliveries) {
+      const bucket = channels[delivery.channel];
+      if (delivery.status === 'owed') bucket.owed += 1;
+      else if (delivery.skipReason) bucket.skipped[delivery.skipReason] = (bucket.skipped[delivery.skipReason] ?? 0) + 1;
+    }
+  }
+  return { recipientCount: recipients.length, channels };
 }
 
 /** One planned delivery row. */

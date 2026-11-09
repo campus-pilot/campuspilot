@@ -274,6 +274,20 @@
       "when": 1794236258306,
       "tag": "0038_notification-document-provenance",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1794236681754,
+      "tag": "0039_exam-result-publication",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1794236682256,
+      "tag": "0040_demo-purge-result-publications",
+      "breakpoints": true
     }
   ]
 }

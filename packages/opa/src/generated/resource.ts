@@ -22,6 +22,7 @@ export type ClassResource = {
 
 export type AuthorizationResourceByAction = {
   [CLASS_ACTIONS.APPROVE_EXAM_RESULTS]: ClassResource;
+  [CLASS_ACTIONS.SEND_RESULT_NOTIFICATION]: ClassResource;
   [CLASS_ACTIONS.ADD_STUDENT]: ClassResource;
   [SCHOOL_ACTIONS.ISSUE_ADMISSION_CADET_PASSWORD]: SchoolResource;
   [SCHOOL_ACTIONS.CREATE_ADMISSION]: SchoolResource;
@@ -88,6 +89,7 @@ export type AuthorizationResourceByAction = {
   [SCHOOL_ACTIONS.READ_MEMBER]: SchoolResource;
   [SCHOOL_ACTIONS.REMOVE_MEMBER]: SchoolResource;
   [SCHOOL_ACTIONS.UPDATE_MEMBER_ROLES]: SchoolResource;
+  [SCHOOL_ACTIONS.SEND_NOTIFICATIONS]: SchoolResource;
   [SCHOOL_ACTIONS.UPDATE_SECTION_ATTRIBUTES]: SchoolResource;
   [SCHOOL_ACTIONS.CREATE_SECTION]: SchoolResource;
   [SCHOOL_ACTIONS.DELETE_SECTION]: SchoolResource;
