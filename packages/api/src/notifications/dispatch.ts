@@ -243,12 +243,27 @@ export async function markNotificationEventDispatched(db: DatabaseExecutor, even
     .where(and(eq(notificationEventTable.id, eventId), eq(notificationEventTable.status, 'pending')));
 }
 
-/** Marks a pending event failed with a safe message. */
-export async function failNotificationEvent(db: DatabaseExecutor, eventId: string, message: string) {
+/**
+ * Marks a pending event failed with a safe message, recording whether the
+ * failure may be retried automatically. Fenced on the attempt, so a late
+ * failure of an older attempt never fails a newer one.
+ */
+export async function failNotificationEvent(
+  db: DatabaseExecutor,
+  eventId: string,
+  message: string,
+  options: { retryable: boolean; attempt: number },
+) {
   await db
     .update(notificationEventTable)
-    .set({ status: 'failed', error: message, updatedAt: new Date() })
-    .where(and(eq(notificationEventTable.id, eventId), eq(notificationEventTable.status, 'pending')));
+    .set({ status: 'failed', error: message, failureRetryable: options.retryable, updatedAt: new Date() })
+    .where(
+      and(
+        eq(notificationEventTable.id, eventId),
+        eq(notificationEventTable.status, 'pending'),
+        eq(notificationEventTable.dispatchAttempt, options.attempt),
+      ),
+    );
 }
 
 /** What one send attempt did; JSON-only so it can be journaled. */

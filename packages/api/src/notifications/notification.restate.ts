@@ -13,15 +13,16 @@ const SEND_TIMEOUT_MS = 5_000;
  * send to `NotificationControl.dispatch`. Restate answers once it has durably
  * accepted the call, whether or not a worker runs, so no request waits for
  * the worker. A repeated send (sweep retry, replica race) joins the same
- * invocation through the idempotency key.
+ * invocation through the idempotency key; each fan-out attempt has its own.
  */
-export async function sendNotificationDispatch(eventId: string) {
+export async function sendNotificationDispatch(eventId: string, attempt: number) {
   const secret = env.WORKER_CONTROL_SECRET;
   if (!secret) throw new Error('WORKER_CONTROL_SECRET is not set, so worker control calls cannot be signed.');
-  const input = { eventId };
+  // The attempt is always explicit, so the signed input equals what the worker parses.
+  const input = { eventId, attempt };
   const headers = signWorkerControlCall(secret, { service: NOTIFICATION_CONTROL_SERVICE_NAME, handler: 'dispatch' }, input);
   const sent = await getRestateClient()
     .serviceSendClient<NotificationControlService>({ name: NOTIFICATION_CONTROL_SERVICE_NAME })
-    .dispatch(input, rpc.sendOpts({ idempotencyKey: notificationHandoverKey(eventId), headers, timeout: SEND_TIMEOUT_MS }));
+    .dispatch(input, rpc.sendOpts({ idempotencyKey: notificationHandoverKey(eventId, attempt), headers, timeout: SEND_TIMEOUT_MS }));
   return { invocationId: sent.invocationId };
 }

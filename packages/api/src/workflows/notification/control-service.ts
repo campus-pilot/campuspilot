@@ -30,8 +30,9 @@ function safeRun<T>(ctx: restate.Context, name: string, action: () => Promise<T>
  * an outbox event over with a one-way, idempotent, signed send, so no
  * request waits for the worker. `dispatch` is, in order: Zod-parsed,
  * authenticated by its HMAC signature (`WORKER_CONTROL_SECRET`), checked
- * against the database (the event exists and is pending), and only then
- * starts the workflow under the event's key and records its invocation ID,
+ * against the database (the event exists, is pending and is at this
+ * attempt), and only then starts the workflow under the attempt's key and
+ * records its invocation ID,
  * which the API's sweep uses to notice a fan-out Restate paused or that
  * ended early.
  */
@@ -47,21 +48,27 @@ export const notificationControlService = restate.service({
         const [row] = await db
           .select({ id: notificationEventTable.id })
           .from(notificationEventTable)
-          .where(and(eq(notificationEventTable.id, input.eventId), eq(notificationEventTable.status, 'pending')))
+          .where(
+            and(
+              eq(notificationEventTable.id, input.eventId),
+              eq(notificationEventTable.status, 'pending'),
+              eq(notificationEventTable.dispatchAttempt, input.attempt),
+            ),
+          )
           .limit(1);
         return Boolean(row);
       });
-      // Already dispatched, failed, or purged with its demo school: nothing to do.
+      // Already dispatched, failed, moved on to another attempt, or purged with its demo school: nothing to do.
       if (!pending) return { status: 'not_pending' };
       const handle = ctx
-        .workflowSendClient(notificationDispatchWorkflow, notificationDispatchWorkflowKey(input.eventId))
+        .workflowSendClient(notificationDispatchWorkflow, notificationDispatchWorkflowKey(input.eventId, input.attempt))
         .run(input);
       const invocationId = await handle.invocationId;
       await safeRun(ctx, 'record-invocation', async () => {
         await db
           .update(notificationEventTable)
           .set({ invocationId, updatedAt: new Date() })
-          .where(eq(notificationEventTable.id, input.eventId));
+          .where(and(eq(notificationEventTable.id, input.eventId), eq(notificationEventTable.dispatchAttempt, input.attempt)));
       });
       return { invocationId };
     },

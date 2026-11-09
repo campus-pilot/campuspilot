@@ -7,6 +7,7 @@ import {
   getRestateInvocation,
   type RestateInvocationStatus,
 } from '../workflows/restate-admin';
+import { MAX_NOTIFICATION_DISPATCH_ATTEMPTS } from '../workflows/notification/constants';
 import { log } from '../workflows/notification/log';
 import { sendNotificationDispatch } from './notification.restate';
 
@@ -20,12 +21,18 @@ import { sendNotificationDispatch } from './notification.restate';
  * progress:
  * - a pending, unsubmitted event is re-sent indefinitely, showing its last
  *   hand-over error;
- * - an accepted event whose invocation Restate paused is cancelled and
- *   marked failed;
+ * - an accepted event whose invocation Restate paused is marked failed
+ *   (retryable) and its invocation cancelled;
  * - an accepted event whose invocation ended (or that Restate no longer
- *   knows) without dispatching is marked failed.
- * Failed events are not retried automatically (their workflow key is spent);
- * they are visible to staff in the delivery log (Phase 7).
+ *   knows) without dispatching is marked failed (retryable);
+ * - a retryable failed event is dispatched again as its next attempt
+ *   (a new workflow key), after {@link retryDelayMs}, up to
+ *   `MAX_NOTIFICATION_DISPATCH_ATTEMPTS` attempts in all
+ *   ({@link retryFailedEvents}). Re-running a fan-out is safe: rows have
+ *   derived IDs and are inserted `ON CONFLICT DO NOTHING`, sent deliveries
+ *   are no longer owed, and a delivery stuck in `sending` is never claimed
+ *   again. Deterministic or cancelled failures are never retried; all
+ *   failures stay visible to staff in the delivery log (Phase 7).
  */
 
 /** Rows handled per sweep; the next sweep continues with the rest. */
@@ -56,10 +63,14 @@ export async function dispatchNotificationEvent(db: DatabaseExecutor, eventId: s
     eq(notificationEventTable.status, 'pending'),
     isNull(notificationEventTable.submittedAt),
   );
-  const [event] = await db.select({ id: notificationEventTable.id }).from(notificationEventTable).where(unsubmitted).limit(1);
+  const [event] = await db
+    .select({ id: notificationEventTable.id, attempt: notificationEventTable.dispatchAttempt })
+    .from(notificationEventTable)
+    .where(unsubmitted)
+    .limit(1);
   if (!event) return false;
   try {
-    const { invocationId } = await sendNotificationDispatch(eventId);
+    const { invocationId } = await sendNotificationDispatch(eventId, event.attempt);
     await db
       .update(notificationEventTable)
       .set({
@@ -132,18 +143,20 @@ async function failStaleEvents(db: DatabaseExecutor): Promise<number> {
     if (!checked) continue;
     const verdict = staleVerdict((await getRestateInvocation(checked))?.status ?? null);
     if (!verdict) continue;
-    if (verdict === 'paused') await cancelRestateInvocation(checked);
     // Fenced by the invocation that was checked: if the control service
-    // recorded the workflow run meanwhile, this changes nothing.
+    // recorded the workflow run meanwhile, this changes nothing. Failed
+    // first, then cancelled, so the cancelled run's own failure write (a
+    // non-retryable "cancelled") finds the event no longer pending.
     const sameInvocation: SQL = event.invocationId
       ? eq(notificationEventTable.invocationId, event.invocationId)
       : isNull(notificationEventTable.invocationId);
     const [row] = await db
       .update(notificationEventTable)
-      .set({ status: 'failed', error: MESSAGES[verdict], updatedAt: new Date() })
+      .set({ status: 'failed', error: MESSAGES[verdict], failureRetryable: true, updatedAt: new Date() })
       .where(and(eq(notificationEventTable.id, event.id), eq(notificationEventTable.status, 'pending'), sameInvocation))
       .returning({ id: notificationEventTable.id });
     if (row) {
+      if (verdict === 'paused') await cancelRestateInvocation(checked);
       failed += 1;
       log.warn({ eventId: event.id, verdict }, 'notification.event.stale');
     }
@@ -151,14 +164,71 @@ async function failStaleEvents(db: DatabaseExecutor): Promise<number> {
   return failed;
 }
 
+/** Wait before fan-out attempt `attempt + 1`: 10 minutes after the first failure, 30 after the second. */
+export function retryDelayMs(failedAttempt: number): number {
+  return (failedAttempt === 1 ? 10 : 30) * 60 * 1000;
+}
+
+/**
+ * Puts retryable failed events back to pending as their next attempt, once
+ * their retry delay has passed. Each update is conditional on the event
+ * still being failed at that attempt, so replicas never retry twice.
+ */
+export async function retryFailedEvents(db: DatabaseExecutor, now: Date = new Date()): Promise<number> {
+  const candidates = await db
+    .select({ id: notificationEventTable.id, attempt: notificationEventTable.dispatchAttempt, updatedAt: notificationEventTable.updatedAt })
+    .from(notificationEventTable)
+    .where(
+      and(
+        eq(notificationEventTable.status, 'failed'),
+        eq(notificationEventTable.failureRetryable, true),
+        lt(notificationEventTable.dispatchAttempt, MAX_NOTIFICATION_DISPATCH_ATTEMPTS),
+      ),
+    )
+    .orderBy(asc(notificationEventTable.updatedAt))
+    .limit(SWEEP_LIMIT);
+  let retried = 0;
+  for (const event of candidates) {
+    if (now.getTime() - event.updatedAt.getTime() < retryDelayMs(event.attempt)) continue;
+    const [row] = await db
+      .update(notificationEventTable)
+      .set({
+        status: 'pending',
+        dispatchAttempt: event.attempt + 1,
+        failureRetryable: null,
+        error: null,
+        submittedAt: null,
+        submitInvocationId: null,
+        invocationId: null,
+        lastSubmitError: null,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(notificationEventTable.id, event.id),
+          eq(notificationEventTable.status, 'failed'),
+          eq(notificationEventTable.failureRetryable, true),
+          eq(notificationEventTable.dispatchAttempt, event.attempt),
+        ),
+      )
+      .returning({ id: notificationEventTable.id });
+    if (row) {
+      retried += 1;
+      log.info({ eventId: event.id, attempt: event.attempt + 1 }, 'notification.event.retry');
+    }
+  }
+  return retried;
+}
+
 /**
  * One sweep, safe across API replicas and bounded. Sends run after the
  * claiming transaction commits, so the control service sees the rows.
  */
 export async function sweepNotificationOutbox(db: DatabaseExecutor = defaultDb) {
+  const retried = await retryFailedEvents(db);
   const pending = await claimPendingEvents(db);
   let sent = 0;
   for (const eventId of pending) if (await dispatchNotificationEvent(db, eventId)) sent += 1;
   const stale = await failStaleEvents(db);
-  return { pending: pending.length, sent, stale };
+  return { retried, pending: pending.length, sent, stale };
 }

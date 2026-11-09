@@ -13,7 +13,7 @@ vi.mock('../workflows/restate-admin', () => ({ getRestateInvocation: vi.fn(), ca
 
 const { sendNotificationDispatch } = await import('./notification.restate');
 const { getRestateInvocation, cancelRestateInvocation } = await import('../workflows/restate-admin');
-const { dispatchNotificationEvent, sweepNotificationOutbox } = await import('./notification.outbox');
+const { dispatchNotificationEvent, retryFailedEvents, sweepNotificationOutbox } = await import('./notification.outbox');
 
 async function pendingEvent() {
   const school = await createTestSchool();
@@ -34,6 +34,7 @@ describe('notification outbox', () => {
     expect(await dispatchNotificationEvent(db, eventId)).toBe(true);
     expect(await dispatchNotificationEvent(db, eventId)).toBe(false);
     expect(sendNotificationDispatch).toHaveBeenCalledTimes(1);
+    expect(sendNotificationDispatch).toHaveBeenCalledWith(eventId, 1);
     const [event] = await db.select().from(notificationEventTable).where(eq(notificationEventTable.id, eventId));
     expect(event).toMatchObject({ status: 'pending', submitInvocationId: 'inv_control1', submitAttempts: 1, lastSubmitError: null });
   });
@@ -63,7 +64,44 @@ describe('notification outbox', () => {
     await sweepNotificationOutbox(db);
     expect(cancelRestateInvocation).toHaveBeenCalledWith('inv_workflow3');
     const [event] = await db.select().from(notificationEventTable).where(eq(notificationEventTable.id, eventId));
-    expect(event).toMatchObject({ status: 'failed' });
+    expect(event).toMatchObject({ status: 'failed', failureRetryable: true, dispatchAttempt: 1 });
     expect(event!.error).toMatch(/paused/);
+  });
+
+  it('retries a retryable failed fan-out as the next attempt after its delay, a bounded number of times', async () => {
+    const eventId = await pendingEvent();
+    const failAt = async (attempt: number, minutesAgo: number) =>
+      db
+        .update(notificationEventTable)
+        .set({ status: 'failed', failureRetryable: true, dispatchAttempt: attempt, error: 'x', submittedAt: new Date(), updatedAt: new Date(Date.now() - minutesAgo * 60_000) })
+        .where(eq(notificationEventTable.id, eventId));
+    const read = async () => (await db.select().from(notificationEventTable).where(eq(notificationEventTable.id, eventId)))[0]!;
+
+    // Not before the delay (10 minutes after the first failure).
+    await failAt(1, 5);
+    await retryFailedEvents(db);
+    expect(await read()).toMatchObject({ status: 'failed', dispatchAttempt: 1 });
+
+    await failAt(1, 11);
+    vi.mocked(sendNotificationDispatch).mockResolvedValue({ invocationId: 'inv_retry2' });
+    await sweepNotificationOutbox(db);
+    expect(await read()).toMatchObject({ status: 'pending', dispatchAttempt: 2, failureRetryable: null, error: null, submitInvocationId: 'inv_retry2' });
+    expect(sendNotificationDispatch).toHaveBeenLastCalledWith(eventId, 2);
+
+    // The last attempt's failure stays failed.
+    await failAt(3, 120);
+    expect(await retryFailedEvents(db)).toBe(0);
+    expect(await read()).toMatchObject({ status: 'failed', dispatchAttempt: 3 });
+  });
+
+  it('never retries a deterministic or cancelled failure', async () => {
+    const eventId = await pendingEvent();
+    await db
+      .update(notificationEventTable)
+      .set({ status: 'failed', failureRetryable: false, error: 'The notification type is no longer known to this release.', updatedAt: new Date(Date.now() - 120 * 60_000) })
+      .where(eq(notificationEventTable.id, eventId));
+    await retryFailedEvents(db);
+    const [event] = await db.select().from(notificationEventTable).where(eq(notificationEventTable.id, eventId));
+    expect(event).toMatchObject({ status: 'failed', dispatchAttempt: 1 });
   });
 });

@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  boolean,
   check,
   index,
   integer,
@@ -140,6 +141,19 @@ export const notificationEventTable = pgTable(
     dispatchedAt: timestamp("dispatched_at", { withTimezone: true }),
     /** Safe failure summary (status `failed`); never SQL or personal data. */
     error: text("error"),
+    /**
+     * Which fan-out attempt this is (1-based). A retryable failure is
+     * dispatched again as the next attempt under a new workflow key, up to
+     * a bounded number of attempts (see the API's notification outbox).
+     */
+    dispatchAttempt: integer("dispatch_attempt").notNull().default(1),
+    /**
+     * Set with status `failed`: whether the failure was transient (worker
+     * or database unavailable, Restate paused the run) and may be retried
+     * automatically, or deterministic / deliberate (unknown type, recipient
+     * mismatch, cancelled) and must not be. Null while not failed.
+     */
+    failureRetryable: boolean("failure_retryable"),
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -151,6 +165,10 @@ export const notificationEventTable = pgTable(
     ),
     index("notification_event_status_idx").on(table.status, table.createdAt),
     index("notification_event_created_idx").on(table.createdAt),
+    check(
+      "notification_event_failure_retryable_check",
+      sql`(${table.status} = 'failed') = (${table.failureRetryable} is not null)`,
+    ),
   ],
 );
 

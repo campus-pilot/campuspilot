@@ -55,8 +55,9 @@ function step<T>(ctx: restate.WorkflowContext, name: string, action: () => Promi
 /**
  * `NotificationDispatch` fans out one `notification_event` (D-24): inbox rows
  * per recipient, delivery rows per remote channel, then sends owed copies
- * (see `runNotificationDispatch`). Its key is the event ID, so an event fans
- * out once; every write is idempotent besides (derived IDs, `ON CONFLICT DO
+ * in throttled rounds with durable sleeps (see `runNotificationDispatch`).
+ * Its key is the event ID plus the fan-out attempt, so each attempt runs
+ * once; every write is idempotent besides (derived IDs, `ON CONFLICT DO
  * NOTHING`, claim before send). Private to ingress: only
  * `NotificationControl`, which validates the event first, starts it. A
  * terminal failure is recorded on the event with a safe message.
@@ -68,8 +69,8 @@ export const notificationDispatchWorkflow = restate.workflow({
     run: async (ctx: restate.WorkflowContext, rawInput: NotificationDispatchInput): Promise<NotificationDispatchResult> => {
       const parsed = notificationDispatchInputSchema.safeParse(rawInput);
       if (!parsed.success) throw new restate.TerminalError('Invalid notification dispatch input.', { errorCode: 400 });
-      const { eventId } = parsed.data;
-      if (ctx.key !== notificationDispatchWorkflowKey(eventId)) {
+      const { eventId, attempt } = parsed.data;
+      if (ctx.key !== notificationDispatchWorkflowKey(eventId, attempt)) {
         throw new restate.TerminalError('The workflow key does not match the event.', { errorCode: 400 });
       }
       try {
@@ -83,13 +84,14 @@ export const notificationDispatchWorkflow = restate.workflow({
         return result;
       } catch (error) {
         if (error instanceof restate.TerminalError) {
-          const message = error instanceof restate.CancelledError
-            ? 'The dispatch was cancelled.'
-            : error.code === SAFE_FAILURE_CODE
-              ? error.message
-              : UNEXPECTED_FAILURE;
-          await ctx.run('mark-failed', () => failNotificationEvent(db, eventId, message));
-          log.warn({ eventId, message }, 'notification.dispatch.failed');
+          const cancelled = error instanceof restate.CancelledError;
+          const deterministic = !cancelled && error.code === SAFE_FAILURE_CODE;
+          const message = cancelled ? 'The dispatch was cancelled.' : deterministic ? error.message : UNEXPECTED_FAILURE;
+          // Only exhausted transient failures may be retried; a deterministic
+          // failure would fail again and a cancellation was deliberate.
+          const retryable = !cancelled && !deterministic;
+          await ctx.run('mark-failed', () => failNotificationEvent(db, eventId, message, { retryable, attempt }));
+          log.warn({ eventId, attempt, message, retryable }, 'notification.dispatch.failed');
         }
         throw error;
       }

@@ -260,6 +260,13 @@
       "when": 1794234367659,
       "tag": "0036_demo-purge-push-subscriptions",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1794235298387,
+      "tag": "0037_notification-dispatch-retry",
+      "breakpoints": true
     }
   ]
 }
