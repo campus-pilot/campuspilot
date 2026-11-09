@@ -1,0 +1,280 @@
+import { sql } from "drizzle-orm";
+import {
+  check,
+  index,
+  integer,
+  jsonb,
+  pgEnum,
+  pgTable,
+  text,
+  timestamp,
+  uniqueIndex,
+} from "drizzle-orm/pg-core";
+
+import { generateId } from "../id";
+import {
+  NOTIFICATION_AUDIENCES,
+  REMOTE_NOTIFICATION_CHANNELS,
+  type NotificationRecipientSpec,
+} from "../notifications/catalogue";
+import { admissionTable } from "./admission";
+import { user } from "./auth";
+import { schoolTable } from "./school";
+
+/**
+ * Notification tables (plan §4, D-20 … D-29). Three explicit layers:
+ * `notification_event` (one outbox row per emitted event, written in the
+ * caller's transaction), `notification` (one inbox row per recipient, written
+ * by the worker) and `notification_delivery` (one row per remote channel copy
+ * of a notification). Type and payload come from the code catalogue
+ * (`@campuspilot/db/notifications/catalogue`); `type` is stored as text, so a
+ * retired type never breaks a read (reads filter to known types).
+ */
+
+/**
+ * Fan-out state of an event:
+ * - `pending`: written, not yet fanned out by the worker;
+ * - `dispatched`: every inbox row and delivery row was written;
+ * - `failed`: the worker gave up (`error` says why); its rows may be partial.
+ */
+export const notificationEventStatusEnum = pgEnum("notification_event_status", [
+  "pending",
+  "dispatched",
+  "failed",
+]);
+
+export const notificationRecipientKindEnum = pgEnum(
+  "notification_recipient_kind",
+  NOTIFICATION_AUDIENCES,
+);
+
+export const notificationDeliveryChannelEnum = pgEnum(
+  "notification_delivery_channel",
+  REMOTE_NOTIFICATION_CHANNELS,
+);
+
+/**
+ * Status of one remote copy (D-25, D-29):
+ * - `owed`: decided to send, not yet claimed;
+ * - `sending`: claimed by a worker immediately before the provider call. A
+ *   row stuck here means the worker died mid-send; it is surfaced to staff,
+ *   never retried automatically (it may have been sent);
+ * - `sent`: the provider accepted it;
+ * - `delivered` / `read`: provider receipts (WhatsApp webhooks), monotonic;
+ * - `failed`: given up after bounded retries or a permanent provider error;
+ * - `skipped`: deliberately not sent; `skip_reason` says why.
+ */
+export const notificationDeliveryStatusEnum = pgEnum(
+  "notification_delivery_status",
+  ["owed", "sending", "sent", "delivered", "read", "failed", "skipped"],
+);
+
+/**
+ * Why a delivery was skipped (D-26, plus `not_verified` from D-4):
+ * - `no_number`: the admission has no WhatsApp number;
+ * - `not_verified`: the WhatsApp number is not verified by staff;
+ * - `no_consent`: the guardian has not consented to WhatsApp;
+ * - `opted_out`: the recipient opted out (later: Cadet preferences, STOP);
+ * - `no_subscription`: no active web push subscription;
+ * - `demo_school`: demo schools never send outside the inbox;
+ * - `disabled`: the channel is switched off or not available on this
+ *   platform (kill switch, or no adapter in this release).
+ */
+export const notificationSkipReasonEnum = pgEnum("notification_skip_reason", [
+  "no_number",
+  "not_verified",
+  "no_consent",
+  "opted_out",
+  "no_subscription",
+  "demo_school",
+  "disabled",
+]);
+
+/**
+ * The notification outbox: one row per emitted event, written by `notify()`
+ * in the business transaction (D-23, D-24), then handed to the signed
+ * `NotificationControl` Restate service; the API's 30 s sweep re-sends events
+ * Restate has not accepted. The `NotificationDispatch` workflow (keyed by the
+ * event ID) fans it out to `notification` and `notification_delivery` rows.
+ */
+export const notificationEventTable = pgTable(
+  "notification_event",
+  {
+    id: text("id")
+      .primaryKey()
+      .$default(() => generateId("notificationEvent")),
+    schoolId: text("school_id")
+      .notNull()
+      .references(() => schoolTable.id),
+    /**
+     * The emitter's idempotency key for this event within the school (for
+     * example `payment:<paymentId>`). A second `notify()` with the same key
+     * returns the existing event instead of writing another.
+     */
+    key: text("key").notNull(),
+    /** Catalogue type; text so retired types stay readable. */
+    type: text("type").notNull(),
+    /** Catalogue facts, validated against the type's schema when written. */
+    data: jsonb("data").$type<Record<string, unknown>>().notNull(),
+    /** Who it is addressed to, as stated by the emitter; resolved by the worker. */
+    recipients: jsonb("recipients").$type<NotificationRecipientSpec>().notNull(),
+    /** Staff member whose action emitted it; null for system events or a deleted account. */
+    createdBy: text("created_by").references(() => user.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    status: notificationEventStatusEnum("status").notNull().default("pending"),
+    /** When Restate durably accepted the hand-over to `NotificationControl.dispatch`. */
+    submittedAt: timestamp("submitted_at", { withTimezone: true }),
+    submitInvocationId: text("submit_invocation_id"),
+    submitAttempts: integer("submit_attempts").notNull().default(0),
+    /** Safe summary of the last failed hand-over. */
+    lastSubmitError: text("last_submit_error"),
+    /** Restate invocation of the `NotificationDispatch` workflow. */
+    invocationId: text("invocation_id"),
+    /** Inbox rows the fan-out created (set when dispatched). */
+    notificationCount: integer("notification_count"),
+    dispatchedAt: timestamp("dispatched_at", { withTimezone: true }),
+    /** Safe failure summary (status `failed`); never SQL or personal data. */
+    error: text("error"),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("notification_event_school_key_unique").on(
+      table.schoolId,
+      table.key,
+    ),
+    index("notification_event_status_idx").on(table.status, table.createdAt),
+    index("notification_event_created_idx").on(table.createdAt),
+  ],
+);
+
+/**
+ * One inbox row per recipient (D-20, D-21). The ID is derived from (event,
+ * recipient), so a replayed fan-out inserts nothing new. The audience is
+ * `recipient_kind`, never inferred from which ID column is set; the CHECK
+ * keeps exactly the matching column filled. `school_id` is explicit and is
+ * part of every read predicate. No titles, bodies or links are stored.
+ */
+export const notificationTable = pgTable(
+  "notification",
+  {
+    id: text("id").primaryKey(),
+    eventId: text("event_id")
+      .notNull()
+      .references(() => notificationEventTable.id, { onDelete: "cascade" }),
+    schoolId: text("school_id")
+      .notNull()
+      .references(() => schoolTable.id),
+    recipientKind: notificationRecipientKindEnum("recipient_kind").notNull(),
+    /** Staff recipient (`recipient_kind = 'staff_user'`). */
+    userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
+    /** Student recipient (`recipient_kind = 'admission'`). */
+    admissionId: text("admission_id").references(() => admissionTable.id, {
+      onDelete: "cascade",
+    }),
+    type: text("type").notNull(),
+    data: jsonb("data").$type<Record<string, unknown>>().notNull(),
+    /** When the row was written (seconds after the event); the inbox order. */
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    /** Null while unread. */
+    readAt: timestamp("read_at", { withTimezone: true }),
+    /**
+     * Hidden from the recipient's inbox (only read rows can be dismissed).
+     * The row stays so its delivery log survives until retention removes it.
+     */
+    dismissedAt: timestamp("dismissed_at", { withTimezone: true }),
+  },
+  (table) => [
+    check(
+      "notification_recipient_check",
+      sql`(${table.recipientKind} = 'staff_user' and ${table.userId} is not null and ${table.admissionId} is null) or (${table.recipientKind} = 'admission' and ${table.admissionId} is not null and ${table.userId} is null)`,
+    ),
+    check(
+      "notification_dismiss_read_check",
+      sql`${table.dismissedAt} is null or ${table.readAt} is not null`,
+    ),
+    index("notification_staff_list_idx")
+      .on(table.userId, table.schoolId, table.createdAt.desc(), table.id.desc())
+      .where(sql`${table.recipientKind} = 'staff_user'`),
+    index("notification_admission_list_idx")
+      .on(table.admissionId, table.createdAt.desc(), table.id.desc())
+      .where(sql`${table.recipientKind} = 'admission'`),
+    index("notification_staff_unread_idx")
+      .on(table.userId, table.schoolId)
+      .where(sql`${table.recipientKind} = 'staff_user' and ${table.readAt} is null`),
+    index("notification_admission_unread_idx")
+      .on(table.admissionId)
+      .where(sql`${table.recipientKind} = 'admission' and ${table.readAt} is null`),
+    index("notification_event_idx").on(table.eventId),
+    index("notification_school_idx").on(table.schoolId),
+    index("notification_created_idx").on(table.createdAt),
+  ],
+);
+
+/**
+ * One remote copy of a notification per channel and destination (D-29). The
+ * ID is derived from (notification, channel, destination), so a replayed
+ * fan-out inserts nothing new. Students never see these rows (D-20).
+ */
+export const notificationDeliveryTable = pgTable(
+  "notification_delivery",
+  {
+    id: text("id").primaryKey(),
+    notificationId: text("notification_id")
+      .notNull()
+      .references(() => notificationTable.id, { onDelete: "cascade" }),
+    schoolId: text("school_id")
+      .notNull()
+      .references(() => schoolTable.id),
+    channel: notificationDeliveryChannelEnum("channel").notNull(),
+    /**
+     * Destination snapshot at decision time: an E.164 number (WhatsApp) or a
+     * push subscription ID. Null when skipped before a destination existed.
+     */
+    destination: text("destination"),
+    status: notificationDeliveryStatusEnum("status").notNull(),
+    skipReason: notificationSkipReasonEnum("skip_reason"),
+    /** Provider message ID (WhatsApp `wamid`) for webhook lookups. */
+    providerMessageId: text("provider_message_id"),
+    /** Provider error code, never provider prose with personal data. */
+    errorCode: text("error_code"),
+    errorMessage: text("error_message"),
+    attempts: integer("attempts").notNull().default(0),
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    deliveredAt: timestamp("delivered_at", { withTimezone: true }),
+    readAt: timestamp("read_at", { withTimezone: true }),
+    failedAt: timestamp("failed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    check(
+      "notification_delivery_skip_reason_check",
+      sql`(${table.status} = 'skipped') = (${table.skipReason} is not null)`,
+    ),
+    uniqueIndex("notification_delivery_provider_message_unique")
+      .on(table.channel, table.providerMessageId)
+      .where(sql`${table.providerMessageId} is not null`),
+    index("notification_delivery_notification_idx").on(table.notificationId),
+    index("notification_delivery_school_idx").on(table.schoolId),
+    index("notification_delivery_pending_idx")
+      .on(table.status, table.createdAt)
+      .where(sql`${table.status} in ('owed', 'sending')`),
+  ],
+);
+
+export type NotificationEventRow = typeof notificationEventTable.$inferSelect;
+export type NotificationRow = typeof notificationTable.$inferSelect;
+export type NotificationDeliveryRow = typeof notificationDeliveryTable.$inferSelect;

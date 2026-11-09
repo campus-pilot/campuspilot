@@ -232,6 +232,20 @@
       "when": 1794231998594,
       "tag": "0032_admission-whatsapp",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1794233090909,
+      "tag": "0033_notifications",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1794233102689,
+      "tag": "0034_demo-purge-notifications",
+      "breakpoints": true
     }
   ]
 }
