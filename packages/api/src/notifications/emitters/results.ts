@@ -20,6 +20,7 @@ import { forecastDeliveries, resolveAdmissionRecipients, type DeliveryForecast }
 import { buildStudentReportCardContexts } from '../documents/report-card';
 import { handOffNotificationEvents } from '../notification.outbox';
 import { notify, notifyMany, type NotifyInput } from '../notify';
+import { stuckSendingCutoff } from '../stuck-sending';
 import { MAX_NOTIFICATION_DISPATCH_ATTEMPTS } from '../../workflows/notification/constants';
 import { log } from '../../workflows/notification/log';
 
@@ -266,8 +267,6 @@ async function sendStudentResultOnce(db: Database, scope: StudentResultScope & {
  * of three days for a reached daily limit, D-41) plus margin.
  */
 const SETTLE_DEADLINE_MS = 4 * 24 * 60 * 60 * 1000;
-/** A delivery claimed this long ago without an outcome is counted as failed (the worker died mid-send). */
-const STUCK_SENDING_MS = 60 * 60 * 1000;
 const KEY_CHUNK = 1000;
 
 /**
@@ -323,7 +322,7 @@ export async function settleResultPublication(
     );
   }
   const deliveryOpen = deliveries.some(
-    (delivery) => delivery.status === 'owed' || (delivery.status === 'sending' && (delivery.claimedAt?.getTime() ?? 0) > now.getTime() - STUCK_SENDING_MS),
+    (delivery) => delivery.status === 'owed' || (delivery.status === 'sending' && (delivery.claimedAt?.getTime() ?? 0) > stuckSendingCutoff(now).getTime()),
   );
   if (deliveryOpen && !overdue) return null;
   const recipientCount = publication.admissionIds.length;

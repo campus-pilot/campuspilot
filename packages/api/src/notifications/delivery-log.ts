@@ -5,6 +5,7 @@ import { and, count, desc, eq, exists, inArray, isNotNull, sql, type SQL } from 
 
 import { createNextPageCursor, createPaginatedResult, resolvePaginationInput } from '../paginations';
 import { activePushDestinations, isPushSubscriptionGone } from './redelivery';
+import { stuckSendingCutoff } from './stuck-sending';
 
 /**
  * The staff delivery log (Phase 7, permission `school.notification.log.read`):
@@ -21,8 +22,6 @@ export type DeliveryLogScope =
   | { kind: 'bill_run'; billRunId: string }
   | { kind: 'exam'; sessionId: string; examSlug: string };
 
-/** A delivery claimed this long ago without an outcome is shown as interrupted. */
-export const INTERRUPTED_SENDING_MS = 60 * 60 * 1000;
 
 function scopeWhere(scope: DeliveryLogScope): SQL {
   switch (scope.kind) {
@@ -96,7 +95,7 @@ export async function listDeliveryLog(
   const resent = new Set(deliveries.flatMap((delivery) => (delivery.resendOfDeliveryId ? [delivery.resendOfDeliveryId] : [])));
   const failedPush = deliveries.filter((delivery) => delivery.channel === 'web_push' && delivery.status === 'failed');
   const activePush = await activePushDestinations(db, failedPush.flatMap((delivery) => (delivery.destination ? [delivery.destination] : [])));
-  const now = Date.now();
+  const now = new Date();
   const totalItems = total?.value ?? 0;
   const totalPages = Math.ceil(totalItems / pageSize);
   return createPaginatedResult({
@@ -122,8 +121,12 @@ export async function listDeliveryLog(
           deliveredAt: delivery.deliveredAt,
           readAt: delivery.readAt,
           failedAt: delivery.failedAt,
-          /** A `sending` claim older than an hour: the worker died mid-send; it may or may not have been sent. */
-          interrupted: delivery.status === 'sending' && (delivery.claimedAt?.getTime() ?? now) < now - INTERRUPTED_SENDING_MS,
+          /**
+           * A `sending` claim older than `STUCK_SENDING_MS`: the send was
+           * interrupted and may or may not have gone out. Shown only until
+           * the outbox sweep fails it as `outcome_unknown` (then resendable).
+           */
+          interrupted: delivery.status === 'sending' && (delivery.claimedAt?.getTime() ?? now.getTime()) < stuckSendingCutoff(now).getTime(),
           resendOfDeliveryId: delivery.resendOfDeliveryId,
           /** A staff resend of this delivery exists (each failed delivery can be resent once). */
           resent: resent.has(delivery.id),
@@ -131,8 +134,9 @@ export async function listDeliveryLog(
           subscriptionGone: delivery.status === 'failed' && isPushSubscriptionGone(delivery, activePush),
           /**
            * Staff may resend it: failed, not resent yet, and (web push) its
-           * device still subscribed. Stuck `sending` copies are never
-           * resendable (they may have been sent, D-25).
+           * device still subscribed. A copy still `sending` is not
+           * resendable; once the sweep fails an interrupted one as
+           * `outcome_unknown` it is, like any ambiguous send.
            */
           resendable: delivery.status === 'failed' && !resent.has(delivery.id) && !isPushSubscriptionGone(delivery, activePush),
           /** When an owed copy is due to be (re)tried; null otherwise. */

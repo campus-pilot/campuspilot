@@ -19,7 +19,9 @@ import { decideRetry, type RetryCounters } from './sender/retry-policy';
  * - `failed` → `failed`;
  * - `skipped` → `skipped` with its reason (send-time re-check).
  * A delivery left in `sending` (the worker died between claim and outcome)
- * is never claimed again: it may have been sent. It is surfaced to staff.
+ * is never claimed again: it may have been sent. The outbox sweep fails it
+ * as `outcome_unknown` after `STUCK_SENDING_MS` (`./stuck-sending.ts`), so
+ * it is alerted and staff may resend it; nothing resends it automatically.
  * Every update is conditional on `status = 'sending'`, so a late or repeated
  * outcome never overwrites a newer state.
  */

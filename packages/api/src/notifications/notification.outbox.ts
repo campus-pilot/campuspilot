@@ -11,6 +11,7 @@ import { MAX_NOTIFICATION_DISPATCH_ATTEMPTS } from '../workflows/notification/co
 import { log } from '../workflows/notification/log';
 import { sendNotificationDispatch, sendNotificationSenderPoke } from './notification.restate';
 import { dueSenderTargets } from './sender/queue';
+import { failStuckSendingDeliveries } from './stuck-sending';
 
 /**
  * The notification outbox: `notification_event` rows are the durable record
@@ -326,7 +327,8 @@ export async function pokeDueSenders(db: DatabaseExecutor, now: Date = new Date(
  * sends stop at the first hand-over Restate did not accept (it is down; the
  * rest would each wait for a timeout and hold up the server's sweep loop).
  * The stale check runs even then: it uses the Restate admin API, which may
- * still answer, and it bounds itself the same way.
+ * still answer, and it bounds itself the same way. Deliveries stranded in
+ * `sending` are failed as `outcome_unknown` (see `./stuck-sending.ts`).
  */
 export async function sweepNotificationOutbox(db: DatabaseExecutor = defaultDb) {
   const retried = await retryFailedEvents(db);
@@ -338,6 +340,8 @@ export async function sweepNotificationOutbox(db: DatabaseExecutor = defaultDb) 
     if (result === 'sent') sent += 1;
   }
   const stale = await failStaleEvents(db);
+  const interrupted = await failStuckSendingDeliveries(db);
+  if (interrupted > 0) log.warn({ interrupted }, 'notification.delivery.interrupted');
   const poked = await pokeDueSenders(db);
-  return { retried, pending: pending.length, sent, stale, poked };
+  return { retried, pending: pending.length, sent, stale, interrupted, poked };
 }

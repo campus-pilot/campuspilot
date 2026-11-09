@@ -1,7 +1,7 @@
 import { db } from '@campuspilot/db';
 import { admissionTable } from '@campuspilot/db/schema/admission';
-import { notificationDeliveryTable, notificationEventTable } from '@campuspilot/db/schema/notification';
-import { and, eq } from 'drizzle-orm';
+import { notificationDeliveryTable, notificationEventTable, notificationTable } from '@campuspilot/db/schema/notification';
+import { and, eq, inArray } from 'drizzle-orm';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { createSchoolStaffSession, createTestAdmission, createTestClient, createTestSchool } from '../../test/fixtures';
@@ -9,6 +9,7 @@ import { billIssuedData, dispatchNow, drainSchool } from '../../test/notificatio
 import type { DeliverySendOutcome, NotificationChannelAdapter } from './channels';
 import { sweepWhatsAppFailureAlerts } from './failure-alerts';
 import { notify } from './notify';
+import { failStuckSendingDeliveries, INTERRUPTED_SEND_MESSAGE, STUCK_SENDING_MS } from './stuck-sending';
 
 const pushOff: NotificationChannelAdapter = { channel: 'web_push', available: false, unavailableReason: 'test' };
 function whatsapp(outcome: DeliverySendOutcome): NotificationChannelAdapter {
@@ -145,6 +146,50 @@ describe('delivery log, resend and failure alerts', () => {
     // The recorder of a payment did not ask for a send: only the grant is told.
     expect((byType('payment.received').recipients as { userIds: string[] }).userIds.sort()).toEqual([accountantId, principalId].sort());
     expect((byType('exam.results_published').recipients as { userIds: string[] }).userIds.sort()).toEqual([coordinatorId, principalId].sort());
+  });
+
+  it('fails a copy stranded in `sending` as outcome unknown, alerts it once and lets staff resend it', async () => {
+    const emitPayment = (suffix: string) =>
+      db.transaction((tx) =>
+        notify(tx, {
+          type: 'payment.received',
+          schoolId,
+          key: `payment:stuck-${suffix}-${Date.now()}`,
+          sendPriority: 'immediate',
+          recipients: { kind: 'admissions', admissionIds: [admissionId] },
+          data: { paymentId: `fpay_stuck_${suffix}`, sessionId: 'sess_test', admissionId, receiptNumber: `RCP/S${suffix}`, amountMinor: '100', currency: 'INR', receivedAt: new Date().toISOString(), studentName: 'Kavya Failed' },
+        }),
+      );
+    const owed = whatsapp({ kind: 'sent', providerMessageId: null });
+    const claimAt = async (eventId: string, claimedAt: Date) => {
+      await dispatchNow(eventId, { web_push: pushOff, whatsapp: owed });
+      const [row] = await db
+        .select({ id: notificationDeliveryTable.id })
+        .from(notificationDeliveryTable)
+        .innerJoin(notificationTable, eq(notificationTable.id, notificationDeliveryTable.notificationId))
+        .where(and(eq(notificationTable.eventId, eventId), eq(notificationDeliveryTable.channel, 'whatsapp')));
+      await db.update(notificationDeliveryTable).set({ status: 'sending', claimedAt, nextAttemptAt: null, attempts: 1 }).where(eq(notificationDeliveryTable.id, row!.id));
+      return row!.id;
+    };
+    const now = new Date();
+    const stuck = await claimAt((await emitPayment('old')).eventId, new Date(now.getTime() - STUCK_SENDING_MS - 60_000));
+    const fresh = await claimAt((await emitPayment('new')).eventId, new Date(now.getTime() - 10 * 60_000));
+
+    expect(await failStuckSendingDeliveries(db, now)).toBeGreaterThanOrEqual(1);
+    const rows = await db.select().from(notificationDeliveryTable).where(inArray(notificationDeliveryTable.id, [stuck, fresh]));
+    expect(rows.find((row) => row.id === stuck)).toMatchObject({ status: 'failed', errorCode: 'outcome_unknown', errorMessage: INTERRUPTED_SEND_MESSAGE.whatsapp, failedAt: now });
+    expect(rows.find((row) => row.id === fresh)).toMatchObject({ status: 'sending', errorCode: null });
+
+    const log = await principal.school.listNotificationDeliveries({ schoolId, scope: { kind: 'admission', admissionId } });
+    const copy = log.items.flatMap((item) => item.deliveries).find((delivery) => delivery.id === stuck);
+    expect(copy).toMatchObject({ status: 'failed', interrupted: false, resendable: true });
+
+    await sweepWhatsAppFailureAlerts();
+    const [alert] = await db.select().from(notificationEventTable).where(eq(notificationEventTable.key, `whatsapp-failed:${stuck}`));
+    expect(alert).toMatchObject({ type: 'notification.whatsapp_failed', data: { errorCode: 'outcome_unknown', failedType: 'payment.received' } });
+    await expect(accountant.school.resendNotificationDelivery({ schoolId, deliveryId: stuck })).resolves.toEqual({ created: true });
+    // The fresh claim is cleaned up so other tests' sweeps never fail it later.
+    await db.update(notificationDeliveryTable).set({ status: 'failed', failedAt: now, errorCode: 'test', failureAlertedAt: now }).where(eq(notificationDeliveryTable.id, fresh));
   });
 
   it('filters admissions by WhatsApp readiness', async () => {

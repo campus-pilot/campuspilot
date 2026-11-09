@@ -8,6 +8,7 @@ import { schoolMembersWithPermission } from '../permissions/authorization';
 import { log } from '../workflows/notification/log';
 import { handOffNotificationEvents } from './notification.outbox';
 import { notify, type NotificationBatchKind } from './notify';
+import { stuckSendingCutoff } from './stuck-sending';
 
 /**
  * Failure alerts for WhatsApp (D-38), on the API's 30 s loop. Every failed
@@ -54,8 +55,6 @@ const TOPIC_ACTION = {
 
 /** One-off failures and batches handled per sweep; the next sweep continues. */
 const ALERT_SWEEP_LIMIT = 50;
-/** A WhatsApp copy claimed longer ago than this without an outcome no longer keeps its batch open (the worker died mid-send). */
-const STUCK_SENDING_MS = 60 * 60 * 1000;
 
 const unalertedWhatsAppFailure = and(
   eq(notificationDeliveryTable.channel, 'whatsapp'),
@@ -199,7 +198,7 @@ async function batchOpen(db: Database, batch: { schoolId: string; kind: Notifica
         eq(notificationDeliveryTable.channel, 'whatsapp'),
         or(
           eq(notificationDeliveryTable.status, 'owed'),
-          and(eq(notificationDeliveryTable.status, 'sending'), gt(notificationDeliveryTable.claimedAt, new Date(now.getTime() - STUCK_SENDING_MS))),
+          and(eq(notificationDeliveryTable.status, 'sending'), gt(notificationDeliveryTable.claimedAt, stuckSendingCutoff(now))),
         ),
       ),
     )
