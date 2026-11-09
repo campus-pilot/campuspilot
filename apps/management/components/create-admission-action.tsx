@@ -13,7 +13,8 @@ import { RequirePermissions } from './require-permissions';
 
 /**
  * A new admission. "WhatsApp number is the same as phone number" starts
- * checked (D-4: a form default only; the dialog submits the explicit choice).
+ * checked, and with it "WhatsApp number verified" (D-4: both are form
+ * defaults only; staff can untick either and the dialog submits the choices).
  */
 const emptyAdmission: AdmissionFormValue = {
   name: '',
@@ -23,7 +24,7 @@ const emptyAdmission: AdmissionFormValue = {
   phoneNo: '',
   whatsappNo: null,
   whatsappSameAsPhone: true,
-  whatsappVerified: false,
+  whatsappVerified: true,
   whatsappConsent: false,
   email: null,
   dob: '',

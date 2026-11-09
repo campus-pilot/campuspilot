@@ -35,9 +35,10 @@ const detailsSchema = z.object({
 
 /**
  * Contact and WhatsApp choices (D-4, D-8). While "same as phone" is ticked
- * the WhatsApp number is the phone number and counts as verified (staff
- * asked the guardian); otherwise staff type the WhatsApp number (optional)
- * and tick "verified" themselves.
+ * the WhatsApp number is the phone number; otherwise staff type the WhatsApp
+ * number (optional). "Verified" is always its own field: ticking "same as
+ * phone" only pre-ticks it (D-4 "verified by default"), staff can untick it,
+ * and the submitted value is exactly the field value.
  */
 const contactSchema = z
   .object({
@@ -106,7 +107,9 @@ function toSubmitValue(value: z.output<typeof dialogSchema>): AdmissionFormSubmi
     phoneNo: value.phone,
     whatsappSameAsPhone: value.whatsappSameAsPhone,
     whatsappNo,
-    whatsappVerified: value.whatsappSameAsPhone ? true : value.whatsappVerified && whatsappNo !== null,
+    // The field value as shown; never forced by "same as phone" (an edited
+    // backfilled row keeps its stored "not verified" unless staff tick it).
+    whatsappVerified: value.whatsappVerified && whatsappNo !== null,
     whatsappConsent: value.whatsappConsent,
   };
 }
@@ -170,13 +173,23 @@ function WhatsappNumberField({ form }: { form: AdmissionForm }) {
   return <form.Subscribe selector={(state) => ({ same: state.values.whatsappSameAsPhone, phone: state.values.phone })}>{({ same, phone }) => <form.Field name="whatsapp">{(field) => <div className="flex flex-col gap-2 sm:col-span-2"><Label htmlFor="admission-whatsapp">WhatsApp number</Label><PhoneInput id="admission-whatsapp" value={same ? phone : field.state.value} disabled={same} invalid={field.state.meta.errors.length > 0} onBlur={field.handleBlur} onChange={field.handleChange} /><FormErrors errors={field.state.meta.errors} /></div>}</form.Field>}</form.Subscribe>;
 }
 
+/**
+ * "WhatsApp number is the same as phone number". Ticking it also pre-ticks
+ * "verified" (D-4: staff asked the guardian, so verified is the default);
+ * unticking leaves "verified" as it is. Done in the change handler, so a
+ * stored choice loaded for editing never changes "verified" by itself.
+ */
+function SameAsPhoneField({ form }: { form: AdmissionForm }) {
+  return <form.Field name="whatsappSameAsPhone">{(field) => <CheckboxRow id="admission-whatsapp-same" label="WhatsApp number is the same as phone number" checked={field.state.value} onCheckedChange={(checked) => { field.handleChange(checked); if (checked) form.setFieldValue('whatsappVerified', true); }} />}</form.Field>;
+}
+
 /** Phone number and WhatsApp choices (D-4, D-8). */
 function AdmissionContactFields({ form }: { form: AdmissionForm }) {
   return <>
     <form.Field name="phone">{(field) => <div className="flex flex-col gap-2 sm:col-span-2"><Label htmlFor="admission-phone">Phone number</Label><PhoneInput id="admission-phone" value={field.state.value} invalid={field.state.meta.errors.length > 0} onBlur={field.handleBlur} onChange={field.handleChange} /><FormErrors errors={field.state.meta.errors} /></div>}</form.Field>
-    <form.Field name="whatsappSameAsPhone">{(field) => <CheckboxRow id="admission-whatsapp-same" label="WhatsApp number is the same as phone number" checked={field.state.value} onCheckedChange={field.handleChange} />}</form.Field>
+    <SameAsPhoneField form={form} />
     <WhatsappNumberField form={form} />
-    <form.Subscribe selector={(state) => state.values.whatsappSameAsPhone}>{(same) => <form.Field name="whatsappVerified">{(field) => <div className="flex flex-col gap-1 sm:col-span-2"><CheckboxRow id="admission-whatsapp-verified" label="WhatsApp number verified" hint={same ? 'The phone number was confirmed with the guardian.' : 'Tick once the guardian confirmed this WhatsApp number.'} checked={same || field.state.value} disabled={same} onCheckedChange={field.handleChange} /><FormErrors errors={field.state.meta.errors} /></div>}</form.Field>}</form.Subscribe>
+    <form.Field name="whatsappVerified">{(field) => <div className="flex flex-col gap-1 sm:col-span-2"><CheckboxRow id="admission-whatsapp-verified" label="WhatsApp number verified" hint="Tick once the guardian confirmed this WhatsApp number." checked={field.state.value} onCheckedChange={field.handleChange} /><FormErrors errors={field.state.meta.errors} /></div>}</form.Field>
     <form.Field name="whatsappConsent">{(field) => <CheckboxRow id="admission-whatsapp-consent" label="Guardian consented to WhatsApp notifications" hint="Bills, receipts and results are sent on WhatsApp only with consent. Untick to stop them." checked={field.state.value} onCheckedChange={field.handleChange} />}</form.Field>
   </>;
 }

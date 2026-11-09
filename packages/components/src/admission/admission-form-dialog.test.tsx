@@ -7,7 +7,7 @@ import type { AdmissionFormValue } from './types';
 
 const empty: AdmissionFormValue = {
   name: '', admissionNo: '', admissionClassId: null, address: '', phoneNo: '',
-  whatsappNo: null, whatsappSameAsPhone: true, whatsappVerified: false, whatsappConsent: false,
+  whatsappNo: null, whatsappSameAsPhone: true, whatsappVerified: true, whatsappConsent: false,
   email: null, dob: '', fatherName: '', motherName: '',
 };
 
@@ -102,5 +102,32 @@ describe('AdmissionFormDialog (stepper)', () => {
     expect(((await screen.findByLabelText('Phone number')) as HTMLInputElement).value).toBe('+91 ask at office');
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
     expect(await screen.findByText('Enter a valid phone number for the selected country.')).toBeTruthy();
+  });
+
+  it('keeps a stored "not verified" when editing a row with same-as-phone ticked', async () => {
+    const onSubmit = renderDialog({ ...empty, name: 'Old', admissionNo: 'A-1', dob: '2015-01-01', fatherName: 'F', motherName: 'M', address: 'X', phoneNo: '+919876543210', whatsappNo: '+919876543210', whatsappSameAsPhone: true, whatsappVerified: false }, 'edit');
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    const verified = await screen.findByRole('checkbox', { name: 'WhatsApp number verified' });
+    expect(verified.getAttribute('aria-checked')).toBe('false');
+    expect(verified.hasAttribute('disabled') || verified.getAttribute('aria-disabled') === 'true').toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ whatsappSameAsPhone: true, whatsappVerified: false }), { generateCadetPassword: false });
+  });
+
+  it('pre-ticks verified when same-as-phone is ticked, and submits verified as unticked by staff', async () => {
+    const onSubmit = renderDialog({ ...empty, whatsappSameAsPhone: false, whatsappVerified: false });
+    fillDetails();
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await screen.findByLabelText('Phone number');
+    type('Phone number', '9876543210');
+    fireEvent.click(screen.getByRole('checkbox', { name: 'WhatsApp number is the same as phone number' }));
+    const verified = screen.getByRole('checkbox', { name: 'WhatsApp number verified' });
+    expect(verified.getAttribute('aria-checked')).toBe('true');
+    fireEvent.click(verified);
+    expect(screen.getByRole('checkbox', { name: 'WhatsApp number verified' }).getAttribute('aria-checked')).toBe('false');
+    fireEvent.click(screen.getByRole('button', { name: 'Create admission' }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ whatsappSameAsPhone: true, whatsappNo: '+919876543210', whatsappVerified: false }), { generateCadetPassword: false });
   });
 });
