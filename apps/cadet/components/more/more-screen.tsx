@@ -13,7 +13,6 @@ import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemTitle }
 import { authClient } from '@/lib/auth-client';
 import { initialsOf } from '@/lib/format';
 import { orpc } from '@/lib/orpc';
-import { currentEnrollment } from '@/lib/profile';
 import { ScreenError, ScreenHeader, ScreenLoading } from '../screen';
 
 function Fact({ label, value }: { label: string; value: string }) {
@@ -26,7 +25,7 @@ function Fact({ label, value }: { label: string; value: string }) {
 }
 
 export function ProfileCard({ profile }: { profile: CadetProfileDto }) {
-  const enrollment = currentEnrollment(profile);
+  const enrollment = profile.current;
   const placement = [enrollment?.classLabel, enrollment?.sectionLabel].filter(Boolean).join(' · ');
   return (
     <Card className="gap-0 py-0">
@@ -59,16 +58,27 @@ export function SignOutButton() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const signOut = useMutation({
-    mutationFn: () => authClient.signOut(),
+    mutationFn: async () => {
+      // Better Auth reports failures in `error` rather than throwing.
+      const result = await authClient.signOut();
+      if (result.error) throw new Error(result.error.message ?? 'Unable to sign out. Please try again.');
+    },
     onSuccess: () => {
       queryClient.clear();
       router.replace('/sign-in');
     },
   });
   return (
-    <Button type="button" variant="outline" size="lg" className="w-full" disabled={signOut.isPending} onClick={() => signOut.mutate()}>
-      <LogOutIcon data-icon="inline-start" /> {signOut.isPending ? 'Signing out…' : 'Sign out'}
-    </Button>
+    <div className="flex flex-col gap-2">
+      <Button type="button" variant="outline" size="lg" className="w-full" disabled={signOut.isPending} onClick={() => signOut.mutate()}>
+        <LogOutIcon data-icon="inline-start" /> {signOut.isPending ? 'Signing out…' : 'Sign out'}
+      </Button>
+      {signOut.isError ? (
+        <p role="alert" className="text-sm text-destructive">
+          {signOut.error.message}
+        </p>
+      ) : null}
+    </div>
   );
 }
 

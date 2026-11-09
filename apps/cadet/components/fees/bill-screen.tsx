@@ -68,6 +68,10 @@ export function BillLines({ bill }: { bill: CadetBillDto }) {
   );
 }
 
+export const BillNotFound = () => (
+  <EmptyState icon={FileQuestionIcon} title="Bill not found" description="This bill does not exist or is not on your account." />
+);
+
 /**
  * One bill, line by line. Payments are credited to the student's account
  * rather than to a bill, so the bill shows no "paid" or "left to pay"
@@ -81,7 +85,7 @@ export function BillScreen({ billId }: { billId: string }) {
   if (bill.isError) {
     const missing = (bill.error as { code?: string }).code === 'NOT_FOUND';
     return missing ? (
-      <EmptyState icon={FileQuestionIcon} title="Bill not found" description="This bill does not exist or is not on your account." />
+      <BillNotFound />
     ) : (
       <ScreenError title="Could not load this bill" error={bill.error} onRetry={() => void bill.refetch()} />
     );

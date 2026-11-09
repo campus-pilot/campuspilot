@@ -12,7 +12,6 @@ import { cn } from '@campuspilot/ui/lib/utils';
 import { authClient } from '@/lib/auth-client';
 import { initialsOf } from '@/lib/format';
 import { orpc } from '@/lib/orpc';
-import { currentEnrollment } from '@/lib/profile';
 import { ScreenLoading } from './screen';
 
 const tabs = [
@@ -31,7 +30,7 @@ export function isTabActive(pathname: string, href: string) {
 /** Whose records are shown: the student, their class and school. */
 function TopBar() {
   const profile = useQuery(orpc.getProfile.queryOptions());
-  const enrollment = profile.data ? currentEnrollment(profile.data) : null;
+  const enrollment = profile.data?.current ?? null;
   const detail = profile.data
     ? [enrollment?.classLabel, enrollment?.sectionLabel, profile.data.schoolName].filter(Boolean).join(' · ')
     : null;

@@ -179,7 +179,7 @@ function ReleasedResult({ examId }: { examId: string }) {
   return <ResultDetail result={result.data} />;
 }
 
-const NotFound = () => (
+export const ResultNotFound = () => (
   <EmptyState icon={FileQuestionIcon} title="Result not available" description="This examination does not exist or has no results to show." />
 );
 
@@ -192,10 +192,10 @@ export function ResultDetailScreen({ examId }: { examId: string }) {
   const exam = useQuery(orpc.getExam.queryOptions({ input: { examId } }));
   if (exam.isPending) return <ScreenLoading blocks={3} />;
   if (exam.isError) {
-    if ((exam.error as { code?: string }).code === 'NOT_FOUND') return <NotFound />;
+    if ((exam.error as { code?: string }).code === 'NOT_FOUND') return <ResultNotFound />;
     return <ScreenError error={exam.error} onRetry={() => void exam.refetch()} />;
   }
   if (exam.data.state === 'released') return <ReleasedResult examId={examId} />;
   if (exam.data.state === 'awaiting_release') return <AwaitingRelease exam={exam.data} />;
-  return <NotFound />;
+  return <ResultNotFound />;
 }

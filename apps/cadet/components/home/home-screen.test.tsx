@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { exams, newStudent, profile, summary } from '@/test/fixtures';
 import { page, renderWithQuery, resetHandlers } from '@/test/orpc-mock';
-import { Greeting, HomeScreen } from './home-screen';
+import { Greeting, HomeScreen, LatestResultAlert } from './home-screen';
 
 vi.mock('@/lib/orpc', async () => ({ orpc: (await import('@/test/orpc-mock')).orpcMock }));
 
@@ -68,6 +68,14 @@ describe('HomeScreen', () => {
     expect(await screen.findByText('In credit')).toBeTruthy();
     expect(screen.getByText('₹500')).toBeTruthy();
     expect(screen.queryByText(/Advance/)).toBeNull();
+  });
+
+  it('skips a released exam without the student\'s marks in the result alert', () => {
+    renderWithQuery(
+      <LatestResultAlert exams={[{ ...exams[1]!, examId: 'x.y.z', name: 'Not sat', releasedAt: new Date('2026-11-01T00:00:00Z'), percentage: null, grade: null }, exams[1]!]} />,
+    );
+    expect(screen.getByText('Half-Yearly results are out')).toBeTruthy();
+    expect(screen.queryByText(/Not sat/)).toBeNull();
   });
 
   it('greets by the time of day', () => {

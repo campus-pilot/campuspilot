@@ -12,12 +12,11 @@ import { Badge } from '@campuspilot/ui/components/reui/badge';
 
 import { absMinor, firstNameOf, formatDate, formatMoney, formatPercent, greetingFor, isZeroMinor } from '@/lib/format';
 import { orpc } from '@/lib/orpc';
-import { currentEnrollment } from '@/lib/profile';
 import { ScreenError, ScreenLoading } from '../screen';
 
 /** Greets by first name and states the session so a guardian knows which year they are looking at. */
 export function Greeting({ profile, hour }: { profile: CadetProfileDto; hour: number }) {
-  const enrollment = currentEnrollment(profile);
+  const enrollment = profile.current;
   const facts = [
     enrollment ? `Session ${enrollment.sessionLabel}` : null,
     enrollment?.rollNo != null ? `Roll ${enrollment.rollNo}` : null,
@@ -39,7 +38,8 @@ export function Greeting({ profile, hour }: { profile: CadetProfileDto; hour: nu
  */
 export function LatestResultAlert({ exams }: { exams: CadetExamListItemDto[] }) {
   const latest = exams
-    .filter((exam) => exam.state === 'released' && exam.releasedAt)
+    // Only results with the student's own marks: a class record they moved into may list a released exam they did not sit.
+    .filter((exam) => exam.state === 'released' && exam.releasedAt && exam.percentage !== null)
     .sort((a, b) => new Date(b.releasedAt!).getTime() - new Date(a.releasedAt!).getTime())[0];
   if (!latest) return null;
   const facts = [

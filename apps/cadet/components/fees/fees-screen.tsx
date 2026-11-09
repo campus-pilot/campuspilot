@@ -22,7 +22,7 @@ import { cn } from '@campuspilot/ui/lib/utils';
 
 import { absMinor, formatBalance, formatDate, formatMoney, formatMonth, isZeroMinor } from '@/lib/format';
 import { orpc } from '@/lib/orpc';
-import { currentEnrollment, enrollmentLabel } from '@/lib/profile';
+import { enrollmentLabel } from '@/lib/profile';
 import { EmptyState, ScreenError, ScreenHeader, ScreenLoading, SectionLabel } from '../screen';
 
 type FeeCurrency = CadetFeeSummaryDto['currencies'][number];
@@ -198,7 +198,7 @@ function Ledger() {
 export function FeesScreen() {
   const profile = useQuery(orpc.getProfile.queryOptions());
   const summary = useQuery(orpc.getFeeSummary.queryOptions());
-  const enrollment = profile.data ? currentEnrollment(profile.data) : null;
+  const enrollment = profile.data?.current ?? null;
   return (
     <>
       <ScreenHeader title="Fees" description={enrollmentLabel(enrollment)} />
