@@ -6,6 +6,7 @@ import { redirect, useRouter } from 'next/navigation';
 
 import { authClient } from '@/lib/auth-client';
 import { orpc } from '@/lib/orpc';
+import { CadetNotificationBell } from './notifications/cadet-notifications';
 
 /** Signs out of the Cadet Portal only; a staff session in the same browser stays. */
 function SignOutButton() {
@@ -35,9 +36,12 @@ export function CadetHome() {
   if (!session) redirect('/sign-in');
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-col gap-1">
-        <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Cadet Portal</p>
-        <AdmissionName />
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex flex-col gap-1">
+          <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Cadet Portal</p>
+          <AdmissionName />
+        </div>
+        <CadetNotificationBell />
       </div>
       <div>
         <SignOutButton />
