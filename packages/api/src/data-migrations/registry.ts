@@ -1,3 +1,4 @@
+import { admissionPhoneE164Migration } from './migrations/admission-phone-e164';
 import type { DataMigration } from './types';
 
 /**
@@ -7,7 +8,10 @@ import type { DataMigration } from './types';
  * registered again after a deploy) and hands it to the worker; the server
  * does not wait for it (D-36), so code must tolerate unmigrated rows.
  */
-export const DATA_MIGRATIONS: readonly DataMigration[] = [];
+export const DATA_MIGRATIONS: readonly DataMigration[] = [
+  // Plan Phase 1c (D-2b, D-32, D-34).
+  admissionPhoneE164Migration,
+];
 
 const byId = new Map(DATA_MIGRATIONS.map((migration) => [migration.id, migration]));
 
