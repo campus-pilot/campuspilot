@@ -140,6 +140,24 @@ describe('WhatsApp channel', () => {
     expect(byAdmission.get(admission.id)).toMatchObject({ status: 'sent', providerMessageId: 'wamid.doc', documentTemplateRevisionId: 'artf_receipt_rev' });
   });
 
+  it('sends the text template when the document template was deselected after availability was checked', async () => {
+    const school = await createTestSchool();
+    const admission = await student(school.id);
+    const payment = {
+      type: 'payment.received' as const,
+      data: { paymentId: 'fpay_2', sessionId: 'sess_1', admissionId: admission.id, receiptNumber: 'RCP/2026-27/000002', amountMinor: '250000', currency: 'INR', receivedAt: '2026-11-09T10:00:00.000Z', studentName: 'Meera Singh' },
+      schoolId: school.id,
+      recipients: { kind: 'admissions' as const, admissionIds: [admission.id] },
+    };
+    const receipt = { available: async () => true, produce: vi.fn(async () => 'template_unavailable' as const) };
+    const fetchMock = vi.fn<ChannelFetch>(async () => sent('wamid.text'));
+    const { byAdmission } = await dispatch(payment, fetchMock, { documentSources: { payment_receipt: receipt, report_card: null } });
+    expect(receipt.produce).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(requestBody(fetchMock.mock.calls[0]!).template.name).toBe('school_update');
+    expect(byAdmission.get(admission.id)).toMatchObject({ status: 'sent', providerMessageId: 'wamid.text', documentTemplateRevisionId: null });
+  });
+
   it('re-checks consent and the number right before sending', async () => {
     const school = await createTestSchool();
     const stopped = await student(school.id);

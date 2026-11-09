@@ -78,12 +78,15 @@ describe('result notifications', () => {
     const source = createReportCardDocumentSource();
     const context = { schoolId };
     await expect(source.available(context)).resolves.toBe(false);
+    // Without a selected template the source says so, instead of "never producible".
+    await expect(source.produce({ kind: 'report_card', sessionId, examSlug: 'final', filename: 'Report card.pdf', admissionId: admissionOf.get(approvedStudent)! }, context)).resolves.toBe('template_unavailable');
     const template = await principal.school.selectMarketplaceTemplate({ schoolId, documentType: 'report_card', slug: 'report_card-default', expectedRevisionId: null });
     await expect(source.available(context)).resolves.toBe(true);
     const request = { kind: 'report_card' as const, sessionId, examSlug: 'final', filename: 'Report card.pdf' };
     const document = await source.produce({ ...request, admissionId: admissionOf.get(approvedStudent)! }, context);
     expect(document).toMatchObject({ mimeType: 'application/pdf', templateRevisionId: template.artifact.id });
-    expect((await PDFDocument.load(document!.bytes)).getPageCount()).toBe(1);
+    if (!document || document === 'template_unavailable') throw new Error('Expected a report card PDF.');
+    expect((await PDFDocument.load(document.bytes)).getPageCount()).toBe(1);
     await expect(source.produce({ ...request, admissionId: admissionOf.get(pendingStudent)! }, context)).resolves.toBeNull();
     await expect(source.produce({ ...request, admissionId: 'adm_unknown' }, context)).resolves.toBeNull();
   });

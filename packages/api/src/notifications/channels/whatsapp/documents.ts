@@ -24,19 +24,28 @@ export const WHATSAPP_DOCUMENT_KINDS = ['payment_receipt', 'report_card'] as con
 export type NotificationDocument = { bytes: Uint8Array; mimeType: 'application/pdf'; templateRevisionId: string | null };
 
 /**
+ * `produce`'s answer when the school has no template for the kind any more
+ * (deselected between `available` and `produce`). Unlike `null`, this says
+ * nothing about the fact itself, so the message goes out as the text
+ * `school_update`, exactly as if `available` had said false.
+ */
+export const DOCUMENT_TEMPLATE_UNAVAILABLE = 'template_unavailable' as const;
+
+/**
  * Produces one kind of document.
  * - `available`: whether the school can produce this kind at all right now
  *   (for example it has selected a template). False sends text instead.
  * - `produce`: throwing counts as a transient failure (the send is retried
  *   with backoff); `null` means this document can never be produced (the
- *   fact is gone or was reversed), which fails the delivery.
+ *   fact is gone or was reversed), which fails the delivery;
+ *   {@link DOCUMENT_TEMPLATE_UNAVAILABLE} sends the text instead.
  */
 export type WhatsAppDocumentSource<K extends WhatsAppDocumentKind = WhatsAppDocumentKind> = {
   available: (context: { schoolId: string }) => Promise<boolean>;
   produce: (
     request: Extract<WhatsAppDocumentRequest, { kind: K }>,
     context: { schoolId: string },
-  ) => Promise<NotificationDocument | null>;
+  ) => Promise<NotificationDocument | typeof DOCUMENT_TEMPLATE_UNAVAILABLE | null>;
 };
 
 /** One source per kind; `null` = not available in this release. */

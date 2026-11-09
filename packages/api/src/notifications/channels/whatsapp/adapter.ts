@@ -20,7 +20,7 @@ import {
   type WhatsAppClientConfig,
 } from './client';
 import { whatsappDocumentSources } from './document-sources';
-import { WHATSAPP_DOCUMENT_KINDS, type WhatsAppDocumentKind, type WhatsAppDocumentRequest, type WhatsAppDocumentSources } from './documents';
+import { DOCUMENT_TEMPLATE_UNAVAILABLE, WHATSAPP_DOCUMENT_KINDS, type NotificationDocument, type WhatsAppDocumentKind, type WhatsAppDocumentRequest, type WhatsAppDocumentSources } from './documents';
 import { mapWhatsAppMessage, WHATSAPP_TEMPLATE_LANGUAGE, type WhatsAppMessagePlan } from './templates';
 
 /**
@@ -122,23 +122,36 @@ export function createWhatsAppAdapter(options: {
     } catch {
       return { kind: 'retry', errorCode: 'document_error', scope: 'recipient' };
     }
-    const plan = mapWhatsAppMessage(delivery.type, delivery.data as never, {
+    const mapMessage = () => mapWhatsAppMessage(delivery.type, delivery.data as never, {
       schoolName: admission.schoolName,
       canAttach: (kind) => attachable.has(kind),
     });
+    let plan = mapMessage();
     if (!plan) return { kind: 'failed', errorCode: 'no_template' };
 
-    const components: TemplateComponent[] = [];
-    let documentTemplateRevisionId: string | null = null;
+    let document: NotificationDocument | null = null;
     if (plan.template === 'school_document') {
-      let document;
+      let produced: Awaited<ReturnType<typeof produceDocument>>;
       try {
-        document = await produceDocument(plan.document, delivery.schoolId);
+        produced = await produceDocument(plan.document, delivery.schoolId);
       } catch {
         return { kind: 'retry', errorCode: 'document_error', scope: 'recipient' };
       }
-      if (!document) return { kind: 'failed', errorCode: 'document_unavailable' };
-      documentTemplateRevisionId = document.templateRevisionId;
+      if (produced === DOCUMENT_TEMPLATE_UNAVAILABLE) {
+        // The school deselected the template since availability was checked:
+        // send the same fact as text, as if it had never been available.
+        attachable.delete(plan.document.kind);
+        plan = mapMessage();
+        if (!plan) return { kind: 'failed', errorCode: 'no_template' };
+      } else if (!produced) {
+        return { kind: 'failed', errorCode: 'document_unavailable' };
+      } else {
+        document = produced;
+      }
+    }
+
+    const components: TemplateComponent[] = [];
+    if (plan.template === 'school_document' && document) {
       const filename = safeFilename(plan.document.filename);
       const upload = await uploadMedia(options.config, fetcher, { bytes: document.bytes, mimeType: document.mimeType, filename });
       if (!upload.ok) return classifyWhatsAppFailure(upload);
@@ -153,7 +166,7 @@ export function createWhatsAppAdapter(options: {
       components,
     });
     if (!sent.ok) return classifyWhatsAppFailure(sent);
-    return { kind: 'sent', providerMessageId: sent.messageId, documentTemplateRevisionId };
+    return { kind: 'sent', providerMessageId: sent.messageId, documentTemplateRevisionId: document?.templateRevisionId ?? null };
   }
 
   return { channel: 'whatsapp', available: true, decide: decideWhatsApp, send };

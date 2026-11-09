@@ -95,7 +95,8 @@ describe("immutable finance document contexts", () => {
 
     const document = await source.produce(request, context);
     expect(document).toMatchObject({ mimeType: "application/pdf", templateRevisionId: template.artifact.id });
-    const pdf = await PDFDocument.load(document!.bytes);
+    if (!document || document === "template_unavailable") throw new Error("Expected a receipt PDF.");
+    const pdf = await PDFDocument.load(document.bytes);
     expect(pdf.getPageCount()).toBe(1);
     // An attachment, not a document of the school's history.
     await expect(db.select().from(artifactTable).where(eq(artifactTable.schoolId, scenario.school.id))).resolves.toHaveLength(artifactsBefore.length);
