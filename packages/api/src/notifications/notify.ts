@@ -10,7 +10,7 @@ import {
   type NotificationType,
 } from '@campuspilot/db/notifications/catalogue';
 import { notificationEventTable } from '@campuspilot/db/schema/notification';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 
 /**
  * What an emitter states about an event: its type, its facts, the school,
@@ -31,6 +31,9 @@ export type NotifyInput<T extends NotificationType> = {
   /** Staff member whose action emitted it; omit for system events. */
   createdBy?: string | null;
 };
+
+/** One emit of any type, correlated (`data` and `recipients` match `type`). */
+export type AnyNotifyInput = { [T in NotificationType]: NotifyInput<T> }[NotificationType];
 
 /** Refused emit: a programming error in the caller, never a user error. */
 export class NotifyError extends Error {
@@ -55,6 +58,12 @@ export async function notify<T extends NotificationType>(
   tx: DatabaseExecutor,
   input: NotifyInput<T>,
 ): Promise<{ eventId: string; created: boolean }> {
+  const [result] = await notifyMany(tx, [input as AnyNotifyInput]);
+  return result!;
+}
+
+/** Validates one emit and returns the row to insert (see {@link notify}). */
+function toEventRow(input: AnyNotifyInput) {
   const entry = notificationCatalogue[input.type];
   if (!entry) throw new NotifyError(`Unknown notification type ${String(input.type)}.`);
   const data = notificationPayloadSchemas[input.type].safeParse(input.data);
@@ -69,26 +78,58 @@ export async function notify<T extends NotificationType>(
   const deduplicated = recipients.kind === 'staff_users'
     ? { kind: recipients.kind, userIds: [...new Set(recipients.userIds)] }
     : { kind: recipients.kind, admissionIds: [...new Set(recipients.admissionIds)] };
+  return {
+    schoolId: input.schoolId,
+    key: input.key,
+    type: input.type,
+    data: data.data as Record<string, unknown>,
+    recipients: deduplicated,
+    createdBy: input.createdBy ?? null,
+  };
+}
 
-  const [inserted] = await tx
-    .insert(notificationEventTable)
-    .values({
-      schoolId: input.schoolId,
-      key: input.key,
-      type: input.type,
-      data: data.data as Record<string, unknown>,
-      recipients: deduplicated,
-      createdBy: input.createdBy ?? null,
-    })
-    .onConflictDoNothing({ target: [notificationEventTable.schoolId, notificationEventTable.key] })
-    .returning({ id: notificationEventTable.id });
-  if (inserted) return { eventId: inserted.id, created: true };
+/** Events written per statement by {@link notifyMany}. */
+const NOTIFY_INSERT_CHUNK = 300;
 
-  const [existing] = await tx
-    .select({ id: notificationEventTable.id })
-    .from(notificationEventTable)
-    .where(and(eq(notificationEventTable.schoolId, input.schoolId), eq(notificationEventTable.key, input.key)))
-    .limit(1);
-  if (!existing) throw new NotifyError('The notification event conflicted but could not be read back.');
-  return { eventId: existing.id, created: false };
+/**
+ * {@link notify} for many events of one school at once (for example one
+ * `bill.issued` per bill of a billing run), in bounded multi-row inserts
+ * instead of one round trip per event. Same rules as `notify`: every input
+ * is validated, keys are idempotent within the school (an existing key
+ * returns its event with `created: false`), and the rows commit or roll
+ * back with the caller's transaction. Results are in input order. Keys must
+ * be distinct within one call.
+ */
+export async function notifyMany(
+  tx: DatabaseExecutor,
+  inputs: readonly AnyNotifyInput[],
+): Promise<{ eventId: string; created: boolean }[]> {
+  if (inputs.length === 0) return [];
+  const rows = inputs.map((input) => toEventRow(input));
+  const schoolId = rows[0]!.schoolId;
+  if (rows.some((row) => row.schoolId !== schoolId)) throw new NotifyError('notifyMany emits events of one school per call.');
+  if (new Set(rows.map((row) => row.key)).size !== rows.length) throw new NotifyError('notifyMany keys must be distinct.');
+
+  const idByKey = new Map<string, { eventId: string; created: boolean }>();
+  for (let start = 0; start < rows.length; start += NOTIFY_INSERT_CHUNK) {
+    const chunk = rows.slice(start, start + NOTIFY_INSERT_CHUNK);
+    const inserted = await tx
+      .insert(notificationEventTable)
+      .values(chunk)
+      .onConflictDoNothing({ target: [notificationEventTable.schoolId, notificationEventTable.key] })
+      .returning({ id: notificationEventTable.id, key: notificationEventTable.key });
+    for (const row of inserted) idByKey.set(row.key, { eventId: row.id, created: true });
+    const missing = chunk.map((row) => row.key).filter((key) => !idByKey.has(key));
+    if (missing.length === 0) continue;
+    const existing = await tx
+      .select({ id: notificationEventTable.id, key: notificationEventTable.key })
+      .from(notificationEventTable)
+      .where(and(eq(notificationEventTable.schoolId, schoolId), inArray(notificationEventTable.key, missing)));
+    for (const row of existing) idByKey.set(row.key, { eventId: row.id, created: false });
+  }
+  return rows.map((row) => {
+    const result = idByKey.get(row.key);
+    if (!result) throw new NotifyError('The notification event conflicted but could not be read back.');
+    return result;
+  });
 }

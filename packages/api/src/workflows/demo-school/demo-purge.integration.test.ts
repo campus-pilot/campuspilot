@@ -103,7 +103,8 @@ describe('purge_demo_school and the demo-only finance exception', () => {
     const result = await db.execute<{ counts: Record<string, number> }>(
       sql`SELECT purge_demo_school(${demo.school.id}) AS counts`,
     );
-    expect(result.rows[0]!.counts).toMatchObject({ finance_payment: 1, finance_bill: 1, user: 1, school_member: expect.any(Number), notification_event: 2, notification: 2, notification_delivery: 2 });
+    // Events: the two emitted above plus the bill's and the payment's own (Phase 5); only the two above were fanned out.
+    expect(result.rows[0]!.counts).toMatchObject({ finance_payment: 1, finance_bill: 1, user: 1, school_member: expect.any(Number), notification_event: 4, notification: 2, notification_delivery: 2 });
 
     const remaining = await rowsReferencingSchool(demo.school.id);
     expect(Object.values(remaining).every((count) => count === 0)).toBe(true);

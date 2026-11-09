@@ -86,7 +86,8 @@ describe('notification outbox', () => {
     vi.mocked(sendNotificationDispatch).mockResolvedValue({ invocationId: 'inv_retry2' });
     await sweepNotificationOutbox(db);
     expect(await read()).toMatchObject({ status: 'pending', dispatchAttempt: 2, failureRetryable: null, error: null, submitInvocationId: 'inv_retry2' });
-    expect(sendNotificationDispatch).toHaveBeenLastCalledWith(eventId, 2);
+    // The sweep is platform-wide: other files' pending events may be sent in the same sweep.
+    expect(sendNotificationDispatch).toHaveBeenCalledWith(eventId, 2);
 
     // The last attempt's failure stays failed.
     await failAt(3, 120);

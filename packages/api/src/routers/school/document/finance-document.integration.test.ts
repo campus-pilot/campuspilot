@@ -10,6 +10,7 @@ import { createFinanceConfig, createFinanceIdempotencyKey } from "../../../../te
 import { createFinanceScenario, type FinanceScenario } from "../../../../test/finance/scenario";
 import { createTestAdmission, createTestStudent } from "../../../../test/fixtures";
 import { buildFinanceDocumentContexts } from "./finance-document.context";
+import { createReceiptDocumentSource } from "../../../notifications/documents/receipt";
 
 async function expectA4Pdf(url: string, expectedPages: number) {
   const response = await fetch(url);
@@ -64,6 +65,54 @@ describe("immutable finance document contexts", () => {
       previousBalance: "0.00",
       remainingBalance: "-125.00",
     });
+  });
+
+  it("renders one payment's WhatsApp receipt PDF with the selected template, and none once reversed", async () => {
+    const payment = await scenario.actors.accountant.client.school.recordPayment({
+      schoolId: scenario.school.id,
+      admissionId: scenario.admission.id,
+      sessionId: scenario.activeSession.id,
+      amountMinor: "12500",
+      currency: "INR",
+      method: "cash",
+      receivedAt: "2026-10-02T10:00:00Z",
+      effectiveAt: "2026-10-02T10:00:00Z",
+      idempotencyKey: createFinanceIdempotencyKey("notification-receipt"),
+    });
+    const source = createReceiptDocumentSource();
+    const context = { schoolId: scenario.school.id };
+    const request = { kind: "payment_receipt" as const, paymentId: payment.id, sessionId: scenario.activeSession.id, admissionId: scenario.admission.id, filename: "Receipt.pdf" };
+    // No receipt template selected yet: the message goes out as text.
+    await expect(source.available(context)).resolves.toBe(false);
+    const template = await scenario.actors.accountant.client.school.selectMarketplaceTemplate({
+      schoolId: scenario.school.id,
+      documentType: "receipt",
+      slug: "receipt-default",
+      expectedRevisionId: null,
+    });
+    await expect(source.available(context)).resolves.toBe(true);
+    const artifactsBefore = await db.select().from(artifactTable).where(eq(artifactTable.schoolId, scenario.school.id));
+
+    const document = await source.produce(request, context);
+    expect(document).toMatchObject({ mimeType: "application/pdf", templateRevisionId: template.artifact.id });
+    const pdf = await PDFDocument.load(document!.bytes);
+    expect(pdf.getPageCount()).toBe(1);
+    // An attachment, not a document of the school's history.
+    await expect(db.select().from(artifactTable).where(eq(artifactTable.schoolId, scenario.school.id))).resolves.toHaveLength(artifactsBefore.length);
+    // Never another admission's or session's payment.
+    await expect(source.produce({ ...request, admissionId: "adm_other" }, context)).resolves.toBeNull();
+    await expect(source.produce({ ...request, sessionId: scenario.historicalSession.id }, context)).resolves.toBeNull();
+
+    await scenario.actors.accountant.client.school.reverseLedgerEntry({
+      schoolId: scenario.school.id,
+      admissionId: scenario.admission.id,
+      sessionId: scenario.activeSession.id,
+      ledgerEntryId: payment.ledgerEntryId,
+      reason: "Payment entered in error",
+      effectiveAt: "2026-10-03T10:00:00Z",
+      idempotencyKey: createFinanceIdempotencyKey("notification-receipt-reversal"),
+    });
+    await expect(source.produce(request, context)).resolves.toBeNull();
   });
 
   it("rejects a stale global receipt selection after its payment is reversed", async () => {

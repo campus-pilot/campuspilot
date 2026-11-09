@@ -19,7 +19,8 @@ import {
   type TemplateComponent,
   type WhatsAppClientConfig,
 } from './client';
-import { whatsappDocumentSources, type WhatsAppDocumentRequest, type WhatsAppDocumentSources } from './documents';
+import { whatsappDocumentSources } from './document-sources';
+import { WHATSAPP_DOCUMENT_KINDS, type WhatsAppDocumentKind, type WhatsAppDocumentRequest, type WhatsAppDocumentSources } from './documents';
 import { mapWhatsAppMessage, WHATSAPP_TEMPLATE_LANGUAGE, type WhatsAppMessagePlan } from './templates';
 
 /**
@@ -76,14 +77,24 @@ export function createWhatsAppAdapter(options: {
   async function produceDocument(request: WhatsAppDocumentRequest, schoolId: string) {
     switch (request.kind) {
       case 'payment_receipt':
-        return sources.payment_receipt ? sources.payment_receipt(request, { schoolId }) : null;
+        return sources.payment_receipt ? sources.payment_receipt.produce(request, { schoolId }) : null;
       case 'report_card':
-        return sources.report_card ? sources.report_card(request, { schoolId }) : null;
+        return sources.report_card ? sources.report_card.produce(request, { schoolId }) : null;
       default: {
         const unhandled: never = request;
         throw new Error(`Unhandled document kind ${JSON.stringify(unhandled)}.`);
       }
     }
+  }
+
+  /** Kinds the school can attach now (a source exists and says it is available). */
+  async function attachableKinds(schoolId: string) {
+    const kinds = new Set<WhatsAppDocumentKind>();
+    for (const kind of WHATSAPP_DOCUMENT_KINDS) {
+      const source = sources[kind];
+      if (source && (await source.available({ schoolId }))) kinds.add(kind);
+    }
+    return kinds;
   }
 
   async function send(delivery: ClaimedDelivery): Promise<DeliverySendOutcome> {
@@ -105,13 +116,20 @@ export function createWhatsAppAdapter(options: {
     // The number staff entered changed after the fan-out: never message the old one.
     if (eligibility.number !== delivery.destination) return { kind: 'failed', errorCode: 'number_changed' };
 
+    let attachable: Set<WhatsAppDocumentKind>;
+    try {
+      attachable = await attachableKinds(delivery.schoolId);
+    } catch {
+      return { kind: 'retry', errorCode: 'document_error', scope: 'recipient' };
+    }
     const plan = mapWhatsAppMessage(delivery.type, delivery.data as never, {
       schoolName: admission.schoolName,
-      canAttach: (kind) => sources[kind] !== null,
+      canAttach: (kind) => attachable.has(kind),
     });
     if (!plan) return { kind: 'failed', errorCode: 'no_template' };
 
     const components: TemplateComponent[] = [];
+    let documentTemplateRevisionId: string | null = null;
     if (plan.template === 'school_document') {
       let document;
       try {
@@ -120,6 +138,7 @@ export function createWhatsAppAdapter(options: {
         return { kind: 'retry', errorCode: 'document_error', scope: 'recipient' };
       }
       if (!document) return { kind: 'failed', errorCode: 'document_unavailable' };
+      documentTemplateRevisionId = document.templateRevisionId;
       const filename = safeFilename(plan.document.filename);
       const upload = await uploadMedia(options.config, fetcher, { bytes: document.bytes, mimeType: document.mimeType, filename });
       if (!upload.ok) return classifyWhatsAppFailure(upload);
@@ -134,7 +153,7 @@ export function createWhatsAppAdapter(options: {
       components,
     });
     if (!sent.ok) return classifyWhatsAppFailure(sent);
-    return { kind: 'sent', providerMessageId: sent.messageId };
+    return { kind: 'sent', providerMessageId: sent.messageId, documentTemplateRevisionId };
   }
 
   return { channel: 'whatsapp', available: true, decide: decideWhatsApp, send };

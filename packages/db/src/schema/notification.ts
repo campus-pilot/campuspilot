@@ -265,6 +265,14 @@ export const notificationDeliveryTable = pgTable(
     /** Provider error code, never provider prose with personal data. */
     errorCode: text("error_code"),
     errorMessage: text("error_message"),
+    /**
+     * Template revision (`artifact.id`) of the PDF attached to the message,
+     * when one was rendered through the document system (WhatsApp
+     * `school_document`). The PDF itself is not stored; this records which
+     * revision produced it. Not a foreign key: provenance outlives
+     * revisions, as on generated artifacts.
+     */
+    documentTemplateRevisionId: text("document_template_revision_id"),
     attempts: integer("attempts").notNull().default(0),
     claimedAt: timestamp("claimed_at", { withTimezone: true }),
     sentAt: timestamp("sent_at", { withTimezone: true }),

@@ -4,12 +4,12 @@
  * the document kind for the bytes at send time, uploads them to WhatsApp
  * media and sends the media ID. No public URL is involved.
  *
- * No source exists yet: receipts arrive with Phase 5 and per-student report
- * cards with Phase 6. Until a kind has a source, the template mapper sends
- * the same fact as a `school_update` text instead (see `./templates.ts`).
- * To add one, implement {@link WhatsAppDocumentSource} (render the PDF for
- * exactly the request's IDs, scoped to the school) and register it in
- * {@link whatsappDocumentSources}.
+ * A source is consulted twice per send: `available` decides whether the
+ * message is a `school_document` (with the PDF) or the same fact as a
+ * `school_update` text (for example when the school has not selected a
+ * receipt template, see `./templates.ts`); `produce` then renders exactly
+ * the request's document, scoped to the school. Sources live in
+ * `../../documents/` and render through the document system.
  */
 
 /** Which document a message needs, by identifiers only. */
@@ -18,24 +18,26 @@ export type WhatsAppDocumentRequest =
   | { kind: 'report_card'; sessionId: string; examSlug: string; admissionId: string; filename: string };
 
 export type WhatsAppDocumentKind = WhatsAppDocumentRequest['kind'];
+export const WHATSAPP_DOCUMENT_KINDS = ['payment_receipt', 'report_card'] as const satisfies readonly WhatsAppDocumentKind[];
 
-/** A produced PDF. */
-export type NotificationDocument = { bytes: Uint8Array; mimeType: 'application/pdf' };
+/** A produced PDF and the template revision it was rendered with (provenance). */
+export type NotificationDocument = { bytes: Uint8Array; mimeType: 'application/pdf'; templateRevisionId: string | null };
 
 /**
- * Produces one document. Throwing counts as a transient failure (the send is
- * retried with backoff); return `null` when the document can never be
- * produced (the fact no longer exists), which fails the delivery.
+ * Produces one kind of document.
+ * - `available`: whether the school can produce this kind at all right now
+ *   (for example it has selected a template). False sends text instead.
+ * - `produce`: throwing counts as a transient failure (the send is retried
+ *   with backoff); `null` means this document can never be produced (the
+ *   fact is gone or was reversed), which fails the delivery.
  */
-export type WhatsAppDocumentSource<K extends WhatsAppDocumentKind = WhatsAppDocumentKind> = (
-  request: Extract<WhatsAppDocumentRequest, { kind: K }>,
-  context: { schoolId: string },
-) => Promise<NotificationDocument | null>;
-
-export type WhatsAppDocumentSources = { [K in WhatsAppDocumentKind]: WhatsAppDocumentSource<K> | null };
-
-/** Registered sources; `null` = not available in this release. */
-export const whatsappDocumentSources: WhatsAppDocumentSources = {
-  payment_receipt: null,
-  report_card: null,
+export type WhatsAppDocumentSource<K extends WhatsAppDocumentKind = WhatsAppDocumentKind> = {
+  available: (context: { schoolId: string }) => Promise<boolean>;
+  produce: (
+    request: Extract<WhatsAppDocumentRequest, { kind: K }>,
+    context: { schoolId: string },
+  ) => Promise<NotificationDocument | null>;
 };
+
+/** One source per kind; `null` = not available in this release. */
+export type WhatsAppDocumentSources = { [K in WhatsAppDocumentKind]: WhatsAppDocumentSource<K> | null };

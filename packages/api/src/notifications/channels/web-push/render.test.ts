@@ -35,6 +35,10 @@ describe('web push rendering', () => {
     expect(formatMinorAmount('12', 'XXX')).toBe('XXX 12');
     expect(formatPeriodKey('2026-03')).toBe('March 2026');
     expect(formatPeriodKey('term-1')).toBe('term-1');
+    expect(formatPeriodKey('monthly:2026-10')).toBe('October 2026');
+    expect(formatPeriodKey('quarterly:2026-10')).toBe('the quarter from October 2026');
+    expect(formatPeriodKey('yearly:2026-04')).toBe('the year from April 2026');
+    expect(formatPeriodKey('weekly:2026-04')).toBe('weekly:2026-04');
   });
 });
 

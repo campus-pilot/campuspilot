@@ -120,13 +120,14 @@ describe('WhatsApp channel', () => {
     await dispatch(payment, textOnly);
     expect(requestBody(textOnly.mock.calls[0]!).template.name).toBe('school_update');
 
-    const receipt = vi.fn(async () => ({ bytes: new TextEncoder().encode('%PDF-1.7 test'), mimeType: 'application/pdf' as const }));
+    const produce = vi.fn(async () => ({ bytes: new TextEncoder().encode('%PDF-1.7 test'), mimeType: 'application/pdf' as const, templateRevisionId: 'artf_receipt_rev' }));
+    const receipt = { available: async () => true, produce };
     const withPdf = vi
       .fn<ChannelFetch>()
       .mockResolvedValueOnce(new Response(JSON.stringify({ id: 'media-1' }), { status: 200 }))
       .mockResolvedValueOnce(sent('wamid.doc'));
     const { byAdmission } = await dispatch(payment, withPdf, { documentSources: { payment_receipt: receipt, report_card: null } });
-    expect(receipt).toHaveBeenCalledWith(expect.objectContaining({ kind: 'payment_receipt', paymentId: 'fpay_1', admissionId: admission.id }), { schoolId: school.id });
+    expect(produce).toHaveBeenCalledWith(expect.objectContaining({ kind: 'payment_receipt', paymentId: 'fpay_1', admissionId: admission.id }), { schoolId: school.id });
     const [uploadUrl, uploadInit] = withPdf.mock.calls[0]!;
     expect(uploadUrl).toBe('https://graph.test/v24.0/1234567890/media');
     const form = uploadInit.body as FormData;
@@ -136,7 +137,7 @@ describe('WhatsApp channel', () => {
     expect(message.template.name).toBe('school_document');
     expect(message.template.components[0]).toEqual({ type: 'header', parameters: [{ type: 'document', document: { id: 'media-1', filename: 'Receipt RCP-2026-27-000001.pdf' } }] });
     expect(message.template.components[1].parameters.find((p: { parameter_name: string }) => p.parameter_name === 'document_name').text).toBe('payment receipt for ₹2,500.00');
-    expect(byAdmission.get(admission.id)).toMatchObject({ status: 'sent', providerMessageId: 'wamid.doc' });
+    expect(byAdmission.get(admission.id)).toMatchObject({ status: 'sent', providerMessageId: 'wamid.doc', documentTemplateRevisionId: 'artf_receipt_rev' });
   });
 
   it('re-checks consent and the number right before sending', async () => {

@@ -4,16 +4,19 @@ import { db } from '@campuspilot/db';
 import { admissionTable } from '@campuspilot/db/schema/admission';
 import { user } from '@campuspilot/db/schema/auth';
 import { demoSchoolJobTable } from '@campuspilot/db/schema/demo-school-job';
-import { financeBillTable, financePaymentTable } from '@campuspilot/db/schema/finance';
+import { financeBillRunTable, financeBillTable, financePaymentTable } from '@campuspilot/db/schema/finance';
+import { notificationDeliveryTable, notificationEventTable, notificationTable } from '@campuspilot/db/schema/notification';
 import { schoolMemberTable } from '@campuspilot/db/schema/school-member';
 import { schoolUserRoleTable } from '@campuspilot/db/schema/school-user-role';
 import { studentTable } from '@campuspilot/db/schema/student';
 import { env } from '@campuspilot/env/server';
 import { getS3Client } from '@campuspilot/s3/client';
 import { and, count, eq } from 'drizzle-orm';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { retryFinanceConflict } from '../../../test/finance/assertions';
+import { runNotificationDispatch } from '../../notifications/dispatch';
+import type { NotificationChannelAdapter } from '../../notifications/channels';
 import { createAdminSession, createTestClient, createTestUser, type UserSession } from '../../../test/fixtures';
 import { loadDemoJob, startDemoJob, type DemoJobSnapshot } from './job-store';
 import { buildDemoPlan } from './plan';
@@ -25,14 +28,15 @@ const AS_OF = '2026-12-20T06:30:00.000Z';
 const SEED = 'integration-seed';
 
 async function snapshotCounts(schoolId: string) {
-  const [[admissions], [students], [bills], [payments], [demoUsers]] = await Promise.all([
+  const [[admissions], [students], [bills], [payments], [demoUsers], [events]] = await Promise.all([
     db.select({ value: count() }).from(admissionTable).where(eq(admissionTable.schoolId, schoolId)),
     db.select({ value: count() }).from(studentTable).where(eq(studentTable.schoolId, schoolId)),
     db.select({ value: count() }).from(financeBillTable).where(eq(financeBillTable.schoolId, schoolId)),
     db.select({ value: count() }).from(financePaymentTable).where(eq(financePaymentTable.schoolId, schoolId)),
     db.select({ value: count() }).from(user).where(eq(user.demoSchoolId, schoolId)),
+    db.select({ value: count() }).from(notificationEventTable).where(eq(notificationEventTable.schoolId, schoolId)),
   ]);
-  return { admissions: admissions!.value, students: students!.value, bills: bills!.value, payments: payments!.value, demoUsers: demoUsers!.value };
+  return { admissions: admissions!.value, students: students!.value, bills: bills!.value, payments: payments!.value, demoUsers: demoUsers!.value, notificationEvents: events!.value };
 }
 
 async function readCredentials(key: string) {
@@ -130,6 +134,25 @@ describe('demo school seed steps (2 classes, without Restate)', () => {
 
     const downloaded = await client.systemAdmin.getDemoCredentialsDownload({ schoolId: job.schoolId });
     expect(downloaded.fileName).toBe(`${job.school.slug}-credentials.csv`);
+
+    // Seed steps call the real posting procedures, so every bill, payment and
+    // billing run emitted its notification event (inbox items once fanned out).
+    const counts = await snapshotCounts(job.schoolId);
+    const [runs] = await db.select({ value: count() }).from(financeBillRunTable).where(eq(financeBillRunTable.schoolId, job.schoolId));
+    expect(counts.notificationEvents).toBe(counts.bills + counts.payments + runs!.value);
+    // A demo never sends outside the inbox, even with both channels switched on.
+    const send = vi.fn(async () => ({ kind: 'sent' as const, providerMessageId: 'never' }));
+    const available = (channel: 'web_push' | 'whatsapp'): NotificationChannelAdapter => ({ channel, available: true, decide: () => [{ status: 'owed', destination: 'x' }], send });
+    const [paymentEvent] = await db.select().from(notificationEventTable).where(and(eq(notificationEventTable.schoolId, job.schoolId), eq(notificationEventTable.type, 'payment.received'))).limit(1);
+    await runNotificationDispatch({ eventId: paymentEvent!.id, step: (_name, action) => action(), sleep: async () => undefined, adapters: { web_push: available('web_push'), whatsapp: available('whatsapp') } });
+    const [inbox] = await db.select().from(notificationTable).where(eq(notificationTable.eventId, paymentEvent!.id));
+    expect(inbox).toMatchObject({ recipientKind: 'admission' });
+    const deliveries = await db.select().from(notificationDeliveryTable).where(eq(notificationDeliveryTable.notificationId, inbox!.id));
+    expect(deliveries.map((delivery) => [delivery.channel, delivery.status, delivery.skipReason]).sort()).toEqual([
+      ['web_push', 'skipped', 'demo_school'],
+      ['whatsapp', 'skipped', 'demo_school'],
+    ]);
+    expect(send).not.toHaveBeenCalled();
   }, 600_000);
 
   it('changes nothing when every step runs again', async () => {

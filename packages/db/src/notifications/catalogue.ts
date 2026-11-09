@@ -50,7 +50,8 @@ export type RemoteNotificationChannel =
 export const NOTIFICATION_AUDIENCES = ["staff_user", "admission"] as const;
 export type NotificationAudience = (typeof NOTIFICATION_AUDIENCES)[number];
 
-const minorAmount = z.string().regex(/^\d{1,18}$/);
+/** Non-negative minor units as decimal digits; up to 19 digits (PostgreSQL bigint range). */
+const minorAmount = z.string().regex(/^\d{1,19}$/);
 const currency = z.string().regex(/^[A-Z]{3}$/);
 const isoDate = z.iso.date();
 const isoInstant = z.iso.datetime({ offset: true });
@@ -70,8 +71,13 @@ export const notificationPayloadSchemas = {
     currency,
     issueDate: isoDate,
     studentName: label,
-    /** Billing period key (for example `2026-10`); absent for manual bills. */
+    /**
+     * Billing period key as stored on the bill (`<cadence>:YYYY-MM`, for
+     * example `monthly:2026-10`); absent for manual bills.
+     */
     periodKey: z.string().max(100).optional(),
+    /** The billing run that posted the bill; absent for manual bills (added in Phase 5). */
+    billRunId: id.optional(),
   }),
   /** A payment from the student was recorded (Phase 5). */
   "payment.received": z.object({

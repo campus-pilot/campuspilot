@@ -24,15 +24,29 @@ export function formatMinorAmount(minor: string, currency: string): string {
   }).format(decimal as unknown as number);
 }
 
-/** `2026-10` → `October 2026`; any other billing period key is shown as stored. */
-export function formatPeriodKey(periodKey: string): string {
-  const match = /^(\d{4})-(\d{2})$/.exec(periodKey);
-  if (!match) return periodKey;
-  const month = Number(match[2]);
-  if (month < 1 || month > 12) return periodKey;
+function monthYear(year: number, month: number) {
   return new Intl.DateTimeFormat('en-IN', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(
-    new Date(Date.UTC(Number(match[1]), month - 1, 1)),
+    new Date(Date.UTC(year, month - 1, 1)),
   );
+}
+
+/**
+ * Words for a billing period key as the billing domain stores it
+ * (`<cadence>:YYYY-MM`, the local start month, see
+ * `routers/school/billing/period.ts`): `monthly:2026-10` → `October 2026`,
+ * `quarterly:2026-10` → `the quarter from October 2026`, `yearly:2026-04` →
+ * `the year from April 2026`. A bare `YYYY-MM` reads as a month. Any other
+ * value is shown as stored.
+ */
+export function formatPeriodKey(periodKey: string): string {
+  const match = /^(?:(monthly|quarterly|yearly):)?(\d{4})-(\d{2})$/.exec(periodKey);
+  if (!match) return periodKey;
+  const month = Number(match[3]);
+  if (month < 1 || month > 12) return periodKey;
+  const start = monthYear(Number(match[2]), month);
+  if (match[1] === 'quarterly') return `the quarter from ${start}`;
+  if (match[1] === 'yearly') return `the year from ${start}`;
+  return start;
 }
 
 /** `2026-10-01` → `1 October 2026`. */

@@ -440,6 +440,27 @@ Adding a document type is cross-cutting. At minimum update:
 Do not make a type available in the card selector until its Settings route,
 marketplace designs, backend context, and permissions are complete.
 
+## Notification attachments (WhatsApp)
+
+WhatsApp `school_document` messages (receipts for `payment.received`, report
+cards for `exam.results_published`) carry one PDF rendered in the worker by
+`packages/api/src/notifications/documents/`. Those sources reuse this system
+unchanged: the school's selected immutable template revision, the type's own
+context builder (receipts with the `posted_unreversed_payments` policy and the
+payment's posting-time snapshot; report cards for exactly one registered,
+fully approved student), the restricted renderer, sanitising, batch layout and
+the same Gotenberg conversion. A domain refusal (reversed payment, unapproved
+results, invalid template) produces no PDF and the delivery fails visibly; it
+is never replaced by a partial document.
+
+These PDFs are message attachments, not documents of the school's history:
+no `artifact` row or S3 object is written, so they never appear in Document
+history and cannot be downloaded again. Provenance is kept on the delivery
+(`notification_delivery.document_template_revision_id`). When the school has
+no selected template of the type, the message is sent as text instead. The
+worker acts for the notification system, not for a staff member; staff
+generation permissions do not apply because nothing is generated for staff.
+
 ## History and downloads
 
 History is one session-wide list. It may accept backend filters for contextual API

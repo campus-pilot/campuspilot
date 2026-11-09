@@ -1,0 +1,1 @@
+ALTER TABLE "notification_delivery" ADD COLUMN "document_template_revision_id" text;

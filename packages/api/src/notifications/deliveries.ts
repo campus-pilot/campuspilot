@@ -65,7 +65,14 @@ export async function recordDeliveryOutcome(
     case 'sent':
       await db
         .update(notificationDeliveryTable)
-        .set({ status: 'sent', sentAt: now, providerMessageId: outcome.providerMessageId, errorCode: null, updatedAt: now })
+        .set({
+          status: 'sent',
+          sentAt: now,
+          providerMessageId: outcome.providerMessageId,
+          documentTemplateRevisionId: outcome.documentTemplateRevisionId ?? null,
+          errorCode: null,
+          updatedAt: now,
+        })
         .where(sending);
       return;
     case 'retry':

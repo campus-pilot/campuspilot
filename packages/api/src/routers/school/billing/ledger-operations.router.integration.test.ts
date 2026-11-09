@@ -1,5 +1,6 @@
 import { db } from "@campuspilot/db";
 import { admissionTable } from "@campuspilot/db/schema/admission";
+import { notificationEventTable } from "@campuspilot/db/schema/notification";
 import { schoolSessionTable } from "@campuspilot/db/schema/session";
 import { and, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -50,6 +51,16 @@ describe("school finance ledger operations", () => {
     const payment = await scenario.actors.accountant.client.school.recordPayment(command);
     expect(payment).toMatchObject({ amountMinor: "12000", receiptNumber: expect.any(String) });
     await expect(scenario.actors.accountant.client.school.recordPayment(command)).resolves.toMatchObject({ id: payment.id });
+    // Two manual bills and one payment, each notified once; the payment replay added nothing.
+    const events = await db.select().from(notificationEventTable).where(eq(notificationEventTable.schoolId, scenario.school.id));
+    expect(events.map((event) => event.type).sort()).toEqual(["bill.issued", "bill.issued", "payment.received"]);
+    expect(events.find((event) => event.type === "payment.received")).toMatchObject({
+      key: `payment:${payment.id}`,
+      recipients: { kind: "admissions", admissionIds: [scenario.admission.id] },
+      data: { paymentId: payment.id, receiptNumber: payment.receiptNumber, amountMinor: "12000", currency: "INR", receivedAt: "2040-05-02T10:00:00.000Z" },
+    });
+    expect(events.find((event) => event.key === `bill:${historical.id}`)).toMatchObject({ data: { billId: historical.id, totalAmountMinor: "5000", issueDate: "2039-05-01" } });
+    expect(events.find((event) => event.key === `bill:${historical.id}`)?.data).not.toHaveProperty("periodKey");
 
     const summary = await scenario.actors.platformAdmin.client.school.getAdmissionFinanceSummary({ schoolId: scenario.school.id, admissionId: scenario.admission.id, sessionId: scenario.activeSession.id });
     expect(summary.currencies).toEqual([expect.objectContaining({ currency: "INR", balanceMinor: "3000", dueMinor: "3000", creditMinor: "0", billedMinor: "10000", collectedMinor: "12000", billCounts: { posted: 1, reversed: 0 } })]);

@@ -102,6 +102,31 @@ export function handOffNotificationEvent(eventId: string, db: DatabaseExecutor =
   });
 }
 
+/** Hand-overs one {@link handOffNotificationEvents} call keeps in flight at once. */
+const HANDOFF_CONCURRENCY = 4;
+
+/**
+ * Hands over many events after their emitting transaction committed (for
+ * example one per bill of a billing run), at most {@link HANDOFF_CONCURRENCY}
+ * at a time so a large run does not open thousands of Restate requests at
+ * once. Not awaited by the caller; whatever is not handed over (the API
+ * stops, Restate is down) is left pending for the sweep.
+ */
+export function handOffNotificationEvents(eventIds: readonly string[], db: DatabaseExecutor = defaultDb) {
+  if (eventIds.length === 0) return;
+  const queue = [...new Set(eventIds)];
+  const worker = async () => {
+    for (let eventId = queue.shift(); eventId; eventId = queue.shift()) {
+      try {
+        await dispatchNotificationEvent(db, eventId);
+      } catch (error) {
+        log.error({ eventId, err: error instanceof Error ? { name: error.name, message: error.message } : String(error) }, 'notification.handover.error');
+      }
+    }
+  };
+  for (let index = 0; index < Math.min(HANDOFF_CONCURRENCY, queue.length); index += 1) void worker();
+}
+
 /** Claims unsubmitted pending events (`FOR UPDATE SKIP LOCKED`, so replicas take disjoint rows). */
 async function claimPendingEvents(db: DatabaseExecutor): Promise<string[]> {
   return db.transaction(async (transaction) => {

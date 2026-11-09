@@ -40,7 +40,12 @@ export type DeliveryDecision =
  *   after the fan-out); the delivery is `skipped` with the reason.
  */
 export type DeliverySendOutcome =
-  | { kind: 'sent'; providerMessageId: string | null }
+  | {
+      kind: 'sent';
+      providerMessageId: string | null;
+      /** Template revision of an attached document (provenance of what was sent). */
+      documentTemplateRevisionId?: string | null;
+    }
   | { kind: 'skipped'; reason: NotificationSkipReason }
   | { kind: 'retry'; errorCode: string; scope: 'recipient' | 'channel'; retryAfterMs?: number }
   | { kind: 'failed'; errorCode: string };
