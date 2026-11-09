@@ -45,6 +45,19 @@ describe('HomeScreen', () => {
     expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
   });
 
+  it('shows skeletons while results and fees load, and a retry when results fail', async () => {
+    resetHandlers({
+      getProfile: () => profile,
+      listExams: () => { throw new Error('Results are down'); },
+      getFeeSummary: () => new Promise(() => {}),
+    });
+    renderWithQuery(<HomeScreen />);
+    expect(await screen.findByLabelText('Loading fees')).toBeTruthy();
+    expect(await screen.findByText('Could not load results')).toBeTruthy();
+    expect(screen.getByText('Results are down')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
+  });
+
   it('greets by the time of day', () => {
     renderWithQuery(<Greeting profile={profile} hour={19} />);
     expect(screen.getByText('Good evening')).toBeTruthy();

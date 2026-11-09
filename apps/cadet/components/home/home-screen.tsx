@@ -6,6 +6,7 @@ import { ArrowRightIcon, SparklesIcon } from 'lucide-react';
 import type { CadetExamListItemDto, CadetFeeSummaryDto, CadetProfileDto } from '@campuspilot/api/routers/cadet/cadet.dto';
 import { Button } from '@campuspilot/ui/components/button';
 import { Card, CardContent } from '@campuspilot/ui/components/card';
+import { Skeleton } from '@campuspilot/ui/components/skeleton';
 import { Alert, AlertAction, AlertDescription, AlertTitle } from '@campuspilot/ui/components/reui/alert';
 import { Badge } from '@campuspilot/ui/components/reui/badge';
 
@@ -104,13 +105,15 @@ function FeeBalance({ row }: { row: CadetFeeSummaryDto['currencies'][number] }) 
 
 function HomeResults({ classKnown }: { classKnown: boolean }) {
   const exams = useQuery({ ...orpc.listExams.queryOptions({ input: {} }), enabled: classKnown });
-  if (!classKnown || !exams.data) return null;
+  if (!classKnown) return null;
+  if (exams.isPending) return <Skeleton className="h-24 w-full" aria-label="Loading results" />;
+  if (exams.isError) return <ScreenError title="Could not load results" error={exams.error} onRetry={() => void exams.refetch()} />;
   return <LatestResultAlert exams={exams.data.items} />;
 }
 
 function HomeFees() {
   const summary = useQuery(orpc.getFeeSummary.queryOptions());
-  if (summary.isPending) return null;
+  if (summary.isPending) return <Skeleton className="h-36 w-full" aria-label="Loading fees" />;
   if (summary.isError) return <ScreenError title="Could not load fees" error={summary.error} onRetry={() => void summary.refetch()} />;
   return <FeeCard summary={summary.data} />;
 }

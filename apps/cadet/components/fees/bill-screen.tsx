@@ -32,16 +32,20 @@ function Row({ label, sub, amount, className }: { label: string; sub?: string; a
   );
 }
 
-/** Fee lines, the bill's own concessions and corrections, and the amount after them. */
+/**
+ * Fee lines, the bill's own concessions and corrections, and the amount after
+ * them. A reversed bill dims its lines and says nothing is due instead of
+ * showing a payable amount.
+ */
 export function BillLines({ bill }: { bill: CadetBillDto }) {
   const money = (minor: string) => formatMoney(minor, bill.currency);
   return (
     <Card className="gap-0 py-0">
       <CardContent className="flex flex-col divide-y p-0">
         {bill.lines.map((line) => (
-          <Row key={line.id} label={line.name} amount={money(line.amountMinor)} />
+          <Row key={line.id} label={line.name} amount={money(line.amountMinor)} className={cn(bill.reversed && 'text-muted-foreground line-through')} />
         ))}
-        <Row label="Total" amount={money(bill.totalAmountMinor)} className="font-semibold" />
+        <Row label="Total" amount={money(bill.totalAmountMinor)} className={cn('font-semibold', bill.reversed && 'text-muted-foreground line-through')} />
         {bill.adjustments.map((adjustment) => (
           <Row
             key={adjustment.id}
@@ -54,7 +58,9 @@ export function BillLines({ bill }: { bill: CadetBillDto }) {
             )}
           />
         ))}
-        {isZeroMinor(bill.concessionsMinor) && isZeroMinor(bill.addedMinor) ? null : (
+        {bill.reversed ? (
+          <div className="bg-muted/50 px-4 py-3 text-base font-semibold">Reversed – nothing due</div>
+        ) : isZeroMinor(bill.concessionsMinor) && isZeroMinor(bill.addedMinor) ? null : (
           <Row label="After concessions" amount={money(bill.netAmountMinor)} className="bg-muted/50 text-base font-semibold" />
         )}
       </CardContent>
@@ -66,7 +72,8 @@ export function BillLines({ bill }: { bill: CadetBillDto }) {
  * One bill, line by line. Payments are credited to the student's account
  * rather than to a bill, so the bill shows no "paid" or "left to pay"
  * figure; the outstanding balance lives on Fees. There is no due date in the
- * school's data, so none is shown. PDF download is not offered here.
+ * school's data, so none is shown. Bill PDF download is deliberately out of
+ * scope until documents can be served to cadets safely (see FeesScreen).
  */
 export function BillScreen({ billId }: { billId: string }) {
   const bill = useQuery(orpc.getBill.queryOptions({ input: { billId } }));

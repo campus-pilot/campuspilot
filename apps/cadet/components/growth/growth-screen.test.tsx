@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { growth } from '@/test/fixtures';
 import { page, renderWithQuery, resetHandlers } from '@/test/orpc-mock';
-import { GrowthView, shortLabel, subjectChanges } from './growth-screen';
+import { GrowthScreen, GrowthView, shortLabel, subjectChanges } from './growth-screen';
 
 vi.mock('@/lib/orpc', async () => ({ orpc: (await import('@/test/orpc-mock')).orpcMock }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ replace: vi.fn() }), useSearchParams: () => new URLSearchParams() }));
@@ -45,6 +45,23 @@ describe('GrowthView', () => {
   it('explains an empty growth view for a student without released results', () => {
     renderWithQuery(<GrowthView growth={{ classes: [], selected: null, classAveragesShared: false }} studentName="Meera" />);
     expect(screen.getByText('Nothing to compare yet')).toBeTruthy();
+  });
+
+  it('offers a retry when teacher remarks fail to load', async () => {
+    resetHandlers({ listRemarks: () => { throw new Error('Remarks are down'); } });
+    renderWithQuery(<GrowthView growth={growth} studentName="Meera Singh" />);
+    expect(await screen.findByText('Could not load teacher remarks')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
+  });
+
+  it('links back to the current class when ?class= is not one of the student\'s', async () => {
+    resetHandlers({
+      getProfile: () => ({ name: 'Meera', admissionNo: 'A', schoolName: 'S', enrollments: [] }),
+      getGrowth: () => { throw Object.assign(new Error('Class was not found.'), { code: 'NOT_FOUND' }); },
+    });
+    renderWithQuery(<GrowthScreen />);
+    expect(await screen.findByText('Class not found')).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Show my current class' }).getAttribute('href')).toBe('/growth');
   });
 
   it('shortens long exam names for chart axes', () => {

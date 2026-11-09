@@ -14,6 +14,14 @@ export function absMinor(minor: string) {
   return minor.startsWith('-') ? minor.slice(1) : minor;
 }
 
+/**
+ * A running balance in words: what is owed, or "₹500 credit" when the
+ * account is in credit (a negative balance), never a minus sign.
+ */
+export function formatBalance(minor: string, currency: string) {
+  return minor.startsWith('-') ? `${formatMoney(absMinor(minor), currency)} credit` : formatMoney(minor, currency);
+}
+
 export const isZeroMinor = (minor: string) => /^-?0$/.test(minor);
 
 /**

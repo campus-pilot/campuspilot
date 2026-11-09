@@ -1,9 +1,10 @@
 'use client';
 
 import Link from 'next/link';
-import { useQuery } from '@tanstack/react-query';
+import { useInfiniteQuery } from '@tanstack/react-query';
 import { ChevronRightIcon, GraduationCapIcon } from 'lucide-react';
 import type { CadetExamListItemDto, CadetExamState } from '@campuspilot/api/routers/cadet/cadet.dto';
+import { Button } from '@campuspilot/ui/components/button';
 import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemTitle } from '@campuspilot/ui/components/item';
 import { Badge } from '@campuspilot/ui/components/reui/badge';
 
@@ -51,11 +52,19 @@ export function ExamRow({ exam }: { exam: CadetExamListItemDto }) {
   );
 }
 
+/** Exams of the current class, 20 at a time, with "Show more" when the class has more. */
 export function ResultsScreen() {
-  const exams = useQuery(orpc.listExams.queryOptions({ input: {} }));
+  const exams = useInfiniteQuery(
+    orpc.listExams.infiniteOptions({
+      input: (cursor: string | undefined) => (cursor ? { cursor } : {}),
+      initialPageParam: undefined,
+      getNextPageParam: (page) => page.pagination.nextCursor ?? undefined,
+    }),
+  );
   if (exams.isPending) return <ScreenLoading blocks={2} />;
   if (exams.isError) return <ScreenError error={exams.error} onRetry={() => void exams.refetch()} />;
-  const { record, items } = exams.data;
+  const record = exams.data.pages[0]!.record;
+  const items = exams.data.pages.flatMap((page) => page.items);
   return (
     <>
       <ScreenHeader
@@ -75,6 +84,11 @@ export function ResultsScreen() {
           ))}
         </ItemGroup>
       )}
+      {exams.hasNextPage ? (
+        <Button type="button" variant="outline" disabled={exams.isFetchingNextPage} onClick={() => void exams.fetchNextPage()}>
+          {exams.isFetchingNextPage ? 'Loading…' : 'Show more'}
+        </Button>
+      ) : null}
       <p className="text-xs text-muted-foreground">
         Results appear here only after your school releases them to the Cadet Portal. Earlier classes are in Growth.
       </p>

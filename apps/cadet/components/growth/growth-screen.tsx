@@ -6,6 +6,8 @@ import { useQuery } from '@tanstack/react-query';
 import { Bar, BarChart, CartesianGrid, Line, LineChart, XAxis, YAxis } from 'recharts';
 import { ChartLineIcon, ChevronRightIcon, TrendingDownIcon, TrendingUpIcon } from 'lucide-react';
 import type { CadetGrowthDto } from '@campuspilot/api/routers/cadet/cadet.dto';
+import { Button } from '@campuspilot/ui/components/button';
+import { Skeleton } from '@campuspilot/ui/components/skeleton';
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@campuspilot/ui/components/card';
 import { ChartContainer, ChartLegend, ChartLegendContent, ChartTooltip, ChartTooltipContent, type ChartConfig } from '@campuspilot/ui/components/chart';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@campuspilot/ui/components/select';
@@ -281,7 +283,10 @@ function ClassByClass({ growth }: { growth: CadetGrowthDto }) {
 /** Teacher remarks the school released for the chosen class, newest first. */
 function RemarkTimeline({ recordId, label }: { recordId: string; label: string }) {
   const remarks = useQuery(orpc.listRemarks.queryOptions({ input: { filters: { recordId } } }));
-  if (!remarks.data || remarks.data.items.length === 0) return null;
+  if (remarks.isPending) return <Skeleton className="h-32 w-full" aria-label="Loading teacher remarks" />;
+  if (remarks.isError)
+    return <ScreenError title="Could not load teacher remarks" error={remarks.error} onRetry={() => void remarks.refetch()} />;
+  if (remarks.data.items.length === 0) return null;
   const items = remarks.data.items;
   return (
     <section className="flex flex-col gap-3">
@@ -339,7 +344,14 @@ export function GrowthScreen() {
   if (growth.isPending || profile.isPending) return <ScreenLoading blocks={3} />;
   if (growth.isError) {
     if ((growth.error as { code?: string }).code === 'NOT_FOUND')
-      return <EmptyState icon={ChartLineIcon} title="Class not found" description="Pick one of your classes from Growth." />;
+      return (
+        <>
+          <EmptyState icon={ChartLineIcon} title="Class not found" description="This class is not one of yours." />
+          <Button asChild variant="outline" size="lg" className="w-full">
+            <Link href="/growth">Show my current class</Link>
+          </Button>
+        </>
+      );
     return <ScreenError error={growth.error} onRetry={() => void growth.refetch()} />;
   }
   return <GrowthView growth={growth.data} studentName={profile.data?.name ?? ''} />;

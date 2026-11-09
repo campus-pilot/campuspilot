@@ -20,7 +20,7 @@ import { Badge } from '@campuspilot/ui/components/reui/badge';
 import { IconTile } from '@campuspilot/ui/components/reui/icon-tile';
 import { cn } from '@campuspilot/ui/lib/utils';
 
-import { absMinor, formatDate, formatMoney, formatMonth, isZeroMinor } from '@/lib/format';
+import { absMinor, formatBalance, formatDate, formatMoney, formatMonth, isZeroMinor } from '@/lib/format';
 import { orpc } from '@/lib/orpc';
 import { currentEnrollment, enrollmentLabel } from '@/lib/profile';
 import { EmptyState, ScreenError, ScreenHeader, ScreenLoading, SectionLabel } from '../screen';
@@ -65,7 +65,8 @@ export function BalanceCard({ row }: { row: FeeCurrency }) {
 
 const ENTRY_COPY: Record<CadetLedgerEntryDto['type'], { title: string; icon: LucideIcon; tone: string }> = {
   bill: { title: 'Bill', icon: ArrowUpRightIcon, tone: 'text-amber-600' },
-  manual_debit_adjustment: { title: 'Bill', icon: ArrowUpRightIcon, tone: 'text-amber-600' },
+  // Same wording as the management ledger (its type name in words).
+  manual_debit_adjustment: { title: 'Manual debit adjustment', icon: ArrowUpRightIcon, tone: 'text-amber-600' },
   payment: { title: 'Payment received', icon: ArrowDownLeftIcon, tone: 'text-emerald-600' },
   discount: { title: 'Discount', icon: BadgePercentIcon, tone: 'text-violet-600' },
   waiver: { title: 'Waiver', icon: BadgePercentIcon, tone: 'text-violet-600' },
@@ -115,7 +116,7 @@ export function LedgerRow({ entry }: { entry: CadetLedgerEntryDto }) {
       </div>
       <div className="flex shrink-0 flex-col items-end gap-0.5">
         <EntryAmount entry={entry} />
-        <span className="text-[0.6875rem] text-muted-foreground tabular-nums">Bal {formatMoney(entry.runningBalanceMinor, entry.currency)}</span>
+        <span className="text-[0.6875rem] text-muted-foreground tabular-nums">Bal {formatBalance(entry.runningBalanceMinor, entry.currency)}</span>
       </div>
       {entry.billId ? <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" /> : <span className="size-4 shrink-0" />}
     </>
@@ -188,6 +189,12 @@ function Ledger() {
   );
 }
 
+/**
+ * The student's fees: balance, one ledger and bill links. Statement, receipt,
+ * adjustment and bill PDF downloads are deliberately out of scope until the
+ * document system can serve documents to cadets safely (today only staff can
+ * generate and download them), so this screen offers no download buttons.
+ */
 export function FeesScreen() {
   const profile = useQuery(orpc.getProfile.queryOptions());
   const summary = useQuery(orpc.getFeeSummary.queryOptions());

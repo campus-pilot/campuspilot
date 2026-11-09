@@ -41,6 +41,21 @@ describe('FeesScreen', () => {
     expect(screen.queryByRole('button', { name: /Statement|Download/ })).toBeNull();
   });
 
+  it('writes a negative running balance as credit and names manual charges like management', async () => {
+    resetHandlers({
+      getProfile: () => profile,
+      getFeeSummary: () => summary,
+      listFeeLedger: () => page([
+        { ...ledgerEntries[0]!, runningBalanceMinor: '-50000' },
+        { ...ledgerEntries[2]!, type: 'manual_debit_adjustment' as const },
+      ]),
+    });
+    renderWithQuery(<FeesScreen />);
+    expect(await screen.findByText('Bal ₹500 credit')).toBeTruthy();
+    expect(screen.queryByText(/Bal -/)).toBeNull();
+    expect(screen.getByText('Manual debit adjustment')).toBeTruthy();
+  });
+
   it('explains an empty ledger for a student without fees', async () => {
     resetHandlers({ getProfile: () => profile, getFeeSummary: () => ({ currencies: [] }), listFeeLedger: () => page([]) });
     renderWithQuery(<FeesScreen />);
@@ -57,6 +72,14 @@ describe('BillScreen', () => {
     expect(screen.getByText('After concessions')).toBeTruthy();
     expect(screen.getByText('₹4,350')).toBeTruthy();
     expect(container.textContent).not.toMatch(/Due|Left to pay|Download/);
+  });
+
+  it('says nothing is due on a reversed bill instead of a payable amount', async () => {
+    resetHandlers({ getBill: () => ({ ...bill, reversed: true }) });
+    renderWithQuery(<BillScreen billId="fbill_1" />);
+    expect(await screen.findByText('Reversed – nothing due')).toBeTruthy();
+    expect(screen.queryByText('After concessions')).toBeNull();
+    expect(screen.getByText('Tuition fee').parentElement!.className).toContain('line-through');
   });
 
   it('says a bill is not found rather than showing an error for another account', async () => {

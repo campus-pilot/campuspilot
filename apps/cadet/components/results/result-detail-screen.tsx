@@ -17,12 +17,6 @@ import { EmptyState, ScreenError, ScreenHeader, ScreenLoading, SectionLabel } fr
 
 type Subject = CadetExamResultDto['subjects'][number];
 
-/** The class record an exam id belongs to (`{studentId}.{classId}.{examSlug}`). */
-export function recordIdOfExam(examId: string) {
-  const [studentId, classId] = examId.split('.');
-  return studentId && classId ? `${studentId}.${classId}` : null;
-}
-
 function Stat({ value, label }: { value: string; label: string }) {
   return (
     <div className="flex flex-col gap-0.5 py-4">
@@ -190,23 +184,18 @@ const NotFound = () => (
 );
 
 /**
- * Looks the exam up in its class's list first, so an unreleased exam shows
- * "awaiting release" without asking for marks the server would refuse.
+ * Asks for the exam's state first (`getExam`, independent of list paging), so
+ * an unreleased exam shows "awaiting release" without requesting marks the
+ * server would refuse.
  */
 export function ResultDetailScreen({ examId }: { examId: string }) {
-  const recordId = recordIdOfExam(examId);
-  const exams = useQuery({
-    ...orpc.listExams.queryOptions({ input: { filters: { recordId: recordId ?? '' } } }),
-    enabled: recordId !== null,
-  });
-  if (recordId === null) return <NotFound />;
-  if (exams.isPending) return <ScreenLoading blocks={3} />;
-  if (exams.isError) {
-    if ((exams.error as { code?: string }).code === 'NOT_FOUND') return <NotFound />;
-    return <ScreenError error={exams.error} onRetry={() => void exams.refetch()} />;
+  const exam = useQuery(orpc.getExam.queryOptions({ input: { examId } }));
+  if (exam.isPending) return <ScreenLoading blocks={3} />;
+  if (exam.isError) {
+    if ((exam.error as { code?: string }).code === 'NOT_FOUND') return <NotFound />;
+    return <ScreenError error={exam.error} onRetry={() => void exam.refetch()} />;
   }
-  const exam = exams.data.items.find((item) => item.examId === examId);
-  if (exam?.state === 'released') return <ReleasedResult examId={examId} />;
-  if (exam?.state === 'awaiting_release') return <AwaitingRelease exam={exam} />;
+  if (exam.data.state === 'released') return <ReleasedResult examId={examId} />;
+  if (exam.data.state === 'awaiting_release') return <AwaitingRelease exam={exam.data} />;
   return <NotFound />;
 }
