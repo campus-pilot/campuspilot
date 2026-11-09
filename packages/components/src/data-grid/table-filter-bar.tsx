@@ -294,12 +294,15 @@ export function TableFilterBar<
   }
 
   return (
+    // Every row wraps and nothing keeps a minimum width, so on a phone the
+    // triggers and badges flow onto further lines instead of widening the
+    // page (the admission list at 390 px scrolled sideways before).
     <div
-      className={`flex flex-wrap items-center justify-between gap-2.5 ${
+      className={`flex min-w-0 max-w-full flex-wrap items-center justify-between gap-2.5 ${
         className ?? ''
       }`}
     >
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
         {/* Active Filter Badges on the Left */}
         {activeBadges.map((badge) => (
           <Badge
@@ -336,7 +339,7 @@ export function TableFilterBar<
         ) : null}
 
         {/* Filter Popover triggers */}
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
           {filters.map((config) => (
             <FilterPopover
               key={config.id}
@@ -353,7 +356,7 @@ export function TableFilterBar<
         </div>
       </div>
 
-      {actions ? <div className="flex items-center gap-2">{actions}</div> : null}
+      {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
     </div>
   );
 }
