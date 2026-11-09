@@ -201,15 +201,15 @@ export const OUTCOME_UNKNOWN_MESSAGE =
  * Meta's Cloud API error reference; verify them there when Meta changes it.
  */
 export function classifyWhatsAppFailure(failure: { error: WhatsAppApiError | WhatsAppTransportError; retryAfterMs?: number }): DeliverySendOutcome {
-  if (failure.error === 'connect_failed' || failure.error === 'outcome_unknown') return { kind: 'retry', errorCode: 'network_error', scope: 'channel' };
+  if (failure.error === 'connect_failed' || failure.error === 'outcome_unknown') return { kind: 'retry', errorCode: 'network_error', scope: 'channel', definiteAnswer: false };
   const { status, code } = failure.error;
   const errorCode = code !== null ? `wa_${code}` : `http_${status}`;
-  const retry = (scope: 'recipient' | 'channel'): DeliverySendOutcome => ({ kind: 'retry', errorCode, scope, retryAfterMs: failure.retryAfterMs });
-  if (code !== null && DAILY_MESSAGING_LIMIT_CODES.has(code)) return { kind: 'retry', errorCode, scope: 'recipient', limit: 'daily_messaging_limit' };
+  const retry = (scope: 'recipient' | 'channel'): DeliverySendOutcome => ({ kind: 'retry', errorCode, scope, definiteAnswer: false, retryAfterMs: failure.retryAfterMs });
+  if (code !== null && DAILY_MESSAGING_LIMIT_CODES.has(code)) return { kind: 'retry', errorCode, scope: 'recipient', definiteAnswer: false, limit: 'daily_messaging_limit' };
   if (code !== null && RECIPIENT_THROTTLE_CODES.has(code)) return retry('recipient');
   if (code !== null && (CHANNEL_THROTTLE_CODES.has(code) || TRANSIENT_CODES.has(code))) return retry('channel');
   if (status === 429 || status >= 500) return retry('channel');
-  return { kind: 'failed', errorCode };
+  return { kind: 'failed', errorCode, definiteAnswer: true };
 }
 
 /**
@@ -222,9 +222,9 @@ export function classifyWhatsAppFailure(failure: { error: WhatsAppApiError | Wha
  * message the guardian twice; staff resend deliberately.
  */
 export function classifyWhatsAppSendFailure(failure: { error: WhatsAppApiError | WhatsAppTransportError; retryAfterMs?: number }): DeliverySendOutcome {
-  if (failure.error === 'connect_failed') return { kind: 'retry', errorCode: 'connect_failed', scope: 'channel' };
+  if (failure.error === 'connect_failed') return { kind: 'retry', errorCode: 'connect_failed', scope: 'channel', definiteAnswer: false };
   if (failure.error === 'outcome_unknown' || failure.error.status >= 500) {
-    return { kind: 'failed', errorCode: OUTCOME_UNKNOWN_ERROR_CODE, errorMessage: OUTCOME_UNKNOWN_MESSAGE, outcomeUnknown: true };
+    return { kind: 'failed', errorCode: OUTCOME_UNKNOWN_ERROR_CODE, errorMessage: OUTCOME_UNKNOWN_MESSAGE, outcomeUnknown: true, definiteAnswer: false };
   }
   return classifyWhatsAppFailure(failure);
 }

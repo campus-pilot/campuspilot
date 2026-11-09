@@ -39,6 +39,18 @@ export type SenderPacing = {
 
 /** In-flight sends per lane: a modest cap, as asked for (D-39 chat: "max 10 at a time"). */
 export const SENDER_CONCURRENCY = 10;
+/**
+ * In-flight sends while the lane is cautious: its unknown-outcome streak is
+ * above 0 or the breaker is probing (see {@link sendGroup}). One at a time,
+ * so a provider brownout that is already visible costs at most
+ * {@link UNKNOWN_OUTCOME_BREAKER_THRESHOLD} unknown messages more instead
+ * of a full {@link SENDER_CONCURRENCY} in flight. The sends already in
+ * flight when the first unknown outcome arrives cannot be recalled: a
+ * brownout that starts while the lane is at full concurrency still costs
+ * up to {@link SENDER_CONCURRENCY} unknown messages before the breaker
+ * trips.
+ */
+export const CAUTIOUS_SENDER_CONCURRENCY = 1;
 /** A group is sized to about this much sending time, so a step stays short. */
 const GROUP_SECONDS = 5;
 const MAX_GROUP_SIZE = 50;
@@ -87,11 +99,26 @@ export type SenderSleep = (name: string, ms: number) => Promise<void>;
  * message call, see the WhatsApp client) after which the lane's circuit
  * breaker trips: the lane pauses channel-wide with the same escalating
  * pause as a provider throttle ({@link channelBackoffMs}: 30 s doubling to
- * 15 min, jittered), then probes with a single send. The probe trips the
- * breaker again (a longer pause) if its outcome is unknown too, and
- * returns the lane to normal groups otherwise. The unknown rows themselves
- * stay `failed: outcome_unknown` (never retried automatically); the breaker
- * only stops a provider brownout from burning the rest of the queue.
+ * 15 min, jittered), then probes with single sends. A probe whose outcome
+ * is unknown trips the breaker again (a longer pause). Only a probe the
+ * provider answered definitively (`SendAttemptResult.definiteAnswer`: sent,
+ * or accepted/rejected for a reason of its own) returns the lane to normal
+ * groups; a probe that was throttled (pause, then probe again), not owed
+ * any more, or failed before reaching the provider leaves the lane probing.
+ * The unknown rows themselves stay `failed: outcome_unknown` (never retried
+ * automatically); the breaker only stops a provider brownout from burning
+ * the rest of the queue.
+ *
+ * The breaker state lives in the drain ({@link SenderLaneState}), not in
+ * the database: it is handed to the next drain on a `continue` hand-over,
+ * but a drain that ends idle, fails, or is killed (the API sweep kills a
+ * `paused` drain, see `pokeDueSenders`) takes it along, and the next drain
+ * starts with a closed breaker at full concurrency. During a brownout that
+ * outlives a drain, each fresh drain can therefore spend up to
+ * {@link SENDER_CONCURRENCY} unknown outcomes before tripping again. Not
+ * persisted on purpose: a drain is killed only after Restate gave up on it
+ * (a step failing past its retries), which is rare, and persisting it would
+ * add a lane table whose rows must agree with the virtual object's journal.
  */
 export const UNKNOWN_OUTCOME_BREAKER_THRESHOLD = 3;
 
@@ -103,9 +130,9 @@ export const UNKNOWN_OUTCOME_BREAKER_THRESHOLD = 3;
 export const senderLaneStateSchema = z.object({
   /** Unknown outcomes in a row (completion order), reset by any definite provider answer. */
   unknownStreak: z.number().int().min(0),
-  /** Pauses in a row (throttle or breaker), for the escalation; reset by a group without either. */
+  /** Pauses in a row (throttle or breaker), for the escalation; reset by a group without either that left the breaker closed. */
   pauses: z.number().int().min(0),
-  /** The breaker tripped: the next group is a single probe send. */
+  /** The breaker tripped and no probe got a definite provider answer yet: groups are single probe sends. */
   probing: z.boolean(),
 });
 export type SenderLaneState = z.infer<typeof senderLaneStateSchema>;
@@ -123,13 +150,19 @@ type GroupResult = {
   unknownStreak: number;
   /** The streak reached {@link UNKNOWN_OUTCOME_BREAKER_THRESHOLD}; no new send was started after that. */
   breakerTripped: boolean;
+  /** Sends the provider answered definitively (`SendAttemptResult.definiteAnswer`); a probe group needs one to close the breaker. */
+  definiteAnswers: number;
 };
 
 /** Sends one picked delivery; {@link sendDelivery} in production, injectable for tests. */
 export type SendOne = (deliveryId: string) => Promise<SendAttemptResult>;
 
 /**
- * Sends the picked deliveries with at most `concurrency` in flight, starting
+ * Sends the picked deliveries with at most `concurrency` in flight (only
+ * {@link CAUTIOUS_SENDER_CONCURRENCY} while the unknown-outcome streak is
+ * above 0 or `probing` is set; the limit is re-checked before every start,
+ * so the first unknown outcome in a group already holds back new sends
+ * until those in flight have answered), starting
  * one every `1 / perSecond` seconds; stops starting new ones after a
  * channel-wide throttle (those stay owed, untouched). Returns no sooner than
  * the group's share of the rate, so back-to-back groups keep to it. It
@@ -145,7 +178,7 @@ export type SendOne = (deliveryId: string) => Promise<SendAttemptResult>;
  */
 export async function sendGroup(
   ids: readonly string[],
-  options: { pacing: SenderPacing; send: SendOne; unknownStreak?: number },
+  options: { pacing: SenderPacing; send: SendOne; unknownStreak?: number; probing?: boolean },
 ): Promise<GroupResult> {
   const intervalMs = 1000 / options.pacing.perSecond;
   const started = Date.now();
@@ -156,26 +189,43 @@ export async function sendGroup(
   let sent = 0;
   let unknownStreak = options.unknownStreak ?? 0;
   let breakerTripped = false;
+  let definiteAnswers = 0;
+  let inFlight = 0;
+  /** Workers waiting for an in-flight send to finish (cautious concurrency); woken after every send. */
+  let waiting: (() => void)[] = [];
   const stopped = () => throttle !== null || failure !== null || breakerTripped;
+  const concurrencyNow = () => (unknownStreak > 0 || options.probing ? CAUTIOUS_SENDER_CONCURRENCY : options.pacing.concurrency);
   const worker = async () => {
     for (let index = next++; index < ids.length && !stopped(); index = next++) {
       const slot = started + index * intervalMs;
       const wait = slot - Date.now();
       if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+      while (!stopped() && inFlight >= concurrencyNow()) await new Promise<void>((resolve) => waiting.push(resolve));
       if (stopped()) return;
+      inFlight += 1;
       let result: SendAttemptResult;
       try {
         result = await options.send(ids[index]!);
       } catch (error) {
         failure ??= { error };
         return;
+      } finally {
+        inFlight -= 1;
+        const woken = waiting;
+        waiting = [];
+        for (const wake of woken) wake();
       }
       if (result.kind !== 'not_owed') attempted += 1;
       if (result.kind === 'sent') sent += 1;
       if (result.channelThrottle && !throttle) throttle = result.channelThrottle;
-      // A delivery not owed any more made no provider call: it neither extends nor ends a streak.
+      // Only a definite provider answer ends a streak; a throttle, a failed
+      // connection, a check before sending or a row not owed any more says
+      // nothing about whether the provider works, so it neither extends nor ends it.
       if (result.outcomeUnknown) unknownStreak += 1;
-      else if (result.kind !== 'not_owed') unknownStreak = 0;
+      else if (result.definiteAnswer) {
+        unknownStreak = 0;
+        definiteAnswers += 1;
+      }
       if (unknownStreak >= UNKNOWN_OUTCOME_BREAKER_THRESHOLD) breakerTripped = true;
     }
   };
@@ -184,7 +234,7 @@ export async function sendGroup(
   if (failure) throw (failure as { error: unknown }).error;
   const remaining = started + ids.length * intervalMs - Date.now();
   if (!throttle && !breakerTripped && remaining > 0) await new Promise((resolve) => setTimeout(resolve, remaining));
-  return { attempted, sent, throttle, unknownStreak, breakerTripped };
+  return { attempted, sent, throttle, unknownStreak, breakerTripped, definiteAnswers };
 }
 
 export async function runSenderDrain(options: {
@@ -241,13 +291,16 @@ export async function runSenderDrain(options: {
       continue;
     }
     const send: SendOne = (id) => sendDelivery(db, id, target.channel, adapter, { now: clock(), random });
-    const result = await step(`send:${group}`, () => sendGroup(picked.ids, { pacing, send, unknownStreak: state.unknownStreak }));
+    const probing = state.probing;
+    const result = await step(`send:${group}`, () => sendGroup(picked.ids, { pacing, send, unknownStreak: state.unknownStreak, probing }));
     sent += result.sent;
     attempted += result.attempted;
     state.unknownStreak = result.unknownStreak;
-    state.probing = false;
+    // A probe closes the breaker only on a definite provider answer.
+    if (result.definiteAnswers > 0) state.probing = false;
     if (!result.throttle && !result.breakerTripped) {
-      state.pauses = 0;
+      // A probe left without a definite answer keeps the escalation: the brownout is not known to be over.
+      if (!state.probing) state.pauses = 0;
       continue;
     }
     state.pauses += 1;

@@ -101,7 +101,7 @@ export function createWhatsAppAdapter(options: {
   }
 
   async function send(delivery: ClaimedDelivery): Promise<DeliverySendOutcome> {
-    if (!delivery.destination || !delivery.admissionId) return { kind: 'failed', errorCode: 'no_destination' };
+    if (!delivery.destination || !delivery.admissionId) return { kind: 'failed', errorCode: 'no_destination', definiteAnswer: false };
     const [admission] = await db
       .select({
         whatsappNo: admissionTable.whatsappNo,
@@ -113,24 +113,24 @@ export function createWhatsAppAdapter(options: {
       .innerJoin(schoolTable, eq(schoolTable.id, admissionTable.schoolId))
       .where(eq(admissionTable.id, delivery.admissionId))
       .limit(1);
-    if (!admission) return { kind: 'failed', errorCode: 'admission_gone' };
+    if (!admission) return { kind: 'failed', errorCode: 'admission_gone', definiteAnswer: false };
     const eligibility = whatsappEligibility(admission);
     if (!eligibility.ok) return { kind: 'skipped', reason: eligibility.reason };
     // The number staff entered changed after the fan-out: never message the old one.
-    if (eligibility.number !== delivery.destination) return { kind: 'failed', errorCode: 'number_changed' };
+    if (eligibility.number !== delivery.destination) return { kind: 'failed', errorCode: 'number_changed', definiteAnswer: false };
 
     let attachable: Set<WhatsAppDocumentKind>;
     try {
       attachable = await attachableKinds(delivery.schoolId);
     } catch {
-      return { kind: 'retry', errorCode: 'document_error', scope: 'recipient' };
+      return { kind: 'retry', errorCode: 'document_error', scope: 'recipient', definiteAnswer: false };
     }
     const mapMessage = () => mapWhatsAppMessage(delivery.type, delivery.data as never, {
       schoolName: admission.schoolName,
       canAttach: (kind) => attachable.has(kind),
     });
     let plan = mapMessage();
-    if (!plan) return { kind: 'failed', errorCode: 'no_template' };
+    if (!plan) return { kind: 'failed', errorCode: 'no_template', definiteAnswer: false };
 
     let document: NotificationDocument | null = null;
     if (plan.template === 'school_document') {
@@ -138,16 +138,16 @@ export function createWhatsAppAdapter(options: {
       try {
         produced = await produceDocument(plan.document, delivery.schoolId);
       } catch {
-        return { kind: 'retry', errorCode: 'document_error', scope: 'recipient' };
+        return { kind: 'retry', errorCode: 'document_error', scope: 'recipient', definiteAnswer: false };
       }
       if (produced === DOCUMENT_TEMPLATE_UNAVAILABLE) {
         // The school deselected the template since availability was checked:
         // send the same fact as text, as if it had never been available.
         attachable.delete(plan.document.kind);
         plan = mapMessage();
-        if (!plan) return { kind: 'failed', errorCode: 'no_template' };
+        if (!plan) return { kind: 'failed', errorCode: 'no_template', definiteAnswer: false };
       } else if (!produced) {
-        return { kind: 'failed', errorCode: 'document_unavailable' };
+        return { kind: 'failed', errorCode: 'document_unavailable', definiteAnswer: false };
       } else {
         document = produced;
       }

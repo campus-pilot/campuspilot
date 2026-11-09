@@ -66,6 +66,16 @@ describe('WhatsApp failure classification', () => {
     expect(classifyWhatsAppFailure({ error: 'outcome_unknown' })).toMatchObject({ kind: 'retry', errorCode: 'network_error' });
   });
 
+  it('counts only an explicit accept or reject as a definite provider answer (the circuit breaker needs one)', () => {
+    expect(classifyWhatsAppFailure(error(400, 131056))).toMatchObject({ definiteAnswer: false });
+    expect(classifyWhatsAppFailure(error(429, null))).toMatchObject({ definiteAnswer: false });
+    expect(classifyWhatsAppFailure(error(503, null))).toMatchObject({ definiteAnswer: false });
+    expect(classifyWhatsAppFailure({ error: 'connect_failed' })).toMatchObject({ definiteAnswer: false });
+    expect(classifyWhatsAppSendFailure(error(502, null))).toMatchObject({ definiteAnswer: false });
+    expect(classifyWhatsAppSendFailure({ error: 'outcome_unknown' })).toMatchObject({ definiteAnswer: false });
+    expect(classifyWhatsAppSendFailure(error(400, 131026))).toMatchObject({ kind: 'failed', definiteAnswer: true });
+  });
+
   it('never retries a message send that may have gone out, but retries one that never connected', () => {
     expect(classifyWhatsAppSendFailure(error(502, null))).toMatchObject({ kind: 'failed', errorCode: 'outcome_unknown', outcomeUnknown: true });
     expect(classifyWhatsAppSendFailure(error(500, 131000))).toMatchObject({ kind: 'failed', errorCode: 'outcome_unknown', outcomeUnknown: true });
@@ -74,7 +84,7 @@ describe('WhatsApp failure classification', () => {
     // Explicit rejections are certain: retried or failed as for any call.
     expect(classifyWhatsAppSendFailure(error(400, 130429))).toMatchObject({ kind: 'retry', scope: 'channel' });
     expect(classifyWhatsAppSendFailure(error(429, null))).toMatchObject({ kind: 'retry' });
-    expect(classifyWhatsAppSendFailure(error(400, 132001))).toEqual({ kind: 'failed', errorCode: 'wa_132001' });
+    expect(classifyWhatsAppSendFailure(error(400, 132001))).toEqual({ kind: 'failed', errorCode: 'wa_132001', definiteAnswer: true });
   });
 
   it('tells connection failures before sending apart from ones that may come after', () => {
@@ -90,7 +100,7 @@ describe('WhatsApp failure classification', () => {
 
   it('fails permanently on everything else', () => {
     for (const code of [100, 131026, 131030, 132000, 132001, 132015, 190]) {
-      expect(classifyWhatsAppFailure(error(400, code)), String(code)).toEqual({ kind: 'failed', errorCode: `wa_${code}` });
+      expect(classifyWhatsAppFailure(error(400, code)), String(code)).toEqual({ kind: 'failed', errorCode: `wa_${code}`, definiteAnswer: true });
     }
   });
 });

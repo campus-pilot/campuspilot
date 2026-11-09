@@ -7,7 +7,7 @@ import { createTestAdmission, createTestSchool } from '../../../test/fixtures';
 import { billIssuedData, dispatchNow, emit, fakeClock, TEST_PACING } from '../../../test/notifications';
 import type { ClaimedDelivery, NotificationChannelAdapter } from '../channels';
 import { claimDelivery } from '../deliveries';
-import { idleNotBeforeMs, MAX_GROUPS_PER_DRAIN, POKE_WINDOW_MARGIN_MS, runSenderDrain, sendGroup, UNKNOWN_OUTCOME_BREAKER_THRESHOLD } from './drain';
+import { CAUTIOUS_SENDER_CONCURRENCY, idleNotBeforeMs, MAX_GROUPS_PER_DRAIN, POKE_WINDOW_MARGIN_MS, runSenderDrain, sendGroup, UNKNOWN_OUTCOME_BREAKER_THRESHOLD } from './drain';
 import { SENDER_POKE_WINDOW_MS } from './lanes';
 import type { SenderTarget } from './lanes';
 import { pickDueDeliveries, type SendAttemptResult } from './queue';
@@ -176,7 +176,7 @@ describe('notification sender (D-39)', () => {
       }
       await new Promise((resolve) => setTimeout(resolve, 60));
       finished.push(id);
-      return { kind: 'sent', channelThrottle: null, outcomeUnknown: false };
+      return { kind: 'sent', channelThrottle: null, outcomeUnknown: false, definiteAnswer: true };
     };
     await expect(sendGroup(['a', 'b', 'c', 'd', 'e'], { pacing: { perSecond: 1000, concurrency: 3, groupSize: 5 }, send })).rejects.toThrow('database down');
     // b and c were in flight when a failed: the group returned only after both finished.
@@ -230,7 +230,7 @@ describe('notification sender (D-39)', () => {
       send: async () => {
         calls += 1;
         return calls <= 4
-          ? { kind: 'failed', errorCode: 'outcome_unknown', errorMessage: 'unknown', outcomeUnknown: true }
+          ? { kind: 'failed', errorCode: 'outcome_unknown', errorMessage: 'unknown', outcomeUnknown: true, definiteAnswer: false }
           : { kind: 'sent', providerMessageId: null };
       },
     };
@@ -266,11 +266,102 @@ describe('notification sender (D-39)', () => {
     const started: string[] = [];
     const send = async (id: string): Promise<SendAttemptResult> => {
       started.push(id);
-      return { kind: 'failed', channelThrottle: null, outcomeUnknown: true };
+      return { kind: 'failed', channelThrottle: null, outcomeUnknown: true, definiteAnswer: false };
     };
     const result = await sendGroup(['a', 'b', 'c', 'd'], { pacing: { perSecond: 1000, concurrency: 1, groupSize: 4 }, send, unknownStreak: 1 });
     expect(started).toEqual(['a', 'b']);
     expect(result).toMatchObject({ breakerTripped: true, unknownStreak: 3, attempted: 2 });
+  });
+
+  it('keeps probing after a throttled probe and closes the breaker only on a definite provider answer', async () => {
+    const target = uniqueLane();
+    await queue({ lane: target.lane, copies: 6, sendPriority: 'bulk' });
+    let calls = 0;
+    const adapter: NotificationChannelAdapter = {
+      channel: 'web_push',
+      available: true,
+      decide: () => [],
+      // Three unknowns trip the breaker; the first probe is throttled, the second is accepted.
+      send: async () => {
+        calls += 1;
+        if (calls <= 3) return { kind: 'failed', errorCode: 'outcome_unknown', outcomeUnknown: true, definiteAnswer: false };
+        if (calls === 4) return { kind: 'retry', errorCode: 'http_429', scope: 'channel', definiteAnswer: false, retryAfterMs: 1_000 };
+        return { kind: 'sent', providerMessageId: null };
+      },
+    };
+    const clock = fakeClock();
+    const pickSizes: number[] = [];
+    const pauses: number[] = [];
+    const result = await runSenderDrain({
+      target,
+      step: async (name, action) => {
+        const value = await action();
+        if (name.startsWith('pick:')) pickSizes.push((value as { ids: string[] }).ids.length);
+        return value;
+      },
+      sleep: async (name, ms) => {
+        if (name.startsWith('pause:')) pauses.push(ms);
+        clock.advance(ms);
+      },
+      clock: clock.now,
+      adapters: { web_push: adapter, whatsapp: whatsappOff },
+      pacing: TEST_PACING,
+      random: () => 0.5,
+    });
+    // Trip (30 s), throttled probe (60 s, escalated), a second single probe, then a normal group.
+    expect(pauses).toEqual([30_000, 60_000]);
+    expect(pickSizes.slice(0, 3)).toEqual([6, 1, 1]);
+    expect(pickSizes[3]).toBeGreaterThan(1);
+    expect(result).toMatchObject({ breakerTrips: 1, sent: 3 });
+  });
+
+  it('keeps probing when the probe was not owed any more (no provider answer)', async () => {
+    const outcomes: SendAttemptResult[] = [
+      { kind: 'not_owed', channelThrottle: null, outcomeUnknown: false, definiteAnswer: false },
+    ];
+    const result = await sendGroup(['a'], { pacing: TEST_PACING, send: async () => outcomes.shift()!, unknownStreak: UNKNOWN_OUTCOME_BREAKER_THRESHOLD - 1, probing: true });
+    expect(result).toMatchObject({ definiteAnswers: 0, breakerTripped: false, unknownStreak: UNKNOWN_OUTCOME_BREAKER_THRESHOLD - 1 });
+  });
+
+  it('sends one at a time while the unknown-outcome streak is above 0, so a brownout costs only the threshold', async () => {
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const started: string[] = [];
+    const send = async (id: string): Promise<SendAttemptResult> => {
+      started.push(id);
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 15));
+      inFlight -= 1;
+      return { kind: 'failed', channelThrottle: null, outcomeUnknown: true, definiteAnswer: false };
+    };
+    const ids = Array.from({ length: 12 }, (_, index) => `d${index}`);
+    const result = await sendGroup(ids, { pacing: { perSecond: 1000, concurrency: 10, groupSize: 12 }, send, unknownStreak: 1 });
+    // At full concurrency all ten would have been in flight before the first answer.
+    expect(maxInFlight).toBe(CAUTIOUS_SENDER_CONCURRENCY);
+    expect(started).toHaveLength(UNKNOWN_OUTCOME_BREAKER_THRESHOLD - 1);
+    expect(result).toMatchObject({ breakerTripped: true, attempted: UNKNOWN_OUTCOME_BREAKER_THRESHOLD - 1 });
+  });
+
+  it('sends one at a time while probing and returns to full concurrency after a definite answer', async () => {
+    let inFlight = 0;
+    const inFlightAtStart: number[] = [];
+    const send = async (): Promise<SendAttemptResult> => {
+      inFlight += 1;
+      inFlightAtStart.push(inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 15));
+      inFlight -= 1;
+      return { kind: 'sent', channelThrottle: null, outcomeUnknown: false, definiteAnswer: true };
+    };
+    const ids = Array.from({ length: 12 }, (_, index) => `d${index}`);
+    expect(await sendGroup(ids.slice(0, 3), { pacing: { perSecond: 1000, concurrency: 10, groupSize: 3 }, send, probing: true })).toMatchObject({ sent: 3, definiteAnswers: 3 });
+    expect(Math.max(...inFlightAtStart)).toBe(1);
+    inFlightAtStart.length = 0;
+    // A streak above 0 holds back the second send until the first answered (definitely); then the rest go out in parallel.
+    expect(await sendGroup(ids, { pacing: { perSecond: 1000, concurrency: 10, groupSize: 12 }, send, unknownStreak: 2 })).toMatchObject({ sent: 12, unknownStreak: 0 });
+    expect(inFlightAtStart[0]).toBe(1);
+    expect(inFlightAtStart[1]).toBe(1);
+    expect(Math.max(...inFlightAtStart)).toBeGreaterThan(CAUTIOUS_SENDER_CONCURRENCY);
   });
 
   it('before ending idle, picks once more after the poke window it started in (a folded poke is not lost)', async () => {

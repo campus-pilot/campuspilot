@@ -82,6 +82,15 @@ export type SendAttemptResult = {
   channelThrottle: { retryAfterMs: number | null } | null;
   /** The provider's answer left open whether the message went out (feeds the lane's circuit breaker). */
   outcomeUnknown: boolean;
+  /**
+   * The provider definitively accepted or rejected the message (`sent`, or
+   * the adapter's `definiteAnswer`, see `DefiniteAnswer` in the channel
+   * types). Only such an answer resets the lane's unknown-outcome streak or
+   * ends a breaker probe; a throttle, a failed connection or a check that
+   * failed before any request says nothing about whether the provider
+   * works again.
+   */
+  definiteAnswer: boolean;
 };
 
 /**
@@ -107,18 +116,19 @@ export async function sendDelivery(
   options: { now?: Date; random?: () => number } = {},
 ): Promise<SendAttemptResult> {
   if (!adapter.available) {
-    return { kind: (await skipOwedDelivery(db, deliveryId, 'disabled')) ? 'skipped' : 'not_owed', channelThrottle: null, outcomeUnknown: false };
+    return { kind: (await skipOwedDelivery(db, deliveryId, 'disabled')) ? 'skipped' : 'not_owed', channelThrottle: null, outcomeUnknown: false, definiteAnswer: false };
   }
   const claimed = await claimDelivery(db, deliveryId, options.now);
-  if (!claimed) return { kind: 'not_owed', channelThrottle: null, outcomeUnknown: false };
+  if (!claimed) return { kind: 'not_owed', channelThrottle: null, outcomeUnknown: false, definiteAnswer: false };
   if (claimed.channel !== channel) throw new Error('A sender claimed a delivery of another channel.');
   let outcome: DeliverySendOutcome;
   try {
     outcome = await adapter.send(claimed);
   } catch {
-    outcome = { kind: 'retry', errorCode: 'adapter_error', scope: 'recipient' };
+    outcome = { kind: 'retry', errorCode: 'adapter_error', scope: 'recipient', definiteAnswer: false };
   }
   const recorded = await recordDeliveryOutcome(db, claimed, outcome, { now: options.now, random: options.random });
   const channelThrottle = outcome.kind === 'retry' && outcome.scope === 'channel' ? { retryAfterMs: outcome.retryAfterMs ?? null } : null;
-  return { kind: recorded.kind, channelThrottle, outcomeUnknown: outcome.kind === 'failed' && outcome.outcomeUnknown === true };
+  const definiteAnswer = outcome.kind === 'sent' || ((outcome.kind === 'failed' || outcome.kind === 'retry') && outcome.definiteAnswer);
+  return { kind: recorded.kind, channelThrottle, outcomeUnknown: outcome.kind === 'failed' && outcome.outcomeUnknown === true, definiteAnswer };
 }

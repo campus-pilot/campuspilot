@@ -46,9 +46,9 @@ export function classifyPushResponse(status: number, retryAfter: string | null):
   if (status >= 200 && status < 300) return { kind: 'sent', providerMessageId: null };
   if (status === 404 || status === 410) return 'gone';
   if (status === 429 || status >= 500) {
-    return { kind: 'retry', errorCode: `http_${status}`, scope: 'recipient', retryAfterMs: parseRetryAfter(retryAfter) };
+    return { kind: 'retry', errorCode: `http_${status}`, scope: 'recipient', definiteAnswer: false, retryAfterMs: parseRetryAfter(retryAfter) };
   }
-  return { kind: 'failed', errorCode: `http_${status}` };
+  return { kind: 'failed', errorCode: `http_${status}`, definiteAnswer: true };
 }
 
 /**
@@ -64,13 +64,13 @@ export function createWebPushAdapter(options: {
   const db = options.db ?? defaultDb;
 
   async function send(delivery: ClaimedDelivery): Promise<DeliverySendOutcome> {
-    if (!delivery.destination) return { kind: 'failed', errorCode: 'no_destination' };
+    if (!delivery.destination) return { kind: 'failed', errorCode: 'no_destination', definiteAnswer: false };
     const subscription = await loadPushSubscription(db, delivery.destination);
-    if (!subscription || subscription.revokedAt) return { kind: 'failed', errorCode: 'subscription_revoked' };
+    if (!subscription || subscription.revokedAt) return { kind: 'failed', errorCode: 'subscription_revoked', definiteAnswer: false };
     // Checked at subscribe time too; re-checked so no stored row can make the worker call another host.
-    if (!isAllowedPushEndpoint(subscription.endpoint)) return { kind: 'failed', errorCode: 'endpoint_not_allowed' };
+    if (!isAllowedPushEndpoint(subscription.endpoint)) return { kind: 'failed', errorCode: 'endpoint_not_allowed', definiteAnswer: false };
     const message = renderWebPushMessage(delivery.notificationId, delivery.type, delivery.data);
-    if (!message) return { kind: 'failed', errorCode: 'no_push_text' };
+    if (!message) return { kind: 'failed', errorCode: 'no_push_text', definiteAnswer: false };
 
     const request = generateRequestDetails(
       { endpoint: subscription.endpoint, keys: { p256dh: subscription.p256dh, auth: subscription.auth } },
@@ -98,7 +98,7 @@ export function createWebPushAdapter(options: {
         redirect: 'error',
       });
     } catch {
-      return { kind: 'retry', errorCode: 'network_error', scope: 'recipient' };
+      return { kind: 'retry', errorCode: 'network_error', scope: 'recipient', definiteAnswer: false };
     }
     const outcome = classifyPushResponse(response.status, response.headers.get('retry-after'));
     await response.body?.cancel().catch(() => undefined);
@@ -106,7 +106,7 @@ export function createWebPushAdapter(options: {
     // send is retried, and the message may already have been accepted.
     if (outcome === 'gone') {
       await revokePushSubscriptionById(db, subscription.id).catch(() => undefined);
-      return { kind: 'failed', errorCode: 'subscription_gone' };
+      return { kind: 'failed', errorCode: 'subscription_gone', definiteAnswer: true };
     }
     if (outcome.kind === 'sent') await markPushSubscriptionSuccess(db, subscription.id).catch(() => undefined);
     return outcome;

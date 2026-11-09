@@ -42,6 +42,21 @@ export type DeliveryDecision =
  *   not send any more (e.g. WhatsApp consent was withdrawn by a STOP reply
  *   after the fan-out); the delivery is `skipped` with the reason.
  */
+/**
+ * `definiteAnswer` on a `retry` or `failed` outcome: the provider itself
+ * answered this delivery's request with a definite accept or reject of the
+ * message (an invalid number, a paused template, a 4xx push status, an
+ * expired subscription). False when no provider request was made (a check
+ * before sending failed, a document could not be produced), the connection
+ * failed, the provider throttled or was overloaded (429, 5xx, throttle
+ * codes), or its answer left the outcome open (`outcomeUnknown`). A `sent`
+ * outcome is always a definite answer. The lane's circuit breaker only
+ * counts definite answers as evidence that the provider works again (see
+ * the sender's `UNKNOWN_OUTCOME_BREAKER_THRESHOLD`); it is stated by the
+ * adapter for every outcome, never derived from the error code.
+ */
+export type DefiniteAnswer = boolean;
+
 export type DeliverySendOutcome =
   | {
       kind: 'sent';
@@ -54,6 +69,8 @@ export type DeliverySendOutcome =
       kind: 'retry';
       errorCode: string;
       scope: 'recipient' | 'channel';
+      /** See {@link DefiniteAnswer}. */
+      definiteAnswer: boolean;
       retryAfterMs?: number;
       /**
        * Set when the provider said its daily messaging limit is reached
@@ -64,6 +81,8 @@ export type DeliverySendOutcome =
   | {
       kind: 'failed';
       errorCode: string;
+      /** See {@link DefiniteAnswer}. */
+      definiteAnswer: boolean;
       /** A safe explanation for staff (never provider prose with personal data). */
       errorMessage?: string;
       /**

@@ -67,7 +67,7 @@ describe('delivery log, resend and failure alerts', () => {
         data: { ...billIssuedData(admissionId), billRunId },
       }),
     );
-    await dispatch(eventId, whatsapp({ kind: 'failed', errorCode: 'wa_131026' }));
+    await dispatch(eventId, whatsapp({ kind: 'failed', errorCode: 'wa_131026', definiteAnswer: true }));
 
     await expect(teacher.school.listNotificationDeliveries({ schoolId, scope: { kind: 'admission', admissionId } })).rejects.toMatchObject({ code: 'FORBIDDEN' });
     const byAdmission = await principal.school.listNotificationDeliveries({ schoolId, scope: { kind: 'admission', admissionId } });
@@ -126,7 +126,7 @@ describe('delivery log, resend and failure alerts', () => {
         data: { paymentId: 'fpay_alert', sessionId: 'sess_test', admissionId, receiptNumber: 'RCP/1', amountMinor: '100', currency: 'INR', receivedAt: new Date().toISOString(), studentName: 'Kavya Failed' },
       }),
     );
-    await dispatch(payment.eventId, whatsapp({ kind: 'failed', errorCode: 'wa_131026' }));
+    await dispatch(payment.eventId, whatsapp({ kind: 'failed', errorCode: 'wa_131026', definiteAnswer: true }));
     const result = await db.transaction((tx) =>
       notify(tx, {
         type: 'exam.results_published',
@@ -139,7 +139,7 @@ describe('delivery log, resend and failure alerts', () => {
         data: { sessionId: 'sess_test', examSlug: 'final', examName: 'Final', admissionId, studentName: 'Kavya Failed' },
       }),
     );
-    await dispatch(result.eventId, whatsapp({ kind: 'failed', errorCode: 'outcome_unknown' }));
+    await dispatch(result.eventId, whatsapp({ kind: 'failed', errorCode: 'outcome_unknown', outcomeUnknown: true, definiteAnswer: false }));
     await sweepWhatsAppFailureAlerts();
     const alerts = await db.select().from(notificationEventTable).where(and(eq(notificationEventTable.schoolId, schoolId), eq(notificationEventTable.type, 'notification.whatsapp_failed')));
     const byType = (failedType: string) => alerts.find((alert) => (alert.data as { failedType: string }).failedType === failedType)!;
