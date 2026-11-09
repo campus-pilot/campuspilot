@@ -188,6 +188,11 @@ export const examLifecycleTable = pgTable(
      * hidden from students until someone releases it, and withdrawing clears
      * it again. Release currently requires `status = 'completed'` and blocks
      * reopening, but that is enforced by the procedures, not inferred here.
+     *
+     * Unlike its older siblings `started_at` / `completed_at` (plain
+     * `timestamp`, kept as they are to avoid rewriting legacy rows), this is
+     * `timestamptz`: it is shown to students and guardians as a calendar date,
+     * so it must be an unambiguous instant whatever the server's time zone.
      */
     cadetReleasedAt: timestamp('cadet_released_at', { withTimezone: true }),
     /** The staff user who performed the current release; null when not released or the account was deleted. */

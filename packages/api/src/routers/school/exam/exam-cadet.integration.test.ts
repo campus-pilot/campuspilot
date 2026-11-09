@@ -138,6 +138,12 @@ describe('Cadet Portal release and teacher remarks (staff procedures)', () => {
       expect(await principal.school.saveStudentExamRemark({ ...studentScope(), text: 'Changed' })).toMatchObject({ text: 'Changed' });
     });
 
+    it('refuses to delete an enrollment that has a remark, with a readable conflict', async () => {
+      await runExam(principal, scope, [{ classId, studentId, subjects: { maths: 72 } }]);
+      await principal.school.saveStudentExamRemark({ ...studentScope(), text: 'Keep it up.' });
+      await expectRpcCode(principal.school.deleteStudent({ schoolId: scope.schoolId, sessionId: scope.sessionId, studentId }), 'CONFLICT');
+    });
+
     it('enforces permissions, input limits and the student scope', async () => {
       await runExam(principal, scope, [{ classId, studentId, subjects: { maths: 72 } }]);
       await expectRpcCode(accountant.school.saveStudentExamRemark({ ...studentScope(), text: 'No' }), 'FORBIDDEN');
