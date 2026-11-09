@@ -507,7 +507,7 @@ export const schoolStudentRouter = {
     .route({
       summary: "Delete a student enrollment",
       description:
-        "Delete the student row for the explicitly supplied session while retaining the underlying admission.",
+        "Delete the student row for the explicitly supplied session while retaining the underlying admission. Refused with CONFLICT while examination results, assessments or teacher remarks reference the enrollment.",
       tags: ["School", "Students"],
     })
     .meta({

@@ -21,6 +21,24 @@ import type { ExamScope } from './exam.service';
 type StudentScope = z.infer<typeof dto.examStudentScopeSchema>;
 
 /**
+ * Refuses any change to the plans of an examination whose results are
+ * released to the Cadet Portal: what students see must not change under
+ * them. Locks the lifecycle row like `transitionExam` and
+ * `setExamCadetRelease`, so a concurrent release and plan change serialize.
+ */
+export async function requireNotReleasedToCadet(tx: DatabaseTransaction, scope: ExamScope) {
+  const [lifecycle] = await tx
+    .select({ cadetReleasedAt: examLifecycleTable.cadetReleasedAt })
+    .from(examLifecycleTable)
+    .where(lifecycleWhere(scope))
+    .for('update');
+  if (lifecycle?.cadetReleasedAt)
+    throw rpcError.badRequest(
+      'These results are released to the Cadet Portal. Withdraw them from the Cadet Portal before changing the examination plans.',
+    );
+}
+
+/**
  * Releases or withdraws an examination's results in the Cadet Portal.
  *
  * Release requires the examination to be completed: completion is the point
@@ -29,7 +47,13 @@ type StudentScope = z.infer<typeof dto.examStudentScopeSchema>;
  * still its own recorded act (`cadetReleasedAt`), never implied by
  * completion, and reopening is refused while released (see `transitionExam`).
  * Historical sessions may be released too, because the portal shows earlier
- * years in Growth; releasing changes no academic data. The lifecycle row is
+ * years in Growth; releasing changes no academic data.
+ *
+ * Release freezes marks and remarks only (they cannot be edited while
+ * released). It takes no snapshot: the portal reads exam names, subject and
+ * mode names, co-scholastic area names and the grading scale live from the
+ * session and class configuration, so later configuration edits change how a
+ * released result is labelled and graded. The lifecycle row is
  * locked so a concurrent reopen and release serialize.
  */
 export async function setExamCadetRelease(

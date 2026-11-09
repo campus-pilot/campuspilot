@@ -1,5 +1,13 @@
 import { db } from '@campuspilot/db';
-import { examLifecycleTable, examStudentRemarkTable } from '@campuspilot/db/schema/exam';
+import { classTable } from '@campuspilot/db/schema/class';
+import {
+  examLifecycleTable,
+  examPlanTable,
+  examResultTable,
+  examStudentAssessmentTable,
+  examStudentRemarkTable,
+} from '@campuspilot/db/schema/exam';
+import { studentTable } from '@campuspilot/db/schema/student';
 import { schoolTable } from '@campuspilot/db/schema/school';
 import { and, eq } from 'drizzle-orm';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -97,6 +105,27 @@ describe('Cadet Portal release and teacher remarks (staff procedures)', () => {
       await expectRpcCode(other.principal.school.withdrawExamFromCadet(scope), 'FORBIDDEN');
     });
 
+    it('refuses legacy plan changes while released', async () => {
+      await completeExam();
+      await principal.school.releaseExamToCadet(scope);
+      const [plan] = await db.select().from(examPlanTable).where(eq(examPlanTable.sessionId, scope.sessionId));
+      const planScope = { schoolId: scope.schoolId, sessionId: scope.sessionId, classId, examPlanId: plan!.id };
+      await db.update(classTable).set({
+        config: { subjects: {
+          maths: { name: 'Mathematics', books: [], examModes: { written: { name: 'Written', percentage: 100 } } },
+          english: { name: 'English', books: [], examModes: { written: { name: 'Written', percentage: 100 } } },
+        } },
+      }).where(eq(classTable.id, classId));
+      await expectRpcCode(principal.school.createExamPlan({ ...scope, classId, subjectSlug: 'english' }), 'BAD_REQUEST');
+      await expectRpcCode(principal.school.deleteExamPlan(planScope), 'BAD_REQUEST');
+      await expectRpcCode(principal.school.transitionExamPlan({ ...planScope, status: 'active' }), 'BAD_REQUEST');
+      await expectRpcCode(principal.school.updateExamPlan({ ...planScope, totalMarks: 50 }), 'BAD_REQUEST');
+      expect(await db.select().from(examPlanTable).where(eq(examPlanTable.sessionId, scope.sessionId))).toEqual([plan]);
+
+      await principal.school.withdrawExamFromCadet(scope);
+      expect(await principal.school.createExamPlan({ ...scope, classId, subjectSlug: 'english' })).toMatchObject({ subjectSlug: 'english' });
+    });
+
     it('validates input and unknown exams', async () => {
       await expectRpcCode(principal.school.releaseExamToCadet({ ...scope, examSlug: '' }), 'BAD_REQUEST');
       await expectRpcCode(principal.school.releaseExamToCadet({ ...scope, examSlug: 'missing' }), 'NOT_FOUND');
@@ -138,10 +167,23 @@ describe('Cadet Portal release and teacher remarks (staff procedures)', () => {
       expect(await principal.school.saveStudentExamRemark({ ...studentScope(), text: 'Changed' })).toMatchObject({ text: 'Changed' });
     });
 
-    it('refuses to delete an enrollment that has a remark, with a readable conflict', async () => {
+    it('refuses to delete an enrollment with results, an assessment or a remark, keeping the row', async () => {
+      const remove = () => principal.school.deleteStudent({ schoolId: scope.schoolId, sessionId: scope.sessionId, studentId });
+      const exists = async () => (await db.select().from(studentTable).where(eq(studentTable.id, studentId))).length === 1;
       await runExam(principal, scope, [{ classId, studentId, subjects: { maths: 72 } }]);
+      // Results (and the shared assessment saved with them).
+      await expectRpcCode(remove(), 'CONFLICT');
+      expect(await exists()).toBe(true);
+      // An assessment alone.
+      await db.delete(examResultTable).where(eq(examResultTable.studentId, studentId));
+      expect(await db.select().from(examStudentAssessmentTable).where(eq(examStudentAssessmentTable.studentId, studentId))).toHaveLength(1);
+      await expectRpcCode(remove(), 'CONFLICT');
+      expect(await exists()).toBe(true);
+      // A remark alone.
       await principal.school.saveStudentExamRemark({ ...studentScope(), text: 'Keep it up.' });
-      await expectRpcCode(principal.school.deleteStudent({ schoolId: scope.schoolId, sessionId: scope.sessionId, studentId }), 'CONFLICT');
+      await db.delete(examStudentAssessmentTable).where(eq(examStudentAssessmentTable.studentId, studentId));
+      await expectRpcCode(remove(), 'CONFLICT');
+      expect(await exists()).toBe(true);
     });
 
     it('enforces permissions, input limits and the student scope', async () => {
