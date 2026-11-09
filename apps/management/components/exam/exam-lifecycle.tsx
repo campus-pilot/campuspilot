@@ -180,7 +180,7 @@ function CadetReleaseTrigger({ scope, visible, action, compact = false, onSelect
   const Icon = action === 'release' ? Send : Undo2;
   return (
     <RequirePermissions permissions={schoolPermission(scope.schoolId, SCHOOL_ACTIONS.TRANSITION_EXAM_PLAN)}>
-      <ExamButton variant="outline" onClick={onSelect}><Icon aria-hidden />{actionLabel(action, compact)}</ExamButton>
+      <ExamButton variant="outline" onClick={onSelect}><Icon aria-hidden />{examActionLabel(action, compact)}</ExamButton>
     </RequirePermissions>
   );
 }
@@ -197,7 +197,7 @@ function LifecycleTrigger({ scope, visible, action, blockedReason = null, onSele
     <RequirePermissions permissions={schoolPermission(scope.schoolId, SCHOOL_ACTIONS.TRANSITION_EXAM_PLAN)}>
       <span className="flex flex-wrap items-center gap-2">
         {blockedReason && <span className="text-xs text-muted-foreground">{blockedReason}</span>}
-        <ExamButton variant="outline" disabled={!!blockedReason} onClick={onSelect}><Icon aria-hidden />{actionLabel(action)}</ExamButton>
+        <ExamButton variant="outline" disabled={!!blockedReason} onClick={onSelect}><Icon aria-hidden />{examActionLabel(action)}</ExamButton>
       </span>
     </RequirePermissions>
   );
@@ -227,9 +227,6 @@ function WorkingDaysAlert({
     />
   );
 }
-const actionLabel = examActionLabel;
-const actionDescription = examActionDescription;
-
 function ExamActionDialog({
   scope,
   action,
@@ -246,7 +243,7 @@ function ExamActionDialog({
 }) {
   const cache = useQueryClient();
   const workingDays = action === 'working-days';
-  const title = workingDays ? 'Attendance working days' : actionLabel(action);
+  const title = workingDays ? 'Attendance working days' : examActionLabel(action);
   const form = useForm({
     defaultValues: { days: initial === null ? '' : String(initial) },
     validators: { onSubmit: z.object({ days: optionalIntegerText }) },
@@ -294,7 +291,7 @@ function ExamActionDialog({
             <DialogHeader>
               <DialogTitle>{title}</DialogTitle>
               <DialogDescription>
-                {actionDescription(action, released)}
+                {examActionDescription(action, released)}
               </DialogDescription>
             </DialogHeader>
             <form
