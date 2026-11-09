@@ -35,7 +35,7 @@ export function DataMigrationRunsTable({ runs, onShowSkipped }: {
           <TableHead>Status</TableHead>
           <TableHead className="text-right">Processed</TableHead>
           <TableHead className="text-right">Changed</TableHead>
-          <TableHead className="text-right">Skipped</TableHead>
+          <TableHead className="text-right">Needs attention</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>

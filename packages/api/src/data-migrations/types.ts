@@ -1,6 +1,10 @@
 import type { DatabaseExecutor } from '@campuspilot/db';
 
-/** An item a batch could not migrate; reported on the run instead. */
+/**
+ * An item a batch could not fully migrate; reported on the run for
+ * attention. The batch may still have written part of it (then it also
+ * counts as changed).
+ */
 export type DataMigrationSkippedItem = {
   /** Stable, unique key of the item within the migration (e.g. an admission ID). */
   itemKey: string;
@@ -10,7 +14,11 @@ export type DataMigrationSkippedItem = {
   detail?: Record<string, string>;
 };
 
-/** What one batch did. `processed = changed + skipped.length + unchanged`. */
+/**
+ * What one batch did: `processed` items read, `changed` items written,
+ * `skipped` items reported for attention (written or not; see
+ * {@link DataMigrationSkippedItem}).
+ */
 export type DataMigrationBatchResult = {
   processed: number;
   changed: number;

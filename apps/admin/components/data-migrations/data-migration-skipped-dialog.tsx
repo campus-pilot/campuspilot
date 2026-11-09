@@ -64,8 +64,8 @@ export function DataMigrationSkippedDialog({ run, onOpenChange }: {
     <Dialog open={run !== null} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
         <DialogHeader>
-          <DialogTitle>Skipped items</DialogTitle>
-          <DialogDescription>Items this run reported instead of migrating. They need attention in the app.</DialogDescription>
+          <DialogTitle>Items needing attention</DialogTitle>
+          <DialogDescription>Items this run could not fully migrate. Some may still have been partly changed (counted under Changed); each needs attention in the app.</DialogDescription>
         </DialogHeader>
         {run ? <SkippedItemsTable key={run.id} runId={run.id} /> : null}
       </DialogContent>

@@ -38,8 +38,11 @@ export const dataMigrationRunStatusEnum = pgEnum("data_migration_run_status", [
  * - `checkpoint` is the opaque keyset cursor after the last committed batch.
  *   It is written in the same transaction as that batch's changes, so a crash
  *   resumes exactly after the last committed batch.
- * - Counts: `processed = changed + skipped + unchanged`; `skipped` items are
- *   listed in `data_migration_skipped_item`.
+ * - Counts: `processed` items read; `changed` items the run wrote;
+ *   `skipped` items it reported for attention because it could not fully
+ *   migrate them (listed in `data_migration_skipped_item`). A reported item
+ *   the run still partly fixed is counted in both `changed` and `skipped`,
+ *   so `changed + skipped` may exceed `processed`.
  */
 export const dataMigrationRunTable = pgTable(
   "data_migration_run",

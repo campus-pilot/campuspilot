@@ -83,7 +83,7 @@ export const admissionPhoneE164Migration: DataMigration = {
     for (const row of rows) {
       if (row.whatsappSameAsPhone !== null) continue;
       const backfill = backfillAdmissionPhone(row.phoneNo);
-      await db
+      const written = await db
         .update(admissionTable)
         .set({
           phoneNo: backfill.phoneNo,
@@ -91,10 +91,13 @@ export const admissionPhoneE164Migration: DataMigration = {
           whatsappSameAsPhone: backfill.whatsappSameAsPhone,
           whatsappVerified: false,
         })
-        .where(and(eq(admissionTable.id, row.id), isNull(admissionTable.whatsappSameAsPhone)));
-      if (backfill.kind === 'parsed') {
-        changed += 1;
-      } else {
+        .where(and(eq(admissionTable.id, row.id), isNull(admissionTable.whatsappSameAsPhone)))
+        .returning({ id: admissionTable.id });
+      // Every row written counts as changed, including an unparseable phone
+      // that got its +91 prefix and a blank one that only had its WhatsApp
+      // choice recorded; those are also reported, since they need staff.
+      if (written.length > 0) changed += 1;
+      if (backfill.kind !== 'parsed') {
         const reason = backfill.kind === 'blank' ? 'blank_phone' : 'unparseable_phone';
         skipped.push({ itemKey: row.id, reason, detail: { schoolId: row.schoolId, admissionId: row.id } });
       }

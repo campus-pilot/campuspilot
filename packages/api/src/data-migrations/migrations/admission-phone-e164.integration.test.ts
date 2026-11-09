@@ -60,6 +60,9 @@ describe('admission phone backfill (data migration)', () => {
   it('backfills E.164 numbers and WhatsApp facts, reports unparseable values, and is idempotent', async () => {
     const run = await runMigration(false);
     expect(run.status).toBe('completed');
+    // Every written row counts as changed, the reported (unparseable, blank) ones too.
+    expect(run.changedCount).toBeGreaterThanOrEqual(6);
+    expect(run.changedCount + run.skippedCount).toBeGreaterThan(run.changedCount);
     const reasons = await db.select().from(dataMigrationSkippedItemTable).where(eq(dataMigrationSkippedItemTable.runId, run.id));
     expect(reasons.find((item) => item.itemKey === ids.blank)?.reason).toBe('blank_phone');
     expect(reasons.find((item) => item.itemKey === ids.twoNumbers)?.reason).toBe('unparseable_phone');
