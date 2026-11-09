@@ -1,8 +1,7 @@
 import { db } from '@campuspilot/db';
 import { notificationDeliveryTable, notificationTable } from '@campuspilot/db/schema/notification';
 import { and, asc, eq, inArray } from 'drizzle-orm';
-import { randomInt } from 'node:crypto';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createTestAdmission, createTestSchool } from '../../../test/fixtures';
 import { billIssuedData, dispatchNow, emit, fakeClock, TEST_PACING } from '../../../test/notifications';
@@ -16,9 +15,9 @@ import { pickDueDeliveries, type SendAttemptResult } from './queue';
 const whatsappOff = { channel: 'whatsapp', available: false, unavailableReason: 'test' } as const;
 
 /**
- * Queues `copies` owed web push copies for one student of a new school, on a
- * lane of their own (a random lane number no other test uses), so the lane
- * can be drained and picked without a school scope.
+ * Queues `copies` owed web push copies for one student of a new school, on
+ * the given test lane (see {@link uniqueLane}), so the lane can be drained
+ * and picked without a school scope.
  */
 async function queue(options: { lane: number; copies: number; sendPriority: 'immediate' | 'bulk'; schoolId?: string }) {
   const schoolId = options.schoolId ?? (await createTestSchool()).id;
@@ -40,7 +39,33 @@ async function queue(options: { lane: number; copies: number; sendPriority: 'imm
   return { schoolId, ids: rows.map((row) => row.id).sort() };
 }
 
-const uniqueLane = (): SenderTarget => ({ channel: 'web_push', lane: randomInt(100, 1000) });
+/**
+ * First lane number handed to a test. Production web push lanes are
+ * `0..WEB_PUSH_SENDER_LANES - 1` and no other test file moves rows onto a
+ * lane at or above this, so these lanes belong to this file alone.
+ */
+const FIRST_TEST_LANE = 100;
+let nextTestLane = FIRST_TEST_LANE;
+const usedLanes: number[] = [];
+
+/**
+ * A lane no other test of this run has used: a counter, not a random number,
+ * so two tests can never share one (the test database is created fresh for
+ * every run, see `test/global-setup.ts`). Each test's rows are also deleted
+ * after it ({@link afterEach} below), so even an unscoped drain or pick only
+ * ever sees the rows its own test queued.
+ */
+const uniqueLane = (): SenderTarget => {
+  const lane = nextTestLane++;
+  usedLanes.push(lane);
+  return { channel: 'web_push', lane };
+};
+
+afterEach(async () => {
+  const lanes = usedLanes.splice(0);
+  if (lanes.length === 0) return;
+  await db.delete(notificationDeliveryTable).where(and(eq(notificationDeliveryTable.channel, 'web_push'), inArray(notificationDeliveryTable.sendLane, lanes)));
+});
 
 function recordingAdapter(sent: string[]): NotificationChannelAdapter {
   return {
