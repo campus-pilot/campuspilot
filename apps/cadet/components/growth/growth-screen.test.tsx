@@ -46,6 +46,17 @@ describe('GrowthView', () => {
     expect(screen.queryByRole('tab', { name: 'vs class average' })).toBeNull();
   });
 
+  it('blames the small-class minimum, not the school, when averages are shared but withheld', () => {
+    const tooSmall = {
+      ...growth,
+      classAveragesShared: true,
+      selected: { ...growth.selected!, exams: growth.selected!.exams.map((exam) => ({ ...exam, classAveragePercentage: null, subjectAverages: null })) },
+    };
+    renderWithQuery(<GrowthView growth={tooSmall} studentName="Meera Singh" />);
+    expect(screen.getByText(/Class averages appear once at least 5 students/)).toBeTruthy();
+    expect(screen.queryByText(/doesn.t share class averages/)).toBeNull();
+  });
+
   it('explains an empty growth view for a student without released results', () => {
     renderWithQuery(<GrowthView growth={{ classes: [], selected: null, classAveragesShared: false }} studentName="Meera" />);
     expect(screen.getByText('Nothing to compare yet')).toBeTruthy();

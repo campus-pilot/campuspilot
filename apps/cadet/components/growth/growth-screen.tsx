@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { Bar, BarChart, CartesianGrid, Line, LineChart, XAxis, YAxis } from 'recharts';
 import { ChartLineIcon, ChevronRightIcon, TrendingDownIcon, TrendingUpIcon } from 'lucide-react';
-import type { CadetGrowthDto } from '@campuspilot/api/routers/cadet/cadet.dto';
+import { CADET_CLASS_AVERAGE_MIN_STUDENTS, type CadetGrowthDto } from '@campuspilot/api/routers/cadet/cadet.dto';
 import { Button } from '@campuspilot/ui/components/button';
 import { Skeleton } from '@campuspilot/ui/components/skeleton';
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@campuspilot/ui/components/card';
@@ -62,7 +62,11 @@ function ClassSelect({ classes, value }: { classes: ClassRecord[]; value: string
 }
 
 /**
- * Overall percentage for every released exam in one class. Overall scores are
+ * Overall percentage for every released exam in one class. A missing average
+ * line is explained by its actual cause: the school setting
+ * (`classAveragesShared`) or the small-class minimum.
+ *
+ * Overall scores are
  * the only numbers that stay comparable when classes define different
  * subjects, so this card is the growth headline.
  */
@@ -113,7 +117,11 @@ export function OverallTrend({ growth, studentName }: { growth: CadetGrowthDto; 
           </ChartContainer>
         )}
         {selected.exams.length > 0 && !hasAverage ? (
-          <p className="px-2 text-xs text-muted-foreground">Your school doesn&apos;t share class averages.</p>
+          <p className="px-2 text-xs text-muted-foreground">
+            {growth.classAveragesShared
+              ? `Class averages appear once at least ${CADET_CLASS_AVERAGE_MIN_STUDENTS} students in ${record.classLabel} have results.`
+              : 'Your school doesn’t share class averages.'}
+          </p>
         ) : null}
       </CardContent>
     </Card>
