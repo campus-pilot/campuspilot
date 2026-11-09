@@ -31,8 +31,9 @@ function safeRun<T>(ctx: restate.Context, name: string, action: () => Promise<T>
  * run over with a one-way, idempotent, signed send (an API request or the
  * boot never waits for the worker). `start` is, in order: Zod-parsed,
  * authenticated by its HMAC signature (`WORKER_CONTROL_SECRET`), then checked
- * against the database (the run exists, is pending or running and its
- * migration is registered in this worker's code), and only then starts the
+ * against the database (the run exists and is pending or running, else a
+ * terminal 409; its migration is registered in this worker's code, else a
+ * retryable error until a worker that knows it answers), and only then starts the
  * workflow under the run's key and records its invocation ID, which the
  * API's sweep uses to notice a run Restate paused or that ended early.
  */
@@ -54,7 +55,14 @@ export const dataMigrationControlService = restate.service({
       });
       if (!run) throw new restate.TerminalError('No pending or running data migration run matches this request.', { errorCode: 409 });
       if (!findDataMigration(run.migrationId)) {
-        throw new restate.TerminalError('This worker does not know the migration; is it running an older release?', { errorCode: 409 });
+        // Retryable, not terminal: the API is often deployed before the
+        // worker, so the run was handed over to an older worker release.
+        // Restate retries this call with backoff until the new worker
+        // answers it; if its retry policy pauses the call first, the API's
+        // sweep fails the run visibly ("paused … is the worker running?")
+        // and the next API boot registers a new run.
+        log.warn({ runId: run.id, migrationId: run.migrationId }, 'data-migration.control.unknown-migration');
+        throw new Error('This worker does not know the migration yet; is it running an older release?');
       }
       const handle = ctx
         .workflowSendClient(dataMigrationWorkflow, dataMigrationWorkflowKey(run.migrationId, run.id))
