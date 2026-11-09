@@ -52,7 +52,7 @@ describe('data migration outbox', () => {
       .set({ submittedAt: new Date(Date.now() - 5 * 60_000), submitInvocationId: 'inv_control2', invocationId: 'inv_workflow2', status: 'running' })
       .where(eq(dataMigrationRunTable.id, runId));
     vi.mocked(getRestateInvocation).mockImplementation(async (id) => ({ status: id === 'inv_workflow2' ? 'paused' : 'running', createdAt: Date.now() }));
-    await sweepDataMigrationOutbox({ register: false });
+    await sweepDataMigrationOutbox({ register: [] });
     expect(cancelRestateInvocation).toHaveBeenCalledWith('inv_workflow2');
     const [run] = await db.select().from(dataMigrationRunTable).where(eq(dataMigrationRunTable.id, runId));
     expect(run).toMatchObject({ status: 'failed' });
@@ -70,9 +70,9 @@ describe('data migration outbox', () => {
       .where(eq(dataMigrationRunTable.id, stale));
     vi.mocked(sendDataMigrationStart).mockRejectedValue(new Error('The operation was aborted due to timeout'));
     vi.mocked(getRestateInvocation).mockReset().mockRejectedValue(new Error('Restate admin query failed (503).'));
-    const result = await sweepDataMigrationOutbox({ register: false });
-    expect(result.pending).toBeGreaterThanOrEqual(2);
-    expect(result.sent).toBe(0);
+    const result = await sweepDataMigrationOutbox({ register: [] });
+    expect(result.counts.pending).toBeGreaterThanOrEqual(2);
+    expect(result.counts.sent).toBe(0);
     expect(sendDataMigrationStart).toHaveBeenCalledTimes(1);
     expect(getRestateInvocation).toHaveBeenCalledTimes(1);
     const rows = await db.select().from(dataMigrationRunTable).where(inArray(dataMigrationRunTable.id, [first, second, stale]));

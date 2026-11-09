@@ -9,7 +9,8 @@ import {
 } from '../workflows/restate-admin';
 import { log } from '../workflows/data-migration/log';
 import { sendDataMigrationStart } from './data-migration.restate';
-import { registerPendingDataMigrations } from './run-store';
+import { DATA_MIGRATIONS } from './registry';
+import { dataMigrationsAwaitingApplyRun, registerPendingDataMigrations } from './run-store';
 
 /**
  * The data migration outbox: `data_migration_run` rows are the durable record
@@ -177,15 +178,23 @@ async function failStaleRuns(db: DatabaseExecutor): Promise<number> {
 }
 
 /**
- * One sweep, safe across API replicas and bounded. With `register` (the
- * first sweep after boot) it first registers an apply run for every
- * migration that needs one (see `registerPendingDataMigrations`). Sends run
- * after the picking transaction commits, so the control service sees the
- * rows, and stop at the first hand-over Restate did not accept (the rest
- * would each wait for a timeout and hold up the server's sweep loop).
+ * One sweep, safe across API replicas and bounded. It first registers an
+ * apply run for each migration in `register` that needs one (see
+ * `registerPendingDataMigrations`) and reports in `awaitingRegistration`
+ * those that still have none: a dry run active at boot blocks the insert
+ * (one active run per migration). The server passes every migration on its
+ * first sweep and then only the awaiting ones, until none is left, so a
+ * blocked registration happens as soon as the dry run ends (review round 2
+ * #4), while a run that fails later in this boot is not registered again
+ * before the next boot. Sends run after the picking transaction commits, so
+ * the control service sees the rows, and stop at the first hand-over
+ * Restate did not accept (the rest would each wait for a timeout and hold
+ * up the server's sweep loop).
  */
-export async function sweepDataMigrationOutbox(options: { register: boolean }, db: DatabaseExecutor = defaultDb) {
-  const registered = options.register ? (await registerPendingDataMigrations(db)).length : 0;
+export async function sweepDataMigrationOutbox(options: { register: readonly string[] }, db: DatabaseExecutor = defaultDb) {
+  const toRegister = DATA_MIGRATIONS.filter((migration) => options.register.includes(migration.id));
+  const registered = toRegister.length > 0 ? (await registerPendingDataMigrations(db, toRegister)).length : 0;
+  const awaitingRegistration = await dataMigrationsAwaitingApplyRun(db, toRegister.map((migration) => migration.id));
   const pending = await claimPendingRuns(db);
   let sent = 0;
   for (const runId of pending) {
@@ -194,5 +203,5 @@ export async function sweepDataMigrationOutbox(options: { register: boolean }, d
     if (result === 'sent') sent += 1;
   }
   const stale = await failStaleRuns(db);
-  return { registered, pending: pending.length, sent, stale };
+  return { counts: { registered, pending: pending.length, sent, stale }, awaitingRegistration };
 }

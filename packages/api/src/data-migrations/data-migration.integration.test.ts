@@ -12,6 +12,7 @@ import { runDataMigrationBatches } from '../workflows/data-migration/workflow';
 import {
   failDataMigrationRun,
   loadDataMigrationRun,
+  dataMigrationsAwaitingApplyRun,
   registerPendingDataMigrations,
   requestDataMigrationRun,
   runDataMigrationBatch,
@@ -153,6 +154,18 @@ describe('data migration framework', () => {
     await failDataMigrationRun(runId, 'stopped by test');
     expect(await runDataMigrationBatch(runId, migration)).toEqual({ state: 'stopped' });
     expect((await readItems()).every((item) => !item.migrated)).toBe(true);
+  });
+
+  it('reports a registration a dry run blocked until an apply run exists', async () => {
+    const migration = { id: `test-blocked-${randomUUID()}` };
+    const admin = (await createTestUser()).id;
+    const dryRun = await requestDataMigrationRun(db, { migrationId: migration.id, dryRun: true, requestedBy: admin });
+    expect(await registerPendingDataMigrations(db, [migration])).toEqual([]);
+    expect(await dataMigrationsAwaitingApplyRun(db, [migration.id])).toEqual([migration.id]);
+    await db.update(dataMigrationRunTable).set({ status: 'completed' }).where(eq(dataMigrationRunTable.id, dryRun!.id));
+    const [applied] = await registerPendingDataMigrations(db, [migration]);
+    expect(applied).toMatch(/^dmr_/);
+    expect(await dataMigrationsAwaitingApplyRun(db, [migration.id])).toEqual([]);
   });
 
   it('registers one boot run per migration until it completes, and again after a failure', async () => {

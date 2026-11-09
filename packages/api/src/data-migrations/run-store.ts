@@ -56,6 +56,31 @@ export async function registerPendingDataMigrations(
 }
 
 /**
+ * Of these migrations, the ones that still have no apply run pending,
+ * running or completed: their registration has not happened yet, typically
+ * because an admin's dry run was active (one active run per migration), so
+ * the insert of {@link registerPendingDataMigrations} was refused.
+ */
+export async function dataMigrationsAwaitingApplyRun(
+  db: DatabaseExecutor,
+  migrationIds: readonly string[],
+): Promise<string[]> {
+  if (migrationIds.length === 0) return [];
+  const covered = await db
+    .selectDistinct({ migrationId: dataMigrationRunTable.migrationId })
+    .from(dataMigrationRunTable)
+    .where(
+      and(
+        inArray(dataMigrationRunTable.migrationId, [...migrationIds]),
+        eq(dataMigrationRunTable.dryRun, false),
+        inArray(dataMigrationRunTable.status, ['pending', 'running', 'completed']),
+      ),
+    );
+  const done = new Set(covered.map((row) => row.migrationId));
+  return migrationIds.filter((id) => !done.has(id));
+}
+
+/**
  * Records a run requested by a platform admin. Returns null when the
  * migration already has a pending or running run (one at a time).
  */
