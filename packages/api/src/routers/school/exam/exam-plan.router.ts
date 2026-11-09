@@ -1,4 +1,5 @@
 import { transitionExam } from './exam-lifecycle.service';
+import { requireNotReleasedToCadet } from './exam-cadet.service';
 import { and, asc, count, desc, eq, sql } from 'drizzle-orm';
 import { admissionTable } from '@campuspilot/db/schema/admission';
 import { studentTable } from '@campuspilot/db/schema/student';
@@ -214,6 +215,7 @@ export const schoolExamPlanRouter = {
       try {
         return await context.db.transaction(async (tx) => {
           const { session } = await getExam(tx, input, 'share');
+          await requireNotReleasedToCadet(tx, input);
           const schoolClass = await getExamClass(
             tx,
             input.schoolId,
@@ -281,6 +283,7 @@ export const schoolExamPlanRouter = {
       try {
         return await context.db.transaction(async (tx) => {
           const { plan, session } = await getPlan(tx, input, true);
+          await requireNotReleasedToCadet(tx, plan);
           if (!['draft', 'approved'].includes(plan.status))
             throw rpcError.badRequest(
               'Active and completed exam plans are locked.',
@@ -348,7 +351,7 @@ export const schoolExamPlanRouter = {
     .route(
       route(
         'Delete an exam plan',
-        'Delete a draft or approved exam plan; active and completed plans cannot be deleted.',
+        'Delete a draft or approved exam plan; active and completed plans, and plans of an exam released to the Cadet Portal, cannot be deleted.',
       ),
     )
     .meta({
@@ -366,6 +369,7 @@ export const schoolExamPlanRouter = {
       try {
         return await context.db.transaction(async (tx) => {
           const { plan } = await getPlan(tx, input, true);
+          await requireNotReleasedToCadet(tx, plan);
           if (!['draft', 'approved'].includes(plan.status))
             throw rpcError.badRequest(
               'Active and completed exam plans cannot be deleted.',
@@ -400,6 +404,7 @@ export const schoolExamPlanRouter = {
         return await context.db.transaction(async (tx) => {
           await getExamSession(tx, input, 'update');
           const { plan } = await getPlan(tx, input, true);
+          await requireNotReleasedToCadet(tx, plan);
           const transitions = {
             draft: 'approved',
             approved: 'active',

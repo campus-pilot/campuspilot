@@ -4,6 +4,7 @@ import { db } from '@campuspilot/db';
 import { admissionTable } from '@campuspilot/db/schema/admission';
 import { user } from '@campuspilot/db/schema/auth';
 import { demoSchoolJobTable } from '@campuspilot/db/schema/demo-school-job';
+import { examStudentRemarkTable } from '@campuspilot/db/schema/exam';
 import { financeBillTable, financePaymentTable } from '@campuspilot/db/schema/finance';
 import { schoolMemberTable } from '@campuspilot/db/schema/school-member';
 import { schoolUserRoleTable } from '@campuspilot/db/schema/school-user-role';
@@ -25,14 +26,15 @@ const AS_OF = '2026-12-20T06:30:00.000Z';
 const SEED = 'integration-seed';
 
 async function snapshotCounts(schoolId: string) {
-  const [[admissions], [students], [bills], [payments], [demoUsers]] = await Promise.all([
+  const [[admissions], [students], [bills], [payments], [demoUsers], [remarks]] = await Promise.all([
     db.select({ value: count() }).from(admissionTable).where(eq(admissionTable.schoolId, schoolId)),
     db.select({ value: count() }).from(studentTable).where(eq(studentTable.schoolId, schoolId)),
     db.select({ value: count() }).from(financeBillTable).where(eq(financeBillTable.schoolId, schoolId)),
     db.select({ value: count() }).from(financePaymentTable).where(eq(financePaymentTable.schoolId, schoolId)),
     db.select({ value: count() }).from(user).where(eq(user.demoSchoolId, schoolId)),
+    db.select({ value: count() }).from(examStudentRemarkTable).where(eq(examStudentRemarkTable.schoolId, schoolId)),
   ]);
-  return { admissions: admissions!.value, students: students!.value, bills: bills!.value, payments: payments!.value, demoUsers: demoUsers!.value };
+  return { admissions: admissions!.value, students: students!.value, bills: bills!.value, payments: payments!.value, demoUsers: demoUsers!.value, remarks: remarks!.value };
 }
 
 async function readCredentials(key: string) {
@@ -79,11 +81,24 @@ describe('demo school seed steps (2 classes, without Restate)', () => {
     const client = createTestClient(admin);
     const session = (await client.school.listSessions({ schoolId: job.schoolId })).items[0]!;
     const exams = await client.school.listExams({ schoolId: job.schoolId, sessionId: session.id });
-    expect(exams.items.map((exam) => [exam.slug, exam.status])).toEqual([
-      ['first-term-examination', 'completed'],
-      ['second-term-examination', 'active'],
-      ['annual-examination', 'ready'],
+    expect(exams.items.map((exam) => [exam.slug, exam.status, exam.cadetReleasedAt !== null])).toEqual([
+      ['periodic-test-1', 'completed', true],
+      ['first-term-examination', 'completed', false],
+      ['second-term-examination', 'active', false],
+      ['annual-examination', 'ready', false],
     ]);
+    // The release is back-dated from asOf like every other demo date, not stamped with the worker's clock.
+    const periodic = plan.exams.find((exam) => exam.slug === 'periodic-test-1')!;
+    expect(new Date(exams.items[0]!.cadetReleasedAt!).toISOString()).toBe(periodic.cadetReleasedAt);
+    expect(await client.school.getCadetPortalSettings({ schoolId: job.schoolId })).toMatchObject({ showClassAverages: true });
+
+    // Every registered student of a completed exam has a teacher remark, released or not.
+    const enrolled = await db.select({ id: studentTable.id }).from(studentTable).where(eq(studentTable.schoolId, job.schoolId));
+    const remarks = await db.select().from(examStudentRemarkTable).where(eq(examStudentRemarkTable.schoolId, job.schoolId));
+    for (const slug of ['periodic-test-1', 'first-term-examination']) {
+      expect(remarks.filter((row) => row.examSlug === slug)).toHaveLength(enrolled.length);
+    }
+    expect(remarks.every((row) => !row.text.includes('{firstName}'))).toBe(true);
 
     // Every admission reconciles (the seed also checks this) and nothing is dated after asOf.
     const admissions = await db.select({ id: admissionTable.id }).from(admissionTable).where(eq(admissionTable.schoolId, job.schoolId));

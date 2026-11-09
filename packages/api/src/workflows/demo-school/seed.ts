@@ -79,16 +79,36 @@ const sessionSeedSchema = z.object({
         startDay: z.number().int().min(1).max(20),
         /** Timetable slots, two per exam day. */
         slots: z.number().int().min(2).max(20),
+        /** Whether the exam's month bills the examination fee; short tests do not. */
+        chargesFee: z.boolean(),
       }),
     )
     .min(1),
   /** An exam stays `active` (marks being entered) this many days after its window. */
   activeWithinDaysAfterWindow: z.number().int().nonnegative(),
+  /**
+   * When a released demo exam's results went to the Cadet Portal: this many
+   * days after its window, at this local hour. Kept within
+   * `activeWithinDaysAfterWindow`, so a release always falls after marks were
+   * complete and before `asOf`.
+   */
+  cadetRelease: z.object({ daysAfterWindow: z.number().int().nonnegative(), hour: z.number().int().min(0).max(23) }),
   gradingScale: gradingScaleSchema,
   coScholasticAreas: coScholasticAreasSchema,
   coScholasticGrades: z.array(z.string().min(1)).min(1),
   attendanceTracking: z.object({ enabled: z.boolean() }),
+  /** School-level Cadet Portal settings a demo starts with. */
+  cadetPortal: z.object({ showClassAverages: z.boolean() }),
+  /** Teacher remarks by result band; `{firstName}` is replaced with the student's first name. */
+  remarks: z.object({
+    high: z.array(z.string().min(1).max(1000)).min(1),
+    mid: z.array(z.string().min(1).max(1000)).min(1),
+    low: z.array(z.string().min(1).max(1000)).min(1),
+  }),
   admissionDocumentTypes: z.array(z.object({ value: z.string().min(1), label: z.string().min(1) })).min(1),
+}).refine((session) => session.cadetRelease.daysAfterWindow <= session.activeWithinDaysAfterWindow, {
+  message: 'cadetRelease.daysAfterWindow must not exceed activeWithinDaysAfterWindow.',
+  path: ['cadetRelease', 'daysAfterWindow'],
 });
 
 const financeSeedSchema = z.object({

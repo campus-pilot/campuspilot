@@ -145,7 +145,19 @@ describe('cadet and staff sessions are isolated', () => {
   });
 
   it('keeps cadet procedures out of the staff router and staff procedures out of the cadet router', () => {
-    expect(Object.keys(cadetRouter)).toEqual(['getAdmission', 'getOAuthConsentClient']);
+    expect(Object.keys(cadetRouter)).toEqual([
+      'getAdmission',
+      'getOAuthConsentClient',
+      'getProfile',
+      'getFeeSummary',
+      'listFeeLedger',
+      'getBill',
+      'listExams',
+      'getExam',
+      'getExamResult',
+      'getGrowth',
+      'listRemarks',
+    ]);
     expect(appRouter).not.toHaveProperty('getAdmission');
     expect(appRouter).not.toHaveProperty('getOAuthConsentClient');
     expect(Object.values(appRouter)).not.toContain(cadetRouter);

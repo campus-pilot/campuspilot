@@ -7,6 +7,8 @@ import {
   Settings2,
   CheckCircle2,
   RotateCcw,
+  Send,
+  Undo2,
 } from 'lucide-react';
 import { AppShellAlert } from '@campuspilot/components/app-shell';
 import type { ExamOverviewDto } from '@campuspilot/api/routers/school/exam/exam.dto';
@@ -23,13 +25,19 @@ import { RequirePermissions } from '@/components/require-permissions';
 import { client, orpc } from '@/lib/orpc';
 import { ExamButton, ExamInput, Issues } from './exam-common';
 import {
+  cadetReleaseAction,
+  examActionDescription,
+  examActionLabel,
   errorMessage,
+  reopenBlockedReason,
   optionalIntegerText,
   schoolPermission,
   type ExamScope,
 } from './exam-model';
 
-type Action = '' | 'working-days' | 'start' | 'complete' | 'reopen';
+type Action = '' | 'working-days' | 'start' | 'complete' | 'reopen' | 'release' | 'withdraw';
+type LifecycleAction = Exclude<Action, '' | 'working-days' | 'release' | 'withdraw'>;
+type CadetAction = Extract<Action, 'release' | 'withdraw'>;
 type Props = {
   scope: ExamScope;
   active: boolean;
@@ -44,7 +52,7 @@ export function ExamActions(props: Props) {
     defaultValues: { action: '' as Action },
     validators: {
       onChange: z.object({
-        action: z.enum(['', 'working-days', 'start', 'complete', 'reopen']),
+        action: z.enum(['', 'working-days', 'start', 'complete', 'reopen', 'release', 'withdraw']),
       }),
     },
   });
@@ -56,6 +64,9 @@ export function ExamActions(props: Props) {
       : overview.status === 'completed'
         ? 'reopen'
         : 'start';
+  const applicableCadetAction = cadetReleaseAction(overview);
+  const cadetAction: CadetAction = applicableCadetAction ?? 'release';
+  const cadetVisible = applicableCadetAction !== null;
   return (
     <>
       {placement === 'workspace' && attendanceEnabled &&
@@ -104,13 +115,27 @@ export function ExamActions(props: Props) {
               <p className="text-sm text-muted-foreground">Control when results can be entered and finalized.</p>
             </div>
             <LifecycleTrigger scope={scope} visible={active && overview.planCount > 0}
-              action={lifecycleAction} onSelect={() => ui.setFieldValue('action', lifecycleAction)} />
+              action={lifecycleAction} blockedReason={lifecycleAction === 'reopen' ? reopenBlockedReason(overview) : null}
+              onSelect={() => ui.setFieldValue('action', lifecycleAction)} />
+          </section>
+          <section className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3">
+            <div className="flex flex-col gap-1">
+              <h3 className="text-sm font-medium">Cadet Portal</h3>
+              <p className="text-sm text-muted-foreground">{cadetStatusText(overview)}</p>
+            </div>
+            <CadetReleaseTrigger scope={scope} visible={cadetVisible}
+              action={cadetAction} onSelect={() => ui.setFieldValue('action', cadetAction)} />
           </section>
         </div>
       )}
       {placement === 'navbar' && (
-        <LifecycleTrigger scope={scope} visible={active && overview.planCount > 0}
-          action={lifecycleAction} onSelect={() => ui.setFieldValue('action', lifecycleAction)} />
+        <div className="flex flex-wrap items-center gap-2">
+          <LifecycleTrigger scope={scope} visible={active && overview.planCount > 0}
+            action={lifecycleAction} blockedReason={lifecycleAction === 'reopen' ? reopenBlockedReason(overview) : null}
+            onSelect={() => ui.setFieldValue('action', lifecycleAction)} />
+          <CadetReleaseTrigger scope={scope} visible={cadetVisible} compact
+            action={cadetAction} onSelect={() => ui.setFieldValue('action', cadetAction)} />
+        </div>
       )}
       <ui.Subscribe selector={(state) => state.values.action}>
         {(action) =>
@@ -128,6 +153,7 @@ export function ExamActions(props: Props) {
                 scope={scope}
                 action={action}
                 initial={totalWorkingDays}
+                released={overview.cadetReleasedAt !== null}
                 onClose={() => ui.setFieldValue('action', '')}
               />
             </RequirePermissions>
@@ -137,15 +163,42 @@ export function ExamActions(props: Props) {
     </>
   );
 }
-function LifecycleTrigger({ scope, visible, action, onSelect }: {
-  scope: ExamScope; visible: boolean; action: Exclude<Action, '' | 'working-days'>;
+/** Release state in words; the release time is its own fact, shown when known. */
+function cadetStatusText(overview: ExamOverviewDto) {
+  if (overview.cadetReleasedAt)
+    return `Results released to students on ${new Date(overview.cadetReleasedAt).toLocaleDateString(undefined, { dateStyle: 'medium' })}.`;
+  if (overview.status === 'completed')
+    return 'Not released. Students see this examination as awaiting results.';
+  return 'Results can be released to students after the examination is completed.';
+}
+
+/** `compact` uses the short navbar wording so the button does not wrap on a phone. */
+function CadetReleaseTrigger({ scope, visible, action, compact = false, onSelect }: {
+  scope: ExamScope; visible: boolean; action: CadetAction; compact?: boolean; onSelect: () => void;
+}) {
+  if (!visible) return null;
+  const Icon = action === 'release' ? Send : Undo2;
+  return (
+    <RequirePermissions permissions={schoolPermission(scope.schoolId, SCHOOL_ACTIONS.TRANSITION_EXAM_PLAN)}>
+      <ExamButton variant="outline" onClick={onSelect}><Icon aria-hidden />{examActionLabel(action, compact)}</ExamButton>
+    </RequirePermissions>
+  );
+}
+
+/** A blocked action stays visible but disabled, with its reason next to it, instead of opening a dead-end dialog. */
+function LifecycleTrigger({ scope, visible, action, blockedReason = null, onSelect }: {
+  scope: ExamScope; visible: boolean; action: LifecycleAction;
+  blockedReason?: string | null;
   onSelect: () => void;
 }) {
   if (!visible) return null;
   const Icon = action === 'start' ? Play : action === 'complete' ? CheckCircle2 : RotateCcw;
   return (
     <RequirePermissions permissions={schoolPermission(scope.schoolId, SCHOOL_ACTIONS.TRANSITION_EXAM_PLAN)}>
-      <ExamButton variant="outline" onClick={onSelect}><Icon aria-hidden />{actionLabel(action)}</ExamButton>
+      <span className="flex flex-wrap items-center gap-2">
+        {blockedReason && <span className="text-xs text-muted-foreground">{blockedReason}</span>}
+        <ExamButton variant="outline" disabled={!!blockedReason} onClick={onSelect}><Icon aria-hidden />{examActionLabel(action)}</ExamButton>
+      </span>
     </RequirePermissions>
   );
 }
@@ -174,27 +227,23 @@ function WorkingDaysAlert({
     />
   );
 }
-function actionLabel(action: Exclude<Action, '' | 'working-days'>) {
-  return {
-    start: 'Start examination',
-    complete: 'Complete examination',
-    reopen: 'Reopen examination',
-  }[action];
-}
 function ExamActionDialog({
   scope,
   action,
   initial,
+  released,
   onClose,
 }: {
   scope: ExamScope;
   action: Exclude<Action, ''>;
   initial: number | null;
+  /** Reopening is refused while released; the dialog says so and keeps the action disabled. */
+  released: boolean;
   onClose: () => void;
 }) {
   const cache = useQueryClient();
   const workingDays = action === 'working-days';
-  const title = workingDays ? 'Attendance working days' : actionLabel(action);
+  const title = workingDays ? 'Attendance working days' : examActionLabel(action);
   const form = useForm({
     defaultValues: { days: initial === null ? '' : String(initial) },
     validators: { onSubmit: z.object({ days: optionalIntegerText }) },
@@ -205,6 +254,10 @@ function ExamActionDialog({
             ...scope,
             totalWorkingDays: value.days === '' ? null : Number(value.days),
           });
+        else if (action === 'release')
+          await client.school.releaseExamToCadet(scope);
+        else if (action === 'withdraw')
+          await client.school.withdrawExamFromCadet(scope);
         else
           await client.school.transitionExam({
             ...scope,
@@ -238,13 +291,7 @@ function ExamActionDialog({
             <DialogHeader>
               <DialogTitle>{title}</DialogTitle>
               <DialogDescription>
-                {workingDays
-                  ? 'Set the maximum number of attendance days for this examination.'
-                  : action === 'start'
-                    ? 'Start result entry for every class. Only the principal, manager or exam coordinator can start an examination.'
-                    : action === 'complete'
-                      ? 'All student results must be approved. Completing the examination makes results and timetable read-only.'
-                      : 'Reopen result entry for every class. Saved marks and approvals are preserved.'}
+                {examActionDescription(action, released)}
               </DialogDescription>
             </DialogHeader>
             <form
@@ -275,7 +322,7 @@ function ExamActionDialog({
                 >
                   Cancel
                 </ExamButton>
-                <ExamButton type="submit" disabled={pending || !canSubmit}>
+                <ExamButton type="submit" disabled={pending || !canSubmit || (action === 'reopen' && released)}>
                   {pending
                     ? 'Saving…'
                     : workingDays

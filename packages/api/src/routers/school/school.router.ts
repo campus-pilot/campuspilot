@@ -10,6 +10,7 @@ import { rpcError, toRpcError } from "../../errors";
 import { protectedProcedure } from "../../index";
 import { requireSchoolPermission } from "../../permissions/school";
 import { schoolAdmissionSettingsRouter } from "./admission-settings/admission-settings.router";
+import { schoolCadetSettingsRouter } from "./cadet-settings/cadet-settings.router";
 import { schoolAdmissionRouter } from "./admission/admission.router";
 import { schoolBillingRouter } from "./billing/billing.router";
 import { schoolClassRouter } from "./class/class.router";
@@ -151,6 +152,7 @@ export const schoolRouter = {
       }
     }),
   ...schoolAdmissionSettingsRouter,
+  ...schoolCadetSettingsRouter,
   ...schoolAdmissionRouter,
   ...schoolBillingRouter,
   ...schoolLogoRouter,

@@ -133,3 +133,18 @@ with completion. Batches validate every row before upserting in one transaction.
 Result entry also locks the referenced student and admission rows for the duration
 of the write. Completion evaluates the current roster; student placement after
 completion does not automatically create or rewrite historical results.
+
+## Cadet Portal release and remarks
+
+`releaseExamToCadet` / `withdrawExamFromCadet` (exam transition permission)
+set or clear `exam_lifecycle.cadet_released_at` / `cadet_released_by`. This is
+its own fact: completion never releases anything. Release requires a
+completed examination (results approved and read-only); reopening is refused
+while released, so students never see marks that can still change. Earlier
+sessions can be released too. `getStudentExamRemark` / `saveStudentExamRemark`
+(result read / write permissions) keep one remark per student and exam in
+`exam_student_remark`, writable once the exam has started (also after
+completion) in the active session and frozen while released. School-level
+`getCadetPortalSettings` / `updateCadetPortalSettings` (school details
+permissions) control whether the Cadet Portal shows class averages; the cadet
+procedures omit them on the server when off.

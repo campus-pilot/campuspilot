@@ -22,6 +22,7 @@ import {
   type ExamScope,
 } from './exam-model';
 import { StudentExamForm } from './exam-student-workspace-form';
+import { StudentExamRemark } from './exam-student-remark';
 import { StudentExamPreview } from '@campuspilot/components/exam/student-exam-preview';
 
 export type StudentExamScope = ExamScope & {
@@ -86,6 +87,11 @@ function StudentData({
         data={data}
         open={open}
         completed={overview.data?.status === 'completed'}
+      />
+      <StudentExamRemark
+        scope={scope}
+        active={active && !overview.isError}
+        overview={overview.data}
       />
     </ExamFrame>
   );

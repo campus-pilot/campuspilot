@@ -87,6 +87,22 @@ classes → students (with illustrated photos) → exams → finance → templat
 credentials. The seed and `asOf` are drawn once and stored on the job, so a
 retry rebuilds the same plan and every idempotent step finds its earlier work.
 Exam state and billing months follow from `asOf` (see `dates.ts`, `plan.ts`).
+The exams step also writes a teacher remark for every registered student of
+each completed exam and then releases completed exams to the Cadet Portal:
+all but the latest completed one (which stays "awaiting release"), or the only
+one when just one is completed. The session step turns on the school's
+"show class averages in Cadet Portal" setting. Periodic Test 1 exists so a
+demo created from late September on has both a released and an unreleased
+completed exam; it charges no examination fee (`chargesFee: false`).
+Release times are back-dated from `asOf` like every other demo date: each
+released exam is released `session.cadetRelease.daysAfterWindow` days after its
+window at `cadetRelease.hour` local time (`plan.ts`). The seed schema keeps
+that within `activeWithinDaysAfterWindow`, so a release always falls after the
+exam's marks were complete and before `asOf`. The step releases through the
+real `releaseExamToCadet` procedure (which records the current time) and then
+sets the planned time directly on `exam_lifecycle`, refusing any school that is
+not `is_demo`. Back-dating is deliberately not part of the API or MCP: staff
+releases always record when they happened.
 
 ### Credentials
 

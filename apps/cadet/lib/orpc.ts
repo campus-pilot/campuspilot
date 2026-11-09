@@ -7,6 +7,8 @@ import { RPCLink } from '@orpc/client/fetch';
 import { createTanstackQueryUtils } from '@orpc/tanstack-query';
 import { QueryClient } from '@tanstack/react-query';
 
+import { shouldRetryQuery } from './query-retry';
+
 /**
  * The Cadet Portal talks only to `/api/cadet/rpc` (`cadetRouter`), never to
  * the staff `/rpc`. The `cpc_` session cookie identifies the student.
@@ -22,5 +24,5 @@ export const client: CadetRouterClient = createORPCClient(link);
 export const orpc = createTanstackQueryUtils(client);
 
 export function createQueryClient() {
-  return new QueryClient();
+  return new QueryClient({ defaultOptions: { queries: { retry: shouldRetryQuery } } });
 }

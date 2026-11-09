@@ -1,10 +1,12 @@
 {
   "exams": [
-    { "slug": "first-term-examination", "name": "First Term Examination", "order": 1, "monthOffset": 4, "startDay": 12, "slots": 8 },
-    { "slug": "second-term-examination", "name": "Second Term Examination", "order": 2, "monthOffset": 8, "startDay": 8, "slots": 8 },
-    { "slug": "annual-examination", "name": "Annual Examination", "order": 3, "monthOffset": 11, "startDay": 2, "slots": 10 }
+    { "slug": "periodic-test-1", "name": "Periodic Test 1", "order": 1, "monthOffset": 2, "startDay": 15, "slots": 6, "chargesFee": false },
+    { "slug": "first-term-examination", "name": "First Term Examination", "order": 2, "monthOffset": 4, "startDay": 12, "slots": 8, "chargesFee": true },
+    { "slug": "second-term-examination", "name": "Second Term Examination", "order": 3, "monthOffset": 8, "startDay": 8, "slots": 8, "chargesFee": true },
+    { "slug": "annual-examination", "name": "Annual Examination", "order": 4, "monthOffset": 11, "startDay": 2, "slots": 10, "chargesFee": true }
   ],
   "activeWithinDaysAfterWindow": 30,
+  "cadetRelease": { "daysAfterWindow": 12, "hour": 16 },
   "gradingScale": {
     "a1": { "label": "A1", "minScore": 91 },
     "a2": { "label": "A2", "minScore": 81 },
@@ -23,6 +25,24 @@
   },
   "coScholasticGrades": ["A1", "A2", "B1", "B2", "C1"],
   "attendanceTracking": { "enabled": true },
+  "cadetPortal": { "showClassAverages": true },
+  "remarks": {
+    "high": [
+      "{firstName} has worked with real focus this term and it shows in every subject. Keep reading beyond the textbook.",
+      "Excellent effort, {firstName}. Your written answers are clear and well organised; try leading a study group next term.",
+      "{firstName} is curious, asks thoughtful questions and helps classmates. A very good result."
+    ],
+    "mid": [
+      "{firstName} is steady and attentive in class. Regular revision of chapter summaries will lift the next result.",
+      "Good progress, {firstName}. Spend a little more time on practice questions before tests.",
+      "{firstName} participates well. Neater written work and timely homework will make a clear difference."
+    ],
+    "low": [
+      "{firstName} can do much better with daily practice at home. Please meet the class teacher to plan revision together.",
+      "{firstName} is trying, but needs to complete classwork and homework regularly. Small daily goals will help.",
+      "Attendance and revision both need attention, {firstName}. We will share a simple practice plan with you."
+    ]
+  },
   "admissionDocumentTypes": [
     { "value": "birth_certificate", "label": "Birth certificate" },
     { "value": "aadhaar_card", "label": "Aadhaar card" },

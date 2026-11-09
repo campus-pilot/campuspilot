@@ -10,6 +10,7 @@ import {
   financePaymentTable,
 } from '@campuspilot/db/schema/finance';
 import type { DemoSchoolJobResult } from '@campuspilot/db/schema/demo-school-job';
+import { examLifecycleTable } from '@campuspilot/db/schema/exam';
 import type { FinanceSchemaConfig } from '@campuspilot/db/schema/jsonb/finance-config';
 import { schoolTable } from '@campuspilot/db/schema/school';
 import { schoolMemberTable } from '@campuspilot/db/schema/school-member';
@@ -18,7 +19,7 @@ import { studentTable } from '@campuspilot/db/schema/student';
 import { env } from '@campuspilot/env/server';
 import { getS3Client } from '@campuspilot/s3/client';
 import { createRouterClient, type RouterClient } from '@orpc/server';
-import { and, count, eq, inArray, sql, sum } from 'drizzle-orm';
+import { and, count, eq, inArray, isNotNull, sql, sum } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 
 import { SCHOOL_ACTIONS } from '@campuspilot/opa/policies/school';
@@ -195,6 +196,7 @@ export async function seedSession(ctx: SeedContext): Promise<{ sessionId: string
   });
   if (!session.isActive) await ctx.rpc.school.activateSession({ schoolId, sessionId: session.id });
   await ctx.rpc.school.updateAdmissionSettings({ schoolId, settings: { documentTypes: seedSession.admissionDocumentTypes } });
+  await ctx.rpc.school.updateCadetPortalSettings({ schoolId, showClassAverages: seedSession.cadetPortal.showClassAverages });
   return { sessionId: session.id };
 }
 
@@ -433,6 +435,89 @@ export async function seedExamCompletion(ctx: SeedContext, sessionId: string, ex
   return { status: overview.status ?? 'ready' };
 }
 
+/** The remark band follows the same ability that drives the student's marks. */
+function remarkText(ctx: SeedContext, exam: DemoExam, student: DemoStudent) {
+  const remarks = demoSeed.session.remarks;
+  const band = student.ability >= 0.8 ? remarks.high : student.ability >= 0.6 ? remarks.mid : remarks.low;
+  const template = createRandom(ctx.seed, 'remark', exam.slug, student.admissionNo).pick(band);
+  return template.replaceAll('{firstName}', student.name.split(' ')[0]!);
+}
+
+/**
+ * Writes a teacher remark for every registered student of one class in a
+ * completed exam. It runs before the exam is released (released remarks are
+ * frozen) and skips a remark that already has the planned text, so a replay
+ * changes nothing; a replay after the release finds the exam released and
+ * stops.
+ */
+export async function seedExamRemarks(
+  ctx: SeedContext,
+  input: { sessionId: string; exam: DemoExam; demoClass: DemoClass },
+): Promise<{ saved: number }> {
+  const { exam, demoClass } = input;
+  if (exam.state !== 'completed') return { saved: 0 };
+  const scope = { schoolId: ctx.schoolId, sessionId: input.sessionId, examSlug: exam.slug };
+  const overview = await ctx.rpc.school.getExamOverview(scope);
+  if (overview.status !== 'completed' || overview.cadetReleasedAt) return { saved: 0 };
+  const enrolments = (await enrolmentsFor(ctx, input.sessionId, demoClass.students)).filter((item) => item.registered);
+  let saved = 0;
+  for (const { student, studentId, classId } of enrolments) {
+    const text = remarkText(ctx, exam, student);
+    const existing = await ctx.rpc.school.getStudentExamRemark({ ...scope, classId, studentId });
+    if (existing?.text === text) continue;
+    await ctx.rpc.school.saveStudentExamRemark({ ...scope, classId, studentId, text });
+    saved += 1;
+  }
+  return { saved };
+}
+
+/**
+ * Releases a completed exam to the Cadet Portal when the plan says so.
+ * Returns what actually happened: `released` (this run released it),
+ * `already-released` (a replay found it released) or `skipped` (not planned,
+ * or the exam is not completed). The release goes through the real,
+ * permission-checked `releaseExamToCadet` (which stamps the current time),
+ * then {@link backdateDemoExamRelease} moves the time to the plan's
+ * `cadetReleasedAt`, derived from `asOf` like every other demo date. A replay
+ * re-applies the back-dating, so a crash between the two calls heals.
+ */
+export async function seedExamRelease(
+  ctx: SeedContext,
+  sessionId: string,
+  exam: DemoExam,
+): Promise<{ outcome: 'released' | 'already-released' | 'skipped' }> {
+  if (!exam.cadetReleasedAt) return { outcome: 'skipped' };
+  const scope = { schoolId: ctx.schoolId, sessionId, examSlug: exam.slug };
+  const overview = await ctx.rpc.school.getExamOverview(scope);
+  if (overview.status !== 'completed' && !overview.cadetReleasedAt) return { outcome: 'skipped' };
+  const outcome = overview.cadetReleasedAt ? 'already-released' : 'released';
+  if (outcome === 'released') await ctx.rpc.school.releaseExamToCadet(scope);
+  await backdateDemoExamRelease(scope, new Date(exam.cadetReleasedAt));
+  return { outcome };
+}
+
+/**
+ * Demo-only: sets a released exam's Cadet release time. Staff, the API and
+ * MCP cannot back-date a release (the procedure always records "now"); only
+ * this seed step can, and only for a demo school (`school.is_demo`), so it can
+ * never rewrite a real school's history.
+ */
+async function backdateDemoExamRelease(scope: { schoolId: string; sessionId: string; examSlug: string }, releasedAt: Date) {
+  const [school] = await db.select({ isDemo: schoolTable.isDemo }).from(schoolTable).where(eq(schoolTable.id, scope.schoolId)).limit(1);
+  if (!school?.isDemo) throw new DemoSeedError('Only a demo school’s release times can be back-dated.');
+  await db
+    .update(examLifecycleTable)
+    .set({ cadetReleasedAt: releasedAt })
+    .where(
+      and(
+        eq(examLifecycleTable.schoolId, scope.schoolId),
+        eq(examLifecycleTable.sessionId, scope.sessionId),
+        eq(examLifecycleTable.examSlug, scope.examSlug),
+        isNotNull(examLifecycleTable.cadetReleasedAt),
+      ),
+    );
+}
+
 // ---------------------------------------------------------------------------
 // §6.7 Finance
 
@@ -503,7 +588,7 @@ export async function seedBillingMonth(ctx: SeedContext, sessionId: string, mont
       billingDate: month.billingDate,
       ...(billed.length === students.length ? {} : { admissionIds: billed.map((student) => ids.get(student.admissionNo)!) }),
       runValues: {
-        session: plan.exams.some((exam) => exam.feeMonthIndex === monthIndex)
+        session: plan.exams.some((exam) => exam.chargesFee && exam.feeMonthIndex === monthIndex)
           ? { [demoSeed.finance.examinationFeeElement]: String(demoSeed.finance.examinationFeeMinor) }
           : {},
         classes: {},

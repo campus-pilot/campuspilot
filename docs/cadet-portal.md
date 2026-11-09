@@ -34,9 +34,9 @@ session the student was enrolled in.
 | Placeholder email | `<admissionId>@cadet.campuspilot.invalid` |
 
 Students sign in with school code + admission number + a school-issued password
-and see their own data. Today the portal shows only the student's name and a
-Sign out button; ledger, notices and results are future work. Students can also
-connect AI apps through the read-only cadet MCP.
+and see their own data: Home, Fees (one ledger and bill detail), Results (only
+exams the school released to the portal), Growth (per class) and More. Students
+can also connect AI apps through the read-only cadet MCP.
 
 ## Architecture
 
@@ -275,12 +275,40 @@ so an unexpired access token stops working immediately. It is idempotent.
   without `mcp:read`.
 - `packages/api/src/routers/cadet/cadet.router.ts`: **not** part of `appRouter`.
   Staff RPC, OpenAPI and MCP can never list or reach it, and its handler never
-  reaches staff procedures (the types differ). Procedures today:
+  reaches staff procedures (the types differ). Procedures today (records ones in
+  `cadet-records.router.ts`, DTOs in `cadet.dto.ts`, logic in
+  `cadet-academics.service.ts` and `cadet-fees.service.ts`):
 
 | Procedure | MCP | Purpose |
 | --- | --- | --- |
 | `getAdmission` | core, read, module `account` | The signed-in admission, returned with management's `admissionDtoSchema` / `toAdmissionDto` (reuse DTOs; do not fork a cadet copy). |
 | `getOAuthConsentClient({ clientId })` | hidden | Consent-screen facts from `cadet_oauth_client` only (`oauthConsentClientSchema` from `routers/auth/auth.dto.ts`); a staff client id is never found. |
+| `getProfile` | core, read, `account` | Name, admission number, school, the server-chosen **current** class record (active-session placement, else newest) and enrollments. Clients use `current`; they never pick "current" themselves. |
+| `getFeeSummary` | core, read, `billing` | Lifetime balance, billed, paid, concessions, refunds per currency (staff `getAdmissionFinanceSummary`). |
+| `listFeeLedger` | core, read, `billing` | Paginated ledger with running balances (staff `getAdmissionLedger`), narrowed: no recorder ids, notes or idempotency keys. |
+| `getBill({ billId })` | core, read, `billing` | Lines, the bill's own concessions/corrections and net amount. Payments are account credits, so no per-bill "paid". |
+| `listExams({ filters.recordId? })` | core, read, `exams` | Exams of one class record (default: current) with state `upcoming` / `in_progress` / `awaiting_release` / `released`; scores only when released. |
+| `getExam({ examId })` | core, read, `exams` | One exam's state, independent of list paging. |
+| `getExamResult({ examId })` | core, read, `exams` | Released exams only (otherwise NOT_FOUND): subjects, overall, delta to the previous released exam of the same class, attendance and activities (report-card rules, `exam/exam-assessment-rules.ts`), remark, optional class averages. |
+| `getGrowth({ recordId? })` | core, read, `exams` | Every class record, overall % per released exam of the selected one; subject ids are scoped to the class record and never compared across classes. |
+| `listRemarks({ filters.recordId? })` | core, read, `exams` | Teacher remarks of released exams, dated by the exam's release. |
+
+A **class record** is one class within one session's enrollment
+(`{studentId}.{classId}`); an `examId` is `{recordId}.{examSlug}`. Records come
+from the enrollment's placement plus any class whose plans hold the student's
+results, so a student moved mid-session keeps the class they sat the exam in.
+Remark, attendance and activities attach only to the record holding the results.
+
+**Release and averages.** Results are visible only after the school's explicit
+`releaseExamToCadet` (staff, exam transition permission), which needs a
+completed exam and blocks reopening and legacy plan changes until
+`withdrawExamFromCadet`. The release time is always when the call was made;
+only the demo seed back-dates it (see `docs/demo-school.md`). Release freezes marks and remarks, not labels or grading
+(no snapshot). Remarks (`exam_student_remark`) are written in the management
+student result page and are locked while released. Class averages appear only
+when the school setting `cadet_show_class_averages` is on (school settings) and
+at least `CADET_CLASS_AVERAGE_MIN_STUDENTS` (5) approved, registered students
+contribute; the server returns null otherwise.
 
 ## Cadet MCP
 
@@ -337,14 +365,20 @@ Mirrors management: Next.js 16, oRPC + TanStack Query, TanStack Form,
 | File | Role |
 | --- | --- |
 | `app/layout.tsx` | `QueryProvider` + `ThemeProvider`; title "Cadet Portal". |
-| `app/page.tsx` → `components/cadet-home.tsx` | Session check (`authClient.useSession`, `redirect('/sign-in')`), `orpc.getAdmission` name, Sign out (cadet session only). |
+| `app/(portal)/layout.tsx` → `components/app-frame.tsx` (`AppFrame`) | Session check (`authClient.useSession`, `redirect('/sign-in')`), top bar from `getProfile.current`, bottom nav; phone-sized frame from `md` up. |
+| `app/(portal)/page.tsx`, `fees/`, `fees/[billId]/`, `results/`, `results/[examId]/`, `results/class/[recordId]/`, `growth/`, `growth/class/[recordId]/`, `more/` | Screens in `components/{home,fees,results,growth,more}`; shared headers and loading/error/empty states in `components/screen.tsx`. More holds Sign out (cadet session only; clears the query cache). |
 | `app/sign-in/page.tsx` → `components/sign-in-form.tsx` | `useForm` with a Zod `onSubmit` validator and per-field errors; the request is a `useMutation`, so a rejected sign-in does not disable Submit. Full navigation on success. |
 | `app/oauth/consent/page.tsx` → `components/oauth-consent.tsx` | Cadet MCP consent. |
 | `lib/orpc.ts` | `RPCLink` to `/api/cadet/rpc` with `credentials: 'include'`, typed `CadetRouterClient`. Never the staff `/rpc`. |
 | `lib/auth-client.ts` | Better Auth clients at `CADET_AUTH_BASE_PATH`. |
 
 Env comes from `@campuspilot/env/cadet.client` (`NEXT_PUBLIC_SERVER_URL`). No
-ids in URLs: who the student is comes from the `cpc_` cookie. No `useEffect`;
+identity inputs: who the student is always comes from the `cpc_` session. Record
+ids are path segments, not query parameters (`/results/class/{recordId}`,
+`/growth/class/{recordId}`, `/results/{examId}`, `/fees/{billId}`; build class
+links with `classResultsHref`/`classGrowthHref` in `lib/route-param.ts`). They
+are only looked up within the signed-in admission, and anything else is
+NOT_FOUND. `/results` and `/growth` without a class show the server's current class. No `useEffect`;
 follow the repository rules in `AGENTS.md` (TanStack Form for input, Query for
 data, small components). Shared, API-free UI belongs in
 `packages/components/src/cadet-portal`.
@@ -438,8 +472,9 @@ not involve cadet files.
 
 **Adding a screen**
 
-1. Add the route under `apps/cadet/app`, wrapped in `PortalShell`, with the
-   session check pattern from `cadet-home.tsx`.
+1. Add the route under `apps/cadet/app/(portal)`; its layout wraps it in
+   `AppFrame`, which does the session check. (`PortalShell` is only for the
+   signed-out sign-in and consent pages.)
 2. Load data with `orpc.<procedure>.queryOptions()`; use `useForm` + Zod for any
    input; no `useEffect`.
 3. Put reusable, API-free pieces in `packages/components/src/cadet-portal`.
@@ -451,6 +486,19 @@ number; extend `purge_demo_school` and the purge test; if Better Auth reads it,
 add it to `cadetAuthSchema`.
 
 ## Known gaps and deferred decisions
+
+- **Hidden, not built**: notices, the notification bell, calendar, the Updates
+  screen, push/WhatsApp settings, online payment (a disabled "coming soon"
+  button), guardian/sibling switching and connected-AI-app settings.
+- **No PDFs for cadets**: bill, receipt, adjustment and statement downloads are
+  out of scope until the document system can serve documents to cadets safely.
+- **No bill due dates** exist in the data; none is shown.
+- **Release is per exam**, not per class; release times come from the server
+  clock (also in demos). Averages have known limits (collusion at exactly 5,
+  differencing across withdraw/re-release), documented at
+  `CADET_CLASS_AVERAGE_MIN_STUDENTS`.
+- **"New result" is not tracked**: Home announces the latest released result
+  for `NEW_RESULT_ALERT_DAYS` (14) days after its release, whether or not it was opened.
 
 - **Per-school portal feature flag**: every school can issue passwords today.
 - **Guardian accounts**: one login per admission; a multi-child guardian login
