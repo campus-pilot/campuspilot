@@ -130,4 +130,17 @@ describe('AdmissionFormDialog (stepper)', () => {
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ whatsappSameAsPhone: true, whatsappNo: '+919876543210', whatsappVerified: false }), { generateCadetPassword: false });
   });
+
+  it('clears the verified pre-tick when same-as-phone is unticked', async () => {
+    renderDialog({ ...empty, whatsappSameAsPhone: false, whatsappVerified: false });
+    fillDetails();
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await screen.findByLabelText('Phone number');
+    const same = () => screen.getByRole('checkbox', { name: 'WhatsApp number is the same as phone number' });
+    const verified = () => screen.getByRole('checkbox', { name: 'WhatsApp number verified' });
+    fireEvent.click(same());
+    expect(verified().getAttribute('aria-checked')).toBe('true');
+    fireEvent.click(same());
+    expect(verified().getAttribute('aria-checked')).toBe('false');
+  });
 });

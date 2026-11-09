@@ -176,11 +176,12 @@ function WhatsappNumberField({ form }: { form: AdmissionForm }) {
 /**
  * "WhatsApp number is the same as phone number". Ticking it also pre-ticks
  * "verified" (D-4: staff asked the guardian, so verified is the default);
- * unticking leaves "verified" as it is. Done in the change handler, so a
- * stored choice loaded for editing never changes "verified" by itself.
+ * unticking clears it, because the WhatsApp number staff now type is a
+ * different number nobody has verified yet. Done in the change handler, so
+ * a stored choice loaded for editing never changes "verified" by itself.
  */
 function SameAsPhoneField({ form }: { form: AdmissionForm }) {
-  return <form.Field name="whatsappSameAsPhone">{(field) => <CheckboxRow id="admission-whatsapp-same" label="WhatsApp number is the same as phone number" checked={field.state.value} onCheckedChange={(checked) => { field.handleChange(checked); if (checked) form.setFieldValue('whatsappVerified', true); }} />}</form.Field>;
+  return <form.Field name="whatsappSameAsPhone">{(field) => <CheckboxRow id="admission-whatsapp-same" label="WhatsApp number is the same as phone number" checked={field.state.value} onCheckedChange={(checked) => { field.handleChange(checked); form.setFieldValue('whatsappVerified', checked); }} />}</form.Field>;
 }
 
 /** Phone number and WhatsApp choices (D-4, D-8). */
