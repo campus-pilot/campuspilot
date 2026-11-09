@@ -69,7 +69,10 @@ export const TEST_PACING: SenderPacing = { perSecond: 1000, concurrency: 1, grou
  * scheduled later the clock jumps to it and the lane is drained again,
  * until nothing is owed or `maxDrains` drains ran. Jitter is pinned
  * (random 0.5 = no jitter). Scoped to the school, so parallel test files
- * never send each other's rows.
+ * never send each other's rows. A drain's settle wait before it ends idle
+ * (the lost-poke guard, `idleNotBeforeMs`) is counted in `settles` and does
+ * not move the clock, so `sleeps` and `waits` stay the retry and pause
+ * timings the tests are about.
  */
 export async function drainSchool(
   schoolId: string,
@@ -83,6 +86,7 @@ export async function drainSchool(
   const clock = options.clock ?? fakeClock();
   const sleeps: number[] = [];
   const waits: number[] = [];
+  let settles = 0;
   const targets: SenderTarget[] = [
     { channel: 'whatsapp', lane: 0 },
     ...Array.from({ length: WEB_PUSH_SENDER_LANES }, (_, lane) => ({ channel: 'web_push' as const, lane })),
@@ -95,7 +99,11 @@ export async function drainSchool(
         target,
         scope: { schoolId },
         step: options.step ?? ((_name, action) => action()),
-        sleep: async (_name, ms) => {
+        sleep: async (name, ms) => {
+          if (name.startsWith('settle:')) {
+            settles += 1;
+            return;
+          }
           sleeps.push(ms);
           clock.advance(ms);
         },
@@ -110,7 +118,7 @@ export async function drainSchool(
       clock.set(new Date(result.nextDueAt));
     }
   }
-  return { sleeps, waits, clock };
+  return { sleeps, waits, settles, clock };
 }
 
 /** Facts of a `bill.issued` notification for an admission. */

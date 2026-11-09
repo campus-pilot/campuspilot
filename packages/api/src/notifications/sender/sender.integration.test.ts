@@ -8,7 +8,8 @@ import { createTestAdmission, createTestSchool } from '../../../test/fixtures';
 import { billIssuedData, dispatchNow, emit, fakeClock, TEST_PACING } from '../../../test/notifications';
 import type { ClaimedDelivery, NotificationChannelAdapter } from '../channels';
 import { claimDelivery } from '../deliveries';
-import { MAX_GROUPS_PER_DRAIN, runSenderDrain, sendGroup, UNKNOWN_OUTCOME_BREAKER_THRESHOLD } from './drain';
+import { idleNotBeforeMs, MAX_GROUPS_PER_DRAIN, POKE_WINDOW_MARGIN_MS, runSenderDrain, sendGroup, UNKNOWN_OUTCOME_BREAKER_THRESHOLD } from './drain';
+import { SENDER_POKE_WINDOW_MS } from './lanes';
 import type { SenderTarget } from './lanes';
 import { pickDueDeliveries, type SendAttemptResult } from './queue';
 
@@ -74,13 +75,14 @@ describe('notification sender (D-39)', () => {
     const [stuck, later] = ids;
     await db.update(notificationDeliveryTable).set({ status: 'sending', nextAttemptAt: null, claimedAt: new Date() }).where(eq(notificationDeliveryTable.id, stuck!));
     const clock = fakeClock();
-    await db.update(notificationDeliveryTable).set({ nextAttemptAt: new Date(clock.now().getTime() + 10 * 60_000) }).where(eq(notificationDeliveryTable.id, later!));
+    const laterDue = new Date(clock.now().getTime() + 10 * 60_000);
+    await db.update(notificationDeliveryTable).set({ nextAttemptAt: laterDue }).where(eq(notificationDeliveryTable.id, later!));
     const sent: string[] = [];
     const result = await runSenderDrain({ target, step: (_name, action) => action(), sleep: async (_name, ms) => clock.advance(ms), clock: clock.now, adapters: { web_push: recordingAdapter(sent), whatsapp: whatsappOff }, pacing: TEST_PACING, random: () => 0.5 });
     expect(sent.sort()).toEqual(ids.slice(2).sort());
     expect(result).toMatchObject({ status: 'idle', sent: 2 });
     // The next copy is ten minutes out: the drain ends and leaves it to the sweep's poke.
-    expect(result.status === 'idle' && new Date(result.nextDueAt!).getTime()).toBe(clock.now().getTime() + 10 * 60_000);
+    expect(result.status === 'idle' && new Date(result.nextDueAt!).getTime()).toBe(laterDue.getTime());
     const rows = await db.select().from(notificationDeliveryTable).where(inArray(notificationDeliveryTable.id, ids)).orderBy(asc(notificationDeliveryTable.id));
     expect(rows.find((row) => row.id === stuck)).toMatchObject({ status: 'sending', attempts: 0 });
     expect(rows.find((row) => row.id === later)).toMatchObject({ status: 'owed', attempts: 0 });
@@ -93,7 +95,7 @@ describe('notification sender (D-39)', () => {
     await db.update(notificationDeliveryTable).set({ nextAttemptAt: new Date(clock.now().getTime() + 5_000) }).where(eq(notificationDeliveryTable.id, ids[0]!));
     const sleeps: number[] = [];
     const sent: string[] = [];
-    const result = await runSenderDrain({ target, step: (_name, action) => action(), sleep: async (_name, ms) => { sleeps.push(ms); clock.advance(ms); }, clock: clock.now, adapters: { web_push: recordingAdapter(sent), whatsapp: whatsappOff }, pacing: TEST_PACING });
+    const result = await runSenderDrain({ target, step: (_name, action) => action(), sleep: async (name, ms) => { if (name.startsWith('idle:')) sleeps.push(ms); clock.advance(ms); }, clock: clock.now, adapters: { web_push: recordingAdapter(sent), whatsapp: whatsappOff }, pacing: TEST_PACING });
     expect(sleeps).toEqual([5_000]);
     expect(sent).toEqual(ids);
     expect(result).toMatchObject({ status: 'idle', nextDueAt: null });
@@ -244,5 +246,37 @@ describe('notification sender (D-39)', () => {
     const result = await sendGroup(['a', 'b', 'c', 'd'], { pacing: { perSecond: 1000, concurrency: 1, groupSize: 4 }, send, unknownStreak: 1 });
     expect(started).toEqual(['a', 'b']);
     expect(result).toMatchObject({ breakerTripped: true, unknownStreak: 3, attempted: 2 });
+  });
+
+  it('before ending idle, picks once more after the poke window it started in (a folded poke is not lost)', async () => {
+    const target = uniqueLane();
+    const { ids } = await queue({ lane: target.lane, copies: 2, sendPriority: 'immediate' });
+    const [first, folded] = ids;
+    // Start 3 s into a window that begins after the rows were created, so they are due.
+    const windowStart = (Math.floor(Date.now() / SENDER_POKE_WINDOW_MS) + 1) * SENDER_POKE_WINDOW_MS;
+    const clock = fakeClock(new Date(windowStart + 3_000));
+    // The second copy is not owed yet: it stands for a fan-out that commits and pokes while this drain runs.
+    await db.update(notificationDeliveryTable).set({ nextAttemptAt: new Date(windowStart + 60 * 60_000) }).where(eq(notificationDeliveryTable.id, folded!));
+    const sent: string[] = [];
+    const settles: number[] = [];
+    const result = await runSenderDrain({
+      target,
+      step: (_name, action) => action(),
+      sleep: async (name, ms) => {
+        if (name.startsWith('settle:')) {
+          settles.push(ms);
+          // Meanwhile the fan-out commits its row and pokes; the poke is folded into this drain's key.
+          await db.update(notificationDeliveryTable).set({ nextAttemptAt: clock.now() }).where(eq(notificationDeliveryTable.id, folded!));
+        }
+        clock.advance(ms);
+      },
+      clock: clock.now,
+      adapters: { web_push: recordingAdapter(sent), whatsapp: whatsappOff },
+      pacing: TEST_PACING,
+    });
+    expect(idleNotBeforeMs(windowStart + 3_000)).toBe(windowStart + SENDER_POKE_WINDOW_MS + POKE_WINDOW_MARGIN_MS);
+    expect(settles).toEqual([SENDER_POKE_WINDOW_MS - 3_000 + POKE_WINDOW_MARGIN_MS]);
+    expect(sent).toEqual([first, folded]);
+    expect(result).toMatchObject({ status: 'idle', sent: 2 });
   });
 });

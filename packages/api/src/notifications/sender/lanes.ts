@@ -73,8 +73,9 @@ export const SENDER_POKE_WINDOW_MS = 10_000;
 /**
  * Restate idempotency key of a poke: one per sender and
  * {@link SENDER_POKE_WINDOW_MS} window. A poke folded into a drain that
- * already ran is harmless: the sweep pokes again within 30 s while due rows
- * remain.
+ * already ran loses nothing: a drain ends only on a pick made after the
+ * window it started in (`idleNotBeforeMs` in `./drain.ts`), and the sweep
+ * pokes again within 30 s while due rows remain.
  */
 export function senderPokeIdempotencyKey(target: SenderTarget, nowMs: number): string {
   return `notification-sender:${senderKey(target)}:${Math.floor(nowMs / SENDER_POKE_WINDOW_MS)}`;

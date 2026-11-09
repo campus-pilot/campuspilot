@@ -3,7 +3,7 @@ import type { RemoteNotificationChannel } from '@campuspilot/db/notifications/ca
 import { env } from '@campuspilot/env/server';
 
 import { notificationChannelAdapters, type NotificationChannelAdapter } from '../channels';
-import type { SenderTarget } from './lanes';
+import { SENDER_POKE_WINDOW_MS, type SenderTarget } from './lanes';
 import { nextDueAt, pickDueDeliveries, sendDelivery, type SendAttemptResult, type SenderScope } from './queue';
 import { channelBackoffMs } from './retry-policy';
 import { z } from 'zod';
@@ -16,7 +16,9 @@ import { z } from 'zod';
  * limits, and pause the whole lane after a channel-wide throttle. When
  * nothing is due it sleeps until the next delivery is due if that is soon
  * ({@link MAX_IDLE_WAIT_MS}), else it ends; the API sweep pokes the lane
- * again once rows are due. After {@link MAX_GROUPS_PER_DRAIN} groups it ends
+ * again once rows are due. Before ending it makes sure its last pick came
+ * after the poke window it started in ({@link idleNotBeforeMs}), so a
+ * fan-out poke folded into this drain's idempotency key is never lost. After {@link MAX_GROUPS_PER_DRAIN} groups it ends
  * with `continue`, and the object starts a fresh drain, so no journal grows
  * without bound.
  *
@@ -55,6 +57,25 @@ export function senderPacing(channel: RemoteNotificationChannel): SenderPacing {
 export const MAX_GROUPS_PER_DRAIN = 40;
 /** Longest the drain sleeps waiting for the next due delivery; later ones are left to the sweep's poke. */
 export const MAX_IDLE_WAIT_MS = 15_000;
+/** Allowance for clock differences between the worker that poked and the one draining. */
+export const POKE_WINDOW_MARGIN_MS = 2_000;
+
+/**
+ * When a drain that started at `startedAtMs` may end idle without losing a
+ * poke: after the end of the poke window ({@link SENDER_POKE_WINDOW_MS}) it
+ * started in, plus {@link POKE_WINDOW_MARGIN_MS}.
+ *
+ * Pokes share an idempotency key per lane and window, so a fan-out's poke
+ * that arrives after this drain finished, in the window the drain was poked
+ * in, is folded into this (completed) invocation and starts nothing. Every
+ * such poke was sent in a window no later than the one this drain started
+ * in (it was poked before it started), and the fan-out commits its rows
+ * before poking. So a pick made after that window's end sees every row a
+ * folded poke was meant for.
+ */
+export function idleNotBeforeMs(startedAtMs: number): number {
+  return (Math.floor(startedAtMs / SENDER_POKE_WINDOW_MS) + 1) * SENDER_POKE_WINDOW_MS + POKE_WINDOW_MARGIN_MS;
+}
 
 /** Runs one named unit of work; Restate journals it, tests call it directly. */
 export type SenderStepRunner = <T>(name: string, action: () => Promise<T>) => Promise<T>;
@@ -191,18 +212,31 @@ export async function runSenderDrain(options: {
   let attempted = 0;
   let breakerTrips = 0;
   const state: SenderLaneState = { ...(options.state ?? INITIAL_LANE_STATE) };
+  /** Set by the first pick: the drain may end idle only on a pick at or after it. */
+  let idleNotBefore: number | null = null;
+  /** The drain already slept until {@link idleNotBefore} once (a stubbed sleep in tests may not move the clock). */
+  let settled = false;
   for (let group = 1; group <= MAX_GROUPS_PER_DRAIN; group += 1) {
     // A probe after the breaker tripped is a single send.
     const limit = state.probing ? 1 : pacing.groupSize;
     const picked = await step(`pick:${group}`, async () => {
       const now = clock();
+      const nowMs = now.getTime();
       const ids = await pickDueDeliveries(db, target, { now, limit, ...scope });
-      if (ids.length > 0) return { ids, nextDueAt: null, waitMs: 0 };
+      if (ids.length > 0) return { nowMs, ids, nextDueAt: null, waitMs: 0 };
       const next = await nextDueAt(db, target, scope);
-      return { ids, nextDueAt: next?.toISOString() ?? null, waitMs: next ? Math.max(next.getTime() - now.getTime(), 0) : null };
+      return { nowMs, ids, nextDueAt: next?.toISOString() ?? null, waitMs: next ? Math.max(next.getTime() - nowMs, 0) : null };
     });
+    idleNotBefore ??= idleNotBeforeMs(picked.nowMs);
     if (picked.ids.length === 0) {
-      if (picked.waitMs === null || picked.waitMs > MAX_IDLE_WAIT_MS) return { status: 'idle', sent, attempted, breakerTrips, nextDueAt: picked.nextDueAt };
+      if (picked.waitMs === null || picked.waitMs > MAX_IDLE_WAIT_MS) {
+        if (!settled && picked.nowMs < idleNotBefore) {
+          settled = true;
+          await sleep(`settle:${group}`, idleNotBefore - picked.nowMs);
+          continue;
+        }
+        return { status: 'idle', sent, attempted, breakerTrips, nextDueAt: picked.nextDueAt };
+      }
       await sleep(`idle:${group}`, Math.max(picked.waitMs, 1000));
       continue;
     }
