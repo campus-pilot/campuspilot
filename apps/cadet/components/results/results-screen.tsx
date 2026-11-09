@@ -2,7 +2,6 @@
 
 import Link from 'next/link';
 import { useInfiniteQuery } from '@tanstack/react-query';
-import { useSearchParams } from 'next/navigation';
 import { ChevronRightIcon, GraduationCapIcon } from 'lucide-react';
 import type { CadetExamListItemDto, CadetExamState } from '@campuspilot/api/routers/cadet/cadet.dto';
 import { Button } from '@campuspilot/ui/components/button';
@@ -61,10 +60,22 @@ function BackToCurrent() {
   );
 }
 
-/** Exams of the current class, 20 at a time, with "Show more" when the class has more. */
-export function ResultsScreen() {
-  /** `?class=` (a class record id, e.g. from Growth) shows an earlier class; without it the server's current class. */
-  const recordId = useSearchParams().get('class') ?? undefined;
+/** A class id in the URL that is not one of the student's (or cannot be decoded). */
+export function ResultsClassNotFound() {
+  return (
+    <>
+      <EmptyState icon={GraduationCapIcon} title="Class not found" description="This class is not one of yours." />
+      <BackToCurrent />
+    </>
+  );
+}
+
+/**
+ * Exams of one class, 20 at a time, with "Show more" when the class has more.
+ * `recordId` (from `/results/class/{recordId}`, e.g. linked from Growth) shows
+ * that class; without it the server's current class.
+ */
+export function ResultsScreen({ recordId }: { recordId?: string }) {
   const exams = useInfiniteQuery(
     orpc.listExams.infiniteOptions({
       input: (cursor: string | undefined) => ({
@@ -77,13 +88,7 @@ export function ResultsScreen() {
   );
   if (exams.isPending) return <ScreenLoading blocks={2} />;
   if (exams.isError) {
-    if ((exams.error as { code?: string }).code === 'NOT_FOUND')
-      return (
-        <>
-          <EmptyState icon={GraduationCapIcon} title="Class not found" description="This class is not one of yours." />
-          <BackToCurrent />
-        </>
-      );
+    if ((exams.error as { code?: string }).code === 'NOT_FOUND') return <ResultsClassNotFound />;
     return <ScreenError error={exams.error} onRetry={() => void exams.refetch()} />;
   }
   const record = exams.data.pages[0]!.record;

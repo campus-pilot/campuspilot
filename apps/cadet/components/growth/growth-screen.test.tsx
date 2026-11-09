@@ -6,7 +6,7 @@ import { page, renderWithQuery, resetHandlers } from '@/test/orpc-mock';
 import { GrowthScreen, GrowthView, shortLabel, subjectChanges } from './growth-screen';
 
 vi.mock('@/lib/orpc', async () => ({ orpc: (await import('@/test/orpc-mock')).orpcMock }));
-vi.mock('next/navigation', () => ({ useRouter: () => ({ replace: vi.fn() }), useSearchParams: () => new URLSearchParams() }));
+vi.mock('next/navigation', () => ({ useRouter: () => ({ replace: vi.fn() }) }));
 
 beforeEach(() => {
   resetHandlers({
@@ -27,7 +27,7 @@ describe('GrowthView', () => {
     // Dated by the exam's release, not by when the remark was last edited.
     expect(screen.getByText('October 2026')).toBeTruthy();
     expect(screen.queryByText('December 2026')).toBeNull();
-    expect(screen.getByRole('link', { name: 'See Class 7 results' }).getAttribute('href')).toBe('/results?class=stu_b.cls7');
+    expect(screen.getByRole('link', { name: 'See Class 7 results' }).getAttribute('href')).toBe('/results/class/stu_b.cls7');
   });
 
   it('only compares subjects of the selected class', () => {
@@ -69,12 +69,12 @@ describe('GrowthView', () => {
     expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
   });
 
-  it('links back to the current class when ?class= is not one of the student\'s', async () => {
+  it('links back to the current class when the URL\'s class is not one of the student\'s', async () => {
     resetHandlers({
       getProfile: () => ({ name: 'Meera', admissionNo: 'A', schoolName: 'S', enrollments: [] }),
       getGrowth: () => { throw Object.assign(new Error('Class was not found.'), { code: 'NOT_FOUND' }); },
     });
-    renderWithQuery(<GrowthScreen />);
+    renderWithQuery(<GrowthScreen recordId="stu_x.cls9" />);
     expect(await screen.findByText('Class not found')).toBeTruthy();
     expect(screen.getByRole('link', { name: 'Show my current class' }).getAttribute('href')).toBe('/growth');
   });

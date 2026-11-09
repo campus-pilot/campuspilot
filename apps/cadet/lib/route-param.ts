@@ -10,3 +10,11 @@ export function decodeRouteParam(value: string): string | null {
     return null;
   }
 }
+
+/**
+ * Links to one class's results or growth. The class record id is a path
+ * segment (`/results/class/{recordId}`), not a query parameter; the server
+ * only resolves it within the signed-in admission's own class records.
+ */
+export const classResultsHref = (recordId: string) => `/results/class/${encodeURIComponent(recordId)}`;
+export const classGrowthHref = (recordId: string) => `/growth/class/${encodeURIComponent(recordId)}`;

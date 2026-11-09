@@ -302,7 +302,10 @@ Remark, attendance and activities attach only to the record holding the results.
 **Release and averages.** Results are visible only after the school's explicit
 `releaseExamToCadet` (staff, exam transition permission), which needs a
 completed exam and blocks reopening and legacy plan changes until
-`withdrawExamFromCadet`. Release freezes marks and remarks, not labels or grading
+`withdrawExamFromCadet`. Its optional `releasedAt` records an earlier release
+(e.g. the demo seed's back-dated history); it defaults to now, may not be in
+the future, and does not change when students can see the results (from the
+call on). Release freezes marks and remarks, not labels or grading
 (no snapshot). Remarks (`exam_student_remark`) are written in the management
 student result page and are locked while released. Class averages appear only
 when the school setting `cadet_show_class_averages` is on (school settings) and
@@ -365,7 +368,7 @@ Mirrors management: Next.js 16, oRPC + TanStack Query, TanStack Form,
 | --- | --- |
 | `app/layout.tsx` | `QueryProvider` + `ThemeProvider`; title "Cadet Portal". |
 | `app/(portal)/layout.tsx` → `components/app-frame.tsx` (`AppFrame`) | Session check (`authClient.useSession`, `redirect('/sign-in')`), top bar from `getProfile.current`, bottom nav; phone-sized frame from `md` up. |
-| `app/(portal)/page.tsx`, `fees/`, `fees/[billId]/`, `results/`, `results/[examId]/`, `growth/`, `more/` | Screens in `components/{home,fees,results,growth,more}`; shared headers and loading/error/empty states in `components/screen.tsx`. More holds Sign out (cadet session only; clears the query cache). |
+| `app/(portal)/page.tsx`, `fees/`, `fees/[billId]/`, `results/`, `results/[examId]/`, `results/class/[recordId]/`, `growth/`, `growth/class/[recordId]/`, `more/` | Screens in `components/{home,fees,results,growth,more}`; shared headers and loading/error/empty states in `components/screen.tsx`. More holds Sign out (cadet session only; clears the query cache). |
 | `app/sign-in/page.tsx` → `components/sign-in-form.tsx` | `useForm` with a Zod `onSubmit` validator and per-field errors; the request is a `useMutation`, so a rejected sign-in does not disable Submit. Full navigation on success. |
 | `app/oauth/consent/page.tsx` → `components/oauth-consent.tsx` | Cadet MCP consent. |
 | `lib/orpc.ts` | `RPCLink` to `/api/cadet/rpc` with `credentials: 'include'`, typed `CadetRouterClient`. Never the staff `/rpc`. |
@@ -373,8 +376,11 @@ Mirrors management: Next.js 16, oRPC + TanStack Query, TanStack Form,
 
 Env comes from `@campuspilot/env/cadet.client` (`NEXT_PUBLIC_SERVER_URL`). No
 identity inputs: who the student is always comes from the `cpc_` session. Record
-ids in URLs (`?class=`, `/results/{examId}`, `/fees/{billId}`) are only looked up
-within the signed-in admission, and anything else is NOT_FOUND. No `useEffect`;
+ids are path segments, not query parameters (`/results/class/{recordId}`,
+`/growth/class/{recordId}`, `/results/{examId}`, `/fees/{billId}`; build class
+links with `classResultsHref`/`classGrowthHref` in `lib/route-param.ts`). They
+are only looked up within the signed-in admission, and anything else is
+NOT_FOUND. `/results` and `/growth` without a class show the server's current class. No `useEffect`;
 follow the repository rules in `AGENTS.md` (TanStack Form for input, Query for
 data, small components). Shared, API-free UI belongs in
 `packages/components/src/cadet-portal`.

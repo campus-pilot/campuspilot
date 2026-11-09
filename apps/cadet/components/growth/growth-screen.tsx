@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { Bar, BarChart, CartesianGrid, Line, LineChart, XAxis, YAxis } from 'recharts';
 import { ChartLineIcon, ChevronRightIcon, TrendingDownIcon, TrendingUpIcon } from 'lucide-react';
@@ -27,6 +27,7 @@ import { cn } from '@campuspilot/ui/lib/utils';
 
 import { firstNameOf, formatMonth, formatPercent, signedPoints } from '@/lib/format';
 import { orpc } from '@/lib/orpc';
+import { classGrowthHref, classResultsHref } from '@/lib/route-param';
 import { EmptyState, ScreenError, ScreenHeader, ScreenLoading, SectionLabel } from '../screen';
 
 type ClassRecord = CadetGrowthDto['classes'][number];
@@ -42,11 +43,11 @@ export function shortLabel(name: string, max = 8) {
 
 const classLabel = (record: ClassRecord) => [record.classLabel, record.sectionLabel].filter(Boolean).join(' ');
 
-/** The chosen class lives in the URL (`?class=`), so the view survives a reload and can be shared. */
+/** The chosen class lives in the URL (`/growth/class/{recordId}`), so the view survives a reload and can be shared. */
 function ClassSelect({ classes, value }: { classes: ClassRecord[]; value: string }) {
   const router = useRouter();
   return (
-    <Select value={value} onValueChange={(id) => router.replace(`/growth?class=${encodeURIComponent(id)}`, { scroll: false })}>
+    <Select value={value} onValueChange={(id) => router.replace(classGrowthHref(id), { scroll: false })}>
       <SelectTrigger aria-label="Class">
         <SelectValue />
       </SelectTrigger>
@@ -250,7 +251,7 @@ function ClassRow({ record, selected }: { record: ClassRecord; selected: boolean
   const latest = record.latest;
   return (
     <Link
-      href={`/growth?class=${encodeURIComponent(record.recordId)}`}
+      href={classGrowthHref(record.recordId)}
       scroll={false}
       aria-current={selected ? 'true' : undefined}
       className={cn('flex items-center gap-3 border-b px-3 py-2.5 last:border-b-0 hover:bg-muted/50', selected && 'bg-primary/5')}
@@ -333,7 +334,7 @@ export function GrowthView({ growth, studentName }: { growth: CadetGrowthDto; st
       <ScreenHeader title="Growth" description={`${classLabel(record)} · ${record.sessionLabel}`} />
       <OverallTrend growth={growth} studentName={studentName} />
       <Button asChild variant="outline" size="lg" className="w-full">
-        <Link href={`/results?class=${encodeURIComponent(record.recordId)}`}>See {record.classLabel} results</Link>
+        <Link href={classResultsHref(record.recordId)}>See {record.classLabel} results</Link>
       </Button>
       <StrengthsAndFocus selected={growth.selected} />
       <SubjectComparison selected={growth.selected} classLabel={record.classLabel} />
@@ -343,26 +344,29 @@ export function GrowthView({ growth, studentName }: { growth: CadetGrowthDto; st
   );
 }
 
+/** A class id in the URL that is not one of the student's (or cannot be decoded). */
+export function GrowthClassNotFound() {
+  return (
+    <>
+      <EmptyState icon={ChartLineIcon} title="Class not found" description="This class is not one of yours." />
+      <Button asChild variant="outline" size="lg" className="w-full">
+        <Link href="/growth">Show my current class</Link>
+      </Button>
+    </>
+  );
+}
+
 /**
  * Growth is scoped to one class at a time. Each class defines its own
  * subjects, so subject charts never cross a class boundary; only overall
  * scores are compared between classes, in "Class by class".
  */
-export function GrowthScreen() {
-  const recordId = useSearchParams().get('class') ?? undefined;
+export function GrowthScreen({ recordId }: { recordId?: string }) {
   const profile = useQuery(orpc.getProfile.queryOptions());
   const growth = useQuery(orpc.getGrowth.queryOptions({ input: recordId ? { recordId } : {} }));
   if (growth.isPending || profile.isPending) return <ScreenLoading blocks={3} />;
   if (growth.isError) {
-    if ((growth.error as { code?: string }).code === 'NOT_FOUND')
-      return (
-        <>
-          <EmptyState icon={ChartLineIcon} title="Class not found" description="This class is not one of yours." />
-          <Button asChild variant="outline" size="lg" className="w-full">
-            <Link href="/growth">Show my current class</Link>
-          </Button>
-        </>
-      );
+    if ((growth.error as { code?: string }).code === 'NOT_FOUND') return <GrowthClassNotFound />;
     return <ScreenError error={growth.error} onRetry={() => void growth.refetch()} />;
   }
   return <GrowthView growth={growth.data} studentName={profile.data?.name ?? ''} />;

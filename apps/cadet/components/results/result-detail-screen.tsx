@@ -13,6 +13,7 @@ import { cn } from '@campuspilot/ui/lib/utils';
 
 import { formatDate, formatPercent, signedPoints } from '@/lib/format';
 import { orpc } from '@/lib/orpc';
+import { classGrowthHref } from '@/lib/route-param';
 import { EmptyState, ScreenError, ScreenHeader, ScreenLoading, SectionLabel } from '../screen';
 
 type Subject = CadetExamResultDto['subjects'][number];
@@ -152,7 +153,7 @@ export function ResultDetail({ result }: { result: CadetExamResultDto }) {
       )}
       <CoScholastic areas={result.coScholastics} />
       <Button asChild variant="outline" size="lg" className="w-full">
-        <Link href={`/growth?class=${encodeURIComponent(result.recordId)}`}>See growth across exams</Link>
+        <Link href={classGrowthHref(result.recordId)}>See growth across exams</Link>
       </Button>
     </>
   );
