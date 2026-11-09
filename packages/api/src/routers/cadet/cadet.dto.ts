@@ -15,6 +15,15 @@ import { createListInputSchema, createPaginatedOutputSchema } from '../../pagina
  * your own mark give the other mark exactly), so the portal shows none.
  */
 export const CADET_CLASS_AVERAGE_MIN_STUDENTS = 5;
+/*
+ * Known limits of this threshold (accepted, not solved):
+ * - Collusion: with exactly 5 contributing students, 4 who share their marks
+ *   can compute the fifth's from the average.
+ * - Differencing: if a student's results become (un)approved or they leave
+ *   between a withdraw and a re-release, comparing the two averages can
+ *   reveal the changed student's marks.
+ * Only approved results of registered students count toward the minimum.
+ */
 
 const minorSchema = z.string().regex(/^-?(0|[1-9]\d*)$/);
 const currencySchema = z.string().regex(/^[A-Z]{3}$/);
@@ -38,6 +47,20 @@ export const cadetProfileSchema = z.object({
   name: z.string(),
   admissionNo: z.string(),
   schoolName: z.string(),
+  /**
+   * The class record the server treats as current (the default for
+   * listExams and getGrowth): the placement in the active session, else the
+   * newest. Null for a student without a class.
+   */
+  current: z
+    .object({
+      recordId: z.string(),
+      classLabel: z.string(),
+      sectionLabel: z.string().nullable(),
+      sessionLabel: z.string(),
+      rollNo: z.number().int().nullable(),
+    })
+    .nullable(),
   /** Newest session first. */
   enrollments: z.array(cadetEnrollmentSchema),
 });
@@ -291,5 +314,7 @@ export const cadetRemarkListItemSchema = cadetRemarkSchema.extend({
   examId: z.string(),
   examName: z.string(),
   recordId: z.string(),
+  /** When the exam was released to the Cadet Portal; the timeline dates remarks by this. */
+  releasedAt: z.date(),
 });
 export const listCadetRemarksOutputSchema = createPaginatedOutputSchema(cadetRemarkListItemSchema);

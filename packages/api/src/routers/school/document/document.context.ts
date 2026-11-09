@@ -19,6 +19,7 @@ import type { DocumentSource } from "./document.dto";
 import { documentImage } from "./document.storage";
 import { withReportModeLayout } from "./document.report-modes";
 import { gradeLabel, scorePercent } from "../exam/exam-scoring";
+import { shareableAttendance, shareableCoScholastics } from "../exam/exam-assessment-rules";
 
 /** Report cards print "—" where no grade applies; the rule itself is shared with the Cadet Portal. */
 export function documentGrade(
@@ -546,40 +547,35 @@ export async function buildDocumentContexts(
     // Shared assessment values are separate records. Never choose a subject's
     // legacy metadata as an exam-wide attendance or activity value.
     let attendance = null;
+    const shareable = shareableAttendance(
+      config.attendanceTracking.enabled,
+      assessment,
+      settings?.totalWorkingDays,
+    );
     if (
       (source.documentType !== "report_card" ||
         source.reportSections.includeAttendance) &&
-      config.attendanceTracking.enabled &&
-      assessment?.approved &&
-      assessment.daysAttended !== null
+      shareable.kind !== "none"
     ) {
-      if (
-        settings?.totalWorkingDays === null ||
-        settings?.totalWorkingDays === undefined ||
-        settings.totalWorkingDays <= 0 ||
-        assessment.daysAttended < 0 ||
-        assessment.daysAttended > settings.totalWorkingDays
-      )
+      if (shareable.kind === "invalid")
         throw rpcError.badRequest(
           "Configure valid examination working days before printing attendance.",
         );
       attendance = {
-        daysAttended: assessment.daysAttended,
-        totalWorkingDays: settings.totalWorkingDays,
-        percentage: percent(assessment.daysAttended, settings.totalWorkingDays),
+        daysAttended: shareable.daysAttended,
+        totalWorkingDays: shareable.totalWorkingDays,
+        percentage: percent(shareable.daysAttended, shareable.totalWorkingDays),
       };
     }
-    const coScholastics =
-      assessment?.approved &&
-      assessment.coScholastics &&
-      Object.keys(assessment.coScholastics).length
-        ? Object.fromEntries(
-            Object.entries(assessment.coScholastics).map(([slug, grade]) => [
-              slug,
-              { areaName: config.coScholasticAreas[slug]?.name ?? slug, grade },
-            ]),
-          )
-        : null;
+    const approvedGrades = shareableCoScholastics(assessment);
+    const coScholastics = approvedGrades
+      ? Object.fromEntries(
+          Object.entries(approvedGrades).map(([slug, grade]) => [
+            slug,
+            { areaName: config.coScholasticAreas[slug]?.name ?? slug, grade },
+          ]),
+        )
+      : null;
     includedStudentIds.push(student.id);
     contexts.push(withReportModeLayout({
       ...common,

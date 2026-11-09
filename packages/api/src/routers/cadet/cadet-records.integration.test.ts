@@ -1,7 +1,10 @@
 import { db } from '@campuspilot/db';
 import { studentTable } from '@campuspilot/db/schema/student';
+import { admissionTable } from '@campuspilot/db/schema/admission';
+import { examResultTable, examStudentAssessmentTable } from '@campuspilot/db/schema/exam';
+import { schoolSessionTable } from '@campuspilot/db/schema/session';
 import { createRouterClient } from '@orpc/server';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { connectCadetMcp, createCadetTestClient, signInCadet } from '../../../test/cadet';
@@ -117,6 +120,8 @@ describe('cadet results, growth and remarks', () => {
       { sessionLabel: '2025–26', classLabel: 'Class 6', rollNo: 1, sessionIsActive: false },
     ] });
     expect(profile.enrollments.map((row) => row.studentId)).toEqual([current.meera, past.meera]);
+    // The server's current class, the same one listExams and getGrowth default to.
+    expect(profile.current).toEqual({ recordId: recordOf(current.meera, current.classId), classLabel: 'Class 7', sectionLabel: expect.any(String), sessionLabel: '2026–27', rollNo: 1 });
   });
 
   it('listExams shows released scores only and an explicit awaiting state', async () => {
@@ -241,6 +246,7 @@ describe('cadet results, growth and remarks', () => {
 
   it('listRemarks returns released remarks, newest session first, optionally per class', async () => {
     const remarks = await meera.listRemarks({});
+    expect(remarks.items.every((item) => typeof item.releasedAt === 'string' || item.releasedAt instanceof Date)).toBe(true);
     expect(remarks.items.map(({ examName, text }) => [examName, text])).toEqual([
       ['Half-Yearly', 'Great half-year.'],
       ['Annual', 'Promoted with distinction.'],
@@ -286,32 +292,57 @@ describe('cadet class averages, moved students and scoping', () => {
   let zoya: CadetRouterClient;
   let zoyaStudentId: string;
   let zoyaClassId: string;
+  let pastRecordId: string;
+  const classAAdmissionIds: string[] = [];
+  const classAStudentIds: string[] = [];
 
   beforeAll(async () => {
     const created = await createResultsSchool();
     principal = created.principal;
     schoolId = created.school.id;
-    sessionId = await createExamSession(schoolId, 2026, { t1: 'Term 1' }, { active: true });
+    const logins = [];
+    for (const index of [0, 1, 2, 3, 4]) logins.push(await createAdmissionWithLogin(principal, schoolId, `Student A${index}`));
+
+    // 2025–26: the same five students in Class 7, two released exams.
+    const pastSessionId = await createExamSession(schoolId, 2025, { p1: 'Past 1', p2: 'Past 2' }, { active: true });
+    const classPast = await createSubjectClass(schoolId, 'Class 7', { maths: 'Mathematics' });
+    const past: Array<{ classId: string; studentId: string; subjects: Record<string, number> }> = [];
+    for (const [index, login] of logins.entries()) {
+      const studentId = (await enroll({ schoolId, admissionId: login.admission.id, sessionId: pastSessionId, ...classPast, rollNo: index + 1 })).id;
+      past.push({ classId: classPast.classId, studentId, subjects: { maths: 40 + index * 10 } });
+      if (index === 0) pastRecordId = `${studentId}.${classPast.classId}`;
+    }
+    for (const slug of ['p1', 'p2']) {
+      const pastScope = { schoolId, sessionId: pastSessionId, examSlug: slug };
+      await runExam(principal, pastScope, past, { complete: true });
+      await principal.school.releaseExamToCadet(pastScope);
+    }
+
+    // 2026–27: Class 8 (five) and Class 9 (two) sit one exam with attendance and activities.
+    sessionId = await createExamSession(schoolId, 2026, { t1: 'Term 1' }, { active: true, attendance: true, coScholastic: true });
     classA = await createSubjectClass(schoolId, 'Class 8', { maths: 'Mathematics' });
     classB = await createSubjectClass(schoolId, 'Class 9', { maths: 'Mathematics' });
-    const enrolled: Array<{ classId: string; studentId: string; subjects: Record<string, number> }> = [];
+    const enrolled: Array<{ classId: string; studentId: string; subjects: Record<string, number>; daysAttended: number; coScholastics: Record<string, string> }> = [];
     const aMarks = [90, 80, 70, 60, 50];
     for (const [index, mark] of aMarks.entries()) {
-      const login = await createAdmissionWithLogin(principal, schoolId, `Student A${index}`);
+      const login = logins[index]!;
       const studentId = (await enroll({ schoolId, admissionId: login.admission.id, sessionId, ...classA, rollNo: index + 1 })).id;
+      classAAdmissionIds.push(login.admission.id);
+      classAStudentIds.push(studentId);
       if (index === 0) {
         asha = await cadetClient(login.credentials);
         ashaStudentId = studentId;
       }
-      enrolled.push({ classId: classA.classId, studentId, subjects: { maths: mark } });
+      enrolled.push({ classId: classA.classId, studentId, subjects: { maths: mark }, daysAttended: 40, coScholastics: { art: 'A' } });
     }
     for (const index of [0, 1]) {
       const login = await createAdmissionWithLogin(principal, schoolId, `Student B${index}`);
       const studentId = (await enroll({ schoolId, admissionId: login.admission.id, sessionId, ...classB, rollNo: index + 1 })).id;
-      enrolled.push({ classId: classB.classId, studentId, subjects: { maths: 10 } });
+      enrolled.push({ classId: classB.classId, studentId, subjects: { maths: 10 }, daysAttended: 45, coScholastics: { art: 'B' } });
     }
     const scope = { schoolId, sessionId, examSlug: 't1' };
-    await runExam(principal, scope, enrolled, { complete: true });
+    await runExam(principal, scope, enrolled, { complete: true, workingDays: 50 });
+    await principal.school.saveStudentExamRemark({ ...scope, classId: classA.classId, studentId: ashaStudentId, text: 'Well done.' });
     await principal.school.releaseExamToCadet(scope);
     await principal.school.updateCadetPortalSettings({ schoolId, showClassAverages: true });
 
@@ -338,7 +369,7 @@ describe('cadet class averages, moved students and scoping', () => {
     await db.update(studentTable).set({ classId: classB.classId, sectionId: classB.sectionId, rollNo: 99 }).where(eq(studentTable.id, ashaStudentId));
     try {
       const growth = await asha.getGrowth({});
-      expect(growth.classes.map(({ recordId, classLabel, sectionLabel }) => ({ recordId, classLabel, sectionLabel }))).toEqual([
+      expect(growth.classes.slice(0, 2).map(({ recordId, classLabel, sectionLabel }) => ({ recordId, classLabel, sectionLabel }))).toEqual([
         { recordId: `${ashaStudentId}.${classB.classId}`, classLabel: 'Class 9', sectionLabel: 'Section A' },
         // The results-only record: no longer placed there, so no section.
         { recordId: `${ashaStudentId}.${classA.classId}`, classLabel: 'Class 8', sectionLabel: null },
@@ -347,10 +378,68 @@ describe('cadet class averages, moved students and scoping', () => {
       const current = await asha.listExams({});
       expect(current.items).toMatchObject([{ examSlug: 't1', state: 'released', percentage: null }]);
       const sat = await asha.getExamResult({ examId: examId(ashaStudentId, classA.classId) });
-      expect(sat).toMatchObject({ classLabel: 'Class 8', sectionLabel: null, overall: { percentage: 90 } });
+      expect(sat).toMatchObject({ classLabel: 'Class 8', sectionLabel: null, overall: { percentage: 90 }, remark: { text: 'Well done.' } });
+      expect(sat.attendance).toEqual({ daysAttended: 40, totalWorkingDays: 50 });
+      // The remark, attendance and activities belong to the class holding her results only.
+      const other = await asha.getExamResult({ examId: examId(ashaStudentId, classB.classId) });
+      expect(other).toMatchObject({ overall: null, remark: null, attendance: null, coScholastics: [] });
+      const remarks = await asha.listRemarks({});
+      expect(remarks.items.map((item) => [item.recordId, item.text])).toEqual([[`${ashaStudentId}.${classA.classId}`, 'Well done.']]);
     } finally {
       await db.update(studentTable).set({ classId: classA.classId, sectionId: classA.sectionId, rollNo: 1 }).where(eq(studentTable.id, ashaStudentId));
     }
+  });
+
+  it('shows attendance and activities only as the report card would', async () => {
+    const id = examId(ashaStudentId, classA.classId);
+    expect(await asha.getExamResult({ examId: id })).toMatchObject({
+      attendance: { daysAttended: 40, totalWorkingDays: 50 },
+      coScholastics: [{ area: 'Art', grade: 'A' }],
+    });
+    const assessmentWhere = and(eq(examStudentAssessmentTable.studentId, ashaStudentId), eq(examStudentAssessmentTable.examSlug, 't1'));
+    await db.update(examStudentAssessmentTable).set({ approved: false }).where(assessmentWhere);
+    try {
+      expect(await asha.getExamResult({ examId: id })).toMatchObject({ attendance: null, coScholastics: [] });
+    } finally {
+      await db.update(examStudentAssessmentTable).set({ approved: true }).where(assessmentWhere);
+    }
+    const [session] = await db.select().from(schoolSessionTable).where(eq(schoolSessionTable.id, sessionId));
+    const config = session!.sessionConfig!;
+    await db.update(schoolSessionTable).set({ sessionConfig: { ...config, attendanceTracking: { enabled: false } } }).where(eq(schoolSessionTable.id, sessionId));
+    try {
+      // Tracking off hides attendance; approved activity grades stay.
+      expect(await asha.getExamResult({ examId: id })).toMatchObject({ attendance: null, coScholastics: [{ area: 'Art', grade: 'A' }] });
+    } finally {
+      await db.update(schoolSessionTable).set({ sessionConfig: config }).where(eq(schoolSessionTable.id, sessionId));
+    }
+  });
+
+  it('averages only approved results of registered students and counts only those toward the minimum', async () => {
+    const id = examId(ashaStudentId, classA.classId);
+    const lastRow = eq(examResultTable.studentId, classAStudentIds[4]!);
+    await db.update(examResultTable).set({ approved: false }).where(lastRow);
+    try {
+      expect((await asha.getExamResult({ examId: id })).classAveragePercentage).toBeNull();
+    } finally {
+      await db.update(examResultTable).set({ approved: true }).where(lastRow);
+    }
+    await db.update(admissionTable).set({ registered: false }).where(eq(admissionTable.id, classAAdmissionIds[4]!));
+    try {
+      expect((await asha.getExamResult({ examId: id })).classAveragePercentage).toBeNull();
+    } finally {
+      await db.update(admissionTable).set({ registered: true }).where(eq(admissionTable.id, classAAdmissionIds[4]!));
+    }
+    expect((await asha.getExamResult({ examId: id })).classAveragePercentage).toBe(70);
+  });
+
+  it('computes growth averages for every exam of the selected class and the latest exam of the others', async () => {
+    const growth = await asha.getGrowth({});
+    expect(growth.selected!.recordId).toBe(`${ashaStudentId}.${classA.classId}`);
+    expect(growth.selected!.exams.map((exam) => exam.classAveragePercentage)).toEqual([70]);
+    // Past class: 40..80 → latest average 60, shown in "class by class".
+    expect(growth.classes.find((item) => item.recordId === pastRecordId)!.latest).toMatchObject({ examName: 'Past 2', classAveragePercentage: 60 });
+    const past = await asha.getGrowth({ recordId: pastRecordId });
+    expect(past.selected!.exams.map((exam) => exam.classAveragePercentage)).toEqual([60, 60]);
   });
 
   it('omits a released exam that has no plan for the student\'s class', async () => {

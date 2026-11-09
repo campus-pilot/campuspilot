@@ -58,7 +58,7 @@ export async function createExamSession(
   schoolId: string,
   startYear: number,
   exams: Record<string, string>,
-  options: { active?: boolean; coScholastic?: boolean } = {},
+  options: { active?: boolean; coScholastic?: boolean; attendance?: boolean } = {},
 ) {
   const session = await createTestSession({
     schoolId,
@@ -70,7 +70,7 @@ export async function createExamSession(
     examConfig: Object.fromEntries(Object.entries(exams).map(([slug, name], index) => [slug, { name, order: index + 1 }])),
     coScholasticAreas: options.coScholastic ? { art: { name: 'Art' } } : {},
     gradingScale: GRADING_SCALE,
-    attendanceTracking: { enabled: false },
+    attendanceTracking: { enabled: options.attendance ?? false },
   };
   await db.update(schoolSessionTable).set({ sessionConfig }).where(eq(schoolSessionTable.id, session.id));
   if (options.active) await activateSession(schoolId, session.id);
@@ -107,12 +107,14 @@ export async function enroll(options: {
 export async function runExam(
   client: TestClient,
   scope: { schoolId: string; sessionId: string; examSlug: string },
-  marks: Array<{ classId: string; studentId: string; subjects: Record<string, number>; coScholastics?: Record<string, string> }>,
-  options: { complete?: boolean } = {},
+  marks: Array<{ classId: string; studentId: string; subjects: Record<string, number>; coScholastics?: Record<string, string>; daysAttended?: number }>,
+  options: { complete?: boolean; workingDays?: number } = {},
 ) {
   const preview = await client.school.getExamPlanPreview(scope);
   await client.school.generateExamPlan({ ...scope, configurationVersion: preview.configurationVersion });
   await client.school.transitionExam({ ...scope, status: 'active' });
+  if (options.workingDays !== undefined)
+    await client.school.updateExamAssessmentSettings({ ...scope, totalWorkingDays: options.workingDays });
   for (const entry of marks) {
     const workspace = await client.school.getStudentExam({ ...scope, classId: entry.classId, studentId: entry.studentId });
     await client.school.saveStudentExam({
@@ -120,7 +122,7 @@ export async function runExam(
       classId: entry.classId,
       studentId: entry.studentId,
       approved: true,
-      daysAttended: null,
+      daysAttended: entry.daysAttended ?? null,
       coScholastics: entry.coScholastics ?? null,
       subjects: workspace.subjects.map(({ plan }) => ({
         examPlanId: plan.id,

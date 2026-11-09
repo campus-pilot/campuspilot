@@ -25,7 +25,6 @@ import {
   type CadetExam,
   findRecord,
   loadCadetAcademics,
-  loadCadetEnrollments,
   loadCadetSchool,
   loadRemarks,
   parseExamId,
@@ -75,7 +74,7 @@ function paginate<T>(items: T[], input: { cursor?: string; page?: number; limit:
  */
 export const cadetRecordsRouter = {
   getProfile: cadetProcedure
-    .route(route('Get my profile', "The signed-in student's name, admission number, school and enrollments (session, class, section, roll number), newest session first."))
+    .route(route('Get my profile', "The signed-in student's name, admission number, school, current class and enrollments (session, class, section, roll number), newest session first."))
     .meta(readMeta('account'))
     .output(cadetProfileSchema)
     .handler(async ({ context }) => {
@@ -86,13 +85,25 @@ export const cadetRecordsRouter = {
           .where(eq(admissionTable.id, context.cadet.admissionId))
           .limit(1);
         if (!admission) throw rpcError.notFound('Admission');
-        const [school, enrollments] = await Promise.all([
+        const [school, academics] = await Promise.all([
           loadCadetSchool(context.db, context.cadet),
-          loadCadetEnrollments(context.db, context.cadet),
+          loadCadetAcademics(context.db, context.cadet),
         ]);
+        const { enrollments, currentRecord } = academics;
+        const currentEnrollment = enrollments.find((row) => row.studentId === currentRecord?.studentId);
         return {
           ...admission,
           schoolName: school.name,
+          current: currentRecord
+            ? {
+                recordId: currentRecord.recordId,
+                classLabel: currentRecord.classLabel,
+                sectionLabel: currentRecord.sectionLabel,
+                sessionLabel: currentRecord.sessionLabel,
+                // A roll number belongs to the placement, so only when still placed in this class.
+                rollNo: currentEnrollment?.classId === currentRecord.classId ? currentEnrollment.rollNo : null,
+              }
+            : null,
           enrollments: enrollments.map((row) => ({
             studentId: row.studentId,
             sessionId: row.sessionId,
@@ -210,13 +221,15 @@ export const cadetRecordsRouter = {
         // Unreleased results are refused exactly like missing ones.
         if (!record || !exam || exam.state !== 'released') throw rpcError.notFound('Examination result');
         const school = await loadCadetSchool(context.db, context.cadet);
-        const scores = await scoreReleasedExams(context.db, academics, exams, school.showClassAverages);
-        const score = scores.find((item) => item.exam.examId === exam.examId)!;
+        // Averages only for the requested exam; the others are needed for the previous-exam delta only.
+        const scores = await scoreReleasedExams(context.db, academics, exams, false);
+        const [score] = await scoreReleasedExams(context.db, academics, [exam], school.showClassAverages);
+        if (!score) throw rpcError.notFound('Examination result');
         const previous = scores
           .filter((item) => item.exam.order < exam.order && item.overall !== null)
           .at(-1);
         const previousBySubject = new Map(previous?.subjects.map((subject) => [subject.subjectId, subject.percentage]));
-        const extras = await releasedExamExtras(context.db, context.cadet, exam);
+        const extras = await releasedExamExtras(context.db, context.cadet, academics, exam);
         return {
           examId: exam.examId,
           recordId: record.recordId,
@@ -325,9 +338,9 @@ export const cadetRecordsRouter = {
         const records = input.filters?.recordId ? [findRecord(academics, input.filters.recordId)!] : academics.records;
         // Records are newest session first; exams within a record oldest first.
         const exams = records.flatMap((record) => [...academics.examsOf(record.recordId)].reverse());
-        const remarks = await loadRemarks(context.db, context.cadet, exams);
+        const remarks = await loadRemarks(context.db, context.cadet, academics, exams);
         return paginate(
-          remarks.map(({ exam, remark }) => ({ ...remark, examId: exam.examId, examName: exam.name, recordId: exam.record.recordId })),
+          remarks.map(({ exam, remark }) => ({ ...remark, examId: exam.examId, examName: exam.name, recordId: exam.record.recordId, releasedAt: exam.releasedAt! })),
           input,
         );
       } catch (error) {

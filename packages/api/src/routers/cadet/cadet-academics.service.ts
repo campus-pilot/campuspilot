@@ -15,10 +15,12 @@ import { sessionConfigSchema, type SessionConfig } from '@campuspilot/db/schema/
 import { schoolTable } from '@campuspilot/db/schema/school';
 import { schoolSessionTable } from '@campuspilot/db/schema/session';
 import { studentTable } from '@campuspilot/db/schema/student';
+import { admissionTable } from '@campuspilot/db/schema/admission';
 import { and, desc, eq, inArray } from 'drizzle-orm';
 
 import { rpcError } from '../../errors';
 import { gradeLabel, scorePercent } from '../school/exam/exam-scoring';
+import { shareableAttendance, shareableCoScholastics } from '../school/exam/exam-assessment-rules';
 import { CADET_CLASS_AVERAGE_MIN_STUDENTS, type CadetExamState } from './cadet.dto';
 
 /**
@@ -335,8 +337,9 @@ function subjectOrder(record: CadetRecord, plans: PlanRow[]) {
 
 /**
  * Scores of released examinations. With `withAverages`, class averages are
- * computed from every result in the same class's plans only (other classes
- * sitting the same exam have their own plans), and each average is null
+ * computed from approved results of registered students in the same class's
+ * plans only (other classes sitting the same exam have their own plans), and
+ * each average is null
  * unless at least `CADET_CLASS_AVERAGE_MIN_STUDENTS` students contribute.
  */
 export async function scoreReleasedExams(
@@ -351,7 +354,11 @@ export async function scoreReleasedExams(
     ? await db
         .select({ planId: examResultTable.examPlanId, studentId: examResultTable.studentId, marks: examResultTable.marks })
         .from(examResultTable)
-        .where(inArray(examResultTable.examPlanId, planIds))
+        .innerJoin(studentTable, eq(studentTable.id, examResultTable.studentId))
+        .innerJoin(admissionTable, eq(admissionTable.id, studentTable.admissionId))
+        // Final results of current students only: an unapproved row may still
+        // change, and a student who left is not part of the class any more.
+        .where(and(inArray(examResultTable.examPlanId, planIds), eq(examResultTable.approved, true), eq(admissionTable.registered, true)))
     : [];
   return released.map((exam) => {
     const { record } = exam;
@@ -414,11 +421,32 @@ export async function scoreReleasedExams(
   });
 }
 
-/** Attendance, co-scholastic grades and the remark of one released exam. */
-export async function releasedExamExtras(db: DatabaseExecutor, cadet: Cadet, exam: CadetExam) {
+/**
+ * Whether this class record holds the student's results for the exam. A
+ * student moved between classes mid-session has a record for each class, but
+ * the remark, attendance and activities (keyed by session, exam and student)
+ * belong only to the class whose plans hold their marks, so they are attached
+ * there and nowhere else.
+ */
+export function holdsResults(academics: CadetAcademics, exam: CadetExam) {
+  return exam.plans.some((plan) => academics.marksOf(plan.id, exam.record.studentId) !== undefined);
+}
+
+/**
+ * Attendance, activity grades and the remark of one released exam, using
+ * the same visibility rules as the printed report card
+ * (`exam-assessment-rules.ts`): nothing from an unapproved assessment, and
+ * attendance only while the session tracks it.
+ */
+export async function releasedExamExtras(db: DatabaseExecutor, cadet: Cadet, academics: CadetAcademics, exam: CadetExam) {
   const { record } = exam;
+  if (!holdsResults(academics, exam)) return { attendance: null, coScholastics: [], remark: null };
   const [assessment] = await db
-    .select({ daysAttended: examStudentAssessmentTable.daysAttended, coScholastics: examStudentAssessmentTable.coScholastics })
+    .select({
+      approved: examStudentAssessmentTable.approved,
+      daysAttended: examStudentAssessmentTable.daysAttended,
+      coScholastics: examStudentAssessmentTable.coScholastics,
+    })
     .from(examStudentAssessmentTable)
     .where(
       and(
@@ -440,23 +468,25 @@ export async function releasedExamExtras(db: DatabaseExecutor, cadet: Cadet, exa
       ),
     )
     .limit(1);
-  const remarks = await loadRemarks(db, cadet, [exam]);
+  const remarks = await loadRemarks(db, cadet, academics, [exam]);
   const areas = record.sessionConfig.coScholasticAreas;
+  const attendance = shareableAttendance(record.sessionConfig.attendanceTracking.enabled, assessment, settings?.totalWorkingDays);
   return {
-    attendance:
-      assessment?.daysAttended !== null && assessment?.daysAttended !== undefined && settings?.totalWorkingDays
-        ? { daysAttended: assessment.daysAttended, totalWorkingDays: settings.totalWorkingDays }
-        : null,
-    coScholastics: Object.entries(assessment?.coScholastics ?? {})
+    attendance: attendance.kind === 'ok' ? { daysAttended: attendance.daysAttended, totalWorkingDays: attendance.totalWorkingDays } : null,
+    coScholastics: Object.entries(shareableCoScholastics(assessment) ?? {})
       .sort(([a], [b]) => Object.keys(areas).indexOf(a) - Object.keys(areas).indexOf(b))
       .map(([slug, grade]) => ({ area: areas[slug]?.name ?? slug, grade })),
     remark: remarks[0]?.remark ?? null,
   };
 }
 
-/** Remarks of the given exams; callers pass released exams only. */
-export async function loadRemarks(db: DatabaseExecutor, cadet: Cadet, exams: CadetExam[]) {
-  const released = exams.filter((exam) => exam.state === 'released');
+/**
+ * Remarks of released exams, each attached only to the class record that
+ * holds the student's results for it (see `holdsResults`), so no remark is
+ * listed twice.
+ */
+export async function loadRemarks(db: DatabaseExecutor, cadet: Cadet, academics: CadetAcademics, exams: CadetExam[]) {
+  const released = exams.filter((exam) => exam.state === 'released' && holdsResults(academics, exam));
   if (!released.length) return [];
   const studentIds = [...new Set(released.map((exam) => exam.record.studentId))];
   const rows = await db
