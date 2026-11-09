@@ -1,6 +1,6 @@
 {
-  "id": "f72d1300-da99-4ac9-a970-8c3405c984b1",
-  "prevId": "bc13634a-c1db-4aa3-9009-b59a99f31c52",
+  "id": "52518645-97a8-4104-939a-791d6ebc0ec7",
+  "prevId": "cb2210bc-9293-48fa-8518-ea73c69c5349",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -5082,6 +5082,18 @@
           "type": "timestamp",
           "primaryKey": false,
           "notNull": false
+        },
+        "cadet_released_at": {
+          "name": "cadet_released_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cadet_released_by": {
+          "name": "cadet_released_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {},
@@ -5111,6 +5123,19 @@
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
+        },
+        "exam_lifecycle_cadet_released_by_user_id_fk": {
+          "name": "exam_lifecycle_cadet_released_by_user_id_fk",
+          "tableFrom": "exam_lifecycle",
+          "columnsFrom": [
+            "cadet_released_by"
+          ],
+          "tableTo": "user",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "set null"
         }
       },
       "compositePrimaryKeys": {
@@ -8711,6 +8736,13 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
+        },
+        "cadet_show_class_averages": {
+          "name": "cadet_show_class_averages",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
         }
       },
       "indexes": {},
@@ -9315,47 +9347,6 @@
           "notNull": true,
           "default": 0
         },
-        "send_priority": {
-          "name": "send_priority",
-          "type": "notification_send_priority",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "send_lane": {
-          "name": "send_lane",
-          "type": "smallint",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "next_attempt_at": {
-          "name": "next_attempt_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "quick_retries": {
-          "name": "quick_retries",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "deferred_retries": {
-          "name": "deferred_retries",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "daily_limit_retries": {
-          "name": "daily_limit_retries",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
         "claimed_at": {
           "name": "claimed_at",
           "type": "timestamp with time zone",
@@ -9476,34 +9467,6 @@
           "method": "btree",
           "with": {}
         },
-        "notification_delivery_queue_idx": {
-          "name": "notification_delivery_queue_idx",
-          "columns": [
-            {
-              "expression": "channel",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "send_lane",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "next_attempt_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"notification_delivery\".\"status\" = 'owed'",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
         "notification_delivery_unalerted_failure_idx": {
           "name": "notification_delivery_unalerted_failure_idx",
           "columns": [
@@ -9584,10 +9547,6 @@
         "notification_delivery_skip_reason_check": {
           "name": "notification_delivery_skip_reason_check",
           "value": "(\"notification_delivery\".\"status\" = 'skipped') = (\"notification_delivery\".\"skip_reason\" is not null)"
-        },
-        "notification_delivery_next_attempt_check": {
-          "name": "notification_delivery_next_attempt_check",
-          "value": "(\"notification_delivery\".\"status\" = 'owed') = (\"notification_delivery\".\"next_attempt_at\" is not null)"
         }
       },
       "isRLSEnabled": false
@@ -9637,33 +9596,6 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
-        },
-        "send_priority": {
-          "name": "send_priority",
-          "type": "notification_send_priority",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "batch_kind": {
-          "name": "batch_kind",
-          "type": "notification_batch_kind",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "batch_id": {
-          "name": "batch_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "alert_creator_on_failure": {
-          "name": "alert_creator_on_failure",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
         },
         "created_at": {
           "name": "created_at",
@@ -9835,34 +9767,6 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
-        },
-        "notification_event_batch_idx": {
-          "name": "notification_event_batch_idx",
-          "columns": [
-            {
-              "expression": "school_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "batch_kind",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "batch_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"notification_event\".\"batch_kind\" is not null",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
         }
       },
       "foreignKeys": {
@@ -9913,10 +9817,6 @@
         "notification_event_failure_retryable_check": {
           "name": "notification_event_failure_retryable_check",
           "value": "(\"notification_event\".\"status\" = 'failed') = (\"notification_event\".\"failure_retryable\" is not null)"
-        },
-        "notification_event_batch_check": {
-          "name": "notification_event_batch_check",
-          "value": "(\"notification_event\".\"batch_kind\" is null) = (\"notification_event\".\"batch_id\" is null)"
         }
       },
       "isRLSEnabled": false
@@ -10209,6 +10109,158 @@
         }
       },
       "isRLSEnabled": false
+    },
+    "public.exam_student_remark": {
+      "name": "exam_student_remark",
+      "schema": "",
+      "columns": {
+        "school_id": {
+          "name": "school_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "session_id": {
+          "name": "session_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "exam_slug": {
+          "name": "exam_slug",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "student_id": {
+          "name": "student_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "text": {
+          "name": "text",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "author_id": {
+          "name": "author_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "exam_student_remark_school_student_idx": {
+          "name": "exam_student_remark_school_student_idx",
+          "columns": [
+            {
+              "expression": "school_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "student_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        }
+      },
+      "foreignKeys": {
+        "exam_student_remark_school_id_school_id_fk": {
+          "name": "exam_student_remark_school_id_school_id_fk",
+          "tableFrom": "exam_student_remark",
+          "columnsFrom": [
+            "school_id"
+          ],
+          "tableTo": "school",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "exam_student_remark_session_id_school_session_id_fk": {
+          "name": "exam_student_remark_session_id_school_session_id_fk",
+          "tableFrom": "exam_student_remark",
+          "columnsFrom": [
+            "session_id"
+          ],
+          "tableTo": "school_session",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "exam_student_remark_student_id_student_id_fk": {
+          "name": "exam_student_remark_student_id_student_id_fk",
+          "tableFrom": "exam_student_remark",
+          "columnsFrom": [
+            "student_id"
+          ],
+          "tableTo": "student",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "exam_student_remark_author_id_user_id_fk": {
+          "name": "exam_student_remark_author_id_user_id_fk",
+          "tableFrom": "exam_student_remark",
+          "columnsFrom": [
+            "author_id"
+          ],
+          "tableTo": "user",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "set null"
+        }
+      },
+      "compositePrimaryKeys": {
+        "exam_student_remark_session_id_exam_slug_student_id_pk": {
+          "name": "exam_student_remark_session_id_exam_slug_student_id_pk",
+          "columns": [
+            "session_id",
+            "exam_slug",
+            "student_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "exam_student_remark_text_length_check": {
+          "name": "exam_student_remark_text_length_check",
+          "value": "char_length(\"exam_student_remark\".\"text\") between 1 and 1000"
+        }
+      },
+      "isRLSEnabled": false
     }
   },
   "enums": {
@@ -10415,14 +10467,6 @@
         "manual"
       ]
     },
-    "public.notification_batch_kind": {
-      "name": "notification_batch_kind",
-      "schema": "public",
-      "values": [
-        "billing_run",
-        "result_publication"
-      ]
-    },
     "public.notification_delivery_channel": {
       "name": "notification_delivery_channel",
       "schema": "public",
@@ -10459,14 +10503,6 @@
       "values": [
         "staff_user",
         "admission"
-      ]
-    },
-    "public.notification_send_priority": {
-      "name": "notification_send_priority",
-      "schema": "public",
-      "values": [
-        "immediate",
-        "bulk"
       ]
     },
     "public.notification_skip_reason": {

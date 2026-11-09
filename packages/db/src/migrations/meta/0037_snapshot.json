@@ -1,6 +1,6 @@
 {
-  "id": "a9a37c2f-159c-4a9e-bac7-67be849d5cfc",
-  "prevId": "e6321693-196b-4a09-af58-75a23133e106",
+  "id": "17e3b458-71b2-43ae-bc24-df7bae79537b",
+  "prevId": "d844e951-4ef7-4b5b-86f7-38aad7c25bd8",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -4903,6 +4903,18 @@
           "type": "timestamp",
           "primaryKey": false,
           "notNull": false
+        },
+        "cadet_released_at": {
+          "name": "cadet_released_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cadet_released_by": {
+          "name": "cadet_released_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {},
@@ -4932,6 +4944,19 @@
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
+        },
+        "exam_lifecycle_cadet_released_by_user_id_fk": {
+          "name": "exam_lifecycle_cadet_released_by_user_id_fk",
+          "tableFrom": "exam_lifecycle",
+          "columnsFrom": [
+            "cadet_released_by"
+          ],
+          "tableTo": "user",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "set null"
         }
       },
       "compositePrimaryKeys": {
@@ -8532,6 +8557,13 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
+        },
+        "cadet_show_class_averages": {
+          "name": "cadet_show_class_averages",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
         }
       },
       "indexes": {},
@@ -9388,19 +9420,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "dispatch_attempt": {
-          "name": "dispatch_attempt",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 1
-        },
-        "failure_retryable": {
-          "name": "failure_retryable",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": false
-        },
         "updated_at": {
           "name": "updated_at",
           "type": "timestamp with time zone",
@@ -9499,12 +9518,7 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {
-        "notification_event_failure_retryable_check": {
-          "name": "notification_event_failure_retryable_check",
-          "value": "(\"notification_event\".\"status\" = 'failed') = (\"notification_event\".\"failure_retryable\" is not null)"
-        }
-      },
+      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.notification": {
@@ -9792,6 +9806,158 @@
         "notification_dismiss_read_check": {
           "name": "notification_dismiss_read_check",
           "value": "\"notification\".\"dismissed_at\" is null or \"notification\".\"read_at\" is not null"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.exam_student_remark": {
+      "name": "exam_student_remark",
+      "schema": "",
+      "columns": {
+        "school_id": {
+          "name": "school_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "session_id": {
+          "name": "session_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "exam_slug": {
+          "name": "exam_slug",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "student_id": {
+          "name": "student_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "text": {
+          "name": "text",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "author_id": {
+          "name": "author_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "exam_student_remark_school_student_idx": {
+          "name": "exam_student_remark_school_student_idx",
+          "columns": [
+            {
+              "expression": "school_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "student_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        }
+      },
+      "foreignKeys": {
+        "exam_student_remark_school_id_school_id_fk": {
+          "name": "exam_student_remark_school_id_school_id_fk",
+          "tableFrom": "exam_student_remark",
+          "columnsFrom": [
+            "school_id"
+          ],
+          "tableTo": "school",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "exam_student_remark_session_id_school_session_id_fk": {
+          "name": "exam_student_remark_session_id_school_session_id_fk",
+          "tableFrom": "exam_student_remark",
+          "columnsFrom": [
+            "session_id"
+          ],
+          "tableTo": "school_session",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "exam_student_remark_student_id_student_id_fk": {
+          "name": "exam_student_remark_student_id_student_id_fk",
+          "tableFrom": "exam_student_remark",
+          "columnsFrom": [
+            "student_id"
+          ],
+          "tableTo": "student",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "exam_student_remark_author_id_user_id_fk": {
+          "name": "exam_student_remark_author_id_user_id_fk",
+          "tableFrom": "exam_student_remark",
+          "columnsFrom": [
+            "author_id"
+          ],
+          "tableTo": "user",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "set null"
+        }
+      },
+      "compositePrimaryKeys": {
+        "exam_student_remark_session_id_exam_slug_student_id_pk": {
+          "name": "exam_student_remark_session_id_exam_slug_student_id_pk",
+          "columns": [
+            "session_id",
+            "exam_slug",
+            "student_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "exam_student_remark_text_length_check": {
+          "name": "exam_student_remark_text_length_check",
+          "value": "char_length(\"exam_student_remark\".\"text\") between 1 and 1000"
         }
       },
       "isRLSEnabled": false

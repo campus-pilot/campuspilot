@@ -25,13 +25,12 @@ timetable export invariant.
 
 ### Portalled controls inside dialogs
 
-Management dialogs currently use Radix focus and pointer containment, while shared
-comboboxes use Base UI portals. When a Base UI popup is rendered inside a dialog,
-give its portal a container ref whose element is inside `DialogContent`. A popup
-left in the default `document.body` portal is outside the Radix modal boundary, so
-pointer clicks can highlight an option without committing the selection. Keep this
-rule with the reusable popup component when it always owns its container; otherwise
-accept and forward an explicit container from the dialog-aware caller.
+Management dialogs and shared popups (Popover, Select, DropdownMenu and the
+`Combobox` in `@campuspilot/ui`) are all Radix. Radix popups opened from inside a
+`DialogContent` portal to `document.body` but register as nested Radix layers, so
+pointer selection, focus and Escape work without a custom portal container. Do not
+add Base UI popups: they are outside the Radix layer stack, and a dialog treats
+clicks in them as outside clicks.
 
 ## Permission-gated UI
 

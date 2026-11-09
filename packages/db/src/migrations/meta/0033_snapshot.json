@@ -1,6 +1,6 @@
 {
-  "id": "155b3343-2b9f-49ed-9614-d3f9a4fb4436",
-  "prevId": "4fb2b567-bb53-4417-a82b-b9a8fd23fdc2",
+  "id": "980cb1c9-b9d5-4ba5-95e3-f19f1173e40e",
+  "prevId": "aec1d54b-58d1-491a-8daa-b07b05efd467",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -49,32 +49,6 @@
           "type": "varchar",
           "primaryKey": false,
           "notNull": true
-        },
-        "whatsapp_no": {
-          "name": "whatsapp_no",
-          "type": "varchar",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "whatsapp_same_as_phone": {
-          "name": "whatsapp_same_as_phone",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "whatsapp_verified": {
-          "name": "whatsapp_verified",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "whatsapp_consent": {
-          "name": "whatsapp_consent",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
         },
         "email": {
           "name": "email",
@@ -249,12 +223,7 @@
         }
       },
       "policies": {},
-      "checkConstraints": {
-        "admission_whatsapp_same_as_phone_check": {
-          "name": "admission_whatsapp_same_as_phone_check",
-          "value": "\"admission\".\"whatsapp_same_as_phone\" is not true or \"admission\".\"whatsapp_no\" = \"admission\".\"phone_no\""
-        }
-      },
+      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.artifact": {
@@ -4903,6 +4872,18 @@
           "type": "timestamp",
           "primaryKey": false,
           "notNull": false
+        },
+        "cadet_released_at": {
+          "name": "cadet_released_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cadet_released_by": {
+          "name": "cadet_released_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {},
@@ -4932,6 +4913,19 @@
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
+        },
+        "exam_lifecycle_cadet_released_by_user_id_fk": {
+          "name": "exam_lifecycle_cadet_released_by_user_id_fk",
+          "tableFrom": "exam_lifecycle",
+          "columnsFrom": [
+            "cadet_released_by"
+          ],
+          "tableTo": "user",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "set null"
         }
       },
       "compositePrimaryKeys": {
@@ -8532,6 +8526,13 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
+        },
+        "cadet_show_class_averages": {
+          "name": "cadet_show_class_averages",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
         }
       },
       "indexes": {},
@@ -8917,107 +8918,43 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.notification_delivery": {
-      "name": "notification_delivery",
+    "public.exam_student_remark": {
+      "name": "exam_student_remark",
       "schema": "",
       "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "notification_id": {
-          "name": "notification_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
         "school_id": {
           "name": "school_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true
         },
-        "channel": {
-          "name": "channel",
-          "type": "notification_delivery_channel",
-          "typeSchema": "public",
+        "session_id": {
+          "name": "session_id",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
-        "destination": {
-          "name": "destination",
+        "exam_slug": {
+          "name": "exam_slug",
           "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "status": {
-          "name": "status",
-          "type": "notification_delivery_status",
-          "typeSchema": "public",
           "primaryKey": false,
           "notNull": true
         },
-        "skip_reason": {
-          "name": "skip_reason",
-          "type": "notification_skip_reason",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "provider_message_id": {
-          "name": "provider_message_id",
+        "student_id": {
+          "name": "student_id",
           "type": "text",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
-        "error_code": {
-          "name": "error_code",
+        "text": {
+          "name": "text",
           "type": "text",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
-        "error_message": {
-          "name": "error_message",
+        "author_id": {
+          "name": "author_id",
           "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "attempts": {
-          "name": "attempts",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "claimed_at": {
-          "name": "claimed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "sent_at": {
-          "name": "sent_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "delivered_at": {
-          "name": "delivered_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "read_at": {
-          "name": "read_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "failed_at": {
-          "name": "failed_at",
-          "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
         },
@@ -9037,616 +8974,98 @@
         }
       },
       "indexes": {
-        "notification_delivery_provider_message_unique": {
-          "name": "notification_delivery_provider_message_unique",
-          "columns": [
-            {
-              "expression": "channel",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "provider_message_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"notification_delivery\".\"provider_message_id\" is not null",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "notification_delivery_notification_idx": {
-          "name": "notification_delivery_notification_idx",
-          "columns": [
-            {
-              "expression": "notification_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "notification_delivery_school_idx": {
-          "name": "notification_delivery_school_idx",
+        "exam_student_remark_school_student_idx": {
+          "name": "exam_student_remark_school_student_idx",
           "columns": [
             {
               "expression": "school_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "notification_delivery_pending_idx": {
-          "name": "notification_delivery_pending_idx",
-          "columns": [
-            {
-              "expression": "status",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
             },
             {
-              "expression": "created_at",
+              "expression": "student_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
             }
           ],
           "isUnique": false,
-          "where": "\"notification_delivery\".\"status\" in ('owed', 'sending')",
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
-        "notification_delivery_notification_id_notification_id_fk": {
-          "name": "notification_delivery_notification_id_notification_id_fk",
-          "tableFrom": "notification_delivery",
-          "tableTo": "notification",
-          "columnsFrom": [
-            "notification_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "notification_delivery_school_id_school_id_fk": {
-          "name": "notification_delivery_school_id_school_id_fk",
-          "tableFrom": "notification_delivery",
-          "tableTo": "school",
+        "exam_student_remark_school_id_school_id_fk": {
+          "name": "exam_student_remark_school_id_school_id_fk",
+          "tableFrom": "exam_student_remark",
           "columnsFrom": [
             "school_id"
           ],
+          "tableTo": "school",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "exam_student_remark_session_id_school_session_id_fk": {
+          "name": "exam_student_remark_session_id_school_session_id_fk",
+          "tableFrom": "exam_student_remark",
+          "columnsFrom": [
+            "session_id"
+          ],
+          "tableTo": "school_session",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "exam_student_remark_student_id_student_id_fk": {
+          "name": "exam_student_remark_student_id_student_id_fk",
+          "tableFrom": "exam_student_remark",
+          "columnsFrom": [
+            "student_id"
+          ],
+          "tableTo": "student",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "exam_student_remark_author_id_user_id_fk": {
+          "name": "exam_student_remark_author_id_user_id_fk",
+          "tableFrom": "exam_student_remark",
+          "columnsFrom": [
+            "author_id"
+          ],
+          "tableTo": "user",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "set null"
         }
       },
-      "compositePrimaryKeys": {},
+      "compositePrimaryKeys": {
+        "exam_student_remark_session_id_exam_slug_student_id_pk": {
+          "name": "exam_student_remark_session_id_exam_slug_student_id_pk",
+          "columns": [
+            "session_id",
+            "exam_slug",
+            "student_id"
+          ]
+        }
+      },
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
-        "notification_delivery_skip_reason_check": {
-          "name": "notification_delivery_skip_reason_check",
-          "value": "(\"notification_delivery\".\"status\" = 'skipped') = (\"notification_delivery\".\"skip_reason\" is not null)"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.notification_event": {
-      "name": "notification_event",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "school_id": {
-          "name": "school_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "key": {
-          "name": "key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "type": {
-          "name": "type",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "data": {
-          "name": "data",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "recipients": {
-          "name": "recipients",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_by": {
-          "name": "created_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "status": {
-          "name": "status",
-          "type": "notification_event_status",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'pending'"
-        },
-        "submitted_at": {
-          "name": "submitted_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "submit_invocation_id": {
-          "name": "submit_invocation_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "submit_attempts": {
-          "name": "submit_attempts",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "last_submit_error": {
-          "name": "last_submit_error",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "invocation_id": {
-          "name": "invocation_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "notification_count": {
-          "name": "notification_count",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "dispatched_at": {
-          "name": "dispatched_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "error": {
-          "name": "error",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "notification_event_school_key_unique": {
-          "name": "notification_event_school_key_unique",
-          "columns": [
-            {
-              "expression": "school_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "key",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "notification_event_status_idx": {
-          "name": "notification_event_status_idx",
-          "columns": [
-            {
-              "expression": "status",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "notification_event_created_idx": {
-          "name": "notification_event_created_idx",
-          "columns": [
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "notification_event_school_id_school_id_fk": {
-          "name": "notification_event_school_id_school_id_fk",
-          "tableFrom": "notification_event",
-          "tableTo": "school",
-          "columnsFrom": [
-            "school_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "notification_event_created_by_user_id_fk": {
-          "name": "notification_event_created_by_user_id_fk",
-          "tableFrom": "notification_event",
-          "tableTo": "user",
-          "columnsFrom": [
-            "created_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.notification": {
-      "name": "notification",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "event_id": {
-          "name": "event_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "school_id": {
-          "name": "school_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "recipient_kind": {
-          "name": "recipient_kind",
-          "type": "notification_recipient_kind",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "admission_id": {
-          "name": "admission_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "type": {
-          "name": "type",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "data": {
-          "name": "data",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "read_at": {
-          "name": "read_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "dismissed_at": {
-          "name": "dismissed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {
-        "notification_staff_list_idx": {
-          "name": "notification_staff_list_idx",
-          "columns": [
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "school_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": false,
-              "nulls": "last"
-            },
-            {
-              "expression": "id",
-              "isExpression": false,
-              "asc": false,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"notification\".\"recipient_kind\" = 'staff_user'",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "notification_admission_list_idx": {
-          "name": "notification_admission_list_idx",
-          "columns": [
-            {
-              "expression": "admission_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": false,
-              "nulls": "last"
-            },
-            {
-              "expression": "id",
-              "isExpression": false,
-              "asc": false,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"notification\".\"recipient_kind\" = 'admission'",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "notification_staff_unread_idx": {
-          "name": "notification_staff_unread_idx",
-          "columns": [
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "school_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"notification\".\"recipient_kind\" = 'staff_user' and \"notification\".\"read_at\" is null",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "notification_admission_unread_idx": {
-          "name": "notification_admission_unread_idx",
-          "columns": [
-            {
-              "expression": "admission_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"notification\".\"recipient_kind\" = 'admission' and \"notification\".\"read_at\" is null",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "notification_event_idx": {
-          "name": "notification_event_idx",
-          "columns": [
-            {
-              "expression": "event_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "notification_school_idx": {
-          "name": "notification_school_idx",
-          "columns": [
-            {
-              "expression": "school_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "notification_created_idx": {
-          "name": "notification_created_idx",
-          "columns": [
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "notification_event_id_notification_event_id_fk": {
-          "name": "notification_event_id_notification_event_id_fk",
-          "tableFrom": "notification",
-          "tableTo": "notification_event",
-          "columnsFrom": [
-            "event_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "notification_school_id_school_id_fk": {
-          "name": "notification_school_id_school_id_fk",
-          "tableFrom": "notification",
-          "tableTo": "school",
-          "columnsFrom": [
-            "school_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "notification_user_id_user_id_fk": {
-          "name": "notification_user_id_user_id_fk",
-          "tableFrom": "notification",
-          "tableTo": "user",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "notification_admission_id_admission_id_fk": {
-          "name": "notification_admission_id_admission_id_fk",
-          "tableFrom": "notification",
-          "tableTo": "admission",
-          "columnsFrom": [
-            "admission_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "notification_recipient_check": {
-          "name": "notification_recipient_check",
-          "value": "(\"notification\".\"recipient_kind\" = 'staff_user' and \"notification\".\"user_id\" is not null and \"notification\".\"admission_id\" is null) or (\"notification\".\"recipient_kind\" = 'admission' and \"notification\".\"admission_id\" is not null and \"notification\".\"user_id\" is null)"
-        },
-        "notification_dismiss_read_check": {
-          "name": "notification_dismiss_read_check",
-          "value": "\"notification\".\"dismissed_at\" is null or \"notification\".\"read_at\" is not null"
+        "exam_student_remark_text_length_check": {
+          "name": "exam_student_remark_text_length_check",
+          "value": "char_length(\"exam_student_remark\".\"text\") between 1 and 1000"
         }
       },
       "isRLSEnabled": false
@@ -9854,57 +9273,6 @@
         "run_session",
         "fallback",
         "manual"
-      ]
-    },
-    "public.notification_delivery_channel": {
-      "name": "notification_delivery_channel",
-      "schema": "public",
-      "values": [
-        "web_push",
-        "whatsapp"
-      ]
-    },
-    "public.notification_delivery_status": {
-      "name": "notification_delivery_status",
-      "schema": "public",
-      "values": [
-        "owed",
-        "sending",
-        "sent",
-        "delivered",
-        "read",
-        "failed",
-        "skipped"
-      ]
-    },
-    "public.notification_event_status": {
-      "name": "notification_event_status",
-      "schema": "public",
-      "values": [
-        "pending",
-        "dispatched",
-        "failed"
-      ]
-    },
-    "public.notification_recipient_kind": {
-      "name": "notification_recipient_kind",
-      "schema": "public",
-      "values": [
-        "staff_user",
-        "admission"
-      ]
-    },
-    "public.notification_skip_reason": {
-      "name": "notification_skip_reason",
-      "schema": "public",
-      "values": [
-        "no_number",
-        "not_verified",
-        "no_consent",
-        "opted_out",
-        "no_subscription",
-        "demo_school",
-        "disabled"
       ]
     }
   },

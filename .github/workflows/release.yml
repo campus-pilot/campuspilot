@@ -181,6 +181,11 @@ jobs:
             build_args: |
               NEXT_PUBLIC_SERVER_URL=${{ vars.NEXT_PUBLIC_SERVER_URL }}
               NEXT_PUBLIC_MCP_URL=${{ vars.NEXT_PUBLIC_MCP_URL }}
+          - name: cadet
+            file: apps/cadet/Dockerfile
+            image: ghcr.io/campus-pilot/campuspilot-plus-cadet
+            build_args: |
+              NEXT_PUBLIC_SERVER_URL=${{ vars.NEXT_PUBLIC_SERVER_URL }}
           - name: web
             file: apps/web/Dockerfile
             image: ghcr.io/campus-pilot/campuspilot-plus-web
@@ -264,6 +269,8 @@ jobs:
             image: ghcr.io/campus-pilot/campuspilot-plus-management
           - name: admin
             image: ghcr.io/campus-pilot/campuspilot-plus-admin
+          - name: cadet
+            image: ghcr.io/campus-pilot/campuspilot-plus-cadet
           - name: web
             image: ghcr.io/campus-pilot/campuspilot-plus-web
           - name: api

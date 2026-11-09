@@ -38,9 +38,9 @@ In case a component has a lot of logic create a use\_\_\_ (hook) in same compone
 
 Prefer flex + gap instead of space-x/space-y if possible.
 
-The Shadcn components living in `@campuspilot/ui` are based on `Base UI` NOT Radix.
+The Shadcn components living in `@campuspilot/ui` are based on Radix (`radix-ui`, shadcn style `radix-mira`), NOT Base UI. Do not add `@base-ui/react` or any Base UI component to the repo; build new primitives on Radix (and cmdk for searchable lists, as in `combobox.tsx`).
 
-Base UI compound components must preserve their required context hierarchy. Never use grouped parts such as `DropdownMenuLabel`/`Menu.GroupLabel` outside `DropdownMenuGroup`/`Menu.Group`, or radio menu items outside `DropdownMenuRadioGroup`/`Menu.RadioGroup`. Check the underlying Base UI composition requirements whenever adding a compound component part.
+Radix compound components must preserve their required context hierarchy. Keep every part inside its root's content (for example `DropdownMenuItem` inside `DropdownMenuContent`, `SelectItem` inside `SelectContent`). Never use a group label such as `DropdownMenuLabel`/`DropdownMenu.Label` outside the `DropdownMenuGroup`/`DropdownMenu.Group` it labels, or radio menu items (`DropdownMenuRadioItem`/`DropdownMenu.RadioItem`) outside `DropdownMenuRadioGroup`/`DropdownMenu.RadioGroup`. Check the underlying Radix composition requirements whenever adding a compound component part.
 
 Any reusable components / layouts should live in @campuspilot/components, in these components data are passed as props and mutation must sent via callbacks. There should be no api call within @campuspilot/components
 

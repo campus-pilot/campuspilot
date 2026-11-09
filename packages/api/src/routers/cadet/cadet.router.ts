@@ -6,6 +6,7 @@ import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 
 import { cadetProcedure } from '../../cadet/procedure';
+import { cadetRecordsRouter } from './cadet-records.router';
 import { rpcError, toRpcError } from '../../errors';
 import {
   oauthClientRegistrationMethod,
@@ -133,6 +134,8 @@ export const cadetRouter = {
         throw toRpcError(error);
       }
     }),
+
+  ...cadetRecordsRouter,
 };
 
 export type CadetRouter = typeof cadetRouter;

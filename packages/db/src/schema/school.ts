@@ -43,4 +43,12 @@ export const schoolTable = pgTable("school", {
   demoCreatedBy: text("demo_created_by").references(() => user.id, {
     onDelete: "set null",
   }),
+  /**
+   * Whether the Cadet Portal may show class averages next to a student's own
+   * results. Off by default; the cadet API omits every average while it is
+   * off, so the setting is enforced on the server, not only hidden in the UI.
+   */
+  cadetShowClassAverages: boolean("cadet_show_class_averages")
+    .notNull()
+    .default(false),
 });

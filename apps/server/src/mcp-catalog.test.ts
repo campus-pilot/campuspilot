@@ -199,9 +199,11 @@ describe('catalog metadata', () => {
     expect(classified).toEqual([...leafNames].sort());
     expect(catalog.core.map(({ name }) => name).sort()).toEqual(CORE_TOOLS);
     expect(catalog.core).toHaveLength(36);
+    // 85 on main, plus releaseExamToCadet, withdrawExamFromCadet,
+    // get/saveStudentExamRemark and get/updateCadetPortalSettings (+6);
     // +5 result notification tools (publication read/preview/publish, single
     // preview/send) and +2 delivery log tools (list, resend).
-    expect(catalog.advanced).toHaveLength(92);
+    expect(catalog.advanced).toHaveLength(98);
   });
 });
 
@@ -209,7 +211,7 @@ describe('cadet catalog', () => {
   it('builds from cadetRouter alone: read-only core tools and no staff tools', async () => {
     const { cadetRouter } = await import('@campuspilot/api/routers/cadet/cadet.router');
     const cadetCatalog = await buildMcpCatalog(cadetRouter);
-    expect(cadetCatalog.core.map(({ name }) => name)).toEqual(['getAdmission']);
+    expect(cadetCatalog.core.map(({ name }) => name)).toEqual(['getAdmission', 'getProfile', 'getFeeSummary', 'listFeeLedger', 'getBill', 'listExams', 'getExam', 'getExamResult', 'getGrowth', 'listRemarks']);
     expect(cadetCatalog.advanced).toEqual([]);
     expect(cadetCatalog.core.every((tool) => tool.mcp.access === 'read')).toBe(true);
     expect(catalog.core.map(({ name }) => name)).not.toContain('getAdmission');

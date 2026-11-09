@@ -1,3 +1,5 @@
+-- Keeps the exam_student_remark delete added by 0032 (main's Cadet results),
+-- which this recreation would otherwise drop: remarks reference "student".
 CREATE OR REPLACE FUNCTION "public"."purge_demo_school"(target_school_id text)
 RETURNS jsonb LANGUAGE plpgsql SECURITY INVOKER SET search_path = pg_catalog, public AS $$
 DECLARE
@@ -29,6 +31,7 @@ BEGIN
 	DELETE FROM "public"."finance_admission_session_activity" WHERE "school_id" = target_school_id; GET DIAGNOSTICS affected = ROW_COUNT; counts := counts || jsonb_build_object('finance_admission_session_activity', affected);
 	DELETE FROM "public"."finance_number_counter" WHERE "school_id" = target_school_id; GET DIAGNOSTICS affected = ROW_COUNT; counts := counts || jsonb_build_object('finance_number_counter', affected);
 
+	DELETE FROM "public"."exam_student_remark" WHERE "school_id" = target_school_id; GET DIAGNOSTICS affected = ROW_COUNT; counts := counts || jsonb_build_object('exam_student_remark', affected);
 	DELETE FROM "public"."exam_result" WHERE "school_id" = target_school_id; GET DIAGNOSTICS affected = ROW_COUNT; counts := counts || jsonb_build_object('exam_result', affected);
 	DELETE FROM "public"."exam_student_assessment" WHERE "school_id" = target_school_id; GET DIAGNOSTICS affected = ROW_COUNT; counts := counts || jsonb_build_object('exam_student_assessment', affected);
 	DELETE FROM "public"."exam_assessment_settings" WHERE "school_id" = target_school_id; GET DIAGNOSTICS affected = ROW_COUNT; counts := counts || jsonb_build_object('exam_assessment_settings', affected);

@@ -83,14 +83,23 @@ are specific to the exact route, with no inheritance from the exam root:
 
 | Page | Navbar action |
 | --- | --- |
-| `/exam/<slug>` | Applicable Start / Complete / Reopen action |
+| `/exam/<slug>` | Applicable Start / Complete / Reopen action; once completed, also Release to Cadet / Withdraw from Cadet |
 | `/exam/<slug>/classes/<classId>` | None |
 | `/exam/<slug>/classes/<classId>/students/<studentId>` | Disabled Preview placeholder until implemented |
 | `/exam/<slug>/timetable` | None; populated timetable actions use the in-page overflow |
 | `/exam/<slug>/settings` | None |
 
+Releasing results to the Cadet Portal is a lifecycle step after completion
+(release requires a completed examination, and reopening is refused while
+released), so it sits beside the lifecycle action in the exam-root navbar and in
+Settings' Cadet Portal section, never in the in-page overflow. The navbar uses
+the short labels "Release to Cadet" / "Withdraw from Cadet" so two buttons fit a
+phone; Settings keeps the full wording. While released, Reopen stays visible but
+disabled with "Withdraw from Cadet Portal before reopening." beside it instead of
+opening a dialog that can only fail.
+
 Settings holds
-working days and lifecycle controls. Keep the immediate task visible in context: Create plan in an empty state,
+working days, lifecycle and Cadet Portal release controls. Keep the immediate task visible in context: Create plan in an empty state,
 Enter results in a student preview, and Save in an editor. Avoid a row of competing
 buttons. Menu entries must preserve the underlying shared component's required
 group/context hierarchy; inspect the actual wrapper before composing its parts.

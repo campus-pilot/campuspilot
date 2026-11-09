@@ -1,3 +1,5 @@
+-- Keeps the exam_student_remark delete added by 0032 (main's Cadet results),
+-- which this recreation would otherwise drop: remarks reference "student".
 CREATE OR REPLACE FUNCTION "public"."purge_demo_school"(target_school_id text)
 RETURNS jsonb LANGUAGE plpgsql SECURITY INVOKER SET search_path = pg_catalog, public AS $$
 DECLARE
@@ -29,6 +31,8 @@ BEGIN
 	DELETE FROM "public"."finance_admission_session_activity" WHERE "school_id" = target_school_id; GET DIAGNOSTICS affected = ROW_COUNT; counts := counts || jsonb_build_object('finance_admission_session_activity', affected);
 	DELETE FROM "public"."finance_number_counter" WHERE "school_id" = target_school_id; GET DIAGNOSTICS affected = ROW_COUNT; counts := counts || jsonb_build_object('finance_number_counter', affected);
 
+	DELETE FROM "public"."exam_result_publication" WHERE "school_id" = target_school_id; GET DIAGNOSTICS affected = ROW_COUNT; counts := counts || jsonb_build_object('exam_result_publication', affected);
+	DELETE FROM "public"."exam_student_remark" WHERE "school_id" = target_school_id; GET DIAGNOSTICS affected = ROW_COUNT; counts := counts || jsonb_build_object('exam_student_remark', affected);
 	DELETE FROM "public"."exam_result" WHERE "school_id" = target_school_id; GET DIAGNOSTICS affected = ROW_COUNT; counts := counts || jsonb_build_object('exam_result', affected);
 	DELETE FROM "public"."exam_student_assessment" WHERE "school_id" = target_school_id; GET DIAGNOSTICS affected = ROW_COUNT; counts := counts || jsonb_build_object('exam_student_assessment', affected);
 	DELETE FROM "public"."exam_assessment_settings" WHERE "school_id" = target_school_id; GET DIAGNOSTICS affected = ROW_COUNT; counts := counts || jsonb_build_object('exam_assessment_settings', affected);
@@ -44,6 +48,9 @@ BEGIN
 	-- the counts and makes the cleanup independent of the cascade. Sessions
 	-- were already revoked through the cadet auth instance (Redis included)
 	-- by the workflow's revoke stage.
+	-- Web push subscriptions of those logins (they would cascade with
+	-- "cadet_user" too; explicit for the counts).
+	DELETE FROM "public"."cadet_push_subscription" WHERE "cadet_user_id" IN (SELECT cu."id" FROM "public"."cadet_user" cu JOIN "public"."admission" a ON a."id" = cu."admission_id" WHERE a."school_id" = target_school_id); GET DIAGNOSTICS affected = ROW_COUNT; counts := counts || jsonb_build_object('cadet_push_subscription', affected);
 	DELETE FROM "public"."cadet_oauth_access_token" WHERE "user_id" IN (SELECT cu."id" FROM "public"."cadet_user" cu JOIN "public"."admission" a ON a."id" = cu."admission_id" WHERE a."school_id" = target_school_id); GET DIAGNOSTICS affected = ROW_COUNT; counts := counts || jsonb_build_object('cadet_oauth_access_token', affected);
 	DELETE FROM "public"."cadet_oauth_refresh_token" WHERE "user_id" IN (SELECT cu."id" FROM "public"."cadet_user" cu JOIN "public"."admission" a ON a."id" = cu."admission_id" WHERE a."school_id" = target_school_id); GET DIAGNOSTICS affected = ROW_COUNT; counts := counts || jsonb_build_object('cadet_oauth_refresh_token', affected);
 	DELETE FROM "public"."cadet_oauth_consent" WHERE "user_id" IN (SELECT cu."id" FROM "public"."cadet_user" cu JOIN "public"."admission" a ON a."id" = cu."admission_id" WHERE a."school_id" = target_school_id); GET DIAGNOSTICS affected = ROW_COUNT; counts := counts || jsonb_build_object('cadet_oauth_consent', affected);
@@ -68,4 +75,4 @@ BEGIN
 	DELETE FROM "public"."demo_purge_marker" WHERE "transaction_id" = pg_catalog.txid_current();
 	RETURN counts;
 END; $$;--> statement-breakpoint
-COMMENT ON FUNCTION "public"."purge_demo_school"(text) IS 'Deletes a demo school (is_demo = true) and everything it owns, including demo-only users, the Cadet Portal logins of its admissions and its notifications. Refuses real schools. S3 objects are removed separately by the DemoSchoolPurge workflow from demo_school_purge.';
+COMMENT ON FUNCTION "public"."purge_demo_school"(text) IS 'Deletes a demo school (is_demo = true) and everything it owns, including demo-only users, the Cadet Portal logins of its admissions (with their push subscriptions), teacher remarks on its examinations, its notifications and its exam result publications. Refuses real schools. S3 objects are removed separately by the DemoSchoolPurge workflow from demo_school_purge.';

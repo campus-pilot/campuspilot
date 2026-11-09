@@ -221,6 +221,35 @@ describe("school admission and student router integration", () => {
         },
       },
     ]);
+
+    const { schoolClass: otherClass } = await createTestClass({
+      schoolId: school.id,
+    });
+    const inClass = await client.school.listAdmissions({
+      schoolId: school.id,
+      filters: {
+        placementSessionId: session.id,
+        placementClassId: schoolClass.id,
+      },
+    });
+    expect(inClass.items.map(({ id }) => id)).toEqual([enrolled.id]);
+    expect(inClass.pagination.totalItems).toBe(1);
+
+    const inOtherClass = await client.school.listAdmissions({
+      schoolId: school.id,
+      filters: {
+        placementSessionId: session.id,
+        placementClassId: otherClass.id,
+      },
+    });
+    expect(inOtherClass.items).toEqual([]);
+
+    await expect(
+      client.school.listAdmissions({
+        schoolId: school.id,
+        filters: { placementClassId: schoolClass.id },
+      }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 
   it("fuzzy-searches registered admissions and applies stable relevance ranking", async () => {

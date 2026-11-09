@@ -12,6 +12,7 @@ import {
   examStateAt,
   formatLocalDate,
   localDateOf,
+  localTimeInstant,
   workingDaysBetween,
   type BillingMonth,
   type ExamState,
@@ -100,9 +101,20 @@ export type DemoExam = {
   order: number;
   days: LocalDate[];
   window: { start: LocalDate; end: LocalDate };
-  /** The billing month in which the examination fee is charged. */
+  /** The billing month in which the exam falls (and its fee is charged when `chargesFee`). */
   feeMonthIndex: number;
+  /** Whether that month bills the examination fee; an explicit seed fact per exam. */
+  chargesFee: boolean;
   state: ExamState;
+  /**
+   * When the demo released this exam's results to the Cadet Portal (an ISO
+   * instant), or null when it stays unreleased. Every completed exam except
+   * the latest one is released, so a demo shows both states; a single
+   * completed exam is released. The time is `cadetRelease.daysAfterWindow`
+   * days after the exam window at `cadetRelease.hour` local time, which is
+   * always before `asOf` because a completed exam is past its active period.
+   */
+  cadetReleasedAt: string | null;
   /** Share of students with marks while the exam is `active`. */
   enteredShare: number;
   totalWorkingDays: number;
@@ -237,7 +249,19 @@ function buildClasses(seed: string, input: DemoSeedInput, months: BillingMonth[]
   });
 }
 
-function buildExams(input: DemoSeedInput, sessionStart: LocalDate, asOfLocal: LocalDate): DemoExam[] {
+function buildExams(input: DemoSeedInput, sessionStart: LocalDate, asOfLocal: LocalDate, timeZone: string): DemoExam[] {
+  const exams = scheduleExams(input, sessionStart, asOfLocal);
+  const completed = exams.filter((exam) => exam.state === 'completed');
+  const held = completed.length > 1 ? completed.at(-1) : undefined;
+  const { daysAfterWindow, hour } = demoSeed.session.cadetRelease;
+  return exams.map((exam) => ({
+    ...exam,
+    cadetReleasedAt:
+      exam.state === 'completed' && exam !== held ? localTimeInstant(addDays(exam.window.end, daysAfterWindow), hour, 0, timeZone) : null,
+  }));
+}
+
+function scheduleExams(input: DemoSeedInput, sessionStart: LocalDate, asOfLocal: LocalDate): Array<Omit<DemoExam, 'cadetReleasedAt'>> {
   const session = demoSeed.session;
   let previousEnd: LocalDate | null = null;
   return [...session.exams]
@@ -256,6 +280,7 @@ function buildExams(input: DemoSeedInput, sessionStart: LocalDate, asOfLocal: Lo
         days,
         window,
         feeMonthIndex: exam.monthOffset,
+        chargesFee: exam.chargesFee,
         state,
         enteredShare: state === 'active' ? enteredShareAt(window, asOfLocal, session.activeWithinDaysAfterWindow) : state === 'completed' ? 1 : 0,
         totalWorkingDays: Math.max(1, workingDaysBetween(countFrom, addDays(window.start, -1))),
@@ -294,7 +319,7 @@ export function buildDemoPlan(options: {
     timeZone,
     staff: buildStaff(seed, school.slug, selected),
     classes: buildClasses(seed, input, months),
-    exams: buildExams(input, sessionStart, asOfLocal),
+    exams: buildExams(input, sessionStart, asOfLocal, timeZone),
     billingMonths: months,
   };
 }
@@ -321,7 +346,7 @@ export function billedMonthIndexes(plan: DemoPlan, student: DemoStudent): number
 /** The expected bill total for one student and month, from the seed's pricing. */
 export function expectedBillMinor(plan: DemoPlan, student: DemoStudent, monthIndex: number): number {
   const classSeed = plan.classes.find((item) => item.seed.slug === student.classSlug)!.seed;
-  const examFee = plan.exams.some((exam) => exam.feeMonthIndex === monthIndex) ? demoSeed.finance.examinationFeeMinor : 0;
+  const examFee = plan.exams.some((exam) => exam.chargesFee && exam.feeMonthIndex === monthIndex) ? demoSeed.finance.examinationFeeMinor : 0;
   return classSeed.tuitionMinor + classSeed.smartClassMinor + (student.transportMinor ?? 0) + examFee;
 }
 

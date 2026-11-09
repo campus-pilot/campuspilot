@@ -2,24 +2,18 @@ import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
 
 /**
- * Component and helper tests run in jsdom. `@/` mirrors the tsconfig path;
- * `@campuspilot/components/notifications` and `/install-app-state` point at
- * their files, which the package's `exports` fallback array names but Vite
- * does not try,
+ * Component and helper tests run in jsdom. `@/` and
+ * `@campuspilot/components/` mirror the tsconfig paths (Vite does not follow
+ * the package's array-valued `exports` fallbacks),
  * and the public server URL is a fixed test value so the auth and oRPC
  * clients can be constructed; tests never reach a server.
  */
 export default defineConfig({
   resolve: {
-    alias: {
-      '@': fileURLToPath(new URL('.', import.meta.url)),
-      '@campuspilot/components/notifications': fileURLToPath(
-        new URL('../../packages/components/src/notifications/index.ts', import.meta.url),
-      ),
-      '@campuspilot/components/install-app-state': fileURLToPath(
-        new URL('../../packages/components/src/install-app-state.ts', import.meta.url),
-      ),
-    },
+    alias: [
+      { find: /^@\//, replacement: fileURLToPath(new URL('./', import.meta.url)) },
+      { find: /^@campuspilot\/components\//, replacement: fileURLToPath(new URL('../../packages/components/src/', import.meta.url)) },
+    ],
   },
   test: {
     environment: 'jsdom',

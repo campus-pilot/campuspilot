@@ -1,3 +1,6 @@
+-- purge_demo_school also deletes the school's exam_student_remark rows (0031).
+-- They reference "student", so they go before the students; release columns
+-- on exam_lifecycle and the school's Cadet setting go with their rows.
 CREATE OR REPLACE FUNCTION "public"."purge_demo_school"(target_school_id text)
 RETURNS jsonb LANGUAGE plpgsql SECURITY INVOKER SET search_path = pg_catalog, public AS $$
 DECLARE
@@ -11,12 +14,6 @@ BEGIN
 	-- Binds the finance delete exception to this call (removed before returning).
 	INSERT INTO "public"."demo_purge_marker" ("transaction_id", "school_id") VALUES (pg_catalog.txid_current(), target_school_id);
 
-	-- Notifications: deliveries and inbox rows before their events, and all
-	-- three before the admissions and users they reference.
-	DELETE FROM "public"."notification_delivery" WHERE "school_id" = target_school_id; GET DIAGNOSTICS affected = ROW_COUNT; counts := counts || jsonb_build_object('notification_delivery', affected);
-	DELETE FROM "public"."notification" WHERE "school_id" = target_school_id; GET DIAGNOSTICS affected = ROW_COUNT; counts := counts || jsonb_build_object('notification', affected);
-	DELETE FROM "public"."notification_event" WHERE "school_id" = target_school_id; GET DIAGNOSTICS affected = ROW_COUNT; counts := counts || jsonb_build_object('notification_event', affected);
-
 	DELETE FROM "public"."finance_payment_allocation" WHERE "school_id" = target_school_id; GET DIAGNOSTICS affected = ROW_COUNT; counts := counts || jsonb_build_object('finance_payment_allocation', affected);
 	DELETE FROM "public"."finance_refund" WHERE "school_id" = target_school_id; GET DIAGNOSTICS affected = ROW_COUNT; counts := counts || jsonb_build_object('finance_refund', affected);
 	DELETE FROM "public"."finance_adjustment" WHERE "school_id" = target_school_id; GET DIAGNOSTICS affected = ROW_COUNT; counts := counts || jsonb_build_object('finance_adjustment', affected);
@@ -29,7 +26,7 @@ BEGIN
 	DELETE FROM "public"."finance_admission_session_activity" WHERE "school_id" = target_school_id; GET DIAGNOSTICS affected = ROW_COUNT; counts := counts || jsonb_build_object('finance_admission_session_activity', affected);
 	DELETE FROM "public"."finance_number_counter" WHERE "school_id" = target_school_id; GET DIAGNOSTICS affected = ROW_COUNT; counts := counts || jsonb_build_object('finance_number_counter', affected);
 
-	DELETE FROM "public"."exam_result_publication" WHERE "school_id" = target_school_id; GET DIAGNOSTICS affected = ROW_COUNT; counts := counts || jsonb_build_object('exam_result_publication', affected);
+	DELETE FROM "public"."exam_student_remark" WHERE "school_id" = target_school_id; GET DIAGNOSTICS affected = ROW_COUNT; counts := counts || jsonb_build_object('exam_student_remark', affected);
 	DELETE FROM "public"."exam_result" WHERE "school_id" = target_school_id; GET DIAGNOSTICS affected = ROW_COUNT; counts := counts || jsonb_build_object('exam_result', affected);
 	DELETE FROM "public"."exam_student_assessment" WHERE "school_id" = target_school_id; GET DIAGNOSTICS affected = ROW_COUNT; counts := counts || jsonb_build_object('exam_student_assessment', affected);
 	DELETE FROM "public"."exam_assessment_settings" WHERE "school_id" = target_school_id; GET DIAGNOSTICS affected = ROW_COUNT; counts := counts || jsonb_build_object('exam_assessment_settings', affected);
@@ -45,9 +42,6 @@ BEGIN
 	-- the counts and makes the cleanup independent of the cascade. Sessions
 	-- were already revoked through the cadet auth instance (Redis included)
 	-- by the workflow's revoke stage.
-	-- Web push subscriptions of those logins (they would cascade with
-	-- "cadet_user" too; explicit for the counts).
-	DELETE FROM "public"."cadet_push_subscription" WHERE "cadet_user_id" IN (SELECT cu."id" FROM "public"."cadet_user" cu JOIN "public"."admission" a ON a."id" = cu."admission_id" WHERE a."school_id" = target_school_id); GET DIAGNOSTICS affected = ROW_COUNT; counts := counts || jsonb_build_object('cadet_push_subscription', affected);
 	DELETE FROM "public"."cadet_oauth_access_token" WHERE "user_id" IN (SELECT cu."id" FROM "public"."cadet_user" cu JOIN "public"."admission" a ON a."id" = cu."admission_id" WHERE a."school_id" = target_school_id); GET DIAGNOSTICS affected = ROW_COUNT; counts := counts || jsonb_build_object('cadet_oauth_access_token', affected);
 	DELETE FROM "public"."cadet_oauth_refresh_token" WHERE "user_id" IN (SELECT cu."id" FROM "public"."cadet_user" cu JOIN "public"."admission" a ON a."id" = cu."admission_id" WHERE a."school_id" = target_school_id); GET DIAGNOSTICS affected = ROW_COUNT; counts := counts || jsonb_build_object('cadet_oauth_refresh_token', affected);
 	DELETE FROM "public"."cadet_oauth_consent" WHERE "user_id" IN (SELECT cu."id" FROM "public"."cadet_user" cu JOIN "public"."admission" a ON a."id" = cu."admission_id" WHERE a."school_id" = target_school_id); GET DIAGNOSTICS affected = ROW_COUNT; counts := counts || jsonb_build_object('cadet_oauth_consent', affected);
@@ -72,4 +66,4 @@ BEGIN
 	DELETE FROM "public"."demo_purge_marker" WHERE "transaction_id" = pg_catalog.txid_current();
 	RETURN counts;
 END; $$;--> statement-breakpoint
-COMMENT ON FUNCTION "public"."purge_demo_school"(text) IS 'Deletes a demo school (is_demo = true) and everything it owns, including demo-only users, the Cadet Portal logins of its admissions (with their push subscriptions), its notifications and its exam result publications. Refuses real schools. S3 objects are removed separately by the DemoSchoolPurge workflow from demo_school_purge.';
+COMMENT ON FUNCTION "public"."purge_demo_school"(text) IS 'Deletes a demo school (is_demo = true) and everything it owns, including demo-only users, the Cadet Portal logins of its admissions and teacher remarks on its examinations. Refuses real schools. S3 objects are removed separately by the DemoSchoolPurge workflow from demo_school_purge.';
