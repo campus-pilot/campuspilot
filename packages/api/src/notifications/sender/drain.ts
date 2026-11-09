@@ -6,6 +6,7 @@ import { notificationChannelAdapters, type NotificationChannelAdapter } from '..
 import type { SenderTarget } from './lanes';
 import { nextDueAt, pickDueDeliveries, sendDelivery, type SendAttemptResult, type SenderScope } from './queue';
 import { channelBackoffMs } from './retry-policy';
+import { z } from 'zod';
 
 /**
  * One drain of a sender lane (D-39), shared by the `NotificationSender`
@@ -60,11 +61,48 @@ export type SenderStepRunner = <T>(name: string, action: () => Promise<T>) => Pr
 /** Durable sleep; Restate's `ctx.sleep` in the object, a stub (or a fake clock) in tests. */
 export type SenderSleep = (name: string, ms: number) => Promise<void>;
 
-export type SenderDrainResult =
-  | { status: 'idle'; sent: number; attempted: number; nextDueAt: string | null }
-  | { status: 'continue'; sent: number; attempted: number };
+/**
+ * Consecutive sends whose outcome was unknown (a timeout or 5xx on the
+ * message call, see the WhatsApp client) after which the lane's circuit
+ * breaker trips: the lane pauses channel-wide with the same escalating
+ * pause as a provider throttle ({@link channelBackoffMs}: 30 s doubling to
+ * 15 min, jittered), then probes with a single send. The probe trips the
+ * breaker again (a longer pause) if its outcome is unknown too, and
+ * returns the lane to normal groups otherwise. The unknown rows themselves
+ * stay `failed: outcome_unknown` (never retried automatically); the breaker
+ * only stops a provider brownout from burning the rest of the queue.
+ */
+export const UNKNOWN_OUTCOME_BREAKER_THRESHOLD = 3;
 
-type GroupResult = { attempted: number; sent: number; throttle: { retryAfterMs: number | null } | null };
+/**
+ * A lane's pause state, carried from one drain to the next when a long
+ * backlog continues in a fresh invocation, so a brownout's escalation and
+ * probe are not reset by the hand-over.
+ */
+export const senderLaneStateSchema = z.object({
+  /** Unknown outcomes in a row (completion order), reset by any definite provider answer. */
+  unknownStreak: z.number().int().min(0),
+  /** Pauses in a row (throttle or breaker), for the escalation; reset by a group without either. */
+  pauses: z.number().int().min(0),
+  /** The breaker tripped: the next group is a single probe send. */
+  probing: z.boolean(),
+});
+export type SenderLaneState = z.infer<typeof senderLaneStateSchema>;
+const INITIAL_LANE_STATE: SenderLaneState = { unknownStreak: 0, pauses: 0, probing: false };
+
+export type SenderDrainResult =
+  | { status: 'idle'; sent: number; attempted: number; breakerTrips: number; nextDueAt: string | null }
+  | { status: 'continue'; sent: number; attempted: number; breakerTrips: number; state: SenderLaneState };
+
+type GroupResult = {
+  attempted: number;
+  sent: number;
+  throttle: { retryAfterMs: number | null } | null;
+  /** Unknown outcomes in a row at the end of the group (carried into the next). */
+  unknownStreak: number;
+  /** The streak reached {@link UNKNOWN_OUTCOME_BREAKER_THRESHOLD}; no new send was started after that. */
+  breakerTripped: boolean;
+};
 
 /** Sends one picked delivery; {@link sendDelivery} in production, injectable for tests. */
 export type SendOne = (deliveryId: string) => Promise<SendAttemptResult>;
@@ -73,7 +111,10 @@ export type SendOne = (deliveryId: string) => Promise<SendAttemptResult>;
  * Sends the picked deliveries with at most `concurrency` in flight, starting
  * one every `1 / perSecond` seconds; stops starting new ones after a
  * channel-wide throttle (those stay owed, untouched). Returns no sooner than
- * the group's share of the rate, so back-to-back groups keep to it.
+ * the group's share of the rate, so back-to-back groups keep to it. It
+ * also stops starting sends once {@link UNKNOWN_OUTCOME_BREAKER_THRESHOLD}
+ * outcomes in a row were unknown (counting on from `unknownStreak`); sends
+ * already in flight finish.
  *
  * A send that throws (database error) stops every worker from starting
  * another send, and the group rethrows the first error only once every
@@ -83,7 +124,7 @@ export type SendOne = (deliveryId: string) => Promise<SendAttemptResult>;
  */
 export async function sendGroup(
   ids: readonly string[],
-  options: { pacing: SenderPacing; send: SendOne },
+  options: { pacing: SenderPacing; send: SendOne; unknownStreak?: number },
 ): Promise<GroupResult> {
   const intervalMs = 1000 / options.pacing.perSecond;
   const started = Date.now();
@@ -92,7 +133,9 @@ export async function sendGroup(
   let failure: { error: unknown } | null = null;
   let attempted = 0;
   let sent = 0;
-  const stopped = () => throttle !== null || failure !== null;
+  let unknownStreak = options.unknownStreak ?? 0;
+  let breakerTripped = false;
+  const stopped = () => throttle !== null || failure !== null || breakerTripped;
   const worker = async () => {
     for (let index = next++; index < ids.length && !stopped(); index = next++) {
       const slot = started + index * intervalMs;
@@ -109,14 +152,18 @@ export async function sendGroup(
       if (result.kind !== 'not_owed') attempted += 1;
       if (result.kind === 'sent') sent += 1;
       if (result.channelThrottle && !throttle) throttle = result.channelThrottle;
+      // A delivery not owed any more made no provider call: it neither extends nor ends a streak.
+      if (result.outcomeUnknown) unknownStreak += 1;
+      else if (result.kind !== 'not_owed') unknownStreak = 0;
+      if (unknownStreak >= UNKNOWN_OUTCOME_BREAKER_THRESHOLD) breakerTripped = true;
     }
   };
   // Workers never reject (errors are caught above), so this waits for every one of them.
   await Promise.allSettled(Array.from({ length: Math.min(options.pacing.concurrency, ids.length) }, () => worker()));
   if (failure) throw (failure as { error: unknown }).error;
   const remaining = started + ids.length * intervalMs - Date.now();
-  if (!throttle && remaining > 0) await new Promise((resolve) => setTimeout(resolve, remaining));
-  return { attempted, sent, throttle };
+  if (!throttle && !breakerTripped && remaining > 0) await new Promise((resolve) => setTimeout(resolve, remaining));
+  return { attempted, sent, throttle, unknownStreak, breakerTripped };
 }
 
 export async function runSenderDrain(options: {
@@ -130,6 +177,8 @@ export async function runSenderDrain(options: {
   clock?: () => Date;
   random?: () => number;
   scope?: SenderScope;
+  /** Pause state handed over by the previous drain of this lane (see {@link SenderLaneState}). */
+  state?: SenderLaneState;
 }): Promise<SenderDrainResult> {
   const { target, step, sleep } = options;
   const db = options.db ?? defaultDb;
@@ -140,31 +189,43 @@ export async function runSenderDrain(options: {
   const scope = options.scope ?? {};
   let sent = 0;
   let attempted = 0;
-  let throttles = 0;
+  let breakerTrips = 0;
+  const state: SenderLaneState = { ...(options.state ?? INITIAL_LANE_STATE) };
   for (let group = 1; group <= MAX_GROUPS_PER_DRAIN; group += 1) {
+    // A probe after the breaker tripped is a single send.
+    const limit = state.probing ? 1 : pacing.groupSize;
     const picked = await step(`pick:${group}`, async () => {
       const now = clock();
-      const ids = await pickDueDeliveries(db, target, { now, limit: pacing.groupSize, ...scope });
+      const ids = await pickDueDeliveries(db, target, { now, limit, ...scope });
       if (ids.length > 0) return { ids, nextDueAt: null, waitMs: 0 };
       const next = await nextDueAt(db, target, scope);
       return { ids, nextDueAt: next?.toISOString() ?? null, waitMs: next ? Math.max(next.getTime() - now.getTime(), 0) : null };
     });
     if (picked.ids.length === 0) {
-      if (picked.waitMs === null || picked.waitMs > MAX_IDLE_WAIT_MS) return { status: 'idle', sent, attempted, nextDueAt: picked.nextDueAt };
+      if (picked.waitMs === null || picked.waitMs > MAX_IDLE_WAIT_MS) return { status: 'idle', sent, attempted, breakerTrips, nextDueAt: picked.nextDueAt };
       await sleep(`idle:${group}`, Math.max(picked.waitMs, 1000));
       continue;
     }
     const send: SendOne = (id) => sendDelivery(db, id, target.channel, adapter, { now: clock(), random });
-    const result = await step(`send:${group}`, () => sendGroup(picked.ids, { pacing, send }));
+    const result = await step(`send:${group}`, () => sendGroup(picked.ids, { pacing, send, unknownStreak: state.unknownStreak }));
     sent += result.sent;
     attempted += result.attempted;
-    if (!result.throttle) {
-      throttles = 0;
+    state.unknownStreak = result.unknownStreak;
+    state.probing = false;
+    if (!result.throttle && !result.breakerTripped) {
+      state.pauses = 0;
       continue;
     }
-    throttles += 1;
-    const pauseMs = await step(`throttle:${group}`, async () => channelBackoffMs(throttles, result.throttle?.retryAfterMs, random()));
+    state.pauses += 1;
+    if (result.breakerTripped) {
+      breakerTrips += 1;
+      // One more unknown outcome (the probe's) trips it again.
+      state.probing = true;
+      state.unknownStreak = UNKNOWN_OUTCOME_BREAKER_THRESHOLD - 1;
+    }
+    const pauses = state.pauses;
+    const pauseMs = await step(`throttle:${group}`, async () => channelBackoffMs(pauses, result.throttle?.retryAfterMs, random()));
     await sleep(`pause:${group}`, pauseMs);
   }
-  return { status: 'continue', sent, attempted };
+  return { status: 'continue', sent, attempted, breakerTrips, state };
 }

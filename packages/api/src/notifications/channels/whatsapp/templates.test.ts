@@ -67,9 +67,9 @@ describe('WhatsApp failure classification', () => {
   });
 
   it('never retries a message send that may have gone out, but retries one that never connected', () => {
-    expect(classifyWhatsAppSendFailure(error(502, null))).toMatchObject({ kind: 'failed', errorCode: 'outcome_unknown' });
-    expect(classifyWhatsAppSendFailure(error(500, 131000))).toMatchObject({ kind: 'failed', errorCode: 'outcome_unknown' });
-    expect(classifyWhatsAppSendFailure({ error: 'outcome_unknown' })).toMatchObject({ kind: 'failed', errorCode: 'outcome_unknown' });
+    expect(classifyWhatsAppSendFailure(error(502, null))).toMatchObject({ kind: 'failed', errorCode: 'outcome_unknown', outcomeUnknown: true });
+    expect(classifyWhatsAppSendFailure(error(500, 131000))).toMatchObject({ kind: 'failed', errorCode: 'outcome_unknown', outcomeUnknown: true });
+    expect(classifyWhatsAppSendFailure({ error: 'outcome_unknown' })).toMatchObject({ kind: 'failed', errorCode: 'outcome_unknown', outcomeUnknown: true });
     expect(classifyWhatsAppSendFailure({ error: 'connect_failed' })).toMatchObject({ kind: 'retry', scope: 'channel' });
     // Explicit rejections are certain: retried or failed as for any call.
     expect(classifyWhatsAppSendFailure(error(400, 130429))).toMatchObject({ kind: 'retry', scope: 'channel' });

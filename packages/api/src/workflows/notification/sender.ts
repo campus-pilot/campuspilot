@@ -2,12 +2,19 @@ import * as restate from '@restatedev/restate-sdk';
 import { z } from 'zod';
 
 import { parseSenderKey, senderKey, senderPokeIdempotencyKey, type SenderTarget } from '../../notifications/sender/lanes';
-import { runSenderDrain, type SenderDrainResult } from '../../notifications/sender/drain';
+import { runSenderDrain, senderLaneStateSchema, type SenderDrainResult } from '../../notifications/sender/drain';
 import { NOTIFICATION_SENDER_OBJECT_NAME } from './constants';
 import { log } from './log';
 
-/** Why a drain was started; for the log only. */
-export const senderDrainInputSchema = z.object({ reason: z.enum(['fan_out', 'sweep', 'continue']) });
+/**
+ * Why a drain was started (for the log), and for a `continue` the lane's
+ * pause state handed over by the drain before it (circuit breaker and
+ * throttle escalation, see `SenderLaneState`).
+ */
+export const senderDrainInputSchema = z.object({
+  reason: z.enum(['fan_out', 'sweep', 'continue']),
+  state: senderLaneStateSchema.optional(),
+});
 export type SenderDrainInput = z.infer<typeof senderDrainInputSchema>;
 
 /** Bounded retries per step; a step that still fails ends this drain (see below). */
@@ -47,6 +54,7 @@ export const notificationSenderObject = restate.object({
           target,
           step: (name, action) => ctx.run(name, action, STEP_OPTIONS),
           sleep: (name, ms) => ctx.sleep(ms, name),
+          state: input.data.state,
         });
       } catch (error) {
         if (!(error instanceof restate.TerminalError) || error instanceof restate.CancelledError) throw error;
@@ -54,7 +62,8 @@ export const notificationSenderObject = restate.object({
         return { status: 'aborted' };
       }
       // A long backlog continues in a fresh invocation with a fresh journal.
-      if (result.status === 'continue') ctx.objectSendClient(notificationSenderObject, ctx.key).drain({ reason: 'continue' });
+      if (result.status === 'continue') ctx.objectSendClient(notificationSenderObject, ctx.key).drain({ reason: 'continue', state: result.state });
+      if (result.breakerTrips > 0) log.warn({ sender: ctx.key, breakerTrips: result.breakerTrips }, 'notification.sender.breaker.tripped');
       log.info({ sender: ctx.key, reason: input.data.reason, ...result }, 'notification.sender.drained');
       return result;
     },

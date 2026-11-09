@@ -224,7 +224,7 @@ export function classifyWhatsAppFailure(failure: { error: WhatsAppApiError | Wha
 export function classifyWhatsAppSendFailure(failure: { error: WhatsAppApiError | WhatsAppTransportError; retryAfterMs?: number }): DeliverySendOutcome {
   if (failure.error === 'connect_failed') return { kind: 'retry', errorCode: 'connect_failed', scope: 'channel' };
   if (failure.error === 'outcome_unknown' || failure.error.status >= 500) {
-    return { kind: 'failed', errorCode: OUTCOME_UNKNOWN_ERROR_CODE, errorMessage: OUTCOME_UNKNOWN_MESSAGE };
+    return { kind: 'failed', errorCode: OUTCOME_UNKNOWN_ERROR_CODE, errorMessage: OUTCOME_UNKNOWN_MESSAGE, outcomeUnknown: true };
   }
   return classifyWhatsAppFailure(failure);
 }

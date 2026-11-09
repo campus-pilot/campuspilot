@@ -8,7 +8,7 @@ import { createTestAdmission, createTestSchool } from '../../../test/fixtures';
 import { billIssuedData, dispatchNow, emit, fakeClock, TEST_PACING } from '../../../test/notifications';
 import type { ClaimedDelivery, NotificationChannelAdapter } from '../channels';
 import { claimDelivery } from '../deliveries';
-import { MAX_GROUPS_PER_DRAIN, runSenderDrain, sendGroup } from './drain';
+import { MAX_GROUPS_PER_DRAIN, runSenderDrain, sendGroup, UNKNOWN_OUTCOME_BREAKER_THRESHOLD } from './drain';
 import type { SenderTarget } from './lanes';
 import { pickDueDeliveries, type SendAttemptResult } from './queue';
 
@@ -149,7 +149,7 @@ describe('notification sender (D-39)', () => {
       }
       await new Promise((resolve) => setTimeout(resolve, 60));
       finished.push(id);
-      return { kind: 'sent', channelThrottle: null };
+      return { kind: 'sent', channelThrottle: null, outcomeUnknown: false };
     };
     await expect(sendGroup(['a', 'b', 'c', 'd', 'e'], { pacing: { perSecond: 1000, concurrency: 3, groupSize: 5 }, send })).rejects.toThrow('database down');
     // b and c were in flight when a failed: the group returned only after both finished.
@@ -188,5 +188,61 @@ describe('notification sender (D-39)', () => {
     expect(claimed?.admissionId).toEqual(expect.any(String));
     expect(claimed?.data).toMatchObject({ billNumber: expect.any(String) });
     expect(await claimDelivery(db, ids[0]!)).toBeNull();
+  });
+
+  it('trips the circuit breaker after consecutive unknown outcomes, pauses the lane, then probes with one send', async () => {
+    expect(UNKNOWN_OUTCOME_BREAKER_THRESHOLD).toBe(3);
+    const target = uniqueLane();
+    const { ids } = await queue({ lane: target.lane, copies: 6, sendPriority: 'bulk' });
+    let calls = 0;
+    const adapter: NotificationChannelAdapter = {
+      channel: 'web_push',
+      available: true,
+      decide: () => [],
+      // A brownout: the first four sends time out after sending, then the provider recovers.
+      send: async () => {
+        calls += 1;
+        return calls <= 4
+          ? { kind: 'failed', errorCode: 'outcome_unknown', errorMessage: 'unknown', outcomeUnknown: true }
+          : { kind: 'sent', providerMessageId: null };
+      },
+    };
+    const clock = fakeClock();
+    const pauses: number[] = [];
+    const sendGroups: string[] = [];
+    const result = await runSenderDrain({
+      target,
+      step: async (name, action) => {
+        const value = await action();
+        if (name.startsWith('send:')) sendGroups.push(name);
+        return value;
+      },
+      sleep: async (name, ms) => {
+        if (name.startsWith('pause:')) pauses.push(ms);
+        clock.advance(ms);
+      },
+      clock: clock.now,
+      adapters: { web_push: adapter, whatsapp: whatsappOff },
+      pacing: TEST_PACING,
+      random: () => 0.5,
+    });
+    // Three unknowns trip it (30 s pause); the probe is unknown too (60 s pause); the next probe succeeds and the rest go out.
+    expect(pauses).toEqual([30_000, 60_000]);
+    expect(sendGroups).toHaveLength(4);
+    expect(result).toMatchObject({ breakerTrips: 2, sent: 2, attempted: 6 });
+    const rows = await db.select().from(notificationDeliveryTable).where(inArray(notificationDeliveryTable.id, ids));
+    expect(rows.filter((row) => row.status === 'failed')).toHaveLength(4);
+    expect(rows.filter((row) => row.status === 'sent')).toHaveLength(2);
+  });
+
+  it('stops starting sends in a group once the unknown-outcome streak reaches the threshold', async () => {
+    const started: string[] = [];
+    const send = async (id: string): Promise<SendAttemptResult> => {
+      started.push(id);
+      return { kind: 'failed', channelThrottle: null, outcomeUnknown: true };
+    };
+    const result = await sendGroup(['a', 'b', 'c', 'd'], { pacing: { perSecond: 1000, concurrency: 1, groupSize: 4 }, send, unknownStreak: 1 });
+    expect(started).toEqual(['a', 'b']);
+    expect(result).toMatchObject({ breakerTripped: true, unknownStreak: 3, attempted: 2 });
   });
 });

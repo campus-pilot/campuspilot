@@ -66,6 +66,13 @@ export type DeliverySendOutcome =
       errorCode: string;
       /** A safe explanation for staff (never provider prose with personal data). */
       errorMessage?: string;
+      /**
+       * True when the provider's answer leaves open whether the message
+       * went out (timeout after sending, 5xx, success without an ID). The
+       * delivery is failed all the same; the sender counts these for the
+       * lane's circuit breaker.
+       */
+      outcomeUnknown?: boolean;
     };
 
 /** A delivery handed to a channel's sender after it was claimed. */

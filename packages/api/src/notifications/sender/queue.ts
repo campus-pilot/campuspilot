@@ -80,6 +80,8 @@ export async function dueSenderTargets(db: DatabaseExecutor, now: Date = new Dat
 export type SendAttemptResult = {
   kind: 'sent' | 'failed' | 'skipped' | 'not_owed' | 'retry';
   channelThrottle: { retryAfterMs: number | null } | null;
+  /** The provider's answer left open whether the message went out (feeds the lane's circuit breaker). */
+  outcomeUnknown: boolean;
 };
 
 /**
@@ -105,10 +107,10 @@ export async function sendDelivery(
   options: { now?: Date; random?: () => number } = {},
 ): Promise<SendAttemptResult> {
   if (!adapter.available) {
-    return { kind: (await skipOwedDelivery(db, deliveryId, 'disabled')) ? 'skipped' : 'not_owed', channelThrottle: null };
+    return { kind: (await skipOwedDelivery(db, deliveryId, 'disabled')) ? 'skipped' : 'not_owed', channelThrottle: null, outcomeUnknown: false };
   }
   const claimed = await claimDelivery(db, deliveryId, options.now);
-  if (!claimed) return { kind: 'not_owed', channelThrottle: null };
+  if (!claimed) return { kind: 'not_owed', channelThrottle: null, outcomeUnknown: false };
   if (claimed.channel !== channel) throw new Error('A sender claimed a delivery of another channel.');
   let outcome: DeliverySendOutcome;
   try {
@@ -118,5 +120,5 @@ export async function sendDelivery(
   }
   const recorded = await recordDeliveryOutcome(db, claimed, outcome, { now: options.now, random: options.random });
   const channelThrottle = outcome.kind === 'retry' && outcome.scope === 'channel' ? { retryAfterMs: outcome.retryAfterMs ?? null } : null;
-  return { kind: recorded.kind, channelThrottle };
+  return { kind: recorded.kind, channelThrottle, outcomeUnknown: outcome.kind === 'failed' && outcome.outcomeUnknown === true };
 }
