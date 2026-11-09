@@ -19,7 +19,7 @@ import {
 } from '../../../test/fixtures';
 import { dispatchNow } from '../../../test/notifications';
 import { createReportCardDocumentSource } from '../documents/report-card';
-import { sweepResultPublications } from './results';
+import { studentResultEventKey, sweepResultPublications } from './results';
 import { PDFDocument } from 'pdf-lib';
 
 /** One school with two classes; class A has an approved and an unapproved student. */
@@ -106,6 +106,16 @@ describe('result notifications', () => {
     const events = await db.select().from(notificationEventTable).where(and(eq(notificationEventTable.schoolId, schoolId), like(notificationEventTable.key, 'exam-result:%')));
     expect(events).toHaveLength(2);
     expect(events[0]).toMatchObject({ type: 'exam.results_published', data: { examSlug: 'final', examName: 'Final examination', studentName: 'Asha Approved' } });
+    expect(events.every((event) => event.key.length <= 300)).toBe(true);
+
+    // The longest client key fits, and concurrent retries of one press return the same event.
+    const longKey = `${randomUUID()}${'k'.repeat(164)}`;
+    await Promise.all([
+      teacherA.school.sendStudentResultNotification({ ...one, idempotencyKey: longKey }),
+      teacherA.school.sendStudentResultNotification({ ...one, idempotencyKey: longKey }),
+    ]);
+    const longEventKey = studentResultEventKey({ ...one, idempotencyKey: longKey }, admissionOf.get(approvedStudent)!);
+    expect(await db.select().from(notificationEventTable).where(and(eq(notificationEventTable.schoolId, schoolId), eq(notificationEventTable.key, longEventKey)))).toHaveLength(1);
   });
 
   it('publishes a completed examination once, to every registered student, and notifies the publisher when settled', async () => {
@@ -125,6 +135,9 @@ describe('result notifications', () => {
     // Not finished while the fan-outs are pending; finished once they settled.
     await sweepResultPublications();
     await expect(principal.school.getExamResultPublication(exam())).resolves.toMatchObject({ finishedAt: null });
+    // Every check is recorded, so unsettled publications rotate behind unchecked ones.
+    const [checked] = await db.select().from(examResultPublicationTable).where(eq(examResultPublicationTable.id, publication.id));
+    expect(checked!.settleCheckedAt).toBeInstanceOf(Date);
     for (const event of events) await dispatchNow(event.id);
     await sweepResultPublications();
     const finished = await principal.school.getExamResultPublication(exam());

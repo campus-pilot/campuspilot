@@ -10,9 +10,10 @@ import {
 import { notificationDeliveryTable, notificationEventTable, notificationTable } from '@campuspilot/db/schema/notification';
 import { schoolTable } from '@campuspilot/db/schema/school';
 import { studentTable } from '@campuspilot/db/schema/student';
-import { and, asc, eq, inArray, isNull, lt } from 'drizzle-orm';
+import { createHash } from 'node:crypto';
+import { and, asc, eq, inArray, isNull, lt, sql } from 'drizzle-orm';
 
-import { rpcError } from '../../errors';
+import { isRetryableTransactionError, rpcError } from '../../errors';
 import { getExam, type ExamScope } from '../../routers/school/exam/exam.service';
 import { lifecycleWhere } from '../../routers/school/exam/exam.scope';
 import { forecastDeliveries, resolveAdmissionRecipients, type DeliveryForecast } from '../dispatch';
@@ -199,11 +200,40 @@ export async function previewStudentResult(db: Database, scope: StudentResultSco
 }
 
 /**
+ * Event key of one single-result send: a SHA-256 of the exam, student and
+ * client idempotency key, so it stays within `notify()`'s 300-character
+ * limit however long the exam slug and client key are.
+ */
+export function studentResultEventKey(scope: { sessionId: string; examSlug: string; idempotencyKey: string }, admissionId: string) {
+  const digest = createHash('sha256').update(JSON.stringify([scope.sessionId, scope.examSlug, admissionId, scope.idempotencyKey])).digest('hex');
+  return `exam-result:${digest}`;
+}
+
+/** Transaction attempts of a single send (a concurrent retry of the same press is a serialization failure). */
+const SEND_RESULT_ATTEMPTS = 3;
+
+/**
  * Sends one student's result. Each press is its own event, keyed by the
  * client's idempotency key, so a retried request sends once and a later
  * deliberate press sends again. Returns the forecast taken at press time.
+ *
+ * Repeatable read keeps the eligibility check, forecast and event facts on
+ * one snapshot. A concurrent request with the same key that commits first
+ * makes this transaction's insert a serialization failure (the row is not
+ * in its snapshot); the whole transaction is then run again, and the new
+ * snapshot finds the existing event and returns it.
  */
 export async function sendStudentResult(db: Database, scope: StudentResultScope & { idempotencyKey: string }, sentBy: string) {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await sendStudentResultOnce(db, scope, sentBy);
+    } catch (error) {
+      if (attempt >= SEND_RESULT_ATTEMPTS || !isRetryableTransactionError(error)) throw error;
+    }
+  }
+}
+
+async function sendStudentResultOnce(db: Database, scope: StudentResultScope & { idempotencyKey: string }, sentBy: string) {
   const { eventId, forecast, created } = await db.transaction(
     async (tx) => {
       const { exam, student } = await studentForResult(tx, scope);
@@ -212,7 +242,7 @@ export async function sendStudentResult(db: Database, scope: StudentResultScope 
       const result = await notify(tx, {
         type: 'exam.results_published',
         schoolId: scope.schoolId,
-        key: `exam-result:${scope.sessionId}:${scope.examSlug}:${student.admissionId}:${scope.idempotencyKey}`,
+        key: studentResultEventKey(scope, student.admissionId),
         createdBy: sentBy,
         recipients: { kind: 'admissions', admissionIds: [student.admissionId] },
         data: { sessionId: scope.sessionId, examSlug: scope.examSlug, examName: exam.name, admissionId: student.admissionId, studentName: student.name },
@@ -293,11 +323,44 @@ export async function settleResultPublication(
   return { recipientCount, sentCount, skippedCount, failedCount: Math.max(0, recipientCount - sentCount - skippedCount) };
 }
 
+/**
+ * Checks one publication (recording the check for the sweep's rotation) and
+ * finishes it when settled. Returns undefined when it is not finished by
+ * this call, else the publisher's event ID (null without a publisher).
+ */
+async function finishResultPublicationIfSettled(db: Database, publication: ExamResultPublicationRow, now: Date): Promise<string | null | undefined> {
+  await db.update(examResultPublicationTable).set({ settleCheckedAt: now }).where(eq(examResultPublicationTable.id, publication.id));
+  const outcome = await settleResultPublication(db, publication, now);
+  if (!outcome) return undefined;
+  const eventId = await db.transaction(async (tx) => {
+    const [finished] = await tx
+      .update(examResultPublicationTable)
+      .set({ finishedAt: now, outcome })
+      .where(and(eq(examResultPublicationTable.id, publication.id), isNull(examResultPublicationTable.finishedAt)))
+      .returning({ id: examResultPublicationTable.id });
+    if (!finished) return undefined;
+    if (!publication.publishedBy) return null;
+    const result = await notify(tx, {
+      type: 'exam.results_publish_finished',
+      schoolId: publication.schoolId,
+      key: `exam-results-finished:${publication.id}`,
+      recipients: { kind: 'staff_users', userIds: [publication.publishedBy] },
+      data: { sessionId: publication.sessionId, examSlug: publication.examSlug, examName: publication.examName, ...outcome },
+    });
+    return result.eventId;
+  });
+  if (eventId !== undefined) log.info({ publicationId: publication.id, ...outcome }, 'notification.results.finished');
+  return eventId;
+}
+
 /** Unfinished publications checked per sweep. */
 const PUBLICATION_SWEEP_LIMIT = 20;
 
 /**
- * Finishes publications whose deliveries settled (on the API's 30 s loop):
+ * Finishes publications whose deliveries settled (on the API's 30 s loop),
+ * least recently checked first (`settle_checked_at`, set on every check), so
+ * publications still waiting for retries rotate to the back instead of
+ * filling every sweep and starving newer ones:
  * records the outcome and, in the same transaction, notifies the publisher
  * with `exam.results_publish_finished` (D-30). Conditional on the row still
  * being unfinished, so replicas finish each publication once; the event key
@@ -309,33 +372,20 @@ export async function sweepResultPublications(db: Database = defaultDb, now: Dat
     .select()
     .from(examResultPublicationTable)
     .where(and(isNull(examResultPublicationTable.finishedAt), lt(examResultPublicationTable.publishedAt, now)))
-    .orderBy(asc(examResultPublicationTable.publishedAt))
+    .orderBy(sql`${examResultPublicationTable.settleCheckedAt} asc nulls first`, asc(examResultPublicationTable.publishedAt))
     .limit(PUBLICATION_SWEEP_LIMIT);
   const eventIds: string[] = [];
   let finishedCount = 0;
   for (const publication of open) {
-    const outcome = await settleResultPublication(db, publication, now);
-    if (!outcome) continue;
-    const eventId = await db.transaction(async (tx) => {
-      const [finished] = await tx
-        .update(examResultPublicationTable)
-        .set({ finishedAt: now, outcome })
-        .where(and(eq(examResultPublicationTable.id, publication.id), isNull(examResultPublicationTable.finishedAt)))
-        .returning({ id: examResultPublicationTable.id });
-      if (!finished) return null;
+    // One publication failing (e.g. a lost connection) never stops the others.
+    try {
+      const eventId = await finishResultPublicationIfSettled(db, publication, now);
+      if (eventId === undefined) continue;
       finishedCount += 1;
-      if (!publication.publishedBy) return null;
-      const result = await notify(tx, {
-        type: 'exam.results_publish_finished',
-        schoolId: publication.schoolId,
-        key: `exam-results-finished:${publication.id}`,
-        recipients: { kind: 'staff_users', userIds: [publication.publishedBy] },
-        data: { sessionId: publication.sessionId, examSlug: publication.examSlug, examName: publication.examName, ...outcome },
-      });
-      return result.eventId;
-    });
-    if (eventId) eventIds.push(eventId);
-    log.info({ publicationId: publication.id, ...outcome }, 'notification.results.finished');
+      if (eventId) eventIds.push(eventId);
+    } catch (error) {
+      log.error({ publicationId: publication.id, err: error instanceof Error ? { name: error.name, message: error.message } : String(error) }, 'notification.results.settle.error');
+    }
   }
   handOffNotificationEvents(eventIds);
   return { finished: finishedCount };
