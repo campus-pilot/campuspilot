@@ -83,7 +83,9 @@ export const notificationControlService = restate.service({
      * Starts a drain of one sender lane (D-39) for the API sweep, which
      * pokes every lane that has due deliveries. Signed like `dispatch`; the
      * API's idempotency key folds repeated pokes within a window into one.
-     * A drain already running makes this one queue behind it, harmlessly.
+     * The sweep skips lanes where a drain is already live (see
+     * `pokeDueSenders`); one that raced in anyway queues behind it and
+     * finds nothing left.
      */
     poke: async (ctx: restate.Context, rawInput: NotificationSenderPokeInput): Promise<{ status: 'poked' }> => {
       const parsed = notificationSenderPokeInputSchema.safeParse(rawInput);

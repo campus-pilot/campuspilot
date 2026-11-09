@@ -60,3 +60,40 @@ export async function cancelRestateInvocation(invocationId: string) {
     throw new Error(`Restate refused to cancel invocation (${response.status}).`);
   }
 }
+
+/** Service and virtual object names we query by: plain identifiers only (the query is built as text). */
+const RESTATE_SERVICE_NAME = /^[A-Za-z][A-Za-z0-9_]*$/;
+
+/** One invocation that has not completed: its ID, key (virtual objects and workflows) and status. */
+export type LiveRestateInvocation = { id: string; key: string | null; status: Exclude<RestateInvocationStatus, 'completed'> };
+
+/**
+ * Every invocation of one service, virtual object or workflow that has not
+ * completed (inboxed, scheduled, running, backing off, suspended or
+ * paused), with its key.
+ */
+export async function listLiveRestateInvocations(serviceName: string, signal?: AbortSignal): Promise<LiveRestateInvocation[]> {
+  if (!RESTATE_SERVICE_NAME.test(serviceName)) throw new Error('Invalid Restate service name.');
+  const rows = await queryRestateAdmin<{ id: string; target_service_key: string | null; status: LiveRestateInvocation['status'] }>(
+    `SELECT id, target_service_key, status FROM sys_invocation WHERE target_service_name = '${serviceName}' AND status <> 'completed'`,
+    signal,
+  );
+  return rows.filter((row) => RESTATE_INVOCATION_ID.test(row.id)).map((row) => ({ id: row.id, key: row.target_service_key, status: row.status }));
+}
+
+/**
+ * Kills an invocation through the admin API: it ends at once without
+ * running any more of its code (unlike a cancel, which a paused invocation
+ * only acts on once it resumes). An invocation that already finished is not
+ * an error (404/409).
+ */
+export async function killRestateInvocation(invocationId: string) {
+  if (!RESTATE_INVOCATION_ID.test(invocationId)) throw new Error('Invalid Restate invocation ID.');
+  const response = await fetch(new URL(`/invocations/${encodeURIComponent(invocationId)}/kill`, env.RESTATE_ADMIN_URL), {
+    method: 'PATCH',
+    signal: AbortSignal.timeout(QUERY_TIMEOUT_MS),
+  });
+  if (!response.ok && response.status !== 404 && response.status !== 409) {
+    throw new Error(`Restate refused to kill invocation (${response.status}).`);
+  }
+}

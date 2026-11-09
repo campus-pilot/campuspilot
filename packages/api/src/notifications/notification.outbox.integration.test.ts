@@ -11,10 +11,15 @@ import { senderLaneFor } from './sender/lanes';
 import { notify } from './notify';
 
 vi.mock('./notification.restate', () => ({ sendNotificationDispatch: vi.fn(), sendNotificationSenderPoke: vi.fn() }));
-vi.mock('../workflows/restate-admin', () => ({ getRestateInvocation: vi.fn(), cancelRestateInvocation: vi.fn() }));
+vi.mock('../workflows/restate-admin', () => ({
+  getRestateInvocation: vi.fn(),
+  cancelRestateInvocation: vi.fn(),
+  killRestateInvocation: vi.fn(),
+  listLiveRestateInvocations: vi.fn(async () => []),
+}));
 
 const { sendNotificationDispatch, sendNotificationSenderPoke } = await import('./notification.restate');
-const { getRestateInvocation, cancelRestateInvocation } = await import('../workflows/restate-admin');
+const { getRestateInvocation, cancelRestateInvocation, killRestateInvocation, listLiveRestateInvocations } = await import('../workflows/restate-admin');
 const { dispatchNotificationEvent, failStaleEvents, pokeDueSenders, retryFailedEvents, sweepNotificationOutbox } = await import('./notification.outbox');
 
 async function pendingEvent() {
@@ -110,14 +115,25 @@ describe('notification outbox', () => {
     expect(event).toMatchObject({ status: 'failed', dispatchAttempt: 1 });
   });
 
-  it('stops handing over at the first event Restate does not accept', async () => {
-    await pendingEvent();
-    await pendingEvent();
+  it('stops handing over once Restate does not accept a hand-over (only those already in flight finish)', async () => {
+    for (let index = 0; index < 8; index += 1) await pendingEvent();
     vi.mocked(sendNotificationDispatch).mockRejectedValue(new Error('The operation was aborted due to timeout'));
     vi.mocked(getRestateInvocation).mockResolvedValue({ status: 'running', createdAt: Date.now() });
     const result = await sweepNotificationOutbox(db);
-    expect(result.pending).toBeGreaterThanOrEqual(2);
-    expect(sendNotificationDispatch).toHaveBeenCalledTimes(1);
+    expect(result.pending).toBeGreaterThanOrEqual(8);
+    // At most the four concurrent hand-overs were started.
+    expect(vi.mocked(sendNotificationDispatch).mock.calls.length).toBeLessThanOrEqual(4);
+    vi.mocked(sendNotificationDispatch).mockReset();
+  });
+
+  it('hands over more than one round of pending events in one sweep', async () => {
+    const ids = await Promise.all(Array.from({ length: 230 }, () => pendingEvent()));
+    let counter = 0;
+    vi.mocked(sendNotificationDispatch).mockImplementation(async () => ({ invocationId: `inv_round${(counter += 1)}` }));
+    vi.mocked(getRestateInvocation).mockResolvedValue({ status: 'running', createdAt: Date.now() });
+    await sweepNotificationOutbox(db);
+    const events = await db.select({ submittedAt: notificationEventTable.submittedAt }).from(notificationEventTable).where(inArray(notificationEventTable.id, ids));
+    expect(events.every((event) => event.submittedAt !== null)).toBe(true);
     vi.mocked(sendNotificationDispatch).mockReset();
   });
 
@@ -151,6 +167,7 @@ describe('notification outbox', () => {
     const pushLane = senderLaneFor('web_push', school.id);
     vi.mocked(sendNotificationSenderPoke).mockReset();
     vi.mocked(sendNotificationSenderPoke).mockResolvedValue(undefined);
+    vi.mocked(listLiveRestateInvocations).mockResolvedValueOnce([]);
     await pokeDueSenders(db);
     expect(sendNotificationSenderPoke).toHaveBeenCalledWith({ channel: 'whatsapp', lane: 0 }, expect.any(Date));
     expect(sendNotificationSenderPoke).toHaveBeenCalledWith({ channel: 'web_push', lane: pushLane }, expect.any(Date));
@@ -176,7 +193,60 @@ describe('notification outbox', () => {
     );
     const owedOn = (channel: 'web_push' | 'whatsapp'): NotificationChannelAdapter => ({ channel, available: true, decide: () => [{ status: 'owed', destination: `dest-${channel}` }], send: vi.fn() });
     await dispatchNow(eventId, { web_push: owedOn('web_push'), whatsapp: owedOn('whatsapp') });
-    expect(await pokeDueSenders(db)).toBe(0);
+    expect(await pokeDueSenders(db)).toMatchObject({ poked: 0 });
     expect(sendNotificationSenderPoke).toHaveBeenCalledTimes(1);
+  });
+
+  /** A school with a WhatsApp copy and a web push copy due now; returns the push lane's key. */
+  async function dueOnBothChannels() {
+    const school = await createTestSchool();
+    const admission = await createTestAdmission({ schoolId: school.id });
+    const { eventId } = await db.transaction((tx) =>
+      notify(tx, { sendPriority: 'immediate', type: 'bill.issued', data: billIssuedData(admission.id), schoolId: school.id, recipients: { kind: 'admissions', admissionIds: [admission.id] }, key: `poke:${randomUUID()}` }),
+    );
+    const owedOn = (channel: 'web_push' | 'whatsapp'): NotificationChannelAdapter => ({ channel, available: true, decide: () => [{ status: 'owed', destination: `dest-${channel}` }], send: vi.fn() });
+    await dispatchNow(eventId, { web_push: owedOn('web_push'), whatsapp: owedOn('whatsapp') });
+    return { pushLane: senderLaneFor('web_push', school.id) };
+  }
+
+  it('does not poke a lane whose drain is still live, so pokes never pile up in its inbox', async () => {
+    const { pushLane } = await dueOnBothChannels();
+    vi.mocked(sendNotificationSenderPoke).mockReset().mockResolvedValue(undefined);
+    vi.mocked(listLiveRestateInvocations).mockResolvedValueOnce([
+      { id: 'inv_drainrunning', key: 'whatsapp', status: 'running' },
+      { id: 'inv_draininboxed', key: `web_push:${pushLane}`, status: 'pending' },
+    ]);
+    const result = await pokeDueSenders(db);
+    expect(listLiveRestateInvocations).toHaveBeenLastCalledWith('NotificationSender');
+    expect(sendNotificationSenderPoke).not.toHaveBeenCalledWith({ channel: 'whatsapp', lane: 0 }, expect.any(Date));
+    expect(sendNotificationSenderPoke).not.toHaveBeenCalledWith({ channel: 'web_push', lane: pushLane }, expect.any(Date));
+    expect(result).toMatchObject({ busy: expect.any(Number), killed: 0 });
+    expect(result.busy).toBeGreaterThanOrEqual(2);
+  });
+
+  it('kills a paused drain that blocks its lane, then pokes the lane afresh', async () => {
+    await dueOnBothChannels();
+    vi.mocked(sendNotificationSenderPoke).mockReset().mockResolvedValue(undefined);
+    vi.mocked(killRestateInvocation).mockReset().mockResolvedValue(undefined);
+    vi.mocked(listLiveRestateInvocations).mockResolvedValueOnce([{ id: 'inv_drainpaused', key: 'whatsapp', status: 'paused' }]);
+    expect(await pokeDueSenders(db)).toMatchObject({ killed: 1 });
+    expect(killRestateInvocation).toHaveBeenCalledWith('inv_drainpaused');
+    expect(sendNotificationSenderPoke).toHaveBeenCalledWith({ channel: 'whatsapp', lane: 0 }, expect.any(Date));
+
+    // A paused drain that cannot be killed keeps its lane blocked: no poke joins the queue behind it.
+    vi.mocked(sendNotificationSenderPoke).mockClear();
+    vi.mocked(killRestateInvocation).mockRejectedValueOnce(new Error('Restate refused to kill invocation (503).'));
+    vi.mocked(listLiveRestateInvocations).mockResolvedValueOnce([{ id: 'inv_drainpaused', key: 'whatsapp', status: 'paused' }]);
+    expect(await pokeDueSenders(db)).toMatchObject({ killed: 0 });
+    expect(sendNotificationSenderPoke).not.toHaveBeenCalledWith({ channel: 'whatsapp', lane: 0 }, expect.any(Date));
+  });
+
+  it('pokes every due lane when the Restate admin API does not answer', async () => {
+    const { pushLane } = await dueOnBothChannels();
+    vi.mocked(sendNotificationSenderPoke).mockReset().mockResolvedValue(undefined);
+    vi.mocked(listLiveRestateInvocations).mockRejectedValueOnce(new Error('Restate admin query failed (503).'));
+    await pokeDueSenders(db);
+    expect(sendNotificationSenderPoke).toHaveBeenCalledWith({ channel: 'whatsapp', lane: 0 }, expect.any(Date));
+    expect(sendNotificationSenderPoke).toHaveBeenCalledWith({ channel: 'web_push', lane: pushLane }, expect.any(Date));
   });
 });

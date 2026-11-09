@@ -5,11 +5,15 @@ import { and, asc, eq, isNull, lt, or, sql, type SQL } from 'drizzle-orm';
 import {
   cancelRestateInvocation,
   getRestateInvocation,
+  killRestateInvocation,
+  listLiveRestateInvocations,
+  type LiveRestateInvocation,
   type RestateInvocationStatus,
 } from '../workflows/restate-admin';
-import { MAX_NOTIFICATION_DISPATCH_ATTEMPTS } from '../workflows/notification/constants';
+import { MAX_NOTIFICATION_DISPATCH_ATTEMPTS, NOTIFICATION_SENDER_OBJECT_NAME } from '../workflows/notification/constants';
 import { log } from '../workflows/notification/log';
 import { sendNotificationDispatch, sendNotificationSenderPoke } from './notification.restate';
+import { senderKey } from './sender/lanes';
 import { dueSenderTargets } from './sender/queue';
 import { failStuckSendingDeliveries } from './stuck-sending';
 
@@ -37,8 +41,19 @@ import { failStuckSendingDeliveries } from './stuck-sending';
  *   failures stay visible to staff in the delivery log (Phase 7).
  */
 
-/** Rows handled per sweep; the next sweep continues with the rest. */
+/** Rows handled per sweep by the stale check and the retry pass; the next sweep continues with the rest. */
 const SWEEP_LIMIT = 50;
+/** Unsubmitted events picked per hand-over round of a sweep. */
+const HANDOVER_BATCH = 200;
+/**
+ * Time a sweep spends starting hand-over rounds; it keeps picking rounds
+ * while full ones come back. With {@link HANDOFF_CONCURRENCY} in flight a
+ * Restate answer of ~10 ms hands over several thousand events per sweep, so
+ * a lost in-process hand-off of a 5,000-bill run catches up in a sweep or
+ * two instead of 50 minutes at 50 events per 30 s. Bounded so the other
+ * sweeps of the 30 s loop still run.
+ */
+const HANDOVER_BUDGET_MS = 15_000;
 /** Accepted events are checked against Restate only after this long, to let them start. */
 const STALE_CHECK_AFTER_MS = 2 * 60 * 1000;
 
@@ -118,31 +133,44 @@ export function handOffNotificationEvent(eventId: string, db: DatabaseExecutor =
   });
 }
 
-/** Hand-overs one {@link handOffNotificationEvents} call keeps in flight at once. */
+/** Hand-overs kept in flight at once by {@link handOverEvents}. */
 const HANDOFF_CONCURRENCY = 4;
 
 /**
- * Hands over many events after their emitting transaction committed (for
- * example one per bill of a billing run), at most {@link HANDOFF_CONCURRENCY}
- * at a time so a large run does not open thousands of Restate requests at
- * once. Not awaited by the caller. After the first failed hand-over every
- * worker stops (Restate is down: the rest would only wait for timeouts);
- * whatever is not handed over is left pending for the sweep.
+ * Hands over many events, at most {@link HANDOFF_CONCURRENCY} at a time so a
+ * large batch does not open thousands of Restate requests at once. After
+ * the first hand-over Restate did not accept every worker stops (Restate is
+ * down: the rest would only wait for timeouts); whatever is not handed over
+ * stays pending for the sweep. An error of one hand-over (database) is
+ * logged and the others continue.
  */
-export function handOffNotificationEvents(eventIds: readonly string[], db: DatabaseExecutor = defaultDb) {
-  if (eventIds.length === 0) return;
+async function handOverEvents(db: DatabaseExecutor, eventIds: readonly string[]): Promise<{ sent: number; unreachable: boolean }> {
   const queue = [...new Set(eventIds)];
   let unreachable = false;
+  let sent = 0;
   const worker = async () => {
     for (let eventId = queue.shift(); eventId && !unreachable; eventId = queue.shift()) {
       try {
-        if ((await handOverNotificationEvent(db, eventId)) === 'failed') unreachable = true;
+        const result = await handOverNotificationEvent(db, eventId);
+        if (result === 'failed') unreachable = true;
+        if (result === 'sent') sent += 1;
       } catch (error) {
         log.error({ eventId, err: error instanceof Error ? { name: error.name, message: error.message } : String(error) }, 'notification.handover.error');
       }
     }
   };
-  for (let index = 0; index < Math.min(HANDOFF_CONCURRENCY, queue.length); index += 1) void worker();
+  await Promise.all(Array.from({ length: Math.min(HANDOFF_CONCURRENCY, queue.length) }, () => worker()));
+  return { sent, unreachable };
+}
+
+/**
+ * Hands over many events after their emitting transaction committed (for
+ * example one per bill of a billing run) through {@link handOverEvents}.
+ * Not awaited by the caller.
+ */
+export function handOffNotificationEvents(eventIds: readonly string[], db: DatabaseExecutor = defaultDb) {
+  if (eventIds.length === 0) return;
+  void handOverEvents(db, eventIds);
 }
 
 /**
@@ -152,14 +180,14 @@ export function handOffNotificationEvents(eventIds: readonly string[], db: Datab
  * it is not a claim. Concurrent sends of one event are harmless (same
  * idempotency key, writes conditional on still being unsubmitted).
  */
-async function claimPendingEvents(db: DatabaseExecutor): Promise<string[]> {
+async function claimPendingEvents(db: DatabaseExecutor, limit: number): Promise<string[]> {
   return db.transaction(async (transaction) => {
     const rows = await transaction
       .select({ id: notificationEventTable.id })
       .from(notificationEventTable)
       .where(and(eq(notificationEventTable.status, 'pending'), isNull(notificationEventTable.submittedAt)))
       .orderBy(asc(notificationEventTable.createdAt))
-      .limit(SWEEP_LIMIT)
+      .limit(limit)
       .for('update', { skipLocked: true });
     return rows.map((row) => row.id);
   });
@@ -300,31 +328,91 @@ export async function retryFailedEvents(db: DatabaseExecutor, now: Date = new Da
   return retried;
 }
 
+/** What one {@link pokeDueSenders} pass did. */
+export type SenderPokeResult = {
+  /** Lanes poked. */
+  poked: number;
+  /** Due lanes left alone because a drain is already inboxed, running or waiting there. */
+  busy: number;
+  /** Paused drains killed (each blocked its lane). */
+  killed: number;
+};
+
+/** Safe one-line description of an admin API failure. */
+function describeAdminError(error: unknown) {
+  return error instanceof Error ? { name: error.name, message: error.message } : String(error);
+}
+
 /**
  * Pokes every sender lane that has a delivery due (D-39): the safety net
  * behind the fan-out's own pokes, and what wakes a lane whose next retry
- * was further away than its drain waits. A lane already draining queues
- * one more drain, which finds what is left. Stops at the first poke
+ * was further away than its drain waits.
+ *
+ * It first asks Restate which `NotificationSender` drains have not
+ * completed:
+ * - a **paused** drain (Restate gave up retrying it, e.g. the worker kept
+ *   failing) holds its lane's lock, so every later drain would queue behind
+ *   it forever. It is logged as an error and killed (kill, not cancel: a
+ *   cancel only takes effect once the paused invocation resumes). A row it
+ *   had claimed stays `sending` and is failed as `outcome_unknown` after
+ *   `STUCK_SENDING_MS`. The lane is then poked like any other, unless a
+ *   drain queued behind the killed one takes over.
+ * - a lane with a drain inboxed, scheduled, running, backing off or
+ *   suspended is **not** poked: that drain picks every due row before it
+ *   ends, so a poke would only add another drain to the object's inbox
+ *   (one per sweep per replica, piling up while the drain runs).
+ * If Restate's admin API does not answer, every due lane is poked as
+ * before (a poke is harmless, only wasteful). Pokes stop at the first one
  * Restate does not accept.
  */
-export async function pokeDueSenders(db: DatabaseExecutor, now: Date = new Date()): Promise<number> {
-  let poked = 0;
-  for (const target of await dueSenderTargets(db, now)) {
+export async function pokeDueSenders(db: DatabaseExecutor, now: Date = new Date()): Promise<SenderPokeResult> {
+  const result: SenderPokeResult = { poked: 0, busy: 0, killed: 0 };
+  const due = await dueSenderTargets(db, now);
+  let live: LiveRestateInvocation[] | null;
+  try {
+    live = await listLiveRestateInvocations(NOTIFICATION_SENDER_OBJECT_NAME);
+  } catch (error) {
+    log.warn({ err: describeAdminError(error) }, 'notification.sender.status.failed');
+    live = null;
+  }
+  /** Lanes whose lock is held by a drain that is progressing, or by a paused one that could not be killed. */
+  const blocked = new Set<string>();
+  for (const invocation of live ?? []) {
+    if (!invocation.key) continue;
+    if (invocation.status !== 'paused') {
+      blocked.add(invocation.key);
+      continue;
+    }
+    log.error({ sender: invocation.key, invocationId: invocation.id }, 'notification.sender.paused');
+    try {
+      await killRestateInvocation(invocation.id);
+      result.killed += 1;
+    } catch (error) {
+      log.warn({ sender: invocation.key, invocationId: invocation.id, err: describeAdminError(error) }, 'notification.sender.kill.failed');
+      blocked.add(invocation.key);
+    }
+  }
+  for (const target of due) {
+    if (blocked.has(senderKey(target))) {
+      result.busy += 1;
+      continue;
+    }
     try {
       await sendNotificationSenderPoke(target, now);
-      poked += 1;
+      result.poked += 1;
     } catch (error) {
       log.warn({ channel: target.channel, lane: target.lane, reason: describeHandoverError(error) }, 'notification.sender.poke.failed');
       break;
     }
   }
-  return poked;
+  return result;
 }
 
 /**
- * One sweep, safe across API replicas and bounded. Sends run after the
- * picking transaction commits, so the control service sees the rows. The
- * sends stop at the first hand-over Restate did not accept (it is down; the
+ * One sweep, safe across API replicas and bounded. Hand-overs run in rounds
+ * of {@link HANDOVER_BATCH} for up to {@link HANDOVER_BUDGET_MS}, each after
+ * the picking transaction commits, so the control service sees the rows.
+ * They stop at the first hand-over Restate did not accept (it is down; the
  * rest would each wait for a timeout and hold up the server's sweep loop).
  * The stale check runs even then: it uses the Restate admin API, which may
  * still answer, and it bounds itself the same way. Deliveries stranded in
@@ -332,16 +420,19 @@ export async function pokeDueSenders(db: DatabaseExecutor, now: Date = new Date(
  */
 export async function sweepNotificationOutbox(db: DatabaseExecutor = defaultDb) {
   const retried = await retryFailedEvents(db);
-  const pending = await claimPendingEvents(db);
+  let pending = 0;
   let sent = 0;
-  for (const eventId of pending) {
-    const result = await handOverNotificationEvent(db, eventId);
-    if (result === 'failed') break;
-    if (result === 'sent') sent += 1;
-  }
+  const deadline = Date.now() + HANDOVER_BUDGET_MS;
+  do {
+    const batch = await claimPendingEvents(db, HANDOVER_BATCH);
+    pending += batch.length;
+    const round = await handOverEvents(db, batch);
+    sent += round.sent;
+    if (round.unreachable || batch.length < HANDOVER_BATCH) break;
+  } while (Date.now() < deadline);
   const stale = await failStaleEvents(db);
   const interrupted = await failStuckSendingDeliveries(db);
   if (interrupted > 0) log.warn({ interrupted }, 'notification.delivery.interrupted');
-  const poked = await pokeDueSenders(db);
-  return { retried, pending: pending.length, sent, stale, interrupted, poked };
+  const senders = await pokeDueSenders(db);
+  return { retried, pending, sent, stale, interrupted, ...senders };
 }
