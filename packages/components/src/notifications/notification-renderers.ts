@@ -57,7 +57,8 @@ export const notificationRenderers: { [T in NotificationType]: NotificationRende
   'notification.whatsapp_failed': (data) => ({
     icon: MessageCircleWarning,
     title: `WhatsApp message to ${data.studentName} failed`,
-    description: data.errorCode ? `Error ${data.errorCode}.` : undefined,
+    // The staff explanation, as in the delivery log; the error code stays in the log's details.
+    description: data.errorMessage ?? 'Sending failed.',
   }),
   'notification.whatsapp_batch_failed': (data) => {
     const messages = `${data.failedCount} WhatsApp ${data.failedCount === 1 ? 'message' : 'messages'}`;

@@ -186,7 +186,7 @@ describe('delivery log, resend and failure alerts', () => {
 
     await sweepWhatsAppFailureAlerts();
     const [alert] = await db.select().from(notificationEventTable).where(eq(notificationEventTable.key, `whatsapp-failed:${stuck}`));
-    expect(alert).toMatchObject({ type: 'notification.whatsapp_failed', data: { errorCode: 'outcome_unknown', failedType: 'payment.received' } });
+    expect(alert).toMatchObject({ type: 'notification.whatsapp_failed', data: { errorCode: 'outcome_unknown', errorMessage: INTERRUPTED_SEND_MESSAGE.whatsapp, failedType: 'payment.received' } });
     await expect(accountant.school.resendNotificationDelivery({ schoolId, deliveryId: stuck })).resolves.toEqual({ created: true });
     // The fresh claim is cleaned up so other tests' sweeps never fail it later.
     await db.update(notificationDeliveryTable).set({ status: 'failed', failedAt: now, errorCode: 'test', failureAlertedAt: now }).where(eq(notificationDeliveryTable.id, fresh));

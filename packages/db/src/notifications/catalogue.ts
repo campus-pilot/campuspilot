@@ -122,6 +122,13 @@ export const notificationPayloadSchemas = {
     failedType: z.string().min(1).max(100),
     /** Provider error code, never provider prose. */
     errorCode: z.string().max(100).optional(),
+    /**
+     * The delivery's staff-facing explanation (`notification_delivery.error_message`,
+     * written by the API, never provider prose), shown as the entry's text like
+     * in the delivery log. Absent when the delivery has none, and on alerts
+     * created before it was recorded.
+     */
+    errorMessage: z.string().max(500).optional(),
   }),
   /**
    * WhatsApp copies of one bulk send failed (D-38): one alert per billing

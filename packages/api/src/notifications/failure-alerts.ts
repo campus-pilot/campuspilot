@@ -110,6 +110,7 @@ async function alertOneOffFailures(db: Database, granted: GrantedRecipients) {
       id: notificationDeliveryTable.id,
       schoolId: notificationDeliveryTable.schoolId,
       errorCode: notificationDeliveryTable.errorCode,
+      errorMessage: notificationDeliveryTable.errorMessage,
       resendOfDeliveryId: notificationDeliveryTable.resendOfDeliveryId,
       type: notificationTable.type,
       data: notificationTable.data,
@@ -151,6 +152,7 @@ async function alertOneOffFailures(db: Database, granted: GrantedRecipients) {
           studentName,
           failedType: delivery.type,
           ...(delivery.errorCode ? { errorCode: delivery.errorCode.slice(0, 100) } : {}),
+          ...(delivery.errorMessage ? { errorMessage: delivery.errorMessage.slice(0, 500) } : {}),
         },
       });
       return result.eventId;

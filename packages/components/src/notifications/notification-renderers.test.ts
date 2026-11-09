@@ -18,6 +18,14 @@ describe('notification renderers', () => {
     ).toBe('1 WhatsApp message of Final Examination results failed');
   });
 
+  it('shows a failed WhatsApp message by its explanation, not its raw error code', () => {
+    const failed = (extra: { errorCode?: string; errorMessage?: string }) =>
+      presentNotification({ type: 'notification.whatsapp_failed', data: { admissionId: 'a', studentName: 'Asha', failedType: 'bill.issued', ...extra } }).description;
+    expect(failed({ errorCode: 'outcome_unknown', errorMessage: 'WhatsApp did not confirm this message.' })).toBe('WhatsApp did not confirm this message.');
+    expect(failed({ errorCode: 'wa_131026' })).toBe('Sending failed.');
+    expect(failed({})).toBe('Sending failed.');
+  });
+
   it('tells the publisher the in-app copies apart from WhatsApp', () => {
     expect(
       presentNotification({
