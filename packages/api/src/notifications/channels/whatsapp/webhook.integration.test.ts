@@ -115,8 +115,9 @@ describe('WhatsApp webhook', () => {
     await db.update(notificationDeliveryTable).set({ providerMessageId: recordedLater }).where(eq(notificationDeliveryTable.providerMessageId, wamid));
     expect((await post(callback({ statuses: [status(recordedLater, 'delivered', nowSeconds)] }))).status).toBe(200);
     expect(await read()).toMatchObject({ status: 'delivered' });
-    // A receipt for a message this system never recorded, from long ago, is acknowledged.
-    expect((await post(callback({ statuses: [status(`wamid.${randomUUID()}`, 'delivered', nowSeconds - 2 * 60 * 60)] }))).status).toBe(200);
+    // A receipt for a message this system never recorded (sent from WhatsApp Manager, say), older than a few minutes, is acknowledged.
+    expect((await post(callback({ statuses: [status(`wamid.${randomUUID()}`, 'delivered', nowSeconds - 10 * 60)] }))).status).toBe(200);
+    expect((await post(callback({ statuses: [status(`wamid.${randomUUID()}`, 'delivered', nowSeconds - 2 * 60)] }))).status).toBe(503);
     // A receipt that matches a delivery but cannot move it is acknowledged too.
     expect((await post(callback({ statuses: [status(recordedLater, 'sent', nowSeconds)] }))).status).toBe(200);
   });

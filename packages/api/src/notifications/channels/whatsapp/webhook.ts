@@ -123,10 +123,13 @@ const ADVANCES_FROM: Record<WhatsAppStatusUpdate['status'], Array<'sending' | 's
 /**
  * How long after its own timestamp a receipt for an unknown message ID is
  * refused (so Meta retries it) instead of acknowledged. Covers the moment
- * between Meta accepting a send and the worker recording its message ID,
- * plus Meta's retry spacing; longer than any normal gap by far.
+ * between Meta accepting a send and the worker recording its message ID
+ * (milliseconds to seconds; the sender records it in the same step) and a
+ * few of Meta's retries. Kept short (review round 2 #7) because receipts
+ * for messages sent outside this system (for example from WhatsApp
+ * Manager) also match no delivery, and each one refused makes Meta retry.
  */
-export const EARLY_RECEIPT_WINDOW_MS = 60 * 60 * 1000;
+export const EARLY_RECEIPT_WINDOW_MS = 5 * 60 * 1000;
 
 /** What one receipt did: moved a delivery, matched one it may not move, or matched none. */
 export type WhatsAppStatusResult = 'changed' | 'unchanged' | 'unknown_message';
