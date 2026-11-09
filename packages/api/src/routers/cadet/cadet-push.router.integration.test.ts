@@ -1,12 +1,13 @@
 import { db } from '@campuspilot/db';
 import { cadetPushSubscriptionTable } from '@campuspilot/db/schema/notification';
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 
 import { createCadetTestClient } from '../../../test/cadet';
 import { expectRpcCode } from '../../../test/finance/assertions';
 import { createTestAdmission, createTestSchool } from '../../../test/fixtures';
 import { createCadetLogin, fakePushSubscription } from '../../../test/notifications';
+import { MAX_ACTIVE_PUSH_SUBSCRIPTIONS } from '../../notifications/channels/web-push/subscriptions';
 
 async function student(headers?: Headers) {
   const school = await createTestSchool();
@@ -17,6 +18,23 @@ async function student(headers?: Headers) {
 describe('cadet web push subscriptions', () => {
   it('rejects anonymous callers', async () => {
     await expectRpcCode(createCadetTestClient(new Headers()).subscribePush(fakePushSubscription()), 'UNAUTHORIZED');
+  });
+
+  it('keeps the newest devices of a login and revokes the oldest beyond the cap', async () => {
+    const { client, userId } = await student();
+    const subscriptions = Array.from({ length: MAX_ACTIVE_PUSH_SUBSCRIPTIONS + 1 }, () => fakePushSubscription());
+    for (const subscription of subscriptions) await client.subscribePush(subscription);
+    const active = await db
+      .select({ endpoint: cadetPushSubscriptionTable.endpoint })
+      .from(cadetPushSubscriptionTable)
+      .where(and(eq(cadetPushSubscriptionTable.cadetUserId, userId), isNull(cadetPushSubscriptionTable.revokedAt)));
+    expect(active).toHaveLength(MAX_ACTIVE_PUSH_SUBSCRIPTIONS);
+    expect(active.map((row) => row.endpoint)).not.toContain(subscriptions[0]!.endpoint);
+    expect(await client.getPushSubscription({ endpoint: subscriptions[0]!.endpoint })).toEqual({ active: false });
+    // Turning the oldest device on again makes it the newest; the next oldest goes.
+    await client.subscribePush(subscriptions[0]!);
+    expect(await client.getPushSubscription({ endpoint: subscriptions[0]!.endpoint })).toEqual({ active: true });
+    expect(await client.getPushSubscription({ endpoint: subscriptions[1]!.endpoint })).toEqual({ active: false });
   });
 
   it('turns notifications on and off for this device and reports the state', async () => {

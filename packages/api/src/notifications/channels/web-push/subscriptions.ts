@@ -1,7 +1,7 @@
 import type { DatabaseExecutor } from '@campuspilot/db';
 import { cadetUser } from '@campuspilot/db/schema/cadet';
 import { cadetPushSubscriptionTable } from '@campuspilot/db/schema/notification';
-import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, notInArray } from 'drizzle-orm';
 
 /**
  * Push subscription storage (plan §3b). Every query is bound to one cadet
@@ -16,9 +16,19 @@ export type PushSubscriptionInput = {
 };
 
 /**
+ * Most active subscriptions one Cadet login keeps (review round 2 #6): a
+ * student uses a handful of devices; a client re-subscribing in a loop must
+ * not grow the table or the fan-out without bound.
+ */
+export const MAX_ACTIVE_PUSH_SUBSCRIPTIONS = 10;
+
+/**
  * Stores (or re-activates) this login's subscription for one endpoint. The
  * browser may hand out new keys for the same endpoint, so keys are always
- * overwritten; a revoked row becomes active again.
+ * overwritten; a revoked row becomes active again. The login then keeps its
+ * {@link MAX_ACTIVE_PUSH_SUBSCRIPTIONS} most recently subscribed devices;
+ * older ones are revoked (that device stops getting pushes until it turns
+ * notifications on again).
  */
 export async function upsertPushSubscription(
   db: DatabaseExecutor,
@@ -46,6 +56,22 @@ export async function upsertPushSubscription(
         updatedAt: now,
       },
     });
+  const newest = db
+    .select({ id: cadetPushSubscriptionTable.id })
+    .from(cadetPushSubscriptionTable)
+    .where(and(eq(cadetPushSubscriptionTable.cadetUserId, cadetUserId), isNull(cadetPushSubscriptionTable.revokedAt)))
+    .orderBy(desc(cadetPushSubscriptionTable.updatedAt), desc(cadetPushSubscriptionTable.createdAt), desc(cadetPushSubscriptionTable.id))
+    .limit(MAX_ACTIVE_PUSH_SUBSCRIPTIONS);
+  await db
+    .update(cadetPushSubscriptionTable)
+    .set({ revokedAt: now, updatedAt: now })
+    .where(
+      and(
+        eq(cadetPushSubscriptionTable.cadetUserId, cadetUserId),
+        isNull(cadetPushSubscriptionTable.revokedAt),
+        notInArray(cadetPushSubscriptionTable.id, newest),
+      ),
+    );
 }
 
 /** Revokes this login's subscription for one endpoint; true when one was active. */
