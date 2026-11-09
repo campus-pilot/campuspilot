@@ -50,6 +50,8 @@ export const phoneNumberSchema = z
   .trim()
   .min(1, "Phone number is required.")
   .max(MAX_PHONE_INPUT_LENGTH)
+  // Advertised to API and MCP clients (and used by schema-sample tests).
+  .meta({ examples: ["+919876543210"] })
   .transform((value, context) => {
     const e164 = toE164PhoneNumber(value);
     if (!e164) {
