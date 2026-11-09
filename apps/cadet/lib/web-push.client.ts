@@ -16,14 +16,21 @@ import { client } from './orpc';
 
 const SERVICE_WORKER_URL = '/sw.js';
 
-/** Whether this browser has every API web push needs and the portal has a key. */
+/**
+ * Whether web push is set up for this portal build (a VAPID public key was
+ * supplied at build time). A fact about the deployment, kept separate from
+ * whether the browser supports push: without a key the portal offers no
+ * device notifications at all, rather than calling the browser unsupported.
+ */
+export const webPushConfigured = Boolean(env.NEXT_PUBLIC_VAPID_PUBLIC_KEY);
+
+/** Whether this browser has every API web push needs. */
 function hasPushApis() {
   return (
     typeof window !== 'undefined' &&
     'serviceWorker' in navigator &&
     'PushManager' in window &&
-    'Notification' in window &&
-    Boolean(env.NEXT_PUBLIC_VAPID_PUBLIC_KEY)
+    'Notification' in window
   );
 }
 
@@ -38,6 +45,7 @@ async function currentSubscription(): Promise<PushSubscription | null> {
  * installed (Home Screen) app.
  */
 export async function readDeviceNotificationStatus(): Promise<Exclude<DeviceNotificationStatus, 'loading'>> {
+  if (!webPushConfigured) throw new DevicePushError('Notifications are not set up for this portal.');
   if (isIos() && !isInstalledApp()) return 'needs_install';
   if (!hasPushApis()) return 'unsupported';
   if (Notification.permission === 'denied') return 'denied';
@@ -69,6 +77,7 @@ export class DevicePushError extends Error {
  * call made inside the user's gesture.
  */
 export async function turnOnDeviceNotifications(permission: Promise<NotificationPermission>) {
+  if (!webPushConfigured) throw new DevicePushError('Notifications are not set up for this portal.');
   if (!hasPushApis()) throw new DevicePushError('This browser cannot show notifications.');
   if ((await permission) !== 'granted') {
     throw new DevicePushError('Notifications were not allowed. Allow them in your browser’s site settings to turn them on.');
@@ -89,7 +98,7 @@ export async function turnOnDeviceNotifications(permission: Promise<Notification
  * browser may still use it.
  */
 export async function turnOffDeviceNotifications() {
-  if (!hasPushApis()) return;
+  if (!webPushConfigured || !hasPushApis()) return;
   const subscription = await currentSubscription();
   if (subscription) await client.unsubscribePush({ endpoint: subscription.endpoint });
 }

@@ -8,6 +8,7 @@ import {
   readDeviceNotificationStatus,
   turnOffDeviceNotifications,
   turnOnDeviceNotifications,
+  webPushConfigured,
 } from '@/lib/web-push.client';
 
 /** Browser and server state of this device; read in a query, never an effect. */
@@ -29,11 +30,20 @@ function useDeviceNotifications() {
 }
 
 /**
- * "Turn on notifications" for the signed-in student on this device. The
- * permission request starts synchronously in the click handler (a user
- * gesture, required by Safari) and is handed to the mutation.
+ * "Turn on notifications" for the signed-in student on this device, shown
+ * only when web push is set up for this portal build (otherwise nothing is
+ * offered; the inbox still works).
  */
 export function CadetDeviceNotifications() {
+  return webPushConfigured ? <CadetDeviceNotificationsCard /> : null;
+}
+
+/**
+ * The device card. The permission request starts synchronously in the
+ * click handler (a user gesture, required by Safari) and is handed to the
+ * mutation.
+ */
+function CadetDeviceNotificationsCard() {
   const { status, turnOn, turnOff } = useDeviceNotifications();
   const failure = turnOn.error ?? turnOff.error ?? null;
   const errorMessage = failure
