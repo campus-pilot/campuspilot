@@ -72,6 +72,16 @@ describe('Cadet Portal release and teacher remarks (staff procedures)', () => {
       await expectRpcCode(principal.school.releaseExamToCadet(scope), 'BAD_REQUEST');
     });
 
+    it('records an earlier release time when given one, and refuses a future one', async () => {
+      await completeExam();
+      const future = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+      await expectRpcCode(principal.school.releaseExamToCadet({ ...scope, releasedAt: future }), 'BAD_REQUEST');
+      expect((await principal.school.getExamOverview(scope)).cadetReleasedAt).toBeNull();
+
+      const released = await principal.school.releaseExamToCadet({ ...scope, releasedAt: '2026-06-29T16:00:00+05:30' });
+      expect(new Date(released.cadetReleasedAt!).toISOString()).toBe('2026-06-29T10:30:00.000Z');
+    });
+
     it('refuses to reopen while released and allows it after withdrawing', async () => {
       await completeExam();
       await principal.school.releaseExamToCadet(scope);

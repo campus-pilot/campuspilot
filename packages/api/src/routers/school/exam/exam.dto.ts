@@ -30,6 +30,20 @@ export const planScopeSchema = sessionScopeSchema.extend({
   examPlanId: z.string().min(1),
 });
 export const examDtoSchema = examDefinitionSchema.extend({ slug: z.string() });
+/**
+ * Releasing results to the Cadet Portal. `releasedAt` records a release that
+ * already happened (for example results shared before they were entered here,
+ * or a demo school's back-dated history); it defaults to now and may not be in
+ * the future. Visibility in the portal still starts when this call is made.
+ */
+export const releaseExamToCadetInputSchema = examScopeSchema.extend({
+  releasedAt: z.iso
+    .datetime({ offset: true })
+    .transform((value) => new Date(value))
+    .optional()
+    .describe('When the results were released, if earlier than now (ISO 8601 with offset). Defaults to now; must not be in the future.'),
+});
+
 export const createExamInputSchema = examScopeSchema.extend({
   name: z.string().trim().min(1).max(200),
   order: z.number().int().positive(),

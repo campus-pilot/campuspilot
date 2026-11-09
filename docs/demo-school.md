@@ -94,11 +94,14 @@ one when just one is completed. The session step turns on the school's
 "show class averages in Cadet Portal" setting. Periodic Test 1 exists so a
 demo created from late September on has both a released and an unreleased
 completed exam; it charges no examination fee (`chargesFee: false`).
-Release times come from the API server's clock when the step runs (the real
-`releaseExamToCadet` procedure records them), not from `asOf`, so a demo's
-"Released on" dates are the day the demo was created even though exam
-windows and payments are back-dated. There is deliberately no demo-only way
-to set a release time.
+Release times are back-dated from `asOf` like every other demo date: each
+released exam is released `session.cadetRelease.daysAfterWindow` days after its
+window at `cadetRelease.hour` local time (`plan.ts`). The seed schema keeps
+that within `activeWithinDaysAfterWindow`, so a release always falls after the
+exam's marks were complete and before `asOf`. The step passes the time as
+`releasedAt` to the real `releaseExamToCadet` procedure; this optional input is
+not demo-only: staff may record a release that already happened, never one in
+the future.
 
 ### Credentials
 

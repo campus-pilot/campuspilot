@@ -474,20 +474,20 @@ export async function seedExamRemarks(
  * Releases a completed exam to the Cadet Portal when the plan says so.
  * Returns what actually happened: `released` (this run released it),
  * `already-released` (a replay found it released) or `skipped` (not planned,
- * or the exam is not completed). The release time is the server's clock at
- * this step, not `asOf`; see docs/demo-school.md.
+ * or the exam is not completed). The release is back-dated to the plan's
+ * `cadetReleasedAt`, derived from `asOf` like every other demo date.
  */
 export async function seedExamRelease(
   ctx: SeedContext,
   sessionId: string,
   exam: DemoExam,
 ): Promise<{ outcome: 'released' | 'already-released' | 'skipped' }> {
-  if (!exam.releaseToCadet) return { outcome: 'skipped' };
+  if (!exam.cadetReleasedAt) return { outcome: 'skipped' };
   const scope = { schoolId: ctx.schoolId, sessionId, examSlug: exam.slug };
   const overview = await ctx.rpc.school.getExamOverview(scope);
   if (overview.cadetReleasedAt) return { outcome: 'already-released' };
   if (overview.status !== 'completed') return { outcome: 'skipped' };
-  await ctx.rpc.school.releaseExamToCadet(scope);
+  await ctx.rpc.school.releaseExamToCadet({ ...scope, releasedAt: exam.cadetReleasedAt });
   return { outcome: 'released' };
 }
 
