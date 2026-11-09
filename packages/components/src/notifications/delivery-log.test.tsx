@@ -1,11 +1,16 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render as renderInDom, screen } from '@testing-library/react';
+import { TooltipProvider } from '@campuspilot/ui/components/tooltip';
+import type { ReactElement } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { NotificationDeliveryLog, type DeliveryLogDelivery } from './delivery-log';
 import { whatsappReadiness } from './whatsapp-readiness';
 
 afterEach(() => cleanup());
+
+/** The app renders inside a TooltipProvider (its root layout); so do these tests. */
+const render = (element: ReactElement) => renderInDom(<TooltipProvider>{element}</TooltipProvider>);
 
 const delivery = (overrides: Partial<DeliveryLogDelivery>): DeliveryLogDelivery => ({
   id: 'ndl_1', channel: 'whatsapp', status: 'sent', skipReason: null, errorCode: null, errorMessage: null,
@@ -30,7 +35,10 @@ describe('NotificationDeliveryLog', () => {
       />,
     );
     expect(screen.getByText('Payment receipt · RCP/2026-27/000001 · Meera')).toBeTruthy();
-    expect(screen.getByText('wa_131026')).toBeTruthy();
+    // No human message for this code: a generic line, with the code behind the info button.
+    expect(screen.getByText('Sending failed.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Error code wa_131026' })).toBeTruthy();
+    expect(screen.queryByText(/wa_131026/)).toBeNull();
     expect(screen.getByText('Device notifications not turned on')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Resend' }));
     expect(onResend).toHaveBeenCalledWith('ndl_failed');
@@ -48,6 +56,15 @@ describe('NotificationDeliveryLog', () => {
     expect(screen.queryByRole('button', { name: 'Resend' })).toBeNull();
     expect(screen.getByText('This device no longer receives notifications.')).toBeTruthy();
     expect(screen.getByText(/^Will retry /)).toBeTruthy();
+  });
+
+  it('shows only the human message of an unknown outcome, with the code behind the info button', () => {
+    const message = 'WhatsApp did not confirm this message; it may or may not have been sent. Check with the guardian before resending.';
+    const items = [{ notificationId: 'ntf_3', type: 'bill.issued', studentName: null, reference: null, createdAt: '2026-11-09T10:00:00Z', deliveries: [delivery({ status: 'failed', errorCode: 'outcome_unknown', errorMessage: message })] }];
+    render(<NotificationDeliveryLog canResend={false} resendingDeliveryId={null} onResend={vi.fn()} items={items} />);
+    expect(screen.getByText(message)).toBeTruthy();
+    expect(screen.queryByText(/outcome_unknown/)).toBeNull();
+    expect(screen.getByRole('button', { name: 'Error code outcome_unknown' })).toBeTruthy();
   });
 
   it('hides Resend without permission and after a resend', () => {

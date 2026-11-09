@@ -1,5 +1,7 @@
 import { Badge } from '@campuspilot/ui/components/badge';
 import { Button } from '@campuspilot/ui/components/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@campuspilot/ui/components/tooltip';
+import { Info } from 'lucide-react';
 
 import {
   DELIVERY_CHANNEL_LABELS,
@@ -54,8 +56,26 @@ function deliveryDetail(delivery: DeliveryLogDelivery) {
   }
   if (delivery.subscriptionGone) return 'This device no longer receives notifications.';
   if (delivery.status === 'skipped' && delivery.skipReason) return DELIVERY_SKIP_REASON_LABELS[delivery.skipReason];
-  if (delivery.status === 'failed') return [delivery.errorCode, delivery.errorMessage].filter(Boolean).join(' · ') || null;
+  if (delivery.status === 'failed') return delivery.errorMessage ?? 'Sending failed.';
   return null;
+}
+
+/**
+ * The provider's error code of a failed copy, for support: behind an info
+ * button's tooltip (and its accessible name) rather than in the line, so
+ * staff read the human message, not `outcome_unknown` or `wa_131026`.
+ */
+function ErrorCodeHint({ code }: { code: string }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button type="button" className="text-muted-foreground" aria-label={`Error code ${code}`}>
+          <Info className="size-3.5" aria-hidden />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent>Error code: {code}</TooltipContent>
+    </Tooltip>
+  );
 }
 
 function DeliveryLine({ delivery, canResend, resending, onResend }: { delivery: DeliveryLogDelivery; canResend: boolean; resending: boolean; onResend: (deliveryId: string) => void }) {
@@ -69,6 +89,7 @@ function DeliveryLine({ delivery, canResend, resending, onResend }: { delivery: 
       </span>
       <Badge variant={failed ? 'destructive' : 'outline'}>{DELIVERY_STATUS_LABELS[delivery.status]}</Badge>
       {detail ? <span className="text-muted-foreground">{detail}</span> : null}
+      {failed && delivery.errorCode && !delivery.subscriptionGone ? <ErrorCodeHint code={delivery.errorCode} /> : null}
       {canResend && delivery.resendable ? (
         <Button type="button" variant="outline" size="sm" disabled={resending} onClick={() => onResend(delivery.id)}>
           {resending ? 'Resending…' : 'Resend'}
