@@ -46,6 +46,7 @@ import {
 import { dashboardPage } from './sessions/[sessionId]/_route';
 import { examPage, examDetailsPage } from './sessions/[sessionId]/exam/_route';
 import { noticesPage } from './sessions/[sessionId]/notices/_route';
+import { notificationsPage } from './notifications/_route';
 import { staffPage } from './staff/_route';
 
 import { documentPages } from './sessions/[sessionId]/documents/_route';
@@ -56,6 +57,7 @@ const pages: ManagementPageDescriptor<any>[] = [
   ...documentPages,
   dashboardPage,
   staffPage,
+  notificationsPage,
   noticesPage,
   admissionPage,
   admissionDetailsPage,

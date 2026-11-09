@@ -81,3 +81,11 @@ export function presentNotification(item: Pick<NotificationListItem, 'type' | 'd
   if (!render) return { icon: BellRing, title: 'Notification' };
   return render(item.data as never);
 }
+
+/** Catalogue types re-exported for app route builders (apps do not depend on `@campuspilot/db`). */
+export type {
+  AdmissionNotificationType,
+  NotificationPayloads,
+  NotificationType,
+  StaffNotificationType,
+} from '@campuspilot/db/notifications/catalogue';

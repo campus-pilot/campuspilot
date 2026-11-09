@@ -19,6 +19,7 @@ import { useInstallApp } from '@/lib/install-app.client';
 import { AccountDialog } from './account-dialog';
 import { DemoSchoolBanner } from './demo-school-banner';
 import { ManagementCommandPalette } from './management-command-palette';
+import { ManagementNotificationBell } from './notifications/management-notifications';
 import { commandPaletteContextKey } from './management-command-model';
 import { SchoolSwitcher } from './school-switcher';
 
@@ -114,7 +115,12 @@ export function ManagementShell({
         user={user}
         footerLinks={state.footerLinks}
         footerContent={state.footerContent}
-        navbarActions={state.navbarActions}
+        navbarActions={
+          <>
+            {state.navbarActions}
+            <ManagementNotificationBell schoolId={state.commandContext.schoolId} />
+          </>
+        }
         navbarSearch={
           showSearch ? (
             <Button
