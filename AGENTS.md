@@ -105,6 +105,17 @@ alert list before opening the relevant editor. Remove the registration when the
 condition is resolved. Use adjacent field errors and transient save feedback for
 validation/submission errors rather than adding them to the shell warning list.
 
+## Cadet Portal
+
+Before changing anything cadet-related (the cadet Better Auth instance and
+admission sign-in, `cadet_*` tables, `cadetRouter`/`cadetProcedure`, the cadet
+MCP and its OAuth pages, `apps/cadet`, Cadet Portal password issuing in the
+admission workflows, or the demo purge of cadet logins), read the canonical
+[Cadet Portal guide](docs/cadet-portal.md). It records the two-instance auth
+isolation, route order and CORS scoping, the admission-id-only identity model,
+sign-in limits, issue/reset and revocation semantics, and the checklist for
+adding a cadet procedure, screen or table.
+
 ## Demo schools
 
 Demo schools (`school.is_demo`) are provisioned by `DemoSchoolWorkflow`

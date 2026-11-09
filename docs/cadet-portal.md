@@ -1,0 +1,499 @@
+# Cadet Portal
+
+This guide is the canonical cross-layer reference for the Cadet Portal: the
+student-facing app, its own Better Auth instance, the `cadet_*` tables,
+`cadetRouter`, the cadet MCP, and the management actions that issue portal
+passwords. Read it before changing cadet auth, any `cadet_*` table, the cadet
+router or MCP, `apps/cadet`, password issuing in the admission workspace, or the
+demo purge of cadet logins.
+
+Where this guide and older design notes disagree, the code wins; every rule here
+cites the file that enforces it.
+
+## Naming and goal
+
+**Cadet** is the code name for everything student-facing. "Student" is never used
+for it, because `student` already names the enrolment table (one row per admission
+per academic session). A cadet login belongs to an **admission**
+(`admission`, unique per `(school_id, admission_no)`), so the portal spans every
+session the student was enrolled in.
+
+| Place | Name |
+| --- | --- |
+| UI copy | **Cadet Portal** (code names below are unchanged) |
+| App | `apps/cadet` (Next.js), dev port **3004** (`apps/cadet/package.json`, `apps/cadet/Dockerfile`) |
+| Production host | `cadet.campuspilot.in` (decided; not yet configured anywhere in this repo) |
+| API routes | `/api/cadet/auth/*`, `/api/cadet/rpc/*`, `/api/cadet/mcp` |
+| Router / procedure base | `cadetRouter`, `cadetProcedure` |
+| Tables | `cadet_*` (`packages/db/src/schema/cadet.ts`) |
+| Cookie prefix | `cpc_` (staff: `cp_`) |
+| Redis key prefix | `server:cadet-auth:` (staff: `server:auth:`) |
+| Env | `CADET_APP_URL`, `CADET_MCP_RESOURCE_URL` |
+| OPA action | `school.admission.cadet_password.issue` |
+| `createAdmission` flag | `generateCadetPassword` |
+| Placeholder email | `<admissionId>@cadet.campuspilot.invalid` |
+
+Students sign in with school code + admission number + a school-issued password
+and see their own data. Today the portal shows only the student's name and a
+Sign out button; ledger, notices and results are future work. Students can also
+connect AI apps through the read-only cadet MCP.
+
+## Architecture
+
+One API server (`apps/server`) and one API package (`packages/api`) serve both
+staff and cadets. Isolation comes from a **second Better Auth instance** and a
+**separate router with its own context type**, not from a separate server or
+Postgres schema.
+
+### Two Better Auth instances, one foundation
+
+`packages/auth/src/auth-foundation.ts` holds what both instances share: logger,
+Drizzle adapter, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, cookie attributes
+(`sharedCookieOptions`), Redis secondary storage, `storeSessionInDatabase`, and
+the `authDb` pool. Each instance declares only what differs:
+
+| | Staff (`packages/auth/src/server.ts`) | Cadet (`packages/auth/src/cadet.ts`) |
+| --- | --- | --- |
+| Base path / OAuth issuer | `/api/auth` | `/api/cadet/auth` (`cadetOauthIssuer()`) |
+| Cookie prefix | `cp_` | `cpc_` |
+| Tables | staff auth tables | `cadet_*` via `cadetAuthSchema` |
+| Redis prefix | `server:auth:` | `server:cadet-auth:` (`CADET_REDIS_KEY_PREFIX`) |
+| Trusted origins | `CORS_ORIGIN` | `CADET_APP_URL` origin only |
+| Sign-in | email/password, Google, API key | `POST /sign-in/admission` only |
+| MCP OAuth | resource `MCP_RESOURCE_URL`, pages on management | resource `CADET_MCP_RESOURCE_URL`, pages on the cadet app |
+
+Why they are separate:
+
+- **Cookies.** A teacher who is also a parent must be signed in to management and
+  the portal at once. Distinct prefixes let both sessions coexist; neither app
+  reads the other's cookie. Better Auth's `multiSession` was rejected: it keeps
+  one active session per instance, so the two apps would fight over it.
+- **Redis.** Sessions and sign-in counters live under different prefixes, so a
+  staff session token can never resolve as a cadet session or the reverse.
+- **Issuer and resource.** Cadet MCP tokens are signed by the cadet JWKS
+  (`cadet_jwks`) for the cadet issuer and audience. The staff gate never
+  verifies them and the cadet gate never verifies staff tokens
+  (`apps/server/src/http.ts`, `verifyMcpAccessToken` in
+  `packages/auth/src/mcp-credential.ts`).
+
+On the cadet instance `emailAndPassword` is disabled and `disabledPaths` blocks
+`/sign-in/email`, `/sign-up/email`, `/update-user`, `/delete-user`,
+`/change-email`, `/change-password`, `/set-password`, `/request-password-reset`
+and `/reset-password`. Its `user.additionalFields` (`admissionId`,
+`passwordSource`, `issuedAt`, `issuedBy`) are `input: false`. The shared MCP
+OAuth plugins (`jwt`, `mcp`, `cimd`) come from `mcpOAuthPlugins()` in
+`packages/auth/src/mcp-oauth.ts`, parameterised by `cadetMcpOAuthConfig()`.
+
+### Routes and their order
+
+All in `apps/server/src/http.ts`:
+
+| Route | Handler |
+| --- | --- |
+| `POST/GET /api/cadet/auth/*` | `cadetAuth.handler` |
+| `/api/cadet/rpc/*` | `cadetRpcHandler` (`cadetRouter`), context from `createCadetContextFromHeaders` |
+| `/api/cadet/mcp` | `createMcpGate<CadetContext>` + `createCampusPilotMcpHandler<CadetContext>` with `cadetMcpCatalog = buildMcpCatalog(cadetRouter)` and its own `AsyncLocalStorage` |
+| `GET /.well-known/oauth-protected-resource/api/cadet/mcp` | `cadetAuth.handler` |
+| `GET /.well-known/oauth-authorization-server/api/cadet/auth` | `cadetAuth.api.getOAuthServerConfig()` |
+| `GET /.well-known/openid-configuration/api/cadet/auth` | `cadetAuth.api.getOpenIdConfig()` |
+
+The three cadet well-known routes are registered **before**
+`/.well-known/oauth-protected-resource/*`, which sends everything else to staff
+auth. Hono matches in registration order; moving them after the wildcard makes
+staff auth answer for the cadet resource. `cadet-http.integration.test.ts`
+covers this. The staff MCP is `/mcp`, not under `/api`; the cadet MCP is
+deliberately `/api/cadet/mcp` and never nested under a staff resource path.
+
+### CORS
+
+`apps/server/src/config.ts`: the cadet origin (`CADET_APP_URL`) is **not** in
+`CORS_ORIGIN` (staff auth trusts `CORS_ORIGIN`). The credentialed application CORS
+returns the cadet origin only when the path starts with `/api/cadet/`; on staff
+RPC, MCP and blob routes it gets no CORS. Public discovery (`/.well-known/*`,
+`/api/cadet/auth/.well-known/*`, `/api/cadet/auth/jwks`) uses `origin: *`
+without credentials, as for staff.
+
+## Database and identity model
+
+Tables (`packages/db/src/schema/cadet.ts`, migrations
+`packages/db/src/migrations/0029_cadet-portal.sql` and
+`0030_demo-purge-cadet.sql`), all in `public`:
+
+| Table | Notes |
+| --- | --- |
+| `cadet_user` | One login per admission. `admission_id` unique, not null, FK to `admission.id` **on delete cascade**. `password_source` (`cadet_password_source` enum: `issued`, `student_set`), `issued_at`, `issued_by` (FK to staff `user.id`, on delete set null). `name` is stored empty; `email` is the placeholder. |
+| `cadet_session`, `cadet_account`, `cadet_verification` | Better Auth models; sessions and accounts cascade from `cadet_user`. The password hash is in `cadet_account` (`provider_id = 'credential'`, `account_id = user id`). |
+| `cadet_jwks` | Signing keys of the cadet issuer. |
+| `cadet_oauth_client`, `cadet_oauth_resource`, `cadet_oauth_client_resource`, `cadet_oauth_refresh_token`, `cadet_oauth_access_token`, `cadet_oauth_consent`, `cadet_oauth_client_assertion` | Cadet MCP authorization server. |
+
+The cadet OAuth tables are column-for-column copies of the staff ones because the
+same Better Auth models map onto them. `CadetOAuthTableShapeChecks` in
+`packages/auth/src/mcp-oauth.ts` fails typecheck if a cadet table drifts from its
+staff counterpart; `CADET_OAUTH_SERVER_TABLES` and `CADET_OAUTH_GRANT_TABLES`
+(`mcp-credential.ts`) rely on that. Change both tables together.
+
+Identity rules:
+
+- **The admission is referenced only by `admission.id`**, the login only by
+  `cadet_user.id`. The placeholder email is built from the admission id
+  (`cadetPlaceholderEmail` in `packages/auth/src/cadet-policy.ts`); `.invalid`
+  never delivers and email sign-in is disabled, so it can never authenticate.
+- **The admission number is never stored at the auth level**: not in a `cadet_*`
+  column, key or constraint, not in the email, session, Redis, token claims (the
+  subject is `cadet_user.id`) or rate-limit keys. Sign-in resolves it against the
+  live `admission.admission_no` each time. Renaming 2026 to 2027 makes 2027 work
+  at once and 2026 stop; existing sessions are unaffected.
+- `admission.email` is a contact field only; it is never the login.
+- The student's name stays on the admission and is never copied to `cadet_user`.
+- One login per admission. A parent with two children uses two logins for now.
+
+## Sign-in
+
+`POST /api/cadet/auth/sign-in/admission` with `{ schoolSlug, admissionNo,
+password, oauth_query? }`, implemented by the `cadetAdmissionSignIn` plugin in
+`packages/auth/src/cadet-sign-in.ts`. The form shows **School code** (the school
+slug), **Admission number** and **Password**.
+
+1. If the client IP is locked, refuse with `CADET_SIGN_IN_LOCKED`.
+2. Join `school.slug` + `admission.admission_no` to the admission (registered or
+   unregistered) and left-join its login and credential hash.
+3. No admission: hash the password anyway (equal timing), count an IP failure,
+   refuse with `INVALID_CADET_CREDENTIALS`.
+4. Admission found: if `sign-in:admission:<admissionId>` is locked, refuse.
+5. Verify the hash; an admission **without** a login hashes anyway and fails
+   exactly like a wrong password.
+6. Failure counts against both the IP and the admission. Success clears the
+   admission's count, creates the session through `internalAdapter` and sets the
+   `cpc_` cookie.
+
+Every credential failure returns the same message. Limits
+(`cadet-policy.ts`, `cadet-sign-in-limits.ts`, Redis under the cadet prefix):
+
+| Key | Limit |
+| --- | --- |
+| Resolved admission id | 5 failures in 15 min locks for 15 min; checked before the password, so a locked admission cannot be probed further. Same for admissions with and without a login. |
+| Client IP | 30 failures in 15 min locks that IP for 15 min. Failures only; success neither counts nor resets (a school lab may share one NAT). |
+
+The window starts at the first failure (`EXPIRE … NX`); reaching the limit sets
+the lock and resets the count.
+
+## Passwords
+
+### Format
+
+`generateCadetPassword()` (`packages/auth/src/cadet-password.ts`):
+`<word>-<different word>-<10..99>`, e.g. `happy-tiger-27`, from
+`node:crypto.randomInt`. 524 curated child-friendly words → about 24.7 million
+combinations. The list excludes one-edit neighbours, homophones, rude or unkind
+readings and words over nine letters; unit tests in
+`cadet-auth.integration.test.ts` enforce the mechanical rules, the rest is checked
+by hand when adding a word.
+
+The password is **issued, never derived** from profile data. Profile edits never
+touch it. Only the hash is stored; staff can never view a password again, only
+issue a new one. There is no PDF or printed slip.
+
+### Issuing and resetting
+
+| Path | Behaviour |
+| --- | --- |
+| `school.issueAdmissionCadetPassword({ schoolId, admissionId })` (`packages/api/src/routers/school/admission/admission.router.ts`) | Requires `school.admission.cadet_password.issue`. Works for registered **and** unregistered admissions. In one transaction: find the admission in the school, then `issueAdmissionCadetPassword` (`admission-cadet-password.ts`) → `issueCadetLogin` (`packages/auth/src/cadet-login.ts`), which upserts `cadet_user` on `admission_id` (the row lock serialises concurrent issues), sets `password_source = 'issued'`, `issued_at`, `issued_by`, and writes the hash to the credential account. **After commit**, `revokeCadetLoginAccess([userId])`. Returns `{ schoolSlug, admissionNo, password }` once. |
+| `school.createAdmission({ …, generateCadetPassword })` | `generateCadetPassword: z.boolean().default(false)` (`admission.dto.ts`). When true, `school.admission.cadet_password.issue` is checked **in addition to** `school.admission.create`, and the login and hash are written in the admission's transaction (rolled back together). Output field `cadetPassword` is `null` unless requested. When false, no `cadet_*` rows are created. |
+
+`issueCadetLogin` writes with Drizzle inside the caller's transaction (not
+through the auth instance) so it commits or rolls back with the admission; it
+hashes with Better Auth's `hashPassword`, the same hasher the cadet instance
+verifies with. It does **not** revoke anything; callers do that after commit.
+
+If revocation fails after a reset commits, staff get an error and no password,
+and issuing again revokes again (`admission-cadet-password.integration.test.ts`).
+
+**Permission.** OPA action `school.admission.cadet_password.issue`
+(`packages/opa/src/policies/school/catalog.rego`, granted to `school.principal`
+and `school.manager` in `grants.rego`, generated as
+`SCHOOL_ACTIONS.ISSUE_ADMISSION_CADET_PASSWORD`). It is deliberately separate from
+`school.admission.create`, so granting admission creation to another role later
+does not grant password resets.
+
+**Management UI.**
+
+- `apps/management/components/create-admission-action.tsx`: the admission dialog
+  offers a **"Generate Cadet Portal password"** checkbox (TanStack Form field,
+  unchecked by default) only to users who hold the issue permission.
+- `apps/management/components/admission-actions.tsx` and
+  `admission-actions-model.ts`: the admission workspace's top-right overflow menu
+  shows **"Issue portal password"** (permission-gated, shown for registered and
+  unregistered admissions; Edit and Unregister stay registered-only). An app
+  dialog titled "Issue a new Cadet Portal password?" warns that any previous
+  password stops working and the student is signed out everywhere, including
+  connected AI apps; its wording is correct whether or not a login exists.
+- Both flows show `IssuedCadetPasswordDialog`
+  (`packages/components/src/cadet-portal/issued-cadet-password-dialog.tsx`),
+  titled "This password will only be shown once", with school code, admission
+  number, password and a Copy details button that copies all three. The copy
+  button uses `useMutation`, so consumers need a `QueryClientProvider`.
+
+**Staff MCP.** `createAdmission` is a core write tool and exposes
+`generateCadetPassword`; when true the password is returned in the tool result.
+Accepted trade-off: the password lands in the AI app's history and should be
+rotated. `issueAdmissionCadetPassword` is `exposure: 'hidden'` on MCP: a reset
+returns a credential and signs a student out, so it stays a human action (RPC
+only).
+
+### Reset and revocation semantics
+
+`revokeCadetLoginAccess(userIds)` (`packages/auth/src/cadet.ts`) deletes every
+session **through the cadet instance's `internalAdapter.deleteUserSessions`**, so
+the Redis copies go too, then deletes the logins' cadet OAuth access tokens,
+refresh tokens and consents in one transaction. The cadet MCP gate checks the
+consent on every request (`findLiveOAuthGrant` with `CADET_OAUTH_GRANT_TABLES`),
+so an unexpired access token stops working immediately. It is idempotent.
+
+## Lifecycle
+
+| Event | Portal access |
+| --- | --- |
+| Unregister (`unregisterAdmission`, sets `registered = false`) | **Kept.** Registration and portal access are separate facts; the student keeps signing in and seeing past records. Staff can still issue passwords. |
+| Profile edit | Password untouched. |
+| Admission number edit | Only the username changes; sessions continue. |
+| Delete (`deleteAdmission`: registered admissions without enrolment history only) | Inside the delete, `findCadetLoginId` then `revokeCadetLoginAccess` (Redis included), then the admission row is deleted and the `cadet_*` rows cascade. A refused delete keeps the login. |
+| Login deleted while a token is live | `createCadetOAuthContext` reloads the login per request and returns null; `cadetProcedure` refuses if the admission is gone. |
+
+## `cadetRouter` and `cadetProcedure`
+
+- `packages/api/src/cadet/context.ts`: `CadetContext` is its own type
+  (`db`, `headers`, `login: { userId, admissionId } | null`, `principal`:
+  `anonymous` | `session` | `oauth` with grant). It is resolved only by
+  `cadetAuth.api.getSession`, so `cp_` cookies and API keys are anonymous here.
+  Cadets have no API keys.
+- `packages/api/src/cadet/procedure.ts`: builder `co =
+  os.$context<CadetContext>()`. `cadetProcedure` requires a login, binds
+  `context.cadet = { userId, admissionId, schoolId }` from
+  `cadet_user.admission_id` and that admission's `school_id`, and, for OAuth
+  callers, refuses any procedure whose `meta.mcp.access` is not `read` or a grant
+  without `mcp:read`.
+- `packages/api/src/routers/cadet/cadet.router.ts`: **not** part of `appRouter`.
+  Staff RPC, OpenAPI and MCP can never list or reach it, and its handler never
+  reaches staff procedures (the types differ). Procedures today:
+
+| Procedure | MCP | Purpose |
+| --- | --- | --- |
+| `getAdmission` | core, read, module `account` | The signed-in admission, returned with management's `admissionDtoSchema` / `toAdmissionDto` (reuse DTOs; do not fork a cadet copy). |
+| `getOAuthConsentClient({ clientId })` | hidden | Consent-screen facts from `cadet_oauth_client` only (`oauthConsentClientSchema` from `routers/auth/auth.dto.ts`); a staff client id is never found. |
+
+## Cadet MCP
+
+- Endpoint `/api/cadet/mcp`, **OAuth only**: the gate has no
+  `createApiKeyContext`, and cookies are ignored.
+- Scopes: `openid`, `profile`, `offline_access`, `mcp:read`
+  (`CADET_OAUTH_SUPPORTED_SCOPES`); default and challenged scope `mcp:read`.
+  `mcp:write` and `email` are not offered.
+- Token policy is shared with staff (`mcpOAuthPlugins`): authorization code +
+  refresh token only, PKCE, 1 h access tokens, 90-day rotating refresh tokens,
+  CIMD, open DCR rate-limited to 5 per minute per IP. `clientPrivileges` is
+  always false: nobody manages cadet clients through the OAuth CRUD endpoints.
+  DCR registrations are tagged by `recordDynamicClientRegistration` with the cadet
+  tables.
+- Login and consent pages are on the cadet app: `/sign-in` and `/oauth/consent`
+  (`CADET_OAUTH_LOGIN_PATH`, `CADET_OAUTH_CONSENT_PATH`).
+- **Sign-in during authorization** (`apps/cadet/components/sign-in-form.tsx`,
+  `apps/cadet/lib/auth-client.ts`): when the URL carries Better Auth's signed
+  query (`sig`), the page says an app is asking to connect and posts through
+  `oauthAuthClient` (with `oauthProviderClient()`, which forwards the signed
+  query). That client is separate because it attaches the query to every non-GET
+  request. The signed query expires at `exp` (Better Auth's default
+  `codeExpiresIn`, 600 s, unchanged); an expired one shows "This connection
+  request has expired" instead of the form.
+- **Consent** (`apps/cadet/components/oauth-consent.tsx`): Allow/Cancel through
+  one `useMutation` calling `oauth2.consent`; no scope picker (read only). It
+  states in plain words when `offline_access` lets the app keep reading. If the
+  session expired, it redirects to `/sign-in` **with** the signed query so the
+  authorization resumes.
+
+## Demo schools
+
+- **No seeded cadet logins.** The demo seed's `createAdmission` calls keep
+  `generateCadetPassword` at its default `false`. A demo user tries the portal by
+  issuing a password from the admission workspace.
+- **Purge covers cadet** (`packages/api/src/workflows/demo-school/purge-workflow.ts`):
+  the revoke stage calls `revokeCadetLoginAccess` for the school's logins
+  (`schoolCadetLoginIds`, via `cadet_user` ⋈ `admission`); the data stage records
+  them in `demo_school_purge.cadet_user_ids`; the second revoke re-runs it from
+  that manifest. `purge_demo_school()` (migration `0030_demo-purge-cadet.sql`)
+  explicitly deletes the school's `cadet_oauth_access_token`,
+  `cadet_oauth_refresh_token`, `cadet_oauth_consent`, `cadet_oauth_client` (rows
+  owned by those logins), `cadet_session`, `cadet_account` and `cadet_user`
+  before `admission`. No S3 objects are involved.
+- `demo-purge.integration.test.ts` issues a password, signs in, purges, and
+  asserts no cadet rows remain and the old session and grant no longer
+  authenticate.
+
+## Front end (`apps/cadet`)
+
+Mirrors management: Next.js 16, oRPC + TanStack Query, TanStack Form,
+`@campuspilot/ui`, `@campuspilot/components` (theme provider).
+
+| File | Role |
+| --- | --- |
+| `app/layout.tsx` | `QueryProvider` + `ThemeProvider`; title "Cadet Portal". |
+| `app/page.tsx` → `components/cadet-home.tsx` | Session check (`authClient.useSession`, `redirect('/sign-in')`), `orpc.getAdmission` name, Sign out (cadet session only). |
+| `app/sign-in/page.tsx` → `components/sign-in-form.tsx` | `useForm` with a Zod `onSubmit` validator and per-field errors; the request is a `useMutation`, so a rejected sign-in does not disable Submit. Full navigation on success. |
+| `app/oauth/consent/page.tsx` → `components/oauth-consent.tsx` | Cadet MCP consent. |
+| `lib/orpc.ts` | `RPCLink` to `/api/cadet/rpc` with `credentials: 'include'`, typed `CadetRouterClient`. Never the staff `/rpc`. |
+| `lib/auth-client.ts` | Better Auth clients at `CADET_AUTH_BASE_PATH`. |
+
+Env comes from `@campuspilot/env/cadet.client` (`NEXT_PUBLIC_SERVER_URL`). No
+ids in URLs: who the student is comes from the `cpc_` cookie. No `useEffect`;
+follow the repository rules in `AGENTS.md` (TanStack Form for input, Query for
+data, small components). Shared, API-free UI belongs in
+`packages/components/src/cadet-portal`.
+
+## Testing
+
+| Suite | Covers |
+| --- | --- |
+| `packages/auth/src/__tests__/cadet-auth.integration.test.ts` | Password generator and word list; sign-in, uniform errors, lockout (with and without a login), live admission number, unregistered sign-in, disabled email paths, trusted origin, no admission number at auth level; full cadet OAuth flow in `cadet_*` tables only; no write scope. |
+| `packages/auth/src/__tests__/cadet-sign-in-limits.integration.test.ts` | Redis limiter window and lock; per-IP limit counts failures only; admission and IP locks independent. |
+| `packages/api/src/routers/cadet/cadet.router.integration.test.ts` | `getAdmission` equals management's DTO, survives unregister, rejects anonymous, accepts read grant; consent client is cadet-only; staff/cadet session isolation; router separation. |
+| `packages/api/src/routers/school/admission/admission-cadet-password.integration.test.ts` | `generateCadetPassword` default, transaction and rollback, both permissions; issue/reset, revocation, revocation failure; unregister keeps access; delete revokes and cascades. |
+| `packages/api/src/workflows/demo-school/demo-purge.integration.test.ts` | Purge removes cadet rows and access. |
+| `apps/server/src/cadet-http.integration.test.ts` | Well-known order, cadet issuer discovery, MCP challenge and token isolation, RPC cookie isolation, CORS scoping, sign-in through the server. |
+| `packages/opa/src/__tests__/authorization.integration.test.ts`, `packages/opa/src/policies/school/permissions_test.rego` | The issue permission's grants. |
+| `apps/cadet/lib/auth-client.test.ts`, `apps/cadet/components/{sign-in-form,oauth-consent}.test.tsx` | Signed-query helpers, sign-in form, consent redirect. |
+| `packages/components/src/cadet-portal/issued-cadet-password-dialog.test.tsx` | Shown-once dialog and copy. |
+| `apps/management/components/admission-actions-model.test.ts` | Menu gating and confirmation copy. |
+
+Integration suites start Postgres and Redis with Testcontainers (Docker must be
+running). Run one package with `pnpm --filter @campuspilot/auth test`,
+`pnpm --filter @campuspilot/api test`, `pnpm --filter server test`,
+`pnpm --filter cadet test`, `pnpm --filter @campuspilot/components test`,
+`pnpm --filter management test`; add a file path after `--` to run one file in a
+Vitest package. The serial finance group in `packages/api/vitest.config.ts` does
+not involve cadet files.
+
+## Rules
+
+### Do
+
+- Reference admissions by `admission.id` and logins by `cadet_user.id` everywhere
+  at the auth level; resolve the admission number live at sign-in only.
+- Bind every cadet procedure's admission and school from `context.cadet`.
+- Give every `cadetRouter` leaf MCP metadata; mark reads `access: 'read'`.
+- Reuse management DTOs (`admissionDtoSchema`, `oauthConsentClientSchema`) for
+  cadet outputs where the shape is the same.
+- Revoke through `revokeCadetLoginAccess` (cadet instance + OAuth tables) whenever
+  a password changes or a login is removed, after the write commits.
+- Check `school.admission.cadet_password.issue` on every path that issues a
+  password, in addition to any other action's permission.
+- Keep `createAdmission`'s `generateCadetPassword` a plain boolean defaulting to
+  `false`.
+- Change a cadet OAuth table and its staff counterpart together, keeping
+  `CadetOAuthTableShapeChecks` green.
+- Cover every new school-owned cadet table in `purge_demo_school` (new migration),
+  the purge workflow's revoke stages if it holds credentials, and the purge test.
+- Register new cadet `/.well-known/*` routes before the staff wildcard.
+
+### Don't
+
+- Don't store, copy, hash, or key anything at the auth level by admission number
+  (tables, constraints, email, session, Redis, token claims, rate-limit keys).
+- Don't add `admissionId`, `schoolId` or other identity inputs to cadet
+  procedures.
+- Don't mount cadet procedures on `appRouter` or staff procedures on
+  `cadetRouter`, and don't serve `cadetRouter` with a staff context.
+- Don't let the cadet origin onto staff routes or into `CORS_ORIGIN` / staff
+  `trustedOrigins`.
+- Don't share cookies, cookie prefixes, Redis prefixes, issuers, JWKS or OAuth
+  tables between the instances.
+- Don't enable email/password, sign-up or the account endpoints on the cadet
+  instance; a future student password change must set
+  `passwordSource: 'student_set'` and revoke other sessions deliberately.
+- Don't derive passwords from profile data, store plain passwords, or offer a way
+  to view an issued password again.
+- Don't delete cadet sessions only in the database: that leaves Redis copies
+  valid until expiry.
+- Don't infer portal access from `registered`, or revoke access on unregister.
+- Don't seed cadet logins for demo schools.
+- Don't accept API keys or grant `mcp:write` on the cadet MCP without a new
+  decision, and don't expose `issueAdmissionCadetPassword` over staff MCP.
+
+## Extending the portal
+
+**Adding a cadet procedure**
+
+1. Add it to `cadetRouter` on `cadetProcedure`, with no identity inputs; read the
+   student's data with `context.cadet.admissionId` / `schoolId`.
+2. Reuse the staff DTO and mapper when the shape matches; if a field must not
+   reach students, add a deliberately narrower schema rather than editing the
+   staff one.
+3. Declare `.meta({ mcp: { exposure, access, destructive, module } })`; add an
+   `MCP_MODULES` entry (`packages/api/src/mcp-metadata.ts`) for a new portal
+   area. Writes are refused for OAuth callers until write access is decided.
+4. Add integration tests next to `cadet.router.integration.test.ts`: own data
+   only, another admission's data unreachable, anonymous and staff sessions
+   refused, MCP grant behaviour. The cadet MCP catalog picks the procedure up from
+   its metadata; check `cadet-http.integration.test.ts` still lists the tools you
+   expect.
+
+**Adding a screen**
+
+1. Add the route under `apps/cadet/app`, wrapped in `PortalShell`, with the
+   session check pattern from `cadet-home.tsx`.
+2. Load data with `orpc.<procedure>.queryOptions()`; use `useForm` + Zod for any
+   input; no `useEffect`.
+3. Put reusable, API-free pieces in `packages/components/src/cadet-portal`.
+4. Check the screen at phone width, as for management screens.
+
+**Adding a cadet table**: prefix `cadet_`, reference the login by
+`cadet_user.id` (cascade) or the admission by `admission.id`, never the admission
+number; extend `purge_demo_school` and the purge test; if Better Auth reads it,
+add it to `cadetAuthSchema`.
+
+## Known gaps and deferred decisions
+
+- **Per-school portal feature flag**: every school can issue passwords today.
+- **Guardian accounts**: one login per admission; a multi-child guardian login
+  (likely a link table, phone OTP considered) is not designed.
+- **Student password change**: account endpoints are disabled; later work must
+  record `student_set`.
+- **No staff "revoke portal access" action**: unregistering keeps access; only
+  deleting the admission removes it. Staff can rotate the password to sign the
+  student out.
+- **No "has login" indicator** in management; the admission DTO does not carry it
+  (declined for now).
+- **Admission-number probing**: a nonexistent number never locks, a real one locks
+  after 5 failures, so existence can be inferred. Accepted as low risk; revisit
+  (possibly with an app check).
+- **Staff MCP returns passwords** from `createAdmission`; to revisit.
+- **Expired signed OAuth query** (10 min) requires restarting from the AI app.
+- **Release**: `.github/workflows/release.yml` has no cadet image, and
+  `cadet.campuspilot.in` is not provisioned in this repository; `apps/cadet/Dockerfile`
+  exists.
+
+## Operations
+
+### Environment
+
+| Variable | Where | Meaning |
+| --- | --- | --- |
+| `CADET_APP_URL` | `@campuspilot/env/server` (`packages/env/src/server/auth.env.ts`); the worker needs it too, because the purge workflow imports the cadet auth instance | Cadet app origin: cadet trusted origin, CORS on `/api/cadet/*`, MCP login/consent pages. Its own value, never derived from `PUBLIC_APP_URL`. Local: `http://localhost:3004`; production: `https://cadet.campuspilot.in`. |
+| `CADET_MCP_RESOURCE_URL` | server, worker | Canonical cadet MCP URL and token audience; no query, fragment or trailing slash. Local: `http://localhost:3000/api/cadet/mcp`; production: `https://api.campuspilot.in/api/cadet/mcp`. |
+| `NEXT_PUBLIC_SERVER_URL` | cadet app (`packages/env/src/cadet.client.ts`) | API origin. Local: `http://localhost:3000`; production: `https://api.campuspilot.in`. |
+
+Example values are in `apps/server/.env.example` and `apps/cadet/.env.example`.
+Cookie attributes (`COOKIE_DOMAIN`, `SAME_SITE_COOKIE`, `SECURE_COOKIES`) are
+shared with staff; the portal and API must share a cookie domain in production.
+
+### Local development
+
+1. Apply migrations (including `0029`/`0030`) as usual.
+2. Run `pnpm dev:server` and `pnpm dev:cadet` (port 3004), plus
+   `pnpm dev:management` to issue passwords.
+3. In management, open an admission → overflow menu → **Issue portal password**
+   (as principal or manager), or tick **Generate Cadet Portal password** when
+   creating an admission. Copy the details from the shown-once dialog.
+4. Sign in at `http://localhost:3004/sign-in` with the school slug, admission
+   number and password. Issue again to rotate it and sign the student out.
+
+Use a test or demo school only; never write issued passwords into the repository
+or share real students' credentials.
