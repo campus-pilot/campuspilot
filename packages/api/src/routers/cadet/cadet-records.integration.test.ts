@@ -11,7 +11,7 @@ import {
   runExam,
 } from '../../../test/exam-results';
 import { createFinanceIdempotencyKey } from '../../../test/finance/factories';
-import { expectRpcCode } from '../../../test/finance/assertions';
+import { expectRpcCode, retryFinanceConflict } from '../../../test/finance/assertions';
 import { createFinanceScenario } from '../../../test/finance/scenario';
 import { createTestAdmission, createTestStudent, type TestClient } from '../../../test/fixtures';
 import { createCadetOAuthContext } from '../../cadet/context';
@@ -273,7 +273,7 @@ describe('cadet fees', () => {
     expect(await student.getFeeSummary()).toEqual({ currencies: [] });
     expect((await student.listFeeLedger({})).items).toEqual([]);
 
-    const bill = await accountant.school.createManualBill({
+    const bill = await retryFinanceConflict(() => accountant.school.createManualBill({
       schoolId,
       sessionId: scenario.activeSession.id,
       admissionId: scenario.admission.id,
@@ -281,16 +281,16 @@ describe('cadet fees', () => {
       reason: 'Cadet ledger test',
       idempotencyKey: createFinanceIdempotencyKey('cadet-bill'),
       lines: [{ title: 'Tuition', amountMinor: '400000' }, { title: 'Transport', amountMinor: '100000' }],
-    });
-    await principal.school.recordAdjustment({
+    }));
+    await retryFinanceConflict(() => principal.school.recordAdjustment({
       schoolId, admissionId: scenario.admission.id, sessionId: scenario.activeSession.id, currency: 'INR', kind: 'discount',
       billId: bill.id, calculation: { kind: 'fixed', amountMinor: '50000' }, reasonCode: 'SIBLING', reasonNote: 'Sibling concession',
       effectiveAt: '2040-05-02T00:00:00Z', idempotencyKey: createFinanceIdempotencyKey('cadet-discount'),
-    });
-    const payment = await accountant.school.recordPayment({
+    }));
+    const payment = await retryFinanceConflict(() => accountant.school.recordPayment({
       schoolId, admissionId: scenario.admission.id, sessionId: scenario.activeSession.id, amountMinor: '300000', currency: 'INR',
       method: 'cash', receivedAt: '2040-05-03T10:00:00Z', effectiveAt: '2040-05-03T10:00:00Z', idempotencyKey: createFinanceIdempotencyKey('cadet-payment'),
-    });
+    }));
 
     expect(await student.getFeeSummary()).toEqual({
       currencies: [{
@@ -320,10 +320,10 @@ describe('cadet fees', () => {
     // Another admission's bill in the same school is not reachable.
     const other = await createTestAdmission({ schoolId, name: 'Other Student' });
     await createTestStudent({ schoolId, admissionId: other.id, sessionId: scenario.activeSession.id, classId: scenario.schoolClass.id, sectionId: scenario.section.id, rollNo: 2 });
-    const otherBill = await accountant.school.createManualBill({
+    const otherBill = await retryFinanceConflict(() => accountant.school.createManualBill({
       schoolId, sessionId: scenario.activeSession.id, admissionId: other.id, issueDate: '2040-05-01', reason: 'Other',
       idempotencyKey: createFinanceIdempotencyKey('other-bill'), lines: [{ title: 'Tuition', amountMinor: '1000' }],
-    });
+    }));
     await expectRpcCode(student.getBill({ billId: otherBill.id }), 'NOT_FOUND');
     expect((await student.listFeeLedger({})).items.map((item) => item.billId)).not.toContain(otherBill.id);
     await expectRpcCode(student.getBill({ billId: '' }), 'BAD_REQUEST');
