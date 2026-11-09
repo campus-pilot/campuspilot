@@ -7,9 +7,10 @@ import { describe, expect, it, vi } from 'vitest';
 import { createTestAdmission, createTestSchool } from '../../../test/fixtures';
 import { billIssuedData, dispatchNow, emit, fakeClock, TEST_PACING } from '../../../test/notifications';
 import type { ClaimedDelivery, NotificationChannelAdapter } from '../channels';
-import { MAX_GROUPS_PER_DRAIN, runSenderDrain } from './drain';
+import { claimDelivery } from '../deliveries';
+import { MAX_GROUPS_PER_DRAIN, runSenderDrain, sendGroup } from './drain';
 import type { SenderTarget } from './lanes';
-import { pickDueDeliveries } from './queue';
+import { pickDueDeliveries, type SendAttemptResult } from './queue';
 
 const whatsappOff = { channel: 'whatsapp', available: false, unavailableReason: 'test' } as const;
 
@@ -136,5 +137,56 @@ describe('notification sender (D-39)', () => {
     expect(sent).toHaveLength(5);
     expect(Date.now() - started).toBeGreaterThanOrEqual(240);
   });
-});
 
+  it('waits for every send in flight before a failed group rethrows, and starts no new send after the failure', async () => {
+    const started: string[] = [];
+    const finished: string[] = [];
+    const send = async (id: string): Promise<SendAttemptResult> => {
+      started.push(id);
+      if (id === 'a') {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        throw new Error('database down');
+      }
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      finished.push(id);
+      return { kind: 'sent', channelThrottle: null };
+    };
+    await expect(sendGroup(['a', 'b', 'c', 'd', 'e'], { pacing: { perSecond: 1000, concurrency: 3, groupSize: 5 }, send })).rejects.toThrow('database down');
+    // b and c were in flight when a failed: the group returned only after both finished.
+    expect(finished.sort()).toEqual(['b', 'c']);
+    expect(started.sort()).toEqual(['a', 'b', 'c']);
+  });
+
+  it('retries a delivery whose adapter throws on its own, without pausing the lane', async () => {
+    const target = uniqueLane();
+    const { ids } = await queue({ lane: target.lane, copies: 2, sendPriority: 'bulk' });
+    const sent: string[] = [];
+    const adapter: NotificationChannelAdapter = {
+      channel: 'web_push',
+      available: true,
+      decide: () => [],
+      send: async (delivery) => {
+        if (delivery.id === ids[0]) throw new Error('render bug');
+        sent.push(delivery.id);
+        return { kind: 'sent', providerMessageId: null };
+      },
+    };
+    const names: string[] = [];
+    const clock = fakeClock();
+    await runSenderDrain({ target, step: (name, action) => { names.push(name); return action(); }, sleep: async (_name, ms) => clock.advance(ms), clock: clock.now, adapters: { web_push: adapter, whatsapp: whatsappOff }, pacing: TEST_PACING, random: () => 0.5 });
+    expect(sent).toEqual([ids[1]]);
+    expect(names.some((name) => name.startsWith('throttle:') || name.startsWith('pause:'))).toBe(false);
+    const [row] = await db.select().from(notificationDeliveryTable).where(eq(notificationDeliveryTable.id, ids[0]!));
+    expect(row).toMatchObject({ status: 'owed', errorCode: 'adapter_error', quickRetries: 1 });
+  });
+
+  it('claims a delivery and reads its notification in one statement', async () => {
+    const target = uniqueLane();
+    const { ids } = await queue({ lane: target.lane, copies: 1, sendPriority: 'bulk' });
+    const claimed = await claimDelivery(db, ids[0]!);
+    expect(claimed).toMatchObject({ id: ids[0], channel: 'web_push', type: 'bill.issued', retries: { quickRetries: 0, deferredRetries: 0, dailyLimitRetries: 0 } });
+    expect(claimed?.admissionId).toEqual(expect.any(String));
+    expect(claimed?.data).toMatchObject({ billNumber: expect.any(String) });
+    expect(await claimDelivery(db, ids[0]!)).toBeNull();
+  });
+});

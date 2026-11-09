@@ -29,7 +29,10 @@ export type ClaimedQueueDelivery = ClaimedDelivery & { channel: RemoteNotificati
 
 /**
  * Claims one owed delivery that is due at `now`; null when it is not owed
- * (any more) or not due yet.
+ * (any more) or not due yet. The claim and the read of its notification are
+ * one statement (`UPDATE … FROM notification … RETURNING`), so a claim
+ * always comes back with what sending needs: no failure between two
+ * statements can leave a delivery `sending` that nobody holds.
  */
 export async function claimDelivery(db: DatabaseExecutor, deliveryId: string, now: Date = new Date()): Promise<ClaimedQueueDelivery | null> {
   const [claimed] = await db
@@ -41,11 +44,13 @@ export async function claimDelivery(db: DatabaseExecutor, deliveryId: string, no
       attempts: sql`${notificationDeliveryTable.attempts} + 1`,
       updatedAt: now,
     })
+    .from(notificationTable)
     .where(
       and(
         eq(notificationDeliveryTable.id, deliveryId),
         eq(notificationDeliveryTable.status, 'owed'),
         lte(notificationDeliveryTable.nextAttemptAt, now),
+        eq(notificationTable.id, notificationDeliveryTable.notificationId),
       ),
     )
     .returning({
@@ -57,21 +62,16 @@ export async function claimDelivery(db: DatabaseExecutor, deliveryId: string, no
       quickRetries: notificationDeliveryTable.quickRetries,
       deferredRetries: notificationDeliveryTable.deferredRetries,
       dailyLimitRetries: notificationDeliveryTable.dailyLimitRetries,
+      type: notificationTable.type,
+      data: notificationTable.data,
+      admissionId: notificationTable.admissionId,
     });
   if (!claimed) return null;
-  const [notification] = await db
-    .select({ type: notificationTable.type, data: notificationTable.data, admissionId: notificationTable.admissionId })
-    .from(notificationTable)
-    .where(eq(notificationTable.id, claimed.notificationId))
-    .limit(1);
-  if (!notification) return null;
-  const { quickRetries, deferredRetries, dailyLimitRetries, ...delivery } = claimed;
+  const { quickRetries, deferredRetries, dailyLimitRetries, type, ...delivery } = claimed;
   return {
     ...delivery,
     retries: { quickRetries, deferredRetries, dailyLimitRetries },
-    admissionId: notification.admissionId,
-    type: notification.type as NotificationType,
-    data: notification.data,
+    type: type as NotificationType,
   };
 }
 

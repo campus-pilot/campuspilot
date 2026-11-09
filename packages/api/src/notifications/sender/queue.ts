@@ -87,10 +87,15 @@ export type SendAttemptResult = {
  * delivery no longer owed or not yet due (already sent, stuck in `sending`
  * after a crash, rescheduled) is left alone. A channel switched off since
  * the delivery was planned records it `skipped: disabled` without a claim.
- * An adapter that throws is treated as a transient channel failure before
- * the provider call (adapters classify every provider answer themselves
- * and must not throw after a request may have been accepted), so a bug or
- * outage never leaves the delivery in `sending`.
+ * An adapter that throws is treated as a transient failure of this
+ * delivery before the provider call (adapters classify every provider
+ * answer themselves and must not throw after a request may have been
+ * accepted), so a bug never leaves the delivery in `sending`. It is
+ * recipient-scoped: the delivery's own bounded retries apply and the lane
+ * keeps sending others. Only provider throttling and transport failures the
+ * adapter classified as `channel` pause the whole lane, since a throw (a
+ * document that fails to render, a bug in one notification type) says
+ * nothing about the provider.
  */
 export async function sendDelivery(
   db: DatabaseExecutor,
@@ -109,7 +114,7 @@ export async function sendDelivery(
   try {
     outcome = await adapter.send(claimed);
   } catch {
-    outcome = { kind: 'retry', errorCode: 'adapter_error', scope: 'channel' };
+    outcome = { kind: 'retry', errorCode: 'adapter_error', scope: 'recipient' };
   }
   const recorded = await recordDeliveryOutcome(db, claimed, outcome, { now: options.now, random: options.random });
   const channelThrottle = outcome.kind === 'retry' && outcome.scope === 'channel' ? { retryAfterMs: outcome.retryAfterMs ?? null } : null;

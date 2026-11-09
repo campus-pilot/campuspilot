@@ -90,7 +90,8 @@ export type ClaimedDelivery = {
  *   is not a demo; it returns one decision per destination.
  * - `send` performs one provider call for a claimed delivery. It must not
  *   throw for provider answers; it classifies them as an outcome. A thrown
- *   error is treated like a transient channel failure.
+ *   error is treated like a transient failure of that one delivery
+ *   (recipient scope: its own bounded retries, the lane keeps sending).
  */
 export type NotificationChannelAdapter =
   | { channel: RemoteNotificationChannel; available: false; unavailableReason: string }

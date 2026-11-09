@@ -4,7 +4,7 @@ import { env } from '@campuspilot/env/server';
 
 import { notificationChannelAdapters, type NotificationChannelAdapter } from '../channels';
 import type { SenderTarget } from './lanes';
-import { nextDueAt, pickDueDeliveries, sendDelivery, type SenderScope } from './queue';
+import { nextDueAt, pickDueDeliveries, sendDelivery, type SendAttemptResult, type SenderScope } from './queue';
 import { channelBackoffMs } from './retry-policy';
 
 /**
@@ -66,35 +66,54 @@ export type SenderDrainResult =
 
 type GroupResult = { attempted: number; sent: number; throttle: { retryAfterMs: number | null } | null };
 
+/** Sends one picked delivery; {@link sendDelivery} in production, injectable for tests. */
+export type SendOne = (deliveryId: string) => Promise<SendAttemptResult>;
+
 /**
  * Sends the picked deliveries with at most `concurrency` in flight, starting
  * one every `1 / perSecond` seconds; stops starting new ones after a
  * channel-wide throttle (those stay owed, untouched). Returns no sooner than
  * the group's share of the rate, so back-to-back groups keep to it.
+ *
+ * A send that throws (database error) stops every worker from starting
+ * another send, and the group rethrows the first error only once every
+ * send already in flight has finished. So when Restate retries the failed
+ * step, no send of the previous attempt is still running outside the
+ * journal next to the retry's (a lane never has two senders).
  */
-async function sendGroup(
+export async function sendGroup(
   ids: readonly string[],
-  options: { target: SenderTarget; adapter: NotificationChannelAdapter; pacing: SenderPacing; db: DatabaseExecutor; clock: () => Date; random: () => number },
+  options: { pacing: SenderPacing; send: SendOne },
 ): Promise<GroupResult> {
   const intervalMs = 1000 / options.pacing.perSecond;
   const started = Date.now();
   let next = 0;
   let throttle: GroupResult['throttle'] = null;
+  let failure: { error: unknown } | null = null;
   let attempted = 0;
   let sent = 0;
+  const stopped = () => throttle !== null || failure !== null;
   const worker = async () => {
-    for (let index = next++; index < ids.length && !throttle; index = next++) {
+    for (let index = next++; index < ids.length && !stopped(); index = next++) {
       const slot = started + index * intervalMs;
       const wait = slot - Date.now();
       if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
-      if (throttle) return;
-      const result = await sendDelivery(options.db, ids[index]!, options.target.channel, options.adapter, { now: options.clock(), random: options.random });
+      if (stopped()) return;
+      let result: SendAttemptResult;
+      try {
+        result = await options.send(ids[index]!);
+      } catch (error) {
+        failure ??= { error };
+        return;
+      }
       if (result.kind !== 'not_owed') attempted += 1;
       if (result.kind === 'sent') sent += 1;
       if (result.channelThrottle && !throttle) throttle = result.channelThrottle;
     }
   };
-  await Promise.all(Array.from({ length: Math.min(options.pacing.concurrency, ids.length) }, () => worker()));
+  // Workers never reject (errors are caught above), so this waits for every one of them.
+  await Promise.allSettled(Array.from({ length: Math.min(options.pacing.concurrency, ids.length) }, () => worker()));
+  if (failure) throw (failure as { error: unknown }).error;
   const remaining = started + ids.length * intervalMs - Date.now();
   if (!throttle && remaining > 0) await new Promise((resolve) => setTimeout(resolve, remaining));
   return { attempted, sent, throttle };
@@ -135,7 +154,8 @@ export async function runSenderDrain(options: {
       await sleep(`idle:${group}`, Math.max(picked.waitMs, 1000));
       continue;
     }
-    const result = await step(`send:${group}`, () => sendGroup(picked.ids, { target, adapter, pacing, db, clock, random }));
+    const send: SendOne = (id) => sendDelivery(db, id, target.channel, adapter, { now: clock(), random });
+    const result = await step(`send:${group}`, () => sendGroup(picked.ids, { pacing, send }));
     sent += result.sent;
     attempted += result.attempted;
     if (!result.throttle) {
