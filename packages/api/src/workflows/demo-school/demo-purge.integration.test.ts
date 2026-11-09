@@ -21,6 +21,7 @@ import { deleteDemoSchoolData, revokeDemoSchoolSessions, revokeManifestSessions 
 
 import { createTestUser } from '../../../test/fixtures';
 import { retryFinanceConflict } from '../../../test/finance/assertions';
+import { billIssuedData, billingRunPostedData, emitAndDispatch } from '../../../test/notifications';
 import { createFinanceIdempotencyKey } from '../../../test/finance/factories';
 import { createFinanceScenario, type FinanceScenario } from '../../../test/finance/scenario';
 
@@ -94,11 +95,14 @@ describe('purge_demo_school and the demo-only finance exception', () => {
     const demoUser = await createTestUser({ name: 'Demo teacher' });
     await db.update(user).set({ demoSchoolId: demo.school.id }).where(eq(user.id, demoUser.id));
     const principalId = demo.actors.principal.session.user.id;
+    // Inbox rows and their delivery rows for a student and a staff member.
+    await emitAndDispatch({ type: 'bill.issued', data: billIssuedData(demo.admission.id), schoolId: demo.school.id, recipients: { kind: 'admissions', admissionIds: [demo.admission.id] } });
+    await emitAndDispatch({ type: 'billing.run_posted', data: billingRunPostedData(), schoolId: demo.school.id, recipients: { kind: 'staff_users', userIds: [principalId] } });
 
     const result = await db.execute<{ counts: Record<string, number> }>(
       sql`SELECT purge_demo_school(${demo.school.id}) AS counts`,
     );
-    expect(result.rows[0]!.counts).toMatchObject({ finance_payment: 1, finance_bill: 1, user: 1, school_member: expect.any(Number) });
+    expect(result.rows[0]!.counts).toMatchObject({ finance_payment: 1, finance_bill: 1, user: 1, school_member: expect.any(Number), notification_event: 2, notification: 2, notification_delivery: 2 });
 
     const remaining = await rowsReferencingSchool(demo.school.id);
     expect(Object.values(remaining).every((count) => count === 0)).toBe(true);

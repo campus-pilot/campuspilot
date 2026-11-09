@@ -8,6 +8,10 @@ import {
   dataMigrationControlService,
   dataMigrationWorkflow,
 } from '@campuspilot/api/workflows/data-migration';
+import {
+  notificationControlService,
+  notificationDispatchWorkflow,
+} from '@campuspilot/api/workflows/notification';
 import { env } from '@campuspilot/env/worker';
 import { createEndpointHandler } from '@restatedev/restate-sdk';
 
@@ -31,6 +35,8 @@ export function startWorker() {
       demoSchoolPurgeWorkflow,
       dataMigrationControlService,
       dataMigrationWorkflow,
+      notificationControlService,
+      notificationDispatchWorkflow,
     ],
   });
   const server = createServer(handler);

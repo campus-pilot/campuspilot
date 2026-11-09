@@ -8,6 +8,8 @@ import { runMigrations } from '@campuspilot/db/migrate';
 import { env } from '@campuspilot/env/server';
 import { sweepDemoSchoolOutbox } from '@campuspilot/api/routers/system-admin/demo-school/demo-school.outbox';
 import { sweepDataMigrationOutbox } from '@campuspilot/api/data-migrations/data-migration.outbox';
+import { sweepNotificationOutbox } from '@campuspilot/api/notifications/notification.outbox';
+import { sweepNotificationRetention } from '@campuspilot/api/notifications/retention';
 
 import { app, cadetMcpCatalog, cadetMcpHandler, mcpCatalog, mcpHandler } from './http';
 import { log } from './log';
@@ -53,6 +55,25 @@ async function sweepDataMigrations(register: boolean) {
 }
 
 /**
+ * One notification outbox sweep: re-sends events whose hand-over after
+ * commit failed or never happened, and fails fan-outs Restate paused or
+ * ended. Requests never wait for it.
+ */
+async function sweepNotifications() {
+  const result = await sweepNotificationOutbox();
+  if (Object.values(result).some((value) => value > 0)) log.info(result, 'notification.outbox.ok');
+}
+
+/** How often old notifications are deleted (see `@campuspilot/api/notifications/retention`). */
+const NOTIFICATION_RETENTION_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
+/** One retention pass; idempotent, so concurrent instances are safe. */
+async function removeExpiredNotifications() {
+  const result = await sweepNotificationRetention(db);
+  log.info(result, 'notification.retention.ok');
+}
+
+/**
  * Removes dynamically registered OAuth clients that never got a grant, for
  * the staff and the cadet authorization servers.
  */
@@ -80,6 +101,16 @@ async function main() {
     });
   }, DCR_CLEANUP_INTERVAL_MS);
   dcrCleanup.unref();
+  // Notification retention: once after boot (not awaited), then daily.
+  void removeExpiredNotifications().catch((err) => {
+    log.error({ err }, 'notification.retention.error');
+  });
+  const notificationRetention = setInterval(() => {
+    void removeExpiredNotifications().catch((err) => {
+      log.error({ err }, 'notification.retention.error');
+    });
+  }, NOTIFICATION_RETENTION_INTERVAL_MS);
+  notificationRetention.unref();
   // Chained, not setInterval: the next sweep is scheduled only after the
   // previous one finished, so slow sweeps never overlap on this instance.
   // Across replicas, the sweep claims rows with FOR UPDATE SKIP LOCKED.
@@ -99,6 +130,11 @@ async function main() {
       dataMigrationsRegistered = true;
     } catch (err) {
       log.error({ err }, 'data-migration.outbox.error');
+    }
+    try {
+      await sweepNotifications();
+    } catch (err) {
+      log.error({ err }, 'notification.outbox.error');
     }
     if (stopped) return;
     demoOutbox = setTimeout(() => void sweepOutbox(), DEMO_OUTBOX_INTERVAL_MS);
@@ -122,6 +158,7 @@ async function main() {
   const shutdown = (signal: string) => {
     log.info({ signal }, 'boot.shutdown.start');
     clearInterval(dcrCleanup);
+    clearInterval(notificationRetention);
     stopped = true;
     clearTimeout(demoOutbox);
     void mcpHandler.close().catch((err) => {
