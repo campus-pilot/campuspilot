@@ -14,7 +14,7 @@ describe('TableFilterBar', () => {
       type: 'single' as const,
       options: [{ label: 'Any', value: 'any' }],
     }));
-    render(<TableFilterBar filters={filters} values={{}} onValuesChange={vi.fn()} />);
+    render(<TableFilterBar<Record<string, string | undefined>> filters={filters} values={{}} onValuesChange={vi.fn()} />);
     const triggers = screen.getByRole('button', { name: 'WhatsApp' }).parentElement!;
     expect(triggers.className).toContain('flex-wrap');
     expect(triggers.className).toContain('min-w-0');
