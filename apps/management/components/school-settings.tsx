@@ -32,6 +32,7 @@ import { client, orpc } from '@/lib/orpc';
 import { uploadSchoolLogo } from '@/lib/school-image';
 import { RequirePermissions } from './require-permissions';
 import { SchoolAvatar } from './school-avatar';
+import { CadetPortalSettings } from './cadet-portal-settings';
 
 const schoolDetailsFormSchema = z.object({
   name: z.string().trim().min(1, 'School name is required.'),
@@ -413,6 +414,7 @@ function SchoolSettingsContent({ school }: { school: SchoolDetailsDto }) {
           </RequirePermissions>
         </CardContent>
       </Card>
+      <CadetPortalSettings schoolId={school.id} />
     </section>
   );
 }

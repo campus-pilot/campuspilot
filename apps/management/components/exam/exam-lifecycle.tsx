@@ -7,6 +7,8 @@ import {
   Settings2,
   CheckCircle2,
   RotateCcw,
+  Send,
+  Undo2,
 } from 'lucide-react';
 import { AppShellAlert } from '@campuspilot/components/app-shell';
 import type { ExamOverviewDto } from '@campuspilot/api/routers/school/exam/exam.dto';
@@ -23,13 +25,16 @@ import { RequirePermissions } from '@/components/require-permissions';
 import { client, orpc } from '@/lib/orpc';
 import { ExamButton, ExamInput, Issues } from './exam-common';
 import {
+  cadetReleaseAction,
   errorMessage,
   optionalIntegerText,
   schoolPermission,
   type ExamScope,
 } from './exam-model';
 
-type Action = '' | 'working-days' | 'start' | 'complete' | 'reopen';
+type Action = '' | 'working-days' | 'start' | 'complete' | 'reopen' | 'release' | 'withdraw';
+type LifecycleAction = Exclude<Action, '' | 'working-days' | 'release' | 'withdraw'>;
+type CadetAction = Extract<Action, 'release' | 'withdraw'>;
 type Props = {
   scope: ExamScope;
   active: boolean;
@@ -44,7 +49,7 @@ export function ExamActions(props: Props) {
     defaultValues: { action: '' as Action },
     validators: {
       onChange: z.object({
-        action: z.enum(['', 'working-days', 'start', 'complete', 'reopen']),
+        action: z.enum(['', 'working-days', 'start', 'complete', 'reopen', 'release', 'withdraw']),
       }),
     },
   });
@@ -56,6 +61,9 @@ export function ExamActions(props: Props) {
       : overview.status === 'completed'
         ? 'reopen'
         : 'start';
+  const applicableCadetAction = cadetReleaseAction(overview);
+  const cadetAction: CadetAction = applicableCadetAction ?? 'release';
+  const cadetVisible = applicableCadetAction !== null;
   return (
     <>
       {placement === 'workspace' && attendanceEnabled &&
@@ -106,11 +114,23 @@ export function ExamActions(props: Props) {
             <LifecycleTrigger scope={scope} visible={active && overview.planCount > 0}
               action={lifecycleAction} onSelect={() => ui.setFieldValue('action', lifecycleAction)} />
           </section>
+          <section className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3">
+            <div className="flex flex-col gap-1">
+              <h3 className="text-sm font-medium">Cadet Portal</h3>
+              <p className="text-sm text-muted-foreground">{cadetStatusText(overview)}</p>
+            </div>
+            <CadetReleaseTrigger scope={scope} visible={cadetVisible}
+              action={cadetAction} onSelect={() => ui.setFieldValue('action', cadetAction)} />
+          </section>
         </div>
       )}
       {placement === 'navbar' && (
-        <LifecycleTrigger scope={scope} visible={active && overview.planCount > 0}
-          action={lifecycleAction} onSelect={() => ui.setFieldValue('action', lifecycleAction)} />
+        <div className="flex flex-wrap items-center gap-2">
+          <LifecycleTrigger scope={scope} visible={active && overview.planCount > 0}
+            action={lifecycleAction} onSelect={() => ui.setFieldValue('action', lifecycleAction)} />
+          <CadetReleaseTrigger scope={scope} visible={cadetVisible}
+            action={cadetAction} onSelect={() => ui.setFieldValue('action', cadetAction)} />
+        </div>
       )}
       <ui.Subscribe selector={(state) => state.values.action}>
         {(action) =>
@@ -128,6 +148,7 @@ export function ExamActions(props: Props) {
                 scope={scope}
                 action={action}
                 initial={totalWorkingDays}
+                released={overview.cadetReleasedAt !== null}
                 onClose={() => ui.setFieldValue('action', '')}
               />
             </RequirePermissions>
@@ -137,8 +158,29 @@ export function ExamActions(props: Props) {
     </>
   );
 }
+/** Release state in words; the release time is its own fact, shown when known. */
+function cadetStatusText(overview: ExamOverviewDto) {
+  if (overview.cadetReleasedAt)
+    return `Results released to students on ${new Date(overview.cadetReleasedAt).toLocaleDateString(undefined, { dateStyle: 'medium' })}.`;
+  if (overview.status === 'completed')
+    return 'Not released. Students see this examination as awaiting results.';
+  return 'Results can be released to students after the examination is completed.';
+}
+
+function CadetReleaseTrigger({ scope, visible, action, onSelect }: {
+  scope: ExamScope; visible: boolean; action: CadetAction; onSelect: () => void;
+}) {
+  if (!visible) return null;
+  const Icon = action === 'release' ? Send : Undo2;
+  return (
+    <RequirePermissions permissions={schoolPermission(scope.schoolId, SCHOOL_ACTIONS.TRANSITION_EXAM_PLAN)}>
+      <ExamButton variant="outline" onClick={onSelect}><Icon aria-hidden />{actionLabel(action)}</ExamButton>
+    </RequirePermissions>
+  );
+}
+
 function LifecycleTrigger({ scope, visible, action, onSelect }: {
-  scope: ExamScope; visible: boolean; action: Exclude<Action, '' | 'working-days'>;
+  scope: ExamScope; visible: boolean; action: LifecycleAction;
   onSelect: () => void;
 }) {
   if (!visible) return null;
@@ -179,17 +221,41 @@ function actionLabel(action: Exclude<Action, '' | 'working-days'>) {
     start: 'Start examination',
     complete: 'Complete examination',
     reopen: 'Reopen examination',
+    release: 'Release results to Cadet Portal',
+    withdraw: 'Withdraw from Cadet Portal',
   }[action];
+}
+
+function actionDescription(action: Exclude<Action, ''>, released: boolean) {
+  switch (action) {
+    case 'working-days':
+      return 'Set the maximum number of attendance days for this examination.';
+    case 'start':
+      return 'Start result entry for every class. Only the principal, manager or exam coordinator can start an examination.';
+    case 'complete':
+      return 'All student results must be approved. Completing the examination makes results and timetable read-only.';
+    case 'reopen':
+      return released
+        ? 'These results are visible to students in the Cadet Portal. Withdraw them from the Cadet Portal before reopening the examination.'
+        : 'Reopen result entry for every class. Saved marks and approvals are preserved.';
+    case 'release':
+      return 'Students and guardians will see their marks, grades, attendance, activities and teacher remarks for this examination in the Cadet Portal. Remarks are locked while released, and the examination cannot be reopened until you withdraw it.';
+    case 'withdraw':
+      return 'Students will no longer see this examination’s results in the Cadet Portal. Saved results and remarks are not changed.';
+  }
 }
 function ExamActionDialog({
   scope,
   action,
   initial,
+  released,
   onClose,
 }: {
   scope: ExamScope;
   action: Exclude<Action, ''>;
   initial: number | null;
+  /** Reopening is refused while released; the dialog says so and keeps the action disabled. */
+  released: boolean;
   onClose: () => void;
 }) {
   const cache = useQueryClient();
@@ -205,6 +271,10 @@ function ExamActionDialog({
             ...scope,
             totalWorkingDays: value.days === '' ? null : Number(value.days),
           });
+        else if (action === 'release')
+          await client.school.releaseExamToCadet(scope);
+        else if (action === 'withdraw')
+          await client.school.withdrawExamFromCadet(scope);
         else
           await client.school.transitionExam({
             ...scope,
@@ -238,13 +308,7 @@ function ExamActionDialog({
             <DialogHeader>
               <DialogTitle>{title}</DialogTitle>
               <DialogDescription>
-                {workingDays
-                  ? 'Set the maximum number of attendance days for this examination.'
-                  : action === 'start'
-                    ? 'Start result entry for every class. Only the principal, manager or exam coordinator can start an examination.'
-                    : action === 'complete'
-                      ? 'All student results must be approved. Completing the examination makes results and timetable read-only.'
-                      : 'Reopen result entry for every class. Saved marks and approvals are preserved.'}
+                {actionDescription(action, released)}
               </DialogDescription>
             </DialogHeader>
             <form
@@ -275,7 +339,7 @@ function ExamActionDialog({
                 >
                   Cancel
                 </ExamButton>
-                <ExamButton type="submit" disabled={pending || !canSubmit}>
+                <ExamButton type="submit" disabled={pending || !canSubmit || (action === 'reopen' && released)}>
                   {pending
                     ? 'Saving…'
                     : workingDays

@@ -366,6 +366,7 @@ export const examAssessmentSettingsSchema = examScopeSchema.extend({
 export const examLifecycleInputSchema = examScopeSchema.extend({
   status: z.enum(['active', 'completed']),
 });
+export { EXAM_STUDENT_REMARK_MAX_LENGTH };
 /** A teacher remark is plain text; blank or null removes it. */
 export const saveStudentExamRemarkInputSchema = examStudentScopeSchema.extend({
   text: z

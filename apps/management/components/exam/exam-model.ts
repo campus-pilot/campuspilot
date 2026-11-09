@@ -134,3 +134,25 @@ export function examClassStatusLabel(
       ? 'Entry open'
       : 'Entry not open';
 }
+
+type CadetOverview = {
+  status: 'ready' | 'active' | 'completed' | null;
+  cadetReleasedAt: Date | string | null;
+};
+
+/** Teacher remarks can be written once the examination has started (also after
+ * completion) in the active session, and are locked while the results are
+ * released to the Cadet Portal. The server enforces the same rule.
+ */
+export function isRemarkEditable(sessionActive: boolean, overview: CadetOverview | undefined) {
+  return sessionActive && hasExamStarted(overview?.status ?? null) && !overview?.cadetReleasedAt;
+}
+
+/** Which Cadet Portal action applies, or null when none does. Release needs a
+ * completed examination; a released one can always be withdrawn. Session
+ * activity does not matter: earlier years can be released for Growth.
+ */
+export function cadetReleaseAction(overview: CadetOverview): 'release' | 'withdraw' | null {
+  if (overview.cadetReleasedAt) return 'withdraw';
+  return overview.status === 'completed' ? 'release' : null;
+}
