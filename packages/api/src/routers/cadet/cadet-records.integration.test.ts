@@ -1,0 +1,334 @@
+import { createRouterClient } from '@orpc/server';
+import { beforeAll, describe, expect, it } from 'vitest';
+
+import { connectCadetMcp, createCadetTestClient, signInCadet } from '../../../test/cadet';
+import {
+  createAdmissionWithLogin,
+  createExamSession,
+  createResultsSchool,
+  createSubjectClass,
+  enroll,
+  runExam,
+} from '../../../test/exam-results';
+import { createFinanceIdempotencyKey } from '../../../test/finance/factories';
+import { expectRpcCode } from '../../../test/finance/assertions';
+import { createFinanceScenario } from '../../../test/finance/scenario';
+import { createTestAdmission, createTestStudent, type TestClient } from '../../../test/fixtures';
+import { createCadetOAuthContext } from '../../cadet/context';
+import type { CadetCredentials } from '../../../test/cadet';
+import { cadetRouter, type CadetRouterClient } from './cadet.router';
+
+async function cadetClient(credentials: CadetCredentials): Promise<CadetRouterClient> {
+  const { cookie, response } = await signInCadet(credentials);
+  expect(response.status).toBe(200);
+  return createCadetTestClient(new Headers({ cookie }));
+}
+
+/**
+ * Two classmates, Meera and Ravi, across two sessions:
+ * - 2025–26 in "Class 6" (subjects `maths` "Maths", `sanskrit`): Unit Test 1
+ *   and Annual, both released.
+ * - 2026–27 in "Class 7" (subjects `maths` "Mathematics", `science`): Unit
+ *   Test 1 and Half-Yearly released, Annual completed but not released,
+ *   Weekly started, Final not planned.
+ * Class 6 and Class 7 deliberately reuse the slug `maths`.
+ */
+describe('cadet results, growth and remarks', () => {
+  let principal: TestClient;
+  let schoolId: string;
+  let meera: CadetRouterClient;
+  let ravi: CadetRouterClient;
+  let current: { sessionId: string; classId: string; meera: string; ravi: string };
+  let past: { sessionId: string; classId: string; meera: string; ravi: string };
+
+  beforeAll(async () => {
+    const created = await createResultsSchool();
+    principal = created.principal;
+    schoolId = created.school.id;
+    const meeraLogin = await createAdmissionWithLogin(principal, schoolId, 'Meera Singh');
+    const raviLogin = await createAdmissionWithLogin(principal, schoolId, 'Ravi Kumar');
+
+    const pastSessionId = await createExamSession(schoolId, 2025, { ut1: 'Unit Test 1', annual: 'Annual' }, { active: true });
+    const class6 = await createSubjectClass(schoolId, 'Class 6', { maths: 'Maths', sanskrit: 'Sanskrit' });
+    past = {
+      sessionId: pastSessionId,
+      classId: class6.classId,
+      meera: (await enroll({ schoolId, admissionId: meeraLogin.admission.id, sessionId: pastSessionId, ...class6, rollNo: 1 })).id,
+      ravi: (await enroll({ schoolId, admissionId: raviLogin.admission.id, sessionId: pastSessionId, ...class6, rollNo: 2 })).id,
+    };
+    const pastScope = (examSlug: string) => ({ schoolId, sessionId: pastSessionId, examSlug });
+    await runExam(principal, pastScope('ut1'), [
+      { classId: past.classId, studentId: past.meera, subjects: { maths: 60, sanskrit: 70 } },
+      { classId: past.classId, studentId: past.ravi, subjects: { maths: 40, sanskrit: 50 } },
+    ], { complete: true });
+    await runExam(principal, pastScope('annual'), [
+      { classId: past.classId, studentId: past.meera, subjects: { maths: 70, sanskrit: 80 } },
+      { classId: past.classId, studentId: past.ravi, subjects: { maths: 50, sanskrit: 60 } },
+    ], { complete: true });
+    await principal.school.saveStudentExamRemark({ ...pastScope('annual'), classId: past.classId, studentId: past.meera, text: 'Promoted with distinction.' });
+    await principal.school.releaseExamToCadet(pastScope('ut1'));
+    await principal.school.releaseExamToCadet(pastScope('annual'));
+
+    const currentSessionId = await createExamSession(
+      schoolId,
+      2026,
+      { ut1: 'Unit Test 1', hy: 'Half-Yearly', annual: 'Annual', weekly: 'Weekly', final: 'Final' },
+      { active: true, coScholastic: true },
+    );
+    const class7 = await createSubjectClass(schoolId, 'Class 7', { maths: 'Mathematics', science: 'Science' });
+    current = {
+      sessionId: currentSessionId,
+      classId: class7.classId,
+      meera: (await enroll({ schoolId, admissionId: meeraLogin.admission.id, sessionId: currentSessionId, ...class7, rollNo: 1 })).id,
+      ravi: (await enroll({ schoolId, admissionId: raviLogin.admission.id, sessionId: currentSessionId, ...class7, rollNo: 2 })).id,
+    };
+    const scope = (examSlug: string) => ({ schoolId, sessionId: currentSessionId, examSlug });
+    const marks = (meeraMarks: Record<string, number>, raviMarks: Record<string, number>) => [
+      { classId: current.classId, studentId: current.meera, subjects: meeraMarks, coScholastics: { art: 'A' } },
+      { classId: current.classId, studentId: current.ravi, subjects: raviMarks, coScholastics: { art: 'B' } },
+    ];
+    await runExam(principal, scope('ut1'), marks({ maths: 70, science: 80 }, { maths: 50, science: 60 }), { complete: true });
+    await runExam(principal, scope('hy'), marks({ maths: 90, science: 70 }, { maths: 60, science: 80 }), { complete: true });
+    await runExam(principal, scope('annual'), marks({ maths: 99, science: 99 }, { maths: 10, science: 10 }), { complete: true });
+    await runExam(principal, scope('weekly'), []);
+    const remark = (examSlug: string, studentId: string, text: string) =>
+      principal.school.saveStudentExamRemark({ ...scope(examSlug), classId: current.classId, studentId, text });
+    await remark('hy', current.meera, 'Great half-year.');
+    await remark('hy', current.ravi, 'Ravi needs practice.');
+    await remark('annual', current.meera, 'Secret until release.');
+    await principal.school.releaseExamToCadet(scope('ut1'));
+    await principal.school.releaseExamToCadet(scope('hy'));
+
+    meera = await cadetClient(meeraLogin.credentials);
+    ravi = await cadetClient(raviLogin.credentials);
+  }, 120_000);
+
+  const recordOf = (studentId: string, classId: string) => `${studentId}.${classId}`;
+  const examOf = (studentId: string, classId: string, slug: string) => `${recordOf(studentId, classId)}.${slug}`;
+  const setAverages = (showClassAverages: boolean) => principal.school.updateCadetPortalSettings({ schoolId, showClassAverages });
+
+  it('getProfile returns the student and their enrollments, newest first', async () => {
+    const profile = await meera.getProfile();
+    expect(profile).toMatchObject({ name: 'Meera Singh', enrollments: [
+      { sessionLabel: '2026–27', classLabel: 'Class 7', rollNo: 1, sessionIsActive: true },
+      { sessionLabel: '2025–26', classLabel: 'Class 6', rollNo: 1, sessionIsActive: false },
+    ] });
+    expect(profile.enrollments.map((row) => row.studentId)).toEqual([current.meera, past.meera]);
+  });
+
+  it('listExams shows released scores only and an explicit awaiting state', async () => {
+    const exams = await meera.listExams({});
+    expect(exams.record).toMatchObject({ recordId: recordOf(current.meera, current.classId), classLabel: 'Class 7', sessionLabel: '2026–27' });
+    expect(exams.items.map(({ examSlug, state, percentage, grade }) => ({ examSlug, state, percentage, grade }))).toEqual([
+      { examSlug: 'ut1', state: 'released', percentage: 75, grade: 'B' },
+      { examSlug: 'hy', state: 'released', percentage: 80, grade: 'A' },
+      { examSlug: 'annual', state: 'awaiting_release', percentage: null, grade: null },
+      { examSlug: 'weekly', state: 'in_progress', percentage: null, grade: null },
+      { examSlug: 'final', state: 'upcoming', percentage: null, grade: null },
+    ]);
+    expect(exams.items[2]!.releasedAt).toBeNull();
+    expect(exams.pagination).toMatchObject({ totalItems: 5, currentPage: 1 });
+    const pastExams = await meera.listExams({ filters: { recordId: recordOf(past.meera, past.classId) } });
+    expect(pastExams.items.map((exam) => [exam.examSlug, exam.percentage])).toEqual([['ut1', 65], ['annual', 75]]);
+  });
+
+  it('getExamResult returns marks, the previous exam of the same class, remark and activities without averages by default', async () => {
+    await setAverages(false);
+    const result = await meera.getExamResult({ examId: examOf(current.meera, current.classId, 'hy') });
+    expect(result).toMatchObject({
+      name: 'Half-Yearly',
+      classLabel: 'Class 7',
+      sessionLabel: '2026–27',
+      overall: { obtained: 160, max: 200, percentage: 80, grade: 'A' },
+      previousExam: { examId: examOf(current.meera, current.classId, 'ut1'), name: 'Unit Test 1', percentage: 75 },
+      classAveragePercentage: null,
+      coScholastics: [{ area: 'Art', grade: 'A' }],
+      remark: { text: 'Great half-year.', authorName: expect.any(String) },
+    });
+    expect(result.subjects.map(({ name, obtained, max, grade, previousPercentage, classAveragePercentage }) => ({ name, obtained, max, grade, previousPercentage, classAveragePercentage }))).toEqual([
+      { name: 'Mathematics', obtained: 90, max: 100, grade: 'A', previousPercentage: 70, classAveragePercentage: null },
+      { name: 'Science', obtained: 70, max: 100, grade: 'B', previousPercentage: 80, classAveragePercentage: null },
+    ]);
+    expect(result.subjects[0]!.modes).toEqual([{ name: 'Written', obtained: 90, max: 100 }]);
+
+    // The first exam of a class has no previous exam, even though Class 6 had one.
+    expect((await meera.getExamResult({ examId: examOf(current.meera, current.classId, 'ut1') })).previousExam).toBeNull();
+  });
+
+  it('includes class averages only while the school shares them', async () => {
+    await setAverages(true);
+    const result = await meera.getExamResult({ examId: examOf(current.meera, current.classId, 'hy') });
+    expect(result.classAveragePercentage).toBe(75);
+    expect(result.subjects.map((subject) => subject.classAveragePercentage)).toEqual([75, 75]);
+    const growth = await meera.getGrowth({});
+    expect(growth.classAveragesShared).toBe(true);
+    expect(growth.selected!.exams.map((exam) => exam.classAveragePercentage)).toEqual([65, 75]);
+
+    await setAverages(false);
+    const hidden = await meera.getGrowth({});
+    expect(hidden.classAveragesShared).toBe(false);
+    expect(hidden.selected!.exams.every((exam) => exam.classAveragePercentage === null && exam.subjectAverages === null)).toBe(true);
+    expect(hidden.classes.every((record) => record.latest?.classAveragePercentage === null)).toBe(true);
+    expect((await meera.getExamResult({ examId: examOf(current.meera, current.classId, 'hy') })).classAveragePercentage).toBeNull();
+  });
+
+  it('hides and rejects unreleased examinations, including after a withdrawal', async () => {
+    await expectRpcCode(meera.getExamResult({ examId: examOf(current.meera, current.classId, 'annual') }), 'NOT_FOUND');
+    await expectRpcCode(meera.getExamResult({ examId: examOf(current.meera, current.classId, 'weekly') }), 'NOT_FOUND');
+    await expectRpcCode(meera.getExamResult({ examId: 'not-an-exam' }), 'NOT_FOUND');
+    const remarks = await meera.listRemarks({});
+    expect(remarks.items.map((item) => item.text)).not.toContain('Secret until release.');
+    expect((await meera.getGrowth({})).selected!.exams.map((exam) => exam.name)).toEqual(['Unit Test 1', 'Half-Yearly']);
+
+    const scope = { schoolId, sessionId: current.sessionId, examSlug: 'hy' };
+    await principal.school.withdrawExamFromCadet(scope);
+    try {
+      await expectRpcCode(meera.getExamResult({ examId: examOf(current.meera, current.classId, 'hy') }), 'NOT_FOUND');
+      const exams = await meera.listExams({});
+      expect(exams.items.find((exam) => exam.examSlug === 'hy')).toMatchObject({ state: 'awaiting_release', percentage: null });
+    } finally {
+      await principal.school.releaseExamToCadet(scope);
+    }
+  });
+
+  it("never reaches another student's records", async () => {
+    await expectRpcCode(ravi.getExamResult({ examId: examOf(current.meera, current.classId, 'hy') }), 'NOT_FOUND');
+    await expectRpcCode(ravi.listExams({ filters: { recordId: recordOf(current.meera, current.classId) } }), 'NOT_FOUND');
+    await expectRpcCode(ravi.getGrowth({ recordId: recordOf(past.meera, past.classId) }), 'NOT_FOUND');
+    await expectRpcCode(ravi.listRemarks({ filters: { recordId: recordOf(current.meera, current.classId) } }), 'NOT_FOUND');
+    const own = await ravi.getExamResult({ examId: examOf(current.ravi, current.classId, 'hy') });
+    expect(own.overall!.percentage).toBe(70);
+    expect(own.remark!.text).toBe('Ravi needs practice.');
+    expect((await ravi.listRemarks({})).items.map((item) => item.text)).toEqual(['Ravi needs practice.']);
+  });
+
+  it('getGrowth lists every class and never mixes subjects across classes', async () => {
+    const currentRecord = recordOf(current.meera, current.classId);
+    const pastRecord = recordOf(past.meera, past.classId);
+    const growth = await meera.getGrowth({});
+    expect(growth.classes.map(({ recordId, classLabel, sessionLabel, latest }) => ({ recordId, classLabel, sessionLabel, latest: latest && { examName: latest.examName, percentage: latest.percentage } }))).toEqual([
+      { recordId: currentRecord, classLabel: 'Class 7', sessionLabel: '2026–27', latest: { examName: 'Half-Yearly', percentage: 80 } },
+      { recordId: pastRecord, classLabel: 'Class 6', sessionLabel: '2025–26', latest: { examName: 'Annual', percentage: 75 } },
+    ]);
+    expect(growth.selected!.recordId).toBe(currentRecord);
+    expect(growth.selected!.subjects).toEqual([
+      { subjectId: `${currentRecord}.maths`, name: 'Mathematics' },
+      { subjectId: `${currentRecord}.science`, name: 'Science' },
+    ]);
+    expect(growth.selected!.exams.map((exam) => [exam.name, exam.percentage, exam.subjects])).toEqual([
+      ['Unit Test 1', 75, { [`${currentRecord}.maths`]: 70, [`${currentRecord}.science`]: 80 }],
+      ['Half-Yearly', 80, { [`${currentRecord}.maths`]: 90, [`${currentRecord}.science`]: 70 }],
+    ]);
+
+    const older = await meera.getGrowth({ recordId: pastRecord });
+    expect(older.selected!.subjects.map((subject) => subject.name)).toEqual(['Maths', 'Sanskrit']);
+    const pastIds = older.selected!.subjects.map((subject) => subject.subjectId);
+    const currentIds = growth.selected!.subjects.map((subject) => subject.subjectId);
+    // The shared slug `maths` is two different subjects.
+    expect(pastIds.filter((id) => currentIds.includes(id))).toEqual([]);
+    for (const exam of older.selected!.exams) expect(Object.keys(exam.subjects).every((id) => id.startsWith(`${pastRecord}.`))).toBe(true);
+  });
+
+  it('listRemarks returns released remarks, newest session first, optionally per class', async () => {
+    const remarks = await meera.listRemarks({});
+    expect(remarks.items.map(({ examName, text }) => [examName, text])).toEqual([
+      ['Half-Yearly', 'Great half-year.'],
+      ['Annual', 'Promoted with distinction.'],
+    ]);
+    const pastOnly = await meera.listRemarks({ filters: { recordId: recordOf(past.meera, past.classId) } });
+    expect(pastOnly.items.map((item) => item.text)).toEqual(['Promoted with distinction.']);
+  });
+
+  it('rejects anonymous callers and accepts a read-only MCP grant', async () => {
+    const anonymous = createCadetTestClient(new Headers());
+    await expectRpcCode(anonymous.listExams({}), 'UNAUTHORIZED');
+    await expectRpcCode(anonymous.getGrowth({}), 'UNAUTHORIZED');
+    await expectRpcCode(anonymous.getProfile(), 'UNAUTHORIZED');
+    await expectRpcCode(meera.listExams({ limit: 50 }), 'BAD_REQUEST');
+
+    const admission = await createAdmissionWithLogin(principal, schoolId, 'Asha Nair');
+    const { claims } = await connectCadetMcp(admission.credentials);
+    const context = await createCadetOAuthContext({
+      headers: new Headers(),
+      userId: claims.userId,
+      oauthGrant: { clientId: claims.clientId, scopes: claims.scopes, grantId: 'grant' },
+    });
+    const mcp = createRouterClient(cadetRouter, { context: context! });
+    // A student without an enrollment sees empty, not broken, results.
+    expect(await mcp.listExams({})).toMatchObject({ items: [], record: null });
+    expect(await mcp.getGrowth({})).toMatchObject({ classes: [], selected: null });
+  });
+});
+
+describe('cadet fees', () => {
+  it('shows the own ledger, summary and bills and nothing of another admission', async () => {
+    const scenario = await createFinanceScenario();
+    const accountant = scenario.actors.accountant.client;
+    const principal = scenario.actors.principal.client;
+    const schoolId = scenario.school.id;
+    const credentials = await principal.school.issueAdmissionCadetPassword({ schoolId, admissionId: scenario.admission.id });
+    const student = await cadetClient(credentials);
+
+    // A new student with no bills sees an empty account.
+    expect(await student.getFeeSummary()).toEqual({ currencies: [] });
+    expect((await student.listFeeLedger({})).items).toEqual([]);
+
+    const bill = await accountant.school.createManualBill({
+      schoolId,
+      sessionId: scenario.activeSession.id,
+      admissionId: scenario.admission.id,
+      issueDate: '2040-05-01',
+      reason: 'Cadet ledger test',
+      idempotencyKey: createFinanceIdempotencyKey('cadet-bill'),
+      lines: [{ title: 'Tuition', amountMinor: '400000' }, { title: 'Transport', amountMinor: '100000' }],
+    });
+    await principal.school.recordAdjustment({
+      schoolId, admissionId: scenario.admission.id, sessionId: scenario.activeSession.id, currency: 'INR', kind: 'discount',
+      billId: bill.id, calculation: { kind: 'fixed', amountMinor: '50000' }, reasonCode: 'SIBLING', reasonNote: 'Sibling concession',
+      effectiveAt: '2040-05-02T00:00:00Z', idempotencyKey: createFinanceIdempotencyKey('cadet-discount'),
+    });
+    const payment = await accountant.school.recordPayment({
+      schoolId, admissionId: scenario.admission.id, sessionId: scenario.activeSession.id, amountMinor: '300000', currency: 'INR',
+      method: 'cash', receivedAt: '2040-05-03T10:00:00Z', effectiveAt: '2040-05-03T10:00:00Z', idempotencyKey: createFinanceIdempotencyKey('cadet-payment'),
+    });
+
+    expect(await student.getFeeSummary()).toEqual({
+      currencies: [{
+        currency: 'INR', balanceMinor: '150000', dueMinor: '150000', creditMinor: '0', billedMinor: '500000',
+        paidMinor: '300000', concessionsMinor: '50000', refundedMinor: '0',
+      }],
+    });
+    const ledger = await student.listFeeLedger({});
+    expect(ledger.items.map(({ type, direction, amountMinor, runningBalanceMinor, reference, billId, paymentMethod }) => ({ type, direction, amountMinor, runningBalanceMinor, reference, billId, paymentMethod }))).toEqual([
+      { type: 'payment', direction: 'credit', amountMinor: '300000', runningBalanceMinor: '150000', reference: payment.receiptNumber, billId: null, paymentMethod: 'cash' },
+      { type: 'discount', direction: 'credit', amountMinor: '50000', runningBalanceMinor: '450000', reference: null, billId: null, paymentMethod: null },
+      // Manual bills post as manual debit adjustments; the bill link is what matters.
+      { type: 'manual_debit_adjustment', direction: 'debit', amountMinor: '500000', runningBalanceMinor: '500000', reference: bill.billNumber, billId: bill.id, paymentMethod: null },
+    ]);
+    expect(ledger.items[0]).not.toHaveProperty('recordedBy');
+    expect(ledger.pagination).toMatchObject({ totalItems: 3 });
+
+    const detail = await student.getBill({ billId: bill.id });
+    expect(detail).toMatchObject({
+      billNumber: bill.billNumber, issueDate: '2040-05-01', sessionLabel: '2040–41', totalAmountMinor: '500000',
+      concessionsMinor: '50000', addedMinor: '0', netAmountMinor: '450000', reversed: false,
+      lines: [{ name: 'Tuition', amountMinor: '400000' }, { name: 'Transport', amountMinor: '100000' }],
+      adjustments: [{ kind: 'discount', amountMinor: '50000', reversed: false }],
+    });
+    expect(detail.adjustments[0]).not.toHaveProperty('reasonNote');
+
+    // Another admission's bill in the same school is not reachable.
+    const other = await createTestAdmission({ schoolId, name: 'Other Student' });
+    await createTestStudent({ schoolId, admissionId: other.id, sessionId: scenario.activeSession.id, classId: scenario.schoolClass.id, sectionId: scenario.section.id, rollNo: 2 });
+    const otherBill = await accountant.school.createManualBill({
+      schoolId, sessionId: scenario.activeSession.id, admissionId: other.id, issueDate: '2040-05-01', reason: 'Other',
+      idempotencyKey: createFinanceIdempotencyKey('other-bill'), lines: [{ title: 'Tuition', amountMinor: '1000' }],
+    });
+    await expectRpcCode(student.getBill({ billId: otherBill.id }), 'NOT_FOUND');
+    expect((await student.listFeeLedger({})).items.map((item) => item.billId)).not.toContain(otherBill.id);
+    await expectRpcCode(student.getBill({ billId: '' }), 'BAD_REQUEST');
+    await expectRpcCode(createCadetTestClient(new Headers()).getFeeSummary(), 'UNAUTHORIZED');
+    await expectRpcCode(createCadetTestClient(new Headers()).getBill({ billId: bill.id }), 'UNAUTHORIZED');
+  });
+});
+
