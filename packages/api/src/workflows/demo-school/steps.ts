@@ -195,6 +195,7 @@ export async function seedSession(ctx: SeedContext): Promise<{ sessionId: string
   });
   if (!session.isActive) await ctx.rpc.school.activateSession({ schoolId, sessionId: session.id });
   await ctx.rpc.school.updateAdmissionSettings({ schoolId, settings: { documentTypes: seedSession.admissionDocumentTypes } });
+  await ctx.rpc.school.updateCadetPortalSettings({ schoolId, showClassAverages: seedSession.cadetPortal.showClassAverages });
   return { sessionId: session.id };
 }
 
@@ -433,6 +434,51 @@ export async function seedExamCompletion(ctx: SeedContext, sessionId: string, ex
   return { status: overview.status ?? 'ready' };
 }
 
+/** The remark band follows the same ability that drives the student's marks. */
+function remarkText(ctx: SeedContext, exam: DemoExam, student: DemoStudent) {
+  const remarks = demoSeed.session.remarks;
+  const band = student.ability >= 0.8 ? remarks.high : student.ability >= 0.6 ? remarks.mid : remarks.low;
+  const template = createRandom(ctx.seed, 'remark', exam.slug, student.admissionNo).pick(band);
+  return template.replaceAll('{firstName}', student.name.split(' ')[0]!);
+}
+
+/**
+ * Writes a teacher remark for every registered student of one class in a
+ * completed exam. It runs before the exam is released (released remarks are
+ * frozen) and skips a remark that already has the planned text, so a replay
+ * changes nothing; a replay after the release finds the exam released and
+ * stops.
+ */
+export async function seedExamRemarks(
+  ctx: SeedContext,
+  input: { sessionId: string; exam: DemoExam; demoClass: DemoClass },
+): Promise<{ saved: number }> {
+  const { exam, demoClass } = input;
+  if (exam.state !== 'completed') return { saved: 0 };
+  const scope = { schoolId: ctx.schoolId, sessionId: input.sessionId, examSlug: exam.slug };
+  const overview = await ctx.rpc.school.getExamOverview(scope);
+  if (overview.status !== 'completed' || overview.cadetReleasedAt) return { saved: 0 };
+  const enrolments = (await enrolmentsFor(ctx, input.sessionId, demoClass.students)).filter((item) => item.registered);
+  let saved = 0;
+  for (const { student, studentId, classId } of enrolments) {
+    const text = remarkText(ctx, exam, student);
+    const existing = await ctx.rpc.school.getStudentExamRemark({ ...scope, classId, studentId });
+    if (existing?.text === text) continue;
+    await ctx.rpc.school.saveStudentExamRemark({ ...scope, classId, studentId, text });
+    saved += 1;
+  }
+  return { saved };
+}
+
+/** Releases a completed exam to the Cadet Portal when the plan says so. */
+export async function seedExamRelease(ctx: SeedContext, sessionId: string, exam: DemoExam): Promise<{ released: boolean }> {
+  if (!exam.releaseToCadet) return { released: false };
+  const scope = { schoolId: ctx.schoolId, sessionId, examSlug: exam.slug };
+  const overview = await ctx.rpc.school.getExamOverview(scope);
+  if (overview.status === 'completed' && !overview.cadetReleasedAt) await ctx.rpc.school.releaseExamToCadet(scope);
+  return { released: true };
+}
+
 // ---------------------------------------------------------------------------
 // §6.7 Finance
 
@@ -503,7 +549,7 @@ export async function seedBillingMonth(ctx: SeedContext, sessionId: string, mont
       billingDate: month.billingDate,
       ...(billed.length === students.length ? {} : { admissionIds: billed.map((student) => ids.get(student.admissionNo)!) }),
       runValues: {
-        session: plan.exams.some((exam) => exam.feeMonthIndex === monthIndex)
+        session: plan.exams.some((exam) => exam.chargesFee && exam.feeMonthIndex === monthIndex)
           ? { [demoSeed.finance.examinationFeeElement]: String(demoSeed.finance.examinationFeeMinor) }
           : {},
         classes: {},

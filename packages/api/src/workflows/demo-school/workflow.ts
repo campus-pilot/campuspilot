@@ -29,6 +29,8 @@ import {
   seedCredentials,
   seedExamClassResults,
   seedExamCompletion,
+  seedExamRelease,
+  seedExamRemarks,
   seedExamSetup,
   seedFinanceConfiguration,
   seedSchoolLogo,
@@ -149,6 +151,10 @@ export async function runDemoSeedSteps(options: {
         await step(`exam:${exam.slug}:results:${demoClass.seed.slug}`, async () => seedExamClassResults(await seed(), { sessionId, exam, demoClass }));
       }
       await step(`exam:${exam.slug}:complete`, async () => seedExamCompletion(await seed(), sessionId, exam));
+      for (const demoClass of plan.classes) {
+        await step(`exam:${exam.slug}:remarks:${demoClass.seed.slug}`, async () => seedExamRemarks(await seed(), { sessionId, exam, demoClass }));
+      }
+      await step(`exam:${exam.slug}:release`, async () => seedExamRelease(await seed(), sessionId, exam));
     }
   });
 

@@ -50,7 +50,30 @@ describe('demo seed data and plan', () => {
     expect(examStateAt(window, '2026-09-10', 30)).toBe('active');
     expect(examStateAt(window, '2026-09-20', 30)).toBe('completed');
     const plan = buildDemoPlan({ input, seed: 's', asOf: new Date('2026-11-06T06:00:00Z'), school });
-    expect(plan.exams.map((exam) => exam.state)).toEqual(['completed', 'ready', 'ready']);
+    expect(plan.exams.map((exam) => exam.state)).toEqual(['completed', 'completed', 'ready', 'ready']);
+  });
+
+  it('releases every completed exam to the Cadet Portal except the latest one', () => {
+    const at = (asOf: string) => buildDemoPlan({ input, seed: 's', asOf: new Date(asOf), school }).exams.map((exam) => [exam.slug, exam.releaseToCadet]);
+    expect(at('2026-11-06T06:00:00Z')).toEqual([
+      ['periodic-test-1', true],
+      ['first-term-examination', false],
+      ['second-term-examination', false],
+      ['annual-examination', false],
+    ]);
+    // A single completed exam is released, so a young demo still shows results.
+    expect(at('2026-08-01T06:00:00Z').filter(([, released]) => released)).toEqual([['periodic-test-1', true]]);
+    expect(at('2026-05-01T06:00:00Z').every(([, released]) => !released)).toBe(true);
+  });
+
+  it('charges the examination fee only for exams that charge one', () => {
+    const plan = buildDemoPlan({ input, seed: 's', asOf: new Date('2026-11-06T06:00:00Z'), school });
+    expect(plan.exams.map((exam) => [exam.slug, exam.chargesFee])).toEqual([
+      ['periodic-test-1', false],
+      ['first-term-examination', true],
+      ['second-term-examination', true],
+      ['annual-examination', true],
+    ]);
   });
 
   it('dates no payment on or after the asOf day', () => {

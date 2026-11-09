@@ -79,6 +79,8 @@ const sessionSeedSchema = z.object({
         startDay: z.number().int().min(1).max(20),
         /** Timetable slots, two per exam day. */
         slots: z.number().int().min(2).max(20),
+        /** Whether the exam's month bills the examination fee; short tests do not. */
+        chargesFee: z.boolean(),
       }),
     )
     .min(1),
@@ -88,6 +90,14 @@ const sessionSeedSchema = z.object({
   coScholasticAreas: coScholasticAreasSchema,
   coScholasticGrades: z.array(z.string().min(1)).min(1),
   attendanceTracking: z.object({ enabled: z.boolean() }),
+  /** School-level Cadet Portal settings a demo starts with. */
+  cadetPortal: z.object({ showClassAverages: z.boolean() }),
+  /** Teacher remarks by result band; `{firstName}` is replaced with the student's first name. */
+  remarks: z.object({
+    high: z.array(z.string().min(1).max(1000)).min(1),
+    mid: z.array(z.string().min(1).max(1000)).min(1),
+    low: z.array(z.string().min(1).max(1000)).min(1),
+  }),
   admissionDocumentTypes: z.array(z.object({ value: z.string().min(1), label: z.string().min(1) })).min(1),
 });
 

@@ -30,7 +30,7 @@ export const GRADING_SCALE: SessionConfig['gradingScale'] = {
   c: { label: 'C', minScore: 0 },
 };
 
-export async function createResultsSchool() {
+export async function createResultsSchool(): Promise<{ school: { id: string; slug: string }; principal: TestClient }> {
   const school = await createTestSchool();
   const principal = createTestClient(
     (await createSchoolStaffSession(school.id, [{ role: 'principal', meta: null }])).session,
