@@ -1,8 +1,7 @@
-import { db } from '@campuspilot/db';
 import * as restate from '@restatedev/restate-sdk';
 
 import {
-  failNotificationEvent,
+  failNotificationDispatch,
   NotificationDispatchError,
   runNotificationDispatch,
   type NotificationDispatchResult,
@@ -60,7 +59,9 @@ function step<T>(ctx: restate.WorkflowContext, name: string, action: () => Promi
  * once; every write is idempotent besides (derived IDs, `ON CONFLICT DO
  * NOTHING`, claim before send). Private to ingress: only
  * `NotificationControl`, which validates the event first, starts it. A
- * terminal failure is recorded on the event with a safe message.
+ * terminal failure is recorded on the event with a safe message, or, after
+ * the event was dispatched, on its deliveries still owed
+ * (`failNotificationDispatch`).
  */
 export const notificationDispatchWorkflow = restate.workflow({
   name: NOTIFICATION_DISPATCH_WORKFLOW_NAME,
@@ -90,7 +91,8 @@ export const notificationDispatchWorkflow = restate.workflow({
           // Only exhausted transient failures may be retried; a deterministic
           // failure would fail again and a cancellation was deliberate.
           const retryable = !cancelled && !deterministic;
-          await ctx.run('mark-failed', () => failNotificationEvent(db, eventId, message, { retryable, attempt }));
+          // Fails the event, or (send phase) the deliveries still owed.
+          await ctx.run('mark-failed', () => failNotificationDispatch(eventId, message, { retryable, attempt }));
           log.warn({ eventId, attempt, message, retryable }, 'notification.dispatch.failed');
         }
         throw error;

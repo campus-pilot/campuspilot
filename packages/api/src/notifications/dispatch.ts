@@ -28,7 +28,7 @@ import {
   type ResolvedRecipient,
 } from './channels';
 import { activePushSubscriptionIdsByAdmission } from './channels/web-push/subscriptions';
-import { claimDelivery, recordDeliveryOutcome } from './deliveries';
+import { claimDelivery, recordDeliveryOutcome, skipOwedDelivery } from './deliveries';
 import { notificationDeliveryId, notificationRedeliveryId, notificationRowId } from './ids';
 
 /**
@@ -227,10 +227,13 @@ function toPlannedDelivery(notificationId: string, channel: RemoteNotificationCh
 }
 
 /**
- * The rows an event owes, computed purely from journaled inputs so every
- * replay proposes identical IDs. One inbox row per recipient; one delivery
- * row per remote channel the type allows and per destination the channel
- * decided. Send targets are taken from these proposed rows, never from an
+ * The rows an event owes. One inbox row per recipient; one delivery row per
+ * remote channel the type allows and per destination the channel decided.
+ * The result depends on the adapters (each channel's kill switch, read from
+ * the environment when the worker starts), not only on journaled inputs, so
+ * the dispatch workflow runs it inside a journaled step: a replay on a
+ * worker whose switches changed reuses the recorded plan instead of planning
+ * different rows. Send targets are taken from that plan, never from an
  * insert's `RETURNING` (a replay inserts nothing and would send nothing).
  */
 export function planNotificationRows(
@@ -395,6 +398,49 @@ export async function failNotificationEvent(
     );
 }
 
+/** Error code of a delivery left owed when its dispatch ended for good. */
+export const DISPATCH_ABORTED_ERROR_CODE = 'dispatch_aborted';
+
+/**
+ * Records a dispatch attempt that ended with a terminal error. Before the
+ * rows were written the event itself is failed ({@link failNotificationEvent};
+ * a retryable failure is fanned out again by the sweep, which sends the same
+ * planned deliveries). Once the event is dispatched, the failure happened in
+ * the send phase and no later attempt will send: every delivery of the event
+ * still `owed` is recorded `failed: dispatch_aborted`, so staff see it in the
+ * delivery log, get a failure alert and can resend it, instead of it staying
+ * owed forever. Deliveries in `sending` are left alone (they may have been
+ * sent; see `./deliveries.ts`). Fenced on the attempt, so a late failure of
+ * an older attempt never touches a newer attempt's deliveries.
+ */
+export async function failNotificationDispatch(
+  eventId: string,
+  message: string,
+  options: { retryable: boolean; attempt: number },
+  db: typeof defaultDb = defaultDb,
+) {
+  await db.transaction(async (tx) => {
+    await failNotificationEvent(tx, eventId, message, options);
+    const [event] = await tx
+      .select({ status: notificationEventTable.status, redeliveryOfDeliveryId: notificationEventTable.redeliveryOfDeliveryId })
+      .from(notificationEventTable)
+      .where(and(eq(notificationEventTable.id, eventId), eq(notificationEventTable.dispatchAttempt, options.attempt)))
+      .for('update');
+    if (event?.status !== 'dispatched') return;
+    const ofEvent = event.redeliveryOfDeliveryId
+      ? eq(notificationDeliveryTable.resendOfDeliveryId, event.redeliveryOfDeliveryId)
+      : inArray(
+          notificationDeliveryTable.notificationId,
+          tx.select({ id: notificationTable.id }).from(notificationTable).where(eq(notificationTable.eventId, eventId)),
+        );
+    const now = new Date();
+    await tx
+      .update(notificationDeliveryTable)
+      .set({ status: 'failed', failedAt: now, errorCode: DISPATCH_ABORTED_ERROR_CODE, errorMessage: message, updatedAt: now })
+      .where(and(eq(notificationDeliveryTable.status, 'owed'), ofEvent));
+  });
+}
+
 /** What one send attempt did; JSON-only so it can be journaled. */
 export type SendAttemptResult =
   | { kind: 'sent' | 'failed' | 'skipped' | 'not_owed' }
@@ -403,7 +449,9 @@ export type SendAttemptResult =
 /**
  * Claims and sends one owed delivery on its channel and records the outcome
  * (see `./deliveries.ts`). A delivery that is no longer owed (already sent,
- * or stuck in `sending` after a crash) is left alone. An adapter that throws
+ * or stuck in `sending` after a crash) is left alone. A channel switched off
+ * since the delivery was planned records it `skipped: disabled` (it is not
+ * left `owed`, where nothing would ever pick it up). An adapter that throws
  * is treated as a transient channel failure (the claim is released), so a
  * bug or outage never leaves the delivery in `sending`. On the `final`
  * attempt a transient outcome is recorded as `failed`.
@@ -416,7 +464,9 @@ export async function sendOwedDelivery(
   options: { final?: boolean } = {},
 ): Promise<SendAttemptResult> {
   const adapter = adapters[channel];
-  if (!adapter.available) return { kind: 'not_owed' };
+  if (!adapter.available) {
+    return (await skipOwedDelivery(db, deliveryId, 'disabled')) ? { kind: 'skipped' } : { kind: 'not_owed' };
+  }
   const claimed = await claimDelivery(db, deliveryId);
   if (!claimed) return { kind: 'not_owed' };
   let outcome: DeliverySendOutcome;
@@ -502,10 +552,12 @@ export type NotificationDispatchResult =
 
 /**
  * The dispatch loop shared by the workflow and the tests. Steps, in order:
- * load the pending event, resolve recipients (journaled, so replays plan the
- * same rows), insert rows chunk by chunk, mark the event dispatched, then
- * send the owed deliveries in throttled rounds ({@link sendInRounds}). A
- * redelivery event (staff resend) inserts only its new delivery rows.
+ * load the pending event, resolve recipients, plan the rows (journaled, so a
+ * replay inserts and sends exactly the recorded plan even if a channel was
+ * switched on or off in between), insert rows chunk by chunk, mark the event
+ * dispatched, then send the planned owed deliveries in throttled rounds
+ * ({@link sendInRounds}). A redelivery event (staff resend) inserts only its
+ * new delivery rows.
  */
 export async function runNotificationDispatch(options: {
   eventId: string;
@@ -520,7 +572,7 @@ export async function runNotificationDispatch(options: {
   const recipients = await step('resolve-recipients', () => resolveNotificationRecipients(defaultDb, event));
   if (event.redeliveryOf) {
     const redelivery = { ...event, redeliveryOf: event.redeliveryOf };
-    const rows = planRedeliveryRows(redelivery, recipients, adapters);
+    const rows = await step('plan-redelivery', async () => planRedeliveryRows(redelivery, recipients, adapters));
     const inserted = await step('insert-redelivery', () => insertRedeliveryRows(redelivery, rows));
     if (inserted === 'event_gone') return { status: 'event_gone' };
     await step('mark-dispatched', () => markNotificationEventDispatched(defaultDb, eventId, 0));
@@ -528,7 +580,7 @@ export async function runNotificationDispatch(options: {
     await sendInRounds(owedRedeliveries, { step, sleep, adapters });
     return { status: 'dispatched', notificationCount: 0, owedDeliveryCount: owedRedeliveries.length };
   }
-  const planned = planNotificationRows(event, recipients, adapters);
+  const planned = await step('plan', async () => planNotificationRows(event, recipients, adapters));
   for (let start = 0; start < planned.length || start === 0; start += NOTIFICATION_INSERT_CHUNK) {
     const chunk = planned.slice(start, start + NOTIFICATION_INSERT_CHUNK);
     const inserted = await step(`insert:${start / NOTIFICATION_INSERT_CHUNK}`, () => insertNotificationChunk(event, chunk));

@@ -16,6 +16,8 @@ import {
 import { billIssuedData, billingRunPostedData, dispatchNow, emitAndDispatch } from '../../test/notifications';
 import type { NotificationChannelAdapter } from './channels';
 import {
+  DISPATCH_ABORTED_ERROR_CODE,
+  failNotificationDispatch,
   insertNotificationChunk,
   loadDispatchableEvent,
   planNotificationRows,
@@ -245,5 +247,74 @@ describe('notification dispatch', () => {
     const { deliveries } = await rowsOf(eventId);
     expect(deliveries.find((row) => row.channel === 'whatsapp')).toMatchObject({ status: 'skipped', skipReason: 'demo_school' });
     expect(deliveries.find((row) => row.channel === 'web_push')).toMatchObject({ status: 'skipped', skipReason: 'disabled' });
+  });
+
+  it('replays the journaled plan after a channel switch flip and records planned sends on a now-disabled channel as skipped', async () => {
+    const school = await createTestSchool();
+    const admission = await createTestAdmission({ schoolId: school.id });
+    const send = vi.fn(async () => ({ kind: 'sent' as const, providerMessageId: 'wamid.never' }));
+    const webPushOff = { channel: 'web_push', available: false, unavailableReason: 'test' } as const;
+    const whatsappOn: NotificationChannelAdapter = { channel: 'whatsapp', available: true, decide: () => [{ status: 'owed', destination: '+919876543210' }], send };
+    const whatsappOff = { channel: 'whatsapp', available: false, unavailableReason: 'switched off' } as const;
+    const { eventId } = await db.transaction((tx) =>
+      notify(tx, { type: 'bill.issued', data: billIssuedData(admission.id), schoolId: school.id, recipients: { kind: 'admissions', admissionIds: [admission.id] }, key: 'flip' }),
+    );
+    // A Restate-like journal: a completed step is never run again.
+    const journal = new Map<string, unknown>();
+    const journaled = (crashBeforeSend: boolean) => async <T,>(name: string, action: () => Promise<T>): Promise<T> => {
+      if (journal.has(name)) return journal.get(name) as T;
+      if (crashBeforeSend && name.startsWith('send:')) throw new Error('worker restarted');
+      const value = await action();
+      journal.set(name, value);
+      return value;
+    };
+    await expect(runNotificationDispatch({ eventId, step: journaled(true), sleep: async () => undefined, adapters: { web_push: webPushOff, whatsapp: whatsappOn } }))
+      .rejects.toThrow('worker restarted');
+    // Redeployed with WhatsApp switched off: the replay keeps the recorded plan.
+    expect(await runNotificationDispatch({ eventId, step: journaled(false), sleep: async () => undefined, adapters: { web_push: webPushOff, whatsapp: whatsappOff } }))
+      .toMatchObject({ status: 'dispatched', owedDeliveryCount: 1 });
+    expect(send).not.toHaveBeenCalled();
+    const { deliveries } = await rowsOf(eventId);
+    expect(deliveries.find((row) => row.channel === 'whatsapp')).toMatchObject({ status: 'skipped', skipReason: 'disabled', attempts: 0, destination: '+919876543210' });
+  });
+
+  it('fails deliveries still owed when the dispatch ends for good after the event was dispatched', async () => {
+    const school = await createTestSchool();
+    const admission = await createTestAdmission({ schoolId: school.id });
+    const whatsapp: NotificationChannelAdapter = { channel: 'whatsapp', available: true, decide: () => [{ status: 'owed', destination: '+919876543210' }], send: vi.fn() };
+    const adapters = { web_push: { channel: 'web_push', available: false, unavailableReason: 'test' } as const, whatsapp };
+    const { eventId } = await db.transaction((tx) =>
+      notify(tx, { type: 'bill.issued', data: billIssuedData(admission.id), schoolId: school.id, recipients: { kind: 'admissions', admissionIds: [admission.id] }, key: 'aborted' }),
+    );
+    const failingSends = async <T,>(name: string, action: () => Promise<T>) => {
+      if (name.startsWith('send:')) throw new Error('steps exhausted');
+      return action();
+    };
+    await expect(runNotificationDispatch({ eventId, step: failingSends, sleep: async () => undefined, adapters })).rejects.toThrow('steps exhausted');
+    const [event] = await db.select().from(notificationEventTable).where(eq(notificationEventTable.id, eventId));
+    expect(event!.status).toBe('dispatched');
+
+    // An older attempt never touches this attempt's deliveries.
+    await failNotificationDispatch(eventId, 'old attempt', { retryable: true, attempt: event!.dispatchAttempt + 1 });
+    expect((await rowsOf(eventId)).deliveries.find((row) => row.channel === 'whatsapp')!.status).toBe('owed');
+
+    await failNotificationDispatch(eventId, 'Gave up.', { retryable: true, attempt: event!.dispatchAttempt });
+    const { deliveries } = await rowsOf(eventId);
+    expect(deliveries.find((row) => row.channel === 'whatsapp')).toMatchObject({ status: 'failed', errorCode: DISPATCH_ABORTED_ERROR_CODE });
+    expect(deliveries.find((row) => row.channel === 'web_push')).toMatchObject({ status: 'skipped' });
+    const [after] = await db.select().from(notificationEventTable).where(eq(notificationEventTable.id, eventId));
+    expect(after!.status).toBe('dispatched');
+  });
+
+  it('fails only the event (deliveries stay owed for the retry) when the dispatch ends before it was dispatched', async () => {
+    const school = await createTestSchool();
+    const admission = await createTestAdmission({ schoolId: school.id });
+    const { eventId } = await db.transaction((tx) =>
+      notify(tx, { type: 'bill.issued', data: billIssuedData(admission.id), schoolId: school.id, recipients: { kind: 'admissions', admissionIds: [admission.id] }, key: 'early' }),
+    );
+    const [event] = await db.select().from(notificationEventTable).where(eq(notificationEventTable.id, eventId));
+    await failNotificationDispatch(eventId, 'Gave up.', { retryable: true, attempt: event!.dispatchAttempt });
+    const [after] = await db.select().from(notificationEventTable).where(eq(notificationEventTable.id, eventId));
+    expect(after).toMatchObject({ status: 'failed', failureRetryable: true });
   });
 });

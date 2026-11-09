@@ -3,7 +3,7 @@ import { notificationDeliveryTable, notificationTable } from '@campuspilot/db/sc
 import type { NotificationType } from '@campuspilot/db/notifications/catalogue';
 import { and, eq, sql } from 'drizzle-orm';
 
-import type { ClaimedDelivery, DeliverySendOutcome } from './channels';
+import type { ClaimedDelivery, DeliverySendOutcome, NotificationSkipReason } from './channels';
 
 /**
  * The claim-before-send protocol (D-25). A delivery is moved `owed →
@@ -105,4 +105,18 @@ export async function recordDeliveryOutcome(
       throw new Error(`Unhandled delivery outcome ${JSON.stringify(unhandled)}.`);
     }
   }
+}
+
+/**
+ * Records an owed delivery as skipped without claiming it (no provider call
+ * happens, so no attempt is counted). Used when its channel was switched off
+ * after the delivery was planned. False when it was not owed any more.
+ */
+export async function skipOwedDelivery(db: DatabaseExecutor, deliveryId: string, reason: NotificationSkipReason): Promise<boolean> {
+  const skipped = await db
+    .update(notificationDeliveryTable)
+    .set({ status: 'skipped', skipReason: reason, updatedAt: new Date() })
+    .where(and(eq(notificationDeliveryTable.id, deliveryId), eq(notificationDeliveryTable.status, 'owed')))
+    .returning({ id: notificationDeliveryTable.id });
+  return skipped.length > 0;
 }

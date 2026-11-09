@@ -12,7 +12,10 @@ export type * from './types';
  * until it has an adapter. Each channel is behind its own kill switch
  * (`WEB_PUSH_ENABLED`, `WHATSAPP_ENABLED`; default off, off locally); a
  * switched-off channel is `available: false`, so its copies are recorded as
- * `skipped: disabled`.
+ * `skipped: disabled`. Built at module load: a switch changes with a
+ * restart. The dispatch workflow journals its plan, so a replay after such a
+ * restart keeps the recorded plan, and a planned send whose channel has since
+ * been switched off is recorded `skipped: disabled` at send time.
  */
 export const notificationChannelAdapters: Record<RemoteNotificationChannel, NotificationChannelAdapter> = {
   web_push: createWebPushAdapterFromEnv(),
