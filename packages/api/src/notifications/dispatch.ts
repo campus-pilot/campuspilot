@@ -268,7 +268,7 @@ export async function failNotificationEvent(
 
 /** What one send attempt did; JSON-only so it can be journaled. */
 export type SendAttemptResult =
-  | { kind: 'sent' | 'failed' | 'not_owed' }
+  | { kind: 'sent' | 'failed' | 'skipped' | 'not_owed' }
   | { kind: 'retry'; scope: 'recipient' | 'channel'; retryAfterMs: number | null };
 
 /**

@@ -14,7 +14,8 @@ import type { ClaimedDelivery, DeliverySendOutcome } from './channels';
  * - `retry` → back to `owed` (rate limit / transient), the caller retries
  *   after a durable backoff; on the caller's last attempt (`final`) it is
  *   `failed` instead, keeping the provider's error code (D-7);
- * - `failed` → `failed`.
+ * - `failed` → `failed`;
+ * - `skipped` → `skipped` with its reason (send-time re-check).
  * A delivery left in `sending` (the worker died between claim and outcome)
  * is never claimed again: it may have been sent. It is surfaced to staff.
  * Every update is conditional on `status = 'sending'`, so a late or repeated
@@ -40,12 +41,12 @@ export async function claimDelivery(db: DatabaseExecutor, deliveryId: string): P
     });
   if (!claimed) return null;
   const [notification] = await db
-    .select({ type: notificationTable.type, data: notificationTable.data })
+    .select({ type: notificationTable.type, data: notificationTable.data, admissionId: notificationTable.admissionId })
     .from(notificationTable)
     .where(eq(notificationTable.id, claimed.notificationId))
     .limit(1);
   if (!notification) return null;
-  return { ...claimed, type: notification.type as NotificationType, data: notification.data };
+  return { ...claimed, admissionId: notification.admissionId, type: notification.type as NotificationType, data: notification.data };
 }
 
 /** Shown on a delivery that was still being rate limited or failing transiently after its last attempt. */
@@ -78,6 +79,12 @@ export async function recordDeliveryOutcome(
       await db
         .update(notificationDeliveryTable)
         .set({ status: 'owed', claimedAt: null, errorCode: outcome.errorCode, updatedAt: now })
+        .where(sending);
+      return;
+    case 'skipped':
+      await db
+        .update(notificationDeliveryTable)
+        .set({ status: 'skipped', skipReason: outcome.reason, claimedAt: null, updatedAt: now })
         .where(sending);
       return;
     case 'failed':

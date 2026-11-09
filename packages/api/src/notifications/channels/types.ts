@@ -35,9 +35,13 @@ export type DeliveryDecision =
  *   which case the rest of the round is not attempted. `retryAfterMs` is the
  *   provider's own hint, if it gave one.
  * - `failed`: permanent; the delivery is `failed`.
+ * - `skipped`: the channel re-checked the recipient at send time and must
+ *   not send any more (e.g. WhatsApp consent was withdrawn by a STOP reply
+ *   after the fan-out); the delivery is `skipped` with the reason.
  */
 export type DeliverySendOutcome =
   | { kind: 'sent'; providerMessageId: string | null }
+  | { kind: 'skipped'; reason: NotificationSkipReason }
   | { kind: 'retry'; errorCode: string; scope: 'recipient' | 'channel'; retryAfterMs?: number }
   | { kind: 'failed'; errorCode: string };
 
@@ -46,6 +50,8 @@ export type ClaimedDelivery = {
   id: string;
   notificationId: string;
   schoolId: string;
+  /** The notification's admission (student types); null for staff recipients. */
+  admissionId: string | null;
   type: NotificationType;
   data: Record<string, unknown>;
   destination: string | null;

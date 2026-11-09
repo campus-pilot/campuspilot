@@ -2,6 +2,7 @@ import type { RemoteNotificationChannel } from '@campuspilot/db/notifications/ca
 
 import type { DeliveryDecision, NotificationChannelAdapter, ResolvedRecipient } from './types';
 import { createWebPushAdapterFromEnv } from './web-push/adapter';
+import { createWhatsAppAdapterFromEnv } from './whatsapp/adapter';
 
 export type * from './types';
 
@@ -15,7 +16,7 @@ export type * from './types';
  */
 export const notificationChannelAdapters: Record<RemoteNotificationChannel, NotificationChannelAdapter> = {
   web_push: createWebPushAdapterFromEnv(),
-  whatsapp: { channel: 'whatsapp', available: false, unavailableReason: 'WhatsApp is not built yet (plan Phase 4).' },
+  whatsapp: createWhatsAppAdapterFromEnv(),
 };
 
 /**
