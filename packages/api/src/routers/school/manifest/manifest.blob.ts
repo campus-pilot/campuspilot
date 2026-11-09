@@ -17,6 +17,16 @@ const MANAGEMENT_THEME_COLOR = '#c2580e';
  */
 const SCHOOL_MANIFEST_CACHE_CONTROL = 'public, max-age=3600';
 
+/**
+ * When the browser hands a link into the school's scope to the installed app
+ * (desktop link capturing, Android intent links), reuse the open app window
+ * and navigate it to the link instead of opening another window. `auto` is the
+ * fallback for browsers that don't support `navigate-existing`. This only
+ * shapes launches the browser already decided to make; no web API lets a
+ * browser tab open the installed app by itself.
+ */
+const SCHOOL_LAUNCH_HANDLER = { client_mode: ['navigate-existing', 'auto'] };
+
 const schoolManifestInputSchema = z.object({ schoolId: z.string().min(1) });
 
 type HttpErrorReporter = (error: unknown) => void;
@@ -75,6 +85,7 @@ export async function handleSchoolManifestBlob(
       start_url: appUrl(schoolPath),
       scope: appUrl(schoolPath),
       display: 'standalone',
+      launch_handler: SCHOOL_LAUNCH_HANDLER,
       background_color: '#ffffff',
       theme_color: MANAGEMENT_THEME_COLOR,
       categories: ['business', 'education', 'productivity'],

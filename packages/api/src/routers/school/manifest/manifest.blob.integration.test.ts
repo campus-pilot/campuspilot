@@ -12,6 +12,7 @@ type Manifest = {
   start_url: string;
   scope: string;
   display: string;
+  launch_handler: { client_mode: string[] };
   icons: Array<{ src: string; sizes: string; type: string }>;
 };
 
@@ -36,6 +37,8 @@ describe('handleSchoolManifestBlob', () => {
       start_url: schoolUrl,
       scope: schoolUrl,
       display: 'standalone',
+      // Captured links reuse the open app window instead of opening another.
+      launch_handler: { client_mode: ['navigate-existing', 'auto'] },
     });
     // Relative to the manifest URL, so they resolve to the public logo blob.
     expect(manifest.icons).toEqual([
