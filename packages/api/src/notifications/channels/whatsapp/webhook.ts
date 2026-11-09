@@ -13,7 +13,14 @@ import { log } from '../../../workflows/notification/log';
  * and its event callbacks (POST). Public by protocol; a POST is trusted only
  * after its `X-Hub-Signature-256` HMAC over the raw body verifies with the
  * app secret. Answers 200 for every verified callback, including ones that
- * change nothing, because Meta retries non-2xx answers for days.
+ * change nothing, because Meta retries non-2xx answers for days, with one
+ * exception: a status receipt for a message ID no delivery carries yet,
+ * dated within {@link EARLY_RECEIPT_WINDOW_MS}, is answered 503 so Meta
+ * delivers it again. Meta can report a message before the worker has
+ * stored the message ID it returned for the send; acknowledging that receipt
+ * would lose it. Older unknown receipts (messages not sent through this
+ * system, or whose send was never recorded) are acknowledged and ignored, so
+ * nothing is retried for days. Inbound messages (STOP) never cause a retry.
  *
  * Enabled when `WHATSAPP_APP_SECRET` and `WHATSAPP_WEBHOOK_VERIFY_TOKEN` are
  * set, independent of `WHATSAPP_ENABLED`: receipts and STOP replies for
@@ -113,8 +120,19 @@ const ADVANCES_FROM: Record<WhatsAppStatusUpdate['status'], Array<'sending' | 's
   failed: ['sending', 'sent'],
 };
 
-/** Applies one receipt by `wamid`; true when a delivery changed. */
-export async function applyWhatsAppStatus(db: DatabaseExecutor, update: WhatsAppStatusUpdate): Promise<boolean> {
+/**
+ * How long after its own timestamp a receipt for an unknown message ID is
+ * refused (so Meta retries it) instead of acknowledged. Covers the moment
+ * between Meta accepting a send and the worker recording its message ID,
+ * plus Meta's retry spacing; longer than any normal gap by far.
+ */
+export const EARLY_RECEIPT_WINDOW_MS = 60 * 60 * 1000;
+
+/** What one receipt did: moved a delivery, matched one it may not move, or matched none. */
+export type WhatsAppStatusResult = 'changed' | 'unchanged' | 'unknown_message';
+
+/** Applies one receipt by `wamid`. */
+export async function applyWhatsAppStatus(db: DatabaseExecutor, update: WhatsAppStatusUpdate): Promise<WhatsAppStatusResult> {
   const set =
     update.status === 'sent'
       ? { status: 'sent' as const, sentAt: update.at }
@@ -134,7 +152,13 @@ export async function applyWhatsAppStatus(db: DatabaseExecutor, update: WhatsApp
       ),
     )
     .returning({ id: notificationDeliveryTable.id });
-  return rows.length > 0;
+  if (rows.length > 0) return 'changed';
+  const [known] = await db
+    .select({ id: notificationDeliveryTable.id })
+    .from(notificationDeliveryTable)
+    .where(and(eq(notificationDeliveryTable.channel, 'whatsapp'), eq(notificationDeliveryTable.providerMessageId, update.messageId)))
+    .limit(1);
+  return known ? 'unchanged' : 'unknown_message';
 }
 
 /** Inbound texts that withdraw WhatsApp consent (the template footer says "Reply STOP"). */
@@ -176,11 +200,26 @@ function toStatusUpdate(raw: unknown): WhatsAppStatusUpdate | null {
 }
 
 /** What a callback did (for logs and tests); never contains numbers or text. */
-export type WhatsAppCallbackSummary = { statuses: number; statusChanges: number; stopReplies: number; consentWithdrawn: number };
+export type WhatsAppCallbackSummary = {
+  statuses: number;
+  statusChanges: number;
+  /** Receipts for unknown message IDs recent enough to be early (see {@link EARLY_RECEIPT_WINDOW_MS}). */
+  earlyReceipts: number;
+  stopReplies: number;
+  consentWithdrawn: number;
+};
 
-/** Processes a verified callback body. */
-export async function processWhatsAppCallback(db: DatabaseExecutor, config: WhatsAppWebhookConfig, body: unknown): Promise<WhatsAppCallbackSummary> {
-  const summary: WhatsAppCallbackSummary = { statuses: 0, statusChanges: 0, stopReplies: 0, consentWithdrawn: 0 };
+/**
+ * Processes a verified callback body. Every write is conditional, so a
+ * callback Meta delivers again (after an early receipt) changes nothing twice.
+ */
+export async function processWhatsAppCallback(
+  db: DatabaseExecutor,
+  config: WhatsAppWebhookConfig,
+  body: unknown,
+  now: Date = new Date(),
+): Promise<WhatsAppCallbackSummary> {
+  const summary: WhatsAppCallbackSummary = { statuses: 0, statusChanges: 0, earlyReceipts: 0, stopReplies: 0, consentWithdrawn: 0 };
   const parsed = callbackSchema.safeParse(body);
   if (!parsed.success || parsed.data.object !== 'whatsapp_business_account') return summary;
   for (const entry of parsed.data.entry) {
@@ -192,7 +231,9 @@ export async function processWhatsAppCallback(db: DatabaseExecutor, config: What
         const update = toStatusUpdate(raw);
         if (!update) continue;
         summary.statuses += 1;
-        if (await applyWhatsAppStatus(db, update)) summary.statusChanges += 1;
+        const result = await applyWhatsAppStatus(db, update);
+        if (result === 'changed') summary.statusChanges += 1;
+        if (result === 'unknown_message' && now.getTime() - update.at.getTime() < EARLY_RECEIPT_WINDOW_MS) summary.earlyReceipts += 1;
       }
       for (const raw of value.messages ?? []) {
         const message = messageSchema.safeParse(raw);
@@ -247,5 +288,7 @@ export async function handleWhatsAppWebhook(
   }
   const summary = await processWhatsAppCallback(db, config, body);
   if (summary.statuses > 0 || summary.stopReplies > 0) log.info(summary, 'whatsapp.webhook.processed');
+  // Not acknowledged, so Meta delivers it again once the message ID is stored.
+  if (summary.earlyReceipts > 0) return new Response('Message not recorded yet', { status: 503, headers: { 'Retry-After': '60' } });
   return new Response('OK', { status: 200 });
 }

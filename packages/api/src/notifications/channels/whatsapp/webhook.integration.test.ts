@@ -105,6 +105,22 @@ describe('WhatsApp webhook', () => {
     expect(await delivered.read()).toMatchObject({ status: 'delivered' });
   });
 
+  it('asks Meta to retry a fresh receipt for a message ID not recorded yet, and acknowledges stale ones', async () => {
+    const { wamid, read } = await sentDelivery();
+    const recordedLater = `wamid.${randomUUID()}`;
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    // Meta reported delivery before the worker stored the send's message ID.
+    const early = await post(callback({ statuses: [status(recordedLater, 'delivered', nowSeconds)] }));
+    expect(early.status).toBe(503);
+    await db.update(notificationDeliveryTable).set({ providerMessageId: recordedLater }).where(eq(notificationDeliveryTable.providerMessageId, wamid));
+    expect((await post(callback({ statuses: [status(recordedLater, 'delivered', nowSeconds)] }))).status).toBe(200);
+    expect(await read()).toMatchObject({ status: 'delivered' });
+    // A receipt for a message this system never recorded, from long ago, is acknowledged.
+    expect((await post(callback({ statuses: [status(`wamid.${randomUUID()}`, 'delivered', nowSeconds - 2 * 60 * 60)] }))).status).toBe(200);
+    // A receipt that matches a delivery but cannot move it is acknowledged too.
+    expect((await post(callback({ statuses: [status(recordedLater, 'sent', nowSeconds)] }))).status).toBe(200);
+  });
+
   it('ignores callbacks for another phone number on the same app', async () => {
     const { wamid, read } = await sentDelivery();
     await post(callback({ statuses: [status(wamid, 'delivered', 2_000)] }, '999999'));
