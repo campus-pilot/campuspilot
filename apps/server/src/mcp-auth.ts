@@ -133,7 +133,7 @@ function requiredAccess(catalog: McpCatalog, message: JsonRpcMessage): McpAccess
  */
 /**
  * Generic over the endpoint's context type, so `/mcp` yields the staff
- * `Context` and `/api/cadet/mcp` the `CadetContext`, never either one.
+ * `Context` and `/cadet/mcp` the `CadetContext`, never either one.
  */
 export function createMcpGate<TContext extends McpContext>(options: McpGateOptions<TContext>) {
   const metadataUrl = protectedResourceMetadataUrl(options.resource);

@@ -79,7 +79,7 @@ export type McpCatalog = McpCatalogView & {
 
 /**
  * The oRPC context an MCP request runs with: the staff `Context` on `/mcp`,
- * the `CadetContext` on `/api/cadet/mcp`. Each endpoint has its own catalog
+ * the `CadetContext` on `/cadet/mcp`. Each endpoint has its own catalog
  * built from its own router, so a tool only ever receives the context type
  * its router was built for.
  */

@@ -31,7 +31,7 @@ import { pkce, StubMetadataHost } from './oauth-test-utils';
 const API_ORIGIN = 'http://localhost:3000';
 const CADET_ORIGIN = 'http://localhost:3004';
 const CADET_BASE = `${API_ORIGIN}/api/cadet/auth`;
-const CADET_RESOURCE = 'http://localhost:3000/api/cadet/mcp';
+const CADET_RESOURCE = 'http://localhost:3000/cadet/mcp';
 
 /** In-memory limiter so tests control lockout without sharing Redis keys. */
 function memoryLimiter(): SignInLimiter {

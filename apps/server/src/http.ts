@@ -312,7 +312,7 @@ const authenticateCadetMcpRequest = createMcpGate<CadetContext>({
     recordOAuthGrantUse(db, grantId, new Date(), CADET_OAUTH_GRANT_TABLES),
 });
 
-app.all('/api/cadet/mcp', async (context) => {
+app.all('/cadet/mcp', async (context) => {
   const request = context.req.raw;
   const result = await authenticateCadetMcpRequest(request);
   if (!result.ok) return result.response;
@@ -336,7 +336,7 @@ app.all('/api/cadet/mcp', async (context) => {
  */
 // The cadet resource's metadata and the cadet issuer's discovery documents
 // come first: the staff wildcard below would otherwise answer for them.
-app.get('/.well-known/oauth-protected-resource/api/cadet/mcp', (context) =>
+app.get('/.well-known/oauth-protected-resource/cadet/mcp', (context) =>
   cadetAuth.handler(context.req.raw),
 );
 app.get('/.well-known/oauth-authorization-server/api/cadet/auth', async (context) =>

@@ -15,13 +15,15 @@ export function createConfiguredApp() {
     : undefined;
   /**
    * The Cadet Portal calls the API with credentials, but only its own
-   * `/api/cadet/*` routes (cadet auth, RPC, MCP). Its origin is therefore
+   * `/api/cadet/*` routes (cadet auth, RPC) and the cadet MCP at `/cadet/mcp`
+   * (top-level like the staff `/mcp`). Its origin is therefore
    * allowed on those paths only, never on staff RPC, MCP or blob routes. It
    * is its own env value and is not added to CORS_ORIGIN, because the staff
    * auth instance trusts CORS_ORIGIN and must never trust the cadet app.
    */
   const cadetOrigin = new URL(env.CADET_APP_URL).origin;
-  const isCadetPath = (path: string) => path.startsWith('/api/cadet/');
+  const isCadetPath = (path: string) =>
+    path.startsWith('/api/cadet/') || path === '/cadet/mcp';
   const allowedOrigins = new Set(
     [...configuredOrigins, authOrigin].filter(
       (origin): origin is string => Boolean(origin),

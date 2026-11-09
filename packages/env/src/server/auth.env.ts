@@ -25,7 +25,7 @@ export const AUTH_ENV_SHAPE = {
    */
   CADET_APP_URL: z.url(),
   /**
-   * Canonical URL of the cadet MCP endpoint (`<API origin>/api/cadet/mcp`):
+   * Canonical URL of the cadet MCP endpoint (`<API origin>/cadet/mcp`):
    * the cadet OAuth protected resource and the required access token
    * audience. Its own value for the same reason as MCP_RESOURCE_URL.
    */
