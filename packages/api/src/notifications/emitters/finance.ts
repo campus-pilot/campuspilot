@@ -30,12 +30,18 @@ export type PostedBillFacts = {
   periodKey?: string | null;
 };
 
-function billIssued(bill: PostedBillFacts, createdBy: string): NotifyInput<'bill.issued'> {
+/**
+ * A run's bills are one bulk batch (sent after one-off sends, failures
+ * alerted per run); a manual bill is a one-off send.
+ */
+function billIssued(bill: PostedBillFacts, createdBy: string, run: { id: string } | null): NotifyInput<'bill.issued'> {
   return {
     type: 'bill.issued',
     schoolId: bill.schoolId,
     key: `bill:${bill.id}`,
     createdBy,
+    sendPriority: run ? 'bulk' : 'immediate',
+    batch: run ? { kind: 'billing_run', id: run.id } : null,
     recipients: { kind: 'admissions', admissionIds: [bill.admissionId] },
     data: {
       billId: bill.id,
@@ -62,12 +68,13 @@ export async function notifyBillingRunPosted(
   run: { id: string; schoolId: string; sessionId: string; periodKey: string; recordedBy: string },
   bills: readonly PostedBillFacts[],
 ): Promise<string[]> {
-  const inputs: AnyNotifyInput[] = bills.map((bill) => billIssued(bill, run.recordedBy));
+  const inputs: AnyNotifyInput[] = bills.map((bill) => billIssued(bill, run.recordedBy, run));
   inputs.push({
     type: 'billing.run_posted',
     schoolId: run.schoolId,
     key: `billing-run:${run.id}`,
     createdBy: run.recordedBy,
+    sendPriority: 'immediate',
     recipients: { kind: 'staff_users', userIds: [run.recordedBy] },
     data: { billRunId: run.id, sessionId: run.sessionId, periodKey: run.periodKey, billCount: bills.length },
   } satisfies NotifyInput<'billing.run_posted'>);
@@ -77,7 +84,7 @@ export async function notifyBillingRunPosted(
 
 /** One `bill.issued` for a manual bill. */
 export async function notifyManualBillPosted(tx: DatabaseExecutor, bill: PostedBillFacts, recordedBy: string): Promise<string[]> {
-  const results = await notifyMany(tx, [billIssued(bill, recordedBy)]);
+  const results = await notifyMany(tx, [billIssued(bill, recordedBy, null)]);
   return results.map((result) => result.eventId);
 }
 
@@ -103,6 +110,7 @@ export async function notifyPaymentRecorded(
     schoolId: payment.schoolId,
     key: `payment:${payment.id}`,
     createdBy: recordedBy,
+    sendPriority: 'immediate',
     recipients: { kind: 'admissions', admissionIds: [payment.admissionId] },
     data: {
       paymentId: payment.id,

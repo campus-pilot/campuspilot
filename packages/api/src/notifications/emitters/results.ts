@@ -145,6 +145,8 @@ export async function publishResults(db: Database, scope: ExamScope, publishedBy
       schoolId: scope.schoolId,
       key: resultPublicationEventKey(id, student.admissionId),
       createdBy: publishedBy,
+      sendPriority: 'bulk',
+      batch: { kind: 'result_publication', id },
       recipients: { kind: 'admissions', admissionIds: [student.admissionId] },
       data: { sessionId: scope.sessionId, examSlug: scope.examSlug, examName: exam.name, admissionId: student.admissionId, studentName: student.name },
     }));
@@ -244,6 +246,7 @@ async function sendStudentResultOnce(db: Database, scope: StudentResultScope & {
         schoolId: scope.schoolId,
         key: studentResultEventKey(scope, student.admissionId),
         createdBy: sentBy,
+        sendPriority: 'immediate',
         recipients: { kind: 'admissions', admissionIds: [student.admissionId] },
         data: { sessionId: scope.sessionId, examSlug: scope.examSlug, examName: exam.name, admissionId: student.admissionId, studentName: student.name },
       });
@@ -255,8 +258,12 @@ async function sendStudentResultOnce(db: Database, scope: StudentResultScope & {
   return { eventId, forecast };
 }
 
-/** A publication with deliveries still open after this long is settled anyway (beyond the ~18 h retry window). */
-const SETTLE_DEADLINE_MS = 48 * 60 * 60 * 1000;
+/**
+ * A publication with deliveries still open after this long is settled
+ * anyway: beyond the longest WhatsApp retry path (a day-later retry on each
+ * of three days for a reached daily limit, D-41) plus margin.
+ */
+const SETTLE_DEADLINE_MS = 4 * 24 * 60 * 60 * 1000;
 /** A delivery claimed this long ago without an outcome is counted as failed (the worker died mid-send). */
 const STUCK_SENDING_MS = 60 * 60 * 1000;
 const KEY_CHUNK = 1000;
@@ -344,6 +351,7 @@ async function finishResultPublicationIfSettled(db: Database, publication: ExamR
       type: 'exam.results_publish_finished',
       schoolId: publication.schoolId,
       key: `exam-results-finished:${publication.id}`,
+      sendPriority: 'immediate',
       recipients: { kind: 'staff_users', userIds: [publication.publishedBy] },
       data: { sessionId: publication.sessionId, examSlug: publication.examSlug, examName: publication.examName, ...outcome },
     });

@@ -20,7 +20,13 @@ import { z } from 'zod';
  * - `WHATSAPP_GRAPH_API_VERSION`: the Graph API version to call, e.g.
  *   `v24.0`; pinned explicitly so a Meta default change never alters us.
  *
- * Everything but the switch is required only while sending is enabled
+ * - `WHATSAPP_SEND_RATE_PER_SECOND`: messages the sender starts per second
+ *   on the one number (D-39), default 20. Meta's Cloud API allows 80 per
+ *   second by default (more after upgrades); staying well below leaves room
+ *   for retries and other traffic. Throttling answers (130429) still pause
+ *   the channel whatever the rate.
+ *
+ * Everything but the switch and the rate is required only while sending is enabled
  * ({@link requireWhatsAppConfigWhenEnabled}). The webhook works whenever
  * its two secrets are set, independent of the switch, so delivery receipts
  * and STOP replies for messages already sent are still recorded.
@@ -36,6 +42,7 @@ export const WHATSAPP_ENV_SHAPE = {
   WHATSAPP_APP_SECRET: z.string().min(16).optional(),
   WHATSAPP_WEBHOOK_VERIFY_TOKEN: z.string().min(16, 'Use at least 16 random characters (e.g. openssl rand -hex 24).').optional(),
   WHATSAPP_GRAPH_API_VERSION: z.string().regex(/^v\d+\.\d+$/, 'Use a Graph API version such as v24.0.').optional(),
+  WHATSAPP_SEND_RATE_PER_SECOND: z.coerce.number().int().min(1).max(1000).default(20),
 };
 
 const REQUIRED_WHEN_ENABLED = [

@@ -69,6 +69,7 @@ export async function sweepWhatsAppFailureAlerts(db: Database = defaultDb) {
         type: 'notification.whatsapp_failed',
         schoolId: delivery.schoolId,
         key: `whatsapp-failed:${delivery.id}`,
+        sendPriority: 'immediate',
         recipients: { kind: 'staff_users', userIds: recipients },
         data: {
           admissionId: delivery.admissionId,

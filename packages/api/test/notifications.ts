@@ -5,20 +5,112 @@ import { createRouterClient } from '@orpc/server';
 import { createECDH, randomBytes, randomUUID } from 'node:crypto';
 
 import type { CadetContext } from '../src/cadet/context';
+import type { RemoteNotificationChannel } from '@campuspilot/db/notifications/catalogue';
+
+import type { NotificationChannelAdapter } from '../src/notifications/channels';
 import { runNotificationDispatch, type NotificationDispatchResult } from '../src/notifications/dispatch';
 import { notify, type NotifyInput } from '../src/notifications/notify';
+import { runSenderDrain, type SenderPacing } from '../src/notifications/sender/drain';
+import { WEB_PUSH_SENDER_LANES, type SenderTarget } from '../src/notifications/sender/lanes';
 import { cadetRouter, type CadetRouterClient } from '../src/routers/cadet/cadet.router';
 
-/** Runs a dispatch with plain calls in place of journaled Restate steps. */
-export function dispatchNow(eventId: string): Promise<NotificationDispatchResult> {
-  return runNotificationDispatch({ eventId, step: (_name, action) => action(), sleep: async () => undefined });
+/**
+ * Runs a fan-out with plain calls in place of journaled Restate steps. It
+ * writes rows only; sending is the senders' job ({@link drainSchool}).
+ */
+export function dispatchNow(
+  eventId: string,
+  adapters?: Record<RemoteNotificationChannel, NotificationChannelAdapter>,
+): Promise<NotificationDispatchResult> {
+  return runNotificationDispatch({ eventId, step: (_name, action) => action(), poke: async () => undefined, adapters });
+}
+
+/** An emit as tests write it: key and priority are optional (a fresh key, `immediate`). */
+export type TestNotifyInput<T extends NotificationType> = Omit<NotifyInput<T>, 'key' | 'sendPriority'> & {
+  key?: string;
+  sendPriority?: NotifyInput<T>['sendPriority'];
+};
+
+/** Emits an event in its own transaction. */
+export async function emit<T extends NotificationType>(input: TestNotifyInput<T>) {
+  return db.transaction((tx) =>
+    notify(tx, { ...input, key: input.key ?? `test:${randomUUID()}`, sendPriority: input.sendPriority ?? 'immediate' } as NotifyInput<T>),
+  );
 }
 
 /** Emits an event in its own transaction and fans it out at once. */
-export async function emitAndDispatch<T extends NotificationType>(input: Omit<NotifyInput<T>, 'key'> & { key?: string }) {
-  const { eventId } = await db.transaction((tx) => notify(tx, { ...input, key: input.key ?? `test:${randomUUID()}` } as NotifyInput<T>));
+export async function emitAndDispatch<T extends NotificationType>(input: TestNotifyInput<T>) {
+  const { eventId } = await emit(input);
   const result = await dispatchNow(eventId);
   return { eventId, result };
+}
+
+/** A clock the sender reads; sleeps and waits for retries move it forward. */
+export function fakeClock(start: Date = new Date()) {
+  let now = start.getTime();
+  return {
+    now: () => new Date(now),
+    advance: (ms: number) => {
+      now += ms;
+    },
+    set: (at: Date) => {
+      now = Math.max(now, at.getTime());
+    },
+  };
+}
+
+/** Fast pacing for tests: no rate waits worth mentioning. */
+export const TEST_PACING: SenderPacing = { perSecond: 1000, concurrency: 1, groupSize: 50 };
+
+/**
+ * Drains one school's owed deliveries on every sender lane, as the
+ * `NotificationSender` objects would, with plain steps and a fake clock:
+ * a drain's sleeps advance the clock, and when a drain ends with a retry
+ * scheduled later the clock jumps to it and the lane is drained again,
+ * until nothing is owed or `maxDrains` drains ran. Jitter is pinned
+ * (random 0.5 = no jitter). Scoped to the school, so parallel test files
+ * never send each other's rows.
+ */
+export async function drainSchool(
+  schoolId: string,
+  options: {
+    adapters: Record<RemoteNotificationChannel, NotificationChannelAdapter>;
+    clock?: ReturnType<typeof fakeClock>;
+    maxDrains?: number;
+    step?: <T>(name: string, action: () => Promise<T>) => Promise<T>;
+  },
+) {
+  const clock = options.clock ?? fakeClock();
+  const sleeps: number[] = [];
+  const waits: number[] = [];
+  const targets: SenderTarget[] = [
+    { channel: 'whatsapp', lane: 0 },
+    ...Array.from({ length: WEB_PUSH_SENDER_LANES }, (_, lane) => ({ channel: 'web_push' as const, lane })),
+  ];
+  let drains = 0;
+  for (const target of targets) {
+    while (drains < (options.maxDrains ?? 30)) {
+      drains += 1;
+      const result = await runSenderDrain({
+        target,
+        scope: { schoolId },
+        step: options.step ?? ((_name, action) => action()),
+        sleep: async (_name, ms) => {
+          sleeps.push(ms);
+          clock.advance(ms);
+        },
+        clock: clock.now,
+        random: () => 0.5,
+        adapters: options.adapters,
+        pacing: TEST_PACING,
+      });
+      if (result.status === 'continue') continue;
+      if (!result.nextDueAt) break;
+      waits.push(new Date(result.nextDueAt).getTime() - clock.now().getTime());
+      clock.set(new Date(result.nextDueAt));
+    }
+  }
+  return { sleeps, waits, clock };
 }
 
 /** Facts of a `bill.issued` notification for an admission. */

@@ -9,7 +9,8 @@ import {
 } from '../workflows/restate-admin';
 import { MAX_NOTIFICATION_DISPATCH_ATTEMPTS } from '../workflows/notification/constants';
 import { log } from '../workflows/notification/log';
-import { sendNotificationDispatch } from './notification.restate';
+import { sendNotificationDispatch, sendNotificationSenderPoke } from './notification.restate';
+import { dueSenderTargets } from './sender/queue';
 
 /**
  * The notification outbox: `notification_event` rows are the durable record
@@ -299,6 +300,27 @@ export async function retryFailedEvents(db: DatabaseExecutor, now: Date = new Da
 }
 
 /**
+ * Pokes every sender lane that has a delivery due (D-39): the safety net
+ * behind the fan-out's own pokes, and what wakes a lane whose next retry
+ * was further away than its drain waits. A lane already draining queues
+ * one more drain, which finds what is left. Stops at the first poke
+ * Restate does not accept.
+ */
+export async function pokeDueSenders(db: DatabaseExecutor, now: Date = new Date()): Promise<number> {
+  let poked = 0;
+  for (const target of await dueSenderTargets(db, now)) {
+    try {
+      await sendNotificationSenderPoke(target, now);
+      poked += 1;
+    } catch (error) {
+      log.warn({ channel: target.channel, lane: target.lane, reason: describeHandoverError(error) }, 'notification.sender.poke.failed');
+      break;
+    }
+  }
+  return poked;
+}
+
+/**
  * One sweep, safe across API replicas and bounded. Sends run after the
  * picking transaction commits, so the control service sees the rows. The
  * sends stop at the first hand-over Restate did not accept (it is down; the
@@ -316,5 +338,6 @@ export async function sweepNotificationOutbox(db: DatabaseExecutor = defaultDb) 
     if (result === 'sent') sent += 1;
   }
   const stale = await failStaleEvents(db);
-  return { retried, pending: pending.length, sent, stale };
+  const poked = await pokeDueSenders(db);
+  return { retried, pending: pending.length, sent, stale, poked };
 }

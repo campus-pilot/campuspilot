@@ -19,6 +19,9 @@ const flag = z
  *   same value, or push services refuse the sends.
  * - `VAPID_SUBJECT` is the contact push services may use about abuse:
  *   a `mailto:` or `https:` URL.
+ * - `WEB_PUSH_SEND_RATE_PER_SECOND`: pushes each sender lane starts per
+ *   second (D-39; four lanes sharded by school), default 50. Push services
+ *   limit per subscription, so this only keeps the worker's own load even.
  * The keys and subject are required only while push is enabled
  * ({@link requireWebPushConfigWhenEnabled}).
  */
@@ -30,6 +33,7 @@ export const WEB_PUSH_ENV_SHAPE = {
     .string()
     .refine((value) => value.startsWith('mailto:') || value.startsWith('https://'), 'Use a mailto: or https: URL.')
     .optional(),
+  WEB_PUSH_SEND_RATE_PER_SECOND: z.coerce.number().int().min(1).max(1000).default(50),
 };
 
 /** Final-schema check: the VAPID values are required while web push is enabled. */

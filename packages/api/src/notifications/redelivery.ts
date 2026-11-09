@@ -45,6 +45,8 @@ export async function resendFailedDelivery(
       schoolId: input.schoolId,
       key: `resend:${input.deliveryId}`,
       createdBy: input.requestedBy,
+      // A resend is a deliberate one-off send someone is waiting for.
+      sendPriority: 'immediate',
       recipients: { kind: 'admissions', admissionIds: [row.admissionId] },
       redeliveryOfDeliveryId: input.deliveryId,
     } as AnyNotifyInput;

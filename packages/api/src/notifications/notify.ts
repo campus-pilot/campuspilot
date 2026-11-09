@@ -9,7 +9,11 @@ import {
   type NotificationRecipientSpecFor,
   type NotificationType,
 } from '@campuspilot/db/notifications/catalogue';
-import { notificationEventTable } from '@campuspilot/db/schema/notification';
+import {
+  notificationBatchKindEnum,
+  notificationEventTable,
+  notificationSendPriorityEnum,
+} from '@campuspilot/db/schema/notification';
 import { and, eq, inArray } from 'drizzle-orm';
 
 /**
@@ -31,11 +35,28 @@ export type NotifyInput<T extends NotificationType> = {
   /** Staff member whose action emitted it; omit for system events. */
   createdBy?: string | null;
   /**
+   * How urgently remote copies are sent (D-39): `immediate` for a one-off
+   * send someone waits for (receipt, manual bill, single result send,
+   * resend), `bulk` for one of many (billing run, results publication).
+   * Always stated: nothing infers it from the type or the batch. Staff
+   * types have no remote copies; they state `immediate`.
+   */
+  sendPriority: NotificationSendPriority;
+  /**
+   * The bulk action this event is one of (billing run, results
+   * publication); failure alerts are grouped per batch (D-38). Omit for a
+   * one-off event.
+   */
+  batch?: { kind: NotificationBatchKind; id: string } | null;
+  /**
    * Only for a staff resend (`./redelivery.ts`): the failed delivery to
    * send again. The event then writes no inbox row.
    */
   redeliveryOfDeliveryId?: string | null;
 };
+
+export type NotificationSendPriority = (typeof notificationSendPriorityEnum.enumValues)[number];
+export type NotificationBatchKind = (typeof notificationBatchKindEnum.enumValues)[number];
 
 /** One emit of any type, correlated (`data` and `recipients` match `type`). */
 export type AnyNotifyInput = { [T in NotificationType]: NotifyInput<T> }[NotificationType];
@@ -80,6 +101,10 @@ function toEventRow(input: AnyNotifyInput) {
     throw new NotifyError(`${input.type} is addressed to ${entry.audience}, not ${recipients.kind}.`);
   }
   if (!input.key || input.key.length > 300) throw new NotifyError('A notification key of 1 to 300 characters is required.');
+  if (!(notificationSendPriorityEnum.enumValues as readonly string[]).includes(input.sendPriority)) {
+    throw new NotifyError('A notification send priority is required.');
+  }
+  if (input.batch && (!input.batch.id || input.batch.id.length > 200)) throw new NotifyError('A notification batch needs an ID of 1 to 200 characters.');
   const deduplicated = recipients.kind === 'staff_users'
     ? { kind: recipients.kind, userIds: [...new Set(recipients.userIds)] }
     : { kind: recipients.kind, admissionIds: [...new Set(recipients.admissionIds)] };
@@ -90,6 +115,9 @@ function toEventRow(input: AnyNotifyInput) {
     data: data.data as Record<string, unknown>,
     recipients: deduplicated,
     createdBy: input.createdBy ?? null,
+    sendPriority: input.sendPriority,
+    batchKind: input.batch?.kind ?? null,
+    batchId: input.batch?.id ?? null,
     redeliveryOfDeliveryId: input.redeliveryOfDeliveryId ?? null,
   };
 }

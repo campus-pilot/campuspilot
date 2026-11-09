@@ -5,9 +5,9 @@ import { generateVAPIDKeys } from 'web-push';
 import { describe, expect, it, vi } from 'vitest';
 
 import { createTestAdmission, createTestSchool } from '../../../../test/fixtures';
-import { billIssuedData, createCadetLogin, fakePushSubscription } from '../../../../test/notifications';
-import { MAX_SEND_ROUNDS, runNotificationDispatch } from '../../dispatch';
+import { billIssuedData, createCadetLogin, dispatchNow, drainSchool, fakePushSubscription } from '../../../../test/notifications';
 import { notify } from '../../notify';
+import { WEB_PUSH_QUICK_RETRY_LIMIT } from '../../sender/retry-policy';
 import type { ChannelFetch, NotificationChannelAdapter } from '../types';
 import { createWebPushAdapter } from './adapter';
 
@@ -31,13 +31,13 @@ async function subscribedStudent(subscriptionCount = 1) {
 async function dispatchBill(schoolId: string, admissionId: string, fetchMock: ChannelFetch) {
   const adapters = { web_push: createWebPushAdapter({ vapid, fetch: fetchMock }) as NotificationChannelAdapter, whatsapp: whatsappOff };
   const { eventId } = await db.transaction((tx) =>
-    notify(tx, { type: 'bill.issued', data: billIssuedData(admissionId, { billNumber: 'BILL/9' }), schoolId, recipients: { kind: 'admissions', admissionIds: [admissionId] }, key: `bill:${crypto.randomUUID()}` }),
+    notify(tx, { sendPriority: 'immediate', type: 'bill.issued', data: billIssuedData(admissionId, { billNumber: 'BILL/9' }), schoolId, recipients: { kind: 'admissions', admissionIds: [admissionId] }, key: `bill:${crypto.randomUUID()}` }),
   );
-  const sleep = vi.fn(async (_name: string, _ms: number) => undefined);
-  const result = await runNotificationDispatch({ eventId, step: (_name, action) => action(), sleep, adapters });
+  const result = await dispatchNow(eventId, adapters);
+  const { waits, sleeps } = await drainSchool(schoolId, { adapters });
   const [notification] = await db.select().from(notificationTable).where(eq(notificationTable.eventId, eventId));
   const deliveries = await db.select().from(notificationDeliveryTable).where(inArray(notificationDeliveryTable.notificationId, [notification!.id]));
-  return { result, sleep, notification: notification!, deliveries: deliveries.filter((row) => row.channel === 'web_push') };
+  return { result, waits, sleeps, notification: notification!, deliveries: deliveries.filter((row) => row.channel === 'web_push') };
 }
 
 describe('web push channel', () => {
@@ -78,42 +78,42 @@ describe('web push channel', () => {
     for (const status of [404, 410]) {
       const { school, admission, subscriptions } = await subscribedStudent();
       const fetchMock = vi.fn<ChannelFetch>(async () => new Response(null, { status }));
-      const { deliveries, sleep } = await dispatchBill(school.id, admission.id, fetchMock);
+      const { deliveries, waits } = await dispatchBill(school.id, admission.id, fetchMock);
       expect(fetchMock).toHaveBeenCalledTimes(1);
-      expect(sleep).not.toHaveBeenCalled();
+      expect(waits).toEqual([]);
       expect(deliveries[0]).toMatchObject({ status: 'failed', errorCode: 'subscription_gone' });
       const [row] = await db.select().from(cadetPushSubscriptionTable).where(eq(cadetPushSubscriptionTable.endpoint, subscriptions[0]!.endpoint));
       expect(row!.revokedAt).toBeInstanceOf(Date);
     }
   });
 
-  it('retries 429 after a durable sleep that honours Retry-After, then sends', async () => {
+  it('retries 429 no sooner than its Retry-After, then sends', async () => {
     const { school, admission } = await subscribedStudent();
     const fetchMock = vi
       .fn<ChannelFetch>()
       .mockResolvedValueOnce(new Response(null, { status: 429, headers: { 'Retry-After': '600' } }))
       .mockResolvedValueOnce(new Response(null, { status: 201 }));
-    const { deliveries, sleep } = await dispatchBill(school.id, admission.id, fetchMock);
+    const { deliveries, waits } = await dispatchBill(school.id, admission.id, fetchMock);
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(sleep).toHaveBeenCalledTimes(1);
-    expect(sleep.mock.calls[0]![1]).toBe(600_000);
+    expect(waits).toEqual([600_000]);
     expect(deliveries[0]).toMatchObject({ status: 'sent', attempts: 2 });
   });
 
   it('gives up after the bounded number of attempts on persistent 5xx and records failed', async () => {
     const { school, admission } = await subscribedStudent();
     const fetchMock = vi.fn<ChannelFetch>(async () => new Response(null, { status: 503 }));
-    const { deliveries, sleep } = await dispatchBill(school.id, admission.id, fetchMock);
-    expect(fetchMock).toHaveBeenCalledTimes(MAX_SEND_ROUNDS);
-    expect(sleep).toHaveBeenCalledTimes(MAX_SEND_ROUNDS - 1);
-    expect(deliveries[0]).toMatchObject({ status: 'failed', errorCode: 'http_503', errorMessage: 'Gave up after the last retry.', attempts: MAX_SEND_ROUNDS });
+    const { deliveries, waits } = await dispatchBill(school.id, admission.id, fetchMock);
+    // Quick retries only (1, 4, 16, 64, 256 min); push is never retried a day later.
+    expect(fetchMock).toHaveBeenCalledTimes(WEB_PUSH_QUICK_RETRY_LIMIT + 1);
+    expect(waits).toEqual([60_000, 240_000, 960_000, 3_840_000, 15_360_000]);
+    expect(deliveries[0]).toMatchObject({ status: 'failed', errorCode: 'http_503', errorMessage: 'Gave up after the last retry.', attempts: WEB_PUSH_QUICK_RETRY_LIMIT + 1 });
   });
 
   it('fails permanently on other 4xx (e.g. a VAPID key mismatch) without retrying', async () => {
     const { school, admission } = await subscribedStudent();
     const fetchMock = vi.fn<ChannelFetch>(async () => new Response(null, { status: 403 }));
-    const { deliveries, sleep } = await dispatchBill(school.id, admission.id, fetchMock);
-    expect(sleep).not.toHaveBeenCalled();
+    const { deliveries, waits } = await dispatchBill(school.id, admission.id, fetchMock);
+    expect(waits).toEqual([]);
     expect(deliveries[0]).toMatchObject({ status: 'failed', errorCode: 'http_403', attempts: 1 });
   });
 

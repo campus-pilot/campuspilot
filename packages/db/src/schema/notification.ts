@@ -5,6 +5,7 @@ import {
   check,
   index,
   integer,
+  smallint,
   jsonb,
   pgEnum,
   pgTable,
@@ -94,6 +95,33 @@ export const notificationSkipReasonEnum = pgEnum("notification_skip_reason", [
 ]);
 
 /**
+ * How urgently an event's remote copies are sent (D-39). The channel
+ * senders pick `immediate` copies before `bulk` ones (declaration order is
+ * the sort order):
+ * - `immediate`: one-off sends a person is waiting for (a payment receipt,
+ *   a manual bill, a single result send, a staff resend);
+ * - `bulk`: one copy of many (a billing run's bills, a results
+ *   publication).
+ * Stated by the emitter on every event, never derived from its type or batch.
+ */
+export const notificationSendPriorityEnum = pgEnum("notification_send_priority", [
+  "immediate",
+  "bulk",
+]);
+
+/**
+ * The bulk action an event belongs to (D-38): failure alerts of one batch
+ * are grouped into one staff notification.
+ * - `billing_run`: one `bill.issued` per bill of a posted billing run;
+ * - `result_publication`: one `exam.results_published` per student of a
+ *   results publication.
+ */
+export const notificationBatchKindEnum = pgEnum("notification_batch_kind", [
+  "billing_run",
+  "result_publication",
+]);
+
+/**
  * The notification outbox: one row per emitted event, written by `notify()`
  * in the business transaction (D-23, D-24), then handed to the signed
  * `NotificationControl` Restate service; the API's 30 s sweep re-sends events
@@ -125,6 +153,15 @@ export const notificationEventTable = pgTable(
     createdBy: text("created_by").references(() => user.id, {
       onDelete: "set null",
     }),
+    /** Send priority of the event's remote copies, stated by the emitter (D-39). */
+    sendPriority: notificationSendPriorityEnum("send_priority").notNull(),
+    /**
+     * The bulk action this event is one of (D-38), with {@link batchId};
+     * both null for a one-off event. Failure alerts are grouped per batch.
+     */
+    batchKind: notificationBatchKindEnum("batch_kind"),
+    /** The billing run or results publication ID (see `batch_kind`). */
+    batchId: text("batch_id"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -190,6 +227,13 @@ export const notificationEventTable = pgTable(
       "notification_event_failure_retryable_check",
       sql`(${table.status} = 'failed') = (${table.failureRetryable} is not null)`,
     ),
+    check(
+      "notification_event_batch_check",
+      sql`(${table.batchKind} is null) = (${table.batchId} is null)`,
+    ),
+    index("notification_event_batch_idx")
+      .on(table.schoolId, table.batchKind, table.batchId)
+      .where(sql`${table.batchKind} is not null`),
   ],
 );
 
@@ -262,6 +306,14 @@ export const notificationTable = pgTable(
  * One remote copy of a notification per channel and destination (D-29). The
  * ID is derived from (notification, channel, destination), so a replayed
  * fan-out inserts nothing new. Students never see these rows (D-20).
+ *
+ * The table is also the send queue (D-39): an `owed` row is due at
+ * `next_attempt_at`; the channel's sender (a Restate virtual object per
+ * channel and `send_lane`) picks due rows by `send_priority`, then round
+ * robin across schools, claims each (`owed → sending`) and sends it under
+ * the channel's rate limit. A transient failure puts the row back to
+ * `owed` with a later `next_attempt_at`, counted in the retry counters
+ * below, until the channel's retry policy gives up (`failed`).
  */
 export const notificationDeliveryTable = pgTable(
   "notification_delivery",
@@ -306,6 +358,23 @@ export const notificationDeliveryTable = pgTable(
      */
     documentTemplateRevisionId: text("document_template_revision_id"),
     attempts: integer("attempts").notNull().default(0),
+    /** Copied from the event: `immediate` rows are sent before `bulk` ones. */
+    sendPriority: notificationSendPriorityEnum("send_priority").notNull(),
+    /**
+     * Which sender of the channel sends this row: always 0 for WhatsApp
+     * (one sender for the one number); for web push the school's shard
+     * (see the API's `notifications/sender/lanes.ts`), written once at
+     * fan-out so a later change of the lane count never strands rows.
+     */
+    sendLane: smallint("send_lane").notNull().default(0),
+    /** When an `owed` row is due to be sent; null in every other status. */
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }),
+    /** Quick retries (minutes apart) used after transient failures (D-41). */
+    quickRetries: integer("quick_retries").notNull().default(0),
+    /** Retries a day later used after the quick retries ran out (D-41). */
+    deferredRetries: integer("deferred_retries").notNull().default(0),
+    /** Retries a day later used because the provider's daily messaging limit was reached (D-41). */
+    dailyLimitRetries: integer("daily_limit_retries").notNull().default(0),
     claimedAt: timestamp("claimed_at", { withTimezone: true }),
     sentAt: timestamp("sent_at", { withTimezone: true }),
     deliveredAt: timestamp("delivered_at", { withTimezone: true }),
@@ -331,6 +400,13 @@ export const notificationDeliveryTable = pgTable(
     index("notification_delivery_pending_idx")
       .on(table.status, table.createdAt)
       .where(sql`${table.status} in ('owed', 'sending')`),
+    index("notification_delivery_queue_idx")
+      .on(table.channel, table.sendLane, table.nextAttemptAt)
+      .where(sql`${table.status} = 'owed'`),
+    check(
+      "notification_delivery_next_attempt_check",
+      sql`(${table.status} = 'owed') = (${table.nextAttemptAt} is not null)`,
+    ),
     index("notification_delivery_unalerted_failure_idx")
       .on(table.failedAt)
       .where(sql`${table.channel} = 'whatsapp' and ${table.status} = 'failed' and ${table.failureAlertedAt} is null`),

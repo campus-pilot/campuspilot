@@ -4,6 +4,11 @@
  * implementation.
  */
 export const NOTIFICATION_DISPATCH_WORKFLOW_NAME = 'NotificationDispatch';
+/**
+ * The channel senders (D-39): a Restate virtual object keyed by sender lane
+ * (`whatsapp`, `web_push:<n>`), private to ingress.
+ */
+export const NOTIFICATION_SENDER_OBJECT_NAME = 'NotificationSender';
 /** The only ingress-callable notification service; it validates the event before starting the workflow. */
 export const NOTIFICATION_CONTROL_SERVICE_NAME = 'NotificationControl';
 

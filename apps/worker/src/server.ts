@@ -11,6 +11,7 @@ import {
 import {
   notificationControlService,
   notificationDispatchWorkflow,
+  notificationSenderObject,
 } from '@campuspilot/api/workflows/notification';
 import { env } from '@campuspilot/env/worker';
 import { createEndpointHandler } from '@restatedev/restate-sdk';
@@ -37,6 +38,7 @@ export function startWorker() {
       dataMigrationWorkflow,
       notificationControlService,
       notificationDispatchWorkflow,
+      notificationSenderObject,
     ],
   });
   const server = createServer(handler);

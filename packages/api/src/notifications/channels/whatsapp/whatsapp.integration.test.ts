@@ -7,9 +7,11 @@ import { randomUUID } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 
 import { createTestAdmission, createTestSchool } from '../../../../test/fixtures';
-import { billIssuedData } from '../../../../test/notifications';
-import { MAX_SEND_ROUNDS, runNotificationDispatch, type NotificationStepRunner } from '../../dispatch';
+import { billIssuedData, dispatchNow, drainSchool } from '../../../../test/notifications';
+import { RETRIES_EXHAUSTED_MESSAGE } from '../../deliveries';
+import type { NotificationStepRunner } from '../../dispatch';
 import { notify, type NotifyInput } from '../../notify';
+import { DAY_MS } from '../../sender/retry-policy';
 import type { ChannelFetch, NotificationChannelAdapter } from '../types';
 import { createWhatsAppAdapter } from './adapter';
 import type { WhatsAppDocumentSources } from './documents';
@@ -34,22 +36,28 @@ function graphError(status: number, code: number) {
   return new Response(JSON.stringify({ error: { message: 'x', type: 'OAuthException', code, fbtrace_id: 't' } }), { status });
 }
 
+/**
+ * Emits, fans out and drains the school's WhatsApp lane as the sender
+ * would (fake clock; `waits` are the jumps to scheduled retries, `sleeps`
+ * the sender's own pauses).
+ */
 async function dispatch<T extends NotificationType>(
-  input: Omit<NotifyInput<T>, 'key'>,
+  input: Omit<NotifyInput<T>, 'key' | 'sendPriority'>,
   fetchMock: ChannelFetch,
   options: { documentSources?: WhatsAppDocumentSources; step?: NotificationStepRunner } = {},
 ) {
   const whatsapp = createWhatsAppAdapter({ config, fetch: fetchMock, documentSources: options.documentSources ?? noDocuments }) as NotificationChannelAdapter;
-  const { eventId } = await db.transaction((tx) => notify(tx, { ...input, key: `wa:${randomUUID()}` } as NotifyInput<T>));
-  const sleep = vi.fn(async (_name: string, _ms: number) => undefined);
-  await runNotificationDispatch({ eventId, step: options.step ?? ((_name, action) => action()), sleep, adapters: { web_push: pushOff, whatsapp } });
+  const adapters = { web_push: pushOff, whatsapp };
+  const { eventId } = await db.transaction((tx) => notify(tx, { sendPriority: 'immediate', ...input, key: `wa:${randomUUID()}` } as NotifyInput<T>));
+  await dispatchNow(eventId, adapters);
+  const { sleeps, waits } = await drainSchool(input.schoolId, { adapters, step: options.step });
   const notifications = await db.select().from(notificationTable).where(eq(notificationTable.eventId, eventId));
   const deliveries = await db
     .select()
     .from(notificationDeliveryTable)
     .where(inArray(notificationDeliveryTable.notificationId, notifications.map((row) => row.id)));
   const byAdmission = new Map(notifications.map((row) => [row.admissionId!, deliveries.find((d) => d.notificationId === row.id && d.channel === 'whatsapp')!]));
-  return { sleep, byAdmission };
+  return { sleeps, waits, byAdmission };
 }
 
 function bill(schoolId: string, admissionIds: string[]) {
@@ -179,7 +187,7 @@ describe('WhatsApp channel', () => {
     expect(byAdmission.get(renumbered.id)).toMatchObject({ status: 'failed', errorCode: 'number_changed' });
   });
 
-  it('retries a pair rate limit (131056) for that recipient only while the others go out', async () => {
+  it('retries a pair rate limit (131056) for that recipient only, a minute later, while the others go out', async () => {
     const school = await createTestSchool();
     const first = await student(school.id, { ...reachable, whatsappNo: '+919800000001' });
     const second = await student(school.id, { ...reachable, whatsappNo: '+919800000002' });
@@ -190,38 +198,48 @@ describe('WhatsApp channel', () => {
       attemptsTo.set(to, attempt);
       return to === '919800000001' && attempt === 1 ? graphError(400, 131056) : sent();
     });
-    const { byAdmission, sleep } = await dispatch(bill(school.id, [first.id, second.id]), fetchMock);
+    const { byAdmission, sleeps, waits } = await dispatch(bill(school.id, [first.id, second.id]), fetchMock);
     expect(fetchMock).toHaveBeenCalledTimes(3);
-    expect(sleep).toHaveBeenCalledTimes(1);
-    expect(sleep.mock.calls[0]![1]).toBe(60_000);
-    expect(byAdmission.get(first.id)).toMatchObject({ status: 'sent', attempts: 2 });
+    expect(sleeps).toEqual([]);
+    expect(waits).toEqual([60_000]);
+    expect(byAdmission.get(first.id)).toMatchObject({ status: 'sent', attempts: 2, quickRetries: 1 });
     expect(byAdmission.get(second.id)).toMatchObject({ status: 'sent', attempts: 1 });
   });
 
-  it('defers the rest of the round on a throughput limit (130429) instead of sending into it', async () => {
+  it('pauses the whole channel on a throughput limit (130429) instead of sending into it', async () => {
     const school = await createTestSchool();
     const admissions = await Promise.all([1, 2, 3].map((n) => student(school.id, { ...reachable, whatsappNo: `+91980000010${n}` })));
     const fetchMock = vi.fn<ChannelFetch>().mockResolvedValueOnce(graphError(400, 130429)).mockImplementation(async () => sent());
-    const { byAdmission, sleep } = await dispatch(bill(school.id, admissions.map((a) => a.id)), fetchMock);
-    // Round 1: one call, limited; round 2: all three.
+    const { byAdmission, sleeps } = await dispatch(bill(school.id, admissions.map((a) => a.id)), fetchMock);
+    // One limited call, a channel-wide pause of 30 s, then all three.
+    expect(sleeps).toEqual([30_000]);
     expect(fetchMock).toHaveBeenCalledTimes(4);
-    expect(sleep).toHaveBeenCalledTimes(1);
     for (const admission of admissions) expect(byAdmission.get(admission.id)!.status).toBe('sent');
     expect(admissions.map((a) => byAdmission.get(a.id)!.attempts).sort()).toEqual([1, 1, 2]);
   });
 
-  it('fails at once on a permanent error and after the bounded rounds on persistent 5xx', async () => {
+  it('fails at once on a permanent error, and after 4 quick retries and one a day later on a persistent transient one', async () => {
     const school = await createTestSchool();
     const permanent = await student(school.id);
     const missingTemplate = vi.fn<ChannelFetch>(async () => graphError(404, 132001));
     const first = await dispatch(bill(school.id, [permanent.id]), missingTemplate);
     expect(first.byAdmission.get(permanent.id)).toMatchObject({ status: 'failed', errorCode: 'wa_132001', attempts: 1 });
-    expect(first.sleep).not.toHaveBeenCalled();
+    expect(first.waits).toEqual([]);
 
-    const outage = vi.fn<ChannelFetch>(async () => new Response('bad gateway', { status: 502 }));
-    const second = await dispatch(bill(school.id, [permanent.id]), outage);
-    expect(outage).toHaveBeenCalledTimes(MAX_SEND_ROUNDS);
-    expect(second.sleep.mock.calls.map(([, ms]) => ms)).toEqual([60_000, 240_000, 960_000, 3_840_000, 15_360_000, 21_600_000, 21_600_000]);
-    expect(second.byAdmission.get(permanent.id)).toMatchObject({ status: 'failed', errorCode: 'http_502', attempts: MAX_SEND_ROUNDS });
+    const limited = vi.fn<ChannelFetch>(async () => graphError(400, 131056));
+    const second = await dispatch(bill(school.id, [permanent.id]), limited);
+    expect(limited).toHaveBeenCalledTimes(6);
+    // 1, 4, 16, 64 minutes, then a day (+ the pinned half of the 30 min spread).
+    expect(second.waits).toEqual([60_000, 240_000, 960_000, 3_840_000, DAY_MS + 900_000]);
+    expect(second.byAdmission.get(permanent.id)).toMatchObject({
+      status: 'failed',
+      errorCode: 'wa_131056',
+      errorMessage: RETRIES_EXHAUSTED_MESSAGE,
+      attempts: 6,
+      quickRetries: 4,
+      deferredRetries: 1,
+      nextAttemptAt: null,
+    });
   });
+
 });

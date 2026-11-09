@@ -15,7 +15,7 @@ import { and, count, eq } from 'drizzle-orm';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { retryFinanceConflict } from '../../../test/finance/assertions';
-import { runNotificationDispatch } from '../../notifications/dispatch';
+import { dispatchNow, drainSchool } from '../../../test/notifications';
 import type { NotificationChannelAdapter } from '../../notifications/channels';
 import { createAdminSession, createTestClient, createTestUser, type UserSession } from '../../../test/fixtures';
 import { loadDemoJob, startDemoJob, type DemoJobSnapshot } from './job-store';
@@ -144,7 +144,9 @@ describe('demo school seed steps (2 classes, without Restate)', () => {
     const send = vi.fn(async () => ({ kind: 'sent' as const, providerMessageId: 'never' }));
     const available = (channel: 'web_push' | 'whatsapp'): NotificationChannelAdapter => ({ channel, available: true, decide: () => [{ status: 'owed', destination: 'x' }], send });
     const [paymentEvent] = await db.select().from(notificationEventTable).where(and(eq(notificationEventTable.schoolId, job.schoolId), eq(notificationEventTable.type, 'payment.received'))).limit(1);
-    await runNotificationDispatch({ eventId: paymentEvent!.id, step: (_name, action) => action(), sleep: async () => undefined, adapters: { web_push: available('web_push'), whatsapp: available('whatsapp') } });
+    const adapters = { web_push: available('web_push'), whatsapp: available('whatsapp') };
+    await dispatchNow(paymentEvent!.id, adapters);
+    await drainSchool(job.schoolId, { adapters });
     const [inbox] = await db.select().from(notificationTable).where(eq(notificationTable.eventId, paymentEvent!.id));
     expect(inbox).toMatchObject({ recipientKind: 'admission' });
     const deliveries = await db.select().from(notificationDeliveryTable).where(eq(notificationDeliveryTable.notificationId, inbox!.id));

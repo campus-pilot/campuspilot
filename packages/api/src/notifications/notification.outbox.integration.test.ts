@@ -1,26 +1,28 @@
 import { db } from '@campuspilot/db';
-import { notificationEventTable } from '@campuspilot/db/schema/notification';
-import { eq } from 'drizzle-orm';
+import { notificationDeliveryTable, notificationEventTable, notificationTable } from '@campuspilot/db/schema/notification';
+import { and, eq, inArray, lte } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createTestSchool, createTestSchoolMember, createTestUser } from '../../test/fixtures';
-import { billingRunPostedData } from '../../test/notifications';
+import { createTestAdmission, createTestSchool, createTestSchoolMember, createTestUser } from '../../test/fixtures';
+import { billingRunPostedData, billIssuedData, dispatchNow } from '../../test/notifications';
+import type { NotificationChannelAdapter } from './channels';
+import { senderLaneFor } from './sender/lanes';
 import { notify } from './notify';
 
-vi.mock('./notification.restate', () => ({ sendNotificationDispatch: vi.fn() }));
+vi.mock('./notification.restate', () => ({ sendNotificationDispatch: vi.fn(), sendNotificationSenderPoke: vi.fn() }));
 vi.mock('../workflows/restate-admin', () => ({ getRestateInvocation: vi.fn(), cancelRestateInvocation: vi.fn() }));
 
-const { sendNotificationDispatch } = await import('./notification.restate');
+const { sendNotificationDispatch, sendNotificationSenderPoke } = await import('./notification.restate');
 const { getRestateInvocation, cancelRestateInvocation } = await import('../workflows/restate-admin');
-const { dispatchNotificationEvent, failStaleEvents, retryFailedEvents, sweepNotificationOutbox } = await import('./notification.outbox');
+const { dispatchNotificationEvent, failStaleEvents, pokeDueSenders, retryFailedEvents, sweepNotificationOutbox } = await import('./notification.outbox');
 
 async function pendingEvent() {
   const school = await createTestSchool();
   const member = await createTestUser();
   await createTestSchoolMember({ schoolId: school.id, userId: member.id, roles: [] });
   const { eventId } = await db.transaction((tx) =>
-    notify(tx, { type: 'billing.run_posted', data: billingRunPostedData(), schoolId: school.id, recipients: { kind: 'staff_users', userIds: [member.id] }, key: `outbox:${randomUUID()}` }),
+    notify(tx, { sendPriority: 'immediate', type: 'billing.run_posted', data: billingRunPostedData(), schoolId: school.id, recipients: { kind: 'staff_users', userIds: [member.id] }, key: `outbox:${randomUUID()}` }),
   );
   return eventId;
 }
@@ -136,5 +138,45 @@ describe('notification outbox', () => {
     vi.mocked(getRestateInvocation).mockReset();
     await db.update(notificationEventTable).set({ status: 'dispatched' }).where(eq(notificationEventTable.id, first));
     await db.update(notificationEventTable).set({ status: 'dispatched' }).where(eq(notificationEventTable.id, second));
+  });
+
+  it('pokes every sender lane with a due delivery, and none for copies scheduled later', async () => {
+    const school = await createTestSchool();
+    const admission = await createTestAdmission({ schoolId: school.id });
+    const { eventId } = await db.transaction((tx) =>
+      notify(tx, { sendPriority: 'immediate', type: 'bill.issued', data: billIssuedData(admission.id), schoolId: school.id, recipients: { kind: 'admissions', admissionIds: [admission.id] }, key: `poke:${randomUUID()}` }),
+    );
+    const owedOn = (channel: 'web_push' | 'whatsapp'): NotificationChannelAdapter => ({ channel, available: true, decide: () => [{ status: 'owed', destination: `dest-${channel}` }], send: vi.fn() });
+    await dispatchNow(eventId, { web_push: owedOn('web_push'), whatsapp: owedOn('whatsapp') });
+    const pushLane = senderLaneFor('web_push', school.id);
+    vi.mocked(sendNotificationSenderPoke).mockReset();
+    vi.mocked(sendNotificationSenderPoke).mockResolvedValue(undefined);
+    await pokeDueSenders(db);
+    expect(sendNotificationSenderPoke).toHaveBeenCalledWith({ channel: 'whatsapp', lane: 0 }, expect.any(Date));
+    expect(sendNotificationSenderPoke).toHaveBeenCalledWith({ channel: 'web_push', lane: pushLane }, expect.any(Date));
+
+    // Rescheduled a day ahead: this school's copies are not due, so they never cause a poke now.
+    const later = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const notifications = await db.select({ id: notificationTable.id }).from(notificationTable).where(eq(notificationTable.eventId, eventId));
+    await db.update(notificationDeliveryTable).set({ nextAttemptAt: later }).where(inArray(notificationDeliveryTable.notificationId, notifications.map((row) => row.id)));
+    const dueBefore = await db
+      .select({ id: notificationDeliveryTable.id })
+      .from(notificationDeliveryTable)
+      .where(and(inArray(notificationDeliveryTable.notificationId, notifications.map((row) => row.id)), lte(notificationDeliveryTable.nextAttemptAt, new Date())));
+    expect(dueBefore).toEqual([]);
+  });
+
+  it('stops poking at the first poke Restate does not accept', async () => {
+    vi.mocked(sendNotificationSenderPoke).mockReset();
+    vi.mocked(sendNotificationSenderPoke).mockRejectedValue(new Error('connect ECONNREFUSED'));
+    const school = await createTestSchool();
+    const admission = await createTestAdmission({ schoolId: school.id });
+    const { eventId } = await db.transaction((tx) =>
+      notify(tx, { sendPriority: 'immediate', type: 'bill.issued', data: billIssuedData(admission.id), schoolId: school.id, recipients: { kind: 'admissions', admissionIds: [admission.id] }, key: `poke:${randomUUID()}` }),
+    );
+    const owedOn = (channel: 'web_push' | 'whatsapp'): NotificationChannelAdapter => ({ channel, available: true, decide: () => [{ status: 'owed', destination: `dest-${channel}` }], send: vi.fn() });
+    await dispatchNow(eventId, { web_push: owedOn('web_push'), whatsapp: owedOn('whatsapp') });
+    expect(await pokeDueSenders(db)).toBe(0);
+    expect(sendNotificationSenderPoke).toHaveBeenCalledTimes(1);
   });
 });

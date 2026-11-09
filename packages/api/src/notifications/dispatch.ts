@@ -22,14 +22,14 @@ import {
   decideDeliveries,
   notificationChannelAdapters,
   type DeliveryDecision,
-  type DeliverySendOutcome,
   type NotificationChannelAdapter,
   type NotificationSkipReason,
   type ResolvedRecipient,
 } from './channels';
 import { activePushSubscriptionIdsByAdmission } from './channels/web-push/subscriptions';
-import { claimDelivery, recordDeliveryOutcome, skipOwedDelivery } from './deliveries';
 import { notificationDeliveryId, notificationRedeliveryId, notificationRowId } from './ids';
+import type { NotificationSendPriority } from './notify';
+import { senderLaneFor, uniqueSenderTargets, type SenderTarget } from './sender/lanes';
 
 /**
  * The notification dispatcher (D-23 … D-26): everything between an outbox
@@ -55,11 +55,19 @@ export type DispatchableEvent = {
   type: NotificationType;
   data: Record<string, unknown>;
   recipients: ReturnType<typeof notificationRecipientSpecSchema.parse>;
+  /** Copied onto every delivery row: the senders send `immediate` before `bulk`. */
+  sendPriority: NotificationSendPriority;
   /**
    * Set for a staff resend of one failed delivery: the fan-out writes no
    * inbox row, only a new delivery of that notification on that channel.
    */
-  redeliveryOf: { deliveryId: string; notificationId: string; channel: RemoteNotificationChannel } | null;
+  redeliveryOf: {
+    deliveryId: string;
+    notificationId: string;
+    channel: RemoteNotificationChannel;
+    /** The original copy's destination; a web push resend goes to that subscription only (D-40). */
+    destination: string | null;
+  } | null;
 };
 
 /**
@@ -77,6 +85,7 @@ export async function loadDispatchableEvent(db: DatabaseExecutor, eventId: strin
       status: notificationEventTable.status,
       isDemoSchool: schoolTable.isDemo,
       redeliveryOfDeliveryId: notificationEventTable.redeliveryOfDeliveryId,
+      sendPriority: notificationEventTable.sendPriority,
     })
     .from(notificationEventTable)
     .innerJoin(schoolTable, eq(schoolTable.id, notificationEventTable.schoolId))
@@ -93,12 +102,17 @@ export async function loadDispatchableEvent(db: DatabaseExecutor, eventId: strin
   let redeliveryOf: DispatchableEvent['redeliveryOf'] = null;
   if (event.redeliveryOfDeliveryId) {
     const [original] = await db
-      .select({ id: notificationDeliveryTable.id, notificationId: notificationDeliveryTable.notificationId, channel: notificationDeliveryTable.channel })
+      .select({
+        id: notificationDeliveryTable.id,
+        notificationId: notificationDeliveryTable.notificationId,
+        channel: notificationDeliveryTable.channel,
+        destination: notificationDeliveryTable.destination,
+      })
       .from(notificationDeliveryTable)
       .where(and(eq(notificationDeliveryTable.id, event.redeliveryOfDeliveryId), eq(notificationDeliveryTable.schoolId, event.schoolId)))
       .limit(1);
     if (!original) throw new NotificationDispatchError('The delivery to resend no longer exists.');
-    redeliveryOf = { deliveryId: original.id, notificationId: original.notificationId, channel: original.channel };
+    redeliveryOf = { deliveryId: original.id, notificationId: original.notificationId, channel: original.channel, destination: original.destination };
   }
   return {
     id: event.id,
@@ -107,6 +121,7 @@ export async function loadDispatchableEvent(db: DatabaseExecutor, eventId: strin
     type: event.type,
     data: event.data,
     recipients: recipients.data,
+    sendPriority: event.sendPriority,
     redeliveryOf,
   };
 }
@@ -255,13 +270,32 @@ export function planNotificationRows(
 }
 
 /**
+ * The queue columns of a planned delivery row (D-39): an owed copy is due
+ * now, in the event's priority, on its school's sender lane.
+ */
+function queueColumns(event: Pick<DispatchableEvent, 'schoolId' | 'sendPriority'>, delivery: PlannedDelivery, now: Date) {
+  return {
+    sendPriority: event.sendPriority,
+    sendLane: senderLaneFor(delivery.channel, event.schoolId),
+    nextAttemptAt: delivery.status === 'owed' ? now : null,
+  };
+}
+
+/** The senders a set of planned deliveries owes a poke (lanes with owed rows). */
+export function senderTargetsOf(event: Pick<DispatchableEvent, 'schoolId'>, deliveries: readonly PlannedDelivery[]): SenderTarget[] {
+  return uniqueSenderTargets(
+    deliveries.filter((delivery) => delivery.status === 'owed').map((delivery) => ({ channel: delivery.channel, lane: senderLaneFor(delivery.channel, event.schoolId) })),
+  );
+}
+
+/**
  * Inserts one chunk of planned rows in one transaction, `ON CONFLICT DO
  * NOTHING`, so a replayed chunk changes nothing. The event row is locked
  * `FOR SHARE` first: a concurrent demo purge (which deletes the event) waits,
  * and a purged event inserts nothing (`'event_gone'`).
  */
 export async function insertNotificationChunk(
-  event: Pick<DispatchableEvent, 'id' | 'schoolId' | 'type' | 'data'>,
+  event: Pick<DispatchableEvent, 'id' | 'schoolId' | 'type' | 'data' | 'sendPriority'>,
   chunk: readonly PlannedNotification[],
   db: typeof defaultDb = defaultDb,
 ): Promise<'inserted' | 'event_gone'> {
@@ -288,6 +322,7 @@ export async function insertNotificationChunk(
         })),
       )
       .onConflictDoNothing({ target: notificationTable.id });
+    const now = new Date();
     const deliveries = chunk.flatMap((planned) =>
       planned.deliveries.map((delivery) => ({
         id: delivery.id,
@@ -298,6 +333,7 @@ export async function insertNotificationChunk(
         status: delivery.status,
         skipReason: delivery.skipReason,
         resendOfDeliveryId: delivery.resendOfDeliveryId ?? null,
+        ...queueColumns(event, delivery, now),
       })),
     );
     if (deliveries.length > 0) {
@@ -321,7 +357,17 @@ export function planRedeliveryRows(
   const recipient = recipients[0];
   if (!recipient) return [];
   const { notificationId, channel, deliveryId } = event.redeliveryOf;
-  return decideDeliveries(adapters[channel], { isDemoSchool: event.isDemoSchool, recipient }).map((decision) => ({
+  let decisions = decideDeliveries(adapters[channel], { isDemoSchool: event.isDemoSchool, recipient });
+  if (channel === 'web_push') {
+    // D-40: a push resend goes to the device that missed it, never to every
+    // device the student has now. Gone since the resend was asked for: skipped.
+    // A channel-level skip (switched off, demo school) keeps its own reason.
+    const original = event.redeliveryOf.destination;
+    const same = decisions.find((decision) => decision.status === 'owed' && decision.destination === original);
+    const channelSkip = decisions.find((decision) => decision.status === 'skipped' && decision.reason !== 'no_subscription');
+    decisions = same ? [same] : channelSkip ? [channelSkip] : [{ status: 'skipped', reason: 'no_subscription', destination: original }];
+  }
+  return decisions.map((decision) => ({
     id: notificationRedeliveryId(notificationId, channel, decision.destination, event.id),
     channel,
     destination: decision.destination,
@@ -336,7 +382,7 @@ export function planRedeliveryRows(
  * {@link insertNotificationChunk}), `ON CONFLICT DO NOTHING`.
  */
 export async function insertRedeliveryRows(
-  event: Pick<DispatchableEvent, 'id' | 'schoolId'> & { redeliveryOf: NonNullable<DispatchableEvent['redeliveryOf']> },
+  event: Pick<DispatchableEvent, 'id' | 'schoolId' | 'sendPriority'> & { redeliveryOf: NonNullable<DispatchableEvent['redeliveryOf']> },
   rows: readonly PlannedDelivery[],
   db: typeof defaultDb = defaultDb,
 ): Promise<'inserted' | 'event_gone'> {
@@ -348,10 +394,12 @@ export async function insertRedeliveryRows(
       .for('share');
     if (!locked) return 'event_gone';
     if (rows.length === 0) return 'inserted';
+    const now = new Date();
     await tx
       .insert(notificationDeliveryTable)
       .values(
         rows.map((row) => ({
+          ...queueColumns(event, row, now),
           id: row.id,
           notificationId: event.redeliveryOf.notificationId,
           schoolId: event.schoolId,
@@ -398,152 +446,33 @@ export async function failNotificationEvent(
     );
 }
 
-/** Error code of a delivery left owed when its dispatch ended for good. */
-export const DISPATCH_ABORTED_ERROR_CODE = 'dispatch_aborted';
-
 /**
- * Records a dispatch attempt that ended with a terminal error. Before the
- * rows were written the event itself is failed ({@link failNotificationEvent};
- * a retryable failure is fanned out again by the sweep, which sends the same
- * planned deliveries). Once the event is dispatched, the failure happened in
- * the send phase and no later attempt will send: every delivery of the event
- * still `owed` is recorded `failed: dispatch_aborted`, so staff see it in the
- * delivery log, get a failure alert and can resend it, instead of it staying
- * owed forever. Deliveries in `sending` are left alone (they may have been
- * sent; see `./deliveries.ts`). Fenced on the attempt, so a late failure of
- * an older attempt never touches a newer attempt's deliveries.
+ * Records a dispatch attempt that ended with a terminal error: the event is
+ * failed if it is still pending ({@link failNotificationEvent}; a retryable
+ * failure is fanned out again by the sweep, which writes the same planned
+ * rows). Once the event is dispatched there is nothing left to fail: every
+ * row is written, and owed deliveries belong to the channel senders, which
+ * the API sweep pokes while any are due (D-39), so no delivery can be left
+ * owed by a dispatch that ended early.
  */
 export async function failNotificationDispatch(
   eventId: string,
   message: string,
   options: { retryable: boolean; attempt: number },
-  db: typeof defaultDb = defaultDb,
-) {
-  await db.transaction(async (tx) => {
-    await failNotificationEvent(tx, eventId, message, options);
-    const [event] = await tx
-      .select({ status: notificationEventTable.status, redeliveryOfDeliveryId: notificationEventTable.redeliveryOfDeliveryId })
-      .from(notificationEventTable)
-      .where(and(eq(notificationEventTable.id, eventId), eq(notificationEventTable.dispatchAttempt, options.attempt)))
-      .for('update');
-    if (event?.status !== 'dispatched') return;
-    const ofEvent = event.redeliveryOfDeliveryId
-      ? eq(notificationDeliveryTable.resendOfDeliveryId, event.redeliveryOfDeliveryId)
-      : inArray(
-          notificationDeliveryTable.notificationId,
-          tx.select({ id: notificationTable.id }).from(notificationTable).where(eq(notificationTable.eventId, eventId)),
-        );
-    const now = new Date();
-    await tx
-      .update(notificationDeliveryTable)
-      .set({ status: 'failed', failedAt: now, errorCode: DISPATCH_ABORTED_ERROR_CODE, errorMessage: message, updatedAt: now })
-      .where(and(eq(notificationDeliveryTable.status, 'owed'), ofEvent));
-  });
-}
-
-/** What one send attempt did; JSON-only so it can be journaled. */
-export type SendAttemptResult =
-  | { kind: 'sent' | 'failed' | 'skipped' | 'not_owed' }
-  | { kind: 'retry'; scope: 'recipient' | 'channel'; retryAfterMs: number | null };
-
-/**
- * Claims and sends one owed delivery on its channel and records the outcome
- * (see `./deliveries.ts`). A delivery that is no longer owed (already sent,
- * or stuck in `sending` after a crash) is left alone. A channel switched off
- * since the delivery was planned records it `skipped: disabled` (it is not
- * left `owed`, where nothing would ever pick it up). An adapter that throws
- * is treated as a transient channel failure (the claim is released), so a
- * bug or outage never leaves the delivery in `sending`. On the `final`
- * attempt a transient outcome is recorded as `failed`.
- */
-export async function sendOwedDelivery(
-  deliveryId: string,
-  channel: RemoteNotificationChannel,
-  adapters: Record<RemoteNotificationChannel, NotificationChannelAdapter> = notificationChannelAdapters,
   db: DatabaseExecutor = defaultDb,
-  options: { final?: boolean } = {},
-): Promise<SendAttemptResult> {
-  const adapter = adapters[channel];
-  if (!adapter.available) {
-    return (await skipOwedDelivery(db, deliveryId, 'disabled')) ? { kind: 'skipped' } : { kind: 'not_owed' };
-  }
-  const claimed = await claimDelivery(db, deliveryId);
-  if (!claimed) return { kind: 'not_owed' };
-  let outcome: DeliverySendOutcome;
-  try {
-    outcome = await adapter.send(claimed);
-  } catch {
-    outcome = { kind: 'retry', errorCode: 'adapter_error', scope: 'channel' };
-  }
-  await recordDeliveryOutcome(db, deliveryId, outcome, { final: options.final });
-  if (outcome.kind !== 'retry') return { kind: outcome.kind };
-  if (options.final) return { kind: 'failed' };
-  return { kind: 'retry', scope: outcome.scope, retryAfterMs: outcome.retryAfterMs ?? null };
-}
-
-/**
- * Durable, throttled sending (D-7). Owed deliveries are sent in rounds:
- * round 1 tries each once; whatever came back transient is retried in the
- * next round after one durable sleep, up to {@link MAX_SEND_ROUNDS} rounds,
- * after which the last attempt records it `failed`. A `channel`-scoped
- * outcome (throughput limit, provider outage) ends the round at once and
- * carries the not-yet-tried deliveries over untouched, so a rate limit is
- * not answered with more sends. The sleep between rounds is
- * {@link sendRetryDelayMs}: exponential, capped, and never shorter than
- * the provider's own `Retry-After`.
- */
-export const MAX_SEND_ROUNDS = 8;
-const RETRY_BASE_DELAY_MS = 60_000;
-const RETRY_FACTOR = 4;
-export const MAX_RETRY_DELAY_MS = 6 * 60 * 60 * 1000;
-
-/**
- * Sleep before round `round + 1`: 1 min, 4 min, 16 min, 64 min, ~4.3 h,
- * then 6 h (about 17.7 h over all eight rounds, so a daily messaging limit
- * gets a chance to reset), raised to the largest provider hint and capped
- * at 6 h.
- */
-export function sendRetryDelayMs(round: number, retryAfterMs: number | null): number {
-  const exponential = RETRY_BASE_DELAY_MS * RETRY_FACTOR ** (round - 1);
-  return Math.min(Math.max(exponential, retryAfterMs ?? 0), MAX_RETRY_DELAY_MS);
-}
-
-/** Durable sleep; Restate's `ctx.sleep` in the workflow, a stub in tests. */
-export type NotificationSleep = (name: string, ms: number) => Promise<void>;
-
-type OwedDelivery = { id: string; channel: RemoteNotificationChannel };
-
-async function sendInRounds(
-  owed: readonly OwedDelivery[],
-  options: { step: NotificationStepRunner; sleep: NotificationSleep; adapters: Record<RemoteNotificationChannel, NotificationChannelAdapter> },
 ) {
-  let pending = [...owed];
-  for (let round = 1; round <= MAX_SEND_ROUNDS && pending.length > 0; round += 1) {
-    const final = round === MAX_SEND_ROUNDS;
-    const retry: OwedDelivery[] = [];
-    let retryAfterMs: number | null = null;
-    for (let index = 0; index < pending.length; index += 1) {
-      const delivery = pending[index]!;
-      const name = round === 1 ? `send:${delivery.id}` : `send:${delivery.id}:${round}`;
-      const result = await options.step(name, () => sendOwedDelivery(delivery.id, delivery.channel, options.adapters, defaultDb, { final }));
-      if (result.kind !== 'retry') continue;
-      retry.push(delivery);
-      retryAfterMs = Math.max(retryAfterMs ?? 0, result.retryAfterMs ?? 0) || null;
-      if (result.scope === 'channel') {
-        // The whole channel is limited: carry the rest of this channel over untried.
-        const rest = pending.slice(index + 1);
-        retry.push(...rest.filter((other) => other.channel === delivery.channel));
-        pending = [...pending.slice(0, index + 1), ...rest.filter((other) => other.channel !== delivery.channel)];
-      }
-    }
-    if (retry.length === 0) return;
-    await options.sleep(`backoff:${round}`, sendRetryDelayMs(round, retryAfterMs));
-    pending = retry;
-  }
+  await failNotificationEvent(db, eventId, message, options);
 }
 
 /** Runs one named unit of work; Restate journals it, tests call it directly. */
 export type NotificationStepRunner = <T>(name: string, action: () => Promise<T>) => Promise<T>;
+
+/**
+ * Starts the senders of these lanes (D-39); the workflow sends one-way
+ * calls to the `NotificationSender` virtual objects. A lost poke only
+ * delays: the API sweep pokes every lane with due rows every 30 s.
+ */
+export type NotificationSenderPoke = (targets: readonly SenderTarget[]) => Promise<void>;
 
 export type NotificationDispatchResult =
   | { status: 'skipped' }
@@ -551,21 +480,22 @@ export type NotificationDispatchResult =
   | { status: 'dispatched'; notificationCount: number; owedDeliveryCount: number };
 
 /**
- * The dispatch loop shared by the workflow and the tests. Steps, in order:
- * load the pending event, resolve recipients, plan the rows (journaled, so a
- * replay inserts and sends exactly the recorded plan even if a channel was
- * switched on or off in between), insert rows chunk by chunk, mark the event
- * dispatched, then send the planned owed deliveries in throttled rounds
- * ({@link sendInRounds}). A redelivery event (staff resend) inserts only its
- * new delivery rows.
+ * The fan-out shared by the workflow and the tests. Steps, in order: load
+ * the pending event, resolve recipients, plan the rows (journaled, so a
+ * replay inserts exactly the recorded plan even if a channel was switched
+ * on or off in between), insert rows chunk by chunk, mark the event
+ * dispatched, then poke the senders of the lanes that got owed copies. It
+ * sends nothing itself: `notification_delivery` is the queue and each
+ * channel's sender drains it at the channel's rate (D-39). A redelivery
+ * event (staff resend) inserts only its new delivery rows.
  */
 export async function runNotificationDispatch(options: {
   eventId: string;
   step: NotificationStepRunner;
-  sleep: NotificationSleep;
+  poke: NotificationSenderPoke;
   adapters?: Record<RemoteNotificationChannel, NotificationChannelAdapter>;
 }): Promise<NotificationDispatchResult> {
-  const { eventId, step, sleep } = options;
+  const { eventId, step, poke } = options;
   const adapters = options.adapters ?? notificationChannelAdapters;
   const event = await step('load-event', () => loadDispatchableEvent(defaultDb, eventId));
   if (!event) return { status: 'skipped' };
@@ -576,9 +506,8 @@ export async function runNotificationDispatch(options: {
     const inserted = await step('insert-redelivery', () => insertRedeliveryRows(redelivery, rows));
     if (inserted === 'event_gone') return { status: 'event_gone' };
     await step('mark-dispatched', () => markNotificationEventDispatched(defaultDb, eventId, 0));
-    const owedRedeliveries = rows.filter((row) => row.status === 'owed');
-    await sendInRounds(owedRedeliveries, { step, sleep, adapters });
-    return { status: 'dispatched', notificationCount: 0, owedDeliveryCount: owedRedeliveries.length };
+    await poke(senderTargetsOf(event, rows));
+    return { status: 'dispatched', notificationCount: 0, owedDeliveryCount: rows.filter((row) => row.status === 'owed').length };
   }
   const planned = await step('plan', async () => planNotificationRows(event, recipients, adapters));
   for (let start = 0; start < planned.length || start === 0; start += NOTIFICATION_INSERT_CHUNK) {
@@ -587,9 +516,7 @@ export async function runNotificationDispatch(options: {
     if (inserted === 'event_gone') return { status: 'event_gone' };
   }
   await step('mark-dispatched', () => markNotificationEventDispatched(defaultDb, eventId, planned.length));
-  const owed = planned.flatMap((notification) =>
-    notification.deliveries.filter((delivery) => delivery.status === 'owed'),
-  );
-  await sendInRounds(owed, { step, sleep, adapters });
-  return { status: 'dispatched', notificationCount: planned.length, owedDeliveryCount: owed.length };
+  const deliveries = planned.flatMap((notification) => notification.deliveries);
+  await poke(senderTargetsOf(event, deliveries));
+  return { status: 'dispatched', notificationCount: planned.length, owedDeliveryCount: deliveries.filter((delivery) => delivery.status === 'owed').length };
 }

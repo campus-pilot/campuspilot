@@ -1,0 +1,140 @@
+import { db } from '@campuspilot/db';
+import { notificationDeliveryTable, notificationTable } from '@campuspilot/db/schema/notification';
+import { and, asc, eq, inArray } from 'drizzle-orm';
+import { randomInt } from 'node:crypto';
+import { describe, expect, it, vi } from 'vitest';
+
+import { createTestAdmission, createTestSchool } from '../../../test/fixtures';
+import { billIssuedData, dispatchNow, emit, fakeClock, TEST_PACING } from '../../../test/notifications';
+import type { ClaimedDelivery, NotificationChannelAdapter } from '../channels';
+import { MAX_GROUPS_PER_DRAIN, runSenderDrain } from './drain';
+import type { SenderTarget } from './lanes';
+import { pickDueDeliveries } from './queue';
+
+const whatsappOff = { channel: 'whatsapp', available: false, unavailableReason: 'test' } as const;
+
+/**
+ * Queues `copies` owed web push copies for one student of a new school, on a
+ * lane of their own (a random lane number no other test uses), so the lane
+ * can be drained and picked without a school scope.
+ */
+async function queue(options: { lane: number; copies: number; sendPriority: 'immediate' | 'bulk'; schoolId?: string }) {
+  const schoolId = options.schoolId ?? (await createTestSchool()).id;
+  const admission = await createTestAdmission({ schoolId });
+  const adapter: NotificationChannelAdapter = {
+    channel: 'web_push',
+    available: true,
+    decide: () => Array.from({ length: options.copies }, (_, index) => ({ status: 'owed' as const, destination: `sub_${index}` })),
+    send: vi.fn(),
+  };
+  const { eventId } = await emit({ type: 'bill.issued', data: billIssuedData(admission.id), schoolId, recipients: { kind: 'admissions', admissionIds: [admission.id] }, sendPriority: options.sendPriority });
+  await dispatchNow(eventId, { web_push: adapter, whatsapp: whatsappOff });
+  const notifications = await db.select({ id: notificationTable.id }).from(notificationTable).where(eq(notificationTable.eventId, eventId));
+  const rows = await db
+    .update(notificationDeliveryTable)
+    .set({ sendLane: options.lane })
+    .where(and(inArray(notificationDeliveryTable.notificationId, notifications.map((row) => row.id)), eq(notificationDeliveryTable.channel, 'web_push')))
+    .returning({ id: notificationDeliveryTable.id });
+  return { schoolId, ids: rows.map((row) => row.id).sort() };
+}
+
+const uniqueLane = (): SenderTarget => ({ channel: 'web_push', lane: randomInt(100, 1000) });
+
+function recordingAdapter(sent: string[]): NotificationChannelAdapter {
+  return {
+    channel: 'web_push',
+    available: true,
+    decide: () => [],
+    send: async (delivery: ClaimedDelivery) => {
+      sent.push(delivery.id);
+      return { kind: 'sent', providerMessageId: null };
+    },
+  };
+}
+
+describe('notification sender (D-39)', () => {
+  it('picks immediate copies first, then takes turns across schools', async () => {
+    const target = uniqueLane();
+    const big = await queue({ lane: target.lane, copies: 3, sendPriority: 'bulk' });
+    const small = await queue({ lane: target.lane, copies: 1, sendPriority: 'bulk' });
+    const receipt = await queue({ lane: target.lane, copies: 1, sendPriority: 'immediate', schoolId: big.schoolId });
+    const picked = await pickDueDeliveries(db, target, { now: new Date(), limit: 10 });
+    expect(picked).toHaveLength(5);
+    expect(picked[0]).toBe(receipt.ids[0]);
+    // Turn 1: one of each school's bulk copies; then the big school's rest.
+    expect(picked.slice(1, 3)).toContain(small.ids[0]);
+    expect(picked.slice(1, 3).filter((id) => big.ids.includes(id))).toHaveLength(1);
+    expect(picked.slice(3).every((id) => big.ids.includes(id))).toBe(true);
+  });
+
+  it('sends every due copy once, never a stuck `sending` one or one not yet due', async () => {
+    const target = uniqueLane();
+    const { ids } = await queue({ lane: target.lane, copies: 4, sendPriority: 'bulk' });
+    const [stuck, later] = ids;
+    await db.update(notificationDeliveryTable).set({ status: 'sending', nextAttemptAt: null, claimedAt: new Date() }).where(eq(notificationDeliveryTable.id, stuck!));
+    const clock = fakeClock();
+    await db.update(notificationDeliveryTable).set({ nextAttemptAt: new Date(clock.now().getTime() + 10 * 60_000) }).where(eq(notificationDeliveryTable.id, later!));
+    const sent: string[] = [];
+    const result = await runSenderDrain({ target, step: (_name, action) => action(), sleep: async (_name, ms) => clock.advance(ms), clock: clock.now, adapters: { web_push: recordingAdapter(sent), whatsapp: whatsappOff }, pacing: TEST_PACING, random: () => 0.5 });
+    expect(sent.sort()).toEqual(ids.slice(2).sort());
+    expect(result).toMatchObject({ status: 'idle', sent: 2 });
+    // The next copy is ten minutes out: the drain ends and leaves it to the sweep's poke.
+    expect(result.status === 'idle' && new Date(result.nextDueAt!).getTime()).toBe(clock.now().getTime() + 10 * 60_000);
+    const rows = await db.select().from(notificationDeliveryTable).where(inArray(notificationDeliveryTable.id, ids)).orderBy(asc(notificationDeliveryTable.id));
+    expect(rows.find((row) => row.id === stuck)).toMatchObject({ status: 'sending', attempts: 0 });
+    expect(rows.find((row) => row.id === later)).toMatchObject({ status: 'owed', attempts: 0 });
+  });
+
+  it('waits for a copy due within seconds instead of ending', async () => {
+    const target = uniqueLane();
+    const { ids } = await queue({ lane: target.lane, copies: 1, sendPriority: 'immediate' });
+    const clock = fakeClock();
+    await db.update(notificationDeliveryTable).set({ nextAttemptAt: new Date(clock.now().getTime() + 5_000) }).where(eq(notificationDeliveryTable.id, ids[0]!));
+    const sleeps: number[] = [];
+    const sent: string[] = [];
+    const result = await runSenderDrain({ target, step: (_name, action) => action(), sleep: async (_name, ms) => { sleeps.push(ms); clock.advance(ms); }, clock: clock.now, adapters: { web_push: recordingAdapter(sent), whatsapp: whatsappOff }, pacing: TEST_PACING });
+    expect(sleeps).toEqual([5_000]);
+    expect(sent).toEqual(ids);
+    expect(result).toMatchObject({ status: 'idle', nextDueAt: null });
+  });
+
+  it('hands a long backlog over to a fresh drain after a bounded number of groups', async () => {
+    const target = uniqueLane();
+    const { ids } = await queue({ lane: target.lane, copies: MAX_GROUPS_PER_DRAIN + 2, sendPriority: 'bulk' });
+    const sent: string[] = [];
+    const names: string[] = [];
+    const step = <T,>(name: string, action: () => Promise<T>) => {
+      names.push(name);
+      return action();
+    };
+    const adapters = { web_push: recordingAdapter(sent), whatsapp: whatsappOff };
+    const pacing = { ...TEST_PACING, groupSize: 1 };
+    expect(await runSenderDrain({ target, step, sleep: async () => undefined, adapters, pacing })).toMatchObject({ status: 'continue', sent: MAX_GROUPS_PER_DRAIN });
+    expect(names.filter((name) => name.startsWith('send:'))).toHaveLength(MAX_GROUPS_PER_DRAIN);
+    expect(await runSenderDrain({ target, step, sleep: async () => undefined, adapters, pacing })).toMatchObject({ status: 'idle', sent: 2 });
+    expect(sent.sort()).toEqual(ids);
+  });
+
+  it('records copies of a channel switched off since fan-out as skipped: disabled', async () => {
+    const target = uniqueLane();
+    const { ids } = await queue({ lane: target.lane, copies: 2, sendPriority: 'bulk' });
+    const off = { channel: 'web_push', available: false, unavailableReason: 'off' } as const;
+    await runSenderDrain({ target, step: (_name, action) => action(), sleep: async () => undefined, adapters: { web_push: off, whatsapp: whatsappOff }, pacing: TEST_PACING });
+    const rows = await db.select().from(notificationDeliveryTable).where(inArray(notificationDeliveryTable.id, ids));
+    expect(rows.map((row) => [row.status, row.skipReason, row.nextAttemptAt])).toEqual([
+      ['skipped', 'disabled', null],
+      ['skipped', 'disabled', null],
+    ]);
+  });
+
+  it('keeps to the rate: a group of n takes at least n / rate seconds', async () => {
+    const target = uniqueLane();
+    await queue({ lane: target.lane, copies: 5, sendPriority: 'bulk' });
+    const sent: string[] = [];
+    const started = Date.now();
+    await runSenderDrain({ target, step: (_name, action) => action(), sleep: async () => undefined, adapters: { web_push: recordingAdapter(sent), whatsapp: whatsappOff }, pacing: { perSecond: 20, concurrency: 10, groupSize: 5 } });
+    expect(sent).toHaveLength(5);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(240);
+  });
+});
+

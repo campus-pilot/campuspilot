@@ -1,9 +1,10 @@
 import type { DatabaseExecutor } from '@campuspilot/db';
 import { notificationDeliveryTable, notificationTable } from '@campuspilot/db/schema/notification';
-import type { NotificationType } from '@campuspilot/db/notifications/catalogue';
-import { and, eq, sql } from 'drizzle-orm';
+import type { NotificationType, RemoteNotificationChannel } from '@campuspilot/db/notifications/catalogue';
+import { and, eq, lte, sql } from 'drizzle-orm';
 
 import type { ClaimedDelivery, DeliverySendOutcome, NotificationSkipReason } from './channels';
+import { decideRetry, type RetryCounters } from './sender/retry-policy';
 
 /**
  * The claim-before-send protocol (D-25). A delivery is moved `owed →
@@ -11,9 +12,10 @@ import type { ClaimedDelivery, DeliverySendOutcome, NotificationSkipReason } fro
  * at most one worker attempt ever calls the provider for it. The outcome
  * moves it on:
  * - `sent` → `sent` (+ provider message ID);
- * - `retry` → back to `owed` (rate limit / transient), the caller retries
- *   after a durable backoff; on the caller's last attempt (`final`) it is
- *   `failed` instead, keeping the provider's error code (D-7);
+ * - `retry` → back to `owed` with a later `next_attempt_at` decided by the
+ *   channel's retry policy (`./sender/retry-policy.ts`), so the channel's
+ *   sender picks it up again then; once the policy gives up it is `failed`
+ *   instead, keeping the provider's error code (D-7, D-41);
  * - `failed` → `failed`;
  * - `skipped` → `skipped` with its reason (send-time re-check).
  * A delivery left in `sending` (the worker died between claim and outcome)
@@ -22,22 +24,39 @@ import type { ClaimedDelivery, DeliverySendOutcome, NotificationSkipReason } fro
  * outcome never overwrites a newer state.
  */
 
-/** Claims one owed delivery; null when it is not owed any more. */
-export async function claimDelivery(db: DatabaseExecutor, deliveryId: string): Promise<ClaimedDelivery | null> {
+/** A claimed delivery with what recording its outcome needs. */
+export type ClaimedQueueDelivery = ClaimedDelivery & { channel: RemoteNotificationChannel; retries: RetryCounters };
+
+/**
+ * Claims one owed delivery that is due at `now`; null when it is not owed
+ * (any more) or not due yet.
+ */
+export async function claimDelivery(db: DatabaseExecutor, deliveryId: string, now: Date = new Date()): Promise<ClaimedQueueDelivery | null> {
   const [claimed] = await db
     .update(notificationDeliveryTable)
     .set({
       status: 'sending',
-      claimedAt: new Date(),
+      claimedAt: now,
+      nextAttemptAt: null,
       attempts: sql`${notificationDeliveryTable.attempts} + 1`,
-      updatedAt: new Date(),
+      updatedAt: now,
     })
-    .where(and(eq(notificationDeliveryTable.id, deliveryId), eq(notificationDeliveryTable.status, 'owed')))
+    .where(
+      and(
+        eq(notificationDeliveryTable.id, deliveryId),
+        eq(notificationDeliveryTable.status, 'owed'),
+        lte(notificationDeliveryTable.nextAttemptAt, now),
+      ),
+    )
     .returning({
       id: notificationDeliveryTable.id,
       notificationId: notificationDeliveryTable.notificationId,
       schoolId: notificationDeliveryTable.schoolId,
+      channel: notificationDeliveryTable.channel,
       destination: notificationDeliveryTable.destination,
+      quickRetries: notificationDeliveryTable.quickRetries,
+      deferredRetries: notificationDeliveryTable.deferredRetries,
+      dailyLimitRetries: notificationDeliveryTable.dailyLimitRetries,
     });
   if (!claimed) return null;
   const [notification] = await db
@@ -46,21 +65,37 @@ export async function claimDelivery(db: DatabaseExecutor, deliveryId: string): P
     .where(eq(notificationTable.id, claimed.notificationId))
     .limit(1);
   if (!notification) return null;
-  return { ...claimed, admissionId: notification.admissionId, type: notification.type as NotificationType, data: notification.data };
+  const { quickRetries, deferredRetries, dailyLimitRetries, ...delivery } = claimed;
+  return {
+    ...delivery,
+    retries: { quickRetries, deferredRetries, dailyLimitRetries },
+    admissionId: notification.admissionId,
+    type: notification.type as NotificationType,
+    data: notification.data,
+  };
 }
 
 /** Shown on a delivery that was still being rate limited or failing transiently after its last attempt. */
 export const RETRIES_EXHAUSTED_MESSAGE = 'Gave up after the last retry.';
 
-/** Records the provider's outcome for a claimed delivery. */
+/** What recording an outcome did; `retry` carries when the delivery is due again. */
+export type RecordedOutcome =
+  | { kind: 'sent' | 'failed' | 'skipped' }
+  | { kind: 'retry'; nextAttemptAt: Date };
+
+/**
+ * Records the provider's outcome for a claimed delivery. A transient outcome
+ * is rescheduled or given up by the channel's retry policy; `random` feeds
+ * its jitter (injected so tests can pin it).
+ */
 export async function recordDeliveryOutcome(
   db: DatabaseExecutor,
-  deliveryId: string,
+  delivery: Pick<ClaimedQueueDelivery, 'id' | 'channel' | 'retries'>,
   outcome: DeliverySendOutcome,
-  options: { final?: boolean } = {},
-) {
-  const sending = and(eq(notificationDeliveryTable.id, deliveryId), eq(notificationDeliveryTable.status, 'sending'));
-  const now = new Date();
+  options: { now?: Date; random?: () => number } = {},
+): Promise<RecordedOutcome> {
+  const sending = and(eq(notificationDeliveryTable.id, delivery.id), eq(notificationDeliveryTable.status, 'sending'));
+  const now = options.now ?? new Date();
   switch (outcome.kind) {
     case 'sent':
       await db
@@ -71,35 +106,45 @@ export async function recordDeliveryOutcome(
           providerMessageId: outcome.providerMessageId,
           documentTemplateRevisionId: outcome.documentTemplateRevisionId ?? null,
           errorCode: null,
+          errorMessage: null,
           updatedAt: now,
         })
         .where(sending);
-      return;
-    case 'retry':
-      if (options.final) {
+      return { kind: 'sent' };
+    case 'retry': {
+      const decision = decideRetry(delivery.channel, outcome, delivery.retries, now, (options.random ?? Math.random)());
+      if (decision.kind === 'give_up') {
         await db
           .update(notificationDeliveryTable)
           .set({ status: 'failed', failedAt: now, errorCode: outcome.errorCode, errorMessage: RETRIES_EXHAUSTED_MESSAGE, updatedAt: now })
           .where(sending);
-        return;
+        return { kind: 'failed' };
       }
       await db
         .update(notificationDeliveryTable)
-        .set({ status: 'owed', claimedAt: null, errorCode: outcome.errorCode, updatedAt: now })
+        .set({
+          status: 'owed',
+          claimedAt: null,
+          nextAttemptAt: decision.nextAttemptAt,
+          errorCode: outcome.errorCode,
+          ...decision.counters,
+          updatedAt: now,
+        })
         .where(sending);
-      return;
+      return { kind: 'retry', nextAttemptAt: decision.nextAttemptAt };
+    }
     case 'skipped':
       await db
         .update(notificationDeliveryTable)
         .set({ status: 'skipped', skipReason: outcome.reason, claimedAt: null, updatedAt: now })
         .where(sending);
-      return;
+      return { kind: 'skipped' };
     case 'failed':
       await db
         .update(notificationDeliveryTable)
-        .set({ status: 'failed', failedAt: now, errorCode: outcome.errorCode, updatedAt: now })
+        .set({ status: 'failed', failedAt: now, errorCode: outcome.errorCode, errorMessage: outcome.errorMessage ?? null, updatedAt: now })
         .where(sending);
-      return;
+      return { kind: 'failed' };
     default: {
       const unhandled: never = outcome;
       throw new Error(`Unhandled delivery outcome ${JSON.stringify(unhandled)}.`);
@@ -115,7 +160,7 @@ export async function recordDeliveryOutcome(
 export async function skipOwedDelivery(db: DatabaseExecutor, deliveryId: string, reason: NotificationSkipReason): Promise<boolean> {
   const skipped = await db
     .update(notificationDeliveryTable)
-    .set({ status: 'skipped', skipReason: reason, updatedAt: new Date() })
+    .set({ status: 'skipped', skipReason: reason, nextAttemptAt: null, updatedAt: new Date() })
     .where(and(eq(notificationDeliveryTable.id, deliveryId), eq(notificationDeliveryTable.status, 'owed')))
     .returning({ id: notificationDeliveryTable.id });
   return skipped.length > 0;

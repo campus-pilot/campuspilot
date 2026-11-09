@@ -5,12 +5,19 @@ import { and, eq } from 'drizzle-orm';
 
 import { authenticateControlCall } from '../control-service-auth';
 import { NOTIFICATION_CONTROL_SERVICE_NAME, notificationDispatchWorkflowKey } from './constants';
-import { notificationDispatchInputSchema, type NotificationDispatchInput } from './input';
+import {
+  notificationDispatchInputSchema,
+  notificationSenderPokeInputSchema,
+  type NotificationDispatchInput,
+  type NotificationSenderPokeInput,
+} from './input';
 import { log } from './log';
+import { notificationSenderObject } from './sender';
 import { notificationDispatchWorkflow } from './workflow';
+import { senderKey } from '../../notifications/sender/lanes';
 
 /** Handlers of `NotificationControl`; each signature is bound to one. */
-export type NotificationControlHandler = 'dispatch';
+export type NotificationControlHandler = 'dispatch' | 'poke';
 
 /** A database step with bounded retries and a generic failure text (no SQL). */
 function safeRun<T>(ctx: restate.Context, name: string, action: () => Promise<T>) {
@@ -71,6 +78,20 @@ export const notificationControlService = restate.service({
           .where(and(eq(notificationEventTable.id, input.eventId), eq(notificationEventTable.dispatchAttempt, input.attempt)));
       });
       return { invocationId };
+    },
+    /**
+     * Starts a drain of one sender lane (D-39) for the API sweep, which
+     * pokes every lane that has due deliveries. Signed like `dispatch`; the
+     * API's idempotency key folds repeated pokes within a window into one.
+     * A drain already running makes this one queue behind it, harmlessly.
+     */
+    poke: async (ctx: restate.Context, rawInput: NotificationSenderPokeInput): Promise<{ status: 'poked' }> => {
+      const parsed = notificationSenderPokeInputSchema.safeParse(rawInput);
+      if (!parsed.success) throw new restate.TerminalError('Invalid notification sender poke.', { errorCode: 400 });
+      const input = parsed.data;
+      await authenticateControlCall(ctx, { service: NOTIFICATION_CONTROL_SERVICE_NAME, handler: 'poke', input, log });
+      ctx.objectSendClient(notificationSenderObject, senderKey(input)).drain({ reason: 'sweep' });
+      return { status: 'poked' };
     },
   },
 });

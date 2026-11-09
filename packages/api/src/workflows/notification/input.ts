@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { REMOTE_NOTIFICATION_CHANNELS } from '@campuspilot/db/notifications/catalogue';
 
 import { MAX_NOTIFICATION_DISPATCH_ATTEMPTS } from './constants';
 
@@ -10,3 +11,11 @@ export const notificationDispatchInputSchema = z.object({
 });
 
 export type NotificationDispatchInput = z.input<typeof notificationDispatchInputSchema>;
+
+/** Input of `NotificationControl.poke`: the sender lane to start draining (D-39). */
+export const notificationSenderPokeInputSchema = z.object({
+  channel: z.enum(REMOTE_NOTIFICATION_CHANNELS),
+  lane: z.number().int().min(0).max(999),
+});
+
+export type NotificationSenderPokeInput = z.infer<typeof notificationSenderPokeInputSchema>;

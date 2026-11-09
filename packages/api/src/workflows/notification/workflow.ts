@@ -9,6 +9,7 @@ import {
 import { NOTIFICATION_DISPATCH_WORKFLOW_NAME, notificationDispatchWorkflowKey } from './constants';
 import { notificationDispatchInputSchema, type NotificationDispatchInput } from './input';
 import { log } from './log';
+import { pokeSenders } from './sender';
 
 /** Error code marking a deterministic failure whose message is safe to record. */
 const SAFE_FAILURE_CODE = 422;
@@ -53,14 +54,14 @@ function step<T>(ctx: restate.WorkflowContext, name: string, action: () => Promi
 
 /**
  * `NotificationDispatch` fans out one `notification_event` (D-24): inbox rows
- * per recipient, delivery rows per remote channel, then sends owed copies
- * in throttled rounds with durable sleeps (see `runNotificationDispatch`).
+ * per recipient, delivery rows per remote channel, then pokes the channel
+ * senders (`NotificationSender`), which send the owed copies from the
+ * queue at the channel's rate (D-39; see `runNotificationDispatch`).
  * Its key is the event ID plus the fan-out attempt, so each attempt runs
  * once; every write is idempotent besides (derived IDs, `ON CONFLICT DO
  * NOTHING`, claim before send). Private to ingress: only
  * `NotificationControl`, which validates the event first, starts it. A
- * terminal failure is recorded on the event with a safe message, or, after
- * the event was dispatched, on its deliveries still owed
+ * terminal failure is recorded on the event with a safe message
  * (`failNotificationDispatch`).
  */
 export const notificationDispatchWorkflow = restate.workflow({
@@ -78,8 +79,9 @@ export const notificationDispatchWorkflow = restate.workflow({
         const result = await runNotificationDispatch({
           eventId,
           step: (name, action) => step(ctx, name, action),
-          // Durable: the workflow suspends and resumes after the backoff, surviving worker restarts.
-          sleep: (name, ms) => ctx.sleep(ms, name),
+          poke: async (targets) => {
+            if (targets.length > 0) pokeSenders(ctx, targets, await ctx.date.now(), 'fan_out');
+          },
         });
         log.info({ eventId, ...result }, 'notification.dispatch.finished');
         return result;
@@ -91,7 +93,6 @@ export const notificationDispatchWorkflow = restate.workflow({
           // Only exhausted transient failures may be retried; a deterministic
           // failure would fail again and a cancellation was deliberate.
           const retryable = !cancelled && !deterministic;
-          // Fails the event, or (send phase) the deliveries still owed.
           await ctx.run('mark-failed', () => failNotificationDispatch(eventId, message, { retryable, attempt }));
           log.warn({ eventId, attempt, message, retryable }, 'notification.dispatch.failed');
         }

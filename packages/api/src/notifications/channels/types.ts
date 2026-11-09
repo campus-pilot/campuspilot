@@ -27,13 +27,16 @@ export type DeliveryDecision =
 /**
  * What a provider call reported for one claimed delivery.
  * - `sent`: accepted by the provider.
- * - `retry`: transient (rate limit, 5xx, network). The delivery goes back to
- *   `owed` and is retried after a durable backoff, a bounded number of
- *   times (D-7). `scope` says what the limit applies to: `recipient` (only
- *   this destination, e.g. WhatsApp's pair rate limit) or `channel` (every
- *   send on the channel, e.g. throughput limits or a provider outage), in
- *   which case the rest of the round is not attempted. `retryAfterMs` is the
- *   provider's own hint, if it gave one.
+ * - `retry`: transient (rate limit, 5xx, network) and certainly not sent.
+ *   The delivery goes back to the queue (`owed`) with a later
+ *   `next_attempt_at` by the channel's retry policy, a bounded number of
+ *   times (D-7, D-41). `scope` says what the limit applies to: `recipient`
+ *   (only this destination, e.g. WhatsApp's pair rate limit) or `channel`
+ *   (every send on the channel, e.g. throughput limits or a provider
+ *   outage), in which case the sender pauses the whole channel.
+ *   `retryAfterMs` is the provider's own hint, if it gave one. An answer
+ *   that leaves open whether the message went out is never `retry` but
+ *   `failed` (see the WhatsApp client).
  * - `failed`: permanent; the delivery is `failed`.
  * - `skipped`: the channel re-checked the recipient at send time and must
  *   not send any more (e.g. WhatsApp consent was withdrawn by a STOP reply
@@ -47,8 +50,23 @@ export type DeliverySendOutcome =
       documentTemplateRevisionId?: string | null;
     }
   | { kind: 'skipped'; reason: NotificationSkipReason }
-  | { kind: 'retry'; errorCode: string; scope: 'recipient' | 'channel'; retryAfterMs?: number }
-  | { kind: 'failed'; errorCode: string };
+  | {
+      kind: 'retry';
+      errorCode: string;
+      scope: 'recipient' | 'channel';
+      retryAfterMs?: number;
+      /**
+       * Set when the provider said its daily messaging limit is reached
+       * (WhatsApp): retried a day later instead of within minutes (D-41).
+       */
+      limit?: 'daily_messaging_limit';
+    }
+  | {
+      kind: 'failed';
+      errorCode: string;
+      /** A safe explanation for staff (never provider prose with personal data). */
+      errorMessage?: string;
+    };
 
 /** A delivery handed to a channel's sender after it was claimed. */
 export type ClaimedDelivery = {

@@ -13,10 +13,9 @@ import {
   createTestSchoolMember,
   createTestUser,
 } from '../../test/fixtures';
-import { billIssuedData, billingRunPostedData, dispatchNow, emitAndDispatch } from '../../test/notifications';
+import { billIssuedData, billingRunPostedData, dispatchNow, drainSchool, emitAndDispatch } from '../../test/notifications';
 import type { NotificationChannelAdapter } from './channels';
 import {
-  DISPATCH_ABORTED_ERROR_CODE,
   failNotificationDispatch,
   insertNotificationChunk,
   loadDispatchableEvent,
@@ -51,6 +50,8 @@ describe('notify()', () => {
       schoolId: school.id,
       recipients: { kind: 'admissions' as const, admissionIds: [admission.id, admission.id] },
       key: 'bill:one',
+      sendPriority: 'bulk' as const,
+      batch: { kind: 'billing_run' as const, id: 'frun_test' },
     };
     const first = await db.transaction((tx) => notify(tx, input));
     const replay = await db.transaction((tx) => notify(tx, input));
@@ -58,7 +59,14 @@ describe('notify()', () => {
     expect(replay).toEqual({ eventId: first.eventId, created: false });
     const events = await db.select().from(notificationEventTable).where(eq(notificationEventTable.schoolId, school.id));
     expect(events).toHaveLength(1);
-    expect(events[0]).toMatchObject({ status: 'pending', type: 'bill.issued', recipients: { kind: 'admissions', admissionIds: [admission.id] } });
+    expect(events[0]).toMatchObject({
+      status: 'pending',
+      type: 'bill.issued',
+      recipients: { kind: 'admissions', admissionIds: [admission.id] },
+      sendPriority: 'bulk',
+      batchKind: 'billing_run',
+      batchId: 'frun_test',
+    });
   });
 
   it('rolls back with the business transaction', async () => {
@@ -66,7 +74,7 @@ describe('notify()', () => {
     const admission = await createTestAdmission({ schoolId: school.id });
     await expect(
       db.transaction(async (tx) => {
-        await notify(tx, { type: 'bill.issued', data: billIssuedData(admission.id), schoolId: school.id, recipients: { kind: 'admissions', admissionIds: [admission.id] }, key: 'bill:rolled-back' });
+        await notify(tx, { sendPriority: 'immediate', type: 'bill.issued', data: billIssuedData(admission.id), schoolId: school.id, recipients: { kind: 'admissions', admissionIds: [admission.id] }, key: 'bill:rolled-back' });
         throw new Error('business failure');
       }),
     ).rejects.toThrow('business failure');
@@ -78,6 +86,7 @@ describe('notify()', () => {
     await expect(
       db.transaction((tx) =>
         notify(tx, {
+          sendPriority: 'immediate',
           type: 'bill.issued',
           data: { ...billIssuedData('adm'), totalAmountMinor: '-1' },
           schoolId: school.id,
@@ -89,6 +98,7 @@ describe('notify()', () => {
     await expect(
       db.transaction((tx) =>
         notify(tx, {
+          sendPriority: 'immediate',
           type: 'billing.run_posted',
           data: billingRunPostedData(),
           schoolId: school.id,
@@ -196,7 +206,7 @@ describe('notification dispatch', () => {
     const school = await createTestSchool();
     const member = await staffMember(school.id);
     const { eventId } = await db.transaction((tx) =>
-      notify(tx, { type: 'billing.run_posted', data: billingRunPostedData(), schoolId: school.id, recipients: { kind: 'staff_users', userIds: [member.id] }, key: 'gone' }),
+      notify(tx, { sendPriority: 'immediate', type: 'billing.run_posted', data: billingRunPostedData(), schoolId: school.id, recipients: { kind: 'staff_users', userIds: [member.id] }, key: 'gone' }),
     );
     const loaded = (await loadDispatchableEvent(db, eventId))!;
     const planned = planNotificationRows(loaded, await resolveNotificationRecipients(db, loaded));
@@ -205,7 +215,7 @@ describe('notification dispatch', () => {
     expect(await db.select().from(notificationTable).where(eq(notificationTable.eventId, eventId))).toHaveLength(0);
   });
 
-  it('claims an owed delivery once and records the provider outcome (available channel)', async () => {
+  it('queues owed copies with their priority and lane, pokes the lane once, and a sender sends each once', async () => {
     const school = await createTestSchool();
     const admission = await createTestAdmission({ schoolId: school.id });
     const send = vi.fn(async () => ({ kind: 'sent' as const, providerMessageId: 'wamid.test' }));
@@ -217,17 +227,28 @@ describe('notification dispatch', () => {
     };
     const adapters = { web_push: { channel: 'web_push', available: false, unavailableReason: 'test' } as const, whatsapp };
     const { eventId } = await db.transaction((tx) =>
-      notify(tx, { type: 'bill.issued', data: billIssuedData(admission.id), schoolId: school.id, recipients: { kind: 'admissions', admissionIds: [admission.id] }, key: 'owed' }),
+      notify(tx, { sendPriority: 'bulk', type: 'bill.issued', data: billIssuedData(admission.id), schoolId: school.id, recipients: { kind: 'admissions', admissionIds: [admission.id] }, key: 'owed' }),
     );
     const step = <T,>(_name: string, action: () => Promise<T>) => action();
-    expect(await runNotificationDispatch({ eventId, step, sleep: async () => undefined, adapters })).toMatchObject({ status: 'dispatched', owedDeliveryCount: 1 });
+    const poke = vi.fn(async () => undefined);
+    expect(await runNotificationDispatch({ eventId, step, poke, adapters })).toMatchObject({ status: 'dispatched', owedDeliveryCount: 1 });
+    // The fan-out sends nothing itself; it pokes the WhatsApp sender.
+    expect(send).not.toHaveBeenCalled();
+    expect(poke).toHaveBeenCalledWith([{ channel: 'whatsapp', lane: 0 }]);
+    const queued = (await rowsOf(eventId)).deliveries.find((row) => row.channel === 'whatsapp')!;
+    expect(queued).toMatchObject({ status: 'owed', sendPriority: 'bulk', sendLane: 0, attempts: 0 });
+    expect(queued.nextAttemptAt).toBeInstanceOf(Date);
+    expect((await rowsOf(eventId)).deliveries.find((row) => row.channel === 'web_push')).toMatchObject({ status: 'skipped', nextAttemptAt: null });
+
+    await drainSchool(school.id, { adapters });
     expect(send).toHaveBeenCalledTimes(1);
     const { deliveries } = await rowsOf(eventId);
-    expect(deliveries.find((row) => row.channel === 'whatsapp')).toMatchObject({ status: 'sent', providerMessageId: 'wamid.test', attempts: 1, destination: '+919876543210' });
+    expect(deliveries.find((row) => row.channel === 'whatsapp')).toMatchObject({ status: 'sent', providerMessageId: 'wamid.test', attempts: 1, destination: '+919876543210', nextAttemptAt: null });
 
-    // A replay of the whole dispatch never sends twice.
+    // A replay of the whole dispatch and another drain never send twice.
     await db.update(notificationEventTable).set({ status: 'pending' }).where(eq(notificationEventTable.id, eventId));
-    await runNotificationDispatch({ eventId, step, sleep: async () => undefined, adapters });
+    await runNotificationDispatch({ eventId, step, poke, adapters });
+    await drainSchool(school.id, { adapters });
     expect(send).toHaveBeenCalledTimes(1);
   });
 
@@ -240,16 +261,18 @@ describe('notification dispatch', () => {
       whatsapp: { channel: 'whatsapp', available: true, decide, send: vi.fn() } as NotificationChannelAdapter,
     };
     const { eventId } = await db.transaction((tx) =>
-      notify(tx, { type: 'bill.issued', data: billIssuedData(admission.id), schoolId: school.id, recipients: { kind: 'admissions', admissionIds: [admission.id] }, key: 'demo' }),
+      notify(tx, { sendPriority: 'immediate', type: 'bill.issued', data: billIssuedData(admission.id), schoolId: school.id, recipients: { kind: 'admissions', admissionIds: [admission.id] }, key: 'demo' }),
     );
-    await runNotificationDispatch({ eventId, step: (_name, action) => action(), sleep: async () => undefined, adapters });
+    const poke = vi.fn(async () => undefined);
+    await runNotificationDispatch({ eventId, step: (_name, action) => action(), poke, adapters });
     expect(decide).not.toHaveBeenCalled();
+    expect(poke).toHaveBeenCalledWith([]);
     const { deliveries } = await rowsOf(eventId);
     expect(deliveries.find((row) => row.channel === 'whatsapp')).toMatchObject({ status: 'skipped', skipReason: 'demo_school' });
     expect(deliveries.find((row) => row.channel === 'web_push')).toMatchObject({ status: 'skipped', skipReason: 'disabled' });
   });
 
-  it('replays the journaled plan after a channel switch flip and records planned sends on a now-disabled channel as skipped', async () => {
+  it('replays the journaled plan after a channel switch flip and records queued sends on a now-disabled channel as skipped', async () => {
     const school = await createTestSchool();
     const admission = await createTestAdmission({ schoolId: school.id });
     const send = vi.fn(async () => ({ kind: 'sent' as const, providerMessageId: 'wamid.never' }));
@@ -257,60 +280,56 @@ describe('notification dispatch', () => {
     const whatsappOn: NotificationChannelAdapter = { channel: 'whatsapp', available: true, decide: () => [{ status: 'owed', destination: '+919876543210' }], send };
     const whatsappOff = { channel: 'whatsapp', available: false, unavailableReason: 'switched off' } as const;
     const { eventId } = await db.transaction((tx) =>
-      notify(tx, { type: 'bill.issued', data: billIssuedData(admission.id), schoolId: school.id, recipients: { kind: 'admissions', admissionIds: [admission.id] }, key: 'flip' }),
+      notify(tx, { sendPriority: 'immediate', type: 'bill.issued', data: billIssuedData(admission.id), schoolId: school.id, recipients: { kind: 'admissions', admissionIds: [admission.id] }, key: 'flip' }),
     );
     // A Restate-like journal: a completed step is never run again.
     const journal = new Map<string, unknown>();
-    const journaled = (crashBeforeSend: boolean) => async <T,>(name: string, action: () => Promise<T>): Promise<T> => {
+    const journaled = (crashBeforeInsert: boolean) => async <T,>(name: string, action: () => Promise<T>): Promise<T> => {
       if (journal.has(name)) return journal.get(name) as T;
-      if (crashBeforeSend && name.startsWith('send:')) throw new Error('worker restarted');
+      if (crashBeforeInsert && name.startsWith('insert:')) throw new Error('worker restarted');
       const value = await action();
       journal.set(name, value);
       return value;
     };
-    await expect(runNotificationDispatch({ eventId, step: journaled(true), sleep: async () => undefined, adapters: { web_push: webPushOff, whatsapp: whatsappOn } }))
+    const poke = async () => undefined;
+    await expect(runNotificationDispatch({ eventId, step: journaled(true), poke, adapters: { web_push: webPushOff, whatsapp: whatsappOn } }))
       .rejects.toThrow('worker restarted');
     // Redeployed with WhatsApp switched off: the replay keeps the recorded plan.
-    expect(await runNotificationDispatch({ eventId, step: journaled(false), sleep: async () => undefined, adapters: { web_push: webPushOff, whatsapp: whatsappOff } }))
+    const offAdapters = { web_push: webPushOff, whatsapp: whatsappOff };
+    expect(await runNotificationDispatch({ eventId, step: journaled(false), poke, adapters: offAdapters }))
       .toMatchObject({ status: 'dispatched', owedDeliveryCount: 1 });
+    await drainSchool(school.id, { adapters: offAdapters });
     expect(send).not.toHaveBeenCalled();
     const { deliveries } = await rowsOf(eventId);
-    expect(deliveries.find((row) => row.channel === 'whatsapp')).toMatchObject({ status: 'skipped', skipReason: 'disabled', attempts: 0, destination: '+919876543210' });
+    expect(deliveries.find((row) => row.channel === 'whatsapp')).toMatchObject({ status: 'skipped', skipReason: 'disabled', attempts: 0, destination: '+919876543210', nextAttemptAt: null });
   });
 
-  it('fails deliveries still owed when the dispatch ends for good after the event was dispatched', async () => {
+  it('leaves owed copies to the senders when the dispatch ends for good after the event was dispatched', async () => {
     const school = await createTestSchool();
     const admission = await createTestAdmission({ schoolId: school.id });
     const whatsapp: NotificationChannelAdapter = { channel: 'whatsapp', available: true, decide: () => [{ status: 'owed', destination: '+919876543210' }], send: vi.fn() };
     const adapters = { web_push: { channel: 'web_push', available: false, unavailableReason: 'test' } as const, whatsapp };
     const { eventId } = await db.transaction((tx) =>
-      notify(tx, { type: 'bill.issued', data: billIssuedData(admission.id), schoolId: school.id, recipients: { kind: 'admissions', admissionIds: [admission.id] }, key: 'aborted' }),
+      notify(tx, { sendPriority: 'immediate', type: 'bill.issued', data: billIssuedData(admission.id), schoolId: school.id, recipients: { kind: 'admissions', admissionIds: [admission.id] }, key: 'aborted' }),
     );
-    const failingSends = async <T,>(name: string, action: () => Promise<T>) => {
-      if (name.startsWith('send:')) throw new Error('steps exhausted');
-      return action();
-    };
-    await expect(runNotificationDispatch({ eventId, step: failingSends, sleep: async () => undefined, adapters })).rejects.toThrow('steps exhausted');
+    // The poke is lost (worker died after marking the event dispatched).
+    await expect(runNotificationDispatch({ eventId, step: (_name, action) => action(), poke: async () => { throw new Error('lost'); }, adapters })).rejects.toThrow('lost');
     const [event] = await db.select().from(notificationEventTable).where(eq(notificationEventTable.id, eventId));
     expect(event!.status).toBe('dispatched');
-
-    // An older attempt never touches this attempt's deliveries.
-    await failNotificationDispatch(eventId, 'old attempt', { retryable: true, attempt: event!.dispatchAttempt + 1 });
-    expect((await rowsOf(eventId)).deliveries.find((row) => row.channel === 'whatsapp')!.status).toBe('owed');
-
     await failNotificationDispatch(eventId, 'Gave up.', { retryable: true, attempt: event!.dispatchAttempt });
-    const { deliveries } = await rowsOf(eventId);
-    expect(deliveries.find((row) => row.channel === 'whatsapp')).toMatchObject({ status: 'failed', errorCode: DISPATCH_ABORTED_ERROR_CODE });
-    expect(deliveries.find((row) => row.channel === 'web_push')).toMatchObject({ status: 'skipped' });
     const [after] = await db.select().from(notificationEventTable).where(eq(notificationEventTable.id, eventId));
     expect(after!.status).toBe('dispatched');
+    // Still owed and due: the sweep's poke reaches it (see the sender tests).
+    const owed = (await rowsOf(eventId)).deliveries.find((row) => row.channel === 'whatsapp')!;
+    expect(owed.status).toBe('owed');
+    expect(owed.nextAttemptAt!.getTime()).toBeLessThanOrEqual(Date.now());
   });
 
   it('fails only the event (deliveries stay owed for the retry) when the dispatch ends before it was dispatched', async () => {
     const school = await createTestSchool();
     const admission = await createTestAdmission({ schoolId: school.id });
     const { eventId } = await db.transaction((tx) =>
-      notify(tx, { type: 'bill.issued', data: billIssuedData(admission.id), schoolId: school.id, recipients: { kind: 'admissions', admissionIds: [admission.id] }, key: 'early' }),
+      notify(tx, { sendPriority: 'immediate', type: 'bill.issued', data: billIssuedData(admission.id), schoolId: school.id, recipients: { kind: 'admissions', admissionIds: [admission.id] }, key: 'early' }),
     );
     const [event] = await db.select().from(notificationEventTable).where(eq(notificationEventTable.id, eventId));
     await failNotificationDispatch(eventId, 'Gave up.', { retryable: true, attempt: event!.dispatchAttempt });

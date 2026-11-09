@@ -5,9 +5,8 @@ import { and, eq } from 'drizzle-orm';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { createSchoolStaffSession, createTestAdmission, createTestClient, createTestSchool } from '../../test/fixtures';
-import { billIssuedData } from '../../test/notifications';
+import { billIssuedData, dispatchNow, drainSchool } from '../../test/notifications';
 import type { DeliverySendOutcome, NotificationChannelAdapter } from './channels';
-import { runNotificationDispatch } from './dispatch';
 import { sweepWhatsAppFailureAlerts } from './failure-alerts';
 import { notify } from './notify';
 
@@ -20,8 +19,13 @@ function whatsapp(outcome: DeliverySendOutcome): NotificationChannelAdapter {
     send: vi.fn(async () => outcome),
   };
 }
-const dispatch = (eventId: string, adapter: NotificationChannelAdapter) =>
-  runNotificationDispatch({ eventId, step: (_name, action) => action(), sleep: async () => undefined, adapters: { web_push: pushOff, whatsapp: adapter } });
+async function dispatch(eventId: string, adapter: NotificationChannelAdapter) {
+  const adapters = { web_push: pushOff, whatsapp: adapter };
+  const [event] = await db.select({ schoolId: notificationEventTable.schoolId }).from(notificationEventTable).where(eq(notificationEventTable.id, eventId));
+  const result = await dispatchNow(eventId, adapters);
+  await drainSchool(event!.schoolId, { adapters });
+  return result;
+}
 
 describe('delivery log, resend and failure alerts', () => {
   let schoolId: string, admissionId: string, accountantId: string;
@@ -52,6 +56,8 @@ describe('delivery log, resend and failure alerts', () => {
         type: 'bill.issued',
         schoolId,
         key: `bill:delivery-log-test`,
+        sendPriority: 'bulk',
+        batch: { kind: 'billing_run', id: billRunId },
         recipients: { kind: 'admissions', admissionIds: [admissionId] },
         data: { ...billIssuedData(admissionId), billRunId },
       }),
