@@ -18,7 +18,8 @@ import { studentTable } from '@campuspilot/db/schema/student';
 import { and, desc, eq, inArray } from 'drizzle-orm';
 
 import { rpcError } from '../../errors';
-import type { CadetExamState } from './cadet.dto';
+import { gradeLabel, scorePercent } from '../school/exam/exam-scoring';
+import { CADET_CLASS_AVERAGE_MIN_STUDENTS, type CadetExamState } from './cadet.dto';
 
 /**
  * Everything the Cadet Portal shows about a student's examinations, read for
@@ -97,19 +98,11 @@ export type ReleasedExamResult = {
   subjectAverages: Map<string, number> | null;
 };
 
-const percent = (score: number, maximum: number) =>
-  maximum > 0 ? Math.round((score / maximum) * 1000) / 10 : 0;
+const percent = scorePercent;
 const mean = (values: number[]) =>
   values.length ? Math.round((values.reduce((sum, value) => sum + value, 0) / values.length) * 10) / 10 : null;
 
-/** Highest grade whose threshold the percentage reaches; null without a scale. */
-export function gradeFor(percentage: number, scale: SessionConfig['gradingScale']): string | null {
-  return (
-    Object.values(scale)
-      .sort((a, b) => b.minScore - a.minScore)
-      .find((grade) => percentage >= grade.minScore)?.label ?? null
-  );
-}
+const gradeFor = gradeLabel;
 
 export const recordIdOf = (studentId: string, classId: string) => `${studentId}.${classId}`;
 export const examIdOf = (recordId: string, examSlug: string) => `${recordId}.${examSlug}`;
@@ -341,8 +334,10 @@ function subjectOrder(record: CadetRecord, plans: PlanRow[]) {
 
 
 /**
- * Scores of released examinations, with class averages computed from every
- * result in the same class plans only when `withAverages` is true.
+ * Scores of released examinations. With `withAverages`, class averages are
+ * computed from every result in the same class's plans only (other classes
+ * sitting the same exam have their own plans), and each average is null
+ * unless at least `CADET_CLASS_AVERAGE_MIN_STUDENTS` students contribute.
  */
 export async function scoreReleasedExams(
   db: DatabaseExecutor,
@@ -399,7 +394,7 @@ export async function scoreReleasedExams(
         const percentages = rows
           .filter((row) => row.planId === plan.id)
           .map((row) => percent(Object.values(row.marks).reduce((sum, value) => sum + value, 0), plan.totalMarks));
-        const average = mean(percentages);
+        const average = percentages.length >= CADET_CLASS_AVERAGE_MIN_STUDENTS ? mean(percentages) : null;
         if (average !== null) subjectAverages.set(subjectIdOf(record.recordId, plan.subjectSlug), average);
       }
       for (const row of rows) {
@@ -409,7 +404,11 @@ export async function scoreReleasedExams(
         total.max += plan.totalMarks;
         totals.set(row.studentId, total);
       }
-      classAveragePercentage = mean([...totals.values()].map((total) => percent(total.obtained, total.max)));
+      classAveragePercentage =
+        totals.size >= CADET_CLASS_AVERAGE_MIN_STUDENTS
+          ? mean([...totals.values()].map((total) => percent(total.obtained, total.max)))
+          : null;
+      if (subjectAverages.size === 0) subjectAverages = null;
     }
     return { exam, overall, subjects, classAveragePercentage, subjectAverages };
   });

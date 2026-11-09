@@ -8,6 +8,14 @@ import { createListInputSchema, createPaginatedOutputSchema } from '../../pagina
  * metadata such as recorder ids, idempotency keys or internal notes.
  */
 
+/**
+ * A class average (overall or for one subject) is shown only when at least
+ * this many students have results in it. With fewer, an average would let a
+ * student work out a classmate's marks (in a class of two, the average and
+ * your own mark give the other mark exactly), so the portal shows none.
+ */
+export const CADET_CLASS_AVERAGE_MIN_STUDENTS = 5;
+
 const minorSchema = z.string().regex(/^-?(0|[1-9]\d*)$/);
 const currencySchema = z.string().regex(/^[A-Z]{3}$/);
 

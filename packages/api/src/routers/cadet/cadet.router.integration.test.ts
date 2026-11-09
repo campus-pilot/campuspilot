@@ -153,6 +153,7 @@ describe('cadet and staff sessions are isolated', () => {
       'listFeeLedger',
       'getBill',
       'listExams',
+      'getExam',
       'getExamResult',
       'getGrowth',
       'listRemarks',

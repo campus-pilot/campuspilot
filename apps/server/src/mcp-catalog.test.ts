@@ -199,7 +199,7 @@ describe('cadet catalog', () => {
   it('builds from cadetRouter alone: read-only core tools and no staff tools', async () => {
     const { cadetRouter } = await import('@campuspilot/api/routers/cadet/cadet.router');
     const cadetCatalog = await buildMcpCatalog(cadetRouter);
-    expect(cadetCatalog.core.map(({ name }) => name)).toEqual(['getAdmission', 'getProfile', 'getFeeSummary', 'listFeeLedger', 'getBill', 'listExams', 'getExamResult', 'getGrowth', 'listRemarks']);
+    expect(cadetCatalog.core.map(({ name }) => name)).toEqual(['getAdmission', 'getProfile', 'getFeeSummary', 'listFeeLedger', 'getBill', 'listExams', 'getExam', 'getExamResult', 'getGrowth', 'listRemarks']);
     expect(cadetCatalog.advanced).toEqual([]);
     expect(cadetCatalog.core.every((tool) => tool.mcp.access === 'read')).toBe(true);
     expect(catalog.core.map(({ name }) => name)).not.toContain('getAdmission');

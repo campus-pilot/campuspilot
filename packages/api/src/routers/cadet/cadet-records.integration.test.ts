@@ -1,4 +1,7 @@
+import { db } from '@campuspilot/db';
+import { studentTable } from '@campuspilot/db/schema/student';
 import { createRouterClient } from '@orpc/server';
+import { eq } from 'drizzle-orm';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { connectCadetMcp, createCadetTestClient, signInCadet } from '../../../test/cadet';
@@ -155,21 +158,28 @@ describe('cadet results, growth and remarks', () => {
     expect((await meera.getExamResult({ examId: examOf(current.meera, current.classId, 'ut1') })).previousExam).toBeNull();
   });
 
-  it('includes class averages only while the school shares them', async () => {
+  it('never shows class averages for a class of two, even when the school shares them', async () => {
+    // Two students: the average plus your own mark would reveal the other mark.
     await setAverages(true);
     const result = await meera.getExamResult({ examId: examOf(current.meera, current.classId, 'hy') });
-    expect(result.classAveragePercentage).toBe(75);
-    expect(result.subjects.map((subject) => subject.classAveragePercentage)).toEqual([75, 75]);
+    expect(result.classAveragePercentage).toBeNull();
+    expect(result.subjects.every((subject) => subject.classAveragePercentage === null)).toBe(true);
     const growth = await meera.getGrowth({});
     expect(growth.classAveragesShared).toBe(true);
-    expect(growth.selected!.exams.map((exam) => exam.classAveragePercentage)).toEqual([65, 75]);
-
+    expect(growth.selected!.exams.every((exam) => exam.classAveragePercentage === null && exam.subjectAverages === null)).toBe(true);
+    expect(growth.classes.every((record) => record.latest?.classAveragePercentage === null)).toBe(true);
     await setAverages(false);
-    const hidden = await meera.getGrowth({});
-    expect(hidden.classAveragesShared).toBe(false);
-    expect(hidden.selected!.exams.every((exam) => exam.classAveragePercentage === null && exam.subjectAverages === null)).toBe(true);
-    expect(hidden.classes.every((record) => record.latest?.classAveragePercentage === null)).toBe(true);
-    expect((await meera.getExamResult({ examId: examOf(current.meera, current.classId, 'hy') })).classAveragePercentage).toBeNull();
+  });
+
+  it('getExam returns any state without paging, and NOT_FOUND for unknown or foreign ids', async () => {
+    expect(await meera.getExam({ examId: examOf(current.meera, current.classId, 'annual') })).toMatchObject({
+      examSlug: 'annual', state: 'awaiting_release', percentage: null,
+    });
+    expect(await meera.getExam({ examId: examOf(current.meera, current.classId, 'hy') })).toMatchObject({
+      state: 'released', percentage: 80, grade: 'A',
+    });
+    await expectRpcCode(meera.getExam({ examId: examOf(current.ravi, current.classId, 'hy') }), 'NOT_FOUND');
+    await expectRpcCode(meera.getExam({ examId: 'nope' }), 'NOT_FOUND');
   });
 
   it('hides and rejects unreleased examinations, including after a withdrawal', async () => {
@@ -257,6 +267,108 @@ describe('cadet results, growth and remarks', () => {
     // A student without an enrollment sees empty, not broken, results.
     expect(await mcp.listExams({})).toMatchObject({ items: [], record: null });
     expect(await mcp.getGrowth({})).toMatchObject({ classes: [], selected: null });
+  });
+});
+
+/**
+ * Class 8A has five students and Class 8B two, both sitting one exam with
+ * their own plans. Asha (8A) is later moved to 8B; Zoya joins a class created
+ * after the plans were generated.
+ */
+describe('cadet class averages, moved students and scoping', () => {
+  let principal: TestClient;
+  let schoolId: string;
+  let sessionId: string;
+  let classA: { classId: string; sectionId: string };
+  let classB: { classId: string; sectionId: string };
+  let asha: CadetRouterClient;
+  let ashaStudentId: string;
+  let zoya: CadetRouterClient;
+  let zoyaStudentId: string;
+  let zoyaClassId: string;
+
+  beforeAll(async () => {
+    const created = await createResultsSchool();
+    principal = created.principal;
+    schoolId = created.school.id;
+    sessionId = await createExamSession(schoolId, 2026, { t1: 'Term 1' }, { active: true });
+    classA = await createSubjectClass(schoolId, 'Class 8', { maths: 'Mathematics' });
+    classB = await createSubjectClass(schoolId, 'Class 9', { maths: 'Mathematics' });
+    const enrolled: Array<{ classId: string; studentId: string; subjects: Record<string, number> }> = [];
+    const aMarks = [90, 80, 70, 60, 50];
+    for (const [index, mark] of aMarks.entries()) {
+      const login = await createAdmissionWithLogin(principal, schoolId, `Student A${index}`);
+      const studentId = (await enroll({ schoolId, admissionId: login.admission.id, sessionId, ...classA, rollNo: index + 1 })).id;
+      if (index === 0) {
+        asha = await cadetClient(login.credentials);
+        ashaStudentId = studentId;
+      }
+      enrolled.push({ classId: classA.classId, studentId, subjects: { maths: mark } });
+    }
+    for (const index of [0, 1]) {
+      const login = await createAdmissionWithLogin(principal, schoolId, `Student B${index}`);
+      const studentId = (await enroll({ schoolId, admissionId: login.admission.id, sessionId, ...classB, rollNo: index + 1 })).id;
+      enrolled.push({ classId: classB.classId, studentId, subjects: { maths: 10 } });
+    }
+    const scope = { schoolId, sessionId, examSlug: 't1' };
+    await runExam(principal, scope, enrolled, { complete: true });
+    await principal.school.releaseExamToCadet(scope);
+    await principal.school.updateCadetPortalSettings({ schoolId, showClassAverages: true });
+
+    // A class created after plan generation has no plan in the released exam.
+    const late = await createSubjectClass(schoolId, 'Class 10', { maths: 'Mathematics' });
+    zoyaClassId = late.classId;
+    const zoyaLogin = await createAdmissionWithLogin(principal, schoolId, 'Zoya Late');
+    zoyaStudentId = (await enroll({ schoolId, admissionId: zoyaLogin.admission.id, sessionId, ...late, rollNo: 1 })).id;
+    zoya = await cadetClient(zoyaLogin.credentials);
+  }, 120_000);
+
+  const examId = (studentId: string, classId: string) => `${studentId}.${classId}.t1`;
+
+  it("averages only the student's own class plans, from five students up", async () => {
+    const result = await asha.getExamResult({ examId: examId(ashaStudentId, classA.classId) });
+    // Class 9's marks (10, 10) sit the same exam in their own plans and are not mixed in.
+    expect(result.classAveragePercentage).toBe(70);
+    expect(result.subjects[0]!.classAveragePercentage).toBe(70);
+    const growth = await asha.getGrowth({ recordId: `${ashaStudentId}.${classA.classId}` });
+    expect(growth.selected!.exams[0]).toMatchObject({ percentage: 90, classAveragePercentage: 70 });
+  });
+
+  it('keeps a moved student\'s results under the class they sat the exam in', async () => {
+    await db.update(studentTable).set({ classId: classB.classId, sectionId: classB.sectionId, rollNo: 99 }).where(eq(studentTable.id, ashaStudentId));
+    try {
+      const growth = await asha.getGrowth({});
+      expect(growth.classes.map(({ recordId, classLabel, sectionLabel }) => ({ recordId, classLabel, sectionLabel }))).toEqual([
+        { recordId: `${ashaStudentId}.${classB.classId}`, classLabel: 'Class 9', sectionLabel: 'Section A' },
+        // The results-only record: no longer placed there, so no section.
+        { recordId: `${ashaStudentId}.${classA.classId}`, classLabel: 'Class 8', sectionLabel: null },
+      ]);
+      // The current class sat the exam too, but she has no marks in its plans.
+      const current = await asha.listExams({});
+      expect(current.items).toMatchObject([{ examSlug: 't1', state: 'released', percentage: null }]);
+      const sat = await asha.getExamResult({ examId: examId(ashaStudentId, classA.classId) });
+      expect(sat).toMatchObject({ classLabel: 'Class 8', sectionLabel: null, overall: { percentage: 90 } });
+    } finally {
+      await db.update(studentTable).set({ classId: classA.classId, sectionId: classA.sectionId, rollNo: 1 }).where(eq(studentTable.id, ashaStudentId));
+    }
+  });
+
+  it('omits a released exam that has no plan for the student\'s class', async () => {
+    expect((await zoya.listExams({})).items).toEqual([]);
+    await expectRpcCode(zoya.getExam({ examId: examId(zoyaStudentId, zoyaClassId) }), 'NOT_FOUND');
+    await expectRpcCode(zoya.getExamResult({ examId: examId(zoyaStudentId, zoyaClassId) }), 'NOT_FOUND');
+    // A record id of another class the student was never in is not hers either.
+    await expectRpcCode(zoya.getExamResult({ examId: examId(zoyaStudentId, classA.classId) }), 'NOT_FOUND');
+  });
+
+  it("returns NOT_FOUND for another school's ids", async () => {
+    const other = await createResultsSchool();
+    const login = await createAdmissionWithLogin(other.principal, other.school.id, 'Other School Student');
+    const outsider = await cadetClient(login.credentials);
+    await expectRpcCode(outsider.getExamResult({ examId: examId(ashaStudentId, classA.classId) }), 'NOT_FOUND');
+    await expectRpcCode(outsider.getExam({ examId: examId(ashaStudentId, classA.classId) }), 'NOT_FOUND');
+    await expectRpcCode(outsider.getGrowth({ recordId: `${ashaStudentId}.${classA.classId}` }), 'NOT_FOUND');
+    await expectRpcCode(outsider.listRemarks({ filters: { recordId: `${ashaStudentId}.${classA.classId}` } }), 'NOT_FOUND');
   });
 });
 

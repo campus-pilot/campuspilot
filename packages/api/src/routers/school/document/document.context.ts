@@ -18,19 +18,16 @@ import { rpcError } from "../../../errors";
 import type { DocumentSource } from "./document.dto";
 import { documentImage } from "./document.storage";
 import { withReportModeLayout } from "./document.report-modes";
+import { gradeLabel, scorePercent } from "../exam/exam-scoring";
 
+/** Report cards print "—" where no grade applies; the rule itself is shared with the Cadet Portal. */
 export function documentGrade(
   percentage: number,
   scale: Record<string, { label: string; minScore: number }>,
 ) {
-  return (
-    Object.values(scale)
-      .sort((a, b) => b.minScore - a.minScore)
-      .find((grade) => percentage >= grade.minScore)?.label ?? "—"
-  );
+  return gradeLabel(percentage, scale) ?? "—";
 }
-const percent = (score: number, maximum: number) =>
-  maximum > 0 ? Math.round((score / maximum) * 1000) / 10 : 0;
+const percent = scorePercent;
 
 /** Calendar dates and local school times never pass through the host timezone. */
 export function documentScheduleSlot(row: {
