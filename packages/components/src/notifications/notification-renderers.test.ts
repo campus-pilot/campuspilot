@@ -17,4 +17,13 @@ describe('notification renderers', () => {
       }).title,
     ).toBe('1 WhatsApp message of Final Examination results failed');
   });
+
+  it('tells the publisher the in-app copies apart from WhatsApp', () => {
+    expect(
+      presentNotification({
+        type: 'exam.results_publish_finished',
+        data: { sessionId: 's', examSlug: 'final', examName: 'Final', recipientCount: 3, sentCount: 0, failedCount: 0, skippedCount: 3, inAppCount: 3 },
+      }).description,
+    ).toBe('3 of 3 students have them in their Cadet Portal inbox. WhatsApp: 0 sent, 0 failed, 3 skipped.');
+  });
 });

@@ -147,7 +147,7 @@ describe('result notifications', () => {
     expect(finished?.finishedAt).not.toBeNull();
     expect(finished).toMatchObject({ outcome: { recipientCount: 3, sentCount: 0, skippedCount: 3, failedCount: 0 } });
     const [staffEvent] = await db.select().from(notificationEventTable).where(eq(notificationEventTable.key, `exam-results-finished:${publication.id}`));
-    expect(staffEvent).toMatchObject({ type: 'exam.results_publish_finished', recipients: { kind: 'staff_users', userIds: [principalId] }, data: { recipientCount: 3, skippedCount: 3 } });
+    expect(staffEvent).toMatchObject({ type: 'exam.results_publish_finished', recipients: { kind: 'staff_users', userIds: [principalId] }, data: { recipientCount: 3, skippedCount: 3, inAppCount: 3 } });
 
     // Reopening retracts nothing; the publication stays recorded.
     await setStatus('active');

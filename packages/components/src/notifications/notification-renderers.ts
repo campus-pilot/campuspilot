@@ -49,7 +49,10 @@ export const notificationRenderers: { [T in NotificationType]: NotificationRende
   'exam.results_publish_finished': (data) => ({
     icon: ClipboardCheck,
     title: `${data.examName} results sent`,
-    description: `${data.sentCount} sent, ${data.failedCount} failed, ${data.skippedCount} skipped of ${data.recipientCount} students.`,
+    description: [
+      data.inAppCount === undefined ? null : `${data.inAppCount} of ${data.recipientCount} students have them in their Cadet Portal inbox.`,
+      `WhatsApp: ${data.sentCount} sent, ${data.failedCount} failed, ${data.skippedCount} skipped.`,
+    ].filter(Boolean).join(' '),
   }),
   'notification.whatsapp_failed': (data) => ({
     icon: MessageCircleWarning,

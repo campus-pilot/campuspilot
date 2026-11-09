@@ -104,9 +104,15 @@ export const notificationPayloadSchemas = {
     examSlug: id,
     examName: label,
     recipientCount: count,
+    /** WhatsApp copies sent, failed and skipped (one per student). */
     sentCount: count,
     failedCount: count,
     skippedCount: count,
+    /**
+     * Students whose in-app (Cadet Portal inbox) copy was written, whatever
+     * happened on WhatsApp (added after the first release, hence optional).
+     */
+    inAppCount: count.optional(),
   }),
   /** A WhatsApp copy of a student notification failed (Phase 6, D-30). */
   "notification.whatsapp_failed": z.object({

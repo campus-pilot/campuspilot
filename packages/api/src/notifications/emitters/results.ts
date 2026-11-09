@@ -11,7 +11,7 @@ import { notificationDeliveryTable, notificationEventTable, notificationTable } 
 import { schoolTable } from '@campuspilot/db/schema/school';
 import { studentTable } from '@campuspilot/db/schema/student';
 import { createHash } from 'node:crypto';
-import { and, asc, eq, inArray, isNull, lt, sql } from 'drizzle-orm';
+import { and, asc, count, eq, inArray, isNull, lt, sql } from 'drizzle-orm';
 
 import { isRetryableTransactionError, rpcError } from '../../errors';
 import { getExam, type ExamScope } from '../../routers/school/exam/exam.service';
@@ -333,6 +333,25 @@ export async function settleResultPublication(
 }
 
 /**
+ * Students of a publication whose inbox row exists: the in-app copy every
+ * fanned-out student gets, whatever WhatsApp did (counted from the rows,
+ * not assumed from the recipient count).
+ */
+async function publicationInboxCount(db: DatabaseExecutor, publication: Pick<ExamResultPublicationRow, 'id' | 'schoolId' | 'admissionIds'>) {
+  const keys = publication.admissionIds.map((admissionId) => resultPublicationEventKey(publication.id, admissionId));
+  let total = 0;
+  for (let start = 0; start < keys.length; start += KEY_CHUNK) {
+    const [row] = await db
+      .select({ value: count() })
+      .from(notificationTable)
+      .innerJoin(notificationEventTable, eq(notificationEventTable.id, notificationTable.eventId))
+      .where(and(eq(notificationEventTable.schoolId, publication.schoolId), inArray(notificationEventTable.key, keys.slice(start, start + KEY_CHUNK))));
+    total += row?.value ?? 0;
+  }
+  return total;
+}
+
+/**
  * Checks one publication (recording the check for the sweep's rotation) and
  * finishes it when settled. Returns undefined when it is not finished by
  * this call, else the publisher's event ID (null without a publisher).
@@ -349,13 +368,14 @@ async function finishResultPublicationIfSettled(db: Database, publication: ExamR
       .returning({ id: examResultPublicationTable.id });
     if (!finished) return undefined;
     if (!publication.publishedBy) return null;
+    const inAppCount = await publicationInboxCount(tx, publication);
     const result = await notify(tx, {
       type: 'exam.results_publish_finished',
       schoolId: publication.schoolId,
       key: `exam-results-finished:${publication.id}`,
       sendPriority: 'immediate',
       recipients: { kind: 'staff_users', userIds: [publication.publishedBy] },
-      data: { sessionId: publication.sessionId, examSlug: publication.examSlug, examName: publication.examName, ...outcome },
+      data: { sessionId: publication.sessionId, examSlug: publication.examSlug, examName: publication.examName, ...outcome, inAppCount },
     });
     return result.eventId;
   });
