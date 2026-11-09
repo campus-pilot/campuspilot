@@ -17,6 +17,7 @@ import { schoolSectionRouter } from "./class/section.router";
 import { schoolExamRouter } from "./exam/exam.router";
 import { schoolLogoRouter } from "./logo/logo.router";
 import { schoolMemberRouter } from "./member/member.router";
+import { schoolNotificationRouter } from "./notification/notification.router";
 import {
   mySchoolDtoSchema,
   schoolDetailsDtoSchema,
@@ -31,6 +32,7 @@ export const schoolRouter = {
   ...schoolDashboardRouter,
   ...schoolDocumentRouter,
   ...schoolExamRouter,
+  ...schoolNotificationRouter,
   listMySchools: protectedProcedure
     .route({
       summary: "List my schools",

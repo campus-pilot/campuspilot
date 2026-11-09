@@ -17,6 +17,7 @@ import {
   admissionDtoSchema,
   toAdmissionDto,
 } from '../school/admission/admission.dto';
+import { cadetNotificationRouter } from './cadet-notification.router';
 
 /**
  * The Cadet Portal's router. It is deliberately not part of `appRouter`, so
@@ -25,6 +26,7 @@ import {
  * metadata like `appRouter` leaves; the cadet MCP catalog is built from it.
  */
 export const cadetRouter = {
+  ...cadetNotificationRouter,
   getAdmission: cadetProcedure
     .route({
       summary: 'Get my admission',
