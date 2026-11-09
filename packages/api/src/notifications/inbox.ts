@@ -4,7 +4,7 @@ import {
   type NotificationAudience,
 } from '@campuspilot/db/notifications/catalogue';
 import { notificationTable } from '@campuspilot/db/schema/notification';
-import { and, count, desc, eq, inArray, isNotNull, isNull, lt, or, type SQL } from 'drizzle-orm';
+import { and, count, desc, eq, inArray, isNotNull, isNull, lt, sql, type SQL } from 'drizzle-orm';
 
 /**
  * The one query module behind both inboxes (staff in management, students in
@@ -45,10 +45,19 @@ export const NOTIFICATION_MAX_PAGE_SIZE = 20;
 /** At most this many IDs per mark-read or dismiss call. */
 export const NOTIFICATION_MAX_IDS = 50;
 
-/** Keyset position after the last row of a page. */
+/**
+ * Keyset position after the last row of a page. `createdAt` is the row's
+ * stored timestamp at full (microsecond) precision as UTC ISO text, never a
+ * JavaScript `Date` (milliseconds): rows of one fan-out differ only in
+ * microseconds, and a truncated cursor would skip some of them.
+ */
 export type NotificationCursor = { createdAt: string; id: string };
 
-const CURSOR_PATTERN = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z)\|([a-z]+_[a-z0-9]{21})$/;
+/** Microsecond cursors; millisecond ones (issued before) still decode. */
+const CURSOR_PATTERN = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3,6}Z)\|([a-z]+_[a-z0-9]{21})$/;
+
+/** `created_at` as microsecond UTC ISO text, computed by PostgreSQL. */
+const createdAtCursorText = sql<string>`to_char(${notificationTable.createdAt} at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`;
 
 /** Opaque cursor text: `<ISO created_at>|<id>`. */
 export function encodeNotificationCursor(cursor: NotificationCursor): string {
@@ -84,13 +93,8 @@ export async function listNotifications(
   const conditions: SQL[] = [notificationVisibleTo(viewer)];
   if (options.filter === 'unread') conditions.push(isNull(notificationTable.readAt));
   if (options.cursor) {
-    const after = new Date(options.cursor.createdAt);
-    conditions.push(
-      or(
-        lt(notificationTable.createdAt, after),
-        and(eq(notificationTable.createdAt, after), lt(notificationTable.id, options.cursor.id)),
-      )!,
-    );
+    // Row comparison at full precision: the cursor text is cast by PostgreSQL.
+    conditions.push(sql`(${notificationTable.createdAt}, ${notificationTable.id}) < (${options.cursor.createdAt}::timestamptz, ${options.cursor.id})`);
   }
   const rows = await db
     .select({
@@ -99,16 +103,18 @@ export async function listNotifications(
       data: notificationTable.data,
       createdAt: notificationTable.createdAt,
       readAt: notificationTable.readAt,
+      cursorAt: createdAtCursorText,
     })
     .from(notificationTable)
     .where(and(...conditions))
     .orderBy(desc(notificationTable.createdAt), desc(notificationTable.id))
     .limit(options.limit + 1);
-  const items = rows.slice(0, options.limit);
-  const last = items.at(-1);
+  const page = rows.slice(0, options.limit);
+  const last = page.at(-1);
   const nextCursor = rows.length > options.limit && last
-    ? encodeNotificationCursor({ createdAt: last.createdAt.toISOString(), id: last.id })
+    ? encodeNotificationCursor({ createdAt: last.cursorAt, id: last.id })
     : null;
+  const items = page.map(({ cursorAt: _cursorAt, ...item }) => item);
   return { items, nextCursor };
 }
 

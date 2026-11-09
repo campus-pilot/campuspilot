@@ -1,6 +1,6 @@
 import { db } from '@campuspilot/db';
 import { notificationEventTable, notificationTable } from '@campuspilot/db/schema/notification';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 
 import { expectRpcCode } from '../../../../test/finance/assertions';
@@ -110,6 +110,24 @@ describe('staff notification inbox', () => {
     expect(second.nextCursor).toBeNull();
     await expectRpcCode(client.school.listNotifications({ schoolId: school.id, cursor: 'page-2' }), 'BAD_REQUEST');
     await expectRpcCode(client.school.listNotifications({ schoolId: school.id, limit: 21 }), 'BAD_REQUEST');
+  });
+
+  it('pages rows that differ only in microseconds without skipping any', async () => {
+    const { school, client, ids } = await staffInbox(3);
+    // Same millisecond, different microseconds (as one fan-out writes them).
+    const micro = ['2026-11-01T10:00:00.123100Z', '2026-11-01T10:00:00.123400Z', '2026-11-01T10:00:00.123700Z'];
+    for (const [index, id] of ids.entries()) {
+      await db.execute(sql`update notification set created_at = ${micro[index]}::timestamptz where id = ${id}`);
+    }
+    const seen: string[] = [];
+    let cursor: string | undefined;
+    for (let page = 0; page < 3; page += 1) {
+      const result = await client.school.listNotifications({ schoolId: school.id, limit: 1, ...(cursor ? { cursor } : {}) });
+      seen.push(...result.items.map((item) => item.id));
+      if (!result.nextCursor) break;
+      cursor = result.nextCursor;
+    }
+    expect(seen).toEqual([...ids].reverse());
   });
 
   it('marks read only the viewer’s rows and filters unread', async () => {
