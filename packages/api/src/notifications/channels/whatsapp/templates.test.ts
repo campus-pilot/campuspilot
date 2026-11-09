@@ -4,7 +4,7 @@ import { requireWhatsAppConfigWhenEnabled, WHATSAPP_ENV_SHAPE } from '@campuspil
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import { classifyWhatsAppFailure } from './client';
+import { classifyWhatsAppFailure, classifyWhatsAppSendFailure, isPreSendError } from './client';
 import { mapWhatsAppMessage, templateParam } from './templates';
 
 const facts = {
@@ -61,7 +61,30 @@ describe('WhatsApp failure classification', () => {
     }
     expect(classifyWhatsAppFailure(error(429, null))).toMatchObject({ kind: 'retry', errorCode: 'http_429' });
     expect(classifyWhatsAppFailure(error(503, null))).toMatchObject({ kind: 'retry', errorCode: 'http_503' });
-    expect(classifyWhatsAppFailure({ error: 'network' })).toMatchObject({ kind: 'retry', errorCode: 'network_error' });
+    expect(classifyWhatsAppFailure({ error: 'connect_failed' })).toMatchObject({ kind: 'retry', errorCode: 'network_error' });
+    expect(classifyWhatsAppFailure({ error: 'outcome_unknown' })).toMatchObject({ kind: 'retry', errorCode: 'network_error' });
+  });
+
+  it('never retries a message send that may have gone out, but retries one that never connected', () => {
+    expect(classifyWhatsAppSendFailure(error(502, null))).toMatchObject({ kind: 'failed', errorCode: 'outcome_unknown' });
+    expect(classifyWhatsAppSendFailure(error(500, 131000))).toMatchObject({ kind: 'failed', errorCode: 'outcome_unknown' });
+    expect(classifyWhatsAppSendFailure({ error: 'outcome_unknown' })).toMatchObject({ kind: 'failed', errorCode: 'outcome_unknown' });
+    expect(classifyWhatsAppSendFailure({ error: 'connect_failed' })).toMatchObject({ kind: 'retry', scope: 'channel' });
+    // Explicit rejections are certain: retried or failed as for any call.
+    expect(classifyWhatsAppSendFailure(error(400, 130429))).toMatchObject({ kind: 'retry', scope: 'channel' });
+    expect(classifyWhatsAppSendFailure(error(429, null))).toMatchObject({ kind: 'retry' });
+    expect(classifyWhatsAppSendFailure(error(400, 132001))).toEqual({ kind: 'failed', errorCode: 'wa_132001' });
+  });
+
+  it('tells connection failures before sending apart from ones that may come after', () => {
+    const coded = (code: string) => Object.assign(new Error(code), { code });
+    expect(isPreSendError(new TypeError('fetch failed', { cause: coded('ECONNREFUSED') }))).toBe(true);
+    expect(isPreSendError(new TypeError('fetch failed', { cause: coded('UND_ERR_CONNECT_TIMEOUT') }))).toBe(true);
+    expect(isPreSendError(new TypeError('fetch failed', { cause: new AggregateError([coded('ECONNREFUSED'), coded('ENETUNREACH')]) }))).toBe(true);
+    expect(isPreSendError(new TypeError('fetch failed', { cause: coded('ECONNRESET') }))).toBe(false);
+    expect(isPreSendError(new TypeError('fetch failed', { cause: coded('UND_ERR_SOCKET') }))).toBe(false);
+    expect(isPreSendError(new DOMException('The operation timed out.', 'TimeoutError'))).toBe(false);
+    expect(isPreSendError(new TypeError('fetch failed'))).toBe(false);
   });
 
   it('fails permanently on everything else', () => {

@@ -14,6 +14,7 @@ import type {
 } from '../types';
 import {
   classifyWhatsAppFailure,
+  classifyWhatsAppSendFailure,
   sendTemplateMessage,
   uploadMedia,
   type TemplateComponent,
@@ -60,8 +61,10 @@ function bodyComponent(plan: WhatsAppMessagePlan): TemplateComponent {
 /**
  * WhatsApp sender (Cloud API). Per claimed delivery: re-check eligibility
  * against the live admission, map the template, produce and upload the PDF
- * when the template has a document header, then send. Provider answers are
- * classified by `classifyWhatsAppFailure` (D-7).
+ * when the template has a document header, then send. Upload answers are
+ * classified by `classifyWhatsAppFailure` (safe to repeat), the message
+ * send's by `classifyWhatsAppSendFailure`, which never retries a send that
+ * may have gone out (D-7, review round 2 #2).
  */
 export function createWhatsAppAdapter(options: {
   config: WhatsAppClientConfig;
@@ -165,7 +168,7 @@ export function createWhatsAppAdapter(options: {
       languageCode: WHATSAPP_TEMPLATE_LANGUAGE,
       components,
     });
-    if (!sent.ok) return classifyWhatsAppFailure(sent);
+    if (!sent.ok) return classifyWhatsAppSendFailure(sent);
     return { kind: 'sent', providerMessageId: sent.messageId, documentTemplateRevisionId: document?.templateRevisionId ?? null };
   }
 

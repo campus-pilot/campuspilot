@@ -14,6 +14,7 @@ import { notify, type NotifyInput } from '../../notify';
 import { DAY_MS } from '../../sender/retry-policy';
 import type { ChannelFetch, NotificationChannelAdapter } from '../types';
 import { createWhatsAppAdapter } from './adapter';
+import { OUTCOME_UNKNOWN_ERROR_CODE } from './client';
 import type { WhatsAppDocumentSources } from './documents';
 
 const config = { accessToken: 'test-token-0123456789', phoneNumberId: '1234567890', graphApiVersion: 'v24.0', graphBaseUrl: 'https://graph.test' };
@@ -242,4 +243,54 @@ describe('WhatsApp channel', () => {
     });
   });
 
+  it('never retries a message send whose outcome is unknown (5xx or a timeout after sending), but retries one that never connected', async () => {
+    const school = await createTestSchool();
+    const admission = await student(school.id);
+    const outage = vi.fn<ChannelFetch>(async () => new Response('bad gateway', { status: 502 }));
+    const fiveHundred = await dispatch(bill(school.id, [admission.id]), outage);
+    expect(outage).toHaveBeenCalledTimes(1);
+    expect(fiveHundred.byAdmission.get(admission.id)).toMatchObject({ status: 'failed', errorCode: OUTCOME_UNKNOWN_ERROR_CODE, attempts: 1 });
+    expect(fiveHundred.byAdmission.get(admission.id)!.errorMessage).toMatch(/may or may not have been sent/);
+
+    const timeout = vi.fn<ChannelFetch>(async () => {
+      throw new DOMException('The operation timed out.', 'TimeoutError');
+    });
+    const timedOut = await dispatch(bill(school.id, [admission.id]), timeout);
+    expect(timeout).toHaveBeenCalledTimes(1);
+    expect(timedOut.byAdmission.get(admission.id)).toMatchObject({ status: 'failed', errorCode: OUTCOME_UNKNOWN_ERROR_CODE });
+
+    const refusedOnce = vi
+      .fn<ChannelFetch>()
+      .mockRejectedValueOnce(new TypeError('fetch failed', { cause: Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' }) }))
+      .mockResolvedValue(sent('wamid.after-refused'));
+    const refused = await dispatch(bill(school.id, [admission.id]), refusedOnce);
+    expect(refusedOnce).toHaveBeenCalledTimes(2);
+    expect(refused.byAdmission.get(admission.id)).toMatchObject({ status: 'sent', providerMessageId: 'wamid.after-refused', attempts: 2 });
+  });
+
+  it('retries a document upload that got a 5xx (uploading twice is harmless)', async () => {
+    const school = await createTestSchool();
+    const admission = await student(school.id);
+    const receipt = {
+      available: async () => true,
+      produce: vi.fn(async () => ({ bytes: new TextEncoder().encode('%PDF-1.7 test'), mimeType: 'application/pdf' as const, templateRevisionId: 'artf_rev' })),
+    };
+    const fetchMock = vi
+      .fn<ChannelFetch>()
+      .mockResolvedValueOnce(new Response('unavailable', { status: 503 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: 'media-2' }), { status: 200 }))
+      .mockResolvedValueOnce(sent('wamid.doc2'));
+    const { byAdmission } = await dispatch(
+      {
+        type: 'payment.received' as const,
+        data: { paymentId: 'fpay_3', sessionId: 'sess_1', admissionId: admission.id, receiptNumber: 'RCP/2026-27/000003', amountMinor: '100', currency: 'INR', receivedAt: '2026-11-09T10:00:00.000Z', studentName: 'Meera Singh' },
+        schoolId: school.id,
+        recipients: { kind: 'admissions' as const, admissionIds: [admission.id] },
+      },
+      fetchMock,
+      { documentSources: { payment_receipt: receipt, report_card: null } },
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(byAdmission.get(admission.id)).toMatchObject({ status: 'sent', providerMessageId: 'wamid.doc2', attempts: 2 });
+  });
 });
