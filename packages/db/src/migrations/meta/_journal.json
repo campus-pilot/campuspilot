@@ -218,6 +218,13 @@
       "when": 1794008247010,
       "tag": "0030_demo-purge-cadet",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1794231452162,
+      "tag": "0031_data-migration",
+      "breakpoints": true
     }
   ]
 }

@@ -232,3 +232,48 @@ test_school_principal_cannot_read_aggregate_stats if {
     }
   }
 }
+
+test_admin_can_read_and_run_data_migrations if {
+  every action in {"system.data_migration.read", "system.data_migration.run"} {
+    authorization.allow with input as {
+      "action": action,
+      "subject": {
+        "userId": "admin-1",
+        "roleAssignments": [{"role": "platform.admin", "scope": {"kind": "platform"}}],
+      },
+      "resource": {"kind": "system"},
+    }
+  }
+}
+
+test_non_admins_cannot_use_data_migrations if {
+  every action in {"system.data_migration.read", "system.data_migration.run"} {
+    not authorization.allow with input as {
+      "action": action,
+      "subject": {
+        "userId": "user-2",
+        "roleAssignments": [{"role": "platform.user", "scope": {"kind": "platform"}}],
+      },
+      "resource": {"kind": "system"},
+    }
+    not authorization.allow with input as {
+      "action": action,
+      "subject": {
+        "userId": "user-3",
+        "roleAssignments": [{"role": "school.principal", "scope": {"kind": "school", "schoolId": "school-1"}}],
+      },
+      "resource": {"kind": "system"},
+    }
+  }
+}
+
+test_data_migration_actions_reject_school_resources if {
+  not authorization.allow with input as {
+    "action": "system.data_migration.run",
+    "subject": {
+      "userId": "admin-1",
+      "roleAssignments": [{"role": "platform.admin", "scope": {"kind": "platform"}}],
+    },
+    "resource": {"kind": "school", "schoolId": "school-1"},
+  }
+}

@@ -83,6 +83,10 @@ const HIDDEN_TOOLS = [
   'systemAdmin.rotateOAuthClientSecret',
   'systemAdmin.deleteOAuthClient',
   'systemAdmin.setOAuthClientDisabled',
+  // Data migrations change every school's data: human platform-admin actions.
+  'systemAdmin.listDataMigrations',
+  'systemAdmin.listDataMigrationSkippedItems',
+  'systemAdmin.requestDataMigrationRun',
   // Demo provisioning, credentials and purge stay human admin actions.
   'systemAdmin.listDemoClassCatalogue',
   'systemAdmin.createDemoSchool',

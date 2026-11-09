@@ -7,6 +7,7 @@ import { db } from '@campuspilot/db';
 import { runMigrations } from '@campuspilot/db/migrate';
 import { env } from '@campuspilot/env/server';
 import { sweepDemoSchoolOutbox } from '@campuspilot/api/routers/system-admin/demo-school/demo-school.outbox';
+import { sweepDataMigrationOutbox } from '@campuspilot/api/data-migrations/data-migration.outbox';
 
 import { app, cadetMcpCatalog, cadetMcpHandler, mcpCatalog, mcpHandler } from './http';
 import { log } from './log';
@@ -38,6 +39,17 @@ const DEMO_OUTBOX_INTERVAL_MS = 30 * 1000;
 async function sweepDemoOutbox() {
   const result = await sweepDemoSchoolOutbox();
   if (Object.values(result).some((value) => value > 0)) log.info(result, 'demo-school.outbox.ok');
+}
+
+/**
+ * One data migration sweep. The first successful sweep after boot also
+ * registers an apply run for every data migration that needs one; the run is
+ * handed to the worker and the server never waits for it (D-36), so the code
+ * must tolerate rows a migration has not reached yet.
+ */
+async function sweepDataMigrations(register: boolean) {
+  const result = await sweepDataMigrationOutbox({ register });
+  if (Object.values(result).some((value) => value > 0)) log.info(result, 'data-migration.outbox.ok');
 }
 
 /**
@@ -73,11 +85,20 @@ async function main() {
   // Across replicas, the sweep claims rows with FOR UPDATE SKIP LOCKED.
   let demoOutbox: NodeJS.Timeout | undefined;
   let stopped = false;
+  // Registration of pending data migrations is retried on every sweep until
+  // it succeeds once, then never again during this process.
+  let dataMigrationsRegistered = false;
   const sweepOutbox = async () => {
     try {
       await sweepDemoOutbox();
     } catch (err) {
       log.error({ err }, 'demo-school.outbox.error');
+    }
+    try {
+      await sweepDataMigrations(!dataMigrationsRegistered);
+      dataMigrationsRegistered = true;
+    } catch (err) {
+      log.error({ err }, 'data-migration.outbox.error');
     }
     if (stopped) return;
     demoOutbox = setTimeout(() => void sweepOutbox(), DEMO_OUTBOX_INTERVAL_MS);

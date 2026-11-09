@@ -4,6 +4,10 @@ import {
   demoSchoolPurgeWorkflow,
   demoSchoolWorkflow,
 } from '@campuspilot/api/workflows/demo-school';
+import {
+  dataMigrationControlService,
+  dataMigrationWorkflow,
+} from '@campuspilot/api/workflows/data-migration';
 import { env } from '@campuspilot/env/worker';
 import { createEndpointHandler } from '@restatedev/restate-sdk';
 
@@ -21,7 +25,13 @@ import { registerUntilAccepted } from './register';
  */
 export function startWorker() {
   const handler = createEndpointHandler({
-    services: [demoSchoolControlService, demoSchoolWorkflow, demoSchoolPurgeWorkflow],
+    services: [
+      demoSchoolControlService,
+      demoSchoolWorkflow,
+      demoSchoolPurgeWorkflow,
+      dataMigrationControlService,
+      dataMigrationWorkflow,
+    ],
   });
   const server = createServer(handler);
   const registration = new AbortController();

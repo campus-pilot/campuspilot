@@ -96,3 +96,17 @@ actions contains {
   "key": "PURGE_DEMO_SCHOOL",
   "resourceKind": "system",
 } if { true }
+
+# Data migrations (packages/api/src/data-migrations): reading run status and
+# skipped reports is separate from requesting a run, which changes data.
+actions contains {
+  "id": "system.data_migration.read",
+  "key": "READ_DATA_MIGRATIONS",
+  "resourceKind": "system",
+} if { true }
+
+actions contains {
+  "id": "system.data_migration.run",
+  "key": "RUN_DATA_MIGRATION",
+  "resourceKind": "system",
+} if { true }
