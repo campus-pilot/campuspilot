@@ -58,6 +58,7 @@ export async function examOverviews(
           status: lifecycle?.status ?? null,
           startedAt: lifecycle?.startedAt ?? null,
           completedAt: lifecycle?.completedAt ?? null,
+          cadetReleasedAt: lifecycle?.cadetReleasedAt ?? null,
         },
       ];
     }),
@@ -85,10 +86,17 @@ export async function transitionExam(
     .orderBy(asc(examPlanTable.id))
     .for('update');
   if (!plans.length) throw rpcError.notFound('Exam plan');
+  // Locked so a concurrent Cadet Portal release cannot slip in between the
+  // released check below and the status change (release locks the same row).
   const [lifecycle] = await tx
     .select()
     .from(examLifecycleTable)
-    .where(lifecycleWhere(input));
+    .where(lifecycleWhere(input))
+    .for('update');
+  if (input.status === 'active' && lifecycle?.cadetReleasedAt)
+    throw rpcError.badRequest(
+      'These results are released to the Cadet Portal. Withdraw them from the Cadet Portal before reopening the examination.',
+    );
   if (input.status === 'completed') {
     if (lifecycle?.status !== 'active')
       throw rpcError.badRequest('Only a started examination can be completed.');

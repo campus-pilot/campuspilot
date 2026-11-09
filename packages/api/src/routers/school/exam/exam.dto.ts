@@ -7,6 +7,7 @@ import {
   timetableConfigSchema,
 } from '@campuspilot/db/schema/jsonb/exam-config';
 import { examDefinitionSchema } from '@campuspilot/db/schema/jsonb/session-config';
+import { EXAM_STUDENT_REMARK_MAX_LENGTH } from '@campuspilot/db/schema/exam';
 import {
   createListInputSchema,
   createPaginatedOutputSchema,
@@ -56,6 +57,8 @@ export const examOverviewSchema = z.object({
   status: z.enum(['ready', 'active', 'completed']).nullable(),
   startedAt: z.date().nullable(),
   completedAt: z.date().nullable(),
+  /** When the results were released to the Cadet Portal; independent of `status`. */
+  cadetReleasedAt: z.date().nullable(),
 });
 export const listExamsOutputSchema = createPaginatedOutputSchema(
   examDtoSchema.extend(examOverviewSchema.shape),
@@ -363,6 +366,24 @@ export const examAssessmentSettingsSchema = examScopeSchema.extend({
 export const examLifecycleInputSchema = examScopeSchema.extend({
   status: z.enum(['active', 'completed']),
 });
+/** A teacher remark is plain text; blank or null removes it. */
+export const saveStudentExamRemarkInputSchema = examStudentScopeSchema.extend({
+  text: z
+    .string()
+    .trim()
+    .max(EXAM_STUDENT_REMARK_MAX_LENGTH)
+    .nullable()
+    .describe('The remark the student will see once results are released. Send null or an empty string to remove it.'),
+});
+export const studentExamRemarkSchema = z.object({
+  text: z.string(),
+  /** The staff user who saved the current text; null when that account no longer exists. */
+  authorId: z.string().nullable(),
+  authorName: z.string().nullable(),
+  createdAt: z.date(),
+  updatedAt: z.date(),
+});
+export type StudentExamRemarkDto = z.infer<typeof studentExamRemarkSchema>;
 export type StudentExamWorkspaceDto = z.infer<
   typeof studentExamWorkspaceSchema
 >;
