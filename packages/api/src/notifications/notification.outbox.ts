@@ -356,7 +356,10 @@ function describeAdminError(error: unknown) {
  *   cancel only takes effect once the paused invocation resumes). A row it
  *   had claimed stays `sending` and is failed as `outcome_unknown` after
  *   `STUCK_SENDING_MS`. The lane is then poked like any other, unless a
- *   drain queued behind the killed one takes over.
+ *   drain queued behind the killed one takes over. The killed drain's
+ *   circuit breaker state (unknown-outcome streak, probing, pause
+ *   escalation) is lost with it: the next drain starts closed, at full
+ *   concurrency (see `UNKNOWN_OUTCOME_BREAKER_THRESHOLD`).
  * - a lane with a drain inboxed, scheduled, running, backing off or
  *   suspended is **not** poked: that drain picks every due row before it
  *   ends, so a poke would only add another drain to the object's inbox

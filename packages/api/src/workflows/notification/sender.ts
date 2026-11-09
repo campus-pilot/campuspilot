@@ -9,7 +9,11 @@ import { log } from './log';
 /**
  * Why a drain was started (for the log), and for a `continue` the lane's
  * pause state handed over by the drain before it (circuit breaker and
- * throttle escalation, see `SenderLaneState`).
+ * throttle escalation, see `SenderLaneState`). Only a `continue` carries
+ * it: a drain started by a poke (including the one that follows a paused
+ * drain the API sweep killed) starts with a closed breaker. The object keeps
+ * no Restate state of its own, so nothing survives a killed drain; see
+ * `UNKNOWN_OUTCOME_BREAKER_THRESHOLD` for why that is accepted.
  */
 export const senderDrainInputSchema = z.object({
   reason: z.enum(['fan_out', 'sweep', 'continue']),
