@@ -1,7 +1,9 @@
 import { admissionTable } from '@campuspilot/db/schema/admission';
 import { cadetOauthClient } from '@campuspilot/db/schema/cadet';
+import { schoolTable } from '@campuspilot/db/schema/school';
 import type { RouterClient } from '@orpc/server';
 import { eq } from 'drizzle-orm';
+import { z } from 'zod';
 
 import { cadetProcedure } from '../../cadet/procedure';
 import { rpcError, toRpcError } from '../../errors';
@@ -18,6 +20,7 @@ import {
   toAdmissionDto,
 } from '../school/admission/admission.dto';
 import { cadetNotificationRouter } from './cadet-notification.router';
+import { cadetPushRouter } from './cadet-push.router';
 
 /**
  * The Cadet Portal's router. It is deliberately not part of `appRouter`, so
@@ -27,6 +30,7 @@ import { cadetNotificationRouter } from './cadet-notification.router';
  */
 export const cadetRouter = {
   ...cadetNotificationRouter,
+  ...cadetPushRouter,
   getAdmission: cadetProcedure
     .route({
       summary: 'Get my admission',
@@ -52,6 +56,32 @@ export const cadetRouter = {
           .limit(1);
         if (!admission) throw rpcError.notFound('Admission');
         return toAdmissionDto(admission);
+      } catch (error) {
+        throw toRpcError(error);
+      }
+    }),
+
+  getSchool: cadetProcedure
+    .route({
+      summary: 'Get my school',
+      description:
+        "Get the public details of the signed-in student's school: its name and whether it has a logo. Takes no input.",
+      tags: ['Cadet'],
+    })
+    .meta({
+      // Portal chrome (installed-app name and icon); no agent value.
+      mcp: { exposure: 'hidden', access: 'read', destructive: false, module: 'account' },
+    })
+    .output(z.object({ id: z.string(), name: z.string(), hasLogo: z.boolean() }))
+    .handler(async ({ context }) => {
+      try {
+        const [school] = await context.db
+          .select({ id: schoolTable.id, name: schoolTable.name, logoS3Key: schoolTable.logoS3Key })
+          .from(schoolTable)
+          .where(eq(schoolTable.id, context.cadet.schoolId))
+          .limit(1);
+        if (!school) throw rpcError.notFound('School');
+        return { id: school.id, name: school.name, hasLogo: school.logoS3Key !== null };
       } catch (error) {
         throw toRpcError(error);
       }

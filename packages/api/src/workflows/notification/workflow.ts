@@ -73,7 +73,12 @@ export const notificationDispatchWorkflow = restate.workflow({
         throw new restate.TerminalError('The workflow key does not match the event.', { errorCode: 400 });
       }
       try {
-        const result = await runNotificationDispatch({ eventId, step: (name, action) => step(ctx, name, action) });
+        const result = await runNotificationDispatch({
+          eventId,
+          step: (name, action) => step(ctx, name, action),
+          // Durable: the workflow suspends and resumes after the backoff, surviving worker restarts.
+          sleep: (name, ms) => ctx.sleep(ms, name),
+        });
         log.info({ eventId, ...result }, 'notification.dispatch.finished');
         return result;
       } catch (error) {

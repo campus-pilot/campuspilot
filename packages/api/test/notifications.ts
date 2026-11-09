@@ -1,7 +1,8 @@
 import { db } from '@campuspilot/db';
 import type { NotificationType } from '@campuspilot/db/notifications/catalogue';
+import { cadetUser } from '@campuspilot/db/schema/cadet';
 import { createRouterClient } from '@orpc/server';
-import { randomUUID } from 'node:crypto';
+import { createECDH, randomBytes, randomUUID } from 'node:crypto';
 
 import type { CadetContext } from '../src/cadet/context';
 import { runNotificationDispatch, type NotificationDispatchResult } from '../src/notifications/dispatch';
@@ -10,7 +11,7 @@ import { cadetRouter, type CadetRouterClient } from '../src/routers/cadet/cadet.
 
 /** Runs a dispatch with plain calls in place of journaled Restate steps. */
 export function dispatchNow(eventId: string): Promise<NotificationDispatchResult> {
-  return runNotificationDispatch({ eventId, step: (_name, action) => action() });
+  return runNotificationDispatch({ eventId, step: (_name, action) => action(), sleep: async () => undefined });
 }
 
 /** Emits an event in its own transaction and fans it out at once. */
@@ -52,4 +53,35 @@ export function createCadetClientForAdmission(admissionId: string): CadetRouterC
     principal: { authMethod: 'session' },
   };
   return createRouterClient(cadetRouter, { context });
+}
+
+/**
+ * Inserts a Cadet Portal login for an admission (no password; tests never
+ * sign in with it) and returns a router client bound to it, as the cadet
+ * session middleware would.
+ */
+export async function createCadetLogin(admissionId: string, headers: Headers = new Headers()) {
+  const userId = `cadet_${randomUUID()}`;
+  await db.insert(cadetUser).values({
+    id: userId,
+    email: `${admissionId}-${userId}@cadet.campuspilot.invalid`,
+    admissionId,
+    passwordSource: 'issued',
+    issuedAt: new Date(),
+  });
+  const context: CadetContext = { db, headers, login: { userId, admissionId }, principal: { authMethod: 'session' } };
+  return { userId, client: createRouterClient(cadetRouter, { context }) as CadetRouterClient };
+}
+
+/** A browser-like push subscription (valid P-256 key and auth secret) on FCM. */
+export function fakePushSubscription(endpointId: string = randomUUID()) {
+  const ecdh = createECDH('prime256v1');
+  ecdh.generateKeys();
+  return {
+    endpoint: `https://fcm.googleapis.com/fcm/send/${endpointId}`,
+    keys: {
+      p256dh: ecdh.getPublicKey().toString('base64url'),
+      auth: randomBytes(16).toString('base64url'),
+    },
+  };
 }

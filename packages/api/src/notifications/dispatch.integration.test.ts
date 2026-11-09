@@ -218,14 +218,14 @@ describe('notification dispatch', () => {
       notify(tx, { type: 'bill.issued', data: billIssuedData(admission.id), schoolId: school.id, recipients: { kind: 'admissions', admissionIds: [admission.id] }, key: 'owed' }),
     );
     const step = <T,>(_name: string, action: () => Promise<T>) => action();
-    expect(await runNotificationDispatch({ eventId, step, adapters })).toMatchObject({ status: 'dispatched', owedDeliveryCount: 1 });
+    expect(await runNotificationDispatch({ eventId, step, sleep: async () => undefined, adapters })).toMatchObject({ status: 'dispatched', owedDeliveryCount: 1 });
     expect(send).toHaveBeenCalledTimes(1);
     const { deliveries } = await rowsOf(eventId);
     expect(deliveries.find((row) => row.channel === 'whatsapp')).toMatchObject({ status: 'sent', providerMessageId: 'wamid.test', attempts: 1, destination: '+919876543210' });
 
     // A replay of the whole dispatch never sends twice.
     await db.update(notificationEventTable).set({ status: 'pending' }).where(eq(notificationEventTable.id, eventId));
-    await runNotificationDispatch({ eventId, step, adapters });
+    await runNotificationDispatch({ eventId, step, sleep: async () => undefined, adapters });
     expect(send).toHaveBeenCalledTimes(1);
   });
 
@@ -240,7 +240,7 @@ describe('notification dispatch', () => {
     const { eventId } = await db.transaction((tx) =>
       notify(tx, { type: 'bill.issued', data: billIssuedData(admission.id), schoolId: school.id, recipients: { kind: 'admissions', admissionIds: [admission.id] }, key: 'demo' }),
     );
-    await runNotificationDispatch({ eventId, step: (_name, action) => action(), adapters });
+    await runNotificationDispatch({ eventId, step: (_name, action) => action(), sleep: async () => undefined, adapters });
     expect(decide).not.toHaveBeenCalled();
     const { deliveries } = await rowsOf(eventId);
     expect(deliveries.find((row) => row.channel === 'whatsapp')).toMatchObject({ status: 'skipped', skipReason: 'demo_school' });

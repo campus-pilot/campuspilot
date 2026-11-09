@@ -11,6 +11,7 @@ import {
   cadetUser,
 } from '@campuspilot/db/schema/cadet';
 import { demoSchoolPurgeTable } from '@campuspilot/db/schema/demo-school-job';
+import { cadetPushSubscriptionTable } from '@campuspilot/db/schema/notification';
 import { schoolTable } from '@campuspilot/db/schema/school';
 import { eq, inArray, sql } from 'drizzle-orm';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -122,6 +123,7 @@ describe('purge_demo_school and the demo-only finance exception', () => {
     expect(browser.response.status).toBe(200);
     const mcp = await connectCadetMcp(issued);
     const [login] = await db.select({ id: cadetUser.id }).from(cadetUser).where(eq(cadetUser.admissionId, demo.admission.id));
+    await db.insert(cadetPushSubscriptionTable).values({ cadetUserId: login!.id, endpoint: 'https://fcm.googleapis.com/fcm/send/demo', p256dh: 'p', auth: 'a' });
     // A real school's cadet login must survive the demo purge.
     const realIssued = await real.actors.principal.client.school.issueAdmissionCadetPassword({ schoolId: real.school.id, admissionId: real.admission.id });
 
@@ -131,7 +133,7 @@ describe('purge_demo_school and the demo-only finance exception', () => {
     await revokeDemoSchoolSessions(demo.school.id);
     const deleted = await deleteDemoSchoolData(demo.school.id, 1);
     await revokeManifestSessions(demo.school.id);
-    expect(deleted.deletedRows).toMatchObject({ cadet_user: 1, cadet_account: 1 });
+    expect(deleted.deletedRows).toMatchObject({ cadet_user: 1, cadet_account: 1, cadet_push_subscription: 1 });
 
     const loginIds = [login!.id];
     const remaining = await Promise.all([
@@ -141,8 +143,9 @@ describe('purge_demo_school and the demo-only finance exception', () => {
       db.select().from(cadetOauthConsent).where(inArray(cadetOauthConsent.userId, loginIds)),
       db.select().from(cadetOauthRefreshToken).where(inArray(cadetOauthRefreshToken.userId, loginIds)),
       db.select().from(cadetOauthAccessToken).where(inArray(cadetOauthAccessToken.userId, loginIds)),
+      db.select().from(cadetPushSubscriptionTable).where(inArray(cadetPushSubscriptionTable.cadetUserId, loginIds)),
     ]);
-    expect(remaining).toEqual([[], [], [], [], [], []]);
+    expect(remaining).toEqual([[], [], [], [], [], [], []]);
     const [manifest] = await db.select().from(demoSchoolPurgeTable).where(eq(demoSchoolPurgeTable.schoolId, demo.school.id));
     expect(manifest?.cadetUserIds).toEqual(loginIds);
 

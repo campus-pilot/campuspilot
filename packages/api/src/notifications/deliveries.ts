@@ -11,7 +11,9 @@ import type { ClaimedDelivery, DeliverySendOutcome } from './channels';
  * at most one worker attempt ever calls the provider for it. The outcome
  * moves it on:
  * - `sent` → `sent` (+ provider message ID);
- * - `retry` → back to `owed` (rate limit / transient), the caller retries;
+ * - `retry` → back to `owed` (rate limit / transient), the caller retries
+ *   after a durable backoff; on the caller's last attempt (`final`) it is
+ *   `failed` instead, keeping the provider's error code (D-7);
  * - `failed` → `failed`.
  * A delivery left in `sending` (the worker died between claim and outcome)
  * is never claimed again: it may have been sent. It is surfaced to staff.
@@ -46,8 +48,16 @@ export async function claimDelivery(db: DatabaseExecutor, deliveryId: string): P
   return { ...claimed, type: notification.type as NotificationType, data: notification.data };
 }
 
+/** Shown on a delivery that was still being rate limited or failing transiently after its last attempt. */
+export const RETRIES_EXHAUSTED_MESSAGE = 'Gave up after the last retry.';
+
 /** Records the provider's outcome for a claimed delivery. */
-export async function recordDeliveryOutcome(db: DatabaseExecutor, deliveryId: string, outcome: DeliverySendOutcome) {
+export async function recordDeliveryOutcome(
+  db: DatabaseExecutor,
+  deliveryId: string,
+  outcome: DeliverySendOutcome,
+  options: { final?: boolean } = {},
+) {
   const sending = and(eq(notificationDeliveryTable.id, deliveryId), eq(notificationDeliveryTable.status, 'sending'));
   const now = new Date();
   switch (outcome.kind) {
@@ -58,6 +68,13 @@ export async function recordDeliveryOutcome(db: DatabaseExecutor, deliveryId: st
         .where(sending);
       return;
     case 'retry':
+      if (options.final) {
+        await db
+          .update(notificationDeliveryTable)
+          .set({ status: 'failed', failedAt: now, errorCode: outcome.errorCode, errorMessage: RETRIES_EXHAUSTED_MESSAGE, updatedAt: now })
+          .where(sending);
+        return;
+      }
       await db
         .update(notificationDeliveryTable)
         .set({ status: 'owed', claimedAt: null, errorCode: outcome.errorCode, updatedAt: now })

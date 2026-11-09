@@ -22,10 +22,12 @@ import {
   decideDeliveries,
   notificationChannelAdapters,
   type DeliveryDecision,
+  type DeliverySendOutcome,
   type NotificationChannelAdapter,
   type NotificationSkipReason,
   type ResolvedRecipient,
 } from './channels';
+import { activePushSubscriptionIdsByAdmission } from './channels/web-push/subscriptions';
 import { claimDelivery, recordDeliveryOutcome } from './deliveries';
 import { notificationDeliveryId, notificationRowId } from './ids';
 
@@ -122,9 +124,10 @@ export async function resolveNotificationRecipients(db: DatabaseExecutor, event:
     .from(admissionTable)
     .where(and(eq(admissionTable.schoolId, event.schoolId), inArray(admissionTable.id, spec.admissionIds)));
   const byId = new Map(admissions.map((admission) => [admission.id, admission]));
+  const subscriptions = await activePushSubscriptionIdsByAdmission(db, admissions.map((admission) => admission.id));
   return spec.admissionIds.flatMap((admissionId) => {
     const admission = byId.get(admissionId);
-    return admission ? [{ kind: 'admission' as const, ...admission }] : [];
+    return admission ? [{ kind: 'admission' as const, ...admission, pushSubscriptionIds: subscriptions.get(admissionId) ?? [] }] : [];
   });
 }
 
@@ -248,24 +251,101 @@ export async function failNotificationEvent(db: DatabaseExecutor, eventId: strin
     .where(and(eq(notificationEventTable.id, eventId), eq(notificationEventTable.status, 'pending')));
 }
 
+/** What one send attempt did; JSON-only so it can be journaled. */
+export type SendAttemptResult =
+  | { kind: 'sent' | 'failed' | 'not_owed' }
+  | { kind: 'retry'; scope: 'recipient' | 'channel'; retryAfterMs: number | null };
+
 /**
  * Claims and sends one owed delivery on its channel and records the outcome
  * (see `./deliveries.ts`). A delivery that is no longer owed (already sent,
- * or stuck in `sending` after a crash) is left alone.
+ * or stuck in `sending` after a crash) is left alone. An adapter that throws
+ * is treated as a transient channel failure (the claim is released), so a
+ * bug or outage never leaves the delivery in `sending`. On the `final`
+ * attempt a transient outcome is recorded as `failed`.
  */
 export async function sendOwedDelivery(
   deliveryId: string,
   channel: RemoteNotificationChannel,
   adapters: Record<RemoteNotificationChannel, NotificationChannelAdapter> = notificationChannelAdapters,
   db: DatabaseExecutor = defaultDb,
-): Promise<'sent' | 'retry' | 'failed' | 'not_owed'> {
+  options: { final?: boolean } = {},
+): Promise<SendAttemptResult> {
   const adapter = adapters[channel];
-  if (!adapter.available) return 'not_owed';
+  if (!adapter.available) return { kind: 'not_owed' };
   const claimed = await claimDelivery(db, deliveryId);
-  if (!claimed) return 'not_owed';
-  const outcome = await adapter.send(claimed);
-  await recordDeliveryOutcome(db, deliveryId, outcome);
-  return outcome.kind;
+  if (!claimed) return { kind: 'not_owed' };
+  let outcome: DeliverySendOutcome;
+  try {
+    outcome = await adapter.send(claimed);
+  } catch {
+    outcome = { kind: 'retry', errorCode: 'adapter_error', scope: 'channel' };
+  }
+  await recordDeliveryOutcome(db, deliveryId, outcome, { final: options.final });
+  if (outcome.kind !== 'retry') return { kind: outcome.kind };
+  if (options.final) return { kind: 'failed' };
+  return { kind: 'retry', scope: outcome.scope, retryAfterMs: outcome.retryAfterMs ?? null };
+}
+
+/**
+ * Durable, throttled sending (D-7). Owed deliveries are sent in rounds:
+ * round 1 tries each once; whatever came back transient is retried in the
+ * next round after one durable sleep, up to {@link MAX_SEND_ROUNDS} rounds,
+ * after which the last attempt records it `failed`. A `channel`-scoped
+ * outcome (throughput limit, provider outage) ends the round at once and
+ * carries the not-yet-tried deliveries over untouched, so a rate limit is
+ * not answered with more sends. The sleep between rounds is
+ * {@link sendRetryDelayMs}: exponential, capped, and never shorter than
+ * the provider's own `Retry-After`.
+ */
+export const MAX_SEND_ROUNDS = 8;
+const RETRY_BASE_DELAY_MS = 60_000;
+const RETRY_FACTOR = 4;
+export const MAX_RETRY_DELAY_MS = 6 * 60 * 60 * 1000;
+
+/**
+ * Sleep before round `round + 1`: 1 min, 4 min, 16 min, 64 min, ~4.3 h,
+ * then 6 h (about 17.7 h over all eight rounds, so a daily messaging limit
+ * gets a chance to reset), raised to the largest provider hint and capped
+ * at 6 h.
+ */
+export function sendRetryDelayMs(round: number, retryAfterMs: number | null): number {
+  const exponential = RETRY_BASE_DELAY_MS * RETRY_FACTOR ** (round - 1);
+  return Math.min(Math.max(exponential, retryAfterMs ?? 0), MAX_RETRY_DELAY_MS);
+}
+
+/** Durable sleep; Restate's `ctx.sleep` in the workflow, a stub in tests. */
+export type NotificationSleep = (name: string, ms: number) => Promise<void>;
+
+type OwedDelivery = { id: string; channel: RemoteNotificationChannel };
+
+async function sendInRounds(
+  owed: readonly OwedDelivery[],
+  options: { step: NotificationStepRunner; sleep: NotificationSleep; adapters: Record<RemoteNotificationChannel, NotificationChannelAdapter> },
+) {
+  let pending = [...owed];
+  for (let round = 1; round <= MAX_SEND_ROUNDS && pending.length > 0; round += 1) {
+    const final = round === MAX_SEND_ROUNDS;
+    const retry: OwedDelivery[] = [];
+    let retryAfterMs: number | null = null;
+    for (let index = 0; index < pending.length; index += 1) {
+      const delivery = pending[index]!;
+      const name = round === 1 ? `send:${delivery.id}` : `send:${delivery.id}:${round}`;
+      const result = await options.step(name, () => sendOwedDelivery(delivery.id, delivery.channel, options.adapters, defaultDb, { final }));
+      if (result.kind !== 'retry') continue;
+      retry.push(delivery);
+      retryAfterMs = Math.max(retryAfterMs ?? 0, result.retryAfterMs ?? 0) || null;
+      if (result.scope === 'channel') {
+        // The whole channel is limited: carry the rest of this channel over untried.
+        const rest = pending.slice(index + 1);
+        retry.push(...rest.filter((other) => other.channel === delivery.channel));
+        pending = [...pending.slice(0, index + 1), ...rest.filter((other) => other.channel !== delivery.channel)];
+      }
+    }
+    if (retry.length === 0) return;
+    await options.sleep(`backoff:${round}`, sendRetryDelayMs(round, retryAfterMs));
+    pending = retry;
+  }
 }
 
 /** Runs one named unit of work; Restate journals it, tests call it directly. */
@@ -280,19 +360,15 @@ export type NotificationDispatchResult =
  * The dispatch loop shared by the workflow and the tests. Steps, in order:
  * load the pending event, resolve recipients (journaled, so replays plan the
  * same rows), insert rows chunk by chunk, mark the event dispatched, then
- * claim and send each owed delivery.
- *
- * In this release no remote channel is available, so nothing is owed and the
- * send phase does nothing. Retry scheduling for `retry` outcomes (durable
- * backoff, bounded attempts, then `failed`) is added with the first real
- * channel; until then a `retry` leaves the delivery `owed`.
+ * send the owed deliveries in throttled rounds ({@link sendInRounds}).
  */
 export async function runNotificationDispatch(options: {
   eventId: string;
   step: NotificationStepRunner;
+  sleep: NotificationSleep;
   adapters?: Record<RemoteNotificationChannel, NotificationChannelAdapter>;
 }): Promise<NotificationDispatchResult> {
-  const { eventId, step } = options;
+  const { eventId, step, sleep } = options;
   const adapters = options.adapters ?? notificationChannelAdapters;
   const event = await step('load-event', () => loadDispatchableEvent(defaultDb, eventId));
   if (!event) return { status: 'skipped' };
@@ -307,8 +383,6 @@ export async function runNotificationDispatch(options: {
   const owed = planned.flatMap((notification) =>
     notification.deliveries.filter((delivery) => delivery.status === 'owed'),
   );
-  for (const delivery of owed) {
-    await step(`send:${delivery.id}`, () => sendOwedDelivery(delivery.id, delivery.channel, adapters));
-  }
+  await sendInRounds(owed, { step, sleep, adapters });
   return { status: 'dispatched', notificationCount: planned.length, owedDeliveryCount: owed.length };
 }

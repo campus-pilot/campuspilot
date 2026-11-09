@@ -57,7 +57,8 @@ anyone to read. The school logo blob is for browser icons only (favicon,
 web-app manifest and apple-touch icons). Logos shown inside pages, such as the
 school avatar or switcher, keep using the permissioned `school.getLogo`
 presigned URL. `/blob/school/{schoolId}/manifest.webmanifest` installs a
-school as its own app. School name, logo and registration number are public
+school as its own app. `/blob/school/{schoolId}/cadet.webmanifest` installs a
+school's Cadet Portal as its own app (linked only on signed-in portal pages). School name, logo and registration number are public
 school details; nothing else about a school belongs on `/blob/*`. Everything else, including student photos and documents, stays
 on the authenticated `/api/blob/*` routes or short-lived presigned URLs from
 permissioned procedures. Validate every query parameter against an explicit

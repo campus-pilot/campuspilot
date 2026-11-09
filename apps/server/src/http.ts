@@ -19,6 +19,7 @@ import {
 import { handleSchoolLogoUpload } from '@campuspilot/api/routers/system-admin/school/school.http';
 import { handleSchoolLogoBlob } from '@campuspilot/api/routers/school/logo/logo.blob';
 import { handleSchoolManifestBlob } from '@campuspilot/api/routers/school/manifest/manifest.blob';
+import { handleCadetManifestBlob } from '@campuspilot/api/routers/school/manifest/cadet-manifest.blob';
 import {
   handleAdmissionDocumentDelete,
   handleAdmissionDocumentRead,
@@ -94,6 +95,14 @@ app.get('/blob/school/:schoolId/manifest.webmanifest', (context) => {
   const input = { schoolId: context.req.param('schoolId') };
   return handleSchoolManifestBlob({ db }, input, (error) =>
     reportUploadError(context.var.logger, 'school.manifest.blob.error', input, error),
+  );
+});
+
+/** Installs a school's Cadet Portal as its own app (school name and logo only). */
+app.get('/blob/school/:schoolId/cadet.webmanifest', (context) => {
+  const input = { schoolId: context.req.param('schoolId') };
+  return handleCadetManifestBlob({ db }, input, (error) =>
+    reportUploadError(context.var.logger, 'school.cadet-manifest.blob.error', input, error),
   );
 });
 

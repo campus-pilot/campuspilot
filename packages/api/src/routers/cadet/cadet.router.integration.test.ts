@@ -150,10 +150,14 @@ describe('cadet and staff sessions are isolated', () => {
       'dismissNotifications',
       'getAdmission',
       'getOAuthConsentClient',
+      'getPushSubscription',
+      'getSchool',
       'getUnreadNotificationCount',
       'listNotifications',
       'markAllNotificationsRead',
       'markNotificationsRead',
+      'subscribePush',
+      'unsubscribePush',
     ]);
     // Same-named staff inbox procedures live under `school`, scoped by membership.
     expect(appRouter).not.toHaveProperty('listNotifications');

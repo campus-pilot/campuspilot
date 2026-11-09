@@ -35,7 +35,7 @@ describe('notification catalogue', () => {
     expect([...notificationTypesFor('admission'), ...notificationTypesFor('staff_user')].sort()).toEqual([...NOTIFICATION_TYPES].sort());
   });
 
-  it('has an adapter for every remote channel, none of which can send in this release', () => {
+  it('has an adapter for every remote channel, all switched off by default (test env sets no kill switch)', () => {
     expect(Object.values(notificationChannelAdapters).every((adapter) => !adapter.available)).toBe(true);
   });
 

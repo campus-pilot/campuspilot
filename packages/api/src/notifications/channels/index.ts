@@ -1,76 +1,20 @@
-import type { NotificationType, RemoteNotificationChannel } from '@campuspilot/db/notifications/catalogue';
-import type { notificationSkipReasonEnum } from '@campuspilot/db/schema/notification';
+import type { RemoteNotificationChannel } from '@campuspilot/db/notifications/catalogue';
 
-export type NotificationSkipReason = (typeof notificationSkipReasonEnum.enumValues)[number];
+import type { DeliveryDecision, NotificationChannelAdapter, ResolvedRecipient } from './types';
+import { createWebPushAdapterFromEnv } from './web-push/adapter';
 
-/**
- * A recipient as the dispatcher resolved it, with the facts a channel needs
- * to decide. Contact facts are snapshots read at fan-out time.
- */
-export type ResolvedRecipient =
-  | { kind: 'staff_user'; id: string }
-  | {
-      kind: 'admission';
-      id: string;
-      whatsappNo: string | null;
-      whatsappVerified: boolean;
-      whatsappConsent: boolean;
-    };
-
-/** One remote copy a channel decided for one recipient. */
-export type DeliveryDecision =
-  | { status: 'owed'; destination: string | null }
-  | { status: 'skipped'; reason: NotificationSkipReason; destination: string | null };
-
-/** What a provider call reported for one claimed delivery. */
-export type DeliverySendOutcome =
-  /** Accepted by the provider. */
-  | { kind: 'sent'; providerMessageId: string | null }
-  /** Transient (rate limit, 5xx): released back to `owed` and retried later. */
-  | { kind: 'retry'; errorCode: string }
-  /** Permanent: the delivery is `failed`. */
-  | { kind: 'failed'; errorCode: string };
-
-/** A delivery handed to a channel's sender after it was claimed. */
-export type ClaimedDelivery = {
-  id: string;
-  notificationId: string;
-  schoolId: string;
-  type: NotificationType;
-  data: Record<string, unknown>;
-  destination: string | null;
-};
+export type * from './types';
 
 /**
- * One remote channel (web push, WhatsApp). The in-app channel has no adapter:
- * the notification row is the in-app copy.
- * - `available: false` means this platform cannot send on the channel at all
- *   (not built in this release, or switched off by a platform kill switch);
- *   every copy is then recorded as `skipped: disabled`, never faked as sent.
- * - `decide` is consulted only when the channel is available and the school
- *   is not a demo; it returns one decision per destination.
- * - `send` performs one provider call for a claimed delivery.
- */
-export type NotificationChannelAdapter =
-  | { channel: RemoteNotificationChannel; available: false; unavailableReason: string }
-  | {
-      channel: RemoteNotificationChannel;
-      available: true;
-      decide: (recipient: ResolvedRecipient) => DeliveryDecision[];
-      send: (delivery: ClaimedDelivery) => Promise<DeliverySendOutcome>;
-    };
-
-/**
- * The adapter of every remote channel. Exhaustive by type: a new remote
- * channel fails the build until it has an adapter.
- *
- * Phase 2 ships the notification core and the inbox only. Web push arrives
- * in Phase 3 and WhatsApp in Phase 4 (each behind its own env kill switch),
- * so both are unavailable here and every student copy is recorded as
+ * The adapter of every remote channel, built once from the platform
+ * environment. Exhaustive by type: a new remote channel fails the build
+ * until it has an adapter. Each channel is behind its own kill switch
+ * (`WEB_PUSH_ENABLED`, `WHATSAPP_ENABLED`; default off, off locally); a
+ * switched-off channel is `available: false`, so its copies are recorded as
  * `skipped: disabled`.
  */
 export const notificationChannelAdapters: Record<RemoteNotificationChannel, NotificationChannelAdapter> = {
-  web_push: { channel: 'web_push', available: false, unavailableReason: 'Web push is not built yet (plan Phase 3).' },
+  web_push: createWebPushAdapterFromEnv(),
   whatsapp: { channel: 'whatsapp', available: false, unavailableReason: 'WhatsApp is not built yet (plan Phase 4).' },
 };
 
