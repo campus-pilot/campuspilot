@@ -23,6 +23,12 @@ export type DeliveryLogDelivery = {
   interrupted: boolean;
   resendOfDeliveryId: string | null;
   resent: boolean;
+  /** A failed device notification whose device no longer receives notifications (not resendable). */
+  subscriptionGone: boolean;
+  /** Staff may resend it (the server decides: failed, not resent, device still subscribed). */
+  resendable: boolean;
+  /** When an owed copy is due to be (re)tried. */
+  nextAttemptAt: Date | string | null;
 };
 
 /** One student notification with its copies. */
@@ -43,6 +49,10 @@ const TYPE_LABELS: Record<string, string> = {
 
 function deliveryDetail(delivery: DeliveryLogDelivery) {
   if (delivery.interrupted) return 'Sending was interrupted; it may or may not have arrived.';
+  if (delivery.status === 'owed' && delivery.nextAttemptAt && delivery.attempts > 0) {
+    return `Will retry ${formatNotificationTime(delivery.nextAttemptAt)}.`;
+  }
+  if (delivery.subscriptionGone) return 'This device no longer receives notifications.';
   if (delivery.status === 'skipped' && delivery.skipReason) return DELIVERY_SKIP_REASON_LABELS[delivery.skipReason];
   if (delivery.status === 'failed') return [delivery.errorCode, delivery.errorMessage].filter(Boolean).join(' · ') || null;
   return null;
@@ -59,7 +69,7 @@ function DeliveryLine({ delivery, canResend, resending, onResend }: { delivery: 
       </span>
       <Badge variant={failed ? 'destructive' : 'outline'}>{DELIVERY_STATUS_LABELS[delivery.status]}</Badge>
       {detail ? <span className="text-muted-foreground">{detail}</span> : null}
-      {failed && canResend && !delivery.resent ? (
+      {canResend && delivery.resendable ? (
         <Button type="button" variant="outline" size="sm" disabled={resending} onClick={() => onResend(delivery.id)}>
           {resending ? 'Resending…' : 'Resend'}
         </Button>

@@ -41,6 +41,9 @@ const deliverySchema = z.object({
   interrupted: z.boolean(),
   resendOfDeliveryId: z.string().nullable(),
   resent: z.boolean(),
+  subscriptionGone: z.boolean(),
+  resendable: z.boolean(),
+  nextAttemptAt: z.date().nullable(),
 });
 
 export const deliveryLogItemSchema = z.object({
@@ -76,7 +79,7 @@ export const schoolNotificationLogRouter = {
     }),
 
   resendNotificationDelivery: protectedProcedure
-    .route(route('Resend a failed notification delivery', "Send one failed device-notification or WhatsApp copy again as a new delivery, using the student's current WhatsApp number and consent. Each failed delivery can be resent once; retries of the request change nothing."))
+    .route(route('Resend a failed notification delivery', "Send one failed device-notification or WhatsApp copy again as a new delivery, using the student's current WhatsApp number and consent. A device notification is resent to the same device only, and refused when that device no longer receives notifications. Each failed delivery can be resent once; retries of the request change nothing."))
     .meta({ mcp: { exposure: 'advanced', access: 'write', destructive: false, module: 'notifications' } })
     .input(z.object({ schoolId: id, deliveryId: id }))
     .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_NOTIFICATION_LOG))

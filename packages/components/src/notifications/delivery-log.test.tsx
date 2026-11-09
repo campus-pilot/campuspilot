@@ -9,7 +9,7 @@ afterEach(() => cleanup());
 
 const delivery = (overrides: Partial<DeliveryLogDelivery>): DeliveryLogDelivery => ({
   id: 'ndl_1', channel: 'whatsapp', status: 'sent', skipReason: null, errorCode: null, errorMessage: null,
-  attempts: 1, interrupted: false, resendOfDeliveryId: null, resent: false, ...overrides,
+  attempts: 1, interrupted: false, resendOfDeliveryId: null, resent: false, subscriptionGone: false, resendable: false, nextAttemptAt: null, ...overrides,
 });
 
 describe('NotificationDeliveryLog', () => {
@@ -23,7 +23,7 @@ describe('NotificationDeliveryLog', () => {
         items={[{
           notificationId: 'ntf_1', type: 'payment.received', studentName: 'Meera', reference: 'RCP/2026-27/000001', createdAt: '2026-11-09T10:00:00Z',
           deliveries: [
-            delivery({ id: 'ndl_failed', status: 'failed', errorCode: 'wa_131026' }),
+            delivery({ id: 'ndl_failed', status: 'failed', errorCode: 'wa_131026', resendable: true }),
             delivery({ id: 'ndl_push', channel: 'web_push', status: 'skipped', skipReason: 'no_subscription' }),
           ],
         }]}
@@ -34,6 +34,20 @@ describe('NotificationDeliveryLog', () => {
     expect(screen.getByText('Device notifications not turned on')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Resend' }));
     expect(onResend).toHaveBeenCalledWith('ndl_failed');
+  });
+
+  it('never offers Resend for a device that no longer receives notifications, and shows a pending retry', () => {
+    const items = [{
+      notificationId: 'ntf_2', type: 'bill.issued', studentName: null, reference: null, createdAt: '2026-11-09T10:00:00Z',
+      deliveries: [
+        delivery({ id: 'ndl_gone', channel: 'web_push', status: 'failed', errorCode: 'subscription_gone', subscriptionGone: true }),
+        delivery({ id: 'ndl_retry', status: 'owed', attempts: 1, nextAttemptAt: '2026-11-10T10:00:00Z' }),
+      ],
+    }];
+    render(<NotificationDeliveryLog canResend resendingDeliveryId={null} onResend={vi.fn()} items={items} />);
+    expect(screen.queryByRole('button', { name: 'Resend' })).toBeNull();
+    expect(screen.getByText('This device no longer receives notifications.')).toBeTruthy();
+    expect(screen.getByText(/^Will retry /)).toBeTruthy();
   });
 
   it('hides Resend without permission and after a resend', () => {

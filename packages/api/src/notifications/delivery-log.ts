@@ -4,6 +4,7 @@ import { notificationDeliveryTable, notificationTable } from '@campuspilot/db/sc
 import { and, count, desc, eq, exists, inArray, isNotNull, sql, type SQL } from 'drizzle-orm';
 
 import { createNextPageCursor, createPaginatedResult, resolvePaginationInput } from '../paginations';
+import { activePushDestinations, isPushSubscriptionGone } from './redelivery';
 
 /**
  * The staff delivery log (Phase 7, permission `school.notification.log.read`):
@@ -93,6 +94,8 @@ export async function listDeliveryLog(
         .orderBy(notificationDeliveryTable.createdAt, notificationDeliveryTable.id)
     : [];
   const resent = new Set(deliveries.flatMap((delivery) => (delivery.resendOfDeliveryId ? [delivery.resendOfDeliveryId] : [])));
+  const failedPush = deliveries.filter((delivery) => delivery.channel === 'web_push' && delivery.status === 'failed');
+  const activePush = await activePushDestinations(db, failedPush.flatMap((delivery) => (delivery.destination ? [delivery.destination] : [])));
   const now = Date.now();
   const totalItems = total?.value ?? 0;
   const totalPages = Math.ceil(totalItems / pageSize);
@@ -124,6 +127,16 @@ export async function listDeliveryLog(
           resendOfDeliveryId: delivery.resendOfDeliveryId,
           /** A staff resend of this delivery exists (each failed delivery can be resent once). */
           resent: resent.has(delivery.id),
+          /** A failed web push copy whose device no longer receives notifications (D-40). */
+          subscriptionGone: delivery.status === 'failed' && isPushSubscriptionGone(delivery, activePush),
+          /**
+           * Staff may resend it: failed, not resent yet, and (web push) its
+           * device still subscribed. Stuck `sending` copies are never
+           * resendable (they may have been sent, D-25).
+           */
+          resendable: delivery.status === 'failed' && !resent.has(delivery.id) && !isPushSubscriptionGone(delivery, activePush),
+          /** When an owed copy is due to be (re)tried; null otherwise. */
+          nextAttemptAt: delivery.status === 'owed' ? delivery.nextAttemptAt : null,
         })),
     })),
     nextCursor: createNextPageCursor(currentPage, totalPages),

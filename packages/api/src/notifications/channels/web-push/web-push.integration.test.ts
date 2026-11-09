@@ -1,12 +1,13 @@
 import { db } from '@campuspilot/db';
 import { cadetPushSubscriptionTable, notificationDeliveryTable, notificationTable } from '@campuspilot/db/schema/notification';
-import { eq, inArray } from 'drizzle-orm';
+import { eq, inArray, isNotNull, and } from 'drizzle-orm';
 import { generateVAPIDKeys } from 'web-push';
 import { describe, expect, it, vi } from 'vitest';
 
-import { createTestAdmission, createTestSchool } from '../../../../test/fixtures';
+import { createTestAdmission, createTestSchool, createTestUser } from '../../../../test/fixtures';
 import { billIssuedData, createCadetLogin, dispatchNow, drainSchool, fakePushSubscription } from '../../../../test/notifications';
 import { notify } from '../../notify';
+import { resendFailedDelivery } from '../../redelivery';
 import { WEB_PUSH_QUICK_RETRY_LIMIT } from '../../sender/retry-policy';
 import type { ChannelFetch, NotificationChannelAdapter } from '../types';
 import { createWebPushAdapter } from './adapter';
@@ -125,5 +126,30 @@ describe('web push channel', () => {
       .mockResolvedValueOnce(new Response(null, { status: 201 }));
     const { deliveries } = await dispatchBill(school.id, admission.id, fetchMock);
     expect(deliveries[0]).toMatchObject({ status: 'sent', attempts: 2, errorCode: null });
+  });
+
+  it('resends a failed push to the device that missed it only, and refuses when that device is gone (D-40)', async () => {
+    const { school, admission, subscriptions } = await subscribedStudent(2);
+    const [first] = await db.select().from(cadetPushSubscriptionTable).where(eq(cadetPushSubscriptionTable.endpoint, subscriptions[0]!.endpoint));
+    // The first device fails transiently until its retries run out; the second gets it.
+    const failing = vi.fn<ChannelFetch>(async (url) => new Response(null, { status: String(url).includes(subscriptions[0]!.endpoint.split('/').pop()!) ? 503 : 201 }));
+    const { deliveries } = await dispatchBill(school.id, admission.id, failing);
+    const failed = deliveries.find((row) => row.destination === first!.id)!;
+    expect(failed.status).toBe('failed');
+
+    const adapters = { web_push: createWebPushAdapter({ vapid, fetch: vi.fn<ChannelFetch>(async () => new Response(null, { status: 201 })) }) as NotificationChannelAdapter, whatsapp: whatsappOff };
+    const staff = await createTestUser();
+    const resend = await resendFailedDelivery({ schoolId: school.id, deliveryId: failed.id, requestedBy: staff.id });
+    await dispatchNow(resend.eventId, adapters);
+    await drainSchool(school.id, { adapters });
+    const resent = await db.select().from(notificationDeliveryTable).where(eq(notificationDeliveryTable.resendOfDeliveryId, failed.id));
+    expect(resent).toEqual([expect.objectContaining({ channel: 'web_push', destination: first!.id, status: 'sent' })]);
+
+    // A gone device: the push service said so, nothing is sent.
+    const gone = await subscribedStudent(1);
+    const { deliveries: goneDeliveries } = await dispatchBill(gone.school.id, gone.admission.id, vi.fn<ChannelFetch>(async () => new Response(null, { status: 410 })));
+    await expect(resendFailedDelivery({ schoolId: gone.school.id, deliveryId: goneDeliveries[0]!.id, requestedBy: staff.id })).rejects.toMatchObject({ code: 'CONFLICT' });
+    const revoked = await db.select().from(cadetPushSubscriptionTable).where(and(eq(cadetPushSubscriptionTable.endpoint, gone.subscriptions[0]!.endpoint), isNotNull(cadetPushSubscriptionTable.revokedAt)));
+    expect(revoked).toHaveLength(1);
   });
 });
