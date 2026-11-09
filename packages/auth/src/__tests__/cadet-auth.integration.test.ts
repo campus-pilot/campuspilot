@@ -1,4 +1,5 @@
 import { createDb } from '@campuspilot/db';
+import { cadetPushSubscriptionTable } from '@campuspilot/db/schema/notification';
 import { admissionTable } from '@campuspilot/db/schema/admission';
 import * as staffSchema from '@campuspilot/db/schema/auth';
 import * as cadetSchema from '@campuspilot/db/schema/cadet';
@@ -410,8 +411,13 @@ describe('cadet MCP OAuth stores everything in cadet_* tables', () => {
     expect(await findLiveOAuthGrant(db, claims!)).toBeNull();
     expect(await findLiveOAuthGrant(db, claims!, CADET_OAUTH_GRANT_TABLES)).not.toBeNull();
 
-    // Revoking signs the login out everywhere and disconnects the client.
+    // Revoking signs the login out everywhere, disconnects the client and
+    // stops web push to its devices.
+    await db.insert(cadetPushSubscriptionTable).values({ cadetUserId: userId, endpoint: 'https://fcm.googleapis.com/fcm/send/revoke-test', p256dh: 'key', auth: 'secret' });
     await revokeCadetLoginAccess([userId], cadetAuth, db);
+    const subscriptions = await db.select().from(cadetPushSubscriptionTable).where(eq(cadetPushSubscriptionTable.cadetUserId, userId));
+    expect(subscriptions).toHaveLength(1);
+    expect(subscriptions[0]!.revokedAt).toBeInstanceOf(Date);
     expect(await cadetAuth.api.getSession({ headers: new Headers({ cookie }) })).toBeNull();
     expect(await findLiveOAuthGrant(db, claims!, CADET_OAUTH_GRANT_TABLES)).toBeNull();
     const refreshAfter = await db.select().from(cadetSchema.cadetOauthRefreshToken).where(eq(cadetSchema.cadetOauthRefreshToken.userId, userId));

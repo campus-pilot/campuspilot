@@ -16,7 +16,8 @@ import {
 import { env } from '@campuspilot/env/server';
 import { getRedisClient } from '@campuspilot/redis/client';
 import { betterAuth } from 'better-auth';
-import { inArray } from 'drizzle-orm';
+import { cadetPushSubscriptionTable } from '@campuspilot/db/schema/notification';
+import { and, inArray, isNull } from 'drizzle-orm';
 
 import {
   authDb,
@@ -182,6 +183,9 @@ export const cadetAuth = createCadetAuth(authDb);
  * not only the database rows), and every OAuth consent and refresh/access
  * token is deleted. The cadet MCP gate checks the consent on every request,
  * so an access token that is still unexpired stops working immediately.
+ * Every active web push subscription of the login is revoked too (kept as a
+ * row with `revoked_at`, like "turn off" on the device), so a device that is
+ * no longer signed in stops receiving notifications.
  * Idempotent.
  */
 export async function revokeCadetLoginAccess(
@@ -205,5 +209,10 @@ export async function revokeCadetLoginAccess(
     await transaction
       .delete(cadetOauthConsent)
       .where(inArray(cadetOauthConsent.userId, ids));
+    const now = new Date();
+    await transaction
+      .update(cadetPushSubscriptionTable)
+      .set({ revokedAt: now, updatedAt: now })
+      .where(and(inArray(cadetPushSubscriptionTable.cadetUserId, ids), isNull(cadetPushSubscriptionTable.revokedAt)));
   });
 }
