@@ -56,6 +56,15 @@ function jittered(ms: number, random: number) {
   return Math.round(ms * (0.75 + random * 0.5));
 }
 
+/**
+ * The longest a quick retry can be scheduled ahead: the {@link
+ * MAX_QUICK_RETRY_MS} cap with the most jitter. Every day-later retry is
+ * scheduled further out ({@link DAY_MS} or more), so "owed within this
+ * horizon" is exactly "will be attempted on the quick path" (used by the
+ * batch failure alerts, D-38).
+ */
+export const QUICK_RETRY_HORIZON_MS = jittered(MAX_QUICK_RETRY_MS, 1);
+
 /** Delay of quick retry number `retry` (1-based): exponential, at least the provider's hint, jittered. */
 export function quickRetryDelayMs(retry: number, retryAfterMs: number | null | undefined, random: number): number {
   const exponential = QUICK_RETRY_BASE_MS * QUICK_RETRY_FACTOR ** (retry - 1);

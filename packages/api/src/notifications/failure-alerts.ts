@@ -2,12 +2,14 @@ import { db as defaultDb, type Database } from '@campuspilot/db';
 import { isNotificationType, type AdmissionNotificationType } from '@campuspilot/db/notifications/catalogue';
 import { notificationDeliveryTable, notificationEventTable, notificationTable } from '@campuspilot/db/schema/notification';
 import { SCHOOL_ACTIONS } from '@campuspilot/opa/policies/school';
-import { and, asc, eq, exists, gt, isNotNull, isNull, min, or, sql } from 'drizzle-orm';
+import { and, asc, eq, exists, isNotNull, isNull, min, not, or, sql, type SQL } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 
 import { schoolMembersWithPermission } from '../permissions/authorization';
 import { log } from '../workflows/notification/log';
 import { handOffNotificationEvents } from './notification.outbox';
 import { notify, type NotificationBatchKind } from './notify';
+import { QUICK_RETRY_HORIZON_MS } from './sender/retry-policy';
 import { stuckSendingCutoff } from './stuck-sending';
 
 /**
@@ -25,11 +27,13 @@ import { stuckSendingCutoff } from './stuck-sending';
  * - **how**: one `notification.whatsapp_failed` per failed delivery of a
  *   one-off event (a payment, a manual bill, a single send) and per failed
  *   resend; one `notification.whatsapp_batch_failed` per bulk batch
- *   (billing run, results publication) once the batch's WhatsApp copies
- *   settled (no event still pending, nothing owed or freshly claimed),
- *   counting the failures not reported before, so a run of 5,000 bills
- *   yields one alert, not hundreds. A failure receipt arriving later yields
- *   a follow-up alert for that batch.
+ *   (billing run, results publication) once nothing in the batch is about
+ *   to produce an outcome (no event still pending, no WhatsApp copy owed
+ *   within the quick-retry horizon or freshly claimed; see
+ *   {@link batchOpenSql}), counting the failures not reported before, so a
+ *   run of 5,000 bills yields one alert, not hundreds. A copy waiting for a
+ *   day-later retry that finally fails, or a failure receipt arriving
+ *   later, yields a follow-up alert for that batch.
  * Web push failures are never alerted (a gone subscription is the device's
  * own state, and the inbox holds the notification anyway).
  *
@@ -172,41 +176,47 @@ function batchDeliveries(schoolId: string, kind: NotificationBatchKind, batchId:
 }
 
 /**
- * Whether a batch may still produce WhatsApp outcomes: an event not yet
- * fanned out, or a WhatsApp copy owed or claimed recently.
+ * Whether the batch of the current `notification_event` row (the outer
+ * query's) may still produce WhatsApp outcomes soon (D-38 as refined in
+ * review round 3): an event of the batch not yet fanned out, a WhatsApp
+ * first copy owed within the quick-retry horizon ({@link
+ * QUICK_RETRY_HORIZON_MS}: due now or on a quick retry), or one claimed
+ * recently (within `STUCK_SENDING_MS`). Copies waiting for a day-later
+ * retry do not hold the batch: its failures so far are alerted now, and a
+ * copy that finally fails a day later is reported in a follow-up alert.
+ * Expressed in SQL, so batches still open never take a place in the
+ * sweep's limit (no starvation of settled batches behind open ones).
  */
-async function batchOpen(db: Database, batch: { schoolId: string; kind: NotificationBatchKind; batchId: string }, now: Date) {
-  const [pendingEvent] = await db
-    .select({ id: notificationEventTable.id })
-    .from(notificationEventTable)
-    .where(
-      and(
-        eq(notificationEventTable.schoolId, batch.schoolId),
-        eq(notificationEventTable.batchKind, batch.kind),
-        eq(notificationEventTable.batchId, batch.batchId),
-        eq(notificationEventTable.status, 'pending'),
-      ),
-    )
-    .limit(1);
-  if (pendingEvent) return true;
-  const [open] = await db
-    .select({ id: notificationDeliveryTable.id })
-    .from(notificationDeliveryTable)
-    .where(
-      and(
-        batchDeliveries(batch.schoolId, batch.kind, batch.batchId),
-        eq(notificationDeliveryTable.channel, 'whatsapp'),
-        or(
-          eq(notificationDeliveryTable.status, 'owed'),
-          and(eq(notificationDeliveryTable.status, 'sending'), gt(notificationDeliveryTable.claimedAt, stuckSendingCutoff(now))),
-        ),
-      ),
-    )
-    .limit(1);
-  return Boolean(open);
+function batchOpenSql(now: Date): SQL {
+  const pendingEvent = alias(notificationEventTable, 'open_event');
+  const openEvent = alias(notificationEventTable, 'open_delivery_event');
+  const openNotification = alias(notificationTable, 'open_notification');
+  const openDelivery = alias(notificationDeliveryTable, 'open_delivery');
+  const horizon = new Date(now.getTime() + QUICK_RETRY_HORIZON_MS);
+  return or(
+    exists(
+      sql`(select 1 from ${notificationEventTable} as ${pendingEvent}
+        where ${pendingEvent.schoolId} = ${notificationEventTable.schoolId}
+          and ${pendingEvent.batchKind} = ${notificationEventTable.batchKind}
+          and ${pendingEvent.batchId} = ${notificationEventTable.batchId}
+          and ${pendingEvent.status} = 'pending')`,
+    ),
+    exists(
+      sql`(select 1 from ${notificationEventTable} as ${openEvent}
+        join ${notificationTable} as ${openNotification} on ${openNotification.eventId} = ${openEvent.id}
+        join ${notificationDeliveryTable} as ${openDelivery} on ${openDelivery.notificationId} = ${openNotification.id}
+        where ${openEvent.schoolId} = ${notificationEventTable.schoolId}
+          and ${openEvent.batchKind} = ${notificationEventTable.batchKind}
+          and ${openEvent.batchId} = ${notificationEventTable.batchId}
+          and ${openDelivery.channel} = 'whatsapp'
+          and ${openDelivery.resendOfDeliveryId} is null
+          and ((${openDelivery.status} = 'owed' and ${openDelivery.nextAttemptAt} <= ${horizon})
+            or (${openDelivery.status} = 'sending' and ${openDelivery.claimedAt} > ${stuckSendingCutoff(now)})))`,
+    ),
+  )!;
 }
 
-/** One grouped alert per settled batch with unreported failures. */
+/** One grouped alert per settled batch with unreported failures (oldest failure first). */
 async function alertBatchFailures(db: Database, granted: GrantedRecipients, now: Date) {
   const batches = await db
     .select({
@@ -217,7 +227,14 @@ async function alertBatchFailures(db: Database, granted: GrantedRecipients, now:
     .from(notificationDeliveryTable)
     .innerJoin(notificationTable, eq(notificationTable.id, notificationDeliveryTable.notificationId))
     .innerJoin(notificationEventTable, eq(notificationEventTable.id, notificationTable.eventId))
-    .where(and(unalertedWhatsAppFailure, isNotNull(notificationEventTable.batchKind), isNull(notificationDeliveryTable.resendOfDeliveryId)))
+    .where(
+      and(
+        unalertedWhatsAppFailure,
+        isNotNull(notificationEventTable.batchKind),
+        isNull(notificationDeliveryTable.resendOfDeliveryId),
+        not(batchOpenSql(now)),
+      ),
+    )
     .groupBy(notificationEventTable.schoolId, notificationEventTable.batchKind, notificationEventTable.batchId)
     .orderBy(asc(min(notificationDeliveryTable.failedAt)))
     .limit(ALERT_SWEEP_LIMIT);
@@ -226,7 +243,6 @@ async function alertBatchFailures(db: Database, granted: GrantedRecipients, now:
   for (const row of batches) {
     if (!row.kind || !row.batchId) continue;
     const batch = { schoolId: row.schoolId, kind: row.kind, batchId: row.batchId };
-    if (await batchOpen(db, batch, now)) continue;
     const ofBatch = and(batchDeliveries(batch.schoolId, batch.kind, batch.batchId), unalertedWhatsAppFailure);
     const [sample] = await db
       .select({ type: notificationTable.type, data: notificationTable.data })
