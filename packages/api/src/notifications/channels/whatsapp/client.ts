@@ -13,11 +13,12 @@ export type WhatsAppClientConfig = {
   phoneNumberId: string;
   /** e.g. `v24.0` (pinned in env). */
   graphApiVersion: string;
-  /** Overridable for tests; production is Meta's Graph host. */
-  graphBaseUrl?: string;
+  /**
+   * Graph API host without a trailing slash: `WHATSAPP_GRAPH_BASE_URL`
+   * (default Meta's `https://graph.facebook.com`), or a mock in tests.
+   */
+  graphBaseUrl: string;
 };
-
-const GRAPH_BASE_URL = 'https://graph.facebook.com';
 const REQUEST_TIMEOUT_MS = 20_000;
 
 /** A Graph API error as Meta returns it (`{ error: { code, error_subcode, … } }`). */
@@ -82,7 +83,7 @@ export type TemplateMessage = {
 };
 
 function graphUrl(config: WhatsAppClientConfig, path: string) {
-  return `${config.graphBaseUrl ?? GRAPH_BASE_URL}/${config.graphApiVersion}/${path}`;
+  return `${config.graphBaseUrl}/${config.graphApiVersion}/${path}`;
 }
 
 async function readError(response: Response): Promise<WhatsAppApiError> {

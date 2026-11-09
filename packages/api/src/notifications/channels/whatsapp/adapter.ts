@@ -4,6 +4,7 @@ import { schoolTable } from '@campuspilot/db/schema/school';
 import { env } from '@campuspilot/env/server';
 import { eq } from 'drizzle-orm';
 
+import { log } from '../../../workflows/notification/log';
 import type {
   ChannelFetch,
   ClaimedDelivery,
@@ -180,11 +181,14 @@ export function createWhatsAppAdapterFromEnv(): NotificationChannelAdapter {
   if (!env.WHATSAPP_ENABLED || !env.WHATSAPP_ACCESS_TOKEN || !env.WHATSAPP_PHONE_NUMBER_ID || !env.WHATSAPP_GRAPH_API_VERSION) {
     return { channel: 'whatsapp', available: false, unavailableReason: 'WhatsApp is switched off (WHATSAPP_ENABLED).' };
   }
+  // Logged once at start-up, so a stack pointed at a mock of the Cloud API is visible.
+  log.info({ graphBaseUrl: env.WHATSAPP_GRAPH_BASE_URL, graphApiVersion: env.WHATSAPP_GRAPH_API_VERSION }, 'notification.whatsapp.graph');
   return createWhatsAppAdapter({
     config: {
       accessToken: env.WHATSAPP_ACCESS_TOKEN,
       phoneNumberId: env.WHATSAPP_PHONE_NUMBER_ID,
       graphApiVersion: env.WHATSAPP_GRAPH_API_VERSION,
+      graphBaseUrl: env.WHATSAPP_GRAPH_BASE_URL,
     },
   });
 }

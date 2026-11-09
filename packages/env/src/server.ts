@@ -6,7 +6,7 @@ import { AUTH_ENV_SHAPE } from './server/auth.env';
 import { S3_ENV_SHAPE } from './server/s3.env';
 import { requireWorkerControlSecretInProduction, SERVICES_ENV_SHAPE } from './server/services.env';
 import { requireWebPushConfigWhenEnabled, WEB_PUSH_ENV_SHAPE } from './server/web-push.env';
-import { requireWhatsAppConfigWhenEnabled, WHATSAPP_ENV_SHAPE } from './server/whatsapp.env';
+import { requireSafeWhatsAppGraphBaseUrl, requireWhatsAppConfigWhenEnabled, WHATSAPP_ENV_SHAPE } from './server/whatsapp.env';
 
 export const env = createEnv({
   server: {
@@ -30,6 +30,7 @@ export const env = createEnv({
       requireWorkerControlSecretInProduction(value, context);
       requireWebPushConfigWhenEnabled(value, context);
       requireWhatsAppConfigWhenEnabled(value, context);
+      requireSafeWhatsAppGraphBaseUrl(value, context);
     }),
   runtimeEnv: process.env,
   skipValidation: !!process.env.SKIP_ENV_VALIDATION,

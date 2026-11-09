@@ -26,11 +26,21 @@ import { z } from 'zod';
  *   for retries and other traffic. Throttling answers (130429) still pause
  *   the channel whatever the rate.
  *
- * Everything but the switch and the rate is required only while sending is enabled
+ * - `WHATSAPP_GRAPH_BASE_URL`: the Graph API host the client calls,
+ *   default `https://graph.facebook.com` (Meta). Only for pointing a
+ *   non-production stack at a mock of the Cloud API: it must be an https
+ *   URL, or http on a loopback host (`localhost`, `127.0.0.1`, `[::1]`)
+ *   outside production ({@link requireSafeWhatsAppGraphBaseUrl}). No query,
+ *   fragment or credentials; a trailing slash is dropped.
+ *
+ * Everything but the switch, the rate and the base URL is required only while sending is enabled
  * ({@link requireWhatsAppConfigWhenEnabled}). The webhook works whenever
  * its two secrets are set, independent of the switch, so delivery receipts
  * and STOP replies for messages already sent are still recorded.
  */
+/** Meta's Graph API host, used unless `WHATSAPP_GRAPH_BASE_URL` points elsewhere. */
+export const DEFAULT_WHATSAPP_GRAPH_BASE_URL = 'https://graph.facebook.com';
+
 export const WHATSAPP_ENV_SHAPE = {
   WHATSAPP_ENABLED: z
     .enum(['true', 'false'])
@@ -43,7 +53,38 @@ export const WHATSAPP_ENV_SHAPE = {
   WHATSAPP_WEBHOOK_VERIFY_TOKEN: z.string().min(16, 'Use at least 16 random characters (e.g. openssl rand -hex 24).').optional(),
   WHATSAPP_GRAPH_API_VERSION: z.string().regex(/^v\d+\.\d+$/, 'Use a Graph API version such as v24.0.').optional(),
   WHATSAPP_SEND_RATE_PER_SECOND: z.coerce.number().int().min(1).max(1000).default(20),
+  WHATSAPP_GRAPH_BASE_URL: z
+    .url({ protocol: /^https?$/, error: 'Use an http(s) URL such as https://graph.facebook.com.' })
+    .refine((value) => {
+      const url = new URL(value);
+      return !url.search && !url.hash && !url.username && !url.password;
+    }, 'Use a URL without query, fragment or credentials.')
+    .default(DEFAULT_WHATSAPP_GRAPH_BASE_URL)
+    .transform((value) => value.replace(/\/+$/, '')),
 };
+
+/** Hosts on which `WHATSAPP_GRAPH_BASE_URL` may use plain http (outside production). */
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
+
+/**
+ * Final-schema check: the Graph base URL carries the access token, so it is
+ * https, except a loopback mock (`http://localhost:…`) outside production.
+ */
+export function requireSafeWhatsAppGraphBaseUrl(
+  value: { NODE_ENV?: string; WHATSAPP_GRAPH_BASE_URL?: string },
+  context: z.RefinementCtx,
+) {
+  // An unparseable value already failed the field's own check.
+  if (!value.WHATSAPP_GRAPH_BASE_URL || !URL.canParse(value.WHATSAPP_GRAPH_BASE_URL)) return;
+  const url = new URL(value.WHATSAPP_GRAPH_BASE_URL);
+  if (url.protocol === 'https:') return;
+  if (value.NODE_ENV !== 'production' && LOOPBACK_HOSTS.has(url.hostname)) return;
+  context.addIssue({
+    code: 'custom',
+    path: ['WHATSAPP_GRAPH_BASE_URL'],
+    message: 'WHATSAPP_GRAPH_BASE_URL must use https (plain http only for localhost outside production).',
+  });
+}
 
 const REQUIRED_WHEN_ENABLED = [
   'WHATSAPP_ACCESS_TOKEN',
