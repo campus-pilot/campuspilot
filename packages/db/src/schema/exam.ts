@@ -1,5 +1,8 @@
+import { sql } from 'drizzle-orm';
 import {
   boolean,
+  check,
+  index,
   integer,
   jsonb,
   pgEnum,
@@ -20,6 +23,7 @@ import { schoolTable } from './school';
 import { schoolSessionTable } from './session';
 import { classTable } from './class';
 import { studentTable } from './student';
+import { user } from './auth';
 
 export const examPlanStatusEnum = pgEnum('exam_plan_status', [
   'draft',
@@ -177,6 +181,66 @@ export const examLifecycleTable = pgTable(
     status: examLifecycleStatusEnum('status').notNull().default('ready'),
     startedAt: timestamp('started_at'),
     completedAt: timestamp('completed_at'),
+    /**
+     * When the school explicitly released this examination's results to the
+     * Cadet Portal; null while they are not visible there. This is its own
+     * fact and is never derived from `status`: a completed examination stays
+     * hidden from students until someone releases it, and withdrawing clears
+     * it again. Release currently requires `status = 'completed'` and blocks
+     * reopening, but that is enforced by the procedures, not inferred here.
+     */
+    cadetReleasedAt: timestamp('cadet_released_at', { withTimezone: true }),
+    /** The staff user who performed the current release; null when not released or the account was deleted. */
+    cadetReleasedBy: text('cadet_released_by').references(() => user.id, {
+      onDelete: 'set null',
+    }),
   },
   (table) => [primaryKey({ columns: [table.sessionId, table.examSlug] })],
+);
+
+/** Maximum length of a teacher's remark on one student's examination. */
+export const EXAM_STUDENT_REMARK_MAX_LENGTH = 1000;
+
+/**
+ * A teacher's written remark on one student's whole examination (not a
+ * subject). Students see it in the Cadet Portal only once the examination is
+ * released there. `authorId` is whoever saved the current text; `createdAt`
+ * is when the remark was first written and `updatedAt` when its text last
+ * changed. Removing a remark deletes the row.
+ */
+export const examStudentRemarkTable = pgTable(
+  'exam_student_remark',
+  {
+    schoolId: text('school_id')
+      .notNull()
+      .references(() => schoolTable.id),
+    sessionId: text('session_id')
+      .notNull()
+      .references(() => schoolSessionTable.id),
+    examSlug: text('exam_slug').notNull(),
+    studentId: text('student_id')
+      .notNull()
+      .references(() => studentTable.id),
+    text: text('text').notNull(),
+    authorId: text('author_id').references(() => user.id, {
+      onDelete: 'set null',
+    }),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.sessionId, table.examSlug, table.studentId] }),
+    index('exam_student_remark_school_student_idx').on(
+      table.schoolId,
+      table.studentId,
+    ),
+    check(
+      'exam_student_remark_text_length_check',
+      sql`char_length(${table.text}) between 1 and ${sql.raw(String(EXAM_STUDENT_REMARK_MAX_LENGTH))}`,
+    ),
+  ],
 );
