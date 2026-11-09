@@ -50,12 +50,20 @@ describe("Notification authorization with real OPA", () => {
     expect(await allowed(CLASS_ACTIONS.SEND_RESULT_NOTIFICATION, role("school.teacher", { classIds: [] }), "class-1")).toBe(false);
   });
 
-  it("reads the delivery log as a school administrator or accountant, and alerts accountants of failures", async () => {
+  it("reads the delivery log as a school administrator or accountant, and routes failure alerts by topic", async () => {
     for (const name of ["school.principal", "school.manager", "school.exam_coordinator", "school.accountant"]) {
       expect(await allowed(SCHOOL_ACTIONS.READ_NOTIFICATION_LOG, role(name)), name).toBe(true);
     }
     expect(await allowed(SCHOOL_ACTIONS.READ_NOTIFICATION_LOG, role("school.teacher", { classIds: ["class-1"] }))).toBe(false);
-    expect(await allowed(SCHOOL_ACTIONS.RECEIVE_NOTIFICATION_FAILURES, role("school.accountant"))).toBe(true);
-    expect(await allowed(SCHOOL_ACTIONS.RECEIVE_NOTIFICATION_FAILURES, role("school.principal"))).toBe(false);
+    for (const name of ["school.principal", "school.manager", "school.accountant"]) {
+      expect(await allowed(SCHOOL_ACTIONS.RECEIVE_FINANCE_NOTIFICATION_FAILURES, role(name)), name).toBe(true);
+    }
+    expect(await allowed(SCHOOL_ACTIONS.RECEIVE_FINANCE_NOTIFICATION_FAILURES, role("school.exam_coordinator"))).toBe(false);
+    for (const name of ["school.principal", "school.manager"]) {
+      expect(await allowed(SCHOOL_ACTIONS.RECEIVE_RESULT_NOTIFICATION_FAILURES, role(name)), name).toBe(true);
+    }
+    for (const name of ["school.accountant", "school.exam_coordinator"]) {
+      expect(await allowed(SCHOOL_ACTIONS.RECEIVE_RESULT_NOTIFICATION_FAILURES, role(name)), name).toBe(false);
+    }
   });
 });

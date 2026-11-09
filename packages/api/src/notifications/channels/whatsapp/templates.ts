@@ -117,6 +117,7 @@ function mapUnsanitized(type: NotificationType, data: never, context: WhatsAppMa
     }
     case 'exam.results_publish_finished':
     case 'notification.whatsapp_failed':
+    case 'notification.whatsapp_batch_failed':
     case 'billing.run_posted':
       return null;
     default: {

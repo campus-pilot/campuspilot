@@ -56,6 +56,17 @@ export const notificationRenderers: { [T in NotificationType]: NotificationRende
     title: `WhatsApp message to ${data.studentName} failed`,
     description: data.errorCode ? `Error ${data.errorCode}.` : undefined,
   }),
+  'notification.whatsapp_batch_failed': (data) => {
+    const messages = `${data.failedCount} WhatsApp ${data.failedCount === 1 ? 'message' : 'messages'}`;
+    const batch = data.batchKind === 'billing_run'
+      ? (data.periodKey ? `billing run ${data.periodKey}` : 'a billing run')
+      : `${data.examName ?? 'the examination'} results`;
+    return {
+      icon: MessageCircleWarning,
+      title: `${messages} of ${batch} failed`,
+      description: 'Open the delivery log to see who missed it and resend.',
+    };
+  },
   'billing.run_posted': (data) => ({
     icon: CreditCard,
     title: `Billing run ${data.periodKey} posted`,

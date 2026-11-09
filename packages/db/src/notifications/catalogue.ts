@@ -117,6 +117,24 @@ export const notificationPayloadSchemas = {
     /** Provider error code, never provider prose. */
     errorCode: z.string().max(100).optional(),
   }),
+  /**
+   * WhatsApp copies of one bulk send failed (D-38): one alert per billing
+   * run or results publication once its WhatsApp copies settled, counting
+   * the failures not reported before.
+   */
+  "notification.whatsapp_batch_failed": z.object({
+    batchKind: z.enum(["billing_run", "result_publication"]),
+    /** The type of the notifications whose WhatsApp copies failed. */
+    failedType: z.string().min(1).max(100),
+    failedCount: count,
+    sessionId: id,
+    /** Billing runs: the run and its period. */
+    billRunId: id.optional(),
+    periodKey: z.string().max(100).optional(),
+    /** Results publications: the examination. */
+    examSlug: id.optional(),
+    examName: label.optional(),
+  }),
   /** A billing run the staff member posted has finished posting (Phase 5, D-30). */
   "billing.run_posted": z.object({
     billRunId: id,
@@ -150,6 +168,7 @@ export const notificationCatalogue = {
   "exam.results_published": { audience: "admission", channels: ["in_app", "web_push", "whatsapp"] },
   "exam.results_publish_finished": { audience: "staff_user", channels: ["in_app"] },
   "notification.whatsapp_failed": { audience: "staff_user", channels: ["in_app"] },
+  "notification.whatsapp_batch_failed": { audience: "staff_user", channels: ["in_app"] },
   "billing.run_posted": { audience: "staff_user", channels: ["in_app"] },
 } as const satisfies Record<NotificationType, NotificationCatalogueEntry>;
 
@@ -166,6 +185,7 @@ export const notificationLinkFactKeys = {
   "exam.results_published": ["sessionId", "examSlug"],
   "exam.results_publish_finished": ["sessionId", "examSlug"],
   "notification.whatsapp_failed": ["admissionId"],
+  "notification.whatsapp_batch_failed": ["sessionId", "billRunId", "examSlug"],
   "billing.run_posted": ["billRunId", "sessionId"],
 } as const satisfies { [T in NotificationType]: readonly (keyof NotificationPayloads[T])[] };
 

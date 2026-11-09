@@ -148,5 +148,12 @@ grants contains {"role": role, "action": "school.notification.log.read"} if {
   some role in {"school.principal", "school.manager", "school.exam_coordinator", "school.accountant"}
 }
 
-# D-30: failed WhatsApp deliveries are reported to accountants.
-grants contains {"role": "school.accountant", "action": "school.notification.failure.receive"} if { true }
+# D-38: principal and manager are told about every failed WhatsApp
+# delivery; accountants about finance ones only, never about results.
+grants contains {"role": role, "action": "school.notification.failure.finance.receive"} if {
+  some role in {"school.principal", "school.manager", "school.accountant"}
+}
+
+grants contains {"role": role, "action": "school.notification.failure.results.receive"} if {
+  some role in {"school.principal", "school.manager"}
+}

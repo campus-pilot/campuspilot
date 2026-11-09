@@ -13,6 +13,7 @@ const facts = {
   'exam.results_published': { sessionId: 's', examSlug: 'half-yearly', examName: 'Half-Yearly Examination 2026', admissionId: 'a', studentName: 'Asha' },
   'exam.results_publish_finished': { sessionId: 's', examSlug: 'e', examName: 'E', recipientCount: 1, sentCount: 1, failedCount: 0, skippedCount: 0 },
   'notification.whatsapp_failed': { admissionId: 'a', studentName: 'Asha', failedType: 'bill.issued' },
+  'notification.whatsapp_batch_failed': { batchKind: 'billing_run', failedType: 'bill.issued', failedCount: 2, sessionId: 's', billRunId: 'r' },
   'billing.run_posted': { billRunId: 'r', sessionId: 's', periodKey: '2026-10', billCount: 1 },
 } as const;
 

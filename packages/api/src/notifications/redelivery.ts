@@ -47,6 +47,7 @@ export async function resendFailedDelivery(
       createdBy: input.requestedBy,
       // A resend is a deliberate one-off send someone is waiting for.
       sendPriority: 'immediate',
+      alertCreatorOnFailure: true,
       recipients: { kind: 'admissions', admissionIds: [row.admissionId] },
       redeliveryOfDeliveryId: input.deliveryId,
     } as AnyNotifyInput;

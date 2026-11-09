@@ -162,6 +162,13 @@ export const notificationEventTable = pgTable(
     batchKind: notificationBatchKindEnum("batch_kind"),
     /** The billing run or results publication ID (see `batch_kind`). */
     batchId: text("batch_id"),
+    /**
+     * Whether `created_by` asked for this very send (a single result send,
+     * a resend) and is told when its WhatsApp copy fails, besides the
+     * staff granted failure alerts (D-38). False when the creator's action
+     * only caused the notification (recording a payment, posting a run).
+     */
+    alertCreatorOnFailure: boolean("alert_creator_on_failure").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -345,8 +352,10 @@ export const notificationDeliveryTable = pgTable(
     ),
     /**
      * When staff were told about this delivery's failure
-     * (`notification.whatsapp_failed`, D-30). Null while not failed or not
-     * yet reported; the API sweep reports each failed WhatsApp delivery once.
+     * (`notification.whatsapp_failed`, or grouped per batch in
+     * `notification.whatsapp_batch_failed`; D-38). Null while not failed or
+     * not yet reported; the API sweep reports each failed WhatsApp delivery
+     * once.
      */
     failureAlertedAt: timestamp("failure_alerted_at", { withTimezone: true }),
     /**

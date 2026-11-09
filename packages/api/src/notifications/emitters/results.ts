@@ -247,6 +247,8 @@ async function sendStudentResultOnce(db: Database, scope: StudentResultScope & {
         key: studentResultEventKey(scope, student.admissionId),
         createdBy: sentBy,
         sendPriority: 'immediate',
+        // A single send is the sender's own request: they hear if it fails (D-38).
+        alertCreatorOnFailure: true,
         recipients: { kind: 'admissions', admissionIds: [student.admissionId] },
         data: { sessionId: scope.sessionId, examSlug: scope.examSlug, examName: exam.name, admissionId: student.admissionId, studentName: student.name },
       });

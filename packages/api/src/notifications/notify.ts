@@ -49,6 +49,11 @@ export type NotifyInput<T extends NotificationType> = {
    */
   batch?: { kind: NotificationBatchKind; id: string } | null;
   /**
+   * True when `createdBy` asked for this very send (a single result send, a
+   * resend): they are told if its WhatsApp copy fails (D-38). Default false.
+   */
+  alertCreatorOnFailure?: boolean;
+  /**
    * Only for a staff resend (`./redelivery.ts`): the failed delivery to
    * send again. The event then writes no inbox row.
    */
@@ -104,6 +109,7 @@ function toEventRow(input: AnyNotifyInput) {
   if (!(notificationSendPriorityEnum.enumValues as readonly string[]).includes(input.sendPriority)) {
     throw new NotifyError('A notification send priority is required.');
   }
+  if (input.alertCreatorOnFailure && !input.createdBy) throw new NotifyError('Alerting the creator on failure needs a creator.');
   if (input.batch && (!input.batch.id || input.batch.id.length > 200)) throw new NotifyError('A notification batch needs an ID of 1 to 200 characters.');
   const deduplicated = recipients.kind === 'staff_users'
     ? { kind: recipients.kind, userIds: [...new Set(recipients.userIds)] }
@@ -118,6 +124,7 @@ function toEventRow(input: AnyNotifyInput) {
     sendPriority: input.sendPriority,
     batchKind: input.batch?.kind ?? null,
     batchId: input.batch?.id ?? null,
+    alertCreatorOnFailure: input.alertCreatorOnFailure ?? false,
     redeliveryOfDeliveryId: input.redeliveryOfDeliveryId ?? null,
   };
 }

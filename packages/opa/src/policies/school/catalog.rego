@@ -474,8 +474,11 @@ actions contains {"id": "school.document.artifacts.delete", "key": "DELETE_DOCUM
 actions contains {"id": "school.notification.send", "key": "SEND_NOTIFICATIONS", "resourceKind": "school"} if { true }
 
 # Notifications (Phase 7): the staff delivery log (per-channel status and
-# skip/failure reasons, never message content) and who is told about
-# failed WhatsApp deliveries (D-30). Resending a failed delivery uses
-# school.notification.send.
+# skip/failure reasons, never message content). Resending a failed delivery
+# uses school.notification.send.
 actions contains {"id": "school.notification.log.read", "key": "READ_NOTIFICATION_LOG", "resourceKind": "school"} if { true }
-actions contains {"id": "school.notification.failure.receive", "key": "RECEIVE_NOTIFICATION_FAILURES", "resourceKind": "school"} if { true }
+# Who is told about failed WhatsApp deliveries (D-38), by topic: finance
+# messages (bills, receipts) and result messages are separate actions, so
+# each topic's audience is its own grant.
+actions contains {"id": "school.notification.failure.finance.receive", "key": "RECEIVE_FINANCE_NOTIFICATION_FAILURES", "resourceKind": "school"} if { true }
+actions contains {"id": "school.notification.failure.results.receive", "key": "RECEIVE_RESULT_NOTIFICATION_FAILURES", "resourceKind": "school"} if { true }

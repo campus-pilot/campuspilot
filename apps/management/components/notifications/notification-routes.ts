@@ -18,6 +18,16 @@ export const staffNotificationRoutes: { [T in StaffNotificationType]: StaffRoute
     schoolSessionHref(schoolId, data.sessionId, `/exam/${encodeURIComponent(data.examSlug)}`),
   'notification.whatsapp_failed': (schoolId, data) =>
     schoolHref(schoolId, `/admission/${encodeURIComponent(data.admissionId)}`),
+  // The batch's delivery log: under the billing run, or the exam's settings section.
+  'notification.whatsapp_batch_failed': (schoolId, data) => {
+    if (data.batchKind === 'billing_run' && data.billRunId) {
+      return schoolSessionHref(schoolId, data.sessionId, `/billing/runs/${encodeURIComponent(data.billRunId)}`);
+    }
+    if (data.batchKind === 'result_publication' && data.examSlug) {
+      return schoolSessionHref(schoolId, data.sessionId, `/exam/${encodeURIComponent(data.examSlug)}/settings`);
+    }
+    return null;
+  },
   'billing.run_posted': (schoolId, data) =>
     schoolSessionHref(schoolId, data.sessionId, `/billing/runs/${encodeURIComponent(data.billRunId)}`),
 };

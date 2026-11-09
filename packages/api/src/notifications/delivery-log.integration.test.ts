@@ -28,7 +28,7 @@ async function dispatch(eventId: string, adapter: NotificationChannelAdapter) {
 }
 
 describe('delivery log, resend and failure alerts', () => {
-  let schoolId: string, admissionId: string, accountantId: string;
+  let schoolId: string, admissionId: string, accountantId: string, principalId: string, coordinatorId: string;
   let principal: ReturnType<typeof createTestClient>, accountant: ReturnType<typeof createTestClient>, teacher: ReturnType<typeof createTestClient>;
   const billRunId = 'frun_deliverylogtest00001';
 
@@ -43,14 +43,18 @@ describe('delivery log, resend and failure alerts', () => {
     // A second admission that is not ready for WhatsApp (backfilled: unverified, no consent).
     const pending = await createTestAdmission({ schoolId, name: 'Rohan Pending' });
     await db.update(admissionTable).set({ phoneNo: '+919876500000', whatsappNo: '+919876500000', whatsappSameAsPhone: true, whatsappVerified: false, whatsappConsent: false }).where(eq(admissionTable.id, pending.id));
-    principal = createTestClient((await createSchoolStaffSession(schoolId, [{ role: 'principal' }])).session);
+    const principalSession = await createSchoolStaffSession(schoolId, [{ role: 'principal' }]);
+    principal = createTestClient(principalSession.session);
+    principalId = principalSession.user.id;
+    const coordinatorSession = await createSchoolStaffSession(schoolId, [{ role: 'exam_coordinator' }]);
+    coordinatorId = coordinatorSession.user.id;
     const accountantSession = await createSchoolStaffSession(schoolId, [{ role: 'accountant' }]);
     accountant = createTestClient(accountantSession.session);
     accountantId = accountantSession.user.id;
     teacher = createTestClient((await createSchoolStaffSession(schoolId, [{ role: 'teacher', meta: { classIds: [] } }])).session);
   });
 
-  it('lists per-channel status by admission and bill run, resends a failed copy once and reports the failure to accountants', async () => {
+  it('lists per-channel status by admission and bill run, resends a failed copy once and groups the run\'s failure alert', async () => {
     const { eventId } = await db.transaction((tx) =>
       notify(tx, {
         type: 'bill.issued',
@@ -77,12 +81,15 @@ describe('delivery log, resend and failure alerts', () => {
     await expect(principal.school.listNotificationDeliveries({ schoolId, scope: { kind: 'exam', sessionId: 'sess_test', examSlug: 'final' } })).resolves.toMatchObject({ pagination: { totalItems: 0 } });
     await expect(principal.school.listNotificationDeliveries({ schoolId, scope: { kind: 'admission', admissionId }, onlyFailed: true })).resolves.toMatchObject({ pagination: { totalItems: 1 } });
 
-    // The failure is reported once, to accountants (the grant), not to the principal.
+    // A billing run's failures are reported once, grouped, to the finance grant (principal, accountant; not the coordinator).
     await sweepWhatsAppFailureAlerts();
     await sweepWhatsAppFailureAlerts();
-    const alerts = await db.select().from(notificationEventTable).where(and(eq(notificationEventTable.schoolId, schoolId), eq(notificationEventTable.type, 'notification.whatsapp_failed')));
+    const alerts = await db.select().from(notificationEventTable).where(and(eq(notificationEventTable.schoolId, schoolId), eq(notificationEventTable.type, 'notification.whatsapp_batch_failed')));
     expect(alerts).toHaveLength(1);
-    expect(alerts[0]).toMatchObject({ recipients: { kind: 'staff_users', userIds: [accountantId] }, data: { admissionId, failedType: 'bill.issued', errorCode: 'wa_131026', studentName: 'Test Student' } });
+    expect(alerts[0]).toMatchObject({ data: { batchKind: 'billing_run', billRunId, failedCount: 1, failedType: 'bill.issued', sessionId: 'sess_test' } });
+    expect((alerts[0]!.recipients as { userIds: string[] }).userIds.sort()).toEqual([accountantId, principalId].sort());
+    const single = await db.select().from(notificationEventTable).where(and(eq(notificationEventTable.schoolId, schoolId), eq(notificationEventTable.type, 'notification.whatsapp_failed')));
+    expect(single).toHaveLength(0);
 
     // Resend: permission-gated, once per failed delivery, a new delivery for the same notification.
     await expect(teacher.school.resendNotificationDelivery({ schoolId, deliveryId: failed.id })).rejects.toMatchObject({ code: 'FORBIDDEN' });
@@ -104,6 +111,40 @@ describe('delivery log, resend and failure alerts', () => {
     await expect(accountant.school.resendNotificationDelivery({ schoolId, deliveryId: 'ndl_unknown' })).rejects.toMatchObject({ code: 'NOT_FOUND' });
     const [original] = await db.select().from(notificationDeliveryTable).where(eq(notificationDeliveryTable.id, failed.id));
     expect(original!.failureAlertedAt).not.toBeNull();
+  });
+
+  it('alerts each one-off failure: finance to the finance grant, results never to accountants, and a single send also to its sender', async () => {
+    const payment = await db.transaction((tx) =>
+      notify(tx, {
+        type: 'payment.received',
+        schoolId,
+        key: `payment:alert-${Date.now()}`,
+        sendPriority: 'immediate',
+        createdBy: accountantId,
+        recipients: { kind: 'admissions', admissionIds: [admissionId] },
+        data: { paymentId: 'fpay_alert', sessionId: 'sess_test', admissionId, receiptNumber: 'RCP/1', amountMinor: '100', currency: 'INR', receivedAt: new Date().toISOString(), studentName: 'Kavya Failed' },
+      }),
+    );
+    await dispatch(payment.eventId, whatsapp({ kind: 'failed', errorCode: 'wa_131026' }));
+    const result = await db.transaction((tx) =>
+      notify(tx, {
+        type: 'exam.results_published',
+        schoolId,
+        key: `exam-result:alert-${Date.now()}`,
+        sendPriority: 'immediate',
+        createdBy: coordinatorId,
+        alertCreatorOnFailure: true,
+        recipients: { kind: 'admissions', admissionIds: [admissionId] },
+        data: { sessionId: 'sess_test', examSlug: 'final', examName: 'Final', admissionId, studentName: 'Kavya Failed' },
+      }),
+    );
+    await dispatch(result.eventId, whatsapp({ kind: 'failed', errorCode: 'outcome_unknown' }));
+    await sweepWhatsAppFailureAlerts();
+    const alerts = await db.select().from(notificationEventTable).where(and(eq(notificationEventTable.schoolId, schoolId), eq(notificationEventTable.type, 'notification.whatsapp_failed')));
+    const byType = (failedType: string) => alerts.find((alert) => (alert.data as { failedType: string }).failedType === failedType)!;
+    // The recorder of a payment did not ask for a send: only the grant is told.
+    expect((byType('payment.received').recipients as { userIds: string[] }).userIds.sort()).toEqual([accountantId, principalId].sort());
+    expect((byType('exam.results_published').recipients as { userIds: string[] }).userIds.sort()).toEqual([coordinatorId, principalId].sort());
   });
 
   it('filters admissions by WhatsApp readiness', async () => {
