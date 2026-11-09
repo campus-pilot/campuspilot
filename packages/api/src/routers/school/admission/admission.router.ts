@@ -15,6 +15,8 @@ import {
   inArray,
   exists,
   isNotNull,
+  isNull,
+  not,
   notExists,
   or,
   sql,
@@ -263,9 +265,22 @@ export const schoolAdmissionRouter = {
               ? exists(assignedPlacement)
               : notExists(assignedPlacement)
             : undefined;
+        const whatsappReady = and(
+          isNotNull(admissionTable.whatsappNo),
+          eq(admissionTable.whatsappVerified, true),
+          eq(admissionTable.whatsappConsent, true),
+        );
+        const whatsappCondition = {
+          ready: whatsappReady,
+          needs_attention: not(whatsappReady!),
+          no_number: isNull(admissionTable.whatsappNo),
+          not_verified: and(isNotNull(admissionTable.whatsappNo), eq(admissionTable.whatsappVerified, false)),
+          no_consent: and(isNotNull(admissionTable.whatsappNo), eq(admissionTable.whatsappVerified, true), eq(admissionTable.whatsappConsent, false)),
+        }[input.filters?.whatsappStatus ?? "ready"];
         const where = and(
           eq(admissionTable.schoolId, input.schoolId),
           searchCondition,
+          input.filters?.whatsappStatus ? whatsappCondition : undefined,
           input.filters?.registered === undefined
             ? undefined
             : eq(admissionTable.registered, input.filters.registered),

@@ -472,3 +472,10 @@ actions contains {"id": "school.document.artifacts.delete", "key": "DELETE_DOCUM
 # student is school-wide; sending one student's result is class-scoped
 # (class/catalog.rego) so teacher assignments can restrict it.
 actions contains {"id": "school.notification.send", "key": "SEND_NOTIFICATIONS", "resourceKind": "school"} if { true }
+
+# Notifications (Phase 7): the staff delivery log (per-channel status and
+# skip/failure reasons, never message content) and who is told about
+# failed WhatsApp deliveries (D-30). Resending a failed delivery uses
+# school.notification.send.
+actions contains {"id": "school.notification.log.read", "key": "READ_NOTIFICATION_LOG", "resourceKind": "school"} if { true }
+actions contains {"id": "school.notification.failure.receive", "key": "RECEIVE_NOTIFICATION_FAILURES", "resourceKind": "school"} if { true }

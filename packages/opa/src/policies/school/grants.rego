@@ -143,3 +143,10 @@ grants contains {"role": role, "action": action} if {
 grants contains {"role": role, "action": "school.notification.send"} if {
   some role in {"school.principal", "school.manager", "school.exam_coordinator", "school.accountant"}
 }
+
+grants contains {"role": role, "action": "school.notification.log.read"} if {
+  some role in {"school.principal", "school.manager", "school.exam_coordinator", "school.accountant"}
+}
+
+# D-30: failed WhatsApp deliveries are reported to accountants.
+grants contains {"role": "school.accountant", "action": "school.notification.failure.receive"} if { true }

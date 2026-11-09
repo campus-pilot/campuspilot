@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  type AnyPgColumn,
   boolean,
   check,
   index,
@@ -142,6 +143,16 @@ export const notificationEventTable = pgTable(
     /** Safe failure summary (status `failed`); never SQL or personal data. */
     error: text("error"),
     /**
+     * Set when staff resend one failed delivery (Phase 7): this event then
+     * owns no inbox row; its fan-out writes one new delivery for the same
+     * notification and channel (recipient facts re-read) and sends it.
+     * Deleted with the delivery it resends.
+     */
+    redeliveryOfDeliveryId: text("redelivery_of_delivery_id").references(
+      (): AnyPgColumn => notificationDeliveryTable.id,
+      { onDelete: "cascade" },
+    ),
+    /**
      * Which fan-out attempt this is (1-based). A retryable failure is
      * dispatched again as the next attempt under a new workflow key, up to
      * a bounded number of attempts (see the API's notification outbox).
@@ -165,6 +176,9 @@ export const notificationEventTable = pgTable(
     ),
     index("notification_event_status_idx").on(table.status, table.createdAt),
     index("notification_event_created_idx").on(table.createdAt),
+    index("notification_event_redelivery_idx")
+      .on(table.redeliveryOfDeliveryId)
+      .where(sql`${table.redeliveryOfDeliveryId} is not null`),
     check(
       "notification_event_failure_retryable_check",
       sql`(${table.status} = 'failed') = (${table.failureRetryable} is not null)`,
@@ -265,6 +279,17 @@ export const notificationDeliveryTable = pgTable(
     /** Provider error code, never provider prose with personal data. */
     errorCode: text("error_code"),
     errorMessage: text("error_message"),
+    /** The failed delivery this one resends (staff "Resend"); null for a first delivery. */
+    resendOfDeliveryId: text("resend_of_delivery_id").references(
+      (): AnyPgColumn => notificationDeliveryTable.id,
+      { onDelete: "cascade" },
+    ),
+    /**
+     * When staff were told about this delivery's failure
+     * (`notification.whatsapp_failed`, D-30). Null while not failed or not
+     * yet reported; the API sweep reports each failed WhatsApp delivery once.
+     */
+    failureAlertedAt: timestamp("failure_alerted_at", { withTimezone: true }),
     /**
      * Template revision (`artifact.id`) of the PDF attached to the message,
      * when one was rendered through the document system (WhatsApp
@@ -299,6 +324,10 @@ export const notificationDeliveryTable = pgTable(
     index("notification_delivery_pending_idx")
       .on(table.status, table.createdAt)
       .where(sql`${table.status} in ('owed', 'sending')`),
+    index("notification_delivery_unalerted_failure_idx")
+      .on(table.failedAt)
+      .where(sql`${table.channel} = 'whatsapp' and ${table.status} = 'failed' and ${table.failureAlertedAt} is null`),
+    index("notification_delivery_resend_idx").on(table.resendOfDeliveryId),
   ],
 );
 

@@ -29,7 +29,7 @@ import {
 } from './channels';
 import { activePushSubscriptionIdsByAdmission } from './channels/web-push/subscriptions';
 import { claimDelivery, recordDeliveryOutcome } from './deliveries';
-import { notificationDeliveryId, notificationRowId } from './ids';
+import { notificationDeliveryId, notificationRedeliveryId, notificationRowId } from './ids';
 
 /**
  * The notification dispatcher (D-23 … D-26): everything between an outbox
@@ -55,6 +55,11 @@ export type DispatchableEvent = {
   type: NotificationType;
   data: Record<string, unknown>;
   recipients: ReturnType<typeof notificationRecipientSpecSchema.parse>;
+  /**
+   * Set for a staff resend of one failed delivery: the fan-out writes no
+   * inbox row, only a new delivery of that notification on that channel.
+   */
+  redeliveryOf: { deliveryId: string; notificationId: string; channel: RemoteNotificationChannel } | null;
 };
 
 /**
@@ -71,6 +76,7 @@ export async function loadDispatchableEvent(db: DatabaseExecutor, eventId: strin
       recipients: notificationEventTable.recipients,
       status: notificationEventTable.status,
       isDemoSchool: schoolTable.isDemo,
+      redeliveryOfDeliveryId: notificationEventTable.redeliveryOfDeliveryId,
     })
     .from(notificationEventTable)
     .innerJoin(schoolTable, eq(schoolTable.id, notificationEventTable.schoolId))
@@ -84,6 +90,16 @@ export async function loadDispatchableEvent(db: DatabaseExecutor, eventId: strin
   if (!recipients.success || recipients.data.kind !== RECIPIENT_SPEC_KIND_BY_AUDIENCE[notificationCatalogue[event.type].audience]) {
     throw new NotificationDispatchError('The notification recipients do not match its audience.');
   }
+  let redeliveryOf: DispatchableEvent['redeliveryOf'] = null;
+  if (event.redeliveryOfDeliveryId) {
+    const [original] = await db
+      .select({ id: notificationDeliveryTable.id, notificationId: notificationDeliveryTable.notificationId, channel: notificationDeliveryTable.channel })
+      .from(notificationDeliveryTable)
+      .where(and(eq(notificationDeliveryTable.id, event.redeliveryOfDeliveryId), eq(notificationDeliveryTable.schoolId, event.schoolId)))
+      .limit(1);
+    if (!original) throw new NotificationDispatchError('The delivery to resend no longer exists.');
+    redeliveryOf = { deliveryId: original.id, notificationId: original.notificationId, channel: original.channel };
+  }
   return {
     id: event.id,
     schoolId: event.schoolId,
@@ -91,6 +107,7 @@ export async function loadDispatchableEvent(db: DatabaseExecutor, eventId: strin
     type: event.type,
     data: event.data,
     recipients: recipients.data,
+    redeliveryOf,
   };
 }
 
@@ -187,6 +204,8 @@ export type PlannedDelivery = {
   destination: string | null;
   status: 'owed' | 'skipped';
   skipReason: NotificationSkipReason | null;
+  /** The failed delivery a staff resend replaces; null for a first delivery. */
+  resendOfDeliveryId?: string | null;
 };
 
 /** One planned inbox row with its delivery rows. */
@@ -275,11 +294,72 @@ export async function insertNotificationChunk(
         destination: delivery.destination,
         status: delivery.status,
         skipReason: delivery.skipReason,
+        resendOfDeliveryId: delivery.resendOfDeliveryId ?? null,
       })),
     );
     if (deliveries.length > 0) {
       await tx.insert(notificationDeliveryTable).values(deliveries).onConflictDoNothing({ target: notificationDeliveryTable.id });
     }
+    return 'inserted';
+  });
+}
+
+/**
+ * The delivery rows a staff resend owes: the channel decides again for the
+ * recipient's current facts (number, consent, subscriptions, demo school),
+ * so a corrected number is used and a withdrawn consent is honoured. IDs are
+ * derived from the redelivery event, never colliding with the original.
+ */
+export function planRedeliveryRows(
+  event: Pick<DispatchableEvent, 'id' | 'isDemoSchool'> & { redeliveryOf: NonNullable<DispatchableEvent['redeliveryOf']> },
+  recipients: readonly ResolvedRecipient[],
+  adapters: Record<RemoteNotificationChannel, NotificationChannelAdapter> = notificationChannelAdapters,
+): PlannedDelivery[] {
+  const recipient = recipients[0];
+  if (!recipient) return [];
+  const { notificationId, channel, deliveryId } = event.redeliveryOf;
+  return decideDeliveries(adapters[channel], { isDemoSchool: event.isDemoSchool, recipient }).map((decision) => ({
+    id: notificationRedeliveryId(notificationId, channel, decision.destination, event.id),
+    channel,
+    destination: decision.destination,
+    status: decision.status,
+    skipReason: decision.status === 'skipped' ? decision.reason : null,
+    resendOfDeliveryId: deliveryId,
+  }));
+}
+
+/**
+ * Inserts a resend's delivery rows under the event's `FOR SHARE` lock (as
+ * {@link insertNotificationChunk}), `ON CONFLICT DO NOTHING`.
+ */
+export async function insertRedeliveryRows(
+  event: Pick<DispatchableEvent, 'id' | 'schoolId'> & { redeliveryOf: NonNullable<DispatchableEvent['redeliveryOf']> },
+  rows: readonly PlannedDelivery[],
+  db: typeof defaultDb = defaultDb,
+): Promise<'inserted' | 'event_gone'> {
+  return db.transaction(async (tx) => {
+    const [locked] = await tx
+      .select({ id: notificationEventTable.id })
+      .from(notificationEventTable)
+      .where(eq(notificationEventTable.id, event.id))
+      .for('share');
+    if (!locked) return 'event_gone';
+    if (rows.length === 0) return 'inserted';
+    await tx
+      .insert(notificationDeliveryTable)
+      .values(
+        rows.map((row) => ({
+          id: row.id,
+          notificationId: event.redeliveryOf.notificationId,
+          schoolId: event.schoolId,
+          channel: row.channel,
+          destination: row.destination,
+          status: row.status,
+          skipReason: row.skipReason,
+          resendOfDeliveryId: row.resendOfDeliveryId ?? null,
+        })),
+      )
+      .onConflictDoNothing({ target: notificationDeliveryTable.id });
     return 'inserted';
   });
 }
@@ -424,7 +504,8 @@ export type NotificationDispatchResult =
  * The dispatch loop shared by the workflow and the tests. Steps, in order:
  * load the pending event, resolve recipients (journaled, so replays plan the
  * same rows), insert rows chunk by chunk, mark the event dispatched, then
- * send the owed deliveries in throttled rounds ({@link sendInRounds}).
+ * send the owed deliveries in throttled rounds ({@link sendInRounds}). A
+ * redelivery event (staff resend) inserts only its new delivery rows.
  */
 export async function runNotificationDispatch(options: {
   eventId: string;
@@ -437,6 +518,16 @@ export async function runNotificationDispatch(options: {
   const event = await step('load-event', () => loadDispatchableEvent(defaultDb, eventId));
   if (!event) return { status: 'skipped' };
   const recipients = await step('resolve-recipients', () => resolveNotificationRecipients(defaultDb, event));
+  if (event.redeliveryOf) {
+    const redelivery = { ...event, redeliveryOf: event.redeliveryOf };
+    const rows = planRedeliveryRows(redelivery, recipients, adapters);
+    const inserted = await step('insert-redelivery', () => insertRedeliveryRows(redelivery, rows));
+    if (inserted === 'event_gone') return { status: 'event_gone' };
+    await step('mark-dispatched', () => markNotificationEventDispatched(defaultDb, eventId, 0));
+    const owedRedeliveries = rows.filter((row) => row.status === 'owed');
+    await sendInRounds(owedRedeliveries, { step, sleep, adapters });
+    return { status: 'dispatched', notificationCount: 0, owedDeliveryCount: owedRedeliveries.length };
+  }
   const planned = planNotificationRows(event, recipients, adapters);
   for (let start = 0; start < planned.length || start === 0; start += NOTIFICATION_INSERT_CHUNK) {
     const chunk = planned.slice(start, start + NOTIFICATION_INSERT_CHUNK);

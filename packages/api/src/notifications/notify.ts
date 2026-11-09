@@ -30,6 +30,11 @@ export type NotifyInput<T extends NotificationType> = {
   key: string;
   /** Staff member whose action emitted it; omit for system events. */
   createdBy?: string | null;
+  /**
+   * Only for a staff resend (`./redelivery.ts`): the failed delivery to
+   * send again. The event then writes no inbox row.
+   */
+  redeliveryOfDeliveryId?: string | null;
 };
 
 /** One emit of any type, correlated (`data` and `recipients` match `type`). */
@@ -85,6 +90,7 @@ function toEventRow(input: AnyNotifyInput) {
     data: data.data as Record<string, unknown>,
     recipients: deduplicated,
     createdBy: input.createdBy ?? null,
+    redeliveryOfDeliveryId: input.redeliveryOfDeliveryId ?? null,
   };
 }
 

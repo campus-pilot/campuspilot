@@ -58,6 +58,16 @@ export const listAdmissionsInputSchema = createListInputSchema({
       /** Session used to evaluate the independent classroom-placement filter. */
       placementSessionId: z.string().min(1).optional(),
       placementStatus: z.enum(["assigned", "unassigned"]).optional(),
+      /**
+       * WhatsApp readiness (D-4, D-8), first failing fact wins, as the
+       * WhatsApp channel decides: `no_number` (no WhatsApp number),
+       * `not_verified` (number not verified), `no_consent` (verified, no
+       * guardian consent), `ready` (all three), `needs_attention` (any of
+       * the first three).
+       */
+      whatsappStatus: z
+        .enum(["ready", "needs_attention", "no_number", "not_verified", "no_consent"])
+        .optional(),
     })
     .refine(
       ({ placementSessionId, placementStatus }) =>

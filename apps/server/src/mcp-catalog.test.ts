@@ -199,8 +199,9 @@ describe('catalog metadata', () => {
     expect(classified).toEqual([...leafNames].sort());
     expect(catalog.core.map(({ name }) => name).sort()).toEqual(CORE_TOOLS);
     expect(catalog.core).toHaveLength(36);
-    // +5 result notification tools (publication read/preview/publish, single preview/send).
-    expect(catalog.advanced).toHaveLength(90);
+    // +5 result notification tools (publication read/preview/publish, single
+    // preview/send) and +2 delivery log tools (list, resend).
+    expect(catalog.advanced).toHaveLength(92);
   });
 });
 

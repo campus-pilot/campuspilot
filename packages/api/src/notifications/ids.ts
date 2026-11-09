@@ -32,3 +32,18 @@ export function notificationDeliveryId(
 ) {
   return derive(PREFIX_MAP.notificationDelivery, [notificationId, channel, destination ?? '']);
 }
+
+/**
+ * Delivery row written by a staff resend (a redelivery event) of a failed
+ * delivery: derived from the same notification and channel plus the
+ * redelivery event, so it never collides with the original and a replayed
+ * resend inserts nothing new.
+ */
+export function notificationRedeliveryId(
+  notificationId: string,
+  channel: RemoteNotificationChannel,
+  destination: string | null,
+  redeliveryEventId: string,
+) {
+  return derive(PREFIX_MAP.notificationDelivery, [notificationId, channel, destination ?? '', 'redelivery', redeliveryEventId]);
+}

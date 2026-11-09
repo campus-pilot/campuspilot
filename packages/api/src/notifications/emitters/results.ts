@@ -273,7 +273,14 @@ export async function settleResultPublication(
         .select({ status: notificationDeliveryTable.status, claimedAt: notificationDeliveryTable.claimedAt })
         .from(notificationDeliveryTable)
         .innerJoin(notificationTable, eq(notificationTable.id, notificationDeliveryTable.notificationId))
-        .where(and(inArray(notificationTable.eventId, eventIds.slice(start, start + KEY_CHUNK)), eq(notificationDeliveryTable.channel, 'whatsapp')))),
+        .where(
+          and(
+            inArray(notificationTable.eventId, eventIds.slice(start, start + KEY_CHUNK)),
+            eq(notificationDeliveryTable.channel, 'whatsapp'),
+            // First copies only: a staff resend is a later, separate attempt.
+            isNull(notificationDeliveryTable.resendOfDeliveryId),
+          ),
+        )),
     );
   }
   const deliveryOpen = deliveries.some(

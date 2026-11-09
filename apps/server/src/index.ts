@@ -11,6 +11,7 @@ import { sweepDataMigrationOutbox } from '@campuspilot/api/data-migrations/data-
 import { sweepNotificationOutbox } from '@campuspilot/api/notifications/notification.outbox';
 import { sweepNotificationRetention } from '@campuspilot/api/notifications/retention';
 import { sweepResultPublications } from '@campuspilot/api/notifications/emitters/results';
+import { sweepWhatsAppFailureAlerts } from '@campuspilot/api/notifications/failure-alerts';
 
 import { app, cadetMcpCatalog, cadetMcpHandler, mcpCatalog, mcpHandler } from './http';
 import { log } from './log';
@@ -66,6 +67,8 @@ async function sweepNotifications() {
   // Finishes result publications whose deliveries settled (publisher notified once).
   const publications = await sweepResultPublications();
   if (publications.finished > 0) log.info(publications, 'notification.results.sweep.ok');
+  // Reports failed WhatsApp deliveries to staff granted to receive them (D-30).
+  await sweepWhatsAppFailureAlerts();
 }
 
 /** How often old notifications are deleted (see `@campuspilot/api/notifications/retention`). */

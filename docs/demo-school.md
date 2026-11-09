@@ -275,3 +275,9 @@ ingress.
   `schools/{schoolId}/`.
 - `packages/api/scripts/local-demo.ts` is kept as the separate one-off seeder of
   the dedicated `docker/local-demo` stack; it is not used by this feature.
+- Notifications: the seed's real posting procedures emit one notification event
+  per bill, billing run and payment, so a fresh demo's student and staff inboxes
+  fill once the worker fans them out. Demo schools never send outside the inbox:
+  every web push and WhatsApp copy is recorded `skipped: demo_school` (or
+  `disabled` while the channel is switched off), and resends of a demo delivery
+  are decided the same way.
