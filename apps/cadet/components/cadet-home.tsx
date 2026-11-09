@@ -6,13 +6,23 @@ import { redirect, useRouter } from 'next/navigation';
 
 import { authClient } from '@/lib/auth-client';
 import { orpc } from '@/lib/orpc';
+import { turnOffDeviceNotifications } from '@/lib/web-push.client';
+import { CadetSchoolChrome } from './cadet-school-chrome';
+import { CadetDeviceNotifications } from './notifications/cadet-device-notifications';
 import { CadetNotificationBell } from './notifications/cadet-notifications';
 
-/** Signs out of the Cadet Portal only; a staff session in the same browser stays. */
+/**
+ * Signs out of the Cadet Portal only; a staff session in the same browser
+ * stays. This device's notifications for the student are turned off first
+ * (best effort), so a signed-out device stops showing their notifications.
+ */
 function SignOutButton() {
   const router = useRouter();
   const signOut = useMutation({
-    mutationFn: () => authClient.signOut(),
+    mutationFn: async () => {
+      await turnOffDeviceNotifications().catch(() => undefined);
+      return authClient.signOut();
+    },
     onSuccess: () => router.replace('/sign-in'),
   });
   return (
@@ -36,6 +46,7 @@ export function CadetHome() {
   if (!session) redirect('/sign-in');
   return (
     <div className="flex flex-col gap-6">
+      <CadetSchoolChrome />
       <div className="flex items-start justify-between gap-2">
         <div className="flex flex-col gap-1">
           <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Cadet Portal</p>
@@ -43,6 +54,7 @@ export function CadetHome() {
         </div>
         <CadetNotificationBell />
       </div>
+      <CadetDeviceNotifications />
       <div>
         <SignOutButton />
       </div>

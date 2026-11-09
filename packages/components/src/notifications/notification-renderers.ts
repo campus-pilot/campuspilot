@@ -85,7 +85,9 @@ export function presentNotification(item: Pick<NotificationListItem, 'type' | 'd
 /** Catalogue types re-exported for app route builders (apps do not depend on `@campuspilot/db`). */
 export type {
   AdmissionNotificationType,
+  NotificationLinkFacts,
   NotificationPayloads,
   NotificationType,
   StaffNotificationType,
 } from '@campuspilot/db/notifications/catalogue';
+export { isNotificationType, notificationLinkFactKeys } from '@campuspilot/db/notifications/catalogue';

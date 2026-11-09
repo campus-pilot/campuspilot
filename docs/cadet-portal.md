@@ -343,6 +343,8 @@ Mirrors management: Next.js 16, oRPC + TanStack Query, TanStack Form,
 | `app/oauth/consent/page.tsx` → `components/oauth-consent.tsx` | Cadet MCP consent. |
 | `lib/orpc.ts` | `RPCLink` to `/api/cadet/rpc` with `credentials: 'include'`, typed `CadetRouterClient`. Never the staff `/rpc`. |
 | `lib/auth-client.ts` | Better Auth clients at `CADET_AUTH_BASE_PATH`. |
+| `components/cadet-school-chrome.tsx` | Signed-in pages only: links the school's Cadet manifest (`/blob/school/{id}/cadet.webmanifest`, per-school app id, scope = whole portal) and home-screen icon, and shows the phone install screen (shared `useInstallAppScreen`). Before sign-in the portal is not installable (the school is unknown). |
+| `public/sw.js` + `lib/web-push.client.ts` + `components/notifications/cadet-device-notifications.tsx` | Web push: the service worker (push → notification, click → `/notifications/open?type=…&<ids>` → route builders), registered only when the student taps **Turn on notifications** (permission requested inside the tap). One row per login and endpoint (`cadet_push_subscription`), so siblings on one phone each get their own; sign-out turns this device off for that student. iPhone/iPad: only inside the installed app. |
 
 Env comes from `@campuspilot/env/cadet.client` (`NEXT_PUBLIC_SERVER_URL`). No
 ids in URLs: who the student is comes from the `cpc_` cookie. No `useEffect`;
@@ -481,6 +483,8 @@ add it to `cadetAuthSchema`.
 | `CADET_APP_URL` | `@campuspilot/env/server` (`packages/env/src/server/auth.env.ts`); the worker needs it too, because the purge workflow imports the cadet auth instance | Cadet app origin: cadet trusted origin, CORS on `/api/cadet/*` and `/cadet/mcp`, MCP login/consent pages. Its own value, never derived from `PUBLIC_APP_URL`. Local: `http://localhost:3004`; production: `https://cadet.campuspilot.in`. |
 | `CADET_MCP_RESOURCE_URL` | server, worker | Canonical cadet MCP URL and token audience; no query, fragment or trailing slash. Local: `http://localhost:3000/cadet/mcp`; production: `https://api.campuspilot.in/cadet/mcp`. |
 | `NEXT_PUBLIC_SERVER_URL` | cadet app (`packages/env/src/cadet.client.ts`) | API origin. Local: `http://localhost:3000`; production: `https://api.campuspilot.in`. |
+| `NEXT_PUBLIC_VAPID_PUBLIC_KEY` | cadet app (build time) | Web push public key, equal to the server's `VAPID_PUBLIC_KEY`. Unset: the portal does not offer notifications. |
+| `WEB_PUSH_ENABLED`, `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | server, worker (`packages/env/src/server/web-push.env.ts`) | Web push kill switch (default off, off locally) and VAPID identity (`npx web-push generate-vapid-keys`; subject `mailto:`/`https:`), required when enabled. |
 
 Example values are in `apps/server/.env.example` and `apps/cadet/.env.example`.
 Cookie attributes (`COOKIE_DOMAIN`, `SAME_SITE_COOKIE`, `SECURE_COOKIES`) are
