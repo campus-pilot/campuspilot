@@ -68,4 +68,11 @@ describe("resolveAdmissionWhatsapp", () => {
     expect(resolveAdmissionWhatsapp(legacy, { whatsappConsent: true }))
       .toEqual({ whatsappNo: null, whatsappSameAsPhone: null, whatsappVerified: false, whatsappConsent: true });
   });
+
+  it("records an explicit choice when a never-recorded row gets a WhatsApp number, so the backfill cannot overwrite it", () => {
+    const legacy = { phoneNo: "9876543210", whatsappNo: null, whatsappSameAsPhone: null, whatsappVerified: false, whatsappConsent: false };
+    expect(resolveAdmissionWhatsapp(legacy, { whatsappNo: "+919123456789", whatsappVerified: true }))
+      .toEqual({ whatsappNo: "+919123456789", whatsappSameAsPhone: false, whatsappVerified: true, whatsappConsent: false });
+    expect(resolveAdmissionWhatsapp(legacy, { whatsappNo: null }).whatsappSameAsPhone).toBe(false);
+  });
 });

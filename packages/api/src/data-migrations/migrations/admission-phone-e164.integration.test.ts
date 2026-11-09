@@ -1,5 +1,6 @@
 import { db } from '@campuspilot/db';
 import { admissionTable } from '@campuspilot/db/schema/admission';
+import { dataMigrationSkippedItemTable } from '@campuspilot/db/schema/data-migration';
 import { eq, inArray } from 'drizzle-orm';
 import { beforeAll, describe, expect, it } from 'vitest';
 
@@ -42,6 +43,7 @@ describe('admission phone backfill (data migration)', () => {
     await legacy('foreign', '+1 415 555 2671');
     await legacy('twoNumbers', '9876543210 / 9123456789');
     await legacy('consented', '9123456789', { whatsappConsent: true });
+    await legacy('blank', '  ');
     // Recorded after Phase 1b: never touched by the backfill.
     await legacy('recorded', '+919000000001', { whatsappSameAsPhone: false, whatsappNo: '+14155552671', whatsappVerified: true });
   });
@@ -58,6 +60,9 @@ describe('admission phone backfill (data migration)', () => {
   it('backfills E.164 numbers and WhatsApp facts, reports unparseable values, and is idempotent', async () => {
     const run = await runMigration(false);
     expect(run.status).toBe('completed');
+    const reasons = await db.select().from(dataMigrationSkippedItemTable).where(eq(dataMigrationSkippedItemTable.runId, run.id));
+    expect(reasons.find((item) => item.itemKey === ids.blank)?.reason).toBe('blank_phone');
+    expect(reasons.find((item) => item.itemKey === ids.twoNumbers)?.reason).toBe('unparseable_phone');
     const after = await rows();
     expect(after.plain).toMatchObject({ phoneNo: '+919876543210', whatsappNo: '+919876543210', whatsappSameAsPhone: true, whatsappVerified: false, whatsappConsent: false });
     expect(after.spaced).toMatchObject({ phoneNo: '+919876543210', whatsappNo: '+919876543210', whatsappSameAsPhone: true });
@@ -65,6 +70,7 @@ describe('admission phone backfill (data migration)', () => {
     expect(after.twoNumbers).toMatchObject({ phoneNo: '+919876543210 / 9123456789', whatsappNo: null, whatsappSameAsPhone: false, whatsappVerified: false });
     // An explicitly recorded consent is kept.
     expect(after.consented).toMatchObject({ phoneNo: '+919123456789', whatsappConsent: true, whatsappVerified: false });
+    expect(after.blank).toMatchObject({ phoneNo: '  ', whatsappNo: null, whatsappSameAsPhone: false, whatsappVerified: false });
     expect(after.recorded).toMatchObject({ phoneNo: '+919000000001', whatsappNo: '+14155552671', whatsappSameAsPhone: false, whatsappVerified: true });
 
     const again = await runMigration(false);

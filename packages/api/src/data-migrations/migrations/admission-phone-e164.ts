@@ -11,7 +11,8 @@ const BACKFILL_CALLING_CODE = '+91';
 /** What the backfill writes for one admission whose WhatsApp choice was never recorded. */
 export type AdmissionPhoneBackfill =
   | { kind: 'parsed'; phoneNo: string; whatsappNo: string; whatsappSameAsPhone: true }
-  | { kind: 'unparseable'; phoneNo: string; whatsappNo: null; whatsappSameAsPhone: false };
+  | { kind: 'unparseable'; phoneNo: string; whatsappNo: null; whatsappSameAsPhone: false }
+  | { kind: 'blank'; phoneNo: string; whatsappNo: null; whatsappSameAsPhone: false };
 
 /**
  * The phone backfill for one stored value (D-2b, D-32):
@@ -28,8 +29,16 @@ export type AdmissionPhoneBackfill =
  *   again on the next run. False states the fact: there is no WhatsApp
  *   number taken from this phone. When staff correct the phone in the
  *   admission dialog, they choose again.
+ * - A blank value is kept unchanged (no `+91`), gets no WhatsApp number and
+ *   is reported, recorded like an unparseable value.
+ * - Values libphonenumber cannot read are not guessed at; e.g.
+ *   `0919876543210` (trunk 0 before the country code) is reported as
+ *   unparseable rather than having digits stripped heuristically.
  */
 export function backfillAdmissionPhone(stored: string): AdmissionPhoneBackfill {
+  // A blank value is not a number with a missing code: prefixing would store
+  // a bare "+91". It is kept exactly as stored and reported.
+  if (!stored.trim()) return { kind: 'blank', phoneNo: stored, whatsappNo: null, whatsappSameAsPhone: false };
   const e164 = toE164PhoneNumber(stored, DEFAULT_PHONE_COUNTRY);
   if (e164) return { kind: 'parsed', phoneNo: e164, whatsappNo: e164, whatsappSameAsPhone: true };
   const trimmed = stored.trim();
@@ -86,7 +95,8 @@ export const admissionPhoneE164Migration: DataMigration = {
       if (backfill.kind === 'parsed') {
         changed += 1;
       } else {
-        skipped.push({ itemKey: row.id, reason: 'unparseable_phone', detail: { schoolId: row.schoolId, admissionId: row.id } });
+        const reason = backfill.kind === 'blank' ? 'blank_phone' : 'unparseable_phone';
+        skipped.push({ itemKey: row.id, reason, detail: { schoolId: row.schoolId, admissionId: row.id } });
       }
     }
     return {

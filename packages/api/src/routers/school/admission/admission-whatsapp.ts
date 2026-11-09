@@ -27,6 +27,12 @@ export class AdmissionContactError extends Error {
  * update, from the stored row and the supplied changes. Rules, in order:
  *
  * 1. `whatsappSameAsPhone` is whatever was supplied, else what is stored.
+ *    Stored null means "no choice ever recorded" (a row from before Phase 1b
+ *    that the phone backfill has not reached yet; the backfill only visits
+ *    null rows). An update of such a row that supplies a WhatsApp number or
+ *    verification without the choice records `false` (the number is its own
+ *    value), so the backfill can never overwrite what staff entered. An
+ *    update that touches neither keeps null: the backfill still owns it.
  * 2. While it is true, the WhatsApp number is the (new) phone number: a
  *    different supplied `whatsappNo` is refused, and so is a phone number
  *    that is not valid E.164 (an unmigrated legacy value cannot become a
@@ -44,7 +50,11 @@ export function resolveAdmissionWhatsapp(
   changes: AdmissionContactChanges,
 ): AdmissionWhatsappState {
   const phoneNo = changes.phoneNo ?? current?.phoneNo;
-  const sameAsPhone = changes.whatsappSameAsPhone ?? current?.whatsappSameAsPhone ?? null;
+  const touchesWhatsapp = changes.whatsappNo !== undefined || changes.whatsappVerified !== undefined;
+  const sameAsPhone =
+    changes.whatsappSameAsPhone ??
+    current?.whatsappSameAsPhone ??
+    (touchesWhatsapp ? false : null);
   let whatsappNo: string | null;
   if (sameAsPhone === true) {
     if (!phoneNo || !isE164PhoneNumber(phoneNo)) {

@@ -21,4 +21,13 @@ describe('backfillAdmissionPhone', () => {
     // Never prefixed twice.
     expect(backfillAdmissionPhone('+91 ask at office')).toMatchObject({ kind: 'unparseable', phoneNo: '+91 ask at office' });
   });
+
+  it('keeps blank values unchanged instead of storing a bare +91', () => {
+    expect(backfillAdmissionPhone('')).toEqual({ kind: 'blank', phoneNo: '', whatsappNo: null, whatsappSameAsPhone: false });
+    expect(backfillAdmissionPhone('   ')).toEqual({ kind: 'blank', phoneNo: '   ', whatsappNo: null, whatsappSameAsPhone: false });
+  });
+
+  it('does not guess at a trunk 0 before the country code', () => {
+    expect(backfillAdmissionPhone('0919876543210')).toMatchObject({ kind: 'unparseable', whatsappNo: null });
+  });
 });
