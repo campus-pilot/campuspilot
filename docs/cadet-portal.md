@@ -302,10 +302,8 @@ Remark, attendance and activities attach only to the record holding the results.
 **Release and averages.** Results are visible only after the school's explicit
 `releaseExamToCadet` (staff, exam transition permission), which needs a
 completed exam and blocks reopening and legacy plan changes until
-`withdrawExamFromCadet`. Its optional `releasedAt` records an earlier release
-(e.g. the demo seed's back-dated history); it defaults to now, may not be in
-the future, and does not change when students can see the results (from the
-call on). Release freezes marks and remarks, not labels or grading
+`withdrawExamFromCadet`. The release time is always when the call was made;
+only the demo seed back-dates it (see `docs/demo-school.md`). Release freezes marks and remarks, not labels or grading
 (no snapshot). Remarks (`exam_student_remark`) are written in the management
 student result page and are locked while released. Class averages appear only
 when the school setting `cadet_show_class_averages` is on (school settings) and
@@ -499,7 +497,8 @@ add it to `cadetAuthSchema`.
   clock (also in demos). Averages have known limits (collusion at exactly 5,
   differencing across withdraw/re-release), documented at
   `CADET_CLASS_AVERAGE_MIN_STUDENTS`.
-- **"New result" is not tracked**: Home shows the latest released result.
+- **"New result" is not tracked**: Home announces the latest released result
+  for `NEW_RESULT_ALERT_DAYS` (14) days after its release, whether or not it was opened.
 
 - **Per-school portal feature flag**: every school can issue passwords today.
 - **Guardian accounts**: one login per admission; a multi-child guardian login

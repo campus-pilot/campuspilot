@@ -31,17 +31,22 @@ export function Greeting({ profile, hour }: { profile: CadetProfileDto; hour: nu
   );
 }
 
+/** How long after its release a result is announced on Home. */
+export const NEW_RESULT_ALERT_DAYS = 14;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 /**
- * The most recently released result of the current class. The portal does
- * not track which results a student has opened, so this always shows the
- * latest release rather than claiming it is unseen.
+ * The most recently released result of the current class, announced for
+ * {@link NEW_RESULT_ALERT_DAYS} days after its release and then dropped (the
+ * result stays in Results). The portal does not track which results a student
+ * has opened, so the alert never claims a result is unseen.
  */
-export function LatestResultAlert({ exams }: { exams: CadetExamListItemDto[] }) {
+export function LatestResultAlert({ exams, now }: { exams: CadetExamListItemDto[]; now: Date }) {
   const latest = exams
     // Only results with the student's own marks: a class record they moved into may list a released exam they did not sit.
     .filter((exam) => exam.state === 'released' && exam.releasedAt && exam.percentage !== null)
     .sort((a, b) => new Date(b.releasedAt!).getTime() - new Date(a.releasedAt!).getTime())[0];
-  if (!latest) return null;
+  if (!latest || now.getTime() - new Date(latest.releasedAt!).getTime() > NEW_RESULT_ALERT_DAYS * DAY_MS) return null;
   const facts = [
     `Released ${formatDate(latest.releasedAt!, { withYear: false })}`,
     latest.percentage !== null ? formatPercent(latest.percentage) : null,
@@ -108,7 +113,7 @@ function HomeResults({ classKnown }: { classKnown: boolean }) {
   if (!classKnown) return null;
   if (exams.isPending) return <Skeleton className="h-24 w-full" aria-label="Loading results" />;
   if (exams.isError) return <ScreenError title="Could not load results" error={exams.error} onRetry={() => void exams.refetch()} />;
-  return <LatestResultAlert exams={exams.data.items} />;
+  return <LatestResultAlert exams={exams.data.items} now={new Date()} />;
 }
 
 function HomeFees() {

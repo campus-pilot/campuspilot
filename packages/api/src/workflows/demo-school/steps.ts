@@ -10,6 +10,7 @@ import {
   financePaymentTable,
 } from '@campuspilot/db/schema/finance';
 import type { DemoSchoolJobResult } from '@campuspilot/db/schema/demo-school-job';
+import { examLifecycleTable } from '@campuspilot/db/schema/exam';
 import type { FinanceSchemaConfig } from '@campuspilot/db/schema/jsonb/finance-config';
 import { schoolTable } from '@campuspilot/db/schema/school';
 import { schoolMemberTable } from '@campuspilot/db/schema/school-member';
@@ -18,7 +19,7 @@ import { studentTable } from '@campuspilot/db/schema/student';
 import { env } from '@campuspilot/env/server';
 import { getS3Client } from '@campuspilot/s3/client';
 import { createRouterClient, type RouterClient } from '@orpc/server';
-import { and, count, eq, inArray, sql, sum } from 'drizzle-orm';
+import { and, count, eq, inArray, isNotNull, sql, sum } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 
 import { SCHOOL_ACTIONS } from '@campuspilot/opa/policies/school';
@@ -474,8 +475,11 @@ export async function seedExamRemarks(
  * Releases a completed exam to the Cadet Portal when the plan says so.
  * Returns what actually happened: `released` (this run released it),
  * `already-released` (a replay found it released) or `skipped` (not planned,
- * or the exam is not completed). The release is back-dated to the plan's
- * `cadetReleasedAt`, derived from `asOf` like every other demo date.
+ * or the exam is not completed). The release goes through the real,
+ * permission-checked `releaseExamToCadet` (which stamps the current time),
+ * then {@link backdateDemoExamRelease} moves the time to the plan's
+ * `cadetReleasedAt`, derived from `asOf` like every other demo date. A replay
+ * re-applies the back-dating, so a crash between the two calls heals.
  */
 export async function seedExamRelease(
   ctx: SeedContext,
@@ -485,10 +489,33 @@ export async function seedExamRelease(
   if (!exam.cadetReleasedAt) return { outcome: 'skipped' };
   const scope = { schoolId: ctx.schoolId, sessionId, examSlug: exam.slug };
   const overview = await ctx.rpc.school.getExamOverview(scope);
-  if (overview.cadetReleasedAt) return { outcome: 'already-released' };
-  if (overview.status !== 'completed') return { outcome: 'skipped' };
-  await ctx.rpc.school.releaseExamToCadet({ ...scope, releasedAt: exam.cadetReleasedAt });
-  return { outcome: 'released' };
+  if (overview.status !== 'completed' && !overview.cadetReleasedAt) return { outcome: 'skipped' };
+  const outcome = overview.cadetReleasedAt ? 'already-released' : 'released';
+  if (outcome === 'released') await ctx.rpc.school.releaseExamToCadet(scope);
+  await backdateDemoExamRelease(scope, new Date(exam.cadetReleasedAt));
+  return { outcome };
+}
+
+/**
+ * Demo-only: sets a released exam's Cadet release time. Staff, the API and
+ * MCP cannot back-date a release (the procedure always records "now"); only
+ * this seed step can, and only for a demo school (`school.is_demo`), so it can
+ * never rewrite a real school's history.
+ */
+async function backdateDemoExamRelease(scope: { schoolId: string; sessionId: string; examSlug: string }, releasedAt: Date) {
+  const [school] = await db.select({ isDemo: schoolTable.isDemo }).from(schoolTable).where(eq(schoolTable.id, scope.schoolId)).limit(1);
+  if (!school?.isDemo) throw new DemoSeedError('Only a demo school’s release times can be back-dated.');
+  await db
+    .update(examLifecycleTable)
+    .set({ cadetReleasedAt: releasedAt })
+    .where(
+      and(
+        eq(examLifecycleTable.schoolId, scope.schoolId),
+        eq(examLifecycleTable.sessionId, scope.sessionId),
+        eq(examLifecycleTable.examSlug, scope.examSlug),
+        isNotNull(examLifecycleTable.cadetReleasedAt),
+      ),
+    );
 }
 
 // ---------------------------------------------------------------------------

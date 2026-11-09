@@ -98,10 +98,11 @@ Release times are back-dated from `asOf` like every other demo date: each
 released exam is released `session.cadetRelease.daysAfterWindow` days after its
 window at `cadetRelease.hour` local time (`plan.ts`). The seed schema keeps
 that within `activeWithinDaysAfterWindow`, so a release always falls after the
-exam's marks were complete and before `asOf`. The step passes the time as
-`releasedAt` to the real `releaseExamToCadet` procedure; this optional input is
-not demo-only: staff may record a release that already happened, never one in
-the future.
+exam's marks were complete and before `asOf`. The step releases through the
+real `releaseExamToCadet` procedure (which records the current time) and then
+sets the planned time directly on `exam_lifecycle`, refusing any school that is
+not `is_demo`. Back-dating is deliberately not part of the API or MCP: staff
+releases always record when they happened.
 
 ### Credentials
 

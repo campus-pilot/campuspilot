@@ -22,7 +22,7 @@ export const schoolExamCadetRouter = {
     .route(
       route(
         'Release examination results to the Cadet Portal',
-        'Make a completed examination’s results, remarks and co-scholastic grades visible to its students in the Cadet Portal. Records who released it and when (now, or an earlier releasedAt for a release that already happened). Reopening is refused while released.',
+        'Make a completed examination’s results, remarks and co-scholastic grades visible to its students in the Cadet Portal. Records who released it and when. Reopening is refused while released.',
       ),
     )
     .meta({
@@ -33,14 +33,13 @@ export const schoolExamCadetRouter = {
         module: 'exams',
       },
     })
-    .input(dto.releaseExamToCadetInputSchema)
+    .input(dto.examScopeSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.TRANSITION_EXAM_PLAN))
     .output(dto.examOverviewSchema)
     .handler(async ({ context, input }) => {
-      const { releasedAt, ...scope } = input;
       try {
         return await context.db.transaction((tx) =>
-          setExamCadetRelease(tx, scope, { userId: context.session.user.id, releasedAt }),
+          setExamCadetRelease(tx, input, { userId: context.session.user.id }),
         );
       } catch (error) {
         throw toRpcError(error);

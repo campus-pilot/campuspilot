@@ -1,5 +1,5 @@
 import { screen } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { exams, newStudent, profile, summary } from '@/test/fixtures';
 import { page, renderWithQuery, resetHandlers } from '@/test/orpc-mock';
@@ -7,12 +7,21 @@ import { Greeting, HomeScreen, LatestResultAlert } from './home-screen';
 
 vi.mock('@/lib/orpc', async () => ({ orpc: (await import('@/test/orpc-mock')).orpcMock }));
 
+// Five days after the Half-Yearly fixture's release (2026-10-04), inside the alert window.
+const SOON_AFTER = new Date('2026-10-09T09:00:00Z');
+
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(SOON_AFTER);
   resetHandlers({
     getProfile: () => profile,
     listExams: () => ({ ...page(exams), record: { recordId: 'stu_b.cls7', classLabel: 'Class 7', sectionLabel: 'B', sessionLabel: '2026–27' } }),
     getFeeSummary: () => summary,
   });
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe('HomeScreen', () => {
@@ -72,7 +81,7 @@ describe('HomeScreen', () => {
 
   it('skips a released exam without the student\'s marks in the result alert', () => {
     renderWithQuery(
-      <LatestResultAlert exams={[{ ...exams[1]!, examId: 'x.y.z', name: 'Not sat', releasedAt: new Date('2026-11-01T00:00:00Z'), percentage: null, grade: null }, exams[1]!]} />,
+      <LatestResultAlert exams={[{ ...exams[1]!, examId: 'x.y.z', name: 'Not sat', releasedAt: new Date('2026-11-01T00:00:00Z'), percentage: null, grade: null }, exams[1]!]} now={SOON_AFTER} />,
     );
     expect(screen.getByText('Half-Yearly results are out')).toBeTruthy();
     expect(screen.queryByText(/Not sat/)).toBeNull();
@@ -81,5 +90,14 @@ describe('HomeScreen', () => {
   it('greets by the time of day', () => {
     renderWithQuery(<Greeting profile={profile} hour={19} />);
     expect(screen.getByText('Good evening')).toBeTruthy();
+  });
+
+  it('announces a result for 14 days after its release, then drops it', () => {
+    const released = exams[1]!.releasedAt!.getTime();
+    const day = 24 * 60 * 60 * 1000;
+    const { rerender } = renderWithQuery(<LatestResultAlert exams={exams} now={new Date(released + 14 * day)} />);
+    expect(screen.getByText('Half-Yearly results are out')).toBeTruthy();
+    rerender(<LatestResultAlert exams={exams} now={new Date(released + 14 * day + 1)} />);
+    expect(screen.queryByText(/results are out/)).toBeNull();
   });
 });

@@ -59,7 +59,7 @@ export async function requireNotReleasedToCadet(tx: DatabaseTransaction, scope: 
 export async function setExamCadetRelease(
   tx: DatabaseTransaction,
   scope: ExamScope,
-  release: { userId: string; releasedAt?: Date } | null,
+  release: { userId: string } | null,
 ) {
   await getExam(tx, scope);
   const [lifecycle] = await tx
@@ -76,8 +76,6 @@ export async function setExamCadetRelease(
       throw rpcError.badRequest(
         'These results are already released to the Cadet Portal.',
       );
-    if (release.releasedAt && release.releasedAt.getTime() > Date.now())
-      throw rpcError.badRequest('The release time cannot be in the future.');
   } else if (!lifecycle?.cadetReleasedAt) {
     throw rpcError.badRequest(
       'These results are not released to the Cadet Portal.',
@@ -86,7 +84,7 @@ export async function setExamCadetRelease(
   await tx
     .update(examLifecycleTable)
     .set({
-      cadetReleasedAt: release ? (release.releasedAt ?? new Date()) : null,
+      cadetReleasedAt: release ? new Date() : null,
       cadetReleasedBy: release ? release.userId : null,
     })
     .where(lifecycleWhere(scope));
