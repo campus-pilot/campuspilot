@@ -25,6 +25,12 @@ describe('web push rendering', () => {
       tag: 'ntf_1',
     });
     expect(message!.url).not.toContain('Meera');
+    // A result links with the enrollment and class the Cadet result screen needs (D-44).
+    expect(
+      renderWebPushMessage('ntf_3', 'exam.results_published', {
+        sessionId: 'sess_1', examSlug: 'final', examName: 'Final', admissionId: 'adm_1', studentId: 'stu_1', classId: 'cls_1', studentName: 'Meera Singh',
+      })!.url,
+    ).toBe('/notifications/open?type=exam.results_published&sessionId=sess_1&examSlug=final&studentId=stu_1&classId=cls_1');
     expect(renderWebPushMessage('ntf_2', 'billing.run_posted', { billRunId: 'x', sessionId: 's', periodKey: 'p', billCount: 1 })).toBeNull();
   });
 

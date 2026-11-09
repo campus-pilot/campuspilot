@@ -5,20 +5,22 @@ import {
   type NotificationListItem,
 } from '@campuspilot/components/notifications';
 
+import { billHref, examResultHref, FEES_HREF } from '@/lib/route-param';
+
 type CadetRouteBuilder<T extends AdmissionNotificationType> = (facts: NotificationLinkFacts<T>) => string | null;
 
 /**
- * Cadet Portal route builders (D-21), exhaustive over the student audience.
- * They take only a type's link facts (identifiers), so the same builder
- * serves an inbox row and a web push click (`/notifications/open`).
- * The portal has no bill, receipt or results pages yet (plan Phases 5–6,
- * D-18), so every type links nowhere for now and is read in the inbox
- * itself; when a page exists, only its builder changes.
+ * Cadet Portal route builders (D-21, D-44), exhaustive over the student
+ * audience. They take only a type's link facts (identifiers), so the same
+ * builder serves an inbox row and a web push click (`/notifications/open`).
+ * A bill opens its bill on the Fees screen; a payment opens the Fees ledger
+ * (the portal has no receipt page); a result opens that exam's result for
+ * the enrollment and class named in the notification.
  */
 export const cadetNotificationRoutes: { [T in AdmissionNotificationType]: CadetRouteBuilder<T> } = {
-  'bill.issued': () => null,
-  'payment.received': () => null,
-  'exam.results_published': () => null,
+  'bill.issued': ({ billId }) => billHref(billId),
+  'payment.received': () => FEES_HREF,
+  'exam.results_published': ({ studentId, classId, examSlug }) => examResultHref({ studentId, classId, examSlug }),
 };
 
 function isAdmissionType(type: string): type is AdmissionNotificationType {
