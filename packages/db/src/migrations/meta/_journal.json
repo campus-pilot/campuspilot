@@ -246,6 +246,20 @@
       "when": 1794233102689,
       "tag": "0034_demo-purge-notifications",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1794234359969,
+      "tag": "0035_cadet-push-subscription",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1794234367659,
+      "tag": "0036_demo-purge-push-subscriptions",
+      "breakpoints": true
     }
   ]
 }

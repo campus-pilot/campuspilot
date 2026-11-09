@@ -147,6 +147,41 @@ export const notificationCatalogue = {
   "billing.run_posted": { audience: "staff_user", channels: ["in_app"] },
 } as const satisfies Record<NotificationType, NotificationCatalogueEntry>;
 
+/**
+ * The facts of each type that may appear in a link (for example the URL a
+ * web push opens): identifiers only, never names, amounts or numbers a
+ * person reads. A route builder that must also work from a link (the Cadet
+ * Portal's, used by push clicks) takes exactly these facts, so a route can
+ * be built from a full row and from a link alike.
+ */
+export const notificationLinkFactKeys = {
+  "bill.issued": ["billId", "sessionId"],
+  "payment.received": ["paymentId", "sessionId"],
+  "exam.results_published": ["sessionId", "examSlug"],
+  "exam.results_publish_finished": ["sessionId", "examSlug"],
+  "notification.whatsapp_failed": ["admissionId"],
+  "billing.run_posted": ["billRunId", "sessionId"],
+} as const satisfies { [T in NotificationType]: readonly (keyof NotificationPayloads[T])[] };
+
+/** The link facts of a type. */
+export type NotificationLinkFacts<T extends NotificationType> = Pick<
+  NotificationPayloads[T],
+  Extract<(typeof notificationLinkFactKeys)[T][number], keyof NotificationPayloads[T]>
+>;
+
+/** Picks a row's link facts (absent optional facts are left out). */
+export function pickNotificationLinkFacts<T extends NotificationType>(
+  type: T,
+  data: Record<string, unknown>,
+): Record<string, string> {
+  const facts: Record<string, string> = {};
+  for (const key of notificationLinkFactKeys[type] as readonly string[]) {
+    const value = data[key];
+    if (typeof value === "string") facts[key] = value;
+  }
+  return facts;
+}
+
 /** Every known type, in catalogue order. */
 export const NOTIFICATION_TYPES = Object.keys(
   notificationCatalogue,

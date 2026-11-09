@@ -19,6 +19,7 @@ import {
 } from "../notifications/catalogue";
 import { admissionTable } from "./admission";
 import { user } from "./auth";
+import { cadetUser } from "./cadet";
 import { schoolTable } from "./school";
 
 /**
@@ -275,6 +276,57 @@ export const notificationDeliveryTable = pgTable(
   ],
 );
 
+/**
+ * One browser push subscription of one Cadet Portal login (plan §3b, D-33).
+ * A browser profile has one push endpoint per site, so siblings who sign in
+ * on the same phone share an endpoint and each get their own row: unique on
+ * (login, endpoint). Rows are never reused across logins and go with the
+ * login (cascade).
+ *
+ * `revoked_at` is set when the student turns notifications off on the
+ * device, signs out there, or the push service reports the endpoint gone
+ * (404/410). A revoked row is never sent to; subscribing again on the same
+ * device clears it and stores the browser's current keys.
+ */
+export const cadetPushSubscriptionTable = pgTable(
+  "cadet_push_subscription",
+  {
+    id: text("id")
+      .primaryKey()
+      .$default(() => generateId("cadetPushSubscription")),
+    cadetUserId: text("cadet_user_id")
+      .notNull()
+      .references(() => cadetUser.id, { onDelete: "cascade" }),
+    /** The push service URL the browser issued; secret-ish, never logged. */
+    endpoint: text("endpoint").notNull(),
+    /** Browser's P-256 ECDH public key (base64url) for payload encryption. */
+    p256dh: text("p256dh").notNull(),
+    /** Browser's auth secret (base64url) for payload encryption. */
+    auth: text("auth").notNull(),
+    /** User-Agent of the subscribing request, for staff support only. */
+    userAgent: text("user_agent"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    /** When a push service last accepted a message for it. */
+    lastSuccessAt: timestamp("last_success_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex("cadet_push_subscription_user_endpoint_unique").on(
+      table.cadetUserId,
+      table.endpoint,
+    ),
+    index("cadet_push_subscription_active_idx")
+      .on(table.cadetUserId)
+      .where(sql`${table.revokedAt} is null`),
+  ],
+);
+
+export type CadetPushSubscriptionRow = typeof cadetPushSubscriptionTable.$inferSelect;
 export type NotificationEventRow = typeof notificationEventTable.$inferSelect;
 export type NotificationRow = typeof notificationTable.$inferSelect;
 export type NotificationDeliveryRow = typeof notificationDeliveryTable.$inferSelect;
