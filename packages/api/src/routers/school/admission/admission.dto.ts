@@ -48,6 +48,12 @@ export const listAdmissionsInputSchema = createListInputSchema({
       /** Session used to evaluate the independent classroom-placement filter. */
       placementSessionId: z.string().min(1).optional(),
       placementStatus: z.enum(["assigned", "unassigned"]).optional(),
+      /**
+       * Class the admission's student row holds in the placement session.
+       * Independent of `admissionClassId` (the class applied for) and of
+       * `placementStatus`, which additionally requires a section.
+       */
+      placementClassId: z.string().min(1).optional(),
     })
     .refine(
       ({ placementSessionId, placementStatus }) =>
@@ -55,6 +61,13 @@ export const listAdmissionsInputSchema = createListInputSchema({
       {
         message:
           "Placement status requires an explicit placement session.",
+      },
+    )
+    .refine(
+      ({ placementSessionId, placementClassId }) =>
+        placementClassId === undefined || placementSessionId !== undefined,
+      {
+        message: "Placement class requires an explicit placement session.",
       },
     )
     .optional(),

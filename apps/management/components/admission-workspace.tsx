@@ -1,46 +1,21 @@
 'use client';
 
 import type { ReactNode } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { Tabs, TabsList, TabsTrigger } from '@campuspilot/ui/components/tabs';
-import { ProfileImageEditor } from '@campuspilot/components/profile-image-editor';
-import type { AdmissionRecord } from '@campuspilot/components/admission';
 import { usePathname, useRouter } from 'next/navigation';
 
 import { orpc } from '@/lib/orpc';
 import { AdmissionActions } from './admission-actions';
+import { AdmissionPhotoEditor } from './admission-photo-editor';
 import { RequirePermissions } from './require-permissions';
 import { SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
-import { getAdmissionPhotoUrl, uploadAdmissionPhoto } from '@/lib/admission-photo';
 
 type WorkspaceItem = { id: string; label: string };
 const items: WorkspaceItem[] = [
   { id: 'details', label: 'Details' },
   { id: 'ledger', label: 'Ledger' },
 ];
-
-function AdmissionHeaderPhoto({ schoolId, admissionId, admission }: { schoolId: string; admissionId: string; admission: AdmissionRecord }) {
-  const queryClient = useQueryClient();
-  const imageUrl = getAdmissionPhotoUrl(schoolId, admissionId, admission.photoS3Key);
-  const editor = (canEdit: boolean) => (
-    <ProfileImageEditor
-      compact
-      imageUrl={imageUrl}
-      name={admission.name}
-      subject="student photo"
-      label="Photo"
-      canEdit={canEdit && admission.registered}
-      onUpload={canEdit ? async (file, options) => {
-        await uploadAdmissionPhoto(schoolId, admissionId, file, options);
-        await Promise.all([
-          queryClient.invalidateQueries({ queryKey: orpc.school.getAdmission.queryKey({ input: { schoolId, admissionId } }) }),
-          queryClient.invalidateQueries({ queryKey: orpc.school.listAdmissions.queryKey({ input: { schoolId } }) }),
-        ]);
-      } : undefined}
-    />
-  );
-  return <RequirePermissions permissions={{ action: SCHOOL_ACTIONS.UPDATE_ADMISSION, resource: { kind: 'school', schoolId } }} fallback={editor(false)}>{editor(true)}</RequirePermissions>;
-}
 
 export function AdmissionWorkspace({ children, schoolId, admissionId }: { children: ReactNode; schoolId: string; admissionId: string }) {
   const pathname = usePathname();
@@ -53,7 +28,7 @@ export function AdmissionWorkspace({ children, schoolId, admissionId }: { childr
     <section className="mx-auto flex w-full max-w-7xl flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-3">
-          {admissionQuery.data ? <AdmissionHeaderPhoto schoolId={schoolId} admissionId={admissionId} admission={admissionQuery.data} /> : <span className="size-10 shrink-0 animate-pulse rounded-full bg-muted" />}
+          {admissionQuery.data ? <AdmissionPhotoEditor schoolId={schoolId} admission={admissionQuery.data} /> : <span className="size-10 shrink-0 animate-pulse rounded-full bg-muted" />}
           <div className="min-w-0">
             <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Admission</p>
             <h1 className="truncate text-xl font-semibold tracking-tight">{admissionQuery.data?.name ?? 'Loading admission…'}</h1>
