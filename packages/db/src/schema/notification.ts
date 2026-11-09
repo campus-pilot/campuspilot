@@ -137,6 +137,13 @@ export const notificationEventTable = pgTable(
     lastSubmitError: text("last_submit_error"),
     /** Restate invocation of the `NotificationDispatch` workflow. */
     invocationId: text("invocation_id"),
+    /**
+     * When the outbox sweep last checked this accepted event's invocation
+     * against Restate. The sweep checks the least recently checked events
+     * first, so fan-outs that legitimately run for hours (durable send
+     * backoff) cannot keep newer events from ever being checked.
+     */
+    staleCheckedAt: timestamp("stale_checked_at", { withTimezone: true }),
     /** Inbox rows the fan-out created (set when dispatched). */
     notificationCount: integer("notification_count"),
     dispatchedAt: timestamp("dispatched_at", { withTimezone: true }),

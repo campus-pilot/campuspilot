@@ -64,12 +64,26 @@ async function sweepDataMigrations(register: boolean) {
 async function sweepNotifications() {
   const result = await sweepNotificationOutbox();
   if (Object.values(result).some((value) => value > 0)) log.info(result, 'notification.outbox.ok');
-  // Finishes result publications whose deliveries settled (publisher notified once).
+}
+
+/** Finishes result publications whose deliveries settled (publisher notified once). */
+async function sweepPublications() {
   const publications = await sweepResultPublications();
   if (publications.finished > 0) log.info(publications, 'notification.results.sweep.ok');
-  // Reports failed WhatsApp deliveries to staff granted to receive them (D-30).
-  await sweepWhatsAppFailureAlerts();
 }
+
+/**
+ * The sweeps of the chained 30 s loop, in order. Each runs in isolation: a
+ * failing sweep (for example Restate unreachable) is logged under its own
+ * error message and never keeps the later, database-only sweeps from running.
+ */
+const OUTBOX_SWEEPS: ReadonlyArray<{ errorMessage: string; run: () => Promise<void> }> = [
+  { errorMessage: 'demo-school.outbox.error', run: sweepDemoOutbox },
+  { errorMessage: 'notification.outbox.error', run: sweepNotifications },
+  { errorMessage: 'notification.results.sweep.error', run: sweepPublications },
+  // Reports failed WhatsApp deliveries to staff granted to receive them (D-30).
+  { errorMessage: 'notification.failure-alerts.error', run: async () => { await sweepWhatsAppFailureAlerts(); } },
+];
 
 /** How often old notifications are deleted (see `@campuspilot/api/notifications/retention`). */
 const NOTIFICATION_RETENTION_INTERVAL_MS = 24 * 60 * 60 * 1000;
@@ -120,7 +134,8 @@ async function main() {
   notificationRetention.unref();
   // Chained, not setInterval: the next sweep is scheduled only after the
   // previous one finished, so slow sweeps never overlap on this instance.
-  // Across replicas, the sweep claims rows with FOR UPDATE SKIP LOCKED.
+  // Across replicas, every write of a sweep is conditional, so overlapping
+  // sweeps on two instances change nothing twice.
   let demoOutbox: NodeJS.Timeout | undefined;
   let stopped = false;
   // Registration of pending data migrations is retried on every sweep until
@@ -128,20 +143,17 @@ async function main() {
   let dataMigrationsRegistered = false;
   const sweepOutbox = async () => {
     try {
-      await sweepDemoOutbox();
-    } catch (err) {
-      log.error({ err }, 'demo-school.outbox.error');
-    }
-    try {
       await sweepDataMigrations(!dataMigrationsRegistered);
       dataMigrationsRegistered = true;
     } catch (err) {
       log.error({ err }, 'data-migration.outbox.error');
     }
-    try {
-      await sweepNotifications();
-    } catch (err) {
-      log.error({ err }, 'notification.outbox.error');
+    for (const sweep of OUTBOX_SWEEPS) {
+      try {
+        await sweep.run();
+      } catch (err) {
+        log.error({ err }, sweep.errorMessage);
+      }
     }
     if (stopped) return;
     demoOutbox = setTimeout(() => void sweepOutbox(), DEMO_OUTBOX_INTERVAL_MS);

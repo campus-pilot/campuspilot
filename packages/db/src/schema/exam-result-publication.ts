@@ -82,6 +82,12 @@ export const examResultPublicationTable = pgTable(
     /** When every delivery had settled and the publisher was notified. */
     finishedAt: timestamp("finished_at", { withTimezone: true }),
     outcome: jsonb("outcome").$type<ResultPublicationOutcome>(),
+    /**
+     * When the API sweep last checked whether this publication settled. The
+     * sweep checks the least recently checked first, so publications whose
+     * deliveries are still retrying cannot starve newer ones.
+     */
+    settleCheckedAt: timestamp("settle_checked_at", { withTimezone: true }),
   },
   (table) => [
     uniqueIndex("exam_result_publication_exam_unique").on(

@@ -43,18 +43,27 @@ function describeHandoverError(error: unknown) {
 }
 
 /**
- * Sends a pending run that Restate has not accepted yet. Every write is
- * conditional on the run still being unsubmitted, so a send racing another
- * replica changes nothing twice.
+ * Sends a pending run that Restate has not accepted yet; true when Restate
+ * accepted it. See {@link handOverDataMigrationRun}.
  */
 export async function dispatchDataMigrationRun(db: DatabaseExecutor, runId: string): Promise<boolean> {
+  return (await handOverDataMigrationRun(db, runId)) === 'sent';
+}
+
+/**
+ * Sends a pending run that Restate has not accepted yet. Every write is
+ * conditional on the run still being unsubmitted, so a send racing another
+ * replica changes nothing twice (both carry the same idempotency key).
+ * `failed` means Restate did not accept it (unreachable, timed out).
+ */
+async function handOverDataMigrationRun(db: DatabaseExecutor, runId: string): Promise<'sent' | 'not_pending' | 'failed'> {
   const unsubmitted = and(
     eq(dataMigrationRunTable.id, runId),
     eq(dataMigrationRunTable.status, 'pending'),
     isNull(dataMigrationRunTable.submittedAt),
   );
   const [run] = await db.select({ id: dataMigrationRunTable.id }).from(dataMigrationRunTable).where(unsubmitted).limit(1);
-  if (!run) return false;
+  if (!run) return 'not_pending';
   try {
     const { invocationId } = await sendDataMigrationStart(runId);
     await db
@@ -67,14 +76,14 @@ export async function dispatchDataMigrationRun(db: DatabaseExecutor, runId: stri
         updatedAt: new Date(),
       })
       .where(unsubmitted);
-    return true;
+    return 'sent';
   } catch (error) {
     await db
       .update(dataMigrationRunTable)
       .set({ submitAttempts: sql`${dataMigrationRunTable.submitAttempts} + 1`, lastSubmitError: describeHandoverError(error), updatedAt: new Date() })
       .where(unsubmitted);
     log.warn({ runId, reason: describeHandoverError(error) }, 'data-migration.handover.failed');
-    return false;
+    return 'failed';
   }
 }
 
@@ -88,7 +97,13 @@ export function handOffDataMigrationRun(runId: string, db: DatabaseExecutor = de
   });
 }
 
-/** Claims unsubmitted pending runs (`FOR UPDATE SKIP LOCKED`, so replicas take disjoint rows). */
+/**
+ * Picks unsubmitted pending runs, oldest first. The `FOR UPDATE SKIP LOCKED`
+ * only keeps two replicas from picking the same rows at the same instant:
+ * the lock ends when this transaction commits, before any send, so it is not
+ * a claim. Concurrent sends of one run are harmless (same idempotency key,
+ * writes conditional on still being unsubmitted).
+ */
 async function claimPendingRuns(db: DatabaseExecutor): Promise<string[]> {
   return db.transaction(async (transaction) => {
     const rows = await transaction
@@ -109,7 +124,14 @@ function staleVerdict(status: RestateInvocationStatus | null): keyof typeof MESS
   return null;
 }
 
-/** Fails accepted runs whose invocation Restate paused or that ended without finishing. */
+/**
+ * Fails accepted runs whose invocation Restate paused or that ended without
+ * finishing. A failed Restate admin call is logged and ends this pass (an
+ * admin outage would fail every other check too, each after a timeout); the
+ * next sweep checks again. No rotation is needed: at most one run per
+ * migration is pending or running (partial unique index), so every active
+ * run fits in one pass.
+ */
 async function failStaleRuns(db: DatabaseExecutor): Promise<number> {
   const cutoff = new Date(Date.now() - STALE_CHECK_AFTER_MS);
   const runs = await db
@@ -127,9 +149,15 @@ async function failStaleRuns(db: DatabaseExecutor): Promise<number> {
     // The workflow run once the control service recorded it, else the control call itself.
     const checked = run.invocationId ?? run.submitInvocationId;
     if (!checked) continue;
-    const verdict = staleVerdict((await getRestateInvocation(checked))?.status ?? null);
+    let verdict: keyof typeof MESSAGES | null;
+    try {
+      verdict = staleVerdict((await getRestateInvocation(checked))?.status ?? null);
+      if (verdict === 'paused') await cancelRestateInvocation(checked);
+    } catch (error) {
+      log.warn({ runId: run.id, err: error instanceof Error ? { name: error.name, message: error.message } : String(error) }, 'data-migration.run.stale-check.failed');
+      break;
+    }
     if (!verdict) continue;
-    if (verdict === 'paused') await cancelRestateInvocation(checked);
     // Fenced by the invocation that was checked: if the control service
     // recorded the workflow run meanwhile, this changes nothing.
     const sameInvocation: SQL = run.invocationId
@@ -152,14 +180,19 @@ async function failStaleRuns(db: DatabaseExecutor): Promise<number> {
  * One sweep, safe across API replicas and bounded. With `register` (the
  * first sweep after boot) it first registers an apply run for every
  * migration that needs one (see `registerPendingDataMigrations`). Sends run
- * after the claiming transaction commits, so the control service sees the
- * rows.
+ * after the picking transaction commits, so the control service sees the
+ * rows, and stop at the first hand-over Restate did not accept (the rest
+ * would each wait for a timeout and hold up the server's sweep loop).
  */
 export async function sweepDataMigrationOutbox(options: { register: boolean }, db: DatabaseExecutor = defaultDb) {
   const registered = options.register ? (await registerPendingDataMigrations(db)).length : 0;
   const pending = await claimPendingRuns(db);
   let sent = 0;
-  for (const runId of pending) if (await dispatchDataMigrationRun(db, runId)) sent += 1;
+  for (const runId of pending) {
+    const result = await handOverDataMigrationRun(db, runId);
+    if (result === 'failed') break;
+    if (result === 'sent') sent += 1;
+  }
   const stale = await failStaleRuns(db);
   return { registered, pending: pending.length, sent, stale };
 }

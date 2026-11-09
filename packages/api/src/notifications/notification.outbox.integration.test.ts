@@ -13,7 +13,7 @@ vi.mock('../workflows/restate-admin', () => ({ getRestateInvocation: vi.fn(), ca
 
 const { sendNotificationDispatch } = await import('./notification.restate');
 const { getRestateInvocation, cancelRestateInvocation } = await import('../workflows/restate-admin');
-const { dispatchNotificationEvent, retryFailedEvents, sweepNotificationOutbox } = await import('./notification.outbox');
+const { dispatchNotificationEvent, failStaleEvents, retryFailedEvents, sweepNotificationOutbox } = await import('./notification.outbox');
 
 async function pendingEvent() {
   const school = await createTestSchool();
@@ -26,7 +26,9 @@ async function pendingEvent() {
 }
 
 describe('notification outbox', () => {
-  beforeEach(() => vi.mocked(sendNotificationDispatch).mockReset());
+  beforeEach(() => {
+    vi.mocked(sendNotificationDispatch).mockReset();
+  });
 
   it('records an accepted hand-over once', async () => {
     const eventId = await pendingEvent();
@@ -104,5 +106,35 @@ describe('notification outbox', () => {
     await retryFailedEvents(db);
     const [event] = await db.select().from(notificationEventTable).where(eq(notificationEventTable.id, eventId));
     expect(event).toMatchObject({ status: 'failed', dispatchAttempt: 1 });
+  });
+
+  it('stops handing over at the first event Restate does not accept', async () => {
+    await pendingEvent();
+    await pendingEvent();
+    vi.mocked(sendNotificationDispatch).mockRejectedValue(new Error('The operation was aborted due to timeout'));
+    vi.mocked(getRestateInvocation).mockResolvedValue({ status: 'running', createdAt: Date.now() });
+    const result = await sweepNotificationOutbox(db);
+    expect(result.pending).toBeGreaterThanOrEqual(2);
+    expect(sendNotificationDispatch).toHaveBeenCalledTimes(1);
+    vi.mocked(sendNotificationDispatch).mockReset();
+  });
+
+  it('checks the least recently checked accepted events first and stops a pass on a Restate admin error', async () => {
+    const first = await pendingEvent();
+    const second = await pendingEvent();
+    await db.update(notificationEventTable).set({ submittedAt: new Date('2019-01-01T00:00:00Z'), submitInvocationId: 'inv_rotate1' }).where(eq(notificationEventTable.id, first));
+    await db.update(notificationEventTable).set({ submittedAt: new Date('2020-01-01T00:00:00Z'), submitInvocationId: 'inv_rotate2' }).where(eq(notificationEventTable.id, second));
+    vi.mocked(getRestateInvocation).mockReset().mockRejectedValue(new Error('Restate admin query failed (503).'));
+
+    expect(await failStaleEvents(db)).toBe(0);
+    expect(getRestateInvocation).toHaveBeenCalledTimes(1);
+    expect(getRestateInvocation).toHaveBeenLastCalledWith('inv_rotate1');
+    // The checked event rotated to the back: the next pass starts with the other one.
+    await failStaleEvents(db);
+    expect(getRestateInvocation).toHaveBeenLastCalledWith('inv_rotate2');
+
+    vi.mocked(getRestateInvocation).mockReset();
+    await db.update(notificationEventTable).set({ status: 'dispatched' }).where(eq(notificationEventTable.id, first));
+    await db.update(notificationEventTable).set({ status: 'dispatched' }).where(eq(notificationEventTable.id, second));
   });
 });

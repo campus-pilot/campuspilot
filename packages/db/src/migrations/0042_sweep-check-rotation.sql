@@ -1,0 +1,2 @@
+ALTER TABLE "exam_result_publication" ADD COLUMN "settle_checked_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "notification_event" ADD COLUMN "stale_checked_at" timestamp with time zone;

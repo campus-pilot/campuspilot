@@ -1,6 +1,6 @@
 import { db as defaultDb, type DatabaseExecutor } from '@campuspilot/db';
 import { notificationEventTable } from '@campuspilot/db/schema/notification';
-import { and, asc, eq, isNull, lt, sql, type SQL } from 'drizzle-orm';
+import { and, asc, eq, isNull, lt, or, sql, type SQL } from 'drizzle-orm';
 
 import {
   cancelRestateInvocation,
@@ -52,12 +52,26 @@ function describeHandoverError(error: unknown) {
   return 'Restate is unreachable.';
 }
 
+/** What one hand-over did: Restate accepted it, it was not owed, or Restate could not be reached. */
+export type NotificationHandoverResult = 'sent' | 'not_pending' | 'failed';
+
+/**
+ * Sends a pending event that Restate has not accepted yet; true when
+ * Restate accepted it. See {@link handOverNotificationEvent}.
+ */
+export async function dispatchNotificationEvent(db: DatabaseExecutor, eventId: string): Promise<boolean> {
+  return (await handOverNotificationEvent(db, eventId)) === 'sent';
+}
+
 /**
  * Sends a pending event that Restate has not accepted yet. Every write is
  * conditional on the event still being unsubmitted, so a send racing another
- * replica changes nothing twice.
+ * replica changes nothing twice (both sends carry the same idempotency key,
+ * so Restate runs one invocation). `failed` means Restate did not accept it
+ * (unreachable, timed out); callers handing over many events stop at the
+ * first one, since the rest would fail the same way.
  */
-export async function dispatchNotificationEvent(db: DatabaseExecutor, eventId: string): Promise<boolean> {
+export async function handOverNotificationEvent(db: DatabaseExecutor, eventId: string): Promise<NotificationHandoverResult> {
   const unsubmitted = and(
     eq(notificationEventTable.id, eventId),
     eq(notificationEventTable.status, 'pending'),
@@ -68,7 +82,7 @@ export async function dispatchNotificationEvent(db: DatabaseExecutor, eventId: s
     .from(notificationEventTable)
     .where(unsubmitted)
     .limit(1);
-  if (!event) return false;
+  if (!event) return 'not_pending';
   try {
     const { invocationId } = await sendNotificationDispatch(eventId, event.attempt);
     await db
@@ -81,14 +95,14 @@ export async function dispatchNotificationEvent(db: DatabaseExecutor, eventId: s
         updatedAt: new Date(),
       })
       .where(unsubmitted);
-    return true;
+    return 'sent';
   } catch (error) {
     await db
       .update(notificationEventTable)
       .set({ submitAttempts: sql`${notificationEventTable.submitAttempts} + 1`, lastSubmitError: describeHandoverError(error), updatedAt: new Date() })
       .where(unsubmitted);
     log.warn({ eventId, reason: describeHandoverError(error) }, 'notification.handover.failed');
-    return false;
+    return 'failed';
   }
 }
 
@@ -109,16 +123,18 @@ const HANDOFF_CONCURRENCY = 4;
  * Hands over many events after their emitting transaction committed (for
  * example one per bill of a billing run), at most {@link HANDOFF_CONCURRENCY}
  * at a time so a large run does not open thousands of Restate requests at
- * once. Not awaited by the caller; whatever is not handed over (the API
- * stops, Restate is down) is left pending for the sweep.
+ * once. Not awaited by the caller. After the first failed hand-over every
+ * worker stops (Restate is down: the rest would only wait for timeouts);
+ * whatever is not handed over is left pending for the sweep.
  */
 export function handOffNotificationEvents(eventIds: readonly string[], db: DatabaseExecutor = defaultDb) {
   if (eventIds.length === 0) return;
   const queue = [...new Set(eventIds)];
+  let unreachable = false;
   const worker = async () => {
-    for (let eventId = queue.shift(); eventId; eventId = queue.shift()) {
+    for (let eventId = queue.shift(); eventId && !unreachable; eventId = queue.shift()) {
       try {
-        await dispatchNotificationEvent(db, eventId);
+        if ((await handOverNotificationEvent(db, eventId)) === 'failed') unreachable = true;
       } catch (error) {
         log.error({ eventId, err: error instanceof Error ? { name: error.name, message: error.message } : String(error) }, 'notification.handover.error');
       }
@@ -127,7 +143,13 @@ export function handOffNotificationEvents(eventIds: readonly string[], db: Datab
   for (let index = 0; index < Math.min(HANDOFF_CONCURRENCY, queue.length); index += 1) void worker();
 }
 
-/** Claims unsubmitted pending events (`FOR UPDATE SKIP LOCKED`, so replicas take disjoint rows). */
+/**
+ * Picks unsubmitted pending events, oldest first. The `FOR UPDATE SKIP
+ * LOCKED` only keeps two replicas from picking the same rows at the same
+ * instant: the lock ends when this transaction commits, before any send, so
+ * it is not a claim. Concurrent sends of one event are harmless (same
+ * idempotency key, writes conditional on still being unsubmitted).
+ */
 async function claimPendingEvents(db: DatabaseExecutor): Promise<string[]> {
   return db.transaction(async (transaction) => {
     const rows = await transaction
@@ -148,9 +170,17 @@ function staleVerdict(status: RestateInvocationStatus | null): keyof typeof MESS
   return null;
 }
 
-/** Fails accepted events whose invocation Restate paused or that ended without dispatching. */
-async function failStaleEvents(db: DatabaseExecutor): Promise<number> {
-  const cutoff = new Date(Date.now() - STALE_CHECK_AFTER_MS);
+/**
+ * Fails accepted events whose invocation Restate paused or that ended
+ * without dispatching. Checks the least recently checked events first
+ * (`stale_checked_at`, set on every check whatever its result), so fan-outs
+ * that legitimately run for hours rotate to the back instead of filling
+ * every sweep. A failed Restate admin call is logged and ends this pass (an
+ * admin outage would fail every other check too, each after a timeout); the
+ * event it was checking has rotated back, and the next sweep continues.
+ */
+export async function failStaleEvents(db: DatabaseExecutor, now: Date = new Date()): Promise<number> {
+  const cutoff = new Date(now.getTime() - STALE_CHECK_AFTER_MS);
   const events = await db
     .select({
       id: notificationEventTable.id,
@@ -159,14 +189,21 @@ async function failStaleEvents(db: DatabaseExecutor): Promise<number> {
     })
     .from(notificationEventTable)
     .where(and(eq(notificationEventTable.status, 'pending'), lt(notificationEventTable.submittedAt, cutoff)))
-    .orderBy(asc(notificationEventTable.submittedAt))
+    .orderBy(sql`${notificationEventTable.staleCheckedAt} asc nulls first`, asc(notificationEventTable.submittedAt))
     .limit(SWEEP_LIMIT);
   let failed = 0;
   for (const event of events) {
     // The workflow run once the control service recorded it, else the control call itself.
     const checked = event.invocationId ?? event.submitInvocationId;
+    await db.update(notificationEventTable).set({ staleCheckedAt: now }).where(eq(notificationEventTable.id, event.id));
     if (!checked) continue;
-    const verdict = staleVerdict((await getRestateInvocation(checked))?.status ?? null);
+    let verdict: keyof typeof MESSAGES | null;
+    try {
+      verdict = staleVerdict((await getRestateInvocation(checked))?.status ?? null);
+    } catch (error) {
+      log.warn({ eventId: event.id, err: error instanceof Error ? { name: error.name, message: error.message } : String(error) }, 'notification.event.stale-check.failed');
+      break;
+    }
     if (!verdict) continue;
     // Fenced by the invocation that was checked: if the control service
     // recorded the workflow run meanwhile, this changes nothing. Failed
@@ -181,9 +218,17 @@ async function failStaleEvents(db: DatabaseExecutor): Promise<number> {
       .where(and(eq(notificationEventTable.id, event.id), eq(notificationEventTable.status, 'pending'), sameInvocation))
       .returning({ id: notificationEventTable.id });
     if (row) {
-      if (verdict === 'paused') await cancelRestateInvocation(checked);
       failed += 1;
       log.warn({ eventId: event.id, verdict }, 'notification.event.stale');
+      // The event is already failed (and retried as a new attempt); a cancel
+      // that fails leaves only a paused invocation behind, so it never stops the pass.
+      if (verdict === 'paused') {
+        try {
+          await cancelRestateInvocation(checked);
+        } catch (error) {
+          log.warn({ eventId: event.id, err: error instanceof Error ? { name: error.name, message: error.message } : String(error) }, 'notification.event.cancel.failed');
+        }
+      }
     }
   }
   return failed;
@@ -200,6 +245,9 @@ export function retryDelayMs(failedAttempt: number): number {
  * still being failed at that attempt, so replicas never retry twice.
  */
 export async function retryFailedEvents(db: DatabaseExecutor, now: Date = new Date()): Promise<number> {
+  // Only events already due are selected, so events still waiting never fill the batch.
+  const dueAfterFirst = new Date(now.getTime() - retryDelayMs(1));
+  const dueAfterLater = new Date(now.getTime() - retryDelayMs(2));
   const candidates = await db
     .select({ id: notificationEventTable.id, attempt: notificationEventTable.dispatchAttempt, updatedAt: notificationEventTable.updatedAt })
     .from(notificationEventTable)
@@ -208,6 +256,10 @@ export async function retryFailedEvents(db: DatabaseExecutor, now: Date = new Da
         eq(notificationEventTable.status, 'failed'),
         eq(notificationEventTable.failureRetryable, true),
         lt(notificationEventTable.dispatchAttempt, MAX_NOTIFICATION_DISPATCH_ATTEMPTS),
+        or(
+          and(eq(notificationEventTable.dispatchAttempt, 1), lt(notificationEventTable.updatedAt, dueAfterFirst)),
+          and(sql`${notificationEventTable.dispatchAttempt} > 1`, lt(notificationEventTable.updatedAt, dueAfterLater)),
+        ),
       ),
     )
     .orderBy(asc(notificationEventTable.updatedAt))
@@ -226,6 +278,7 @@ export async function retryFailedEvents(db: DatabaseExecutor, now: Date = new Da
         submitInvocationId: null,
         invocationId: null,
         lastSubmitError: null,
+        staleCheckedAt: null,
         updatedAt: now,
       })
       .where(
@@ -247,13 +300,21 @@ export async function retryFailedEvents(db: DatabaseExecutor, now: Date = new Da
 
 /**
  * One sweep, safe across API replicas and bounded. Sends run after the
- * claiming transaction commits, so the control service sees the rows.
+ * picking transaction commits, so the control service sees the rows. The
+ * sends stop at the first hand-over Restate did not accept (it is down; the
+ * rest would each wait for a timeout and hold up the server's sweep loop).
+ * The stale check runs even then: it uses the Restate admin API, which may
+ * still answer, and it bounds itself the same way.
  */
 export async function sweepNotificationOutbox(db: DatabaseExecutor = defaultDb) {
   const retried = await retryFailedEvents(db);
   const pending = await claimPendingEvents(db);
   let sent = 0;
-  for (const eventId of pending) if (await dispatchNotificationEvent(db, eventId)) sent += 1;
+  for (const eventId of pending) {
+    const result = await handOverNotificationEvent(db, eventId);
+    if (result === 'failed') break;
+    if (result === 'sent') sent += 1;
+  }
   const stale = await failStaleEvents(db);
   return { retried, pending: pending.length, sent, stale };
 }

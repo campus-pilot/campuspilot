@@ -1,6 +1,6 @@
 import { db } from '@campuspilot/db';
 import { dataMigrationRunTable } from '@campuspilot/db/schema/data-migration';
-import { eq } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -20,7 +20,9 @@ async function requested() {
 }
 
 describe('data migration outbox', () => {
-  beforeEach(() => vi.mocked(sendDataMigrationStart).mockReset());
+  beforeEach(() => {
+    vi.mocked(sendDataMigrationStart).mockReset();
+  });
 
   it('records an accepted hand-over once', async () => {
     const runId = await requested();
@@ -55,5 +57,27 @@ describe('data migration outbox', () => {
     const [run] = await db.select().from(dataMigrationRunTable).where(eq(dataMigrationRunTable.id, runId));
     expect(run).toMatchObject({ status: 'failed' });
     expect(run!.error).toMatch(/paused/);
+  });
+
+  it('stops handing over at the first run Restate does not accept, and survives a Restate admin error', async () => {
+    const { sweepDataMigrationOutbox } = await import('./data-migration.outbox');
+    const first = await requested();
+    const second = await requested();
+    const stale = await requested();
+    await db
+      .update(dataMigrationRunTable)
+      .set({ submittedAt: new Date(Date.now() - 5 * 60_000), submitInvocationId: 'inv_control3', status: 'running' })
+      .where(eq(dataMigrationRunTable.id, stale));
+    vi.mocked(sendDataMigrationStart).mockRejectedValue(new Error('The operation was aborted due to timeout'));
+    vi.mocked(getRestateInvocation).mockReset().mockRejectedValue(new Error('Restate admin query failed (503).'));
+    const result = await sweepDataMigrationOutbox({ register: false });
+    expect(result.pending).toBeGreaterThanOrEqual(2);
+    expect(result.sent).toBe(0);
+    expect(sendDataMigrationStart).toHaveBeenCalledTimes(1);
+    expect(getRestateInvocation).toHaveBeenCalledTimes(1);
+    const rows = await db.select().from(dataMigrationRunTable).where(inArray(dataMigrationRunTable.id, [first, second, stale]));
+    expect(rows.find((row) => row.id === stale)).toMatchObject({ status: 'running' });
+    vi.mocked(getRestateInvocation).mockReset();
+    await db.update(dataMigrationRunTable).set({ status: 'failed', finishedAt: new Date() }).where(inArray(dataMigrationRunTable.id, [first, second, stale]));
   });
 });
