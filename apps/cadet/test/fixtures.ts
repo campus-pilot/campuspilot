@@ -12,13 +12,14 @@ export const profile: CadetProfileDto = {
   name: 'Meera Singh',
   admissionNo: 'GV-1042',
   schoolName: 'Greenfield Valley School',
+  current: { recordId: 'stu_b.cls7', classLabel: 'Class 7', sectionLabel: 'B', sessionLabel: '2026–27', rollNo: 14 },
   enrollments: [
     { studentId: 'stu_b', sessionId: 's2', sessionLabel: '2026–27', sessionIsActive: true, classLabel: 'Class 7', sectionLabel: 'B', rollNo: 14 },
     { studentId: 'stu_a', sessionId: 's1', sessionLabel: '2025–26', sessionIsActive: false, classLabel: 'Class 6', sectionLabel: 'A', rollNo: 9 },
   ],
 };
 
-export const newStudent: CadetProfileDto = { ...profile, enrollments: [] };
+export const newStudent: CadetProfileDto = { ...profile, current: null, enrollments: [] };
 
 export const summary: CadetFeeSummaryDto = {
   currencies: [

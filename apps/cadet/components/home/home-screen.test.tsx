@@ -58,6 +58,18 @@ describe('HomeScreen', () => {
     expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
   });
 
+  it('says In credit for a credit balance rather than inferring an advance payment', async () => {
+    resetHandlers({
+      getProfile: () => profile,
+      listExams: () => ({ ...page([]), record: null }),
+      getFeeSummary: () => ({ currencies: [{ ...summary.currencies[0]!, balanceMinor: '-50000', dueMinor: '0', creditMinor: '50000' }] }),
+    });
+    renderWithQuery(<HomeScreen />);
+    expect(await screen.findByText('In credit')).toBeTruthy();
+    expect(screen.getByText('₹500')).toBeTruthy();
+    expect(screen.queryByText(/Advance/)).toBeNull();
+  });
+
   it('greets by the time of day', () => {
     renderWithQuery(<Greeting profile={profile} hour={19} />);
     expect(screen.getByText('Good evening')).toBeTruthy();

@@ -296,7 +296,7 @@ function RemarkTimeline({ recordId, label }: { recordId: string; label: string }
           <TimelineItem key={remark.examId} step={index + 1}>
             <TimelineHeader>
               <TimelineSeparator />
-              <TimelineDate>{formatMonth(remark.updatedAt)}</TimelineDate>
+              <TimelineDate>{formatMonth(remark.releasedAt)}</TimelineDate>
               <TimelineTitle>{remark.examName}</TimelineTitle>
               <TimelineIndicator />
             </TimelineHeader>
@@ -324,6 +324,9 @@ export function GrowthView({ growth, studentName }: { growth: CadetGrowthDto; st
     <>
       <ScreenHeader title="Growth" description={`${classLabel(record)} · ${record.sessionLabel}`} />
       <OverallTrend growth={growth} studentName={studentName} />
+      <Button asChild variant="outline" size="lg" className="w-full">
+        <Link href={`/results?class=${encodeURIComponent(record.recordId)}`}>See {record.classLabel} results</Link>
+      </Button>
       <StrengthsAndFocus selected={growth.selected} />
       <SubjectComparison selected={growth.selected} classLabel={record.classLabel} />
       <ClassByClass growth={growth} />

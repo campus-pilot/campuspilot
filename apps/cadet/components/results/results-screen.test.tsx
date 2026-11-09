@@ -8,6 +8,9 @@ import { ResultsScreen } from './results-screen';
 
 vi.mock('@/lib/orpc', async () => ({ orpc: (await import('@/test/orpc-mock')).orpcMock }));
 
+const nav = vi.hoisted(() => ({ search: new URLSearchParams() }));
+vi.mock('next/navigation', () => ({ useSearchParams: () => nav.search }));
+
 const record = { recordId: 'stu_b.cls7', classLabel: 'Class 7', sectionLabel: 'B', sessionLabel: '2026–27' };
 const getExamResult = vi.fn(() => examResult);
 
@@ -18,6 +21,7 @@ const getExam = (input: unknown) => {
 };
 
 beforeEach(() => {
+  nav.search = new URLSearchParams();
   getExamResult.mockClear();
   resetHandlers({ listExams: () => ({ ...page(exams), record }), getExamResult, getExam });
 });
@@ -44,6 +48,17 @@ describe('ResultsScreen', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Show more' }));
     expect(await screen.findByText('Annual')).toBeTruthy();
     expect(listExams).toHaveBeenLastCalledWith({ cursor: '2' });
+  });
+
+  it('shows an earlier class from ?class= with a way back to the current class', async () => {
+    nav.search = new URLSearchParams('class=stu_a.cls6');
+    const listExams = vi.fn(() => ({ ...page([exams[0]!]), record: { recordId: 'stu_a.cls6', classLabel: 'Class 6', sectionLabel: 'A', sessionLabel: '2025–26' } }));
+    resetHandlers({ listExams });
+    renderWithQuery(<ResultsScreen />);
+    expect(await screen.findByText('Results for Class 6')).toBeTruthy();
+    expect(listExams).toHaveBeenCalledWith({ filters: { recordId: 'stu_a.cls6' } });
+    expect(screen.getByRole('link', { name: 'Back to current class' }).getAttribute('href')).toBe('/results');
+    expect(screen.queryByText(/Earlier classes are in Growth/)).toBeNull();
   });
 
   it('explains when there are no examinations yet', async () => {

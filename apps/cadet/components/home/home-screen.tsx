@@ -90,9 +90,9 @@ function FeeBalance({ row }: { row: CadetFeeSummaryDto['currencies'][number] }) 
         <span className="text-xs font-medium text-muted-foreground">
           {owed ? 'Fees outstanding' : inCredit ? 'In credit' : 'Fees'}
         </span>
-        {owed ? null : (
+        {owed || inCredit ? null : (
           <Badge variant="success-light" radius="full">
-            {inCredit ? 'Advance paid' : 'All paid'}
+            Nothing due
           </Badge>
         )}
       </div>
@@ -126,7 +126,7 @@ export function HomeScreen() {
   return (
     <>
       <Greeting profile={profile.data} hour={new Date().getHours()} />
-      <HomeResults classKnown={profile.data.enrollments.length > 0} />
+      <HomeResults classKnown={profile.data.current !== null} />
       <HomeFees />
     </>
   );

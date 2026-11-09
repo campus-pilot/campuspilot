@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useInfiniteQuery } from '@tanstack/react-query';
+import { useSearchParams } from 'next/navigation';
 import { ChevronRightIcon, GraduationCapIcon } from 'lucide-react';
 import type { CadetExamListItemDto, CadetExamState } from '@campuspilot/api/routers/cadet/cadet.dto';
 import { Button } from '@campuspilot/ui/components/button';
@@ -52,25 +53,48 @@ export function ExamRow({ exam }: { exam: CadetExamListItemDto }) {
   );
 }
 
+function BackToCurrent() {
+  return (
+    <Button asChild variant="outline" className="self-start">
+      <Link href="/results">Back to current class</Link>
+    </Button>
+  );
+}
+
 /** Exams of the current class, 20 at a time, with "Show more" when the class has more. */
 export function ResultsScreen() {
+  /** `?class=` (a class record id, e.g. from Growth) shows an earlier class; without it the server's current class. */
+  const recordId = useSearchParams().get('class') ?? undefined;
   const exams = useInfiniteQuery(
     orpc.listExams.infiniteOptions({
-      input: (cursor: string | undefined) => (cursor ? { cursor } : {}),
+      input: (cursor: string | undefined) => ({
+        ...(cursor ? { cursor } : {}),
+        ...(recordId ? { filters: { recordId } } : {}),
+      }),
       initialPageParam: undefined,
       getNextPageParam: (page) => page.pagination.nextCursor ?? undefined,
     }),
   );
   if (exams.isPending) return <ScreenLoading blocks={2} />;
-  if (exams.isError) return <ScreenError error={exams.error} onRetry={() => void exams.refetch()} />;
+  if (exams.isError) {
+    if ((exams.error as { code?: string }).code === 'NOT_FOUND')
+      return (
+        <>
+          <EmptyState icon={GraduationCapIcon} title="Class not found" description="This class is not one of yours." />
+          <BackToCurrent />
+        </>
+      );
+    return <ScreenError error={exams.error} onRetry={() => void exams.refetch()} />;
+  }
   const record = exams.data.pages[0]!.record;
   const items = exams.data.pages.flatMap((page) => page.items);
   return (
     <>
       <ScreenHeader
-        title="Results"
+        title={recordId && record ? `Results for ${record.classLabel}` : 'Results'}
         description={record ? `${[record.classLabel, record.sectionLabel].filter(Boolean).join(' ')} · ${record.sessionLabel}` : null}
       />
+      {recordId ? <BackToCurrent /> : null}
       {items.length === 0 ? (
         <EmptyState
           icon={GraduationCapIcon}
@@ -90,7 +114,8 @@ export function ResultsScreen() {
         </Button>
       ) : null}
       <p className="text-xs text-muted-foreground">
-        Results appear here only after your school releases them to the Cadet Portal. Earlier classes are in Growth.
+        Results appear here only after your school releases them to the Cadet Portal. For an earlier class, choose it in
+        Growth and open its results.
       </p>
     </>
   );
