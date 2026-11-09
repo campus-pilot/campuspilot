@@ -5,3 +5,12 @@ import { afterEach } from 'vitest';
 afterEach(() => {
   cleanup();
 });
+
+/** jsdom has no ResizeObserver; Recharts' responsive container needs one to mount. */
+if (typeof globalThis.ResizeObserver === 'undefined') {
+  globalThis.ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  } as unknown as typeof ResizeObserver;
+}
