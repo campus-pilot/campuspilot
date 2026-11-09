@@ -20,13 +20,15 @@ ENV NODE_ENV=production
 ENV HOSTNAME=0.0.0.0
 ENV PORT=3004
 
-COPY --from=builder /app/apps/cadet/.next/standalone ./
-COPY --from=builder /app/apps/cadet/.next/static ./apps/cadet/.next/static
-COPY --from=builder /app/apps/cadet/public ./apps/cadet/public
+COPY --chown=node:node --from=builder /app/apps/cadet/.next/standalone ./
+COPY --chown=node:node --from=builder /app/apps/cadet/.next/static ./apps/cadet/.next/static
+COPY --chown=node:node --from=builder /app/apps/cadet/public ./apps/cadet/public
 
 EXPOSE 3004
 
 HEALTHCHECK --interval=10s --timeout=5s --retries=5 \
   CMD node -e "fetch('http://localhost:3004/').then(response => { if (!response.ok) process.exit(1) }).catch(() => process.exit(1))"
+
+USER node
 
 CMD ["node", "apps/cadet/server.js"]

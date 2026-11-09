@@ -1,13 +1,14 @@
 # Container release workflow
 
 `release.yml` assigns a strict `vMAJOR.MINOR.PATCH` version to each successful
-push to `main`. For a new version, it publishes all six images with immutable
+push to `main`. For a new version, it publishes all seven images with immutable
 semver and `sha-<commit>` tags. Only after every image succeeds does it push the
 Git tag and create the GitHub release. No mutable image tag is published;
 deployments must pin a semver or commit-SHA tag.
 
-The six images are `campuspilot-plus-management`, `campuspilot-plus-admin`,
-`campuspilot-plus-web`, `campuspilot-plus-api`, `campuspilot-plus-worker`
+The seven images are `campuspilot-plus-management`, `campuspilot-plus-admin`,
+`campuspilot-plus-cadet` (the Cadet Portal, `https://cadet.campuspilot.in`, see
+`docs/cadet-portal.md`), `campuspilot-plus-web`, `campuspilot-plus-api`, `campuspilot-plus-worker`
 (the Restate workflow host, see `docs/demo-school.md`), and
 `campuspilot-plus-opa`. The
 admin image serves `https://admin.campuspilot.in`; its sign-in route is
@@ -32,7 +33,7 @@ They are browser-public build settings embedded into frontend assets.
 
 | Variable | Image | Production value or owner input |
 | --- | --- | --- |
-| `NEXT_PUBLIC_SERVER_URL` | `campuspilot-plus-management`, `campuspilot-plus-admin` | `https://api.campuspilot.in` |
+| `NEXT_PUBLIC_SERVER_URL` | `campuspilot-plus-management`, `campuspilot-plus-admin`, `campuspilot-plus-cadet` | `https://api.campuspilot.in` |
 | `NEXT_PUBLIC_MCP_URL` | `campuspilot-plus-management`, `campuspilot-plus-admin` | `https://api.campuspilot.in/mcp` (must equal the server's `MCP_RESOURCE_URL`) |
 | `VITE_SERVER_URL` | `campuspilot-plus-web` | `https://api.campuspilot.in` |
 | `VITE_CONTACT_EMAIL` | `campuspilot-plus-web` | `shubhaman47@gmail.com` |

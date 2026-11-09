@@ -22,7 +22,7 @@ session the student was enrolled in.
 | --- | --- |
 | UI copy | **Cadet Portal** (code names below are unchanged) |
 | App | `apps/cadet` (Next.js), dev port **3004** (`apps/cadet/package.json`, `apps/cadet/Dockerfile`) |
-| Production host | `cadet.campuspilot.in` (decided; not yet configured anywhere in this repo) |
+| Production host | `cadet.campuspilot.in`: image `campuspilot-plus-cadet` from `release.yml` (built with `NEXT_PUBLIC_SERVER_URL`), served in-cluster at `cadet.campuspilot-plus.svc.cluster.local:3004` behind the Cloudflare tunnel |
 | API routes | `/api/cadet/auth/*`, `/api/cadet/rpc/*`, `/cadet/mcp` |
 | Router / procedure base | `cadetRouter`, `cadetProcedure` |
 | Tables | `cadet_*` (`packages/db/src/schema/cadet.ts`) |
@@ -515,9 +515,6 @@ add it to `cadetAuthSchema`.
   (possibly with an app check).
 - **Staff MCP returns passwords** from `createAdmission`; to revisit.
 - **Expired signed OAuth query** (10 min) requires restarting from the AI app.
-- **Release**: `.github/workflows/release.yml` has no cadet image, and
-  `cadet.campuspilot.in` is not provisioned in this repository; `apps/cadet/Dockerfile`
-  exists.
 
 ## Operations
 
