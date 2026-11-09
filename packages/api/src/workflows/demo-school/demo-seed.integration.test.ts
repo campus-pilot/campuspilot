@@ -4,7 +4,8 @@ import { db } from '@campuspilot/db';
 import { admissionTable } from '@campuspilot/db/schema/admission';
 import { user } from '@campuspilot/db/schema/auth';
 import { demoSchoolJobTable } from '@campuspilot/db/schema/demo-school-job';
-import { examStudentRemarkTable } from '@campuspilot/db/schema/exam';
+import { examLifecycleTable, examStudentRemarkTable } from '@campuspilot/db/schema/exam';
+import { examResultPublicationTable } from '@campuspilot/db/schema/exam-result-publication';
 import { financeBillRunTable, financeBillTable, financePaymentTable } from '@campuspilot/db/schema/finance';
 import { notificationDeliveryTable, notificationEventTable, notificationTable } from '@campuspilot/db/schema/notification';
 import { schoolMemberTable } from '@campuspilot/db/schema/school-member';
@@ -12,7 +13,7 @@ import { schoolUserRoleTable } from '@campuspilot/db/schema/school-user-role';
 import { studentTable } from '@campuspilot/db/schema/student';
 import { env } from '@campuspilot/env/server';
 import { getS3Client } from '@campuspilot/s3/client';
-import { and, count, eq } from 'drizzle-orm';
+import { and, count, eq, isNotNull } from 'drizzle-orm';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { retryFinanceConflict } from '../../../test/finance/assertions';
@@ -150,11 +151,17 @@ describe('demo school seed steps (2 classes, without Restate)', () => {
     const downloaded = await client.systemAdmin.getDemoCredentialsDownload({ schoolId: job.schoolId });
     expect(downloaded.fileName).toBe(`${job.school.slug}-credentials.csv`);
 
-    // Seed steps call the real posting procedures, so every bill, payment and
-    // billing run emitted its notification event (inbox items once fanned out).
+    // Seed steps call the real posting and release procedures, so every bill,
+    // payment and billing run emitted its notification event, and every
+    // released exam one per registered student (inbox items once fanned out).
     const counts = await snapshotCounts(job.schoolId);
     const [runs] = await db.select({ value: count() }).from(financeBillRunTable).where(eq(financeBillRunTable.schoolId, job.schoolId));
-    expect(counts.notificationEvents).toBe(counts.bills + counts.payments + runs!.value);
+    const releases = await db.select().from(examResultPublicationTable).where(eq(examResultPublicationTable.schoolId, job.schoolId));
+    const [released] = await db.select({ value: count() }).from(examLifecycleTable).where(and(eq(examLifecycleTable.schoolId, job.schoolId), isNotNull(examLifecycleTable.cadetReleasedAt)));
+    expect(releases.length).toBe(released!.value);
+    expect(releases.length).toBeGreaterThan(0);
+    const releaseRecipients = releases.reduce((total, release) => total + release.admissionIds.length, 0);
+    expect(counts.notificationEvents).toBe(counts.bills + counts.payments + runs!.value + releaseRecipients);
     // A demo never sends outside the inbox, even with both channels switched on.
     const send = vi.fn(async () => ({ kind: 'sent' as const, providerMessageId: 'never' }));
     const available = (channel: 'web_push' | 'whatsapp'): NotificationChannelAdapter => ({ channel, available: true, decide: () => [{ status: 'owed', destination: 'x' }], send });

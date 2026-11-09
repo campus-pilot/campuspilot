@@ -136,7 +136,7 @@ describe('delivery log, resend and failure alerts', () => {
         createdBy: coordinatorId,
         alertCreatorOnFailure: true,
         recipients: { kind: 'admissions', admissionIds: [admissionId] },
-        data: { sessionId: 'sess_test', examSlug: 'final', examName: 'Final', admissionId, studentName: 'Kavya Failed' },
+        data: { sessionId: 'sess_test', examSlug: 'final', examName: 'Final', admissionId, studentId: 'stu_alert', classId: 'cls_alert', studentName: 'Kavya Failed' },
       }),
     );
     await dispatch(result.eventId, whatsapp({ kind: 'failed', errorCode: 'outcome_unknown', outcomeUnknown: true, definiteAnswer: false }));

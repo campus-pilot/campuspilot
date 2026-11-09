@@ -25,17 +25,19 @@ import { MAX_NOTIFICATION_DISPATCH_ATTEMPTS } from '../../workflows/notification
 import { log } from '../../workflows/notification/log';
 
 /**
- * Result notifications (Phase 6, D-10, D-26, D-30):
- * - **Publish**: once per examination, only while it is completed, every
- *   registered student of the examination's classes gets one
- *   `exam.results_published`. The recipients are resolved and their
- *   per-channel forecast computed when staff press the button, stored on the
- *   `exam_result_publication` row and returned.
+ * Result notifications (Phase 6, D-10, D-26, D-30, D-43):
+ * - **Release**: the examination's first release to the Cadet Portal
+ *   (`releaseExamToCadet`) notifies every registered student of its classes
+ *   with one `exam.results_published`, in the release's own transaction
+ *   ({@link notifyFirstResultRelease}). The recipients and their per-channel
+ *   forecast are stored on the `exam_result_publication` row, which is also
+ *   what makes it once per exam: a withdraw and a later re-release notify
+ *   nobody again.
  * - **Single send**: one student's result for any started exam at any time
- *   (not tied to publication), as often as staff choose; each press is its
- *   own event (client idempotency key).
- * - **Finished**: once every delivery of a publication settled, the
- *   publisher gets `exam.results_publish_finished` ({@link sweepResultPublications}).
+ *   (not tied to the release), as often as staff choose; each press is its
+ *   own event (client idempotency key). Corrections after a release use it.
+ * - **Finished**: once every delivery of a release batch settled, the
+ *   releaser gets `exam.results_publish_finished` ({@link sweepResultPublications}).
  * Delivery is the ordinary durable, bounded fan-out (retries with backoff).
  */
 
@@ -43,14 +45,18 @@ import { log } from '../../workflows/notification/log';
 export const resultPublicationEventKey = (publicationId: string, admissionId: string) =>
   `exam-results:${publicationId}:${admissionId}`;
 
-/** Registered students of the exam's classes, by admission (one enrollment per session). */
+/**
+ * Registered students of the exam's classes, by admission (one enrollment
+ * per session), with the enrollment and its class: the class whose plan the
+ * student's results of this exam belong to.
+ */
 async function publicationRoster(db: DatabaseExecutor, scope: ExamScope) {
   const classIds = db
     .selectDistinct({ classId: examPlanTable.classId })
     .from(examPlanTable)
     .where(and(eq(examPlanTable.schoolId, scope.schoolId), eq(examPlanTable.sessionId, scope.sessionId), eq(examPlanTable.examSlug, scope.examSlug)));
-  return db
-    .select({ admissionId: admissionTable.id, name: admissionTable.name })
+  const rows = await db
+    .select({ admissionId: admissionTable.id, name: admissionTable.name, studentId: studentTable.id, classId: studentTable.classId })
     .from(studentTable)
     .innerJoin(admissionTable, and(eq(admissionTable.id, studentTable.admissionId), eq(admissionTable.schoolId, studentTable.schoolId)))
     .where(
@@ -62,6 +68,8 @@ async function publicationRoster(db: DatabaseExecutor, scope: ExamScope) {
       ),
     )
     .orderBy(asc(admissionTable.name), asc(admissionTable.id));
+  // `inArray` above already excludes enrollments without a class.
+  return rows.flatMap((row) => (row.classId ? [{ ...row, classId: row.classId }] : []));
 }
 
 async function isDemoSchool(db: DatabaseExecutor, schoolId: string) {
@@ -70,9 +78,8 @@ async function isDemoSchool(db: DatabaseExecutor, schoolId: string) {
   return school.isDemo;
 }
 
-async function lifecycleStatus(db: DatabaseExecutor, scope: ExamScope, lock: boolean) {
-  const query = db.select({ status: examLifecycleTable.status }).from(examLifecycleTable).where(lifecycleWhere(scope)).limit(1);
-  const [row] = await (lock ? query.for('update') : query);
+async function lifecycleStatus(db: DatabaseExecutor, scope: ExamScope) {
+  const [row] = await db.select({ status: examLifecycleTable.status }).from(examLifecycleTable).where(lifecycleWhere(scope)).limit(1);
   return row?.status ?? null;
 }
 
@@ -92,70 +99,72 @@ export async function getResultPublication(db: DatabaseExecutor, scope: ExamScop
   return row ?? null;
 }
 
-function requirePublishable(status: string | null, existing: ExamResultPublicationRow | null) {
-  if (existing) throw rpcError.conflict('The results of this examination were already published.');
-  if (status !== 'completed') throw rpcError.badRequest('Only a completed examination can publish its results.');
-}
-
 /**
- * What publishing would do now: the students it would address and the
- * per-channel forecast. Read-only; refuses when publishing is not allowed.
+ * What releasing the exam to the Cadet Portal would notify (D-43): on a
+ * first release, the per-channel forecast for its registered students; once
+ * a release batch exists, nothing (`already_notified`). Read-only; whether
+ * the release itself is allowed is decided by the release.
  */
-export async function previewResultPublication(db: DatabaseExecutor, scope: ExamScope): Promise<DeliveryForecast> {
+export type ResultReleasePreview =
+  | { kind: 'first_release'; forecast: DeliveryForecast }
+  | { kind: 'already_notified'; notifiedAt: Date };
+
+export async function previewResultRelease(db: DatabaseExecutor, scope: ExamScope): Promise<ResultReleasePreview> {
   await getExam(db, scope);
-  requirePublishable(await lifecycleStatus(db, scope, false), await getResultPublication(db, scope));
+  const existing = await getResultPublication(db, scope);
+  if (existing) return { kind: 'already_notified', notifiedAt: existing.publishedAt };
   const roster = await publicationRoster(db, scope);
   const recipients = await resolveAdmissionRecipients(db, scope.schoolId, roster.map((row) => row.admissionId));
-  return forecastDeliveries('exam.results_published', await isDemoSchool(db, scope.schoolId), recipients);
+  return { kind: 'first_release', forecast: forecastDeliveries('exam.results_published', await isDemoSchool(db, scope.schoolId), recipients) };
 }
 
 /**
- * Publishes an exam's results (see the module comment). One transaction:
- * the exam lifecycle row is locked so the exam cannot be reopened in
- * between, the publication row is written (unique per exam, a concurrent
- * second press fails with CONFLICT) and one event per student is emitted.
- * Events are handed over after commit.
+ * Notifies the students of an exam's first Cadet release (see the module
+ * comment). Runs inside the release's transaction, after the release write,
+ * while that transaction holds the lifecycle row lock (`setExamCadetRelease`),
+ * so concurrent releases serialize; the batch row is unique per exam besides.
+ * Writes the batch row and one event per student, or nothing when a batch
+ * already exists (a re-release after a withdraw) or no registered student is
+ * addressed. Returns the event IDs for the caller to hand over after commit.
  */
-export async function publishResults(db: Database, scope: ExamScope, publishedBy: string) {
-  const { publication, eventIds } = await db.transaction(async (tx) => {
-    // No session lock: results of a historical session's exam may be published too.
-    // The lifecycle row lock below keeps the exam from being reopened meanwhile.
-    const { exam } = await getExam(tx, scope);
-    const status = await lifecycleStatus(tx, scope, true);
-    requirePublishable(status, await getResultPublication(tx, scope));
-    const roster = await publicationRoster(tx, scope);
-    if (roster.length === 0) throw rpcError.badRequest('This examination has no registered students to publish results to.');
-    const recipients = await resolveAdmissionRecipients(tx, scope.schoolId, roster.map((row) => row.admissionId));
-    const forecast = forecastDeliveries('exam.results_published', await isDemoSchool(tx, scope.schoolId), recipients);
-    const id = generateId('examResultPublication');
-    const [publication] = await tx
-      .insert(examResultPublicationTable)
-      .values({
-        id,
-        schoolId: scope.schoolId,
-        sessionId: scope.sessionId,
-        examSlug: scope.examSlug,
-        examName: exam.name,
-        publishedBy,
-        admissionIds: roster.map((row) => row.admissionId),
-        snapshot: forecast,
-      })
-      .returning();
-    const inputs: NotifyInput<'exam.results_published'>[] = roster.map((student) => ({
-      type: 'exam.results_published',
-      schoolId: scope.schoolId,
-      key: resultPublicationEventKey(id, student.admissionId),
-      createdBy: publishedBy,
-      sendPriority: 'bulk',
-      batch: { kind: 'result_publication', id },
-      recipients: { kind: 'admissions', admissionIds: [student.admissionId] },
-      data: { sessionId: scope.sessionId, examSlug: scope.examSlug, examName: exam.name, admissionId: student.admissionId, studentName: student.name },
-    }));
-    const results = await notifyMany(tx, inputs);
-    return { publication: publication!, eventIds: results.map((result) => result.eventId) };
+export async function notifyFirstResultRelease(tx: DatabaseExecutor, scope: ExamScope, releasedBy: string): Promise<string[]> {
+  if (await getResultPublication(tx, scope)) return [];
+  const { exam } = await getExam(tx, scope);
+  const roster = await publicationRoster(tx, scope);
+  if (roster.length === 0) return [];
+  const recipients = await resolveAdmissionRecipients(tx, scope.schoolId, roster.map((row) => row.admissionId));
+  const forecast = forecastDeliveries('exam.results_published', await isDemoSchool(tx, scope.schoolId), recipients);
+  const id = generateId('examResultPublication');
+  await tx.insert(examResultPublicationTable).values({
+    id,
+    schoolId: scope.schoolId,
+    sessionId: scope.sessionId,
+    examSlug: scope.examSlug,
+    examName: exam.name,
+    publishedBy: releasedBy,
+    admissionIds: roster.map((row) => row.admissionId),
+    snapshot: forecast,
   });
-  handOffNotificationEvents(eventIds);
-  return publication;
+  const inputs: NotifyInput<'exam.results_published'>[] = roster.map((student) => ({
+    type: 'exam.results_published',
+    schoolId: scope.schoolId,
+    key: resultPublicationEventKey(id, student.admissionId),
+    createdBy: releasedBy,
+    sendPriority: 'bulk',
+    batch: { kind: 'result_publication', id },
+    recipients: { kind: 'admissions', admissionIds: [student.admissionId] },
+    data: {
+      sessionId: scope.sessionId,
+      examSlug: scope.examSlug,
+      examName: exam.name,
+      admissionId: student.admissionId,
+      studentId: student.studentId,
+      classId: student.classId,
+      studentName: student.name,
+    },
+  }));
+  const results = await notifyMany(tx, inputs);
+  return results.map((result) => result.eventId);
 }
 
 /** One student of an exam, as the single-send procedures address them. */
@@ -170,7 +179,7 @@ export type StudentResultScope = ExamScope & { classId: string; studentId: strin
  */
 async function studentForResult(db: DatabaseExecutor, scope: StudentResultScope) {
   const { exam } = await getExam(db, scope);
-  const status = await lifecycleStatus(db, scope, false);
+  const status = await lifecycleStatus(db, scope);
   if (status === null || status === 'ready') throw rpcError.badRequest('Results can be sent once the examination has started.');
   const [student] = await db
     .select({ admissionId: admissionTable.id, name: admissionTable.name })
@@ -251,7 +260,7 @@ async function sendStudentResultOnce(db: Database, scope: StudentResultScope & {
         // A single send is the sender's own request: they hear if it fails (D-38).
         alertCreatorOnFailure: true,
         recipients: { kind: 'admissions', admissionIds: [student.admissionId] },
-        data: { sessionId: scope.sessionId, examSlug: scope.examSlug, examName: exam.name, admissionId: student.admissionId, studentName: student.name },
+        data: { sessionId: scope.sessionId, examSlug: scope.examSlug, examName: exam.name, admissionId: student.admissionId, studentId: scope.studentId, classId: scope.classId, studentName: student.name },
       });
       return { ...result, forecast };
     },

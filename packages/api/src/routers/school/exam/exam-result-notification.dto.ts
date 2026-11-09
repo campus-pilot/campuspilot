@@ -13,7 +13,7 @@ export const channelForecastSchema = z.object({
 });
 
 /**
- * What a result send decides when staff press the button: the students
+ * What a result send decides when staff press the button (or release): the students
  * addressed and, per remote channel, the copies owed and the skips by
  * reason. Web push counts one copy per active device subscription; WhatsApp
  * one per student. The in-app inbox always gets one row per student.
@@ -47,6 +47,12 @@ export const resultPublicationSchema = z.object({
 });
 
 export const examResultPublicationInputSchema = examScopeSchema;
+
+/** What releasing an examination to the Cadet Portal would notify (D-43). */
+export const resultReleasePreviewSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('first_release'), forecast: deliveryForecastSchema }),
+  z.object({ kind: z.literal('already_notified'), notifiedAt: z.date() }),
+]);
 
 export const studentResultNotificationInputSchema = examStudentScopeSchema;
 

@@ -10,7 +10,7 @@ import { mapWhatsAppMessage, templateParam } from './templates';
 const facts = {
   'bill.issued': { billId: 'b', sessionId: 's', admissionId: 'a', billNumber: 'BILL/1', totalAmountMinor: '100', currency: 'INR', issueDate: '2026-10-05', studentName: 'Asha' },
   'payment.received': { paymentId: 'p', sessionId: 's', admissionId: 'a', receiptNumber: 'RCP/1', amountMinor: '100', currency: 'INR', receivedAt: '2026-10-05T00:00:00Z', studentName: 'Asha' },
-  'exam.results_published': { sessionId: 's', examSlug: 'half-yearly', examName: 'Half-Yearly Examination 2026', admissionId: 'a', studentName: 'Asha' },
+  'exam.results_published': { sessionId: 's', examSlug: 'half-yearly', examName: 'Half-Yearly Examination 2026', admissionId: 'a', studentId: 'stu', classId: 'cls', studentName: 'Asha' },
   'exam.results_publish_finished': { sessionId: 's', examSlug: 'e', examName: 'E', recipientCount: 1, sentCount: 1, failedCount: 0, skippedCount: 0 },
   'notification.whatsapp_failed': { admissionId: 'a', studentName: 'Asha', failedType: 'bill.issued' },
   'notification.whatsapp_batch_failed': { batchKind: 'billing_run', failedType: 'bill.issued', failedCount: 2, sessionId: 's', billRunId: 'r' },

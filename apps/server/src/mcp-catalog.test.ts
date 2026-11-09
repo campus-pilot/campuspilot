@@ -201,9 +201,9 @@ describe('catalog metadata', () => {
     expect(catalog.core).toHaveLength(36);
     // 85 on main, plus releaseExamToCadet, withdrawExamFromCadet,
     // get/saveStudentExamRemark and get/updateCadetPortalSettings (+6);
-    // +5 result notification tools (publication read/preview/publish, single
-    // preview/send) and +2 delivery log tools (list, resend).
-    expect(catalog.advanced).toHaveLength(98);
+    // +4 result notification tools (release preview, release batch read,
+    // single preview/send) and +2 delivery log tools (list, resend).
+    expect(catalog.advanced).toHaveLength(97);
   });
 });
 

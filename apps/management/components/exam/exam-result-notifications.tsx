@@ -1,6 +1,6 @@
 'use client';
 import { useForm } from '@tanstack/react-form';
-import { useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
+import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import { DeliveryForecastSummary, type DeliveryForecast } from '@campuspilot/components/notifications';
 import {
   Dialog,
@@ -71,23 +71,28 @@ function ConfirmSendDialog({ title, description, confirmLabel, preview, onConfir
 /** Forecasts are read fresh each time a dialog opens and never retried on refusal. */
 const FORECAST_QUERY = { staleTime: 0, gcTime: 0, retry: false } as const;
 
-/** "Publish results": once per completed examination (D-10). */
-export function PublishResultsDialog({ scope, onClose }: { scope: ExamScope; onClose: () => void }) {
-  const cache = useQueryClient();
-  const preview = useQuery(orpc.school.previewExamResultPublication.queryOptions({ input: scope, ...FORECAST_QUERY }));
+/**
+ * What releasing to the Cadet Portal will notify (D-43), shown in the
+ * release confirmation: the forecast on a first release, otherwise that
+ * nobody is notified again. Informational only: the release does not wait
+ * for it, and the server decides again inside the release.
+ */
+export function ReleaseNotificationPreview({ scope }: { scope: ExamScope }) {
+  const preview = useQuery(orpc.school.previewExamCadetRelease.queryOptions({ input: scope, ...FORECAST_QUERY }));
+  if (preview.isPending) return <LoadingExam />;
+  if (preview.isError) return <ReadError error={preview.error} retry={preview.refetch} />;
+  if (preview.data.kind === 'already_notified')
+    return (
+      <p className="text-sm text-muted-foreground">
+        Students were notified when these results were first released on{' '}
+        {preview.data.notifiedAt.toLocaleDateString(undefined, { dateStyle: 'medium' })}. Releasing again notifies nobody; use Send result on a student page for a correction.
+      </p>
+    );
   return (
-    <ConfirmSendDialog
-      title="Publish results"
-      description="Every registered student of this examination gets their results. This can be done once; reopening the examination later does not retract anything."
-      confirmLabel="Publish results"
-      preview={preview}
-      onClose={onClose}
-      onConfirm={async () => {
-        const publication = await client.school.publishExamResults(scope);
-        await cache.invalidateQueries({ queryKey: orpc.school.getExamResultPublication.key() });
-        toast.success(`Results published to ${publication.snapshot.recipientCount} students.`);
-      }}
-    />
+    <div className="flex flex-col gap-2">
+      <p className="text-sm text-muted-foreground">Every registered student of this examination is notified once, now.</p>
+      <DeliveryForecastSummary forecast={preview.data.forecast} />
+    </div>
   );
 }
 
@@ -99,7 +104,7 @@ export function SendStudentResultDialog({ scope, onClose }: { scope: ExamStudent
   return (
     <ConfirmSendDialog
       title="Send result"
-      description="The student gets this examination's results now, independently of publishing results for the whole examination."
+      description="The student gets this examination's results now, independently of releasing results to the Cadet Portal."
       confirmLabel="Send result"
       preview={preview}
       onClose={onClose}

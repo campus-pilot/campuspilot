@@ -468,9 +468,10 @@ actions contains {"id": "school.document.artifacts.read", "key": "READ_DOCUMENT_
 
 actions contains {"id": "school.document.artifacts.delete", "key": "DELETE_DOCUMENT_ARTIFACTS", "resourceKind": "school"} if { true }
 
-# Notifications (Phase 6). Publishing an examination's results to every
-# student is school-wide; sending one student's result is class-scoped
-# (class/catalog.rego) so teacher assignments can restrict it.
+# Notifications. Resending a failed delivery (delivery log) is school-wide.
+# An examination's students are notified by its first Cadet release, which
+# needs only the release permission (D-43); sending one student's result is
+# class-scoped (class/catalog.rego) so teacher assignments can restrict it.
 actions contains {"id": "school.notification.send", "key": "SEND_NOTIFICATIONS", "resourceKind": "school"} if { true }
 
 # Notifications (Phase 7): the staff delivery log (per-channel status and

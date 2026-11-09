@@ -96,6 +96,14 @@ export const notificationPayloadSchemas = {
     examSlug: id,
     examName: label,
     admissionId: id,
+    /**
+     * The session enrollment (`student.id`) and the class it was sent for:
+     * together with the exam they name the student's result in the Cadet
+     * Portal (D-44). Recorded when the event is emitted, never looked up
+     * later, so a later class move does not change where it points.
+     */
+    studentId: id,
+    classId: id,
     studentName: label,
   }),
   /** A results publication the staff member started has finished (Phase 6, D-30). */
@@ -195,7 +203,7 @@ export const notificationCatalogue = {
 export const notificationLinkFactKeys = {
   "bill.issued": ["billId", "sessionId"],
   "payment.received": ["paymentId", "sessionId"],
-  "exam.results_published": ["sessionId", "examSlug"],
+  "exam.results_published": ["sessionId", "examSlug", "studentId", "classId"],
   "exam.results_publish_finished": ["sessionId", "examSlug"],
   "notification.whatsapp_failed": ["admissionId"],
   "notification.whatsapp_batch_failed": ["sessionId", "billRunId", "examSlug"],

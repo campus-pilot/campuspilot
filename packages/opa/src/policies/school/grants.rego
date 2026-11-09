@@ -137,9 +137,9 @@ grants contains {"role": role, "action": action} if {
   some action in {"school.document.templates.manage", "school.document.generate", "school.document.artifacts.delete"}
 }
 
-# D-35 roles minus teachers: a school-wide publication cannot honour a
-# teacher's class restriction, so teachers send single results only
-# (class.notification.result.send).
+# Resending failed deliveries: D-35 roles minus teachers, since a
+# school-wide delivery log cannot honour a teacher's class restriction;
+# teachers send single results only (class.notification.result.send).
 grants contains {"role": role, "action": "school.notification.send"} if {
   some role in {"school.principal", "school.manager", "school.exam_coordinator", "school.accountant"}
 }

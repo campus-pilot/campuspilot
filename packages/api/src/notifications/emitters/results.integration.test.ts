@@ -121,36 +121,50 @@ describe('result notifications', () => {
     expect(await db.select().from(notificationEventTable).where(and(eq(notificationEventTable.schoolId, schoolId), eq(notificationEventTable.key, longEventKey)))).toHaveLength(1);
   });
 
-  it('publishes a completed examination once, to every registered student, and notifies the publisher when settled', async () => {
-    await expect(principal.school.previewExamResultPublication(exam())).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+  it('notifies every registered student on the first Cadet release only, and the releaser when settled', async () => {
+    // A refused release (not completed) commits no notification either.
+    await expect(principal.school.releaseExamToCadet(exam())).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    await expect(principal.school.getExamResultPublication(exam())).resolves.toBeNull();
     await db.update(examResultTable).set({ approved: true }).where(eq(examResultTable.studentId, pendingStudent));
     await setStatus('completed');
-    await expect(teacherA.school.publishExamResults(exam())).rejects.toMatchObject({ code: 'FORBIDDEN' });
-    await expect(principal.school.getExamResultPublication(exam())).resolves.toBeNull();
-    await expect(principal.school.previewExamResultPublication(exam())).resolves.toMatchObject({ recipientCount: 3 });
+    await expect(teacherA.school.previewExamCadetRelease(exam())).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(teacherA.school.releaseExamToCadet(exam())).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(principal.school.previewExamCadetRelease(exam())).resolves.toMatchObject({
+      kind: 'first_release',
+      forecast: { recipientCount: 3, channels: { whatsapp: { skipped: { disabled: 3 } } } },
+    });
 
-    const publication = await principal.school.publishExamResults(exam());
+    await principal.school.releaseExamToCadet(exam());
+    const publication = await principal.school.getExamResultPublication(exam());
     expect(publication).toMatchObject({ examName: 'Final examination', publishedBy: principalId, finishedAt: null, outcome: null, snapshot: { recipientCount: 3, channels: { whatsapp: { skipped: { disabled: 3 } } } } });
-    await expect(accountant.school.publishExamResults(exam())).rejects.toMatchObject({ code: 'CONFLICT' });
-    const events = await db.select().from(notificationEventTable).where(like(notificationEventTable.key, `exam-results:${publication.id}:%`));
+    const events = await db.select().from(notificationEventTable).where(like(notificationEventTable.key, `exam-results:${publication!.id}:%`));
     expect(events).toHaveLength(3);
+    // Each copy names the student's own enrollment and class (the Cadet result link, D-44).
+    expect(events.map((event) => [(event.data as { studentId: string }).studentId, (event.data as { classId: string }).classId]).sort()).toEqual(
+      [[approvedStudent, classA], [pendingStudent, classA], [classBStudent, classB]].sort(),
+    );
 
     // Not finished while the fan-outs are pending; finished once they settled.
     await sweepResultPublications();
     await expect(principal.school.getExamResultPublication(exam())).resolves.toMatchObject({ finishedAt: null });
     // Every check is recorded, so unsettled publications rotate behind unchecked ones.
-    const [checked] = await db.select().from(examResultPublicationTable).where(eq(examResultPublicationTable.id, publication.id));
+    const [checked] = await db.select().from(examResultPublicationTable).where(eq(examResultPublicationTable.id, publication!.id));
     expect(checked!.settleCheckedAt).toBeInstanceOf(Date);
     for (const event of events) await dispatchNow(event.id);
     await sweepResultPublications();
     const finished = await principal.school.getExamResultPublication(exam());
     expect(finished?.finishedAt).not.toBeNull();
     expect(finished).toMatchObject({ outcome: { recipientCount: 3, sentCount: 0, skippedCount: 3, failedCount: 0 } });
-    const [staffEvent] = await db.select().from(notificationEventTable).where(eq(notificationEventTable.key, `exam-results-finished:${publication.id}`));
+    const [staffEvent] = await db.select().from(notificationEventTable).where(eq(notificationEventTable.key, `exam-results-finished:${publication!.id}`));
     expect(staffEvent).toMatchObject({ type: 'exam.results_publish_finished', recipients: { kind: 'staff_users', userIds: [principalId] }, data: { recipientCount: 3, skippedCount: 3, inAppCount: 3 } });
 
-    // Reopening retracts nothing; the publication stays recorded.
-    await setStatus('active');
-    await expect(db.select().from(examResultPublicationTable).where(eq(examResultPublicationTable.id, publication.id))).resolves.toHaveLength(1);
+    // Withdraw and re-release notify nobody again (D-43).
+    const eventCount = async () => (await db.select().from(notificationEventTable).where(eq(notificationEventTable.schoolId, schoolId))).length;
+    const before = await eventCount();
+    await principal.school.withdrawExamFromCadet(exam());
+    await expect(principal.school.previewExamCadetRelease(exam())).resolves.toMatchObject({ kind: 'already_notified', notifiedAt: publication!.publishedAt });
+    await principal.school.releaseExamToCadet(exam());
+    expect(await eventCount()).toBe(before);
+    await expect(db.select().from(examResultPublicationTable).where(eq(examResultPublicationTable.schoolId, schoolId))).resolves.toHaveLength(1);
   });
 });

@@ -41,7 +41,7 @@ import {
 } from './exam-model';
 import { ExamActions } from './exam-lifecycle';
 import { ExamTimetableMenu } from './exam-timetable';
-import { PublishResultsDialog, SendStudentResultDialog } from './exam-result-notifications';
+import { SendStudentResultDialog } from './exam-result-notifications';
 import { confirmNavigation } from '@/lib/navigation-guard';
 
 export function ExamWorkspace({
@@ -172,14 +172,12 @@ function WorkspaceActions(
 }
 
 /**
- * The result notification action of the page, if any: "Publish results" at
- * the examination root (school-wide), "Send result" on a student page
- * (class-scoped, so a teacher only for assigned classes). Class pages have
- * none.
+ * The result notification action of the page, if any: "Send result" on a
+ * student page (class-scoped, so a teacher only for assigned classes). The
+ * whole examination is notified by its release to the Cadet Portal (D-43),
+ * so the examination root and class pages have none.
  */
 function resultNotificationPermission(scope: ExamScope, classId?: string, studentId?: string): PermissionCheck | null {
-  if (!classId && !studentId)
-    return { action: SCHOOL_ACTIONS.SEND_NOTIFICATIONS, resource: { kind: 'school', schoolId: scope.schoolId } } as PermissionCheck;
   if (classId && studentId)
     return { action: CLASS_ACTIONS.SEND_RESULT_NOTIFICATION, resource: { kind: 'class', schoolId: scope.schoolId, classId } } as PermissionCheck;
   return null;
@@ -187,9 +185,8 @@ function resultNotificationPermission(scope: ExamScope, classId?: string, studen
 
 /**
  * Keeps admit-card, result-document and result-notification permissions
- * independent while sharing one menu. Notification items are lifecycle
- * actions: Publish is enabled only for a completed, unpublished
- * examination; Send result once the examination has started.
+ * independent while sharing one menu. Send result is enabled once the
+ * examination has started.
  */
 function ExamDocumentsMenu({
   scope,
@@ -204,13 +201,8 @@ function ExamDocumentsMenu({
   reportCardsEnabled: boolean;
   examStatus: 'ready' | 'active' | 'completed' | null;
 }) {
-  const ui = useForm({ defaultValues: { dialog: '' as '' | 'publish' | 'send' } });
+  const ui = useForm({ defaultValues: { dialog: '' as '' | 'send' } });
   const notificationPermission = resultNotificationPermission(scope, classId, studentId);
-  const atExamRoot = !classId && !studentId;
-  const publication = useQuery({
-    ...orpc.school.getExamResultPublication.queryOptions({ input: scope }),
-    enabled: atExamRoot,
-  });
   const reportCardHref = documentWorkspaceHref({
     scope,
     type: 'report_card',
@@ -259,12 +251,8 @@ function ExamDocumentsMenu({
   const canCreateResults = permissions.data.results
     .slice(admitCardPermissions.length, admitCardPermissions.length + reportCardPermissions.length)
     .every(Boolean);
-  const canNotify = notificationPermissions.length > 0 && permissions.data.results.slice(-1)[0] === true;
-  // Publication state must be known (and readable) before offering Publish.
-  const canPublish = canNotify && atExamRoot && publication.isSuccess;
-  const canSendResult = canNotify && !atExamRoot;
-  if (!canDownloadAdmitCards && !canCreateResults && !canPublish && !canSendResult) return null;
-  const published = publication.data ?? null;
+  const canSendResult = notificationPermissions.length > 0 && permissions.data.results.slice(-1)[0] === true;
+  if (!canDownloadAdmitCards && !canCreateResults && !canSendResult) return null;
   return (
     <>
     <DropdownMenu>
@@ -303,28 +291,17 @@ function ExamDocumentsMenu({
               </DropdownMenuItem>
             ))}
         </DropdownMenuGroup>
-        {(canPublish || canSendResult) && (
+        {canSendResult && (
           <>
             <DropdownMenuSeparator />
             <DropdownMenuGroup>
-              {canPublish && (
-                <DropdownMenuItem
-                  disabled={examStatus !== 'completed' || published !== null}
-                  onSelect={() => ui.setFieldValue('dialog', 'publish')}
-                >
-                  <Send aria-hidden />
-                  {published ? 'Results published' : 'Publish results'}
-                </DropdownMenuItem>
-              )}
-              {canSendResult && (
-                <DropdownMenuItem
-                  disabled={examStatus === null || examStatus === 'ready'}
-                  onSelect={() => ui.setFieldValue('dialog', 'send')}
-                >
-                  <Send aria-hidden />
-                  Send result
-                </DropdownMenuItem>
-              )}
+              <DropdownMenuItem
+                disabled={examStatus === null || examStatus === 'ready'}
+                onSelect={() => ui.setFieldValue('dialog', 'send')}
+              >
+                <Send aria-hidden />
+                Send result
+              </DropdownMenuItem>
             </DropdownMenuGroup>
           </>
         )}
@@ -332,9 +309,7 @@ function ExamDocumentsMenu({
     </DropdownMenu>
     <ui.Subscribe selector={(state) => state.values.dialog}>
       {(dialog) =>
-        dialog === 'publish' ? (
-          <PublishResultsDialog scope={scope} onClose={() => ui.setFieldValue('dialog', '')} />
-        ) : dialog === 'send' && classId && studentId ? (
+        dialog === 'send' && classId && studentId ? (
           <SendStudentResultDialog scope={{ ...scope, classId, studentId }} onClose={() => ui.setFieldValue('dialog', '')} />
         ) : null
       }

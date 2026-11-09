@@ -304,7 +304,13 @@ Remark, attendance and activities attach only to the record holding the results.
 `releaseExamToCadet` (staff, exam transition permission), which needs a
 completed exam and blocks reopening and legacy plan changes until
 `withdrawExamFromCadet`. The release time is always when the call was made;
-only the demo seed back-dates it (see `docs/demo-school.md`). Release freezes marks and remarks, not labels or grading
+only the demo seed back-dates it (see `docs/demo-school.md`). The **first**
+release also notifies every registered student of the examination
+(`exam.results_published`: inbox, web push, WhatsApp) in the same transaction,
+recorded once per exam in `exam_result_publication`; the confirmation shows the
+per-channel forecast (`previewExamCadetRelease`). Withdraw notifies nobody, and
+neither does a re-release (D-43; see `packages/api/src/routers/school/exam/README.md`).
+Release freezes marks and remarks, not labels or grading
 (no snapshot). Remarks (`exam_student_remark`) are written in the management
 student result page and are locked while released. Class averages appear only
 when the school setting `cadet_show_class_averages` is on (school settings) and

@@ -6,9 +6,7 @@ import { toRpcError } from '../../../errors';
 import { protectedProcedure } from '../../../index';
 import {
   getResultPublication,
-  previewResultPublication,
   previewStudentResult,
-  publishResults,
   sendStudentResult,
 } from '../../../notifications/emitters/results';
 import { requireClassPermission } from '../../../permissions/class';
@@ -29,14 +27,15 @@ function publicationDto(row: NonNullable<Awaited<ReturnType<typeof getResultPubl
 }
 
 /**
- * Result notifications (D-10, D-26, D-35). Publishing is school-wide
- * (`school.notification.send`); sending one student's result is
- * class-scoped (`class.notification.result.send`), so a teacher may send
- * only for assigned classes. Both also need exam/result read access.
+ * Result notifications (D-10, D-26, D-35, D-43). The whole examination is
+ * notified by its first Cadet release (`releaseExamToCadet`); this router
+ * reads that batch and sends one student's result, which is class-scoped
+ * (`class.notification.result.send`), so a teacher may send only for
+ * assigned classes, and also needs result read access.
  */
 export const schoolExamResultNotificationRouter = {
   getExamResultPublication: protectedProcedure
-    .route(route('Get an examination results publication', 'Read whether and when the results of an examination were published to its students, the per-channel forecast taken at that moment, and the settled WhatsApp outcome once every delivery finished. Null when not published.'))
+    .route(route('Get an examination results notification batch', 'Read whether and when the students of an examination were notified by its first release to the Cadet Portal, the per-channel forecast taken at that moment, and the settled WhatsApp outcome once every delivery finished. Null when not released yet (or released with no registered students).'))
     .meta({ mcp: { exposure: 'advanced', access: 'read', destructive: false, module: 'exams' } })
     .input(dto.examResultPublicationInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_EXAMS))
@@ -45,36 +44,6 @@ export const schoolExamResultNotificationRouter = {
       try {
         const row = await getResultPublication(context.db, input);
         return row ? publicationDto(row) : null;
-      } catch (error) {
-        throw toRpcError(error);
-      }
-    }),
-
-  previewExamResultPublication: protectedProcedure
-    .route(route('Preview publishing examination results', 'Count the registered students a publication would address now and, per channel, the copies owed and skipped by reason. Only for a completed, not yet published examination. Writes nothing.'))
-    .meta({ mcp: { exposure: 'advanced', access: 'read', destructive: false, module: 'exams' } })
-    .input(dto.examResultPublicationInputSchema)
-    .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_EXAM_RESULTS))
-    .use(requireSchoolPermission(SCHOOL_ACTIONS.SEND_NOTIFICATIONS))
-    .output(dto.deliveryForecastSchema)
-    .handler(async ({ context, input }) => {
-      try {
-        return await context.db.transaction((tx) => previewResultPublication(tx, input), { isolationLevel: 'repeatable read', accessMode: 'read only' });
-      } catch (error) {
-        throw toRpcError(error);
-      }
-    }),
-
-  publishExamResults: protectedProcedure
-    .route(route('Publish examination results', 'Once per completed examination, notify every registered student of its classes (in-app, device push and WhatsApp with the report card where allowed). Recipients and the per-channel forecast are snapshotted and returned. Reopening the examination later retracts nothing.'))
-    .meta({ mcp: { exposure: 'advanced', access: 'write', destructive: false, module: 'exams' } })
-    .input(dto.examResultPublicationInputSchema)
-    .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_EXAM_RESULTS))
-    .use(requireSchoolPermission(SCHOOL_ACTIONS.SEND_NOTIFICATIONS))
-    .output(dto.resultPublicationSchema)
-    .handler(async ({ context, input }) => {
-      try {
-        return publicationDto(await publishResults(context.db, input, context.session.user.id));
       } catch (error) {
         throw toRpcError(error);
       }
