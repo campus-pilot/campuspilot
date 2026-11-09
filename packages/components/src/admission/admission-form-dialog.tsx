@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { useForm } from '@tanstack/react-form';
 import { Button } from '@campuspilot/ui/components/button';
 import { Checkbox } from '@campuspilot/ui/components/checkbox';
@@ -180,10 +181,47 @@ function AdmissionContactFields({ form }: { form: AdmissionForm }) {
   </>;
 }
 
+/** The dialog's steps, in order (D-8b). */
+const STEPS = [
+  { id: 'details', title: 'Details', description: 'Personal and family information. Documents are attached after the admission is saved.' },
+  { id: 'contact', title: 'Contact & notifications', description: 'Phone number, WhatsApp number and consent for WhatsApp notifications.' },
+] as const;
+
+type StepIndex = 0 | 1;
+
+/** Field errors keyed by field name, from a failed step validation. */
+function fieldErrors(error: z.ZodError) {
+  return Object.fromEntries(error.issues.map((issue) => [issue.path.join('.'), issue.message]));
+}
+
+/** "Step 1 of 2" with the step title, announced to assistive technology. */
+function StepIndicator({ step }: { step: StepIndex }) {
+  return <ol className="flex flex-wrap gap-x-4 gap-y-1 text-xs" aria-label="Steps">{STEPS.map((item, index) => <li key={item.id} aria-current={index === step ? 'step' : undefined} className={index === step ? 'font-medium text-foreground' : 'text-muted-foreground'}>{`${index + 1}. ${item.title}`}</li>)}</ol>;
+}
+
+/** Cancel/Back and Next/Save, with the form's errors and submission progress. */
+function StepFooter({ form, step, mode, onBack, onCancel }: {
+  form: AdmissionForm;
+  step: StepIndex;
+  mode: 'create' | 'edit';
+  onBack: () => void;
+  onCancel: () => void;
+}) {
+  const last = step === STEPS.length - 1;
+  const saveLabel = mode === 'create' ? 'Create admission' : 'Save changes';
+  return <form.Subscribe selector={(state) => ({ canSubmit: state.canSubmit, errors: state.errors, isSubmitting: state.isSubmitting })}>{({ canSubmit, errors, isSubmitting }) => <div className="flex flex-col gap-3 sm:col-span-2"><FormErrors errors={errors} /><DialogFooter>{step === 0 ? <Button type="button" variant="outline" onClick={onCancel}>Cancel</Button> : <Button type="button" variant="outline" disabled={isSubmitting} onClick={onBack}>Back</Button>}<Button type="submit" disabled={last && (!canSubmit || isSubmitting)}>{last ? (isSubmitting ? 'Saving…' : saveLabel) : 'Next'}</Button></DialogFooter></div>}</form.Subscribe>;
+}
+
 /**
- * Create or edit an admission. `cadetPasswordOption` shows the "Generate
- * Cadet Portal password" checkbox (unchecked by default) in create mode; the
- * caller passes it only when the user may issue Cadet Portal passwords.
+ * Create or edit an admission in two steps (D-8b): details, then contact &
+ * notifications. One TanStack Form holds every field across both steps, so
+ * going back and forth keeps what was typed. "Next" validates only the
+ * details step; saving validates everything. In create mode "WhatsApp number
+ * is the same as phone number" starts checked (D-4).
+ *
+ * `cadetPasswordOption` shows the "Generate Cadet Portal password" checkbox
+ * (unchecked by default) in create mode; the caller passes it only when the
+ * user may issue Cadet Portal passwords.
  */
 export function AdmissionFormDialog({ open, mode, defaultValues, classes, cadetPasswordOption = false, onOpenChange, onSubmit }: {
   open: boolean;
@@ -195,14 +233,26 @@ export function AdmissionFormDialog({ open, mode, defaultValues, classes, cadetP
   onSubmit: (value: AdmissionFormSubmitValue, options: AdmissionFormOptions) => Promise<void>;
 }) {
   const showCadetPasswordOption = mode === 'create' && cadetPasswordOption;
+  const [step, setStep] = useState<StepIndex>(0);
   const form = useAdmissionForm({ defaultValues, showCadetPasswordOption, onSubmit, onSaved: () => onOpenChange(false) });
 
-  return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl"><DialogHeader><DialogTitle>{mode === 'create' ? 'Create admission' : 'Edit admission'}</DialogTitle><DialogDescription>Record personal and contact information. Documents are attached after the admission is saved.</DialogDescription></DialogHeader>
-    <form className="grid gap-4 sm:grid-cols-2" onSubmit={(event) => { event.preventDefault(); event.stopPropagation(); void form.handleSubmit(); }}>
-      <AdmissionDetailsFields form={form} classes={classes} />
-      <AdmissionContactFields form={form} />
-      {showCadetPasswordOption ? <form.Field name="generateCadetPassword">{(field) => <CheckboxRow id="admission-generate-cadet-password" label="Generate Cadet Portal password" hint="The student can sign in to the Cadet Portal with it. It is shown once after the admission is created." checked={field.state.value} onCheckedChange={field.handleChange} />}</form.Field> : null}
-      <form.Subscribe selector={(state) => ({ canSubmit: state.canSubmit, errors: state.errors, isSubmitting: state.isSubmitting })}>{({ canSubmit, errors, isSubmitting }) => <div className="flex flex-col gap-3 sm:col-span-2"><FormErrors errors={errors} /><DialogFooter><Button type="button" variant="outline" disabled={isSubmitting} onClick={() => onOpenChange(false)}>Cancel</Button><Button type="submit" disabled={!canSubmit || isSubmitting}>{isSubmitting ? 'Saving…' : mode === 'create' ? 'Create admission' : 'Save changes'}</Button></DialogFooter></div>}</form.Subscribe>
+  /** Validates the details step only, then moves to contact & notifications. */
+  function next() {
+    const parsed = detailsSchema.safeParse(form.state.values);
+    if (!parsed.success) {
+      form.setErrorMap({ onSubmit: { fields: fieldErrors(parsed.error), form: undefined } });
+      return;
+    }
+    form.setErrorMap({ onSubmit: { fields: {}, form: undefined } });
+    setStep(1);
+  }
+
+  const current = STEPS[step];
+  return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl"><DialogHeader><DialogTitle>{mode === 'create' ? 'Create admission' : 'Edit admission'}</DialogTitle><DialogDescription>{current.description}</DialogDescription><StepIndicator step={step} /></DialogHeader>
+    <form className="grid gap-4 sm:grid-cols-2" onSubmit={(event) => { event.preventDefault(); event.stopPropagation(); if (step === 0) next(); else void form.handleSubmit(); }}>
+      {step === 0 ? <AdmissionDetailsFields form={form} classes={classes} /> : <AdmissionContactFields form={form} />}
+      {step === 1 && showCadetPasswordOption ? <form.Field name="generateCadetPassword">{(field) => <CheckboxRow id="admission-generate-cadet-password" label="Generate Cadet Portal password" hint="The student can sign in to the Cadet Portal with it. It is shown once after the admission is created." checked={field.state.value} onCheckedChange={field.handleChange} />}</form.Field> : null}
+      <StepFooter form={form} step={step} mode={mode} onBack={() => setStep(0)} onCancel={() => onOpenChange(false)} />
     </form>
   </DialogContent></Dialog>;
 }
