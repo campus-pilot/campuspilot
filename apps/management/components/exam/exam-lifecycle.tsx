@@ -26,7 +26,10 @@ import { client, orpc } from '@/lib/orpc';
 import { ExamButton, ExamInput, Issues } from './exam-common';
 import {
   cadetReleaseAction,
+  examActionDescription,
+  examActionLabel,
   errorMessage,
+  reopenBlockedReason,
   optionalIntegerText,
   schoolPermission,
   type ExamScope,
@@ -112,7 +115,8 @@ export function ExamActions(props: Props) {
               <p className="text-sm text-muted-foreground">Control when results can be entered and finalized.</p>
             </div>
             <LifecycleTrigger scope={scope} visible={active && overview.planCount > 0}
-              action={lifecycleAction} onSelect={() => ui.setFieldValue('action', lifecycleAction)} />
+              action={lifecycleAction} blockedReason={lifecycleAction === 'reopen' ? reopenBlockedReason(overview) : null}
+              onSelect={() => ui.setFieldValue('action', lifecycleAction)} />
           </section>
           <section className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3">
             <div className="flex flex-col gap-1">
@@ -127,8 +131,9 @@ export function ExamActions(props: Props) {
       {placement === 'navbar' && (
         <div className="flex flex-wrap items-center gap-2">
           <LifecycleTrigger scope={scope} visible={active && overview.planCount > 0}
-            action={lifecycleAction} onSelect={() => ui.setFieldValue('action', lifecycleAction)} />
-          <CadetReleaseTrigger scope={scope} visible={cadetVisible}
+            action={lifecycleAction} blockedReason={lifecycleAction === 'reopen' ? reopenBlockedReason(overview) : null}
+            onSelect={() => ui.setFieldValue('action', lifecycleAction)} />
+          <CadetReleaseTrigger scope={scope} visible={cadetVisible} compact
             action={cadetAction} onSelect={() => ui.setFieldValue('action', cadetAction)} />
         </div>
       )}
@@ -167,27 +172,33 @@ function cadetStatusText(overview: ExamOverviewDto) {
   return 'Results can be released to students after the examination is completed.';
 }
 
-function CadetReleaseTrigger({ scope, visible, action, onSelect }: {
-  scope: ExamScope; visible: boolean; action: CadetAction; onSelect: () => void;
+/** `compact` uses the short navbar wording so the button does not wrap on a phone. */
+function CadetReleaseTrigger({ scope, visible, action, compact = false, onSelect }: {
+  scope: ExamScope; visible: boolean; action: CadetAction; compact?: boolean; onSelect: () => void;
 }) {
   if (!visible) return null;
   const Icon = action === 'release' ? Send : Undo2;
   return (
     <RequirePermissions permissions={schoolPermission(scope.schoolId, SCHOOL_ACTIONS.TRANSITION_EXAM_PLAN)}>
-      <ExamButton variant="outline" onClick={onSelect}><Icon aria-hidden />{actionLabel(action)}</ExamButton>
+      <ExamButton variant="outline" onClick={onSelect}><Icon aria-hidden />{actionLabel(action, compact)}</ExamButton>
     </RequirePermissions>
   );
 }
 
-function LifecycleTrigger({ scope, visible, action, onSelect }: {
+/** A blocked action stays visible but disabled, with its reason next to it, instead of opening a dead-end dialog. */
+function LifecycleTrigger({ scope, visible, action, blockedReason = null, onSelect }: {
   scope: ExamScope; visible: boolean; action: LifecycleAction;
+  blockedReason?: string | null;
   onSelect: () => void;
 }) {
   if (!visible) return null;
   const Icon = action === 'start' ? Play : action === 'complete' ? CheckCircle2 : RotateCcw;
   return (
     <RequirePermissions permissions={schoolPermission(scope.schoolId, SCHOOL_ACTIONS.TRANSITION_EXAM_PLAN)}>
-      <ExamButton variant="outline" onClick={onSelect}><Icon aria-hidden />{actionLabel(action)}</ExamButton>
+      <span className="flex flex-wrap items-center gap-2">
+        {blockedReason && <span className="text-xs text-muted-foreground">{blockedReason}</span>}
+        <ExamButton variant="outline" disabled={!!blockedReason} onClick={onSelect}><Icon aria-hidden />{actionLabel(action)}</ExamButton>
+      </span>
     </RequirePermissions>
   );
 }
@@ -216,34 +227,9 @@ function WorkingDaysAlert({
     />
   );
 }
-function actionLabel(action: Exclude<Action, '' | 'working-days'>) {
-  return {
-    start: 'Start examination',
-    complete: 'Complete examination',
-    reopen: 'Reopen examination',
-    release: 'Release results to Cadet Portal',
-    withdraw: 'Withdraw from Cadet Portal',
-  }[action];
-}
+const actionLabel = examActionLabel;
+const actionDescription = examActionDescription;
 
-function actionDescription(action: Exclude<Action, ''>, released: boolean) {
-  switch (action) {
-    case 'working-days':
-      return 'Set the maximum number of attendance days for this examination.';
-    case 'start':
-      return 'Start result entry for every class. Only the principal, manager or exam coordinator can start an examination.';
-    case 'complete':
-      return 'All student results must be approved. Completing the examination makes results and timetable read-only.';
-    case 'reopen':
-      return released
-        ? 'These results are visible to students in the Cadet Portal. Withdraw them from the Cadet Portal before reopening the examination.'
-        : 'Reopen result entry for every class. Saved marks and approvals are preserved.';
-    case 'release':
-      return 'Students and guardians will see their marks, grades, attendance, activities and teacher remarks for this examination in the Cadet Portal. Remarks are locked while released, and the examination cannot be reopened until you withdraw it.';
-    case 'withdraw':
-      return 'Students will no longer see this examination’s results in the Cadet Portal. Saved results and remarks are not changed.';
-  }
-}
 function ExamActionDialog({
   scope,
   action,

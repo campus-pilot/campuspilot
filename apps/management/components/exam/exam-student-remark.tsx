@@ -9,6 +9,7 @@ import {
 } from '@campuspilot/api/routers/school/exam/exam.dto';
 import { SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
 import { ConfirmationDialog } from '@campuspilot/components/confirmation-dialog';
+import { StudentExamRemarkPreview } from '@campuspilot/components/exam/student-exam-remark-preview';
 import { Label } from '@campuspilot/ui/components/label';
 import { Textarea } from '@campuspilot/ui/components/textarea';
 import { toast } from '@campuspilot/ui/lib/toast';
@@ -41,7 +42,8 @@ export function StudentExamRemark({
     defaultValues: { editing: false },
     validators: { onChange: z.object({ editing: z.boolean() }) },
   });
-  if (query.isPending) return null;
+  if (query.isPending)
+    return <div className="h-24 animate-pulse rounded-lg border bg-muted/40" aria-busy="true" aria-label="Loading teacher remark" />;
   if (query.isError) return <ReadError error={query.error} retry={query.refetch} />;
   const editable = isRemarkEditable(active, overview);
   return (
@@ -84,34 +86,22 @@ function RemarkPreview({
   onEdit: () => void;
 }) {
   return (
-    <>
-      {remark ? (
-        <div className="flex flex-col gap-1">
-          <p className="text-sm whitespace-pre-wrap">{remark.text}</p>
-          <p className="text-xs text-muted-foreground">
-            {remark.authorName ?? 'Former staff member'} ·{' '}
-            {new Date(remark.updatedAt).toLocaleDateString(undefined, { dateStyle: 'medium' })}
-          </p>
-        </div>
-      ) : (
-        <p className="text-sm text-muted-foreground">No remark written yet.</p>
-      )}
-      {released && (
-        <p className="text-xs text-muted-foreground">
-          Locked while the results are released to the Cadet Portal.
-        </p>
-      )}
-      {editable && (
-        <RequirePermissions permissions={schoolPermission(scope.schoolId, SCHOOL_ACTIONS.WRITE_EXAM_RESULTS)}>
-          <div className="flex flex-wrap gap-2">
-            <ExamButton variant="outline" onClick={onEdit}>
-              {remark ? 'Edit remark' : 'Write remark'}
-            </ExamButton>
-            {remark && <RemoveRemark scope={scope} />}
-          </div>
-        </RequirePermissions>
-      )}
-    </>
+    <StudentExamRemarkPreview
+      remark={remark}
+      released={released}
+      actions={
+        editable ? (
+          <RequirePermissions permissions={schoolPermission(scope.schoolId, SCHOOL_ACTIONS.WRITE_EXAM_RESULTS)}>
+            <div className="flex flex-wrap gap-2">
+              <ExamButton variant="outline" onClick={onEdit}>
+                {remark ? 'Edit remark' : 'Write remark'}
+              </ExamButton>
+              {remark && <RemoveRemark scope={scope} />}
+            </div>
+          </RequirePermissions>
+        ) : null
+      }
+    />
   );
 }
 

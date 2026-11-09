@@ -5,6 +5,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
 import { SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
 import type { CadetPortalSettingsDto } from '@campuspilot/api/routers/school/cadet-settings/cadet-settings.dto';
+import { CADET_CLASS_AVERAGE_MIN_STUDENTS } from '@campuspilot/api/routers/cadet/cadet.dto';
 import { Button } from '@campuspilot/ui/components/button';
 import {
   Card,
@@ -90,7 +91,9 @@ function CadetPortalSettingsForm({ settings }: { settings: CadetPortalSettingsDt
             <div className="flex flex-col gap-1">
               <Label htmlFor="cadet-show-class-averages">Show class averages</Label>
               <p className="text-xs text-muted-foreground">
-                Students see their class&apos;s average next to their own released results and growth. Ranks are never shown.
+                Students see their class&apos;s average next to their own released results and growth. An average is
+                shown only when at least {CADET_CLASS_AVERAGE_MIN_STUDENTS} students have results, so a small class
+                cannot reveal a classmate&apos;s marks. Ranks are never shown.
               </p>
             </div>
             <Switch

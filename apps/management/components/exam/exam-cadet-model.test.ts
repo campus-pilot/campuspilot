@@ -1,6 +1,6 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { cadetReleaseAction, isRemarkEditable } from './exam-model';
+import { cadetReleaseAction, examActionDescription, examActionLabel, isRemarkEditable, reopenBlockedReason } from './exam-model';
 
 const released = new Date('2026-10-04T00:00:00Z');
 
@@ -21,4 +21,21 @@ test('remarks are editable after the start, in the active session, while not rel
   assert.equal(isRemarkEditable(true, { status: 'completed', cadetReleasedAt: released }), false);
   assert.equal(isRemarkEditable(false, { status: 'completed', cadetReleasedAt: null }), false);
   assert.equal(isRemarkEditable(true, undefined), false);
+});
+
+test('reopen is blocked with its reason only while released', () => {
+  assert.equal(reopenBlockedReason({ status: 'completed', cadetReleasedAt: released }), 'Withdraw from Cadet Portal before reopening.');
+  assert.equal(reopenBlockedReason({ status: 'completed', cadetReleasedAt: null }), null);
+});
+
+test('the release confirmation explains what students see and what it locks', () => {
+  const release = examActionDescription('release', false);
+  assert.match(release, /marks, grades, attendance, activities and teacher remarks/);
+  assert.match(release, /cannot be reopened until you withdraw/);
+  assert.match(examActionDescription('reopen', true), /Withdraw them from the Cadet Portal before reopening/);
+  assert.equal(examActionLabel('release'), 'Release results to Cadet Portal');
+  // The navbar uses short labels so they fit a phone.
+  assert.equal(examActionLabel('release', true), 'Release to Cadet');
+  assert.equal(examActionLabel('withdraw', true), 'Withdraw from Cadet');
+  assert.equal(examActionLabel('reopen', true), 'Reopen examination');
 });
