@@ -281,6 +281,7 @@ so an unexpired access token stops working immediately. It is idempotent.
 | --- | --- | --- |
 | `getAdmission` | core, read, module `account` | The signed-in admission, returned with management's `admissionDtoSchema` / `toAdmissionDto` (reuse DTOs; do not fork a cadet copy). |
 | `getOAuthConsentClient({ clientId })` | hidden | Consent-screen facts from `cadet_oauth_client` only (`oauthConsentClientSchema` from `routers/auth/auth.dto.ts`); a staff client id is never found. |
+| `listNotifications`, `getUnreadNotificationCount`, `markNotificationsRead`, `markAllNotificationsRead`, `dismissNotifications` | hidden | The student's notification inbox (`cadet-notification.router.ts`), bound to the session's admission through the shared visibility predicate in `packages/api/src/notifications/inbox.ts`; no delivery status. |
 
 ## Cadet MCP
 

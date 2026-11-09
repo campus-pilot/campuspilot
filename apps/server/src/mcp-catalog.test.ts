@@ -83,6 +83,12 @@ const HIDDEN_TOOLS = [
   'systemAdmin.rotateOAuthClientSecret',
   'systemAdmin.deleteOAuthClient',
   'systemAdmin.setOAuthClientDisabled',
+  // The staff notification inbox is app chrome with no agent value.
+  'school.listNotifications',
+  'school.getUnreadNotificationCount',
+  'school.markNotificationsRead',
+  'school.markAllNotificationsRead',
+  'school.dismissNotifications',
   // Data migrations change every school's data: human platform-admin actions.
   'systemAdmin.listDataMigrations',
   'systemAdmin.listDataMigrationSkippedItems',

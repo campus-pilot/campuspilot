@@ -146,7 +146,17 @@ describe('cadet and staff sessions are isolated', () => {
   });
 
   it('keeps cadet procedures out of the staff router and staff procedures out of the cadet router', () => {
-    expect(Object.keys(cadetRouter)).toEqual(['getAdmission', 'getOAuthConsentClient']);
+    expect(Object.keys(cadetRouter).sort()).toEqual([
+      'dismissNotifications',
+      'getAdmission',
+      'getOAuthConsentClient',
+      'getUnreadNotificationCount',
+      'listNotifications',
+      'markAllNotificationsRead',
+      'markNotificationsRead',
+    ]);
+    // Same-named staff inbox procedures live under `school`, scoped by membership.
+    expect(appRouter).not.toHaveProperty('listNotifications');
     expect(appRouter).not.toHaveProperty('getAdmission');
     expect(appRouter).not.toHaveProperty('getOAuthConsentClient');
     expect(Object.values(appRouter)).not.toContain(cadetRouter);
