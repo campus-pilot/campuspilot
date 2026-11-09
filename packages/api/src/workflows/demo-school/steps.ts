@@ -470,13 +470,25 @@ export async function seedExamRemarks(
   return { saved };
 }
 
-/** Releases a completed exam to the Cadet Portal when the plan says so. */
-export async function seedExamRelease(ctx: SeedContext, sessionId: string, exam: DemoExam): Promise<{ released: boolean }> {
-  if (!exam.releaseToCadet) return { released: false };
+/**
+ * Releases a completed exam to the Cadet Portal when the plan says so.
+ * Returns what actually happened: `released` (this run released it),
+ * `already-released` (a replay found it released) or `skipped` (not planned,
+ * or the exam is not completed). The release time is the server's clock at
+ * this step, not `asOf`; see docs/demo-school.md.
+ */
+export async function seedExamRelease(
+  ctx: SeedContext,
+  sessionId: string,
+  exam: DemoExam,
+): Promise<{ outcome: 'released' | 'already-released' | 'skipped' }> {
+  if (!exam.releaseToCadet) return { outcome: 'skipped' };
   const scope = { schoolId: ctx.schoolId, sessionId, examSlug: exam.slug };
   const overview = await ctx.rpc.school.getExamOverview(scope);
-  if (overview.status === 'completed' && !overview.cadetReleasedAt) await ctx.rpc.school.releaseExamToCadet(scope);
-  return { released: true };
+  if (overview.cadetReleasedAt) return { outcome: 'already-released' };
+  if (overview.status !== 'completed') return { outcome: 'skipped' };
+  await ctx.rpc.school.releaseExamToCadet(scope);
+  return { outcome: 'released' };
 }
 
 // ---------------------------------------------------------------------------

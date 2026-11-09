@@ -94,6 +94,11 @@ one when just one is completed. The session step turns on the school's
 "show class averages in Cadet Portal" setting. Periodic Test 1 exists so a
 demo created from late September on has both a released and an unreleased
 completed exam; it charges no examination fee (`chargesFee: false`).
+Release times come from the API server's clock when the step runs (the real
+`releaseExamToCadet` procedure records them), not from `asOf`, so a demo's
+"Released on" dates are the day the demo was created even though exam
+windows and payments are back-dated. There is deliberately no demo-only way
+to set a release time.
 
 ### Credentials
 
