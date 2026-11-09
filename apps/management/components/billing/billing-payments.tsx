@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { useForm } from "@tanstack/react-form";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import type { z } from "zod";
@@ -23,14 +23,7 @@ import {
 } from "@campuspilot/components/finance";
 import { Badge } from "@campuspilot/ui/components/badge";
 import { Button } from "@campuspilot/ui/components/button";
-import {
-  Combobox,
-  ComboboxContent,
-  ComboboxEmpty,
-  ComboboxInput,
-  ComboboxItem,
-  ComboboxList,
-} from "@campuspilot/ui/components/combobox";
+import { Combobox } from "@campuspilot/ui/components/combobox";
 import {
   Dialog,
   DialogContent,
@@ -87,7 +80,6 @@ function PaymentAdmissionSearch({
   onValueChange: (value: AdmissionOption | null) => void;
   onSearchChange: (value: string) => void;
 }) {
-  const popupContainer = useRef<HTMLDivElement>(null);
   const query = useQuery(
     orpc.school.listAdmissions.queryOptions({
       input: {
@@ -98,55 +90,42 @@ function PaymentAdmissionSearch({
       },
     }),
   );
-  const admissions = query.data?.items ?? [];
-  const items =
-    value && !admissions.some(({ id }) => id === value.id)
-      ? [value, ...admissions]
-      : admissions;
   return (
-    <div ref={popupContainer} className="min-w-64 flex-1">
-      <Combobox
-        items={items}
-        filteredItems={admissions}
-        filter={null}
-        value={value}
-        inputValue={search}
-        onValueChange={onValueChange}
-        onInputValueChange={onSearchChange}
-        itemToStringLabel={(admission) => admission.name}
-        isItemEqualToValue={(admission, selected) =>
-          admission.id === selected.id
-        }
-      >
-        <ComboboxInput
-          aria-label="Admission for payment"
-          className="w-full"
-          placeholder="Search admission name or number…"
-          showClear
-        />
-        <ComboboxContent container={popupContainer}>
-          <ComboboxEmpty>
-            {query.isPending
-              ? "Loading admissions…"
-              : query.isError
-                ? "Unable to load admissions."
-                : "No admissions found."}
-          </ComboboxEmpty>
-          <ComboboxList>
-            {(admission: AdmissionOption) => (
-              <ComboboxItem key={admission.id} value={admission}>
-                <span className="flex min-w-0 flex-col">
-                  <span className="truncate font-medium">{admission.name}</span>
-                  <span className="truncate text-muted-foreground">
-                    Admission {admission.admissionNo}
-                  </span>
-                </span>
-              </ComboboxItem>
-            )}
-          </ComboboxList>
-        </ComboboxContent>
-      </Combobox>
-    </div>
+    <Combobox
+      className="min-w-64 flex-1"
+      items={query.data?.items ?? []}
+      value={value}
+      onValueChange={onValueChange}
+      itemKey={(admission) => admission.id}
+      itemLabel={(admission) => admission.name}
+      renderItem={(admission) => <AdmissionOptionLabel admission={admission} />}
+      search={search}
+      onSearchChange={onSearchChange}
+      aria-label="Admission for payment"
+      placeholder="Select an admission"
+      searchLabel="Search admissions"
+      searchPlaceholder="Search admission name or number…"
+      clearLabel="Clear admission"
+      showClear
+      emptyMessage={
+        query.isPending
+          ? "Loading admissions…"
+          : query.isError
+            ? "Unable to load admissions."
+            : "No admissions found."
+      }
+    />
+  );
+}
+
+function AdmissionOptionLabel({ admission }: { admission: AdmissionOption }) {
+  return (
+    <span className="flex min-w-0 flex-col">
+      <span className="truncate font-medium">{admission.name}</span>
+      <span className="truncate text-muted-foreground">
+        Admission {admission.admissionNo}
+      </span>
+    </span>
   );
 }
 

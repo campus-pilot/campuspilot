@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import { CLASS_ACTIONS, SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
 import { useForm } from '@tanstack/react-form';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from '@campuspilot/ui/components/input';
 import { Label } from '@campuspilot/ui/components/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@campuspilot/ui/components/select';
-import { Combobox, ComboboxContent, ComboboxEmpty, ComboboxInput, ComboboxItem, ComboboxList } from '@campuspilot/ui/components/combobox';
+import { Combobox } from '@campuspilot/ui/components/combobox';
 import { Plus } from 'lucide-react';
 import { z } from 'zod';
 
@@ -21,49 +21,40 @@ type AdmissionOption = z.infer<typeof admissionOptionSchema>;
 
 const enrollmentSchema = z.object({ admission: admissionOptionSchema.nullable().refine((admission) => admission !== null, 'Select an admission.'), admissionSearch: z.string(), sectionId: z.string().min(1, 'Select a section.'), rollNo: z.number().int().positive('Enter a positive roll number.') });
 
-/** Uses the server's eligible results for both option rendering and combobox state. */
+/**
+ * Lists the server's eligible results unfiltered: search also matches admission
+ * numbers and contact details on the server. The selected admission's label
+ * comes from `value`, so it stays visible while another search is loading.
+ */
 function AdmissionCombobox({ schoolId, sessionId, value, searchQuery, onValueChange, onSearchChange }: { schoolId: string; sessionId: string; value: AdmissionOption | null; searchQuery: string; onValueChange: (value: AdmissionOption | null) => void; onSearchChange: (value: string) => void }) {
-  const popupContainer = useRef<HTMLDivElement>(null);
   const admissionsQuery = useQuery(orpc.school.listAdmissions.queryOptions({ input: { schoolId, limit: 20, searchQuery: searchQuery.trim() || undefined, filters: { registered: true, unadmittedForSessionId: sessionId } } }));
-  const admissions = admissionsQuery.data?.items ?? [];
-  // Keep the selection available while a different search is loading. Its label
-  // must not depend on the current query results.
-  const items = value && !admissions.some(({ id }) => id === value.id) ? [value, ...admissions] : admissions;
-  // Search also matches admission numbers and contact details on the server.
-  // Disable label-only filtering so those results remain selectable.
-  // The dialog uses Radix focus containment. Keep the Base UI popup inside
-  // that dialog so pointer interaction is not treated as an outside click.
   return (
-    <div ref={popupContainer}>
-      <Combobox
-        items={items}
-        filteredItems={admissions}
-        filter={null}
-        value={value}
-        inputValue={searchQuery}
-        onValueChange={onValueChange}
-        onInputValueChange={onSearchChange}
-        itemToStringLabel={(admission) => admission.name}
-        isItemEqualToValue={(admission, selected) => admission.id === selected.id}
-      >
-        <ComboboxInput aria-label="Admission" className="w-full" placeholder="Search eligible admissions…" showClear />
-        <ComboboxContent container={popupContainer}>
-          <ComboboxEmpty>
-            {admissionsQuery.isPending ? 'Loading admissions…' : admissionsQuery.isError ? 'Unable to load admissions. Try again.' : 'No eligible admissions found.'}
-          </ComboboxEmpty>
-          <ComboboxList>
-            {(admission: AdmissionOption) => (
-              <ComboboxItem key={admission.id} value={admission}>
-                <span className="flex min-w-0 flex-col">
-                  <span className="truncate font-medium">{admission.name}</span>
-                  <span className="truncate text-muted-foreground">Admission {admission.admissionNo}</span>
-                </span>
-              </ComboboxItem>
-            )}
-          </ComboboxList>
-        </ComboboxContent>
-      </Combobox>
-    </div>
+    <Combobox
+      items={admissionsQuery.data?.items ?? []}
+      value={value}
+      onValueChange={onValueChange}
+      itemKey={(admission) => admission.id}
+      itemLabel={(admission) => admission.name}
+      renderItem={(admission) => <AdmissionOptionLabel admission={admission} />}
+      search={searchQuery}
+      onSearchChange={onSearchChange}
+      aria-label="Admission"
+      placeholder="Select an eligible admission"
+      searchLabel="Search eligible admissions"
+      searchPlaceholder="Search eligible admissions…"
+      clearLabel="Clear admission"
+      showClear
+      emptyMessage={admissionsQuery.isPending ? 'Loading admissions…' : admissionsQuery.isError ? 'Unable to load admissions. Try again.' : 'No eligible admissions found.'}
+    />
+  );
+}
+
+function AdmissionOptionLabel({ admission }: { admission: AdmissionOption }) {
+  return (
+    <span className="flex min-w-0 flex-col">
+      <span className="truncate font-medium">{admission.name}</span>
+      <span className="truncate text-muted-foreground">Admission {admission.admissionNo}</span>
+    </span>
   );
 }
 
