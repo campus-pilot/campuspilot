@@ -24,7 +24,7 @@ export type CadetLogin = {
 /**
  * How the cadet authenticated, from the credential actually verified.
  * - `session`: `cpc_` browser session cookie (the Cadet Portal app).
- * - `oauth`: cadet MCP access token; only accepted on `/api/cadet/mcp`.
+ * - `oauth`: cadet MCP access token; only accepted on `/cadet/mcp`.
  * Cadet logins have no API keys.
  */
 export type CadetPrincipal =

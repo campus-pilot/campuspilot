@@ -23,7 +23,7 @@ session the student was enrolled in.
 | UI copy | **Cadet Portal** (code names below are unchanged) |
 | App | `apps/cadet` (Next.js), dev port **3004** (`apps/cadet/package.json`, `apps/cadet/Dockerfile`) |
 | Production host | `cadet.campuspilot.in` (decided; not yet configured anywhere in this repo) |
-| API routes | `/api/cadet/auth/*`, `/api/cadet/rpc/*`, `/api/cadet/mcp` |
+| API routes | `/api/cadet/auth/*`, `/api/cadet/rpc/*`, `/cadet/mcp` |
 | Router / procedure base | `cadetRouter`, `cadetProcedure` |
 | Tables | `cadet_*` (`packages/db/src/schema/cadet.ts`) |
 | Cookie prefix | `cpc_` (staff: `cp_`) |
@@ -92,8 +92,8 @@ All in `apps/server/src/http.ts`:
 | --- | --- |
 | `POST/GET /api/cadet/auth/*` | `cadetAuth.handler` |
 | `/api/cadet/rpc/*` | `cadetRpcHandler` (`cadetRouter`), context from `createCadetContextFromHeaders` |
-| `/api/cadet/mcp` | `createMcpGate<CadetContext>` + `createCampusPilotMcpHandler<CadetContext>` with `cadetMcpCatalog = buildMcpCatalog(cadetRouter)` and its own `AsyncLocalStorage` |
-| `GET /.well-known/oauth-protected-resource/api/cadet/mcp` | `cadetAuth.handler` |
+| `/cadet/mcp` | `createMcpGate<CadetContext>` + `createCampusPilotMcpHandler<CadetContext>` with `cadetMcpCatalog = buildMcpCatalog(cadetRouter)` and its own `AsyncLocalStorage` |
+| `GET /.well-known/oauth-protected-resource/cadet/mcp` | `cadetAuth.handler` |
 | `GET /.well-known/oauth-authorization-server/api/cadet/auth` | `cadetAuth.api.getOAuthServerConfig()` |
 | `GET /.well-known/openid-configuration/api/cadet/auth` | `cadetAuth.api.getOpenIdConfig()` |
 
@@ -101,14 +101,15 @@ The three cadet well-known routes are registered **before**
 `/.well-known/oauth-protected-resource/*`, which sends everything else to staff
 auth. Hono matches in registration order; moving them after the wildcard makes
 staff auth answer for the cadet resource. `cadet-http.integration.test.ts`
-covers this. The staff MCP is `/mcp`, not under `/api`; the cadet MCP is
-deliberately `/api/cadet/mcp` and never nested under a staff resource path.
+covers this. Both MCP endpoints are top-level, not under `/api`: staff at `/mcp`,
+cadet at `/cadet/mcp`. The cadet MCP is never nested under a staff resource path.
 
 ### CORS
 
 `apps/server/src/config.ts`: the cadet origin (`CADET_APP_URL`) is **not** in
 `CORS_ORIGIN` (staff auth trusts `CORS_ORIGIN`). The credentialed application CORS
-returns the cadet origin only when the path starts with `/api/cadet/`; on staff
+returns the cadet origin only when the path starts with `/api/cadet/` or is
+`/cadet/mcp`; on staff
 RPC, MCP and blob routes it gets no CORS. Public discovery (`/.well-known/*`,
 `/api/cadet/auth/.well-known/*`, `/api/cadet/auth/jwks`) uses `origin: *`
 without credentials, as for staff.
@@ -283,7 +284,7 @@ so an unexpired access token stops working immediately. It is idempotent.
 
 ## Cadet MCP
 
-- Endpoint `/api/cadet/mcp`, **OAuth only**: the gate has no
+- Endpoint `/cadet/mcp`, **OAuth only**: the gate has no
   `createApiKeyContext`, and cookies are ignored.
 - Scopes: `openid`, `profile`, `offline_access`, `mcp:read`
   (`CADET_OAUTH_SUPPORTED_SCOPES`); default and challenged scope `mcp:read`.
@@ -476,8 +477,8 @@ add it to `cadetAuthSchema`.
 
 | Variable | Where | Meaning |
 | --- | --- | --- |
-| `CADET_APP_URL` | `@campuspilot/env/server` (`packages/env/src/server/auth.env.ts`); the worker needs it too, because the purge workflow imports the cadet auth instance | Cadet app origin: cadet trusted origin, CORS on `/api/cadet/*`, MCP login/consent pages. Its own value, never derived from `PUBLIC_APP_URL`. Local: `http://localhost:3004`; production: `https://cadet.campuspilot.in`. |
-| `CADET_MCP_RESOURCE_URL` | server, worker | Canonical cadet MCP URL and token audience; no query, fragment or trailing slash. Local: `http://localhost:3000/api/cadet/mcp`; production: `https://api.campuspilot.in/api/cadet/mcp`. |
+| `CADET_APP_URL` | `@campuspilot/env/server` (`packages/env/src/server/auth.env.ts`); the worker needs it too, because the purge workflow imports the cadet auth instance | Cadet app origin: cadet trusted origin, CORS on `/api/cadet/*` and `/cadet/mcp`, MCP login/consent pages. Its own value, never derived from `PUBLIC_APP_URL`. Local: `http://localhost:3004`; production: `https://cadet.campuspilot.in`. |
+| `CADET_MCP_RESOURCE_URL` | server, worker | Canonical cadet MCP URL and token audience; no query, fragment or trailing slash. Local: `http://localhost:3000/cadet/mcp`; production: `https://api.campuspilot.in/cadet/mcp`. |
 | `NEXT_PUBLIC_SERVER_URL` | cadet app (`packages/env/src/cadet.client.ts`) | API origin. Local: `http://localhost:3000`; production: `https://api.campuspilot.in`. |
 
 Example values are in `apps/server/.env.example` and `apps/cadet/.env.example`.

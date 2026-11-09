@@ -20,9 +20,9 @@ import { app } from './http';
 
 const ORIGIN = 'http://localhost:3000';
 const CADET_ORIGIN = 'http://localhost:3004';
-const CADET_RESOURCE = `${ORIGIN}/api/cadet/mcp`;
+const CADET_RESOURCE = `${ORIGIN}/cadet/mcp`;
 const CADET_ISSUER = `${ORIGIN}/api/cadet/auth`;
-const CADET_PRM_URL = `${ORIGIN}/.well-known/oauth-protected-resource/api/cadet/mcp`;
+const CADET_PRM_URL = `${ORIGIN}/.well-known/oauth-protected-resource/cadet/mcp`;
 
 let schoolId: string;
 let admissionId: string;
@@ -60,7 +60,7 @@ beforeAll(async () => {
   staffCookie = completed.user.cookie;
 });
 
-async function mcp(path: '/mcp' | '/api/cadet/mcp', headers: Record<string, string>, method: string, params: Record<string, unknown> = {}) {
+async function mcp(path: '/mcp' | '/cadet/mcp', headers: Record<string, string>, method: string, params: Record<string, unknown> = {}) {
   const response = await app.fetch(
     new Request(`${ORIGIN}${path}`, {
       method: 'POST',
@@ -118,30 +118,30 @@ describe('cadet discovery documents', () => {
   });
 });
 
-describe('/api/cadet/mcp', () => {
+describe('/cadet/mcp', () => {
   it('challenges without a credential and refuses API keys and cookies', async () => {
-    const anonymous = await mcp('/api/cadet/mcp', {}, 'tools/list');
+    const anonymous = await mcp('/cadet/mcp', {}, 'tools/list');
     expect(anonymous.response.status).toBe(401);
     expect(anonymous.response.headers.get('www-authenticate')).toBe(
       `Bearer resource_metadata="${CADET_PRM_URL}", scope="mcp:read"`,
     );
-    expect((await mcp('/api/cadet/mcp', { 'x-api-key': 'cp_anything' }, 'tools/list')).response.status).toBe(401);
-    expect((await mcp('/api/cadet/mcp', { cookie: cadetCookie }, 'tools/list')).response.status).toBe(401);
+    expect((await mcp('/cadet/mcp', { 'x-api-key': 'cp_anything' }, 'tools/list')).response.status).toBe(401);
+    expect((await mcp('/cadet/mcp', { cookie: cadetCookie }, 'tools/list')).response.status).toBe(401);
   });
 
   it("lists and runs the cadet tools for a cadet token, returning the student's own admission", async () => {
     const auth = { authorization: `Bearer ${cadetToken}` };
-    const list = await mcp('/api/cadet/mcp', auth, 'tools/list');
+    const list = await mcp('/cadet/mcp', auth, 'tools/list');
     expect(list.response.status).toBe(200);
     expect((list.json.result.tools as Array<{ name: string }>).map((tool) => tool.name)).toEqual(['getAdmission']);
 
-    const call = await mcp('/api/cadet/mcp', auth, 'tools/call', { name: 'getAdmission', arguments: {} });
+    const call = await mcp('/cadet/mcp', auth, 'tools/call', { name: 'getAdmission', arguments: {} });
     expect(call.json.result.isError).not.toBe(true);
     expect(JSON.parse(call.json.result.content[0].text)).toMatchObject({ id: admissionId, schoolId, name: 'Ravi Verma' });
   });
 
   it('never accepts a staff token, and the staff MCP never accepts a cadet token', async () => {
-    expect((await mcp('/api/cadet/mcp', { authorization: `Bearer ${staffToken}` }, 'tools/list')).response.status).toBe(401);
+    expect((await mcp('/cadet/mcp', { authorization: `Bearer ${staffToken}` }, 'tools/list')).response.status).toBe(401);
     expect((await mcp('/mcp', { authorization: `Bearer ${cadetToken}` }, 'tools/list')).response.status).toBe(401);
   });
 });
@@ -171,7 +171,7 @@ describe('/api/cadet/rpc and /api/cadet/auth', () => {
       const actual = await rpc(path, { origin: CADET_ORIGIN, cookie: cadetCookie }, {});
       expect(actual.headers.get('access-control-allow-origin'), path).toBeNull();
     }
-    for (const path of ['/api/cadet/rpc/getAdmission', '/api/cadet/auth/sign-in/admission', '/api/cadet/mcp']) {
+    for (const path of ['/api/cadet/rpc/getAdmission', '/api/cadet/auth/sign-in/admission', '/cadet/mcp']) {
       expect((await preflight(path)).headers.get('access-control-allow-origin'), path).toBe(CADET_ORIGIN);
     }
   });
