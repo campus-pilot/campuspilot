@@ -1,7 +1,7 @@
 import type { DatabaseExecutor } from '@campuspilot/db';
 import type { RemoteNotificationChannel } from '@campuspilot/db/notifications/catalogue';
 import { notificationDeliveryTable } from '@campuspilot/db/schema/notification';
-import { and, asc, eq, lte, min, sql, type SQL } from 'drizzle-orm';
+import { and, eq, lte, min, sql, type SQL } from 'drizzle-orm';
 
 import type { DeliverySendOutcome, NotificationChannelAdapter } from '../channels';
 import { claimDelivery, recordDeliveryOutcome, skipOwedDelivery } from '../deliveries';
@@ -31,29 +31,56 @@ function laneWhere(target: SenderTarget, scope: SenderScope): SQL {
  * first due row, then each school's second, …), oldest due first within a
  * turn. So a school posting 5,000 bills delays another school's receipt by
  * at most one turn, never by the whole batch.
+ *
+ * Bounded by the number of (priority, school) groups with owed rows, not by
+ * the number of due rows: a recursive skip scan walks the groups through
+ * `notification_delivery_queue_school_idx` (one index probe per group), and
+ * each group contributes only its first `limit` due rows. That is exact: a
+ * row in turn `limit + 1` or later of its school has at least `limit` rows
+ * of the same priority before it, so it can never be among the first
+ * `limit`. A group whose owed rows are all not yet due contributes nothing.
  */
 export async function pickDueDeliveries(
   db: DatabaseExecutor,
   target: SenderTarget,
   options: { now: Date; limit: number } & SenderScope,
 ): Promise<string[]> {
-  const table = notificationDeliveryTable;
-  const due = db
-    .select({
-      id: table.id,
-      priority: table.sendPriority,
-      nextAttemptAt: table.nextAttemptAt,
-      turn: sql<number>`row_number() over (partition by ${table.sendPriority}, ${table.schoolId} order by ${table.nextAttemptAt}, ${table.id})`.as('turn'),
-    })
-    .from(table)
-    .where(and(laneWhere(target, options), lte(table.nextAttemptAt, options.now)))
-    .as('due');
-  const rows = await db
-    .select({ id: due.id })
-    .from(due)
-    .orderBy(asc(due.priority), asc(due.turn), asc(due.nextAttemptAt), asc(due.id))
-    .limit(options.limit);
-  return rows.map((row) => row.id);
+  const school = (alias: SQL) => (options.schoolId ? sql` and ${alias}.school_id = ${options.schoolId}` : sql``);
+  const owed = (alias: SQL) => sql`${alias}.status = 'owed' and ${alias}.channel = ${target.channel} and ${alias}.send_lane = ${target.lane}${school(alias)}`;
+  const g = sql.raw('g');
+  const d = sql.raw('d');
+  const result = await db.execute<{ id: string }>(sql`
+    with recursive groups as (
+      (select ${d}.send_priority, ${d}.school_id from ${notificationDeliveryTable} ${d}
+        where ${owed(d)}
+        order by ${d}.send_priority, ${d}.school_id
+        limit 1)
+      union all
+      select next_group.send_priority, next_group.school_id
+      from groups ${g}
+      cross join lateral (
+        select ${d}.send_priority, ${d}.school_id from ${notificationDeliveryTable} ${d}
+        where ${owed(d)} and (${d}.send_priority, ${d}.school_id) > (${g}.send_priority, ${g}.school_id)
+        order by ${d}.send_priority, ${d}.school_id
+        limit 1
+      ) next_group
+    )
+    select picked.id
+    from groups ${g}
+    cross join lateral (
+      select ${d}.id, ${d}.next_attempt_at, row_number() over (order by ${d}.next_attempt_at, ${d}.id) as turn
+      from ${notificationDeliveryTable} ${d}
+      where ${owed(d)}
+        and ${d}.send_priority = ${g}.send_priority
+        and ${d}.school_id = ${g}.school_id
+        and ${d}.next_attempt_at <= ${options.now.toISOString()}::timestamptz
+      order by ${d}.next_attempt_at, ${d}.id
+      limit ${options.limit}
+    ) picked
+    order by ${g}.send_priority, picked.turn, picked.next_attempt_at, picked.id
+    limit ${options.limit}
+  `);
+  return result.rows.map((row) => row.id);
 }
 
 /** When the lane's next owed delivery is due; null when nothing is owed. */

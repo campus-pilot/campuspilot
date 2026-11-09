@@ -94,6 +94,22 @@ describe('notification sender (D-39)', () => {
     expect(picked.slice(3).every((id) => big.ids.includes(id))).toBe(true);
   });
 
+  it('takes turns within the limit and skips a school whose copies are not due yet', async () => {
+    const target = uniqueLane();
+    const big = await queue({ lane: target.lane, copies: 5, sendPriority: 'bulk' });
+    const small = await queue({ lane: target.lane, copies: 2, sendPriority: 'bulk' });
+    const waiting = await queue({ lane: target.lane, copies: 2, sendPriority: 'immediate' });
+    const now = new Date();
+    await db.update(notificationDeliveryTable).set({ nextAttemptAt: new Date(now.getTime() + 60 * 60_000) }).where(inArray(notificationDeliveryTable.id, waiting.ids));
+    const picked = await pickDueDeliveries(db, target, { now, limit: 4 });
+    expect(picked).toHaveLength(4);
+    expect(picked.filter((id) => small.ids.includes(id)).sort()).toEqual(small.ids);
+    expect(picked.filter((id) => big.ids.includes(id))).toHaveLength(2);
+    // Turn by turn: one copy of each school, then one more of each.
+    expect(new Set(picked.slice(0, 2).map((id) => (big.ids.includes(id) ? 'big' : 'small')))).toEqual(new Set(['big', 'small']));
+    expect(await pickDueDeliveries(db, target, { now, limit: 10, schoolId: big.schoolId })).toHaveLength(5);
+  });
+
   it('sends every due copy once, never a stuck `sending` one or one not yet due', async () => {
     const target = uniqueLane();
     const { ids } = await queue({ lane: target.lane, copies: 4, sendPriority: 'bulk' });

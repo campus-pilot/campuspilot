@@ -412,6 +412,15 @@ export const notificationDeliveryTable = pgTable(
     index("notification_delivery_queue_idx")
       .on(table.channel, table.sendLane, table.nextAttemptAt)
       .where(sql`${table.status} = 'owed'`),
+    /**
+     * The sender's pick (API `notifications/sender/queue.ts`,
+     * `pickDueDeliveries`): skips from one (priority, school) of a lane to
+     * the next and reads each one's first due rows in send order, so a pick
+     * reads at most `limit` rows per school instead of every due row.
+     */
+    index("notification_delivery_queue_school_idx")
+      .on(table.channel, table.sendLane, table.sendPriority, table.schoolId, table.nextAttemptAt, table.id)
+      .where(sql`${table.status} = 'owed'`),
     check(
       "notification_delivery_next_attempt_check",
       sql`(${table.status} = 'owed') = (${table.nextAttemptAt} is not null)`,
