@@ -293,6 +293,8 @@ describe('cadet class averages, moved students and scoping', () => {
   let zoyaStudentId: string;
   let zoyaClassId: string;
   let pastRecordId: string;
+  let movedIn: CadetRouterClient;
+  let movedInStudentId: string;
   const classAAdmissionIds: string[] = [];
   const classAStudentIds: string[] = [];
 
@@ -339,6 +341,10 @@ describe('cadet class averages, moved students and scoping', () => {
       const login = await createAdmissionWithLogin(principal, schoolId, `Student B${index}`);
       const studentId = (await enroll({ schoolId, admissionId: login.admission.id, sessionId, ...classB, rollNo: index + 1 })).id;
       enrolled.push({ classId: classB.classId, studentId, subjects: { maths: 10 }, daysAttended: 45, coScholastics: { art: 'B' } });
+      if (index === 0) {
+        movedIn = await cadetClient(login.credentials);
+        movedInStudentId = studentId;
+      }
     }
     const scope = { schoolId, sessionId, examSlug: 't1' };
     await runExam(principal, scope, enrolled, { complete: true, workingDays: 50 });
@@ -387,6 +393,18 @@ describe('cadet class averages, moved students and scoping', () => {
       expect(remarks.items.map((item) => [item.recordId, item.text])).toEqual([[`${ashaStudentId}.${classA.classId}`, 'Well done.']]);
     } finally {
       await db.update(studentTable).set({ classId: classA.classId, sectionId: classA.sectionId, rollNo: 1 }).where(eq(studentTable.id, ashaStudentId));
+    }
+  });
+
+  it('shows no averages on a class record without the student\'s results', async () => {
+    // A Class 9 student moves into Class 8, which has five approved results.
+    await db.update(studentTable).set({ classId: classA.classId, sectionId: classA.sectionId, rollNo: 98 }).where(eq(studentTable.id, movedInStudentId));
+    try {
+      const notSat = await movedIn.getExamResult({ examId: examId(movedInStudentId, classA.classId) });
+      expect(notSat).toMatchObject({ overall: null, classAveragePercentage: null, remark: null, attendance: null });
+      expect((await movedIn.listExams({})).items).toMatchObject([{ state: 'released', percentage: null }]);
+    } finally {
+      await db.update(studentTable).set({ classId: classB.classId, sectionId: classB.sectionId, rollNo: 1 }).where(eq(studentTable.id, movedInStudentId));
     }
   });
 

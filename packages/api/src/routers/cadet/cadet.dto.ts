@@ -31,7 +31,7 @@ const currencySchema = z.string().regex(/^[A-Z]{3}$/);
 // ---------------------------------------------------------------------------
 // Profile
 
-export const cadetEnrollmentSchema = z.object({
+const cadetEnrollmentSchema = z.object({
   /** The student row (one session's enrollment). */
   studentId: z.string(),
   sessionId: z.string(),
@@ -103,7 +103,7 @@ const ledgerTypeSchema = z.enum([
 
 export const listCadetFeeLedgerInputSchema = createListInputSchema({});
 
-export const cadetLedgerEntrySchema = z.object({
+const cadetLedgerEntrySchema = z.object({
   id: z.string(),
   sessionId: z.string(),
   type: ledgerTypeSchema,
@@ -170,7 +170,7 @@ export type CadetBillDto = z.infer<typeof cadetBillSchema>;
  * `upcoming`, `active` is `in_progress`, `completed` without a Cadet release
  * is `awaiting_release`, and only an explicit release is `released`.
  */
-export const cadetExamStateSchema = z.enum(['upcoming', 'in_progress', 'awaiting_release', 'released']);
+const cadetExamStateSchema = z.enum(['upcoming', 'in_progress', 'awaiting_release', 'released']);
 export type CadetExamState = z.infer<typeof cadetExamStateSchema>;
 
 export const listCadetExamsInputSchema = createListInputSchema({
@@ -210,7 +210,7 @@ export const getCadetExamResultInputSchema = z.object({
   examId: z.string().min(1).describe('An examId from listExams.'),
 });
 
-export const cadetRemarkSchema = z.object({
+const cadetRemarkSchema = z.object({
   text: z.string(),
   authorName: z.string().nullable(),
   updatedAt: z.date(),
@@ -261,7 +261,7 @@ export const getCadetGrowthInputSchema = z.object({
     .describe('A class record id from classes[].recordId. Defaults to the current class.'),
 });
 
-export const cadetClassRecordSchema = z.object({
+const cadetClassRecordSchema = z.object({
   /** One class in one session's enrollment. */
   recordId: z.string(),
   classLabel: z.string(),
@@ -310,7 +310,7 @@ export const listCadetRemarksInputSchema = createListInputSchema({
     })
     .optional(),
 });
-export const cadetRemarkListItemSchema = cadetRemarkSchema.extend({
+const cadetRemarkListItemSchema = cadetRemarkSchema.extend({
   examId: z.string(),
   examName: z.string(),
   recordId: z.string(),

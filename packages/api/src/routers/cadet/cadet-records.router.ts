@@ -30,6 +30,9 @@ import {
   parseExamId,
   releasedExamExtras,
   scoreReleasedExams,
+  classAverages,
+  holdsResults,
+  type ClassAverages,
 } from './cadet-academics.service';
 import { cadetBill, cadetFeeLedger, cadetFeeSummary } from './cadet-fees.service';
 
@@ -51,6 +54,8 @@ function toExamListItem(exam: CadetExam, overall: { percentage: number; grade: s
     grade: overall?.grade ?? null,
   };
 }
+
+const toRecord = (map: Map<string, number> | null) => (map ? Object.fromEntries(map) : null);
 
 /** Slices an in-memory list with the shared pagination contract. */
 function paginate<T>(items: T[], input: { cursor?: string; page?: number; limit: number }) {
@@ -168,9 +173,7 @@ export const cadetRecordsRouter = {
         const record = findRecord(academics, input.filters?.recordId);
         if (!record) return { ...paginate([], input), record: null };
         const exams = academics.examsOf(record.recordId);
-        const scores = new Map(
-          (await scoreReleasedExams(context.db, academics, exams, false)).map((score) => [score.exam.examId, score]),
-        );
+        const scores = new Map(scoreReleasedExams(academics, exams).map((score) => [score.exam.examId, score]));
         const items = exams.map((exam) => toExamListItem(exam, scores.get(exam.examId)?.overall ?? null));
         return {
           ...paginate(items, input),
@@ -198,7 +201,7 @@ export const cadetRecordsRouter = {
         const academics = await loadCadetAcademics(context.db, context.cadet);
         const exam = academics.examsOf(parsed.recordId).find((item) => item.examSlug === parsed.examSlug);
         if (!exam) throw rpcError.notFound('Examination');
-        const [score] = await scoreReleasedExams(context.db, academics, [exam], false);
+        const [score] = scoreReleasedExams(academics, [exam]);
         return toExamListItem(exam, score?.overall ?? null);
       } catch (error) {
         throw toRpcError(error);
@@ -221,10 +224,14 @@ export const cadetRecordsRouter = {
         // Unreleased results are refused exactly like missing ones.
         if (!record || !exam || exam.state !== 'released') throw rpcError.notFound('Examination result');
         const school = await loadCadetSchool(context.db, context.cadet);
-        // Averages only for the requested exam; the others are needed for the previous-exam delta only.
-        const scores = await scoreReleasedExams(context.db, academics, exams, false);
-        const [score] = await scoreReleasedExams(context.db, academics, [exam], school.showClassAverages);
-        if (!score) throw rpcError.notFound('Examination result');
+        const scores = scoreReleasedExams(academics, exams);
+        const score = scores.find((item) => item.exam.examId === exam.examId)!;
+        // Averages only for the requested exam, and only on the class record
+        // holding the student's results (a class they moved into shows none).
+        const averages =
+          school.showClassAverages && holdsResults(academics, exam)
+            ? (await classAverages(context.db, [exam])).get(exam.examId)
+            : undefined;
         const previous = scores
           .filter((item) => item.exam.order < exam.order && item.overall !== null)
           .at(-1);
@@ -240,7 +247,7 @@ export const cadetRecordsRouter = {
           releasedAt: exam.releasedAt!,
           overall: score.overall,
           previousExam: previous ? { examId: previous.exam.examId, name: previous.exam.name, percentage: previous.overall!.percentage } : null,
-          classAveragePercentage: score.classAveragePercentage,
+          classAveragePercentage: averages?.overall ?? null,
           attendance: extras.attendance,
           subjects: score.subjects.map((subject) => ({
             subjectId: subject.subjectId,
@@ -251,7 +258,7 @@ export const cadetRecordsRouter = {
             grade: subject.grade,
             modes: subject.modes,
             previousPercentage: previousBySubject.get(subject.subjectId) ?? null,
-            classAveragePercentage: score.subjectAverages?.get(subject.subjectId) ?? null,
+            classAveragePercentage: averages?.subjects?.get(subject.subjectId) ?? null,
           })),
           coScholastics: extras.coScholastics,
           remark: extras.remark,
@@ -271,25 +278,23 @@ export const cadetRecordsRouter = {
         const academics = await loadCadetAcademics(context.db, context.cadet);
         const selectedRecord = findRecord(academics, input.recordId);
         const school = await loadCadetSchool(context.db, context.cadet);
-        // Averages are computed only where they are shown: every exam of the
-        // selected class, and the latest exam of each other class.
         const scored = new Map(
-          await Promise.all(
-            academics.records.map(async (record) => {
-              const selected = record.recordId === selectedRecord?.recordId;
-              const exams = academics.examsOf(record.recordId);
-              const scores = (await scoreReleasedExams(context.db, academics, exams, school.showClassAverages && selected)).filter(
-                (score) => score.overall !== null,
-              );
-              const latest = scores.at(-1);
-              if (!selected && latest && school.showClassAverages) {
-                const [withAverage] = await scoreReleasedExams(context.db, academics, [latest.exam], true);
-                scores[scores.length - 1] = withAverage!;
-              }
-              return [record.recordId, scores] as const;
-            }),
-          ),
+          academics.records.map((record) => [
+            record.recordId,
+            scoreReleasedExams(academics, academics.examsOf(record.recordId)).filter((score) => score.overall !== null),
+          ]),
         );
+        // One averages pass, only where averages are shown: every exam of the
+        // selected class and the latest exam of each other class.
+        const averaged = school.showClassAverages
+          ? await classAverages(
+              context.db,
+              academics.records.flatMap((record) => {
+                const scores = scored.get(record.recordId)!;
+                return (record.recordId === selectedRecord?.recordId ? scores : scores.slice(-1)).map((score) => score.exam);
+              }),
+            )
+          : new Map<string, ClassAverages>();
         const classes = academics.records.map((record) => {
           const latest = scored.get(record.recordId)!.at(-1);
           return {
@@ -299,7 +304,7 @@ export const cadetRecordsRouter = {
             sessionLabel: record.sessionLabel,
             sessionIsActive: record.sessionIsActive,
             latest: latest
-              ? { examName: latest.exam.name, percentage: latest.overall!.percentage, classAveragePercentage: latest.classAveragePercentage }
+              ? { examName: latest.exam.name, percentage: latest.overall!.percentage, classAveragePercentage: averaged.get(latest.exam.examId)?.overall ?? null }
               : null,
           };
         });
@@ -315,9 +320,9 @@ export const cadetRecordsRouter = {
               examId: score.exam.examId,
               name: score.exam.name,
               percentage: score.overall!.percentage,
-              classAveragePercentage: score.classAveragePercentage,
+              classAveragePercentage: averaged.get(score.exam.examId)?.overall ?? null,
               subjects: Object.fromEntries(score.subjects.map((subject) => [subject.subjectId, subject.percentage])),
-              subjectAverages: score.subjectAverages ? Object.fromEntries(score.subjectAverages) : null,
+              subjectAverages: toRecord(averaged.get(score.exam.examId)?.subjects ?? null),
             })),
           };
         }

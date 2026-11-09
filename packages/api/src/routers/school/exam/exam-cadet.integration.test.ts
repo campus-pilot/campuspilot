@@ -116,10 +116,14 @@ describe('Cadet Portal release and teacher remarks (staff procedures)', () => {
           english: { name: 'English', books: [], examModes: { written: { name: 'Written', percentage: 100 } } },
         } },
       }).where(eq(classTable.id, classId));
-      await expectRpcCode(principal.school.createExamPlan({ ...scope, classId, subjectSlug: 'english' }), 'BAD_REQUEST');
-      await expectRpcCode(principal.school.deleteExamPlan(planScope), 'BAD_REQUEST');
-      await expectRpcCode(principal.school.transitionExamPlan({ ...planScope, status: 'active' }), 'BAD_REQUEST');
-      await expectRpcCode(principal.school.updateExamPlan({ ...planScope, totalMarks: 50 }), 'BAD_REQUEST');
+      await expect(principal.school.createExamPlan({ ...scope, classId, subjectSlug: 'english' })).rejects.toThrowError(
+        expect.objectContaining({ message: expect.stringMatching(/released to the Cadet Portal/) }),
+      );
+      // The release guard answers, not the completed-plan guards behind it.
+      const releaseGuard = expect.objectContaining({ code: 'BAD_REQUEST', message: expect.stringMatching(/released to the Cadet Portal/) });
+      await expect(principal.school.deleteExamPlan(planScope)).rejects.toThrowError(releaseGuard);
+      await expect(principal.school.transitionExamPlan({ ...planScope, status: 'active' })).rejects.toThrowError(releaseGuard);
+      await expect(principal.school.updateExamPlan({ ...planScope, totalMarks: 50 })).rejects.toThrowError(releaseGuard);
       expect(await db.select().from(examPlanTable).where(eq(examPlanTable.sessionId, scope.sessionId))).toEqual([plan]);
 
       await principal.school.withdrawExamFromCadet(scope);

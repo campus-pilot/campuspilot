@@ -44,7 +44,7 @@ import { CADET_CLASS_AVERAGE_MIN_STUDENTS, type CadetExamState } from './cadet.d
 
 type Cadet = { schoolId: string; admissionId: string };
 
-export type CadetRecord = {
+type CadetRecord = {
   recordId: string;
   studentId: string;
   classId: string;
@@ -80,7 +80,7 @@ export type CadetExam = {
   plans: PlanRow[];
 };
 
-export type SubjectScore = {
+type SubjectScore = {
   subjectId: string;
   subjectSlug: string;
   name: string;
@@ -91,24 +91,20 @@ export type SubjectScore = {
   modes: Array<{ name: string; obtained: number; max: number }>;
 };
 
-export type ReleasedExamResult = {
+type ReleasedExamResult = {
   exam: CadetExam;
   /** Null when the student has no marks in this exam. */
   overall: { obtained: number; max: number; percentage: number; grade: string | null } | null;
   subjects: SubjectScore[];
-  classAveragePercentage: number | null;
-  subjectAverages: Map<string, number> | null;
 };
 
-const percent = scorePercent;
 const mean = (values: number[]) =>
   values.length ? Math.round((values.reduce((sum, value) => sum + value, 0) / values.length) * 10) / 10 : null;
 
-const gradeFor = gradeLabel;
 
-export const recordIdOf = (studentId: string, classId: string) => `${studentId}.${classId}`;
-export const examIdOf = (recordId: string, examSlug: string) => `${recordId}.${examSlug}`;
-export const subjectIdOf = (recordId: string, subjectSlug: string) => `${recordId}.${subjectSlug}`;
+const recordIdOf = (studentId: string, classId: string) => `${studentId}.${classId}`;
+const examIdOf = (recordId: string, examSlug: string) => `${recordId}.${examSlug}`;
+const subjectIdOf = (recordId: string, subjectSlug: string) => `${recordId}.${subjectSlug}`;
 
 /** Splits an exam id into its record and slug. Student and class ids never contain a dot. */
 export function parseExamId(examId: string) {
@@ -141,7 +137,7 @@ export async function loadCadetSchool(db: DatabaseExecutor, cadet: Cadet) {
 }
 
 /** The admission's enrollments, newest session first. */
-export async function loadCadetEnrollments(db: DatabaseExecutor, cadet: Cadet) {
+async function loadCadetEnrollments(db: DatabaseExecutor, cadet: Cadet) {
   return db
     .select({
       studentId: studentTable.id,
@@ -312,7 +308,7 @@ export async function loadCadetAcademics(db: DatabaseExecutor, cadet: Cadet) {
   };
 }
 
-export type CadetAcademics = Awaited<ReturnType<typeof loadCadetAcademics>>;
+type CadetAcademics = Awaited<ReturnType<typeof loadCadetAcademics>>;
 
 export function findRecord(academics: CadetAcademics, recordId: string | undefined) {
   if (recordId === undefined) return academics.currentRecord;
@@ -336,89 +332,91 @@ function subjectOrder(record: CadetRecord, plans: PlanRow[]) {
 
 
 /**
- * Scores of released examinations. With `withAverages`, class averages are
- * computed from approved results of registered students in the same class's
- * plans only (other classes sitting the same exam have their own plans), and
- * each average is null
- * unless at least `CADET_CLASS_AVERAGE_MIN_STUDENTS` students contribute.
+ * The student's own scores in released examinations (no database access).
+ * Exams without the student's marks get `overall: null`.
  */
-export async function scoreReleasedExams(
-  db: DatabaseExecutor,
-  academics: CadetAcademics,
-  exams: CadetExam[],
-  withAverages: boolean,
-): Promise<ReleasedExamResult[]> {
-  const released = exams.filter((exam) => exam.state === 'released');
-  const planIds = released.flatMap((exam) => exam.plans.map((plan) => plan.id));
-  const classRows = withAverages && planIds.length
-    ? await db
-        .select({ planId: examResultTable.examPlanId, studentId: examResultTable.studentId, marks: examResultTable.marks })
-        .from(examResultTable)
-        .innerJoin(studentTable, eq(studentTable.id, examResultTable.studentId))
-        .innerJoin(admissionTable, eq(admissionTable.id, studentTable.admissionId))
-        // Final results of current students only: an unapproved row may still
-        // change, and a student who left is not part of the class any more.
-        .where(and(inArray(examResultTable.examPlanId, planIds), eq(examResultTable.approved, true), eq(admissionTable.registered, true)))
-    : [];
-  return released.map((exam) => {
-    const { record } = exam;
-    const subjects: SubjectScore[] = [];
-    for (const plan of subjectOrder(record, exam.plans)) {
-      const marks = academics.marksOf(plan.id, record.studentId);
-      if (!marks) continue;
-      const obtained = Object.values(marks).reduce((sum, value) => sum + value, 0);
-      const percentage = percent(obtained, plan.totalMarks);
-      const modeNames = record.classConfig.subjects[plan.subjectSlug]?.examModes ?? {};
-      subjects.push({
-        subjectId: subjectIdOf(record.recordId, plan.subjectSlug),
-        subjectSlug: plan.subjectSlug,
-        name: subjectName(record, plan.subjectSlug),
-        obtained,
-        max: plan.totalMarks,
-        percentage,
-        grade: gradeFor(percentage, record.sessionConfig.gradingScale),
-        modes: Object.entries(plan.modeConfig).map(([slug, mode]) => ({
-          name: modeNames[slug]?.name ?? slug,
-          obtained: marks[slug] ?? 0,
-          max: mode.maxMarks,
-        })),
-      });
-    }
-    const obtained = subjects.reduce((sum, subject) => sum + subject.obtained, 0);
-    const max = subjects.reduce((sum, subject) => sum + subject.max, 0);
-    const overall = subjects.length
-      ? { obtained, max, percentage: percent(obtained, max), grade: gradeFor(percent(obtained, max), record.sessionConfig.gradingScale) }
-      : null;
+export function scoreReleasedExams(academics: CadetAcademics, exams: CadetExam[]): ReleasedExamResult[] {
+  return exams
+    .filter((exam) => exam.state === 'released')
+    .map((exam) => {
+      const { record } = exam;
+      const subjects: SubjectScore[] = [];
+      for (const plan of subjectOrder(record, exam.plans)) {
+        const marks = academics.marksOf(plan.id, record.studentId);
+        if (!marks) continue;
+        const obtained = Object.values(marks).reduce((sum, value) => sum + value, 0);
+        const percentage = scorePercent(obtained, plan.totalMarks);
+        const modeNames = record.classConfig.subjects[plan.subjectSlug]?.examModes ?? {};
+        subjects.push({
+          subjectId: subjectIdOf(record.recordId, plan.subjectSlug),
+          subjectSlug: plan.subjectSlug,
+          name: subjectName(record, plan.subjectSlug),
+          obtained,
+          max: plan.totalMarks,
+          percentage,
+          grade: gradeLabel(percentage, record.sessionConfig.gradingScale),
+          modes: Object.entries(plan.modeConfig).map(([slug, mode]) => ({
+            name: modeNames[slug]?.name ?? slug,
+            obtained: marks[slug] ?? 0,
+            max: mode.maxMarks,
+          })),
+        });
+      }
+      const obtained = subjects.reduce((sum, subject) => sum + subject.obtained, 0);
+      const max = subjects.reduce((sum, subject) => sum + subject.max, 0);
+      const overall = subjects.length
+        ? { obtained, max, percentage: scorePercent(obtained, max), grade: gradeLabel(scorePercent(obtained, max), record.sessionConfig.gradingScale) }
+        : null;
+      return { exam, overall, subjects };
+    });
+}
 
-    let classAveragePercentage: number | null = null;
-    let subjectAverages: Map<string, number> | null = null;
-    if (withAverages) {
+export type ClassAverages = { overall: number | null; subjects: Map<string, number> | null };
+
+/**
+ * Class averages of the given released exams in one query. Each exam's
+ * averages use approved results of registered students in that class's own
+ * plans only (other classes sitting the same exam have their own plans), and
+ * each average is null unless at least `CADET_CLASS_AVERAGE_MIN_STUDENTS`
+ * students contribute. Callers pass only exams whose averages are shown, and
+ * only when the school shares averages.
+ */
+export async function classAverages(db: DatabaseExecutor, exams: CadetExam[]): Promise<Map<string, ClassAverages>> {
+  const planIds = exams.flatMap((exam) => exam.plans.map((plan) => plan.id));
+  if (!planIds.length) return new Map();
+  const rows = await db
+    .select({ planId: examResultTable.examPlanId, studentId: examResultTable.studentId, marks: examResultTable.marks })
+    .from(examResultTable)
+    .innerJoin(studentTable, eq(studentTable.id, examResultTable.studentId))
+    .innerJoin(admissionTable, eq(admissionTable.id, studentTable.admissionId))
+    // Final results of current students only: an unapproved row may still
+    // change, and a student who left is not part of the class any more.
+    .where(and(inArray(examResultTable.examPlanId, planIds), eq(examResultTable.approved, true), eq(admissionTable.registered, true)));
+  const total = (marks: ResultMarks) => Object.values(marks).reduce((sum, value) => sum + value, 0);
+  return new Map(
+    exams.map((exam) => {
       const planById = new Map(exam.plans.map((plan) => [plan.id, plan]));
-      const rows = classRows.filter((row) => planById.has(row.planId));
-      const totals = new Map<string, { obtained: number; max: number }>();
-      subjectAverages = new Map();
+      const examRows = rows.filter((row) => planById.has(row.planId));
+      const subjects = new Map<string, number>();
       for (const plan of exam.plans) {
-        const percentages = rows
-          .filter((row) => row.planId === plan.id)
-          .map((row) => percent(Object.values(row.marks).reduce((sum, value) => sum + value, 0), plan.totalMarks));
-        const average = percentages.length >= CADET_CLASS_AVERAGE_MIN_STUDENTS ? mean(percentages) : null;
-        if (average !== null) subjectAverages.set(subjectIdOf(record.recordId, plan.subjectSlug), average);
+        const percentages = examRows.filter((row) => row.planId === plan.id).map((row) => scorePercent(total(row.marks), plan.totalMarks));
+        if (percentages.length >= CADET_CLASS_AVERAGE_MIN_STUDENTS)
+          subjects.set(subjectIdOf(exam.record.recordId, plan.subjectSlug), mean(percentages)!);
       }
-      for (const row of rows) {
-        const plan = planById.get(row.planId)!;
-        const total = totals.get(row.studentId) ?? { obtained: 0, max: 0 };
-        total.obtained += Object.values(row.marks).reduce((sum, value) => sum + value, 0);
-        total.max += plan.totalMarks;
-        totals.set(row.studentId, total);
+      const totals = new Map<string, { obtained: number; max: number }>();
+      for (const row of examRows) {
+        const entry = totals.get(row.studentId) ?? { obtained: 0, max: 0 };
+        entry.obtained += total(row.marks);
+        entry.max += planById.get(row.planId)!.totalMarks;
+        totals.set(row.studentId, entry);
       }
-      classAveragePercentage =
+      const overall =
         totals.size >= CADET_CLASS_AVERAGE_MIN_STUDENTS
-          ? mean([...totals.values()].map((total) => percent(total.obtained, total.max)))
+          ? mean([...totals.values()].map((entry) => scorePercent(entry.obtained, entry.max)))
           : null;
-      if (subjectAverages.size === 0) subjectAverages = null;
-    }
-    return { exam, overall, subjects, classAveragePercentage, subjectAverages };
-  });
+      return [exam.examId, { overall, subjects: subjects.size ? subjects : null }] as const;
+    }),
+  );
 }
 
 /**
