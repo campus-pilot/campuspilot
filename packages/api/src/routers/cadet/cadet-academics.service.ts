@@ -327,17 +327,18 @@ export function findRecord(academics: CadetAcademics, recordId: string | undefin
   return record;
 }
 
+const subjectName = (record: CadetRecord, slug: string) => record.classConfig.subjects[slug]?.name ?? slug;
+
+/**
+ * Subjects in name order. The class configuration is stored as jsonb, which
+ * does not keep key order, so there is no configured order to follow.
+ */
 function subjectOrder(record: CadetRecord, plans: PlanRow[]) {
-  const configured = Object.keys(record.classConfig.subjects);
-  return [...plans].sort((a, b) => {
-    const left = configured.indexOf(a.subjectSlug);
-    const right = configured.indexOf(b.subjectSlug);
-    if (left !== right) return (left === -1 ? Infinity : left) - (right === -1 ? Infinity : right);
-    return a.subjectSlug.localeCompare(b.subjectSlug);
-  });
+  return [...plans].sort(
+    (a, b) => subjectName(record, a.subjectSlug).localeCompare(subjectName(record, b.subjectSlug)) || a.subjectSlug.localeCompare(b.subjectSlug),
+  );
 }
 
-const subjectName = (record: CadetRecord, slug: string) => record.classConfig.subjects[slug]?.name ?? slug;
 
 /**
  * Scores of released examinations, with class averages computed from every
