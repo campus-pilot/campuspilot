@@ -8,14 +8,15 @@ import { useRouter } from 'next/navigation';
 import { orpc } from '@/lib/orpc';
 import { useSchoolSessions, useStoredSchoolSessionId } from './session-selection';
 
-type AdmissionFilters = { sessionId?: string; placementStatus?: 'assigned' | 'unassigned'; registrationStatus?: 'registered' | 'unregistered' };
+type AdmissionFilters = { sessionId?: string; classId?: string; placementStatus?: 'assigned' | 'unassigned'; registrationStatus?: 'registered' | 'unregistered' };
 type AdmissionController = DataTableListController<'name' | 'admissionNo' | 'dob' | 'createdAt', AdmissionFilters>;
 
 function AdmissionRows({ schoolId, controller, sessionId, classLabels }: { schoolId: string; controller: AdmissionController; sessionId?: string; classLabels: Map<string, string> }) {
   const router = useRouter();
   const placementStatus = controller.query.filters?.placementStatus;
   const registrationStatus = controller.query.filters?.registrationStatus;
-  const { data } = useSuspenseQuery(orpc.school.listAdmissions.queryOptions({ input: { schoolId, page: controller.query.page, limit: controller.query.limit, searchQuery: controller.query.searchQuery, orderBy: controller.query.orderBy, filters: { ...(sessionId ? { placementSessionId: sessionId, ...(placementStatus ? { placementStatus } : {}) } : {}), ...(registrationStatus ? { registered: registrationStatus === 'registered' } : {}) } } }));
+  const classId = controller.query.filters?.classId;
+  const { data } = useSuspenseQuery(orpc.school.listAdmissions.queryOptions({ input: { schoolId, page: controller.query.page, limit: controller.query.limit, searchQuery: controller.query.searchQuery, orderBy: controller.query.orderBy, filters: { ...(sessionId ? { placementSessionId: sessionId, ...(placementStatus ? { placementStatus } : {}), ...(classId ? { placementClassId: classId } : {}) } : {}), ...(registrationStatus ? { registered: registrationStatus === 'registered' } : {}) } } }));
   const columns: DataTableColumnDef<AdmissionListItemDto>[] = [
     { accessorKey: 'name', header: 'Name', cell: ({ row }) => <span className="font-medium">{row.original.name}</span> },
     { accessorKey: 'admissionNo', header: 'Admission no.' },
@@ -35,6 +36,7 @@ export function AdmissionTable({ schoolId }: { schoolId: string }) {
   const sessionId = controller.query.filters?.sessionId ?? defaultSessionId;
   const filters: TableFilterConfig<keyof AdmissionFilters>[] = [
     { id: 'sessionId', label: 'Session', type: 'single' as const, options: sessions.map((session) => ({ value: session.id, label: `${session.sessionStartYear}–${session.sessionEndYear}` })) },
+    { id: 'classId', label: 'Class', type: 'single' as const, options: (classesQuery.data ?? []).map(({ id, label }) => ({ value: id, label })) },
     { id: 'placementStatus', label: 'Class status', type: 'single' as const, options: [{ value: 'assigned', label: 'Assigned' }, { value: 'unassigned', label: 'Unassigned' }] },
     { id: 'registrationStatus', label: 'Registration', type: 'single' as const, options: [{ value: 'registered', label: 'Registered' }, { value: 'unregistered', label: 'Unregistered' }] },
   ];

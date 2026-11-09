@@ -235,6 +235,27 @@ export const schoolAdmissionRouter = {
               ? exists(assignedPlacement)
               : notExists(assignedPlacement)
             : undefined;
+        const placementClassId = input.filters?.placementClassId;
+        /**
+         * Matches on the student row's class alone, so it agrees with the
+         * class returned in `placement` even while a section is still pending.
+         */
+        const placementClassCondition =
+          placementSessionId && placementClassId
+            ? exists(
+                context.db
+                  .select({ value: sql`1` })
+                  .from(studentTable)
+                  .where(
+                    and(
+                      eq(studentTable.schoolId, input.schoolId),
+                      eq(studentTable.admissionId, admissionTable.id),
+                      eq(studentTable.sessionId, placementSessionId),
+                      eq(studentTable.classId, placementClassId),
+                    ),
+                  ),
+              )
+            : undefined;
         const where = and(
           eq(admissionTable.schoolId, input.schoolId),
           searchCondition,
@@ -249,6 +270,7 @@ export const schoolAdmissionRouter = {
             : undefined,
           unadmittedCondition,
           placementCondition,
+          placementClassCondition,
         );
         const orderByColumn =
           input.orderBy.field === "relevance"
