@@ -52,7 +52,7 @@ describe('cadet notices', () => {
   });
   async function create(key: string, overrides: Record<string, unknown>, publish = true) {
     const draft = await principal.school.createNotice(body({ title: key, ...overrides }));
-    if (publish) await principal.school.publishNotice({ schoolId, noticeId: draft.id, expectedVersion: draft.version });
+    if (publish) await principal.school.publishNotice({ schoolId, noticeId: draft.id, expectedVersion: draft.version, expectedTemplateRevisionId: null });
     notices[key] = draft.id;
     return draft.id;
   }
@@ -171,7 +171,7 @@ describe('cadet notices', () => {
     const otherSession = (await createTestSession({ schoolId: other.id, sessionStartYear: 2026, sessionEndYear: 2027 })).id;
     const otherPrincipal = createTestClient((await createSchoolStaffSession(other.id, [{ role: 'principal' }])).session);
     const theirs = await otherPrincipal.school.createNotice({ ...body(), schoolId: other.id, sessionId: otherSession });
-    await otherPrincipal.school.publishNotice({ schoolId: other.id, noticeId: theirs.id, expectedVersion: theirs.version });
+    await otherPrincipal.school.publishNotice({ schoolId: other.id, noticeId: theirs.id, expectedVersion: theirs.version, expectedTemplateRevisionId: null });
     await expect(asha.getNotice({ noticeId: theirs.id })).rejects.toMatchObject({ code: 'NOT_FOUND' });
     // Not even with a forged class row pointing at the student's class from the other school's notice.
     await db.update(noticeTable).set({ cadetScope: 'selected_classes' }).where(eq(noticeTable.id, theirs.id));

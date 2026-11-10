@@ -58,7 +58,10 @@ describe('notice notifications', () => {
       .where(and(eq(notificationEventTable.schoolId, schoolId), like(notificationEventTable.key, `notice%:${noticeId}%`)));
   async function publish(overrides: Record<string, unknown>) {
     const draft = await principal.school.createNotice(body(overrides));
-    await principal.school.publishNotice({ schoolId, noticeId: draft.id, expectedVersion: draft.version });
+    // Publish what the forecast describes: the draft's version inside the school's current Notice template (a test may have selected one).
+    const forecast = await principal.school.previewNoticePublish({ schoolId, noticeId: draft.id });
+    if (forecast.kind !== 'ready') throw new Error('The draft is already published.');
+    await principal.school.publishNotice({ schoolId, noticeId: draft.id, expectedVersion: forecast.version, expectedTemplateRevisionId: forecast.templateRevisionId });
     return draft.id;
   }
   /** Fans out a notice's events and sends its WhatsApp copies through the real adapter with a mocked Graph API. */

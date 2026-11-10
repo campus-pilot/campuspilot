@@ -157,7 +157,7 @@ describe('purge_demo_school and the demo-only finance exception', () => {
     // A published notice pins the school's selected Notice template revision (an artifact row).
     const template = await principal.selectMarketplaceTemplate({ schoolId: demo.school.id, documentType: 'notice', slug: 'notice-default', expectedRevisionId: null });
     const published = await principal.createNotice({ ...base, cadetScope: 'selected_classes', classIds: [demo.schoolClass.id] });
-    await expect(principal.publishNotice({ schoolId: demo.school.id, noticeId: published.id, expectedVersion: published.version })).resolves.toMatchObject({ templateRevisionId: template.artifact.id });
+    await expect(principal.publishNotice({ schoolId: demo.school.id, noticeId: published.id, expectedVersion: published.version, expectedTemplateRevisionId: template.artifact.id })).resolves.toMatchObject({ templateRevisionId: template.artifact.id });
     // A draft written by a demo-only account, which the purge deletes as well.
     const demoUser = await createTestUser({ name: 'Demo teacher' });
     await db.update(user).set({ demoSchoolId: demo.school.id }).where(eq(user.id, demoUser.id));
@@ -185,7 +185,7 @@ describe('purge_demo_school and the demo-only finance exception', () => {
       const session = await createTestSession({ schoolId: school.id, sessionStartYear: 2026, sessionEndYear: 2027 });
       const principal = createTestClient((await createSchoolStaffSession(school.id, [{ role: 'principal' }])).session).school;
       const notice = await principal.createNotice({ schoolId: school.id, sessionId: session.id, title: 'Staff meeting', bodyMode: 'plain', body: 'In the staff room at 2:30 PM.', toStaff: true, cadetScope: 'none' });
-      await principal.publishNotice({ schoolId: school.id, noticeId: notice.id, expectedVersion: notice.version });
+      await principal.publishNotice({ schoolId: school.id, noticeId: notice.id, expectedVersion: notice.version, expectedTemplateRevisionId: null });
       // The first download renders the PDF and caches it under the school's prefix.
       await principal.getNoticeDownload({ schoolId: school.id, noticeId: notice.id });
       const draft = await principal.createNotice({ schoolId: school.id, sessionId: session.id, title: 'Draft', bodyMode: 'plain', body: 'Not yet.', toStaff: true, cadetScope: 'none' });

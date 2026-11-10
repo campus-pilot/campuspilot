@@ -27,6 +27,7 @@ import { documentDownloadUrl } from '../document/document.storage';
 import type { NoticePublishPreview } from './notice-delivery.dto';
 import {
   NOTICE_CHANGED_MESSAGE,
+  NOTICE_TEMPLATE_CHANGED_MESSAGE,
   type createNoticeInputSchema,
   type listNoticesInputSchema,
   type NOTICE_BODY_MODES,
@@ -43,6 +44,7 @@ import {
   asPublishedNotice,
   assertValidNoticeTemplate,
   ensureNoticePdfStored,
+  currentNoticeTemplateRevisionId,
   renderNoticeHtml,
   renderPublishedNoticeHtml,
   type NoticeContent,
@@ -352,11 +354,13 @@ export async function previewNotice(db: DatabaseExecutor, input: z.infer<typeof 
   if (input.source.kind === 'saved') {
     const row = await visibleRow(db, { schoolId: input.schoolId, noticeId: input.source.noticeId }, viewer);
     const published = asPublishedNotice(row);
-    if (published) return { html: (await renderPublishedNoticeHtml(db, published)).html };
-    return { html: (await renderNoticeHtml(db, row, draftOptions)).html };
+    const rendered = published ? await renderPublishedNoticeHtml(db, published) : await renderNoticeHtml(db, row, draftOptions);
+    // The version and template revision of exactly this render: what a publisher who reads it confirms.
+    return { html: rendered.html, version: row.version, templateRevisionId: rendered.templateRevisionId };
   }
   const content: NoticeContent = { schoolId: input.schoolId, sessionId: input.source.sessionId, title: input.source.title, bodyMode: input.source.bodyMode, body: input.source.body };
-  return { html: (await renderNoticeHtml(db, content, draftOptions)).html };
+  const rendered = await renderNoticeHtml(db, content, draftOptions);
+  return { html: rendered.html, version: null, templateRevisionId: rendered.templateRevisionId };
 }
 
 /**
@@ -391,8 +395,9 @@ async function recordPublishedClasses(tx: DatabaseExecutor, notice: Pick<NoticeR
 
 /**
  * What publishing would notify (the caller holds the publish permission, so
- * every draft is visible). `version` is the version this forecast was made
- * for: the dialog compares it with the notice the publisher is looking at.
+ * every draft is visible). `version` and `templateRevisionId` say what this
+ * forecast was made for: the dialog compares them with the preview the
+ * publisher is looking at.
  */
 export async function previewNoticePublish(db: DatabaseExecutor, input: { schoolId: string; noticeId: string }, viewer: NoticeViewer): Promise<NoticePublishPreview> {
   const row = await visibleRow(db, input, viewer);
@@ -400,11 +405,11 @@ export async function previewNoticePublish(db: DatabaseExecutor, input: { school
   if (row.cadetScope !== 'none') await assertSchoolFeatureEnabled(db, input.schoolId, 'cadet');
   await assertHasAudienceClasses(db, row);
   const delivery = await previewNoticeDelivery(db, row);
-  return { kind: 'ready', version: row.version, toStaff: row.toStaff, cadetScope: row.cadetScope, ...delivery };
+  return { kind: 'ready', version: row.version, templateRevisionId: await currentNoticeTemplateRevisionId(db, row), toStaff: row.toStaff, cadetScope: row.cadetScope, ...delivery };
 }
 
 /**
- * Publishes a draft, once, and only the version the publisher reviewed.
+ * Publishes a draft, once, and only what the publisher reviewed.
  *
  * One transaction: lock the notice row, refuse an already published notice
  * with CONFLICT, refuse with CONFLICT when the draft is no longer the
@@ -413,7 +418,13 @@ export async function previewNoticePublish(db: DatabaseExecutor, input: { school
  * audience nobody approved), re-check the audience against the school as it
  * is now (the `cadet` feature may have been switched off since the draft
  * was saved), render it once to prove it renders and to learn the template
- * revision to pin and the issued-on date to store, resolve the recipients,
+ * revision to pin and the issued-on date to store, refuse with CONFLICT
+ * when that revision is not the `expectedTemplateRevisionId` (a plain
+ * notice is printed inside the school's Notice template, which a template
+ * manager may have replaced since the publisher's preview; the revision
+ * compared is the one this very render used and pins, so no change of the
+ * selection can slip between the check and the publication), resolve the
+ * recipients,
  * flip `draft -> published` conditionally and emit one notification event
  * per student plus the staff events. The row lock serializes a double click
  * and concurrent publishers: the second finds the notice published and gets
@@ -437,6 +448,7 @@ export async function publishNotice(db: Database, input: z.infer<typeof publishN
     await recordPublishedClasses(tx, row);
     const publishedAt = new Date();
     const rendered = await renderNoticeHtml(tx, row, { generatedAt: publishedAt, issuedOn: null, template: { kind: 'current' } });
+    if (rendered.templateRevisionId !== input.expectedTemplateRevisionId) throw rpcError.conflict(NOTICE_TEMPLATE_CHANGED_MESSAGE);
     const recipients = await resolveNoticeRecipients(tx, row);
     const [published] = await tx
       .update(noticeTable)

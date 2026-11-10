@@ -99,7 +99,7 @@ describe('school notices', () => {
         () => anonymous.school.deleteNotice(scope),
         () => anonymous.school.previewNotice({ schoolId, source: { kind: 'saved', noticeId: 'ntc_missing' } }),
         () => anonymous.school.previewNoticePublish(scope),
-        () => anonymous.school.publishNotice({ ...scope, expectedVersion: 1 }),
+        () => anonymous.school.publishNotice({ ...scope, expectedVersion: 1, expectedTemplateRevisionId: null }),
         () => anonymous.school.getNoticeDownload(scope),
       ]) {
         await expect(call()).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
@@ -118,7 +118,7 @@ describe('school notices', () => {
         await expectPermissionDenied(outsider.school.listNotices({ schoolId, sessionId }));
         await expectPermissionDenied(outsider.school.getNotice({ schoolId, noticeId: draft.id }));
         await expectPermissionDenied(outsider.school.createNotice(plain()));
-        await expectPermissionDenied(outsider.school.publishNotice({ schoolId, noticeId: draft.id, expectedVersion: draft.version }));
+        await expectPermissionDenied(outsider.school.publishNotice({ schoolId, noticeId: draft.id, expectedVersion: draft.version, expectedTemplateRevisionId: null }));
         await expectPermissionDenied(outsider.school.getNoticeDownload({ schoolId, noticeId: draft.id }));
       }
     });
@@ -131,10 +131,10 @@ describe('school notices', () => {
       }
       const draft = await teacher.school.createNotice(plain());
       for (const client of [teacher, accountant, examCoordinator]) {
-        await expectPermissionDenied(client.school.publishNotice({ schoolId, noticeId: draft.id, expectedVersion: draft.version }));
+        await expectPermissionDenied(client.school.publishNotice({ schoolId, noticeId: draft.id, expectedVersion: draft.version, expectedTemplateRevisionId: null }));
         await expectPermissionDenied(client.school.previewNoticePublish({ schoolId, noticeId: draft.id }));
       }
-      await expect(manager.school.publishNotice({ schoolId, noticeId: draft.id, expectedVersion: draft.version })).resolves.toMatchObject({ status: 'published' });
+      await expect(manager.school.publishNotice({ schoolId, noticeId: draft.id, expectedVersion: draft.version, expectedTemplateRevisionId: null })).resolves.toMatchObject({ status: 'published' });
     });
 
     it('refuses every procedure while the school has no notices feature, after the permission check, and writes nothing', async () => {
@@ -150,7 +150,7 @@ describe('school notices', () => {
       await expectFeatureDisabled(offPrincipal.school.deleteNotice(scope), 'notices');
       await expectFeatureDisabled(offPrincipal.school.previewNotice({ schoolId: off.id, source: { kind: 'unsaved', sessionId: offSession, title: 'T', bodyMode: 'plain', body: 'B' } }), 'notices');
       await expectFeatureDisabled(offPrincipal.school.previewNoticePublish(scope), 'notices');
-      await expectFeatureDisabled(offPrincipal.school.publishNotice({ ...scope, expectedVersion: 1 }), 'notices');
+      await expectFeatureDisabled(offPrincipal.school.publishNotice({ ...scope, expectedVersion: 1, expectedTemplateRevisionId: null }), 'notices');
       await expectFeatureDisabled(offPrincipal.school.getNoticeDownload(scope), 'notices');
       expect(await db.select().from(noticeTable).where(eq(noticeTable.schoolId, off.id))).toHaveLength(0);
       // A caller without access cannot tell whether the school has the feature.
@@ -221,7 +221,7 @@ describe('school notices', () => {
       await expect(principal.school.deleteNotice(scope)).rejects.toMatchObject({ code: 'NOT_FOUND' });
       await expect(principal.school.previewNotice({ schoolId, source: { kind: 'saved', noticeId: theirs.id } })).rejects.toMatchObject({ code: 'NOT_FOUND' });
       await expect(principal.school.previewNoticePublish(scope)).rejects.toMatchObject({ code: 'NOT_FOUND' });
-      await expect(principal.school.publishNotice({ ...scope, expectedVersion: 1 })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      await expect(principal.school.publishNotice({ ...scope, expectedVersion: 1, expectedTemplateRevisionId: null })).rejects.toMatchObject({ code: 'NOT_FOUND' });
       await expect(principal.school.getNoticeDownload(scope)).rejects.toMatchObject({ code: 'NOT_FOUND' });
       await expect(otherPrincipal.school.getNotice({ schoolId: other.id, noticeId: theirs.id })).resolves.toMatchObject({ status: 'draft' });
       expect((await principal.school.listNotices({ schoolId, sessionId })).items.map((item) => item.id)).not.toContain(theirs.id);
@@ -312,8 +312,8 @@ describe('school notices', () => {
       const alpha = await client.school.createNotice({ ...base, title: 'Alpha staff' });
       const beta = await client.school.createNotice({ ...base, title: 'Beta cadets 100%', toStaff: false, cadetScope: 'all_classes' });
       const gamma = await client.school.createNotice({ ...base, title: 'Gamma both', cadetScope: 'all_classes' });
-      await client.school.publishNotice({ schoolId: listSchool.id, noticeId: gamma.id, expectedVersion: gamma.version });
-      await client.school.publishNotice({ schoolId: listSchool.id, noticeId: alpha.id, expectedVersion: alpha.version });
+      await client.school.publishNotice({ schoolId: listSchool.id, noticeId: gamma.id, expectedVersion: gamma.version, expectedTemplateRevisionId: null });
+      await client.school.publishNotice({ schoolId: listSchool.id, noticeId: alpha.id, expectedVersion: alpha.version, expectedTemplateRevisionId: null });
       const list = (input: Record<string, unknown> = {}) => client.school.listNotices({ schoolId: listSchool.id, sessionId: listSession, ...input } as never);
       const ids = async (input: Record<string, unknown> = {}) => (await list(input)).items.map((item) => item.id);
 
@@ -366,11 +366,11 @@ describe('school notices', () => {
       const draft = await client.school.createNotice({ ...base, cadetScope: 'all_classes' });
       await setTestSchoolFeature(school.id, 'cadet', false);
       await expectFeatureDisabled(client.school.previewNoticePublish({ schoolId: school.id, noticeId: draft.id }), 'cadet');
-      await expectFeatureDisabled(client.school.publishNotice({ schoolId: school.id, noticeId: draft.id, expectedVersion: draft.version }), 'cadet');
+      await expectFeatureDisabled(client.school.publishNotice({ schoolId: school.id, noticeId: draft.id, expectedVersion: draft.version, expectedTemplateRevisionId: null }), 'cadet');
       expect((await db.select().from(noticeTable).where(eq(noticeTable.id, draft.id)))[0]).toMatchObject({ status: 'draft', publishedAt: null });
       expect(await db.select().from(notificationEventTable).where(eq(notificationEventTable.schoolId, school.id))).toHaveLength(0);
       // Staff-only notices never need the portal.
-      await expect(client.school.publishNotice({ schoolId: school.id, noticeId: staffOnly.id, expectedVersion: staffOnly.version })).resolves.toMatchObject({ status: 'published', publishedCadetCount: 0 });
+      await expect(client.school.publishNotice({ schoolId: school.id, noticeId: staffOnly.id, expectedVersion: staffOnly.version, expectedTemplateRevisionId: null })).resolves.toMatchObject({ status: 'published', publishedCadetCount: 0 });
     });
   });
 
@@ -396,7 +396,7 @@ describe('school notices', () => {
       await expect(teacher.school.previewNotice({ schoolId, source: { kind: 'unsaved', sessionId, title: 'Bad', bodyMode: 'template', body: '{{#each}}' } })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
       // The structural limits apply to an unsaved preview as well as to a save.
       const selfCalling = '{{#*inline "p"}}{{> p}}{{> p}}{{/inline}}{{> p}}';
-      await expect(teacher.school.previewNotice({ schoolId, source: { kind: 'unsaved', sessionId, title: 'Loop', bodyMode: 'template', body: selfCalling } })).rejects.toMatchObject({ code: 'BAD_REQUEST', message: 'A notice template cannot use partials.' });
+      await expect(teacher.school.previewNotice({ schoolId, source: { kind: 'unsaved', sessionId, title: 'Loop', bodyMode: 'template', body: selfCalling } })).rejects.toMatchObject({ code: 'BAD_REQUEST', message: 'Templates cannot use partials, inline partials or decorators.' });
       await expect(teacher.school.createNotice(plain({ bodyMode: 'template', body: selfCalling }))).rejects.toMatchObject({ code: 'BAD_REQUEST' });
       const deep = `${'{{#each this}}'.repeat(5)}x${'{{/each}}'.repeat(5)}`;
       await expect(teacher.school.previewNotice({ schoolId, source: { kind: 'unsaved', sessionId, title: 'Deep', bodyMode: 'template', body: deep } })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
@@ -424,6 +424,7 @@ describe('school notices', () => {
       await expect(principal.school.previewNoticePublish({ schoolId, noticeId: staffOnly.id })).resolves.toEqual({
         kind: 'ready',
         version: 1,
+        templateRevisionId: null,
         toStaff: true,
         staffRecipientCount: staffCount,
         cadetScope: 'none',
@@ -448,7 +449,7 @@ describe('school notices', () => {
     it('publishes once: records who and when, notifies each addressed student and the staff, and freezes the notice', async () => {
       const draft = await teacher.school.createNotice(plain({ title: 'Parent meeting', cadetScope: 'selected_classes', classIds: [grade6] }));
       const scope = { schoolId, noticeId: draft.id };
-      const published = await principal.school.publishNotice({ ...scope, expectedVersion: 1 });
+      const published = await principal.school.publishNotice({ ...scope, expectedVersion: 1, expectedTemplateRevisionId: null });
       expect(published).toMatchObject({
         status: 'published',
         publishedBy: principalId,
@@ -475,8 +476,8 @@ describe('school notices', () => {
       expect((staffEvents[0]!.recipients as { userIds: string[] }).userIds).toHaveLength(staffCount);
 
       // Published is final: no second publication, no edit, no delete; nothing more is emitted.
-      await expect(principal.school.publishNotice({ ...scope, expectedVersion: 1 })).rejects.toMatchObject({ code: 'CONFLICT' });
-      await expect(manager.school.publishNotice({ ...scope, expectedVersion: 1 })).rejects.toMatchObject({ code: 'CONFLICT' });
+      await expect(principal.school.publishNotice({ ...scope, expectedVersion: 1, expectedTemplateRevisionId: null })).rejects.toMatchObject({ code: 'CONFLICT' });
+      await expect(manager.school.publishNotice({ ...scope, expectedVersion: 1, expectedTemplateRevisionId: null })).rejects.toMatchObject({ code: 'CONFLICT' });
       await expect(principal.school.updateNotice({ ...plain({ title: 'Changed' }), noticeId: draft.id, expectedVersion: draft.version })).rejects.toMatchObject({ code: 'CONFLICT' });
       await expect(teacher.school.updateNotice({ ...plain({ title: 'Changed' }), noticeId: draft.id, expectedVersion: draft.version })).rejects.toMatchObject({ code: 'CONFLICT' });
       await expect(principal.school.deleteNotice(scope)).rejects.toMatchObject({ code: 'CONFLICT' });
@@ -493,7 +494,7 @@ describe('school notices', () => {
     it('fans out exactly once when two people publish at the same moment', async () => {
       const draft = await principal.school.createNotice(plain({ cadetScope: 'all_classes' }));
       const scope = { schoolId, noticeId: draft.id };
-      const results = await Promise.allSettled([principal.school.publishNotice({ ...scope, expectedVersion: 1 }), manager.school.publishNotice({ ...scope, expectedVersion: 1 }), principal.school.publishNotice({ ...scope, expectedVersion: 1 })]);
+      const results = await Promise.allSettled([principal.school.publishNotice({ ...scope, expectedVersion: 1, expectedTemplateRevisionId: null }), manager.school.publishNotice({ ...scope, expectedVersion: 1, expectedTemplateRevisionId: null }), principal.school.publishNotice({ ...scope, expectedVersion: 1, expectedTemplateRevisionId: null })]);
       expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
       for (const result of results) {
         if (result.status === 'rejected') expect(result.reason).toMatchObject({ code: 'CONFLICT' });
@@ -507,7 +508,7 @@ describe('school notices', () => {
     it('publishes a notice nobody is enrolled for, and refuses a selected-classes draft left without classes', async () => {
       const emptyClass = (await createTestClass({ schoolId, label: 'Grade 12' })).schoolClass.id;
       const draft = await principal.school.createNotice(plain({ toStaff: false, cadetScope: 'selected_classes', classIds: [emptyClass] }));
-      await expect(principal.school.publishNotice({ schoolId, noticeId: draft.id, expectedVersion: draft.version })).resolves.toMatchObject({ status: 'published', publishedStaffCount: 0, publishedCadetCount: 0 });
+      await expect(principal.school.publishNotice({ schoolId, noticeId: draft.id, expectedVersion: draft.version, expectedTemplateRevisionId: null })).resolves.toMatchObject({ status: 'published', publishedStaffCount: 0, publishedCadetCount: 0 });
       expect(await eventsOf(draft.id)).toHaveLength(0);
 
       // A draft whose only class is deleted afterwards (through the real procedure) addresses nobody.
@@ -516,7 +517,7 @@ describe('school notices', () => {
       await principal.school.deleteClass({ schoolId, classId: doomed });
       await expect(principal.school.getNotice({ schoolId, noticeId: orphan.id })).resolves.toMatchObject({ classIds: [], classes: [{ classId: null, name: 'Grade 13' }] });
       await expect(principal.school.previewNoticePublish({ schoolId, noticeId: orphan.id })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
-      await expect(principal.school.publishNotice({ schoolId, noticeId: orphan.id, expectedVersion: orphan.version })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+      await expect(principal.school.publishNotice({ schoolId, noticeId: orphan.id, expectedVersion: orphan.version, expectedTemplateRevisionId: null })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
       expect((await db.select().from(noticeTable).where(eq(noticeTable.id, orphan.id)))[0]).toMatchObject({ status: 'draft' });
     });
 
@@ -539,7 +540,7 @@ describe('school notices', () => {
           { classId: null, name: 'Grade 14' },
         ],
       });
-      const published = await principal.school.publishNotice({ schoolId, noticeId: draft.id, expectedVersion: draft.version });
+      const published = await principal.school.publishNotice({ schoolId, noticeId: draft.id, expectedVersion: draft.version, expectedTemplateRevisionId: null });
       const audience = [
         { classId: keep, name: 'Grade 9' },
         { classId: renamed, name: 'Grade 10 (Science)' },
@@ -579,7 +580,7 @@ describe('school notices', () => {
       const edited = await teacher.school.updateNotice({ ...plain({ title: 'Not reviewed', body: 'Different text.', toStaff: true, cadetScope: 'all_classes' }), noticeId: draft.id, expectedVersion: draft.version });
       expect(edited.version).toBe(reviewed.version + 1);
       // ...and the principal's click publishes nothing.
-      await expect(principal.school.publishNotice({ ...scope, expectedVersion: reviewed.version })).rejects.toMatchObject({
+      await expect(principal.school.publishNotice({ ...scope, expectedVersion: reviewed.version, expectedTemplateRevisionId: null })).rejects.toMatchObject({
         code: 'CONFLICT',
         message: 'This notice changed since you opened it. Review it again.',
       });
@@ -587,11 +588,11 @@ describe('school notices', () => {
       expect(await eventsOf(draft.id)).toHaveLength(0);
       // The forecast now names the new version; publishing that one works.
       await expect(principal.school.previewNoticePublish(scope)).resolves.toMatchObject({ kind: 'ready', version: edited.version });
-      const published = await principal.school.publishNotice({ ...scope, expectedVersion: edited.version });
+      const published = await principal.school.publishNotice({ ...scope, expectedVersion: edited.version, expectedTemplateRevisionId: null });
       expect(published).toMatchObject({ status: 'published', title: 'Not reviewed', version: edited.version + 1 });
       // Input validation: the version is required and positive.
       await expect(principal.school.publishNotice(scope as never)).rejects.toMatchObject({ code: 'BAD_REQUEST' });
-      await expect(principal.school.publishNotice({ ...scope, expectedVersion: 0 })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+      await expect(principal.school.publishNotice({ ...scope, expectedVersion: 0, expectedTemplateRevisionId: null })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
     });
 
     it('refuses to overwrite a draft someone else changed since it was opened', async () => {
@@ -627,7 +628,7 @@ describe('school notices', () => {
       const draft = await client.school.createNotice({ ...plain({ bodyMode: 'template', body }), schoolId: school.id, sessionId: session });
       const stillDraft = await client.school.createNotice({ ...plain({ bodyMode: 'template', body }), schoolId: school.id, sessionId: session });
       expect(draft.issuedOn).toBeNull();
-      const published = await client.school.publishNotice({ schoolId: school.id, noticeId: draft.id, expectedVersion: draft.version });
+      const published = await client.school.publishNotice({ schoolId: school.id, noticeId: draft.id, expectedVersion: draft.version, expectedTemplateRevisionId: null });
       const issuedOn = dateIn('Pacific/Kiritimati', new Date(published.publishedAt!));
       expect(published.issuedOn).toBe(issuedOn);
       expect((await db.select().from(noticeTable).where(eq(noticeTable.id, draft.id)))[0]).toMatchObject({ issuedOn });
@@ -655,16 +656,16 @@ describe('school notices', () => {
 
       // Published with the built-in default (nothing selected): null is pinned and stays the default.
       const builtIn = await client.school.createNotice(base);
-      const builtInPublished = await client.school.publishNotice({ schoolId: school.id, noticeId: builtIn.id, expectedVersion: builtIn.version });
+      const builtInPublished = await client.school.publishNotice({ schoolId: school.id, noticeId: builtIn.id, expectedVersion: builtIn.version, expectedTemplateRevisionId: null });
       expect(builtInPublished.templateRevisionId).toBeNull();
 
       const first = await client.school.saveDocumentTemplate({ schoolId: school.id, documentType: 'notice', name: 'First', content: template('first'), pageSize: 'full', expectedRevisionId: null });
       const pinned = await client.school.createNotice(base);
-      const pinnedPublished = await client.school.publishNotice({ schoolId: school.id, noticeId: pinned.id, expectedVersion: pinned.version });
+      const pinnedPublished = await client.school.publishNotice({ schoolId: school.id, noticeId: pinned.id, expectedVersion: pinned.version, expectedTemplateRevisionId: first.artifact.id });
       expect(pinnedPublished.templateRevisionId).toBe(first.artifact.id);
       const draft = await client.school.createNotice(base);
       const custom = await client.school.createNotice({ ...base, bodyMode: 'template', body: '<h1 class="own">{{notice.title}}</h1>' });
-      const customPublished = await client.school.publishNotice({ schoolId: school.id, noticeId: custom.id, expectedVersion: custom.version });
+      const customPublished = await client.school.publishNotice({ schoolId: school.id, noticeId: custom.id, expectedVersion: custom.version, expectedTemplateRevisionId: null });
       expect(customPublished.templateRevisionId).toBeNull();
       const pinnedBefore = await html(pinned.id);
       expect(pinnedBefore).toContain('first: Sports Day');
@@ -679,11 +680,72 @@ describe('school notices', () => {
       expect(await html(pinned.id)).toBe(await html(pinned.id));
     });
 
+    it('publishes only inside the Notice template the publisher reviewed: a template replaced in between is a CONFLICT and notifies nobody', async () => {
+      const school = await createTestSchool({ name: 'Reviewed Template School', features: ['notices'] });
+      const session = (await createTestSession({ schoolId: school.id, sessionStartYear: 2026, sessionEndYear: 2027 })).id;
+      const client = createTestClient((await createSchoolStaffSession(school.id, [{ role: 'principal' }])).session);
+      const base = { ...plain(), schoolId: school.id, sessionId: session };
+      const template = (text: string) => `<section><p>${text}</p><h1>{{notice.title}}</h1>{{#each notice.paragraphs}}<p>{{this}}</p>{{/each}}</section>`;
+      const preview = (noticeId: string) => client.school.previewNotice({ schoolId: school.id, source: { kind: 'saved', noticeId } });
+      const stored = async (noticeId: string) => (await db.select().from(noticeTable).where(eq(noticeTable.id, noticeId)))[0]!;
+
+      // The publisher reviews a draft printed with the built-in design...
+      const draft = await client.school.createNotice(base);
+      const scope = { schoolId: school.id, noticeId: draft.id };
+      const reviewedBuiltIn = await preview(draft.id);
+      expect(reviewedBuiltIn).toMatchObject({ version: draft.version, templateRevisionId: null });
+      await expect(client.school.previewNoticePublish(scope)).resolves.toMatchObject({ kind: 'ready', version: draft.version, templateRevisionId: null });
+      // ...a template manager selects a design that carries text of its own...
+      const first = await client.school.saveDocumentTemplate({ schoolId: school.id, documentType: 'notice', name: 'First', content: template('School closed tomorrow'), pageSize: 'full', expectedRevisionId: null });
+      // ...and the publisher's click sends nothing: the notice itself did not change, the page around it did.
+      await expect(client.school.publishNotice({ ...scope, expectedVersion: reviewedBuiltIn.version!, expectedTemplateRevisionId: reviewedBuiltIn.templateRevisionId })).rejects.toMatchObject({
+        code: 'CONFLICT',
+        message: "The school's Notice template changed since you opened this notice. Review it again.",
+      });
+      expect(await stored(draft.id)).toMatchObject({ status: 'draft', publishedAt: null, templateRevisionId: null, version: draft.version });
+      expect(await eventsOf(draft.id)).toHaveLength(0);
+
+      // The publisher reviews again: the preview and the forecast now name the selected revision...
+      const reviewedFirst = await preview(draft.id);
+      expect(reviewedFirst).toMatchObject({ version: draft.version, templateRevisionId: first.artifact.id });
+      expect(reviewedFirst.html).toContain('School closed tomorrow');
+      await expect(client.school.previewNoticePublish(scope)).resolves.toMatchObject({ kind: 'ready', templateRevisionId: first.artifact.id });
+      // ...which is replaced once more before the click.
+      const second = await client.school.saveDocumentTemplate({ schoolId: school.id, documentType: 'notice', name: 'Second', content: template('School open as usual'), pageSize: 'full', expectedRevisionId: first.artifact.id });
+      await expect(client.school.publishNotice({ ...scope, expectedVersion: draft.version, expectedTemplateRevisionId: first.artifact.id })).rejects.toMatchObject({ code: 'CONFLICT' });
+      // Claiming the built-in design does not help either.
+      await expect(client.school.publishNotice({ ...scope, expectedVersion: draft.version, expectedTemplateRevisionId: null })).rejects.toMatchObject({ code: 'CONFLICT' });
+      expect(await eventsOf(draft.id)).toHaveLength(0);
+
+      // Publishing with the revision of the current preview works and pins exactly that revision.
+      const reviewedSecond = await preview(draft.id);
+      expect(reviewedSecond.templateRevisionId).toBe(second.artifact.id);
+      const published = await client.school.publishNotice({ ...scope, expectedVersion: reviewedSecond.version!, expectedTemplateRevisionId: reviewedSecond.templateRevisionId });
+      expect(published).toMatchObject({ status: 'published', templateRevisionId: second.artifact.id });
+      expect((await preview(draft.id)).html).toContain('School open as usual');
+      // A published notice's preview names its pinned revision.
+      expect(await preview(draft.id)).toMatchObject({ version: published.version, templateRevisionId: second.artifact.id });
+
+      // A notice that is its own template is not printed inside the school's: its reviewed revision is null whatever is selected.
+      const own = await client.school.createNotice({ ...base, bodyMode: 'template', body: '<h1>{{notice.title}}</h1>' });
+      expect(await preview(own.id)).toMatchObject({ templateRevisionId: null });
+      await expect(client.school.previewNoticePublish({ schoolId: school.id, noticeId: own.id })).resolves.toMatchObject({ kind: 'ready', templateRevisionId: null });
+      await expect(client.school.publishNotice({ schoolId: school.id, noticeId: own.id, expectedVersion: own.version, expectedTemplateRevisionId: second.artifact.id })).rejects.toMatchObject({ code: 'CONFLICT' });
+      await expect(client.school.publishNotice({ schoolId: school.id, noticeId: own.id, expectedVersion: own.version, expectedTemplateRevisionId: null })).resolves.toMatchObject({ status: 'published', templateRevisionId: null });
+
+      // Unsaved text is previewed with the current selection and has no version.
+      await expect(client.school.previewNotice({ schoolId: school.id, source: { kind: 'unsaved', sessionId: session, title: 'T', bodyMode: 'plain', body: 'B' } })).resolves.toMatchObject({ version: null, templateRevisionId: second.artifact.id });
+      // Input validation: the reviewed revision must be stated, as null or an id.
+      const another = await client.school.createNotice(base);
+      await expect(client.school.publishNotice({ schoolId: school.id, noticeId: another.id, expectedVersion: another.version } as never)).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+      await expect(client.school.publishNotice({ schoolId: school.id, noticeId: another.id, expectedVersion: another.version, expectedTemplateRevisionId: '' })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    });
+
     it('refuses to publish a draft that no longer renders', async () => {
       const draft = await principal.school.createNotice(plain({ bodyMode: 'template', body: '<p>{{notice.title}}</p>' }));
       // A source saved by an older release that the renderer now rejects.
       await db.update(noticeTable).set({ body: '{{unknownHelper notice.title}}' }).where(eq(noticeTable.id, draft.id));
-      await expect(principal.school.publishNotice({ schoolId, noticeId: draft.id, expectedVersion: draft.version })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+      await expect(principal.school.publishNotice({ schoolId, noticeId: draft.id, expectedVersion: draft.version, expectedTemplateRevisionId: null })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
       expect((await db.select().from(noticeTable).where(eq(noticeTable.id, draft.id)))[0]).toMatchObject({ status: 'draft' });
       expect(await eventsOf(draft.id)).toHaveLength(0);
     });
@@ -697,7 +759,7 @@ describe('school notices', () => {
 
     it('renders a published notice once, caches it under the school prefix and serves the same file to every reader', async () => {
       const draft = await principal.school.createNotice(plain({ title: 'Holiday list' }));
-      await principal.school.publishNotice({ schoolId, noticeId: draft.id, expectedVersion: draft.version });
+      await principal.school.publishNotice({ schoolId, noticeId: draft.id, expectedVersion: draft.version, expectedTemplateRevisionId: null });
       const key = noticePdfKey(schoolId, draft.id);
       await expect(getS3Client().send(new HeadObjectCommand({ Bucket: env.S3_BUCKET, Key: key }))).rejects.toBeDefined();
 
@@ -727,7 +789,7 @@ describe('school notices', () => {
       const paragraph = 'This paragraph is repeated to make the notice longer than a single printed page. '.repeat(6);
       const body = Array.from({ length: 40 }, (_, index) => `${index + 1}. ${paragraph}`).join('\n\n');
       const draft = await principal.school.createNotice(plain({ title: 'Long notice', body }));
-      await principal.school.publishNotice({ schoolId, noticeId: draft.id, expectedVersion: draft.version });
+      await principal.school.publishNotice({ schoolId, noticeId: draft.id, expectedVersion: draft.version, expectedTemplateRevisionId: null });
       const download = await principal.school.getNoticeDownload({ schoolId, noticeId: draft.id });
       const pdf = await PDFDocument.load(new Uint8Array(await (await fetch(download.url)).arrayBuffer()));
       expect(pdf.getPageCount()).toBeGreaterThan(1);

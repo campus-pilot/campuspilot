@@ -788,7 +788,14 @@ export async function seedNotice(
       classIds,
     }));
   const publish = notice.status === 'published' && saved.status === 'draft';
-  if (publish) await ctx.rpc.school.publishNotice({ schoolId: ctx.schoolId, noticeId: saved.id, expectedVersion: saved.version });
+  if (publish) {
+    // Publishing names the template revision that was reviewed; the demo's
+    // principal "reviews" through the publish forecast, like the dialog.
+    const forecast = await ctx.rpc.school.previewNoticePublish({ schoolId: ctx.schoolId, noticeId: saved.id });
+    if (forecast.kind === 'ready') {
+      await ctx.rpc.school.publishNotice({ schoolId: ctx.schoolId, noticeId: saved.id, expectedVersion: saved.version, expectedTemplateRevisionId: forecast.templateRevisionId });
+    }
+  }
   await backdateDemoNotice({ schoolId: ctx.schoolId, noticeId: saved.id }, notice);
   return { noticeId: saved.id, outcome: publish ? 'published' : existing ? 'unchanged' : 'created' };
 }

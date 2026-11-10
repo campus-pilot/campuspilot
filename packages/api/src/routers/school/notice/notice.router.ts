@@ -139,7 +139,7 @@ export const schoolNoticeRouter = {
     }),
 
   previewNotice: protectedProcedure
-    .route(route('Preview a notice', "Render a saved notice, or unsaved title and text, to sanitized network-free HTML with the school's letterhead. A published notice renders exactly as published. Saves nothing."))
+    .route(route('Preview a notice', "Render a saved notice, or unsaved title and text, to sanitized network-free HTML with the school's letterhead, and say which notice version and school Notice template revision were rendered. A published notice renders exactly as published. Saves nothing."))
     .meta(meta('read', false))
     .input(previewNoticeInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_NOTICE))
@@ -173,7 +173,7 @@ export const schoolNoticeRouter = {
     }),
 
   publishNotice: protectedProcedure
-    .route(route('Publish a notice', 'Publish a draft, once and irreversibly: it becomes visible to its audience, can no longer be changed, and its recipients are notified (staff in the app; students in the Cadet Portal, by device notification and by WhatsApp with the notice PDF). Send expectedVersion, the version you reviewed: a notice edited since, or already published, is refused with CONFLICT.'))
+    .route(route('Publish a notice', 'Publish a draft, once and irreversibly: it becomes visible to its audience, can no longer be changed, and its recipients are notified (staff in the app; students in the Cadet Portal, by device notification and by WhatsApp with the notice PDF). Send expectedVersion and expectedTemplateRevisionId, the version and template revision of the preview you reviewed (previewNotice or previewNoticePublish): a notice edited since, a school Notice template replaced since, or a notice already published is refused with CONFLICT.'))
     .meta(meta('write', true))
     .input(publishNoticeInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.PUBLISH_NOTICE))

@@ -99,11 +99,34 @@ const expectedVersionSchema = z
   .positive()
   .describe('version from getNotice (or previewNoticePublish) of the notice as you last read it; a different stored version is refused with CONFLICT.');
 
-/** Publishing names the version that was reviewed: publication is irreversible. */
-export const publishNoticeInputSchema = z.object({ schoolId: id, noticeId: id, expectedVersion: expectedVersionSchema });
+/**
+ * The school Notice template revision of the preview the caller reviewed
+ * (`previewNotice.templateRevisionId` or
+ * `previewNoticePublish.templateRevisionId`); null when that preview used
+ * the built-in design or the notice is its own template. A plain notice is
+ * printed inside the school's selected Notice template, which a template
+ * manager can replace at any time and which may carry text of its own, so
+ * the reviewed revision is as much part of "what the publisher saw" as the
+ * notice's version. Publication is refused with CONFLICT when the notice
+ * would now be printed with another revision. Required (never defaulted):
+ * a caller that has not looked at a preview has nothing to confirm.
+ */
+const expectedTemplateRevisionIdSchema = id
+  .nullable()
+  .describe('templateRevisionId from previewNotice or previewNoticePublish of the preview you reviewed (null = built-in design or a custom-template notice); publication with another template revision is refused with CONFLICT.');
+
+/** Publishing names what was reviewed, the notice version and the template revision it was shown in: publication is irreversible. */
+export const publishNoticeInputSchema = z.object({
+  schoolId: id,
+  noticeId: id,
+  expectedVersion: expectedVersionSchema,
+  expectedTemplateRevisionId: expectedTemplateRevisionIdSchema,
+});
 
 /** The CONFLICT message of a stale `expectedVersion` (the UI shows it and reloads the notice). */
 export const NOTICE_CHANGED_MESSAGE = 'This notice changed since you opened it. Review it again.';
+/** The CONFLICT message of a stale `expectedTemplateRevisionId` (the UI shows it and reloads the preview). */
+export const NOTICE_TEMPLATE_CHANGED_MESSAGE = "The school's Notice template changed since you opened this notice. Review it again.";
 
 export const createNoticeInputSchema = z
   .object({ schoolId: id, sessionId: id, ...contentShape, ...audienceShape })
@@ -212,7 +235,22 @@ export const previewNoticeInputSchema = z.object({
   ]),
 });
 
-/** Sanitized HTML for an empty-sandbox iframe (`DocumentPreview`). */
-export const noticePreviewOutputSchema = z.object({ html: z.string() });
+/**
+ * A rendered notice and what exactly was rendered, so a reader can later
+ * say which preview they reviewed (`publishNotice`).
+ */
+export const noticePreviewOutputSchema = z.object({
+  /** Sanitized HTML for an empty-sandbox iframe (`DocumentPreview`). */
+  html: z.string(),
+  /** The version of the saved notice that was rendered; null for unsaved content. */
+  version: z.number().int().positive().nullable(),
+  /**
+   * The school Notice template revision the page was rendered with: the
+   * pinned one for a published notice, the school's current selection for a
+   * draft or unsaved text. Null for the built-in design and for a notice
+   * that is its own template.
+   */
+  templateRevisionId: z.string().nullable(),
+});
 
 export const noticeDownloadOutputSchema = z.object({ url: z.url(), expiresIn: z.number().int() });
