@@ -8,6 +8,6 @@ export const aiUsagePage = defineAdminPage<SchoolRouteParams>({
   breadcrumbs: ({ schoolId }) => [
     { id: 'campuspilot', label: 'CampusPilot', href: '/', icon: AppWindow },
     { id: 'school', label: <SchoolSlugBreadcrumbValue schoolId={schoolId} />, href: schoolHref(schoolId) },
-    { id: 'ai-usage', label: 'AI Usage', icon: Sparkles },
+    { id: 'ai-usage', label: 'AI', icon: Sparkles },
   ],
 });
