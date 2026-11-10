@@ -124,8 +124,11 @@ export const assistantRunDiagnosticsSchema = z.object({
   outputTokens: z.number().int(),
   cacheReadInputTokens: z.number().int(),
   cacheCreationInputTokens: z.number().int(),
-  /** Estimate from list prices; null when the model's prices are unknown. */
-  estimatedCostUsd: z.number().nullable(),
+  /**
+   * The run's saved cost in USD (decimal text): the sum of its model
+   * requests at the prices configured when each was made. Never recomputed.
+   */
+  costUsd: z.string(),
   /** The raw provider or runtime error behind `errorMessage`, if any. */
   errorDetail: z.string().nullable(),
 });

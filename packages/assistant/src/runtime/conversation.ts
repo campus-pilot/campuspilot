@@ -382,6 +382,15 @@ export function createRunProcessor(deps: AssistantConversationDeps) {
     const access = await deps.checkAccess({ schoolId: run.schoolId, userId: run.userId });
     if (!access.allowed) throw runFailure(access.code, access.message);
 
+    // Every request is saved with the prices it was made at, so a provider
+    // without prices is never called.
+    const prices = deps.providers.prices(provider.id);
+    if (!prices) {
+      throw runFailure('provider_unavailable', 'The assistant is not available right now. Please try again later.', {
+        detail: `No prices are configured for ${provider.id}.`,
+      });
+    }
+
     const catalog = await loadToolCatalog(await requireToken(run.runId));
     const transcript = await store.loadTranscript(db, run.conversationId);
     const itemKey = assistantMessageItemKey(run.runId, step);
@@ -490,6 +499,20 @@ export function createRunProcessor(deps: AssistantConversationDeps) {
     const content = result.refusal ? provider.assistantTextContent(text) : result.content;
     const item = text ? await ensureItem() : itemPromise ? await itemPromise : null;
     await tx(async (t, emit) => {
+      // First, so the run's row is locked before the conversation's (see
+      // `recordModelRequest`). Keyed like the transcript entry: a step
+      // replayed after this commit returns early above and adds nothing.
+      await store.recordModelRequest(t, {
+        runId: run.runId,
+        schoolId: run.schoolId,
+        userId: run.userId,
+        requestKey: entryKey,
+        provider: provider.id,
+        requestedModel: provider.model,
+        answeredModel: result.model,
+        usage: result.usage,
+        prices,
+      });
       if (item) {
         await store.updateItem(t, emit, item, { status: 'complete', body: { text } });
       }
@@ -502,7 +525,7 @@ export function createRunProcessor(deps: AssistantConversationDeps) {
       });
       // The model that answered: a provider may serve a request with a
       // different model than the one asked for (a fallback, a dated version).
-      await store.updateRun(t, emit, runRef(run), { model: result.model }, result.usage);
+      await store.updateRun(t, emit, runRef(run), { model: result.model });
     });
 
     return { kind: 'response', toolUses, paused: result.refusal ? false : result.paused };

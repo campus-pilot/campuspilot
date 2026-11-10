@@ -1,4 +1,5 @@
 import type { AssistantRunDiagnosticsDto } from '@campuspilot/assistant-contract/dto';
+import { formatUsdText, sumUsd } from '@campuspilot/assistant-contract/money';
 import { Popover, PopoverContent, PopoverTrigger } from '@campuspilot/ui/components/popover';
 import { cn } from '@campuspilot/ui/lib/utils';
 import { Gauge } from 'lucide-react';
@@ -18,12 +19,6 @@ const exact = new Intl.NumberFormat('en');
 
 const formatTokens = (count: number) => compact.format(count);
 
-/** Small costs keep four decimals so a cheap turn does not read as $0.00. */
-function formatUsd(amount: number | null): string {
-  if (amount === null) return 'Unknown';
-  return `$${amount.toFixed(amount < 1 ? 4 : 2)}`;
-}
-
 const totalTokens = (usage: AssistantRunDiagnosticsDto) =>
   usage.inputTokens + usage.outputTokens + usage.cacheReadInputTokens + usage.cacheCreationInputTokens;
 
@@ -35,10 +30,8 @@ export type AssistantUsageTotals = {
   outputTokens: number;
   cacheReadInputTokens: number;
   cacheCreationInputTokens: number;
-  /** Sum of the runs that have an estimate. */
-  estimatedCostUsd: number;
-  /** Runs whose model has no known prices, so the cost leaves them out. */
-  unpricedRuns: number;
+  /** Exact sum of the runs' saved costs, in USD (decimal text). */
+  costUsd: string;
 };
 
 export function sumAssistantUsage(list: readonly AssistantRunDiagnosticsDto[]): AssistantUsageTotals {
@@ -50,8 +43,7 @@ export function sumAssistantUsage(list: readonly AssistantRunDiagnosticsDto[]): 
       outputTokens: sum.outputTokens + run.outputTokens,
       cacheReadInputTokens: sum.cacheReadInputTokens + run.cacheReadInputTokens,
       cacheCreationInputTokens: sum.cacheCreationInputTokens + run.cacheCreationInputTokens,
-      estimatedCostUsd: sum.estimatedCostUsd + (run.estimatedCostUsd ?? 0),
-      unpricedRuns: sum.unpricedRuns + (run.estimatedCostUsd === null ? 1 : 0),
+      costUsd: sumUsd([sum.costUsd, run.costUsd]),
     }),
     {
       runs: 0,
@@ -60,8 +52,7 @@ export function sumAssistantUsage(list: readonly AssistantRunDiagnosticsDto[]): 
       outputTokens: 0,
       cacheReadInputTokens: 0,
       cacheCreationInputTokens: 0,
-      estimatedCostUsd: 0,
-      unpricedRuns: 0,
+      costUsd: '0',
     },
   );
 }
@@ -109,7 +100,7 @@ function DiagnosticsList({ rows }: { rows: readonly Row[] }) {
   );
 }
 
-const tokenRows = (usage: Omit<AssistantRunDiagnosticsDto, 'provider' | 'model' | 'estimatedCostUsd' | 'errorDetail'>): Row[] => [
+const tokenRows = (usage: Omit<AssistantRunDiagnosticsDto, 'provider' | 'model' | 'costUsd' | 'errorDetail'>): Row[] => [
   ['Model calls', exact.format(usage.modelRequestCount)],
   ['Input', exact.format(usage.inputTokens)],
   ['Cached input', exact.format(usage.cacheReadInputTokens)],
@@ -125,7 +116,7 @@ export function AssistantRunDiagnostics({ runId, diagnostics }: { runId: string;
       summary={
         <>
           <span>{formatTokens(totalTokens(diagnostics))}</span>
-          {diagnostics.estimatedCostUsd !== null ? <span>{formatUsd(diagnostics.estimatedCostUsd)}</span> : null}
+          <span>{formatUsdText(diagnostics.costUsd)}</span>
         </>
       }
     >
@@ -136,7 +127,7 @@ export function AssistantRunDiagnostics({ runId, diagnostics }: { runId: string;
           ['Provider', diagnostics.provider ?? 'Not started'],
           ['Model', diagnostics.model ?? 'Not started', true],
           ...tokenRows(diagnostics),
-          ['Estimated cost', formatUsd(diagnostics.estimatedCostUsd)],
+          ['Cost', formatUsdText(diagnostics.costUsd)],
         ]}
       />
       {diagnostics.errorDetail ? (
@@ -160,7 +151,7 @@ export function AssistantConversationUsage({ totals }: { totals: AssistantUsageT
       summary={
         <>
           <span>{formatTokens(tokens)}</span>
-          <span>{formatUsd(totals.estimatedCostUsd)}</span>
+          <span>{formatUsdText(totals.costUsd)}</span>
         </>
       }
     >
@@ -169,11 +160,10 @@ export function AssistantConversationUsage({ totals }: { totals: AssistantUsageT
         rows={[
           ['Turns', exact.format(totals.runs)],
           ...tokenRows(totals),
-          ['Estimated cost', formatUsd(totals.estimatedCostUsd)],
-          ...(totals.unpricedRuns ? ([['Turns without prices', exact.format(totals.unpricedRuns)]] as const) : []),
+          ['Cost', formatUsdText(totals.costUsd)],
         ]}
       />
-      <p className="text-[11px] text-assistant-dim">Estimated from list prices; the provider’s bill is the source of truth.</p>
+      <p className="text-[11px] text-assistant-dim">Saved with each model request at the configured prices; compare with the provider’s bill.</p>
     </DiagnosticsChip>
   );
 }

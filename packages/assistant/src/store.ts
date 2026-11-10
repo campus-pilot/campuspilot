@@ -21,10 +21,12 @@ import {
   assistantApprovalTable,
   assistantConversationTable,
   assistantItemTable,
+  assistantModelRequestTable,
   assistantRunTable,
   assistantTranscriptEntryTable,
   type AssistantItemBody,
 } from '@campuspilot/db/schema/assistant';
+import type { ModelPrices } from './runtime/providers/config';
 import { publishAssistantEvent } from './events';
 import { log } from './log';
 
@@ -147,7 +149,7 @@ function runDiagnostics(row: RunRow): AssistantRunDto['diagnostics'] {
     outputTokens: row.outputTokens,
     cacheReadInputTokens: row.cacheReadInputTokens,
     cacheCreationInputTokens: row.cacheCreationInputTokens,
-    estimatedCostUsd: Number(row.costUsd),
+    costUsd: row.costUsd,
     errorDetail: row.errorDetail,
   };
 }
@@ -349,29 +351,84 @@ export async function updateRun(
   emit: EmitAssistantChange,
   run: { id: string; conversationId: string },
   patch: AssistantRunPatch,
-  usage?: AssistantUsage,
 ): Promise<AssistantRunDto> {
   const counters = await allocate(tx, run.conversationId, { sequence: true });
   const [row] = await tx
     .update(assistantRunTable)
-    .set({
-      ...patch,
-      ...(usage
-        ? {
-            modelRequestCount: sql`${assistantRunTable.modelRequestCount} + 1`,
-            inputTokens: sql`${assistantRunTable.inputTokens} + ${usage.inputTokens}`,
-            outputTokens: sql`${assistantRunTable.outputTokens} + ${usage.outputTokens}`,
-            cacheReadInputTokens: sql`${assistantRunTable.cacheReadInputTokens} + ${usage.cacheReadInputTokens}`,
-            cacheCreationInputTokens: sql`${assistantRunTable.cacheCreationInputTokens} + ${usage.cacheCreationInputTokens}`,
-          }
-        : {}),
-      sequence: counters.lastSequence,
-    })
+    .set({ ...patch, sequence: counters.lastSequence })
     .where(eq(assistantRunTable.id, run.id))
     .returning();
   const dto = toRunDto(row!);
   emit(run.conversationId, { type: 'run', run: dto });
   return dto;
+}
+
+/**
+ * Saves one answered model request with its tokens, the prices it was made
+ * at and its cost, and adds them to the run's totals, in the caller's
+ * transaction. The cost is computed once, in Postgres `numeric` (USD per
+ * million tokens × tokens ÷ 10⁶, stored at 8 decimals), and the run's
+ * `cost_usd` grows by exactly the stored amount, so the run always equals
+ * the sum of its requests.
+ *
+ * Idempotent on `requestKey`: a durable step retried after it saved the
+ * request adds nothing a second time (returns false). It takes the run's
+ * row lock before the conversation's (in the `updateRun` that follows), the
+ * order a stop and an approval take them in.
+ */
+export async function recordModelRequest(
+  tx: AssistantExecutor,
+  input: {
+    runId: string;
+    schoolId: string;
+    userId: string;
+    requestKey: string;
+    provider: RunRow['provider'] & string;
+    requestedModel: string;
+    answeredModel: string;
+    usage: AssistantUsage;
+    prices: ModelPrices;
+  },
+): Promise<boolean> {
+  const { usage, prices } = input;
+  const [saved] = await tx
+    .insert(assistantModelRequestTable)
+    .values({
+      runId: input.runId,
+      schoolId: input.schoolId,
+      userId: input.userId,
+      requestKey: input.requestKey,
+      provider: input.provider,
+      requestedModel: input.requestedModel,
+      answeredModel: input.answeredModel,
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      cacheReadInputTokens: usage.cacheReadInputTokens,
+      cacheCreationInputTokens: usage.cacheCreationInputTokens,
+      inputUsdPerMtok: prices.inputUsdPerMtok,
+      outputUsdPerMtok: prices.outputUsdPerMtok,
+      cacheReadUsdPerMtok: prices.cacheReadUsdPerMtok,
+      cacheWriteUsdPerMtok: prices.cacheWriteUsdPerMtok,
+      costUsd: sql`(${usage.inputTokens}::numeric * ${prices.inputUsdPerMtok}::numeric
+        + ${usage.outputTokens}::numeric * ${prices.outputUsdPerMtok}::numeric
+        + ${usage.cacheReadInputTokens}::numeric * ${prices.cacheReadUsdPerMtok}::numeric
+        + ${usage.cacheCreationInputTokens}::numeric * ${prices.cacheWriteUsdPerMtok}::numeric) / 1000000`,
+    })
+    .onConflictDoNothing({ target: assistantModelRequestTable.requestKey })
+    .returning({ costUsd: assistantModelRequestTable.costUsd });
+  if (!saved) return false;
+  await tx
+    .update(assistantRunTable)
+    .set({
+      modelRequestCount: sql`${assistantRunTable.modelRequestCount} + 1`,
+      inputTokens: sql`${assistantRunTable.inputTokens} + ${usage.inputTokens}`,
+      outputTokens: sql`${assistantRunTable.outputTokens} + ${usage.outputTokens}`,
+      cacheReadInputTokens: sql`${assistantRunTable.cacheReadInputTokens} + ${usage.cacheReadInputTokens}`,
+      cacheCreationInputTokens: sql`${assistantRunTable.cacheCreationInputTokens} + ${usage.cacheCreationInputTokens}`,
+      costUsd: sql`${assistantRunTable.costUsd} + ${saved.costUsd}::numeric`,
+    })
+    .where(eq(assistantRunTable.id, input.runId));
+  return true;
 }
 
 export async function findItemByKey(

@@ -1,6 +1,9 @@
+import { assistantModelRequestTable } from '@campuspilot/db/schema/assistant';
 import { createLogger } from '@campuspilot/logger';
+import { asc, eq } from 'drizzle-orm';
 import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 
+import { db } from '../db';
 import { getRunToken } from '../run-token';
 import { createFakeRunContext, SimulatedCrash, type FakeRunContext } from '../testing/run-context';
 import {
@@ -30,6 +33,7 @@ import {
 } from './conversation';
 import {
   createFakeProvider,
+  FAKE_PRICES,
   FAKE_USAGE,
   FakeModelError,
   fakeProviderRegistry,
@@ -128,6 +132,14 @@ async function arrange({
   const invoke = (ctx: FakeRunContext = createFakeRunContext()) => ({ ctx, done: processRun(ctx, turn.input) });
   return { provider, turn, events, invoke };
 }
+
+/** The cost rows a run saved, in the order its requests were made. */
+const modelRequestsOf = (runId: string) =>
+  db
+    .select()
+    .from(assistantModelRequestTable)
+    .where(eq(assistantModelRequestTable.runId, runId))
+    .orderBy(asc(assistantModelRequestTable.requestKey));
 
 /** The tool results a model request was given: its transcript's last entry. */
 const toolResultsSentTo = (call: FakeModelCall | undefined) =>
@@ -638,6 +650,8 @@ describe('at-most-once writes', () => {
     expect(callToolMock).toHaveBeenCalledExactlyOnceWith(TOKEN, listStudents, readCall.input);
     const { run, items } = await readTurn(turn);
     expect(run).toMatchObject({ status: 'completed', modelRequestCount: 2, inputTokens: 2 * FAKE_USAGE.inputTokens });
+    // One cost row per request, not per attempt of its step.
+    expect(await modelRequestsOf(turn.runId)).toHaveLength(2);
     expect(items.map((item) => [item.kind, item.status])).toEqual([
       ['user_message', 'complete'],
       ['assistant_message', 'complete'],
@@ -1042,5 +1056,58 @@ describe('the access check before each model request', () => {
     expect(provider.calls).toHaveLength(0);
     const { run } = await readTurn(turn);
     expect(run).toMatchObject({ status: 'failed', errorCode: 'feature_disabled', modelRequestCount: 0 });
+  });
+});
+
+describe('the cost of each model request', () => {
+  it('is saved once per request with the prices it was made at, and the run holds their exact sum', async () => {
+    const { provider, turn, invoke } = await arrange({
+      script: [fakeReply({ toolUses: [readCall], model: 'answered-model-1' }), fakeReply({ text: 'Done.', model: 'answered-model-2' })],
+      providerModel: 'configured-model',
+    });
+    callToolMock.mockResolvedValue(toolSuccess('[]'));
+
+    await invoke().done;
+
+    expect(provider.calls).toHaveLength(2);
+    const requests = await modelRequestsOf(turn.runId);
+    // (100 × 2.5 + 20 × 10 + 30 × 0.25 + 5 × 3.125) ÷ 10⁶ = 0.000473125, stored at 8 decimals.
+    const expected = {
+      runId: turn.runId,
+      schoolId: turn.schoolId,
+      userId: turn.userId,
+      provider: 'anthropic',
+      requestedModel: 'configured-model',
+      ...FAKE_USAGE,
+      inputUsdPerMtok: '2.500000',
+      outputUsdPerMtok: '10.000000',
+      cacheReadUsdPerMtok: '0.250000',
+      cacheWriteUsdPerMtok: '3.125000',
+      costUsd: '0.00047313',
+    };
+    expect(FAKE_PRICES).toEqual({ inputUsdPerMtok: '2.5', outputUsdPerMtok: '10', cacheReadUsdPerMtok: '0.25', cacheWriteUsdPerMtok: '3.125' });
+    expect(requests).toMatchObject([
+      { ...expected, answeredModel: 'answered-model-1', requestKey: modelTranscriptKey(turn.runId, 0) },
+      { ...expected, answeredModel: 'answered-model-2', requestKey: modelTranscriptKey(turn.runId, 1) },
+    ]);
+    const { run } = await readTurn(turn);
+    expect(run).toMatchObject({ status: 'completed', modelRequestCount: 2, costUsd: '0.00094626' });
+  });
+
+  it('is never incurred when the provider has no prices: the run fails before the model is called', async () => {
+    const provider = createFakeProvider({ script: [fakeReply({ text: 'never sent' })] });
+    const turn = await seedTurn({ provider: provider.id });
+    const processRun = createRunProcessor({
+      providers: { ...fakeProviderRegistry(provider), prices: () => null },
+      log,
+      checkAccess: async () => ({ allowed: true }),
+    });
+
+    await processRun(createFakeRunContext(), turn.input);
+
+    expect(provider.calls).toHaveLength(0);
+    const { run } = await readTurn(turn);
+    expect(run).toMatchObject({ status: 'failed', errorCode: 'provider_unavailable', costUsd: '0.00000000' });
+    expect(await modelRequestsOf(turn.runId)).toEqual([]);
   });
 });
