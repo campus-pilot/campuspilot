@@ -8,10 +8,13 @@ import {
   type NoticeStatus,
 } from '@campuspilot/api/routers/school/notice/notice.dto';
 import { NOTICE_TEMPLATE_STARTER } from '@campuspilot/api/routers/school/notice/notice-template-guide';
+import { readSchoolFeatureDisabled } from '@campuspilot/api/routers/school/feature-flags/feature-flags.dto';
 import {
   NOTICE_AUDIENCE_CHOICES,
   NOTICE_CADET_CLASS_SCOPES,
+  noticeAudienceChoicesOffered,
   noticeAudienceFacts,
+  noticeAudienceIncludesCadets,
   noticeAudienceSelection,
   type NoticeAudienceChoice,
   type NoticeAudienceFacts,
@@ -44,33 +47,99 @@ export function editNoticeHref({ schoolId, sessionId }: NoticeSessionScope, noti
 export { NOTICE_TEMPLATE_STARTER, NOTICE_TEMPLATE_VARIABLES } from '@campuspilot/api/routers/school/notice/notice-template-guide';
 
 /**
+ * Whether this school can address students, as the editor needs to know it.
+ * Three different facts, never folded into a boolean:
+ * - `available`: the school has the Cadet Portal;
+ * - `disabled`: it is known not to have it;
+ * - `unknown`: the school's features could not be read, so nobody can say.
+ */
+export type CadetAudienceAvailability = 'available' | 'disabled' | 'unknown';
+
+/** The availability of student audiences from the `cadet` feature's view (never called while it is `pending`). */
+export function cadetAudienceAvailability(cadet: { enabled: boolean; status: 'pending' | 'unknown' | 'ready' }): CadetAudienceAvailability {
+  if (cadet.status !== 'ready') return 'unknown';
+  return cadet.enabled ? 'available' : 'disabled';
+}
+
+/**
+ * Why a student audience cannot be saved right now, or null when it can.
+ * The server refuses it too (the disabled-feature error for `cadet`); the
+ * form says so next to the audience before the author loses a round trip.
+ */
+export function cadetAudienceBlock(audience: NoticeAudienceChoice, availability: CadetAudienceAvailability): string | null {
+  if (!noticeAudienceIncludesCadets(audience) || availability === 'available') return null;
+  return availability === 'disabled'
+    ? 'The Cadet Portal is not enabled for this school, so a notice cannot be addressed to cadets. Choose Staff to save it for staff only.'
+    : 'We could not check whether this school has the Cadet Portal. Retry, or choose Staff to save it for staff only.';
+}
+
+/**
+ * What the author is told about student audiences under the audience
+ * choices, or null when there is nothing to explain. It separates "this
+ * school does not have the portal" from "we could not find out", and says
+ * what happens to a draft that is already addressed to students: nothing,
+ * until the author changes it.
+ */
+export function cadetAudienceNote(availability: CadetAudienceAvailability, stored: NoticeAudienceChoice | null): { text: string; retry: boolean } | null {
+  const storedForCadets = stored !== null && noticeAudienceIncludesCadets(stored);
+  if (availability === 'available') return null;
+  if (availability === 'unknown') {
+    return {
+      text: storedForCadets
+        ? 'We could not check whether this school has the Cadet Portal. This draft stays addressed to cadets; it cannot be saved until the check succeeds.'
+        : 'We could not check whether this school has the Cadet Portal, so only Staff can be chosen for now.',
+      retry: true,
+    };
+  }
+  return storedForCadets
+    ? { text: 'This draft is addressed to cadets, but the Cadet Portal is not enabled for this school. It stays as it is until you change it; to save or publish it, choose Staff.', retry: false }
+    : null;
+}
+
+/** The audience choices the editor offers; see `noticeAudienceChoicesOffered`. */
+export function noticeAudienceChoicesFor(availability: CadetAudienceAvailability, notice: NoticeAudienceFacts | null) {
+  return noticeAudienceChoicesOffered(availability === 'available', notice ? noticeAudienceSelection(notice).audience : null);
+}
+
+/**
  * The editor's values. The two bodies are separate fields, so switching
  * between plain text and a custom template never overwrites what was typed
  * in the other mode; only the active mode's body is validated and saved.
  * The audience is held as the readable choice plus the class scope
  * (`NoticeAudienceSelection`) and converted to the stored facts on save.
+ *
+ * `availability` is read when the form is submitted (a getter, because the
+ * school's features can change while the editor is open): a student
+ * audience the school cannot address is an error on the audience field.
  */
-export const noticeFormSchema = z
-  .object({
-    title: noticeTitleSchema,
-    bodyMode: z.enum(NOTICE_BODY_MODES),
-    plainBody: z.string(),
-    templateBody: z.string(),
-    audience: z.enum(NOTICE_AUDIENCE_CHOICES),
-    cadetClassScope: z.enum(NOTICE_CADET_CLASS_SCOPES),
-    classIds: z.array(z.string()),
-  })
-  .superRefine((value, context) => {
-    const field = activeBodyField(value.bodyMode);
-    const body = noticeBodySchema.safeParse(value[field]);
-    if (!body.success) {
-      for (const issue of body.error.issues) {
-        context.addIssue({ code: 'custom', path: [field], message: value.bodyMode === 'template' && issue.code === 'too_small' ? 'Add the template HTML.' : issue.message });
+export function noticeFormSchemaFor(availability: () => CadetAudienceAvailability) {
+  return z
+    .object({
+      title: noticeTitleSchema,
+      bodyMode: z.enum(NOTICE_BODY_MODES),
+      plainBody: z.string(),
+      templateBody: z.string(),
+      audience: z.enum(NOTICE_AUDIENCE_CHOICES),
+      cadetClassScope: z.enum(NOTICE_CADET_CLASS_SCOPES),
+      classIds: z.array(z.string()),
+    })
+    .superRefine((value, context) => {
+      const field = activeBodyField(value.bodyMode);
+      const body = noticeBodySchema.safeParse(value[field]);
+      if (!body.success) {
+        for (const issue of body.error.issues) {
+          context.addIssue({ code: 'custom', path: [field], message: value.bodyMode === 'template' && issue.code === 'too_small' ? 'Add the template HTML.' : issue.message });
+        }
       }
-    }
-    // The server's own audience rules, on the facts this selection stores.
-    validateNoticeAudience(noticeAudienceFacts(value), context);
-  });
+      const blocked = cadetAudienceBlock(value.audience, availability());
+      if (blocked) context.addIssue({ code: 'custom', path: ['audience'], message: blocked });
+      // The server's own audience rules, on the facts this selection stores.
+      validateNoticeAudience(noticeAudienceFacts(value), context);
+    });
+}
+
+/** The form schema of a school that can address students (the shape of the values is the same for every school). */
+export const noticeFormSchema = noticeFormSchemaFor(() => 'available');
 
 export type NoticeFormValues = z.input<typeof noticeFormSchema>;
 
@@ -82,27 +151,95 @@ export function activeBodyField(bodyMode: NoticeBodyMode) {
 type SavedNoticeContent = NoticeAudienceFacts & { title: string; bodyMode: NoticeBodyMode; body: string };
 
 /**
- * The editor's starting values: a saved draft, or an empty plain-text notice
- * to staff. A school without the Cadet Portal can address staff only, so a
- * draft that addressed students opens as "Staff" (`audienceNarrowed` says
- * when that happened, and the editor tells the author).
+ * The editor's starting values: a saved draft exactly as stored, or an
+ * empty plain-text notice to staff. The stored audience is never adjusted
+ * to what the school can address today: whether students can be addressed
+ * is a separate fact (`CadetAudienceAvailability`), applied when saving,
+ * not a reason to rewrite a draft the moment it is opened.
  */
-export function noticeFormDefaults(notice: SavedNoticeContent | null, cadetsAvailable: boolean): NoticeFormValues {
+export function noticeFormDefaults(notice: SavedNoticeContent | null): NoticeFormValues {
   const saved = notice ? noticeAudienceSelection(notice) : { audience: 'staff' as const, cadetClassScope: 'all_classes' as const, classIds: [] };
   return {
     title: notice?.title ?? '',
     bodyMode: notice?.bodyMode ?? 'plain',
     plainBody: notice?.bodyMode === 'plain' ? notice.body : '',
     templateBody: notice?.bodyMode === 'template' ? notice.body : NOTICE_TEMPLATE_STARTER,
-    audience: cadetsAvailable ? saved.audience : 'staff',
+    audience: saved.audience,
     cadetClassScope: saved.cadetClassScope,
     classIds: [...saved.classIds],
   };
 }
 
-/** True when a saved draft addresses students but the school can no longer address them. */
-export function audienceNarrowed(notice: Pick<NoticeAudienceFacts, 'cadetScope'> | null, cadetsAvailable: boolean) {
-  return !cadetsAvailable && notice !== null && notice.cadetScope !== 'none';
+/**
+ * The form fields in the order they appear, for moving focus to the first
+ * one that failed validation (the body field is the active mode's).
+ */
+export function firstInvalidNoticeField(fields: Partial<Record<keyof NoticeFormValues, unknown>>, bodyMode: NoticeBodyMode): keyof NoticeFormValues | null {
+  const order: (keyof NoticeFormValues)[] = ['title', activeBodyField(bodyMode), 'audience', 'cadetClassScope', 'classIds'];
+  const failed = (value: unknown) => (Array.isArray(value) ? value.length > 0 : Boolean(value));
+  return order.find((name) => failed(fields[name])) ?? null;
+}
+
+/** The DOM id of each field's focusable control and of its error text (`aria-describedby`). */
+export const NOTICE_FIELD_IDS = {
+  title: { control: 'notice-title', error: 'notice-title-error' },
+  plainBody: { control: 'notice-plain-body', error: 'notice-plain-body-error' },
+  templateBody: { control: 'notice-template-body', error: 'notice-template-body-error' },
+  audience: { control: 'notice-audience', error: 'notice-audience-error' },
+  cadetClassScope: { control: 'notice-class-scope', error: 'notice-class-scope-error' },
+  classIds: { control: 'notice-classes', error: 'notice-classes-error' },
+  bodyMode: { control: 'notice-body-mode', error: 'notice-body-mode-error' },
+} as const satisfies Record<keyof NoticeFormValues, { control: string; error: string }>;
+
+/**
+ * Why a notice could not be loaded, as the page should say it:
+ * - `not_found`: it does not exist, or it is someone else's draft (the
+ *   server answers both the same way). Retrying cannot help;
+ * - `feature_disabled`: the school does not have notices (or the named
+ *   feature) any more;
+ * - `failed`: anything else, typically the network. Worth a retry.
+ */
+export type NoticeLoadFailure = { kind: 'not_found' } | { kind: 'feature_disabled'; feature: NonNullable<ReturnType<typeof readSchoolFeatureDisabled>> } | { kind: 'failed'; message: string };
+
+export function noticeLoadFailure(error: unknown): NoticeLoadFailure {
+  const feature = readSchoolFeatureDisabled(error);
+  if (feature) return { kind: 'feature_disabled', feature };
+  if ((error as { code?: unknown } | null)?.code === 'NOT_FOUND') return { kind: 'not_found' };
+  return { kind: 'failed', message: noticeErrorMessage(error, 'Unable to load this notice.') };
+}
+
+/**
+ * Whether a notice belongs to the session of the route it is shown under.
+ * A notice opened under another session's URL (a hand-edited link, or the
+ * session switched while it was open) is treated as not found there, rather
+ * than shown inside the wrong session's navigation and class list.
+ */
+export function noticeBelongsToSession(notice: { sessionId: string }, scope: NoticeSessionScope) {
+  return notice.sessionId === scope.sessionId;
+}
+
+/** Whether a failed save or publication means the notice changed underneath (CONFLICT): the stored notice is then loaded again. */
+export function isNoticeConflict(error: unknown): boolean {
+  return (error as { code?: unknown } | null)?.code === 'CONFLICT';
+}
+
+/**
+ * Whether the publish confirmation still describes the notice the publisher
+ * read. `reviewedVersion` is the version on screen when Publish was
+ * pressed; `forecastVersion` the one the server forecast (null until it
+ * loaded). They differ when the author saved in between.
+ */
+export function publishReviewIsCurrent(reviewedVersion: number, forecastVersion: number | null) {
+  return forecastVersion === null || forecastVersion === reviewedVersion;
+}
+
+/**
+ * The line under the students' forecast about the PDF, or null. It is said
+ * only when WhatsApp will actually send something: a school whose WhatsApp
+ * channel is off, or whose students have no number, is not promised a PDF.
+ */
+export function whatsappPdfLine(forecast: { channels: { whatsapp: { owed: number } } } | null): string | null {
+  return forecast && forecast.channels.whatsapp.owed > 0 ? 'WhatsApp messages carry the notice as a PDF.' : null;
 }
 
 /** The content and audience a save sends: the active body only, and the audience as its explicit facts. */
@@ -133,12 +270,17 @@ export function noticePreviewContent(values: Pick<NoticeFormValues, 'title' | 'b
 /** The list's filter values (one choice per filter). */
 export type NoticeListFilters = { status?: NoticeStatus; audience?: 'staff' | 'cadets' };
 
-/** The API filters of a list filter selection: an audience choice asks for notices that include it. */
-export function noticeListApiFilters(filters: NoticeListFilters | undefined, cadetsAvailable: boolean) {
+/**
+ * The API filters of a list filter selection: an audience choice asks for
+ * notices that include it. A filter reads what notices store, so "Cadets"
+ * is offered whether or not the school can address students today (notices
+ * addressed to them earlier are still listed).
+ */
+export function noticeListApiFilters(filters: NoticeListFilters | undefined) {
   return {
     ...(filters?.status ? { status: filters.status } : {}),
     ...(filters?.audience === 'staff' ? { toStaff: true } : {}),
-    ...(filters?.audience === 'cadets' && cadetsAvailable ? { toCadets: true } : {}),
+    ...(filters?.audience === 'cadets' ? { toCadets: true } : {}),
   };
 }
 
@@ -188,9 +330,12 @@ export function staffRecipientLine(count: number) {
 
 export const NOTICE_BODY_MODE_LABELS: Record<NoticeBodyMode, string> = { plain: 'Plain text', template: 'Custom template' };
 
-/** The audience choice labels the list filter offers; students only with the Cadet Portal. */
-export function noticeAudienceFilterOptions(cadetsAvailable: boolean): { value: 'staff' | 'cadets'; label: string }[] {
-  return [{ value: 'staff', label: 'Staff' }, ...(cadetsAvailable ? [{ value: 'cadets' as const, label: 'Cadets' }] : [])];
+/** The audience choices the list filter offers. */
+export function noticeAudienceFilterOptions(): { value: 'staff' | 'cadets'; label: string }[] {
+  return [
+    { value: 'staff', label: 'Staff' },
+    { value: 'cadets', label: 'Cadets' },
+  ];
 }
 
 export type { NoticeAudienceChoice };

@@ -39,7 +39,7 @@ export const noticeDetailsPage = defineManagementPage<NoticeRouteParams>({
   title: 'Notice',
   breadcrumbs: ({ noticeId, ...params }) => [
     ...noticesTrail(params),
-    { id: 'notice-title', label: <NoticeBreadcrumbValue schoolId={params.schoolId} noticeId={noticeId} /> },
+    { id: 'notice-title', label: <NoticeBreadcrumbValue schoolId={params.schoolId} sessionId={params.sessionId} noticeId={noticeId} /> },
   ],
 });
 
@@ -49,7 +49,7 @@ export const noticeEditPage = defineManagementPage<NoticeRouteParams>({
   title: 'Edit notice',
   breadcrumbs: ({ noticeId, ...params }) => [
     ...noticesTrail(params),
-    { id: 'notice-title', label: <NoticeBreadcrumbValue schoolId={params.schoolId} noticeId={noticeId} />, href: noticeHref(params.schoolId, params.sessionId, noticeId) },
+    { id: 'notice-title', label: <NoticeBreadcrumbValue schoolId={params.schoolId} sessionId={params.sessionId} noticeId={noticeId} />, href: noticeHref(params.schoolId, params.sessionId, noticeId) },
     { id: 'notice-edit', label: 'Edit' },
   ],
 });

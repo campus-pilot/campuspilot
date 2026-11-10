@@ -5,13 +5,13 @@ import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useForm } from '@tanstack/react-form';
-import { keepPreviousData, skipToken, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, skipToken, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { z } from 'zod';
 import { SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
 import { NOTICE_BODY_MODES, NOTICE_TITLE_MAX_LENGTH, type NoticeBodyMode, type NoticeDto } from '@campuspilot/api/routers/school/notice/notice.dto';
 import { ClassScopePicker } from '@campuspilot/components/class-scope-picker';
-import { DocumentErrors, DocumentNotice, DocumentPreview } from '@campuspilot/components/documents/document-controls';
-import { NoticeAudienceField, NoticeCadetClassScopeField, noticeAudienceIncludesCadets } from '@campuspilot/components/notices';
+import { DocumentButton, DocumentErrors, DocumentNotice, DocumentPreview } from '@campuspilot/components/documents/document-controls';
+import { NoticeAudienceField, NoticeCadetClassScopeField, noticeAudienceIncludesCadets, noticeAudienceSelection } from '@campuspilot/components/notices';
 import { Button } from '@campuspilot/ui/components/button';
 import { Input } from '@campuspilot/ui/components/input';
 import { Label } from '@campuspilot/ui/components/label';
@@ -22,17 +22,23 @@ import { toast } from '@campuspilot/ui/lib/toast';
 import { client, orpc } from '@/lib/orpc';
 import { DirtyGuard } from '../exam/exam-common';
 import { noticeHref } from '../notifications/notification-routes';
+import { featureFlagsOutdatedBy } from '../require-feature-model';
 import { RequirePermissions } from '../require-permissions';
 import {
   NOTICE_BODY_MODE_LABELS,
+  NOTICE_FIELD_IDS,
   NOTICE_TEMPLATE_VARIABLES,
-  audienceNarrowed,
+  cadetAudienceNote,
+  firstInvalidNoticeField,
+  isNoticeConflict,
+  noticeAudienceChoicesFor,
   noticeErrorMessage,
   noticeFormDefaults,
-  noticeFormSchema,
+  noticeFormSchemaFor,
   noticePreviewContent,
   noticeSaveInput,
   noticesHref,
+  type CadetAudienceAvailability,
   type NoticePreviewContent,
   type NoticeSessionScope,
 } from './notice-model';
@@ -47,37 +53,86 @@ const PREVIEW_DEBOUNCE_MS = 650;
 
 type EditorProps = {
   scope: NoticeSessionScope;
-  /** The draft being edited, as it was when the editor opened; null for a new notice. */
+  /** The draft being edited; null for a new notice. The editor works from the draft as it was when it opened. */
   baseline: NoticeDto | null;
-  cadetsAvailable: boolean;
+  /** Whether this school can address students: available, known to be off, or unknown (features could not be read). */
+  cadetAudience: CadetAudienceAvailability;
+  /** Reads the school's features again (offered while `cadetAudience` is unknown). */
+  onRetryFeatures: () => void;
+  /** Reopens the editor on the notice as it is stored now, discarding what was typed (offered after a conflict). */
+  onReload?: () => void;
 };
+
+type NoticePreview = UseQueryResult<{ html: string }>;
+
+/**
+ * The live preview's render. Each content is its own query, so an
+ * out-of-date response can never replace a newer one. `lastGoodHtml` is the
+ * last render that succeeded: `keepPreviousData` only bridges the wait for a
+ * new render, and a render that **fails** (every keystroke inside an
+ * unfinished `{{#if …}}`) has no data, which used to blank the panel. The
+ * successful render is recorded when its request resolves (an event, not an
+ * effect), and `staleTime: 0` makes every shown content pass through there.
+ */
+function useNoticePreview(scope: NoticeSessionScope, content: NoticePreviewContent | null) {
+  const [lastGoodHtml, setLastGoodHtml] = useState<string>();
+  const input = content ? { schoolId: scope.schoolId, source: { kind: 'unsaved' as const, sessionId: scope.sessionId, ...content } } : null;
+  const preview: NoticePreview = useQuery({
+    queryKey: input ? orpc.school.previewNotice.queryKey({ input }) : [...orpc.school.previewNotice.key(), 'nothing-to-render'],
+    queryFn: input
+      ? async () => {
+          const rendered = await client.school.previewNotice(input);
+          setLastGoodHtml(rendered.html);
+          return rendered;
+        }
+      : skipToken,
+    placeholderData: keepPreviousData,
+    retry: false,
+    staleTime: 0,
+  });
+  return { preview, lastGoodHtml };
+}
 
 /**
  * The editor's form, save and live preview.
  *
- * The preview follows the form through the form's own debounced change
- * listener (no effect): after a pause it records what to render, and a
- * query renders it. The query cache discards out-of-date responses, and the
- * last good render stays on screen while a newer one loads or fails.
- * `previewContent` is derived request state, not an input value.
+ * - **The draft as opened.** `opened` is the baseline of the first render.
+ *   The form starts from it and a save names its `version`, so a background
+ *   refetch of the notice neither replaces what the author is typing nor
+ *   lets the save overwrite someone else's change unseen: the server
+ *   answers CONFLICT, and the editor offers to load the stored notice.
+ * - **The stored audience is shown as it is.** Whether students can be
+ *   addressed (`cadetAudience`) is checked when saving, on the audience
+ *   field; it never rewrites the form.
+ * - **The preview** follows the form through the form's own debounced
+ *   change listener (no effect): after a pause it records what to render.
+ *   `previewContent` is derived request state, not an input value.
  */
-function useNoticeEditor({ scope, baseline, cadetsAvailable }: EditorProps) {
+function useNoticeEditor({ scope, baseline, cadetAudience }: EditorProps) {
   const router = useRouter();
   const cache = useQueryClient();
-  const defaultValues = noticeFormDefaults(baseline, cadetsAvailable);
+  const [opened] = useState(baseline);
+  const [conflict, setConflict] = useState(false);
+  const defaultValues = noticeFormDefaults(opened);
   const [previewContent, setPreviewContent] = useState<NoticePreviewContent | null>(() => noticePreviewContent(defaultValues));
   const form = useForm({
     defaultValues,
-    validators: { onSubmit: noticeFormSchema },
+    // Rebuilt each render, so the check uses the features as they are when Save is pressed.
+    validators: { onSubmit: noticeFormSchemaFor(() => cadetAudience) },
     listeners: {
       onChangeDebounceMs: PREVIEW_DEBOUNCE_MS,
       onChange: ({ formApi }) => setPreviewContent(noticePreviewContent(formApi.state.values)),
     },
+    onSubmitInvalid: ({ formApi }) => {
+      const errors = Object.fromEntries(Object.entries(formApi.state.fieldMeta).map(([name, meta]) => [name, meta?.errors ?? []]));
+      const field = firstInvalidNoticeField(errors, formApi.state.values.bodyMode);
+      if (field) document.getElementById(NOTICE_FIELD_IDS[field].control)?.focus();
+    },
     onSubmit: async ({ value }) => {
       try {
         const input = noticeSaveInput(value);
-        const saved = baseline
-          ? await client.school.updateNotice({ schoolId: scope.schoolId, noticeId: baseline.id, ...input })
+        const saved = opened
+          ? await client.school.updateNotice({ schoolId: scope.schoolId, noticeId: opened.id, expectedVersion: opened.version, ...input })
           : await client.school.createNotice({ ...scope, ...input });
         cache.setQueryData(orpc.school.getNotice.queryKey({ input: { schoolId: scope.schoolId, noticeId: saved.id } }), saved);
         await Promise.all([
@@ -87,32 +142,36 @@ function useNoticeEditor({ scope, baseline, cadetsAvailable }: EditorProps) {
         toast.success('Draft saved.');
         router.push(noticeHref(scope.schoolId, scope.sessionId, saved.id));
       } catch (error) {
+        // The form calls the API directly, so the app-wide cache handlers do not see this error.
+        if (featureFlagsOutdatedBy(error)) void cache.invalidateQueries({ queryKey: orpc.school.getFeatureFlags.key() });
+        if (opened && isNoticeConflict(error)) {
+          setConflict(true);
+          void cache.invalidateQueries({ queryKey: orpc.school.getNotice.queryKey({ input: { schoolId: scope.schoolId, noticeId: opened.id } }) });
+        }
         form.setErrorMap({ onSubmit: { form: noticeErrorMessage(error, 'Unable to save this notice.'), fields: {} } });
       }
     },
   });
-  const preview = useQuery(
-    orpc.school.previewNotice.queryOptions({
-      input: previewContent ? { schoolId: scope.schoolId, source: { kind: 'unsaved', sessionId: scope.sessionId, ...previewContent } } : skipToken,
-      placeholderData: keepPreviousData,
-      retry: false,
-      staleTime: 60_000,
-    }),
-  );
-  return { form, preview, hasPreviewContent: previewContent !== null };
+  return { form, opened, conflict, hasPreviewContent: previewContent !== null, ...useNoticePreview(scope, previewContent) };
 }
 
 type NoticeEditorState = ReturnType<typeof useNoticeEditor>;
 type NoticeForm = NoticeEditorState['form'];
 
+/** `aria-invalid` and `aria-describedby` of a control whose error text has the given id. */
+function invalidProps(errors: readonly unknown[], errorId: string) {
+  return errors.length > 0 ? ({ 'aria-invalid': true, 'aria-describedby': errorId } as const) : {};
+}
+
 function TitleField({ form }: { form: NoticeForm }) {
+  const ids = NOTICE_FIELD_IDS.title;
   return (
     <form.Field name="title">
       {(field) => (
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="notice-title">Title</Label>
-          <Input id="notice-title" maxLength={NOTICE_TITLE_MAX_LENGTH} placeholder="For example: Annual Sports Day" aria-invalid={field.state.meta.errors.length > 0} value={field.state.value} onBlur={field.handleBlur} onChange={(event) => field.handleChange(event.target.value)} />
-          <DocumentErrors errors={field.state.meta.errors} />
+          <Label htmlFor={ids.control}>Title</Label>
+          <Input id={ids.control} maxLength={NOTICE_TITLE_MAX_LENGTH} placeholder="For example: Annual Sports Day" {...invalidProps(field.state.meta.errors, ids.error)} value={field.state.value} onBlur={field.handleBlur} onChange={(event) => field.handleChange(event.target.value)} />
+          <DocumentErrors id={ids.error} errors={field.state.meta.errors} />
         </div>
       )}
     </form.Field>
@@ -140,12 +199,13 @@ function BodyModeField({ form }: { form: NoticeForm }) {
 }
 
 function PlainBodyField({ form }: { form: NoticeForm }) {
+  const ids = NOTICE_FIELD_IDS.plainBody;
   return (
     <form.Field name="plainBody">
       {(field) => (
         <div className="flex flex-col gap-1.5">
-          <Textarea aria-label="Notice text" className="min-h-56" placeholder="Write the notice as you would write a message. Leave a blank line between paragraphs." aria-invalid={field.state.meta.errors.length > 0} value={field.state.value} onBlur={field.handleBlur} onChange={(event) => field.handleChange(event.target.value)} />
-          <DocumentErrors errors={field.state.meta.errors} />
+          <Textarea id={ids.control} aria-label="Notice text" className="min-h-56" placeholder="Write the notice as you would write a message. Leave a blank line between paragraphs." {...invalidProps(field.state.meta.errors, ids.error)} value={field.state.value} onBlur={field.handleBlur} onChange={(event) => field.handleChange(event.target.value)} />
+          <DocumentErrors id={ids.error} errors={field.state.meta.errors} />
           <p className="text-xs text-muted-foreground">Your school&apos;s letterhead, the date and the title are added for you.</p>
         </div>
       )}
@@ -171,15 +231,17 @@ function TemplateVariables() {
 }
 
 function TemplateBodyField({ form }: { form: NoticeForm }) {
+  const ids = NOTICE_FIELD_IDS.templateBody;
   return (
     <form.Field name="templateBody">
       {(field) => (
         <div className="flex flex-col gap-2">
           <p className="text-xs text-muted-foreground">You write the whole document in HTML with Handlebars variables. Your school&apos;s notice template is not used.</p>
-          <div className="flex h-[28rem] overflow-hidden rounded-lg border">
+          {/* The code editor has no single input to label; the group carries the field's name, validity and error, and takes focus when it is the first invalid field. */}
+          <div id={ids.control} role="group" aria-label="Notice template code" tabIndex={-1} className="flex h-[28rem] overflow-hidden rounded-lg border aria-invalid:border-destructive" {...invalidProps(field.state.meta.errors, ids.error)}>
             <TemplateCodeEditor value={field.state.value} onBlur={field.handleBlur} onChange={field.handleChange} />
           </div>
-          <DocumentErrors errors={field.state.meta.errors} />
+          <DocumentErrors id={ids.error} errors={field.state.meta.errors} />
           <TemplateVariables />
         </div>
       )}
@@ -215,13 +277,15 @@ function SelectedClassesField({ form, scope }: { form: NoticeForm; scope: Notice
               isPending={classes.isPending}
               isError={classes.isError}
               invalid={field.state.meta.errors.length > 0}
+              id={NOTICE_FIELD_IDS.classIds.control}
+              errorId={NOTICE_FIELD_IDS.classIds.error}
               search={search}
               page={page}
               onSelectedIdsChange={field.handleChange}
               onSearchChange={(value) => view.setFieldValue('search', value)}
               onPageChange={(value) => view.setFieldValue('page', value)}
             >
-              <DocumentErrors errors={field.state.meta.errors} />
+              <DocumentErrors id={NOTICE_FIELD_IDS.classIds.error} errors={field.state.meta.errors} />
             </ClassScopePicker>
           )}
         </form.Field>
@@ -242,21 +306,36 @@ function CadetClassScopeSection({ form, scope }: { form: NoticeForm; scope: Noti
   );
 }
 
+/** What the author is told when students cannot be addressed, with a retry when that is merely unknown. */
+function CadetAudienceNote({ note, onRetry }: { note: { text: string; retry: boolean }; onRetry: () => void }) {
+  return (
+    <p className="text-xs text-muted-foreground">
+      {note.text}
+      {note.retry ? <DocumentButton variant="outline" size="sm" className="ml-2" onClick={onRetry}>Retry</DocumentButton> : null}
+    </p>
+  );
+}
+
 /**
- * Who the notice is for. Without the Cadet Portal the student choices are
- * not rendered; `narrowed` tells the author of a draft that addressed
- * students why it now reads "Staff".
+ * Who the notice is for. The stored audience is always shown as it is. When
+ * the school cannot address students (or that could not be checked), new
+ * student choices are not offered, a draft that already addresses students
+ * keeps saying so with the reason, and saving it is refused on this field
+ * until the author chooses Staff: the audience is never changed for them.
  */
-function AudienceSection({ form, scope, cadetsAvailable, narrowed }: { form: NoticeForm; scope: NoticeSessionScope; cadetsAvailable: boolean; narrowed: boolean }) {
+function AudienceSection({ form, scope, opened, cadetAudience, onRetryFeatures }: { form: NoticeForm; scope: NoticeSessionScope; opened: NoticeDto | null; cadetAudience: CadetAudienceAvailability; onRetryFeatures: () => void }) {
+  const ids = NOTICE_FIELD_IDS.audience;
+  const choices = noticeAudienceChoicesFor(cadetAudience, opened);
+  const note = cadetAudienceNote(cadetAudience, opened ? noticeAudienceSelection(opened).audience : null);
   return (
     <form.Field name="audience">
       {(field) => (
-        <div className="flex flex-col gap-4">
-          <NoticeAudienceField value={field.state.value} cadetsAvailable={cadetsAvailable} onChange={field.handleChange}>
-            <DocumentErrors errors={field.state.meta.errors} />
-            {narrowed ? <p className="text-xs text-muted-foreground">This draft was addressed to cadets. The Cadet Portal is not enabled for this school, so saving addresses it to staff only.</p> : null}
+        <div id={ids.control} tabIndex={-1} className="flex flex-col gap-4">
+          <NoticeAudienceField value={field.state.value} choices={choices} invalid={field.state.meta.errors.length > 0} errorId={ids.error} onChange={field.handleChange}>
+            <DocumentErrors id={ids.error} errors={field.state.meta.errors} />
+            {note ? <CadetAudienceNote note={note} onRetry={onRetryFeatures} /> : null}
           </NoticeAudienceField>
-          {cadetsAvailable && noticeAudienceIncludesCadets(field.state.value) ? <CadetClassScopeSection form={form} scope={scope} /> : null}
+          {noticeAudienceIncludesCadets(field.state.value) ? <CadetClassScopeSection form={form} scope={scope} /> : null}
         </div>
       )}
     </form.Field>
@@ -275,14 +354,28 @@ function SaveHint({ schoolId }: { schoolId: string }) {
   );
 }
 
-function SaveBar({ form, cancelHref, schoolId }: { form: NoticeForm; cancelHref: string; schoolId: string }) {
+/**
+ * Shown when a save was refused because the draft changed since it was
+ * opened. What was typed stays on screen (it may be worth copying); loading
+ * the stored notice is the author's explicit step, since it discards it.
+ */
+function ConflictNotice({ onReload }: { onReload?: () => void }) {
+  return (
+    <DocumentNotice error>
+      Someone else changed this notice after you opened it, so your changes were not saved. Load the latest version to review it; what you typed here will be replaced.
+      {onReload ? <DocumentButton variant="outline" className="ml-3" onClick={onReload}>Load the latest version</DocumentButton> : null}
+    </DocumentNotice>
+  );
+}
+
+function SaveBar({ form, cancelHref, schoolId, conflict, onReload }: { form: NoticeForm; cancelHref: string; schoolId: string; conflict: boolean; onReload?: () => void }) {
   return (
     <form.Subscribe selector={(state) => ({ canSubmit: state.canSubmit, isSubmitting: state.isSubmitting, errors: state.errors })}>
       {({ canSubmit, isSubmitting, errors }) => (
         <div className="flex flex-col gap-3 border-t pt-4">
-          <DocumentErrors errors={errors} />
+          {conflict ? <ConflictNotice onReload={onReload} /> : <DocumentErrors errors={errors} />}
           <div className="flex flex-wrap items-center gap-2">
-            <Button type="submit" disabled={!canSubmit || isSubmitting}>{isSubmitting ? 'Saving…' : 'Save draft'}</Button>
+            <Button type="submit" disabled={!canSubmit || isSubmitting || conflict}>{isSubmitting ? 'Saving…' : 'Save draft'}</Button>
             <Button asChild type="button" variant="outline"><Link href={cancelHref}>Cancel</Link></Button>
           </div>
           <SaveHint schoolId={schoolId} />
@@ -292,19 +385,27 @@ function SaveBar({ form, cancelHref, schoolId }: { form: NoticeForm; cancelHref:
   );
 }
 
-function previewStatus(preview: NoticeEditorState['preview']) {
+/** What is said under the preview: refreshing, following the text, or (after a failed render) that an older render is shown. */
+function previewStatus(preview: NoticePreview, showingLastGood: boolean) {
   if (preview.isFetching) return 'Refreshing preview…';
-  if (preview.isError) return null;
+  if (preview.isError) return showingLastGood ? 'Showing the last preview that worked. It updates when the problem above is fixed.' : null;
   return 'The preview follows what you write, with today as the date.';
 }
 
-/** The sandboxed render of the unsaved notice. A render error (for example invalid template code) is shown above the last good render. */
-function LivePreview({ preview, hasContent }: { preview: NoticeEditorState['preview']; hasContent: boolean }) {
+/**
+ * The sandboxed render of the unsaved notice. A render error (for example
+ * unfinished template code) is shown above the last render that worked, so
+ * the panel never goes blank while the author is in the middle of a line.
+ * Only when nothing has rendered yet does the placeholder say what to do.
+ */
+function LivePreview({ preview, lastGoodHtml, hasContent }: { preview: NoticePreview; lastGoodHtml: string | undefined; hasContent: boolean }) {
+  const failed = preview.isError && hasContent;
+  const html = !hasContent ? undefined : failed ? lastGoodHtml : preview.data?.html;
   return (
     <aside className="flex min-w-0 flex-col gap-2 xl:sticky xl:top-4 xl:self-start">
-      {preview.isError && hasContent ? <DocumentNotice error>{noticeErrorMessage(preview.error, 'Unable to render this notice.')}</DocumentNotice> : null}
-      <DocumentPreview fitPageWidth html={hasContent ? preview.data?.html : undefined} label="Preview" placeholder="Write the notice text to see it on your school's letterhead." />
-      <p className="text-xs text-muted-foreground" aria-live="polite">{hasContent ? previewStatus(preview) : null}</p>
+      {failed ? <DocumentNotice error>{noticeErrorMessage(preview.error, 'Unable to render this notice.')}</DocumentNotice> : null}
+      <DocumentPreview fitPageWidth html={html} label="Preview" placeholder={failed ? 'Fix the problem above to see the preview.' : "Write the notice text to see it on your school's letterhead."} />
+      <p className="text-xs text-muted-foreground" aria-live="polite">{hasContent ? previewStatus(preview, failed && html !== undefined) : null}</p>
     </aside>
   );
 }
@@ -316,13 +417,13 @@ function LivePreview({ preview, hasContent }: { preview: NoticeEditorState['prev
  * Leaving with unsaved input asks first (`DirtyGuard`).
  */
 export function NoticeEditor(props: EditorProps) {
-  const { scope, baseline, cadetsAvailable } = props;
-  const { form, preview, hasPreviewContent } = useNoticeEditor(props);
-  const cancelHref = baseline ? noticeHref(scope.schoolId, scope.sessionId, baseline.id) : noticesHref(scope);
+  const { scope, cadetAudience, onRetryFeatures, onReload } = props;
+  const { form, opened, conflict, preview, lastGoodHtml, hasPreviewContent } = useNoticeEditor(props);
+  const cancelHref = opened ? noticeHref(scope.schoolId, scope.sessionId, opened.id) : noticesHref(scope);
   return (
     <section className="mx-auto flex w-full max-w-7xl flex-col gap-5">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">{baseline ? 'Edit notice' : 'New notice'}</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">{opened ? 'Edit notice' : 'New notice'}</h1>
         <p className="text-sm text-muted-foreground">Write the notice, choose who it is for, and save it as a draft.</p>
       </div>
       <form.Subscribe selector={(state) => state.isDirty}>
@@ -332,10 +433,10 @@ export function NoticeEditor(props: EditorProps) {
         <form className="flex min-w-0 flex-col gap-5" noValidate onSubmit={(event) => { event.preventDefault(); void form.handleSubmit(); }}>
           <TitleField form={form} />
           <BodySection form={form} />
-          <AudienceSection form={form} scope={scope} cadetsAvailable={cadetsAvailable} narrowed={audienceNarrowed(baseline, cadetsAvailable)} />
-          <SaveBar form={form} cancelHref={cancelHref} schoolId={scope.schoolId} />
+          <AudienceSection form={form} scope={scope} opened={opened} cadetAudience={cadetAudience} onRetryFeatures={onRetryFeatures} />
+          <SaveBar form={form} cancelHref={cancelHref} schoolId={scope.schoolId} conflict={conflict} onReload={onReload} />
         </form>
-        <LivePreview preview={preview} hasContent={hasPreviewContent} />
+        <LivePreview preview={preview} lastGoodHtml={lastGoodHtml} hasContent={hasPreviewContent} />
       </div>
     </section>
   );

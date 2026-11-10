@@ -69,6 +69,9 @@ function useDeleteNotice(notice: NoticeDto) {
     onSuccess: async () => {
       toast.success('Draft deleted.');
       router.push(noticesHref(notice));
+      // The notice is gone: drop it from the cache, so going Back shows
+      // "not found" with a neutral breadcrumb instead of the deleted title.
+      cache.removeQueries({ queryKey: orpc.school.getNotice.queryKey({ input: { schoolId: notice.schoolId, noticeId: notice.id } }) });
       await cache.invalidateQueries({ queryKey: orpc.school.listNotices.key() });
     },
   });

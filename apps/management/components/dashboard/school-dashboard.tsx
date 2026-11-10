@@ -803,7 +803,7 @@ function RecentNotices({ schoolId, sessionId }: DashboardProps) {
             <li key={notice.id}>
               <Link href={noticeHref(schoolId, sessionId, notice.id)} className="flex items-center justify-between gap-3 rounded-md py-2.5 hover:bg-muted/50">
                 <span className="min-w-0 flex-1 truncate font-medium">{notice.title}</span>
-                <span className="hidden shrink-0 text-[11px] text-muted-foreground sm:inline">{noticeAudienceLabel(notice)}</span>
+                <span className="hidden shrink-0 text-[11px] text-muted-foreground sm:inline">{noticeAudienceLabel(notice, notice.classes.map((entry) => entry.name))}</span>
                 <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
                   {notice.publishedAt ? new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short" }).format(notice.publishedAt) : ""}
                 </span>

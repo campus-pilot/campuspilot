@@ -1,6 +1,6 @@
 'use client';
 
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import { Megaphone } from 'lucide-react';
@@ -10,10 +10,21 @@ import { NoticeStatusBadge, noticeAudienceLabel } from '@campuspilot/components/
 
 import { orpc } from '@/lib/orpc';
 import { NotificationDeliveryLogSection } from '../notifications/notification-delivery-log';
+import { FeatureUnavailable } from '../feature-unavailable';
 import { useSchoolFeature } from '../require-feature';
 import { NoticeActions } from './notice-actions';
 import { NoticeEditor } from './notice-editor';
-import { NOTICE_BODY_MODE_LABELS, draftNotice, noticeErrorMessage, noticesHref, publishedRecipientSummary, type NoticeSessionScope } from './notice-model';
+import {
+  NOTICE_BODY_MODE_LABELS,
+  cadetAudienceAvailability,
+  draftNotice,
+  noticeBelongsToSession,
+  noticeErrorMessage,
+  noticeLoadFailure,
+  noticesHref,
+  publishedRecipientSummary,
+  type NoticeSessionScope,
+} from './notice-model';
 
 type NoticeScope = NoticeSessionScope & { noticeId: string };
 
@@ -24,26 +35,60 @@ function useNotice({ schoolId, noticeId }: NoticeScope) {
   return useQuery(orpc.school.getNotice.queryOptions({ input: { schoolId, noticeId }, retry: false }));
 }
 
-/** The breadcrumb label of a notice route: its title once known. */
-export function NoticeBreadcrumbValue({ schoolId, noticeId }: { schoolId: string; noticeId: string }) {
+/**
+ * The breadcrumb label of a notice route: its title while the notice is
+ * loaded. A notice that failed to load (deleted, not visible), or that
+ * belongs to another session than the route's, reads "Notice", also when an
+ * older title is still cached.
+ */
+export function NoticeBreadcrumbValue({ schoolId, sessionId, noticeId }: NoticeScope) {
   const notice = useQuery(orpc.school.getNotice.queryOptions({ input: { schoolId, noticeId }, retry: false }));
-  return <span className="inline-block max-w-[12rem] truncate align-bottom">{notice.data?.title ?? 'Notice'}</span>;
+  const shown = !notice.isError && notice.data && noticeBelongsToSession(notice.data, { schoolId, sessionId });
+  return <span className="inline-block max-w-[12rem] truncate align-bottom">{shown ? notice.data.title : 'Notice'}</span>;
 }
 
-function NoticeUnavailable({ scope, error, retry }: { scope: NoticeSessionScope; error: unknown; retry: () => unknown }) {
+function AllNoticesLink({ scope }: { scope: NoticeSessionScope }) {
+  return <DocumentButton asChild variant="ghost" className="ml-1"><Link href={noticesHref(scope)}>All notices</Link></DocumentButton>;
+}
+
+/** A notice that does not exist here: deleted, another author's draft, or a notice of another session. Retrying cannot help. */
+function NoticeNotFound({ scope }: { scope: NoticeSessionScope }) {
   return (
-    <DocumentNotice error>
-      {noticeErrorMessage(error, 'Unable to load this notice.')} A draft can be opened only by its author, the principal and managers.
-      <DocumentButton variant="outline" className="ml-3" onClick={() => void retry()}>Retry</DocumentButton>
-      <DocumentButton asChild variant="ghost" className="ml-1"><Link href={noticesHref(scope)}>All notices</Link></DocumentButton>
+    <DocumentNotice>
+      This notice was not found. It may have been deleted, or it is a draft that only its author, the principal and managers can open.
+      <AllNoticesLink scope={scope} />
     </DocumentNotice>
   );
 }
 
-/** Loading, unavailable, or the loaded notice handed to `children`. */
+/**
+ * Why the notice is not shown, said as what happened (`noticeLoadFailure`):
+ * not found (no retry), the feature switched off (the same state as the
+ * page gate), or a failure worth retrying.
+ */
+function NoticeUnavailable({ scope, error, retry }: { scope: NoticeSessionScope; error: unknown; retry: () => unknown }) {
+  const failure = noticeLoadFailure(error);
+  if (failure.kind === 'feature_disabled') return <FeatureUnavailable feature={failure.feature} />;
+  if (failure.kind === 'not_found') return <NoticeNotFound scope={scope} />;
+  return (
+    <DocumentNotice error>
+      {failure.message}
+      <DocumentButton variant="outline" className="ml-3" onClick={() => void retry()}>Retry</DocumentButton>
+      <AllNoticesLink scope={scope} />
+    </DocumentNotice>
+  );
+}
+
+/**
+ * Loading, unavailable, or the loaded notice handed to `children`. A notice
+ * of another session than the route's is not found here
+ * (`noticeBelongsToSession`). A failed background refetch keeps showing the
+ * notice already loaded.
+ */
 function NoticeBoundary({ scope, notice, children }: { scope: NoticeSessionScope; notice: UseQueryResult<NoticeDto>; children: (notice: NoticeDto) => ReactNode }) {
   if (notice.isPending) return <div role="status" aria-label="Loading notice" className="mx-auto h-60 w-full max-w-7xl animate-pulse rounded-xl bg-muted" />;
   if (notice.isError) return <section className="mx-auto w-full max-w-7xl"><NoticeUnavailable scope={scope} error={notice.error} retry={notice.refetch} /></section>;
+  if (!noticeBelongsToSession(notice.data, scope)) return <section className="mx-auto w-full max-w-7xl"><NoticeNotFound scope={scope} /></section>;
   return children(notice.data);
 }
 
@@ -72,19 +117,17 @@ function Fact({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-/** Class names for the audience line; without permission to list classes it shows the count. */
-function useClassLabels(scope: NoticeSessionScope, enabled: boolean): ReadonlyMap<string, string> {
-  const classes = useQuery(orpc.school.listClasses.queryOptions({ input: scope, enabled, retry: false }));
-  return new Map((classes.data ?? []).map(({ id, label }) => [id, label]));
-}
-
-/** Audience, author and publication as separate facts; nothing is inferred from the status. */
-function NoticeFacts({ scope, notice }: { scope: NoticeSessionScope; notice: NoticeDto }) {
-  const classLabels = useClassLabels(scope, notice.cadetScope === 'selected_classes');
+/**
+ * Audience, author and publication as separate facts; nothing is inferred
+ * from the status. The classes are the notice's own record (`classes`): a
+ * published notice names the classes it was published to, also after one
+ * was renamed or deleted.
+ */
+function NoticeFacts({ notice }: { notice: NoticeDto }) {
   const notified = publishedRecipientSummary(notice);
   return (
     <dl className="grid gap-4 rounded-xl border bg-card p-4 sm:grid-cols-2 lg:grid-cols-4">
-      <Fact label="For">{noticeAudienceLabel(notice, classLabels)}</Fact>
+      <Fact label="For">{noticeAudienceLabel(notice, notice.classes.map((entry) => entry.name))}</Fact>
       <Fact label="Written by">{notice.createdByName ?? 'Former staff member'} · {dateTimeFormat.format(notice.createdAt)}</Fact>
       <Fact label="Published">{notice.publishedAt ? `${notice.publishedByName ?? 'Former staff member'} · ${dateTimeFormat.format(notice.publishedAt)}` : 'Not published'}</Fact>
       <Fact label={notified ? 'Delivery' : 'Format'}>{notified ?? NOTICE_BODY_MODE_LABELS[notice.bodyMode]}</Fact>
@@ -107,8 +150,8 @@ function NoticeDetail({ scope, notice }: { scope: NoticeSessionScope; notice: No
     <section className="mx-auto flex w-full max-w-7xl flex-col gap-4">
       <NoticeHeader notice={notice} />
       {draft ? <DocumentNotice>{draft}</DocumentNotice> : null}
-      <NoticeFacts scope={scope} notice={notice} />
-      <SavedNoticePreview key={`${notice.status}-${notice.updatedAt.getTime()}`} notice={notice} />
+      <NoticeFacts notice={notice} />
+      <SavedNoticePreview key={`${notice.status}-${notice.version}`} notice={notice} />
       {notice.status === 'published' ? <NotificationDeliveryLogSection schoolId={scope.schoolId} scope={{ kind: 'notice', noticeId: notice.id }} /> : null}
     </section>
   );
@@ -137,20 +180,32 @@ function NotEditable({ scope, notice }: { scope: NoticeSessionScope; notice: Not
 }
 
 /**
- * Edits a draft. The editor is keyed by the notice only and takes the draft
- * as first loaded, so a background refetch never replaces what the author
- * is typing. It waits for the school's features, because the audience
- * choices depend on the Cadet Portal.
+ * Edits a draft. The editor works from the draft as it was when it opened
+ * (see `useNoticeEditor`), so a background refetch never replaces what the
+ * author is typing; `reloads` remounts it on the stored notice when the
+ * author asks for the latest version after a conflict. It waits for the
+ * first read of the school's features, then passes on what is known about
+ * addressing students: available, off, or unknown.
  */
 export function EditNotice({ scope }: { scope: NoticeScope }) {
   const notice = useNotice(scope);
   const cadet = useSchoolFeature(scope.schoolId, 'cadet');
+  const [reloads, setReloads] = useState(0);
   return (
     <NoticeBoundary scope={scope} notice={notice}>
       {(data) => {
         if (data.status !== 'draft' || !data.viewer.canEdit) return <NotEditable scope={scope} notice={data} />;
         if (cadet.status === 'pending') return null;
-        return <NoticeEditor key={data.id} scope={scope} baseline={data} cadetsAvailable={cadet.enabled} />;
+        return (
+          <NoticeEditor
+            key={`${data.id}:${reloads}`}
+            scope={scope}
+            baseline={data}
+            cadetAudience={cadetAudienceAvailability(cadet)}
+            onRetryFeatures={cadet.retry}
+            onReload={() => void notice.refetch().then(() => setReloads((count) => count + 1))}
+          />
+        );
       }}
     </NoticeBoundary>
   );
@@ -160,5 +215,5 @@ export function EditNotice({ scope }: { scope: NoticeScope }) {
 export function NewNotice({ scope }: { scope: NoticeSessionScope }) {
   const cadet = useSchoolFeature(scope.schoolId, 'cadet');
   if (cadet.status === 'pending') return null;
-  return <NoticeEditor scope={scope} baseline={null} cadetsAvailable={cadet.enabled} />;
+  return <NoticeEditor scope={scope} baseline={null} cadetAudience={cadetAudienceAvailability(cadet)} onRetryFeatures={cadet.retry} />;
 }

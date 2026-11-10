@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useQuery, useSuspenseQuery } from '@tanstack/react-query';
+import { useSuspenseQuery } from '@tanstack/react-query';
 import { Megaphone, Plus } from 'lucide-react';
 import { SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
 import type { NoticeSummaryDto } from '@campuspilot/api/routers/school/notice/notice.dto';
@@ -13,7 +13,7 @@ import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTi
 
 import { orpc } from '@/lib/orpc';
 import { noticeHref } from '../notifications/notification-routes';
-import { RequireFeature, useSchoolFeature } from '../require-feature';
+import { RequireFeature } from '../require-feature';
 import { RequirePermissions } from '../require-permissions';
 import { newNoticeHref, noticeAudienceFilterOptions, noticeListApiFilters, type NoticeListFilters, type NoticeSessionScope } from './notice-model';
 
@@ -51,10 +51,10 @@ function NoNoticesYet({ scope }: { scope: NoticeSessionScope }) {
   );
 }
 
-function noticeColumns(classLabels: ReadonlyMap<string, string>): DataTableColumnDef<NoticeSummaryDto>[] {
+function noticeColumns(): DataTableColumnDef<NoticeSummaryDto>[] {
   return [
     { accessorKey: 'title', header: 'Title', cell: ({ row }) => <span className="block max-w-[28rem] truncate font-medium">{row.original.title}</span> },
-    { id: 'audience', header: 'Audience', enableSorting: false, cell: ({ row }) => noticeAudienceLabel(row.original, classLabels) },
+    { id: 'audience', header: 'Audience', enableSorting: false, cell: ({ row }) => noticeAudienceLabel(row.original, row.original.classes.map((entry) => entry.name)) },
     { id: 'status', header: 'Status', enableSorting: false, cell: ({ row }) => <NoticeStatusBadge status={row.original.status} /> },
     { id: 'author', header: 'Written by', enableSorting: false, cell: ({ row }) => row.original.createdByName ?? 'Former staff member' },
     { accessorKey: 'publishedAt', header: 'Published', cell: ({ row }) => (row.original.publishedAt ? dateFormat.format(row.original.publishedAt) : '—') },
@@ -66,17 +66,17 @@ function noticeColumns(classLabels: ReadonlyMap<string, string>): DataTableColum
  * filter) shows the invitation to write the first one instead of an empty
  * table; a search or filter without matches keeps the table and says so.
  */
-function NoticeRows({ scope, controller, cadetsAvailable, classLabels }: { scope: NoticeSessionScope; controller: NoticeController; cadetsAvailable: boolean; classLabels: ReadonlyMap<string, string> }) {
+function NoticeRows({ scope, controller }: { scope: NoticeSessionScope; controller: NoticeController }) {
   const router = useRouter();
   const { query } = controller;
-  const filters = noticeListApiFilters(query.filters, cadetsAvailable);
+  const filters = noticeListApiFilters(query.filters);
   const { data } = useSuspenseQuery(orpc.school.listNotices.queryOptions({ input: { ...scope, page: query.page, limit: query.limit, searchQuery: query.searchQuery ?? '', orderBy: query.orderBy, filters } }));
   const unfiltered = !query.searchQuery && Object.keys(filters).length === 0;
   if (unfiltered && data.pagination.totalItems === 0) return <NoNoticesYet scope={scope} />;
   return (
     <DataTable
       ariaLabel="Notices"
-      columns={noticeColumns(classLabels)}
+      columns={noticeColumns()}
       data={data.items}
       getRowId={(notice) => notice.id}
       manualPagination
@@ -93,12 +93,6 @@ function NoticeRows({ scope, controller, cadetsAvailable, classLabels }: { scope
   );
 }
 
-/** Class names for the audience column; without permission to list classes the column shows counts. */
-function useClassLabels(scope: NoticeSessionScope): ReadonlyMap<string, string> {
-  const classes = useQuery(orpc.school.listClasses.queryOptions({ input: scope, retry: false }));
-  return new Map((classes.data ?? []).map(({ id, label }) => [id, label]));
-}
-
 function NoticeListHeader() {
   return (
     <div>
@@ -110,12 +104,10 @@ function NoticeListHeader() {
 
 /** The session's notices: every published notice, plus the caller's drafts (all drafts for staff who may publish). */
 export function NoticeList({ scope }: { scope: NoticeSessionScope }) {
-  const cadetsAvailable = useSchoolFeature(scope.schoolId, 'cadet').enabled;
-  const classLabels = useClassLabels(scope);
   const controller = useDataTableListState<NoticeOrderField, NoticeListFilters>({ defaultOrderBy: { field: 'createdAt', direction: 'desc' } });
   const filters: TableFilterConfig<keyof NoticeListFilters>[] = [
     { id: 'status', label: 'Status', type: 'single', options: (['draft', 'published'] as const).map((value) => ({ value, label: NOTICE_STATUS_LABELS[value] })) },
-    { id: 'audience', label: 'Audience', type: 'single', options: noticeAudienceFilterOptions(cadetsAvailable) },
+    { id: 'audience', label: 'Audience', type: 'single', options: noticeAudienceFilterOptions() },
   ];
   return (
     <section className="mx-auto flex w-full max-w-7xl flex-col gap-5">
@@ -124,8 +116,8 @@ export function NoticeList({ scope }: { scope: NoticeSessionScope }) {
         <TableSearchBar placeholder="Search notice titles…" onSearchChange={controller.onSearchChange} />
         <TableFilterBar filters={filters} values={controller.query.filters ?? {}} onValuesChange={controller.onFiltersChange} />
       </div>
-      <DataTableSuspense key={JSON.stringify({ ...controller.query, cadetsAvailable })} columnCount={5}>
-        <NoticeRows scope={scope} controller={controller} cadetsAvailable={cadetsAvailable} classLabels={classLabels} />
+      <DataTableSuspense key={JSON.stringify(controller.query)} columnCount={5}>
+        <NoticeRows scope={scope} controller={controller} />
       </DataTableSuspense>
     </section>
   );
