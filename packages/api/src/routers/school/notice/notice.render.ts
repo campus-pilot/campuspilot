@@ -18,7 +18,7 @@ import { buildSchoolDocumentContext } from '../document/document.context';
 import { combineDocuments, convertDocumentPdf, isEmbeddableDocumentImage, renderDocument } from '../document/document.render';
 import { getSelectedDocumentTemplate } from '../document/document.selected-template';
 import { readDocumentTemplate } from '../document/document.storage';
-import type { NoticeBodyMode } from './notice.dto';
+import { NOTICE_BODY_MAX_LENGTH, NOTICE_TITLE_MAX_LENGTH, type NoticeBodyMode } from './notice.dto';
 
 /**
  * Rendering of notices (decisions D4, D9; docs/document-system.md).
@@ -198,10 +198,21 @@ async function noticeSource(db: DatabaseExecutor, content: NoticeContent, choice
 }
 
 /**
- * The most a notice may render to, in characters, before the school logo is
- * placed. Enforced while rendering by the document renderer's output meter,
- * identically for the save-time check, every preview and the publication.
- * A long plain notice is about a tenth of this.
+ * The school Notice template revision a notice would be printed with if it
+ * were published now: the school's current selection for a plain notice
+ * (null = built-in design), null for a notice that is its own template.
+ */
+export async function currentNoticeTemplateRevisionId(db: DatabaseExecutor, content: Pick<NoticeContent, 'schoolId' | 'bodyMode'>): Promise<string | null> {
+  if (content.bodyMode === 'template') return null;
+  return (await selectedNoticeTemplate(db, content.schoolId))?.revisionId ?? null;
+}
+
+/**
+ * The render budget of a notice before the school logo is placed: the most
+ * characters it may render to (block runs count one each as well; see the
+ * renderer's `RenderMeter`). Enforced while rendering, identically for the
+ * save-time check, every preview and the publication. A long plain notice
+ * is about a tenth of this.
  */
 export const NOTICE_RENDER_MAX_CHARS = 2_000_000;
 
@@ -275,20 +286,19 @@ export async function renderNoticeHtml(
 export const NOTICE_TEMPLATE_MAX_BLOCK_DEPTH = 4;
 
 /**
- * Structural limits on an author's notice source, beyond what the shared
- * renderer enforces. A notice template can be written by every staff role
- * (school templates only by roles that manage templates), so constructs
- * with no place in a notice are refused outright:
- * - partials and inline partials (`{{> name}}`, `{{#*inline}}`): an inline
- *   partial can call itself, which is unbounded recursion from a few lines;
- * - block helpers nested deeper than {@link NOTICE_TEMPLATE_MAX_BLOCK_DEPTH}.
- *   An `{{else if}}` chain is one level however long it is: Handlebars
- *   parses each `else if` as a block inside the previous one's else branch,
- *   but a chain only ever runs one branch, so it is counted as flat.
+ * A structural limit on an author's notice source, beyond what the shared
+ * renderer enforces for every template (no partials, inline partials or
+ * decorators, no helper other than the documented ones, a render budget;
+ * see `document.render.ts`). A notice template can be written by every
+ * staff role (school templates only by roles that manage templates), so
+ * block helpers may nest at most {@link NOTICE_TEMPLATE_MAX_BLOCK_DEPTH}
+ * deep. An `{{else if}}` chain is one level however long it is: Handlebars
+ * parses each `else if` as a block inside the previous one's else branch,
+ * but a chain only ever runs one branch, so it is counted as flat.
  *
- * These limits keep templates simple; they do **not** bound the output
- * (nested `each` multiplies whatever depth is allowed). The output is
- * bounded by the renderer's meter and the logo placeholder, see
+ * The limit keeps templates simple; it does **not** bound the output
+ * (nested `each` multiplies whatever depth is allowed). The cost of a render
+ * is bounded by the renderer's budget and the logo placeholder, see
  * {@link renderNoticeDocument}. Invalid syntax is left to the renderer,
  * which reports it as BAD_REQUEST.
  */
@@ -301,38 +311,32 @@ function assertBoundedNoticeTemplate(source: string) {
   }
   const visit = (node: hbs.AST.Node | null | undefined, depth: number): void => {
     if (!node) return;
-    switch (node.type) {
-      case 'Program':
-        for (const statement of (node as hbs.AST.Program).body) visit(statement, depth);
-        return;
-      case 'BlockStatement': {
-        if (depth + 1 > NOTICE_TEMPLATE_MAX_BLOCK_DEPTH) {
-          throw rpcError.badRequest(`A notice template can nest blocks such as each and if at most ${NOTICE_TEMPLATE_MAX_BLOCK_DEPTH} levels deep.`);
-        }
-        const block = node as hbs.AST.BlockStatement;
-        visit(block.program, depth + 1);
-        // `{{else if …}}`: the chained block continues this block's level.
-        visit(block.inverse, (block.inverse as (hbs.AST.Program & { chained?: boolean }) | undefined)?.chained ? depth : depth + 1);
-        return;
-      }
-      case 'PartialStatement':
-      case 'PartialBlockStatement':
-      case 'Decorator':
-      case 'DecoratorBlock':
-        throw rpcError.badRequest('A notice template cannot use partials.');
-      default:
-        return;
+    if (node.type === 'Program') {
+      for (const statement of (node as hbs.AST.Program).body) visit(statement, depth);
+      return;
     }
+    if (node.type !== 'BlockStatement') return;
+    if (depth + 1 > NOTICE_TEMPLATE_MAX_BLOCK_DEPTH) {
+      throw rpcError.badRequest(`A notice template can nest blocks such as each and if at most ${NOTICE_TEMPLATE_MAX_BLOCK_DEPTH} levels deep.`);
+    }
+    const block = node as hbs.AST.BlockStatement;
+    visit(block.program, depth + 1);
+    // `{{else if …}}`: the chained block continues this block's level.
+    visit(block.inverse, (block.inverse as (hbs.AST.Program & { chained?: boolean }) | undefined)?.chained ? depth : depth + 1);
   };
   visit(program, 0);
 }
 
 /**
  * Checks an author's Handlebars source before it is saved: the structural
- * limits above, then a render against the synthetic notice context through
+ * limit above, then a render against the synthetic notice context through
  * {@link renderNoticeDocument}, so the save-time check applies the same
- * output budget and logo limit as every later render. Invalid syntax or an
- * unsupported helper is a BAD_REQUEST exactly as for a school template.
+ * budget and logo limit as every later render. An author's source reads no
+ * notice text (`paragraphs` is empty for a `template` notice) and gets the
+ * logo as a placeholder, so the sample is as large as any real context,
+ * apart from the school's name, location and registration number. Invalid
+ * syntax or an unsupported helper is a BAD_REQUEST exactly as for a school
+ * template.
  */
 export function assertValidNoticeTemplate(source: string) {
   assertBoundedNoticeTemplate(source);
@@ -340,14 +344,43 @@ export function assertValidNoticeTemplate(source: string) {
 }
 
 /**
+ * The largest plain notice a school template can be asked to print: a title
+ * and a text of the maximum lengths the notice DTO accepts, as one
+ * paragraph (the logo is a placeholder in every notice render, so its size
+ * plays no part).
+ */
+const LONGEST_NOTICE_CONTEXT = {
+  ...SAMPLE_NOTICE_CONTEXT,
+  notice: { ...SAMPLE_NOTICE_CONTEXT.notice, title: 'W'.repeat(NOTICE_TITLE_MAX_LENGTH), paragraphs: ['W'.repeat(NOTICE_BODY_MAX_LENGTH)] },
+};
+
+/**
  * Checks a school Notice template (document system, written by template
- * managers) the way notices will render it: with the notice output budget
- * and logo limit, so a design that could never print a notice is refused
- * when it is saved rather than when a notice is published. The structural
- * limits for authors' own sources do not apply to school templates.
+ * managers) the way notices will render it: through
+ * {@link renderNoticeDocument} with the notice budget and logo limit,
+ * against the sample **and** against the longest notice the DTO accepts
+ * ({@link LONGEST_NOTICE_CONTEXT}), so a design that could not print a
+ * maximum-length notice is refused when it is saved rather than when such a
+ * notice is published.
+ *
+ * This check is a courtesy to the template's author, not the bound: every
+ * later render of every notice runs under the same budget, so a template
+ * that passes here can never cost more than the budget at render time. A
+ * notice it cannot print within the budget (for example tens of thousands
+ * of one-line paragraphs in a design with heavy per-paragraph markup) is a
+ * BAD_REQUEST for that notice. The structural depth limit for authors' own
+ * sources does not apply to school templates.
  */
 export function assertValidSchoolNoticeTemplate(source: string) {
   renderNoticeDocument(source, SAMPLE_NOTICE_CONTEXT, NOTICE_RENDER_MAX_CHARS);
+  try {
+    renderNoticeDocument(source, LONGEST_NOTICE_CONTEXT, NOTICE_RENDER_MAX_CHARS);
+  } catch (error) {
+    if (error instanceof ORPCError && error.status === 400) {
+      throw rpcError.badRequest(`This design cannot print a notice of the maximum length (${NOTICE_BODY_MAX_LENGTH.toLocaleString('en-IN')} characters) within the rendering limit. Print the notice text fewer times.`, error);
+    }
+    throw error;
+  }
 }
 
 /** Renders a published notice from what was fixed at publication: its content, pinned template revision, instant and issued-on date. */

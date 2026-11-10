@@ -1,7 +1,7 @@
 import { db as defaultDb, type Database } from '@campuspilot/db';
 import { ORPCError } from '@orpc/server';
 
-import { combineDocuments, convertDocumentPdf, renderDocument } from '../../routers/school/document/document.render';
+import { combineDocuments, convertDocumentPdf, renderDocuments } from '../../routers/school/document/document.render';
 import { getSelectedDocumentTemplate } from '../../routers/school/document/document.selected-template';
 import type { DocumentType } from '../../routers/school/document/document.dto';
 import { DOCUMENT_TEMPLATE_UNAVAILABLE, type NotificationDocument } from '../channels/whatsapp/documents';
@@ -44,7 +44,7 @@ export async function renderNotificationDocument(
   try {
     const contexts = await input.buildContexts(db);
     if (contexts.length !== 1) return null;
-    const html = combineDocuments(contexts.map((context) => renderDocument(template.content, context)), input.documentType, template.row.pageSize);
+    const html = combineDocuments(renderDocuments(template.content, contexts), input.documentType, template.row.pageSize);
     const bytes = await convertDocumentPdf(html, input.documentType);
     return { bytes: new Uint8Array(bytes), mimeType: 'application/pdf', templateRevisionId: template.row.id };
   } catch (error) {

@@ -39,12 +39,34 @@ export const DOCUMENT_TEMPLATE_HELPERS = [
   "add",
 ] as const;
 /**
+ * The helpers that may open a block (`{{#each}}…{{/each}}`). Each of them
+ * returns nothing but the output of the block bodies it ran, which the
+ * bodies count themselves. `lookup` and `add` return a context value, so in
+ * block form their result would be printed without passing a counted
+ * `{{value}}`: they are expression helpers only ({@link prepareTemplate}).
+ */
+export const DOCUMENT_TEMPLATE_BLOCK_HELPERS = [
+  "each",
+  "if",
+  "unless",
+  "with",
+] as const;
+/**
  * Not callable features but the runtime's hooks for `{{#section}}` on a
  * context value and for a call to an unknown helper (which throws).
  */
 const RUNTIME_HELPER_HOOKS = ["helperMissing", "blockHelperMissing"];
-/** Wraps every `{{value}}` so its output is counted; see {@link instrument}. */
-const OUTPUT_METER_HELPER = "__documentOutput";
+/**
+ * Names beginning with this belong to the renderer's own accounting helpers.
+ * A template that mentions one anywhere is refused before it is compiled.
+ */
+const RESERVED_PREFIX = "__document";
+/** Counts one run of a block body or of the template itself: its static text plus one step. */
+const RUN_METER_HELPER = `${RESERVED_PREFIX}Run`;
+/** Counts and escapes the value of one `{{value}}`. */
+const OUTPUT_METER_HELPER = `${RESERVED_PREFIX}Output`;
+/** Counts the value of one `{{{value}}}` or `{{&value}}`. */
+const RAW_OUTPUT_METER_HELPER = `${RESERVED_PREFIX}RawOutput`;
 
 for (const name of Object.keys(handlebars.helpers)) {
   if (
@@ -53,128 +75,451 @@ for (const name of Object.keys(handlebars.helpers)) {
   )
     handlebars.unregisterHelper(name);
 }
+// No decorators and no partials exist on this instance: `inline` (the
+// built-in decorator that defines inline partials) is removed, and the
+// parse-time check below refuses their syntax for every template.
+for (const name of Object.keys(
+  (handlebars as unknown as { decorators: Record<string, unknown> }).decorators,
+))
+  handlebars.unregisterDecorator(name);
 
 /** The helpers registered on the restricted instance (for tests of the allowlist). */
 export function registeredDocumentHelpers(): string[] {
   return Object.keys(handlebars.helpers).sort();
 }
+/** The decorators and partials registered on the restricted instance: none (for tests). */
+export function registeredDocumentPartialsAndDecorators(): string[] {
+  const instance = handlebars as unknown as {
+    decorators: Record<string, unknown>;
+    partials: Record<string, unknown>;
+  };
+  return [...Object.keys(instance.decorators), ...Object.keys(instance.partials)];
+}
 
-/** The ceiling of one rendered document, in characters, unless a caller sets a lower one. */
+/** The ceiling of one render, in budget units (see {@link RenderMeter}), unless a caller sets a lower one. */
 export const DOCUMENT_RENDER_MAX_CHARS = 25_000_000;
 const OVERSIZE_MESSAGE =
   "This document exceeds the rendering limit. Use a shorter template, fewer repeated blocks or smaller images.";
+const PARTIAL_MESSAGE =
+  "Templates cannot use partials, inline partials or decorators.";
+const UNCOUNTED_MESSAGE =
+  "The template uses a construct that is not supported.";
 
 /**
- * The output budget of the render in progress. Rendering is synchronous, so
- * one module-level meter belongs to exactly one `renderDocument` call.
+ * The render budget: how the cost of a render is bounded **while** it runs.
  *
- * Why the budget is enforced while rendering and not on the result: a
- * template multiplies. `{{{school.logoUrl}}}` written a few thousand times,
- * or nested `each` blocks around one large value, make Handlebars build a
- * string of hundreds of megabytes before any check on the finished string
- * can run. The meter counts every character as it is produced and aborts
- * the render at the limit, so a hostile or mistaken template costs at most
- * the budget, whatever the context holds.
+ * Why not check the finished string: a template multiplies. A large value
+ * printed a few thousand times, or nested `each` blocks, make Handlebars
+ * build hundreds of megabytes before any check on the result can run.
+ *
+ * Design: every construct that can produce output is either counted here or
+ * refused when the template is parsed. There is no third category, and
+ * counting does not depend on which helper ran a block.
+ *
+ * | Construct | Decision |
+ * | --- | --- |
+ * | Static text | counted per run of the body it is written in (`__documentRun`, inserted first in every body) |
+ * | `{{value}}`, `{{helper a b}}`, `{{@index}}`, `{{../a}}`, block params | counted after escaping (`__documentOutput` wraps the expression) |
+ * | `{{{value}}}`, `{{&value}}` | counted (`__documentRawOutput`) |
+ * | Sub-expressions `(lookup a b)`, hash arguments | produce no output; printed only through one of the two rows above |
+ * | `{{#each}}`, `{{#if}}`, `{{#unless}}`, `{{#with}}`, `{{else}}`, `{{else if}}`, `{{^}}` | output is the bodies they run: each run counts itself; every run also costs one step plus one per statement in the body, so loops that print nothing are bounded too |
+ * | `{{#value}}…{{/value}}` sections (incl. `{{{{raw}}}}`) | as above (the runtime's `blockHelperMissing` only runs bodies) |
+ * | `{{#lookup}}`, `{{#add}}`, any other registered helper as a block | refused at parse time (their result would be printed uncounted) |
+ * | `{{> partial}}`, `{{#> partial}}`, `{{#*inline}}`, `{{* decorator}}` | refused at parse time; none is registered |
+ * | Any AST node type this file does not know | refused at parse time |
+ *
+ * `chars` is therefore exactly the length of the rendered string, and the
+ * render is refused if the two ever differ ({@link runMetered}): a
+ * construct that produced output without being counted cannot pass, even one
+ * a future Handlebars release adds. As a second line of defence every
+ * registered helper called as a block has its result charged
+ * ({@link meterBlockResults}).
+ *
+ * Rendering is synchronous, so one module-level meter belongs to exactly one
+ * render call (one document, or one batch sharing a budget).
  */
-let activeMeter: { used: number; limit: number } | null = null;
+type RenderMeter = {
+  /** Characters produced so far. */
+  chars: number;
+  /**
+   * Work that need not print anything: one unit per run of a block body (or
+   * of the template) plus one per expression or block written in that body,
+   * so loops that print nothing still end, and in time proportional to the budget.
+   */
+  steps: number;
+  /** The most `chars + steps` may reach. */
+  limit: number;
+};
+let activeMeter: RenderMeter | null = null;
 
-function spend(chars: number) {
-  if (!activeMeter || chars <= 0) return;
-  activeMeter.used += chars;
-  if (activeMeter.used > activeMeter.limit)
+/** The meter of the render in progress. Templates of this instance only ever run inside {@link runMetered}. */
+function meter(): RenderMeter {
+  if (!activeMeter)
+    throw new Error("A document template ran outside a metered render.");
+  return activeMeter;
+}
+
+function spend(chars: number, steps = 0) {
+  const current = meter();
+  if (chars > 0) current.chars += chars;
+  current.steps += steps;
+  if (current.chars + current.steps > current.limit)
     throw rpcError.badRequest(OVERSIZE_MESSAGE);
 }
 
+/**
+ * One run of a body: its static text, and as steps one for the run plus one
+ * per expression or block written directly in it. Charging the expressions
+ * makes the work of a run (not only its output) count: a body of thousands
+ * of `{{missing}}` inside nested loops prints nothing, yet each run
+ * evaluates every one of them.
+ */
+handlebars.registerHelper(
+  RUN_METER_HELPER,
+  (staticChars: unknown, statements: unknown) => {
+    spend(
+      typeof staticChars === "number" ? staticChars : 0,
+      1 + (typeof statements === "number" ? statements : 0),
+    );
+    return "";
+  },
+);
 handlebars.registerHelper(OUTPUT_METER_HELPER, (value: unknown) => {
-  if (value !== null && value !== undefined)
-    spend(typeof value === "string" ? value.length : String(value).length);
-  return value;
+  // Refuse a value that cannot fit before allocating its escaped copy.
+  if (typeof value === "string") {
+    const current = meter();
+    if (current.chars + current.steps + value.length > current.limit)
+      throw rpcError.badRequest(OVERSIZE_MESSAGE);
+  }
+  const text = handlebars.escapeExpression(value as string);
+  spend(text.length);
+  // Already escaped: Handlebars appends a SafeString as it is.
+  return new handlebars.SafeString(text);
+});
+handlebars.registerHelper(RAW_OUTPUT_METER_HELPER, (value: unknown) => {
+  if (value === null || value === undefined) return value;
+  // What `{{{value}}}` appends: the value's string form.
+  const text = typeof value === "string" ? value : `${value as string}`;
+  spend(text.length);
+  return text;
 });
 
-type BlockProgram = ((context: unknown, options?: unknown) => string) &
-  Record<string, unknown>;
-
 /**
- * Counts what one run of a block body adds: its output minus whatever the
- * body already counted itself (the values and nested blocks inside it), so
- * every character is counted once and a repeated body is counted per run.
+ * Second line of defence behind the parse-time rule on block helpers: when
+ * any registered helper is called as a block, whatever its result holds
+ * beyond what its bodies already counted is charged. For `each`, `if`,
+ * `unless`, `with` and sections that is always nothing. It is applied to
+ * every helper on the instance, so one registered later cannot be forgotten
+ * (the allowlist test pins the list).
  */
-function meteredProgram(program: BlockProgram | undefined) {
-  if (typeof program !== "function") return program;
-  const metered = (context: unknown, options?: unknown) => {
-    const before = activeMeter?.used ?? 0;
-    const output = program(context, options);
-    if (activeMeter) spend(output.length - (activeMeter.used - before));
-    return output;
-  };
-  // Handlebars reads `program`, `depth` and `blockParams` off the function.
-  return Object.assign(metered, program);
-}
-
-// Everything that can run a block body goes through the meter: the block
-// helpers and the hook behind `{{#value}}…{{/value}}` sections.
-for (const name of ["each", "if", "unless", "with", "blockHelperMissing"]) {
-  const original = handlebars.helpers[name] as (
-    this: unknown,
-    ...args: unknown[]
-  ) => unknown;
-  handlebars.registerHelper(name, function (this: unknown, ...args: unknown[]) {
-    const options = args[args.length - 1] as {
-      fn?: BlockProgram;
-      inverse?: BlockProgram;
-    };
-    options.fn = meteredProgram(options.fn);
-    options.inverse = meteredProgram(options.inverse);
-    return original.apply(this, args);
-  });
-}
-
-/**
- * Rewrites every `{{expression}}` to `{{__documentOutput expression}}` so the
- * length of each printed value is counted the moment it is produced (also
- * outside any block, where no block body would count it). The expression,
- * its escaping and its whitespace control are unchanged.
- */
-function instrument(node: hbs.AST.Node | null | undefined): void {
-  if (!node) return;
-  if (node.type === "Program") {
-    for (const statement of (node as hbs.AST.Program).body)
-      instrument(statement);
-    return;
+function meterBlockResults() {
+  for (const name of Object.keys(handlebars.helpers)) {
+    if (name.startsWith(RESERVED_PREFIX)) continue;
+    const original = handlebars.helpers[name] as (
+      this: unknown,
+      ...args: unknown[]
+    ) => unknown;
+    handlebars.registerHelper(name, function (this: unknown, ...args: unknown[]) {
+      const options = args[args.length - 1] as { fn?: unknown } | undefined;
+      // Handlebars passes `fn` exactly when the helper opened a block.
+      if (typeof options?.fn !== "function") return original.apply(this, args);
+      const before = meter().chars;
+      const result = original.apply(this, args);
+      if (result !== null && result !== undefined)
+        spend(`${result as string}`.length - (meter().chars - before));
+      return result;
+    });
   }
+}
+meterBlockResults();
+
+type TemplateHead = hbs.AST.PathExpression | hbs.AST.Literal;
+type CallNode = {
+  path: TemplateHead | hbs.AST.SubExpression;
+  params: hbs.AST.Expression[];
+  hash?: hbs.AST.Hash;
+};
+
+function refuse(message: string): never {
+  throw rpcError.badRequest(message);
+}
+
+function helperPath(name: string, loc: hbs.AST.SourceLocation) {
+  return {
+    type: "PathExpression",
+    data: false,
+    depth: 0,
+    parts: [name],
+    original: name,
+    loc,
+  } as hbs.AST.PathExpression;
+}
+
+/**
+ * `{{"name" …}}` and `{{1}}` are path lookups to Handlebars' compiler, so a
+ * literal in head position can name a helper. It is turned into the path the
+ * compiler would make of it before any rule below looks at the name.
+ */
+function headPath(node: CallNode): hbs.AST.PathExpression {
+  const head = node.path as hbs.AST.Node;
+  if (head.type === "PathExpression") return head as hbs.AST.PathExpression;
   if (
-    node.type === "BlockStatement" ||
-    node.type === "DecoratorBlock" ||
-    node.type === "PartialBlockStatement"
-  ) {
-    const block = node as hbs.AST.BlockStatement;
-    instrument(block.program);
-    instrument(block.inverse);
-    return;
+    head.type !== "StringLiteral" &&
+    head.type !== "NumberLiteral" &&
+    head.type !== "BooleanLiteral" &&
+    head.type !== "UndefinedLiteral" &&
+    head.type !== "NullLiteral"
+  )
+    refuse(UNCOUNTED_MESSAGE);
+  const literal = head as hbs.AST.Literal & { original: unknown };
+  const path = helperPath(`${literal.original as string}`, literal.loc);
+  node.path = path;
+  return path;
+}
+
+/** Whether a name is a helper of the instance (never a prototype member). */
+function isRegisteredHelper(name: string | undefined) {
+  return name !== undefined && Object.hasOwn(handlebars.helpers, name);
+}
+
+/** Handlebars' `simpleId`: one part, not `this.x`, `./x` or `../x`. */
+function isSimpleId(path: hbs.AST.PathExpression) {
+  return (
+    path.parts.length === 1 && !/^\.|this\b/.test(path.original) && !path.depth
+  );
+}
+
+/** Checks one expression (a path, literal or sub-expression) and everything inside it. */
+function checkExpression(node: hbs.AST.Node | null | undefined): void {
+  if (!node) return;
+  switch (node.type) {
+    case "PathExpression": {
+      // The first part is what Handlebars resolves a helper by, also for
+      // `@name` and `name.more`.
+      const first = (node as hbs.AST.PathExpression).parts[0];
+      if (typeof first === "string" && first.startsWith(RESERVED_PREFIX))
+        refuse(UNCOUNTED_MESSAGE);
+      return;
+    }
+    case "SubExpression":
+      checkCall(node as hbs.AST.SubExpression);
+      return;
+    case "StringLiteral":
+    case "NumberLiteral":
+    case "BooleanLiteral":
+    case "UndefinedLiteral":
+    case "NullLiteral":
+      return;
+    default:
+      refuse(UNCOUNTED_MESSAGE);
   }
-  if (node.type !== "MustacheStatement") return;
-  const mustache = node as hbs.AST.MustacheStatement;
-  const isCall =
-    mustache.params.length > 0 || (mustache.hash?.pairs.length ?? 0) > 0;
-  const expression = isCall
+}
+
+/** Checks the head, arguments and hash of a mustache, block or sub-expression. */
+function checkCall(node: CallNode): hbs.AST.PathExpression {
+  const path = headPath(node);
+  checkExpression(path);
+  for (const param of node.params ?? []) checkExpression(param);
+  for (const pair of node.hash?.pairs ?? []) checkExpression(pair.value);
+  return path;
+}
+
+/**
+ * Rewrites `{{expression}}` to `{{__documentOutput expression}}` (or the raw
+ * variant for `{{{expression}}}`), so the printed value is counted the
+ * moment it is produced. What the expression evaluates to is unchanged: a
+ * call stays a call, a bare name that is a helper stays a call of it, and
+ * anything else stays the same context, data or block-param lookup.
+ */
+function meterMustache(mustache: hbs.AST.MustacheStatement, scope: string[][]) {
+  const path = checkCall(mustache);
+  const name = path.parts[0];
+  const hasArguments = mustache.params.length > 0 || Boolean(mustache.hash);
+  const shadowed = scope.some((names) => names.includes(name ?? ""));
+  const callsHelper =
+    hasArguments || (isSimpleId(path) && !shadowed && isRegisteredHelper(name));
+  const expression = callsHelper
     ? ({
         type: "SubExpression",
-        path: mustache.path,
+        path,
         params: mustache.params,
         hash: mustache.hash,
         loc: mustache.loc,
       } as hbs.AST.SubExpression)
-    : mustache.path;
-  mustache.path = {
-    type: "PathExpression",
-    data: false,
-    depth: 0,
-    parts: [OUTPUT_METER_HELPER],
-    original: OUTPUT_METER_HELPER,
-    loc: mustache.loc,
-  } as hbs.AST.PathExpression;
+    : path;
+  mustache.path = helperPath(
+    mustache.escaped ? OUTPUT_METER_HELPER : RAW_OUTPUT_METER_HELPER,
+    mustache.loc,
+  );
   mustache.params = [expression];
   mustache.hash = undefined as unknown as hbs.AST.Hash;
+  // The helper returns exactly what is appended (escaped already, as a SafeString).
+  mustache.escaped = false;
+}
+
+/**
+ * A block may be opened by one of {@link DOCUMENT_TEMPLATE_BLOCK_HELPERS} or
+ * be a section on a context value. Handlebars resolves a helper by the first
+ * part of the head whatever follows it (`{{#lookup.x a b}}` and
+ * `{{#@lookup a b}}` both call `lookup`), so the rule is on that first part.
+ */
+function checkBlockHead(block: hbs.AST.BlockStatement) {
+  const name = checkCall(block).parts[0];
+  if (
+    isRegisteredHelper(name) &&
+    !(DOCUMENT_TEMPLATE_BLOCK_HELPERS as readonly string[]).includes(name ?? "")
+  )
+    refuse(
+      `"${name}" cannot open a block. Blocks are each, if, unless and with; write {{${name} …}} to print a value.`,
+    );
+}
+
+/**
+ * Prepares one block body (or the template itself): checks and rewrites each
+ * statement, then inserts the statement that counts the body's static text
+ * and its steps (one, plus one per expression or block in it) on every run. Returns nothing; the AST is changed in place.
+ */
+function prepareProgram(
+  program: hbs.AST.Program | null | undefined,
+  scope: string[][],
+): void {
+  if (!program) return;
+  scope.push(program.blockParams ?? []);
+  let staticChars = 0;
+  let statements = 0;
+  for (const statement of program.body) {
+    if (statement.type === "MustacheStatement" || statement.type === "BlockStatement")
+      statements += 1;
+    switch (statement.type) {
+      case "ContentStatement": {
+        const value = (statement as hbs.AST.ContentStatement).value;
+        if (typeof value !== "string") refuse(UNCOUNTED_MESSAGE);
+        staticChars += value.length;
+        break;
+      }
+      case "CommentStatement":
+        break;
+      case "MustacheStatement":
+        meterMustache(statement as hbs.AST.MustacheStatement, scope);
+        break;
+      case "BlockStatement": {
+        const block = statement as hbs.AST.BlockStatement;
+        checkBlockHead(block);
+        prepareProgram(block.program, scope);
+        prepareProgram(block.inverse, scope);
+        break;
+      }
+      case "PartialStatement":
+      case "PartialBlockStatement":
+      case "Decorator":
+      case "DecoratorBlock":
+        refuse(PARTIAL_MESSAGE);
+      // eslint-disable-next-line no-fallthrough
+      default:
+        refuse(UNCOUNTED_MESSAGE);
+    }
+  }
+  scope.pop();
+  program.body.unshift({
+    type: "MustacheStatement",
+    path: helperPath(RUN_METER_HELPER, program.loc),
+    params: [
+      {
+        type: "NumberLiteral",
+        value: staticChars,
+        original: staticChars,
+        loc: program.loc,
+      } as hbs.AST.NumberLiteral,
+      {
+        type: "NumberLiteral",
+        value: statements,
+        original: statements,
+        loc: program.loc,
+      } as hbs.AST.NumberLiteral,
+    ],
+    hash: undefined as unknown as hbs.AST.Hash,
+    escaped: false,
+    strip: { open: false, close: false },
+    loc: program.loc,
+  } as hbs.AST.MustacheStatement);
+}
+
+type CompiledTemplate = (context: object) => string;
+
+/**
+ * Parses a template, applies the parse-time rules and the accounting
+ * rewrite of {@link RenderMeter}, and compiles it.
+ *
+ * The compiler classes are called directly instead of
+ * `handlebars.compile(ast)`: `compile` runs Handlebars' whitespace control a
+ * second time over an AST it is given, and that pass must see the template
+ * as written, not with the accounting statements in it (`handlebars.parse`
+ * has already applied it once).
+ */
+function prepareTemplate(content: string): CompiledTemplate {
+  const program = handlebars.parse(content);
+  prepareProgram(program, []);
+  const compiler = handlebars as unknown as {
+    Compiler: new () => { compile(program: hbs.AST.Program, options: object): unknown };
+    JavaScriptCompiler: new () => {
+      compile(environment: unknown, options: object, context: undefined, asObject: true): TemplateSpecification;
+    };
+  };
+  // The defaults `handlebars.compile` applies.
+  const options = { data: true };
+  const environment = new compiler.Compiler().compile(program, options);
+  const specification = new compiler.JavaScriptCompiler().compile(
+    environment,
+    options,
+    undefined,
+    true,
+  );
+  return handlebars.template(specification) as CompiledTemplate;
+}
+
+/**
+ * Runs one compiled template under the active meter and holds it to the
+ * accounting: the string it returns must be exactly as long as what was
+ * counted while it was built. Output that was produced without being
+ * counted is refused, whatever produced it.
+ */
+function runMetered(template: CompiledTemplate, context: object): string {
+  const current = meter();
+  const before = current.chars;
+  const raw = template(context);
+  if (raw.length > current.chars - before) refuse(UNCOUNTED_MESSAGE);
+  return raw;
+}
+
+/**
+ * Compiles `content` once and renders it for every context under one shared
+ * budget. Errors that are not already BAD_REQUEST (a parse error, an unknown
+ * helper, a helper given the wrong arguments) become the generic one.
+ */
+function renderMetered(
+  content: string,
+  contexts: object[],
+  limit: number,
+): { raws: string[]; meter: RenderMeter } {
+  if (activeMeter)
+    throw new Error("A document render started inside another render.");
+  const current: RenderMeter = { chars: 0, steps: 0, limit };
+  try {
+    const template = prepareTemplate(content);
+    activeMeter = current;
+    return {
+      raws: contexts.map((context) => runMetered(template, context)),
+      meter: current,
+    };
+  } catch (cause) {
+    if (cause instanceof ORPCError) throw cause;
+    throw rpcError.badRequest(
+      "The template contains invalid Handlebars syntax or an unsupported helper.",
+      cause,
+    );
+  } finally {
+    activeMeter = null;
+  }
 }
 /** The only image sources a document may carry (no SVG, no network). */
 const EMBEDDABLE_IMAGE = /^data:image\/(png|jpeg|webp);base64,[a-z0-9+/=]+$/i;
@@ -229,39 +574,49 @@ export function isEmbeddableDocumentImage(value: string) {
 
 /**
  * Renders one template against one context with the restricted Handlebars
- * instance (allowlisted helpers only) and returns sanitized, CSP-wrapped
- * HTML. The output is capped at `maxOutputChars` **while it is produced**
- * (see the meter above); invalid syntax, an unknown helper and an oversized
- * result are all BAD_REQUEST.
+ * instance (allowlisted helpers only, no partials) and returns sanitized,
+ * CSP-wrapped HTML. The render is held to `maxOutputChars` **while it
+ * runs** (see {@link RenderMeter}); invalid syntax, an unknown helper, a
+ * refused construct and an oversized result are all BAD_REQUEST.
  */
 export function renderDocument(
   content: string,
   context: object,
   options: { maxOutputChars?: number } = {},
 ) {
-  const meter = {
-    used: 0,
-    limit: options.maxOutputChars ?? DOCUMENT_RENDER_MAX_CHARS,
-  };
-  try {
-    const program = handlebars.parse(content);
-    instrument(program);
-    const template = handlebars.compile(program);
-    activeMeter = meter;
-    // Text outside every block is printed exactly once.
-    spend(content.length);
-    const raw = template(context);
-    activeMeter = null;
-    return safeHtml(raw);
-  } catch (cause) {
-    if (cause instanceof ORPCError) throw cause;
-    throw rpcError.badRequest(
-      "The template contains invalid Handlebars syntax or an unsupported helper.",
-      cause,
-    );
-  } finally {
-    activeMeter = null;
-  }
+  return renderDocuments(content, [context], options)[0]!;
+}
+
+/**
+ * Renders one template for each context of a batch (one per student, bill
+ * or receipt), compiled once. The whole batch shares **one** budget, so the
+ * cost of a batch is bounded by the same ceiling as its combined result
+ * ({@link combineDocuments}), not by the ceiling times the batch size.
+ */
+export function renderDocuments(
+  content: string,
+  contexts: object[],
+  options: { maxOutputChars?: number } = {},
+): string[] {
+  const { raws } = renderMetered(
+    content,
+    contexts,
+    options.maxOutputChars ?? DOCUMENT_RENDER_MAX_CHARS,
+  );
+  return raws.map(safeHtml);
+}
+
+/**
+ * The unsanitized output of one render with what the meter counted for it:
+ * for tests of the accounting (`chars` must equal `raw.length`).
+ */
+export function measureDocumentRender(
+  content: string,
+  context: object,
+  maxOutputChars: number = DOCUMENT_RENDER_MAX_CHARS,
+) {
+  const { raws, meter: used } = renderMetered(content, [context], maxOutputChars);
+  return { raw: raws[0]!, chars: used.chars, steps: used.steps };
 }
 function chunks<T>(items: T[], size: number) {
   const result: T[][] = [];

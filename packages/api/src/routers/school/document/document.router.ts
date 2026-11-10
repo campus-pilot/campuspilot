@@ -29,6 +29,7 @@ import {
   combineDocuments,
   convertDocumentPdf,
   renderDocument,
+  renderDocuments,
 } from "./document.render";
 import {
   deleteDocumentObject,
@@ -263,13 +264,13 @@ async function renderSelection(
       (tx) => buildFinanceDocumentContexts(tx, input.schoolId, input.source as Extract<dto.DocumentSource, { documentType: "bill" | "receipt" | "statement" }>),
       { isolationLevel: "repeatable read", accessMode: "read only" },
     );
-    return { ...data, studentIds: [] as string[], recipientCount: data.contexts.length, warnings: [] as string[], template, html: combineDocuments(data.contexts.map((context) => renderDocument(template.content, context)), input.source.documentType, template.row.pageSize) };
+    return { ...data, studentIds: [] as string[], recipientCount: data.contexts.length, warnings: [] as string[], template, html: combineDocuments(renderDocuments(template.content, data.contexts), input.source.documentType, template.row.pageSize) };
   }
   const data = await db.transaction(
     (tx) => buildDocumentContexts(tx, input.schoolId, input.source as Exclude<dto.DocumentSource, { documentType: "bill" | "receipt" | "statement" }>),
     { isolationLevel: "repeatable read", accessMode: "read only" },
   );
-  return { ...data, recipientCount: data.studentIds.length, financeSource: null, reviewHash: null, template, html: combineDocuments(data.contexts.map((context) => renderDocument(template.content, context)), input.source.documentType, template.row.pageSize) };
+  return { ...data, recipientCount: data.studentIds.length, financeSource: null, reviewHash: null, template, html: combineDocuments(renderDocuments(template.content, data.contexts), input.source.documentType, template.row.pageSize) };
 }
 export const schoolDocumentRouter = {
   listMarketplaceTemplates: protectedProcedure

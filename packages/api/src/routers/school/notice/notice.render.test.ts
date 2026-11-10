@@ -8,6 +8,7 @@ import {
   assertValidNoticeTemplate,
   assertValidSchoolNoticeTemplate,
   NOTICE_MAX_LOGO_USES,
+  NOTICE_PUBLISHED_RENDER_MAX_CHARS,
   NOTICE_RENDER_MAX_CHARS,
   NOTICE_TEMPLATE_MAX_BLOCK_DEPTH,
   noticeDocumentText,
@@ -203,6 +204,80 @@ describe('hostile and ordinary author templates', () => {
     const inBranch = (depth: number) => `{{#if a}}A{{else if b}}${'{{#each school}}'.repeat(depth)}x${'{{/each}}'.repeat(depth)}{{else}}C{{/if}}`;
     expect(() => assertValidNoticeTemplate(inBranch(NOTICE_TEMPLATE_MAX_BLOCK_DEPTH - 1))).not.toThrow();
     expect(() => assertValidNoticeTemplate(inBranch(NOTICE_TEMPLATE_MAX_BLOCK_DEPTH))).toThrowError(badRequest);
+  });
+});
+
+/**
+ * Review round 2, R2B1: the budget also holds for school Notice templates
+ * (which render every plain notice) and for constructs other than
+ * `{{value}}`. The construct-by-construct tables are in
+ * `document.render.test.ts`; these are the notice paths with the reviewer's
+ * templates and a notice of the maximum length.
+ */
+describe('school Notice templates and the render budget', () => {
+  const badRequest = expect.objectContaining({ code: 'BAD_REQUEST' });
+  const longest = { ...SAMPLE_NOTICE_CONTEXT, notice: { ...SAMPLE_NOTICE_CONTEXT.notice, paragraphs: ['y'.repeat(199_000)] } };
+  let doubling = `{{#*inline "p0"}}${'x'.repeat(1_000)}{{/inline}}`;
+  for (let index = 1; index <= 24; index += 1) doubling += `{{#*inline "p${index}"}}{{> p${index - 1}}}{{> p${index - 1}}}{{/inline}}`;
+
+  it("refuses the reviewer's templates when they are saved, and bounds them if they are rendered anyway", () => {
+    const before = process.memoryUsage().rss;
+    const started = performance.now();
+    for (const template of [
+      // Accepted before: 2000 block lookups of the notice text (0.46 GB per render of a long notice).
+      '<p>{{#lookup notice "paragraphs"}}{{/lookup}}</p>'.repeat(2_000),
+      // Returned a 19.9 MB page against the 2 MB budget.
+      '<p>{{#lookup notice "paragraphs"}}{{/lookup}}</p>'.repeat(100),
+      // 4 MB accepted against the 2 MB budget; 0.5 GB allocated on the save request itself.
+      `${doubling}{{> p12}}`,
+      `${doubling}{{> p19}}`,
+      `${doubling}{{> p24}}`,
+      // An author's notice (every staff role) with the same constructs.
+      '{{#lookup notice "title"}}{{/lookup}}'.repeat(5_000),
+      '<img src="{{#lookup school "logoUrl"}}{{/lookup}}">'.repeat(10),
+    ]) {
+      expect(() => assertValidSchoolNoticeTemplate(template), template.slice(0, 50)).toThrowError(badRequest);
+      expect(() => assertValidNoticeTemplate(template), template.slice(0, 50)).toThrowError(badRequest);
+      // A stored copy (saved before this rule existed) cannot be rendered either, for any notice.
+      expect(() => renderNoticeDocument(template, longest, NOTICE_PUBLISHED_RENDER_MAX_CHARS), template.slice(0, 50)).toThrowError(badRequest);
+    }
+    expect(performance.now() - started).toBeLessThan(5_000);
+    expect(process.memoryUsage().rss - before).toBeLessThan(100_000_000);
+  });
+
+  it('checks a design against the longest notice when it is saved, and holds every render to the same budget', () => {
+    // The built-in design prints a notice of the maximum length.
+    expect(() => assertValidSchoolNoticeTemplate(defaultTemplate)).not.toThrow();
+    const printsTextTimes = (times: number) => `<h1>{{notice.title}}</h1>${'{{#each notice.paragraphs}}<p>{{this}}</p>{{/each}}'.repeat(times)}`;
+    // Twice (a notice with a tear-off copy) fits; twelve times fits the sample but not a long notice.
+    expect(() => assertValidSchoolNoticeTemplate(printsTextTimes(2))).not.toThrow();
+    expect(() => renderNoticeDocument(printsTextTimes(12), SAMPLE_NOTICE_CONTEXT, NOTICE_RENDER_MAX_CHARS)).not.toThrow();
+    expect(() => assertValidSchoolNoticeTemplate(printsTextTimes(12))).toThrowError(
+      expect.objectContaining({ code: 'BAD_REQUEST', message: expect.stringContaining('maximum length') }),
+    );
+    // Whatever was saved, the render of a real notice stops at the budget, published or not.
+    const before = process.memoryUsage().rss;
+    for (const budget of [NOTICE_RENDER_MAX_CHARS, NOTICE_PUBLISHED_RENDER_MAX_CHARS]) {
+      expect(() => renderNoticeDocument(printsTextTimes(2_000), longest, budget)).toThrowError(
+        expect.objectContaining({ code: 'BAD_REQUEST', message: expect.stringContaining('rendering limit') }),
+      );
+    }
+    expect(process.memoryUsage().rss - before).toBeLessThan(100_000_000);
+    // And an accepted page is never longer than the budget plus the wrapper the renderer adds.
+    const html = renderNoticeDocument(printsTextTimes(2), longest, NOTICE_RENDER_MAX_CHARS);
+    expect(html.length).toBeLessThan(NOTICE_RENDER_MAX_CHARS + 2_000);
+  });
+
+  it('bounds a long notice of many short paragraphs by the same budget', () => {
+    const many = { ...SAMPLE_NOTICE_CONTEXT, notice: { ...SAMPLE_NOTICE_CONTEXT.notice, paragraphs: Array.from({ length: 66_666 }, () => 'a') } };
+    // The built-in design prints it.
+    expect(() => renderNoticeDocument(defaultTemplate, many, NOTICE_RENDER_MAX_CHARS)).not.toThrow();
+    // Loops over the paragraphs that print nothing are work too: 66,666 x 66,666 empty runs are refused.
+    const started = performance.now();
+    expect(() =>
+      renderNoticeDocument('{{#each notice.paragraphs}}{{#each ../notice.paragraphs}}{{/each}}{{/each}}', many, NOTICE_RENDER_MAX_CHARS),
+    ).toThrowError(expect.objectContaining({ code: 'BAD_REQUEST', message: expect.stringContaining('rendering limit') }));
+    expect(performance.now() - started).toBeLessThan(5_000);
   });
 });
 
