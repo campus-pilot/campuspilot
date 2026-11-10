@@ -37,6 +37,16 @@ import {
   type ToolOutcome,
 } from './tools';
 
+/**
+ * Today's calendar date in India (Asia/Kolkata, `YYYY-MM-DD`), the schools'
+ * time zone, for the prompt: a UTC date is yesterday's until 05:30 IST.
+ * Read inside the run's first durable step, so a replay keeps it.
+ */
+const istToday = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
+
+/** The usage saved for a stopped request that reported none. */
+const NO_USAGE = { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 };
+
 /** Model requests one run may make before it stops to protect against loops. */
 export const MAX_MODEL_STEPS = 20;
 
@@ -337,7 +347,7 @@ export function createRunProcessor(deps: AssistantConversationDeps) {
         schoolName: await lookUpSchoolName(run.id, run.schoolId),
         userName: user.name,
         userEmail: user.email,
-        today: new Date().toISOString().slice(0, 10),
+        today: istToday(),
       },
     };
   }
@@ -474,9 +484,24 @@ export function createRunProcessor(deps: AssistantConversationDeps) {
 
     if (result.stopped) {
       const text = result.text;
-      if (text) {
-        const item = await ensureItem();
-        await tx(async (t, emit) => {
+      const item = text ? await ensureItem() : null;
+      await tx(async (t, emit) => {
+        // A stopped request is paid for too. Its usage is what the provider
+        // had reported before the abort (zeros when nothing arrived), saved as
+        // incomplete so the gap shows on the billing page.
+        await store.recordModelRequest(t, {
+          runId: run.runId,
+          schoolId: run.schoolId,
+          userId: run.userId,
+          requestKey: entryKey,
+          provider: provider.id,
+          requestedModel: provider.model,
+          answeredModel: result.model ?? provider.model,
+          usage: result.partialUsage ?? NO_USAGE,
+          usageComplete: false,
+          prices,
+        });
+        if (item) {
           await store.updateItem(t, emit, item, { status: 'complete', body: { text } });
           await store.appendTranscriptEntry(t, {
             conversationId: run.conversationId,
@@ -485,8 +510,9 @@ export function createRunProcessor(deps: AssistantConversationDeps) {
             content: provider.assistantTextContent(text),
             entryKey,
           });
-        });
-      }
+        }
+        await store.updateRun(t, emit, runRef(run), {});
+      });
       return { kind: 'stopped' };
     }
 
@@ -511,6 +537,7 @@ export function createRunProcessor(deps: AssistantConversationDeps) {
         requestedModel: provider.model,
         answeredModel: result.model,
         usage: result.usage,
+        usageComplete: true,
         prices,
       });
       if (item) {

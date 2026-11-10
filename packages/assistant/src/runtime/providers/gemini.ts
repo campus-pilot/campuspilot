@@ -198,7 +198,15 @@ export function createGeminiProvider({ apiKey, model }: { apiKey: string; model:
         modelVersion = chunk.modelVersion ?? modelVersion;
       }
     } catch (error) {
-      if (stopped && isAbort(error)) return { stopped: true, text: geminiVisibleText(parts) };
+      if (stopped && isAbort(error)) {
+        // Gemini reports usage on stream chunks; keep what arrived before the abort.
+        return {
+          stopped: true,
+          text: geminiVisibleText(parts),
+          partialUsage: usage ? normalizeGeminiUsage(usage) : null,
+          model: usage ? modelVersion : null,
+        };
+      }
       throw error;
     } finally {
       clearInterval(stopPoll);

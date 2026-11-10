@@ -40,8 +40,8 @@ async function teacherOf(schoolId: string) {
   return { ...staff, context: createHandlerContext(staff.session) };
 }
 
-/** Saves a model request of `costUsd` for the school this month, as the worker does. */
-async function spend(schoolId: string, userId: string, costUsd: string) {
+/** Saves a model request of `costUsd` for the school (this month unless `at` says when), as the worker does. */
+async function spend(schoolId: string, userId: string, costUsd: string, at?: Date) {
   const [conversation] = await db
     .insert(assistantConversationTable)
     .values({ schoolId, userId, provider: 'gemini', model: 'm' })
@@ -58,6 +58,7 @@ async function spend(schoolId: string, userId: string, costUsd: string) {
     provider: 'gemini',
     requestedModel: 'm',
     answeredModel: 'm',
+    usageComplete: true,
     inputTokens: 1,
     outputTokens: 1,
     cacheReadInputTokens: 0,
@@ -67,6 +68,7 @@ async function spend(schoolId: string, userId: string, costUsd: string) {
     cacheReadUsdPerMtok: '0',
     cacheWriteUsdPerMtok: '0',
     costUsd,
+    ...(at ? { createdAt: at } : {}),
   });
 }
 
@@ -139,7 +141,7 @@ describe('resolveAssistantAccess', () => {
     expect(await resolveAssistantAccess(db, { schoolId: school.id, userId: teacher.user.id })).toMatchObject({
       allowed: true,
       limitReached: false,
-      monthlyLimitUsd: 1,
+      limit: { known: true, monthlyLimitUsd: 1 },
     });
     // The spend is cached for limit checks (10 minutes); a new request is
     // seen once the cache entry is gone.
@@ -152,6 +154,25 @@ describe('resolveAssistantAccess', () => {
       limitReached: true,
       refusal: { code: 'limit_reached' },
     });
+  });
+
+  it('counts spend by IST month: 18:29 UTC on the last day is still that month, 18:31 UTC is the next', async () => {
+    const school = await createTestSchool();
+    const teacher = await teacherOf(school.id);
+    await enableAssistant(school.id, { monthlyLimitUsd: 1, eligibleRoles: ['teacher'] });
+    await switchOn(school.id, 'teacher');
+    const redis = getRedisClient();
+    await redis.del(`assistant:spend:${school.id}:2033-01`, `assistant:spend:${school.id}:2033-02`);
+    // 23:59 IST on 31 January, and 00:01 IST on 1 February.
+    await spend(school.id, teacher.user.id, '1', new Date('2033-01-31T18:29:00Z'));
+    await spend(school.id, teacher.user.id, '0.5', new Date('2033-01-31T18:31:00Z'));
+
+    const inJanuary = await resolveAssistantAccess(db, { schoolId: school.id, userId: teacher.user.id, now: new Date('2033-01-31T18:29:30Z') });
+    expect(inJanuary).toMatchObject({ limitReached: true, refusal: { code: 'limit_reached' } });
+    const inFebruary = await resolveAssistantAccess(db, { schoolId: school.id, userId: teacher.user.id, now: new Date('2033-01-31T18:31:30Z') });
+    expect(inFebruary).toMatchObject({ limitReached: false, allowed: true });
+    expect(await redis.get(`assistant:spend:${school.id}:2033-01`)).toBe('1.00000000');
+    expect(await redis.get(`assistant:spend:${school.id}:2033-02`)).toBe('0.50000000');
   });
 
   it('refuses with config_invalid when the stored settings no longer match their schema', async () => {

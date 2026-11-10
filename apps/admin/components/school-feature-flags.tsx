@@ -63,7 +63,7 @@ export const DISABLE_WARNINGS: Record<SchoolFeatureKey, string> = {
   notices:
     'Staff of this school can no longer open, write or publish notices, or edit the Notice template. Students no longer see notices in the Cadet Portal, and notice notifications that have not gone out yet are not sent. Existing notices are kept.',
   assistant:
-    'Staff of this school no longer see the AI assistant or their assistant conversations, and a turn in progress stops before its next model request. Conversations, usage and costs are kept and come back when the assistant is enabled again.',
+    'Staff of this school no longer see the AI assistant or their assistant conversations. A turn in progress is refused at its next model request; a turn waiting for approval stays paused until the assistant is enabled again. Conversations, usage and costs are kept and come back when the assistant is enabled again.',
 };
 
 const featureFormSchema = z.object({ enabled: z.boolean() });

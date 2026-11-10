@@ -14,8 +14,9 @@ import {
   type UsageRangePreset,
 } from './usage-model';
 
-/** The longest range the usage procedures answer, in days (the API's limit). */
-export const MAX_USAGE_RANGE_DAYS = 400;
+import { MAX_USAGE_RANGE_DAYS } from '@campuspilot/assistant-contract/usage';
+
+export { MAX_USAGE_RANGE_DAYS };
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Pick a date.');
 
@@ -53,15 +54,16 @@ export function resolveUsageSelection(values: UsageRangeFormValues, now: Date): 
 }
 
 /**
- * The usage range picker's form: last 7 days by default, this month, last
- * month or custom dates (IST), grouped per day or per month. Validated with
+ * The usage range picker's form: last 7 days by default (a page may start on
+ * another preset, such as this month for billing), this month, last month or
+ * custom dates (IST), grouped per day or per month. Validated with
  * Zod on every change; the selection is derived from the form's values
  * (`useUsageSelection`), so the views refetch as soon as a valid range is
  * picked and nothing else holds a copy of it.
  */
-export function useUsageRangeForm() {
+export function useUsageRangeForm({ defaultPreset = 'last7' }: { defaultPreset?: Exclude<UsageRangePreset, 'custom'> } = {}) {
   return useForm({
-    defaultValues: { preset: 'last7', from: '', to: '', grouping: 'day' } as UsageRangeFormValues,
+    defaultValues: { preset: defaultPreset, from: '', to: '', grouping: 'day' } as UsageRangeFormValues,
     validators: { onChange: usageRangeFormSchema },
   });
 }

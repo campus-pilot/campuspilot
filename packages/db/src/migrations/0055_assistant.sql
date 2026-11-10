@@ -55,10 +55,11 @@ CREATE TABLE "assistant_item" (
 --> statement-breakpoint
 CREATE TABLE "assistant_model_request" (
 	"id" text PRIMARY KEY NOT NULL,
-	"run_id" text NOT NULL,
+	"run_id" text,
 	"school_id" text NOT NULL,
 	"user_id" text NOT NULL,
 	"request_key" text NOT NULL,
+	"usage_complete" boolean NOT NULL,
 	"provider" "assistant_model_provider" NOT NULL,
 	"requested_model" text NOT NULL,
 	"answered_model" text NOT NULL,
@@ -132,7 +133,7 @@ ALTER TABLE "assistant_approval" ADD CONSTRAINT "assistant_approval_school_id_sc
 ALTER TABLE "assistant_conversation" ADD CONSTRAINT "assistant_conversation_school_id_school_id_fk" FOREIGN KEY ("school_id") REFERENCES "public"."school"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "assistant_item" ADD CONSTRAINT "assistant_item_conversation_id_assistant_conversation_id_fk" FOREIGN KEY ("conversation_id") REFERENCES "public"."assistant_conversation"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "assistant_item" ADD CONSTRAINT "assistant_item_run_id_assistant_run_id_fk" FOREIGN KEY ("run_id") REFERENCES "public"."assistant_run"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "assistant_model_request" ADD CONSTRAINT "assistant_model_request_run_id_assistant_run_id_fk" FOREIGN KEY ("run_id") REFERENCES "public"."assistant_run"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "assistant_model_request" ADD CONSTRAINT "assistant_model_request_run_id_assistant_run_id_fk" FOREIGN KEY ("run_id") REFERENCES "public"."assistant_run"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "assistant_model_request" ADD CONSTRAINT "assistant_model_request_school_id_school_id_fk" FOREIGN KEY ("school_id") REFERENCES "public"."school"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "assistant_run" ADD CONSTRAINT "assistant_run_conversation_id_assistant_conversation_id_fk" FOREIGN KEY ("conversation_id") REFERENCES "public"."assistant_conversation"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "assistant_run" ADD CONSTRAINT "assistant_run_school_id_school_id_fk" FOREIGN KEY ("school_id") REFERENCES "public"."school"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint

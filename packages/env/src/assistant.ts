@@ -73,8 +73,8 @@ function requireCompleteProviders(value: Record<string, unknown>, context: z.Ref
   }
 }
 
-export const env = createEnv({
-  server: {
+/** The assistant settings' shape, without validation (see `assistantEnvSchema`). */
+const assistantEnvShape = {
     NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
     /**
      * Model provider for new conversations. Existing conversations keep the
@@ -98,7 +98,18 @@ export const env = createEnv({
      * and never meant for real users, who would see internals.
      */
     ASSISTANT_DIAGNOSTICS: z.stringbool().default(false),
-  },
+};
+
+/**
+ * The full assistant environment schema, with the all-or-nothing rule per
+ * provider. Exported so the rule is testable without a process environment.
+ */
+export const assistantEnvSchema = z.object(assistantEnvShape).superRefine((value, context) => {
+  requireCompleteProviders(value, context);
+});
+
+export const env = createEnv({
+  server: assistantEnvShape,
   createFinalSchema: (shape) =>
     z.object(shape).superRefine((value, context) => {
       requireCompleteProviders(value, context);

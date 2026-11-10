@@ -23,11 +23,14 @@ process.on('uncaughtException', (err: unknown) => {
  * The dynamic imports resolve to the instances the test file used.
  */
 afterAll(async () => {
-  const [{ db }, { authDb }, { getRedis }] = await Promise.all([
+  const [{ db }, { authDb }, { getRedis }, { getRedisClient }] = await Promise.all([
     import('@campuspilot/db'),
     import('@campuspilot/auth/server'),
     import('../src/redis'),
+    import('@campuspilot/redis/client'),
   ]);
   getRedis().disconnect();
+  // The API's own client (spend and usage caches), when a test used it.
+  getRedisClient().disconnect();
   await Promise.all([db.$client.end(), authDb.$client.end()]);
 });

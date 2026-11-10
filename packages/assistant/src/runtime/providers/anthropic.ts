@@ -11,6 +11,7 @@ import type {
   ModelStepResult,
   ModelToolResult,
   ModelToolUse,
+  ModelUsage,
 } from './types';
 
 /**
@@ -77,7 +78,7 @@ export type StreamAssistantResponseInput = {
 
 export type StreamAssistantResponseResult =
   | { stopped: false; response: AssistantModelResponse; text: string }
-  | { stopped: true; text: string };
+  | { stopped: true; text: string; partialUsage: ModelUsage | null; model: string | null };
 
 /** Visible text of a response: its text blocks, separated by blank lines. */
 export function responseText(content: Anthropic.Beta.Messages.BetaContentBlock[]): string {
@@ -153,7 +154,22 @@ export async function streamAssistantResponse({
     }
   };
 
+  // Usage as the stream reports it (`message_start`, then `message_delta`),
+  // so a stopped request still says what it had used.
+  let partialUsage: ModelUsage | null = null;
+  let answeringModel: string | null = null;
   stream.on('streamEvent', (event) => {
+    if (event.type === 'message_start') {
+      answeringModel = event.message.model;
+      partialUsage = {
+        inputTokens: event.message.usage.input_tokens,
+        outputTokens: event.message.usage.output_tokens,
+        cacheReadInputTokens: event.message.usage.cache_read_input_tokens ?? 0,
+        cacheCreationInputTokens: event.message.usage.cache_creation_input_tokens ?? 0,
+      };
+    } else if (event.type === 'message_delta' && partialUsage) {
+      partialUsage = { ...partialUsage, outputTokens: event.usage.output_tokens };
+    }
     if (event.type === 'content_block_start' && event.content_block.type === 'text' && text) {
       text += '\n\n';
     } else if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
@@ -191,7 +207,7 @@ export async function streamAssistantResponse({
     };
   } catch (error) {
     if (stopped && error instanceof Anthropic.APIUserAbortError) {
-      return { stopped: true, text };
+      return { stopped: true, text, partialUsage, model: answeringModel };
     }
     throw error;
   } finally {
@@ -243,7 +259,7 @@ export function createAnthropicProvider({ apiKey, model }: { apiKey: string; mod
         onText,
         isStopRequested,
       });
-      if (result.stopped) return { stopped: true, text: result.text };
+      if (result.stopped) return { stopped: true, text: result.text, partialUsage: result.partialUsage, model: result.model };
       const { response } = result;
       return {
         stopped: false,

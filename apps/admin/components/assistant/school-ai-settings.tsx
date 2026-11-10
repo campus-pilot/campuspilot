@@ -158,8 +158,24 @@ function RolesField({ form }: { form: SettingsForm }) {
   );
 }
 
-function SaveRow({ form, wasEnabled }: { form: SettingsForm; wasEnabled: boolean }) {
+/**
+ * Saving, by the button or by Enter in a field: switching a live assistant
+ * off asks first (the confirmation dialog), anything else saves at once.
+ * The dialog's open flag is UI state, not form state.
+ */
+function useSaveRequest(form: SettingsForm, wasEnabled: boolean) {
   const [confirmingDisable, setConfirmingDisable] = useState(false);
+  const requestSave = () => {
+    if (wasEnabled && !form.state.values.enabled) setConfirmingDisable(true);
+    else void form.handleSubmit();
+  };
+  return { confirmingDisable, setConfirmingDisable, requestSave };
+}
+
+type SaveRequest = ReturnType<typeof useSaveRequest>;
+
+function SaveRow({ form, wasEnabled, save }: { form: SettingsForm; wasEnabled: boolean; save: SaveRequest }) {
+  const { confirmingDisable, setConfirmingDisable, requestSave } = save;
   const label = schoolFeatureCatalogue.assistant.label;
   return (
     <form.Subscribe
@@ -181,10 +197,7 @@ function SaveRow({ form, wasEnabled }: { form: SettingsForm; wasEnabled: boolean
             <Button
               type="button"
               disabled={!isDirty || isSubmitting}
-              onClick={() => {
-                if (wasEnabled && !enabled) setConfirmingDisable(true);
-                else void form.handleSubmit();
-              }}
+              onClick={requestSave}
             >
               {isSubmitting ? <LoaderCircle className="animate-spin" aria-hidden /> : null}
               {isSubmitting ? 'Saving…' : 'Save changes'}
@@ -216,18 +229,19 @@ export function AssistantSettingsForm({
   stored: { enabled: boolean; config: AssistantConfig | null };
 }) {
   const form = useAssistantSettingsForm(schoolId, stored);
+  const save = useSaveRequest(form, stored.enabled);
   return (
     <form
       className="flex flex-col gap-5"
       onSubmit={(event) => {
         event.preventDefault();
-        void form.handleSubmit();
+        save.requestSave();
       }}
     >
       <EnabledField form={form} />
       <LimitField form={form} />
       <RolesField form={form} />
-      <SaveRow form={form} wasEnabled={stored.enabled} />
+      <SaveRow form={form} wasEnabled={stored.enabled} save={save} />
     </form>
   );
 }

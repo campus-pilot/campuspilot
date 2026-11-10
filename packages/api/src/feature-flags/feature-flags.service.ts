@@ -5,6 +5,7 @@ import {
   SCHOOL_FEATURE_DISABLED_REASON,
   type SchoolFeatureConfig,
   schoolFeatureCatalogue,
+  schoolFeatureHasConfig,
   type SchoolFeatureDisabledData,
   type SchoolFeatureEntry,
   type SchoolFeatureKey,
@@ -17,6 +18,8 @@ import {
 } from '@campuspilot/db/feature-flags/store';
 import { schoolFeatureFlagTable } from '@campuspilot/db/schema/school-feature-flag';
 import { ORPCError } from '@orpc/server';
+
+import { rpcError } from '../errors';
 
 /**
  * Per-school feature flags (docs/feature-flags.md). Reads come from
@@ -109,7 +112,9 @@ export type SetSchoolFeatureInput = SchoolFeatureEntry & {
 /**
  * Writes one feature's state for a school (insert or replace). `enabled` and
  * `config` are both stored as given: disabling does not clear the config,
- * and the config is validated against the schema of `feature`.
+ * and the config is validated against the schema of `feature`. Enabling a
+ * feature whose catalogue config is not `z.null()` requires a config
+ * (BAD_REQUEST otherwise); disabling never does.
  * The caller verifies that the school exists and that the actor may change
  * flags; pass a transaction to write together with other rows.
  */
@@ -118,6 +123,11 @@ export async function setSchoolFeature(
   input: SetSchoolFeatureInput,
 ): Promise<void> {
   const config = parseSchoolFeatureConfig(input.feature, input.config);
+  // A feature with settings cannot be switched on without them: whatever
+  // reads them would have nothing to go by. Disabling stays possible either way.
+  if (input.enabled && config === null && schoolFeatureHasConfig(input.feature)) {
+    throw rpcError.badRequest(`${schoolFeatureCatalogue[input.feature].label} needs its settings to be enabled.`);
+  }
   const updatedAt = new Date();
   await db
     .insert(schoolFeatureFlagTable)

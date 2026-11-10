@@ -3,13 +3,7 @@ import { assistantContract } from '@campuspilot/assistant-contract/contract';
 import { ASSISTANT_LIST_PAGE_SIZE, type AssistantStreamEvent } from '@campuspilot/assistant-contract/dto';
 import { implement, ORPCError } from '@orpc/server';
 
-import {
-  assertCanRead,
-  assertCanUse,
-  canRead,
-  loadAssistantAccess,
-  roleAllowed,
-} from './access';
+import { assertCanSee, assertCanUse, assertMember, canSee, loadAssistantAccess } from './access';
 import { db } from './db';
 import { handOverApprovalResolution, handOverRun } from './dispatch';
 import { liveEvents, streamingTexts, subscribeAssistantEvents } from './events';
@@ -49,9 +43,12 @@ const authed = os.use(async ({ context, next }) => {
 
 type Authed = { session: AssistantSession };
 
-/** Throws unless the user may read their assistant history in the school. */
+/**
+ * Throws unless the user may see the assistant in the school (feature,
+ * membership, an eligible role the school switched on; not the limit).
+ */
 async function assertReadAccess(context: Authed, schoolId: string) {
-  assertCanRead(await loadAssistantAccess(context.session, schoolId));
+  assertCanSee(await loadAssistantAccess(context.session, schoolId));
 }
 
 /** Throws unless the user may start or continue a turn in the school now. */
@@ -104,7 +101,7 @@ const ACCESS_RECHECK_MS = 2 * 60_000;
 async function streamStillAllowed(context: Authed, headers: Headers, schoolId: string): Promise<boolean> {
   try {
     const current = await resolveAssistantSession(headers);
-    return current?.user.id === context.session.user.id && canRead(await loadAssistantAccess(current, schoolId));
+    return current?.user.id === context.session.user.id && canSee(await loadAssistantAccess(current, schoolId));
   } catch (err) {
     log.warn({ err, schoolId }, 'assistant.stream.access-recheck-failed');
     return true;
@@ -140,9 +137,11 @@ export const assistantRouter = os.router({
    */
   getStatus: authed.getStatus.handler(async ({ context, input }) => {
     const access = await loadAssistantAccess(context.session, input.schoolId);
-    assertCanRead(access);
+    // The status answers every member, so the app can tell "not for you"
+    // (`allowed: false`) from an error; everything else requires `allowed`.
+    assertMember(access);
     const provider = providerAvailability();
-    const allowed = roleAllowed(access);
+    const allowed = canSee(access);
     if (!provider.configured) return { configured: false, allowed, available: false, unavailableReason: provider.unavailableReason };
     return {
       configured: true,
@@ -331,8 +330,8 @@ export const assistantRouter = os.router({
 
   /**
    * Approving continues the turn, so it needs use access (enforced by the
-   * fresh token it issues); declining only needs the history to be the
-   * user's to read.
+   * fresh token it issues); declining needs read access, so it stays
+   * possible at the limit.
    */
   respondToApproval: authed.respondToApproval.handler(async ({ context, input }) => {
     await assertReadAccess(context, input.schoolId);
@@ -372,7 +371,7 @@ export const assistantRouter = os.router({
     return store.toRunDto(run);
   }),
 
-  /** Stopping spends nothing, so it needs only read access: a user whose role was switched off can still stop. */
+  /** Stopping spends nothing, so it needs only read access (it stays possible at the limit). */
   stopRun: authed.stopRun.handler(async ({ context, input }) => {
     await assertReadAccess(context, input.schoolId);
     const run = await store.findRun(db, input.runId);
@@ -389,9 +388,12 @@ export const assistantRouter = os.router({
 
   /**
    * Deletes a conversation for good. The same checks as reading it: the
-   * user may use the assistant in the school, and the conversation is their
+   * user may see the assistant in the school (feature, membership, an
+   * eligible role switched on; not the limit), and the conversation is their
    * own. It is refused while a run has not finished, so the user stops the
-   * assistant first and nothing is deleted from under a working turn.
+   * assistant first and nothing is deleted from under a working turn. The
+   * saved costs of its model requests are kept (their run reference is
+   * cleared), so spend and limits do not change.
    */
   deleteConversation: authed.deleteConversation.handler(async ({ context, input }) => {
     await assertReadAccess(context, input.schoolId);

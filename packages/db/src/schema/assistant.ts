@@ -1,5 +1,6 @@
 import type { AssistantView } from "@campuspilot/assistant-contract/views";
 import {
+  boolean,
   index,
   integer,
   jsonb,
@@ -371,7 +372,8 @@ export const assistantTranscriptEntryTable = pgTable(
 );
 
 /**
- * One model request and what it cost, saved when the response arrives.
+ * One model request and what it cost, saved when the response arrives (or
+ * when a stopped request is abandoned, see `usage_complete`).
  *
  * Prices are the ones the worker was configured with at that moment (USD per
  * million tokens, from env), stored with the row, and `cost_usd` is computed
@@ -389,15 +391,27 @@ export const assistantModelRequestTable = pgTable(
     id: text("id")
       .primaryKey()
       .$default(() => generateId("assistantModelRequest")),
-    runId: text("run_id")
-      .notNull()
-      .references(() => assistantRunTable.id, { onDelete: "cascade" }),
+    /**
+     * The run that made the request; null once its conversation was deleted.
+     * The row itself is kept (`ON DELETE SET NULL`): saved costs are the
+     * billing truth and the month's spend must not drop when a user deletes
+     * a conversation. Every spend and usage read uses this table, never runs.
+     */
+    runId: text("run_id").references(() => assistantRunTable.id, { onDelete: "set null" }),
     schoolId: text("school_id")
       .notNull()
       .references(() => schoolTable.id, { onDelete: "cascade" }),
     /** No foreign key: a deleted user's costs are kept. */
     userId: text("user_id").notNull(),
     requestKey: text("request_key").notNull().unique(),
+    /**
+     * Whether the token counts are the provider's final usage of the request.
+     * False for a request stopped mid-stream: its counts are whatever the
+     * provider had reported before the abort (possibly nothing, then zeros),
+     * so the cost is a lower bound. Its own fact, never inferred from zero
+     * tokens; the billing page counts such rows.
+     */
+    usageComplete: boolean("usage_complete").notNull(),
     provider: assistantModelProviderEnum("provider").notNull(),
     /** The model the worker asked for (its configured model). */
     requestedModel: text("requested_model").notNull(),

@@ -40,6 +40,8 @@ async function request(options: {
   costUsd: string;
   model?: string;
   inputUsdPerMtok?: string;
+  inputTokens?: number;
+  usageComplete?: boolean;
 }) {
   const [conversation] = await db
     .insert(assistantConversationTable)
@@ -64,7 +66,8 @@ async function request(options: {
     provider: 'gemini',
     requestedModel: options.model ?? 'gemini-3.8-flash',
     answeredModel: options.model ?? 'gemini-3.8-flash',
-    inputTokens: 1000,
+    usageComplete: options.usageComplete ?? true,
+    inputTokens: options.inputTokens ?? 1000,
     outputTokens: 100,
     cacheReadInputTokens: 10,
     cacheCreationInputTokens: 0,
@@ -109,6 +112,23 @@ describe('school.getAssistantUsage', () => {
         prices: [{ inputUsdPerMtok: '0.75', outputUsdPerMtok: '3.75', cacheReadUsdPerMtok: '0.075', cacheWriteUsdPerMtok: '0', requests: 3 }],
       }),
     ]);
+  });
+
+  it('adds token counts past the 32-bit range without overflow, and counts requests with incomplete usage', async () => {
+    const school = await createTestSchool();
+    await enable(school.id);
+    const principal = await createSchoolStaffSession(school.id, [{ role: 'principal' }]);
+    const userId = principal.user.id;
+    // Each row holds the largest integer the column takes; three of them pass 2³¹.
+    for (const at of ['2031-07-01T06:00:00Z', '2031-07-01T07:00:00Z', '2031-07-01T08:00:00Z']) {
+      await request({ schoolId: school.id, userId, at, costUsd: '1', inputTokens: 2_147_483_647 });
+    }
+    await request({ schoolId: school.id, userId, at: '2031-07-01T09:00:00Z', costUsd: '0', inputTokens: 0, usageComplete: false });
+
+    const usage = await createTestClient(principal.session).school.getAssistantUsage({ schoolId: school.id, from: '2031-07-01', to: '2031-07-01' });
+    expect(usage.total).toMatchObject({ requests: 4, incompleteRequests: 1, inputTokens: 3 * 2_147_483_647 });
+    expect(usage.days[0]).toMatchObject({ inputTokens: 6_442_450_941, incompleteRequests: 1 });
+    expect(usage.models[0]).toMatchObject({ inputTokens: 6_442_450_941, incompleteRequests: 1 });
   });
 
   it('is cached for an hour: a request saved after the first read is not seen yet', async () => {

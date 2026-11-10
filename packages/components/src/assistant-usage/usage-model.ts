@@ -1,4 +1,5 @@
 import { formatUsdText, sumUsd } from '@campuspilot/assistant-contract/money';
+import { addTokenCounts, type TokenCount } from '@campuspilot/assistant-contract/usage';
 
 /**
  * Pure helpers of the assistant usage views (admin AI pages, the school's
@@ -11,10 +12,10 @@ import { formatUsdText, sumUsd } from '@campuspilot/assistant-contract/money';
 export type UsageDay = {
   date: string;
   requests: number;
-  inputTokens: number;
-  outputTokens: number;
-  cacheReadInputTokens: number;
-  cacheCreationInputTokens: number;
+  inputTokens: TokenCount;
+  outputTokens: TokenCount;
+  cacheReadInputTokens: TokenCount;
+  cacheCreationInputTokens: TokenCount;
   costUsd: string;
 };
 
@@ -26,7 +27,7 @@ export type UsagePeriod = {
   period: string;
   label: string;
   requests: number;
-  tokens: number;
+  tokens: TokenCount;
   costUsd: string;
 };
 
@@ -80,7 +81,7 @@ const dayLabel = new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'shor
 const monthLabel = new Intl.DateTimeFormat('en-IN', { month: 'short', year: 'numeric', timeZone: 'UTC' });
 
 const tokensOf = (day: UsageDay) =>
-  day.inputTokens + day.outputTokens + day.cacheReadInputTokens + day.cacheCreationInputTokens;
+  addTokenCounts(day.inputTokens, day.outputTokens, day.cacheReadInputTokens, day.cacheCreationInputTokens);
 
 /** Days as they are, or added up per calendar month (exact USD sums). */
 export function groupUsage(days: readonly UsageDay[], grouping: UsageGrouping): UsagePeriod[] {
@@ -102,7 +103,7 @@ export function groupUsage(days: readonly UsageDay[], grouping: UsageGrouping): 
     period,
     label: monthLabel.format(new Date(`${period}-01T00:00:00Z`)),
     requests: monthDays.reduce((sum, day) => sum + day.requests, 0),
-    tokens: monthDays.reduce((sum, day) => sum + tokensOf(day), 0),
+    tokens: addTokenCounts(...monthDays.map(tokensOf)),
     costUsd: sumUsd(monthDays.map((day) => day.costUsd)),
   }));
 }

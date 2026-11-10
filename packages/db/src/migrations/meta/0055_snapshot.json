@@ -1,5 +1,5 @@
 {
-  "id": "761a93c0-c6aa-4119-a9e9-2da913eb956b",
+  "id": "5feabfc3-0a8e-4f79-8e13-b0b77cb8eea2",
   "prevId": "f2673503-e74f-4b59-8515-9e217f32da92",
   "version": "7",
   "dialect": "postgresql",
@@ -1035,7 +1035,7 @@
           "name": "run_id",
           "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "school_id": {
           "name": "school_id",
@@ -1052,6 +1052,12 @@
         "request_key": {
           "name": "request_key",
           "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "usage_complete": {
+          "name": "usage_complete",
+          "type": "boolean",
           "primaryKey": false,
           "notNull": true
         },
@@ -1200,7 +1206,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
+          "onDelete": "set null",
           "onUpdate": "no action"
         },
         "assistant_model_request_school_id_school_id_fk": {

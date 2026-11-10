@@ -6,7 +6,11 @@ import { getRedisClient } from '@campuspilot/redis/client';
 import { and, desc, eq, gte, lt, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 
+import { MAX_USAGE_RANGE_DAYS, tokenCountFromText } from '@campuspilot/assistant-contract/usage';
+
 import { IST_TIME_ZONE, istDate, istDayStart } from './ist';
+
+export { MAX_USAGE_RANGE_DAYS };
 
 /**
  * Assistant spend for people to read (the school's usage tab, the admin AI
@@ -18,9 +22,6 @@ import { IST_TIME_ZONE, istDate, istDayStart } from './ist';
 
 /** How long a usage answer is reused. */
 export const USAGE_CACHE_SECONDS = 60 * 60;
-
-/** The longest range one request may ask for, in days. */
-export const MAX_USAGE_RANGE_DAYS = 400;
 
 const isoDate = z
   .string()
@@ -62,12 +63,21 @@ export const usageRangeSchema = withUsageRange({});
 
 export type UsageRange = z.infer<typeof usageRangeSchema>;
 
+/** A token sum: a number while it is a safe integer, its decimal text beyond (see `TokenCount`). */
+const tokenCountSchema = z.union([z.number().int().nonnegative(), z.string().regex(/^\d+$/)]);
+
 const tokenShape = {
   requests: z.number().int(),
-  inputTokens: z.number().int(),
-  outputTokens: z.number().int(),
-  cacheReadInputTokens: z.number().int(),
-  cacheCreationInputTokens: z.number().int(),
+  /**
+   * Requests saved with incomplete usage (stopped mid-stream; see
+   * `assistant_model_request.usage_complete`): their tokens and cost are
+   * lower bounds, so the provider may bill more.
+   */
+  incompleteRequests: z.number().int(),
+  inputTokens: tokenCountSchema,
+  outputTokens: tokenCountSchema,
+  cacheReadInputTokens: tokenCountSchema,
+  cacheCreationInputTokens: tokenCountSchema,
   /** USD as decimal text, the exact sum of saved costs. */
   costUsd: z.string(),
 };
@@ -123,16 +133,46 @@ export const assistantUsageSchema = z.object({
 
 export type AssistantUsage = z.infer<typeof assistantUsageSchema>;
 
+/**
+ * Sums of a group of rows. Token sums are `bigint` (an `integer` sum would
+ * overflow past 2³¹) and read back as text, then converted without rounding
+ * (`tokenCountFromText`).
+ */
 const sums = {
   requests: sql<number>`count(*)::int`,
-  inputTokens: sql<number>`coalesce(sum(${assistantModelRequestTable.inputTokens}), 0)::int`,
-  outputTokens: sql<number>`coalesce(sum(${assistantModelRequestTable.outputTokens}), 0)::int`,
-  cacheReadInputTokens: sql<number>`coalesce(sum(${assistantModelRequestTable.cacheReadInputTokens}), 0)::int`,
-  cacheCreationInputTokens: sql<number>`coalesce(sum(${assistantModelRequestTable.cacheCreationInputTokens}), 0)::int`,
+  incompleteRequests: sql<number>`(count(*) filter (where not ${assistantModelRequestTable.usageComplete}))::int`,
+  inputTokens: sql<string>`coalesce(sum(${assistantModelRequestTable.inputTokens}), 0)::bigint::text`,
+  outputTokens: sql<string>`coalesce(sum(${assistantModelRequestTable.outputTokens}), 0)::bigint::text`,
+  cacheReadInputTokens: sql<string>`coalesce(sum(${assistantModelRequestTable.cacheReadInputTokens}), 0)::bigint::text`,
+  cacheCreationInputTokens: sql<string>`coalesce(sum(${assistantModelRequestTable.cacheCreationInputTokens}), 0)::bigint::text`,
   costUsd: sql<string>`coalesce(sum(${assistantModelRequestTable.costUsd}), 0)::text`,
 };
 
-const ZERO = { requests: 0, inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, costUsd: '0' };
+type SumRow = { [K in keyof typeof sums]: (typeof sums)[K]['_']['type'] };
+
+/** A row of {@link sums} as the API returns it. */
+function toTotals(row: SumRow | undefined) {
+  if (!row) return ZERO;
+  return {
+    requests: row.requests,
+    incompleteRequests: row.incompleteRequests,
+    inputTokens: tokenCountFromText(row.inputTokens),
+    outputTokens: tokenCountFromText(row.outputTokens),
+    cacheReadInputTokens: tokenCountFromText(row.cacheReadInputTokens),
+    cacheCreationInputTokens: tokenCountFromText(row.cacheCreationInputTokens),
+    costUsd: trimUsd(row.costUsd),
+  };
+}
+
+const ZERO = {
+  requests: 0,
+  incompleteRequests: 0,
+  inputTokens: 0,
+  outputTokens: 0,
+  cacheReadInputTokens: 0,
+  cacheCreationInputTokens: 0,
+  costUsd: '0',
+};
 
 /** The rows of a range (IST days, `to` inclusive), for one school or the platform. */
 function rangeFilter(range: UsageRange, schoolId: string | null): SQL | undefined {
@@ -196,16 +236,14 @@ async function computeUsage(db: DatabaseExecutor, range: UsageRange, schoolId: s
   return {
     from: range.from,
     to: range.to,
-    total: { ...ZERO, ...totalRows[0], costUsd: trimUsd(totalRows[0]?.costUsd ?? '0') },
-    days: datesOf(range).map((date) => {
-      const row = byDay.get(date);
-      return row ? { ...row, date, costUsd: trimUsd(row.costUsd) } : { date, ...ZERO };
-    }),
-    models: modelRows.map((row) => ({
-      ...row,
-      costUsd: trimUsd(row.costUsd),
+    total: toTotals(totalRows[0]),
+    days: datesOf(range).map((date) => ({ date, ...toTotals(byDay.get(date)) })),
+    models: modelRows.map(({ provider, model, ...row }) => ({
+      provider,
+      model,
+      ...toTotals(row),
       prices: priceRows
-        .filter((price) => price.provider === row.provider && price.model === row.model)
+        .filter((price) => price.provider === provider && price.model === model)
         .map(({ provider: _provider, model: _model, ...price }) => ({
           ...price,
           inputUsdPerMtok: trimUsd(price.inputUsdPerMtok),

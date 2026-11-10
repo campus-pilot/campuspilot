@@ -75,6 +75,30 @@ describe('systemAdmin school feature flags', () => {
     });
   });
 
+  describe('features with settings', () => {
+    it('cannot be enabled without their settings, but can always be disabled', async () => {
+      const school = await createTestSchool();
+      const client = createTestClient(admin);
+      await expect(
+        client.systemAdmin.updateSchoolFeatureFlag({ id: school.id, feature: 'assistant', enabled: true, config: null }),
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+      expect((await client.systemAdmin.getSchoolFeatureFlags({ id: school.id })).features.assistant).toEqual(OFF);
+
+      await expect(
+        client.systemAdmin.updateSchoolFeatureFlag({ id: school.id, feature: 'assistant', enabled: false, config: null }),
+      ).resolves.toMatchObject({ features: { assistant: OFF } });
+
+      const config = { monthlyLimitUsd: 50, eligibleRoles: ['principal' as const] };
+      await expect(
+        client.systemAdmin.updateSchoolFeatureFlag({ id: school.id, feature: 'assistant', enabled: true, config }),
+      ).resolves.toMatchObject({ features: { assistant: { enabled: true, config } } });
+      // Switching off keeps the settings.
+      await expect(
+        client.systemAdmin.updateSchoolFeatureFlag({ id: school.id, feature: 'assistant', enabled: false, config }),
+      ).resolves.toMatchObject({ features: { assistant: { enabled: false, config } } });
+    });
+  });
+
   describe('domain behaviour and persistence', () => {
     it('answers NOT_FOUND for a school that does not exist', async () => {
       const client = createTestClient(admin);

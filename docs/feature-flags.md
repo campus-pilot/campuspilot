@@ -245,9 +245,10 @@ switched on, the IST month spend under the limit); see
 
 | Surface | Behaviour when off |
 | --- | --- |
-| Every `/model/*` procedure (list, get, subscribe, send, approve, stop, delete, status) | Disabled-feature error (`feature: 'assistant'`); nothing is written. Open streams end at their next recheck. |
+| Every `/model/*` procedure (list, get, subscribe, send, approve, decline, stop, delete, status) | Disabled-feature error (`feature: 'assistant'`); nothing is written. Open streams end at their next recheck. |
 | Delegated token issue (`issueAssistantRunToken`) | Disabled-feature error: no token. |
-| Worker, before every model request | The run fails with `feature_disabled`; changes already approved and made stay made. |
+| Worker, before every model request | The run fails with `feature_disabled`; changes already approved and made stay made. A run waiting for approval stays paused until the feature is on again. |
+| `systemAdmin.updateSchoolFeatureFlag` | Enabling needs the settings (`monthlyLimitUsd`, `eligibleRoles`); BAD_REQUEST without them. |
 | `school.getAssistantAccess`, `school.updateAssistantRoles`, `school.getAssistantUsage` | Disabled-feature error after the permission check. |
 | Management UI | The navbar panel button, sidebar link and ⌘K entry (`AssistantAccess`), the assistant pages (`FeaturePage`), Settings › AI assistant and Settings › Usage disappear. |
 
@@ -263,8 +264,9 @@ showing past spend.
    `DEMO_SCHOOL_FEATURE_DEFAULTS`, the admin editor's `DISABLE_WARNINGS`, and
    the pinned key lists in tests. If the feature has notifications, name it in
    `notificationRequiredFeatures` for each of its types.
-2. If it has settings, add its config control to the admin editor (the guard
-   there fails until you do) and decide the demo's config. Read them in
+2. If it has settings, give it a settings page in the admin app and name it
+   in `SETTINGS_PAGES` (the guard there fails until you do), and decide the
+   demo's config. `setSchoolFeature` refuses to enable it without a config. Read them in
    handlers with `getSchoolFeatureConfig`, after the gate; never parse a
    config inside a gate.
 3. Gate the API: `requireSchoolFeature('<key>')` after the permission

@@ -1,10 +1,14 @@
 import { randomUUID } from 'node:crypto';
 
 import { assistantConversationAttention, type AssistantRunStatus } from '@campuspilot/assistant-contract/dto';
+import { istMonthOf } from '@campuspilot/api/assistant/ist';
+import { schoolMonthSpendUsd } from '@campuspilot/api/assistant/spend';
+import { getRedisClient } from '@campuspilot/redis/client';
 import {
   assistantApprovalTable,
   assistantConversationTable,
   assistantItemTable,
+  assistantModelRequestTable,
   assistantRunTable,
   assistantTranscriptEntryTable,
 } from '@campuspilot/db/schema/assistant';
@@ -46,7 +50,7 @@ const ALLOWED: AssistantAccessDecision = {
   featureEnabled: true,
   member: true,
   allowedRoles: ['principal'],
-  monthlyLimitUsd: null,
+  limit: { known: true, monthlyLimitUsd: null },
   limitReached: false,
   allowed: true,
   refusal: null,
@@ -388,10 +392,39 @@ describe('deleting a conversation', () => {
     expect(await rowsOf(turn.conversationId)).toMatchObject({ conversations: 1 });
   });
 
-  it('is allowed for a user whose role was switched off: their history stays theirs', async () => {
+  it('is refused for a user whose role was switched off, and keeps the conversation', async () => {
     const turn = await finishedConversationWithEverything();
     loadAccessMock.mockResolvedValue(refusedAccess('role_not_enabled'));
+    await expect(remove(turn, turn.userId)).rejects.toMatchObject({ code: 'FORBIDDEN', data: { reason: 'role_not_enabled' } });
+    expect(await rowsOf(turn.conversationId)).toMatchObject({ conversations: 1 });
+  });
+
+  it('keeps the saved costs of its model requests, so the month’s spend does not drop', async () => {
+    const turn = await finishedConversationWithEverything();
+    await store.assistantTransaction(db, (tx) =>
+      store.recordModelRequest(tx, {
+        runId: turn.runId,
+        schoolId: turn.schoolId,
+        userId: turn.userId,
+        requestKey: `${turn.runId}:model:0`,
+        provider: 'gemini',
+        requestedModel: 'm',
+        answeredModel: 'm',
+        usage: { inputTokens: 1_000_000, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 },
+        usageComplete: true,
+        prices: { inputUsdPerMtok: '0.75', outputUsdPerMtok: '3.75', cacheReadUsdPerMtok: '0.075', cacheWriteUsdPerMtok: '0' },
+      }),
+    );
+    const monthKey = `assistant:spend:${turn.schoolId}:${istMonthOf(new Date()).month}`;
+    await getRedisClient().del(monthKey);
+    expect(await schoolMonthSpendUsd(db, turn.schoolId)).toBe('0.75000000');
+
     await expect(remove(turn, turn.userId)).resolves.toEqual({ id: turn.conversationId });
+
+    const kept = await db.select().from(assistantModelRequestTable).where(eq(assistantModelRequestTable.schoolId, turn.schoolId));
+    expect(kept).toMatchObject([{ runId: null, userId: turn.userId, costUsd: '0.75000000', inputTokens: 1_000_000 }]);
+    await getRedisClient().del(monthKey);
+    expect(await schoolMonthSpendUsd(db, turn.schoolId)).toBe('0.75000000');
   });
 
   it('is refused without a session', async () => {
@@ -431,23 +464,34 @@ describe('access', () => {
     expect(await rowsOf(turn.conversationId)).toMatchObject({ conversations: 1, runs: 1 });
   });
 
-  it('keeps history readable but refuses a new message when the user’s role is not switched on', async () => {
+  it('makes everything disappear for a user whose role is not switched on, except the status that says so', async () => {
     const turn = await seedTurn();
     loadAccessMock.mockResolvedValue(refusedAccess('role_not_enabled'));
-    await expect(list(turn)).resolves.toMatchObject({ pagination: { totalItems: 1 } });
+    for (const attempt of [
+      list(turn),
+      call(assistantRouter.getConversation, { schoolId: turn.schoolId, conversationId: turn.conversationId }, as(turn.userId)),
+      call(assistantRouter.stopRun, { schoolId: turn.schoolId, runId: turn.runId }, as(turn.userId)),
+      remove(turn, turn.userId),
+      send(turn),
+    ]) {
+      await expect(attempt).rejects.toMatchObject({ code: 'FORBIDDEN', data: { reason: 'role_not_enabled' } });
+    }
     await expect(call(assistantRouter.getStatus, { schoolId: turn.schoolId }, as(turn.userId))).resolves.toEqual({
       configured: true,
       allowed: false,
       available: false,
       unavailableReason: 'Refused: role_not_enabled.',
     });
-    await expect(send(turn)).rejects.toMatchObject({ code: 'FORBIDDEN', data: { reason: 'role_not_enabled' } });
-    expect(await rowsOf(turn.conversationId)).toMatchObject({ runs: 1 });
+    expect(await rowsOf(turn.conversationId)).toMatchObject({ conversations: 1, runs: 1 });
   });
 
-  it('keeps the assistant visible but refuses a new message once the school reached its monthly limit', async () => {
+  it('keeps the assistant and its history visible but refuses a new message once the school reached its monthly limit', async () => {
     const turn = await seedTurn();
     loadAccessMock.mockResolvedValue(refusedAccess('limit_reached'));
+    await expect(list(turn)).resolves.toMatchObject({ pagination: { totalItems: 1 } });
+    await expect(call(assistantRouter.stopRun, { schoolId: turn.schoolId, runId: turn.runId }, as(turn.userId))).resolves.toMatchObject({
+      id: turn.runId,
+    });
     await expect(call(assistantRouter.getStatus, { schoolId: turn.schoolId }, as(turn.userId))).resolves.toEqual({
       configured: true,
       allowed: true,

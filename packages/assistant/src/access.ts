@@ -21,33 +21,32 @@ export async function loadAssistantAccess(session: AssistantSession, schoolId: s
 }
 
 /**
- * Whether the user may read their own assistant history in the school: the
- * school has the feature and the user is a member. Neither their role nor
- * the school's limit matters here: a user whose role was switched off, or a
- * school at its limit, keeps its conversations readable. With the feature
- * off everything disappears (the standard disabled-feature error).
+ * Whether the user may see the assistant in the school at all: the school
+ * has the feature, the user is a member, and one of their roles is eligible
+ * and switched on by the school. Everything of `resolveAssistantAccess`
+ * except the monthly limit: at the limit the history stays visible (the
+ * composer says why it cannot send); for anyone else the assistant
+ * disappears, history included.
  */
-export function canRead(decision: AssistantAccessDecision): boolean {
-  return decision.featureEnabled && decision.member;
+export function canSee(decision: AssistantAccessDecision): boolean {
+  return decision.featureEnabled && decision.member && decision.allowedRoles.length > 0;
 }
 
-/** Throws unless {@link canRead}. */
-export function assertCanRead(decision: AssistantAccessDecision): void {
+/** Throws unless the school has the feature and the user is a member (the status check's precondition). */
+export function assertMember(decision: AssistantAccessDecision): void {
   if (!decision.featureEnabled) throw schoolFeatureDisabledError('assistant');
   if (!decision.member) throw new ORPCError('FORBIDDEN', { message: 'You are not a member of this school.' });
 }
 
-/** Throws unless the user may start or continue a turn now (feature, role, limit). */
-export function assertCanUse(decision: AssistantAccessDecision): void {
-  assertCanRead(decision);
-  if (decision.refusal) throw assistantAccessError(decision.refusal);
+/** Throws unless {@link canSee}: reading history, deleting, stopping and declining. */
+export function assertCanSee(decision: AssistantAccessDecision): void {
+  assertMember(decision);
+  if (canSee(decision)) return;
+  throw assistantAccessError(decision.refusal ?? { code: 'role_not_enabled', message: 'You cannot use the AI assistant in this school.' });
 }
 
-/**
- * Whether the user's role may use the assistant, whatever the limit: the
- * entry points stay visible at the limit so the history and the reason stay
- * in reach.
- */
-export function roleAllowed(decision: AssistantAccessDecision): boolean {
-  return decision.featureEnabled && decision.member && decision.allowedRoles.length > 0 && decision.refusal?.code !== 'config_invalid';
+/** Throws unless the user may start or continue a turn now (feature, role, limit). */
+export function assertCanUse(decision: AssistantAccessDecision): void {
+  assertCanSee(decision);
+  if (decision.refusal) throw assistantAccessError(decision.refusal);
 }

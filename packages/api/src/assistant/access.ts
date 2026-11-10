@@ -41,14 +41,21 @@ export type AssistantAccessDecision = {
   member: boolean;
   /** The user's roles that are eligible and switched on by the school. */
   allowedRoles: Role[];
-  /** The school's monthly USD limit; null when it has none (or it is not known). */
-  monthlyLimitUsd: number | null;
+  /**
+   * The school's monthly USD limit as two explicit facts: whether it is
+   * known (it is not when the decision stopped before reading the flag's
+   * settings), and then the amount, null meaning "no limit".
+   */
+  limit: AssistantLimit;
   /** Whether the school's spend this IST month reached its limit (false without a limit). */
   limitReached: boolean;
   allowed: boolean;
   /** The first fact that refuses use, for the user; null when allowed. */
   refusal: AssistantAccessRefusal | null;
 };
+
+/** See `AssistantAccessDecision.limit`. */
+export type AssistantLimit = { known: false } | { known: true; monthlyLimitUsd: number | null };
 
 const MESSAGES: Record<AssistantAccessRefusalCode, string> = {
   feature_disabled: 'The AI assistant is not enabled for this school.',
@@ -97,7 +104,13 @@ export async function resolveAssistantAccess(
     .where(and(eq(schoolFeatureFlagTable.schoolId, schoolId), eq(schoolFeatureFlagTable.feature, 'assistant')))
     .limit(1);
   const featureEnabled = flag?.enabled ?? false;
-  const base = { featureEnabled, member: false, allowedRoles: [] as Role[], monthlyLimitUsd: null, limitReached: false };
+  const base = {
+    featureEnabled,
+    member: false,
+    allowedRoles: [] as Role[],
+    limit: { known: false } as AssistantLimit,
+    limitReached: false,
+  };
   if (!featureEnabled) return refused(base, 'feature_disabled');
 
   const [membership, roleRows] = await Promise.all([
@@ -131,7 +144,7 @@ export async function resolveAssistantAccess(
   const allowedRoles = [...new Set(roleRows.map((row) => row.role))].filter(
     (role) => eligible.has(role) && switchedOn.has(role),
   );
-  const withRoles = { ...facts, allowedRoles, monthlyLimitUsd };
+  const withRoles = { ...facts, allowedRoles, limit: { known: true, monthlyLimitUsd } as AssistantLimit };
   if (allowedRoles.length === 0) return refused(withRoles, 'role_not_enabled');
 
   const limitReached =

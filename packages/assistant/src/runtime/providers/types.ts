@@ -52,7 +52,18 @@ export type ModelStepInput = {
 };
 
 export type ModelStepResult =
-  | { stopped: true; text: string }
+  | {
+      stopped: true;
+      text: string;
+      /**
+       * The usage the provider had reported before the stop, or null when it
+       * reported none. Never the final usage: the request was abandoned, so
+       * what it is billed for may be more.
+       */
+      partialUsage: ModelUsage | null;
+      /** The model that was answering, when the provider said so before the stop. */
+      model: string | null;
+    }
   | {
       stopped: false;
       text: string;

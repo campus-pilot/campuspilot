@@ -114,13 +114,20 @@ its own check, and the first that fails is returned with a message for the user:
 
 There is no OPA grant to use the assistant: the school's role list is the only
 source of who may. It is used by `/model/*` (sending, approving), the token
-issue, the worker before every model request, and (its read facts) the open
-stream recheck. Reading one's own history needs only the feature and
-membership: a user whose role is switched off, or a school at its limit, keeps
-its conversations readable and the composer says why it cannot send. With the
-feature off **everything disappears** (every `/model/*` procedure answers the
-disabled-feature error); conversations and costs are kept and come back when
-it is enabled again.
+issue, the worker before every model request, and the open stream recheck.
+
+The assistant **disappears for anyone who may not use it**. Seeing it at all
+(the pages, the history list, a conversation and its stream, delete, stop,
+decline) needs facts 1 to 4: the feature, membership, and an eligible role the
+school switched on. Only the monthly limit is left out: at the limit the
+history stays visible and the composer says why it cannot send. With the
+feature off every `/model/*` procedure answers the disabled-feature error; for
+a role that is not switched on they answer FORBIDDEN (`role_not_enabled`).
+Only `getStatus` answers every member (`allowed: false`), so the app can tell
+"not for you" from an error. Conversations and costs are kept and come back
+when access returns. A turn that is waiting for approval when the feature is
+switched off stays paused until it is switched on again; a turn that is
+working is refused at its next model request.
 
 | Who | Action | Granted to |
 | --- | --- | --- |
@@ -136,7 +143,11 @@ to the assistant itself).
 UI: every management entry point (navbar panel button, sidebar link, ⌘K
 entry) is wrapped in `AssistantAccess`: `RequireFeature('assistant')` and the
 user's `getStatus().allowed` (their role may use it, whatever the limit). The
-assistant pages use `FeaturePage`.
+assistant pages use `FeaturePage` and the same `AssistantAccess` role gate.
+
+Enabling the feature requires its settings: `setSchoolFeature` refuses to
+switch on any feature whose catalogue config is not `z.null()` without a
+config (BAD_REQUEST); switching it off never needs one.
 
 ## Model providers
 
@@ -180,12 +191,27 @@ token counts, the four prices used, `cost_usd = Σ tokens × price / 10⁶` comp
 in Postgres `numeric(14,8)`) and adds the tokens and exactly that cost to
 `assistant_run` (`cost_usd`). The insert is idempotent per step
 (`request_key`). One row per request, not per run, because a release with new
-prices can land mid-run. A provider without prices is never called. Limits,
-the usage tab and the admin pages read these rows; amounts travel as decimal
-text and are added exactly (`sumUsd`), never as floats.
+prices can land mid-run. A provider without prices is never called.
+
+A request **stopped** mid-stream is saved too, with `usage_complete = false`
+and the usage the provider had reported before the abort (Gemini's
+`usageMetadata`; Claude's `message_start` and `message_delta`), or zeros when
+nothing arrived. Its cost is therefore a lower bound; the admin pages count
+such rows ("incomplete usage") so the gap is visible next to the provider's
+bill.
+
+Saved costs outlive conversations: deleting a conversation clears the
+`run_id` of its model requests (`ON DELETE SET NULL`) and keeps every row, so
+spend, limits and bills never drop. Limits, the usage tab and the admin pages
+read only `assistant_model_request`, never runs. Amounts travel as decimal
+text and are added exactly (`sumUsd`), never as floats; token sums are
+`bigint` and reach clients as a number while it is a safe integer and as
+decimal text beyond (`TokenCount`).
 
 Days and months are **IST** (Asia/Kolkata, fixed UTC+05:30): a month is the
-1st to the last day. Usage reads (`packages/api/src/assistant/usage.ts`) are
+1st to the last day. The prompt's "today" is the IST date too. The AI billing
+page opens on the current IST month; the other usage views on the last 7
+days. Usage reads (`packages/api/src/assistant/usage.ts`) are
 cached in Redis for an hour, so these pages can be one to two hours behind.
 Provider consoles group days in their own time zone: compare months, not days.
 INR is shown only in the admin app, at a rate the viewer types, kept in the
@@ -328,9 +354,10 @@ and describe it in `SHOW_VIEW_TOOL_DESCRIPTION`.
   applies it to the open conversation's live runs, which it shows as a row
   when that conversation is older than the loaded pages.
 - **`deleteConversation`** deletes one of the user's conversations for good,
-  with the same checks as reading it (may use the assistant in the school;
+  with the same checks as reading it (may see the assistant in the school;
   owns the conversation). The schema cascades its runs, items, approvals and
-  transcript. It is refused with "Stop the assistant before deleting this
+  transcript. Its saved model-request costs are kept, with their run
+  reference cleared, so the school's spend and limit do not change. It is refused with "Stop the assistant before deleting this
   conversation." while a run is queued, running or waiting for approval: the
   conversation row is locked for the check and the delete, and saving a
   message or a run's progress updates that row, so no run can start in

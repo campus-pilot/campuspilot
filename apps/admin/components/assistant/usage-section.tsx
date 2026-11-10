@@ -16,7 +16,7 @@ import type { ReactNode } from 'react';
 import { InrRateControl } from './inr-rate';
 
 /** Totals shown above a usage chart. */
-export type UsageTotals = { requests: number; costUsd: string };
+export type UsageTotals = { requests: number; incompleteRequests: number; costUsd: string };
 
 /** The range picker, the INR rate and the stated freshness, shared by the AI pages. */
 export function UsageToolbar({ form }: { form: UsageRangeFormApi }) {
@@ -52,6 +52,9 @@ export function UsageSpendCard({
         <CardDescription>
           {formatSpend(total.costUsd, inrPerUsd)} over {total.requests} model requests. Days are IST; figures may be up to two hours
           behind.
+          {total.incompleteRequests > 0
+            ? ` ${total.incompleteRequests} stopped requests were saved with incomplete usage, so the provider may bill a little more.`
+            : null}
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">

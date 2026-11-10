@@ -201,7 +201,7 @@ describe('purge_demo_school and the demo-only finance exception', () => {
       await db.insert(assistantApprovalTable).values({ conversationId: conversation!.id, runId: run!.id, itemId: item!.id, schoolId, userId, toolName: 't', awakeableId: 'a' });
       await db.insert(assistantTranscriptEntryTable).values({ conversationId: conversation!.id, position: 1, runId: run!.id, role: 'user', content: [], entryKey: 'user' });
       await db.insert(assistantModelRequestTable).values({
-        runId: run!.id, schoolId, userId, requestKey: `${run!.id}:model:0`, provider: 'gemini', requestedModel: 'm', answeredModel: 'm',
+        runId: run!.id, schoolId, userId, requestKey: `${run!.id}:model:0`, provider: 'gemini', requestedModel: 'm', answeredModel: 'm', usageComplete: true,
         inputTokens: 1, outputTokens: 1, cacheReadInputTokens: 0, cacheCreationInputTokens: 0,
         inputUsdPerMtok: '1', outputUsdPerMtok: '1', cacheReadUsdPerMtok: '0', cacheWriteUsdPerMtok: '0', costUsd: '0.000002',
       });

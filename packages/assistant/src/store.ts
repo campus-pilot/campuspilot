@@ -387,6 +387,8 @@ export async function recordModelRequest(
     requestedModel: string;
     answeredModel: string;
     usage: AssistantUsage;
+    /** False when `usage` is what a stopped request had reported, not its final usage. */
+    usageComplete: boolean;
     prices: ModelPrices;
   },
 ): Promise<boolean> {
@@ -401,6 +403,7 @@ export async function recordModelRequest(
       provider: input.provider,
       requestedModel: input.requestedModel,
       answeredModel: input.answeredModel,
+      usageComplete: input.usageComplete,
       inputTokens: usage.inputTokens,
       outputTokens: usage.outputTokens,
       cacheReadInputTokens: usage.cacheReadInputTokens,

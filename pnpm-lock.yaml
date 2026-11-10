@@ -606,6 +606,9 @@ importers:
       '@aws-sdk/s3-request-presigner':
         specifier: ^3.1132.0
         version: 3.1132.0
+      '@campuspilot/assistant-contract':
+        specifier: workspace:*
+        version: link:../assistant-contract
       '@campuspilot/auth':
         specifier: workspace:*
         version: link:../auth

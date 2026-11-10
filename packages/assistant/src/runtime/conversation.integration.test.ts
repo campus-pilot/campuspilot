@@ -926,13 +926,17 @@ describe('stopping', () => {
   });
 
   it('keeps the text streamed before a stop and ends the run cancelled', async () => {
-    const { provider, turn, invoke } = await arrange({ script: [{ stopped: true, text: 'Partial ans' }] });
+    const { provider, turn, invoke } = await arrange({ script: [{ stopped: true, text: 'Partial ans', partialUsage: null, model: null }] });
 
     await invoke().done;
 
     expect(provider.calls).toHaveLength(1);
     const { run, items, transcript } = await readTurn(turn);
-    expect(run).toMatchObject({ status: 'cancelled', errorCode: null, modelRequestCount: 0 });
+    // The stopped request is recorded, with no usage reported: zeros, marked incomplete.
+    expect(run).toMatchObject({ status: 'cancelled', errorCode: null, modelRequestCount: 1, inputTokens: 0, costUsd: '0.00000000' });
+    expect(await modelRequestsOf(turn.runId)).toMatchObject([
+      { usageComplete: false, inputTokens: 0, outputTokens: 0, costUsd: '0.00000000', requestKey: modelTranscriptKey(turn.runId, 0) },
+    ]);
     expect(items.map(({ kind, status, body }) => ({ kind, status, body }))).toEqual([
       { kind: 'user_message', status: 'complete', body: { text: QUESTION } },
       { kind: 'assistant_message', status: 'complete', body: { text: 'Partial ans' } },
@@ -942,6 +946,20 @@ describe('stopping', () => {
       entryKey: modelTranscriptKey(turn.runId, 0),
       content: [{ type: 'text', text: 'Partial ans' }],
     });
+  });
+
+  it('saves the usage a stopped request had reported, as incomplete, and charges it', async () => {
+    const { turn, invoke } = await arrange({
+      script: [{ stopped: true, text: '', partialUsage: FAKE_USAGE, model: 'answering-model' }],
+    });
+
+    await invoke().done;
+
+    const { run } = await readTurn(turn);
+    expect(run).toMatchObject({ status: 'cancelled', modelRequestCount: 1, inputTokens: FAKE_USAGE.inputTokens, costUsd: '0.00047313' });
+    expect(await modelRequestsOf(turn.runId)).toMatchObject([
+      { usageComplete: false, answeredModel: 'answering-model', ...FAKE_USAGE, costUsd: '0.00047313' },
+    ]);
   });
 
   it('ends the run after a tool call that was running when the stop arrived, without asking the model again', async () => {
@@ -1086,6 +1104,7 @@ describe('the cost of each model request', () => {
       costUsd: '0.00047313',
     };
     expect(FAKE_PRICES).toEqual({ inputUsdPerMtok: '2.5', outputUsdPerMtok: '10', cacheReadUsdPerMtok: '0.25', cacheWriteUsdPerMtok: '3.125' });
+    expect(requests.map((request) => request.usageComplete)).toEqual([true, true]);
     expect(requests).toMatchObject([
       { ...expected, answeredModel: 'answered-model-1', requestKey: modelTranscriptKey(turn.runId, 0) },
       { ...expected, answeredModel: 'answered-model-2', requestKey: modelTranscriptKey(turn.runId, 1) },

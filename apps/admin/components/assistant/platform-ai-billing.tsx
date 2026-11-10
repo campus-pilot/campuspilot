@@ -74,7 +74,8 @@ function TableCard({ title, description, children }: { title: string; descriptio
  */
 export function PlatformAiBilling() {
   const [now] = useState(() => new Date());
-  const form = useUsageRangeForm();
+  // Billing compares months with the providers' consoles, so it opens on this month.
+  const form = useUsageRangeForm({ defaultPreset: 'currentMonth' });
   const selection = useUsageSelection(form, now);
   const inrPerUsd = useInrRate();
   const usageQuery = useQuery({
