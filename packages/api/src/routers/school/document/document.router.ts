@@ -1,3 +1,4 @@
+import { assertValidSchoolNoticeTemplate } from "../notice/notice.render";
 import { z } from "zod";
 import { alias } from "drizzle-orm/pg-core";
 import { and, asc, count, desc, eq, ilike, inArray, notInArray, sql } from "drizzle-orm";
@@ -142,7 +143,10 @@ async function saveTemplate(
   input: z.infer<typeof dto.saveTemplateSchema>,
   marketplaceSlug: string | null,
 ) {
-  renderDocument(input.content, sampleDocumentContext(input.documentType));
+  // A Notice template is checked the way notices render it (their output
+  // budget and logo limit), so a design no notice could print is refused here.
+  if (input.documentType === "notice") assertValidSchoolNoticeTemplate(input.content);
+  else renderDocument(input.content, sampleDocumentContext(input.documentType));
   const id = generateId("artifact");
   return persistDocumentObject(
     db,

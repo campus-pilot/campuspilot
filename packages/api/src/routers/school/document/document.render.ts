@@ -20,6 +20,164 @@ handlebars.registerHelper("add", (a: unknown, b: unknown) => {
     throw new Error("add requires finite numbers");
   return a + b;
 });
+
+/**
+ * Every helper a template may call: the documented `each`, `if`, `unless`,
+ * `with`, `lookup` and `add`. This is an allowlist, not a blocklist: a
+ * Handlebars environment starts with more built-ins than templates are
+ * promised (`log` writes its arguments to the server's console at a level
+ * the author chooses, with no size limit), so everything not listed here is
+ * unregistered and a call to it is a "missing helper" BAD_REQUEST. A
+ * helper added by a future Handlebars release is refused until it is listed.
+ */
+export const DOCUMENT_TEMPLATE_HELPERS = [
+  "each",
+  "if",
+  "unless",
+  "with",
+  "lookup",
+  "add",
+] as const;
+/**
+ * Not callable features but the runtime's hooks for `{{#section}}` on a
+ * context value and for a call to an unknown helper (which throws).
+ */
+const RUNTIME_HELPER_HOOKS = ["helperMissing", "blockHelperMissing"];
+/** Wraps every `{{value}}` so its output is counted; see {@link instrument}. */
+const OUTPUT_METER_HELPER = "__documentOutput";
+
+for (const name of Object.keys(handlebars.helpers)) {
+  if (
+    !(DOCUMENT_TEMPLATE_HELPERS as readonly string[]).includes(name) &&
+    !RUNTIME_HELPER_HOOKS.includes(name)
+  )
+    handlebars.unregisterHelper(name);
+}
+
+/** The helpers registered on the restricted instance (for tests of the allowlist). */
+export function registeredDocumentHelpers(): string[] {
+  return Object.keys(handlebars.helpers).sort();
+}
+
+/** The ceiling of one rendered document, in characters, unless a caller sets a lower one. */
+export const DOCUMENT_RENDER_MAX_CHARS = 25_000_000;
+const OVERSIZE_MESSAGE =
+  "This document exceeds the rendering limit. Use a shorter template, fewer repeated blocks or smaller images.";
+
+/**
+ * The output budget of the render in progress. Rendering is synchronous, so
+ * one module-level meter belongs to exactly one `renderDocument` call.
+ *
+ * Why the budget is enforced while rendering and not on the result: a
+ * template multiplies. `{{{school.logoUrl}}}` written a few thousand times,
+ * or nested `each` blocks around one large value, make Handlebars build a
+ * string of hundreds of megabytes before any check on the finished string
+ * can run. The meter counts every character as it is produced and aborts
+ * the render at the limit, so a hostile or mistaken template costs at most
+ * the budget, whatever the context holds.
+ */
+let activeMeter: { used: number; limit: number } | null = null;
+
+function spend(chars: number) {
+  if (!activeMeter || chars <= 0) return;
+  activeMeter.used += chars;
+  if (activeMeter.used > activeMeter.limit)
+    throw rpcError.badRequest(OVERSIZE_MESSAGE);
+}
+
+handlebars.registerHelper(OUTPUT_METER_HELPER, (value: unknown) => {
+  if (value !== null && value !== undefined)
+    spend(typeof value === "string" ? value.length : String(value).length);
+  return value;
+});
+
+type BlockProgram = ((context: unknown, options?: unknown) => string) &
+  Record<string, unknown>;
+
+/**
+ * Counts what one run of a block body adds: its output minus whatever the
+ * body already counted itself (the values and nested blocks inside it), so
+ * every character is counted once and a repeated body is counted per run.
+ */
+function meteredProgram(program: BlockProgram | undefined) {
+  if (typeof program !== "function") return program;
+  const metered = (context: unknown, options?: unknown) => {
+    const before = activeMeter?.used ?? 0;
+    const output = program(context, options);
+    if (activeMeter) spend(output.length - (activeMeter.used - before));
+    return output;
+  };
+  // Handlebars reads `program`, `depth` and `blockParams` off the function.
+  return Object.assign(metered, program);
+}
+
+// Everything that can run a block body goes through the meter: the block
+// helpers and the hook behind `{{#value}}…{{/value}}` sections.
+for (const name of ["each", "if", "unless", "with", "blockHelperMissing"]) {
+  const original = handlebars.helpers[name] as (
+    this: unknown,
+    ...args: unknown[]
+  ) => unknown;
+  handlebars.registerHelper(name, function (this: unknown, ...args: unknown[]) {
+    const options = args[args.length - 1] as {
+      fn?: BlockProgram;
+      inverse?: BlockProgram;
+    };
+    options.fn = meteredProgram(options.fn);
+    options.inverse = meteredProgram(options.inverse);
+    return original.apply(this, args);
+  });
+}
+
+/**
+ * Rewrites every `{{expression}}` to `{{__documentOutput expression}}` so the
+ * length of each printed value is counted the moment it is produced (also
+ * outside any block, where no block body would count it). The expression,
+ * its escaping and its whitespace control are unchanged.
+ */
+function instrument(node: hbs.AST.Node | null | undefined): void {
+  if (!node) return;
+  if (node.type === "Program") {
+    for (const statement of (node as hbs.AST.Program).body)
+      instrument(statement);
+    return;
+  }
+  if (
+    node.type === "BlockStatement" ||
+    node.type === "DecoratorBlock" ||
+    node.type === "PartialBlockStatement"
+  ) {
+    const block = node as hbs.AST.BlockStatement;
+    instrument(block.program);
+    instrument(block.inverse);
+    return;
+  }
+  if (node.type !== "MustacheStatement") return;
+  const mustache = node as hbs.AST.MustacheStatement;
+  const isCall =
+    mustache.params.length > 0 || (mustache.hash?.pairs.length ?? 0) > 0;
+  const expression = isCall
+    ? ({
+        type: "SubExpression",
+        path: mustache.path,
+        params: mustache.params,
+        hash: mustache.hash,
+        loc: mustache.loc,
+      } as hbs.AST.SubExpression)
+    : mustache.path;
+  mustache.path = {
+    type: "PathExpression",
+    data: false,
+    depth: 0,
+    parts: [OUTPUT_METER_HELPER],
+    original: OUTPUT_METER_HELPER,
+    loc: mustache.loc,
+  } as hbs.AST.PathExpression;
+  mustache.params = [expression];
+  mustache.hash = undefined as unknown as hbs.AST.Hash;
+}
+/** The only image sources a document may carry (no SVG, no network). */
+const EMBEDDABLE_IMAGE = /^data:image\/(png|jpeg|webp);base64,[a-z0-9+/=]+$/i;
 const policy =
   "default-src 'none'; img-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'";
 const options: sanitizeHtml.IOptions = {
@@ -45,10 +203,7 @@ const options: sanitizeHtml.IOptions = {
   allowProtocolRelative: false,
   allowVulnerableTags: true,
   exclusiveFilter: (frame) =>
-    frame.tag === "img" &&
-    !/^data:image\/(png|jpeg|webp);base64,[a-z0-9+/=]+$/i.test(
-      frame.attribs.src ?? "",
-    ),
+    frame.tag === "img" && !EMBEDDABLE_IMAGE.test(frame.attribs.src ?? ""),
 };
 /** The CSP is inserted before all user markup. Sanitization removes active
  * elements and attributes; data-only images keep previews and Chromium offline.
@@ -67,10 +222,36 @@ function safeHtml(raw: string) {
   });
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${policy}"></head><body>${clean}</body></html>`;
 }
-export function renderDocument(content: string, context: object) {
+/** Whether a value is an image the sanitizer keeps: a base64 PNG, JPEG or WebP data URI. */
+export function isEmbeddableDocumentImage(value: string) {
+  return EMBEDDABLE_IMAGE.test(value);
+}
+
+/**
+ * Renders one template against one context with the restricted Handlebars
+ * instance (allowlisted helpers only) and returns sanitized, CSP-wrapped
+ * HTML. The output is capped at `maxOutputChars` **while it is produced**
+ * (see the meter above); invalid syntax, an unknown helper and an oversized
+ * result are all BAD_REQUEST.
+ */
+export function renderDocument(
+  content: string,
+  context: object,
+  options: { maxOutputChars?: number } = {},
+) {
+  const meter = {
+    used: 0,
+    limit: options.maxOutputChars ?? DOCUMENT_RENDER_MAX_CHARS,
+  };
   try {
-    handlebars.precompile(content);
-    const raw = handlebars.compile(content)(context);
+    const program = handlebars.parse(content);
+    instrument(program);
+    const template = handlebars.compile(program);
+    activeMeter = meter;
+    // Text outside every block is printed exactly once.
+    spend(content.length);
+    const raw = template(context);
+    activeMeter = null;
     return safeHtml(raw);
   } catch (cause) {
     if (cause instanceof ORPCError) throw cause;
@@ -78,6 +259,8 @@ export function renderDocument(content: string, context: object) {
       "The template contains invalid Handlebars syntax or an unsupported helper.",
       cause,
     );
+  } finally {
+    activeMeter = null;
   }
 }
 function chunks<T>(items: T[], size: number) {

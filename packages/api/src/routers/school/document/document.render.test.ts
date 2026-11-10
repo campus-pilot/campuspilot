@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   combineDocuments,
   convertDocumentPdf,
+  DOCUMENT_TEMPLATE_HELPERS,
+  registeredDocumentHelpers,
   renderDocument,
 } from './document.render';
 
@@ -67,6 +69,62 @@ describe('document rendering', () => {
           'The template contains invalid Handlebars syntax or an unsupported helper.',
       }),
     );
+  });
+
+  it('registers exactly the documented helpers: an allowlist, so `log` and any future built-in are refused', () => {
+    expect(registeredDocumentHelpers()).toEqual(
+      [...DOCUMENT_TEMPLATE_HELPERS, '__documentOutput', 'blockHelperMissing', 'helperMissing'].sort(),
+    );
+    const spies = (['log', 'info', 'warn', 'error', 'debug'] as const).map((level) =>
+      vi.spyOn(console, level).mockImplementation(() => undefined),
+    );
+    for (const template of ['{{log "x"}}', '{{log value level="error"}}', '{{#each list}}{{log this}}{{/each}}']) {
+      expect(() => renderDocument(template, { value: 1, list: [1, 2] }), template).toThrowError(
+        expect.objectContaining({ code: 'BAD_REQUEST' }),
+      );
+    }
+    for (const spy of spies) expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('stops a template that multiplies a large value while it renders, not after', () => {
+    const photo = `data:image/png;base64,${'A'.repeat(1_000_000)}`;
+    const students = Array.from({ length: 40 }, () => ({ photo }));
+    // 40 x 40 x 1 MB = 1.6 GB if it were allowed to finish.
+    const started = performance.now();
+    expect(() =>
+      renderDocument('{{#each students}}{{#each ../students}}<img src="{{photo}}">{{/each}}{{/each}}', { students }),
+    ).toThrowError(expect.objectContaining({ code: 'BAD_REQUEST', message: expect.stringContaining('rendering limit') }));
+    // Outside any block too.
+    expect(() => renderDocument('{{{photo}}}'.repeat(30), { photo })).toThrowError(
+      expect.objectContaining({ code: 'BAD_REQUEST' }),
+    );
+    expect(performance.now() - started).toBeLessThan(5_000);
+  });
+
+  it('counts each character once: a legitimate large document renders, with conditions, sections and nesting', () => {
+    const photo = `data:image/png;base64,${'A'.repeat(1_000_000)}`;
+    const students = Array.from({ length: 15 }, (_, index) => ({ name: `Student ${index}`, photo }));
+    // 15 MB of photos read by an `if`, printed inside nested blocks: under the 25 MB ceiling.
+    const html = renderDocument(
+      '{{#each students}}{{#with this}}{{#if photo}}<p>{{name}}</p><img src="{{photo}}">{{/if}}{{/with}}{{/each}}{{#students}}<i>{{name}}</i>{{/students}}',
+      { students },
+    );
+    expect(html.split(photo).length - 1).toBe(15);
+    expect(html).toContain('<i>Student 14</i>');
+    // A lower ceiling is honoured exactly: 3 KB of output fits 4 KB and not 2 KB.
+    const text = 'x'.repeat(1_000);
+    expect(() => renderDocument('{{a}}{{a}}{{a}}', { a: text }, { maxOutputChars: 4_000 })).not.toThrow();
+    expect(() => renderDocument('{{a}}{{a}}{{a}}', { a: text }, { maxOutputChars: 2_000 })).toThrowError(
+      expect.objectContaining({ code: 'BAD_REQUEST' }),
+    );
+  });
+
+  it('keeps expressions, escaping and whitespace control unchanged by the output meter', () => {
+    const html = renderDocument(
+      '<p>{{name}}|{{{raw}}}|{{lookup map "key"}}|{{add n 1}}|{{#each list}}{{@index}}:{{this}}{{#unless @last}},{{/unless}}{{/each}}|  {{~tight~}}  |{{missing}}|{{#if missing}}no{{else}}yes{{/if}}</p>',
+      { name: 'A & B', raw: '<b>bold</b>', map: { key: 'value' }, n: 2, list: ['x', 'y'], tight: 'T' },
+    );
+    expect(html).toContain('<p>A &amp; B|<b>bold</b>|value|3|0:x,1:y|T||yes</p>');
   });
 
   it('uses an A4 grid for ID card batches', () => {
