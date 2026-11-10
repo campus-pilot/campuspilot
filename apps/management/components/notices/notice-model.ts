@@ -71,7 +71,7 @@ export function cadetAudienceAvailability(cadet: { enabled: boolean; status: 'pe
 export function cadetAudienceBlock(audience: NoticeAudienceChoice, availability: CadetAudienceAvailability): string | null {
   if (!noticeAudienceIncludesCadets(audience) || availability === 'available') return null;
   return availability === 'disabled'
-    ? 'The Cadet Portal is not enabled for this school, so a notice cannot be addressed to cadets. Choose Staff to save it for staff only.'
+    ? 'The Cadet Portal is not enabled for this school, so a notice cannot be addressed to students. Choose Staff to save it for staff only.'
     : 'We could not check whether this school has the Cadet Portal. Retry, or choose Staff to save it for staff only.';
 }
 
@@ -88,13 +88,13 @@ export function cadetAudienceNote(availability: CadetAudienceAvailability, store
   if (availability === 'unknown') {
     return {
       text: storedForCadets
-        ? 'We could not check whether this school has the Cadet Portal. This draft stays addressed to cadets; it cannot be saved until the check succeeds.'
+        ? 'We could not check whether this school has the Cadet Portal. This draft stays addressed to students; it cannot be saved until the check succeeds.'
         : 'We could not check whether this school has the Cadet Portal, so only Staff can be chosen for now.',
       retry: true,
     };
   }
   return storedForCadets
-    ? { text: 'This draft is addressed to cadets, but the Cadet Portal is not enabled for this school. It stays as it is until you change it; to save or publish it, choose Staff.', retry: false }
+    ? { text: 'This draft is addressed to students, but the Cadet Portal is not enabled for this school. It stays as it is until you change it; to save or publish it, choose Staff.', retry: false }
     : null;
 }
 
@@ -239,6 +239,18 @@ export function savedNoticePreviewInput(notice: { schoolId: string; id: string }
 }
 
 /**
+ * What the saved notice's preview is cached under beyond its input: the
+ * version the page shows. The input names the notice only, so without this
+ * a render of version 1 would stand for version 2 after the draft was saved
+ * elsewhere (and stay, if refreshing it failed), and the publish dialog
+ * would confirm a page nobody was shown. Appended to the procedure's key,
+ * so invalidating every `previewNotice` still covers it.
+ */
+export function savedNoticePreviewKeySuffix(notice: { version: number }) {
+  return { version: notice.version } as const;
+}
+
+/**
  * The review a rendered preview stands for, or null when there is none to
  * confirm: the preview has not loaded (or failed), so the publisher has not
  * seen the notice as it would be published.
@@ -266,6 +278,9 @@ export const PUBLISH_REVIEW_CHANGE_MESSAGES: Record<'notice' | 'template', strin
   template: "The school's Notice template changed since you opened this notice, so it would be printed differently from the preview you read. Close this dialog and review it again before publishing.",
 };
 
+/** The DOM id of the page note that says why a draft cannot be published as addressed; the disabled Publish button is described by it. */
+export const NOTICE_UNPUBLISHABLE_REASON_ID = 'notice-unpublishable-reason';
+
 /**
  * Why a draft cannot be published as it is addressed, or null. A draft for
  * students in a school that is known not to have the Cadet Portal is
@@ -274,7 +289,7 @@ export const PUBLISH_REVIEW_CHANGE_MESSAGES: Record<'notice' | 'template', strin
  */
 export function cadetAudienceUnpublishable(notice: { status: NoticeStatus; cadetScope: NoticeAudienceFacts['cadetScope'] }, availability: CadetAudienceAvailability | 'pending'): string | null {
   if (notice.status !== 'draft' || notice.cadetScope === 'none' || availability !== 'disabled') return null;
-  return 'This draft is addressed to cadets, but the Cadet Portal is not enabled for this school. To publish it, edit it and choose Staff.';
+  return 'This draft is addressed to students, but the Cadet Portal is not enabled for this school. To publish it, edit it and choose Staff.';
 }
 
 /**
@@ -285,13 +300,13 @@ export function cadetAudienceUnpublishable(notice: { status: NoticeStatus; cadet
  * that is on screen. A notice of another session than the route's is not
  * found there.
  */
-export type NoticeBoundaryState<T> = { kind: 'pending' } | { kind: 'unavailable'; error: unknown } | { kind: 'elsewhere' } | { kind: 'ready'; notice: T };
+export type NoticeBoundaryState<T> = { kind: 'pending' } | { kind: 'unavailable'; error: unknown } | { kind: 'elsewhere' } | { kind: 'ready'; notice: T; refetchError: unknown };
 
 export function noticeBoundaryState<T extends { sessionId: string }>(query: QueryBoundaryInput<T>, scope: NoticeSessionScope): NoticeBoundaryState<T> {
   const state = resolveQueryBoundary(query, { replaces: (error) => noticeLoadFailure(error).kind !== 'failed' });
   if (state.kind === 'pending') return state;
   if (state.kind === 'failed') return { kind: 'unavailable', error: state.error };
-  return noticeBelongsToSession(state.data, scope) ? { kind: 'ready', notice: state.data } : { kind: 'elsewhere' };
+  return noticeBelongsToSession(state.data, scope) ? { kind: 'ready', notice: state.data, refetchError: state.refetchError } : { kind: 'elsewhere' };
 }
 
 /**
@@ -345,7 +360,7 @@ export type NoticeListFilters = { status?: NoticeStatus; audience?: 'staff' | 'c
 
 /**
  * The API filters of a list filter selection: an audience choice asks for
- * notices that include it. A filter reads what notices store, so "Cadets"
+ * notices that include it. A filter reads what notices store, so "Students"
  * is offered whether or not the school can address students today (notices
  * addressed to them earlier are still listed).
  */
@@ -407,7 +422,7 @@ export const NOTICE_BODY_MODE_LABELS: Record<NoticeBodyMode, string> = { plain: 
 export function noticeAudienceFilterOptions(): { value: 'staff' | 'cadets'; label: string }[] {
   return [
     { value: 'staff', label: 'Staff' },
-    { value: 'cadets', label: 'Cadets' },
+    { value: 'cadets', label: 'Students' },
   ];
 }
 

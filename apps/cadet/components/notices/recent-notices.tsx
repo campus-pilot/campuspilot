@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { ChevronRightIcon, MegaphoneIcon } from 'lucide-react';
 import { CadetNoticeList } from '@campuspilot/components/cadet-portal';
 import { resolveQueryBoundary } from '@campuspilot/components/query-boundary';
+import { QueryRefreshNote } from '@campuspilot/components/query-refresh-note';
 import { Button } from '@campuspilot/ui/components/button';
 import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemMedia, ItemTitle } from '@campuspilot/ui/components/item';
 
@@ -52,6 +53,7 @@ export function HomeNotices() {
       >
         Notices
       </SectionLabel>
+      <QueryRefreshNote error={state.refetchError} onRetry={() => void notices.refetch()} />
       <CadetNoticeList entries={noticeEntries(state.data.items)} renderLink={renderNoticeLink} />
     </section>
   );

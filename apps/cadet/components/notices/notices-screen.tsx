@@ -5,6 +5,7 @@ import { useInfiniteQuery } from '@tanstack/react-query';
 import { MegaphoneIcon } from 'lucide-react';
 import { CadetNoticeList, type CadetNoticeLinkProps } from '@campuspilot/components/cadet-portal';
 import { resolveQueryBoundary } from '@campuspilot/components/query-boundary';
+import { QueryRefreshNote } from '@campuspilot/components/query-refresh-note';
 import { Button } from '@campuspilot/ui/components/button';
 
 import { orpc } from '@/lib/orpc';
@@ -43,6 +44,7 @@ function NoticeList() {
     return <EmptyState icon={MegaphoneIcon} title="No notices yet" description="Notices your school publishes for you or your class appear here." />;
   return (
     <>
+      <QueryRefreshNote error={state.refetchError} onRetry={() => void notices.refetch()} />
       <CadetNoticeList entries={noticeEntries(items)} renderLink={renderNoticeLink} />
       {notices.hasNextPage ? (
         <Button type="button" variant="outline" disabled={notices.isFetchingNextPage} onClick={() => void notices.fetchNextPage()}>

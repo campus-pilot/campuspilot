@@ -20,6 +20,7 @@ import {
   publishReviewChange,
   publishReviewOf,
   savedNoticePreviewInput,
+  savedNoticePreviewKeySuffix,
   whatsappPdfLine,
   draftNotice,
   editNoticeHref,
@@ -177,6 +178,11 @@ test('publishing is offered only for the preview that was read: its version and 
   assert.equal(isNoticeConflict(null), false);
 });
 
+test('the saved preview is cached per version, so an older render never stands for the version shown (review R3U3)', () => {
+  assert.notDeepEqual(savedNoticePreviewKeySuffix({ version: 1 }), savedNoticePreviewKeySuffix({ version: 2 }));
+  assert.deepEqual(savedNoticePreviewKeySuffix({ version: 2 }), { version: 2 });
+});
+
 test('a loaded notice survives a failed refetch; only "gone" or "feature off" replaces it (review R2U1)', () => {
   const notice = { sessionId: scope.sessionId, title: 'Draft' };
   const network = new Error('Failed to fetch');
@@ -185,10 +191,11 @@ test('a loaded notice survives a failed refetch; only "gone" or "feature off" re
 
   assert.deepEqual(noticeBoundaryState({ data: undefined, error: null }, scope), { kind: 'pending' });
   assert.deepEqual(noticeBoundaryState({ data: undefined, error: network }, scope), { kind: 'unavailable', error: network });
-  assert.deepEqual(noticeBoundaryState({ data: notice, error: null }, scope), { kind: 'ready', notice });
+  assert.deepEqual(noticeBoundaryState({ data: notice, error: null }, scope), { kind: 'ready', notice, refetchError: null });
   // The defect: one failed request on returning to the tab unmounted the editor and discarded the typed text.
-  assert.deepEqual(noticeBoundaryState({ data: notice, error: network }, scope), { kind: 'ready', notice });
-  assert.deepEqual(noticeBoundaryState({ data: notice, error: { code: 'INTERNAL_SERVER_ERROR' } }, scope), { kind: 'ready', notice });
+  // The failed refresh is reported beside the held notice, for the page's quiet note (review R3U3).
+  assert.deepEqual(noticeBoundaryState({ data: notice, error: network }, scope), { kind: 'ready', notice, refetchError: network });
+  assert.deepEqual(noticeBoundaryState({ data: notice, error: { code: 'INTERNAL_SERVER_ERROR' } }, scope), { kind: 'ready', notice, refetchError: { code: 'INTERNAL_SERVER_ERROR' } });
   // Answers that make the held notice untrue still replace it.
   assert.deepEqual(noticeBoundaryState({ data: notice, error: notFound }, scope), { kind: 'unavailable', error: notFound });
   assert.deepEqual(noticeBoundaryState({ data: notice, error: featureOff }, scope), { kind: 'unavailable', error: featureOff });

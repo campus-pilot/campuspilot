@@ -217,7 +217,10 @@ Admin: `/school/{id}/usage/feature-flags`
 feature with an Enabled switch and Save. Each card works on a
 `SchoolFeatureEntry` and builds its update by spreading it. `DISABLE_WARNINGS`
 states everything switching a feature off does (keep it complete: staff,
-students, notifications). No feature has settings yet, so the cards have no
+students, notifications); it is shown under the switch (which it describes,
+`aria-describedby`) and again in the app confirmation dialog that saving a
+switch-off opens. Enabling saves at once. Each switch's accessible name
+includes the feature's label. No feature has settings yet, so the cards have no
 config controls; a compile-time guard in that file fails as soon as a catalogue
 entry declares a config, so the control is added with it.
 

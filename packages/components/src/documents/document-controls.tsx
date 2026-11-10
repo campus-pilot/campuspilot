@@ -292,12 +292,16 @@ export function DocumentPreview({
 export function DocumentNotice({
   children,
   error = false,
+  id,
 }: {
   children: ReactNode;
   error?: boolean;
+  /** For a control described by this notice (`aria-describedby`). */
+  id?: string;
 }) {
   return (
     <div
+      id={id}
       role={error ? "alert" : "status"}
       className={`rounded-lg border px-4 py-3 text-sm ${error ? "border-destructive/30 bg-destructive/5 text-destructive" : "bg-muted/40 text-muted-foreground"}`}
     >

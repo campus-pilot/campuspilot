@@ -70,6 +70,12 @@ describe('ClassScopePicker', () => {
     expect(options.filter((text) => text?.endsWith(', not selected'))).toHaveLength(2);
   });
 
+  it('draws one check mark per row: the shared item\'s own (review round 3, R3U1)', () => {
+    renderPicker();
+    fireEvent.click(screen.getByRole('combobox', { name: 'Classes' }));
+    for (const option of screen.getAllByRole('option')) expect(option.querySelectorAll('svg')).toHaveLength(1);
+  });
+
   it('announces its error with the trigger while invalid', () => {
     renderPicker({ invalid: true, errorId: 'classes-error', children: <p id="classes-error">Choose at least one class.</p> });
     const trigger = screen.getByRole('combobox', { name: 'Classes' });

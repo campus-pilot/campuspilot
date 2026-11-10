@@ -8,6 +8,7 @@ import type { NoticeDto } from '@campuspilot/api/routers/school/notice/notice.dt
 import { DocumentButton, DocumentNotice, DocumentPreview } from '@campuspilot/components/documents/document-controls';
 import { NoticeStatusBadge, noticeAudienceLabel } from '@campuspilot/components/notices';
 import { resolveQueryBoundary } from '@campuspilot/components/query-boundary';
+import { QueryRefreshNote } from '@campuspilot/components/query-refresh-note';
 
 import { orpc } from '@/lib/orpc';
 import { NotificationDeliveryLogSection } from '../notifications/notification-delivery-log';
@@ -17,6 +18,7 @@ import { NoticeActions } from './notice-actions';
 import { NoticeEditor } from './notice-editor';
 import {
   NOTICE_BODY_MODE_LABELS,
+  NOTICE_UNPUBLISHABLE_REASON_ID,
   cadetAudienceAvailability,
   cadetAudienceUnpublishable,
   draftNotice,
@@ -25,9 +27,9 @@ import {
   noticeLoadFailure,
   noticesHref,
   publishedRecipientSummary,
-  savedNoticePreviewInput,
   type NoticeSessionScope,
 } from './notice-model';
+import { savedNoticePreviewQueryOptions } from './notice-queries';
 
 type NoticeScope = NoticeSessionScope & { noticeId: string };
 
@@ -87,15 +89,21 @@ function NoticeUnavailable({ scope, error, retry }: { scope: NoticeSessionScope;
  * Loading, unavailable, or the loaded notice handed to `children`, as
  * `noticeBoundaryState` resolves the read: a notice already on screen (and
  * an editor with typed text under it) stays when a background refetch
- * fails; only "not found" or "feature switched off" replaces it. A notice
- * of another session than the route's is not found here.
+ * fails, with a quiet note above it that it may be out of date; only "not
+ * found" or "feature switched off" replaces it. A notice of another session
+ * than the route's is not found here.
  */
 function NoticeBoundary({ scope, notice, children }: { scope: NoticeSessionScope; notice: UseQueryResult<NoticeDto>; children: (notice: NoticeDto) => ReactNode }) {
   const state = noticeBoundaryState(notice, scope);
   if (state.kind === 'pending') return <div role="status" aria-label="Loading notice" className="mx-auto h-60 w-full max-w-7xl animate-pulse rounded-xl bg-muted" />;
   if (state.kind === 'unavailable') return <section className="mx-auto w-full max-w-7xl"><NoticeUnavailable scope={scope} error={state.error} retry={notice.refetch} /></section>;
   if (state.kind === 'elsewhere') return <section className="mx-auto w-full max-w-7xl"><NoticeNotFound scope={scope} /></section>;
-  return children(state.notice);
+  return (
+    <>
+      <QueryRefreshNote error={state.refetchError} onRetry={() => void notice.refetch()} className="mx-auto w-full max-w-7xl" />
+      {children(state.notice)}
+    </>
+  );
 }
 
 function NoticeHeader({ notice }: { notice: NoticeDto }) {
@@ -146,23 +154,30 @@ function NoticeFacts({ notice }: { notice: NoticeDto }) {
  * date and the school's current Notice template, a published notice as
  * published. This render is what a publisher reviews: the publish dialog
  * reads the version and template revision of the same cached result
- * (`savedNoticePreviewInput`). A render already shown stays when a refetch
- * fails; the error replaces it only when there is nothing to show.
+ * (`savedNoticePreviewQueryOptions`, keyed by the version shown, so a render
+ * of an older version never stands for this one). A render already shown
+ * stays when a refetch fails, with a note saying so; the error replaces it
+ * only when there is nothing to show.
  */
 function SavedNoticePreview({ notice }: { notice: NoticeDto }) {
-  const preview = useQuery(orpc.school.previewNotice.queryOptions({ input: savedNoticePreviewInput(notice), retry: false }));
+  const preview = useQuery(savedNoticePreviewQueryOptions(notice));
   const state = resolveQueryBoundary(preview);
   if (state.kind === 'failed') {
     return <DocumentNotice error>{noticeErrorMessage(state.error, 'Unable to render this notice.')}<DocumentButton variant="outline" className="ml-3" onClick={() => void preview.refetch()}>Retry</DocumentButton></DocumentNotice>;
   }
-  return <DocumentPreview fitPageWidth html={state.kind === 'ready' ? state.data.html : undefined} label={notice.status === 'published' ? 'Published notice' : 'Draft preview'} placeholder="Rendering the notice…" />;
+  return (
+    <div className="flex flex-col gap-2">
+      {state.kind === 'ready' ? <QueryRefreshNote error={state.refetchError} onRetry={() => void preview.refetch()} /> : null}
+      <DocumentPreview fitPageWidth html={state.kind === 'ready' ? state.data.html : undefined} label={notice.status === 'published' ? 'Published notice' : 'Draft preview'} placeholder="Rendering the notice…" />
+    </div>
+  );
 }
 
 /** Said on a draft that cannot be published as addressed (students, in a school known not to have the Cadet Portal). */
 function UnpublishableAudienceNotice({ scope, notice }: { scope: NoticeSessionScope; notice: NoticeDto }) {
   const cadet = useSchoolFeature(scope.schoolId, 'cadet');
   const reason = cadetAudienceUnpublishable(notice, cadet.status === 'pending' ? 'pending' : cadetAudienceAvailability(cadet));
-  return reason ? <DocumentNotice>{reason}</DocumentNotice> : null;
+  return reason ? <DocumentNotice id={NOTICE_UNPUBLISHABLE_REASON_ID}>{reason}</DocumentNotice> : null;
 }
 
 function NoticeDetail({ scope, notice }: { scope: NoticeSessionScope; notice: NoticeDto }) {

@@ -1,7 +1,7 @@
 'use client';
 
 import { useId, type ReactNode } from 'react';
-import { Check, ChevronsUpDown } from 'lucide-react';
+import { ChevronsUpDown } from 'lucide-react';
 import { Button } from '@campuspilot/ui/components/button';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@campuspilot/ui/components/command';
 import { Label } from '@campuspilot/ui/components/label';
@@ -63,9 +63,10 @@ function ClassScopeList({ classes, selectedIds, search, page, footer, onSelected
             return (
               // cmdk's own `aria-selected` follows the highlighted row, not
               // the choice, so the choice is stated in words as well: a
-              // screen reader hears "Class 5, selected".
+              // screen reader hears "Class 5, selected". The visible check
+              // is the shared CommandItem's own (shown for `data-checked`,
+              // as in the school switcher); the row adds none of its own.
               <CommandItem key={item.id} value={item.id} data-checked={checked || undefined} onSelect={() => onSelectedIdsChange(toggleClassScopeId(classes, selectedIds, item.id))}>
-                <Check className={checked ? 'size-4 opacity-100' : 'size-4 opacity-0'} aria-hidden />
                 <span className="truncate">{item.label}</span>
                 <span className="sr-only">{checked ? ', selected' : ', not selected'}</span>
               </CommandItem>
@@ -102,7 +103,7 @@ export function ClassScopePicker({ classes, selectedIds, isPending = false, isEr
             <ChevronsUpDown className="size-4 shrink-0 text-muted-foreground" aria-hidden />
           </Button>
         </PopoverTrigger>
-        <PopoverContent align="start" className="w-80 max-w-[calc(100vw-2rem)] p-0">
+        <PopoverContent align="start" className="w-(--radix-popover-trigger-width) min-w-72 max-w-[calc(100vw-2rem)] p-0">
           <ClassScopeList classes={classes} selectedIds={selectedIds} {...list} />
         </PopoverContent>
       </Popover>

@@ -2,6 +2,7 @@
 
 import { useForm } from '@tanstack/react-form';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useState } from 'react';
 import { z } from 'zod';
 import {
   schoolFeatureCatalogue,
@@ -10,6 +11,7 @@ import {
   type SchoolFeatureEntry,
   type SchoolFeatureKey,
 } from '@campuspilot/api/routers/school/feature-flags/feature-flags.dto';
+import { ConfirmationDialog } from '@campuspilot/components/confirmation-dialog';
 import { resolveQueryBoundary } from '@campuspilot/components/query-boundary';
 import { Badge } from '@campuspilot/ui/components/badge';
 import { Button } from '@campuspilot/ui/components/button';
@@ -120,26 +122,38 @@ type FeatureFlagFormProps = {
  * `configInvalid`: the stored settings are unusable, so saving is offered
  * even when the switch was not moved; the save stores the entry's (valid)
  * settings in their place.
+ *
+ * Switching a live feature **off** is confirmed in an app dialog that
+ * repeats what stops ({@link DISABLE_WARNINGS}); enabling saves at once.
+ * The dialog's open flag is UI state, not form state.
  */
 function FeatureFlagForm({ schoolId, entry, configInvalid }: FeatureFlagFormProps & { configInvalid: boolean }) {
   const { feature } = entry;
+  const { label } = schoolFeatureCatalogue[feature];
   const form = useFeatureFlagForm(schoolId, entry);
+  const [confirmingDisable, setConfirmingDisable] = useState(false);
   const switchId = `feature-${feature}-enabled`;
+  const warningId = `feature-${feature}-disable-warning`;
   return (
     <form
       className="flex flex-col gap-4"
       onSubmit={(event) => {
         event.preventDefault();
-        void form.handleSubmit();
+        if (entry.enabled && !form.state.values.enabled) setConfirmingDisable(true);
+        else void form.handleSubmit();
       }}
     >
       <form.Field name="enabled">
         {(field) => (
           <div className="flex items-center justify-between gap-4">
-            <Label htmlFor={switchId}>Enabled for this school</Label>
+            {/* The feature's name is part of the switch's accessible name, so two cards' switches differ. */}
+            <Label htmlFor={switchId}>
+              <span className="sr-only">{label}: </span>Enabled for this school
+            </Label>
             <Switch
               id={switchId}
               checked={field.state.value}
+              aria-describedby={entry.enabled && !field.state.value ? warningId : undefined}
               onCheckedChange={(checked) => field.handleChange(checked)}
             />
           </div>
@@ -156,7 +170,7 @@ function FeatureFlagForm({ schoolId, entry, configInvalid }: FeatureFlagFormProp
         {({ enabled, isDirty, isSubmitting, errors }) => (
           <div className="flex flex-col gap-3">
             {entry.enabled && !enabled ? (
-              <p className="text-xs text-destructive" role="alert">
+              <p id={warningId} className="text-xs text-destructive" role="alert">
                 {DISABLE_WARNINGS[feature]}
               </p>
             ) : null}
@@ -171,6 +185,18 @@ function FeatureFlagForm({ schoolId, entry, configInvalid }: FeatureFlagFormProp
                 {isSubmitting ? 'Saving…' : 'Save changes'}
               </Button>
             </div>
+            <ConfirmationDialog
+              open={confirmingDisable}
+              title={`Disable ${label} for this school?`}
+              description={DISABLE_WARNINGS[feature]}
+              confirmLabel={isSubmitting ? 'Disabling…' : `Disable ${label}`}
+              pending={isSubmitting}
+              onOpenChange={setConfirmingDisable}
+              onConfirm={() => {
+                // A failed save is shown on the card under the switch, so the dialog closes either way.
+                void form.handleSubmit().finally(() => setConfirmingDisable(false));
+              }}
+            />
           </div>
         )}
       </form.Subscribe>

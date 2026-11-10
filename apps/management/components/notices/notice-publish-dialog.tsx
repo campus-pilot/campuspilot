@@ -11,6 +11,7 @@ import { NOTICE_CADET_CLASS_SCOPE_OPTIONS } from '@campuspilot/components/notice
 import { DeliveryForecastSummary } from '@campuspilot/components/notifications';
 import { readSchoolFeatureDisabled } from '@campuspilot/api/routers/school/feature-flags/feature-flags.dto';
 import { resolveQueryBoundary } from '@campuspilot/components/query-boundary';
+import { QueryRefreshNote } from '@campuspilot/components/query-refresh-note';
 import { toast } from '@campuspilot/ui/lib/toast';
 
 import { client, orpc } from '@/lib/orpc';
@@ -22,11 +23,11 @@ import {
   noticeErrorMessage,
   publishReviewChange,
   publishReviewOf,
-  savedNoticePreviewInput,
   staffRecipientLine,
   whatsappPdfLine,
   type PublishReview,
 } from './notice-model';
+import { savedNoticePreviewQueryOptions } from './notice-queries';
 
 type ReadyPreview = Extract<NoticePublishPreview, { kind: 'ready' }>;
 
@@ -55,7 +56,7 @@ function CadetRecipients({ notice, preview }: { notice: NoticeDto; preview: Read
   const classNames = notice.classes.flatMap((entry) => (entry.classId ? [entry.name] : []));
   return (
     <section className="flex flex-col gap-1">
-      <h3 className="text-sm font-medium">Cadets · {NOTICE_CADET_CLASS_SCOPE_OPTIONS[preview.cadetScope].label}</h3>
+      <h3 className="text-sm font-medium">Students · {NOTICE_CADET_CLASS_SCOPE_OPTIONS[preview.cadetScope].label}</h3>
       {preview.cadetScope === 'selected_classes' ? <p className="text-sm [overflow-wrap:anywhere]">{classNames.join(', ')}</p> : null}
       <DeliveryForecastSummary forecast={preview.cadetForecast} />
       {pdfLine ? <p className="text-xs text-muted-foreground">{pdfLine}</p> : null}
@@ -121,7 +122,7 @@ function ForecastUnavailable({ notice, error, retry }: { notice: NoticeDto; erro
  */
 function usePublishNotice(notice: NoticeDto, onClose: () => void) {
   const cache = useQueryClient();
-  const [reviewed] = useState<PublishReview | null>(() => publishReviewOf(cache.getQueryData(orpc.school.previewNotice.queryKey({ input: savedNoticePreviewInput(notice) }))));
+  const [reviewed] = useState<PublishReview | null>(() => publishReviewOf(cache.getQueryData(savedNoticePreviewQueryOptions(notice).queryKey)));
   const scope = { schoolId: notice.schoolId, noticeId: notice.id };
   const refreshNotice = () =>
     Promise.all([
@@ -175,6 +176,7 @@ function PublishDialogBody({ notice, state }: { notice: NoticeDto; state: Return
   if (resolved.kind === 'failed') return <ForecastUnavailable notice={notice} error={resolved.error} retry={forecast.refetch} />;
   return (
     <>
+      <QueryRefreshNote error={resolved.refetchError} onRetry={() => void forecast.refetch()} />
       <PublishForecast notice={notice} preview={resolved.data} />
       {publish.isError ? <p className="text-sm text-destructive" role="alert">{noticeErrorMessage(publish.error, 'Unable to publish this notice.')}</p> : null}
     </>

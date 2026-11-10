@@ -5,6 +5,7 @@ import { DownloadIcon, FileQuestionIcon } from 'lucide-react';
 import type { CadetNoticeDto } from '@campuspilot/api/routers/cadet/cadet.dto';
 import { CadetNoticeDocument, CadetNoticeText } from '@campuspilot/components/cadet-portal';
 import { resolveQueryBoundary } from '@campuspilot/components/query-boundary';
+import { QueryRefreshNote } from '@campuspilot/components/query-refresh-note';
 import { Button } from '@campuspilot/ui/components/button';
 
 import { client, orpc } from '@/lib/orpc';
@@ -122,6 +123,7 @@ export function NoticeScreen({ noticeId }: { noticeId: string }) {
   }
   return (
     <>
+      <QueryRefreshNote error={state.refetchError} onRetry={() => void notice.refetch()} />
       <NoticeHeading notice={state.data} />
       <NoticeBody notice={state.data} />
     </>

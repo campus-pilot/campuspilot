@@ -14,7 +14,16 @@ import { toast } from '@campuspilot/ui/lib/toast';
 
 import { client, orpc } from '@/lib/orpc';
 import { RequirePermissions } from '../require-permissions';
-import { editNoticeHref, noticeActionsFor, noticeErrorMessage, noticesHref } from './notice-model';
+import { useSchoolFeature } from '../require-feature';
+import {
+  NOTICE_UNPUBLISHABLE_REASON_ID,
+  cadetAudienceAvailability,
+  cadetAudienceUnpublishable,
+  editNoticeHref,
+  noticeActionsFor,
+  noticeErrorMessage,
+  noticesHref,
+} from './notice-model';
 import { NoticePublishDialog } from './notice-publish-dialog';
 
 function schoolPermission(schoolId: string, action: typeof SCHOOL_ACTIONS.DRAFT_NOTICE | typeof SCHOOL_ACTIONS.PUBLISH_NOTICE | typeof SCHOOL_ACTIONS.READ_NOTICE) {
@@ -31,11 +40,20 @@ function EditNoticeAction({ notice }: { notice: NoticeDto }) {
   );
 }
 
+/**
+ * Publish, or a disabled Publish while the page already says the draft
+ * cannot be published as addressed (students, in a school known not to
+ * have the Cadet Portal): the reason is the page note the button is
+ * described by, and Edit beside it is the way out. The server decides
+ * again on publication either way.
+ */
 function PublishNoticeAction({ notice }: { notice: NoticeDto }) {
   const [open, setOpen] = useState(false);
+  const cadet = useSchoolFeature(notice.schoolId, 'cadet');
+  const blocked = cadetAudienceUnpublishable(notice, cadet.status === 'pending' ? 'pending' : cadetAudienceAvailability(cadet)) !== null;
   return (
     <RequirePermissions permissions={schoolPermission(notice.schoolId, SCHOOL_ACTIONS.PUBLISH_NOTICE)}>
-      <Button type="button" size="sm" onClick={() => setOpen(true)}><Send aria-hidden />Publish</Button>
+      <Button type="button" size="sm" disabled={blocked} aria-describedby={blocked ? NOTICE_UNPUBLISHABLE_REASON_ID : undefined} onClick={() => setOpen(true)}><Send aria-hidden />Publish</Button>
       {open ? <NoticePublishDialog notice={notice} onClose={() => setOpen(false)} /> : null}
     </RequirePermissions>
   );
