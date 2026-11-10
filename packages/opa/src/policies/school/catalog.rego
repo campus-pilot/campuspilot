@@ -483,3 +483,12 @@ actions contains {"id": "school.notification.log.read", "key": "READ_NOTIFICATIO
 # each topic's audience is its own grant.
 actions contains {"id": "school.notification.failure.finance.receive", "key": "RECEIVE_FINANCE_NOTIFICATION_FAILURES", "resourceKind": "school"} if { true }
 actions contains {"id": "school.notification.failure.results.receive", "key": "RECEIVE_RESULT_NOTIFICATION_FAILURES", "resourceKind": "school"} if { true }
+actions contains {"id": "school.notification.failure.notices.receive", "key": "RECEIVE_NOTICE_NOTIFICATION_FAILURES", "resourceKind": "school"} if { true }
+
+# School notices (docs/notices.md). Reading covers every published notice and
+# the caller's own drafts; drafting covers creating notices and editing or
+# deleting one's own drafts (ownership is a data fact checked by the API,
+# not a role); publishing also covers every draft of the school.
+actions contains {"id": "school.notice.read", "key": "READ_NOTICE", "resourceKind": "school"} if { true }
+actions contains {"id": "school.notice.draft", "key": "DRAFT_NOTICE", "resourceKind": "school"} if { true }
+actions contains {"id": "school.notice.publish", "key": "PUBLISH_NOTICE", "resourceKind": "school"} if { true }
