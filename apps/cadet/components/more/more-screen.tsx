@@ -14,6 +14,7 @@ import { authClient } from '@/lib/auth-client';
 import { initialsOf } from '@/lib/format';
 import { orpc } from '@/lib/orpc';
 import { turnOffDeviceNotifications } from '@/lib/web-push.client';
+import { MoreNoticesRow } from '../notices/recent-notices';
 import { CadetDeviceNotifications } from '../notifications/cadet-device-notifications';
 import { ScreenError, ScreenHeader, ScreenLoading } from '../screen';
 
@@ -99,6 +100,7 @@ export function MoreScreen() {
       ) : (
         <ProfileCard profile={profile.data} />
       )}
+      <MoreNoticesRow />
       <ItemGroup className="gap-0 rounded-lg border">
         <Item>
           <ItemContent>
