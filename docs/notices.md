@@ -19,7 +19,7 @@ that enforces it.
 ## Data model
 
 `packages/db/src/schema/notice.ts` (migrations `0050_notices.sql`,
-`0051_demo-purge-notices.sql`; ID prefix `ntc`).
+`0051_demo-purge-notices.sql`; ID prefixes `ntc`, `ntcc`).
 
 | Column | Meaning |
 | --- | --- |
@@ -31,12 +31,30 @@ that enforces it.
 | `to_staff` | Addressed to the school's staff (every member). |
 | `cadet_scope` | Students addressed: `none`, `all_classes`, `selected_classes`. |
 | `created_by`, `created_at`, `updated_at` | The author (null after the account is deleted). |
+| `version` | Counts the writes: 1 when created, plus one per saved edit and for the publication. The optimistic-concurrency token (see "Concurrent changes"). |
 | `published_by`, `published_at` | Set together when published. |
+| `issued_on` | The calendar date printed on the notice, decided once at publication; null for a draft. |
 | `template_revision_id` | The school's Notice template revision pinned at publication (plain notices only). |
 | `published_staff_count`, `published_cadet_count` | Who was notified at publication; null for a draft. |
 
-`notice_class (notice_id, class_id, school_id)` holds the classes of a
-`selected_classes` notice. Both foreign keys cascade.
+`notice_class (id, notice_id, class_id, class_name, school_id)` holds the
+classes of a `selected_classes` notice. A row is an **audience record that
+outlives its class**:
+
+- `class_id` is the live reference used for targeting and visibility. It is
+  `ON DELETE SET NULL`: a notice never blocks deleting a class, and a deleted
+  class addresses nobody.
+- `class_name` is the class's name as the audience was recorded: when the draft
+  was last saved, and again at publication (`recordPublishedClasses`). A
+  published notice shows these names, so "sent to Class 5 and Class 8" stays
+  true after Class 8 is renamed or deleted.
+- Publishing drops a draft's rows whose class is already gone (it was never
+  addressed).
+
+The DTO carries both views and never mixes them: `classIds` is the existing
+classes (what the editor edits), `classes: [{ classId, name }]` the record for
+display (`classId` null = deleted since; a draft shows current names, a
+published notice the names it was published with).
 
 ### The two audience facts
 
@@ -52,8 +70,9 @@ is meaningful only for `selected_classes` and must be empty otherwise
 look saved. There is no class "level" in the schema: targeting a level means
 choosing its classes.
 
-Other CHECKs: the published facts are all set or all null; a revision can be
-pinned only on a published plain notice; the title length.
+Other CHECKs: the published facts (including `issued_on`) are all set or all
+null; a revision can be pinned only on a published plain notice; the title
+length; `version >= 1`.
 
 ## Lifecycle and who can do what
 
@@ -77,6 +96,25 @@ these rules.
 No school action is reachable by a platform admin who is not a member of the
 school; notices are no exception.
 
+### Concurrent changes
+
+A draft can be edited by its author while a publisher reads it, and by two
+people at once. Both writes therefore name the version the caller read
+(`expectedVersion`, from `getNotice.version` or
+`previewNoticePublish.version`), checked under the row lock:
+
+- `updateNotice` with a stale version is `CONFLICT` and writes nothing, so
+  nobody overwrites a change they did not see;
+- `publishNotice` with a stale version is `CONFLICT` and notifies nobody.
+  Publication is irreversible, so it must only ever send the text and audience
+  the publisher reviewed.
+
+The message is `NOTICE_CHANGED_MESSAGE` ("This notice changed since you opened
+it. Review it again."). Management: the editor keeps what was typed and offers
+"Load the latest version"; the publish dialog holds the version that was on the
+page when Publish was pressed, blocks itself when the forecast or the server
+reports another version, and refreshes the page behind it.
+
 ## Feature gating
 
 Two per-school platform features (see [School feature flags](feature-flags.md)):
@@ -89,6 +127,8 @@ Two per-school platform features (see [School feature flags](feature-flags.md)):
 - **`cadet`** gates addressing students. A notice whose `cadetScope` is not
   `none` is refused with the disabled-feature error for `cadet` when it is
   created or updated, and again when its publication is previewed or performed.
+  Nothing rewrites a stored audience when the feature goes off: the draft keeps
+  its audience and cannot be saved or published until someone changes it.
 
 Clients tell the error apart with `readSchoolFeatureDisabled(error)`, never by
 its message. Management wraps navigation and pages in `RequireFeature` /
@@ -96,7 +136,32 @@ its message. Management wraps navigation and pages in `RequireFeature` /
 notice procedures' own answer as the signal (see "Cadet Portal").
 
 Nothing is deleted when a feature is switched off: notices, cached PDFs and
-already emitted notifications are kept and work again when it is switched on.
+inbox rows are kept and work again when it is switched on.
+
+### Nothing new goes out while a feature is off
+
+`notificationRequiredFeatures` (`@campuspilot/db/notifications/catalogue`)
+names the features each notification type belongs to: `notice.published` needs
+`notices` **and** `cadet`, `notice.published_staff` needs `notices`.
+`disabledFeatureOf` (`notifications/features.ts`) is the one check, applied at
+every point a copy could still leave the API:
+
+| Point | While a required feature is off |
+| --- | --- |
+| Fan-out of an event not dispatched yet (`loadDispatchableEvent`, `decideDeliveries`) | Remote copies are planned `skipped: feature_disabled`. The inbox row is still written. |
+| Sender, just before a queued copy is claimed (`sendDelivery`) | The copy is recorded `skipped: feature_disabled`; the provider is not called. |
+| Staff resend (`resendNotificationDelivery`) | Refused with the disabled-feature error; no event is written. |
+| Notice PDF source (`notifications/documents/notice.ts`) | Produces nothing. |
+
+`feature_disabled` is its own skip reason (the delivery log reads "Feature
+switched off for this school"); it is about the school, not the channel.
+Copies skipped this way are not sent later when the feature returns.
+
+Inbox rows are the record and stay: rows written before the switch, and the
+row of an event fanned out after it, remain in the staff and Cadet inboxes with
+the notice title. Their link lands on the calm unavailable state ("Notices is
+not enabled" in management, "Notices are not available" in the Cadet Portal;
+with `cadet` off the whole portal says "Cadet Portal unavailable").
 
 ## Rendering
 
@@ -115,8 +180,25 @@ instance, the sanitizer, the CSP wrapper and Gotenberg.
 - `notice.{title,issuedOn,issuedOnDisplay,paragraphs[]}`.
 
 Nothing about students, staff, results or money is reachable from a notice,
-whoever wrote it. `issuedOn` is the publication date (today for a draft) in the
-session's finance time zone when one is configured, else UTC.
+whoever wrote it.
+
+### What is fixed at publication, and what is live
+
+| Fact | Published notice |
+| --- | --- |
+| Title, body, audience | Fixed (immutable row). |
+| Template revision of a plain notice | Fixed (`template_revision_id`; the built-in design is not pinned, see below). |
+| `issuedOn` / `issuedOnDisplay` | **Fixed**: `notice.issued_on`, the publication instant's calendar date in the session's finance time zone as configured at that moment (UTC without one). It is stored, never recomputed, so changing the time zone later does not move a notice's date. |
+| `generatedAt` | Fixed: the publication instant. |
+| School name, location, registration number, logo | **Live**, by decision: every HTML render reads the school's current letterhead. |
+| Cached PDF | Rendered on first use, then never again: it keeps the letterhead of that moment. |
+
+So a published notice's wording, date and design never change, but its
+letterhead can: after a school changes its name or logo, the HTML views show
+the new letterhead while an already cached PDF shows the old one. That is
+accepted (a school's identity changing is rare, and the notice's content is what
+must not move); do not describe a published notice as rendering "identically
+every time". A draft or unsaved preview shows today's date.
 
 The context has three descriptions that must stay in step, and the build and
 tests keep them so:
@@ -141,8 +223,9 @@ runtime imports). Do not copy the variable list or the starter into an app.
 | Pinned at publication | The revision used (`template_revision_id`; null for the built-in design). | Nothing to pin. |
 
 A draft or unsaved preview uses the school's current selection; a published
-notice always renders from its stored publication time and pinned revision
-(`renderPublishedNoticeHtml`), so a later template edit never changes it. The
+notice always renders from its stored publication instant, issued-on date and
+pinned revision (`renderPublishedNoticeHtml`), so a later template edit never
+changes it. The
 built-in design is not pinned: a plain notice published without a selected
 template renders with whatever `notice-default` the running release ships (its
 cached PDF does not change).
@@ -155,12 +238,34 @@ must not set a fixed height, `overflow: hidden` or outer page padding.
 
 - Plain text is data. Markup or `{{…}}` typed by an author is shown, never run.
 - A custom template is written by **any** staff role, so it gets the school
-  template safeguards (restricted helpers, no scripts, forms, links, external
-  URLs or network assets; sanitized output) **plus** structural limits
-  (`assertBoundedNoticeTemplate`): no partials or inline partials, block helpers
-  nested at most four deep. Both are checked on save
-  (`assertValidNoticeTemplate`, which also renders against the sample) and again
-  on every render.
+  template safeguards plus the limits below. Everything is checked on save
+  (`assertValidNoticeTemplate`) and again on every render, by the same function
+  (`renderNoticeDocument`), so what saves is what renders.
+- **Helpers are an allowlist** (`DOCUMENT_TEMPLATE_HELPERS` in
+  `document.render.ts`): `each`, `if`, `unless`, `with`, `lookup`, `add`. Every
+  other Handlebars built-in is unregistered on the shared instance, for school
+  templates too. In particular `log` is gone: it wrote its arguments to the
+  server's console with no size limit. A call to anything else is BAD_REQUEST.
+- **The output is bounded while it is produced.** The renderer counts every
+  character as Handlebars emits it (each printed value and each run of a block
+  body) and aborts at the budget, so a template that multiplies (nested `each`,
+  a value repeated thousands of times) costs at most the budget and never
+  builds the oversized string. Notices use `NOTICE_RENDER_MAX_CHARS` (2 million
+  characters; a published notice is re-rendered with twice that, so a longer
+  school name can never make it unreadable). Other documents use 25 million.
+- **The school logo is placed outside the template's control.** It is the one
+  large value in the context (a data URI of up to ~6.7 MB). A notice template is
+  rendered with a short, random, single-use placeholder in `school.logoUrl`; the
+  real image is substituted after rendering and sanitizing, at most
+  `NOTICE_MAX_LOGO_USES` (3) times, and more uses are BAD_REQUEST. A rendered
+  notice is therefore at most the budget plus three logos, whatever the source
+  does, and the limit is the same against the sample context and against a
+  school with a 5 MB logo. A school Notice template is held to the same budget
+  and logo limit when it is saved (`assertValidSchoolNoticeTemplate`).
+- **Structural limits** (`assertBoundedNoticeTemplate`) keep author templates
+  simple: no partials or inline partials (an inline partial can call itself),
+  block helpers nested at most four deep. An `{{else if}}` chain is one level
+  however long it is. These limits do not bound the output; the meter does.
 - Browsers show notice HTML only in an **empty-sandbox** iframe
   (`DocumentPreview` in `@campuspilot/components/documents`). Never add sandbox
   capabilities and never inject notice HTML into a page.
@@ -171,23 +276,27 @@ must not set a fixed height, `overflow: hidden` or outer page padding.
 
 `publishNotice` (`notice.service.ts`) is one transaction:
 
-1. lock the notice row; refuse NOT_FOUND (not visible) or CONFLICT (already
-   published);
+1. lock the notice row; refuse NOT_FOUND (not visible), CONFLICT (already
+   published) or CONFLICT (not the `expectedVersion` the publisher reviewed);
 2. re-check the `cadet` feature when students are addressed, and that a
-   `selected_classes` notice still has a class;
+   `selected_classes` notice still has an existing class; record the audience
+   (`recordPublishedClasses`);
 3. render it once with the current time, which validates it and decides the
-   revision to pin;
+   revision to pin and the issued-on date to store;
 4. resolve the recipients (`resolveNoticeRecipients`);
 5. flip `draft → published` conditionally, storing `published_at`,
-   `published_by`, the pinned revision and both recipient counts;
+   `issued_on`, `published_by`, the pinned revision and both recipient counts,
+   and incrementing `version`;
 6. emit the notification events (`notifyNoticePublished`).
 
 The events are handed to the worker only after the commit. The conditional
 update and the event keys both make a replayed publication harmless.
 
 `previewNoticePublish` returns the same recipient resolution without writing
-(staff count and the students' per-channel forecast); the management confirmation
-dialog shows it. The server decides again inside the publication.
+(staff count, the students' per-channel forecast, and the `version` it was made
+for); the management confirmation dialog shows it and says what each channel
+will really send (the PDF is mentioned only when the forecast has WhatsApp
+copies to send). The server decides again inside the publication.
 
 ## Notifications
 
@@ -230,10 +339,16 @@ applies to billing runs and results releases. Do not treat a short log as final,
 and do not compare it with `published_cadet_count` to guess progress: use
 `preparation`.
 
+The counts are read on every (polled) log request, so they never scan other
+schools: a notice and a billing run are one batch and are found through
+`notification_event_batch_idx`; an admission and an examination read the
+school's own pending and failed events through
+`notification_event_school_unsettled_idx` (`scopePreparation`).
+
 ## The notice PDF and its cache
 
-A published notice is immutable and identical for every reader, so its PDF is
-rendered once and cached at
+A published notice's content, date and design are fixed and the same for every
+reader, so its PDF is rendered once and cached at
 
 ```
 schools/{schoolId}/notices/{noticeId}.pdf
@@ -257,7 +372,7 @@ download, the Cadet download and every WhatsApp attachment
 
 Procedures (`routers/cadet/cadet-notices.{router,service}.ts`, on
 `cadetProcedure`, no identity inputs): `listNotices`, `getNotice`,
-`getNoticeDownload`.
+`getNoticeDocument`, `getNoticeDownload`.
 
 **Visibility rule** (`addressedTo`, evaluated in the query on every request): a
 student sees a notice when it belongs to their school, is **published**,
@@ -269,9 +384,18 @@ publication: a student moved to another class sees that class's notices.
 Registration is not part of visibility (portal access survives unregistering);
 it only decides who is notified.
 
-`getNotice` returns `{ noticeId, title, publishedAt, text, html }`: `text` is the
-plain body for a plain notice and null for a custom-template one; `html` is the
-sanitized document.
+The content and the printed page are two reads, because the Cadet MCP serves
+`getNotice` as a core tool and an AI app must not be sent megabytes of markup
+and base64 to read a few sentences:
+
+- `getNotice` returns `{ noticeId, title, publishedAt, bodyMode, text }`, never
+  HTML. `text` is the plain body for a plain notice; for a custom-template
+  notice it is the readable text of the rendered document (`noticeDocumentText`,
+  rendered without the logo). `bodyMode` is its own fact and decides how the app
+  shows the notice.
+- `getNoticeDocument` returns `{ noticeId, html }`, the sanitized printed page
+  with the letterhead. MCP hidden; the app asks for it only for a
+  custom-template notice.
 
 Screens (`apps/cadet/components/notices`, shared API-free pieces in
 `packages/components/src/cadet-portal/cadet-notice.tsx`):
@@ -283,9 +407,12 @@ Screens (`apps/cadet/components/notices`, shared API-free pieces in
 
 - **Reading on a phone.** A plain notice is shown as text (`CadetNoticeText`,
   the same paragraph rule as the printed notice), not as an A4 sheet scaled to a
-  few millimetres of type. A custom-template notice has no text form, so it is
-  shown as its printed page in the shared empty-sandbox `DocumentPreview` with
-  `fitPageWidth`. Both offer the PDF.
+  few millimetres of type. A custom-template notice is shown as its printed
+  page (`getNoticeDocument`) in the shared empty-sandbox `DocumentPreview` with
+  `fitPageWidth`; while the page loads, or if it cannot be loaded, its text is
+  shown instead. Both offer the PDF. `fitPageWidth` scales with CSS only where
+  the browser supports it (`@supports`); elsewhere the frame is full width and
+  scrolls, so the notice is readable at its real size.
 - **Entry points.** A notices block on Home (`HomeNotices`, the newest three,
   rendered only when there are notices) and a row on More (`MoreNoticesRow`).
   The tab bar keeps its five tabs.
@@ -309,8 +436,25 @@ components in `apps/management/components/notices`):
 | `/school/:schoolId/settings/templates/notice` | The school's Notice template (document system). |
 
 The sidebar item, the pages, the dashboard "Recent notices" card and the "Create
-notice" job need the `notices` feature and their permission. Student audience
-options appear only when the school has `cadet`.
+notice" job need the `notices` feature and their permission.
+
+Rules the screens follow (models in `notice-model.ts`, each with tests):
+
+- **The stored audience is shown as it is.** New student audiences are offered
+  only when the school has `cadet`; a draft already addressed to students keeps
+  showing that, with the reason it cannot be saved, until the author chooses
+  Staff. "The portal is off" and "the features could not be read" are different
+  states with different words (`CadetAudienceAvailability`); the second offers
+  Retry.
+- **A notice is shown only under its own session** (`noticeBelongsToSession`);
+  switching session from a notice returns to the list (`sessionSwitchSuffix`).
+- **A notice that cannot be loaded says why** (`noticeLoadFailure`): not found
+  (no retry), feature switched off, or a failure with Retry. Deleting a draft
+  removes it from the cache.
+- **The live preview never goes blank on an error**: the last render that
+  worked stays under the error message.
+- **Field errors are linked to their inputs** (`aria-describedby`,
+  `NOTICE_FIELD_IDS`) and a failed save moves focus to the first invalid field.
 
 ## Demo schools
 
@@ -340,12 +484,12 @@ custom-template invitation, and two drafts.
   attachments; no read receipts.
 - No "publication finished" message or settle sweep for notices (results have
   one). The delivery log's `preparation` is the only progress signal.
-- `updateNotice` has no optimistic concurrency: the last write to a draft wins.
 - The built-in default design is not pinned (see "Rendering").
-- Resending a notice delivery, and delivering already emitted notice events, are
-  not gated by the features.
-- `notice_class.class_id` cascades: deleting a class can leave a
-  `selected_classes` draft with none, which is refused at publication.
+- A published notice's letterhead is live in HTML and frozen in its cached PDF
+  (see "What is fixed at publication, and what is live").
+- Inbox rows of notices stay visible while a feature is off; only remote copies
+  are held back (see "Nothing new goes out while a feature is off").
+- Copies skipped as `feature_disabled` are not sent when the feature returns.
 - A platform admin who is not a school member cannot use notices.
 - The Cadet Portal highlights no tab on the notice screens, and shows no
   "unread notice" state beyond the notification inbox.
@@ -380,7 +524,8 @@ custom-template invitation, and two drafts.
 1. Staff: `.route()`, `.meta({ mcp })` (notice tools are `advanced`),
    `requireSchoolPermission(...)` **then** `requireSchoolFeature('notices')`;
    call `assertSchoolFeatureEnabled(..., 'cadet')` wherever students are
-   addressed. Cadet: `cadetProcedure`, no identity inputs,
+   addressed. A procedure that changes a notice takes `expectedVersion` and
+   increments `version`. Cadet: `cadetProcedure`, no identity inputs,
    `assertNoticesEnabled`, look the notice up through `addressedTo`.
 2. Integration tests: anonymous, wrong school, each role, feature off, another
    author's draft, published immutability.
@@ -389,9 +534,10 @@ custom-template invitation, and two drafts.
 
 **A new notification channel or type for notices**
 
-1. Catalogue entry (one audience per type) and every exhaustive consumer:
-   renderers, web-push renderer, WhatsApp templates, delivery-log labels and
-   reference, failure-alert topic, management and Cadet route maps.
+1. Catalogue entry (one audience per type), its `notificationRequiredFeatures`,
+   and every exhaustive consumer: renderers, web-push renderer, WhatsApp
+   templates, delivery-log labels and reference, failure-alert topic, management
+   and Cadet route maps.
 2. Keep one event per student with the `notice` batch; keys derive from the
    notice.
 

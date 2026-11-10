@@ -347,7 +347,20 @@ Every bundled design must:
 - render against `SAMPLE_DOCUMENT_CONTEXT` without reading live tenant data.
 
 The renderer allows standard Handlebars `each`, `if`, `unless`, `with`, and
-`lookup`, plus the finite-numeric `add` helper. Prototype access is disabled.
+`lookup`, plus the finite-numeric `add` helper. This is an **allowlist**
+(`DOCUMENT_TEMPLATE_HELPERS` in `document.render.ts`): every other built-in is
+unregistered when the instance is created, including `log`, which would let a
+template write unbounded data to the server's console. A call to any other
+helper is a BAD_REQUEST. Prototype access is disabled.
+
+The output is bounded **while it is produced**, not afterwards: the renderer
+rewrites each `{{value}}` to pass through a counting helper and wraps every
+block body, so a template that multiplies a large value (nested `each` around
+photos, one value repeated thousands of times) is aborted at the limit instead
+of building a string of hundreds of megabytes first. The default limit is 25
+million characters per rendered document (`DOCUMENT_RENDER_MAX_CHARS`); notices
+pass a much lower one. Each character is counted once, so a legitimate large
+batch is unaffected.
 Rendered HTML is sanitized, wrapped in a restrictive content-security policy, and
 shown in an iframe with an empty `sandbox` attribute. Gotenberg runs with JavaScript
 and public/private outbound network access disabled.
@@ -469,7 +482,9 @@ conversion. What differs is recorded here because it is easy to get wrong.
   staff, exam or finance data. Templates are previewed and validated against
   `SAMPLE_NOTICE_CONTEXT` (`sampleDocumentContext('notice')`), never the
   general sample. `issuedOn` is the publication date (today for a draft) in
-  the session's finance time zone when one is configured, else UTC.
+  the session's finance time zone when one is configured, else UTC. For a
+  published notice the date is stored at publication (`notice.issued_on`) and
+  never recomputed.
 - **Two body modes.** A `plain` notice is data: its text is split into
   `notice.paragraphs[]` at blank lines and printed escaped by the template; it
   is never compiled as Handlebars. A `template` notice is its own complete
@@ -477,7 +492,12 @@ conversion. What differs is recorded here because it is easy to get wrong.
   sanitized like a school template, with `paragraphs` empty. Because every
   staff role can write one, an author's source is additionally refused when
   it uses partials or inline partials, or nests block helpers more than four
-  deep (`assertBoundedNoticeTemplate`), on save and on every render. What the
+  deep (`assertBoundedNoticeTemplate`), on save and on every render. Every
+  notice render (author source or school Notice template) has a 2 million
+  character budget and receives the school logo as a placeholder that is
+  replaced after rendering, at most three times; a school Notice template is
+  checked against both when it is saved. See "Security contract" in
+  [School notices](notices.md). What the
   custom-template editor tells authors (variable list, starter document) is
   owned by `notice-template-guide.ts` next to the renderer and is exhaustive
   over `SAMPLE_NOTICE_CONTEXT`; do not copy it into an app.

@@ -21,6 +21,7 @@ its own layer, and never infer one from the other.
 | `SchoolFeatureConfig<K>` | The config type of exactly one key. A caller holding key `K` never sees another key's shape. |
 | `SchoolFeatureState<K>` | `{ enabled: boolean; config: SchoolFeatureConfig<K> \| null }`. |
 | `SchoolFeatureFlags` | `{ [K in SchoolFeatureKey]: SchoolFeatureState<K> }`. |
+| `SchoolFeatureEntry`, `schoolFeatureEntries(flags)` | One feature's state **with its key**, a union discriminated on `feature`. Use it whenever the key is not a literal (a loop, a form): a value whose key may be any feature cannot carry one feature's config for another. Build updates by spreading an entry, never by pairing `feature` and `config` by hand. |
 | `parseSchoolFeatureConfig(key, raw)` | Validates stored or submitted jsonb against that key's schema; null means "no config". |
 | `schoolFeatureFlagsSchema`, `schoolFeatureUpdateSchema` | API output schema; update input as a discriminated union on `feature`. |
 | `SCHOOL_FEATURE_DISABLED_REASON`, `readSchoolFeatureDisabled(error)` | The disabled-feature error contract (below). |
@@ -32,15 +33,20 @@ Browser apps do not depend on `@campuspilot/db`; they import the same names from
 
 Table `school_feature_flag` (`packages/db/src/schema/school-feature-flag.ts`,
 migration `0048_school-feature-flags.sql`): primary key `(school_id, feature)`,
-`enabled`, `config` jsonb, `updated_by`, `updated_at`.
+`enabled`, `config` jsonb, `updated_by`, `updated_at`. `school_id` is
+`ON DELETE CASCADE`: flags are the school's own configuration and go with it,
+so `systemAdmin.deleteSchool` is never blocked by a flag row.
 
 - `feature` is text, not a database enum: adding a feature needs no migration,
   and rows of a retired key are ignored by every read.
 - **A missing row means disabled with no config.** A new school has no rows, so
   every feature is off until an administrator enables it.
 - `enabled` and `config` are independent facts. Disabling keeps the config.
-- A stored config that no longer matches its schema makes the read throw; it is
-  never silently replaced by a default.
+- A stored config that no longer matches its schema makes a **config** read
+  throw (`getSchoolFeature`, `getSchoolFeatureFlags`, `requireSchoolFeature`); it
+  is never silently replaced by a default. "Is it enabled" never reads the
+  config (`isSchoolFeatureEnabled`, `assertSchoolFeatureEnabled`), so a stale
+  config cannot turn a gate, such as Cadet sign-in, into a 500.
 - Migration 0048 backfilled `cadet = enabled` for every school that existed,
   because the Cadet Portal was already available to all of them. `notices` was
   not backfilled.
@@ -54,7 +60,7 @@ migration `0048_school-feature-flags.sql`): primary key `(school_id, feature)`,
 | Where | What |
 | --- | --- |
 | `@campuspilot/db/feature-flags/store` | `getSchoolFeatureFlags(db, schoolId)`, `getSchoolFeature(db, schoolId, key)`, `isSchoolFeatureEnabled(db, schoolId, key)`. Shared with `@campuspilot/auth` (Cadet sign-in). |
-| `packages/api/src/feature-flags/feature-flags.service.ts` | Re-exports the reads; `setSchoolFeature(db, { schoolId, feature, enabled, config, updatedBy })`; `assertSchoolFeatureEnabled(db, schoolId, key)`; `schoolFeatureDisabledError(key)`. |
+| `packages/api/src/feature-flags/feature-flags.service.ts` | Re-exports the reads; `setSchoolFeature(db, { ...entry, schoolId, updatedBy })` (the input is a `SchoolFeatureEntry`); `assertSchoolFeatureEnabled(db, schoolId, key)` (decides from `enabled` only, returns nothing); `schoolFeatureDisabledError(key)`. |
 | `packages/api/src/permissions/feature.ts` | `requireSchoolFeature(key)` middleware. |
 | `school.getFeatureFlags({ schoolId })` | Any member of the school (`requireSchoolMember`), no permission. Returns `{ schoolId, features }`. MCP hidden. |
 | `systemAdmin.getSchoolFeatureFlags({ id })` | `system.school.feature_flags.read`. MCP advanced. |
@@ -106,14 +112,29 @@ school-level switch. Off means the portal is unavailable everywhere:
 | Cadet MCP (`createCadetOAuthContext`) | No context, so the gate answers 401 like a revoked connection. The grant is kept. |
 | `issueAdmissionCadetPassword`, `createAdmission` with `generateCadetPassword` | Disabled-feature error (after the permission check); nothing is written. Plain `createAdmission` is unaffected. |
 | `getCadetPortalSettings` / `updateCadetPortalSettings` | Disabled-feature error (after the permission check). |
+| `releaseExamToCadet`, `previewExamCadetRelease` | Disabled-feature error (after the permission check); nothing is released, stamped or notified, so the first release after the portal is enabled still notifies. |
+| `sendStudentResultNotification`, `previewStudentResultNotification` | Disabled-feature error (after both permission checks). |
+| Saving or publishing a notice addressed to students | Disabled-feature error for `cadet` (see the notices table). |
+| `notice.published` copies not sent yet | Skipped (`feature_disabled`), resend refused; see [School notices](notices.md). |
 | `/blob/school/{id}/cadet.webmanifest` | 404, identical to an unknown school. |
-| Management UI | The Cadet Portal settings card, the "Generate Cadet Portal password" checkbox and "Issue portal password" are hidden (`RequireFeature`). |
-| Cadet app | A signed-in student sees "Cadet Portal unavailable" with Sign out (`AppFrame`). |
+| Management UI | The Cadet Portal settings card, the "Generate Cadet Portal password" checkbox, "Issue portal password" and the examination's Cadet Portal release are hidden (`RequireFeature`). |
+| Cadet app | A signed-in student sees "Cadet Portal unavailable" with Sign out (`AppFrame`); the AI-app consent screen says the same instead of blaming the app. |
+
+Deliberately **not** gated, each for a stated reason:
+
+- `withdrawExamFromCadet`: withdrawing only hides what was released, and must
+  stay possible for a school whose portal was switched off.
+- `unsubscribePush` (on `cadetLoginProcedure`, the cadet builder without the
+  feature check): a student must be able to stop a device's notifications, which
+  the app does when signing out. Sign-out itself also revokes the session's push
+  subscriptions on the server (see [Cadet Portal](cadet-portal.md)).
+- Bill and payment notifications (`bill.issued`, `payment.received`: inbox, web
+  push, WhatsApp): fees are not a portal feature, and guardians are told about
+  them whether or not the school uses the portal.
+- Copies of a results release made while the portal was on.
 
 Logins, sessions, grants and data are kept while the feature is off, and work
-again when it is enabled. Not gated today: `releaseExamToCadet` /
-`withdrawExamFromCadet` and the student notification fan-out (inbox rows, web
-push, WhatsApp) still run for a school without the portal.
+again when it is enabled.
 
 ## The `notices` feature: where it is enforced
 
@@ -126,40 +147,64 @@ push, WhatsApp) still run for a school without the portal.
 | Cadet app | The Home notices block and the More row do not appear; `/notices` and `/notices/{id}` show "Notices are not available". The app reads the feature from the notice procedures' own error; there is no features read for students. |
 | `getDashboard` | `actions.createNotice` is false. |
 
+| Notice notifications not sent yet (`notice.published`, also needs `cadet`; `notice.published_staff`) | Remote copies are recorded `skipped: feature_disabled` when planned and when sent; a resend is refused; the notice PDF source produces nothing. Inbox rows are still written and kept. |
+
 Addressing students also needs `cadet`: a notice whose `cadetScope` is not
 `none` is refused with the disabled-feature error for `cadet` when it is
-saved and again when it is published or its publication is previewed.
-Notices, their cached PDFs and already emitted notifications are kept while
-either feature is off.
+saved and again when it is published or its publication is previewed. A stored
+audience is never rewritten when `cadet` goes off. Notices, their cached PDFs
+and inbox rows are kept while either feature is off; see
+"Nothing new goes out while a feature is off" in [School notices](notices.md).
 
 ## UI
 
 Management (`apps/management/components`):
 
+- `useSchoolFeature(schoolId, feature)`: `{ enabled, config, status, retry }`
+  typed by key. `status` tells **three outcomes** apart, and screens must not
+  fold them together:
+  - `ready`: the flags are known; `enabled` is the truth, on or off;
+  - `pending`: the first read is running;
+  - `unknown`: the flags could not be read and none are held. This is not
+    "disabled": offer `retry`, do not say the feature is not enabled.
+  `enabled` is false while `pending` or `unknown`, so a plain check fails closed.
+- **Known flags survive a failed refetch.** TanStack Query keeps the last good
+  data when a background refetch fails; `resolveSchoolFeature` reads the data
+  first, so a network blip never closes an open page or drops unsaved input.
+  (`permissionsSatisfied` and `SchoolAccessBoundary` follow the same rule.)
+- **A disabled-feature answer refreshes the flags.** The app's query client
+  (`lib/orpc.ts`) invalidates `school.getFeatureFlags` whenever any query or
+  mutation fails with the disabled-feature error (`featureFlagsOutdatedBy`), so
+  navigation and pages close as soon as the server says a feature is off. Code
+  that calls `client.*` directly inside a form submit does the same in its catch.
 - `RequireFeature({ schoolId, feature, fallback?, children })`
-  (`require-feature.tsx`): renders children only when enabled. Pending, failed
+  (`require-feature.tsx`): renders children only when enabled. Pending, unknown
   and disabled all render `fallback` (default nothing), like
   `RequirePermissions`.
-- `useSchoolFeature(schoolId, feature)`: `{ enabled, config, status }` typed by
-  key, for code that needs the config or must tell loading from disabled.
-- Both share one query per school (`school.getFeatureFlags`).
-- `FeaturePage` / `FeatureUnavailable` (`feature-unavailable.tsx`): gate a whole
-  page for a typed or bookmarked URL.
+- `FeaturePage` (`feature-unavailable.tsx`) gates a whole page for a typed or
+  bookmarked URL: the page when enabled, `FeatureUnavailable` ("not enabled")
+  when known to be off, `FeatureUnknown` (with Retry) when the flags could not
+  be read, nothing while the first read runs.
+- All share one query per school (`school.getFeatureFlags`).
 - Wrap a permission-protected entry point with `RequireFeature` **and**
   `RequirePermissions`.
 
 Admin: `/school/{id}/usage/feature-flags`
 (`apps/admin/components/school-feature-flags.tsx`), one card per catalogue
-feature with an Enabled switch and Save. No feature has settings yet, so the
-cards have no config controls; a compile-time guard in that file fails as soon
-as a catalogue entry declares a config, so the control is added with it.
+feature with an Enabled switch and Save. Each card works on a
+`SchoolFeatureEntry` and builds its update by spreading it. `DISABLE_WARNINGS`
+states everything switching a feature off does (keep it complete: staff,
+students, notifications). No feature has settings yet, so the cards have no
+config controls; a compile-time guard in that file fails as soon as a catalogue
+entry declares a config, so the control is added with it.
 
 ## Adding a feature
 
 1. Add the entry to `schoolFeatureCatalogue` (label, description, `config`).
    Fix every exhaustive record the build then flags:
    `DEMO_SCHOOL_FEATURE_DEFAULTS`, the admin editor's `DISABLE_WARNINGS`, and
-   the pinned key lists in tests.
+   the pinned key lists in tests. If the feature has notifications, name it in
+   `notificationRequiredFeatures` for each of its types.
 2. If it has settings, add its config control to the admin editor (the guard
    there fails until you do) and decide the demo's config.
 3. Gate the API: `requireSchoolFeature('<key>')` after the permission

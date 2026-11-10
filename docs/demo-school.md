@@ -124,7 +124,8 @@ demo's classes, so the seed picks from the senior or junior end of whatever was
 chosen (`classPick`). The procedures stamp the current time and
 `backdateDemoNotice` then sets the planned creation and publication times,
 refusing any school that is not `is_demo`; a notice's printed "issued on" date
-follows its stored publication time. The step is idempotent on the notice title
+is a stored fact of its publication (`notice.issued_on`), so the plan supplies
+it together with the publication time (`DemoNotice.issuedOn`). The step is idempotent on the notice title
 within the session, so a replay neither writes a second copy nor publishes (and
 notifies) twice. All content is invented. See [School notices](notices.md).
 

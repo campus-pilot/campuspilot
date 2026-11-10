@@ -270,13 +270,33 @@ surface, and each decides from the same read
 | Cadet MCP (`createCadetOAuthContext`) | Returns null, so the gate answers 401 like a revoked connection. |
 | `issueAdmissionCadetPassword`, `createAdmission({ generateCadetPassword: true })` | Refused with the same FORBIDDEN after the permission check; nothing is written. |
 | `getCadetPortalSettings`, `updateCadetPortalSettings` | Refused the same way. |
+| `releaseExamToCadet`, `previewExamCadetRelease`, `sendStudentResultNotification`, `previewStudentResultNotification` | Refused the same way after their permission checks: nothing is released, stamped or notified. |
+| A notice addressed to students, and its notifications | Cannot be saved or published; copies not sent yet are skipped (see [School notices](notices.md)). |
 | `/blob/school/{id}/cadet.webmanifest` | 404, as for an unknown school. |
-| Management | The Cadet Portal settings card and both password entry points are hidden. |
+| Management | The Cadet Portal settings card, both password entry points and the examination's Cadet Portal release are hidden. |
+| AI-app consent screen (`oauth-consent.tsx`) | "Cadet Portal unavailable", not "this app is not known". |
 
 Nothing is deleted or revoked when the flag is switched off: logins, sessions,
 MCP grants and push subscriptions are kept and work again when it is switched
-on. `releaseExamToCadet` / `withdrawExamFromCadet` and student notification
-delivery are not gated by the flag.
+on. Three things stay possible on purpose: `withdrawExamFromCadet` (it only
+hides what was released), `unsubscribePush` (a student can always stop a
+device's notifications; it is on `cadetLoginProcedure`, the builder without the
+feature check, and nothing else may use that builder without the same
+reasoning), and signing out. Bill and payment notifications are not portal
+features and are delivered regardless of the flag.
+
+### Signing out stops the device, on the server
+
+A push subscription records the portal session that turned it on
+(`cadet_push_subscription.cadet_session_id`; subscribing again from another
+session moves it). The cadet auth instance revokes that session's subscriptions
+in a `before` hook of `/sign-out` (`revokeDevicePushOnSignOut` in
+`packages/auth/src/cadet.ts`), so a signed-out phone stops receiving the
+student's notifications even when the app's own "turn off" request never
+arrives (offline) or is refused. The app still calls `unsubscribePush` first,
+which also removes the browser's subscription and covers rows stored before the
+session was recorded (their `cadet_session_id` is null). An expired session
+does not revoke anything, as before; `revokeCadetLoginAccess` revokes all.
 
 ## Lifecycle
 
@@ -322,7 +342,8 @@ delivery are not gated by the flag.
 | `getGrowth({ recordId? })` | core, read, `exams` | Every class record, overall % per released exam of the selected one; subject ids are scoped to the class record and never compared across classes. |
 | `listRemarks({ filters.recordId? })` | core, read, `exams` | Teacher remarks of released exams, dated by the exam's release. |
 | `listNotices({})` | core, read, `notices` | Published notices addressed to the student (paginated, newest first): `{ noticeId, title, publishedAt }`. Needs the school's `notices` feature. |
-| `getNotice({ noticeId })` | core, read, `notices` | One addressed notice with its sanitized `html` (for the sandboxed iframe) and `text` (plain notices only); anything else is NOT_FOUND. |
+| `getNotice({ noticeId })` | core, read, `notices` | One addressed notice as content: `{ noticeId, title, publishedAt, bodyMode, text }`, never HTML (`text` is the plain body, or the readable text of a custom-template notice); anything else is NOT_FOUND. |
+| `getNoticeDocument({ noticeId })` | hidden, read | The printed page of one addressed notice as sanitized `html` for the sandboxed iframe. App only: it is megabytes of markup with the logo embedded. |
 | `getNoticeDownload({ noticeId })` | hidden, read | A five-minute URL of the notice's cached PDF (the file staff download). |
 
 A **class record** is one class within one session's enrollment
@@ -332,8 +353,8 @@ results, so a student moved mid-session keeps the class they sat the exam in.
 Remark, attendance and activities attach only to the record holding the results.
 
 **Release and averages.** Results are visible only after the school's explicit
-`releaseExamToCadet` (staff, exam transition permission), which needs a
-completed exam and blocks reopening and legacy plan changes until
+`releaseExamToCadet` (staff, exam transition permission, and the school's
+`cadet` feature), which needs a completed exam and blocks reopening and legacy plan changes until
 `withdrawExamFromCadet`. The release time is always when the call was made;
 only the demo seed back-dates it (see `docs/demo-school.md`). The **first**
 release also notifies every registered student of the examination
@@ -355,7 +376,7 @@ one of the notice's classes (`cadet-notices.service.ts`). Membership is
 evaluated on each request, so a student moved to another class sees that
 class's notices. Who was *notified* is fixed when the notice is published
 (`notice.published`: inbox, web push, WhatsApp with the PDF; route
-`/notices/{noticeId}`). The three procedures also require the school's
+`/notices/{noticeId}`). The four procedures also require the school's
 `notices` feature. The screens are `/notices` and `/notices/{noticeId}` (see
 "Front end"); [School notices](notices.md) is the canonical guide.
 
@@ -421,9 +442,9 @@ Mirrors management: Next.js 16, oRPC + TanStack Query, TanStack Form,
 | `lib/orpc.ts` | `RPCLink` to `/api/cadet/rpc` with `credentials: 'include'`, typed `CadetRouterClient`. Never the staff `/rpc`. |
 | `lib/auth-client.ts` | Better Auth clients at `CADET_AUTH_BASE_PATH`. |
 | `components/cadet-school-chrome.tsx` | Signed-in pages only: links the school's Cadet manifest (`/blob/school/{id}/cadet.webmanifest`, per-school app id, scope = whole portal) and home-screen icon, and shows the phone install screen (shared `useInstallAppScreen`). Before sign-in the portal is not installable (the school is unknown). |
-| `app/(portal)/notices`, `notices/[noticeId]` → `components/notices/` | The student's notices (`NoticesScreen`, infinite list) and one notice (`NoticeScreen`). A notice written as text is shown as text; a custom-template notice as its printed page in the shared empty-sandbox `DocumentPreview` (`fitPageWidth`); both offer Download PDF (`getNoticeDownload`, a five-minute URL issued on the tap). Reached from Home's notices block (`HomeNotices`, shown only when the student has notices) and a row on More (`MoreNoticesRow`); the tab bar keeps five tabs. When the school's `notices` feature is off, the notice procedures answer the disabled-feature error: the block and the row do not appear and both routes show "Notices are not available" (`noticesSwitchedOff` in `notices-model.ts`), never an error. API-free pieces are in `packages/components/src/cadet-portal/cadet-notice.tsx`. |
+| `app/(portal)/notices`, `notices/[noticeId]` → `components/notices/` | The student's notices (`NoticesScreen`, infinite list) and one notice (`NoticeScreen`). A notice written as text is shown as text; a custom-template notice as its printed page (`getNoticeDocument`, asked for only then) in the shared empty-sandbox `DocumentPreview` (`fitPageWidth`), with its text shown while the page loads or cannot be loaded; both offer Download PDF (`getNoticeDownload`, a five-minute URL issued on the tap). Reached from Home's notices block (`HomeNotices`, shown only when the student has notices) and a row on More (`MoreNoticesRow`); the tab bar keeps five tabs. When the school's `notices` feature is off, the notice procedures answer the disabled-feature error: the block and the row do not appear and both routes show "Notices are not available" (`noticesSwitchedOff` in `notices-model.ts`), never an error. API-free pieces are in `packages/components/src/cadet-portal/cadet-notice.tsx`. |
 | `app/(portal)/notifications` → `components/notifications/` | The inbox inside the portal frame; the top bar's bell links to it. `/notifications/open` resolves push clicks with the route builders in `cadet-notification-routes.ts`: a bill opens `/fees/{billId}`, a payment `/fees`, a result `/results/{examId}` built from the enrollment, class and exam named in the notification (`examResultHref` in `lib/route-param.ts`), a notice `/notices/{noticeId}` (`noticeHref`); anything else stays in the inbox. The device notification toggle is on the inbox and on More. |
-| `public/sw.js` + `lib/web-push.client.ts` + `components/notifications/cadet-device-notifications.tsx` | Web push: the service worker (push → notification, click → `/notifications/open?type=…&<ids>` → route builders), registered only when the student taps **Turn on notifications** (permission requested inside the tap). One row per login and endpoint (`cadet_push_subscription`), so siblings on one phone each get their own; a login keeps its 10 most recently subscribed devices (older ones are revoked); sign-out turns this device off for that student. A staff resend of a failed push goes to that same device only, never to a device that no longer receives notifications. iPhone/iPad: only inside the installed app. |
+| `public/sw.js` + `lib/web-push.client.ts` + `components/notifications/cadet-device-notifications.tsx` | Web push: the service worker (push → notification, click → `/notifications/open?type=…&<ids>` → route builders), registered only when the student taps **Turn on notifications** (permission requested inside the tap). One row per login and endpoint (`cadet_push_subscription`), so siblings on one phone each get their own; a login keeps its 10 most recently subscribed devices (older ones are revoked); sign-out turns this device off for that student, enforced on the server (see "Signing out stops the device, on the server"). A staff resend of a failed push goes to that same device only, never to a device that no longer receives notifications. iPhone/iPad: only inside the installed app. |
 
 Env comes from `@campuspilot/env/cadet.client` (`NEXT_PUBLIC_SERVER_URL`). No
 identity inputs: who the student is always comes from the `cpc_` session. Record
@@ -506,7 +527,11 @@ not involve cadet files.
 - Don't seed cadet logins for demo schools.
 - Don't add a Cadet surface (procedure outside `cadetProcedure`, route, blob,
   staff action) without the `cadet` feature check, and don't add a second,
-  school-level "portal enabled" switch.
+  school-level "portal enabled" switch. The only ungated actions are the ones
+  listed under the flag table, each of which only undoes something.
+- Don't return rendered HTML or embedded images from a core MCP tool; give the
+  content as text and keep the page in a hidden, app-only procedure (as
+  `getNotice` / `getNoticeDocument` do).
 - Don't accept API keys or grant `mcp:write` on the cadet MCP without a new
   decision, and don't expose `issueAdmissionCadetPassword` over staff MCP.
 
