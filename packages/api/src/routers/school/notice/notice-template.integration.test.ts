@@ -12,6 +12,16 @@ import {
   setTestSchoolFeature,
   type TestClient,
 } from '../../../../test/fixtures';
+import { SAMPLE_NOTICE_CONTEXT } from '../document/document.catalog';
+import { NOTICE_CONTEXT_FIELDS } from './notice-template-guide';
+import { buildNoticeContext } from './notice.render';
+
+/** Dotted leaf paths of a context object; an array is one leaf. */
+function leafPaths(value: object, prefix = ''): string[] {
+  return Object.entries(value).flatMap(([key, child]) =>
+    child !== null && typeof child === 'object' && !Array.isArray(child) ? leafPaths(child, `${prefix}${key}.`) : [`${prefix}${key}`],
+  );
+}
 
 /** The `notice` document type through the document system's template procedures. */
 describe('notice document template', () => {
@@ -24,6 +34,13 @@ describe('notice document template', () => {
     sessionId = (await createTestSession({ schoolId, sessionStartYear: 2026, sessionEndYear: 2027 })).id;
     manager = createTestClient((await createSchoolStaffSession(schoolId, [{ role: 'manager' }])).session);
     teacher = createTestClient((await createSchoolStaffSession(schoolId, [{ role: 'teacher', meta: { classIds: [] } }])).session);
+  });
+
+  it('builds a real notice context with exactly the fields of the sample and of the editor\'s variable guide', async () => {
+    const context = await buildNoticeContext(db, { schoolId, sessionId, title: 'Holiday', bodyMode: 'plain', body: 'School is closed.' }, new Date('2026-11-10T06:00:00.000Z'));
+    const paths = leafPaths(context).sort();
+    expect(paths).toEqual(leafPaths(SAMPLE_NOTICE_CONTEXT).sort());
+    expect(paths).toEqual(Object.keys(NOTICE_CONTEXT_FIELDS).sort());
   });
 
   it('offers the built-in design in the marketplace, previewed with notice-only sample data in the flowing layout', async () => {

@@ -1,7 +1,9 @@
+import Handlebars from 'handlebars';
 import { describe, expect, it } from 'vitest';
 
 import { DOCUMENT_MARKETPLACE, NOTICE_DEFAULT_TEMPLATE_SLUG, SAMPLE_NOTICE_CONTEXT } from '../document/document.catalog';
 import { combineDocuments, renderDocument } from '../document/document.render';
+import { NOTICE_CONTEXT_FIELDS, NOTICE_TEMPLATE_STARTER, NOTICE_TEMPLATE_VARIABLES } from './notice-template-guide';
 import { assertValidNoticeTemplate, NOTICE_TEMPLATE_MAX_BLOCK_DEPTH, noticeParagraphs, noticePdfKey } from './notice.render';
 
 const defaultTemplate = DOCUMENT_MARKETPLACE.find((item) => item.slug === NOTICE_DEFAULT_TEMPLATE_SLUG)!.content;
@@ -129,5 +131,52 @@ describe('flowing notice layout', () => {
 describe('notice PDF cache key', () => {
   it("lives under the school's prefix, so the demo purge sweep removes it", () => {
     expect(noticePdfKey('sch_1', 'ntc_1')).toBe('schools/sch_1/notices/ntc_1.pdf');
+  });
+});
+
+/** Dotted leaf paths of a context object; an array is one leaf (as in `notice-template-guide.ts`). */
+function leafPaths(value: object, prefix = ''): string[] {
+  return Object.entries(value).flatMap(([key, child]) =>
+    child !== null && typeof child === 'object' && !Array.isArray(child) ? leafPaths(child, `${prefix}${key}.`) : [`${prefix}${key}`],
+  );
+}
+
+/** Every `{{path}}` a template reads. */
+function templatePaths(source: string): string[] {
+  const paths: string[] = [];
+  const visitor = new Handlebars.Visitor();
+  visitor.PathExpression = (path) => {
+    paths.push(path.original);
+  };
+  visitor.accept(Handlebars.parse(source));
+  return paths;
+}
+
+describe('the custom-template guide', () => {
+  it('describes exactly the fields of the notice context', () => {
+    expect(Object.keys(NOTICE_CONTEXT_FIELDS).sort()).toEqual(leafPaths(SAMPLE_NOTICE_CONTEXT).sort());
+  });
+
+  it('offers authors only variables the context holds, each with a value in the sample', () => {
+    expect(NOTICE_TEMPLATE_VARIABLES.length).toBeGreaterThan(0);
+    for (const variable of NOTICE_TEMPLATE_VARIABLES) {
+      expect(variable.name).toBe(`{{${variable.path}}}`);
+      // Rendered alone against the sample, an offered variable prints something.
+      expect(renderDocument(`<p>${variable.name}</p>`, SAMPLE_NOTICE_CONTEXT), variable.name).not.toBe('<p></p>');
+    }
+    // Empty for a custom template, so it is not offered there.
+    expect(NOTICE_TEMPLATE_VARIABLES.map((variable) => variable.path)).not.toContain('notice.paragraphs');
+  });
+
+  it('starts a custom template from a document that is valid and reads offered variables only', () => {
+    expect(() => assertValidNoticeTemplate(NOTICE_TEMPLATE_STARTER)).not.toThrow();
+    const offered = NOTICE_TEMPLATE_VARIABLES.map((variable) => variable.path as string);
+    const used = templatePaths(NOTICE_TEMPLATE_STARTER);
+    expect(used.length).toBeGreaterThan(0);
+    for (const path of used) expect(offered, path).toContain(path);
+    const html = renderTemplate(NOTICE_TEMPLATE_STARTER);
+    expect(html).toContain(SAMPLE_NOTICE_CONTEXT.school.name);
+    expect(html).toContain(SAMPLE_NOTICE_CONTEXT.notice.title);
+    expect(html).toContain(SAMPLE_NOTICE_CONTEXT.notice.issuedOnDisplay);
   });
 });

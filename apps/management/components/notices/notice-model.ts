@@ -7,6 +7,7 @@ import {
   type NoticeBodyMode,
   type NoticeStatus,
 } from '@campuspilot/api/routers/school/notice/notice.dto';
+import { NOTICE_TEMPLATE_STARTER } from '@campuspilot/api/routers/school/notice/notice-template-guide';
 import {
   NOTICE_AUDIENCE_CHOICES,
   NOTICE_CADET_CLASS_SCOPES,
@@ -35,42 +36,12 @@ export function editNoticeHref({ schoolId, sessionId }: NoticeSessionScope, noti
 }
 
 /**
- * What a new custom-template notice starts from: a small, complete letterhead
- * that uses every commonly needed variable, so the author edits a working
- * document instead of facing an empty editor. Notices flow over as many A4
- * pages as they need, so it sets no fixed height.
+ * The starter template and the variable list of the custom-template editor
+ * are owned by the API next to the renderer's context
+ * (`notice-template-guide.ts`), so they cannot drift from what a notice can
+ * actually read. Re-exported for the editor.
  */
-export const NOTICE_TEMPLATE_STARTER = `<style>
-  .notice { font: 14px/1.55 Arial, Helvetica, sans-serif; color: #1f2933; }
-  .notice h1 { margin: 0; font-size: 22px; }
-  .notice .meta { margin: 2mm 0 8mm; font-size: 12px; color: #52606d; }
-  .notice h2 { margin: 0 0 5mm; font-size: 18px; text-align: center; }
-  .notice p { margin: 0 0 4mm; }
-</style>
-<div class="notice">
-  <h1>{{school.name}}</h1>
-  <p class="meta">Session {{session.startYear}}-{{session.endYear}} · {{notice.issuedOnDisplay}}</p>
-  <h2>{{notice.title}}</h2>
-  <p>Write your notice here.</p>
-</div>
-`;
-
-/**
- * The variables a custom notice template can read. A notice context holds
- * school, session and notice facts only (`buildNoticeContext` on the server);
- * nothing about students, staff, results or fees is reachable.
- */
-export const NOTICE_TEMPLATE_VARIABLES: readonly { name: string; description: string }[] = [
-  { name: '{{notice.title}}', description: 'The title above' },
-  { name: '{{notice.issuedOnDisplay}}', description: 'Publication date in words, for example 15 October 2026 (today while a draft)' },
-  { name: '{{notice.issuedOn}}', description: 'The same date as 2026-10-15' },
-  { name: '{{school.name}}', description: 'School name' },
-  { name: '{{school.location}}', description: 'School address, when set' },
-  { name: '{{school.registrationNo}}', description: 'Registration number, when set' },
-  { name: '{{school.logoUrl}}', description: 'School logo for an <img src>, when uploaded' },
-  { name: '{{session.startYear}}', description: 'First year of the session' },
-  { name: '{{session.endYear}}', description: 'Last year of the session' },
-];
+export { NOTICE_TEMPLATE_STARTER, NOTICE_TEMPLATE_VARIABLES } from '@campuspilot/api/routers/school/notice/notice-template-guide';
 
 /**
  * The editor's values. The two bodies are separate fields, so switching

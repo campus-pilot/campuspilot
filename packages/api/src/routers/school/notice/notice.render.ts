@@ -92,6 +92,15 @@ function noticeTimeZone(financeConfig: unknown): string {
 }
 
 /**
+ * The field names of `T` at every level, values unconstrained (an array is a
+ * leaf). `buildNoticeContext` must satisfy this for the sample context, so a
+ * field can only be added to, or dropped from, both at once; the editor's
+ * variable list (`notice-template-guide.ts`) is exhaustive over the same
+ * sample.
+ */
+type SameFields<T> = { [K in keyof T]: T[K] extends readonly unknown[] ? unknown : T[K] extends object ? SameFields<T[K]> : unknown };
+
+/**
  * The complete Handlebars context of a notice: the school block every
  * document shares, the session years, and the notice's own facts. Nothing
  * about students, staff, results or money is reachable from a notice
@@ -126,7 +135,7 @@ export async function buildNoticeContext(db: DatabaseExecutor, content: NoticeCo
       /** Empty for a `template` notice: its body is the document, not data. */
       paragraphs: content.bodyMode === 'plain' ? noticeParagraphs(content.body) : [],
     },
-  } satisfies Record<keyof typeof SAMPLE_NOTICE_CONTEXT, unknown>;
+  } satisfies SameFields<typeof SAMPLE_NOTICE_CONTEXT>;
 }
 
 /**
