@@ -13,7 +13,14 @@ import {
 } from '../../../../test/exam-results';
 import { expectRpcCode } from '../../../../test/finance/assertions';
 import { createSchoolStaffSession, createTestClient, setTestSchoolFeature, type TestClient } from '../../../../test/fixtures';
-import { createCadetLogin } from '../../../../test/notifications';
+import { createCadetTestClient, signInCadet, type CadetCredentials } from '../../../../test/cadet';
+
+/** Signs in through the Cadet Portal with the password the principal issued. */
+async function cadetClient(credentials: CadetCredentials) {
+  const { cookie, response } = await signInCadet(credentials);
+  expect(response.status).toBe(200);
+  return createCadetTestClient(new Headers({ cookie }));
+}
 
 type Scope = { schoolId: string; sessionId: string; examSlug: string };
 
@@ -21,7 +28,7 @@ type Scope = { schoolId: string; sessionId: string; examSlug: string };
 describe('exam timetable publication', () => {
   let scope: Scope;
   let classId: string;
-  let admissionId: string;
+  let studentCredentials: CadetCredentials;
   let principal: TestClient;
   let teacher: TestClient;
   let config: { columns: string[]; rows: { id: string; date: string; startTime: string; endTime: string; cells: Record<string, { subjectSlug: string; modeSlug: string }[]> }[] };
@@ -39,8 +46,8 @@ describe('exam timetable publication', () => {
     const sessionId = await createExamSession(school.school.id, 2026, { term: 'Term 1' }, { active: true });
     const placement = await createSubjectClass(school.school.id, 'Class 7', { maths: 'Mathematics' });
     classId = placement.classId;
-    const { admission } = await createAdmissionWithLogin(principal, school.school.id, 'Asha Rao');
-    admissionId = admission.id;
+    const { admission, credentials } = await createAdmissionWithLogin(principal, school.school.id, 'Asha Rao');
+    studentCredentials = credentials;
     await enroll({ schoolId: school.school.id, admissionId: admission.id, sessionId, ...placement });
     scope = { schoolId: school.school.id, sessionId, examSlug: 'term' };
     const preview = await principal.school.getExamPlanPreview(scope);
@@ -146,7 +153,7 @@ describe('exam timetable publication', () => {
   });
 
   it('shows an enrolled student the published timetable of every class, and nothing while it is a draft', async () => {
-    const { client: student } = await createCadetLogin(admissionId);
+    const student = await cadetClient(studentCredentials);
     await principal.school.saveExamTimetable({ ...scope, config });
     await expectRpcCode(student.getTimetable(scope), 'NOT_FOUND');
     expect((await student.listTimetables({})).items).toHaveLength(0);
@@ -163,8 +170,8 @@ describe('exam timetable publication', () => {
   });
 
   it('hides the timetable from a student who is not enrolled in its session', async () => {
-    const { admission } = await createAdmissionWithLogin(principal, scope.schoolId, 'Bela Rao');
-    const { client: outsider } = await createCadetLogin(admission.id);
+    const { credentials } = await createAdmissionWithLogin(principal, scope.schoolId, 'Bela Rao');
+    const outsider = await cadetClient(credentials);
     await principal.school.saveExamTimetable({ ...scope, config });
     await principal.school.publishExamTimetable(scope);
     await expectRpcCode(outsider.getTimetable(scope), 'NOT_FOUND');

@@ -4,7 +4,7 @@ import { db } from '@campuspilot/db';
 import { admissionTable } from '@campuspilot/db/schema/admission';
 import { user } from '@campuspilot/db/schema/auth';
 import { demoSchoolJobTable } from '@campuspilot/db/schema/demo-school-job';
-import { examLifecycleTable, examStudentRemarkTable } from '@campuspilot/db/schema/exam';
+import { examLifecycleTable, examStudentRemarkTable, examTimetableTable } from '@campuspilot/db/schema/exam';
 import { examResultPublicationTable } from '@campuspilot/db/schema/exam-result-publication';
 import { financeBillRunTable, financeBillTable, financePaymentTable } from '@campuspilot/db/schema/finance';
 import { noticeTable } from '@campuspilot/db/schema/notice';
@@ -231,7 +231,19 @@ describe('demo school seed steps (2 classes, without Restate)', () => {
       .filter((row) => row.status === 'published')
       .reduce((total, row) => total + (row.publishedCadetCount ?? 0) + (row.toStaff ? 1 : 0), 0);
     expect(noticeEvents).toBe(registered.length * 3 + 3);
-    expect(counts.notificationEvents).toBe(counts.bills + counts.payments + runs!.value + releaseRecipients + noticeEvents);
+    // Each published exam timetable notified the staff once (one event: the
+    // demo's staff fit one batch) and each student registered and enrolled in
+    // its session at publication. Students are counted from the events: the
+    // timetables were published during exam setup, before leavers left.
+    const publishedTimetables = await db.select({ value: count() }).from(examTimetableTable).where(and(eq(examTimetableTable.schoolId, job.schoolId), isNotNull(examTimetableTable.publishedAt)));
+    expect(publishedTimetables[0]!.value).toBeGreaterThan(0);
+    const timetableEventsOf = async (type: 'exam.timetable_published' | 'exam.timetable_published_staff') =>
+      (await db.select({ value: count() }).from(notificationEventTable).where(and(eq(notificationEventTable.schoolId, job.schoolId), eq(notificationEventTable.type, type))))[0]!.value;
+    const timetableStaffEvents = await timetableEventsOf('exam.timetable_published_staff');
+    const timetableStudentEvents = await timetableEventsOf('exam.timetable_published');
+    expect(timetableStaffEvents).toBe(publishedTimetables[0]!.value);
+    expect(timetableStudentEvents).toBeGreaterThan(0);
+    expect(counts.notificationEvents).toBe(counts.bills + counts.payments + runs!.value + releaseRecipients + noticeEvents + timetableStaffEvents + timetableStudentEvents);
     // A demo never sends outside the inbox, even with both channels switched on.
     const send = vi.fn(async () => ({ kind: 'sent' as const, providerMessageId: 'never' }));
     const available = (channel: 'web_push' | 'whatsapp'): NotificationChannelAdapter => ({ channel, available: true, decide: () => [{ status: 'owed', destination: 'x' }], send });

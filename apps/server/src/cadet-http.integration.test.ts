@@ -135,7 +135,7 @@ describe('/cadet/mcp', () => {
     const auth = { authorization: `Bearer ${cadetToken}` };
     const list = await mcp('/cadet/mcp', auth, 'tools/list');
     expect(list.response.status).toBe(200);
-    expect((list.json.result.tools as Array<{ name: string }>).map((tool) => tool.name)).toEqual(['getAdmission', 'getProfile', 'getFeeSummary', 'listFeeLedger', 'getBill', 'listExams', 'getExam', 'getExamResult', 'getGrowth', 'listRemarks', 'listNotices', 'getNotice']);
+    expect((list.json.result.tools as Array<{ name: string }>).map((tool) => tool.name)).toEqual(['getAdmission', 'getProfile', 'getFeeSummary', 'listFeeLedger', 'getBill', 'listExams', 'getExam', 'getExamResult', 'getGrowth', 'listRemarks', 'listNotices', 'getNotice', 'listTimetables', 'getTimetable']);
 
     const call = await mcp('/cadet/mcp', auth, 'tools/call', { name: 'getAdmission', arguments: {} });
     expect(call.json.result.isError).not.toBe(true);
