@@ -11,6 +11,7 @@ import {
 } from '@campuspilot/db/schema/finance';
 import type { DemoSchoolJobResult } from '@campuspilot/db/schema/demo-school-job';
 import { examLifecycleTable } from '@campuspilot/db/schema/exam';
+import { noticeTable } from '@campuspilot/db/schema/notice';
 import type { FinanceSchemaConfig } from '@campuspilot/db/schema/jsonb/finance-config';
 import { schoolTable } from '@campuspilot/db/schema/school';
 import { schoolMemberTable } from '@campuspilot/db/schema/school-member';
@@ -43,6 +44,7 @@ import {
   paymentEvents,
   type DemoClass,
   type DemoExam,
+  type DemoNotice,
   type DemoPlan,
   type DemoStaffMember,
   type DemoStudent,
@@ -732,6 +734,86 @@ export async function seedTemplates(ctx: SeedContext): Promise<{ templates: numb
     }
   }
   return { templates: DOCUMENT_TYPES.length };
+}
+
+// ---------------------------------------------------------------------------
+// Notices
+
+/** The demo's notice with this title in the session, if an earlier run wrote it. */
+async function findDemoNotice(ctx: SeedContext, sessionId: string, title: string) {
+  const scope = { schoolId: ctx.schoolId, sessionId };
+  for (let page = 1; ; page += 1) {
+    const listed = await ctx.rpc.school.listNotices({ ...scope, searchQuery: title.slice(0, 100), page });
+    const match = listed.items.find((item) => item.title === title);
+    if (match || page >= listed.pagination.totalPages) return match ?? null;
+  }
+}
+
+/**
+ * Writes one planned notice through the real, permission-checked notice
+ * procedures as the demo's principal: `createNotice`, then `publishNotice`
+ * when the plan publishes it (which renders it, pins the school's Notice
+ * template revision and notifies the audience exactly like a staff
+ * publication). Idempotent on the notice's title within the session: a
+ * replay finds the notice and only finishes what is missing, so it never
+ * writes a second copy or notifies twice (publishing an already published
+ * notice is refused, and its event keys deduplicate besides).
+ *
+ * The procedures stamp the current time; {@link backdateDemoNotice} then
+ * moves the notice to the plan's times, derived from `asOf` like every
+ * other demo date, and is re-applied on a replay so a crash between the
+ * calls heals. Returns what this run did.
+ */
+export async function seedNotice(
+  ctx: SeedContext,
+  input: { sessionId: string; classIdsBySlug: Record<string, string>; notice: DemoNotice },
+): Promise<{ noticeId: string; outcome: 'created' | 'published' | 'unchanged' }> {
+  const { sessionId, notice } = input;
+  const classIds = notice.classSlugs.map((slug) => {
+    const classId = input.classIdsBySlug[slug];
+    if (!classId) throw new DemoSeedError(`The demo class ${slug} of the notice "${notice.title}" does not exist.`);
+    return classId;
+  });
+  const existing = await findDemoNotice(ctx, sessionId, notice.title);
+  const saved =
+    existing ??
+    (await ctx.rpc.school.createNotice({
+      schoolId: ctx.schoolId,
+      sessionId,
+      title: notice.title,
+      bodyMode: notice.bodyMode,
+      body: notice.body,
+      toStaff: notice.toStaff,
+      cadetScope: notice.cadetScope,
+      classIds,
+    }));
+  const publish = notice.status === 'published' && saved.status === 'draft';
+  if (publish) await ctx.rpc.school.publishNotice({ schoolId: ctx.schoolId, noticeId: saved.id });
+  await backdateDemoNotice({ schoolId: ctx.schoolId, noticeId: saved.id }, notice);
+  return { noticeId: saved.id, outcome: publish ? 'published' : existing ? 'unchanged' : 'created' };
+}
+
+/**
+ * Demo-only: sets when a seeded notice was written and published. Staff,
+ * the API and MCP cannot back-date a notice (the procedures always record
+ * "now"); only this seed step can, and only for a demo school
+ * (`school.is_demo`), so it can never rewrite a real school's history. The
+ * publication time is changed only on a notice that is published, and a
+ * notice's printed "issued on" date follows it, because a published notice
+ * is always rendered from its stored publication time. Nothing has read the
+ * notice's PDF yet (it is rendered on first download), so no cached file can
+ * disagree with the new date.
+ */
+async function backdateDemoNotice(scope: { schoolId: string; noticeId: string }, notice: Pick<DemoNotice, 'createdAt' | 'publishedAt'>) {
+  const [school] = await db.select({ isDemo: schoolTable.isDemo }).from(schoolTable).where(eq(schoolTable.id, scope.schoolId)).limit(1);
+  if (!school?.isDemo) throw new DemoSeedError('Only a demo school’s notices can be back-dated.');
+  const mine = and(eq(noticeTable.id, scope.noticeId), eq(noticeTable.schoolId, scope.schoolId));
+  const createdAt = new Date(notice.createdAt);
+  await db.update(noticeTable).set({ createdAt, updatedAt: createdAt }).where(and(mine, eq(noticeTable.status, 'draft')));
+  if (notice.publishedAt) {
+    const publishedAt = new Date(notice.publishedAt);
+    await db.update(noticeTable).set({ createdAt, publishedAt, updatedAt: publishedAt }).where(and(mine, eq(noticeTable.status, 'published')));
+  }
 }
 
 // ---------------------------------------------------------------------------

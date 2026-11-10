@@ -14,6 +14,7 @@ import { z } from 'zod';
 
 import classesJson from './seed/classes.json';
 import financeJson from './seed/finance.json';
+import noticesJson from './seed/notices.json';
 import peopleJson from './seed/people.json';
 import sessionJson from './seed/session.json';
 import staffJson from './seed/staff.json';
@@ -145,6 +146,70 @@ const financeSeedSchema = z.object({
   unregisterShare: shareSchema,
 });
 
+/** Days relative to the demo's `asOf` day, written `{date:-3}` or `{date:+10}` in notice text. */
+export const DEMO_NOTICE_DATE_TOKEN = /\{date:([+-]\d{1,3})\}/g;
+
+/**
+ * Demo notices (invented, never copied from a school). Dates are stated
+ * relative to the demo's `asOf` so a demo created any day looks current:
+ * `createdDaysAgo` / `publishedDaysAgo` place a notice in the recent past,
+ * and `{date:±N}` in the title or text becomes a written date N days from
+ * `asOf`. `body` is a list joined with a blank line for a plain notice (its
+ * paragraphs) and with a line break for a custom template (its source
+ * lines). Titles are unique: the seed step finds its earlier work by title.
+ */
+const noticeSeedSchema = z
+  .object({
+    key: slugSchema,
+    title: z.string().min(1).max(200),
+    /** Whether the demo publishes it; a fact of its own, checked against `publishedDaysAgo` below. */
+    status: z.enum(['draft', 'published']),
+    createdDaysAgo: z.number().int().min(1).max(120),
+    publishedDaysAgo: z.number().int().min(1).max(120).nullable(),
+    toStaff: z.boolean(),
+    cadetScope: z.enum(['none', 'all_classes', 'selected_classes']),
+    /**
+     * Which of the demo's classes a `selected_classes` notice names. The
+     * demo's classes are chosen by the admin, so the seed cannot name them:
+     * it takes up to `count` from the senior or junior end of whatever was
+     * chosen. Null for the other scopes.
+     */
+    classPick: z.object({ from: z.enum(['seniormost', 'juniormost']), count: z.number().int().min(1).max(13) }).nullable(),
+    bodyMode: z.enum(['plain', 'template']),
+    body: z.array(z.string().min(1)).min(1),
+  })
+  .superRefine((notice, context) => {
+    if ((notice.status === 'published') !== (notice.publishedDaysAgo !== null)) {
+      context.addIssue({ code: 'custom', path: ['publishedDaysAgo'], message: 'A published notice states when it was published; a draft does not.' });
+    }
+    if (notice.publishedDaysAgo !== null && notice.publishedDaysAgo > notice.createdDaysAgo) {
+      context.addIssue({ code: 'custom', path: ['publishedDaysAgo'], message: 'A notice is published on or after the day it was written.' });
+    }
+    if (!notice.toStaff && notice.cadetScope === 'none') {
+      context.addIssue({ code: 'custom', path: ['toStaff'], message: 'A notice addresses staff, students or both.' });
+    }
+    if ((notice.cadetScope === 'selected_classes') !== (notice.classPick !== null)) {
+      context.addIssue({ code: 'custom', path: ['classPick'], message: 'classPick is given exactly for selected_classes.' });
+    }
+  });
+
+const noticesSeedSchema = z
+  .object({
+    /** Local wall-clock hours of the back-dated creation and publication times. */
+    localHours: z.object({ created: z.number().int().min(0).max(23), published: z.number().int().min(0).max(23) }),
+    notices: z.array(noticeSeedSchema).min(1),
+  })
+  .superRefine((value, context) => {
+    if (value.localHours.published <= value.localHours.created) {
+      context.addIssue({ code: 'custom', path: ['localHours'], message: 'A notice written and published on one day is published after it is written.' });
+    }
+    for (const field of ['key', 'title'] as const) {
+      if (new Set(value.notices.map((notice) => notice[field])).size !== value.notices.length) {
+        context.addIssue({ code: 'custom', path: ['notices'], message: `Notice ${field}s must be unique` });
+      }
+    }
+  });
+
 const nameListSchema = z.array(z.string().min(1)).min(10);
 const peopleSeedSchema = z.object({
   childFirstNames: z.object({ female: nameListSchema, male: nameListSchema }),
@@ -189,6 +254,7 @@ export const demoSeed = {
     })
     .parse(financeJson),
   people: peopleSeedSchema.parse(peopleJson),
+  notices: noticesSeedSchema.parse(noticesJson),
   staff: staffSeedSchema.parse(staffJson),
 };
 

@@ -18,6 +18,7 @@ export const DEMO_SCHOOL_STEPS = [
   'exams',
   'finance',
   'templates',
+  'notices',
   'credentials',
 ] as const;
 

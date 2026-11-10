@@ -11,6 +11,7 @@ import {
   demoSchoolPurgeTable,
   type DemoSchoolPurgeStage,
 } from '@campuspilot/db/schema/demo-school-job';
+import { noticeTable } from '@campuspilot/db/schema/notice';
 import { schoolTable } from '@campuspilot/db/schema/school';
 import { env } from '@campuspilot/env/server';
 import { getS3Client } from '@campuspilot/s3/client';
@@ -18,6 +19,7 @@ import * as restate from '@restatedev/restate-sdk';
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
 
+import { noticePdfKey } from '../../routers/school/notice/notice.render';
 import { DEMO_SCHOOL_PURGE_WORKFLOW_NAME, demoCredentialsS3Key } from './constants';
 import { log } from './log';
 import { listLiveDemoSeedInvocations } from './restate-admin';
@@ -208,6 +210,13 @@ export async function deleteDemoSchoolData(schoolId: string, attempt: number): P
       .from(admissionTable)
       .where(eq(admissionTable.schoolId, schoolId));
     const artifacts = await transaction.select({ s3Key: artifactTable.s3Key }).from(artifactTable).where(eq(artifactTable.schoolId, schoolId));
+    // A published notice's PDF is cached under a key derived from its ID
+    // (no artifact row); it exists once somebody downloaded or was sent it.
+    // Every possible key is recorded: deleting a missing object is harmless.
+    const publishedNotices = await transaction
+      .select({ id: noticeTable.id })
+      .from(noticeTable)
+      .where(and(eq(noticeTable.schoolId, schoolId), eq(noticeTable.status, 'published')));
     const cadetUserIds = await schoolCadetLoginIds(transaction, schoolId);
     // Recorded as-is; the file stage accepts only keys under this school's
     // or its demo users' prefixes (demoSchoolPurgeScope).
@@ -217,6 +226,7 @@ export async function deleteDemoSchoolData(schoolId: string, attempt: number): P
       ...demoUsers.map((item) => item.profileImageS3Key),
       ...admissions.flatMap((item) => [item.photoS3Key, ...item.documents.flatMap((document) => document.files.map((file) => file.s3Key))]),
       ...artifacts.map((item) => item.s3Key),
+      ...publishedNotices.map((item) => noticePdfKey(schoolId, item.id)),
     ].filter((key): key is string => Boolean(key)))];
     const result = await transaction.execute<{ counts: Record<string, number> }>(sql`SELECT purge_demo_school(${schoolId}) AS counts`);
     await transaction
