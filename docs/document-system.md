@@ -353,14 +353,48 @@ unregistered when the instance is created, including `log`, which would let a
 template write unbounded data to the server's console. A call to any other
 helper is a BAD_REQUEST. Prototype access is disabled.
 
-The output is bounded **while it is produced**, not afterwards: the renderer
-rewrites each `{{value}}` to pass through a counting helper and wraps every
-block body, so a template that multiplies a large value (nested `each` around
-photos, one value repeated thousands of times) is aborted at the limit instead
-of building a string of hundreds of megabytes first. The default limit is 25
-million characters per rendered document (`DOCUMENT_RENDER_MAX_CHARS`); notices
-pass a much lower one. Each character is counted once, so a legitimate large
-batch is unaffected.
+### Render budget
+
+A render is bounded **while it runs**, not afterwards: a template that
+multiplies a large value (nested `each` around photos, one value repeated
+thousands of times) is aborted at the limit instead of building a string of
+hundreds of megabytes first. The rule in `document.render.ts` is a design rule,
+not a list of patched helpers: **every construct that can produce output is
+either counted or refused when the template is parsed**, for school document
+templates and notices alike (one shared instance).
+
+| Construct | Decision |
+| --- | --- |
+| Static text | Counted on every run of the body it is written in (a statement inserted first in every body). |
+| `{{value}}`, `{{helper a b}}`, `{{@index}}`, `{{../a}}`, block params | Counted after HTML escaping. |
+| `{{{value}}}`, `{{&value}}` | Counted. |
+| Sub-expressions `(lookup a b)`, hash arguments | Produce no output; printed only through the two rows above. |
+| `{{#each}}`, `{{#if}}`, `{{#unless}}`, `{{#with}}`, `{{else}}`, `{{else if}}`, `{{^}}` | Their output is the bodies they run, and each run counts itself. Every run also costs one step plus one per expression or block written in that body, so loops that print nothing (or evaluate thousands of empty values) are bounded in time too. |
+| `{{#value}}…{{/value}}` sections, `{{{{raw}}}}` | As above. |
+| `{{#lookup}}`, `{{#add}}`, any other registered helper opened as a block (also spelled `{{#"lookup"}}`, `{{#@lookup}}`, `{{#lookup.x}}`) | **Refused.** Their result would be printed without passing a counted value. |
+| `{{> partial}}`, `{{#> partial}}`, `{{#*inline}}`, `{{* decorator}}` | **Refused**; no partial or decorator is registered. |
+| The renderer's own helpers (`__document…`), any unknown AST node | **Refused.** |
+
+Two further lines of defence keep this true for constructs nobody listed: the
+result of any helper called as a block is charged for whatever its bodies did
+not count, and after a render the string must be exactly as long as what was
+counted, or the render is refused. `document.render.test.ts` has one row per
+construct in two tables (counted to the character and identical to plain
+Handlebars; refused), and checks every marketplace design the same way. A new
+helper or construct belongs in exactly one of them.
+
+The budget is 25 million units (`DOCUMENT_RENDER_MAX_CHARS`) for a **whole
+batch**: `renderDocuments` compiles the template once and renders every
+student's context under one shared budget, the same ceiling as the combined
+result. Notices pass a much lower one. Because the save-time check and every
+later render run under the same budget, a template that was accepted cannot
+cost more than the budget when it is rendered with real data; real data that
+does not fit is a BAD_REQUEST for that render.
+
+Before shipping this to a database with stored school templates, run them
+through `renderDocument` against their sample context: a stored template that
+uses a partial or a block `lookup` (no catalog design does) would now be
+refused.
 Rendered HTML is sanitized, wrapped in a restrictive content-security policy, and
 shown in an iframe with an empty `sandbox` attribute. Gotenberg runs with JavaScript
 and public/private outbound network access disabled.
@@ -491,12 +525,12 @@ conversion. What differs is recorded here because it is easy to get wrong.
   document: the author's source is compiled by the restricted renderer and
   sanitized like a school template, with `paragraphs` empty. Because every
   staff role can write one, an author's source is additionally refused when
-  it uses partials or inline partials, or nests block helpers more than four
-  deep (`assertBoundedNoticeTemplate`), on save and on every render. Every
-  notice render (author source or school Notice template) has a 2 million
-  character budget and receives the school logo as a placeholder that is
-  replaced after rendering, at most three times; a school Notice template is
-  checked against both when it is saved. See "Security contract" in
+  it nests block helpers more than four deep (`assertBoundedNoticeTemplate`),
+  on save and on every render. Every notice render (author source or school
+  Notice template) has a 2 million budget and receives the school logo as a
+  placeholder that is replaced after rendering, at most three times; a school
+  Notice template is checked against both when it is saved, with the sample
+  and with a notice of the maximum length. See "Security contract" in
   [School notices](notices.md). What the
   custom-template editor tells authors (variable list, starter document) is
   owned by `notice-template-guide.ts` next to the renderer and is exhaustive

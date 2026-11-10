@@ -100,7 +100,7 @@ school; notices are no exception.
 
 A draft can be edited by its author while a publisher reads it, and by two
 people at once. Both writes therefore name the version the caller read
-(`expectedVersion`, from `getNotice.version` or
+(`expectedVersion`, from `getNotice.version`, `previewNotice.version` or
 `previewNoticePublish.version`), checked under the row lock:
 
 - `updateNotice` with a stale version is `CONFLICT` and writes nothing, so
@@ -110,10 +110,29 @@ people at once. Both writes therefore name the version the caller read
   the publisher reviewed.
 
 The message is `NOTICE_CHANGED_MESSAGE` ("This notice changed since you opened
-it. Review it again."). Management: the editor keeps what was typed and offers
-"Load the latest version"; the publish dialog holds the version that was on the
-page when Publish was pressed, blocks itself when the forecast or the server
-reports another version, and refreshes the page behind it.
+it. Review it again.").
+
+**The reviewed page includes the school's Notice template.** A plain notice is
+printed inside the school's selected Notice template, which a template manager
+can replace at any moment and which may carry text of its own. So a preview
+also says which template revision it rendered (`previewNotice.templateRevisionId`
+and `previewNoticePublish.templateRevisionId`; null = the built-in design, or a
+notice that is its own template), and `publishNotice` requires it back as
+`expectedTemplateRevisionId` (required, nullable, never defaulted). The
+publication renders once, pins the revision that render used, and is refused
+with `CONFLICT` (`NOTICE_TEMPLATE_CHANGED_MESSAGE`) when that is not the
+revision named: the comparison is on the very revision that would be pinned,
+so the selection cannot change between the check and the publication. The
+school's letterhead facts (name, logo) are outside this, by the decision under
+"What is fixed at publication".
+
+Management: the editor keeps what was typed and offers "Load the latest
+version". The publish dialog confirms the **preview that was on the page** when
+Publish was pressed: it reads that render's `version` and `templateRevisionId`
+from the cache (`publishReviewOf`), sends both, blocks itself when the forecast
+or the server reports that either changed (saying which), and refreshes the
+page behind it. With no preview on the page yet there is nothing to confirm
+and Publish stays disabled.
 
 ## Feature gating
 
@@ -246,13 +265,18 @@ must not set a fixed height, `overflow: hidden` or outer page padding.
   other Handlebars built-in is unregistered on the shared instance, for school
   templates too. In particular `log` is gone: it wrote its arguments to the
   server's console with no size limit. A call to anything else is BAD_REQUEST.
-- **The output is bounded while it is produced.** The renderer counts every
-  character as Handlebars emits it (each printed value and each run of a block
-  body) and aborts at the budget, so a template that multiplies (nested `each`,
-  a value repeated thousands of times) costs at most the budget and never
-  builds the oversized string. Notices use `NOTICE_RENDER_MAX_CHARS` (2 million
-  characters; a published notice is re-rendered with twice that, so a longer
-  school name can never make it unreadable). Other documents use 25 million.
+- **Every render has a budget, enforced while it runs.** The renderer counts
+  every character as it is produced and, for every run of a block body, one
+  step plus one per expression or block in it, and aborts at the budget, so a template that multiplies (nested `each`,
+  a value repeated thousands of times, loops that print nothing) costs at most
+  the budget and never builds the oversized string. Every Handlebars construct
+  that can produce output is either counted or refused when the template is
+  parsed; the table is in [the document system guide](document-system.md)
+  ("Render budget"). Partials, inline partials and decorators are refused for
+  every template, and `lookup`/`add` cannot open a block. Notices use
+  `NOTICE_RENDER_MAX_CHARS` (2 million; a published notice is re-rendered with
+  twice that, so a longer school name can never make it unreadable). Other
+  documents use 25 million for a whole batch.
 - **The school logo is placed outside the template's control.** It is the one
   large value in the context (a data URI of up to ~6.7 MB). A notice template is
   rendered with a short, random, single-use placeholder in `school.logoUrl`; the
@@ -260,12 +284,20 @@ must not set a fixed height, `overflow: hidden` or outer page padding.
   `NOTICE_MAX_LOGO_USES` (3) times, and more uses are BAD_REQUEST. A rendered
   notice is therefore at most the budget plus three logos, whatever the source
   does, and the limit is the same against the sample context and against a
-  school with a 5 MB logo. A school Notice template is held to the same budget
-  and logo limit when it is saved (`assertValidSchoolNoticeTemplate`).
-- **Structural limits** (`assertBoundedNoticeTemplate`) keep author templates
-  simple: no partials or inline partials (an inline partial can call itself),
-  block helpers nested at most four deep. An `{{else if}}` chain is one level
-  however long it is. These limits do not bound the output; the meter does.
+  school with a 5 MB logo.
+- **A school Notice template renders every plain notice**, so it is held to
+  the same budget and logo limit. On save (`assertValidSchoolNoticeTemplate`)
+  it is rendered against the sample **and** against the longest notice the DTO
+  accepts (a 200,000-character text), so a design that could not print a long
+  notice is refused there. That check is a courtesy to the template's author;
+  the bound is that every later render of every notice runs under the same
+  budget. A template that passes the save check can therefore never cost more
+  than the budget at render time; a notice it cannot print within it (for
+  example tens of thousands of one-line paragraphs in a design with heavy
+  per-paragraph markup) is a BAD_REQUEST for that notice.
+- **A structural limit** (`assertBoundedNoticeTemplate`) keeps author templates
+  simple: block helpers nested at most four deep. An `{{else if}}` chain is one
+  level however long it is. The limit does not bound the cost; the budget does.
 - Browsers show notice HTML only in an **empty-sandbox** iframe
   (`DocumentPreview` in `@campuspilot/components/documents`). Never add sandbox
   capabilities and never inject notice HTML into a page.
@@ -278,6 +310,8 @@ must not set a fixed height, `overflow: hidden` or outer page padding.
 
 1. lock the notice row; refuse NOT_FOUND (not visible), CONFLICT (already
    published) or CONFLICT (not the `expectedVersion` the publisher reviewed);
+   after the render of step 3, CONFLICT when the template revision it used is
+   not the `expectedTemplateRevisionId` the publisher reviewed;
 2. re-check the `cadet` feature when students are addressed, and that a
    `selected_classes` notice still has an existing class; record the audience
    (`recordPublishedClasses`);
@@ -451,8 +485,20 @@ Rules the screens follow (models in `notice-model.ts`, each with tests):
 - **A notice that cannot be loaded says why** (`noticeLoadFailure`): not found
   (no retry), feature switched off, or a failure with Retry. Deleting a draft
   removes it from the cache.
-- **The live preview never goes blank on an error**: the last render that
-  worked stays under the error message.
+- **A loaded notice survives a failed refetch** (`noticeBoundaryState`, built
+  on `resolveQueryBoundary`): the notice page, the editor with whatever was
+  typed, the breadcrumb and the saved preview keep what they hold when a
+  background refetch fails; only "not found" or "feature switched off"
+  replaces them. The Cadet Portal's notice screens, the dashboard card, the
+  delivery log, the template settings page and the admin flag editor resolve
+  the same way.
+- **The live preview never goes blank on an error**: the newest render that
+  worked stays under the error message (`newestRenderedPreview`: a slow render
+  of older text never replaces a newer one).
+- **A draft that cannot be published says why instead of offering a retry**
+  (`cadetAudienceUnpublishable`): a draft addressed to students in a school
+  known not to have the Cadet Portal carries a note on its page, and the
+  publish dialog repeats it with "Edit audience".
 - **Field errors are linked to their inputs** (`aria-describedby`,
   `NOTICE_FIELD_IDS`) and a failed save moves focus to the first invalid field.
 
@@ -525,7 +571,8 @@ custom-template invitation, and two drafts.
    `requireSchoolPermission(...)` **then** `requireSchoolFeature('notices')`;
    call `assertSchoolFeatureEnabled(..., 'cadet')` wherever students are
    addressed. A procedure that changes a notice takes `expectedVersion` and
-   increments `version`. Cadet: `cadetProcedure`, no identity inputs,
+   increments `version`; one that sends what a reader confirmed also takes
+   what else that reader saw (`expectedTemplateRevisionId`). Cadet: `cadetProcedure`, no identity inputs,
    `assertNoticesEnabled`, look the notice up through `addressedTo`.
 2. Integration tests: anonymous, wrong school, each role, feature off, another
    author's draft, published immutability.

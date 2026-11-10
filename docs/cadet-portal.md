@@ -285,18 +285,32 @@ feature check, and nothing else may use that builder without the same
 reasoning), and signing out. Bill and payment notifications are not portal
 features and are delivered regardless of the flag.
 
-### Signing out stops the device, on the server
+### A session that ends stops its device, on the server
 
 A push subscription records the portal session that turned it on
 (`cadet_push_subscription.cadet_session_id`; subscribing again from another
-session moves it). The cadet auth instance revokes that session's subscriptions
-in a `before` hook of `/sign-out` (`revokeDevicePushOnSignOut` in
-`packages/auth/src/cadet.ts`), so a signed-out phone stops receiving the
-student's notifications even when the app's own "turn off" request never
-arrives (offline) or is refused. The app still calls `unsubscribePush` first,
-which also removes the browser's subscription and covers rows stored before the
-session was recorded (their `cadet_session_id` is null). An expired session
-does not revoke anything, as before; `revokeCadetLoginAccess` revokes all.
+session moves it). When that session ends, **by any path**, its subscriptions
+are revoked where the session row is deleted: a `BEFORE DELETE` trigger on
+`cadet_session` (`cadet_session_revoke_push_subscriptions`, migration 0052)
+sets `revoked_at` before the foreign key clears the link. No endpoint or hook
+has to remember it, so a path added later cannot forget it:
+
+| How the session ends | What deletes the row |
+| --- | --- |
+| Sign out (`/sign-out`) | Better Auth `deleteSession` |
+| Sign out elsewhere (`/revoke-session`, `/revoke-sessions`, `/revoke-other-sessions`; enabled on the instance, not offered by the app) | Better Auth `deleteSession(s)` |
+| Staff password reset or revocation, admission deletion, demo purge | `revokeCadetLoginAccess` (`deleteUserSessions`; it also revokes every subscription of the login, including ones without a session) |
+| Expiry | Better Auth deletes an expired session when its cookie is next presented; any later cleanup job that deletes expired rows is covered the same way |
+
+So a signed-out phone stops receiving the student's notifications even when
+the app's own "turn off" request never arrives (offline) or is refused. The
+app still calls `unsubscribePush` first, which also removes the browser's
+subscription and covers rows stored before the session was recorded (their
+`cadet_session_id` is null). Two limits, stated plainly: an expired session
+that nobody presents again keeps its row, and so its device stays subscribed,
+until that row is deleted; and a subscription stored before 0052 names no
+session, so only `unsubscribePush` and `revokeCadetLoginAccess` revoke it.
+The trigger is not part of the Drizzle schema; it lives in the migration.
 
 ## Lifecycle
 
@@ -442,7 +456,7 @@ Mirrors management: Next.js 16, oRPC + TanStack Query, TanStack Form,
 | `lib/orpc.ts` | `RPCLink` to `/api/cadet/rpc` with `credentials: 'include'`, typed `CadetRouterClient`. Never the staff `/rpc`. |
 | `lib/auth-client.ts` | Better Auth clients at `CADET_AUTH_BASE_PATH`. |
 | `components/cadet-school-chrome.tsx` | Signed-in pages only: links the school's Cadet manifest (`/blob/school/{id}/cadet.webmanifest`, per-school app id, scope = whole portal) and home-screen icon, and shows the phone install screen (shared `useInstallAppScreen`). Before sign-in the portal is not installable (the school is unknown). |
-| `app/(portal)/notices`, `notices/[noticeId]` → `components/notices/` | The student's notices (`NoticesScreen`, infinite list) and one notice (`NoticeScreen`). A notice written as text is shown as text; a custom-template notice as its printed page (`getNoticeDocument`, asked for only then) in the shared empty-sandbox `DocumentPreview` (`fitPageWidth`), with its text shown while the page loads or cannot be loaded; both offer Download PDF (`getNoticeDownload`, a five-minute URL issued on the tap). Reached from Home's notices block (`HomeNotices`, shown only when the student has notices) and a row on More (`MoreNoticesRow`); the tab bar keeps five tabs. When the school's `notices` feature is off, the notice procedures answer the disabled-feature error: the block and the row do not appear and both routes show "Notices are not available" (`noticesSwitchedOff` in `notices-model.ts`), never an error. API-free pieces are in `packages/components/src/cadet-portal/cadet-notice.tsx`. |
+| `app/(portal)/notices`, `notices/[noticeId]` → `components/notices/` | The student's notices (`NoticesScreen`, infinite list) and one notice (`NoticeScreen`). A notice written as text is shown as text; a custom-template notice as its printed page (`getNoticeDocument`, asked for only then) in the shared empty-sandbox `DocumentPreview` (`fitPageWidth`), with its text shown while the page loads or cannot be loaded (the page is fixed at publication and can be megabytes, so it is downloaded once and not again on each return to the app); a list or notice already on screen stays when a refetch fails; both offer Download PDF (`getNoticeDownload`, a five-minute URL issued on the tap). Reached from Home's notices block (`HomeNotices`, shown only when the student has notices) and a row on More (`MoreNoticesRow`); the tab bar keeps five tabs. When the school's `notices` feature is off, the notice procedures answer the disabled-feature error: the block and the row do not appear and both routes show "Notices are not available" (`noticesSwitchedOff` in `notices-model.ts`), never an error. API-free pieces are in `packages/components/src/cadet-portal/cadet-notice.tsx`. |
 | `app/(portal)/notifications` → `components/notifications/` | The inbox inside the portal frame; the top bar's bell links to it. `/notifications/open` resolves push clicks with the route builders in `cadet-notification-routes.ts`: a bill opens `/fees/{billId}`, a payment `/fees`, a result `/results/{examId}` built from the enrollment, class and exam named in the notification (`examResultHref` in `lib/route-param.ts`), a notice `/notices/{noticeId}` (`noticeHref`); anything else stays in the inbox. The device notification toggle is on the inbox and on More. |
 | `public/sw.js` + `lib/web-push.client.ts` + `components/notifications/cadet-device-notifications.tsx` | Web push: the service worker (push → notification, click → `/notifications/open?type=…&<ids>` → route builders), registered only when the student taps **Turn on notifications** (permission requested inside the tap). One row per login and endpoint (`cadet_push_subscription`), so siblings on one phone each get their own; a login keeps its 10 most recently subscribed devices (older ones are revoked); sign-out turns this device off for that student, enforced on the server (see "Signing out stops the device, on the server"). A staff resend of a failed push goes to that same device only, never to a device that no longer receives notifications. iPhone/iPad: only inside the installed app. |
 
