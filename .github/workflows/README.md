@@ -1,3 +1,11 @@
+# CI workflow
+
+`ci.yml` runs on every pull request and push to `main`: a full `turbo run
+check-types`, `turbo run lint`, each package's `test` script as its own job
+(the API, auth, server and OPA suites start their own containers through
+Testcontainers), and the Rego policy tests. A pull request is ready to merge
+only when every CI job passes.
+
 # Container release workflow
 
 `release.yml` assigns a strict `vMAJOR.MINOR.PATCH` version to each successful
