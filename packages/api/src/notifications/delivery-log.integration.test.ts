@@ -67,7 +67,15 @@ describe('delivery log, resend and failure alerts', () => {
         data: { ...billIssuedData(admissionId), billRunId },
       }),
     );
+    // Until the worker fans the event out the log has no row for it and says one is still to come.
+    await expect(principal.school.listNotificationDeliveries({ schoolId, scope: { kind: 'bill_run', billRunId } })).resolves.toMatchObject({
+      items: [],
+      preparation: { pendingCount: 1, failedCount: 0 },
+    });
+    await expect(principal.school.listNotificationDeliveries({ schoolId, scope: { kind: 'admission', admissionId } })).resolves.toMatchObject({ items: [], preparation: { pendingCount: 1 } });
+    await expect(principal.school.listNotificationDeliveries({ schoolId, scope: { kind: 'bill_run', billRunId: 'frun_other' } })).resolves.toMatchObject({ preparation: { pendingCount: 0, failedCount: 0 } });
     await dispatch(eventId, whatsapp({ kind: 'failed', errorCode: 'wa_131026', definiteAnswer: true }));
+    await expect(principal.school.listNotificationDeliveries({ schoolId, scope: { kind: 'bill_run', billRunId } })).resolves.toMatchObject({ preparation: { pendingCount: 0, failedCount: 0 } });
 
     await expect(teacher.school.listNotificationDeliveries({ schoolId, scope: { kind: 'admission', admissionId } })).rejects.toMatchObject({ code: 'FORBIDDEN' });
     const byAdmission = await principal.school.listNotificationDeliveries({ schoolId, scope: { kind: 'admission', admissionId } });
@@ -97,6 +105,8 @@ describe('delivery log, resend and failure alerts', () => {
     await expect(accountant.school.resendNotificationDelivery({ schoolId, deliveryId: failed.id })).resolves.toEqual({ created: true });
     await expect(accountant.school.resendNotificationDelivery({ schoolId, deliveryId: failed.id })).resolves.toEqual({ created: false });
     const [resendEvent] = await db.select().from(notificationEventTable).where(eq(notificationEventTable.key, `resend:${failed.id}`));
+    // A resend adds a copy to a listed notification; it is not a notification still to come.
+    await expect(principal.school.listNotificationDeliveries({ schoolId, scope: { kind: 'admission', admissionId } })).resolves.toMatchObject({ preparation: { pendingCount: 0 } });
     const sender = whatsapp({ kind: 'sent', providerMessageId: 'wamid.resent' });
     await expect(dispatch(resendEvent!.id, sender)).resolves.toMatchObject({ status: 'dispatched', notificationCount: 0, owedDeliveryCount: 1 });
     expect(sender.available && sender.send).toHaveBeenCalledTimes(1);

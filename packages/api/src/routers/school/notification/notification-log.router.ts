@@ -58,6 +58,18 @@ export const deliveryLogItemSchema = z.object({
   deliveries: z.array(deliverySchema),
 });
 
+/**
+ * The delivery log page plus how much of the scope is not listed yet: a
+ * bulk action's notifications appear one student at a time as the worker
+ * fans its events out.
+ */
+export const deliveryLogOutputSchema = createPaginatedOutputSchema(deliveryLogItemSchema).extend({
+  preparation: z.object({
+    pendingCount: z.number().int().nonnegative().describe('Notifications of this scope that were requested but are not prepared yet; they appear in the list once the worker has processed them.'),
+    failedCount: z.number().int().nonnegative().describe('Notifications of this scope that could not be prepared; they may be missing from the list.'),
+  }),
+});
+
 const route = (summary: string, description: string) => ({ summary, description, tags: ['School', 'Notifications'] });
 
 /**
@@ -67,11 +79,11 @@ const route = (summary: string, description: string) => ({ summary, description,
  */
 export const schoolNotificationLogRouter = {
   listNotificationDeliveries: protectedProcedure
-    .route(route('List notification deliveries', 'Page through the student notifications of one admission, billing run, examination or notice, newest first, with the status of every in-app copy sent by device notification or WhatsApp and the reason a copy was skipped or failed. Shows references (bill or receipt number, exam name, notice title), never amounts or message text.'))
+    .route(route('List notification deliveries', 'Page through the student notifications of one admission, billing run, examination or notice, newest first, with the status of every in-app copy sent by device notification or WhatsApp and the reason a copy was skipped or failed. Right after a bulk action (a billing run, a results release, a published notice) the list is still filling: preparation.pendingCount is how many notifications are yet to appear. Shows references (bill or receipt number, exam name, notice title), never amounts or message text.'))
     .meta({ mcp: { exposure: 'advanced', access: 'read', destructive: false, module: 'notifications' } })
     .input(listNotificationDeliveriesInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_NOTIFICATION_LOG))
-    .output(createPaginatedOutputSchema(deliveryLogItemSchema))
+    .output(deliveryLogOutputSchema)
     .handler(async ({ context, input }) => {
       try {
         // A notice's deliveries belong to the notices feature like the notice itself.

@@ -105,6 +105,34 @@ function DeliveryLine({ delivery, canResend, resending, onResend }: { delivery: 
   );
 }
 
+const countOf = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
+
+/**
+ * What the log does not list yet. A bulk action's notifications are
+ * prepared one student at a time after the action returns, so right after
+ * it the list is shorter than the audience: this line says how many are
+ * still to come (the caller keeps reading the log until none are) and how
+ * many could not be prepared at all. Renders nothing when the list is
+ * complete.
+ */
+export function DeliveryLogPreparation({ pendingCount, failedCount }: { pendingCount: number; failedCount: number }) {
+  if (pendingCount === 0 && failedCount === 0) return null;
+  return (
+    <div className="flex flex-col gap-1 text-sm">
+      {pendingCount > 0 ? (
+        <p role="status" className="text-muted-foreground">
+          {countOf(pendingCount, 'more notification is', 'more notifications are')} being prepared. This list updates by itself.
+        </p>
+      ) : null}
+      {failedCount > 0 ? (
+        <p role="alert" className="text-destructive">
+          {countOf(failedCount, 'notification', 'notifications')} could not be prepared and may be missing from this list.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 /**
  * The staff delivery log (presentational): each student notification with
  * the status of its device-notification and WhatsApp copies and why a copy

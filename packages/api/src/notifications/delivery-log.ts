@@ -1,7 +1,7 @@
 import type { DatabaseExecutor } from '@campuspilot/db';
 import { notificationTypesFor } from '@campuspilot/db/notifications/catalogue';
-import { notificationDeliveryTable, notificationTable } from '@campuspilot/db/schema/notification';
-import { and, count, desc, eq, exists, inArray, isNotNull, sql, type SQL } from 'drizzle-orm';
+import { notificationDeliveryTable, notificationEventTable, notificationTable } from '@campuspilot/db/schema/notification';
+import { and, count, desc, eq, exists, inArray, isNotNull, isNull, sql, type AnyColumn, type SQL } from 'drizzle-orm';
 
 import { createNextPageCursor, createPaginatedResult, resolvePaginationInput } from '../paginations';
 import { activePushDestinations, isPushSubscriptionGone } from './redelivery';
@@ -24,25 +24,70 @@ export type DeliveryLogScope =
   | { kind: 'notice'; noticeId: string };
 
 
-function scopeWhere(scope: DeliveryLogScope): SQL {
+/**
+ * The scope as a predicate over a row carrying a catalogue `type` and its
+ * `data` facts. Inbox rows copy both from their event unchanged, so the same
+ * predicate selects a scope's notifications and the events that produce them.
+ * `admissionId` is the row's addressed admission: a column on an inbox row,
+ * the `admissionId` fact every student type carries on an event.
+ */
+type ScopedRow = { type: AnyColumn; data: AnyColumn; admissionId: AnyColumn | SQL };
+const EVENT_ROW: ScopedRow = {
+  type: notificationEventTable.type,
+  data: notificationEventTable.data,
+  admissionId: sql`${notificationEventTable.data}->>'admissionId'`,
+};
+
+function scopeWhere(scope: DeliveryLogScope, row: ScopedRow): SQL {
   switch (scope.kind) {
     case 'admission':
-      return eq(notificationTable.admissionId, scope.admissionId);
+      return sql`${row.admissionId} = ${scope.admissionId}`;
     case 'bill_run':
-      return and(eq(notificationTable.type, 'bill.issued'), sql`${notificationTable.data}->>'billRunId' = ${scope.billRunId}`)!;
+      return and(eq(row.type, 'bill.issued'), sql`${row.data}->>'billRunId' = ${scope.billRunId}`)!;
     case 'exam':
       return and(
-        eq(notificationTable.type, 'exam.results_published'),
-        sql`${notificationTable.data}->>'sessionId' = ${scope.sessionId}`,
-        sql`${notificationTable.data}->>'examSlug' = ${scope.examSlug}`,
+        eq(row.type, 'exam.results_published'),
+        sql`${row.data}->>'sessionId' = ${scope.sessionId}`,
+        sql`${row.data}->>'examSlug' = ${scope.examSlug}`,
       )!;
     case 'notice':
-      return and(eq(notificationTable.type, 'notice.published'), sql`${notificationTable.data}->>'noticeId' = ${scope.noticeId}`)!;
+      return and(eq(row.type, 'notice.published'), sql`${row.data}->>'noticeId' = ${scope.noticeId}`)!;
     default: {
       const unhandled: never = scope;
       throw new Error(`Unhandled delivery log scope ${JSON.stringify(unhandled)}.`);
     }
   }
+}
+
+/**
+ * How far the scope's fan-out is. Emitting writes one outbox event per
+ * student in the business transaction; the worker turns each into its inbox
+ * and delivery rows afterwards, one event at a time. Until then a
+ * notification is not in the log at all, so a log read right after a bulk
+ * action (publishing a notice, posting a run, releasing results) lists only
+ * the students dispatched so far. These counts say so explicitly:
+ * - `pendingCount`: events not fanned out yet (their rows will appear);
+ * - `failedCount`: events the worker gave up on (their rows may be missing
+ *   or partial; the outbox retries the retryable ones as pending again).
+ * Staff resends are events too but add a copy to an existing notification;
+ * they are not counted.
+ */
+async function scopePreparation(db: DatabaseExecutor, schoolId: string, scope: DeliveryLogScope) {
+  const rows = await db
+    .select({ status: notificationEventTable.status, value: count() })
+    .from(notificationEventTable)
+    .where(
+      and(
+        eq(notificationEventTable.schoolId, schoolId),
+        inArray(notificationEventTable.type, notificationTypesFor('admission')),
+        inArray(notificationEventTable.status, ['pending', 'failed']),
+        isNull(notificationEventTable.redeliveryOfDeliveryId),
+        scopeWhere(scope, EVENT_ROW),
+      ),
+    )
+    .groupBy(notificationEventTable.status);
+  const of = (status: 'pending' | 'failed') => rows.find((row) => row.status === status)?.value ?? 0;
+  return { pendingCount: of('pending'), failedCount: of('failed') };
 }
 
 /** The human reference of a notification (never an amount). */
@@ -64,7 +109,9 @@ function referenceOf(type: string, data: Record<string, unknown>): string | null
  * One page of a scope's student notifications, newest first, each with all
  * of its deliveries (oldest first, resends after the copy they resend).
  * `onlyFailed` keeps notifications with at least one failed delivery.
- * Retired types are left out.
+ * Retired types are left out. `preparation` reports the part of the scope
+ * that is not in the list yet (see {@link scopePreparation}); it describes
+ * the whole scope, independent of the page and of `onlyFailed`.
  */
 export async function listDeliveryLog(
   db: DatabaseExecutor,
@@ -80,7 +127,7 @@ export async function listDeliveryLog(
     eq(notificationTable.recipientKind, 'admission'),
     isNotNull(notificationTable.admissionId),
     inArray(notificationTable.type, notificationTypesFor('admission')),
-    scopeWhere(input.scope),
+    scopeWhere(input.scope, notificationTable),
     input.onlyFailed ? exists(failedDelivery) : undefined,
   );
   const [total] = await db.select({ value: count() }).from(notificationTable).where(where);
@@ -110,7 +157,8 @@ export async function listDeliveryLog(
   const now = new Date();
   const totalItems = total?.value ?? 0;
   const totalPages = Math.ceil(totalItems / pageSize);
-  return createPaginatedResult({
+  const preparation = await scopePreparation(db, input.schoolId, input.scope);
+  const page = createPaginatedResult({
     items: rows.map((row) => ({
       notificationId: row.id,
       type: row.type,
@@ -161,4 +209,5 @@ export async function listDeliveryLog(
     totalItems,
     pageSize,
   });
+  return { ...page, preparation };
 }
