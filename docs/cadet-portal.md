@@ -152,8 +152,25 @@ Identity rules:
 
 `POST /api/cadet/auth/sign-in/admission` with `{ schoolSlug, admissionNo,
 password, oauth_query? }`, implemented by the `cadetAdmissionSignIn` plugin in
-`packages/auth/src/cadet-sign-in.ts`. The form shows **School code** (the school
-slug), **Admission number** and **Password**.
+`packages/auth/src/cadet-sign-in.ts`. The form shows **School**, **Admission
+number** and **Password**.
+
+**Choosing the school** (`apps/cadet/components/school-combobox.tsx`). School is
+a combobox (`@campuspilot/ui` `Combobox`, Radix + cmdk), not a free-text code.
+After three characters it asks the public `searchSchools`, which returns up to
+five schools matching the name or school code anywhere (exact code first, then
+prefix matches, then by name). Picking one stores only its code (`school.slug`);
+the school's name and logo are then shown in the field and above the form from
+the public `getSignInSchool` (exact code). A school can share
+`/sign-in?school=<school code>`: the code is the form's initial value, and a
+code no school has says so under the field. Demo schools (`is_demo`) are never
+suggested; they are returned only for their exact code.
+
+Both procedures (`packages/api/src/routers/cadet/cadet-school-search.router.ts`)
+are built on `co` without `cadetProcedure`, so they answer anonymous callers,
+are `exposure: 'hidden'` on MCP, and return only the school code, name and a
+5-minute presigned logo URL (in-page logos never use the `/blob` icon). Each
+client IP may call them 30 times per 10 s together (`apps/server/src/http.ts`).
 
 1. If the client IP is locked, refuse with `CADET_SIGN_IN_LOCKED`.
 2. Join `school.slug` + `admission.admission_no` to the admission (registered or
@@ -304,7 +321,7 @@ Remark, attendance and activities attach only to the record holding the results.
 `releaseExamToCadet` (staff, exam transition permission), which needs a
 completed exam and blocks reopening and legacy plan changes until
 `withdrawExamFromCadet`. The release time is always when the call was made;
-only the demo seed back-dates it (see `docs/demo-school.md`). The **first**
+only the demo seed sets it, to the demo's creation time (see `docs/demo-school.md`). The **first**
 release also notifies every registered student of the examination
 (`exam.results_published`: inbox, web push, WhatsApp) in the same transaction,
 recorded once per exam in `exam_result_publication`; the confirmation shows the
@@ -374,7 +391,7 @@ Mirrors management: Next.js 16, oRPC + TanStack Query, TanStack Form,
 | `app/layout.tsx` | `QueryProvider` + `ThemeProvider`; title "Cadet Portal". |
 | `app/(portal)/layout.tsx` → `components/app-frame.tsx` (`AppFrame`) | Session check (`authClient.useSession`, `redirect('/sign-in')`), top bar from `getProfile.current`, bottom nav; phone-sized frame from `md` up. |
 | `app/(portal)/page.tsx`, `fees/`, `fees/[billId]/`, `results/`, `results/[examId]/`, `results/class/[recordId]/`, `growth/`, `growth/class/[recordId]/`, `more/` | Screens in `components/{home,fees,results,growth,more}`; shared headers and loading/error/empty states in `components/screen.tsx`. More holds Sign out (cadet session only; clears the query cache). |
-| `app/sign-in/page.tsx` → `components/sign-in-form.tsx` | `useForm` with a Zod `onSubmit` validator and per-field errors; the request is a `useMutation`, so a rejected sign-in does not disable Submit. Full navigation on success. |
+| `app/sign-in/page.tsx` → `components/sign-in-form.tsx` (+ `school-combobox.tsx`) | `useForm` with a Zod `onSubmit` validator and per-field errors; school picker and `?school=` prefill as in Sign-in; the request is a `useMutation`, so a rejected sign-in does not disable Submit. Full navigation on success. |
 | `app/oauth/consent/page.tsx` → `components/oauth-consent.tsx` | Cadet MCP consent. |
 | `lib/orpc.ts` | `RPCLink` to `/api/cadet/rpc` with `credentials: 'include'`, typed `CadetRouterClient`. Never the staff `/rpc`. |
 | `lib/auth-client.ts` | Better Auth clients at `CADET_AUTH_BASE_PATH`. |

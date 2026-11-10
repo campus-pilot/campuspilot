@@ -92,7 +92,7 @@ describe('demo school seed steps (2 classes, without Restate)', () => {
       ['second-term-examination', 'active', false],
       ['annual-examination', 'ready', false],
     ]);
-    // The release is back-dated from asOf like every other demo date, not stamped with the worker's clock.
+    // The release is stamped with asOf (the demo's creation), not the worker's clock.
     const periodic = plan.exams.find((exam) => exam.slug === 'periodic-test-1')!;
     expect(new Date(exams.items[0]!.cadetReleasedAt!).toISOString()).toBe(periodic.cadetReleasedAt);
     expect(await client.school.getCadetPortalSettings({ schoolId: job.schoolId })).toMatchObject({ showClassAverages: true });

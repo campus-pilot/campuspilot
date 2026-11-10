@@ -3,6 +3,8 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { handlers, orpcMock, resetHandlers } from '@/test/orpc-mock';
+
 import { SignInForm } from './sign-in-form';
 
 const mocks = vi.hoisted(() => ({
@@ -10,6 +12,8 @@ const mocks = vi.hoisted(() => ({
   signInFetch: vi.fn(),
   oauthSignInFetch: vi.fn(),
 }));
+
+vi.mock('@/lib/orpc', () => ({ orpc: orpcMock }));
 
 vi.mock('next/navigation', () => ({
   useSearchParams: () => mocks.searchParams,
@@ -34,15 +38,24 @@ vi.mock('@/lib/auth-client', async (importOriginal) => {
 
 function renderSignIn(search = '') {
   mocks.searchParams = new URLSearchParams(search);
-  const queryClient = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
   );
   return render(<SignInForm />, { wrapper });
 }
 
-function fillIn() {
-  fireEvent.change(screen.getByLabelText('School code'), { target: { value: 'greenwood' } });
+const greenwood = { slug: 'greenwood', name: 'Greenwood High', logoUrl: null };
+
+/** Picks Greenwood High from the school combobox's suggestions. */
+async function chooseSchool() {
+  fireEvent.click(screen.getByLabelText('School'));
+  fireEvent.change(screen.getByPlaceholderText('School name or code…'), { target: { value: 'gre' } });
+  fireEvent.click(await screen.findByRole('option', { name: /Greenwood High/ }));
+}
+
+async function fillIn() {
+  await chooseSchool();
   fireEvent.change(screen.getByLabelText('Admission number'), { target: { value: 'ADM-1' } });
   fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'maple-river-42' } });
 }
@@ -50,6 +63,13 @@ function fillIn() {
 const signInButton = () => screen.getByRole('button', { name: 'Sign in' });
 
 beforeEach(() => {
+  resetHandlers({
+    searchSchools: () => ({ schools: [greenwood] }),
+    getSignInSchool: (input) => {
+      if ((input as { slug: string }).slug === 'greenwood') return greenwood;
+      throw { code: 'NOT_FOUND' };
+    },
+  });
   mocks.signInFetch.mockReset();
   mocks.oauthSignInFetch.mockReset();
 });
@@ -59,7 +79,7 @@ describe('SignInForm', () => {
     renderSignIn();
     fireEvent.click(signInButton());
 
-    expect(await screen.findByText('Enter your school code.')).toBeTruthy();
+    expect(await screen.findByText('Choose your school.')).toBeTruthy();
     expect(screen.getByText('Enter your admission number.')).toBeTruthy();
     expect(screen.getByText('Enter your password.')).toBeTruthy();
     expect(screen.queryByText(/\[object Object\]/)).toBeNull();
@@ -72,7 +92,7 @@ describe('SignInForm', () => {
       error: { message: 'The school code, admission number or password is incorrect.' },
     });
     renderSignIn();
-    fillIn();
+    await fillIn();
     fireEvent.click(signInButton());
 
     expect(await screen.findByText('The school code, admission number or password is incorrect.')).toBeTruthy();
@@ -85,6 +105,46 @@ describe('SignInForm', () => {
       method: 'POST',
       body: { schoolSlug: 'greenwood', admissionNo: 'ADM-1', password: 'maple-river-42' },
     });
+  });
+
+  it('asks for three letters before suggesting schools', async () => {
+    const search = vi.fn(() => ({ schools: [greenwood] }));
+    handlers.searchSchools = search;
+    renderSignIn();
+    fireEvent.click(screen.getByLabelText('School'));
+    fireEvent.change(screen.getByPlaceholderText('School name or code…'), { target: { value: 'gr' } });
+    expect(screen.getByText(/Type at least 3 letters/)).toBeTruthy();
+    expect(search).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByPlaceholderText('School name or code…'), { target: { value: 'gre' } });
+    expect(await screen.findByRole('option', { name: /Greenwood High/ })).toBeTruthy();
+    expect(search).toHaveBeenCalledWith({ query: 'gre' });
+  });
+
+  it('shows the chosen school above the form', async () => {
+    renderSignIn();
+    await chooseSchool();
+    expect(await screen.findByText('Greenwood High', { selector: 'p' })).toBeTruthy();
+  });
+
+  it('chooses the school from a shared link and signs in with its code', async () => {
+    mocks.signInFetch.mockResolvedValue({ data: null, error: { message: 'Nope.' } });
+    renderSignIn('school=greenwood');
+    expect(await screen.findByText('Greenwood High', { selector: 'p' })).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('Admission number'), { target: { value: 'ADM-1' } });
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'maple-river-42' } });
+    fireEvent.click(signInButton());
+    await waitFor(() =>
+      expect(mocks.signInFetch).toHaveBeenCalledWith('/sign-in/admission', {
+        method: 'POST',
+        body: { schoolSlug: 'greenwood', admissionNo: 'ADM-1', password: 'maple-river-42' },
+      }),
+    );
+  });
+
+  it('says so when a shared link names a code no school has', async () => {
+    renderSignIn('school=unknown');
+    expect(await screen.findByText(/No school has the code “unknown”/)).toBeTruthy();
   });
 
   it('says an app is asking to connect only when the signed OAuth query is present', () => {
