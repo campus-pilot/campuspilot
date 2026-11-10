@@ -23,8 +23,10 @@ export type NoticeCadetClassScope = (typeof NOTICE_CADET_CLASS_SCOPES)[number];
 
 export const NOTICE_AUDIENCE_OPTIONS: Record<NoticeAudienceChoice, { label: string; description: string }> = {
   staff: { label: 'Staff', description: 'Every staff member of the school, in this app.' },
-  cadets: { label: 'Cadets', description: 'Students, in the Cadet Portal and on WhatsApp.' },
-  staff_and_cadets: { label: 'Staff and cadets', description: 'Everyone: staff here, students in the Cadet Portal and on WhatsApp.' },
+  // Channel-neutral on purpose: which channels reach students depends on the
+  // school and platform, and the publish confirmation states it from the forecast.
+  cadets: { label: 'Cadets', description: 'Students, in the Cadet Portal and by their notifications.' },
+  staff_and_cadets: { label: 'Staff and cadets', description: 'Everyone: staff here, students in the Cadet Portal and by their notifications.' },
 };
 
 export const NOTICE_CADET_CLASS_SCOPE_OPTIONS: Record<NoticeCadetClassScope, { label: string; description: string }> = {
@@ -73,21 +75,35 @@ export function noticeAudienceSelection(facts: NoticeAudienceFacts): NoticeAudie
   };
 }
 
+/**
+ * The audience choices an author may pick from. With the Cadet Portal every
+ * choice is offered. Without it (switched off, or not known because the
+ * school's features could not be read) only "Staff" is, **plus the choice
+ * the notice already has stored**: a draft addressed to students keeps
+ * showing that it is, instead of silently reading "Staff". Whether such an
+ * audience can be saved is the form's decision, not this list's.
+ */
+export function noticeAudienceChoicesOffered(cadetsAvailable: boolean, stored: NoticeAudienceChoice | null): NoticeAudienceChoice[] {
+  if (cadetsAvailable) return [...NOTICE_AUDIENCE_CHOICES];
+  return stored && stored !== 'staff' ? ['staff', stored] : ['staff'];
+}
+
 function classCount(count: number) {
   return `${count} ${count === 1 ? 'class' : 'classes'}`;
 }
 
 /**
  * One line naming the audience, for lists and summaries: "Staff",
- * "Cadets · All classes", "Staff and cadets · Class 6, Class 7". Class
- * names are listed when known and at most three; otherwise the count.
+ * "Cadets · All classes", "Staff and cadets · Class 6, Class 7".
+ * `classNames` are the names of a selected-classes audience as the notice
+ * records them (a published notice keeps the names it was published with,
+ * also for classes deleted since). Up to three are listed; more, or none
+ * known, reads as a count.
  */
-export function noticeAudienceLabel(facts: NoticeAudienceFacts, classLabels?: ReadonlyMap<string, string>) {
-  const { audience } = noticeAudienceSelection(facts);
+export function noticeAudienceLabel(facts: Pick<NoticeAudienceFacts, 'toStaff' | 'cadetScope'>, classNames: readonly string[] = []) {
+  const { audience } = noticeAudienceSelection({ ...facts, classIds: [] });
   const base = NOTICE_AUDIENCE_OPTIONS[audience].label;
   if (facts.cadetScope === 'none') return base;
   if (facts.cadetScope === 'all_classes') return `${base} · All classes`;
-  const names = facts.classIds.map((id) => classLabels?.get(id));
-  const known = names.every((name): name is string => name !== undefined);
-  return `${base} · ${known && names.length > 0 && names.length <= 3 ? names.join(', ') : classCount(facts.classIds.length)}`;
+  return `${base} · ${classNames.length > 0 && classNames.length <= 3 ? classNames.join(', ') : classCount(classNames.length)}`;
 }

@@ -99,7 +99,9 @@ export const notificationRenderers: { [T in NotificationType]: NotificationRende
   'notice.published_staff': (data) => ({
     icon: Megaphone,
     title: data.noticeTitle,
-    description: 'New staff notice.',
+    // The same words as the student type: a staff notice may be addressed to students too,
+    // and the notification does not carry the audience.
+    description: 'New notice from your school.',
   }),
 };
 

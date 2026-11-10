@@ -5,7 +5,6 @@ import { Label } from '@campuspilot/ui/components/label';
 import { RadioGroup, RadioGroupItem } from '@campuspilot/ui/components/radio-group';
 
 import {
-  NOTICE_AUDIENCE_CHOICES,
   NOTICE_AUDIENCE_OPTIONS,
   NOTICE_CADET_CLASS_SCOPES,
   NOTICE_CADET_CLASS_SCOPE_OPTIONS,
@@ -27,12 +26,12 @@ function OptionRow<T extends string>({ id, option }: { id: string; option: Optio
   );
 }
 
-function OptionRadioGroup<T extends string>({ legend, value, options, className, onChange, children }: { legend: string; value: T; options: readonly Option<T>[]; className: string; onChange: (value: T) => void; children?: ReactNode }) {
+function OptionRadioGroup<T extends string>({ legend, value, options, className, errorId, invalid = false, onChange, children }: { legend: string; value: T; options: readonly Option<T>[]; className: string; errorId?: string; invalid?: boolean; onChange: (value: T) => void; children?: ReactNode }) {
   const id = useId();
   return (
     <fieldset className="flex min-w-0 flex-col gap-2">
       <legend className="mb-2 text-sm font-medium">{legend}</legend>
-      <RadioGroup value={value} className={className} onValueChange={(next) => onChange(next as T)}>
+      <RadioGroup value={value} className={className} aria-invalid={invalid || undefined} aria-describedby={invalid ? errorId : undefined} onValueChange={(next) => onChange(next as T)}>
         {options.map((option) => <OptionRow key={option.value} id={`${id}-${option.value}`} option={option} />)}
       </RadioGroup>
       {children}
@@ -41,19 +40,22 @@ function OptionRadioGroup<T extends string>({ legend, value, options, className,
 }
 
 /**
- * "Who is this notice for?" as the three readable choices. Without the
- * Cadet Portal only "Staff" can be chosen, so the student choices are not
- * rendered at all (`cadetsAvailable`). `children` holds the field's errors
- * or a note.
+ * "Who is this notice for?" as readable choices. `choices` are the ones on
+ * offer (`noticeAudienceChoicesOffered`): all three with the Cadet Portal,
+ * otherwise "Staff" plus whatever the notice already stores, so the stored
+ * audience is always shown as it is. `errorId` links the field's error text
+ * (rendered by the caller in `children`) to the group for assistive
+ * technology; `children` holds the field's errors or a note.
  */
-export function NoticeAudienceField({ value, cadetsAvailable, onChange, children }: { value: NoticeAudienceChoice; cadetsAvailable: boolean; onChange: (value: NoticeAudienceChoice) => void; children?: ReactNode }) {
-  const choices = cadetsAvailable ? NOTICE_AUDIENCE_CHOICES : (['staff'] as const);
+export function NoticeAudienceField({ value, choices, errorId, invalid = false, onChange, children }: { value: NoticeAudienceChoice; choices: readonly NoticeAudienceChoice[]; errorId?: string; invalid?: boolean; onChange: (value: NoticeAudienceChoice) => void; children?: ReactNode }) {
   return (
     <OptionRadioGroup
       legend="Who is this notice for?"
       value={value}
-      className={cadetsAvailable ? 'grid gap-2 sm:grid-cols-3' : 'grid gap-2'}
+      className={choices.length >= 3 ? 'grid gap-2 sm:grid-cols-3' : choices.length === 2 ? 'grid gap-2 sm:grid-cols-2' : 'grid gap-2'}
       options={choices.map((choice) => ({ value: choice, ...NOTICE_AUDIENCE_OPTIONS[choice] }))}
+      errorId={errorId}
+      invalid={invalid}
       onChange={onChange}
     >
       {children}

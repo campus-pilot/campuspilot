@@ -25,10 +25,14 @@ export type ClassScopePickerProps = {
   isPending?: boolean;
   isError?: boolean;
   label?: string;
+  /** The DOM id of the trigger, for a caller that moves focus to it; generated when omitted. */
+  id?: string;
   /** Trigger text; defaults to "N of M classes". */
   summary?: string;
   /** Marks the trigger invalid for assistive technology. */
   invalid?: boolean;
+  /** The id of the element holding this field's error text (in `children`); announced with the trigger while `invalid`. */
+  errorId?: string;
   /** Extra controls under the list (for example "Select all classes"). */
   footer?: ReactNode;
   /** Help text or field errors under the trigger. */
@@ -51,15 +55,22 @@ function ClassScopeList({ classes, selectedIds, search, page, footer, onSelected
   return (
     <Command shouldFilter={false}>
       <CommandInput value={search} placeholder="Search classes…" onValueChange={(value) => { onSearchChange(value); onPageChange(1); }} />
-      <CommandList>
+      <CommandList aria-multiselectable="true" aria-label="Classes; choose one or more">
         <CommandEmpty>No classes match this search.</CommandEmpty>
         <CommandGroup heading="Classes in this session">
-          {visible.map((item) => (
-            <CommandItem key={item.id} value={item.id} onSelect={() => onSelectedIdsChange(toggleClassScopeId(classes, selectedIds, item.id))}>
-              <Check className={selected.has(item.id) ? 'size-4 opacity-100' : 'size-4 opacity-0'} aria-hidden />
-              <span className="truncate">{item.label}</span>
-            </CommandItem>
-          ))}
+          {visible.map((item) => {
+            const checked = selected.has(item.id);
+            return (
+              // cmdk's own `aria-selected` follows the highlighted row, not
+              // the choice, so the choice is stated in words as well: a
+              // screen reader hears "Class 5, selected".
+              <CommandItem key={item.id} value={item.id} data-checked={checked || undefined} onSelect={() => onSelectedIdsChange(toggleClassScopeId(classes, selectedIds, item.id))}>
+                <Check className={checked ? 'size-4 opacity-100' : 'size-4 opacity-0'} aria-hidden />
+                <span className="truncate">{item.label}</span>
+                <span className="sr-only">{checked ? ', selected' : ', not selected'}</span>
+              </CommandItem>
+            );
+          })}
         </CommandGroup>
       </CommandList>
       <div className="flex flex-col gap-2 border-t p-2">
@@ -77,15 +88,16 @@ function ClassScopeList({ classes, selectedIds, search, page, footer, onSelected
  * decides what an empty or complete selection means. Built on Radix Popover
  * and cmdk, so it stays interactive inside a Radix dialog.
  */
-export function ClassScopePicker({ classes, selectedIds, isPending = false, isError = false, label = 'Classes', summary, invalid = false, children, ...list }: ClassScopePickerProps) {
-  const id = useId();
+export function ClassScopePicker({ classes, selectedIds, isPending = false, isError = false, label = 'Classes', summary, invalid = false, errorId, id: givenId, children, ...list }: ClassScopePickerProps) {
+  const generatedId = useId();
+  const id = givenId ?? generatedId;
   const text = isPending ? 'Loading classes…' : (summary ?? classScopeSummary(selectedIds.length, classes.length));
   return (
     <div className="flex min-w-0 flex-col gap-1.5">
       <Label htmlFor={id}>{label}</Label>
       <Popover>
         <PopoverTrigger asChild>
-          <Button id={id} type="button" variant="outline" role="combobox" aria-invalid={invalid || undefined} className="w-full justify-between" disabled={isPending || isError}>
+          <Button id={id} type="button" variant="outline" role="combobox" aria-invalid={invalid || undefined} aria-describedby={invalid ? errorId : undefined} className="w-full justify-between" disabled={isPending || isError}>
             <span className="truncate">{text}</span>
             <ChevronsUpDown className="size-4 shrink-0 text-muted-foreground" aria-hidden />
           </Button>

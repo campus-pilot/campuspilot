@@ -56,8 +56,25 @@ describe('ClassScopePicker', () => {
   it('reports the toggled selection in display order', () => {
     const { onSelectedIdsChange } = renderPicker();
     fireEvent.click(screen.getByRole('combobox', { name: 'Classes' }));
-    fireEvent.click(screen.getByRole('option', { name: 'Class 1' }));
+    fireEvent.click(screen.getByRole('option', { name: /^Class 1 ?,/ }));
     expect(onSelectedIdsChange).toHaveBeenCalledWith(['c1', 'c2']);
+  });
+
+  it('says which classes are chosen in words, since the list highlight is not the choice', () => {
+    renderPicker();
+    fireEvent.click(screen.getByRole('combobox', { name: 'Classes' }));
+    expect(screen.getByRole('listbox').getAttribute('aria-multiselectable')).toBe('true');
+    const options = screen.getAllByRole('option').map((option) => option.textContent);
+    expect(options.filter((text) => text?.endsWith(', selected'))).toHaveLength(1);
+    expect(screen.getByRole('option', { name: /, selected$/ }).getAttribute('data-checked')).toBe('true');
+    expect(options.filter((text) => text?.endsWith(', not selected'))).toHaveLength(2);
+  });
+
+  it('announces its error with the trigger while invalid', () => {
+    renderPicker({ invalid: true, errorId: 'classes-error', children: <p id="classes-error">Choose at least one class.</p> });
+    const trigger = screen.getByRole('combobox', { name: 'Classes' });
+    expect(trigger.getAttribute('aria-invalid')).toBe('true');
+    expect(trigger.getAttribute('aria-describedby')).toBe('classes-error');
   });
 
   it('hands search text to the caller and returns to the first page', () => {

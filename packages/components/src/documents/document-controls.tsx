@@ -187,28 +187,43 @@ export function DocumentPanel({
 }
 /** Portrait A4 width (210mm) in CSS pixels. */
 const A4_WIDTH_PX = 794;
+/** The on-screen height of a fitted page frame. */
+const FITTED_FRAME_HEIGHT_PX = 640;
 /**
  * The scale that fits an A4-wide page into the container, never above 1.
  * `tan(atan2(a, b))` is the CSS way to divide two lengths into a plain
  * number, so the fit needs no measuring script, state or effect.
  */
 const FIT_SCALE = `min(1, tan(atan2(100cqw, ${A4_WIDTH_PX}px)))`;
+/**
+ * The fitted layout as a stylesheet rule, applied only where the browser
+ * understands both things it relies on (container query units and dividing
+ * two lengths with `tan(atan2())`). The declarations used to be inline
+ * styles: a browser without them (iOS 15, older Android WebViews) dropped
+ * each declaration and showed the frame at the default 300x150 px. Now such
+ * a browser keeps the base classes below (a full-width, 640 px high frame
+ * whose content scrolls), so the notice stays readable at its real size.
+ */
+const FITTED_PAGE_CSS = `@supports (width: 1cqw) and (width: calc(1px * tan(atan2(1px, 1px)))) {
+  .document-fitted-frame {
+    width: max(100cqw, ${A4_WIDTH_PX}px);
+    height: calc(${FITTED_FRAME_HEIGHT_PX}px / ${FIT_SCALE});
+    transform: scale(${FIT_SCALE});
+    transform-origin: top left;
+  }
+}`;
 
 /** The sandboxed frame of {@link DocumentPreview} at A4 width, scaled to its container. The sandbox stays empty. */
 function FittedPageFrame({ html, label }: { html: string; label: string }) {
   return (
     <div className="h-[640px] overflow-hidden bg-white [container-type:inline-size]">
+      <style>{FITTED_PAGE_CSS}</style>
       <iframe
         title={label}
         sandbox=""
         referrerPolicy="no-referrer"
         srcDoc={html}
-        className="origin-top-left border-0 bg-white"
-        style={{
-          width: `max(100cqw, ${A4_WIDTH_PX}px)`,
-          height: `calc(640px / ${FIT_SCALE})`,
-          transform: `scale(${FIT_SCALE})`,
-        }}
+        className="document-fitted-frame h-[640px] w-full border-0 bg-white"
       />
     </div>
   );
@@ -290,22 +305,36 @@ export function DocumentNotice({
     </div>
   );
 }
-export function DocumentErrors({ errors }: { errors: readonly unknown[] }) {
-  const messages = errors.flatMap((e) =>
-    typeof e === "string"
-      ? [e]
-      : e && typeof e === "object" && "message" in e
-        ? [String(e.message)]
-        : [],
-  );
-  return (
-    <>
-      {[...new Set(messages)].map((message) => (
-        <p key={message} role="alert" className="text-sm text-destructive">
-          {message}
-        </p>
-      ))}
-    </>
+/**
+ * A field's error messages. Pass `id` and reference it from the input's
+ * `aria-describedby` so assistive technology reads the error with the
+ * field; the wrapper is rendered only while there is an error, so the
+ * reference never points at an empty element.
+ */
+export function DocumentErrors({ errors, id }: { errors: readonly unknown[]; id?: string }) {
+  const messages = [
+    ...new Set(
+      errors.flatMap((e) =>
+        typeof e === "string"
+          ? [e]
+          : e && typeof e === "object" && "message" in e
+            ? [String(e.message)]
+            : [],
+      ),
+    ),
+  ];
+  if (messages.length === 0) return null;
+  const items = messages.map((message) => (
+    <p key={message} role="alert" className="text-sm text-destructive">
+      {message}
+    </p>
+  ));
+  return id ? (
+    <div id={id} className="flex flex-col gap-1">
+      {items}
+    </div>
+  ) : (
+    <>{items}</>
   );
 }
 export type DocumentStringField<T extends string = string> = {

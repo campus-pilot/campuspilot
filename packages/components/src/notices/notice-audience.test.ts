@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { noticeAudienceFacts, noticeAudienceLabel, noticeAudienceSelection } from './notice-audience';
+import { NOTICE_AUDIENCE_OPTIONS, noticeAudienceChoicesOffered, noticeAudienceFacts, noticeAudienceLabel, noticeAudienceSelection } from './notice-audience';
 
 describe('notice audience', () => {
   it('stores the two explicit facts for each readable choice', () => {
@@ -25,12 +25,27 @@ describe('notice audience', () => {
     }
   });
 
-  it('labels the audience with the classes when they are few and known', () => {
-    const labels = new Map([['c1', 'Class 1'], ['c2', 'Class 2']]);
-    expect(noticeAudienceLabel({ toStaff: true, cadetScope: 'none', classIds: [] })).toBe('Staff');
-    expect(noticeAudienceLabel({ toStaff: false, cadetScope: 'all_classes', classIds: [] })).toBe('Cadets · All classes');
-    expect(noticeAudienceLabel({ toStaff: true, cadetScope: 'selected_classes', classIds: ['c1', 'c2'] }, labels)).toBe('Staff and cadets · Class 1, Class 2');
-    expect(noticeAudienceLabel({ toStaff: false, cadetScope: 'selected_classes', classIds: ['c1', 'gone'] }, labels)).toBe('Cadets · 2 classes');
-    expect(noticeAudienceLabel({ toStaff: false, cadetScope: 'selected_classes', classIds: ['c1'] })).toBe('Cadets · 1 class');
+  it('labels the audience with the recorded class names when they are few', () => {
+    expect(noticeAudienceLabel({ toStaff: true, cadetScope: 'none' })).toBe('Staff');
+    expect(noticeAudienceLabel({ toStaff: false, cadetScope: 'all_classes' })).toBe('Cadets · All classes');
+    expect(noticeAudienceLabel({ toStaff: true, cadetScope: 'selected_classes' }, ['Class 1', 'Class 2'])).toBe('Staff and cadets · Class 1, Class 2');
+    // A class deleted since publication is still named: the names are the notice's own record.
+    expect(noticeAudienceLabel({ toStaff: false, cadetScope: 'selected_classes' }, ['Class 5', 'Class 8'])).toBe('Cadets · Class 5, Class 8');
+    expect(noticeAudienceLabel({ toStaff: false, cadetScope: 'selected_classes' }, ['A', 'B', 'C', 'D'])).toBe('Cadets · 4 classes');
+    expect(noticeAudienceLabel({ toStaff: false, cadetScope: 'selected_classes' })).toBe('Cadets · 0 classes');
+  });
+
+  it('never promises a delivery channel in the audience descriptions', () => {
+    for (const option of Object.values(NOTICE_AUDIENCE_OPTIONS)) expect(option.description).not.toMatch(/whatsapp/i);
+  });
+
+  it('offers student audiences only with the Cadet Portal, but always shows the audience a notice already has', () => {
+    expect(noticeAudienceChoicesOffered(true, null)).toEqual(['staff', 'cadets', 'staff_and_cadets']);
+    expect(noticeAudienceChoicesOffered(true, 'cadets')).toEqual(['staff', 'cadets', 'staff_and_cadets']);
+    expect(noticeAudienceChoicesOffered(false, null)).toEqual(['staff']);
+    expect(noticeAudienceChoicesOffered(false, 'staff')).toEqual(['staff']);
+    // The stored audience is never hidden or replaced.
+    expect(noticeAudienceChoicesOffered(false, 'cadets')).toEqual(['staff', 'cadets']);
+    expect(noticeAudienceChoicesOffered(false, 'staff_and_cadets')).toEqual(['staff', 'staff_and_cadets']);
   });
 });

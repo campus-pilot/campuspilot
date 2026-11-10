@@ -30,7 +30,7 @@ describe('notification renderers', () => {
     ).toMatchObject({ title: 'Sports Day', description: 'New notice from your school.' });
     expect(presentNotification({ type: 'notice.published_staff', data: { noticeId: 'n', sessionId: 's', noticeTitle: 'Staff meeting' } })).toMatchObject({
       title: 'Staff meeting',
-      description: 'New staff notice.',
+      description: 'New notice from your school.',
     });
   });
 
