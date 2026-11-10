@@ -1,11 +1,12 @@
-import { Bell } from 'lucide-react';
-import { FeaturePage } from '@/components/feature-unavailable';
-import { ModulePlaceholder } from '@/components/module-placeholder';
+import { SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
+import { NoticeList } from '@/components/notices/notice-list';
+import { NoticePageGate } from '@/components/notices/notice-page-gate';
 
-export default function NoticesPage() {
+export default async function NoticesPage({ params }: { params: Promise<{ schoolId: string; sessionId: string }> }) {
+  const scope = await params;
   return (
-    <FeaturePage feature="notices">
-      <ModulePlaceholder icon={Bell} title="Notices" description="School notices will be managed here." />
-    </FeaturePage>
+    <NoticePageGate schoolId={scope.schoolId} action={SCHOOL_ACTIONS.READ_NOTICE}>
+      <NoticeList scope={scope} />
+    </NoticePageGate>
   );
 }

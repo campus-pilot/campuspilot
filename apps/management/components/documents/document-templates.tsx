@@ -132,28 +132,7 @@ export function DocumentTemplates({ scope }: { scope: DocumentTemplateScope }) {
     return <DocumentReadError error={active.error} retry={active.refetch} />;
 
   if (!active.data) {
-    return (
-      <div className="flex flex-col gap-5">
-        <TemplatePageHeader scope={scope} />
-        <DocumentPanel
-          title="No template selected"
-          description="Import a design from the template marketplace before editing this document type."
-        >
-          <div className="flex min-h-64 flex-col items-center justify-center gap-4 rounded-lg border border-dashed px-6 text-center">
-            <Store className="size-10 text-muted-foreground/50" aria-hidden />
-            <div className="flex max-w-md flex-col gap-1">
-              <p className="text-sm font-medium">Browse the marketplace</p>
-              <p className="text-xs text-muted-foreground">
-                Preview available designs, then import one into this school.
-              </p>
-            </div>
-            <DocumentButton asChild variant="outline">
-              <Link href={marketplaceHref(scope)}>Browse marketplace</Link>
-            </DocumentButton>
-          </div>
-        </DocumentPanel>
-      </div>
-    );
+    return <NoTemplateSelected scope={scope} />;
   }
 
   return (
@@ -171,6 +150,53 @@ export function DocumentTemplates({ scope }: { scope: DocumentTemplateScope }) {
         }}
       />
     </DocumentPermission>
+  );
+}
+
+/**
+ * What the empty state says for a type without a selected template. Most
+ * types cannot be created until a design is imported. A notice never needs
+ * one: until the school picks a design, notices use the built-in default,
+ * and the copy says so instead of implying notices are blocked.
+ */
+function noTemplateCopy(documentType: DocumentTemplateScope['documentType']) {
+  if (documentType === 'notice') {
+    return {
+      title: 'Using the built-in notice design',
+      description:
+        'Notices already work: until your school picks a design, every plain-text notice is printed on the built-in default letterhead.',
+      heading: 'Pick your own design',
+      detail:
+        'Import a notice design from the marketplace to replace the built-in one, then edit it here. Notices published earlier keep the design they were published with.',
+    };
+  }
+  return {
+    title: 'No template selected',
+    description:
+      'Import a design from the template marketplace before editing this document type.',
+    heading: 'Browse the marketplace',
+    detail: 'Preview available designs, then import one into this school.',
+  };
+}
+
+function NoTemplateSelected({ scope }: { scope: DocumentTemplateScope }) {
+  const copy = noTemplateCopy(scope.documentType);
+  return (
+    <div className="flex flex-col gap-5">
+      <TemplatePageHeader scope={scope} />
+      <DocumentPanel title={copy.title} description={copy.description}>
+        <div className="flex min-h-64 flex-col items-center justify-center gap-4 rounded-lg border border-dashed px-6 text-center">
+          <Store className="size-10 text-muted-foreground/50" aria-hidden />
+          <div className="flex max-w-md flex-col gap-1">
+            <p className="text-sm font-medium">{copy.heading}</p>
+            <p className="text-xs text-muted-foreground">{copy.detail}</p>
+          </div>
+          <DocumentButton asChild variant="outline">
+            <Link href={marketplaceHref(scope)}>Browse marketplace</Link>
+          </DocumentButton>
+        </div>
+      </DocumentPanel>
+    </div>
   );
 }
 

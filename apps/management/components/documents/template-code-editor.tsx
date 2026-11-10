@@ -23,7 +23,8 @@ export function TemplateCodeEditor({
   value: string;
   onChange: (value: string) => void;
   onBlur: () => void;
-  onCollapse: () => void;
+  /** Collapses the editor's panel; the control is drawn only where the editor sits in a collapsible panel. */
+  onCollapse?: () => void;
 }) {
   const editorRef = useRef<MonacoEditor | null>(null);
   const { resolvedTheme } = useTheme();
@@ -48,15 +49,17 @@ export function TemplateCodeEditor({
             <WandSparkles />
             Format
           </DocumentButton>
-          <DocumentButton
-            variant="ghost"
-            size="icon-sm"
-            aria-label="Collapse code editor"
-            title="Collapse code editor"
-            onClick={onCollapse}
-          >
-            <PanelLeftClose />
-          </DocumentButton>
+          {onCollapse ? (
+            <DocumentButton
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Collapse code editor"
+              title="Collapse code editor"
+              onClick={onCollapse}
+            >
+              <PanelLeftClose />
+            </DocumentButton>
+          ) : null}
         </div>
       </header>
       <div className="min-h-0 flex-1">

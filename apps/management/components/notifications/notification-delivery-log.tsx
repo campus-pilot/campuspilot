@@ -16,13 +16,14 @@ import { client, orpc } from '@/lib/orpc';
 export type DeliveryLogScope =
   | { kind: 'admission'; admissionId: string }
   | { kind: 'bill_run'; billRunId: string }
-  | { kind: 'exam'; sessionId: string; examSlug: string };
+  | { kind: 'exam'; sessionId: string; examSlug: string }
+  | { kind: 'notice'; noticeId: string };
 
 const PAGE_SIZE = 20;
 const viewSchema = z.object({ page: z.number().int().positive(), onlyFailed: z.boolean() });
 
 /**
- * The delivery log section for one admission, billing run or examination
+ * The delivery log section for one admission, billing run, examination or notice
  * (Phase 7): rendered only for staff with `READ_NOTIFICATION_LOG`; "Resend"
  * on failed copies only with `SEND_NOTIFICATIONS`.
  */
