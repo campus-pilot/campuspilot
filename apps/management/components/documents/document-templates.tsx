@@ -42,6 +42,7 @@ import {
 import { client, orpc } from '@/lib/orpc';
 import { confirmNavigation } from '@/lib/navigation-guard';
 import { TemplatePromptEditor } from './template-prompt-editor';
+import { noticePreviewPrintSizeSchema, noticePrintSizeOptions } from './notice-print-size-preview';
 import {
   DocumentDirtyGuard,
   DocumentLoading,
@@ -88,17 +89,6 @@ const pageSizeOptions = [
   { value: 'half', label: 'Half A4 · two per sheet' },
   { value: 'full', label: 'Full A4 · one per sheet' },
 ] as const;
-/**
- * A Notice design has no footprint of its own: each notice chooses full or
- * half A4 and the design adapts to `print.size`. So instead of a saved
- * paper footprint, the Notice editor offers the size to preview at; it is
- * never saved with the revision.
- */
-const noticePrintSizeOptions = [
-  { value: 'full', label: 'Full A4 notice' },
-  { value: 'half', label: 'Half A4 notice · two per sheet' },
-] as const;
-
 const DESKTOP_WORKSPACE_QUERY = '(min-width: 1280px)';
 const MM_TO_PX = 96 / 25.4;
 
@@ -287,8 +277,8 @@ function useDocumentTemplateForm(
         preview: z.string(),
         previewContent: z.string(),
         previewPageSize: z.enum(['', 'full', 'half']),
-        printSize: z.enum(['full', 'half']),
-        previewPrintSize: z.enum(['full', 'half']),
+        printSize: noticePreviewPrintSizeSchema,
+        previewPrintSize: noticePreviewPrintSizeSchema,
         error: z.string(),
         previewing: z.boolean(),
       }),

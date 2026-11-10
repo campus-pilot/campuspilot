@@ -313,7 +313,9 @@ marketplace `notice-compact` designs adapt with `notice--{{print.size}}` /
 **both** sizes against the sample and the longest notice, and the catalog
 tests do the same for every bundled design, so a plain notice never fails to
 print at the size it chose with a built-in or marketplace design. Settings ›
-Templates › Notice previews the design at either size ("Preview as";
+Templates › Notice and the marketplace detail page of a Notice design preview
+it at either size (the same "Preview as" control and options, in
+`notice-print-size-preview.ts`;
 `previewDocumentTemplate` and `getMarketplaceTemplate` take an optional
 `printSize`, refused for every other type).
 
@@ -626,8 +628,6 @@ shows both print sizes.
 - The half-page preview marks where each half page ends at a fixed text
   height; Chromium may break a line or two earlier (never later). The PDF is
   the authority.
-- The marketplace detail page previews Notice designs at full size only;
-  Settings › Templates › Notice previews both.
 - A published notice's letterhead is live in HTML and frozen in its cached PDF
   (see "What is fixed at publication, and what is live").
 - Inbox rows of notices stay visible while a feature is off; only remote copies

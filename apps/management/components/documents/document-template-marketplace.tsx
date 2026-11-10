@@ -1,9 +1,10 @@
 'use client';
 
+import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useForm } from '@tanstack/react-form';
-import { useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { resolveQueryBoundary } from '@campuspilot/components/query-boundary';
 import { Check, Eye, LayoutTemplate, Store } from 'lucide-react';
 import { z } from 'zod';
@@ -18,6 +19,7 @@ import {
   DocumentNotice,
   DocumentPanel,
   DocumentPreview,
+  DocumentSelect,
   allDocumentKinds,
   noticeDocumentKind,
 } from '@campuspilot/components/documents/document-controls';
@@ -32,6 +34,12 @@ import {
   useDocumentCache,
   type DocumentTemplateScope,
 } from './document-common';
+import {
+  marketplaceTemplatePreviewInput,
+  noticePreviewPrintSizeSchema,
+  noticePrintSizeOptions,
+  type NoticePreviewPrintSize,
+} from './notice-print-size-preview';
 
 type MarketplaceItem = {
   slug: string;
@@ -320,6 +328,12 @@ function UseMarketplaceTemplate({
   );
 }
 
+/**
+ * A marketplace design in context. A Notice design adapts to each notice's
+ * print size (`print.size`), so its preview offers "Preview as" full or half
+ * A4, the same choice as Settings › Templates › Notice. The choice is a form
+ * field; the preview query is keyed by it.
+ */
 export function DocumentTemplateMarketplaceDetail({
   scope,
   slug,
@@ -327,11 +341,61 @@ export function DocumentTemplateMarketplaceDetail({
   scope: DocumentTemplateScope;
   slug: string;
 }) {
-  const preview = useQuery(
-    orpc.school.getMarketplaceTemplate.queryOptions({
-      input: { ...scope, slug },
-    }),
+  const form = useForm({
+    defaultValues: { printSize: 'full' as NoticePreviewPrintSize },
+    validators: {
+      onChange: z.object({ printSize: noticePreviewPrintSizeSchema }),
+    },
+  });
+  const printSizeControl =
+    scope.documentType === 'notice' ? (
+      <form.Field name="printSize">
+        {(field) => (
+          <DocumentSelect
+            field={field}
+            label="Preview as"
+            options={noticePrintSizeOptions}
+          />
+        )}
+      </form.Field>
+    ) : null;
+  return (
+    <form.Subscribe selector={(state) => state.values.printSize}>
+      {(printSize) => (
+        <MarketplaceDetail
+          scope={scope}
+          slug={slug}
+          printSize={printSize}
+          printSizeControl={printSizeControl}
+        />
+      )}
+    </form.Subscribe>
   );
+}
+
+/**
+ * The preview of one design at one print size. While another size renders,
+ * the page keeps the design's name, actions and the "Preview as" control
+ * (`keepPreviousData`), but never shows the previous size's render as the
+ * new one: the preview is empty until the requested size arrives.
+ */
+function MarketplaceDetail({
+  scope,
+  slug,
+  printSize,
+  printSizeControl,
+}: {
+  scope: DocumentTemplateScope;
+  slug: string;
+  printSize: NoticePreviewPrintSize;
+  printSizeControl: ReactNode;
+}) {
+  const preview = useQuery({
+    ...orpc.school.getMarketplaceTemplate.queryOptions({
+      input: marketplaceTemplatePreviewInput(scope, slug, printSize),
+    }),
+    placeholderData: keepPreviousData,
+  });
   const active = useQuery(
     orpc.school.getActiveDocumentTemplate.queryOptions({ input: scope }),
   );
@@ -345,6 +409,10 @@ export function DocumentTemplateMarketplaceDetail({
   if (previewState.kind === 'pending' || activeState.kind === 'pending') return <DocumentLoading />;
 
   const selected = activeState.data?.artifact.marketplaceSlug === slug;
+  const sizeLabel =
+    scope.documentType === 'notice'
+      ? noticePrintSizeOptions.find((option) => option.value === printSize)?.label
+      : undefined;
   return (
     <DocumentPermission
       schoolId={scope.schoolId}
@@ -382,7 +450,13 @@ export function DocumentTemplateMarketplaceDetail({
             />
           </div>
         </header>
-        <DocumentPreview html={previewState.data.html} label={previewState.data.name} sample />
+        {printSizeControl ? <div className="w-full max-w-xs">{printSizeControl}</div> : null}
+        <DocumentPreview
+          html={preview.isPlaceholderData ? undefined : previewState.data.html}
+          label={sizeLabel ? `${previewState.data.name} · ${sizeLabel}` : previewState.data.name}
+          placeholder="Rendering the preview…"
+          sample
+        />
       </div>
     </DocumentPermission>
   );

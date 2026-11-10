@@ -158,7 +158,8 @@ When a revision exists, an authorized editor sees:
   half A4 (two documents per physical sheet) or full A4 (one per sheet);
 - for notices, a "Preview as" choice of a full-A4 or half-A4 notice instead:
   a Notice design has no footprint (each notice chooses its size) and the
-  choice is never saved;
+  choice is never saved (the marketplace detail page of a Notice design offers
+  the same choice);
 - Save template and Reload saved revision actions;
 - a collapsible variable reference;
 - a sanitized sample preview on the right at wide widths and second in the stack
