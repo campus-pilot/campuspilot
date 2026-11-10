@@ -1,12 +1,6 @@
-import type {
-  SchoolFeatureKey,
-  SchoolFeatureState,
-} from '@campuspilot/db/feature-flags/catalogue';
+import type { SchoolFeatureKey } from '@campuspilot/db/feature-flags/catalogue';
 
-import {
-  getSchoolFeature,
-  schoolFeatureDisabledError,
-} from '../feature-flags/feature-flags.service';
+import { assertSchoolFeatureEnabled } from '../feature-flags/feature-flags.service';
 import { o } from '../index';
 
 type SchoolScopedInput = {
@@ -15,9 +9,7 @@ type SchoolScopedInput = {
 
 /**
  * Creates an input-aware oRPC middleware that refuses the procedure unless
- * the input school has `feature` enabled, and hands the handler the
- * feature's typed state as `context.feature` (`context.feature.config` is
- * that feature's config type only).
+ * the input school has `feature` enabled.
  *
  * A feature flag is not authorization: it says what the school has, not who
  * may act. Attach it after `.input(...)` and **after** the permission
@@ -29,18 +21,19 @@ type SchoolScopedInput = {
  *
  * A disabled feature throws FORBIDDEN with
  * `data: { reason: 'SCHOOL_FEATURE_DISABLED', feature }`.
+ *
+ * The gate decides from the `enabled` fact alone, exactly like every other
+ * enforcement point (`assertSchoolFeatureEnabled`). It does not read or
+ * parse the feature's stored config and adds nothing to the context: a
+ * config that no longer matches its schema must not turn every procedure of
+ * the feature into a server error. A handler that uses the config reads it
+ * itself with `getSchoolFeatureConfig(context.db, input.schoolId, feature)`,
+ * which is the only call that can fail on it (CONFLICT,
+ * `SCHOOL_FEATURE_CONFIG_INVALID`).
  */
-export function requireSchoolFeature<
-  K extends SchoolFeatureKey,
-  TInput extends SchoolScopedInput = SchoolScopedInput,
->(feature: K) {
-  return o.middleware<{ feature: SchoolFeatureState<K> & { enabled: true } }, TInput>(
-    async ({ context, next }, input) => {
-      // The handler receives the typed config, so this read parses it
-      // (and throws on a stored config that no longer matches its schema).
-      const state = await getSchoolFeature(context.db, input.schoolId, feature);
-      if (!state.enabled) throw schoolFeatureDisabledError(feature);
-      return next({ context: { feature: { ...state, enabled: true } } });
-    },
-  );
+export function requireSchoolFeature<TInput extends SchoolScopedInput = SchoolScopedInput>(feature: SchoolFeatureKey) {
+  return o.middleware<Record<never, never>, TInput>(async ({ context, next }, input) => {
+    await assertSchoolFeatureEnabled(context.db, input.schoolId, feature);
+    return next();
+  });
 }

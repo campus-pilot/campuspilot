@@ -17,29 +17,40 @@ import {
  * Writes live in the API (`packages/api/src/feature-flags`).
  */
 
-function toState<K extends SchoolFeatureKey>(
+/**
+ * A stored config as its feature's schema reads it. `invalid` is its own
+ * outcome, not an exception: a config that no longer matches its schema
+ * (after a schema change, or a row written by hand) must only stop the code
+ * that uses that config, never a read of which features a school has.
+ */
+export type StoredSchoolFeatureConfig<K extends SchoolFeatureKey> =
+  | { status: "valid"; config: SchoolFeatureState<K>["config"] }
+  | { status: "invalid" };
+
+function readStoredConfig<K extends SchoolFeatureKey>(
   key: K,
-  row: { enabled: boolean; config: unknown } | undefined,
-): SchoolFeatureState<K> {
-  if (!row) return DISABLED_SCHOOL_FEATURE;
-  return { enabled: row.enabled, config: parseSchoolFeatureConfig(key, row.config) };
+  raw: unknown,
+): StoredSchoolFeatureConfig<K> {
+  try {
+    return { status: "valid", config: parseSchoolFeatureConfig(key, raw) };
+  } catch {
+    return { status: "invalid" };
+  }
 }
 
 /**
- * One feature's state for a school. A missing row (and a school that does
- * not exist) reads as disabled with no config. Throws when the stored config
- * no longer matches the feature's schema, rather than guessing a default.
+ * One feature's stored config for a school, for the code that uses it. A
+ * missing row is a valid "nothing stored" (`config: null`); a stored value
+ * that does not match the feature's schema is `invalid`. This says nothing
+ * about whether the feature is enabled ({@link isSchoolFeatureEnabled}).
  */
-export async function getSchoolFeature<K extends SchoolFeatureKey>(
+export async function readSchoolFeatureConfig<K extends SchoolFeatureKey>(
   db: DatabaseExecutor,
   schoolId: string,
   key: K,
-): Promise<SchoolFeatureState<K>> {
+): Promise<StoredSchoolFeatureConfig<K>> {
   const [row] = await db
-    .select({
-      enabled: schoolFeatureFlagTable.enabled,
-      config: schoolFeatureFlagTable.config,
-    })
+    .select({ config: schoolFeatureFlagTable.config })
     .from(schoolFeatureFlagTable)
     .where(
       and(
@@ -48,7 +59,7 @@ export async function getSchoolFeature<K extends SchoolFeatureKey>(
       ),
     )
     .limit(1);
-  return toState(key, row);
+  return readStoredConfig(key, row?.config ?? null);
 }
 
 /**
@@ -59,8 +70,9 @@ export async function getSchoolFeature<K extends SchoolFeatureKey>(
  * the manifest) asks just this question. A stored config that no longer
  * matches its schema must therefore not turn a gate into a 500; for Cadet
  * sign-in that would also tell an existing admission (500) from an unknown
- * one (401). Callers that use the config read it with `getSchoolFeature`,
- * which does throw on a mismatch.
+ * one (401). Code that uses the config reads it with
+ * {@link readSchoolFeatureConfig} (the API's `getSchoolFeatureConfig`),
+ * where a mismatch stops that code alone.
  */
 export async function isSchoolFeatureEnabled(
   db: DatabaseExecutor,
@@ -80,11 +92,22 @@ export async function isSchoolFeatureEnabled(
   return row?.enabled ?? false;
 }
 
-/** Every catalogue feature's state for a school; rows of retired keys are ignored. */
-export async function getSchoolFeatureFlags(
+/**
+ * Every catalogue feature's state for a school, and which features hold a
+ * stored config that no longer matches its schema. Rows of retired keys are
+ * ignored.
+ *
+ * `enabled` is always the stored fact. A feature listed in `invalidConfigs`
+ * reads with `config: null` here: the stored value is unusable, which the
+ * list states explicitly (null alone would also mean "nothing stored").
+ * This read never throws because of a config, so the pages and gates that
+ * only ask what a school has keep working; the administrator's editor shows
+ * the listed features as needing their settings saved again.
+ */
+export async function readSchoolFeatureFlags(
   db: DatabaseExecutor,
   schoolId: string,
-): Promise<SchoolFeatureFlags> {
+): Promise<{ features: SchoolFeatureFlags; invalidConfigs: SchoolFeatureKey[] }> {
   const rows = await db
     .select({
       feature: schoolFeatureFlagTable.feature,
@@ -94,7 +117,26 @@ export async function getSchoolFeatureFlags(
     .from(schoolFeatureFlagTable)
     .where(eq(schoolFeatureFlagTable.schoolId, schoolId));
   const byKey = new Map(rows.map((row) => [row.feature as string, row]));
-  return Object.fromEntries(
-    SCHOOL_FEATURE_KEYS.map((key) => [key, toState(key, byKey.get(key))]),
+  const invalidConfigs: SchoolFeatureKey[] = [];
+  const features = Object.fromEntries(
+    SCHOOL_FEATURE_KEYS.map((key) => {
+      const row = byKey.get(key);
+      if (!row) return [key, DISABLED_SCHOOL_FEATURE];
+      const stored = readStoredConfig(key, row.config);
+      if (stored.status === "invalid") invalidConfigs.push(key);
+      return [
+        key,
+        { enabled: row.enabled, config: stored.status === "valid" ? stored.config : null },
+      ];
+    }),
   ) as SchoolFeatureFlags;
+  return { features, invalidConfigs };
+}
+
+/** The `features` of {@link readSchoolFeatureFlags}, for callers that only ask what a school has. */
+export async function getSchoolFeatureFlags(
+  db: DatabaseExecutor,
+  schoolId: string,
+): Promise<SchoolFeatureFlags> {
+  return (await readSchoolFeatureFlags(db, schoolId)).features;
 }

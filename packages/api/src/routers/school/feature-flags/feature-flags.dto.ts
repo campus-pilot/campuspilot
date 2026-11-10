@@ -1,14 +1,23 @@
-import { schoolFeatureFlagsSchema } from '@campuspilot/db/feature-flags/catalogue';
+import { schoolFeatureFlagsSchema, schoolFeatureKeySchema } from '@campuspilot/db/feature-flags/catalogue';
 import { z } from 'zod';
 
 export const schoolFeatureFlagsInputSchema = z.object({
   schoolId: z.string().min(1),
 });
 
+/**
+ * The features whose stored config no longer matches its schema. Such a
+ * feature still reports its real `enabled` fact; its `config` reads null
+ * (unusable), and whatever needs that config answers CONFLICT
+ * (`SCHOOL_FEATURE_CONFIG_INVALID`) until an administrator saves it again.
+ */
+export const invalidFeatureConfigsSchema = z.array(schoolFeatureKeySchema);
+
 /** Every catalogue feature's state for one school, keyed by feature. */
 export const schoolFeatureFlagsDtoSchema = z.object({
   schoolId: z.string(),
   features: schoolFeatureFlagsSchema,
+  invalidConfigs: invalidFeatureConfigsSchema,
 });
 
 export type SchoolFeatureFlagsDto = z.infer<typeof schoolFeatureFlagsDtoSchema>;
@@ -21,6 +30,7 @@ export type SchoolFeatureFlagsDto = z.infer<typeof schoolFeatureFlagsDtoSchema>;
 export {
   DISABLED_SCHOOL_FEATURE,
   readSchoolFeatureDisabled,
+  SCHOOL_FEATURE_CONFIG_INVALID_REASON,
   SCHOOL_FEATURE_DISABLED_REASON,
   SCHOOL_FEATURE_KEYS,
   schoolFeatureCatalogue,

@@ -1,5 +1,5 @@
 import { toRpcError } from '../../../errors';
-import { getSchoolFeatureFlags } from '../../../feature-flags/feature-flags.service';
+import { readSchoolFeatureFlags } from '../../../feature-flags/feature-flags.service';
 import { protectedProcedure } from '../../../index';
 import { requireSchoolMember } from '../../../permissions/school-member';
 import {
@@ -31,7 +31,7 @@ export const schoolFeatureFlagsRouter = {
       try {
         return {
           schoolId: input.schoolId,
-          features: await getSchoolFeatureFlags(context.db, input.schoolId),
+          ...(await readSchoolFeatureFlags(context.db, input.schoolId)),
         };
       } catch (error) {
         throw toRpcError(error);

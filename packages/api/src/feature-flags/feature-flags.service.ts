@@ -1,16 +1,19 @@
 import type { DatabaseExecutor } from '@campuspilot/db';
 import {
   parseSchoolFeatureConfig,
+  SCHOOL_FEATURE_CONFIG_INVALID_REASON,
   SCHOOL_FEATURE_DISABLED_REASON,
+  type SchoolFeatureConfig,
   schoolFeatureCatalogue,
   type SchoolFeatureDisabledData,
   type SchoolFeatureEntry,
   type SchoolFeatureKey,
 } from '@campuspilot/db/feature-flags/catalogue';
 import {
-  getSchoolFeature,
   getSchoolFeatureFlags,
   isSchoolFeatureEnabled,
+  readSchoolFeatureConfig,
+  readSchoolFeatureFlags,
 } from '@campuspilot/db/feature-flags/store';
 import { schoolFeatureFlagTable } from '@campuspilot/db/schema/school-feature-flag';
 import { ORPCError } from '@orpc/server';
@@ -21,7 +24,7 @@ import { ORPCError } from '@orpc/server';
  * and the API decide from the same query; they are re-exported here so API
  * code has one import.
  */
-export { getSchoolFeature, getSchoolFeatureFlags, isSchoolFeatureEnabled };
+export { getSchoolFeatureFlags, isSchoolFeatureEnabled, readSchoolFeatureFlags };
 
 /**
  * The one error every surface throws for a disabled feature: FORBIDDEN with
@@ -47,8 +50,8 @@ export function schoolFeatureDisabledError(feature: SchoolFeatureKey) {
  *
  * It decides from `enabled` alone (`isSchoolFeatureEnabled`) and never parses
  * the stored config: a gate must not fail because of a setting it does not
- * read. Code that needs the config uses `requireSchoolFeature` (typed
- * `context.feature`) or `getSchoolFeature`.
+ * read. The oRPC middleware `requireSchoolFeature` decides the same way.
+ * Code that needs the config reads it with {@link getSchoolFeatureConfig}.
  */
 export async function assertSchoolFeatureEnabled(
   db: DatabaseExecutor,
@@ -58,6 +61,38 @@ export async function assertSchoolFeatureEnabled(
   if (!(await isSchoolFeatureEnabled(db, schoolId, key))) {
     throw schoolFeatureDisabledError(key);
   }
+}
+
+/**
+ * The error for code that needs a feature's config when the stored value no
+ * longer matches the feature's schema: CONFLICT with
+ * `data: { reason: 'SCHOOL_FEATURE_CONFIG_INVALID', feature }`. It is not a
+ * server fault to retry and not a refusal of the caller: the stored settings
+ * must be saved again by a platform administrator, and only what uses them
+ * is unavailable until then.
+ */
+export function schoolFeatureConfigInvalidError(feature: SchoolFeatureKey) {
+  return new ORPCError('CONFLICT', {
+    message: `The stored settings of ${schoolFeatureCatalogue[feature].label} for this school are not valid. A platform administrator must save them again.`,
+    data: { reason: SCHOOL_FEATURE_CONFIG_INVALID_REASON, feature },
+  });
+}
+
+/**
+ * One feature's typed config for a school (null when nothing is stored), for
+ * the handlers that use it. Call it after the gate
+ * (`requireSchoolFeature` / `assertSchoolFeatureEnabled`): being enabled and
+ * having a usable config are separate facts, and only this read can fail on
+ * the config, with {@link schoolFeatureConfigInvalidError}.
+ */
+export async function getSchoolFeatureConfig<K extends SchoolFeatureKey>(
+  db: DatabaseExecutor,
+  schoolId: string,
+  key: K,
+): Promise<SchoolFeatureConfig<K> | null> {
+  const stored = await readSchoolFeatureConfig(db, schoolId, key);
+  if (stored.status === 'invalid') throw schoolFeatureConfigInvalidError(key);
+  return stored.config;
 }
 
 /**

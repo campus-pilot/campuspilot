@@ -17,12 +17,14 @@ import {
   createSchoolStaffSession,
   createTestClient,
   createTestSchool,
+  createTestSession,
   setTestSchoolFeature,
 } from '../../../../test/fixtures';
 import {
   assertSchoolFeatureEnabled,
-  getSchoolFeature,
+  getSchoolFeatureConfig,
   getSchoolFeatureFlags,
+  readSchoolFeatureFlags,
   isSchoolFeatureEnabled,
   setSchoolFeature,
 } from '../../../feature-flags/feature-flags.service';
@@ -37,7 +39,7 @@ describe('school feature flag storage', () => {
   it('reads a school without rows as every feature disabled', async () => {
     const school = await createTestSchool();
     expect(await getSchoolFeatureFlags(db, school.id)).toEqual({ cadet: OFF, notices: OFF });
-    expect(await getSchoolFeature(db, school.id, 'cadet')).toEqual(OFF);
+    expect(await getSchoolFeatureConfig(db, school.id, 'cadet')).toBeNull();
     expect(await isSchoolFeatureEnabled(db, school.id, 'notices')).toBe(false);
     expect(await isSchoolFeatureEnabled(db, 'sch_missing', 'cadet')).toBe(false);
   });
@@ -69,28 +71,70 @@ describe('school feature flag storage', () => {
     expect(await db.select().from(schoolFeatureFlagTable).where(eqSchool(school.id))).toEqual([]);
   });
 
-  it('ignores rows of a retired feature key and fails loudly on a stored config that no longer fits', async () => {
+  it('ignores rows of a retired feature key', async () => {
     const school = await createTestSchool({ features: ['cadet'] });
     await db.insert(schoolFeatureFlagTable).values({ schoolId: school.id, feature: 'retired-feature' as never, enabled: true });
     expect(await getSchoolFeatureFlags(db, school.id)).toEqual({ cadet: ON, notices: OFF });
-
-    await db.insert(schoolFeatureFlagTable).values({ schoolId: school.id, feature: 'notices', enabled: true, config: { stale: true } });
-    await expect(getSchoolFeature(db, school.id, 'notices')).rejects.toThrow();
+    expect(await readSchoolFeatureFlags(db, school.id)).toEqual({ features: { cadet: ON, notices: OFF }, invalidConfigs: [] });
   });
 
+  /**
+   * Review rounds 1 and 2, F6. A stored config that no longer matches its
+   * schema (as after a schema change) stops the code that uses that config,
+   * with a clear error, and nothing else: "is it enabled" and "what does
+   * this school have" are answered from the facts they ask for.
+   */
   it('answers "is it enabled" from the enabled fact alone, whatever the stored config looks like', async () => {
-    // A config that no longer matches its schema (as after a schema change):
-    // reading the config fails loudly, but every gate must keep deciding.
     const school = await createTestSchool();
     await db.insert(schoolFeatureFlagTable).values([
       { schoolId: school.id, feature: 'cadet', enabled: true, config: { stale: true } },
       { schoolId: school.id, feature: 'notices', enabled: false, config: { stale: true } },
     ]);
-    await expect(getSchoolFeature(db, school.id, 'cadet')).rejects.toThrow();
     expect(await isSchoolFeatureEnabled(db, school.id, 'cadet')).toBe(true);
     expect(await isSchoolFeatureEnabled(db, school.id, 'notices')).toBe(false);
     await expect(assertSchoolFeatureEnabled(db, school.id, 'cadet')).resolves.toBeUndefined();
     await expectFeatureDisabled(assertSchoolFeatureEnabled(db, school.id, 'notices'), 'notices');
+    // Only the read of the config fails, and it says what is wrong and for which feature.
+    await expect(getSchoolFeatureConfig(db, school.id, 'cadet')).rejects.toMatchObject({
+      code: 'CONFLICT',
+      status: 409,
+      data: { reason: 'SCHOOL_FEATURE_CONFIG_INVALID', feature: 'cadet' },
+      message: 'The stored settings of Cadet Portal for this school are not valid. A platform administrator must save them again.',
+    });
+    // Every feature is still listed with its real enabled fact; the unusable configs are named.
+    expect(await readSchoolFeatureFlags(db, school.id)).toEqual({ features: { cadet: ON, notices: OFF }, invalidConfigs: ['cadet', 'notices'] });
+    // A feature with nothing stored has a valid, empty config.
+    const fresh = await createTestSchool({ features: ['notices'] });
+    await expect(getSchoolFeatureConfig(db, fresh.id, 'notices')).resolves.toBeNull();
+    await expect(getSchoolFeatureConfig(db, fresh.id, 'cadet')).resolves.toBeNull();
+  });
+
+  it('keeps every gate, flag read and feature procedure working with a stale config, until an administrator saves it again', async () => {
+    const school = await createTestSchool();
+    await db.insert(schoolFeatureFlagTable).values([
+      { schoolId: school.id, feature: 'cadet', enabled: true, config: { stale: true } },
+      { schoolId: school.id, feature: 'notices', enabled: true, config: ['stale'] },
+    ]);
+    const principal = createTestClient((await createSchoolStaffSession(school.id, [{ role: 'principal', meta: null }])).session);
+    const admin = createTestClient(await createAdminSession());
+    // Staff procedures behind `requireSchoolFeature` answer normally (they were 500 while the gate parsed the config).
+    await expect(principal.school.getCadetPortalSettings({ schoolId: school.id })).resolves.toEqual({ schoolId: school.id, showClassAverages: false });
+    const session = (await createTestSession({ schoolId: school.id, sessionStartYear: 2026, sessionEndYear: 2027 })).id;
+    await expect(principal.school.listNotices({ schoolId: school.id, sessionId: session })).resolves.toMatchObject({ items: [] });
+    // The app's own read of the flags, which gates every page, does too.
+    await expect(principal.school.getFeatureFlags({ schoolId: school.id })).resolves.toEqual({
+      schoolId: school.id,
+      features: { cadet: ON, notices: ON },
+      invalidConfigs: ['cadet', 'notices'],
+    });
+    // The administrator sees which settings need saving, and saving heals that feature.
+    await expect(admin.systemAdmin.getSchoolFeatureFlags({ id: school.id })).resolves.toMatchObject({ invalidConfigs: ['cadet', 'notices'] });
+    await expect(admin.systemAdmin.updateSchoolFeatureFlag({ id: school.id, feature: 'cadet', enabled: true, config: null })).resolves.toEqual({
+      schoolId: school.id,
+      features: { cadet: ON, notices: ON },
+      invalidConfigs: ['notices'],
+    });
+    await expect(getSchoolFeatureConfig(db, school.id, 'cadet')).resolves.toBeNull();
   });
 });
 
@@ -159,6 +203,7 @@ describe('school.getFeatureFlags', () => {
       expect(await createTestClient(staff.session).school.getFeatureFlags({ schoolId: school.id })).toEqual({
         schoolId: school.id,
         features: { cadet: ON, notices: OFF },
+        invalidConfigs: [],
       });
     }
 
@@ -181,7 +226,7 @@ describe('requireSchoolFeature', () => {
     .input(z.object({ schoolId: z.string().min(1) }))
     .use(requireSchoolMember())
     .use(requireSchoolFeature('notices'))
-    .handler(({ context }) => context.feature);
+    .handler(() => 'reached');
 
   async function callProbe(session: Parameters<typeof createHandlerContext>[0], schoolId: string) {
     return createRouterClient({ probe }, { context: createHandlerContext(session) }).probe({ schoolId });
@@ -197,12 +242,15 @@ describe('requireSchoolFeature', () => {
     await expectFeatureDisabled(callProbe(staff.session, school.id), 'notices');
   });
 
-  it('hands the handler the typed state once the feature is enabled, per school', async () => {
+  it('lets the handler run once the feature is enabled, per school, also when the stored config is stale', async () => {
     const [school, other] = await Promise.all([createTestSchool(), createTestSchool({ features: ['notices'] })]);
     const staff = await createSchoolStaffSession(school.id, [{ role: 'principal', meta: null }]);
     await expectFeatureDisabled(callProbe(staff.session, school.id), 'notices');
     await setTestSchoolFeature(school.id, 'notices', true);
-    expect(await callProbe(staff.session, school.id)).toEqual({ enabled: true, config: null });
+    expect(await callProbe(staff.session, school.id)).toBe('reached');
+    // The gate reads the enabled fact only: a config it does not use cannot fail it.
+    await db.update(schoolFeatureFlagTable).set({ config: { stale: true } }).where(eqSchool(school.id));
+    expect(await callProbe(staff.session, school.id)).toBe('reached');
     // Another school's flag never applies.
     await setTestSchoolFeature(school.id, 'notices', false);
     await expectFeatureDisabled(callProbe(staff.session, school.id), 'notices');

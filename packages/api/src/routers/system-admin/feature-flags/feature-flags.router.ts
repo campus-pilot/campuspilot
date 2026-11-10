@@ -4,7 +4,7 @@ import { eq } from 'drizzle-orm';
 
 import { rpcError, toRpcError } from '../../../errors';
 import {
-  getSchoolFeatureFlags,
+  readSchoolFeatureFlags,
   setSchoolFeature,
 } from '../../../feature-flags/feature-flags.service';
 import { protectedProcedure } from '../../../index';
@@ -42,7 +42,7 @@ export const featureFlagsRouter = {
         if (!school) throw rpcError.notFound('School');
         return {
           schoolId: school.id,
-          features: await getSchoolFeatureFlags(context.db, school.id),
+          ...(await readSchoolFeatureFlags(context.db, school.id)),
         };
       } catch (error) {
         throw toRpcError(error);
@@ -86,7 +86,7 @@ export const featureFlagsRouter = {
           });
           return {
             schoolId: school.id,
-            features: await getSchoolFeatureFlags(transaction, school.id),
+            ...(await readSchoolFeatureFlags(transaction, school.id)),
           };
         });
       } catch (error) {

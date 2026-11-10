@@ -90,6 +90,7 @@ describe('systemAdmin school feature flags', () => {
       expect(await createTestClient(admin).systemAdmin.getSchoolFeatureFlags({ id: school.id })).toEqual({
         schoolId: school.id,
         features: { cadet: OFF, notices: OFF },
+        invalidConfigs: [],
       });
     });
 
@@ -109,10 +110,10 @@ describe('systemAdmin school feature flags', () => {
 
       expect(
         await client.systemAdmin.updateSchoolFeatureFlag({ id: school.id, feature: 'notices', enabled: true, config: null }),
-      ).toEqual({ schoolId: school.id, features: { cadet: OFF, notices: ON } });
+      ).toEqual({ schoolId: school.id, features: { cadet: OFF, notices: ON }, invalidConfigs: [] });
       expect(
         await client.systemAdmin.updateSchoolFeatureFlag({ id: school.id, feature: 'cadet', enabled: true, config: null }),
-      ).toEqual({ schoolId: school.id, features: { cadet: ON, notices: ON } });
+      ).toEqual({ schoolId: school.id, features: { cadet: ON, notices: ON }, invalidConfigs: [] });
 
       const rows = await db.select().from(schoolFeatureFlagTable).where(eq(schoolFeatureFlagTable.schoolId, school.id));
       expect(rows).toHaveLength(2);
@@ -120,7 +121,7 @@ describe('systemAdmin school feature flags', () => {
 
       expect(
         await client.systemAdmin.updateSchoolFeatureFlag({ id: school.id, feature: 'notices', enabled: false, config: null }),
-      ).toEqual({ schoolId: school.id, features: { cadet: ON, notices: OFF } });
+      ).toEqual({ schoolId: school.id, features: { cadet: ON, notices: OFF }, invalidConfigs: [] });
       // Disabling keeps the row (explicitly disabled), one per feature.
       expect(await db.select().from(schoolFeatureFlagTable).where(eq(schoolFeatureFlagTable.schoolId, school.id))).toHaveLength(2);
       // Another school is never touched.

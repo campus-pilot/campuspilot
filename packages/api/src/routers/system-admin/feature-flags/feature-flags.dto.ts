@@ -1,5 +1,6 @@
 import {
   schoolFeatureFlagsSchema,
+  schoolFeatureKeySchema,
   schoolFeatureUpdateSchema,
 } from '@campuspilot/db/feature-flags/catalogue';
 import { z } from 'zod';
@@ -21,4 +22,10 @@ export const updateSchoolFeatureFlagInputSchema = z
 export const adminSchoolFeatureFlagsDtoSchema = z.object({
   schoolId: z.string(),
   features: schoolFeatureFlagsSchema,
+  /**
+   * Features whose stored config no longer matches its schema (their
+   * `config` reads null). Saving the feature again replaces the stored
+   * value and clears it from this list.
+   */
+  invalidConfigs: z.array(schoolFeatureKeySchema),
 });

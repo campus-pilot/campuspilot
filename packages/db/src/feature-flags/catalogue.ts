@@ -145,6 +145,13 @@ export function schoolFeatureStateSchema<K extends SchoolFeatureKey>(key: K) {
   });
 }
 
+/**
+ * `data.reason` of the CONFLICT error thrown to code that needs a feature's
+ * config when the stored value no longer matches the feature's schema. Only
+ * that code is stopped; whether the feature is enabled is still answered.
+ */
+export const SCHOOL_FEATURE_CONFIG_INVALID_REASON = "SCHOOL_FEATURE_CONFIG_INVALID";
+
 /** Zod schema of every feature's state for one school (API output). */
 export const schoolFeatureFlagsSchema = z.object(
   Object.fromEntries(
