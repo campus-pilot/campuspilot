@@ -22,14 +22,13 @@ export const co = os.$context<CadetContext>().$meta<ProcedureMeta>({});
  * as input. OAuth connectors are read-only (`mcp:read`); the cadet MCP never
  * grants `mcp:write`, so a procedure that writes is refused for them.
  *
- * The school's `cadet` feature is checked on every call, so switching it off
- * stops existing sessions and connected apps at once, not only new sign-ins.
- * That refusal is FORBIDDEN with
- * `data: { reason: 'SCHOOL_FEATURE_DISABLED', feature: 'cadet' }` (never
- * UNAUTHORIZED: the login is still valid), which the portal shows as "Cadet
- * Portal unavailable" instead of sending the student back to sign-in.
+ * This builder does **not** check the school's `cadet` feature. It exists
+ * for the few actions a signed-in student must still be able to take after
+ * the portal was switched off, all of which only undo something on their
+ * own device (turning its notifications off). Everything else uses
+ * {@link cadetProcedure}.
  */
-export const cadetProcedure = co.use(async ({ context, next, procedure }) => {
+export const cadetLoginProcedure = co.use(async ({ context, next, procedure }) => {
   if (!context.login) throw rpcError.unauthorized();
   if (context.principal.authMethod === 'oauth') {
     const meta = procedure['~orpc'].meta;
@@ -51,7 +50,6 @@ export const cadetProcedure = co.use(async ({ context, next, procedure }) => {
   // The login cascades with its admission, so this only happens in the
   // instant between a delete and the session's revocation.
   if (!admission) throw rpcError.unauthorized();
-  await assertSchoolFeatureEnabled(context.db, admission.schoolId, 'cadet');
 
   return next({
     context: {
@@ -62,4 +60,18 @@ export const cadetProcedure = co.use(async ({ context, next, procedure }) => {
       },
     },
   });
+});
+
+/**
+ * The builder of every Cadet Portal procedure: {@link cadetLoginProcedure}
+ * plus the school's `cadet` feature, checked on every call, so switching it
+ * off stops existing sessions and connected apps at once, not only new
+ * sign-ins. That refusal is FORBIDDEN with
+ * `data: { reason: 'SCHOOL_FEATURE_DISABLED', feature: 'cadet' }` (never
+ * UNAUTHORIZED: the login is still valid), which the portal shows as "Cadet
+ * Portal unavailable" instead of sending the student back to sign-in.
+ */
+export const cadetProcedure = cadetLoginProcedure.use(async ({ context, next }) => {
+  await assertSchoolFeatureEnabled(context.db, context.cadet.schoolId, 'cadet');
+  return next();
 });

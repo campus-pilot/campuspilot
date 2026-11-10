@@ -17,7 +17,8 @@ import { env } from '@campuspilot/env/server';
 import { getRedisClient } from '@campuspilot/redis/client';
 import { betterAuth } from 'better-auth';
 import { cadetPushSubscriptionTable } from '@campuspilot/db/schema/notification';
-import { and, inArray, isNull } from 'drizzle-orm';
+import { createAuthMiddleware, getSessionFromCtx } from 'better-auth/api';
+import { and, eq, inArray, isNull } from 'drizzle-orm';
 
 import {
   authDb,
@@ -96,6 +97,46 @@ export function cadetMcpOAuthConfig(): McpOAuthServerConfig {
   };
 }
 
+/**
+ * Revokes the active web push subscriptions a Cadet Portal session turned
+ * on (`cadet_push_subscription.cadet_session_id`). True when any was active.
+ */
+export async function revokePushSubscriptionsOfSession(
+  db: DatabaseExecutor,
+  cadetSessionId: string,
+): Promise<boolean> {
+  const now = new Date();
+  const rows = await db
+    .update(cadetPushSubscriptionTable)
+    .set({ revokedAt: now, updatedAt: now })
+    .where(
+      and(
+        eq(cadetPushSubscriptionTable.cadetSessionId, cadetSessionId),
+        isNull(cadetPushSubscriptionTable.revokedAt),
+      ),
+    )
+    .returning({ id: cadetPushSubscriptionTable.id });
+  return rows.length > 0;
+}
+
+/**
+ * Signing out of the Cadet Portal stops that device's notifications **on
+ * the server**: before `/sign-out` deletes the session, the subscriptions
+ * the session turned on are revoked. The portal app also asks to turn the
+ * device off, but that request can fail without anyone noticing (offline,
+ * or refused because the school's portal is switched off), and a signed-out
+ * phone that still shows a student's notifications is a disclosure on a
+ * shared device. Runs before the sign-out so the session is still readable;
+ * a request without a valid session revokes nothing.
+ */
+function revokeDevicePushOnSignOut(db: DatabaseExecutor) {
+  return createAuthMiddleware(async (ctx) => {
+    if (ctx.path !== '/sign-out') return;
+    const session = await getSessionFromCtx(ctx);
+    if (session) await revokePushSubscriptionsOfSession(db, session.session.id);
+  });
+}
+
 export type CadetAuthOptions = McpOAuthOptions & {
   /** Failed-sign-in store; defaults to Redis under the cadet key prefix. */
   limiter?: SignInLimiter;
@@ -147,6 +188,7 @@ export function createCadetAuth(
     advanced: sharedCookieOptions(CADET_COOKIE_PREFIX),
     session: SHARED_SESSION_OPTIONS,
     hooks: {
+      before: revokeDevicePushOnSignOut(db),
       after: recordDynamicClientRegistration(db, CADET_OAUTH_SERVER_TABLES),
     },
 

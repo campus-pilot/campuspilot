@@ -4,7 +4,13 @@ import { eq, inArray, isNotNull, and } from 'drizzle-orm';
 import { generateVAPIDKeys } from 'web-push';
 import { describe, expect, it, vi } from 'vitest';
 
-import { createTestAdmission, createTestSchool, createTestUser } from '../../../../test/fixtures';
+import { cadetAuth } from '@campuspilot/auth/cadet';
+import { env } from '@campuspilot/env/server';
+
+import { createCadetTestClient, signInCadet } from '../../../../test/cadet';
+import { createAdmissionWithLogin } from '../../../../test/exam-results';
+import { expectFeatureDisabled } from '../../../../test/feature-flags';
+import { createSchoolStaffSession, createTestAdmission, createTestClient, createTestSchool, createTestUser, setTestSchoolFeature } from '../../../../test/fixtures';
 import { billIssuedData, createCadetLogin, dispatchNow, drainSchool, fakePushSubscription } from '../../../../test/notifications';
 import { notify } from '../../notify';
 import { resendFailedDelivery } from '../../redelivery';
@@ -151,5 +157,87 @@ describe('web push channel', () => {
     await expect(resendFailedDelivery({ schoolId: gone.school.id, deliveryId: goneDeliveries[0]!.id, requestedBy: staff.id })).rejects.toMatchObject({ code: 'CONFLICT' });
     const revoked = await db.select().from(cadetPushSubscriptionTable).where(and(eq(cadetPushSubscriptionTable.endpoint, gone.subscriptions[0]!.endpoint), isNotNull(cadetPushSubscriptionTable.revokedAt)));
     expect(revoked).toHaveLength(1);
+  });
+
+  /**
+   * Review round 1, F1: a signed-out device must stop receiving the
+   * student's pushes, also while the school's Cadet Portal is switched off
+   * (when every portal call, including the app's own "turn off", is refused).
+   */
+  describe('signing out stops the device, decided on the server', () => {
+    const CADET_AUTH_URL = `${env.BETTER_AUTH_URL}/api/cadet/auth`;
+    const signOut = (cookie: string) =>
+      cadetAuth.handler(new Request(`${CADET_AUTH_URL}/sign-out`, { method: 'POST', headers: { cookie, origin: new URL(env.CADET_APP_URL).origin, 'content-type': 'application/json' }, body: '{}' }));
+    const rowsOf = (endpoint: string) => db.select().from(cadetPushSubscriptionTable).where(eq(cadetPushSubscriptionTable.endpoint, endpoint));
+
+    async function signedInStudent() {
+      const school = await createTestSchool({ features: ['cadet'] });
+      const principal = createTestClient((await createSchoolStaffSession(school.id, [{ role: 'principal', meta: null }])).session);
+      const { admission, credentials } = await createAdmissionWithLogin(principal, school.id, 'Push Student');
+      const signIn = async () => {
+        const { response, cookie } = await signInCadet(credentials);
+        expect(response.status).toBe(200);
+        return { cookie, client: createCadetTestClient(new Headers({ cookie })) };
+      };
+      return { school, admission, signIn };
+    }
+
+    it('revokes the subscriptions of the session that signs out, and only those, even with the portal switched off', async () => {
+      const { school, admission, signIn } = await signedInStudent();
+      // The same student on a shared phone and on a tablet: two sessions, two devices.
+      const phone = await signIn();
+      const tablet = await signIn();
+      const phoneDevice = fakePushSubscription();
+      const tabletDevice = fakePushSubscription();
+      await phone.client.subscribePush(phoneDevice);
+      await tablet.client.subscribePush(tabletDevice);
+      const [phoneRow] = await rowsOf(phoneDevice.endpoint);
+      const [tabletRow] = await rowsOf(tabletDevice.endpoint);
+      expect(phoneRow!.cadetSessionId).toEqual(expect.any(String));
+      expect(tabletRow!.cadetSessionId).not.toBe(phoneRow!.cadetSessionId);
+
+      // The administrator switches the portal off; the phone then signs out.
+      await setTestSchoolFeature(school.id, 'cadet', false);
+      await expectFeatureDisabled(phone.client.getPushSubscription({ endpoint: phoneDevice.endpoint }), 'cadet');
+      expect((await signOut(phone.cookie)).status).toBe(200);
+
+      expect((await rowsOf(phoneDevice.endpoint))[0]!.revokedAt).toBeInstanceOf(Date);
+      expect((await rowsOf(tabletDevice.endpoint))[0]!.revokedAt).toBeNull();
+      // A bill posted afterwards reaches the tablet only, also once the portal is back on.
+      await setTestSchoolFeature(school.id, 'cadet', true);
+      const fetchMock = vi.fn<ChannelFetch>(async () => new Response(null, { status: 201 }));
+      const { deliveries } = await dispatchBill(school.id, admission.id, fetchMock);
+      expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([tabletDevice.endpoint]);
+      expect(deliveries).toHaveLength(1);
+      // Signing out again, or without a session, changes nothing.
+      expect((await signOut(phone.cookie)).status).toBe(200);
+      expect((await rowsOf(tabletDevice.endpoint))[0]!.revokedAt).toBeNull();
+    });
+
+    it('lets the device be turned off while the portal is switched off, but not turned on', async () => {
+      const { school, signIn } = await signedInStudent();
+      const { client } = await signIn();
+      const device = fakePushSubscription();
+      await client.subscribePush(device);
+      await setTestSchoolFeature(school.id, 'cadet', false);
+      await expectFeatureDisabled(client.subscribePush(fakePushSubscription()), 'cadet');
+      await expect(client.unsubscribePush({ endpoint: device.endpoint })).resolves.toEqual({ changed: true });
+      expect((await rowsOf(device.endpoint))[0]!.revokedAt).toBeInstanceOf(Date);
+      await expect(createCadetTestClient(new Headers()).unsubscribePush({ endpoint: device.endpoint })).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+    });
+
+    it('moves a device to the session that subscribes it again', async () => {
+      const { signIn } = await signedInStudent();
+      const first = await signIn();
+      const second = await signIn();
+      const device = fakePushSubscription();
+      await first.client.subscribePush(device);
+      await second.client.subscribePush(device);
+      // The first session signing out no longer owns the device.
+      await signOut(first.cookie);
+      expect((await rowsOf(device.endpoint))[0]!.revokedAt).toBeNull();
+      await signOut(second.cookie);
+      expect((await rowsOf(device.endpoint))[0]!.revokedAt).toBeInstanceOf(Date);
+    });
   });
 });

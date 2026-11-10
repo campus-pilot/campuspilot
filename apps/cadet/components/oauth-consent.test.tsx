@@ -11,6 +11,8 @@ const mocks = vi.hoisted(() => ({
   searchParams: new URLSearchParams(),
   session: null as { user: { id: string } } | null,
   redirect: vi.fn(),
+  /** When set, the consent client lookup fails with it. */
+  clientError: null as unknown,
 }));
 
 vi.mock('next/navigation', () => ({
@@ -33,13 +35,16 @@ vi.mock('@/lib/orpc', () => ({
     getOAuthConsentClient: {
       queryOptions: ({ input }: { input: { clientId: string } }) => ({
         queryKey: ['getOAuthConsentClient', input.clientId],
-        queryFn: async (): Promise<z.infer<typeof oauthConsentClientSchema>> => ({
+        queryFn: async (): Promise<z.infer<typeof oauthConsentClientSchema>> => {
+          if (mocks.clientError) throw mocks.clientError;
+          return {
           clientId: input.clientId,
           name: 'Study Buddy',
           uri: null,
           registrationMethod: 'dynamic',
           verifiedHost: null,
-        }),
+          };
+        },
       }),
     },
   },
@@ -71,6 +76,7 @@ function renderConsent(searchParams: URLSearchParams) {
 beforeEach(() => {
   mocks.redirect.mockReset();
   mocks.session = null;
+  mocks.clientError = null;
 });
 
 describe('OAuthConsent', () => {
@@ -100,5 +106,28 @@ describe('OAuthConsent', () => {
 
     expect(await screen.findByText('Read your admission details')).toBeTruthy();
     expect(screen.queryByText(STAYS_CONNECTED)).toBeNull();
+  });
+
+  it('says the Cadet Portal is unavailable, not that the app is unknown, when the school has it switched off', async () => {
+    mocks.session = { user: { id: 'cadet-user' } };
+    mocks.clientError = Object.assign(new Error('Cadet Portal is not enabled for this school.'), {
+      code: 'FORBIDDEN',
+      data: { reason: 'SCHOOL_FEATURE_DISABLED', feature: 'cadet' },
+    });
+    renderConsent(signedQuery('mcp:read'));
+
+    expect(await screen.findByRole('heading', { name: 'Cadet Portal unavailable' })).toBeTruthy();
+    expect(screen.getByText(/Your school is not using the Cadet Portal right now/)).toBeTruthy();
+    expect(screen.queryByText(/not known to the Cadet Portal/)).toBeNull();
+    expect(screen.queryByText(/Start the connection again/)).toBeNull();
+  });
+
+  it('still blames the app for any other failure of the lookup', async () => {
+    mocks.session = { user: { id: 'cadet-user' } };
+    mocks.clientError = Object.assign(new Error('OAuth client was not found.'), { code: 'NOT_FOUND' });
+    renderConsent(signedQuery('mcp:read'));
+
+    expect(await screen.findByRole('heading', { name: 'Cannot connect this app' })).toBeTruthy();
+    expect(screen.getByText(/not known to the Cadet Portal or has been disabled/)).toBeTruthy();
   });
 });

@@ -25,13 +25,15 @@ export type CadetLogin = {
 
 /**
  * How the cadet authenticated, from the credential actually verified.
- * - `session`: `cpc_` browser session cookie (the Cadet Portal app).
+ * - `session`: `cpc_` browser session cookie (the Cadet Portal app), with
+ *   the session's ID: device facts such as a push subscription are tied to
+ *   the session that set them, so signing it out can undo them.
  * - `oauth`: cadet MCP access token; only accepted on `/cadet/mcp`.
  * Cadet logins have no API keys.
  */
 export type CadetPrincipal =
   | { authMethod: 'anonymous' }
-  | { authMethod: 'session' }
+  | { authMethod: 'session'; sessionId: string }
   | { authMethod: 'oauth'; oauthGrant: OAuthGrant };
 
 export type CadetContext = {
@@ -60,7 +62,7 @@ export async function createCadetContextFromHeaders(
         db,
         headers,
         login: { userId: session.user.id, admissionId: session.user.admissionId },
-        principal: { authMethod: 'session' },
+        principal: { authMethod: 'session', sessionId: session.session.id },
       }
     : { db, headers, login: null, principal: { authMethod: 'anonymous' } };
 }

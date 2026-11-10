@@ -29,12 +29,18 @@ export const MAX_ACTIVE_PUSH_SUBSCRIPTIONS = 10;
  * {@link MAX_ACTIVE_PUSH_SUBSCRIPTIONS} most recently subscribed devices;
  * older ones are revoked (that device stops getting pushes until it turns
  * notifications on again).
+ *
+ * `cadetSessionId` is the portal session doing this (null only for a caller
+ * without one). It replaces any earlier session on the row: the device now
+ * belongs to this sign-in, and signing it out revokes the subscription
+ * ({@link revokePushSubscriptionsOfSession}).
  */
 export async function upsertPushSubscription(
   db: DatabaseExecutor,
   cadetUserId: string,
   subscription: PushSubscriptionInput,
   userAgent: string | null,
+  cadetSessionId: string | null,
 ) {
   const now = new Date();
   await db
@@ -45,6 +51,7 @@ export async function upsertPushSubscription(
       p256dh: subscription.keys.p256dh,
       auth: subscription.keys.auth,
       userAgent,
+      cadetSessionId,
     })
     .onConflictDoUpdate({
       target: [cadetPushSubscriptionTable.cadetUserId, cadetPushSubscriptionTable.endpoint],
@@ -52,6 +59,7 @@ export async function upsertPushSubscription(
         p256dh: subscription.keys.p256dh,
         auth: subscription.keys.auth,
         userAgent,
+        cadetSessionId,
         revokedAt: null,
         updatedAt: now,
       },

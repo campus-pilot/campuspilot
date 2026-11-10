@@ -35,7 +35,7 @@ describe('result notifications', () => {
     db.update(examLifecycleTable).set({ status }).where(and(eq(examLifecycleTable.sessionId, sessionId), eq(examLifecycleTable.examSlug, 'final')));
 
   beforeAll(async () => {
-    schoolId = (await createTestSchool({ name: 'Results School' })).id;
+    schoolId = (await createTestSchool({ name: 'Results School', features: ['cadet'] })).id;
     sessionId = (await createTestSession({ schoolId, sessionStartYear: 2026, sessionEndYear: 2027 })).id;
     await db
       .update(schoolSessionTable)
