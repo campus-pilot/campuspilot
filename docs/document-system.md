@@ -156,6 +156,9 @@ When a revision exists, an authorized editor sees:
   syntax highlighting, line numbers, wrapping, and theme support;
 - for admit cards, bills, receipts, and statements, an explicit paper footprint:
   half A4 (two documents per physical sheet) or full A4 (one per sheet);
+- for notices, a "Preview as" choice of a full-A4 or half-A4 notice instead:
+  a Notice design has no footprint (each notice chooses its size) and the
+  choice is never saved;
 - Save template and Reload saved revision actions;
 - a collapsible variable reference;
 - a sanitized sample preview on the right at wide widths and second in the stack
@@ -251,7 +254,10 @@ print options, and approval policy used at generation time.
 Template `pageSize` is immutable revision metadata. `half` means one rendered
 document occupies 210 × 148.5 mm and the server places two documents vertically
 on each portrait A4 sheet. It is supported only for admit cards, bills, receipts,
-and statements. Report cards remain full portrait A4, timetables remain full
+and statements. A Notice revision is always `full` and `half` is refused
+(`validateTemplatePageSize`): a notice's print size is the notice's own fact
+(`notice.page_size`), and one Notice design prints both sizes, adapting to
+the `print.size` context fact (see "Notices"). Report cards remain full portrait A4, timetables remain full
 landscape A4, and student IDs keep their dedicated 86 × 54 mm A4 imposition.
 Preview and generation read this value from the selected revision; a batch request
 cannot override it. Existing revisions migrate to `full`, avoiding a silent
@@ -528,7 +534,8 @@ conversion. What differs is recorded here because it is easy to get wrong.
 - **Context.** `buildNoticeContext` (`notice.render.ts`) exposes only
   `school.{name,location,registrationNo,logoUrl}` (the shared
   `buildSchoolDocumentContext`, also used by academic and finance documents),
-  `session.{startYear,endYear}`, `generatedAt` and
+  `session.{startYear,endYear}`, `generatedAt`, `print.size` (the notice's
+  own `page_size`, `full` or `half`) and
   `notice.{title,issuedOn,issuedOnDisplay,paragraphs[]}`. There is no student,
   staff, exam or finance data. Templates are previewed and validated against
   `SAMPLE_NOTICE_CONTEXT` (`sampleDocumentContext('notice')`), never the
@@ -558,14 +565,24 @@ conversion. What differs is recorded here because it is easy to get wrong.
   revision used on the notice (`notice.template_revision_id`; null for the
   built-in design and for `template` notices), so a later template change
   never alters a published notice.
-- **Flowing layout.** `combineDocuments(..., 'notice')` does not clip to a
-  fixed 297 mm sheet: a notice flows over as many portrait A4 pages as its
-  text needs, each with a 16 mm `@page` margin (shown as padding in the
-  on-screen preview). Notice templates must not set a fixed height,
+- **Print size and flowing layout.** Each notice chooses `full` or `half`
+  A4 (`notice.page_size`, both body modes). `combineDocuments(..., 'notice',
+  size)` never clips to a fixed sheet: a full notice flows over portrait A4
+  pages with a 16 mm `@page` margin, a half notice over 210 x 148.5 mm pages
+  with a 10 mm margin (on screen: padding, plus a line where each half page
+  ends). The half-page PDF is then imposed with pdf-lib two copies per
+  portrait A4 sheet with a dashed cut guide (`imposeHalfPageNoticeCopies`),
+  so it prints on plain A4: unlike admit cards and finance documents, the
+  two halves of a sheet are the **same** page, by decision (the school
+  "cut in half" circular). Notice designs are size-adaptive: their
+  revision `pageSize` is always `full`, the save check renders them at both
+  sizes, and the bundled `notice-default` and `notice-compact` designs carry
+  `--{{print.size}}` classes. Notice templates must not set a fixed height,
   `overflow: hidden` or outer page padding.
 - **PDF.** A published notice is immutable and identical for every reader, so
   its PDF is rendered once and cached at
-  `schools/{schoolId}/notices/{noticeId}.pdf` (no `artifact` row). The same
+  `schools/{schoolId}/notices/{noticeId}-{pageSize}.pdf` (no `artifact`
+  row; the pinned size is in the key). The same
   object backs the staff download, the Cadet Portal download and every
   WhatsApp attachment. The key is deterministic: concurrent first requests in
   different processes may each write an equivalent object. The demo purge's

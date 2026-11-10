@@ -27,6 +27,7 @@ that enforces it.
 | `title` | 1 to 200 characters. |
 | `body_mode` | `plain` or `template` (see "Rendering"). |
 | `body` | Plain text, or the author's Handlebars/HTML source; at most 200,000 characters. |
+| `page_size` | The paper it prints on, `full` (default) or `half` A4, chosen per notice for **both** body modes (see "Print size"). Fixed with the rest of the row at publication. |
 | `status` | `draft` or `published`. One way. |
 | `to_staff` | Addressed to the school's staff (every member). |
 | `cadet_scope` | Students addressed: `none`, `all_classes`, `selected_classes`. |
@@ -182,6 +183,48 @@ the notice title. Their link lands on the calm unavailable state ("Notices is
 not enabled" in management, "Notices are not available" in the Cadet Portal;
 with `cadet` off the whole portal says "Cadet Portal unavailable").
 
+## Print size
+
+Every notice states its own print size (`notice.page_size`, the
+`document_template_page_size` enum: `full` or `half`). It is an explicit fact
+of the notice, chosen in the editor for plain and custom-template notices
+alike, never inferred from a template.
+
+| | `full` | `half` |
+| --- | --- | --- |
+| Page | Portrait A4, 16 mm margin | 210 x 148.5 mm (half an A4 sheet), 10 mm margin |
+| Long notice | Continues on further A4 pages | Continues on further half pages |
+| PDF | One A4 page per page | **Two copies** of each half page on one portrait A4 sheet, with a dashed cut guide (`imposeHalfPageNoticeCopies`) |
+
+- **Two copies per sheet, by decision.** A half-page notice is the usual
+  school "print and cut in half" circular: printing the PDF on plain A4 and
+  cutting the stack along the guide gives two complete copies in page
+  order. A notice of N half pages is N A4 sheets. Chromium paginates the
+  half pages (`@page{size:210mm 148.5mm}`); pdf-lib then imposes each one
+  twice on an A4 sheet. A page is scaled down to fit its half, never
+  cropped.
+- **Never clipped.** Both sizes flow (`flowingNoticeLayout` in
+  `document.render.ts`): there is no fixed-height slot, so long content
+  continues on the next page and nothing is hidden. There is no
+  measurement-based refusal: a sandboxed preview cannot be measured, and
+  flowing makes one unnecessary.
+- **A truthful preview.** On screen a half-page notice is an A4-wide column
+  with the 10 mm margin, a caption ("Half A4 · two copies per A4 sheet") and
+  a line at every 128.5 mm of text, where each half page ends. A page may
+  break a line earlier than the line shows (Chromium never splits a line of
+  text), never later. The editor's live preview, the notice page, the
+  publish dialog and the Cadet Portal (`pageSize` on `getNotice` and
+  `getNoticeDocument`) state the size.
+- **Templates adapt to it.** The size reaches every template as the
+  context fact `print.size`. One school Notice design prints plain notices
+  of both sizes (a compact letterhead and smaller type on half A4, typically
+  through a `notice--{{print.size}}` class); a custom template can do the
+  same. See "Rendering".
+- **Versioned and pinned.** A size change is a saved edit and increments
+  `version`, so a publisher never confirms a stale size. A published row is
+  immutable, so `page_size` is the size pinned at publication; the cached
+  PDF and every WhatsApp copy use it, and the PDF cache key names it.
+
 ## Rendering
 
 All rendering is in `packages/api/src/routers/school/notice/notice.render.ts`
@@ -196,6 +239,7 @@ instance, the sanitizer, the CSP wrapper and Gotenberg.
   `buildSchoolDocumentContext`),
 - `session.{startYear,endYear}`,
 - `generatedAt`,
+- `print.size` (`full` or `half`: the notice's own `page_size`),
 - `notice.{title,issuedOn,issuedOnDisplay,paragraphs[]}`.
 
 Nothing about students, staff, results or money is reachable from a notice,
@@ -205,7 +249,7 @@ whoever wrote it.
 
 | Fact | Published notice |
 | --- | --- |
-| Title, body, audience | Fixed (immutable row). |
+| Title, body, audience, print size | Fixed (immutable row). |
 | Template revision of a plain notice | Fixed (`template_revision_id`; the built-in design is not pinned, see below). |
 | `issuedOn` / `issuedOnDisplay` | **Fixed**: `notice.issued_on`, the publication instant's calendar date in the session's finance time zone as configured at that moment (UTC without one). It is stored, never recomputed, so changing the time zone later does not move a notice's date. |
 | `generatedAt` | Fixed: the publication instant. |
@@ -249,9 +293,25 @@ built-in design is not pinned: a plain notice published without a selected
 template renders with whatever `notice-default` the running release ships (its
 cached PDF does not change).
 
-Notices use the flowing layout (`combineDocuments(..., 'notice')`): as many
-portrait A4 pages as the text needs, each with a 16 mm margin. A notice template
-must not set a fixed height, `overflow: hidden` or outer page padding.
+Notices use the flowing layout (`combineDocuments(..., 'notice', size)`):
+as many full-A4 or half-A4 pages as the text needs (see "Print size"). The
+layout is taken from the `print.size` the template was rendered with
+(`renderNoticeDocument`), so design and page never disagree. A notice
+template must not set a fixed height, `overflow: hidden` or outer page
+padding.
+
+**A school Notice template is size-adaptive.** Each notice chooses its own
+size, so a Notice design has no paper footprint: its revision's
+document-system `pageSize` is always `full` (saving `half` is refused) and
+never decides a notice's layout. The built-in `notice-default` and the
+marketplace `notice-compact` designs adapt with `notice--{{print.size}}` /
+`cn--{{print.size}}`. `assertValidSchoolNoticeTemplate` renders a design at
+**both** sizes against the sample and the longest notice, and the catalog
+tests do the same for every bundled design, so a plain notice never fails to
+print at the size it chose with a built-in or marketplace design. Settings ›
+Templates › Notice previews the design at either size ("Preview as";
+`previewDocumentTemplate` and `getMarketplaceTemplate` take an optional
+`printSize`, refused for every other type).
 
 ### Security contract
 
@@ -392,10 +452,13 @@ A published notice's content, date and design are fixed and the same for every
 reader, so its PDF is rendered once and cached at
 
 ```
-schools/{schoolId}/notices/{noticeId}.pdf
+schools/{schoolId}/notices/{noticeId}-{pageSize}.pdf
 ```
 
-(`noticePdfKey`, `ensureNoticePdfStored`). The same object backs the staff
+(`noticePdfKey`, `ensureNoticePdfStored`). The pinned page size is part of
+the key, so a PDF laid out at one size can never be served for a notice of
+the other (including objects cached before notices had a size). A half-page
+notice's PDF is the imposed two-copies-per-sheet file. The same object backs the staff
 download, the Cadet download and every WhatsApp attachment
 (`notifications/documents/notice.ts`). This is a deliberate exception to
 "notification attachments are never stored". Consequences:
@@ -474,7 +537,7 @@ components in `apps/management/components/notices`):
 | Route | Screen |
 | --- | --- |
 | `/notices` | List (search, status and audience filters), "New notice" in the navbar. |
-| `/notices/new`, `/notices/:noticeId/edit` | Editor: title, plain text or custom template (Monaco, variable list, starter), audience, debounced live preview, unsaved-changes dialog. |
+| `/notices/new`, `/notices/:noticeId/edit` | Editor: title, plain text or custom template (Monaco, variable list, starter), print size (Full A4 / Half A4, both modes), audience, debounced live preview labelled with its size, unsaved-changes dialog. |
 | `/notices/:noticeId` | The notice page: facts, rendered notice, Edit / Publish (with forecast) / Download PDF / Delete, and the delivery log once published. Staff notification deep link. |
 | `/school/:schoolId/settings/templates/notice` | The school's Notice template (document system). |
 
@@ -532,7 +595,9 @@ design) writes the notices of `seed/notices.json` through the real
 `createNotice` / `publishNotice` procedures as the demo's principal
 (`seedNotice` in `steps.ts`): a published staff-only notice, one for all
 classes, one for staff and the two seniormost of the demo's classes, a
-custom-template invitation, and two drafts.
+custom-template invitation, and two drafts. Each seed notice states its
+`pageSize`; the "Revised school timings" circular is half A4, so a fresh demo
+shows both print sizes.
 
 - **Dates** come from the journaled `asOf`: `createdDaysAgo`,
   `publishedDaysAgo` and `{date:±N}` tokens in the text (`buildNotices`,
@@ -553,6 +618,11 @@ custom-template invitation, and two drafts.
 - No "publication finished" message or settle sweep for notices (results have
   one). The delivery log's `preparation` is the only progress signal.
 - The built-in default design is not pinned (see "Rendering").
+- The half-page preview marks where each half page ends at a fixed text
+  height; Chromium may break a line or two earlier (never later). The PDF is
+  the authority.
+- The marketplace detail page previews Notice designs at full size only;
+  Settings › Templates › Notice previews both.
 - A published notice's letterhead is live in HTML and frozen in its cached PDF
   (see "What is fixed at publication, and what is live").
 - Inbox rows of notices stay visible while a feature is off; only remote copies
@@ -573,7 +643,8 @@ custom-template invitation, and two drafts.
 2. Describe it in `NOTICE_CONTEXT_FIELDS` and decide `offeredToAuthors` (the
    build fails until you do).
 3. Update the "Notices:" line of `DOCUMENT_CONTEXT_HELP` and the built-in
-   `notice-default` design if it should print.
+   `notice-default` and `notice-compact` designs if it should print (both
+   must keep rendering at both print sizes).
 4. Run `notice.render.test.ts` and `notice-template.integration.test.ts`.
 
 **A new audience or lifecycle rule**
