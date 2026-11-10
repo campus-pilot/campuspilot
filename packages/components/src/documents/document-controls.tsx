@@ -185,6 +185,35 @@ export function DocumentPanel({
     </section>
   );
 }
+/** Portrait A4 width (210mm) in CSS pixels. */
+const A4_WIDTH_PX = 794;
+/**
+ * The scale that fits an A4-wide page into the container, never above 1.
+ * `tan(atan2(a, b))` is the CSS way to divide two lengths into a plain
+ * number, so the fit needs no measuring script, state or effect.
+ */
+const FIT_SCALE = `min(1, tan(atan2(100cqw, ${A4_WIDTH_PX}px)))`;
+
+/** The sandboxed frame of {@link DocumentPreview} at A4 width, scaled to its container. The sandbox stays empty. */
+function FittedPageFrame({ html, label }: { html: string; label: string }) {
+  return (
+    <div className="h-[640px] overflow-hidden bg-white [container-type:inline-size]">
+      <iframe
+        title={label}
+        sandbox=""
+        referrerPolicy="no-referrer"
+        srcDoc={html}
+        className="origin-top-left border-0 bg-white"
+        style={{
+          width: `max(100cqw, ${A4_WIDTH_PX}px)`,
+          height: `calc(640px / ${FIT_SCALE})`,
+          transform: `scale(${FIT_SCALE})`,
+        }}
+      />
+    </div>
+  );
+}
+
 /** Displays server-sanitized HTML without scripts, navigation, or inherited
  * origin privileges. Keep the sandbox empty; adding capabilities here weakens
  * both marketplace previews and the school template editor.
@@ -193,10 +222,20 @@ export function DocumentPreview({
   html,
   label = "Document preview",
   sample = false,
+  placeholder = "Choose a template or preview a document to see the finished layout.",
+  fitPageWidth = false,
 }: {
   html?: string;
   label?: string;
   sample?: boolean;
+  /** The hint shown while there is nothing to render yet. */
+  placeholder?: string;
+  /**
+   * Lays the document out at portrait A4 width and scales it down to fit a
+   * narrower container, so a phone shows the page as printed instead of
+   * re-wrapping it into a narrow column. Wide containers are unaffected.
+   */
+  fitPageWidth?: boolean;
 }) {
   return (
     <section className="flex min-w-0 flex-col overflow-hidden rounded-xl border bg-muted/30">
@@ -211,7 +250,9 @@ export function DocumentPreview({
           </span>
         )}
       </header>
-      {html ? (
+      {html && fitPageWidth ? (
+        <FittedPageFrame html={html} label={label} />
+      ) : html ? (
         <iframe
           title={label}
           sandbox=""
@@ -226,7 +267,7 @@ export function DocumentPreview({
             Your preview will appear here.
           </p>
           <p className="max-w-xs text-xs text-muted-foreground">
-            Choose a template or preview a document to see the finished layout.
+            {placeholder}
           </p>
         </div>
       )}
