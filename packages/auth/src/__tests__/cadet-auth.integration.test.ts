@@ -4,6 +4,7 @@ import { admissionTable } from '@campuspilot/db/schema/admission';
 import * as staffSchema from '@campuspilot/db/schema/auth';
 import * as cadetSchema from '@campuspilot/db/schema/cadet';
 import { schoolTable } from '@campuspilot/db/schema/school';
+import { schoolFeatureFlagTable } from '@campuspilot/db/schema/school-feature-flag';
 import { generateId } from '@campuspilot/db/id';
 import { eq, inArray } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
@@ -94,6 +95,11 @@ async function createAdmissionWithLogin(options: { registered?: boolean } = {}) 
     .insert(schoolTable)
     .values({ slug, name: `School ${slug}`, location: 'Town' })
     .returning();
+  // A new school has no platform feature; these suites test the portal of
+  // a school that has the Cadet Portal.
+  await db
+    .insert(schoolFeatureFlagTable)
+    .values({ schoolId: school!.id, feature: 'cadet', enabled: true });
   const admissionNo = `ADM-${randomUUID().slice(0, 6)}`;
   const [admission] = await db
     .insert(admissionTable)
@@ -210,6 +216,36 @@ describe('cadet admission sign-in', () => {
       expect(response.status).toBe(401);
       expect(((await response.json()) as { code: string }).code).toBe('INVALID_CADET_CREDENTIALS');
     }
+  });
+
+  it('treats a school without the cadet feature like an unknown school, even with the right password', async () => {
+    const { school, admission, password } = await createAdmissionWithLogin();
+    const credentials = { schoolSlug: school.slug, admissionNo: admission.admissionNo, password };
+    const setCadetFeature = (enabled: boolean) =>
+      db
+        .update(schoolFeatureFlagTable)
+        .set({ enabled })
+        .where(eq(schoolFeatureFlagTable.schoolId, school.id));
+
+    await setCadetFeature(false);
+    // More attempts than the per-admission limit: a disabled school's
+    // admissions are not resolved, so none of them counts or locks.
+    for (let attempt = 0; attempt <= CADET_ADMISSION_MAX_FAILURES; attempt += 1) {
+      const response = await signIn(credentials);
+      expect(response.status).toBe(401);
+      expect(((await response.json()) as { code: string }).code).toBe('INVALID_CADET_CREDENTIALS');
+      expect(cookiesOf(response)).toBe('');
+    }
+
+    // The login was kept: it works again once the feature is enabled.
+    await setCadetFeature(true);
+    expect((await signIn(credentials)).status).toBe(200);
+
+    // A school that never had a flag row is disabled too (missing row = off).
+    await db.delete(schoolFeatureFlagTable).where(eq(schoolFeatureFlagTable.schoolId, school.id));
+    const missing = await signIn(credentials);
+    expect(missing.status).toBe(401);
+    expect(((await missing.json()) as { code: string }).code).toBe('INVALID_CADET_CREDENTIALS');
   });
 
   it('locks an admission after repeated failures, even for the right password', async () => {

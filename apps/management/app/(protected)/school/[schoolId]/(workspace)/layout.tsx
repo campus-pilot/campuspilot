@@ -3,6 +3,7 @@
 import type { ReactNode } from 'react';
 import { useParams, usePathname } from 'next/navigation';
 import { SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
+import { RequireFeature } from '@/components/require-feature';
 import { RequirePermissions } from '@/components/require-permissions';
 import type { AppShellNavigationEntry } from '@campuspilot/components/app-shell';
 import {
@@ -152,6 +153,7 @@ function navigationFor(
           label: 'Notices',
           href: sessionHref('/notices'),
           icon: Bell,
+          wrap: children => <RequireFeature schoolId={schoolId} feature="notices">{children}</RequireFeature>,
         },
       ],
     },

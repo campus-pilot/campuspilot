@@ -17,7 +17,7 @@ const whatsappOff = { channel: 'whatsapp', available: false, unavailableReason: 
 
 /** A school, an admission with a Cadet login, and that login's subscriptions. */
 async function subscribedStudent(subscriptionCount = 1) {
-  const school = await createTestSchool();
+  const school = await createTestSchool({ features: ['cadet'] });
   const admission = await createTestAdmission({ schoolId: school.id });
   const { client } = await createCadetLogin(admission.id);
   const subscriptions = [];

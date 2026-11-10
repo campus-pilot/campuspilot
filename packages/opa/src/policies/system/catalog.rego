@@ -110,3 +110,18 @@ actions contains {
   "key": "RUN_DATA_MIGRATION",
   "resourceKind": "system",
 } if { true }
+
+# Per-school platform feature flags (docs/feature-flags.md). Reading a
+# school's flags is separate from changing them, which switches product
+# areas such as the Cadet Portal on or off for the whole school.
+actions contains {
+  "id": "system.school.feature_flags.read",
+  "key": "READ_SCHOOL_FEATURE_FLAGS",
+  "resourceKind": "system",
+} if { true }
+
+actions contains {
+  "id": "system.school.feature_flags.update",
+  "key": "UPDATE_SCHOOL_FEATURE_FLAGS",
+  "resourceKind": "system",
+} if { true }

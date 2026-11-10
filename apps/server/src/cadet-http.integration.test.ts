@@ -5,6 +5,7 @@ import {
   createSchoolStaffSession,
   createTestClient,
   createTestSchool,
+  setTestSchoolFeature,
 } from '@campuspilot/api/test/fixtures';
 import {
   authorizeWithConsent,
@@ -33,7 +34,7 @@ let staffToken: string;
 let staffCookie: string;
 
 beforeAll(async () => {
-  const school = await createTestSchool();
+  const school = await createTestSchool({ features: ['cadet'] });
   schoolId = school.id;
   const principal = await createSchoolStaffSession(school.id, [{ role: 'principal', meta: null }]);
   const created = await createTestClient(principal.session).school.createAdmission({
@@ -194,5 +195,38 @@ describe('/api/cadet/rpc and /api/cadet/auth', () => {
     expect(response.headers.get('access-control-allow-origin')).toBe(CADET_ORIGIN);
     expect(cookiesOf(response)).toMatch(/^cpc_\./);
 
+  });
+});
+
+/**
+ * Runs last and restores the flag: the suites above share one school.
+ */
+describe('a school whose cadet feature is switched off', () => {
+  it('closes every Cadet surface over HTTP and reopens them when re-enabled', async () => {
+    await setTestSchoolFeature(schoolId, 'cadet', false);
+    try {
+      // RPC: a valid session gets 403 with the feature data (portal
+      // unavailable), not 401, so the app does not bounce to sign-in.
+      const refused = await rpc('/api/cadet/rpc/getAdmission', { cookie: cadetCookie });
+      expect(refused.status).toBe(403);
+      expect(((await refused.json()) as { json: { code: string; data: unknown } }).json).toMatchObject({
+        code: 'FORBIDDEN',
+        data: { reason: 'SCHOOL_FEATURE_DISABLED', feature: 'cadet' },
+      });
+      // MCP: the gate answers like a revoked connection.
+      expect((await mcp('/cadet/mcp', { authorization: `Bearer ${cadetToken}` }, 'tools/list')).response.status).toBe(401);
+      // Sign-in: indistinguishable from wrong credentials.
+      const signIn = await signInCadet(credentials);
+      expect(signIn.response.status).toBe(401);
+      expect(((await signIn.response.json()) as { code: string }).code).toBe('INVALID_CADET_CREDENTIALS');
+      // The public install manifest: as for an unknown school.
+      expect((await app.fetch(new Request(`${ORIGIN}/blob/school/${schoolId}/cadet.webmanifest`))).status).toBe(404);
+    } finally {
+      await setTestSchoolFeature(schoolId, 'cadet', true);
+    }
+
+    expect((await rpc('/api/cadet/rpc/getAdmission', { cookie: cadetCookie })).status).toBe(200);
+    expect((await mcp('/cadet/mcp', { authorization: `Bearer ${cadetToken}` }, 'tools/list')).response.status).toBe(200);
+    expect((await app.fetch(new Request(`${ORIGIN}/blob/school/${schoolId}/cadet.webmanifest`))).status).toBe(200);
   });
 });

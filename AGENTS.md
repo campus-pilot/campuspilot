@@ -117,6 +117,17 @@ isolation, route order and CORS scoping, the admission-id-only identity model,
 sign-in limits, issue/reset and revocation semantics, and the checklist for
 adding a cadet procedure, screen or table.
 
+## School feature flags
+
+Before adding a per-school feature, gating a procedure, page or navigation item
+on one, or changing `school_feature_flag`, the feature catalogue
+(`packages/db/src/feature-flags`), `requireSchoolFeature`, `RequireFeature` /
+`useSchoolFeature`, or the admin feature-flags editor, read the canonical
+[School feature flags guide](docs/feature-flags.md). A flag says what a school
+has; it is never a substitute for a permission, and a missing row means
+disabled. New schools start with no feature; tests name the features they need
+(`createTestSchool({ features: [...] })`).
+
 ## Demo schools
 
 Demo schools (`school.is_demo`) are provisioned by `DemoSchoolWorkflow`

@@ -4,6 +4,7 @@ import { os } from '@orpc/server';
 import { eq } from 'drizzle-orm';
 
 import { rpcError } from '../errors';
+import { assertSchoolFeatureEnabled } from '../feature-flags/feature-flags.service';
 import type { ProcedureMeta } from '../mcp-metadata';
 import type { CadetContext } from './context';
 
@@ -20,6 +21,13 @@ export const co = os.$context<CadetContext>().$meta<ProcedureMeta>({});
  * admission. Cadet procedures therefore never take an admission or school id
  * as input. OAuth connectors are read-only (`mcp:read`); the cadet MCP never
  * grants `mcp:write`, so a procedure that writes is refused for them.
+ *
+ * The school's `cadet` feature is checked on every call, so switching it off
+ * stops existing sessions and connected apps at once, not only new sign-ins.
+ * That refusal is FORBIDDEN with
+ * `data: { reason: 'SCHOOL_FEATURE_DISABLED', feature: 'cadet' }` (never
+ * UNAUTHORIZED: the login is still valid), which the portal shows as "Cadet
+ * Portal unavailable" instead of sending the student back to sign-in.
  */
 export const cadetProcedure = co.use(async ({ context, next, procedure }) => {
   if (!context.login) throw rpcError.unauthorized();
@@ -43,6 +51,7 @@ export const cadetProcedure = co.use(async ({ context, next, procedure }) => {
   // The login cascades with its admission, so this only happens in the
   // instant between a delete and the session's revocation.
   if (!admission) throw rpcError.unauthorized();
+  await assertSchoolFeatureEnabled(context.db, admission.schoolId, 'cadet');
 
   return next({
     context: {

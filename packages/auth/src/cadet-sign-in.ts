@@ -1,4 +1,5 @@
 import type { DatabaseExecutor } from '@campuspilot/db';
+import { isSchoolFeatureEnabled } from '@campuspilot/db/feature-flags/store';
 import { admissionTable } from '@campuspilot/db/schema/admission';
 import { cadetAccount, cadetUser } from '@campuspilot/db/schema/cadet';
 import { schoolTable } from '@campuspilot/db/schema/school';
@@ -78,6 +79,7 @@ async function findCadetLogin(
   const [row] = await db
     .select({
       admissionId: admissionTable.id,
+      schoolId: admissionTable.schoolId,
       userId: cadetUser.id,
       passwordHash: cadetAccount.password,
     })
@@ -119,6 +121,13 @@ export type CadetAdmissionSignInOptions = {
  * counts failures and locks exactly like one with a login, and attempts
  * that match no login hash the password anyway, so neither the lockout nor
  * timing reveals which admissions have a login.
+ *
+ * A school whose `cadet` feature is disabled has no portal: its admissions
+ * are treated exactly like a school code or admission number that matches
+ * nothing (same error, the password is hashed anyway, only the IP failure
+ * is counted), so sign-in does not reveal which schools have the portal or
+ * which admission numbers exist there. This holds even with a correct
+ * password; an issued login works again as soon as the feature is enabled.
  */
 export function cadetAdmissionSignIn(options: CadetAdmissionSignInOptions) {
   const { db, limiter } = options;
@@ -148,7 +157,13 @@ export function cadetAdmissionSignIn(options: CadetAdmissionSignInOptions) {
             if (ipLock > 0) throw tooManyAttempts(ipLock);
           }
 
-          const login = await findCadetLogin(db, schoolSlug, admissionNo);
+          const found = await findCadetLogin(db, schoolSlug, admissionNo);
+          // The shared feature read (`@campuspilot/db/feature-flags/store`),
+          // the same one every other Cadet surface decides from.
+          const login =
+            found && (await isSchoolFeatureEnabled(db, found.schoolId, 'cadet'))
+              ? found
+              : null;
           if (!login) {
             await ctx.context.password.hash(password);
             if (ipKey) await limiter.recordFailure(ipKey, IP_LIMIT);

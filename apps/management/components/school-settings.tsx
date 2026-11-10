@@ -31,6 +31,7 @@ import { z } from 'zod';
 import { client, orpc } from '@/lib/orpc';
 import { uploadSchoolLogo } from '@/lib/school-image';
 import { RequirePermissions } from './require-permissions';
+import { RequireFeature } from './require-feature';
 import { SchoolAvatar } from './school-avatar';
 import { CadetPortalSettings } from './cadet-portal-settings';
 
@@ -414,7 +415,10 @@ function SchoolSettingsContent({ school }: { school: SchoolDetailsDto }) {
           </RequirePermissions>
         </CardContent>
       </Card>
-      <CadetPortalSettings schoolId={school.id} />
+      {/* The card exists only for schools that have the Cadet Portal. */}
+      <RequireFeature schoolId={school.id} feature="cadet">
+        <CadetPortalSettings schoolId={school.id} />
+      </RequireFeature>
     </section>
   );
 }

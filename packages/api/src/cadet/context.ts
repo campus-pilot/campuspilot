@@ -1,5 +1,7 @@
 import { cadetAuth } from '@campuspilot/auth/cadet';
 import { db } from '@campuspilot/db';
+import { isSchoolFeatureEnabled } from '@campuspilot/db/feature-flags/store';
+import { admissionTable } from '@campuspilot/db/schema/admission';
 import { cadetUser } from '@campuspilot/db/schema/cadet';
 import { eq } from 'drizzle-orm';
 
@@ -73,7 +75,11 @@ export type CadetOAuthContextInput = {
  * Creates the context for a request authenticated by a verified cadet MCP
  * access token. The login is loaded from the database, so a deleted login
  * (its admission was deleted or purged) stops authenticating immediately.
- * Returns null when the login no longer exists.
+ * Returns null when the login no longer exists, and when the school's
+ * `cadet` feature is disabled: the Cadet MCP gate then answers like a
+ * revoked connection, so a connected AI app stops at the gate instead of
+ * listing tools that would all be refused. The grant itself is kept and
+ * works again once the feature is enabled.
  */
 export async function createCadetOAuthContext({
   headers,
@@ -81,11 +87,17 @@ export async function createCadetOAuthContext({
   oauthGrant,
 }: CadetOAuthContextInput): Promise<CadetContext | null> {
   const [login] = await db
-    .select({ id: cadetUser.id, admissionId: cadetUser.admissionId })
+    .select({
+      id: cadetUser.id,
+      admissionId: cadetUser.admissionId,
+      schoolId: admissionTable.schoolId,
+    })
     .from(cadetUser)
+    .innerJoin(admissionTable, eq(admissionTable.id, cadetUser.admissionId))
     .where(eq(cadetUser.id, userId))
     .limit(1);
   if (!login) return null;
+  if (!(await isSchoolFeatureEnabled(db, login.schoolId, 'cadet'))) return null;
   return {
     db,
     headers,

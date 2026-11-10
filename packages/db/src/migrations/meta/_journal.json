@@ -337,6 +337,20 @@
       "when": 1794263082400,
       "tag": "0047_notification-queue-school-index",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1794275825783,
+      "tag": "0048_school-feature-flags",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1794275837328,
+      "tag": "0049_demo-purge-feature-flags",
+      "breakpoints": true
     }
   ]
 }

@@ -250,6 +250,34 @@ refresh tokens and consents in one transaction. The cadet MCP gate checks the
 consent on every request (`findLiveOAuthGrant` with `CADET_OAUTH_GRANT_TABLES`),
 so an unexpired access token stops working immediately. It is idempotent.
 
+## The `cadet` feature flag
+
+Whether a school has the Cadet Portal is the per-school platform feature
+`cadet` (`school_feature_flag`, switched by platform administrators in the
+admin app; see [School feature flags](feature-flags.md)). There is no separate
+school-level "enable portal" setting. Schools that existed when the flag was
+introduced were enabled by migration 0048; a new school has it off until an
+administrator enables it; demo schools are created with it on.
+
+While the flag is off the portal is unavailable for that school on every
+surface, and each decides from the same read
+(`@campuspilot/db/feature-flags/store`):
+
+| Surface | Behaviour |
+| --- | --- |
+| Sign-in (`cadet-sign-in.ts`) | The school's admissions are treated like an unknown school or admission number: `INVALID_CADET_CREDENTIALS`, the password is hashed anyway, only the IP failure counts, and the admission never locks. A correct password is refused too. |
+| `cadetProcedure` | Checked on every call, so existing sessions stop at once: FORBIDDEN with `data: { reason: 'SCHOOL_FEATURE_DISABLED', feature: 'cadet' }`. Never UNAUTHORIZED, because the login is still valid. `apps/cadet`'s `AppFrame` shows "Cadet Portal unavailable" with Sign out. |
+| Cadet MCP (`createCadetOAuthContext`) | Returns null, so the gate answers 401 like a revoked connection. |
+| `issueAdmissionCadetPassword`, `createAdmission({ generateCadetPassword: true })` | Refused with the same FORBIDDEN after the permission check; nothing is written. |
+| `getCadetPortalSettings`, `updateCadetPortalSettings` | Refused the same way. |
+| `/blob/school/{id}/cadet.webmanifest` | 404, as for an unknown school. |
+| Management | The Cadet Portal settings card and both password entry points are hidden. |
+
+Nothing is deleted or revoked when the flag is switched off: logins, sessions,
+MCP grants and push subscriptions are kept and work again when it is switched
+on. `releaseExamToCadet` / `withdrawExamFromCadet` and student notification
+delivery are not gated by the flag.
+
 ## Lifecycle
 
 | Event | Portal access |
@@ -402,6 +430,7 @@ data, small components). Shared, API-free UI belongs in
 | `packages/api/src/routers/cadet/cadet.router.integration.test.ts` | `getAdmission` equals management's DTO, survives unregister, rejects anonymous, accepts read grant; consent client is cadet-only; staff/cadet session isolation; router separation. |
 | `packages/api/src/routers/school/admission/admission-cadet-password.integration.test.ts` | `generateCadetPassword` default, transaction and rollback, both permissions; issue/reset, revocation, revocation failure; unregister keeps access; delete revokes and cascades. |
 | `packages/api/src/workflows/demo-school/demo-purge.integration.test.ts` | Purge removes cadet rows and access. |
+| `packages/api/src/routers/school/feature-flags/feature-flags.router.integration.test.ts`, `packages/api/src/routers/system-admin/feature-flags/feature-flags.router.integration.test.ts` | Flag storage, `requireSchoolFeature`, the staff read and the admin procedures; Cadet Portal settings refused while `cadet` is off. The cadet suites above also cover the flag switched off (sign-in, sessions, MCP, password issuing, manifest). |
 | `apps/server/src/cadet-http.integration.test.ts` | Well-known order, cadet issuer discovery, MCP challenge and token isolation, RPC cookie isolation, CORS scoping, sign-in through the server. |
 | `packages/opa/src/__tests__/authorization.integration.test.ts`, `packages/opa/src/policies/school/permissions_test.rego` | The issue permission's grants. |
 | `apps/cadet/lib/auth-client.test.ts`, `apps/cadet/components/{sign-in-form,oauth-consent}.test.tsx` | Signed-query helpers, sign-in form, consent redirect. |
@@ -459,6 +488,9 @@ not involve cadet files.
   valid until expiry.
 - Don't infer portal access from `registered`, or revoke access on unregister.
 - Don't seed cadet logins for demo schools.
+- Don't add a Cadet surface (procedure outside `cadetProcedure`, route, blob,
+  staff action) without the `cadet` feature check, and don't add a second,
+  school-level "portal enabled" switch.
 - Don't accept API keys or grant `mcp:write` on the cadet MCP without a new
   decision, and don't expose `issueAdmissionCadetPassword` over staff MCP.
 
@@ -510,7 +542,6 @@ add it to `cadetAuthSchema`.
 - **"New result" is not tracked**: Home announces the latest released result
   for `NEW_RESULT_ALERT_DAYS` (14) days after its release, whether or not it was opened.
 
-- **Per-school portal feature flag**: every school can issue passwords today.
 - **Guardian accounts**: one login per admission; a multi-child guardian login
   (likely a link table, phone OTP considered) is not designed.
 - **Student password change**: account endpoints are disabled; later work must
@@ -547,7 +578,9 @@ shared with staff; the portal and API must share a cookie domain in production.
 1. Apply migrations (including `0029`/`0030`) as usual.
 2. Run `pnpm dev:server` and `pnpm dev:cadet` (port 3004), plus
    `pnpm dev:management` to issue passwords.
-3. In management, open an admission → overflow menu → **Issue portal password**
+3. A school needs the `cadet` feature (admin app → the school → Feature
+   Flags); existing and demo schools have it, a newly added school does not.
+   In management, open an admission → overflow menu → **Issue portal password**
    (as principal or manager), or tick **Generate Cadet Portal password** when
    creating an admission. Copy the details from the shown-once dialog.
 4. Sign in at `http://localhost:3004/sign-in` with the school slug, admission

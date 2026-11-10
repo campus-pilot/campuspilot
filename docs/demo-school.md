@@ -9,7 +9,10 @@ the slug, the staff email domain or the existence of a job.
 
 1. `systemAdmin.createDemoSchool` creates, in one transaction, the school
    (`is_demo = true`, `demo_created_by = admin`), the admin's membership with
-   the `principal` role, and a `demo_school_job` row (`queued`). The dialog
+   the `principal` role, the school's platform feature flags
+   (`DEMO_SCHOOL_FEATURE_DEFAULTS`: every feature on, unlike a real school,
+   which starts with none; see [School feature flags](feature-flags.md)), and a
+   `demo_school_job` row (`queued`). The dialog
    closes at once and a persistent toast follows the job.
 2. The client uploads the optional logo through the normal logo endpoint,
    then calls `systemAdmin.startDemoSchoolJob`. It **returns immediately**:
@@ -287,6 +290,9 @@ ingress.
 
 - New user-visible feature: extend the seed JSON and a step so a new demo shows it.
 - New school-owned table: add it to `purge_demo_school` in a migration.
+- New platform feature: decide it in `DEMO_SCHOOL_FEATURE_DEFAULTS` (the build
+  fails until you do); a seed step that calls a feature-gated procedure relies
+  on the flag written at creation.
 - New school-owned S3 object: make sure purge collects its key or it lives under
   `schools/{schoolId}/`.
 - `packages/api/scripts/local-demo.ts` is kept as the separate one-off seeder of

@@ -32,6 +32,7 @@ import {
 
 import { authClient } from "@/lib/auth-client";
 import { orpc } from "@/lib/orpc";
+import { RequireFeature } from "@/components/require-feature";
 import { RequirePermissions } from "@/components/require-permissions";
 import { schoolHref, schoolSessionHref } from "@/components/school-route";
 import {
@@ -526,15 +527,17 @@ function CommonJobs({ data, schoolId, sessionId }: DashboardProps & { data: Dash
             />
           </PermissionSection>
         ) : null}
-        <Button type="button" variant="outline" disabled className="h-auto min-w-0 justify-start gap-3 p-3 text-left">
-          <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-muted">
-            <Bell className="size-4" aria-hidden />
-          </span>
-          <span className="min-w-0">
-            <span className="block truncate font-medium">Create notice</span>
-            <span className="block truncate text-[10px] font-normal">Feature not ready</span>
-          </span>
-        </Button>
+        <RequireFeature schoolId={schoolId} feature="notices">
+          <Button type="button" variant="outline" disabled className="h-auto min-w-0 justify-start gap-3 p-3 text-left">
+            <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-muted">
+              <Bell className="size-4" aria-hidden />
+            </span>
+            <span className="min-w-0">
+              <span className="block truncate font-medium">Create notice</span>
+              <span className="block truncate text-[10px] font-normal">Feature not ready</span>
+            </span>
+          </Button>
+        </RequireFeature>
       </div>
     </section>
   );

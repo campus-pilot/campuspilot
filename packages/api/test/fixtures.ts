@@ -1,4 +1,5 @@
 import { db } from '@campuspilot/db';
+import type { SchoolFeatureKey } from '@campuspilot/db/feature-flags/catalogue';
 import { admissionTable } from '@campuspilot/db/schema/admission';
 import { studentTable } from '@campuspilot/db/schema/student';
 import { user } from '@campuspilot/db/schema/auth';
@@ -14,6 +15,7 @@ import type { Client } from '@orpc/client';
 import { createRouterClient } from '@orpc/server';
 
 import type { Context } from '../src/context';
+import { setSchoolFeature } from '../src/feature-flags/feature-flags.service';
 import { appRouter, type AppRouterClient } from '../src/routers/index';
 
 export type UserSession = NonNullable<Context['session']>;
@@ -195,7 +197,11 @@ export async function createRegularUserSession(): Promise<UserSession> {
 }
 
 /**
- * Inserts a test school directly into the database.
+ * Inserts a test school directly into the database. Like a school created in
+ * production, it starts with **no** platform feature enabled; a suite that
+ * exercises a feature-gated area names it in `features` (for example
+ * `features: ['cadet']` for anything touching the Cadet Portal), so the
+ * feature gate is exercised for real instead of being bypassed.
  */
 export async function createTestSchool(overrides: {
   id?: string;
@@ -207,6 +213,8 @@ export async function createTestSchool(overrides: {
   hasCompletedOnboarding?: boolean;
   /** Fixed at insert: a database trigger makes `is_demo` immutable afterwards. */
   isDemo?: boolean;
+  /** Platform features to enable for the school (default: none). */
+  features?: readonly SchoolFeatureKey[];
 } = {}) {
   const id = overrides.id ?? randomUUID();
   const slug = overrides.slug ?? `school-${randomUUID().toLowerCase()}`;
@@ -228,8 +236,25 @@ export async function createTestSchool(overrides: {
       updatedAt: new Date(),
     })
     .returning();
+  for (const feature of overrides.features ?? []) {
+    await setTestSchoolFeature(id, feature, true);
+  }
 
   return school!;
+}
+
+/**
+ * Enables or disables one platform feature for a test school, writing the
+ * same row an administrator's change writes (`setSchoolFeature`). Use it to
+ * flip a feature mid-test, for example to prove that disabling the Cadet
+ * Portal stops an existing session.
+ */
+export async function setTestSchoolFeature(
+  schoolId: string,
+  feature: SchoolFeatureKey,
+  enabled: boolean,
+) {
+  await setSchoolFeature(db, { schoolId, feature, enabled, config: null, updatedBy: null });
 }
 
 /**

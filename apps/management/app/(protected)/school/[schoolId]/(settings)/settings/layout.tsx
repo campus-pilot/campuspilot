@@ -40,6 +40,7 @@ import {
 import { SchoolDocumentHead } from '@/components/school-document-head';
 import { SessionSwitcher } from '@/components/session-switcher';
 import { orpc } from '@/lib/orpc';
+import { RequireFeature } from '@/components/require-feature';
 import { RequirePermissions } from '@/components/require-permissions';
 import { schoolSettingsPage } from './_route';
 import { documentSettingsPage } from './documents/_route';
@@ -192,6 +193,11 @@ function navigationFor(
         {
           type: 'item',
           id: 'notice-template',
+          wrap: (children) => (
+            <RequireFeature schoolId={schoolId} feature="notices">
+              {children}
+            </RequireFeature>
+          ),
           label: 'Notice',
           href: schoolHref(schoolId, '/settings/templates/notice'),
           icon: BookOpenCheck,

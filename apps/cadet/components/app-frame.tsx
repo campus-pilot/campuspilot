@@ -4,7 +4,8 @@ import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { redirect, usePathname } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { ChartLineIcon, GraduationCapIcon, HouseIcon, MenuIcon, WalletIcon } from 'lucide-react';
+import { ChartLineIcon, GraduationCapIcon, HouseIcon, MenuIcon, SchoolIcon, WalletIcon } from 'lucide-react';
+import { readSchoolFeatureDisabled } from '@campuspilot/api/routers/school/feature-flags/feature-flags.dto';
 import { Avatar, AvatarFallback } from '@campuspilot/ui/components/avatar';
 import { Skeleton } from '@campuspilot/ui/components/skeleton';
 import { cn } from '@campuspilot/ui/lib/utils';
@@ -13,8 +14,9 @@ import { authClient } from '@/lib/auth-client';
 import { initialsOf } from '@/lib/format';
 import { orpc } from '@/lib/orpc';
 import { CadetSchoolChrome } from './cadet-school-chrome';
+import { SignOutButton } from './more/more-screen';
 import { CadetNotificationBell } from './notifications/cadet-notifications';
-import { ScreenLoading } from './screen';
+import { EmptyState, ScreenLoading } from './screen';
 
 const tabs = [
   { href: '/', label: 'Home', icon: HouseIcon },
@@ -99,6 +101,63 @@ function Frame({ children }: { children: ReactNode }) {
 }
 
 /**
+ * Shown instead of the portal when the student's school has the Cadet Portal
+ * switched off (the `cadet` feature flag). The session is still valid, so
+ * this is not a sign-in problem: the student is told to ask the school and
+ * can sign out. No tabs are drawn, because every screen would be refused.
+ */
+function PortalUnavailable() {
+  return (
+    <main className="flex flex-1 flex-col justify-center gap-5 px-4 py-6">
+      <EmptyState
+        icon={SchoolIcon}
+        title="Cadet Portal unavailable"
+        description="Your school is not using the Cadet Portal right now. Please ask your school office for help."
+      />
+      <SignOutButton />
+    </main>
+  );
+}
+
+/** The portal chrome around a screen: install chrome, top bar, content, tabs. */
+function PortalChrome({ children }: { children: ReactNode }) {
+  return (
+    <>
+      <CadetSchoolChrome />
+      <TopBar />
+      <main className="flex flex-1 flex-col gap-5 px-4 pb-6 pt-4 md:min-h-0 md:overflow-y-auto md:*:shrink-0">
+        {children}
+      </main>
+      <BottomNav />
+    </>
+  );
+}
+
+/**
+ * The signed-in portal, or the "unavailable" screen when the server answers
+ * the profile read (the one read every screen shares, through the top bar)
+ * with the feature-disabled error for `cadet`. Any other failure is left to
+ * the screens' own error states.
+ */
+function SignedInPortal({ children }: { children: ReactNode }) {
+  const profile = useQuery(orpc.getProfile.queryOptions());
+  if (readSchoolFeatureDisabled(profile.error) === 'cadet') return <PortalUnavailable />;
+  return <PortalChrome>{children}</PortalChrome>;
+}
+
+/** What a visitor sees while the session is being resolved (or before the redirect). */
+function ResolvingSession() {
+  return (
+    <>
+      <main className="flex flex-1 flex-col gap-5 px-4 pb-6 pt-4 md:min-h-0 md:overflow-y-auto md:*:shrink-0">
+        <ScreenLoading />
+      </main>
+      <BottomNav />
+    </>
+  );
+}
+
+/**
  * The signed-in portal. Who the student is comes from the cadet session;
  * signed-out visitors go to sign-in before any record is requested. Signed-in
  * pages also carry the school's install chrome (manifest, icon, install
@@ -107,14 +166,5 @@ function Frame({ children }: { children: ReactNode }) {
 export function AppFrame({ children }: { children: ReactNode }) {
   const { data: session, isPending } = authClient.useSession();
   if (!isPending && !session) redirect('/sign-in');
-  return (
-    <Frame>
-      {session ? <CadetSchoolChrome /> : null}
-      {session ? <TopBar /> : null}
-      <main className="flex flex-1 flex-col gap-5 px-4 pb-6 pt-4 md:min-h-0 md:overflow-y-auto md:*:shrink-0">
-        {session ? children : <ScreenLoading />}
-      </main>
-      <BottomNav />
-    </Frame>
-  );
+  return <Frame>{session ? <SignedInPortal>{children}</SignedInPortal> : <ResolvingSession />}</Frame>;
 }

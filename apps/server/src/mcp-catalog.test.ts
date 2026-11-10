@@ -107,6 +107,10 @@ const HIDDEN_TOOLS = [
   'systemAdmin.getDemoSchoolPurge',
   'systemAdmin.watchDemoSchoolPurge',
   'systemAdmin.listDemoSchoolPurges',
+  // Which features a school has is app chrome; switching them is a human
+  // platform decision (systemAdmin.getSchoolFeatureFlags stays advanced).
+  'school.getFeatureFlags',
+  'systemAdmin.updateSchoolFeatureFlag',
 ];
 
 /**
@@ -202,8 +206,9 @@ describe('catalog metadata', () => {
     // 85 on main, plus releaseExamToCadet, withdrawExamFromCadet,
     // get/saveStudentExamRemark and get/updateCadetPortalSettings (+6);
     // +4 result notification tools (release preview, release batch read,
-    // single preview/send) and +2 delivery log tools (list, resend).
-    expect(catalog.advanced).toHaveLength(97);
+    // single preview/send) and +2 delivery log tools (list, resend);
+    // +1 systemAdmin.getSchoolFeatureFlags.
+    expect(catalog.advanced).toHaveLength(98);
   });
 });
 

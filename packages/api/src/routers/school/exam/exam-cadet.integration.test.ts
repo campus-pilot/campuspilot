@@ -36,7 +36,7 @@ describe('Cadet Portal release and teacher remarks (staff procedures)', () => {
   let accountant: TestClient;
 
   beforeEach(async () => {
-    const school = await createResultsSchool();
+    const school = await createResultsSchool({ features: ['cadet'] });
     const principalSession = await createSchoolStaffSession(school.school.id, [{ role: 'principal', meta: null }]);
     principal = createTestClient(principalSession.session);
     principalUserId = principalSession.user.id;
@@ -101,7 +101,7 @@ describe('Cadet Portal release and teacher remarks (staff procedures)', () => {
       await expectRpcCode(createTestClient(null).school.releaseExamToCadet(scope), 'UNAUTHORIZED');
       await principal.school.releaseExamToCadet(scope);
       await expectRpcCode(teacher.school.withdrawExamFromCadet(scope), 'FORBIDDEN');
-      const other = await createResultsSchool();
+      const other = await createResultsSchool({ features: ['cadet'] });
       await expectRpcCode(other.principal.school.withdrawExamFromCadet(scope), 'FORBIDDEN');
     });
 
@@ -194,7 +194,7 @@ describe('Cadet Portal release and teacher remarks (staff procedures)', () => {
       await runExam(principal, scope, [{ classId, studentId, subjects: { maths: 72 } }]);
       await expectRpcCode(accountant.school.saveStudentExamRemark({ ...studentScope(), text: 'No' }), 'FORBIDDEN');
       await expectRpcCode(createTestClient(null).school.getStudentExamRemark(studentScope()), 'UNAUTHORIZED');
-      const other = await createResultsSchool();
+      const other = await createResultsSchool({ features: ['cadet'] });
       await expectRpcCode(other.principal.school.getStudentExamRemark(studentScope()), 'FORBIDDEN');
       await expectRpcCode(principal.school.saveStudentExamRemark({ ...studentScope(), text: 'x'.repeat(1001) }), 'BAD_REQUEST');
       await expectRpcCode(principal.school.saveStudentExamRemark({ ...studentScope(), studentId: 'missing', text: 'Hi' }), 'NOT_FOUND');
@@ -205,7 +205,7 @@ describe('Cadet Portal release and teacher remarks (staff procedures)', () => {
 
 describe('Cadet Portal settings', () => {
   it('defaults to hiding class averages and lets school details editors change it', async () => {
-    const { school, principal } = await createResultsSchool();
+    const { school, principal } = await createResultsSchool({ features: ['cadet'] });
     const teacher = createTestClient((await createSchoolStaffSession(school.id, [{ role: 'teacher', meta: { classIds: [] } }])).session);
     expect(await principal.school.getCadetPortalSettings({ schoolId: school.id })).toEqual({ schoolId: school.id, showClassAverages: false });
 
@@ -218,7 +218,7 @@ describe('Cadet Portal settings', () => {
 
     await expectRpcCode(teacher.school.updateCadetPortalSettings({ schoolId: school.id, showClassAverages: false }), 'FORBIDDEN');
     await expectRpcCode(createTestClient(null).school.getCadetPortalSettings({ schoolId: school.id }), 'UNAUTHORIZED');
-    const other = await createResultsSchool();
+    const other = await createResultsSchool({ features: ['cadet'] });
     await expectRpcCode(other.principal.school.updateCadetPortalSettings({ schoolId: school.id, showClassAverages: false }), 'FORBIDDEN');
     // @ts-expect-error showClassAverages is required
     await expectRpcCode(principal.school.updateCadetPortalSettings({ schoolId: school.id }), 'BAD_REQUEST');

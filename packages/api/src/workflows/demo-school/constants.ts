@@ -1,3 +1,4 @@
+import type { SchoolFeatureKey } from "@campuspilot/db/feature-flags/catalogue";
 /**
  * Restate service names and the ordered product steps. Kept free of runtime
  * imports so the API router can reference the workflows by name and type
@@ -31,3 +32,14 @@ export function demoSchoolWorkflowKey(jobId: string, attempt: number): string {
 export function demoCredentialsS3Key(schoolId: string): string {
   return `schools/${schoolId}/demo/credentials.csv`;
 }
+
+/**
+ * Which platform features a new demo school starts with. One explicit
+ * decision per catalogue feature (the record is exhaustive, so adding a
+ * feature fails the build until it is decided here); real schools start with
+ * none. `createDemoSchool` writes them in the school's own transaction.
+ */
+export const DEMO_SCHOOL_FEATURE_DEFAULTS: Record<SchoolFeatureKey, boolean> = {
+  cadet: true,
+  notices: true,
+};
