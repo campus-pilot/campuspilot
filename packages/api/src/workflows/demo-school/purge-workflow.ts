@@ -179,7 +179,8 @@ export async function revokeManifestSessions(schoolId: string) {
  * The data purge, in one transaction: lock the purge row and the school,
  * record the manifest of every S3 key and demo user the school owns, run
  * `purge_demo_school()` (which deletes every row the school owns, its
- * demo-only users and its admissions' Cadet Portal logins) and record
+ * demo-only users and its admissions' Cadet Portal logins, including the
+ * in-app assistant's conversations, runs, saved costs and role list) and record
  * `data_deleted_at`. A replay after commit finds
  * `data_deleted_at` and does nothing. The requesting admin has no
  * `demo_school_id` and survives; accounts invited with a real address keep

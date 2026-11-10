@@ -1,7 +1,7 @@
 # School feature flags
 
 A feature flag says whether one school **has** a product area (the Cadet Portal,
-notices). Platform administrators switch flags per school in the admin app; a
+notices, the AI assistant). Platform administrators switch flags per school in the admin app; a
 school's own staff can only read them. This guide is the canonical reference:
 read it before adding a feature, gating a procedure or screen on one, or
 changing how flags are stored or enforced.
@@ -17,7 +17,7 @@ its own layer, and never infer one from the other.
 | Export | Meaning |
 | --- | --- |
 | `schoolFeatureCatalogue` | One entry per feature: `label`, `description`, `config` (a Zod schema; `z.null()` for a feature without settings). |
-| `SchoolFeatureKey`, `SCHOOL_FEATURE_KEYS`, `schoolFeatureKeySchema` | The keys (`cadet`, `notices`). |
+| `SchoolFeatureKey`, `SCHOOL_FEATURE_KEYS`, `schoolFeatureKeySchema` | The keys (`cadet`, `notices`, `assistant`). |
 | `SchoolFeatureConfig<K>` | The config type of exactly one key. A caller holding key `K` never sees another key's shape. |
 | `SchoolFeatureState<K>` | `{ enabled: boolean; config: SchoolFeatureConfig<K> \| null }`. |
 | `SchoolFeatureFlags` | `{ [K in SchoolFeatureKey]: SchoolFeatureState<K> }`. |
@@ -68,8 +68,12 @@ has them.)
   not backfilled.
 - Demo schools: `createDemoSchool` writes the features listed in
   `DEMO_SCHOOL_FEATURE_DEFAULTS` (`workflows/demo-school/constants.ts`, an
-  exhaustive record) in the school's own transaction. Today both are on.
-- `purge_demo_school` deletes the rows (migration `0049_demo-purge-feature-flags.sql`).
+  exhaustive record) in the school's own transaction. `cadet` and `notices`
+  are on; `assistant` is off (every assistant request is paid model usage, so
+  an administrator enables it for a demo deliberately).
+- `purge_demo_school` deletes the rows (migration `0049_demo-purge-feature-flags.sql`),
+  and the assistant's rows and role list (`0056_demo-purge-assistant.sql`).
+- `assistant` was not backfilled: it is off for every school until enabled.
 
 ## Reading and writing (API)
 
@@ -214,15 +218,43 @@ Management (`apps/management/components`):
 
 Admin: `/school/{id}/usage/feature-flags`
 (`apps/admin/components/school-feature-flags.tsx`), one card per catalogue
-feature with an Enabled switch and Save. Each card works on a
-`SchoolFeatureEntry` and builds its update by spreading it. `DISABLE_WARNINGS`
-states everything switching a feature off does (keep it complete: staff,
-students, notifications); it is shown under the switch (which it describes,
-`aria-describedby`) and again in the app confirmation dialog that saving a
-switch-off opens. Enabling saves at once. Each switch's accessible name
-includes the feature's label. No feature has settings yet, so the cards have no
-config controls; a compile-time guard in that file fails as soon as a catalogue
-entry declares a config, so the control is added with it.
+feature. A switch-only feature's card has an Enabled switch and Save. Each card
+works on a `SchoolFeatureEntry` and builds its update by spreading it.
+`DISABLE_WARNINGS` states everything switching a feature off does (keep it
+complete: staff, students, notifications); it is shown under the switch (which
+it describes, `aria-describedby`) and again in the app confirmation dialog that
+saving a switch-off opens. Enabling saves at once. Each switch's accessible name
+includes the feature's label.
+
+A feature **with settings** is edited on its own page, where its switch and
+its settings are saved together (switching it on needs settings): its card
+here shows its state and links there. `SETTINGS_PAGES` in that file is an
+exhaustive record over the features whose config is not `z.null()`, a
+compile-time guard: a catalogue entry that gains a config does not compile
+until it names its settings page. Today: `assistant` → School › AI
+(`/school/{id}/usage/ai`, `apps/admin/components/assistant`), which uses the
+same `DISABLE_WARNINGS` entry and confirmation dialog.
+
+## The `assistant` feature: where it is enforced
+
+Config: `{ monthlyLimitUsd: number | null, eligibleRoles: role[] }` (at least
+one role, each once). Who may use the assistant is decided by
+`resolveAssistantAccess` (feature, membership, an eligible role the school
+switched on, the IST month spend under the limit); see
+[In-app assistant](assistant.md#access).
+
+| Surface | Behaviour when off |
+| --- | --- |
+| Every `/model/*` procedure (list, get, subscribe, send, approve, stop, delete, status) | Disabled-feature error (`feature: 'assistant'`); nothing is written. Open streams end at their next recheck. |
+| Delegated token issue (`issueAssistantRunToken`) | Disabled-feature error: no token. |
+| Worker, before every model request | The run fails with `feature_disabled`; changes already approved and made stay made. |
+| `school.getAssistantAccess`, `school.updateAssistantRoles`, `school.getAssistantUsage` | Disabled-feature error after the permission check. |
+| Management UI | The navbar panel button, sidebar link and ⌘K entry (`AssistantAccess`), the assistant pages (`FeaturePage`), Settings › AI assistant and Settings › Usage disappear. |
+
+Conversations, runs, saved costs and the school's role list are kept while the
+feature is off and come back when it is enabled. The admin usage pages
+(`systemAdmin.getSchoolAssistantUsage`, `getPlatformAssistantUsage`) keep
+showing past spend.
 
 ## Adding a feature
 

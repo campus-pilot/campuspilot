@@ -1,74 +1,147 @@
 # In-app assistant
 
 The assistant lets staff ask for anything they could do in the management app,
-in plain language. It is a **separate service** (`apps/assistant`) that knows no
-CampusPilot business logic: it reaches school data only through the API's MCP
-endpoint, as the signed-in user, with the same permissions.
+in plain language. Its code is `packages/assistant`, served by the API server
+(the browser procedures at `/model/*`) and by `apps/worker` (the durable turn
+loop). It knows no CampusPilot business logic: the model reaches school data
+only through the API's MCP endpoint, as the signed-in user, with the same
+permissions.
 
 ## Pieces
 
 | Piece | Where | Owns |
 | --- | --- | --- |
-| Assistant service | `apps/assistant` | Agent loop (Restate), model calls, conversations, approvals, token usage, live stream |
-| Contract | `packages/assistant-contract` | DTOs, the service's oRPC contract, shared protocol constants |
+| Assistant package | `packages/assistant` | Agent loop and model providers (`src/runtime`), store, live events, the `/model/*` router (`router.ts`, `http.ts`), the outbox (`dispatch.ts`), the signed worker service (`control.ts`, `worker.ts`) |
+| Tables | `packages/db/src/schema/assistant.ts` (main migrations, `assistant_` prefix) | Conversations, runs, items, approvals, transcript, `assistant_model_request` (saved costs), `school_assistant_access_role` |
+| Contract | `packages/assistant-contract` | DTOs, the oRPC contract of `/model/*`, shared protocol constants, exact USD sums (`money.ts`) |
 | Chat UI pieces | `packages/components/src/assistant` | Presentational timeline, approval card, composer (props and callbacks only) |
-| Management surfaces | `apps/management/components/assistant` | Data hooks and the three surfaces (panel, page, palette) |
-| API side | `packages/auth/src/assistant-token.ts`, `packages/api/src/routers/auth/assistant-token.router.ts`, `packages/api/src/assistant/tool-policy.ts`, `apps/server/src/mcp*.ts` | Delegated tokens, the `assistant` principal, the policy, the MCP assistant view |
+| Usage UI pieces | `packages/components/src/assistant-usage` | Date range form, spend chart and table (props only) |
+| Management surfaces | `apps/management/components/assistant`, `components/assistant-settings` | Data hooks, the three surfaces (panel, page, palette), Settings › AI assistant and Settings › Usage |
+| Admin pages | `apps/admin/components/assistant` | School › AI (feature flag, limit, eligible roles, spend), AI billing (platform) |
+| API side | `packages/api/src/assistant/*` (`access.ts`, `token.ts`, `spend.ts`, `usage.ts`, `tool-policy.ts`), `packages/auth/src/assistant-token.ts`, `routers/school/assistant-access`, `routers/system-admin/assistant-usage`, `apps/server/src/mcp*.ts` | The access decision, delegated tokens, spend and usage reads, the `assistant` principal, the tool policy, the MCP assistant view |
 
-### Why its own service, not `apps/worker`
+### Where it runs
 
-`apps/worker` hosts the platform's own Restate workflows (the demo school) and
-runs with the API's environment: database credentials and the API's secrets.
-The assistant runs model-driven code, and its safety rests on having none of
-that: it reaches school data only through the API's MCP endpoint, as the
-signed-in user, so the API's policy and OPA decide every call. Hosting its
-turn loop in the worker, or in the API server, would put that code next to
-credentials it must never hold. It follows the worker's conventions instead:
-its Restate endpoint runs on its own HTTP/2 server so shutdown can close it,
-it registers with Restate on every start until accepted, it uses no request
-signing inside the private network, and it uses the same Restate SDK line.
-One process serves both of its ports (the browser API and the Restate
-endpoint); replicas scale them together.
+- **API server** (`apps/server`): mounts the assistant router at
+  `/model/rpc/*` (`createAssistantRequestHandler`). The session, the access
+  decision and the delegated token are the API's own, in-process. No request
+  waits for the worker: a saved run is handed to Restate after commit, and the
+  outbox sweep (on the API's 30 s loop) re-sends what Restate did not accept.
+- **Worker** (`apps/worker`): serves the `assistantConversation` virtual
+  object (one per conversation, `ingressPrivate`) and `AssistantControl`, the
+  only assistant service on Restate ingress. Every call to it is signed with
+  `WORKER_CONTROL_SECRET` (`packages/api/src/workflows/control-auth.ts`), like
+  every worker control service.
+- **The model's reach**: the worker holds database credentials, but only our
+  code uses them, for the assistant's own rows. The model is offered exactly
+  the tools the API's MCP assistant view lists, plus `show_view`, and calls
+  them over HTTP at `CAMPUSPILOT_MCP_URL` with the run's delegated token, so
+  the API's policy and OPA decide every call. A guard test checks this
+  (`src/runtime/boundary.test.ts`): every offered tool is an MCP tool or
+  `show_view`, and the turn loop imports no API code and no school table.
 
 ## How a message flows
 
-1. The management app calls the service with the user's CampusPilot session
-   cookie. The service checks the session with the API (`/api/auth/get-session`)
-   and the `school.assistant.use` permission (`authorization.checkPermissions`).
-2. The service asks the API for a **delegated token** (`auth.issueAssistantToken`)
-   for that user, school, conversation and run. The API issues one only when the
-   request carries **both** the user's live session **and** the service secret.
-   Tokens last 30 minutes and are refreshed whenever the user is present again
-   (sending, approving).
-3. The service saves the message and starts a run on the Restate virtual object
-   `assistantConversation` (one per conversation, so messages queue behind an
-   active run).
-4. Each model step and tool call is a durable Restate step. Tools are the MCP
-   tools the API's **assistant view** lists: every procedure the policy allows,
-   core and advanced, tagged with exposure and module. Core tools load up front;
-   advanced ones are deferred to the provider's tool search where it has one
-   (Anthropic); Gemini gets every tool on each request.
-5. A write pauses on a Restate awakeable until the user approves or declines it
-   in the UI. Stop cancels a pending approval and aborts a streaming step.
-   Stop can be pressed again if it failed halfway (`run-stop.ts`): every step
-   of it is repeatable, and an approval it could not cancel goes back to
-   pending but can no longer be approved. The run checks for a stop while
-   holding its row lock before it creates an approval, so a Stop never lands
-   between the check and the approval.
+1. The management app calls `API /model/rpc/sendMessage` with the user's
+   session cookie (`assistantClient`, on the API origin). A request with an
+   API key is not a user at the app and is refused.
+2. The API checks access (`resolveAssistantAccess`, below) and issues a
+   **delegated token** in-process (`issueAssistantRunToken`) for that user,
+   school, conversation and run, kept in Redis for the worker. Tokens last 30
+   minutes and are issued again whenever the user is present (sending,
+   approving). An impersonating admin gets none.
+3. One transaction saves the conversation, the run and the user's message.
+   After commit the run is handed to Restate (`AssistantControl.startRun`,
+   signed, idempotent per run); the run row is the outbox entry
+   (`handed_over_at`). A run Restate never accepts within 10 minutes is failed
+   visibly (`dispatch_failed`) so the user can send again.
+4. The worker runs the turn on the conversation's object (messages queue
+   behind an active run). Each model step and tool call is a durable Restate
+   step. **Before every model request** it asks the same access decision
+   again, so a long tool loop stops at the school's limit (`limit_reached`)
+   or when the feature or the user's role is switched off; changes already
+   approved and made stay made. Tools are the MCP tools the API's **assistant
+   view** lists: every procedure the policy allows, core and advanced, tagged
+   with exposure and module. Core tools load up front; advanced ones are
+   deferred to the provider's tool search where it has one (Anthropic);
+   Gemini gets every tool on each request.
+5. A write pauses on a Restate awakeable until the user approves or declines
+   it in the UI. The decision is saved on the approval row and handed to the
+   worker (`AssistantControl.resolveApproval`, which wakes the run with the
+   decision on the row); a hand-over that fails is re-sent by the sweep, so a
+   decision is never lost and the request never fails because Restate is
+   briefly away. Stop records the stop, signals a streaming step, and cancels
+   a pending approval the same way (`run-stop.ts`); every step of it is
+   repeatable, and once a stop is asked the change can no longer be approved.
+   The run checks for a stop while holding its row lock before it creates an
+   approval, so a Stop never lands between the check and the approval.
    An approved write is handed to the API **at most once**: the intent is saved
    on the item before the call, so a step repeated after a crash never sends it
    again. If the outcome never came back (the connection dropped mid-call), the
    call fails with `OUTCOME_UNKNOWN` and the model is told to check the data
    before trying again. Reads may be repeated.
-6. Changes are published over Redis to the conversation's stream: a snapshot,
-   then sequenced upserts, plus ephemeral text frames while a reply streams.
-   When an assistant write succeeds, the management app refreshes its
-   CampusPilot queries so open screens show the change.
+6. Each answered model request is saved as an `assistant_model_request` row
+   (tokens, the prices used, `cost_usd`) and added to the run's totals in the
+   same transaction (below).
+7. Changes are published over Redis to the conversation's stream
+   (`/model/rpc/subscribeConversation`): a snapshot, then sequenced upserts,
+   plus ephemeral text frames while a reply streams. When an assistant write
+   succeeds, the management app refreshes its CampusPilot queries so open
+   screens show the change. The stream is an SSE event iterator: nothing in
+   front of `/model/*` may buffer responses.
+
+## Access
+
+The school feature flag `assistant` (see [School feature flags](feature-flags.md))
+carries `{ monthlyLimitUsd: number | null, eligibleRoles: role[] }`. It is off
+for every school by default, demo schools included, and is edited only on the
+admin app's School › AI page.
+
+**Use** (start or continue a turn) is decided by one API function,
+`resolveAssistantAccess` (`packages/api/src/assistant/access.ts`). Each fact is
+its own check, and the first that fails is returned with a message for the user:
+
+1. the school's `assistant` flag is enabled (`feature_disabled`);
+2. the user is a member of the school (`not_member`);
+3. the flag's settings are valid (`config_invalid`);
+4. the user holds a role that is in `eligibleRoles` **and** that the school
+   switched on in `school_assistant_access_role` (`role_not_enabled`). A role
+   the school switched on that is no longer eligible grants nothing and is
+   shown as "not available on your plan";
+5. the school's saved spend in the current IST month is below
+   `monthlyLimitUsd` (`limit_reached`). The month spend is cached in Redis for
+   10 minutes, so a limit can be overshot by what is spent in that window.
+
+There is no OPA grant to use the assistant: the school's role list is the only
+source of who may. It is used by `/model/*` (sending, approving), the token
+issue, the worker before every model request, and (its read facts) the open
+stream recheck. Reading one's own history needs only the feature and
+membership: a user whose role is switched off, or a school at its limit, keeps
+its conversations readable and the composer says why it cannot send. With the
+feature off **everything disappears** (every `/model/*` procedure answers the
+disabled-feature error); conversations and costs are kept and come back when
+it is enabled again.
+
+| Who | Action | Granted to |
+| --- | --- | --- |
+| Settings › AI assistant | `school.assistant.access.read`, `school.assistant.access.manage` | principal, manager |
+| Settings › Usage › AI usage | `school.assistant.usage.read` | principal, manager |
+| Admin School › AI, AI billing | `system.assistant.usage.read` (+ `system.school.feature_flags.*` for the settings) | platform admin |
+
+Procedures: `school.getAssistantAccess`, `school.updateAssistantRoles`,
+`school.getAssistantUsage`, `systemAdmin.getSchoolAssistantUsage`,
+`systemAdmin.getPlatformAssistantUsage` (all hidden from MCP, so never offered
+to the assistant itself).
+
+UI: every management entry point (navbar panel button, sidebar link, ⌘K
+entry) is wrapped in `AssistantAccess`: `RequireFeature('assistant')` and the
+user's `getStatus().allowed` (their role may use it, whatever the limit). The
+assistant pages use `FeaturePage`.
 
 ## Model providers
 
 The agent loop talks to models only through `ModelProvider`
-(`apps/assistant/src/runtime/providers/types.ts`). Each adapter owns its
+(`packages/assistant/src/runtime/providers/types.ts`). Each adapter owns its
 provider's request shape, native features and transcript format, so nothing is
 reduced to a common subset:
 
@@ -81,18 +154,42 @@ reduced to a common subset:
   (Gemini has no server-side tool search), model-default thinking and implicit
   caching.
 
-`ASSISTANT_PROVIDER` picks the provider for **new** conversations. A
-conversation stays on its **provider**, because transcripts are
-provider-specific. It does **not** stay on a model: every run calls the model
-that provider is configured with now (`ANTHROPIC_MODEL`, `GEMINI_MODEL`), so
-changing that setting moves existing conversations to the new model from their
-next message. `assistant_conversation.model` is only the model the conversation
-started on. Each run records the provider it called and the model that
-**answered**, as the provider reported it (a fallback or a dated release can
-differ from the model asked for). Usage is normalised to one shape
-(`inputTokens` excludes cache reads), so benchmarks and limits compare like
-with like. Add a provider by implementing `ModelProvider` and registering it in
-`providers/registry.ts`.
+`ASSISTANT_PROVIDER` (`gemini` by default) picks the provider for **new**
+conversations. A conversation stays on its **provider**, because transcripts
+are provider-specific, so every provider that still has conversations needs
+its settings. It does **not** stay on a model: every run calls the model that
+provider is configured with now, so changing it moves existing conversations
+to the new model from their next message. `assistant_conversation.model` is
+only the model the conversation started on. Each run records the provider it
+called and the model that **answered**, as the provider reported it. Usage is
+normalised to one shape (`inputTokens` excludes cache reads). Add a provider
+by implementing `ModelProvider`, registering it in `providers/registry.ts`,
+and giving it the same six settings.
+
+Every provider has the same six settings (`@campuspilot/env/assistant`, read by
+the API and the worker): `<P>_API_KEY`, `<P>_MODEL` and four prices in USD per
+million tokens, `<P>_PRICE_INPUT_USD_PER_MTOK`, `_OUTPUT_`, `_CACHE_READ_`,
+`_CACHE_WRITE_`. A provider is configured only when all six are set; setting
+some of them refuses to start. There is no price list in code.
+
+### Cost: saved, never recomputed
+
+After each answered model request, one transaction (the step's own) inserts an
+`assistant_model_request` row (provider, requested and answered model, the four
+token counts, the four prices used, `cost_usd = Σ tokens × price / 10⁶` computed
+in Postgres `numeric(14,8)`) and adds the tokens and exactly that cost to
+`assistant_run` (`cost_usd`). The insert is idempotent per step
+(`request_key`). One row per request, not per run, because a release with new
+prices can land mid-run. A provider without prices is never called. Limits,
+the usage tab and the admin pages read these rows; amounts travel as decimal
+text and are added exactly (`sumUsd`), never as floats.
+
+Days and months are **IST** (Asia/Kolkata, fixed UTC+05:30): a month is the
+1st to the last day. Usage reads (`packages/api/src/assistant/usage.ts`) are
+cached in Redis for an hour, so these pages can be one to two hours behind.
+Provider consoles group days in their own time zone: compare months, not days.
+INR is shown only in the admin app, at a rate the viewer types, kept in the
+browser's localStorage and never sent to the API.
 
 ### When a model request fails
 
@@ -106,17 +203,17 @@ sees a message that matches:
 | `busy` | rate limit, exhausted quota or spending cap, overload (429, 503, 529) | 3 (the first and 2 retries) | `model_busy` | to try again in a few minutes |
 | `unknown` | anything else | 3 (the first and 2 retries) | `model_error` | to try again |
 
+The access check before a request ends a run with its own code
+(`limit_reached`, `role_not_enabled`, `feature_disabled`, …) and message.
 The provider's raw error is saved on the run (`assistant_run.error_detail`) and
 logged with the run, conversation, school, provider and model.
 
 ### Developer diagnostics
 
-`ASSISTANT_DIAGNOSTICS=true` shows each turn's model, token counts, estimated
-cost and raw error in the chat, and a conversation total in the composer. It is
+`ASSISTANT_DIAGNOSTICS=true` shows each turn's model, token counts, saved cost
+and raw error in the chat, and a conversation total in the composer. It is
 for developers: with it on, **every** user of that deployment sees these, so
-the service logs a warning when it is on in production. Costs are estimates
-from the list prices in `providers/pricing.ts`, at the price in force on the
-day the run was made; a model that is not listed gets no estimate.
+the worker logs a warning when it is on in production.
 
 ## Rules and where they live
 
@@ -126,14 +223,13 @@ day the run was made; a model that is not listed gets no estimate.
   no bills, receipts or statements through document tools, whether asked for
   by document type or by document domain (only the academic domain passes);
   only the conversation's own school, including the list of the user's
-  schools, which holds just that school. The service cannot widen any of this.
-- **Approval policy, owned by the service** (`apps/assistant/src/runtime/tools.ts`,
+  schools, which holds just that school. The assistant cannot widen any of this.
+- **Approval policy, owned by the assistant** (`packages/assistant/src/runtime/tools.ts`,
   `requiresApproval`): every write waits for the user. Reads run immediately.
-- **Permissions**: OPA decides every tool call as the user. `school.assistant.use`
-  (all school roles) decides who may use the assistant at all. An admin
-  impersonating a user cannot use the assistant: its calls would be recorded as
-  the user's own.
-- **Topic scope, asked of the model** (`apps/assistant/src/runtime/prompt.ts`,
+- **Permissions**: OPA decides every tool call as the user. Who may use the
+  assistant at all is the role-based access above. An admin impersonating a
+  user cannot use the assistant: its calls would be recorded as the user's own.
+- **Topic scope, asked of the model** (`packages/assistant/src/runtime/prompt.ts`,
   "What you help with"): only the school's work in CampusPilot and short
   school communications built on it, such as a notice to parents. Code,
   general knowledge, teaching material, translation and the like are declined
@@ -152,33 +248,20 @@ day the run was made; a model that is not listed gets no estimate.
   through tool results; the prompt tells the model not to follow it, and the
   renderer (`assistant-markdown.tsx`) makes the leak impossible by showing an
   image as its description only. Links still open, on a click.
-- **Cross-site requests are refused.** The service's `/rpc` routes reject a
-  request whose `Origin` is not in `CORS_ORIGIN`. CORS alone only hides the
-  response; the request would still run with the user's cookie.
-- **The Restate endpoint trusts its network**, as `apps/worker` does: it
-  uses no request signing, because Restate and the service run in the same
-  private network and `RESTATE_SERVICE_PORT` is never routed from outside it.
-  Whoever can reach that port can drive a turn, and whoever can reach the
-  Restate ingress can resolve an approval, so both must stay private.
-- **Open streams are rechecked** every two minutes: a user who signed out or
-  lost `school.assistant.use` stops receiving events.
+- **Cross-site requests are refused.** `/model/rpc/*` rejects a request whose
+  `Origin` is not in `CORS_ORIGIN`. CORS alone only hides the response; the
+  request would still run with the user's cookie.
+- **Worker calls are signed.** `AssistantControl` verifies every call's
+  `WORKER_CONTROL_SECRET` signature before it reads anything; the
+  conversation object is private to ingress.
+- **Open streams are rechecked** every two minutes: a user who signed out,
+  left the school, or whose school lost the feature stops receiving events.
 - **The delegated token** is bound to a user and a school and lasts 30
   minutes. The conversation and run in it are labels for the audit trail: the
   API does not check that the run is still active, and the token outlives a
-  sign-out until it expires. The API enforces the tool policy for it; approval
-  is enforced by the service only.
-
-## Limits and feature flags (integration point)
-
-Nothing is limited yet. When platform feature flags and school-level limits
-arrive, plug them in at **one place**: `apps/assistant/src/entitlements.ts`
-(`configureEntitlements`). It is asked `checkRunAllowed({ schoolId, userId })`
-before every run, and its reason is shown to the user. Usage is already
-recorded per run in `assistant.assistant_run` with `school_id`, `user_id`,
-`model`, `surface`, `model_request_count` and input, output, cache-read and
-cache-write token counts, so limits can count real usage. The admin app's
-*AI Usage* page is still a placeholder: the service has no usage procedure for
-it yet.
+  sign-out until it expires (the worker's access check before each model
+  request still applies). The API enforces the tool policy for it; approval
+  is enforced by the assistant's loop only.
 
 ## Comparing the three surfaces
 
@@ -192,29 +275,27 @@ Each run records the surface it started from (`assistant_run.surface`).
 
 ## Running locally
 
-1. In `apps/server/.env`, set `ASSISTANT_SERVICE_SECRET` and
-   `ASSISTANT_TOKEN_SIGNING_SECRET` (32+ characters each, different values).
-2. Copy `apps/assistant/.env.example` to `.env`. Use the same
-   `ASSISTANT_SERVICE_SECRET`, point it at the API, Postgres, Redis and Restate,
-   and set `ASSISTANT_PROVIDER` with that provider's key (and `GEMINI_MODEL`
-   for Gemini). `RESTATE_SERVICE_URL` must be reachable from the
-   Restate container (locally `http://host.docker.internal:9081`); when set, the
-   service registers itself with Restate on every start, retrying until
-   Restate accepts (as `apps/worker` does).
-3. In `apps/management/.env`, set `NEXT_PUBLIC_ASSISTANT_URL`. Without it the
-   assistant UI is hidden.
-4. Start the service (`pnpm --filter assistant dev`, or
-   `node scripts/local-demo-apps.mjs start assistant` for the local demo). It
-   applies its own migrations to the `assistant` Postgres schema at boot.
+1. In `apps/server/.env`, set `ASSISTANT_TOKEN_SIGNING_SECRET` (generate your
+   own: `openssl rand -hex 32`), `WORKER_CONTROL_SECRET`, `ASSISTANT_PROVIDER`
+   and that provider's six settings (`GEMINI_API_KEY`, `GEMINI_MODEL`, the
+   four `GEMINI_PRICE_*_USD_PER_MTOK`; see `.env.example`), and
+   `CAMPUSPILOT_MCP_URL` (the API's `/mcp` as the worker reaches it).
+2. Copy the same values into `apps/worker/.env` (it is a copy of the server's
+   file plus the worker's own settings) and start the worker
+   (`pnpm --filter worker dev`, or `node scripts/local-demo-apps.mjs start
+   worker`). It registers with Restate on every start.
+3. In the admin app, open the school's **AI** page, enable the assistant and
+   choose its eligible roles and limit; then, as the school's principal or
+   manager, switch roles on in **Settings › AI assistant**.
+4. The management app needs nothing extra: the assistant is served by the API
+   at `NEXT_PUBLIC_SERVER_URL` + `/model/rpc`.
 
-The browser sends the CampusPilot session cookie to the service, so in
-production the service must be on a host covered by `COOKIE_DOMAIN` (for
-example `assistant.campuspilot.in` with `COOKIE_DOMAIN=.campuspilot.in`).
+The tables are part of the main migrations, applied by the API at boot.
 
 ## Views: platform UI in the conversation
 
 The model never writes markup. It calls one tool, `show_view`, with a structured
-view from `packages/assistant-contract/src/views.ts`; the service validates it
+view from `packages/assistant-contract/src/views.ts`; the turn loop validates it
 and stores it as a `view` item, and the app renders it with its own components:
 
 - `records`: admissions, students, classes, exams or staff by id. The app fetches
@@ -239,7 +320,7 @@ and describe it in `SHOW_VIEW_TOOL_DESCRIPTION`.
 - **`attention`** on a history row (`approval`, `working` or null) comes
   from the conversation's runs that have not finished: `approval` when one
   waits for the user, otherwise `working` when one is queued or running.
-  These are exactly the runs that make the service refuse a delete, so the
+  These are exactly the runs that make the API refuse a delete, so the
   list never offers what would be refused. It is not stored, and only list
   rows carry it: the list query checks it in the same statement (two
   `exists` lookups per row, never a query per conversation).
@@ -264,7 +345,7 @@ Adapted from T3 Code's data layer:
   (whole words after a short hold; whole lines inside code fences). New blocks
   fade in. The text so far is kept in Redis for viewers who reconnect.
 - **Resume**: the client tracks the highest sequence it holds and reconnects
-  with `afterSequence`; the service sends only what changed (a `resume`), or a
+  with `afterSequence`; the API sends only what changed (a `resume`), or a
   snapshot when that is over 200 changes. Data stays on screen meanwhile.
 - **Liveness**: a heartbeat every 15s when idle; the client treats 40s of
   silence as a dead connection and reconnects inside the stream itself
@@ -325,7 +406,7 @@ painting their own.
   the person approving can check each one; the section scrolls.
 - **Queued messages**: messages sent while a run works wait in the composer
   as queued rows, not in the timeline. Each can be removed before it starts:
-  the row's button asks the service to stop that queued run, and
+  the row's button asks the API to stop that queued run, and
   `beginRun` ends a run with a stop request as stopped before anything is
   sent to the model. The row leaves the queue at once; when its turn comes,
   the message appears in the conversation with "Removed before the assistant

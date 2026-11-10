@@ -393,6 +393,13 @@
       "when": 1794351490797,
       "tag": "0055_assistant",
       "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1794353452220,
+      "tag": "0056_demo-purge-assistant",
+      "breakpoints": true
     }
   ]
 }
