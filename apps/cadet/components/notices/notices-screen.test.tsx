@@ -160,6 +160,8 @@ describe('NoticeScreen', () => {
     expect(frame.getAttribute('srcdoc')).toBe(designedNoticePage.html);
     expect(screen.getByRole('heading', { name: 'Annual Sports Day' })).toBeTruthy();
     expect(getNoticeDocument).toHaveBeenCalledWith({ noticeId: 'ntc_sports' });
+    // Its print size is stated next to the PDF: a half-A4 PDF has two copies per sheet.
+    expect(screen.getByText('Printed on half A4 · the PDF has two copies per A4 sheet')).toBeTruthy();
   });
 
   it('keeps a designed notice readable as text when its printed page cannot be loaded, and offers to try again', async () => {

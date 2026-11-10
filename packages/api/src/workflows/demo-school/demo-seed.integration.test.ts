@@ -199,7 +199,8 @@ describe('demo school seed steps (2 classes, without Restate)', () => {
     const [staffMeeting, timings, sportsDay, homework] = await Promise.all([noticeByKey('staff-meeting'), noticeByKey('school-timings'), noticeByKey('sports-day'), noticeByKey('holiday-homework')]);
     // Notified audiences are the real ones at publication: every member, every registered student (leavers are already unregistered).
     expect(staffMeeting).toMatchObject({ publishedStaffCount: 6, publishedCadetCount: 0 });
-    expect(timings).toMatchObject({ publishedStaffCount: 0, publishedCadetCount: registered.length });
+    expect(timings).toMatchObject({ publishedStaffCount: 0, publishedCadetCount: registered.length, pageSize: 'half' });
+    expect(staffMeeting).toMatchObject({ pageSize: 'full' });
     expect(sportsDay).toMatchObject({ publishedStaffCount: 6, publishedCadetCount: registered.length, templateRevisionId: null });
     expect(homework).toMatchObject({ status: 'draft', publishedStaffCount: null, publishedCadetCount: null, templateRevisionId: null });
     // Templates were seeded first, so a plain notice pinned the school's selected Notice design.
@@ -223,7 +224,7 @@ describe('demo school seed steps (2 classes, without Restate)', () => {
     expect(designedPage.html).not.toContain('{date:');
     // Downloading renders the PDF once and caches it under the school's own prefix.
     await client.school.getNoticeDownload({ schoolId: job.schoolId, noticeId: sportsDay.id });
-    await expect(getS3Client().send(new HeadObjectCommand({ Bucket: env.S3_BUCKET, Key: noticePdfKey(job.schoolId, sportsDay.id) }))).resolves.toMatchObject({ ContentType: 'application/pdf' });
+    await expect(getS3Client().send(new HeadObjectCommand({ Bucket: env.S3_BUCKET, Key: noticePdfKey(job.schoolId, sportsDay.id, sportsDay.pageSize) }))).resolves.toMatchObject({ ContentType: 'application/pdf' });
 
     // One event per student of each published notice, plus one staff event when it addresses staff.
     const noticeEvents = (await noticeRows(job.schoolId))

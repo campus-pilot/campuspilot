@@ -13,7 +13,8 @@ import type { WhatsAppDocumentSource } from '../channels/whatsapp/documents';
  * Unlike receipts and report cards, this PDF is the same for every
  * recipient and its notice is immutable once published, so it is rendered
  * once and reused: the bytes come from the notice's cached object
- * (`schools/{schoolId}/notices/{noticeId}.pdf`, decision D9), which also
+ * (`schools/{schoolId}/notices/{noticeId}-{pageSize}.pdf`, decision D9, laid
+ * out at the notice's pinned page size), which also
  * backs the staff and Cadet Portal downloads. A publication to thousands of
  * students therefore converts one PDF, not thousands.
  *

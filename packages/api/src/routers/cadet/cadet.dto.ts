@@ -350,6 +350,11 @@ export const cadetNoticeSchema = cadetNoticeListItemSchema.extend({
    */
   bodyMode: z.enum(['plain', 'template']),
   /**
+   * The paper the notice is printed on: `full` A4, or `half` A4 (its PDF
+   * carries two copies on every A4 sheet, to be cut apart).
+   */
+  pageSize: z.enum(['full', 'half']),
+  /**
    * The notice's wording. For a `plain` notice, exactly the text staff
    * wrote (blank lines separate paragraphs). For a `template` notice, the
    * readable text of the designed document without its layout.
@@ -358,8 +363,12 @@ export const cadetNoticeSchema = cadetNoticeListItemSchema.extend({
 });
 export type CadetNoticeDto = z.infer<typeof cadetNoticeSchema>;
 
-/** The printed page of a notice: sanitized, network-free HTML for an empty-sandbox iframe. */
-export const cadetNoticeDocumentSchema = z.object({ noticeId: z.string(), html: z.string() });
+/**
+ * The printed page of a notice: sanitized, network-free HTML for an
+ * empty-sandbox iframe, laid out for its print size (`pageSize`; a half-A4
+ * notice shows where each half page ends).
+ */
+export const cadetNoticeDocumentSchema = z.object({ noticeId: z.string(), pageSize: z.enum(['full', 'half']), html: z.string() });
 export type CadetNoticeDocumentDto = z.infer<typeof cadetNoticeDocumentSchema>;
 
 export const cadetNoticeDownloadSchema = z.object({ url: z.url(), expiresIn: z.number().int() });

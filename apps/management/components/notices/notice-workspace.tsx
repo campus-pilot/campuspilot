@@ -4,7 +4,7 @@ import { useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import { Megaphone } from 'lucide-react';
-import type { NoticeDto } from '@campuspilot/api/routers/school/notice/notice.dto';
+import { NOTICE_PAGE_SIZE_LABELS, type NoticeDto } from '@campuspilot/api/routers/school/notice/notice.dto';
 import { DocumentButton, DocumentNotice, DocumentPreview } from '@campuspilot/components/documents/document-controls';
 import { NoticeStatusBadge, noticeAudienceLabel } from '@campuspilot/components/notices';
 import { resolveQueryBoundary } from '@campuspilot/components/query-boundary';
@@ -25,6 +25,7 @@ import {
   noticeBoundaryState,
   noticeErrorMessage,
   noticeLoadFailure,
+  noticePrintSizeDescription,
   noticesHref,
   publishedRecipientSummary,
   type NoticeSessionScope,
@@ -140,11 +141,14 @@ function Fact({ label, children }: { label: string; children: ReactNode }) {
 function NoticeFacts({ notice }: { notice: NoticeDto }) {
   const notified = publishedRecipientSummary(notice);
   return (
-    <dl className="grid gap-4 rounded-xl border bg-card p-4 sm:grid-cols-2 lg:grid-cols-4">
+    <dl className="grid gap-4 rounded-xl border bg-card p-4 sm:grid-cols-2 lg:grid-cols-5">
       <Fact label="For">{noticeAudienceLabel(notice, notice.classes.map((entry) => entry.name))}</Fact>
       <Fact label="Written by">{notice.createdByName ?? 'Former staff member'} · {dateTimeFormat.format(notice.createdAt)}</Fact>
       <Fact label="Published">{notice.publishedAt ? `${notice.publishedByName ?? 'Former staff member'} · ${dateTimeFormat.format(notice.publishedAt)}` : 'Not published'}</Fact>
       <Fact label={notified ? 'Delivery' : 'Format'}>{notified ?? NOTICE_BODY_MODE_LABELS[notice.bodyMode]}</Fact>
+      <Fact label="Print size">
+        <span title={noticePrintSizeDescription(notice.pageSize)}>{NOTICE_PAGE_SIZE_LABELS[notice.pageSize]}{notice.pageSize === 'half' ? ' · two per A4 sheet' : ''}</span>
+      </Fact>
     </dl>
   );
 }
@@ -168,7 +172,7 @@ function SavedNoticePreview({ notice }: { notice: NoticeDto }) {
   return (
     <div className="flex flex-col gap-2">
       {state.kind === 'ready' ? <QueryRefreshNote error={state.refetchError} onRetry={() => void preview.refetch()} /> : null}
-      <DocumentPreview fitPageWidth html={state.kind === 'ready' ? state.data.html : undefined} label={notice.status === 'published' ? 'Published notice' : 'Draft preview'} placeholder="Rendering the notice…" />
+      <DocumentPreview fitPageWidth html={state.kind === 'ready' ? state.data.html : undefined} label={`${notice.status === 'published' ? 'Published notice' : 'Draft preview'} · ${NOTICE_PAGE_SIZE_LABELS[notice.pageSize]}`} placeholder="Rendering the notice…" />
     </div>
   );
 }

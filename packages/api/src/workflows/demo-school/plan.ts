@@ -128,6 +128,8 @@ export type DemoNotice = {
   status: 'draft' | 'published';
   bodyMode: 'plain' | 'template';
   body: string;
+  /** The paper it prints on. */
+  pageSize: 'full' | 'half';
   toStaff: boolean;
   cadetScope: 'none' | 'all_classes' | 'selected_classes';
   /** Slugs of the demo's classes a `selected_classes` notice names; empty otherwise. */
@@ -335,6 +337,7 @@ function buildNotices(selected: DemoClassSeed[], asOfLocal: LocalDate, timeZone:
       title: fillDemoNoticeDates(notice.title, asOfLocal),
       status: notice.status,
       bodyMode: notice.bodyMode,
+      pageSize: notice.pageSize,
       body: fillDemoNoticeDates(notice.body.join(notice.bodyMode === 'plain' ? '\n\n' : '\n'), asOfLocal),
       toStaff: notice.toStaff,
       cadetScope: notice.cadetScope,

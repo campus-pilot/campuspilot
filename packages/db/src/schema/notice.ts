@@ -13,7 +13,7 @@ import {
 } from "drizzle-orm/pg-core";
 
 import { generateId } from "../id";
-import { artifactTable } from "./artifact";
+import { artifactTable, documentTemplatePageSizeEnum } from "./artifact";
 import { user } from "./auth";
 import { classTable } from "./class";
 import { schoolTable } from "./school";
@@ -68,6 +68,15 @@ export const noticeTable = pgTable(
     bodyMode: noticeBodyModeEnum("body_mode").notNull(),
     /** Plain text or Handlebars source, according to `body_mode`. */
     body: text("body").notNull(),
+    /**
+     * The paper the notice is printed on, chosen per notice by its author
+     * for both body modes: `full` (portrait A4 pages) or `half` (half-A4
+     * pages, two copies imposed on every printed A4 sheet). Its own fact:
+     * never read from a template. Templates receive it as `print.size` and
+     * adapt to it. A published row is immutable, so this is also the size
+     * pinned at publication: the cached PDF and every WhatsApp copy use it.
+     */
+    pageSize: documentTemplatePageSizeEnum("page_size").notNull().default("full"),
     status: noticeStatusEnum("status").notNull().default("draft"),
     /** Addressed to the school's staff (every member of the school). */
     toStaff: boolean("to_staff").notNull(),

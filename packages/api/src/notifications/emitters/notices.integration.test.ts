@@ -164,7 +164,7 @@ describe('notice notifications', () => {
     expect(uploads).toHaveLength(2);
     expect(Buffer.from(uploads[0]!).equals(Buffer.from(uploads[1]!))).toBe(true);
     expect((await PDFDocument.load(uploads[0]!)).getPageCount()).toBe(1);
-    await expect(getS3Client().send(new HeadObjectCommand({ Bucket: env.S3_BUCKET, Key: noticePdfKey(schoolId, noticeId) }))).resolves.toMatchObject({ ContentType: 'application/pdf' });
+    await expect(getS3Client().send(new HeadObjectCommand({ Bucket: env.S3_BUCKET, Key: noticePdfKey(schoolId, noticeId, 'full') }))).resolves.toMatchObject({ ContentType: 'application/pdf' });
 
     // Each student reads their own copy; a student of another class has none.
     const ashaInbox = await (await createCadetLogin(asha)).client.listNotifications({});

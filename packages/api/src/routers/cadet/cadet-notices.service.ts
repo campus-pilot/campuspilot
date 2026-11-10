@@ -112,6 +112,7 @@ export async function getCadetNotice(db: DatabaseExecutor, cadet: CadetScope, no
     title: notice.title,
     publishedAt: notice.publishedAt,
     bodyMode: notice.bodyMode,
+    pageSize: notice.pageSize,
     text: notice.bodyMode === 'plain' ? notice.body : await renderPublishedNoticeText(db, notice),
   };
 }
@@ -119,7 +120,7 @@ export async function getCadetNotice(db: DatabaseExecutor, cadet: CadetScope, no
 /** The printed page of one notice (with the letterhead), for the portal's sandboxed preview. */
 export async function getCadetNoticeDocument(db: DatabaseExecutor, cadet: CadetScope, noticeId: string) {
   const notice = await addressedNotice(db, cadet, noticeId);
-  return { noticeId: notice.id, html: (await renderPublishedNoticeHtml(db, notice)).html };
+  return { noticeId: notice.id, pageSize: notice.pageSize, html: (await renderPublishedNoticeHtml(db, notice)).html };
 }
 
 /** A five-minute download URL of the notice's cached PDF (the same file staff download). */

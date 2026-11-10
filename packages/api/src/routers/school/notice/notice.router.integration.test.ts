@@ -751,6 +751,72 @@ describe('school notices', () => {
     });
   });
 
+  describe('print size', () => {
+    it('stores full A4 by default and the chosen size for both body modes', async () => {
+      const byDefault = await teacher.school.createNotice(plain({ title: 'Default size' }));
+      expect(byDefault.pageSize).toBe('full');
+      const halfPlain = await teacher.school.createNotice(plain({ title: 'Half plain', pageSize: 'half' }));
+      expect(halfPlain.pageSize).toBe('half');
+      const halfTemplate = await teacher.school.createNotice(plain({ title: 'Half template', bodyMode: 'template', body: '<p class="{{print.size}}">{{notice.title}}</p>', pageSize: 'half' }));
+      expect(halfTemplate.pageSize).toBe('half');
+      await expect(teacher.school.createNotice(plain({ pageSize: 'a5' }))).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+      expect((await db.select({ pageSize: noticeTable.pageSize }).from(noticeTable).where(eq(noticeTable.id, halfPlain.id)))[0]).toEqual({ pageSize: 'half' });
+    });
+
+    it('previews at the notice\'s size and tells the template that size', async () => {
+      const preview = await teacher.school.previewNotice({ schoolId, source: { kind: 'unsaved', ...plain({ pageSize: 'half' }) } as never });
+      expect(preview.pageSize).toBe('half');
+      expect(preview.html).toContain('size:210mm 148.5mm');
+      expect(preview.html).toContain('notice--half');
+      const custom = await teacher.school.previewNotice({ schoolId, source: { kind: 'unsaved', ...plain({ bodyMode: 'template', body: '<p class="size-{{print.size}}">x</p>', pageSize: 'half' }) } as never });
+      expect(custom.html).toContain('class="size-half"');
+    });
+
+    it('treats a size change as an edit: it bumps the version, so a publisher never confirms a stale size', async () => {
+      const draft = await teacher.school.createNotice(plain({ title: 'Resized' }));
+      const reviewed = await principal.school.previewNoticePublish({ schoolId, noticeId: draft.id });
+      expect(reviewed).toMatchObject({ kind: 'ready', version: draft.version, pageSize: 'full' });
+      const resized = await teacher.school.updateNotice({ ...plain({ title: 'Resized', pageSize: 'half' }), noticeId: draft.id, expectedVersion: draft.version });
+      expect(resized).toMatchObject({ pageSize: 'half', version: draft.version + 1 });
+      await expect(principal.school.publishNotice({ schoolId, noticeId: draft.id, expectedVersion: draft.version, expectedTemplateRevisionId: null })).rejects.toMatchObject({ code: 'CONFLICT' });
+      await expect(principal.school.previewNoticePublish({ schoolId, noticeId: draft.id })).resolves.toMatchObject({ kind: 'ready', pageSize: 'half' });
+    });
+
+    it('pins the size at publication: the notice, its preview and its cached PDF stay half A4, imposed two copies per A4 sheet', async () => {
+      const draft = await principal.school.createNotice(plain({ title: 'Half notice', pageSize: 'half' }));
+      const published = await principal.school.publishNotice({ schoolId, noticeId: draft.id, expectedVersion: draft.version, expectedTemplateRevisionId: null });
+      expect(published).toMatchObject({ status: 'published', pageSize: 'half' });
+      // A published notice is immutable: its size cannot be changed afterwards.
+      await expect(principal.school.updateNotice({ ...plain({ title: 'Half notice', pageSize: 'full' }), noticeId: draft.id, expectedVersion: published.version })).rejects.toMatchObject({ code: 'CONFLICT' });
+      const preview = await teacher.school.previewNotice({ schoolId, source: { kind: 'saved', noticeId: draft.id } });
+      expect(preview).toMatchObject({ pageSize: 'half' });
+      expect(preview.html).toContain('size:210mm 148.5mm');
+
+      const download = await teacher.school.getNoticeDownload({ schoolId, noticeId: draft.id });
+      const pdf = await PDFDocument.load(new Uint8Array(await (await fetch(download.url)).arrayBuffer()));
+      // A short half-page notice is one half page: one A4 sheet carrying it twice.
+      expect(pdf.getPageCount()).toBe(1);
+      expect(Math.round(pdf.getPage(0).getSize().width)).toBe(595);
+      expect(Math.round(pdf.getPage(0).getSize().height)).toBe(842);
+      // Cached under the half-size key only; no full-size object exists for it.
+      await expect(getS3Client().send(new HeadObjectCommand({ Bucket: env.S3_BUCKET, Key: noticePdfKey(schoolId, draft.id, 'half') }))).resolves.toBeDefined();
+      await expect(getS3Client().send(new HeadObjectCommand({ Bucket: env.S3_BUCKET, Key: noticePdfKey(schoolId, draft.id, 'full') }))).rejects.toBeDefined();
+    });
+
+    it('lets a long half-page notice continue on further half pages (one A4 sheet each) instead of clipping it', async () => {
+      const paragraph = 'This paragraph is repeated to make the notice longer than half a printed page. '.repeat(6);
+      const body = Array.from({ length: 12 }, (_, index) => `${index + 1}. ${paragraph}`).join('\n\n');
+      const draft = await principal.school.createNotice(plain({ title: 'Long half notice', body, pageSize: 'half' }));
+      await principal.school.publishNotice({ schoolId, noticeId: draft.id, expectedVersion: draft.version, expectedTemplateRevisionId: null });
+      const download = await principal.school.getNoticeDownload({ schoolId, noticeId: draft.id });
+      const pdf = await PDFDocument.load(new Uint8Array(await (await fetch(download.url)).arrayBuffer()));
+      expect(pdf.getPageCount()).toBeGreaterThan(1);
+      for (const page of pdf.getPages()) expect(Math.round(page.getSize().height)).toBe(842);
+      const preview = await principal.school.previewNotice({ schoolId, source: { kind: 'saved', noticeId: draft.id } });
+      expect(preview.html).toContain('12. This paragraph');
+    });
+  });
+
   describe('PDF download', () => {
     it('has no PDF for a draft', async () => {
       const draft = await principal.school.createNotice(plain());
@@ -760,7 +826,7 @@ describe('school notices', () => {
     it('renders a published notice once, caches it under the school prefix and serves the same file to every reader', async () => {
       const draft = await principal.school.createNotice(plain({ title: 'Holiday list' }));
       await principal.school.publishNotice({ schoolId, noticeId: draft.id, expectedVersion: draft.version, expectedTemplateRevisionId: null });
-      const key = noticePdfKey(schoolId, draft.id);
+      const key = noticePdfKey(schoolId, draft.id, 'full');
       await expect(getS3Client().send(new HeadObjectCommand({ Bucket: env.S3_BUCKET, Key: key }))).rejects.toBeDefined();
 
       const download = await teacher.school.getNoticeDownload({ schoolId, noticeId: draft.id });

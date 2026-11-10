@@ -170,6 +170,8 @@ describe('demo passwords', () => {
     expect(audience('sports-day')).toEqual(['published', 'template', true, 'all_classes', []]);
     expect(notices.filter((notice) => notice.status === 'draft').map((notice) => notice.key)).toEqual(['holiday-homework', 'parent-teacher-meeting']);
     expect(new Set(notices.map((notice) => notice.title)).size).toBe(notices.length);
+    // Both print sizes are shown: the timings circular is a half-A4 notice.
+    expect(notices.filter((notice) => notice.pageSize === 'half').map((notice) => notice.key)).toEqual(['school-timings']);
 
     for (const notice of notices) {
       // Written and published in the past, in that order; drafts are unpublished.
@@ -182,7 +184,7 @@ describe('demo passwords', () => {
       // Every date token was replaced, and what remains is what the API accepts.
       expect(`${notice.title}\n${notice.body}`, notice.key).not.toMatch(/\{date:/);
       expect(notice.body.length, notice.key).toBeLessThanOrEqual(200_000);
-      if (notice.bodyMode === 'template') expect(() => assertValidNoticeTemplate(notice.body), notice.key).not.toThrow();
+      if (notice.bodyMode === 'template') expect(() => assertValidNoticeTemplate(notice.body, notice.pageSize), notice.key).not.toThrow();
     }
     // 16 days before 6 November 2026 at 11:00 in the demo's time zone (Asia/Kolkata).
     expect(notices.find((notice) => notice.key === 'staff-meeting')!.publishedAt).toBe('2026-10-21T05:30:00.000Z');

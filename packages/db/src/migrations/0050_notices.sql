@@ -19,6 +19,7 @@ CREATE TABLE "notice" (
 	"title" text NOT NULL,
 	"body_mode" "notice_body_mode" NOT NULL,
 	"body" text NOT NULL,
+	"page_size" "document_template_page_size" DEFAULT 'full' NOT NULL,
 	"status" "notice_status" DEFAULT 'draft' NOT NULL,
 	"to_staff" boolean NOT NULL,
 	"cadet_scope" "notice_cadet_scope" NOT NULL,

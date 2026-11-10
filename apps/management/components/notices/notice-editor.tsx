@@ -8,7 +8,7 @@ import { useForm } from '@tanstack/react-form';
 import { keepPreviousData, skipToken, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { z } from 'zod';
 import { SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
-import { NOTICE_BODY_MODES, NOTICE_TITLE_MAX_LENGTH, type NoticeBodyMode, type NoticeDto } from '@campuspilot/api/routers/school/notice/notice.dto';
+import { NOTICE_BODY_MODES, NOTICE_PAGE_SIZE_LABELS, NOTICE_PAGE_SIZES, NOTICE_TITLE_MAX_LENGTH, type NoticeBodyMode, type NoticeDto, type NoticePageSize } from '@campuspilot/api/routers/school/notice/notice.dto';
 import { ClassScopePicker } from '@campuspilot/components/class-scope-picker';
 import { DocumentButton, DocumentErrors, DocumentNotice, DocumentPreview } from '@campuspilot/components/documents/document-controls';
 import { NoticeAudienceField, NoticeCadetClassScopeField, noticeAudienceIncludesCadets, noticeAudienceSelection } from '@campuspilot/components/notices';
@@ -37,6 +37,7 @@ import {
   noticeFormDefaults,
   noticeFormSchemaFor,
   noticePreviewContent,
+  noticePrintSizeDescription,
   noticeSaveInput,
   noticesHref,
   type CadetAudienceAvailability,
@@ -65,7 +66,7 @@ type EditorProps = {
   onReload?: () => void;
 };
 
-type NoticePreview = UseQueryResult<{ html: string }>;
+type NoticePreview = UseQueryResult<{ html: string; pageSize: NoticePageSize }>;
 
 /** What the live preview renders and the order in which it was typed (see `newestRenderedPreview`). */
 type PreviewRequest = { content: NoticePreviewContent | null; sequence: number };
@@ -206,6 +207,35 @@ function BodyModeField({ form }: { form: NoticeForm }) {
   );
 }
 
+function isPageSize(value: string): value is NoticePageSize {
+  return (NOTICE_PAGE_SIZES as readonly string[]).includes(value);
+}
+
+/**
+ * The paper the notice prints on, for both body modes. A plain notice's
+ * school Notice design and a custom template both adapt to it
+ * (`print.size`); the live preview shows the chosen frame. Changing it is a
+ * saved edit, so it gives the draft a new version like any other change.
+ */
+function PrintSizeField({ form }: { form: NoticeForm }) {
+  const ids = NOTICE_FIELD_IDS.pageSize;
+  return (
+    <form.Field name="pageSize">
+      {(field) => (
+        <div className="flex flex-col gap-1.5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span id={ids.control} className="text-sm font-medium">Print size</span>
+            <ToggleGroup type="single" variant="outline" spacing={0} aria-labelledby={ids.control} aria-describedby={ids.error} value={field.state.value} onValueChange={(value) => { if (isPageSize(value)) field.handleChange(value); }}>
+              {NOTICE_PAGE_SIZES.map((size) => <ToggleGroupItem key={size} value={size}>{NOTICE_PAGE_SIZE_LABELS[size]}</ToggleGroupItem>)}
+            </ToggleGroup>
+          </div>
+          <p id={ids.error} className="text-xs text-muted-foreground">{noticePrintSizeDescription(field.state.value)}</p>
+        </div>
+      )}
+    </form.Field>
+  );
+}
+
 function PlainBodyField({ form }: { form: NoticeForm }) {
   const ids = NOTICE_FIELD_IDS.plainBody;
   return (
@@ -233,7 +263,7 @@ function TemplateVariables() {
           </div>
         ))}
       </dl>
-      <p className="text-xs text-muted-foreground">A notice can show school, session and notice details only. Scripts and outside files are removed, and it prints on as many A4 pages as it needs.</p>
+      <p className="text-xs text-muted-foreground">A notice can show school, session and notice details only. Scripts and outside files are removed, and it prints on as many pages as it needs. Use {'{{print.size}}'} in a class to adapt the layout to full or half A4.</p>
     </div>
   );
 }
@@ -261,6 +291,7 @@ function BodySection({ form }: { form: NoticeForm }) {
   return (
     <div className="flex flex-col gap-2">
       <BodyModeField form={form} />
+      <PrintSizeField form={form} />
       <form.Subscribe selector={(state) => state.values.bodyMode}>
         {(bodyMode) => (bodyMode === 'plain' ? <PlainBodyField form={form} /> : <TemplateBodyField form={form} />)}
       </form.Subscribe>
@@ -413,7 +444,7 @@ function LivePreview({ preview, lastGoodHtml, hasContent }: { preview: NoticePre
   return (
     <aside className="flex min-w-0 flex-col gap-2 xl:sticky xl:top-4 xl:self-start">
       {failed ? <DocumentNotice error>{noticeErrorMessage(preview.error, 'Unable to render this notice.')}</DocumentNotice> : null}
-      <DocumentPreview fitPageWidth html={html} label="Preview" placeholder={failed ? 'Fix the problem above to see the preview.' : "Write the notice text to see it on your school's letterhead."} />
+      <DocumentPreview fitPageWidth html={html} label={preview.data ? `Preview · ${NOTICE_PAGE_SIZE_LABELS[preview.data.pageSize]}` : 'Preview'} placeholder={failed ? 'Fix the problem above to see the preview.' : "Write the notice text to see it on your school's letterhead."} />
       <p className="text-xs text-muted-foreground" aria-live="polite">{hasContent ? previewStatus(preview, failed && html !== undefined) : null}</p>
     </aside>
   );

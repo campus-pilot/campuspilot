@@ -29,7 +29,7 @@ export function createTemplateEditingPrompt(input: {
       : input.documentType === "timetable"
         ? "Use landscape A4."
         : input.documentType === "notice"
-          ? "Use portrait A4. A notice flows over as many pages as its text needs and CampusPilot gives every page a 16mm margin: do not set a fixed height, overflow:hidden or outer page padding."
+          ? "One design prints notices of two sizes, chosen per notice and given to the template as print.size: \"full\" (portrait A4 pages, 16mm margin) or \"half\" (210mm × 148.5mm pages, 10mm margin; CampusPilot prints two copies on each A4 sheet). Adapt to it with a class such as notice--{{print.size}} (for example a compact letterhead and smaller type for .notice--half). A notice flows over as many pages as its text needs: do not set a fixed height, overflow:hidden or outer page padding."
         : input.pageSize === "half"
           ? "Design one half-A4 document (210mm × 148.5mm). CampusPilot places two documents vertically on each portrait A4 sheet."
           : "Use portrait A4. Each student document starts on a new printed page.";

@@ -1,4 +1,5 @@
 import Handlebars from 'handlebars';
+import { PDFDocument } from 'pdf-lib';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { DOCUMENT_MARKETPLACE, NOTICE_DEFAULT_TEMPLATE_SLUG, SAMPLE_NOTICE_CONTEXT } from '../document/document.catalog';
@@ -7,6 +8,7 @@ import { NOTICE_CONTEXT_FIELDS, NOTICE_TEMPLATE_STARTER, NOTICE_TEMPLATE_VARIABL
 import {
   assertValidNoticeTemplate,
   assertValidSchoolNoticeTemplate,
+  imposeHalfPageNoticeCopies,
   NOTICE_MAX_LOGO_USES,
   NOTICE_PUBLISHED_RENDER_MAX_CHARS,
   NOTICE_RENDER_MAX_CHARS,
@@ -245,6 +247,23 @@ describe('school Notice templates and the render budget', () => {
     expect(process.memoryUsage().rss - before).toBeLessThan(100_000_000);
   });
 
+  it('accepts every catalog Notice design at both print sizes, against the sample and the longest notice', () => {
+    const designs = DOCUMENT_MARKETPLACE.filter((item) => item.documentType === 'notice');
+    expect(designs.map((item) => item.slug)).toEqual(['notice-default', 'notice-compact']);
+    for (const design of designs) {
+      expect(() => assertValidSchoolNoticeTemplate(design.content), design.slug).not.toThrow();
+      // Each design adapts to the size: the class it reads differs between the two renders.
+      const full = renderNoticeDocument(design.content, SAMPLE_NOTICE_CONTEXT, NOTICE_RENDER_MAX_CHARS);
+      const half = renderNoticeDocument(design.content, { ...SAMPLE_NOTICE_CONTEXT, print: { size: 'half' } }, NOTICE_RENDER_MAX_CHARS);
+      expect(full, design.slug).toMatch(/--full"/);
+      expect(half, design.slug).toMatch(/--half"/);
+    }
+  });
+
+  it('checks a custom template at the print size of its own notice', () => {
+    expect(() => assertValidNoticeTemplate('<p class="{{print.size}}">{{notice.title}}</p>', 'half')).not.toThrow();
+  });
+
   it('checks a design against the longest notice when it is saved, and holds every render to the same budget', () => {
     // The built-in design prints a notice of the maximum length.
     expect(() => assertValidSchoolNoticeTemplate(defaultTemplate)).not.toThrow();
@@ -354,15 +373,78 @@ describe('flowing notice layout', () => {
     expect(html).toContain('.notice-document{box-sizing:border-box;width:100%;break-after:page');
   });
 
+  it('lays a half-page notice out on half-A4 pages that flow, never clipped to one slot', () => {
+    const one = renderDocument(defaultTemplate, { ...SAMPLE_NOTICE_CONTEXT, print: { size: 'half' } });
+    const html = combineDocuments([one], 'notice', 'half');
+    expect(html).toContain('@page{size:210mm 148.5mm;margin:10mm}');
+    expect(html).toContain('class="notice notice--half"');
+    expect(html).not.toContain('overflow:hidden');
+    expect(html).not.toContain('148.5mm 148.5mm');
+    expect(html).not.toContain('print-sheet');
+    // The on-screen preview marks where each half page ends and says how it prints.
+    expect(html).toContain('background-size:100% 128.5mm');
+    expect(html).toContain('two copies per A4 sheet');
+  });
+
+  it('keeps every word of a long half-page notice: it continues on further half pages', () => {
+    const paragraphs = Array.from({ length: 60 }, (_, index) => `Paragraph ${index + 1}: ${'Students must carry their identity cards. '.repeat(8)}`);
+    const context = { ...SAMPLE_NOTICE_CONTEXT, print: { size: 'half' as const }, notice: { ...SAMPLE_NOTICE_CONTEXT.notice, paragraphs } };
+    for (const design of DOCUMENT_MARKETPLACE.filter((item) => item.documentType === 'notice')) {
+      const html = renderNoticeDocument(design.content, context, NOTICE_RENDER_MAX_CHARS);
+      expect(html, design.slug).toContain('Paragraph 1:');
+      expect(html, design.slug).toContain('Paragraph 60:');
+      expect(html, design.slug).toContain('size:210mm 148.5mm');
+      // Nothing in the layout or the design hides overflowing text or fixes a height.
+      expect(html, design.slug).not.toMatch(/overflow:\s*hidden|[^-]height:\s*(?:148|297)/);
+    }
+  });
+
+  it('takes the layout from the size the template was told, so design and page never disagree', () => {
+    const half = renderNoticeDocument('<p class="x-{{print.size}}">{{notice.title}}</p>', { ...SAMPLE_NOTICE_CONTEXT, print: { size: 'half' } }, NOTICE_RENDER_MAX_CHARS);
+    expect(half).toContain('class="x-half"');
+    expect(half).toContain('size:210mm 148.5mm');
+    const full = renderNoticeDocument('<p class="x-{{print.size}}">{{notice.title}}</p>', SAMPLE_NOTICE_CONTEXT, NOTICE_RENDER_MAX_CHARS);
+    expect(full).toContain('class="x-full"');
+    expect(full).toContain('@page{size:A4;margin:16mm}');
+  });
+
   it('leaves every other document type on its fixed sheet', () => {
     const html = combineDocuments(['<p>One</p>'], 'report_card');
     expect(html).toContain('height:297mm;overflow:hidden');
   });
 });
 
+describe('half-page notice imposition', () => {
+  /** A PDF of half-A4 pages (as Chromium prints a half-page notice), each page labelled by its size. */
+  async function halfPagePdf(pages: number) {
+    const pdf = await PDFDocument.create();
+    for (let index = 0; index < pages; index += 1) pdf.addPage([595.28, 420.94]).drawText(`Page ${index + 1}`, { x: 40, y: 380 });
+    return pdf.save();
+  }
+
+  it('prints every half page twice on one portrait A4 sheet, so it needs only plain A4 paper', async () => {
+    const imposed = await PDFDocument.load(await imposeHalfPageNoticeCopies(await halfPagePdf(1)));
+    expect(imposed.getPageCount()).toBe(1);
+    const { width, height } = imposed.getPage(0).getSize();
+    expect(width).toBeCloseTo(595.28, 1);
+    expect(height).toBeCloseTo(841.89, 1);
+  });
+
+  it('gives a long notice one sheet per half page, in order, never dropping a page', async () => {
+    const imposed = await PDFDocument.load(await imposeHalfPageNoticeCopies(await halfPagePdf(3)));
+    expect(imposed.getPageCount()).toBe(3);
+    for (const page of imposed.getPages()) expect(page.getSize().height).toBeCloseTo(841.89, 1);
+  });
+});
+
 describe('notice PDF cache key', () => {
   it("lives under the school's prefix, so the demo purge sweep removes it", () => {
-    expect(noticePdfKey('sch_1', 'ntc_1')).toBe('schools/sch_1/notices/ntc_1.pdf');
+    expect(noticePdfKey('sch_1', 'ntc_1', 'full')).toBe('schools/sch_1/notices/ntc_1-full.pdf');
+  });
+
+  it('names the page size, so a PDF laid out at one size is never served for a notice of the other', () => {
+    expect(noticePdfKey('sch_1', 'ntc_1', 'half')).toBe('schools/sch_1/notices/ntc_1-half.pdf');
+    expect(noticePdfKey('sch_1', 'ntc_1', 'half')).not.toBe(noticePdfKey('sch_1', 'ntc_1', 'full'));
   });
 });
 

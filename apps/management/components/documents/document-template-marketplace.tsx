@@ -219,9 +219,12 @@ function MarketplaceCard({
       <div className="flex min-h-16 flex-col gap-1">
         <h3 className="text-sm font-semibold">{item.name}</h3>
         <p className="text-xs font-medium text-foreground/80">
-          {item.pageSize === 'half'
-            ? 'Half A4 · two per sheet'
-            : 'Full A4 · one per sheet'}
+          {/* Notice designs adapt to each notice's print size; they have no footprint. */}
+          {item.documentType === 'notice'
+            ? 'Full or half A4 · each notice chooses'
+            : item.pageSize === 'half'
+              ? 'Half A4 · two per sheet'
+              : 'Full A4 · one per sheet'}
         </p>
         <p className="text-xs leading-relaxed text-muted-foreground">
           {item.description}

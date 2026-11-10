@@ -22,6 +22,19 @@ export type NoticeStatus = (typeof NOTICE_STATUSES)[number];
 export const NOTICE_CADET_SCOPES = ['none', 'all_classes', 'selected_classes'] as const;
 export type NoticeCadetScope = (typeof NOTICE_CADET_SCOPES)[number];
 
+/**
+ * The paper a notice is printed on, as the document system names template
+ * page sizes: `full` = portrait A4, the notice flowing over as many A4 pages
+ * as it needs; `half` = half an A4 sheet (210 x 148.5 mm), the notice flowing
+ * over as many half pages as it needs, with two copies of each half page
+ * imposed on every printed A4 sheet (cut along the guide). Chosen per
+ * notice for both body modes; templates read it as `print.size`.
+ */
+export const NOTICE_PAGE_SIZES = ['full', 'half'] as const;
+export type NoticePageSize = (typeof NOTICE_PAGE_SIZES)[number];
+/** Labels shared by every screen that states a notice's print size. */
+export const NOTICE_PAGE_SIZE_LABELS: Record<NoticePageSize, string> = { full: 'Full A4', half: 'Half A4' };
+
 export const NOTICE_TITLE_MAX_LENGTH = 200;
 /** Same limit as a document template's source. */
 export const NOTICE_BODY_MAX_LENGTH = 200_000;
@@ -83,6 +96,10 @@ const contentShape = {
   title: noticeTitleSchema,
   bodyMode: z.enum(NOTICE_BODY_MODES),
   body: noticeBodySchema.describe('Plain text (blank lines separate paragraphs) or, for bodyMode template, the complete Handlebars/HTML document.'),
+  pageSize: z
+    .enum(NOTICE_PAGE_SIZES)
+    .default('full')
+    .describe('Paper the notice prints on, for either body mode: full (portrait A4 pages) or half (half-A4 pages, two copies per printed A4 sheet). Templates adapt to it through print.size.'),
 };
 
 export const noticeScopeInputSchema = z.object({ schoolId: id, noticeId: id });
@@ -199,6 +216,12 @@ const noticeSummaryShape = {
   publishedAt: z.date().nullable(),
   /** The calendar date printed on the notice (`YYYY-MM-DD`), fixed at publication; null for a draft. */
   issuedOn: z.string().nullable(),
+  /**
+   * The paper the notice prints on (both body modes). Part of the saved
+   * content: changing it is an edit that increments `version`, and it is
+   * fixed once the notice is published.
+   */
+  pageSize: z.enum(NOTICE_PAGE_SIZES),
   /** School members and students notified at publication; null for a draft. */
   publishedStaffCount: z.number().int().nonnegative().nullable(),
   publishedCadetCount: z.number().int().nonnegative().nullable(),
@@ -251,6 +274,8 @@ export const noticePreviewOutputSchema = z.object({
    * that is its own template.
    */
   templateRevisionId: z.string().nullable(),
+  /** The paper this page was laid out for: the notice's `pageSize` (the unsaved content's for an unsaved preview). */
+  pageSize: z.enum(NOTICE_PAGE_SIZES),
 });
 
 export const noticeDownloadOutputSchema = z.object({ url: z.url(), expiresIn: z.number().int() });

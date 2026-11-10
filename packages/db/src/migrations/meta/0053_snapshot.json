@@ -10773,6 +10773,14 @@
           "primaryKey": false,
           "notNull": true
         },
+        "page_size": {
+          "name": "page_size",
+          "type": "document_template_page_size",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'full'"
+        },
         "status": {
           "name": "status",
           "type": "notice_status",

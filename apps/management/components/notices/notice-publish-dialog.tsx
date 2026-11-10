@@ -21,6 +21,7 @@ import {
   editNoticeHref,
   isNoticeConflict,
   noticeErrorMessage,
+  noticePrintSizeDescription,
   publishReviewChange,
   publishReviewOf,
   staffRecipientLine,
@@ -73,6 +74,7 @@ function PublishForecast({ notice, preview }: { notice: NoticeDto; preview: Noti
       <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Who receives it</p>
       <StaffRecipients preview={preview} />
       <CadetRecipients notice={notice} preview={preview} />
+      <p className="text-xs text-muted-foreground">Print size: {noticePrintSizeDescription(preview.pageSize)}</p>
     </div>
   );
 }

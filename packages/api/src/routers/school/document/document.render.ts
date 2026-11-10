@@ -834,29 +834,58 @@ function chunks<T>(items: T[], size: number) {
   return result;
 }
 
-/** Margin of every physical page of a flowing notice. */
+/** Margin of every physical page of a full-A4 flowing notice. */
 const NOTICE_PAGE_MARGIN = "16mm";
+/**
+ * Margin of every half-A4 page of a half-page notice: smaller than the
+ * full-page margin so a half page keeps a useful text area, and wide
+ * enough that the cut guide between the two copies on a sheet
+ * (`imposeHalfPageNoticeCopies`) falls in blank paper.
+ */
+const HALF_NOTICE_PAGE_MARGIN = "10mm";
+/** Height of the text area of one half-A4 notice page: 148.5 mm less both margins. */
+const HALF_NOTICE_TEXT_HEIGHT = "128.5mm";
 
 /**
  * Notices flow: their length is whatever the author wrote, so they are not
- * clipped to one fixed sheet like every other document. Each notice starts
- * on a new portrait A4 page and continues over as many pages as it needs.
- * The page margin belongs to `@page`, so every continuation page keeps it
- * (padding on the template's root would apply to the first and last page
- * only). On screen (the sandboxed preview, where `@page` does not apply) the
- * same margin is shown as padding around an A4-wide column.
+ * clipped to one fixed sheet like every other document, and nothing is
+ * ever hidden. Each notice starts on a new page and continues over as many
+ * pages as it needs. The page margin belongs to `@page`, so every
+ * continuation page keeps it (padding on the template's root would apply
+ * to the first and last page only).
+ *
+ * - `full`: portrait A4 pages with a 16 mm margin.
+ * - `half`: pages of half an A4 sheet (210 x 148.5 mm) with a 10 mm margin;
+ *   a long notice continues on the next half page. Chromium paginates the
+ *   text; the PDF is then imposed two copies per A4 sheet
+ *   (`imposeHalfPageNoticeCopies` in the notice renderer), so it prints on
+ *   ordinary A4 paper.
+ *
+ * On screen (the sandboxed preview, where `@page` does not apply) the same
+ * margin is shown as padding around an A4-wide column, so the text wraps at
+ * the printed width. A half-page notice additionally shows a line at every
+ * 128.5 mm of text, where each half page ends, and a caption in its top
+ * margin: the preview cannot paginate, so the lines mark the frame (a page
+ * may break a line or two earlier, never later: Chromium does not split a
+ * line of text across pages).
  */
-function flowingNoticeLayout(documents: string[]) {
+function flowingNoticeLayout(documents: string[], pageSize: DocumentTemplatePageSize) {
   const notices = documents
     .map((doc) => `<article class="notice-document">${doc}</article>`)
     .join("");
-  return `<div class="batch">${notices}</div><style>@page{size:A4;margin:${NOTICE_PAGE_MARGIN}}html,body{margin:0!important;padding:0!important}.notice-document{box-sizing:border-box;width:100%;break-after:page;overflow-wrap:anywhere}.notice-document:last-child{break-after:auto}@media screen{.notice-document{max-width:210mm;margin:0 auto;padding:${NOTICE_PAGE_MARGIN}}}</style>`;
+  const half = pageSize === "half";
+  const margin = half ? HALF_NOTICE_PAGE_MARGIN : NOTICE_PAGE_MARGIN;
+  const page = half ? `size:210mm 148.5mm;margin:${margin}` : `size:A4;margin:${margin}`;
+  const halfFrame = half
+    ? `.notice-document{position:relative;background-image:linear-gradient(to bottom,transparent calc(100% - 0.4mm),#9aa5b1 calc(100% - 0.4mm));background-size:100% ${HALF_NOTICE_TEXT_HEIGHT};background-origin:content-box;background-clip:content-box;background-repeat:repeat-y}.notice-document::before{content:"Half A4 \\00b7  two copies per A4 sheet \\00b7  lines mark where each half page ends";position:absolute;top:3mm;right:${margin};font:9px/1 Arial,Helvetica,sans-serif;color:#7b8794}`
+    : "";
+  return `<div class="batch">${notices}</div><style>@page{${page}}html,body{margin:0!important;padding:0!important}.notice-document{box-sizing:border-box;width:100%;break-after:page;overflow-wrap:anywhere}.notice-document:last-child{break-after:auto}@media screen{.notice-document{max-width:210mm;margin:0 auto;padding:${margin}}${halfFrame}}</style>`;
 }
 
 /** Templates own the design inside one slot; this wrapper exclusively owns
  * physical A4 imposition. Half templates are paired vertically, ID cards are
  * placed eight-up, and every other document gets one physical sheet, except
- * notices, which flow over as many pages as they need
+ * notices, which flow over as many full- or half-A4 pages as they need
  * ({@link flowingNoticeLayout}).
  */
 export function combineDocuments(
@@ -871,7 +900,7 @@ export function combineDocuments(
     throw rpcError.badRequest(
       "This document exceeds the 25 MB rendering limit. Select fewer students or use smaller photos.",
     );
-  if (type === "notice") return safeHtml(flowingNoticeLayout(documents));
+  if (type === "notice") return safeHtml(flowingNoticeLayout(documents, pageSize));
   const landscape = type === "timetable";
   const perSheet = type === "id_card" ? 8 : pageSize === "half" ? 2 : 1;
   const sheets = chunks(documents, perSheet)

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 import { deliveryForecastSchema } from '../exam/exam-result-notification.dto';
-import { NOTICE_CADET_SCOPES } from './notice.dto';
+import { NOTICE_CADET_SCOPES, NOTICE_PAGE_SIZES } from './notice.dto';
 
 /**
  * What publishing a notice would notify (server-only schema: the forecast
@@ -24,6 +24,11 @@ export const noticePublishPreviewSchema = z.discriminatedUnion('kind', [
      * it is the revision of the preview that was reviewed.
      */
     templateRevisionId: z.string().nullable(),
+    /**
+     * The paper the notice will be printed on (its `pageSize`). Part of the
+     * notice's content, so `version` already covers it.
+     */
+    pageSize: z.enum(NOTICE_PAGE_SIZES),
     toStaff: z.boolean(),
     staffRecipientCount: z.number().int().nonnegative(),
     cadetScope: z.enum(NOTICE_CADET_SCOPES),

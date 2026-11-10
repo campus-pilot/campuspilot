@@ -37,15 +37,21 @@ describe('notice document template', () => {
   });
 
   it('builds a real notice context with exactly the fields of the sample and of the editor\'s variable guide', async () => {
-    const context = await buildNoticeContext(db, { schoolId, sessionId, title: 'Holiday', bodyMode: 'plain', body: 'School is closed.' }, { generatedAt: new Date('2026-11-10T06:00:00.000Z'), issuedOn: null });
+    const context = await buildNoticeContext(db, { schoolId, sessionId, title: 'Holiday', bodyMode: 'plain', body: 'School is closed.', pageSize: 'half' }, { generatedAt: new Date('2026-11-10T06:00:00.000Z'), issuedOn: null });
     const paths = leafPaths(context).sort();
     expect(paths).toEqual(leafPaths(SAMPLE_NOTICE_CONTEXT).sort());
     expect(paths).toEqual(Object.keys(NOTICE_CONTEXT_FIELDS).sort());
+    // The notice's own print size reaches the template as an explicit fact.
+    expect(context.print).toEqual({ size: 'half' });
   });
 
   it('offers the built-in design in the marketplace, previewed with notice-only sample data in the flowing layout', async () => {
     const list = await teacher.school.listMarketplaceTemplates(scope());
-    expect(list.items).toEqual([expect.objectContaining({ slug: 'notice-default', documentType: 'notice', pageSize: 'full' })]);
+    // Notice designs adapt to each notice's print size, so every one is stored as full (not a footprint).
+    expect(list.items).toEqual([
+      expect.objectContaining({ slug: 'notice-default', documentType: 'notice', pageSize: 'full' }),
+      expect.objectContaining({ slug: 'notice-compact', documentType: 'notice', pageSize: 'full' }),
+    ]);
     const item = await teacher.school.getMarketplaceTemplate({ ...scope(), slug: 'notice-default' });
     expect(item.html).toContain('Annual Sports Day');
     expect(item.html).toContain('Greenwood Public School');
@@ -75,6 +81,17 @@ describe('notice document template', () => {
     await expect(teacher.school.getActiveDocumentTemplate(scope())).resolves.toMatchObject({ artifact: { id: saved.artifact.id, name: 'Mine' }, content });
     // The earlier revision is kept: published notices may have pinned it.
     expect(await db.select().from(artifactTable).where(and(eq(artifactTable.schoolId, schoolId), eq(artifactTable.documentType, 'notice')))).toHaveLength(2);
+
+    // A Notice design prints both sizes: it is previewed at either, told the size as print.size.
+    const adaptive = '<p class="size-{{print.size}}">{{notice.title}}</p>';
+    const halfPreview = await teacher.school.previewDocumentTemplate({ ...scope(), content: adaptive, printSize: 'half' });
+    expect(halfPreview.html).toContain('class="size-half"');
+    expect(halfPreview.html).toContain('size:210mm 148.5mm');
+    expect((await teacher.school.previewDocumentTemplate({ ...scope(), content: adaptive })).html).toContain('class="size-full"');
+    const compactHalf = await teacher.school.getMarketplaceTemplate({ ...scope(), slug: 'notice-compact', printSize: 'half' });
+    expect(compactHalf.html).toContain('cn--half');
+    // A print size belongs to Notice designs only; elsewhere it is refused, not ignored.
+    await expect(manager.school.previewDocumentTemplate({ schoolId, documentType: 'report_card', content: '<p>x</p>', printSize: 'half' })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
 
     // Notices have no half-A4 footprint, and invalid Handlebars is refused.
     await expect(manager.school.saveDocumentTemplate({ ...scope(), name: 'Half', content, pageSize: 'half', expectedRevisionId: saved.artifact.id })).rejects.toMatchObject({ code: 'BAD_REQUEST' });

@@ -11,6 +11,7 @@
       "cadetScope": "none",
       "classPick": null,
       "bodyMode": "plain",
+      "pageSize": "full",
       "body": [
         "All teaching staff are requested to attend a meeting in the staff room on {date:-14} at 2:30 PM, after the last period.",
         "Agenda:\n1. Lesson plan submissions for the coming month\n2. Assessment calendar and invigilation duties\n3. Remedial classes for students who need extra support",
@@ -27,6 +28,7 @@
       "cadetScope": "all_classes",
       "classPick": null,
       "bodyMode": "plain",
+      "pageSize": "half",
       "body": [
         "Dear parents and students,",
         "From {date:-6}, school will begin at 8:15 AM and close at 2:15 PM for all classes. The main gate closes at 8:10 AM.",
@@ -44,6 +46,7 @@
       "cadetScope": "selected_classes",
       "classPick": { "from": "seniormost", "count": 2 },
       "bodyMode": "plain",
+      "pageSize": "full",
       "body": [
         "The school science exhibition will be held on {date:+9} in the assembly hall, from 9:30 AM to 12:30 PM.",
         "Students of the classes this notice is addressed to will present working models in groups of three. Each group chooses one topic from the list on the class notice board.",
@@ -61,6 +64,7 @@
       "cadetScope": "all_classes",
       "classPick": null,
       "bodyMode": "template",
+      "pageSize": "full",
       "body": [
         "<style>",
         "  .invite { font: 14px/1.6 Arial, Helvetica, sans-serif; color: #1f2933; }",
@@ -108,6 +112,7 @@
       "cadetScope": "none",
       "classPick": null,
       "bodyMode": "plain",
+      "pageSize": "full",
       "body": [
         "Subject teachers are requested to plan holiday homework that a student can finish in about thirty minutes a day.",
         "Please prefer reading, a short project or revision worksheets over copying exercises, and share the homework with the class teacher by {date:+5}.",
@@ -124,6 +129,7 @@
       "cadetScope": "all_classes",
       "classPick": null,
       "bodyMode": "plain",
+      "pageSize": "full",
       "body": [
         "Dear parents,",
         "A parent-teacher meeting will be held on {date:+8} between 9:00 AM and 12:00 noon in your child's classroom.",

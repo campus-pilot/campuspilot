@@ -106,10 +106,12 @@ describe('cadet notices', () => {
     expect(notice).toMatchObject({ noticeId: notices['Grade 6 only'], title: 'Grade 6 only', bodyMode: 'plain', text: 'First paragraph.\n\nSecond <b>paragraph</b>.' });
     expect(notice.publishedAt).toBeInstanceOf(Date);
     // Nothing staff-only leaves with it, and no markup: the Cadet MCP serves this as a core tool.
-    expect(Object.keys(notice).sort()).toEqual(['bodyMode', 'noticeId', 'publishedAt', 'text', 'title']);
+    expect(Object.keys(notice).sort()).toEqual(['bodyMode', 'noticeId', 'pageSize', 'publishedAt', 'text', 'title']);
+    expect(notice.pageSize).toBe('full');
 
     const page = await asha.getNoticeDocument({ noticeId: notices['Grade 6 only']! });
-    expect(Object.keys(page).sort()).toEqual(['html', 'noticeId']);
+    expect(Object.keys(page).sort()).toEqual(['html', 'noticeId', 'pageSize']);
+    expect(page).toMatchObject({ pageSize: 'full' });
     expect(page.html).toContain('Content-Security-Policy');
     expect(page.html).toContain('Cadet Notice School');
     expect(page.html).toContain('Second &lt;b&gt;paragraph&lt;/b&gt;.');
@@ -126,6 +128,13 @@ describe('cadet notices', () => {
     const rendered = await asha.getNoticeDocument({ noticeId: designed });
     expect(rendered.html).toContain('<h1 class="own">Designed</h1>');
     expect(rendered.html).not.toContain('<script');
+
+    // A half-A4 notice states its size and shows its printed page in the half-page frame.
+    const half = await create('Half size', { pageSize: 'half', cadetScope: 'all_classes' });
+    await expect(asha.getNotice({ noticeId: half })).resolves.toMatchObject({ pageSize: 'half' });
+    const halfPage = await asha.getNoticeDocument({ noticeId: half });
+    expect(halfPage.pageSize).toBe('half');
+    expect(halfPage.html).toContain('size:210mm 148.5mm');
   });
 
   it('keeps megabytes of logo out of the content read: a school with a logo returns text of the same size', async () => {

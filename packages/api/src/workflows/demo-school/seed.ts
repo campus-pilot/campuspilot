@@ -166,6 +166,8 @@ const noticeSeedSchema = z
      */
     classPick: z.object({ from: z.enum(['seniormost', 'juniormost']), count: z.number().int().min(1).max(13) }).nullable(),
     bodyMode: z.enum(['plain', 'template']),
+    /** The paper the notice prints on (`notice.page_size`), stated for every notice. */
+    pageSize: z.enum(['full', 'half']),
     body: z.array(z.string().min(1)).min(1),
   })
   .superRefine((notice, context) => {

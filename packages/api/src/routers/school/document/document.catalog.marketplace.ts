@@ -326,7 +326,14 @@ const statementTemplates: CatalogTemplate[] = [
 /**
  * The built-in notice design. It is also what a plain-text notice is
  * rendered with while the school has selected no Notice template, so it
- * must always render a title and the paragraphs.
+ * must always render a title and the paragraphs, at both print sizes.
+ *
+ * Notice designs are size-adaptive: every notice chooses full or half A4
+ * (`notice.page_size`) and the design reads it as `print.size`. The root
+ * carries `notice--{{print.size}}`, and the `.notice--half` rules make the
+ * letterhead and type compact enough for a half-A4 page. A Notice catalog
+ * entry's `pageSize` is therefore always `full` (it is not a footprint for
+ * notices; see `validateTemplatePageSize`).
  *
  * It has no fixed height and no outer padding: notices flow over as many
  * pages as they need and the renderer's `@page` margin frames every page
@@ -334,8 +341,8 @@ const statementTemplates: CatalogTemplate[] = [
  * through `white-space: pre-wrap`; values are escaped by Handlebars.
  */
 export const NOTICE_DEFAULT_TEMPLATE_SLUG = "notice-default";
-const noticeDefaultTemplate = `<style>.notice{font:14px/1.55 Arial,Helvetica,sans-serif;color:#1f2933}.notice *{box-sizing:border-box}.notice-head{display:flex;align-items:center;gap:5mm;padding-bottom:4mm;border-bottom:2px solid #1f2933}.notice-head img{width:20mm;height:20mm;object-fit:contain;flex:none}.notice-school{flex:1;min-width:0}.notice-school h1{margin:0;font-size:22px;line-height:1.2}.notice-school p{margin:1mm 0 0;font-size:12px;color:#52606d}.notice-meta{display:flex;justify-content:space-between;gap:6mm;margin:5mm 0 0;font-size:12px;color:#52606d}.notice-label{margin:7mm 0 2mm;text-align:center;font-size:13px;font-weight:bold;letter-spacing:3px;text-transform:uppercase}.notice-title{margin:0 0 6mm;text-align:center;font-size:18px;line-height:1.3}.notice-body p{margin:0 0 4mm;white-space:pre-wrap;overflow-wrap:anywhere;orphans:2;widows:2}</style>
-<div class="notice">
+const noticeDefaultTemplate = `<style>.notice{font:14px/1.55 Arial,Helvetica,sans-serif;color:#1f2933}.notice *{box-sizing:border-box}.notice-head{display:flex;align-items:center;gap:5mm;padding-bottom:4mm;border-bottom:2px solid #1f2933}.notice-head img{width:20mm;height:20mm;object-fit:contain;flex:none}.notice-school{flex:1;min-width:0}.notice-school h1{margin:0;font-size:22px;line-height:1.2}.notice-school p{margin:1mm 0 0;font-size:12px;color:#52606d}.notice-meta{display:flex;justify-content:space-between;gap:6mm;margin:5mm 0 0;font-size:12px;color:#52606d}.notice-label{margin:7mm 0 2mm;text-align:center;font-size:13px;font-weight:bold;letter-spacing:3px;text-transform:uppercase}.notice-title{margin:0 0 6mm;text-align:center;font-size:18px;line-height:1.3}.notice-body p{margin:0 0 4mm;white-space:pre-wrap;overflow-wrap:anywhere;orphans:2;widows:2}.notice--half{font-size:12px;line-height:1.45}.notice--half .notice-head{gap:3mm;padding-bottom:2mm}.notice--half .notice-head img{width:12mm;height:12mm}.notice--half .notice-school h1{font-size:16px}.notice--half .notice-school p{margin-top:0.5mm;font-size:10px}.notice--half .notice-meta{margin-top:2mm;font-size:10px}.notice--half .notice-label{margin:3mm 0 1mm;font-size:10px;letter-spacing:2px}.notice--half .notice-title{margin:0 0 3mm;font-size:14px}.notice--half .notice-body p{margin:0 0 2mm}</style>
+<div class="notice notice--{{print.size}}">
   <header class="notice-head">
     {{#if school.logoUrl}}<img src="{{school.logoUrl}}" alt="School logo">{{/if}}
     <div class="notice-school">
@@ -355,15 +362,46 @@ const noticeDefaultTemplate = `<style>.notice{font:14px/1.55 Arial,Helvetica,san
   </main>
 </div>`;
 
+/**
+ * A compact letterhead: logo, school name and date on one line, a thin
+ * rule and the title. Designed for half-A4 notices (it leaves most of a
+ * half page for the text) and still tidy on full A4, where `.notice--full`
+ * only enlarges the type.
+ */
+const noticeCompactTemplate = `<style>.cn{font:12px/1.45 Arial,Helvetica,sans-serif;color:#1f2933}.cn *{box-sizing:border-box}.cn-head{display:flex;align-items:center;gap:3mm;padding-bottom:1.5mm;border-bottom:1px solid #9aa5b1}.cn-head img{width:10mm;height:10mm;object-fit:contain;flex:none}.cn-school{flex:1;min-width:0}.cn-school strong{display:block;font-size:14px;line-height:1.2}.cn-school span{font-size:9.5px;color:#52606d}.cn-date{flex:none;text-align:right;font-size:10px;color:#52606d}.cn-title{margin:3mm 0 2mm;font-size:13px;line-height:1.3}.cn-title small{display:block;font-size:9px;font-weight:bold;letter-spacing:2px;text-transform:uppercase;color:#52606d}.cn-body p{margin:0 0 2mm;white-space:pre-wrap;overflow-wrap:anywhere;orphans:2;widows:2}.cn--full{font-size:14px;line-height:1.55}.cn--full .cn-head img{width:14mm;height:14mm}.cn--full .cn-school strong{font-size:18px}.cn--full .cn-school span,.cn--full .cn-date{font-size:11px}.cn--full .cn-title{margin:5mm 0 4mm;font-size:17px}.cn--full .cn-body p{margin-bottom:3.5mm}</style>
+<div class="cn cn--{{print.size}}">
+  <header class="cn-head">
+    {{#if school.logoUrl}}<img src="{{school.logoUrl}}" alt="School logo">{{/if}}
+    <div class="cn-school">
+      <strong>{{school.name}}</strong>
+      {{#if school.location}}<span>{{school.location}}</span>{{/if}}
+    </div>
+    <div class="cn-date">{{notice.issuedOnDisplay}}<br>Session {{session.startYear}}-{{session.endYear}}</div>
+  </header>
+  <h2 class="cn-title"><small>Notice</small>{{notice.title}}</h2>
+  <main class="cn-body">
+    {{#each notice.paragraphs}}<p>{{this}}</p>{{/each}}
+  </main>
+</div>`;
+
 const noticeTemplates: CatalogTemplate[] = [
   {
     slug: NOTICE_DEFAULT_TEMPLATE_SLUG,
     documentType: "notice",
     name: "Standard Notice",
     description:
-      "A school letterhead with the notice date, title and text. Long notices continue on further A4 pages.",
+      "A school letterhead with the notice date, title and text. Prints full or half A4 (a smaller letterhead on half pages); long notices continue on further pages.",
     pageSize: "full",
     content: noticeDefaultTemplate,
+  },
+  {
+    slug: "notice-compact",
+    documentType: "notice",
+    name: "Compact Notice",
+    description:
+      "A one-line letterhead that leaves room for the text, made for half-A4 notices (two copies per A4 sheet) and also tidy on full A4.",
+    pageSize: "full",
+    content: noticeCompactTemplate,
   },
 ];
 

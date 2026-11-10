@@ -189,7 +189,7 @@ describe('purge_demo_school and the demo-only finance exception', () => {
       // The first download renders the PDF and caches it under the school's prefix.
       await principal.getNoticeDownload({ schoolId: school.id, noticeId: notice.id });
       const draft = await principal.createNotice({ schoolId: school.id, sessionId: session.id, title: 'Draft', bodyMode: 'plain', body: 'Not yet.', toStaff: true, cadetScope: 'none' });
-      return { schoolId: school.id, pdfKey: noticePdfKey(school.id, notice.id), draftPdfKey: noticePdfKey(school.id, draft.id) };
+      return { schoolId: school.id, pdfKey: noticePdfKey(school.id, notice.id, 'full'), draftPdfKey: noticePdfKey(school.id, draft.id, 'full') };
     };
     const exists = (key: string) =>
       getS3Client().send(new HeadObjectCommand({ Bucket: env.S3_BUCKET, Key: key })).then(() => true, () => false);

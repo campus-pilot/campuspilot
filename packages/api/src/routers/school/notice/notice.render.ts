@@ -9,6 +9,7 @@ import { getS3Client } from '@campuspilot/s3/client';
 import { ORPCError } from '@orpc/server';
 import { and, eq } from 'drizzle-orm';
 import { randomBytes } from 'node:crypto';
+import { PDFDocument, rgb } from 'pdf-lib';
 import sanitizeHtml from 'sanitize-html';
 
 import { rpcError } from '../../../errors';
@@ -17,7 +18,7 @@ import { buildSchoolDocumentContext } from '../document/document.context';
 import { combineDocuments, convertDocumentPdf, isEmbeddableDocumentImage, parseDocumentTemplate, renderDocument } from '../document/document.render';
 import { getSelectedDocumentTemplate } from '../document/document.selected-template';
 import { readDocumentTemplate } from '../document/document.storage';
-import { NOTICE_BODY_MAX_LENGTH, NOTICE_TITLE_MAX_LENGTH, type NoticeBodyMode } from './notice.dto';
+import { NOTICE_BODY_MAX_LENGTH, NOTICE_PAGE_SIZES, NOTICE_TITLE_MAX_LENGTH, type NoticeBodyMode, type NoticePageSize } from './notice.dto';
 
 /**
  * Rendering of notices (decisions D4, D9; docs/document-system.md).
@@ -41,6 +42,8 @@ export type NoticeContent = {
   title: string;
   bodyMode: NoticeBodyMode;
   body: string;
+  /** The paper it prints on (`notice.page_size`), for both body modes. */
+  pageSize: NoticePageSize;
 };
 
 /** The built-in design: also the fallback for a school without a Notice template. */
@@ -137,6 +140,8 @@ export async function buildNoticeContext(db: DatabaseExecutor, content: NoticeCo
     school: await buildSchoolDocumentContext(dates.omitLogo ? { ...school, logoS3Key: null } : school),
     session: { startYear: session.startYear, endYear: session.endYear },
     generatedAt: dates.generatedAt.toISOString(),
+    /** The paper the notice prints on, its own fact (`notice.page_size`); designs adapt to it. */
+    print: { size: content.pageSize },
     notice: {
       title: content.title,
       issuedOn,
@@ -178,6 +183,9 @@ async function pinnedNoticeTemplate(db: DatabaseExecutor, schoolId: string, revi
  *   publication (`null` = the built-in default design);
  * - `current`: a draft or unsaved content: whatever the school has selected
  *   now, which is what publishing would pin.
+ *
+ * The page size is never part of this choice: it is the notice's own fact
+ * (`pageSize`), and a Notice template adapts to it (`print.size`).
  */
 export type NoticeTemplateChoice = { kind: 'pinned'; revisionId: string | null } | { kind: 'current' };
 
@@ -242,16 +250,19 @@ export const NOTICE_MAX_LOGO_USES = 3;
  * with a 5 MB logo. A logo the sanitizer would not keep (not a PNG, JPEG or
  * WebP data URI) is placed as nothing.
  */
-export function renderNoticeDocument<C extends { school: { logoUrl: string | null } }>(source: string, context: C, maxChars: number): string {
+export function renderNoticeDocument<C extends { school: { logoUrl: string | null }; print: { size: NoticePageSize } }>(source: string, context: C, maxChars: number): string {
+  // The layout follows the size the template was told (`print.size`), so
+  // the design and the page it is placed on can never disagree.
+  const pageSize = context.print.size;
   const logo = context.school.logoUrl;
-  if (!logo) return combineDocuments([renderDocument(source, context, { maxOutputChars: maxChars })], 'notice', 'full');
+  if (!logo) return combineDocuments([renderDocument(source, context, { maxOutputChars: maxChars })], 'notice', pageSize);
   // Hex is inside the base64 alphabet, so the placeholder passes the
   // sanitizer's image filter and is never changed by HTML escaping.
   const placeholder = `data:image/png;base64,${randomBytes(24).toString('hex')}`;
   const html = combineDocuments(
     [renderDocument(source, { ...context, school: { ...context.school, logoUrl: placeholder } }, { maxOutputChars: maxChars })],
     'notice',
-    'full',
+    pageSize,
   );
   const pieces = html.split(placeholder);
   if (pieces.length - 1 > NOTICE_MAX_LOGO_USES) {
@@ -263,20 +274,22 @@ export function renderNoticeDocument<C extends { school: { logoUrl: string | nul
 /**
  * Renders a notice to the sanitized, CSP-wrapped HTML shown in the sandboxed
  * preview and converted to PDF. Returns the template revision used (null for
- * the built-in default and for `template` notices) and the issued-on date it
- * printed (publication stores exactly that date). An invalid or oversized
+ * the built-in default and for `template` notices), the page size it was
+ * laid out for (the notice's own) and the issued-on date it printed
+ * (publication stores exactly that revision and date). An invalid or oversized
  * template (the author's or the school's) is a BAD_REQUEST from the renderer.
  */
 export async function renderNoticeHtml(
   db: DatabaseExecutor,
   content: NoticeContent,
   options: { generatedAt: Date; issuedOn: string | null; template: NoticeTemplateChoice; maxChars?: number },
-): Promise<{ html: string; templateRevisionId: string | null; issuedOn: string }> {
+): Promise<{ html: string; templateRevisionId: string | null; pageSize: NoticePageSize; issuedOn: string }> {
   const { source, revisionId } = await noticeSource(db, content, options.template);
   const context = await buildNoticeContext(db, content, options);
   return {
     html: renderNoticeDocument(source, context, options.maxChars ?? NOTICE_RENDER_MAX_CHARS),
     templateRevisionId: revisionId,
+    pageSize: content.pageSize,
     issuedOn: context.notice.issuedOn,
   };
 }
@@ -335,11 +348,12 @@ function assertBoundedNoticeTemplate(source: string) {
  * logo as a placeholder, so the sample is as large as any real context,
  * apart from the school's name, location and registration number. Invalid
  * syntax or an unsupported helper is a BAD_REQUEST exactly as for a school
- * template.
+ * template. It is checked at the notice's own print size (`pageSize`), the
+ * only size it is ever rendered at.
  */
-export function assertValidNoticeTemplate(source: string) {
+export function assertValidNoticeTemplate(source: string, pageSize: NoticePageSize = 'full') {
   assertBoundedNoticeTemplate(source);
-  renderNoticeDocument(source, SAMPLE_NOTICE_CONTEXT, NOTICE_RENDER_MAX_CHARS);
+  renderNoticeDocument(source, { ...SAMPLE_NOTICE_CONTEXT, print: { size: pageSize } }, NOTICE_RENDER_MAX_CHARS);
 }
 
 /**
@@ -369,11 +383,17 @@ const LONGEST_NOTICE_CONTEXT = {
  * of one-line paragraphs in a design with heavy per-paragraph markup) is a
  * BAD_REQUEST for that notice. The structural depth limit for authors' own
  * sources does not apply to school templates.
+ *
+ * A Notice template prints plain notices of **both** sizes (each notice
+ * chooses its own; the template adapts through `print.size`), so every
+ * check runs at full and at half A4. The revision's document-system
+ * `pageSize` is not a footprint for notices and is always `full`
+ * (`validateTemplatePageSize`).
  */
 export function assertValidSchoolNoticeTemplate(source: string) {
-  renderNoticeDocument(source, SAMPLE_NOTICE_CONTEXT, NOTICE_RENDER_MAX_CHARS);
+  for (const size of NOTICE_PAGE_SIZES) renderNoticeDocument(source, { ...SAMPLE_NOTICE_CONTEXT, print: { size } }, NOTICE_RENDER_MAX_CHARS);
   try {
-    renderNoticeDocument(source, LONGEST_NOTICE_CONTEXT, NOTICE_RENDER_MAX_CHARS);
+    for (const size of NOTICE_PAGE_SIZES) renderNoticeDocument(source, { ...LONGEST_NOTICE_CONTEXT, print: { size } }, NOTICE_RENDER_MAX_CHARS);
   } catch (error) {
     if (error instanceof ORPCError && error.status === 400) {
       throw rpcError.badRequest(`This design cannot print a notice of the maximum length (${NOTICE_BODY_MAX_LENGTH.toLocaleString('en-IN')} characters) within the rendering limit. Print the notice text fewer times.`, error);
@@ -382,7 +402,7 @@ export function assertValidSchoolNoticeTemplate(source: string) {
   }
 }
 
-/** Renders a published notice from what was fixed at publication: its content, pinned template revision, instant and issued-on date. */
+/** Renders a published notice from what was fixed at publication: its content and page size, pinned template revision, instant and issued-on date. */
 export function renderPublishedNoticeHtml(db: DatabaseExecutor, notice: PublishedNotice) {
   return renderNoticeHtml(db, notice, {
     generatedAt: notice.publishedAt,
@@ -393,7 +413,7 @@ export function renderPublishedNoticeHtml(db: DatabaseExecutor, notice: Publishe
 }
 
 /** The columns of a published notice that rendering reads. */
-export type PublishedNotice = Pick<NoticeRow, 'id' | 'schoolId' | 'sessionId' | 'title' | 'bodyMode' | 'body' | 'templateRevisionId'> & { publishedAt: Date; issuedOn: string };
+export type PublishedNotice = Pick<NoticeRow, 'id' | 'schoolId' | 'sessionId' | 'title' | 'bodyMode' | 'body' | 'pageSize' | 'templateRevisionId'> & { publishedAt: Date; issuedOn: string };
 
 /** A row as a published notice, or null while it is a draft. */
 export function asPublishedNotice(row: NoticeRow): PublishedNotice | null {
@@ -437,10 +457,56 @@ export async function renderPublishedNoticeText(db: DatabaseExecutor, notice: Pu
 
 /**
  * Where a published notice's PDF is cached (decision D9). Under the
- * school's prefix, so the demo purge's prefix sweep removes it.
+ * school's prefix, so the demo purge's prefix sweep removes it. The pinned
+ * page size is part of the key: it never changes for a published notice, so
+ * this costs nothing, and a PDF laid out at one size can never be served
+ * for a notice printed at the other (for example an object cached before
+ * notices had a page size).
  */
-export function noticePdfKey(schoolId: string, noticeId: string) {
-  return `schools/${schoolId}/notices/${noticeId}.pdf`;
+export function noticePdfKey(schoolId: string, noticeId: string, pageSize: NoticePageSize) {
+  return `schools/${schoolId}/notices/${noticeId}-${pageSize}.pdf`;
+}
+
+/** Portrait A4 in PDF points. */
+const A4_WIDTH_PT = 595.28;
+const A4_HEIGHT_PT = 841.89;
+
+/**
+ * Imposes a half-page notice for printing on plain A4: every half-A4 page
+ * of the converted PDF becomes one portrait A4 sheet carrying that page
+ * **twice**, one copy in each half, with a dashed cut guide across the
+ * middle (in the pages' blank 10 mm margins). Two copies per sheet is the
+ * usual school practice for a half-page notice: print, cut the stack in
+ * half, and each half is a complete copy in page order. A long notice
+ * therefore prints on as many sheets as it has half pages, each continuing
+ * where the last stopped; nothing is clipped. A page that is not exactly
+ * half A4 is scaled down to fit its half, never cropped.
+ */
+export async function imposeHalfPageNoticeCopies(pdf: Uint8Array): Promise<Uint8Array> {
+  const source = await PDFDocument.load(pdf);
+  const output = await PDFDocument.create();
+  const pages = await output.embedPages(source.getPages());
+  const half = A4_HEIGHT_PT / 2;
+  for (const page of pages) {
+    const sheet = output.addPage([A4_WIDTH_PT, A4_HEIGHT_PT]);
+    const scale = Math.min(A4_WIDTH_PT / page.width, half / page.height, 1);
+    const width = page.width * scale;
+    const height = page.height * scale;
+    const x = (A4_WIDTH_PT - width) / 2;
+    for (const top of [half, 0]) sheet.drawPage(page, { x, y: top + (half - height) / 2, width, height });
+    sheet.drawLine({ start: { x: 0, y: half }, end: { x: A4_WIDTH_PT, y: half }, thickness: 0.5, color: rgb(0.6, 0.64, 0.69), dashArray: [4, 3] });
+  }
+  return output.save();
+}
+
+/**
+ * The printable PDF of a rendered notice at its page size: the converter's
+ * output for full A4, imposed two copies per A4 sheet for half A4
+ * ({@link imposeHalfPageNoticeCopies}).
+ */
+async function noticePdfBytes(html: string, pageSize: NoticePageSize): Promise<Uint8Array> {
+  const converted = new Uint8Array(await convertDocumentPdf(html, 'notice'));
+  return pageSize === 'half' ? imposeHalfPageNoticeCopies(converted) : converted;
 }
 
 function isMissingObject(error: unknown) {
@@ -478,8 +544,8 @@ function renderAndStoreNoticePdf(db: Database, notice: PublishedNotice, key: str
   let pending = pdfInFlight.get(key);
   if (!pending) {
     pending = (async () => {
-      const { html } = await renderPublishedNoticeHtml(db, notice);
-      const bytes = new Uint8Array(await convertDocumentPdf(html, 'notice'));
+      const { html, pageSize } = await renderPublishedNoticeHtml(db, notice);
+      const bytes = await noticePdfBytes(html, pageSize);
       await getS3Client().send(new PutObjectCommand({ Bucket: env.S3_BUCKET, Key: key, Body: bytes, ContentType: 'application/pdf' }));
       return bytes;
     })().finally(() => pdfInFlight.delete(key));
@@ -503,13 +569,13 @@ function renderAndStoreNoticePdf(db: Database, notice: PublishedNotice, key: str
  * is why these take the pooled database, never a caller's transaction.
  */
 export async function readNoticePdf(db: Database, notice: PublishedNotice): Promise<Uint8Array> {
-  const key = noticePdfKey(notice.schoolId, notice.id);
+  const key = noticePdfKey(notice.schoolId, notice.id, notice.pageSize);
   return (await readCachedPdf(key)) ?? (await renderAndStoreNoticePdf(db, notice, key));
 }
 
 /** Makes sure the cached PDF exists and returns its key (see {@link readNoticePdf}). */
 export async function ensureNoticePdfStored(db: Database, notice: PublishedNotice): Promise<string> {
-  const key = noticePdfKey(notice.schoolId, notice.id);
+  const key = noticePdfKey(notice.schoolId, notice.id, notice.pageSize);
   if (!(await cachedPdfExists(key))) await renderAndStoreNoticePdf(db, notice, key);
   return key;
 }

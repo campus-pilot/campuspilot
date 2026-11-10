@@ -88,6 +88,16 @@ const pageSizeOptions = [
   { value: 'half', label: 'Half A4 · two per sheet' },
   { value: 'full', label: 'Full A4 · one per sheet' },
 ] as const;
+/**
+ * A Notice design has no footprint of its own: each notice chooses full or
+ * half A4 and the design adapts to `print.size`. So instead of a saved
+ * paper footprint, the Notice editor offers the size to preview at; it is
+ * never saved with the revision.
+ */
+const noticePrintSizeOptions = [
+  { value: 'full', label: 'Full A4 notice' },
+  { value: 'half', label: 'Half A4 notice · two per sheet' },
+] as const;
 
 const DESKTOP_WORKSPACE_QUERY = '(min-width: 1280px)';
 const MM_TO_PX = 96 / 25.4;
@@ -263,6 +273,9 @@ function useDocumentTemplateForm(
       preview: '',
       previewContent: '',
       previewPageSize: '' as '' | 'full' | 'half',
+      /** Notice designs only: the notice print size the preview renders at (not saved). */
+      printSize: 'full' as 'full' | 'half',
+      previewPrintSize: 'full' as 'full' | 'half',
       error: '',
       previewing: false,
     },
@@ -274,6 +287,8 @@ function useDocumentTemplateForm(
         preview: z.string(),
         previewContent: z.string(),
         previewPageSize: z.enum(['', 'full', 'half']),
+        printSize: z.enum(['full', 'half']),
+        previewPrintSize: z.enum(['full', 'half']),
         error: z.string(),
         previewing: z.boolean(),
       }),
@@ -309,16 +324,19 @@ function useDocumentTemplateForm(
       previewVersion.current = version;
       form.setFieldValue('error', '');
       form.setFieldValue('previewing', true);
+      const printSize = form.getFieldValue('printSize');
       try {
         const result = await client.school.previewDocumentTemplate({
           ...scope,
           content,
           pageSize,
+          ...(scope.documentType === 'notice' ? { printSize } : {}),
         });
         if (previewVersion.current !== version) return;
         form.setFieldValue('preview', result.html);
         form.setFieldValue('previewContent', content);
         form.setFieldValue('previewPageSize', pageSize);
+        form.setFieldValue('previewPrintSize', printSize);
       } catch (error) {
         if (previewVersion.current !== version) return;
         form.setFieldValue(
@@ -534,6 +552,22 @@ function TemplateSourceForm({
                 />
               )}
             </form.Field>
+          ) : template.artifact.documentType === 'notice' ? (
+            <form.Field name="printSize">
+              {(field) => (
+                <DocumentSelect
+                  field={field}
+                  label="Preview as"
+                  options={noticePrintSizeOptions}
+                  onValueChange={() =>
+                    onDraftChange(
+                      form.getFieldValue('content'),
+                      form.getFieldValue('pageSize'),
+                    )
+                  }
+                />
+              )}
+            </form.Field>
           ) : null}
         </div>
       </div>
@@ -664,7 +698,9 @@ function TemplateDraftPreview({
           : template.artifact.pageSize;
         const stale =
           previewSource !== values.content ||
-          previewPageSize !== values.pageSize;
+          previewPageSize !== values.pageSize ||
+          (values.preview !== '' &&
+            values.previewPrintSize !== values.printSize);
         return (
           <section className="flex h-full min-w-0 flex-col bg-muted/30">
             <header className="flex min-h-11 shrink-0 flex-wrap items-center justify-between gap-2 border-b bg-card px-3 py-1.5">

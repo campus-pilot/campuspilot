@@ -214,7 +214,7 @@ export async function deleteDemoSchoolData(schoolId: string, attempt: number): P
     // (no artifact row); it exists once somebody downloaded or was sent it.
     // Every possible key is recorded: deleting a missing object is harmless.
     const publishedNotices = await transaction
-      .select({ id: noticeTable.id })
+      .select({ id: noticeTable.id, pageSize: noticeTable.pageSize })
       .from(noticeTable)
       .where(and(eq(noticeTable.schoolId, schoolId), eq(noticeTable.status, 'published')));
     const cadetUserIds = await schoolCadetLoginIds(transaction, schoolId);
@@ -226,7 +226,7 @@ export async function deleteDemoSchoolData(schoolId: string, attempt: number): P
       ...demoUsers.map((item) => item.profileImageS3Key),
       ...admissions.flatMap((item) => [item.photoS3Key, ...item.documents.flatMap((document) => document.files.map((file) => file.s3Key))]),
       ...artifacts.map((item) => item.s3Key),
-      ...publishedNotices.map((item) => noticePdfKey(schoolId, item.id)),
+      ...publishedNotices.map((item) => noticePdfKey(schoolId, item.id, item.pageSize)),
     ].filter((key): key is string => Boolean(key)))];
     const result = await transaction.execute<{ counts: Record<string, number> }>(sql`SELECT purge_demo_school(${schoolId}) AS counts`);
     await transaction

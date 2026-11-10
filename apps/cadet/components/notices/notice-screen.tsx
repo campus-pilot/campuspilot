@@ -10,7 +10,7 @@ import { Button } from '@campuspilot/ui/components/button';
 
 import { client, orpc } from '@/lib/orpc';
 import { EmptyState, ScreenError, ScreenLoading } from '../screen';
-import { noticeGone, noticeMissing, noticesSwitchedOff, publishedLabel } from './notices-model';
+import { noticeGone, noticeMissing, noticesSwitchedOff, printSizeLabel, publishedLabel } from './notices-model';
 import { NoticesUnavailable } from './notices-unavailable';
 
 export const NoticeNotFound = () => (
@@ -57,6 +57,7 @@ function NoticeHeading({ notice }: { notice: CadetNoticeDto }) {
       <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Notice</p>
       <h1 className="text-xl font-semibold tracking-tight [overflow-wrap:anywhere]">{notice.title}</h1>
       <p className="text-sm text-muted-foreground">{publishedLabel(notice.publishedAt)}</p>
+      <p className="text-xs text-muted-foreground">{printSizeLabel(notice.pageSize)}</p>
       <DownloadNoticeButton noticeId={notice.noticeId} />
     </div>
   );

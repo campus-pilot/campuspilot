@@ -1,10 +1,12 @@
 import { z } from 'zod';
 import {
   NOTICE_BODY_MODES,
+  NOTICE_PAGE_SIZES,
   noticeBodySchema,
   noticeTitleSchema,
   validateNoticeAudience,
   type NoticeBodyMode,
+  type NoticePageSize,
   type NoticeStatus,
 } from '@campuspilot/api/routers/school/notice/notice.dto';
 import { NOTICE_TEMPLATE_STARTER } from '@campuspilot/api/routers/school/notice/notice-template-guide';
@@ -119,6 +121,8 @@ export function noticeFormSchemaFor(availability: () => CadetAudienceAvailabilit
     .object({
       title: noticeTitleSchema,
       bodyMode: z.enum(NOTICE_BODY_MODES),
+      /** The paper it prints on: chosen per notice, for both body modes. */
+      pageSize: z.enum(NOTICE_PAGE_SIZES),
       plainBody: z.string(),
       templateBody: z.string(),
       audience: z.enum(NOTICE_AUDIENCE_CHOICES),
@@ -150,7 +154,7 @@ export function activeBodyField(bodyMode: NoticeBodyMode) {
   return bodyMode === 'plain' ? ('plainBody' as const) : ('templateBody' as const);
 }
 
-type SavedNoticeContent = NoticeAudienceFacts & { title: string; bodyMode: NoticeBodyMode; body: string };
+type SavedNoticeContent = NoticeAudienceFacts & { title: string; bodyMode: NoticeBodyMode; body: string; pageSize: NoticePageSize };
 
 /**
  * The editor's starting values: a saved draft exactly as stored, or an
@@ -164,6 +168,7 @@ export function noticeFormDefaults(notice: SavedNoticeContent | null): NoticeFor
   return {
     title: notice?.title ?? '',
     bodyMode: notice?.bodyMode ?? 'plain',
+    pageSize: notice?.pageSize ?? 'full',
     plainBody: notice?.bodyMode === 'plain' ? notice.body : '',
     templateBody: notice?.bodyMode === 'template' ? notice.body : NOTICE_TEMPLATE_STARTER,
     audience: saved.audience,
@@ -191,6 +196,7 @@ export const NOTICE_FIELD_IDS = {
   cadetClassScope: { control: 'notice-class-scope', error: 'notice-class-scope-error' },
   classIds: { control: 'notice-classes', error: 'notice-classes-error' },
   bodyMode: { control: 'notice-body-mode', error: 'notice-body-mode-error' },
+  pageSize: { control: 'notice-page-size', error: 'notice-page-size-error' },
 } as const satisfies Record<keyof NoticeFormValues, { control: string; error: string }>;
 
 /**
@@ -336,23 +342,24 @@ export function noticeSaveInput(values: NoticeFormValues) {
     title: values.title.trim(),
     bodyMode: values.bodyMode,
     body: values[activeBodyField(values.bodyMode)].trim(),
+    pageSize: values.pageSize,
     ...noticeAudienceFacts(values),
   };
 }
 
 /** Content the live preview can render. */
-export type NoticePreviewContent = { title: string; bodyMode: NoticeBodyMode; body: string };
+export type NoticePreviewContent = { title: string; bodyMode: NoticeBodyMode; body: string; pageSize: NoticePageSize };
 
 /**
  * What the live preview renders, or null while there is nothing to render
  * yet. A missing title previews as "Untitled notice" so the author sees the
  * text take shape before naming it; an empty body has no preview.
  */
-export function noticePreviewContent(values: Pick<NoticeFormValues, 'title' | 'bodyMode' | 'plainBody' | 'templateBody'>): NoticePreviewContent | null {
+export function noticePreviewContent(values: Pick<NoticeFormValues, 'title' | 'bodyMode' | 'pageSize' | 'plainBody' | 'templateBody'>): NoticePreviewContent | null {
   const body = noticeBodySchema.safeParse(values[activeBodyField(values.bodyMode)]);
   if (!body.success) return null;
   const title = noticeTitleSchema.safeParse(values.title);
-  return { title: title.success ? title.data : 'Untitled notice', bodyMode: values.bodyMode, body: body.data };
+  return { title: title.success ? title.data : 'Untitled notice', bodyMode: values.bodyMode, body: body.data, pageSize: values.pageSize };
 }
 
 /** The list's filter values (one choice per filter). */
@@ -414,6 +421,17 @@ export function publishedRecipientSummary(notice: { publishedStaffCount: number 
 /** The staff line of the publish confirmation. */
 export function staffRecipientLine(count: number) {
   return `${people(count, 'staff member gets', 'staff members get')} a notification in this app.`;
+}
+
+/**
+ * How a print size is described wherever it is shown (editor, notice page,
+ * publish dialog, Cadet Portal): what paper it uses and how a half-page
+ * notice comes out of the printer.
+ */
+export function noticePrintSizeDescription(pageSize: NoticePageSize): string {
+  return pageSize === 'half'
+    ? 'Half A4. Each A4 sheet prints two copies, to cut apart. A long notice continues on further sheets.'
+    : 'Full A4. A long notice continues on further A4 pages.';
 }
 
 export const NOTICE_BODY_MODE_LABELS: Record<NoticeBodyMode, string> = { plain: 'Plain text', template: 'Custom template' };

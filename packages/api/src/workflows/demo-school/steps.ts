@@ -783,6 +783,7 @@ export async function seedNotice(
       title: notice.title,
       bodyMode: notice.bodyMode,
       body: notice.body,
+      pageSize: notice.pageSize,
       toStaff: notice.toStaff,
       cadetScope: notice.cadetScope,
       classIds,

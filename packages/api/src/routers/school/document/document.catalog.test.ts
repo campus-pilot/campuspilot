@@ -84,7 +84,7 @@ describe('document template marketplace', () => {
       bill: ['default', 'compact', 'default-full'],
       receipt: ['default', 'compact', 'default-full'],
       statement: ['default', 'compact', 'default-full'],
-      notice: ['default'],
+      notice: ['default', 'compact'],
     } as const;
     for (const [documentType, variants] of Object.entries(expected)) {
       const items = DOCUMENT_MARKETPLACE.filter(
@@ -115,6 +115,13 @@ describe('document template marketplace', () => {
       'statement-default',
       'statement-compact',
     ]);
+  });
+
+  it('stores every Notice design as full: designs adapt to each notice\'s print size instead of having a footprint', () => {
+    for (const item of DOCUMENT_MARKETPLACE.filter(({ documentType }) => documentType === 'notice')) {
+      expect(item.pageSize, item.slug).toBe('full');
+      expect(item.content, item.slug).toContain('{{print.size}}');
+    }
   });
 
   it('keeps marketplace slugs unique', () => {

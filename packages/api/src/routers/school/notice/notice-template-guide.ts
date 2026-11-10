@@ -53,6 +53,7 @@ export const NOTICE_CONTEXT_FIELDS: Record<NoticeContextPath, NoticeContextField
   'school.logoUrl': { description: 'School logo for an <img src>, when uploaded', offeredToAuthors: true },
   'session.startYear': { description: 'First year of the session', offeredToAuthors: true },
   'session.endYear': { description: 'Last year of the session', offeredToAuthors: true },
+  'print.size': { description: 'Paper the notice prints on: full or half (A4); use it in a class to adapt the layout', offeredToAuthors: true },
   /** A machine timestamp; authors use the issued-on dates. */
   generatedAt: { description: 'Publication instant as an ISO timestamp', offeredToAuthors: false },
 };
@@ -67,8 +68,10 @@ export const NOTICE_TEMPLATE_VARIABLES: readonly { path: NoticeContextPath; name
 /**
  * What a new custom-template notice starts from: a small, complete letterhead
  * that uses the commonly needed variables, so the author edits a working
- * document instead of facing an empty editor. Notices flow over as many A4
- * pages as they need, so it sets no fixed height.
+ * document instead of facing an empty editor. Notices flow over as many
+ * pages as they need, so it sets no fixed height; it adapts to the notice's
+ * print size through the `notice--{{print.size}}` class (smaller type on
+ * half A4).
  */
 export const NOTICE_TEMPLATE_STARTER = `<style>
   .notice { font: 14px/1.55 Arial, Helvetica, sans-serif; color: #1f2933; }
@@ -76,8 +79,13 @@ export const NOTICE_TEMPLATE_STARTER = `<style>
   .notice .meta { margin: 2mm 0 8mm; font-size: 12px; color: #52606d; }
   .notice h2 { margin: 0 0 5mm; font-size: 18px; text-align: center; }
   .notice p { margin: 0 0 4mm; }
+  .notice--half { font-size: 12px; }
+  .notice--half h1 { font-size: 18px; }
+  .notice--half .meta { margin: 1mm 0 4mm; }
+  .notice--half h2 { margin: 0 0 3mm; font-size: 15px; }
+  .notice--half p { margin: 0 0 2.5mm; }
 </style>
-<div class="notice">
+<div class="notice notice--{{print.size}}">
   <h1>{{school.name}}</h1>
   <p class="meta">Session {{session.startYear}}-{{session.endYear}} · {{notice.issuedOnDisplay}}</p>
   <h2>{{notice.title}}</h2>

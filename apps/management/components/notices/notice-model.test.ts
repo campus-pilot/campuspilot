@@ -32,6 +32,7 @@ import {
   noticeListApiFilters,
   noticePreviewContent,
   noticeSaveInput,
+  noticePrintSizeDescription,
   noticesHref,
   publishedRecipientSummary,
   staffRecipientLine,
@@ -59,6 +60,7 @@ test('a new notice starts as plain text to staff, with the template starter kept
   assert.deepEqual(noticeFormDefaults(null), {
     title: '',
     bodyMode: 'plain',
+    pageSize: 'full',
     plainBody: '',
     templateBody: NOTICE_TEMPLATE_STARTER,
     audience: 'staff',
@@ -68,18 +70,20 @@ test('a new notice starts as plain text to staff, with the template starter kept
 });
 
 test('a saved draft opens with its own body in its own mode and its stored audience', () => {
-  const draft = { title: 'Fee reminder', bodyMode: 'template' as const, body: '<p>{{notice.title}}</p>', toStaff: false, cadetScope: 'selected_classes' as const, classIds: ['c1', 'c2'] };
+  const draft = { title: 'Fee reminder', bodyMode: 'template' as const, body: '<p>{{notice.title}}</p>', pageSize: 'half' as const, toStaff: false, cadetScope: 'selected_classes' as const, classIds: ['c1', 'c2'] };
   const form = noticeFormDefaults(draft);
   assert.equal(form.templateBody, '<p>{{notice.title}}</p>');
   assert.equal(form.plainBody, '');
   assert.equal(form.audience, 'cadets');
   assert.equal(form.cadetClassScope, 'selected_classes');
   assert.deepEqual(form.classIds, ['c1', 'c2']);
+  // Its print size is kept and sent back as it is.
+  assert.equal(form.pageSize, 'half');
   assert.deepEqual(noticeSaveInput(form), draft);
 });
 
 test('opening a draft never rewrites its stored audience, whatever the school can address today (review U2)', () => {
-  const cadetsOnly = { title: 'Fee reminder', bodyMode: 'plain' as const, body: 'Pay by Friday.', toStaff: false, cadetScope: 'all_classes' as const, classIds: [] };
+  const cadetsOnly = { title: 'Fee reminder', bodyMode: 'plain' as const, body: 'Pay by Friday.', pageSize: 'full' as const, toStaff: false, cadetScope: 'all_classes' as const, classIds: [] };
   const form = noticeFormDefaults(cadetsOnly);
   assert.equal(form.audience, 'cadets');
   // Saved unchanged, the stored facts are sent back as they were: never "to staff".
@@ -237,6 +241,7 @@ test('saving sends only the active body, trimmed, and the audience as explicit f
     title: 'Sports day',
     bodyMode: 'plain',
     body: 'Come at 8.',
+    pageSize: 'full',
     toStaff: true,
     cadetScope: 'selected_classes',
     classIds: ['c1'],
@@ -263,8 +268,10 @@ test('only the active mode is validated, and remembered classes do not block ano
 
 test('the live preview needs a body and names an untitled notice', () => {
   assert.equal(noticePreviewContent(values({ plainBody: '   ' })), null);
-  assert.deepEqual(noticePreviewContent(values({ title: '' })), { title: 'Untitled notice', bodyMode: 'plain', body: 'Come at 8.' });
-  assert.deepEqual(noticePreviewContent(values({ bodyMode: 'template', templateBody: '<p>x</p>' })), { title: 'Sports day', bodyMode: 'template', body: '<p>x</p>' });
+  assert.deepEqual(noticePreviewContent(values({ title: '' })), { title: 'Untitled notice', bodyMode: 'plain', body: 'Come at 8.', pageSize: 'full' });
+  assert.deepEqual(noticePreviewContent(values({ bodyMode: 'template', templateBody: '<p>x</p>' })), { title: 'Sports day', bodyMode: 'template', body: '<p>x</p>', pageSize: 'full' });
+  // The preview is laid out at the chosen size, for plain text as for a custom template.
+  assert.equal(noticePreviewContent(values({ pageSize: 'half' }))?.pageSize, 'half');
 });
 
 test('list filters map one choice per filter onto the API filters', () => {
@@ -297,4 +304,10 @@ test('recipient summaries name only the audiences the notice addresses', () => {
   assert.equal(publishedRecipientSummary({ toStaff: true, cadetScope: 'none', publishedStaffCount: null, publishedCadetCount: null }), null);
   assert.equal(staffRecipientLine(1), '1 staff member gets a notification in this app.');
   assert.equal(staffRecipientLine(4), '4 staff members get a notification in this app.');
+});
+
+test('says how each print size comes out of the printer', () => {
+  assert.match(noticePrintSizeDescription('half'), /two copies/);
+  assert.match(noticePrintSizeDescription('half'), /continues/);
+  assert.match(noticePrintSizeDescription('full'), /^Full A4/);
 });

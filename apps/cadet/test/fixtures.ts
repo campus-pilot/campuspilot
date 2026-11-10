@@ -103,6 +103,7 @@ export const notices: Pick<CadetNoticeDto, 'noticeId' | 'title' | 'publishedAt'>
 export const plainNotice: CadetNoticeDto = {
   ...notices[0]!,
   bodyMode: 'plain',
+  pageSize: 'full',
   text: 'Winter uniform is compulsory from Monday, 9 November.\nBlazers may be collected from the school store.\n\nClass teachers will check uniforms during assembly.',
 };
 
@@ -110,12 +111,14 @@ export const plainNotice: CadetNoticeDto = {
 export const designedNotice: CadetNoticeDto = {
   ...notices[1]!,
   bodyMode: 'template',
+  pageSize: 'half',
   text: 'Annual Sports Day\n\nGates open at 8 AM.',
 };
 
 /** The printed page of {@link designedNotice} (`getNoticeDocument`). */
 export const designedNoticePage: CadetNoticeDocumentDto = {
   noticeId: designedNotice.noticeId,
+  pageSize: 'half',
   html: '<!doctype html><html><body><h1>Annual Sports Day</h1></body></html>',
 };
 

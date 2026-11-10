@@ -24,6 +24,7 @@ import {
   DOCUMENT_CONTEXT_HELP,
   DOCUMENT_MARKETPLACE,
   sampleDocumentContext,
+  SAMPLE_NOTICE_CONTEXT,
 } from "./document.catalog";
 import {
   combineDocuments,
@@ -137,6 +138,24 @@ function page<T>(
     totalPages,
     nextCursor: createNextPageCursor(currentPage, totalPages),
   });
+}
+/**
+ * A template rendered with synthetic data for a preview. A Notice design is
+ * laid out at the requested notice print size (`printSize`, full when
+ * omitted) and told that size as `print.size`, exactly as a plain notice of
+ * that size is printed; every other type uses its revision's footprint.
+ */
+function previewTemplateHtml(
+  content: string,
+  documentType: dto.DocumentType,
+  pageSize: dto.DocumentTemplatePageSize,
+  printSize: dto.DocumentTemplatePageSize | undefined,
+) {
+  if (documentType === "notice") {
+    const size = printSize ?? "full";
+    return combineDocuments([renderDocument(content, { ...SAMPLE_NOTICE_CONTEXT, print: { size } })], "notice", size);
+  }
+  return combineDocuments([renderDocument(content, sampleDocumentContext(documentType))], documentType, pageSize);
 }
 async function saveTemplate(
   db: Database,
@@ -319,7 +338,7 @@ export const schoolDocumentRouter = {
         module: "documents",
       },
     })
-    .input(dto.templateScopeSchema.extend({ slug: z.string().min(1).max(100) }))
+    .input(dto.marketplaceTemplateInputSchema)
     .use(requireDocumentTypePermission(SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES, SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_TEMPLATES))
     .output(
       dto.marketplaceItemSchema.extend({
@@ -335,11 +354,7 @@ export const schoolDocumentRouter = {
       if (!item) throw rpcError.notFound("Marketplace template");
       return {
         ...item,
-        html: combineDocuments(
-          [renderDocument(item.content, sampleDocumentContext(item.documentType))],
-          item.documentType,
-          item.pageSize,
-        ),
+        html: previewTemplateHtml(item.content, item.documentType, item.pageSize, input.printSize),
         contextHelp: DOCUMENT_CONTEXT_HELP,
       };
     }),
@@ -468,11 +483,7 @@ export const schoolDocumentRouter = {
     .use(requireDocumentTypePermission(SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES, SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_TEMPLATES))
     .output(z.object({ html: z.string(), contextHelp: z.string() }))
     .handler(async ({ input }) => ({
-      html: combineDocuments(
-        [renderDocument(input.content, sampleDocumentContext(input.documentType))],
-        input.documentType,
-        input.pageSize,
-      ),
+      html: previewTemplateHtml(input.content, input.documentType, input.pageSize, input.printSize),
       contextHelp: DOCUMENT_CONTEXT_HELP,
     })),
   previewDocument: protectedProcedure

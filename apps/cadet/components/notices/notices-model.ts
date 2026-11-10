@@ -38,6 +38,15 @@ export function publishedLabel(publishedAt: Date | string): string {
   return `Published ${formatDate(publishedAt)}`;
 }
 
+/**
+ * What paper the notice is printed on, said next to its PDF: a half-A4
+ * notice's PDF carries two copies on every A4 sheet, which would otherwise
+ * surprise a student printing it.
+ */
+export function printSizeLabel(pageSize: 'full' | 'half'): string {
+  return pageSize === 'half' ? 'Printed on half A4 · the PDF has two copies per A4 sheet' : 'Printed on A4';
+}
+
 /** List rows of notices, each linking to its own screen. */
 export function noticeEntries(items: readonly { noticeId: string; title: string; publishedAt: Date | string }[]): CadetNoticeListEntry[] {
   return items.map((item) => ({ noticeId: item.noticeId, title: item.title, detail: publishedLabel(item.publishedAt), href: noticeHref(item.noticeId) }));

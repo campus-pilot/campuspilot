@@ -10717,6 +10717,14 @@
           "primaryKey": false,
           "notNull": true
         },
+        "page_size": {
+          "name": "page_size",
+          "type": "document_template_page_size",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'full'"
+        },
         "status": {
           "name": "status",
           "type": "notice_status",
@@ -10832,9 +10840,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "notice_school_session_published_idx": {
           "name": "notice_school_session_published_idx",
@@ -10865,10 +10873,10 @@
             }
           ],
           "isUnique": false,
-          "with": {},
-          "method": "btree",
           "where": "\"notice\".\"status\" = 'published'",
-          "concurrently": false
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         },
         "notice_created_by_idx": {
           "name": "notice_created_by_idx",
@@ -10881,9 +10889,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "notice_published_by_idx": {
           "name": "notice_published_by_idx",
@@ -10896,76 +10904,76 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "notice_school_id_school_id_fk": {
           "name": "notice_school_id_school_id_fk",
           "tableFrom": "notice",
+          "tableTo": "school",
           "columnsFrom": [
             "school_id"
           ],
-          "tableTo": "school",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "notice_session_id_school_session_id_fk": {
           "name": "notice_session_id_school_session_id_fk",
           "tableFrom": "notice",
+          "tableTo": "school_session",
           "columnsFrom": [
             "session_id"
           ],
-          "tableTo": "school_session",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "notice_created_by_user_id_fk": {
           "name": "notice_created_by_user_id_fk",
           "tableFrom": "notice",
+          "tableTo": "user",
           "columnsFrom": [
             "created_by"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         },
         "notice_published_by_user_id_fk": {
           "name": "notice_published_by_user_id_fk",
           "tableFrom": "notice",
+          "tableTo": "user",
           "columnsFrom": [
             "published_by"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         },
         "notice_template_revision_id_artifact_id_fk": {
           "name": "notice_template_revision_id_artifact_id_fk",
           "tableFrom": "notice",
+          "tableTo": "artifact",
           "columnsFrom": [
             "template_revision_id"
           ],
-          "tableTo": "artifact",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},

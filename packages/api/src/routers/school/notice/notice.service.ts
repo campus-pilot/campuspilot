@@ -9,6 +9,7 @@ import {
   noticeTable,
   type NoticeRow,
 } from '@campuspilot/db/schema/notice';
+import { documentTemplatePageSizeEnum } from '@campuspilot/db/schema/artifact';
 import { schoolSessionTable } from '@campuspilot/db/schema/session';
 import { and, asc, count, desc, eq, ilike, inArray, isNotNull, isNull, ne, or, sql, type SQL } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
@@ -32,6 +33,7 @@ import {
   type listNoticesInputSchema,
   type NOTICE_BODY_MODES,
   type NOTICE_CADET_SCOPES,
+  type NOTICE_PAGE_SIZES,
   type NOTICE_STATUSES,
   type NoticeCadetScope,
   type NoticeDto,
@@ -68,7 +70,8 @@ type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : never) : never;
 const _bodyModes: Same<(typeof NOTICE_BODY_MODES)[number], (typeof noticeBodyModeEnum.enumValues)[number]> = true;
 const _statuses: Same<(typeof NOTICE_STATUSES)[number], (typeof noticeStatusEnum.enumValues)[number]> = true;
 const _cadetScopes: Same<(typeof NOTICE_CADET_SCOPES)[number], (typeof noticeCadetScopeEnum.enumValues)[number]> = true;
-void [_bodyModes, _statuses, _cadetScopes];
+const _pageSizes: Same<(typeof NOTICE_PAGE_SIZES)[number], (typeof documentTemplatePageSizeEnum.enumValues)[number]> = true;
+void [_bodyModes, _statuses, _cadetScopes, _pageSizes];
 
 /** Who is asking, as the handlers establish it. */
 export type NoticeViewer = {
@@ -148,6 +151,7 @@ function toSummary({ notice, createdByName, publishedByName }: NoticeWithNames, 
     publishedByName,
     publishedAt: notice.publishedAt,
     issuedOn: notice.issuedOn,
+    pageSize: notice.pageSize,
     publishedStaffCount: notice.publishedStaffCount,
     publishedCadetCount: notice.publishedCadetCount,
     viewer: viewerFacts(notice, viewer),
@@ -248,7 +252,7 @@ async function replaceNoticeClasses(tx: DatabaseExecutor, schoolId: string, noti
 
 /** Creates a draft owned by the caller. */
 export async function createNotice(db: Database, input: z.infer<typeof createNoticeInputSchema>, viewer: NoticeViewer): Promise<NoticeDto> {
-  if (input.bodyMode === 'template') assertValidNoticeTemplate(input.body);
+  if (input.bodyMode === 'template') assertValidNoticeTemplate(input.body, input.pageSize);
   const noticeId = await db.transaction(async (tx) => {
     await assertSessionOfSchool(tx, input.schoolId, input.sessionId);
     const classes = await assertAudienceAllowed(tx, input.schoolId, input);
@@ -260,6 +264,7 @@ export async function createNotice(db: Database, input: z.infer<typeof createNot
         title: input.title,
         bodyMode: input.bodyMode,
         body: input.body,
+        pageSize: input.pageSize,
         toStaff: input.toStaff,
         cadetScope: input.cadetScope,
         createdBy: viewer.userId,
@@ -297,7 +302,7 @@ async function lockEditableDraft(tx: DatabaseExecutor, input: { schoolId: string
  * version cannot both succeed.
  */
 export async function updateNotice(db: Database, input: z.infer<typeof updateNoticeInputSchema>, viewer: NoticeViewer): Promise<NoticeDto> {
-  if (input.bodyMode === 'template') assertValidNoticeTemplate(input.body);
+  if (input.bodyMode === 'template') assertValidNoticeTemplate(input.body, input.pageSize);
   await db.transaction(async (tx) => {
     const row = await lockEditableDraft(tx, input, viewer, 'changed');
     if (row.version !== input.expectedVersion) throw rpcError.conflict(NOTICE_CHANGED_MESSAGE);
@@ -308,6 +313,9 @@ export async function updateNotice(db: Database, input: z.infer<typeof updateNot
         title: input.title,
         bodyMode: input.bodyMode,
         body: input.body,
+        // Part of the content: a size change is an edit like any other and
+        // increments `version`, so a publisher never confirms a stale size.
+        pageSize: input.pageSize,
         toStaff: input.toStaff,
         cadetScope: input.cadetScope,
         version: row.version + 1,
@@ -356,11 +364,11 @@ export async function previewNotice(db: DatabaseExecutor, input: z.infer<typeof 
     const published = asPublishedNotice(row);
     const rendered = published ? await renderPublishedNoticeHtml(db, published) : await renderNoticeHtml(db, row, draftOptions);
     // The version and template revision of exactly this render: what a publisher who reads it confirms.
-    return { html: rendered.html, version: row.version, templateRevisionId: rendered.templateRevisionId };
+    return { html: rendered.html, version: row.version, templateRevisionId: rendered.templateRevisionId, pageSize: rendered.pageSize };
   }
-  const content: NoticeContent = { schoolId: input.schoolId, sessionId: input.source.sessionId, title: input.source.title, bodyMode: input.source.bodyMode, body: input.source.body };
+  const content: NoticeContent = { schoolId: input.schoolId, sessionId: input.source.sessionId, title: input.source.title, bodyMode: input.source.bodyMode, body: input.source.body, pageSize: input.source.pageSize };
   const rendered = await renderNoticeHtml(db, content, draftOptions);
-  return { html: rendered.html, version: null, templateRevisionId: rendered.templateRevisionId };
+  return { html: rendered.html, version: null, templateRevisionId: rendered.templateRevisionId, pageSize: rendered.pageSize };
 }
 
 /**
@@ -405,7 +413,7 @@ export async function previewNoticePublish(db: DatabaseExecutor, input: { school
   if (row.cadetScope !== 'none') await assertSchoolFeatureEnabled(db, input.schoolId, 'cadet');
   await assertHasAudienceClasses(db, row);
   const delivery = await previewNoticeDelivery(db, row);
-  return { kind: 'ready', version: row.version, templateRevisionId: await currentNoticeTemplateRevisionId(db, row), toStaff: row.toStaff, cadetScope: row.cadetScope, ...delivery };
+  return { kind: 'ready', version: row.version, templateRevisionId: await currentNoticeTemplateRevisionId(db, row), pageSize: row.pageSize, toStaff: row.toStaff, cadetScope: row.cadetScope, ...delivery };
 }
 
 /**
