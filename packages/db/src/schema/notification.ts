@@ -22,7 +22,7 @@ import {
 } from "../notifications/catalogue";
 import { admissionTable } from "./admission";
 import { user } from "./auth";
-import { cadetUser } from "./cadet";
+import { cadetSession, cadetUser } from "./cadet";
 import { schoolTable } from "./school";
 
 /**
@@ -82,7 +82,11 @@ export const notificationDeliveryStatusEnum = pgEnum(
  * - `no_subscription`: no active web push subscription;
  * - `demo_school`: demo schools never send outside the inbox;
  * - `disabled`: the channel is switched off or not available on this
- *   platform (kill switch, or no adapter in this release).
+ *   platform (kill switch, or no adapter in this release);
+ * - `feature_disabled`: the school does not have a platform feature the
+ *   notification belongs to (`notificationRequiredFeatures`), for example a
+ *   notice copy that was still owed when `notices` was switched off. It is
+ *   about the school, not the channel, so it is its own reason.
  */
 export const notificationSkipReasonEnum = pgEnum("notification_skip_reason", [
   "no_number",
@@ -92,6 +96,7 @@ export const notificationSkipReasonEnum = pgEnum("notification_skip_reason", [
   "no_subscription",
   "demo_school",
   "disabled",
+  "feature_disabled",
 ]);
 
 /**
@@ -244,6 +249,12 @@ export const notificationEventTable = pgTable(
     index("notification_event_batch_idx")
       .on(table.schoolId, table.batchKind, table.batchId)
       .where(sql`${table.batchKind} is not null`),
+    // The delivery log's "still being prepared" counts read one school's
+    // pending and failed events (polled every two seconds while a bulk
+    // action fans out). Without this they scanned every school's.
+    index("notification_event_school_unsettled_idx")
+      .on(table.schoolId, table.status)
+      .where(sql`${table.status} in ('pending', 'failed')`),
   ],
 );
 
@@ -462,6 +473,20 @@ export const cadetPushSubscriptionTable = pgTable(
     p256dh: text("p256dh").notNull(),
     /** Browser's auth secret (base64url) for payload encryption. */
     auth: text("auth").notNull(),
+    /**
+     * The Cadet Portal session that last turned notifications on for this
+     * device. Signing that session out revokes the subscription on the
+     * server (`revokePushSubscriptionsOfSession`, run by the cadet auth
+     * instance's sign-out hook), so a signed-out device stops receiving the
+     * student's notifications even when the app's own "turn off" call
+     * never arrives. Null for subscriptions stored before this column
+     * existed and once the session row is gone (expired sessions keep their
+     * device subscribed, as before); such a row is still revoked by the
+     * app's `unsubscribePush` call and by `revokeCadetLoginAccess`.
+     */
+    cadetSessionId: text("cadet_session_id").references(() => cadetSession.id, {
+      onDelete: "set null",
+    }),
     /** User-Agent of the subscribing request, for staff support only. */
     userAgent: text("user_agent"),
     createdAt: timestamp("created_at", { withTimezone: true })
@@ -481,6 +506,9 @@ export const cadetPushSubscriptionTable = pgTable(
     ),
     index("cadet_push_subscription_active_idx")
       .on(table.cadetUserId)
+      .where(sql`${table.revokedAt} is null`),
+    index("cadet_push_subscription_session_idx")
+      .on(table.cadetSessionId)
       .where(sql`${table.revokedAt} is null`),
   ],
 );

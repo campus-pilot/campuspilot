@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import type { SchoolFeatureKey } from "../feature-flags/catalogue";
+
 /**
  * The notification catalogue (plan §4, D-21, D-22): the single authority on
  * which notification types exist, the facts each one carries, who receives it
@@ -253,6 +255,32 @@ export function pickNotificationLinkFacts<T extends NotificationType>(
   }
   return facts;
 }
+
+/**
+ * The per-school platform features (`@campuspilot/db/feature-flags/catalogue`)
+ * a type belongs to. While one of them is switched off for the school,
+ * nothing new of that type goes out: its remote copies are recorded
+ * `skipped: feature_disabled` when planned and again when sent, and a staff
+ * resend is refused (`notifications/features.ts` in the API). Inbox rows
+ * are still written, since the inbox is the record.
+ *
+ * Exhaustive, so each new type decides. Only notice types name features:
+ * a student notice needs the school to have notices and the Cadet Portal.
+ * Bills and receipts are not portal features and go out regardless of
+ * `cadet`; results are released by a procedure that requires `cadet`
+ * itself, and copies of a release already made are delivered.
+ */
+export const notificationRequiredFeatures = {
+  "bill.issued": [],
+  "payment.received": [],
+  "exam.results_published": [],
+  "exam.results_publish_finished": [],
+  "notification.whatsapp_failed": [],
+  "notification.whatsapp_batch_failed": [],
+  "billing.run_posted": [],
+  "notice.published": ["notices", "cadet"],
+  "notice.published_staff": ["notices"],
+} as const satisfies Record<NotificationType, readonly SchoolFeatureKey[]>;
 
 /** Every known type, in catalogue order. */
 export const NOTIFICATION_TYPES = Object.keys(

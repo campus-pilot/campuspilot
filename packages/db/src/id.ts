@@ -25,6 +25,7 @@ export const PREFIX_MAP = {
   demoSchoolJob: "dsj",
   cadetPushSubscription: "cpsub",
   notice: "ntc",
+  noticeClass: "ntcc",
   notification: "ntf",
   notificationDelivery: "ndl",
   notificationEvent: "nev",

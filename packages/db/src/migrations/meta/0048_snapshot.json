@@ -10510,7 +10510,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         },
         "school_feature_flag_updated_by_user_id_fk": {

@@ -72,6 +72,49 @@ export type SchoolFeatureFlags = {
   [K in SchoolFeatureKey]: SchoolFeatureState<K>;
 };
 
+/** The shape every feature catalogue entry has. */
+type FeatureCatalogueShape = Record<
+  string,
+  { label: string; description: string; config: z.ZodType }
+>;
+
+/**
+ * One feature's state **with its key**, as a union discriminated on
+ * `feature`: `{ feature: 'cadet'; config: CadetConfig } | { feature:
+ * 'notices'; config: NoticesConfig }`. This is the type to use whenever the
+ * key is not a literal (a loop over `SCHOOL_FEATURE_KEYS`, an admin form):
+ * a value whose `feature` is the whole key union cannot carry one feature's
+ * config for another, because each member pairs a key with its own config.
+ * `SchoolFeatureState<K>` alone cannot give that guarantee once `K` widens
+ * to the union.
+ *
+ * Generic over the catalogue so the guarantee is testable against a
+ * catalogue whose configs differ (`catalogue.test.ts`); application code uses
+ * `SchoolFeatureEntry`.
+ */
+export type FeatureEntryIn<C extends FeatureCatalogueShape> = {
+  [K in keyof C]: {
+    feature: K;
+    enabled: boolean;
+    config: z.infer<C[K]["config"]> | null;
+  };
+}[keyof C];
+
+/** One catalogue feature's keyed state (see `FeatureEntryIn`). */
+export type SchoolFeatureEntry = FeatureEntryIn<typeof schoolFeatureCatalogue>;
+
+/**
+ * A school's flags as keyed entries, in catalogue order. Each entry keeps
+ * its key and its own config together, so callers iterate without casting.
+ */
+export function schoolFeatureEntries(
+  flags: SchoolFeatureFlags,
+): SchoolFeatureEntry[] {
+  return SCHOOL_FEATURE_KEYS.map(
+    (feature) => ({ feature, ...flags[feature] }) as SchoolFeatureEntry,
+  );
+}
+
 /** The state of a feature that has no stored row. */
 export const DISABLED_SCHOOL_FEATURE = { enabled: false, config: null } as const;
 

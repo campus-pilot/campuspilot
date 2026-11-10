@@ -51,13 +51,33 @@ export async function getSchoolFeature<K extends SchoolFeatureKey>(
   return toState(key, row);
 }
 
-/** Whether a feature is enabled for a school (missing row = disabled). */
+/**
+ * Whether a feature is enabled for a school (missing row = disabled).
+ *
+ * Reads `enabled` only and never parses `config`: the two are independent
+ * facts, and every gate (Cadet sign-in, `cadetProcedure`, the MCP context,
+ * the manifest) asks just this question. A stored config that no longer
+ * matches its schema must therefore not turn a gate into a 500; for Cadet
+ * sign-in that would also tell an existing admission (500) from an unknown
+ * one (401). Callers that use the config read it with `getSchoolFeature`,
+ * which does throw on a mismatch.
+ */
 export async function isSchoolFeatureEnabled(
   db: DatabaseExecutor,
   schoolId: string,
   key: SchoolFeatureKey,
 ): Promise<boolean> {
-  return (await getSchoolFeature(db, schoolId, key)).enabled;
+  const [row] = await db
+    .select({ enabled: schoolFeatureFlagTable.enabled })
+    .from(schoolFeatureFlagTable)
+    .where(
+      and(
+        eq(schoolFeatureFlagTable.schoolId, schoolId),
+        eq(schoolFeatureFlagTable.feature, key),
+      ),
+    )
+    .limit(1);
+  return row?.enabled ?? false;
 }
 
 /** Every catalogue feature's state for a school; rows of retired keys are ignored. */

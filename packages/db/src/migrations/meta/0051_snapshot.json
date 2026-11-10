@@ -1,6 +1,6 @@
 {
-  "id": "9b254588-8c77-428d-92e1-f5ef2c774b82",
-  "prevId": "21bba5a7-5a3d-45f7-8e8c-2635665c8497",
+  "id": "677dc640-a2d9-421b-9cc5-59a67ca85536",
+  "prevId": "fb2c7525-ff14-4177-a582-c51b1292374f",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -10511,7 +10511,7 @@
             "id"
           ],
           "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "cascade"
         },
         "school_feature_flag_updated_by_user_id_fk": {
           "name": "school_feature_flag_updated_by_user_id_fk",
@@ -10545,6 +10545,12 @@
       "name": "notice_class",
       "schema": "",
       "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
         "notice_id": {
           "name": "notice_id",
           "type": "text",
@@ -10553,6 +10559,12 @@
         },
         "class_id": {
           "name": "class_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "class_name": {
+          "name": "class_name",
           "type": "text",
           "primaryKey": false,
           "notNull": true
@@ -10565,6 +10577,27 @@
         }
       },
       "indexes": {
+        "notice_class_notice_class_unique": {
+          "name": "notice_class_notice_class_unique",
+          "columns": [
+            {
+              "expression": "notice_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "class_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        },
         "notice_class_class_idx": {
           "name": "notice_class_class_idx",
           "columns": [
@@ -10621,7 +10654,7 @@
             "id"
           ],
           "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "set null"
         },
         "notice_class_school_id_school_id_fk": {
           "name": "notice_class_school_id_school_id_fk",
@@ -10637,15 +10670,7 @@
           "onDelete": "no action"
         }
       },
-      "compositePrimaryKeys": {
-        "notice_class_notice_id_class_id_pk": {
-          "name": "notice_class_notice_id_class_id_pk",
-          "columns": [
-            "notice_id",
-            "class_id"
-          ]
-        }
-      },
+      "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
@@ -10733,6 +10758,13 @@
           "notNull": true,
           "default": "now()"
         },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
         "published_by": {
           "name": "published_by",
           "type": "text",
@@ -10742,6 +10774,12 @@
         "published_at": {
           "name": "published_at",
           "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "issued_on": {
+          "name": "issued_on",
+          "type": "date",
           "primaryKey": false,
           "notNull": false
         },
@@ -10940,7 +10978,7 @@
         },
         "notice_published_facts_check": {
           "name": "notice_published_facts_check",
-          "value": "(\"notice\".\"status\" = 'published') = (\"notice\".\"published_at\" is not null)\n        and (\"notice\".\"status\" = 'published') = (\"notice\".\"published_staff_count\" is not null)\n        and (\"notice\".\"status\" = 'published') = (\"notice\".\"published_cadet_count\" is not null)\n        and (\"notice\".\"status\" = 'published' or \"notice\".\"published_by\" is null)"
+          "value": "(\"notice\".\"status\" = 'published') = (\"notice\".\"published_at\" is not null)\n        and (\"notice\".\"status\" = 'published') = (\"notice\".\"issued_on\" is not null)\n        and (\"notice\".\"status\" = 'published') = (\"notice\".\"published_staff_count\" is not null)\n        and (\"notice\".\"status\" = 'published') = (\"notice\".\"published_cadet_count\" is not null)\n        and (\"notice\".\"status\" = 'published' or \"notice\".\"published_by\" is null)"
         },
         "notice_template_revision_check": {
           "name": "notice_template_revision_check",
@@ -10949,6 +10987,10 @@
         "notice_title_check": {
           "name": "notice_title_check",
           "value": "char_length(\"notice\".\"title\") between 1 and 200"
+        },
+        "notice_version_check": {
+          "name": "notice_version_check",
+          "value": "\"notice\".\"version\" >= 1"
         }
       },
       "isRLSEnabled": false
@@ -11224,7 +11266,8 @@
         "opted_out",
         "no_subscription",
         "demo_school",
-        "disabled"
+        "disabled",
+        "feature_disabled"
       ]
     },
     "public.notice_body_mode": {

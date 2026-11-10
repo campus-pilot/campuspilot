@@ -10511,7 +10511,7 @@
             "id"
           ],
           "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "cascade"
         },
         "school_feature_flag_updated_by_user_id_fk": {
           "name": "school_feature_flag_updated_by_user_id_fk",

@@ -19,9 +19,14 @@ import { schoolTable } from "./school";
 export const schoolFeatureFlagTable = pgTable(
   "school_feature_flag",
   {
+    /**
+     * Flags are the school's own configuration (like its memberships), so
+     * they go with it: deleting a school must not be blocked by the row the
+     * 0048 backfill, or any administrator toggle, wrote for it.
+     */
     schoolId: text("school_id")
       .notNull()
-      .references(() => schoolTable.id),
+      .references(() => schoolTable.id, { onDelete: "cascade" }),
     feature: text("feature", { enum: SCHOOL_FEATURE_KEYS }).notNull(),
     enabled: boolean("enabled").notNull(),
     /** Validated against the catalogue schema of `feature` on write and read. */
