@@ -18,3 +18,4 @@ export * from "./notification";
 export * from "./exam-result-publication";
 export * from "./school-feature-flag";
 export * from "./notice";
+export * from "./assistant";

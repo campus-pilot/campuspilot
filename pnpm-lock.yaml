@@ -982,6 +982,9 @@ importers:
 
   packages/db:
     dependencies:
+      '@campuspilot/assistant-contract':
+        specifier: workspace:*
+        version: link:../assistant-contract
       '@campuspilot/env':
         specifier: workspace:*
         version: link:../env
