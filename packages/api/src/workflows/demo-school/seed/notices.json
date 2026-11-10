@@ -1,0 +1,141 @@
+{
+  "localHours": { "created": 9, "published": 11 },
+  "notices": [
+    {
+      "key": "staff-meeting",
+      "title": "Staff meeting: lesson plans and assessment calendar",
+      "status": "published",
+      "createdDaysAgo": 17,
+      "publishedDaysAgo": 16,
+      "toStaff": true,
+      "cadetScope": "none",
+      "classPick": null,
+      "bodyMode": "plain",
+      "pageSize": "full",
+      "body": [
+        "All teaching staff are requested to attend a meeting in the staff room on {date:-14} at 2:30 PM, after the last period.",
+        "Agenda:\n1. Lesson plan submissions for the coming month\n2. Assessment calendar and invigilation duties\n3. Remedial classes for students who need extra support",
+        "Class teachers should bring their attendance registers. Please be seated by 2:25 PM."
+      ]
+    },
+    {
+      "key": "school-timings",
+      "title": "Revised school timings",
+      "status": "published",
+      "createdDaysAgo": 10,
+      "publishedDaysAgo": 9,
+      "toStaff": false,
+      "cadetScope": "all_classes",
+      "classPick": null,
+      "bodyMode": "plain",
+      "pageSize": "half",
+      "body": [
+        "Dear parents and students,",
+        "From {date:-6}, school will begin at 8:15 AM and close at 2:15 PM for all classes. The main gate closes at 8:10 AM.",
+        "School buses will leave every stop 15 minutes earlier than at present. Bus attendants will share the revised pick-up times with parents.",
+        "Students who arrive late should report to the school office with a note from a parent."
+      ]
+    },
+    {
+      "key": "science-exhibition",
+      "title": "Science exhibition: models and group lists",
+      "status": "published",
+      "createdDaysAgo": 6,
+      "publishedDaysAgo": 5,
+      "toStaff": true,
+      "cadetScope": "selected_classes",
+      "classPick": { "from": "seniormost", "count": 2 },
+      "bodyMode": "plain",
+      "pageSize": "full",
+      "body": [
+        "The school science exhibition will be held on {date:+9} in the assembly hall, from 9:30 AM to 12:30 PM.",
+        "Students of the classes this notice is addressed to will present working models in groups of three. Each group chooses one topic from the list on the class notice board.",
+        "Group lists and topics must reach the class teacher by {date:+2}. Teachers on duty will receive the stall plan separately.",
+        "Parents are welcome to visit between 11:00 AM and 12:30 PM."
+      ]
+    },
+    {
+      "key": "sports-day",
+      "title": "Annual Sports Day invitation",
+      "status": "published",
+      "createdDaysAgo": 3,
+      "publishedDaysAgo": 2,
+      "toStaff": true,
+      "cadetScope": "all_classes",
+      "classPick": null,
+      "bodyMode": "template",
+      "pageSize": "full",
+      "body": [
+        "<style>",
+        "  .invite { font: 14px/1.6 Arial, Helvetica, sans-serif; color: #1f2933; }",
+        "  .invite .head { display: flex; align-items: center; gap: 5mm; padding-bottom: 5mm; border-bottom: 2px solid #1d4ed8; }",
+        "  .invite .head img { width: 20mm; height: 20mm; object-fit: contain; }",
+        "  .invite h1 { margin: 0; font-size: 22px; color: #1d4ed8; }",
+        "  .invite .meta { margin: 1mm 0 0; font-size: 12px; color: #52606d; }",
+        "  .invite h2 { margin: 9mm 0 2mm; font-size: 26px; text-align: center; letter-spacing: 0.5px; }",
+        "  .invite .lead { margin: 0 0 7mm; text-align: center; color: #52606d; }",
+        "  .invite table { width: 100%; border-collapse: collapse; margin: 0 0 7mm; }",
+        "  .invite th, .invite td { padding: 2.5mm 3mm; border: 1px solid #cbd2d9; text-align: left; font-size: 13px; }",
+        "  .invite th { width: 32%; background: #eff6ff; }",
+        "  .invite p { margin: 0 0 4mm; }",
+        "  .invite .sign { margin-top: 14mm; text-align: right; font-weight: bold; }",
+        "</style>",
+        "<div class=\"invite\">",
+        "  <div class=\"head\">",
+        "    {{#if school.logoUrl}}<img src=\"{{school.logoUrl}}\" alt=\"\">{{/if}}",
+        "    <div>",
+        "      <h1>{{school.name}}</h1>",
+        "      <p class=\"meta\">{{#if school.location}}{{school.location}} · {{/if}}Session {{session.startYear}}-{{session.endYear}} · {{notice.issuedOnDisplay}}</p>",
+        "    </div>",
+        "  </div>",
+        "  <h2>{{notice.title}}</h2>",
+        "  <p class=\"lead\">Students, parents and staff are warmly invited.</p>",
+        "  <table>",
+        "    <tr><th>Date</th><td>{date:+12}</td></tr>",
+        "    <tr><th>Reporting time</th><td>8:00 AM for students, in house uniform</td></tr>",
+        "    <tr><th>Programme</th><td>March past at 8:30 AM, track and field events from 9:00 AM, prize distribution at 12:30 PM</td></tr>",
+        "    <tr><th>Venue</th><td>School sports ground</td></tr>",
+        "  </table>",
+        "  <p>Students taking part in track events should carry a water bottle and a cap. Refreshments will be served to every student after the prize distribution.</p>",
+        "  <p>Parents are requested to be seated by 8:20 AM. There are no classes on the day; school buses run at the usual morning time and return at 1:30 PM.</p>",
+        "  <p class=\"sign\">Principal</p>",
+        "</div>"
+      ]
+    },
+    {
+      "key": "holiday-homework",
+      "title": "Holiday homework guidelines",
+      "status": "draft",
+      "createdDaysAgo": 3,
+      "publishedDaysAgo": null,
+      "toStaff": true,
+      "cadetScope": "none",
+      "classPick": null,
+      "bodyMode": "plain",
+      "pageSize": "full",
+      "body": [
+        "Subject teachers are requested to plan holiday homework that a student can finish in about thirty minutes a day.",
+        "Please prefer reading, a short project or revision worksheets over copying exercises, and share the homework with the class teacher by {date:+5}.",
+        "Class teachers will combine the subjects into one sheet per class before it is sent home."
+      ]
+    },
+    {
+      "key": "parent-teacher-meeting",
+      "title": "Parent-teacher meeting",
+      "status": "draft",
+      "createdDaysAgo": 1,
+      "publishedDaysAgo": null,
+      "toStaff": true,
+      "cadetScope": "all_classes",
+      "classPick": null,
+      "bodyMode": "plain",
+      "pageSize": "full",
+      "body": [
+        "Dear parents,",
+        "A parent-teacher meeting will be held on {date:+8} between 9:00 AM and 12:00 noon in your child's classroom.",
+        "Class teachers will share your child's progress, attendance and notebooks. Please bring the school diary with you.",
+        "There are no regular classes on that day. Students may come with their parents in school uniform."
+      ]
+    }
+  ]
+}

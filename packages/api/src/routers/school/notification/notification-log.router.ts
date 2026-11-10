@@ -4,6 +4,7 @@ import { SCHOOL_ACTIONS } from '@campuspilot/opa/policies/school';
 import { z } from 'zod';
 
 import { toRpcError } from '../../../errors';
+import { assertSchoolFeatureEnabled } from '../../../feature-flags/feature-flags.service';
 import { protectedProcedure } from '../../../index';
 import { listDeliveryLog } from '../../../notifications/delivery-log';
 import { resendFailedDelivery } from '../../../notifications/redelivery';
@@ -12,11 +13,12 @@ import { requireSchoolPermission } from '../../../permissions/school';
 
 const id = z.string().min(1).max(200);
 
-/** Exactly one scope per request: an admission, a billing run or an examination. */
+/** Exactly one scope per request: an admission, a billing run, an examination or a notice. */
 const deliveryLogScopeSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('admission'), admissionId: id }),
   z.object({ kind: z.literal('bill_run'), billRunId: id }),
   z.object({ kind: z.literal('exam'), sessionId: id, examSlug: z.string().trim().min(1).max(100) }),
+  z.object({ kind: z.literal('notice'), noticeId: id }),
 ]);
 
 export const listNotificationDeliveriesInputSchema = createListInputSchema({
@@ -56,6 +58,18 @@ export const deliveryLogItemSchema = z.object({
   deliveries: z.array(deliverySchema),
 });
 
+/**
+ * The delivery log page plus how much of the scope is not listed yet: a
+ * bulk action's notifications appear one student at a time as the worker
+ * fans its events out.
+ */
+export const deliveryLogOutputSchema = createPaginatedOutputSchema(deliveryLogItemSchema).extend({
+  preparation: z.object({
+    pendingCount: z.number().int().nonnegative().describe('Notifications of this scope that were requested but are not prepared yet; they appear in the list once the worker has processed them.'),
+    failedCount: z.number().int().nonnegative().describe('Notifications of this scope that could not be prepared; they may be missing from the list.'),
+  }),
+});
+
 const route = (summary: string, description: string) => ({ summary, description, tags: ['School', 'Notifications'] });
 
 /**
@@ -65,13 +79,15 @@ const route = (summary: string, description: string) => ({ summary, description,
  */
 export const schoolNotificationLogRouter = {
   listNotificationDeliveries: protectedProcedure
-    .route(route('List notification deliveries', 'Page through the student notifications of one admission, billing run or examination, newest first, with the status of every in-app copy sent by device notification or WhatsApp and the reason a copy was skipped or failed. Shows references (bill or receipt number, exam name), never amounts or message text.'))
+    .route(route('List notification deliveries', 'Page through the student notifications of one admission, billing run, examination or notice, newest first, with the status of every in-app copy sent by device notification or WhatsApp and the reason a copy was skipped or failed. Right after a bulk action (a billing run, a results release, a published notice) the list is still filling: preparation.pendingCount is how many notifications are yet to appear. Shows references (bill or receipt number, exam name, notice title), never amounts or message text.'))
     .meta({ mcp: { exposure: 'advanced', access: 'read', destructive: false, module: 'notifications' } })
     .input(listNotificationDeliveriesInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_NOTIFICATION_LOG))
-    .output(createPaginatedOutputSchema(deliveryLogItemSchema))
+    .output(deliveryLogOutputSchema)
     .handler(async ({ context, input }) => {
       try {
+        // A notice's deliveries belong to the notices feature like the notice itself.
+        if (input.scope.kind === 'notice') await assertSchoolFeatureEnabled(context.db, input.schoolId, 'notices');
         return await listDeliveryLog(context.db, input);
       } catch (error) {
         throw toRpcError(error);

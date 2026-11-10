@@ -21,6 +21,7 @@ the backend contract for data, persistence, rendering, and authorization.
 | `document-exam.integration.test.ts` | Examination context, approval, schedule, rendering, PDF size/page, and legacy compatibility coverage |
 | `finance-document.context.ts` | Immutable bill, payment/refund receipt, and cutoff statement contexts |
 | `finance-document.integration.test.ts` | Finance history, authorization, cutoff, and historical-regeneration coverage |
+| `../notice/notice.render.ts` | Notice context, template choice and pinning, flowing layout use, and the cached notice PDF (the `notice` type has a template but no generator source) |
 
 Keep API operations in this package and expose them through the school router.
 Binary conversion and object storage remain server concerns; the management app

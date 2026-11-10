@@ -23,6 +23,7 @@ import { z } from 'zod';
 import { schoolSessionHref } from './school-route';
 import { confirmNavigation } from '@/lib/navigation-guard';
 import { storeSchoolSessionId } from './session-selection';
+import { sessionSwitchSuffix } from './session-switch-model';
 
 const sessionSwitcherSchema = z.object({
   sessionId: z.string().min(1),
@@ -72,15 +73,7 @@ export function SessionSwitcher({
     if (!(await confirmNavigation())) return;
     storeSchoolSessionId(schoolId, sessionId);
     handleOpenChange(false);
-    // Exam plans are scoped to one session; a session change returns to its examination list.
-    const suffix = sessionSuffixFromPath(pathname);
-    router.push(
-      schoolSessionHref(
-        schoolId,
-        sessionId,
-        suffix.startsWith('/exam/') ? '/exam' : suffix,
-      ),
-    );
+    router.push(schoolSessionHref(schoolId, sessionId, sessionSwitchSuffix(sessionSuffixFromPath(pathname))));
   }
 
   return (

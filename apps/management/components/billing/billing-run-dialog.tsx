@@ -4,18 +4,16 @@ import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useForm } from "@tanstack/react-form";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, ChevronsUpDown } from "lucide-react";
 import { z } from "zod";
+import { ClassScopePicker } from "@campuspilot/components/class-scope-picker";
 import { billingRunPreviewOutputSchema } from "@campuspilot/api/routers/school/billing/billing.dto";
 import { civilDateInTimeZone, currencyExponent, financeAmountError, financeBillingDraftSchema, financeScopeIds, formatMinor, decimalToMinor, groupFinanceIssues, idempotencyForDraft, markIdempotencyAmbiguous, type FinanceScopeSelection, type IdempotencyDraftState } from "@campuspilot/components/finance";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@campuspilot/ui/components/alert-dialog";
 import { Badge } from "@campuspilot/ui/components/badge";
 import { Button } from "@campuspilot/ui/components/button";
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@campuspilot/ui/components/command";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@campuspilot/ui/components/dialog";
 import { Input } from "@campuspilot/ui/components/input";
 import { Label } from "@campuspilot/ui/components/label";
-import { Popover, PopoverContent, PopoverTrigger } from "@campuspilot/ui/components/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@campuspilot/ui/components/select";
 import { Textarea } from "@campuspilot/ui/components/textarea";
 import { client, orpc } from "@/lib/orpc";
@@ -109,30 +107,22 @@ function commandDraftFingerprint(value: unknown) {
   return parsed.success ? JSON.stringify(commandDraft(parsed.data)) : null;
 }
 
-function ClassScopePicker({ classes, isPending, isError, values, search, page, onValuesChange, onSearchChange, onPageChange }: { classes: BillingClass[]; isPending: boolean; isError: boolean; values: ScopeSelection[]; search: string; page: number; onValuesChange: (values: ScopeSelection[]) => void; onSearchChange: (value: string) => void; onPageChange: (page: number) => void }) {
+/**
+ * Adapts the shared, explicit-ID class picker to the billing command, where
+ * an empty selection is the compact form of "all classes": every class shows
+ * as checked by default, the last class cannot be unchecked, and checking
+ * every class collapses back to the empty selection.
+ */
+function BillingClassPicker({ classes, isPending, isError, values, search, page, onValuesChange, onSearchChange, onPageChange }: { classes: BillingClass[]; isPending: boolean; isError: boolean; values: ScopeSelection[]; search: string; page: number; onValuesChange: (values: ScopeSelection[]) => void; onSearchChange: (value: string) => void; onPageChange: (page: number) => void }) {
   const selectedClasses = selectedBillingClasses(classes, values);
-  const selected = new Set(selectedClasses.map(({ id }) => id));
-  const filteredClasses = classes.filter((item) => item.label.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()));
-  const pageSize = 10;
-  const totalPages = Math.max(1, Math.ceil(filteredClasses.length / pageSize));
-  const visible = filteredClasses.slice((page - 1) * pageSize, page * pageSize);
 
-  function toggleClass(item: BillingClass) {
-    const current = selectedBillingClasses(classes, values);
-    const next = selected.has(item.id)
-      ? current.filter(({ id }) => id !== item.id)
-      : [...current, item];
-    if (!next.length) return;
-    onValuesChange(next.length === classes.length ? [] : next);
+  function changeSelection(ids: string[]) {
+    if (!ids.length) return;
+    const chosen = new Set(ids);
+    onValuesChange(ids.length === classes.length ? [] : classes.filter(({ id }) => chosen.has(id)));
   }
 
-  const summary = isPending
-    ? "Loading classes…"
-    : values.length
-      ? `${selectedClasses.length} of ${classes.length} classes`
-      : `All ${classes.length} classes`;
-
-  return <div className="flex flex-col gap-1.5"><Label>Classes</Label><Popover><PopoverTrigger asChild><Button type="button" variant="outline" role="combobox" className="w-full justify-between" disabled={isPending || isError}><span className="truncate">{summary}</span><ChevronsUpDown className="size-4 shrink-0 text-muted-foreground" aria-hidden /></Button></PopoverTrigger><PopoverContent align="start" className="w-80 p-0"><Command shouldFilter={false}><CommandInput value={search} placeholder="Search classes…" onValueChange={(value) => { onSearchChange(value); onPageChange(1); }} /><CommandList><CommandEmpty>No classes match this search.</CommandEmpty><CommandGroup heading="Classes in this session">{visible.map((item) => <CommandItem key={item.id} value={item.label} onSelect={() => toggleClass(item)}><Check className={selected.has(item.id) ? "size-4 opacity-100" : "size-4 opacity-0"} aria-hidden /><span className="truncate">{item.label}</span></CommandItem>)}</CommandGroup></CommandList><div className="flex flex-col gap-2 border-t p-2">{values.length ? <Button type="button" size="xs" variant="outline" onClick={() => onValuesChange([])}>Select all classes</Button> : <p className="text-center text-xs text-muted-foreground">All classes are selected</p>}<SimplePagination currentPage={page} totalPages={totalPages} onPageChange={onPageChange} /></div></Command></PopoverContent></Popover>{isError ? <p className="text-xs text-destructive">Unable to load classes.</p> : <p className="text-xs text-muted-foreground">All classes are selected by default. Open this list only to exclude or restore classes.</p>}</div>;
+  return <ClassScopePicker classes={classes} selectedIds={selectedClasses.map(({ id }) => id)} isPending={isPending} isError={isError} search={search} page={page} summary={values.length ? `${selectedClasses.length} of ${classes.length} classes` : `All ${classes.length} classes`} onSelectedIdsChange={changeSelection} onSearchChange={onSearchChange} onPageChange={onPageChange} footer={values.length ? <Button type="button" size="xs" variant="outline" onClick={() => onValuesChange([])}>Select all classes</Button> : <p className="text-center text-xs text-muted-foreground">All classes are selected</p>}><p className="text-xs text-muted-foreground">All classes are selected by default. Open this list only to exclude or restore classes.</p></ClassScopePicker>;
 }
 
 function PreviewIssues({ issues, skippedCount }: { issues: PreviewIssue[]; skippedCount: number }) {
@@ -156,7 +146,7 @@ function ClassRunValueFields({ form, classes, runtimeElements, currency, amountP
 function BillingClassScopeField({ form, schoolId, sessionId }: { form: any; schoolId: string; sessionId: string }) {
   const classesQuery = useQuery(orpc.school.listClasses.queryOptions({ input: { schoolId, sessionId } }));
   const classes = classesQuery.data ?? [];
-  return <div className="flex flex-col gap-3"><p className="text-sm text-muted-foreground">This school-level run includes every active, registered admission enrolled in the session for the selected classes.</p><form.Subscribe selector={(state: any) => ({ values: state.values.classSelections, search: state.values.classSearch, page: state.values.classPage })}>{({ values, search, page }: any) => <form.Field name="classSelections">{(selectionField: any) => <form.Field name="classSearch">{(searchField: any) => <form.Field name="classPage">{(pageField: any) => <ClassScopePicker classes={classes} isPending={classesQuery.isPending} isError={classesQuery.isError} values={values} search={search} page={page} onValuesChange={selectionField.handleChange} onSearchChange={searchField.handleChange} onPageChange={pageField.handleChange} />}</form.Field>}</form.Field>}</form.Field>}</form.Subscribe></div>;
+  return <div className="flex flex-col gap-3"><p className="text-sm text-muted-foreground">This school-level run includes every active, registered admission enrolled in the session for the selected classes.</p><form.Subscribe selector={(state: any) => ({ values: state.values.classSelections, search: state.values.classSearch, page: state.values.classPage })}>{({ values, search, page }: any) => <form.Field name="classSelections">{(selectionField: any) => <form.Field name="classSearch">{(searchField: any) => <form.Field name="classPage">{(pageField: any) => <BillingClassPicker classes={classes} isPending={classesQuery.isPending} isError={classesQuery.isError} values={values} search={search} page={page} onValuesChange={selectionField.handleChange} onSearchChange={searchField.handleChange} onPageChange={pageField.handleChange} />}</form.Field>}</form.Field>}</form.Field>}</form.Subscribe></div>;
 }
 
 function OptionalBillingRunValues({ form, schoolId, sessionId, currency, amountPlaceholder, runtimeElements }: { form: any; schoolId: string; sessionId: string; currency: string; amountPlaceholder: string; runtimeElements: RuntimeElement[] }) {

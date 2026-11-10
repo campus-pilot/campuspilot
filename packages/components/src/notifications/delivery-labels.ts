@@ -6,7 +6,7 @@
 
 export type DeliveryChannel = 'web_push' | 'whatsapp';
 export type DeliveryStatus = 'owed' | 'sending' | 'sent' | 'delivered' | 'read' | 'failed' | 'skipped';
-export type DeliverySkipReason = 'no_number' | 'not_verified' | 'no_consent' | 'opted_out' | 'no_subscription' | 'demo_school' | 'disabled';
+export type DeliverySkipReason = 'no_number' | 'not_verified' | 'no_consent' | 'opted_out' | 'no_subscription' | 'demo_school' | 'disabled' | 'feature_disabled';
 
 export const DELIVERY_CHANNEL_LABELS: Record<DeliveryChannel, string> = {
   web_push: 'Device notification',
@@ -31,4 +31,5 @@ export const DELIVERY_SKIP_REASON_LABELS: Record<DeliverySkipReason, string> = {
   no_subscription: 'Device notifications not turned on',
   demo_school: 'Demo school (never sent)',
   disabled: 'Channel switched off',
+  feature_disabled: 'Feature switched off for this school',
 };

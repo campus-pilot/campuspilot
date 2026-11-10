@@ -128,7 +128,8 @@ function CoScholastic({ areas }: { areas: CadetExamResultDto['coScholastics'] })
       <div className="grid grid-cols-3 gap-2">
         {areas.map((area) => (
           <div key={area.area} className="flex flex-col gap-1 rounded-lg border p-3">
-            <span className="text-lg font-semibold">{area.grade}</span>
+            {/* Imported grades may be stored lower-case ("a1"); display them capitalized. */}
+            <span className="text-lg font-semibold capitalize">{area.grade}</span>
             <span className="text-xs leading-tight text-muted-foreground">{area.area}</span>
           </div>
         ))}

@@ -1,8 +1,7 @@
-import { schoolMemberTable } from '@campuspilot/db/schema/school-member';
-import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
 
-import { rpcError, toRpcError } from '../../../errors';
+import { toRpcError } from '../../../errors';
+import { assertSchoolMember } from '../../../permissions/school-member';
 import { o, protectedProcedure } from '../../../index';
 import {
   countUnreadNotifications,
@@ -34,14 +33,7 @@ const schoolScope = { schoolId: z.string().min(1) };
  */
 const requireSchoolMember = o.middleware<{ viewer: NotificationViewer }, { schoolId: string }>(
   async ({ context, next }, input) => {
-    const userId = context.session?.user.id;
-    if (!userId) throw rpcError.unauthorized();
-    const [membership] = await context.db
-      .select({ userId: schoolMemberTable.userId })
-      .from(schoolMemberTable)
-      .where(and(eq(schoolMemberTable.schoolId, input.schoolId), eq(schoolMemberTable.userId, userId)))
-      .limit(1);
-    if (!membership) throw rpcError.forbidden();
+    const userId = await assertSchoolMember(context, input.schoolId);
     return next({ context: { viewer: { kind: 'staff_user', userId, schoolId: input.schoolId } } });
   },
 );

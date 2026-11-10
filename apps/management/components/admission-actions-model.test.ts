@@ -35,6 +35,13 @@ test('edit and unregister stay registered-only while the portal password does no
   assert.deepEqual(admissionActionsFor({ registered: false }), { edit: false, unregister: false, issuePortalPassword: true });
 });
 
+test('a permission answer already held survives a failed refetch, granted or denied (review U1)', () => {
+  // What TanStack Query reports after a background refetch failed: isError with the last good results.
+  assert.equal(permissionsSatisfied({ isPending: false, isError: true, results: [true] }, 1), true);
+  assert.equal(permissionsSatisfied({ isPending: false, isError: true, results: [false] }, 1), false);
+  assert.equal(permissionsSatisfied({ isPending: false, isError: true, results: [true, false] }, 2), false);
+});
+
 test('permission gates fail closed while pending, on error, and on incomplete answers', () => {
   assert.equal(permissionsSatisfied({ isPending: true, isError: false, results: undefined }, 1), false);
   assert.equal(permissionsSatisfied({ isPending: false, isError: true, results: undefined }, 1), false);

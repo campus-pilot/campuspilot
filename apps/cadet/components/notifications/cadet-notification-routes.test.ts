@@ -11,6 +11,22 @@ describe('cadetRouteFromLink', () => {
     ).toBe('/results/stu_b.cls7.half-yearly');
   });
 
+  it('opens a notice on its own screen, and the inbox when the notice is not named', () => {
+    expect(cadetRouteFromLink(new URLSearchParams('type=notice.published&noticeId=ntc_1'))).toBe('/notices/ntc_1');
+    expect(cadetRouteFromLink(new URLSearchParams('type=notice.published&noticeId=a%2Fb'))).toBe('/notices/a%2Fb');
+    expect(cadetRouteFromLink(new URLSearchParams('type=notice.published'))).toBe('/notifications');
+    // The staff copy of a notice is not a Cadet Portal link.
+    expect(cadetRouteFromLink(new URLSearchParams('type=notice.published_staff&noticeId=ntc_1&sessionId=s'))).toBe('/notifications');
+  });
+
+  it('opens a published timetable from its session and exam', () => {
+    expect(cadetRouteFromLink(new URLSearchParams('type=exam.timetable_published&sessionId=sess_1&examSlug=half-yearly'))).toBe(
+      '/timetables/sess_1/half-yearly',
+    );
+    expect(cadetRouteFromLink(new URLSearchParams('type=exam.timetable_published&sessionId=sess_1'))).toBe('/notifications');
+    expect(cadetRouteFromLink(new URLSearchParams('type=exam.timetable_published_staff&sessionId=sess_1&examSlug=x'))).toBe('/notifications');
+  });
+
   it('encodes identifiers as one path segment', () => {
     expect(cadetRouteFromLink(new URLSearchParams('type=bill.issued&billId=a%2Fb&sessionId=s'))).toBe('/fees/a%2Fb');
   });

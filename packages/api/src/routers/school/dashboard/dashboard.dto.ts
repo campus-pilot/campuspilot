@@ -94,7 +94,11 @@ export const dashboardOutputSchema = z.object({
     createAdmission: z.boolean(),
     recordPayment: z.boolean(),
     enterResults: z.boolean(),
-    createNotice: z.literal(false),
+    /**
+     * The caller may write a notice draft and the school has the `notices`
+     * feature. Both must hold: the job does not exist without the feature.
+     */
+    createNotice: z.boolean(),
   }),
 });
 

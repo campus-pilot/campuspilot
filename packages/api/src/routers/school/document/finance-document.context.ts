@@ -15,7 +15,7 @@ import { and, asc, eq, inArray, lt, or } from "drizzle-orm";
 import { createHash } from "node:crypto";
 import { rpcError } from "../../../errors";
 import type { DocumentSource } from "./document.dto";
-import { documentImage } from "./document.storage";
+import { buildSchoolDocumentContext } from "./document.context";
 import { isValidLocalDate, localDateToInstant } from "../billing/period";
 
 type FinanceSource = Extract<DocumentSource, { documentType: "bill" | "receipt" | "statement" }>;
@@ -158,12 +158,7 @@ async function balanceBeforeLedgerFact(
 async function schoolContext(db: DatabaseExecutor, schoolId: string) {
   const [school] = await db.select().from(schoolTable).where(eq(schoolTable.id, schoolId)).limit(1);
   if (!school) throw rpcError.notFound("School");
-  return {
-    name: school.name,
-    location: school.location,
-    registrationNo: school.registrationNo,
-    logoUrl: await documentImage(school.logoS3Key),
-  };
+  return buildSchoolDocumentContext(school);
 }
 
 /** Builds finance documents only from immutable posted facts and their captured

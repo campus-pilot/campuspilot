@@ -61,6 +61,26 @@ export function documentScheduleSlot(row: {
   };
 }
 
+/**
+ * The `school` block every document context carries: public identity facts
+ * and the logo embedded as a data URI (null without a logo). The one builder
+ * for academic, finance and notice documents, so the block cannot drift
+ * between them.
+ */
+export async function buildSchoolDocumentContext(school: {
+  name: string;
+  location: string | null;
+  registrationNo: string | null;
+  logoS3Key: string | null;
+}) {
+  return {
+    name: school.name,
+    location: school.location,
+    registrationNo: school.registrationNo,
+    logoUrl: await documentImage(school.logoS3Key),
+  };
+}
+
 /** Called inside a repeatable-read transaction. Every relationship is checked
  * independently, including historical sessions and explicit student selections.
  * Missing/unapproved marks are errors rather than fabricated zero scores.
@@ -122,12 +142,7 @@ export async function buildDocumentContexts(
         )
         .limit(1)
     : [];
-  const schoolContext = {
-    name: school.name,
-    location: school.location,
-    registrationNo: school.registrationNo,
-    logoUrl: await documentImage(school.logoS3Key),
-  };
+  const schoolContext = await buildSchoolDocumentContext(school);
   const [lifecycle] = examSlug
     ? await db
         .select()

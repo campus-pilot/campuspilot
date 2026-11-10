@@ -121,7 +121,7 @@ grants contains {"role": role, "action": action} if {
 
 grants contains {"role": role, "action": action} if {
   some role in {"school.principal", "school.manager", "school.exam_coordinator"}
-  some action in {"school.exam.create", "school.exam.update", "school.exam.delete", "school.exam.plan.create", "school.exam.plan.update", "school.exam.plan.delete", "school.exam.plan.transition", "school.exam.result.revise", "school.exam.timetable.update", "school.exam.timetable.delete"}
+  some action in {"school.exam.create", "school.exam.update", "school.exam.delete", "school.exam.plan.create", "school.exam.plan.update", "school.exam.plan.delete", "school.exam.plan.transition", "school.exam.result.revise", "school.exam.timetable.update", "school.exam.timetable.delete", "school.exam.timetable.publish"}
 }
 
 grants contains {"role": role, "action": action} if {
@@ -156,5 +156,21 @@ grants contains {"role": role, "action": "school.notification.failure.finance.re
 }
 
 grants contains {"role": role, "action": "school.notification.failure.results.receive"} if {
+  some role in {"school.principal", "school.manager"}
+}
+
+# Failed WhatsApp copies of a published notice: the roles that publish.
+grants contains {"role": role, "action": "school.notification.failure.notices.receive"} if {
+  some role in {"school.principal", "school.manager"}
+}
+
+# Notices: every staff role reads notices and writes its own drafts; only
+# principal and manager publish (and manage every draft).
+grants contains {"role": role, "action": action} if {
+  some role in {"school.principal", "school.manager", "school.teacher", "school.accountant", "school.exam_coordinator"}
+  some action in {"school.notice.read", "school.notice.draft"}
+}
+
+grants contains {"role": role, "action": "school.notice.publish"} if {
   some role in {"school.principal", "school.manager"}
 }

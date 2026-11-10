@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import type { SchoolFeatureKey } from "../feature-flags/catalogue";
+
 /**
  * The notification catalogue (plan §4, D-21, D-22): the single authority on
  * which notification types exist, the facts each one carries, who receives it
@@ -140,11 +142,11 @@ export const notificationPayloadSchemas = {
   }),
   /**
    * WhatsApp copies of one bulk send failed (D-38): one alert per billing
-   * run or results publication once its WhatsApp copies settled, counting
+   * run, results publication or published notice once its WhatsApp copies settled, counting
    * the failures not reported before.
    */
   "notification.whatsapp_batch_failed": z.object({
-    batchKind: z.enum(["billing_run", "result_publication"]),
+    batchKind: z.enum(["billing_run", "result_publication", "notice"]),
     /** The type of the notifications whose WhatsApp copies failed. */
     failedType: z.string().min(1).max(100),
     failedCount: count,
@@ -155,6 +157,9 @@ export const notificationPayloadSchemas = {
     /** Results publications: the examination. */
     examSlug: id.optional(),
     examName: label.optional(),
+    /** Notices: the notice and its title when it was published. */
+    noticeId: id.optional(),
+    noticeTitle: label.optional(),
   }),
   /** A billing run the staff member posted has finished posting (Phase 5, D-30). */
   "billing.run_posted": z.object({
@@ -162,6 +167,42 @@ export const notificationPayloadSchemas = {
     sessionId: id,
     periodKey: z.string().min(1).max(100),
     billCount: count,
+  }),
+  /**
+   * A school notice addressed to the student was published. One event per
+   * student, so the WhatsApp copy can name them.
+   */
+  "notice.published": z.object({
+    noticeId: id,
+    sessionId: id,
+    /** The notice's title when it was published (a published notice is immutable). */
+    noticeTitle: label,
+    admissionId: id,
+    studentName: label,
+  }),
+  /** A school notice addressed to the staff was published. */
+  "notice.published_staff": z.object({
+    noticeId: id,
+    sessionId: id,
+    noticeTitle: label,
+  }),
+  /**
+   * An examination's timetable was published. One event per student, so the
+   * WhatsApp copy can name them. Every student sees the whole timetable, so
+   * the facts name the exam and never a class.
+   */
+  "exam.timetable_published": z.object({
+    sessionId: id,
+    examSlug: id,
+    examName: label,
+    admissionId: id,
+    studentName: label,
+  }),
+  /** An examination's timetable was published; addressed to the school's staff. */
+  "exam.timetable_published_staff": z.object({
+    sessionId: id,
+    examSlug: id,
+    examName: label,
   }),
 } as const;
 
@@ -191,6 +232,10 @@ export const notificationCatalogue = {
   "notification.whatsapp_failed": { audience: "staff_user", channels: ["in_app"] },
   "notification.whatsapp_batch_failed": { audience: "staff_user", channels: ["in_app"] },
   "billing.run_posted": { audience: "staff_user", channels: ["in_app"] },
+  "notice.published": { audience: "admission", channels: ["in_app", "web_push", "whatsapp"] },
+  "notice.published_staff": { audience: "staff_user", channels: ["in_app"] },
+  "exam.timetable_published": { audience: "admission", channels: ["in_app", "web_push", "whatsapp"] },
+  "exam.timetable_published_staff": { audience: "staff_user", channels: ["in_app"] },
 } as const satisfies Record<NotificationType, NotificationCatalogueEntry>;
 
 /**
@@ -206,8 +251,12 @@ export const notificationLinkFactKeys = {
   "exam.results_published": ["sessionId", "examSlug", "studentId", "classId"],
   "exam.results_publish_finished": ["sessionId", "examSlug"],
   "notification.whatsapp_failed": ["admissionId"],
-  "notification.whatsapp_batch_failed": ["sessionId", "billRunId", "examSlug"],
+  "notification.whatsapp_batch_failed": ["sessionId", "billRunId", "examSlug", "noticeId"],
   "billing.run_posted": ["billRunId", "sessionId"],
+  "notice.published": ["noticeId"],
+  "notice.published_staff": ["noticeId", "sessionId"],
+  "exam.timetable_published": ["sessionId", "examSlug"],
+  "exam.timetable_published_staff": ["sessionId", "examSlug"],
 } as const satisfies { [T in NotificationType]: readonly (keyof NotificationPayloads[T])[] };
 
 /** The link facts of a type. */
@@ -228,6 +277,37 @@ export function pickNotificationLinkFacts<T extends NotificationType>(
   }
   return facts;
 }
+
+/**
+ * The per-school platform features (`@campuspilot/db/feature-flags/catalogue`)
+ * a type belongs to. While one of them is switched off for the school,
+ * nothing new of that type goes out: its remote copies are recorded
+ * `skipped: feature_disabled` when planned and again when sent, and a staff
+ * resend is refused (`notifications/features.ts` in the API). Inbox rows
+ * are still written, since the inbox is the record.
+ *
+ * Exhaustive, so each new type decides. Only notice types name features:
+ * a student notice needs the school to have notices and the Cadet Portal.
+ * Bills and receipts are not portal features and go out regardless of
+ * `cadet`; results are released by a procedure that requires `cadet`
+ * itself, and copies of a release already made are delivered.
+ */
+export const notificationRequiredFeatures = {
+  "bill.issued": [],
+  "payment.received": [],
+  "exam.results_published": [],
+  "exam.results_publish_finished": [],
+  "notification.whatsapp_failed": [],
+  "notification.whatsapp_batch_failed": [],
+  "billing.run_posted": [],
+  "notice.published": ["notices", "cadet"],
+  "notice.published_staff": ["notices"],
+  // Timetables belong to the examination, not to notices. The Cadet Portal
+  // decides the student copies when the timetable is published: with the
+  // `cadet` feature off, only the staff event is emitted.
+  "exam.timetable_published": [],
+  "exam.timetable_published_staff": [],
+} as const satisfies Record<NotificationType, readonly SchoolFeatureKey[]>;
 
 /** Every known type, in catalogue order. */
 export const NOTIFICATION_TYPES = Object.keys(

@@ -84,6 +84,8 @@ export function createWhatsAppAdapter(options: {
         return sources.payment_receipt ? sources.payment_receipt.produce(request, { schoolId }) : null;
       case 'report_card':
         return sources.report_card ? sources.report_card.produce(request, { schoolId }) : null;
+      case 'notice':
+        return sources.notice ? sources.notice.produce(request, { schoolId }) : null;
       default: {
         const unhandled: never = request;
         throw new Error(`Unhandled document kind ${JSON.stringify(unhandled)}.`);

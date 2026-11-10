@@ -44,6 +44,17 @@ Shared presentation and prompt utilities live in
 cards, fields, panels, notices, and sandboxed preview; `template-prompt.ts` builds
 the provider-neutral brief; and `copy-text-button.tsx` owns clipboard feedback.
 
+`DocumentPreview` (in `document-controls.tsx`) is the only place server-rendered
+document HTML is shown: an iframe with an **empty** `sandbox`. Its options:
+
+| Prop | Meaning |
+| --- | --- |
+| `html` | Sanitized HTML from a preview procedure; absent while there is nothing to render. |
+| `label` | The caption and the frame's accessible title (default "Document preview"). |
+| `sample` | Shows the "Sample data" badge for previews rendered with synthetic data. |
+| `placeholder` | The hint under "Your preview will appear here." while `html` is absent. The default speaks of choosing a template; callers with another flow (the notice page: "Rendering the notice…") pass their own. |
+| `fitPageWidth` | Lays the document out at portrait A4 width (794 CSS px) and scales it down to a narrower container with CSS only (container query units and `tan(atan2())`; no measuring script, state or effect), so a phone shows the page as printed instead of re-wrapping it. Wide containers are unaffected. Used by the notice pages in management and by the Cadet Portal's custom-template notices. Leave it off for templates that are edited at their natural width. |
+
 ## State rules
 
 - The active document type is local navigation/form state. The selected school

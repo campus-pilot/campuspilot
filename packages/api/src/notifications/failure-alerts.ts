@@ -21,13 +21,15 @@ import { stuckSendingCutoff } from './stuck-sending';
  *   `school.notification.failure.finance.receive` (principal, manager,
  *   accountant), result failures to
  *   `school.notification.failure.results.receive` (principal, manager;
- *   never accountants). The grants are the only role lists. A send staff
+ *   never accountants), notice failures to
+ *   `school.notification.failure.notices.receive` (principal, manager).
+ *   The grants are the only role lists. A send staff
  *   asked for themselves (a single result send, a resend: the event's
  *   `alert_creator_on_failure`) also alerts that staff member.
  * - **how**: one `notification.whatsapp_failed` per failed delivery of a
  *   one-off event (a payment, a manual bill, a single send) and per failed
  *   resend; one `notification.whatsapp_batch_failed` per bulk batch
- *   (billing run, results publication) once nothing in the batch is about
+ *   (billing run, results publication, published notice) once nothing in the batch is about
  *   to produce an outcome (no event still pending, no WhatsApp copy owed
  *   within the quick-retry horizon or freshly claimed; see
  *   {@link batchOpenSql}), counting the failures not reported before, so a
@@ -46,16 +48,40 @@ import { stuckSendingCutoff } from './stuck-sending';
  */
 
 /** Which failure-alert grant a student notification type's failures go to (D-38). */
-export const FAILURE_TOPIC: Record<AdmissionNotificationType, 'finance' | 'results'> = {
+export type FailureTopic = 'finance' | 'results' | 'notices';
+export const FAILURE_TOPIC: Record<AdmissionNotificationType, FailureTopic> = {
   'bill.issued': 'finance',
   'payment.received': 'finance',
   'exam.results_published': 'results',
+  'notice.published': 'notices',
+  // Examination notifications share the results topic (same recipients as an exam's results).
+  'exam.timetable_published': 'results',
 };
 
 const TOPIC_ACTION = {
   finance: SCHOOL_ACTIONS.RECEIVE_FINANCE_NOTIFICATION_FAILURES,
   results: SCHOOL_ACTIONS.RECEIVE_RESULT_NOTIFICATION_FAILURES,
-} as const;
+  notices: SCHOOL_ACTIONS.RECEIVE_NOTICE_NOTIFICATION_FAILURES,
+} as const satisfies Record<FailureTopic, string>;
+
+/**
+ * The facts of a batch alert that say which bulk action failed, per batch
+ * kind (exhaustive: a new kind fails the build until it is handled).
+ */
+function batchAlertFacts(kind: NotificationBatchKind, batchId: string, text: (key: string) => string | undefined) {
+  switch (kind) {
+    case 'billing_run':
+      return { billRunId: batchId, periodKey: text('periodKey') };
+    case 'result_publication':
+      return { examSlug: text('examSlug'), examName: text('examName') };
+    case 'notice':
+      return { noticeId: batchId, noticeTitle: text('noticeTitle') };
+    default: {
+      const unhandled: never = kind;
+      throw new Error(`Unhandled notification batch kind ${String(unhandled)}.`);
+    }
+  }
+}
 
 /** One-off failures and batches handled per sweep; the next sweep continues. */
 const ALERT_SWEEP_LIMIT = 50;
@@ -73,7 +99,7 @@ function topicOf(type: string) {
 /** Granted recipients per school and topic, cached for one sweep. */
 function recipientResolver(db: Database) {
   const cache = new Map<string, Promise<string[]>>();
-  return (schoolId: string, topic: 'finance' | 'results') => {
+  return (schoolId: string, topic: FailureTopic) => {
     const key = `${schoolId}:${topic}`;
     let found = cache.get(key);
     if (!found) {
@@ -275,9 +301,7 @@ async function alertBatchFailures(db: Database, granted: GrantedRecipients, now:
           failedType: sample.type,
           failedCount: marked.length,
           sessionId,
-          ...(batch.kind === 'billing_run'
-            ? { billRunId: batch.batchId, periodKey: text('periodKey') }
-            : { examSlug: text('examSlug'), examName: text('examName') }),
+          ...batchAlertFacts(batch.kind, batch.batchId, text),
         },
       });
       return result.eventId;

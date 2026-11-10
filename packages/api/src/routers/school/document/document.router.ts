@@ -1,3 +1,4 @@
+import { assertValidSchoolNoticeTemplate } from "../notice/notice.render";
 import { z } from "zod";
 import { alias } from "drizzle-orm/pg-core";
 import { and, asc, count, desc, eq, ilike, inArray, notInArray, sql } from "drizzle-orm";
@@ -12,6 +13,7 @@ import { SCHOOL_ACTIONS } from "@campuspilot/opa/policies/school";
 import { o, protectedProcedure } from "../../../index";
 import { rpcError, toRpcError } from "../../../errors";
 import { assertPermission } from "../../../permissions/authorization";
+import { assertSchoolFeatureEnabled } from "../../../feature-flags/feature-flags.service";
 import {
   createNextPageCursor,
   createPaginatedResult,
@@ -21,12 +23,14 @@ import * as dto from "./document.dto";
 import {
   DOCUMENT_CONTEXT_HELP,
   DOCUMENT_MARKETPLACE,
-  SAMPLE_DOCUMENT_CONTEXT,
+  sampleDocumentContext,
+  SAMPLE_NOTICE_CONTEXT,
 } from "./document.catalog";
 import {
   combineDocuments,
   convertDocumentPdf,
   renderDocument,
+  renderDocuments,
 } from "./document.render";
 import {
   deleteDocumentObject,
@@ -49,6 +53,11 @@ function requireDocumentTypePermission(
         action: isFinanceDocument(input.documentType) ? financeAction : academicAction,
         resource: { kind: "school", schoolId: input.schoolId },
       }, signal);
+      // The Notice template belongs to the notices feature: a school without
+      // it has no notice template to read, preview, import or save. Checked
+      // after the permission, so a caller without access learns nothing.
+      if (input.documentType === "notice")
+        await assertSchoolFeatureEnabled(context.db, input.schoolId, "notices");
       return next();
     },
   );
@@ -129,13 +138,34 @@ function page<T>(
     nextCursor: createNextPageCursor(currentPage, totalPages),
   });
 }
+/**
+ * A template rendered with synthetic data for a preview. A Notice design is
+ * laid out at the requested notice print size (`printSize`, full when
+ * omitted) and told that size as `print.size`, exactly as a plain notice of
+ * that size is printed; every other type uses its revision's footprint.
+ */
+function previewTemplateHtml(
+  content: string,
+  documentType: dto.DocumentType,
+  pageSize: dto.DocumentTemplatePageSize,
+  printSize: dto.DocumentTemplatePageSize | undefined,
+) {
+  if (documentType === "notice") {
+    const size = printSize ?? "full";
+    return combineDocuments([renderDocument(content, { ...SAMPLE_NOTICE_CONTEXT, print: { size } })], "notice", size);
+  }
+  return combineDocuments([renderDocument(content, sampleDocumentContext(documentType))], documentType, pageSize);
+}
 async function saveTemplate(
   db: Database,
   userId: string,
   input: z.infer<typeof dto.saveTemplateSchema>,
   marketplaceSlug: string | null,
 ) {
-  renderDocument(input.content, SAMPLE_DOCUMENT_CONTEXT);
+  // A Notice template is checked the way notices render it (their output
+  // budget and logo limit), so a design no notice could print is refused here.
+  if (input.documentType === "notice") assertValidSchoolNoticeTemplate(input.content);
+  else renderDocument(input.content, sampleDocumentContext(input.documentType));
   const id = generateId("artifact");
   return persistDocumentObject(
     db,
@@ -252,13 +282,13 @@ async function renderSelection(
       (tx) => buildFinanceDocumentContexts(tx, input.schoolId, input.source as Extract<dto.DocumentSource, { documentType: "bill" | "receipt" | "statement" }>),
       { isolationLevel: "repeatable read", accessMode: "read only" },
     );
-    return { ...data, studentIds: [] as string[], recipientCount: data.contexts.length, warnings: [] as string[], template, html: combineDocuments(data.contexts.map((context) => renderDocument(template.content, context)), input.source.documentType, template.row.pageSize) };
+    return { ...data, studentIds: [] as string[], recipientCount: data.contexts.length, warnings: [] as string[], template, html: combineDocuments(renderDocuments(template.content, data.contexts), input.source.documentType, template.row.pageSize) };
   }
   const data = await db.transaction(
     (tx) => buildDocumentContexts(tx, input.schoolId, input.source as Exclude<dto.DocumentSource, { documentType: "bill" | "receipt" | "statement" }>),
     { isolationLevel: "repeatable read", accessMode: "read only" },
   );
-  return { ...data, recipientCount: data.studentIds.length, financeSource: null, reviewHash: null, template, html: combineDocuments(data.contexts.map((context) => renderDocument(template.content, context)), input.source.documentType, template.row.pageSize) };
+  return { ...data, recipientCount: data.studentIds.length, financeSource: null, reviewHash: null, template, html: combineDocuments(renderDocuments(template.content, data.contexts), input.source.documentType, template.row.pageSize) };
 }
 export const schoolDocumentRouter = {
   listMarketplaceTemplates: protectedProcedure
@@ -307,7 +337,7 @@ export const schoolDocumentRouter = {
         module: "documents",
       },
     })
-    .input(dto.templateScopeSchema.extend({ slug: z.string().min(1).max(100) }))
+    .input(dto.marketplaceTemplateInputSchema)
     .use(requireDocumentTypePermission(SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES, SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_TEMPLATES))
     .output(
       dto.marketplaceItemSchema.extend({
@@ -323,11 +353,7 @@ export const schoolDocumentRouter = {
       if (!item) throw rpcError.notFound("Marketplace template");
       return {
         ...item,
-        html: combineDocuments(
-          [renderDocument(item.content, SAMPLE_DOCUMENT_CONTEXT)],
-          item.documentType,
-          item.pageSize,
-        ),
+        html: previewTemplateHtml(item.content, item.documentType, item.pageSize, input.printSize),
         contextHelp: DOCUMENT_CONTEXT_HELP,
       };
     }),
@@ -456,11 +482,7 @@ export const schoolDocumentRouter = {
     .use(requireDocumentTypePermission(SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES, SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_TEMPLATES))
     .output(z.object({ html: z.string(), contextHelp: z.string() }))
     .handler(async ({ input }) => ({
-      html: combineDocuments(
-        [renderDocument(input.content, SAMPLE_DOCUMENT_CONTEXT)],
-        input.documentType,
-        input.pageSize,
-      ),
+      html: previewTemplateHtml(input.content, input.documentType, input.pageSize, input.printSize),
       contextHelp: DOCUMENT_CONTEXT_HELP,
     })),
   previewDocument: protectedProcedure

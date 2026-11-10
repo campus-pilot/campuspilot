@@ -1,0 +1,1 @@
+CREATE INDEX "notification_event_school_unsettled_idx" ON "notification_event" USING btree ("school_id","status") WHERE "notification_event"."status" in ('pending', 'failed');

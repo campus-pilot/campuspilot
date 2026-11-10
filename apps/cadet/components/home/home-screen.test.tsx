@@ -1,7 +1,7 @@
 import { screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { exams, newStudent, profile, summary } from '@/test/fixtures';
+import { exams, featureDisabledError, newStudent, notices, profile, summary } from '@/test/fixtures';
 import { page, renderWithQuery, resetHandlers } from '@/test/orpc-mock';
 import { Greeting, HomeScreen, LatestResultAlert } from './home-screen';
 
@@ -17,6 +17,7 @@ beforeEach(() => {
     getProfile: () => profile,
     listExams: () => ({ ...page(exams), record: { recordId: 'stu_b.cls7', classLabel: 'Class 7', sectionLabel: 'B', sessionLabel: '2026–27' } }),
     getFeeSummary: () => summary,
+    listNotices: () => page(notices),
   });
 });
 
@@ -41,7 +42,7 @@ describe('HomeScreen', () => {
   });
 
   it('shows no result alert and an empty fee card for a new student', async () => {
-    resetHandlers({ getProfile: () => newStudent, getFeeSummary: () => ({ currencies: [] }) });
+    resetHandlers({ getProfile: () => newStudent, getFeeSummary: () => ({ currencies: [] }), listNotices: () => page([]) });
     renderWithQuery(<HomeScreen />);
     expect(await screen.findByText('No fees have been billed yet.')).toBeTruthy();
     expect(screen.queryByText(/results are out/)).toBeNull();
@@ -59,6 +60,7 @@ describe('HomeScreen', () => {
       getProfile: () => profile,
       listExams: () => { throw new Error('Results are down'); },
       getFeeSummary: () => new Promise(() => {}),
+      listNotices: () => page([]),
     });
     renderWithQuery(<HomeScreen />);
     expect(await screen.findByLabelText('Loading fees')).toBeTruthy();
@@ -72,6 +74,7 @@ describe('HomeScreen', () => {
       getProfile: () => profile,
       listExams: () => ({ ...page([]), record: null }),
       getFeeSummary: () => ({ currencies: [{ ...summary.currencies[0]!, balanceMinor: '-50000', dueMinor: '0', creditMinor: '50000' }] }),
+      listNotices: () => page([]),
     });
     renderWithQuery(<HomeScreen />);
     expect(await screen.findByText('In credit')).toBeTruthy();
@@ -99,5 +102,47 @@ describe('HomeScreen', () => {
     expect(screen.getByText('Half-Yearly results are out')).toBeTruthy();
     rerender(<LatestResultAlert exams={exams} now={new Date(released + 14 * day + 1)} />);
     expect(screen.queryByText(/results are out/)).toBeNull();
+  });
+});
+
+describe('HomeScreen notices', () => {
+  it('lists the newest notices after the fees, each opening its notice, with a way to all of them', async () => {
+    const { container } = renderWithQuery(<HomeScreen />);
+    const first = await screen.findByRole('link', { name: /Winter uniform from Monday/ });
+    expect(first.getAttribute('href')).toBe('/notices/ntc_uniform');
+    expect(first.textContent).toContain('Published 3 Nov 2026');
+    expect(screen.getByRole('link', { name: /Annual Sports Day/ }).getAttribute('href')).toBe('/notices/ntc_sports');
+    expect(screen.getByRole('link', { name: 'All notices' }).getAttribute('href')).toBe('/notices');
+    const text = container.textContent ?? '';
+    expect(text.indexOf('Fees outstanding')).toBeLessThan(text.indexOf('Winter uniform from Monday'));
+  });
+
+  it('shows no notices block, and no error, when the school does not have notices', async () => {
+    resetHandlers({
+      getProfile: () => profile,
+      listExams: () => ({ ...page([]), record: null }),
+      getFeeSummary: () => summary,
+      listNotices: () => { throw featureDisabledError('notices'); },
+    });
+    const { container } = renderWithQuery(<HomeScreen />);
+    expect(await screen.findByText('Fees outstanding')).toBeTruthy();
+    await vi.waitFor(() => expect(container.querySelector('[aria-busy]')).toBeNull());
+    expect(screen.queryByText('Notices')).toBeNull();
+    expect(screen.queryByRole('link', { name: 'All notices' })).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+  });
+
+  it('shows no notices block for a student without notices, and a retry when the read really fails', async () => {
+    resetHandlers({ getProfile: () => profile, listExams: () => ({ ...page([]), record: null }), getFeeSummary: () => summary, listNotices: () => page([]) });
+    const empty = renderWithQuery(<HomeScreen />);
+    expect(await screen.findByText('Fees outstanding')).toBeTruthy();
+    expect(screen.queryByRole('link', { name: 'All notices' })).toBeNull();
+    empty.unmount();
+
+    resetHandlers({ getProfile: () => profile, listExams: () => ({ ...page([]), record: null }), getFeeSummary: () => summary, listNotices: () => { throw new Error('Notices are down'); } });
+    renderWithQuery(<HomeScreen />);
+    expect(await screen.findByText('Could not load notices')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
   });
 });

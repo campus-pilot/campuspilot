@@ -49,6 +49,7 @@ Do not infer one surface's state from another fact. In particular:
 | `/school/:schoolId/settings/templates/bill` | Finance bill template editor |
 | `/school/:schoolId/settings/templates/receipt` | Payment/refund receipt template editor |
 | `/school/:schoolId/settings/templates/statement` | Admission account-statement template editor |
+| `/school/:schoolId/settings/templates/notice` | Notice template editor (schools with the `notices` feature only) |
 | `/school/:schoolId/sessions/:sessionId/billing/documents` | Compatibility redirect to session-wide document history |
 | `/school/:schoolId/marketplace/templates?type=:documentType` | Marketplace filtered to one document type |
 | `/school/:schoolId/marketplace/templates/:documentType/:slug` | Dedicated marketplace preview and import action |
@@ -155,6 +156,10 @@ When a revision exists, an authorized editor sees:
   syntax highlighting, line numbers, wrapping, and theme support;
 - for admit cards, bills, receipts, and statements, an explicit paper footprint:
   half A4 (two documents per physical sheet) or full A4 (one per sheet);
+- for notices, a "Preview as" choice of a full-A4 or half-A4 notice instead:
+  a Notice design has no footprint (each notice chooses its size) and the
+  choice is never saved (the marketplace detail page of a Notice design offers
+  the same choice);
 - Save template and Reload saved revision actions;
 - a collapsible variable reference;
 - a sanitized sample preview on the right at wide widths and second in the stack
@@ -250,7 +255,10 @@ print options, and approval policy used at generation time.
 Template `pageSize` is immutable revision metadata. `half` means one rendered
 document occupies 210 × 148.5 mm and the server places two documents vertically
 on each portrait A4 sheet. It is supported only for admit cards, bills, receipts,
-and statements. Report cards remain full portrait A4, timetables remain full
+and statements. A Notice revision is always `full` and `half` is refused
+(`validateTemplatePageSize`): a notice's print size is the notice's own fact
+(`notice.page_size`), and one Notice design prints both sizes, adapting to
+the `print.size` context fact (see "Notices"). Report cards remain full portrait A4, timetables remain full
 landscape A4, and student IDs keep their dedicated 86 × 54 mm A4 imposition.
 Preview and generation read this value from the selected revision; a batch request
 cannot override it. Existing revisions migrate to `full`, avoiding a silent
@@ -285,7 +293,12 @@ the object and row; storage failure leaves a visible record that can be retried.
 ## Document source rules
 
 The supported `DocumentType` values are `report_card`, `id_card`, `admit_card`,
-`timetable`, `bill`, `receipt`, and `statement`. Their source DTOs are a strict discriminated union. Do not add optional
+`timetable`, `bill`, `receipt`, `statement`, and `notice`. The first seven have
+source DTOs in a strict discriminated union. `notice` is a **template-only**
+type (`TEMPLATE_ONLY_DOCUMENT_TYPES`): it has a school template, marketplace
+design and settings page, but no generator source, no card in the Documents
+workspace and no PDF artifacts or history; notices are written, rendered and
+published by the notices feature (see "Notices" below). Do not add optional
 fields to a common base merely because two types happen to use the same value today.
 
 - Report cards can target a complete examination, one class, or up to 500 explicit
@@ -341,7 +354,80 @@ Every bundled design must:
 - render against `SAMPLE_DOCUMENT_CONTEXT` without reading live tenant data.
 
 The renderer allows standard Handlebars `each`, `if`, `unless`, `with`, and
-`lookup`, plus the finite-numeric `add` helper. Prototype access is disabled.
+`lookup`, plus the finite-numeric `add` helper. This is an **allowlist**
+(`DOCUMENT_TEMPLATE_HELPERS` in `document.render.ts`): every other built-in is
+unregistered when the instance is created, including `log`, which would let a
+template write unbounded data to the server's console. A call to any other
+helper is a BAD_REQUEST. Prototype access is disabled.
+
+### Render budget
+
+A render is bounded **while it runs**, not afterwards: a template that
+multiplies a large value (nested `each` around photos, one value repeated
+thousands of times) is aborted at the limit instead of building a string of
+hundreds of megabytes first. The rule in `document.render.ts` is a design rule,
+not a list of patched helpers: **every construct that can produce output is
+either counted or refused when the template is parsed**, for school document
+templates and notices alike (one shared instance).
+
+| Construct | Decision |
+| --- | --- |
+| Static text | Counted on every run of the body it is written in (a statement inserted first in every body). |
+| `{{value}}`, `{{helper a b}}`, `{{@index}}`, `{{../a}}`, block params | Counted after HTML escaping. |
+| `{{{value}}}`, `{{&value}}` | Counted. |
+| Sub-expressions `(lookup a b)`, hash arguments | Produce no output; printed only through the two rows above. |
+| `{{#each}}`, `{{#if}}`, `{{#unless}}`, `{{#with}}`, `{{else}}`, `{{else if}}`, `{{^}}` | Their output is the bodies they run, and each run counts itself. Every run also costs one step plus, for every expression or block written in that body, its expression nodes (path parts, literals and sub-expression heads; `{{x}}` is one, `{{lookup a.b "c"}}` four). See "CPU" below. |
+| `{{#value}}…{{/value}}` sections, `{{{{raw}}}}` | As above. |
+| `{{#lookup}}`, `{{#add}}`, any other registered helper opened as a block (also spelled `{{#"lookup"}}`, `{{#@lookup}}`, `{{#lookup.x}}`) | **Refused.** Their result would be printed without passing a counted value. |
+| `{{> partial}}`, `{{#> partial}}`, `{{#*inline}}`, `{{* decorator}}` | **Refused**; no partial or decorator is registered. |
+| The renderer's own helpers (`__document…`), any unknown AST node | **Refused.** |
+| A call with more than 4 arguments or 4 hash pairs, a path of more than 8 parts, sub-expressions nested more than 4 deep, more than 32 expression nodes in one statement or 10,000 in a template, blocks nested more than 64 deep (every `{{else if}}` of a chain counts as a level) | **Refused** (`DOCUMENT_TEMPLATE_STRUCTURE_LIMITS`). |
+
+Two further lines of defence keep this true for constructs nobody listed: the
+result of any helper called as a block is charged for whatever its bodies did
+not count, and after a render the string must be exactly as long as what was
+counted, or the render is refused. `document.render.test.ts` has one row per
+construct in two tables (counted to the character and identical to plain
+Handlebars; refused), and checks every marketplace design the same way. A new
+helper or construct belongs in exactly one of them.
+
+The budget is 25 million units (`DOCUMENT_RENDER_MAX_CHARS`) for a **whole
+batch**: `renderDocuments` compiles the template once and renders every
+student's context under one shared budget, the same ceiling as the combined
+result. Notices pass a much lower one. Because the save-time check and every
+later render run under the same budget, a template that was accepted cannot
+cost more than the budget when it is rendered with real data; real data that
+does not fit is a BAD_REQUEST for that render.
+
+**CPU.** The budget bounds time as well as output because every unit of it is a
+bounded amount of work. Handlebars evaluates every argument, hash value and path
+part of a statement on every run, so a statement is charged its expression
+nodes on every run, and the structural limits above keep each statement to a
+few nodes (before them, one `{{lookup a a … a}}` with 60,000 arguments inside
+nested loops was charged two steps per run and blocked the process for
+minutes). Nesting is checked on Handlebars' own tokens **before** the template is
+parsed (`parseDocumentTemplate`), because the parser is superlinear in nesting
+(4,000 nested sub-expressions took 2.6 s to parse); every server-side parse goes
+through that function. The scan reads the whole template: the lexer returns most
+tokens as ids but the end of a raw block (`{{{{/raw}}}}`) and `INVALID` as names,
+and the scan maps names through the parser's own symbol table, as the parser does
+(before review round 4 it stopped at the first raw block, so everything after
+one was parsed unchecked). It stops early only where the parser is certain to
+fail at the same position (an `INVALID` token or a lexical error), and refuses a
+token it cannot classify or a scan that does not finish, so the parser never
+consumes a token the scan has not checked. `document.render.test.ts` holds this
+after raw blocks, comments, string literals and escaped mustaches, with a time
+limit. Measured worst cases: a loop of empty bodies or of the
+costliest allowed statement exhausts the 2 million notice budget in about 0.1 s
+and the 25 million document budget in about 1 s (`document.render.test.ts` and
+`notice.render.test.ts` hold this with time limits). The catalog's designs use at
+most 2 arguments, no hash, 3 path parts, sub-expressions one deep and blocks five
+deep, far inside the limits.
+
+Before shipping this to a database with stored school templates, run them
+through `renderDocument` against their sample context: a stored template that
+uses a partial or a block `lookup`, or exceeds a structural limit (no catalog
+design does), would now be refused.
 Rendered HTML is sanitized, wrapped in a restrictive content-security policy, and
 shown in an iframe with an empty `sandbox` attribute. Gotenberg runs with JavaScript
 and public/private outbound network access disabled.
@@ -360,6 +446,7 @@ executable source of truth.
 | Applies to | Context |
 | --- | --- |
 | Every document | `school.{name,location,registrationNo,logoUrl}`, `session.{startYear,endYear}`, nullable `exam`, ISO `generatedAt` |
+| Notices | Only `school`, `session`, `generatedAt` and `notice.{title,issuedOn,issuedOnDisplay,paragraphs[]}`; nothing else from this table |
 | Student documents | `student.{name,admissionNo,rollNo,className,sectionName,dob,fatherName,motherName,address,phoneNo,whatsappNo,photoUrl}` (phone numbers display-formatted with country code; `whatsappNo` nullable) |
 | Report cards | `subjects[]`, totals, overall percentage/grade, grading scale, attendance, co-scholastic data, approval/configuration flags, and independent report-section flags |
 | Admit cards | `timetable[]` entries for the student's class with ISO/display date, weekday, raw/display time, subject, and mode |
@@ -440,6 +527,77 @@ Adding a document type is cross-cutting. At minimum update:
 Do not make a type available in the card selector until its Settings route,
 marketplace designs, backend context, and permissions are complete.
 
+## Notices
+
+[School notices](notices.md) is the canonical guide to the feature; this section
+records only how it uses the document system.
+
+`packages/api/src/routers/school/notice` renders notices through this system:
+the same restricted Handlebars instance, sanitizer, CSP wrapper and Gotenberg
+conversion. What differs is recorded here because it is easy to get wrong.
+
+- **Feature gate.** Every template procedure refuses `documentType: 'notice'`
+  for a school without the `notices` feature (after the permission check).
+  The marketplace shows the Notice card only when the feature is enabled.
+  Notice templates use the academic template actions
+  (`READ_DOCUMENT_TEMPLATES` / `MANAGE_DOCUMENT_TEMPLATES`).
+- **Context.** `buildNoticeContext` (`notice.render.ts`) exposes only
+  `school.{name,location,registrationNo,logoUrl}` (the shared
+  `buildSchoolDocumentContext`, also used by academic and finance documents),
+  `session.{startYear,endYear}`, `generatedAt`, `print.size` (the notice's
+  own `page_size`, `full` or `half`) and
+  `notice.{title,issuedOn,issuedOnDisplay,paragraphs[]}`. There is no student,
+  staff, exam or finance data. Templates are previewed and validated against
+  `SAMPLE_NOTICE_CONTEXT` (`sampleDocumentContext('notice')`), never the
+  general sample. `issuedOn` is the publication date (today for a draft) in
+  the session's finance time zone when one is configured, else UTC. For a
+  published notice the date is stored at publication (`notice.issued_on`) and
+  never recomputed.
+- **Two body modes.** A `plain` notice is data: its text is split into
+  `notice.paragraphs[]` at blank lines and printed escaped by the template; it
+  is never compiled as Handlebars. A `template` notice is its own complete
+  document: the author's source is compiled by the restricted renderer and
+  sanitized like a school template, with `paragraphs` empty. Because every
+  staff role can write one, an author's source is additionally refused when
+  it nests block helpers more than four deep (`assertBoundedNoticeTemplate`),
+  on save and on every render. Every notice render (author source or school
+  Notice template) has a 2 million budget and receives the school logo as a
+  placeholder that is replaced after rendering, at most three times; a school
+  Notice template is checked against both when it is saved, with the sample
+  and with a notice of the maximum length. See "Security contract" in
+  [School notices](notices.md). What the
+  custom-template editor tells authors (variable list, starter document) is
+  owned by `notice-template-guide.ts` next to the renderer and is exhaustive
+  over `SAMPLE_NOTICE_CONTEXT`; do not copy it into an app.
+- **Which template.** A draft or unsaved preview uses the school's selected
+  Notice revision, or the built-in `notice-default` design when none is
+  selected (a notice never needs a selected template). Publishing pins the
+  revision used on the notice (`notice.template_revision_id`; null for the
+  built-in design and for `template` notices), so a later template change
+  never alters a published notice.
+- **Print size and flowing layout.** Each notice chooses `full` or `half`
+  A4 (`notice.page_size`, both body modes). `combineDocuments(..., 'notice',
+  size)` never clips to a fixed sheet: a full notice flows over portrait A4
+  pages with a 16 mm `@page` margin, a half notice over 210 x 148.5 mm pages
+  with a 10 mm margin (on screen: padding, plus a line where each half page
+  ends). The half-page PDF is then imposed with pdf-lib two copies per
+  portrait A4 sheet with a dashed cut guide (`imposeHalfPageNoticeCopies`),
+  so it prints on plain A4: unlike admit cards and finance documents, the
+  two halves of a sheet are the **same** page, by decision (the school
+  "cut in half" circular). Notice designs are size-adaptive: their
+  revision `pageSize` is always `full`, the save check renders them at both
+  sizes, and the bundled `notice-default` and `notice-compact` designs carry
+  `--{{print.size}}` classes. Notice templates must not set a fixed height,
+  `overflow: hidden` or outer page padding.
+- **PDF.** A published notice is immutable and identical for every reader, so
+  its PDF is rendered once and cached at
+  `schools/{schoolId}/notices/{noticeId}-{pageSize}.pdf` (no `artifact`
+  row; the pinned size is in the key). The same
+  object backs the staff download, the Cadet Portal download and every
+  WhatsApp attachment. The key is deterministic: concurrent first requests in
+  different processes may each write an equivalent object. The demo purge's
+  school-prefix sweep removes it.
+
 ## Notification attachments (WhatsApp)
 
 WhatsApp `school_document` messages (receipts for `payment.received`, report
@@ -453,7 +611,13 @@ the same Gotenberg conversion. A domain refusal (reversed payment, unapproved
 results, invalid template) produces no PDF and the delivery fails visibly; it
 is never replaced by a partial document.
 
-These PDFs are message attachments, not documents of the school's history:
+A `notice.published` message carries the notice's PDF from the notice cache
+described under "Notices": rendered once per notice, not once per recipient,
+and always available (no selected template is required), so a notice is never
+downgraded to text for lack of a template. Its delivery records the notice's
+pinned template revision.
+
+Receipt and report-card PDFs are message attachments, not documents of the school's history:
 no `artifact` row or S3 object is written, so they never appear in Document
 history and cannot be downloaded again. Provenance is kept on the delivery
 (`notification_delivery.document_template_revision_id`). When the school has

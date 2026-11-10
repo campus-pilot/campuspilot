@@ -1,7 +1,16 @@
-import { BookOpenCheck } from 'lucide-react';
-import { ModulePlaceholder } from '@/components/module-placeholder';
+import { DocumentTemplateSettings } from '@/components/documents/document-template-settings';
+import { FeaturePage } from '@/components/feature-unavailable';
 
-export default function NoticeTemplatePage() {
-  return <ModulePlaceholder icon={BookOpenCheck} title="Notice template" description="School notice templates will be configured here." />;
+/** The Notice template exists only for schools with the notices feature. */
+export default async function NoticeTemplatePage({
+  params,
+}: {
+  params: Promise<{ schoolId: string }>;
+}) {
+  const { schoolId } = await params;
+  return (
+    <FeaturePage feature="notices">
+      <DocumentTemplateSettings schoolId={schoolId} documentType="notice" />
+    </FeaturePage>
+  );
 }
-

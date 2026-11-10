@@ -15,10 +15,12 @@ import {
   signInCadet,
 } from '../../../test/cadet';
 import { expectRpcCode } from '../../../test/finance/assertions';
+import { expectFeatureDisabled } from '../../../test/feature-flags';
 import {
   createSchoolStaffSession,
   createTestClient,
   createTestSchool,
+  setTestSchoolFeature,
 } from '../../../test/fixtures';
 import { createCadetContextFromHeaders, createCadetOAuthContext } from '../../cadet/context';
 import { createContextFromHeaders } from '../../context';
@@ -26,7 +28,7 @@ import { appRouter } from '../index';
 import { cadetRouter } from './cadet.router';
 
 async function cadetWithLogin() {
-  const school = await createTestSchool();
+  const school = await createTestSchool({ features: ['cadet'] });
   const principal = await createSchoolStaffSession(school.id, [{ role: 'principal', meta: null }]);
   const principalClient = createTestClient(principal.session);
   const created = await principalClient.school.createAdmission({
@@ -94,6 +96,60 @@ describe('cadetRouter.getAdmission', () => {
   });
 });
 
+describe('the cadet feature flag', () => {
+  it('stops an existing session at once with the portal-unavailable error and resumes when re-enabled', async () => {
+    const { school, cookie } = await cadetWithLogin();
+    const client = createCadetTestClient(new Headers({ cookie }));
+    expect((await client.getAdmission()).name).toBe('Meera Singh');
+
+    await setTestSchoolFeature(school.id, 'cadet', false);
+    // FORBIDDEN with the feature data, never UNAUTHORIZED: the login is
+    // still valid, the school just has no portal.
+    await expectFeatureDisabled(client.getAdmission(), 'cadet');
+    await expectFeatureDisabled(client.getProfile(), 'cadet');
+    await expectFeatureDisabled(client.getUnreadNotificationCount(), 'cadet');
+    // Anonymous callers still get UNAUTHORIZED, not a feature answer.
+    await expectRpcCode(createCadetTestClient(new Headers()).getAdmission(), 'UNAUTHORIZED');
+
+    await setTestSchoolFeature(school.id, 'cadet', true);
+    expect((await client.getAdmission()).name).toBe('Meera Singh');
+  });
+
+  it('refuses sign-in like wrong credentials while the feature is off', async () => {
+    const { school, created } = await cadetWithLogin();
+    await setTestSchoolFeature(school.id, 'cadet', false);
+    const refused = await signInCadet(created.cadetPassword!);
+    expect(refused.response.status).toBe(401);
+    expect(((await refused.response.json()) as { code: string }).code).toBe('INVALID_CADET_CREDENTIALS');
+    expect(refused.cookie).toBe('');
+
+    await setTestSchoolFeature(school.id, 'cadet', true);
+    expect((await signInCadet(created.cadetPassword!)).response.status).toBe(200);
+  });
+
+  it('closes the Cadet MCP for a connected app while the feature is off, keeping the grant', async () => {
+    const { school, created } = await cadetWithLogin();
+    const { claims } = await connectCadetMcp(created.cadetPassword!);
+    const oauthInput = {
+      headers: new Headers(),
+      userId: claims.userId,
+      oauthGrant: { clientId: claims.clientId, scopes: claims.scopes, grantId: 'grant' },
+    };
+    const context = await createCadetOAuthContext(oauthInput);
+    expect(context).not.toBeNull();
+
+    await setTestSchoolFeature(school.id, 'cadet', false);
+    // The gate gets no context (it answers as for a revoked connection)...
+    expect(await createCadetOAuthContext(oauthInput)).toBeNull();
+    // ...and a context resolved just before the switch is refused per call.
+    await expectFeatureDisabled(createRouterClient(cadetRouter, { context: context! }).getAdmission(), 'cadet');
+
+    await setTestSchoolFeature(school.id, 'cadet', true);
+    const again = await createCadetOAuthContext(oauthInput);
+    expect((await createRouterClient(cadetRouter, { context: again! }).getAdmission()).id).toBe(created.id);
+  });
+});
+
 describe('cadetRouter.getOAuthConsentClient', () => {
   it('returns a cadet client for a signed-in student and never a staff client', async () => {
     const { created, cookie } = await cadetWithLogin();
@@ -154,22 +210,30 @@ describe('cadet and staff sessions are isolated', () => {
       'getExamResult',
       'getFeeSummary',
       'getGrowth',
+      'getNotice',
+      'getNoticeDocument',
+      'getNoticeDownload',
       'getOAuthConsentClient',
       'getProfile',
       'getPushSubscription',
       'getSchool',
+      'getSignInSchool',
       'getUnreadNotificationCount',
       'listExams',
       'listFeeLedger',
+      'listNotices',
       'listNotifications',
       'listRemarks',
       'markAllNotificationsRead',
       'markNotificationsRead',
+      'searchSchools',
       'subscribePush',
       'unsubscribePush',
     ]);
     // Same-named staff inbox procedures live under `school`, scoped by membership.
     expect(appRouter).not.toHaveProperty('listNotifications');
+    expect(appRouter).not.toHaveProperty('listNotices');
+    expect(appRouter).not.toHaveProperty('getNotice');
     expect(appRouter).not.toHaveProperty('getAdmission');
     expect(appRouter).not.toHaveProperty('getOAuthConsentClient');
     expect(Object.values(appRouter)).not.toContain(cadetRouter);

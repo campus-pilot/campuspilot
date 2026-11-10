@@ -117,6 +117,38 @@ isolation, route order and CORS scoping, the admission-id-only identity model,
 sign-in limits, issue/reset and revocation semantics, and the checklist for
 adding a cadet procedure, screen or table.
 
+## Notices
+
+Before changing anything notice-related (the `notice` / `notice_class` tables,
+the staff notice procedures in `routers/school/notice`, the Cadet notice
+procedures, notice rendering and the custom-template guide, the `notice.*`
+notification types and the notice PDF cache, the notice screens in
+`apps/management` and `apps/cadet`, or the demo seed's notices), read the
+canonical [Notices guide](docs/notices.md). It records the two independent
+audience facts (`to_staff`, `cadet_scope`), the one-way draft to published
+lifecycle and who may do what, the `notices` and `cadet` feature gates, the
+rendering rules for plain and custom-template notices with their security
+contract, the publish transaction and per-channel fan-out (including why a
+delivery log is still filling right after publication), the cached PDF, the
+Cadet visibility rule, and the checklist for extending notices.
+
+## Examination timetables
+
+Before changing exam timetable drafting, publishing or withdrawal, the
+`exam.timetable_published*` notifications, or the Cadet Portal timetable
+screens, read [Examination timetable publishing](docs/exam-timetable-publishing.md).
+
+## School feature flags
+
+Before adding a per-school feature, gating a procedure, page or navigation item
+on one, or changing `school_feature_flag`, the feature catalogue
+(`packages/db/src/feature-flags`), `requireSchoolFeature`, `RequireFeature` /
+`useSchoolFeature`, or the admin feature-flags editor, read the canonical
+[School feature flags guide](docs/feature-flags.md). A flag says what a school
+has; it is never a substitute for a permission, and a missing row means
+disabled. New schools start with no feature; tests name the features they need
+(`createTestSchool({ features: [...] })`).
+
 ## Demo schools
 
 Demo schools (`school.is_demo`) are provisioned by `DemoSchoolWorkflow`

@@ -149,6 +149,20 @@ export const cadetRpcHandler = new RPCHandler(cadetRouter, {
   ],
 });
 
+/**
+ * `searchSchools` and `getSignInSchool` are the public cadet procedures (the
+ * sign-in page calls them as the student types and picks), so each client IP
+ * may call them 30 times per 10 s together. Registered before the RPC handler
+ * so the limit runs first.
+ */
+const cadetSignInSchoolRateLimit = createRateLimit({
+  id: 'cadet-sign-in-school',
+  limit: 30,
+  windowMs: 10_000,
+});
+app.use('/api/cadet/rpc/searchSchools', cadetSignInSchoolRateLimit);
+app.use('/api/cadet/rpc/getSignInSchool', cadetSignInSchoolRateLimit);
+
 app.all('/api/cadet/rpc/*', async (context) => {
   const cadetContext: CadetContext = await createCadetContextFromHeaders(
     context.req.raw.headers,

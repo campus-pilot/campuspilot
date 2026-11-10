@@ -53,3 +53,19 @@ failed, and denied checks remain hidden.
 `RequirePermissions` controls frontend visibility only. Every protected API
 operation must still enforce the same permission in backend middleware; never
 treat the wrapper as the authorization boundary.
+
+## Feature-gated UI
+
+Use `RequireFeature` from `@/components/require-feature` around navigation,
+actions and cards of a product area the school may not have (see the
+[School feature flags guide](../../docs/feature-flags.md)), and `FeaturePage`
+from `@/components/feature-unavailable` around its pages. Pending, unknown (the
+flags could not be read) and disabled checks stay hidden. Use
+`useSchoolFeature(schoolId, feature)` when the typed config or the state is
+needed: its `status` separates `ready`, `pending` and `unknown`, and a screen
+must never tell the user a feature is "not enabled" when it is only `unknown`
+(offer `retry`). Flags and permissions already known keep applying when a
+background refetch fails, so an open page is never unmounted by a network blip;
+never show a stored value differently because a feature is off (show it as it
+is and block the save with the reason). A feature gate does not replace a
+permission gate: wrap permission-protected entry points with both.

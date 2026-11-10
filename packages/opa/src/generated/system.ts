@@ -15,10 +15,12 @@ export const SYSTEM_ACTIONS = {
   READ_DEMO_SCHOOL_CREDENTIALS: 'system.school.demo.credentials.read',
   READ_PLATFORM_STATS: 'system.platform.stats.read',
   READ_SCHOOL: 'system.school.read',
+  READ_SCHOOL_FEATURE_FLAGS: 'system.school.feature_flags.read',
   READ_SCHOOL_STATS: 'system.school.stats.read',
   RUN_DATA_MIGRATION: 'system.data_migration.run',
   UPDATE_OAUTH_CLIENT: 'system.oauth_client.update',
   UPDATE_SCHOOL: 'system.school.update',
+  UPDATE_SCHOOL_FEATURE_FLAGS: 'system.school.feature_flags.update',
 } as const;
 
 export type SystemAction =

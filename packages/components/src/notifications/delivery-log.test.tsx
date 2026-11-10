@@ -4,7 +4,7 @@ import { TooltipProvider } from '@campuspilot/ui/components/tooltip';
 import type { ReactElement } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { NotificationDeliveryLog, type DeliveryLogDelivery } from './delivery-log';
+import { DeliveryLogPreparation, NotificationDeliveryLog, type DeliveryLogDelivery } from './delivery-log';
 import { whatsappReadiness } from './whatsapp-readiness';
 
 afterEach(() => cleanup());
@@ -15,6 +15,19 @@ const render = (element: ReactElement) => renderInDom(<TooltipProvider>{element}
 const delivery = (overrides: Partial<DeliveryLogDelivery>): DeliveryLogDelivery => ({
   id: 'ndl_1', channel: 'whatsapp', status: 'sent', skipReason: null, errorCode: null, errorMessage: null,
   attempts: 1, interrupted: false, resendOfDeliveryId: null, resent: false, subscriptionGone: false, resendable: false, nextAttemptAt: null, ...overrides,
+});
+
+describe('DeliveryLogPreparation', () => {
+  it('says how many notifications are still to come and how many could not be prepared', () => {
+    render(<DeliveryLogPreparation pendingCount={18} failedCount={1} />);
+    expect(screen.getByRole('status').textContent).toBe('18 more notifications are being prepared. This list updates by itself.');
+    expect(screen.getByRole('alert').textContent).toBe('1 notification could not be prepared and may be missing from this list.');
+  });
+
+  it('renders nothing once the list is complete', () => {
+    const { container } = render(<DeliveryLogPreparation pendingCount={0} failedCount={0} />);
+    expect(container.textContent).toBe('');
+  });
 });
 
 describe('NotificationDeliveryLog', () => {
@@ -42,6 +55,13 @@ describe('NotificationDeliveryLog', () => {
     expect(screen.getByText('Device notifications not turned on')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Resend' }));
     expect(onResend).toHaveBeenCalledWith('ndl_failed');
+  });
+
+  it("names only the student on a log of one notice, which the page already names", () => {
+    const item = { notificationId: 'ntf_9', type: 'notice.published', studentName: 'Advika', reference: 'Sports Day', createdAt: '2026-11-09T10:00:00Z', deliveries: [delivery({})] };
+    render(<NotificationDeliveryLog canResend={false} resendingDeliveryId={null} onResend={() => {}} items={[item]} oneSubject />);
+    expect(screen.getByText('Advika')).toBeTruthy();
+    expect(screen.queryByText(/Sports Day/)).toBeNull();
   });
 
   it('never offers Resend for a device that no longer receives notifications, and shows a pending retry', () => {

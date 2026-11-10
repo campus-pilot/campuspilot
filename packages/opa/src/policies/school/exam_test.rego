@@ -14,7 +14,7 @@ test_all_staff_can_view_exams if {
  }
 }
 test_governance_is_school_admin_only if {
- every action in {"school.exam.create", "school.exam.update", "school.exam.delete", "school.exam.plan.create", "school.exam.plan.update", "school.exam.plan.delete", "school.exam.plan.transition", "school.exam.timetable.update", "school.exam.timetable.delete", "school.exam.result.revise"} {
+ every action in {"school.exam.create", "school.exam.update", "school.exam.delete", "school.exam.plan.create", "school.exam.plan.update", "school.exam.plan.delete", "school.exam.plan.transition", "school.exam.timetable.update", "school.exam.timetable.delete", "school.exam.timetable.publish", "school.exam.result.revise"} {
   every role in {"school.principal", "school.manager", "school.exam_coordinator"} {
    authorization.allow with input as school_input(action, role, "school-1")
    not authorization.allow with input as school_input(action, role, "school-2")

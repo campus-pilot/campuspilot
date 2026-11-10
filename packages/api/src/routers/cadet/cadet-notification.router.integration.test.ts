@@ -18,7 +18,7 @@ import {
 import { notificationRowId } from '../../notifications/ids';
 
 async function studentInbox() {
-  const school = await createTestSchool();
+  const school = await createTestSchool({ features: ['cadet'] });
   const admission = await createTestAdmission({ schoolId: school.id });
   const { eventId } = await emitAndDispatch({
     type: 'bill.issued',
@@ -68,7 +68,7 @@ describe('cadet notification inbox', () => {
   });
 
   it('works through a real cadet sign-in', async () => {
-    const school = await createTestSchool();
+    const school = await createTestSchool({ features: ['cadet'] });
     const principal = await createSchoolStaffSession(school.id, [{ role: 'principal', meta: null }]);
     const created = await createTestClient(principal.session).school.createAdmission({
       schoolId: school.id,

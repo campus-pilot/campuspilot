@@ -146,6 +146,11 @@ export function createCadetAuth(
 
     advanced: sharedCookieOptions(CADET_COOKIE_PREFIX),
     session: SHARED_SESSION_OPTIONS,
+    // Ending a session stops its device's notifications, but not here: the
+    // `cadet_session` delete trigger (migration 0052) revokes the session's
+    // push subscriptions for `/sign-out`, `/revoke-session(s)`,
+    // `/revoke-other-sessions`, expired-session cleanup and every other
+    // path, so no endpoint or hook has to remember it.
     hooks: {
       after: recordDynamicClientRegistration(db, CADET_OAUTH_SERVER_TABLES),
     },

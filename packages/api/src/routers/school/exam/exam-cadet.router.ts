@@ -2,6 +2,7 @@ import { SCHOOL_ACTIONS } from '@campuspilot/opa/policies/school';
 
 import { toRpcError } from '../../../errors';
 import { protectedProcedure } from '../../../index';
+import { requireSchoolFeature } from '../../../permissions/feature';
 import { requireSchoolPermission } from '../../../permissions/school';
 import * as dto from './exam.dto';
 import {
@@ -26,7 +27,7 @@ export const schoolExamCadetRouter = {
     .route(
       route(
         'Release examination results to the Cadet Portal',
-        'Make a completed examination’s results, remarks and co-scholastic grades visible to its students in the Cadet Portal. Records who released it and when. Reopening is refused while released. The first release also notifies every registered student (inbox, web push, WhatsApp); a re-release after a withdraw notifies nobody again.',
+        'Make a completed examination’s results, remarks and co-scholastic grades visible to its students in the Cadet Portal. Records who released it and when. Reopening is refused while released. The first release also notifies every registered student (inbox, web push, WhatsApp); a re-release after a withdraw notifies nobody again. Refused when the school does not have the Cadet Portal.',
       ),
     )
     .meta({
@@ -39,6 +40,10 @@ export const schoolExamCadetRouter = {
     })
     .input(dto.examScopeSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.TRANSITION_EXAM_PLAN))
+    // Releasing puts results into the Cadet Portal and notifies students of
+    // it, so the school must have the portal. (Withdrawing stays possible
+    // without it: it only hides what was released.)
+    .use(requireSchoolFeature('cadet'))
     .output(dto.examOverviewSchema)
     .handler(async ({ context, input }) => {
       try {
@@ -71,6 +76,7 @@ export const schoolExamCadetRouter = {
     })
     .input(dto.examScopeSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.TRANSITION_EXAM_PLAN))
+    .use(requireSchoolFeature('cadet'))
     .output(resultReleasePreviewSchema)
     .handler(async ({ context, input }) => {
       try {
@@ -83,7 +89,7 @@ export const schoolExamCadetRouter = {
     .route(
       route(
         'Withdraw examination results from the Cadet Portal',
-        'Hide a released examination from students in the Cadet Portal again. Saved results and remarks are unchanged.',
+        'Hide a released examination from students in the Cadet Portal again. Saved results and remarks are unchanged. Allowed also while the school’s Cadet Portal is switched off.',
       ),
     )
     .meta({

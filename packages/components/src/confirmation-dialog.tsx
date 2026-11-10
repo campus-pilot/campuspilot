@@ -22,6 +22,7 @@ export function ConfirmationDialog({
   onConfirm,
   pending = false,
   confirmVariant = 'destructive',
+  confirmDisabled = false,
   children,
 }: {
   open: boolean;
@@ -34,6 +35,12 @@ export function ConfirmationDialog({
   /** The caller owns submission state; pending operations cannot be dismissed. */
   pending?: boolean;
   confirmVariant?: ComponentProps<typeof Button>['variant'];
+  /**
+   * Disables only the confirm button, for a confirmation that is not ready
+   * yet (for example while what it will do is still loading). Unlike
+   * `pending`, the dialog can still be cancelled.
+   */
+  confirmDisabled?: boolean;
   children?: ReactNode;
 }) {
   return (
@@ -61,7 +68,7 @@ export function ConfirmationDialog({
           <Button
             type="button"
             variant={confirmVariant}
-            disabled={pending}
+            disabled={pending || confirmDisabled}
             onClick={onConfirm}
           >
             {confirmLabel}

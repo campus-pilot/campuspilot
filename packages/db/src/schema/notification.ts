@@ -22,7 +22,7 @@ import {
 } from "../notifications/catalogue";
 import { admissionTable } from "./admission";
 import { user } from "./auth";
-import { cadetUser } from "./cadet";
+import { cadetSession, cadetUser } from "./cadet";
 import { schoolTable } from "./school";
 
 /**
@@ -82,7 +82,11 @@ export const notificationDeliveryStatusEnum = pgEnum(
  * - `no_subscription`: no active web push subscription;
  * - `demo_school`: demo schools never send outside the inbox;
  * - `disabled`: the channel is switched off or not available on this
- *   platform (kill switch, or no adapter in this release).
+ *   platform (kill switch, or no adapter in this release);
+ * - `feature_disabled`: the school does not have a platform feature the
+ *   notification belongs to (`notificationRequiredFeatures`), for example a
+ *   notice copy that was still owed when `notices` was switched off. It is
+ *   about the school, not the channel, so it is its own reason.
  */
 export const notificationSkipReasonEnum = pgEnum("notification_skip_reason", [
   "no_number",
@@ -92,6 +96,7 @@ export const notificationSkipReasonEnum = pgEnum("notification_skip_reason", [
   "no_subscription",
   "demo_school",
   "disabled",
+  "feature_disabled",
 ]);
 
 /**
@@ -114,11 +119,14 @@ export const notificationSendPriorityEnum = pgEnum("notification_send_priority",
  * are grouped into one staff notification.
  * - `billing_run`: one `bill.issued` per bill of a posted billing run;
  * - `result_publication`: one `exam.results_published` per student of a
- *   results publication.
+ *   results publication;
+ * - `notice`: one `notice.published` per student a published notice is
+ *   addressed to (the batch ID is the notice ID).
  */
 export const notificationBatchKindEnum = pgEnum("notification_batch_kind", [
   "billing_run",
   "result_publication",
+  "notice",
 ]);
 
 /**
@@ -160,7 +168,7 @@ export const notificationEventTable = pgTable(
      * both null for a one-off event. Failure alerts are grouped per batch.
      */
     batchKind: notificationBatchKindEnum("batch_kind"),
-    /** The billing run or results publication ID (see `batch_kind`). */
+    /** The billing run, results publication or notice ID (see `batch_kind`). */
     batchId: text("batch_id"),
     /**
      * Whether `created_by` asked for this very send (a single result send,
@@ -241,6 +249,12 @@ export const notificationEventTable = pgTable(
     index("notification_event_batch_idx")
       .on(table.schoolId, table.batchKind, table.batchId)
       .where(sql`${table.batchKind} is not null`),
+    // The delivery log's "still being prepared" counts read one school's
+    // pending and failed events (polled every two seconds while a bulk
+    // action fans out). Without this they scanned every school's.
+    index("notification_event_school_unsettled_idx")
+      .on(table.schoolId, table.status)
+      .where(sql`${table.status} in ('pending', 'failed')`),
   ],
 );
 
@@ -459,6 +473,24 @@ export const cadetPushSubscriptionTable = pgTable(
     p256dh: text("p256dh").notNull(),
     /** Browser's auth secret (base64url) for payload encryption. */
     auth: text("auth").notNull(),
+    /**
+     * The Cadet Portal session that last turned notifications on for this
+     * device. When that session ends, by any path, the subscription is
+     * revoked on the server: a `BEFORE DELETE` trigger on `cadet_session`
+     * (`cadet_session_revoke_push_subscriptions`, migration 0052; triggers
+     * are not part of the Drizzle schema) sets `revoked_at` before the
+     * foreign key clears this column. A signed-out device therefore stops
+     * receiving the student's notifications even when the app's own "turn
+     * off" call never arrives. Null for subscriptions stored before this
+     * column existed and for revoked rows whose session is gone; a row
+     * without a session is still revoked by the app's `unsubscribePush`
+     * call and by `revokeCadetLoginAccess`. An expired session keeps its
+     * device subscribed until its row is deleted (Better Auth deletes it
+     * when the expired cookie is next presented).
+     */
+    cadetSessionId: text("cadet_session_id").references(() => cadetSession.id, {
+      onDelete: "set null",
+    }),
     /** User-Agent of the subscribing request, for staff support only. */
     userAgent: text("user_agent"),
     createdAt: timestamp("created_at", { withTimezone: true })
@@ -479,6 +511,13 @@ export const cadetPushSubscriptionTable = pgTable(
     index("cadet_push_subscription_active_idx")
       .on(table.cadetUserId)
       .where(sql`${table.revokedAt} is null`),
+    /**
+     * Deliberately not partial: the foreign key's `ON DELETE SET NULL`
+     * looks rows up by `cadet_session_id` alone (revoked rows included), and
+     * a partial index on `revoked_at is null` cannot serve that predicate,
+     * so every session delete would scan the whole table.
+     */
+    index("cadet_push_subscription_session_idx").on(table.cadetSessionId),
   ],
 );
 

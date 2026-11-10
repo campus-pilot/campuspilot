@@ -10,6 +10,7 @@ import {
 } from 'react';
 import { useForm } from '@tanstack/react-form';
 import { useQuery } from '@tanstack/react-query';
+import { resolveQueryBoundary } from '@campuspilot/components/query-boundary';
 import {
   FileText,
   Maximize2,
@@ -41,6 +42,7 @@ import {
 import { client, orpc } from '@/lib/orpc';
 import { confirmNavigation } from '@/lib/navigation-guard';
 import { TemplatePromptEditor } from './template-prompt-editor';
+import { noticePreviewPrintSizeSchema, noticePrintSizeOptions } from './notice-print-size-preview';
 import {
   DocumentDirtyGuard,
   DocumentLoading,
@@ -77,6 +79,7 @@ const TEMPLATE_TITLES: Record<DocumentTemplateScope['documentType'], string> = {
   bill: 'Bill Template',
   receipt: 'Receipt Template',
   statement: 'Account Statement Template',
+  notice: 'Notice Template',
 };
 
 const halfPageDocumentTypes = new Set<DocumentTemplateScope['documentType']>(
@@ -86,7 +89,6 @@ const pageSizeOptions = [
   { value: 'half', label: 'Half A4 · two per sheet' },
   { value: 'full', label: 'Full A4 · one per sheet' },
 ] as const;
-
 const DESKTOP_WORKSPACE_QUERY = '(min-width: 1280px)';
 const MM_TO_PX = 96 / 25.4;
 
@@ -126,50 +128,80 @@ export function DocumentTemplates({ scope }: { scope: DocumentTemplateScope }) {
   const active = useQuery(
     orpc.school.getActiveDocumentTemplate.queryOptions({ input: scope }),
   );
-  if (active.isPending) return <DocumentLoading />;
-  if (active.isError)
-    return <DocumentReadError error={active.error} retry={active.refetch} />;
+  // The template already loaded (and the editor with unsaved code under it)
+  // stays when a background refetch fails; see `resolveQueryBoundary`.
+  const state = resolveQueryBoundary(active);
+  if (state.kind === 'pending') return <DocumentLoading />;
+  if (state.kind === 'failed')
+    return <DocumentReadError error={state.error} retry={active.refetch} />;
+  const template = state.data;
 
-  if (!active.data) {
-    return (
-      <div className="flex flex-col gap-5">
-        <TemplatePageHeader scope={scope} />
-        <DocumentPanel
-          title="No template selected"
-          description="Import a design from the template marketplace before editing this document type."
-        >
-          <div className="flex min-h-64 flex-col items-center justify-center gap-4 rounded-lg border border-dashed px-6 text-center">
-            <Store className="size-10 text-muted-foreground/50" aria-hidden />
-            <div className="flex max-w-md flex-col gap-1">
-              <p className="text-sm font-medium">Browse the marketplace</p>
-              <p className="text-xs text-muted-foreground">
-                Preview available designs, then import one into this school.
-              </p>
-            </div>
-            <DocumentButton asChild variant="outline">
-              <Link href={marketplaceHref(scope)}>Browse marketplace</Link>
-            </DocumentButton>
-          </div>
-        </DocumentPanel>
-      </div>
-    );
+  if (!template) {
+    return <NoTemplateSelected scope={scope} />;
   }
 
   return (
     <DocumentPermission
       schoolId={scope.schoolId}
       action={templateManageAction(scope.documentType)}
-      fallback={<SavedTemplatePreview scope={scope} template={active.data} />}
+      fallback={<SavedTemplatePreview scope={scope} template={template} />}
     >
       <TemplateEditor
-        key={active.data.artifact.id}
+        key={template.artifact.id}
         scope={scope}
-        template={active.data}
+        template={template}
         onReload={async () => {
           await active.refetch();
         }}
       />
     </DocumentPermission>
+  );
+}
+
+/**
+ * What the empty state says for a type without a selected template. Most
+ * types cannot be created until a design is imported. A notice never needs
+ * one: until the school picks a design, notices use the built-in default,
+ * and the copy says so instead of implying notices are blocked.
+ */
+function noTemplateCopy(documentType: DocumentTemplateScope['documentType']) {
+  if (documentType === 'notice') {
+    return {
+      title: 'Using the built-in notice design',
+      description:
+        'Notices already work: until your school picks a design, every plain-text notice is printed on the built-in default letterhead.',
+      heading: 'Pick your own design',
+      detail:
+        'Import a notice design from the marketplace to replace the built-in one, then edit it here. Notices published earlier keep the design they were published with.',
+    };
+  }
+  return {
+    title: 'No template selected',
+    description:
+      'Import a design from the template marketplace before editing this document type.',
+    heading: 'Browse the marketplace',
+    detail: 'Preview available designs, then import one into this school.',
+  };
+}
+
+function NoTemplateSelected({ scope }: { scope: DocumentTemplateScope }) {
+  const copy = noTemplateCopy(scope.documentType);
+  return (
+    <div className="flex flex-col gap-5">
+      <TemplatePageHeader scope={scope} />
+      <DocumentPanel title={copy.title} description={copy.description}>
+        <div className="flex min-h-64 flex-col items-center justify-center gap-4 rounded-lg border border-dashed px-6 text-center">
+          <Store className="size-10 text-muted-foreground/50" aria-hidden />
+          <div className="flex max-w-md flex-col gap-1">
+            <p className="text-sm font-medium">{copy.heading}</p>
+            <p className="text-xs text-muted-foreground">{copy.detail}</p>
+          </div>
+          <DocumentButton asChild variant="outline">
+            <Link href={marketplaceHref(scope)}>Browse marketplace</Link>
+          </DocumentButton>
+        </div>
+      </DocumentPanel>
+    </div>
   );
 }
 
@@ -192,7 +224,7 @@ function SavedTemplatePreview({
   return (
     <div className="flex flex-col gap-5">
       <TemplatePageHeader scope={scope} />
-      {preview.isError ? (
+      {preview.isError && preview.data === undefined ? (
         <DocumentReadError error={preview.error} retry={preview.refetch} />
       ) : (
         <DocumentPreview
@@ -231,6 +263,9 @@ function useDocumentTemplateForm(
       preview: '',
       previewContent: '',
       previewPageSize: '' as '' | 'full' | 'half',
+      /** Notice designs only: the notice print size the preview renders at (not saved). */
+      printSize: 'full' as 'full' | 'half',
+      previewPrintSize: 'full' as 'full' | 'half',
       error: '',
       previewing: false,
     },
@@ -242,6 +277,8 @@ function useDocumentTemplateForm(
         preview: z.string(),
         previewContent: z.string(),
         previewPageSize: z.enum(['', 'full', 'half']),
+        printSize: noticePreviewPrintSizeSchema,
+        previewPrintSize: noticePreviewPrintSizeSchema,
         error: z.string(),
         previewing: z.boolean(),
       }),
@@ -277,16 +314,19 @@ function useDocumentTemplateForm(
       previewVersion.current = version;
       form.setFieldValue('error', '');
       form.setFieldValue('previewing', true);
+      const printSize = form.getFieldValue('printSize');
       try {
         const result = await client.school.previewDocumentTemplate({
           ...scope,
           content,
           pageSize,
+          ...(scope.documentType === 'notice' ? { printSize } : {}),
         });
         if (previewVersion.current !== version) return;
         form.setFieldValue('preview', result.html);
         form.setFieldValue('previewContent', content);
         form.setFieldValue('previewPageSize', pageSize);
+        form.setFieldValue('previewPrintSize', printSize);
       } catch (error) {
         if (previewVersion.current !== version) return;
         form.setFieldValue(
@@ -502,6 +542,22 @@ function TemplateSourceForm({
                 />
               )}
             </form.Field>
+          ) : template.artifact.documentType === 'notice' ? (
+            <form.Field name="printSize">
+              {(field) => (
+                <DocumentSelect
+                  field={field}
+                  label="Preview as"
+                  options={noticePrintSizeOptions}
+                  onValueChange={() =>
+                    onDraftChange(
+                      form.getFieldValue('content'),
+                      form.getFieldValue('pageSize'),
+                    )
+                  }
+                />
+              )}
+            </form.Field>
           ) : null}
         </div>
       </div>
@@ -632,7 +688,9 @@ function TemplateDraftPreview({
           : template.artifact.pageSize;
         const stale =
           previewSource !== values.content ||
-          previewPageSize !== values.pageSize;
+          previewPageSize !== values.pageSize ||
+          (values.preview !== '' &&
+            values.previewPrintSize !== values.printSize);
         return (
           <section className="flex h-full min-w-0 flex-col bg-muted/30">
             <header className="flex min-h-11 shrink-0 flex-wrap items-center justify-between gap-2 border-b bg-card px-3 py-1.5">

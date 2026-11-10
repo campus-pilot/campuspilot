@@ -1,7 +1,7 @@
 import type { DatabaseExecutor } from '@campuspilot/db';
 import { notificationTypesFor } from '@campuspilot/db/notifications/catalogue';
-import { notificationDeliveryTable, notificationTable } from '@campuspilot/db/schema/notification';
-import { and, count, desc, eq, exists, inArray, isNotNull, sql, type SQL } from 'drizzle-orm';
+import { notificationDeliveryTable, notificationEventTable, notificationTable } from '@campuspilot/db/schema/notification';
+import { and, count, desc, eq, exists, inArray, isNotNull, isNull, sql, type AnyColumn, type SQL } from 'drizzle-orm';
 
 import { createNextPageCursor, createPaginatedResult, resolvePaginationInput } from '../paginations';
 import { activePushDestinations, isPushSubscriptionGone } from './redelivery';
@@ -12,7 +12,7 @@ import { stuckSendingCutoff } from './stuck-sending';
  * student notifications of one scope with every channel copy's status and
  * skip or failure reason. It shows which notification it was (type, the
  * student's name and a human reference such as the bill or receipt number
- * or the exam name) but never amounts or message text: log readers include
+ * the exam name or the notice title) but never amounts or message text: log readers include
  * roles without finance access. Students never see delivery rows (D-20).
  */
 
@@ -20,21 +20,102 @@ import { stuckSendingCutoff } from './stuck-sending';
 export type DeliveryLogScope =
   | { kind: 'admission'; admissionId: string }
   | { kind: 'bill_run'; billRunId: string }
-  | { kind: 'exam'; sessionId: string; examSlug: string };
+  | { kind: 'exam'; sessionId: string; examSlug: string }
+  | { kind: 'notice'; noticeId: string };
 
 
-function scopeWhere(scope: DeliveryLogScope): SQL {
+/**
+ * The scope as a predicate over a row carrying a catalogue `type` and its
+ * `data` facts. Inbox rows copy both from their event unchanged, so the same
+ * predicate selects a scope's notifications and the events that produce them.
+ * `admissionId` is the row's addressed admission: a column on an inbox row,
+ * the `admissionId` fact every student type carries on an event.
+ */
+type ScopedRow = { type: AnyColumn; data: AnyColumn; admissionId: AnyColumn | SQL };
+const EVENT_ROW: ScopedRow = {
+  type: notificationEventTable.type,
+  data: notificationEventTable.data,
+  admissionId: sql`${notificationEventTable.data}->>'admissionId'`,
+};
+
+function scopeWhere(scope: DeliveryLogScope, row: ScopedRow): SQL {
   switch (scope.kind) {
     case 'admission':
-      return eq(notificationTable.admissionId, scope.admissionId);
+      return sql`${row.admissionId} = ${scope.admissionId}`;
     case 'bill_run':
-      return and(eq(notificationTable.type, 'bill.issued'), sql`${notificationTable.data}->>'billRunId' = ${scope.billRunId}`)!;
+      return and(eq(row.type, 'bill.issued'), sql`${row.data}->>'billRunId' = ${scope.billRunId}`)!;
     case 'exam':
       return and(
-        eq(notificationTable.type, 'exam.results_published'),
-        sql`${notificationTable.data}->>'sessionId' = ${scope.sessionId}`,
-        sql`${notificationTable.data}->>'examSlug' = ${scope.examSlug}`,
+        eq(row.type, 'exam.results_published'),
+        sql`${row.data}->>'sessionId' = ${scope.sessionId}`,
+        sql`${row.data}->>'examSlug' = ${scope.examSlug}`,
       )!;
+    case 'notice':
+      return and(eq(row.type, 'notice.published'), sql`${row.data}->>'noticeId' = ${scope.noticeId}`)!;
+    default: {
+      const unhandled: never = scope;
+      throw new Error(`Unhandled delivery log scope ${JSON.stringify(unhandled)}.`);
+    }
+  }
+}
+
+/**
+ * How far the scope's fan-out is. Emitting writes one outbox event per
+ * student in the business transaction; the worker turns each into its inbox
+ * and delivery rows afterwards, one event at a time. Until then a
+ * notification is not in the log at all, so a log read right after a bulk
+ * action (publishing a notice, posting a run, releasing results) lists only
+ * the students dispatched so far. These counts say so explicitly:
+ * - `pendingCount`: events not fanned out yet (their rows will appear);
+ * - `failedCount`: events the worker gave up on (their rows may be missing
+ *   or partial; the outbox retries the retryable ones as pending again).
+ * Staff resends are events too but add a copy to an existing notification;
+ * they are not counted.
+ *
+ * Cost: this runs on every log read and is polled every two seconds while a
+ * bulk action fans out, so it must never read other schools' events.
+ * - A billing run and a notice are one batch: their events are found
+ *   through `notification_event_batch_idx (school_id, batch_kind, batch_id)`
+ *   ({@link scopeBatch}).
+ * - An admission and an examination have no single batch (one-off sends
+ *   belong to them too); they read only the school's own pending and failed
+ *   events through `notification_event_school_unsettled_idx`.
+ */
+async function scopePreparation(db: DatabaseExecutor, schoolId: string, scope: DeliveryLogScope) {
+  const batch = scopeBatch(scope);
+  const rows = await db
+    .select({ status: notificationEventTable.status, value: count() })
+    .from(notificationEventTable)
+    .where(
+      and(
+        eq(notificationEventTable.schoolId, schoolId),
+        batch ? and(eq(notificationEventTable.batchKind, batch.kind), eq(notificationEventTable.batchId, batch.id)) : undefined,
+        inArray(notificationEventTable.type, notificationTypesFor('admission')),
+        inArray(notificationEventTable.status, ['pending', 'failed']),
+        isNull(notificationEventTable.redeliveryOfDeliveryId),
+        scopeWhere(scope, EVENT_ROW),
+      ),
+    )
+    .groupBy(notificationEventTable.status);
+  const of = (status: 'pending' | 'failed') => rows.find((row) => row.status === status)?.value ?? 0;
+  return { pendingCount: of('pending'), failedCount: of('failed') };
+}
+
+/**
+ * The bulk batch every first-delivery event of a scope belongs to, when the
+ * scope is exactly one batch: the emitters tag each event of a billing run
+ * (`emitters/finance.ts`) and of a notice (`emitters/notices.ts`) with it.
+ * Null for scopes that also hold events outside any batch.
+ */
+function scopeBatch(scope: DeliveryLogScope): { kind: 'billing_run' | 'notice'; id: string } | null {
+  switch (scope.kind) {
+    case 'bill_run':
+      return { kind: 'billing_run', id: scope.billRunId };
+    case 'notice':
+      return { kind: 'notice', id: scope.noticeId };
+    case 'admission':
+    case 'exam':
+      return null;
     default: {
       const unhandled: never = scope;
       throw new Error(`Unhandled delivery log scope ${JSON.stringify(unhandled)}.`);
@@ -44,15 +125,34 @@ function scopeWhere(scope: DeliveryLogScope): SQL {
 
 /** The human reference of a notification (never an amount). */
 function referenceOf(type: string, data: Record<string, unknown>): string | null {
-  const value = type === 'bill.issued' ? data.billNumber : type === 'payment.received' ? data.receiptNumber : type === 'exam.results_published' ? data.examName : null;
+  const value =
+    type === 'bill.issued'
+      ? data.billNumber
+      : type === 'payment.received'
+        ? data.receiptNumber
+        : type === 'exam.results_published' || type === 'exam.timetable_published'
+          ? data.examName
+          : type === 'notice.published'
+            ? data.noticeTitle
+            : null;
   return typeof value === 'string' ? value : null;
+}
+
+/** The order of a notification's copies in the log, as in the delivery forecast; a channel added later sorts last. */
+const DELIVERY_LOG_CHANNEL_ORDER: readonly string[] = ['whatsapp', 'web_push'];
+function channelRank(channel: string) {
+  const rank = DELIVERY_LOG_CHANNEL_ORDER.indexOf(channel);
+  return rank === -1 ? DELIVERY_LOG_CHANNEL_ORDER.length : rank;
 }
 
 /**
  * One page of a scope's student notifications, newest first, each with all
- * of its deliveries (oldest first, resends after the copy they resend).
+ * of its deliveries: WhatsApp, then device notifications, each oldest first
+ * (resends after the copy they resend).
  * `onlyFailed` keeps notifications with at least one failed delivery.
- * Retired types are left out.
+ * Retired types are left out. `preparation` reports the part of the scope
+ * that is not in the list yet (see {@link scopePreparation}); it describes
+ * the whole scope, independent of the page and of `onlyFailed`.
  */
 export async function listDeliveryLog(
   db: DatabaseExecutor,
@@ -68,7 +168,7 @@ export async function listDeliveryLog(
     eq(notificationTable.recipientKind, 'admission'),
     isNotNull(notificationTable.admissionId),
     inArray(notificationTable.type, notificationTypesFor('admission')),
-    scopeWhere(input.scope),
+    scopeWhere(input.scope, notificationTable),
     input.onlyFailed ? exists(failedDelivery) : undefined,
   );
   const [total] = await db.select({ value: count() }).from(notificationTable).where(where);
@@ -92,13 +192,19 @@ export async function listDeliveryLog(
         .where(and(eq(notificationDeliveryTable.schoolId, input.schoolId), inArray(notificationDeliveryTable.notificationId, rows.map((row) => row.id))))
         .orderBy(notificationDeliveryTable.createdAt, notificationDeliveryTable.id)
     : [];
+  // One row's copies in a fixed channel order (the forecast's), and by time
+  // within a channel, so a resend follows its original. Deliveries of one
+  // notification are created together with random ids, so time alone would
+  // swap the channels from row to row.
+  deliveries.sort((a, b) => channelRank(a.channel) - channelRank(b.channel));
   const resent = new Set(deliveries.flatMap((delivery) => (delivery.resendOfDeliveryId ? [delivery.resendOfDeliveryId] : [])));
   const failedPush = deliveries.filter((delivery) => delivery.channel === 'web_push' && delivery.status === 'failed');
   const activePush = await activePushDestinations(db, failedPush.flatMap((delivery) => (delivery.destination ? [delivery.destination] : [])));
   const now = new Date();
   const totalItems = total?.value ?? 0;
   const totalPages = Math.ceil(totalItems / pageSize);
-  return createPaginatedResult({
+  const preparation = await scopePreparation(db, input.schoolId, input.scope);
+  const page = createPaginatedResult({
     items: rows.map((row) => ({
       notificationId: row.id,
       type: row.type,
@@ -149,4 +255,5 @@ export async function listDeliveryLog(
     totalItems,
     pageSize,
   });
+  return { ...page, preparation };
 }

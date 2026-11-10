@@ -1,10 +1,17 @@
 import { db } from '@campuspilot/db';
+import { cadetSession } from '@campuspilot/db/schema/cadet';
 import { cadetPushSubscriptionTable, notificationDeliveryTable, notificationTable } from '@campuspilot/db/schema/notification';
-import { eq, inArray, isNotNull, and } from 'drizzle-orm';
+import { eq, inArray, isNotNull, and, sql } from 'drizzle-orm';
 import { generateVAPIDKeys } from 'web-push';
 import { describe, expect, it, vi } from 'vitest';
 
-import { createTestAdmission, createTestSchool, createTestUser } from '../../../../test/fixtures';
+import { cadetAuth } from '@campuspilot/auth/cadet';
+import { env } from '@campuspilot/env/server';
+
+import { createCadetTestClient, signInCadet } from '../../../../test/cadet';
+import { createAdmissionWithLogin } from '../../../../test/exam-results';
+import { expectFeatureDisabled } from '../../../../test/feature-flags';
+import { createSchoolStaffSession, createTestAdmission, createTestClient, createTestSchool, createTestUser, setTestSchoolFeature } from '../../../../test/fixtures';
 import { billIssuedData, createCadetLogin, dispatchNow, drainSchool, fakePushSubscription } from '../../../../test/notifications';
 import { notify } from '../../notify';
 import { resendFailedDelivery } from '../../redelivery';
@@ -17,7 +24,7 @@ const whatsappOff = { channel: 'whatsapp', available: false, unavailableReason: 
 
 /** A school, an admission with a Cadet login, and that login's subscriptions. */
 async function subscribedStudent(subscriptionCount = 1) {
-  const school = await createTestSchool();
+  const school = await createTestSchool({ features: ['cadet'] });
   const admission = await createTestAdmission({ schoolId: school.id });
   const { client } = await createCadetLogin(admission.id);
   const subscriptions = [];
@@ -151,5 +158,183 @@ describe('web push channel', () => {
     await expect(resendFailedDelivery({ schoolId: gone.school.id, deliveryId: goneDeliveries[0]!.id, requestedBy: staff.id })).rejects.toMatchObject({ code: 'CONFLICT' });
     const revoked = await db.select().from(cadetPushSubscriptionTable).where(and(eq(cadetPushSubscriptionTable.endpoint, gone.subscriptions[0]!.endpoint), isNotNull(cadetPushSubscriptionTable.revokedAt)));
     expect(revoked).toHaveLength(1);
+  });
+
+  /**
+   * Review round 1, F1: a signed-out device must stop receiving the
+   * student's pushes, also while the school's Cadet Portal is switched off
+   * (when every portal call, including the app's own "turn off", is refused).
+   */
+  describe('signing out stops the device, decided on the server', () => {
+    const CADET_AUTH_URL = `${env.BETTER_AUTH_URL}/api/cadet/auth`;
+    const signOut = (cookie: string) =>
+      cadetAuth.handler(new Request(`${CADET_AUTH_URL}/sign-out`, { method: 'POST', headers: { cookie, origin: new URL(env.CADET_APP_URL).origin, 'content-type': 'application/json' }, body: '{}' }));
+    const rowsOf = (endpoint: string) => db.select().from(cadetPushSubscriptionTable).where(eq(cadetPushSubscriptionTable.endpoint, endpoint));
+
+    async function signedInStudent() {
+      const school = await createTestSchool({ features: ['cadet'] });
+      const principal = createTestClient((await createSchoolStaffSession(school.id, [{ role: 'principal', meta: null }])).session);
+      const { admission, credentials } = await createAdmissionWithLogin(principal, school.id, 'Push Student');
+      const signIn = async () => {
+        const { response, cookie } = await signInCadet(credentials);
+        expect(response.status).toBe(200);
+        return { cookie, client: createCadetTestClient(new Headers({ cookie })) };
+      };
+      return { school, admission, signIn };
+    }
+
+    it('revokes the subscriptions of the session that signs out, and only those, even with the portal switched off', async () => {
+      const { school, admission, signIn } = await signedInStudent();
+      // The same student on a shared phone and on a tablet: two sessions, two devices.
+      const phone = await signIn();
+      const tablet = await signIn();
+      const phoneDevice = fakePushSubscription();
+      const tabletDevice = fakePushSubscription();
+      await phone.client.subscribePush(phoneDevice);
+      await tablet.client.subscribePush(tabletDevice);
+      const [phoneRow] = await rowsOf(phoneDevice.endpoint);
+      const [tabletRow] = await rowsOf(tabletDevice.endpoint);
+      expect(phoneRow!.cadetSessionId).toEqual(expect.any(String));
+      expect(tabletRow!.cadetSessionId).not.toBe(phoneRow!.cadetSessionId);
+
+      // The administrator switches the portal off; the phone then signs out.
+      await setTestSchoolFeature(school.id, 'cadet', false);
+      await expectFeatureDisabled(phone.client.getPushSubscription({ endpoint: phoneDevice.endpoint }), 'cadet');
+      expect((await signOut(phone.cookie)).status).toBe(200);
+
+      expect((await rowsOf(phoneDevice.endpoint))[0]!.revokedAt).toBeInstanceOf(Date);
+      expect((await rowsOf(tabletDevice.endpoint))[0]!.revokedAt).toBeNull();
+      // A bill posted afterwards reaches the tablet only, also once the portal is back on.
+      await setTestSchoolFeature(school.id, 'cadet', true);
+      const fetchMock = vi.fn<ChannelFetch>(async () => new Response(null, { status: 201 }));
+      const { deliveries } = await dispatchBill(school.id, admission.id, fetchMock);
+      expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([tabletDevice.endpoint]);
+      expect(deliveries).toHaveLength(1);
+      // Signing out again, or without a session, changes nothing.
+      expect((await signOut(phone.cookie)).status).toBe(200);
+      expect((await rowsOf(tabletDevice.endpoint))[0]!.revokedAt).toBeNull();
+    });
+
+    it('lets the device be turned off while the portal is switched off, but not turned on', async () => {
+      const { school, signIn } = await signedInStudent();
+      const { client } = await signIn();
+      const device = fakePushSubscription();
+      await client.subscribePush(device);
+      await setTestSchoolFeature(school.id, 'cadet', false);
+      await expectFeatureDisabled(client.subscribePush(fakePushSubscription()), 'cadet');
+      await expect(client.unsubscribePush({ endpoint: device.endpoint })).resolves.toEqual({ changed: true });
+      expect((await rowsOf(device.endpoint))[0]!.revokedAt).toBeInstanceOf(Date);
+      await expect(createCadetTestClient(new Headers()).unsubscribePush({ endpoint: device.endpoint })).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+    });
+
+    it('moves a device to the session that subscribes it again', async () => {
+      const { signIn } = await signedInStudent();
+      const first = await signIn();
+      const second = await signIn();
+      const device = fakePushSubscription();
+      await first.client.subscribePush(device);
+      await second.client.subscribePush(device);
+      // The first session signing out no longer owns the device.
+      await signOut(first.cookie);
+      expect((await rowsOf(device.endpoint))[0]!.revokedAt).toBeNull();
+      await signOut(second.cookie);
+      expect((await rowsOf(device.endpoint))[0]!.revokedAt).toBeInstanceOf(Date);
+    });
+  });
+
+  /**
+   * Review round 2, R2B2: signing out is one of several ways a Cadet Portal
+   * session ends. The device's subscription is revoked where the session row
+   * is deleted (a trigger on `cadet_session`), so every path is covered,
+   * including ones nobody has written yet.
+   */
+  describe('a session that ends by any path stops its device', () => {
+    const CADET_AUTH_URL = `${env.BETTER_AUTH_URL}/api/cadet/auth`;
+    const post = (path: string, cookie: string, body: object = {}) =>
+      cadetAuth.handler(new Request(`${CADET_AUTH_URL}${path}`, { method: 'POST', headers: { cookie, origin: new URL(env.CADET_APP_URL).origin, 'content-type': 'application/json' }, body: JSON.stringify(body) }));
+    const rowOf = async (endpoint: string) => (await db.select().from(cadetPushSubscriptionTable).where(eq(cadetPushSubscriptionTable.endpoint, endpoint)))[0]!;
+    const sessionOf = async (cookie: string) => (await cadetAuth.api.getSession({ headers: new Headers({ cookie }) }))?.session ?? null;
+
+    /** One student signed in on a phone and a tablet, both with notifications on. */
+    async function twoDevices() {
+      const school = await createTestSchool({ features: ['cadet'] });
+      const principal = createTestClient((await createSchoolStaffSession(school.id, [{ role: 'principal', meta: null }])).session);
+      const { admission, credentials } = await createAdmissionWithLogin(principal, school.id, 'Push Student');
+      const signIn = async () => {
+        const { response, cookie } = await signInCadet(credentials);
+        expect(response.status).toBe(200);
+        const device = fakePushSubscription();
+        const client = createCadetTestClient(new Headers({ cookie }));
+        await client.subscribePush(device);
+        return { cookie, client, device };
+      };
+      return { school, principal, admission, phone: await signIn(), tablet: await signIn() };
+    }
+
+    it('revoke-sessions (sign out everywhere) stops every device of the student', async () => {
+      const { school, admission, phone, tablet } = await twoDevices();
+      expect((await post('/revoke-sessions', phone.cookie)).status).toBe(200);
+      await expect(tablet.client.getPushSubscription({ endpoint: tablet.device.endpoint })).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+      expect((await rowOf(phone.device.endpoint)).revokedAt).toBeInstanceOf(Date);
+      expect((await rowOf(tablet.device.endpoint)).revokedAt).toBeInstanceOf(Date);
+      // Nothing is pushed to either signed-out device.
+      const fetchMock = vi.fn<ChannelFetch>(async () => new Response(null, { status: 201 }));
+      await dispatchBill(school.id, admission.id, fetchMock);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('revoke-other-sessions stops the other devices and keeps the caller subscribed', async () => {
+      const { phone, tablet } = await twoDevices();
+      expect((await post('/revoke-other-sessions', phone.cookie)).status).toBe(200);
+      expect((await rowOf(tablet.device.endpoint)).revokedAt).toBeInstanceOf(Date);
+      expect((await rowOf(phone.device.endpoint)).revokedAt).toBeNull();
+      await expect(phone.client.getPushSubscription({ endpoint: phone.device.endpoint })).resolves.toEqual({ active: true });
+    });
+
+    it('revoke-session stops exactly the device of the session it names', async () => {
+      const { phone, tablet } = await twoDevices();
+      const tabletSession = await sessionOf(tablet.cookie);
+      expect((await post('/revoke-session', phone.cookie, { token: tabletSession!.token })).status).toBe(200);
+      expect((await rowOf(tablet.device.endpoint)).revokedAt).toBeInstanceOf(Date);
+      expect((await rowOf(phone.device.endpoint)).revokedAt).toBeNull();
+    });
+
+    it('a staff password reset stops every device, also one whose subscription names no session', async () => {
+      const { school, principal, admission, phone, tablet } = await twoDevices();
+      // A subscription stored before sessions were recorded.
+      await db.update(cadetPushSubscriptionTable).set({ cadetSessionId: null }).where(eq(cadetPushSubscriptionTable.endpoint, tablet.device.endpoint));
+      await principal.school.issueAdmissionCadetPassword({ schoolId: school.id, admissionId: admission.id });
+      expect((await rowOf(phone.device.endpoint)).revokedAt).toBeInstanceOf(Date);
+      expect((await rowOf(tablet.device.endpoint)).revokedAt).toBeInstanceOf(Date);
+    });
+
+    it('cleaning up an expired session stops its device, whoever deletes the row', async () => {
+      const { phone, tablet } = await twoDevices();
+      const phoneSession = await sessionOf(phone.cookie);
+      const tabletSession = await sessionOf(tablet.cookie);
+      // Better Auth deletes an expired session when its cookie is next presented.
+      await db.update(cadetSession).set({ expiresAt: new Date(Date.now() - 60_000) }).where(eq(cadetSession.id, phoneSession!.id));
+      const context = await cadetAuth.$context;
+      await context.internalAdapter.deleteSession(phoneSession!.token);
+      expect((await rowOf(phone.device.endpoint)).revokedAt).toBeInstanceOf(Date);
+      expect((await rowOf(tablet.device.endpoint)).revokedAt).toBeNull();
+      // A path that is not Better Auth at all (a maintenance job, a future feature): a plain delete.
+      await db.delete(cadetSession).where(eq(cadetSession.id, tabletSession!.id));
+      const row = await rowOf(tablet.device.endpoint);
+      expect(row.revokedAt).toBeInstanceOf(Date);
+      // The link is gone with the session; the revocation is what remains.
+      expect(row.cadetSessionId).toBeNull();
+    });
+
+    it('finds the subscriptions of a deleted session through an index, revoked ones included (review round 3, R3B2)', async () => {
+      // The foreign key's ON DELETE SET NULL looks rows up by session id alone. A partial
+      // index (revoked_at is null) cannot serve that, and every session delete scanned the table.
+      const result = await db.execute<{ indexdef: string }>(
+        sql`select indexdef from pg_indexes where schemaname = 'public' and indexname = 'cadet_push_subscription_session_idx'`,
+      );
+      expect(result.rows).toHaveLength(1);
+      expect(result.rows[0]!.indexdef).toContain('(cadet_session_id)');
+      expect(result.rows[0]!.indexdef).not.toMatch(/\bWHERE\b/i);
+    });
   });
 });

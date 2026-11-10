@@ -5,7 +5,7 @@ import { app } from './http';
 
 describe('notification HTTP routes', () => {
   it('serves the per-school Cadet manifest on /blob', async () => {
-    const school = await createTestSchool({ name: 'Cedar School' });
+    const school = await createTestSchool({ name: 'Cedar School', features: ['cadet'] });
     const response = await app.request(`/blob/school/${school.id}/cadet.webmanifest`);
     expect(response.status).toBe(200);
     expect(response.headers.get('content-type')).toBe('application/manifest+json');

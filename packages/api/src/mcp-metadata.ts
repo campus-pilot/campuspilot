@@ -28,6 +28,7 @@ export const MCP_MODULES = [
   'documents',
   'exams',
   'members',
+  'notices',
   'notifications',
   'platform',
   'schools',

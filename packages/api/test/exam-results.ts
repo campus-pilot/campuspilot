@@ -1,3 +1,4 @@
+import type { SchoolFeatureKey } from '@campuspilot/db/feature-flags/catalogue';
 import { db } from '@campuspilot/db';
 import { classTable } from '@campuspilot/db/schema/class';
 import type { ClassConfig } from '@campuspilot/db/schema/jsonb/class-config';
@@ -30,8 +31,14 @@ export const GRADING_SCALE: SessionConfig['gradingScale'] = {
   c: { label: 'C', minScore: 0 },
 };
 
-export async function createResultsSchool(): Promise<{ school: { id: string; slug: string }; principal: TestClient }> {
-  const school = await createTestSchool();
+/**
+ * A school with a principal client. Like any new school it has no platform
+ * feature unless named in `features` (Cadet suites pass `['cadet']`).
+ */
+export async function createResultsSchool(
+  options: { features?: readonly SchoolFeatureKey[] } = {},
+): Promise<{ school: { id: string; slug: string }; principal: TestClient }> {
+  const school = await createTestSchool({ features: options.features });
   const principal = createTestClient(
     (await createSchoolStaffSession(school.id, [{ role: 'principal', meta: null }])).session,
   );

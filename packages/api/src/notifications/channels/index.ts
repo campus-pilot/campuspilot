@@ -25,16 +25,19 @@ export const notificationChannelAdapters: Record<RemoteNotificationChannel, Noti
 /**
  * Decides a recipient's copies on one channel. Precedence, first match wins:
  * 1. the channel is unavailable on this platform → `skipped: disabled`;
- * 2. the school is a demo school → `skipped: demo_school` (demos never send
+ * 2. the school does not have a feature the notification type belongs to
+ *    (`disabledFeatureOf`) → `skipped: feature_disabled`;
+ * 3. the school is a demo school → `skipped: demo_school` (demos never send
  *    outside the inbox);
- * 3. the channel's own decision for the recipient (number, verification,
+ * 4. the channel's own decision for the recipient (number, verification,
  *    consent, subscriptions, opt-out).
  */
 export function decideDeliveries(
   adapter: NotificationChannelAdapter,
-  context: { isDemoSchool: boolean; recipient: ResolvedRecipient },
+  context: { isDemoSchool: boolean; featureDisabled: boolean; recipient: ResolvedRecipient },
 ): DeliveryDecision[] {
   if (!adapter.available) return [{ status: 'skipped', reason: 'disabled', destination: null }];
+  if (context.featureDisabled) return [{ status: 'skipped', reason: 'feature_disabled', destination: null }];
   if (context.isDemoSchool) return [{ status: 'skipped', reason: 'demo_school', destination: null }];
   return adapter.decide(context.recipient);
 }

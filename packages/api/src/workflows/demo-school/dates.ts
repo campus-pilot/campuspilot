@@ -46,6 +46,11 @@ export function weekday(date: LocalDate): number {
   return new Date(toUtcDay(date)).getUTCDay();
 }
 
+/** A local date in words, for example `14 November 2026`. */
+export function formatLocalDateInWords(date: LocalDate): string {
+  return new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(toUtcDay(date)));
+}
+
 /** The civil date of an instant in an IANA time zone. */
 export function localDateOf(instant: Date, timeZone: string): LocalDate {
   const parts = new Intl.DateTimeFormat('en-CA', {

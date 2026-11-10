@@ -3,6 +3,7 @@ import { db } from '@campuspilot/db';
 import { user } from '@campuspilot/db/schema/auth';
 import { demoSchoolJobTable, demoSchoolPurgeTable } from '@campuspilot/db/schema/demo-school-job';
 import { schoolTable } from '@campuspilot/db/schema/school';
+import { schoolFeatureFlagTable } from '@campuspilot/db/schema/school-feature-flag';
 import { schoolUserRoleTable } from '@campuspilot/db/schema/school-user-role';
 import { env } from '@campuspilot/env/server';
 import { getS3Client } from '@campuspilot/s3/client';
@@ -132,6 +133,17 @@ describe('systemAdmin demo school procedures', () => {
     expect(school).toMatchObject({ isDemo: true, demoCreatedBy: admin.user.id });
     const roles = await db.select().from(schoolUserRoleTable).where(and(eq(schoolUserRoleTable.schoolId, created.school.id), eq(schoolUserRoleTable.userId, admin.user.id)));
     expect(roles.map((row) => row.role)).toEqual(['principal']);
+    // A demo shows every product area: both features are on from creation
+    // (a real school starts with none), recorded against the requesting admin.
+    const flags = await db.select().from(schoolFeatureFlagTable).where(eq(schoolFeatureFlagTable.schoolId, created.school.id));
+    expect(flags.map((row) => [row.feature, row.enabled, row.updatedBy]).sort()).toEqual([
+      ['cadet', true, admin.user.id],
+      ['notices', true, admin.user.id],
+    ]);
+    expect((await adminClient.systemAdmin.getSchoolFeatureFlags({ id: created.school.id })).features).toEqual({
+      cadet: { enabled: true, config: null },
+      notices: { enabled: true, config: null },
+    });
 
     const second = await adminClient.systemAdmin.createDemoSchool({ ...validInput, registrationNo: 'REG-KEEP-1' });
     expect(second.school.slug).toBe('router-test-school-2');

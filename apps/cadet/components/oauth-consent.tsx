@@ -1,5 +1,6 @@
 'use client';
 
+import { readSchoolFeatureDisabled } from '@campuspilot/api/routers/school/feature-flags/feature-flags.dto';
 import type { oauthConsentClientSchema } from '@campuspilot/api/routers/auth/auth.dto';
 import { CADET_OAUTH_LOGIN_PATH } from '@campuspilot/auth/cadet-policy';
 import { Button } from '@campuspilot/ui/components/button';
@@ -125,10 +126,10 @@ function ConsentScopes({ request }: { request: ConsentRequest }) {
   );
 }
 
-function ConsentProblem({ message }: { message: string }) {
+function ConsentProblem({ message, title = 'Cannot connect this app' }: { message: string; title?: string }) {
   return (
     <div className="flex flex-col gap-3">
-      <h1 className="text-xl font-semibold tracking-tight">Cannot connect this app</h1>
+      <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
       <p className="text-sm text-muted-foreground">{message}</p>
       <Button asChild variant="outline" className="self-start">
         <Link href="/">Go to the Cadet Portal</Link>
@@ -161,6 +162,17 @@ export function OAuthConsent() {
   if (!session) redirect(`${CADET_OAUTH_LOGIN_PATH}?${searchParams.toString()}`);
   if (client.isPending) return <p className="text-sm text-muted-foreground">Loading…</p>;
   if (client.isError) {
+    // The school's Cadet Portal is switched off: every portal call is
+    // refused, this lookup included. The app is not the problem, so the
+    // student is not sent back to it to try again.
+    if (readSchoolFeatureDisabled(client.error) === 'cadet') {
+      return (
+        <ConsentProblem
+          title="Cadet Portal unavailable"
+          message="Your school is not using the Cadet Portal right now, so apps cannot be connected. Please ask your school office for help."
+        />
+      );
+    }
     return <ConsentProblem message="This app is not known to the Cadet Portal or has been disabled. Start the connection again from the app." />;
   }
   return (

@@ -64,3 +64,9 @@ export const sendStudentResultNotificationInputSchema = examStudentScopeSchema.e
     .max(200)
     .describe('Unique per press; resend the same key to retry safely. A new key sends the result again.'),
 });
+
+/** Whom publishing a timetable would notify: the staff and, while the school has the Cadet Portal, its students. */
+export const timetablePublishPreviewSchema = z.object({
+  staffRecipientCount: count,
+  cadetForecast: deliveryForecastSchema.nullable(),
+});

@@ -1,6 +1,7 @@
 import { createDb } from '@campuspilot/db';
 import { admissionTable } from '@campuspilot/db/schema/admission';
 import { schoolTable } from '@campuspilot/db/schema/school';
+import { schoolFeatureFlagTable } from '@campuspilot/db/schema/school-feature-flag';
 import { generateId } from '@campuspilot/db/id';
 import { getRedisClient } from '@campuspilot/redis/client';
 import { randomUUID } from 'node:crypto';
@@ -46,6 +47,11 @@ async function createSchool() {
     .insert(schoolTable)
     .values({ slug, name: `School ${slug}`, location: 'Town' })
     .returning();
+  // A new school has no platform feature; these suites test the portal of
+  // a school that has the Cadet Portal.
+  await db
+    .insert(schoolFeatureFlagTable)
+    .values({ schoolId: school!.id, feature: 'cadet', enabled: true });
   return school!;
 }
 

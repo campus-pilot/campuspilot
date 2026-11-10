@@ -20,11 +20,11 @@ import { Skeleton } from "@campuspilot/ui/components/skeleton";
 import { useQuery } from "@tanstack/react-query";
 import {
   ArrowRight,
-  Bell,
   Check,
   ClipboardCheck,
   CreditCard,
   GraduationCap,
+  Megaphone,
   RotateCcw,
   UserPlus,
   Users,
@@ -32,7 +32,11 @@ import {
 
 import { authClient } from "@/lib/auth-client";
 import { orpc } from "@/lib/orpc";
+import { RequireFeature } from "@/components/require-feature";
 import { RequirePermissions } from "@/components/require-permissions";
+import { noticeAudienceLabel } from "@campuspilot/components/notices";
+import { newNoticeHref, noticesHref } from "@/components/notices/notice-model";
+import { noticeHref } from "@/components/notifications/notification-routes";
 import { schoolHref, schoolSessionHref } from "@/components/school-route";
 import {
   AmountVisibilityProvider,
@@ -526,15 +530,18 @@ function CommonJobs({ data, schoolId, sessionId }: DashboardProps & { data: Dash
             />
           </PermissionSection>
         ) : null}
-        <Button type="button" variant="outline" disabled className="h-auto min-w-0 justify-start gap-3 p-3 text-left">
-          <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-muted">
-            <Bell className="size-4" aria-hidden />
-          </span>
-          <span className="min-w-0">
-            <span className="block truncate font-medium">Create notice</span>
-            <span className="block truncate text-[10px] font-normal">Feature not ready</span>
-          </span>
-        </Button>
+        {data.actions.createNotice ? (
+          <RequireFeature schoolId={schoolId} feature="notices">
+            <PermissionSection action={SCHOOL_ACTIONS.DRAFT_NOTICE} schoolId={schoolId}>
+              <JobLink
+                icon={Megaphone}
+                label="Create notice"
+                detail="Write a new draft"
+                href={newNoticeHref({ schoolId, sessionId })}
+              />
+            </PermissionSection>
+          </RequireFeature>
+        ) : null}
       </div>
     </section>
   );
@@ -761,6 +768,59 @@ function ClassLoad({ classrooms, href }: { classrooms: NonNullable<DashboardDto[
   );
 }
 
+/** How many published staff notices the dashboard shows. */
+const RECENT_NOTICE_LIMIT = 5;
+
+/**
+ * The latest notices published to staff in this session, newest first.
+ * Drafts and notices addressed to students only are not dashboard news.
+ * Rendered only for a school with notices and a member who may read them
+ * (see `DashboardContent`), so the query never runs for anyone else.
+ */
+function RecentNotices({ schoolId, sessionId }: DashboardProps) {
+  const notices = useQuery(
+    orpc.school.listNotices.queryOptions({
+      input: {
+        schoolId,
+        sessionId,
+        filters: { status: "published", toStaff: true },
+        orderBy: { field: "publishedAt", direction: "desc" },
+        limit: RECENT_NOTICE_LIMIT,
+      },
+    }),
+  );
+  return (
+    <SectionCard title="Recent notices" description="Latest notices published to staff this session" href={noticesHref({ schoolId, sessionId })}>
+      {notices.isPending ? (
+        <Skeleton className="h-24 w-full" />
+      ) : notices.data === undefined ? (
+        // Only when nothing was ever loaded: a list already shown stays when a refetch fails.
+        <p className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
+          Notices could not be loaded.
+        </p>
+      ) : notices.data.items.length ? (
+        <ul className="flex flex-col divide-y">
+          {notices.data.items.map((notice) => (
+            <li key={notice.id}>
+              <Link href={noticeHref(schoolId, sessionId, notice.id)} className="flex items-center justify-between gap-3 rounded-md py-2.5 hover:bg-muted/50">
+                <span className="min-w-0 flex-1 truncate font-medium">{notice.title}</span>
+                <span className="hidden shrink-0 text-[11px] text-muted-foreground sm:inline">{noticeAudienceLabel(notice, notice.classes.map((entry) => entry.name))}</span>
+                <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
+                  {notice.publishedAt ? new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short" }).format(notice.publishedAt) : ""}
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
+          No notices have been published to staff in this session.
+        </p>
+      )}
+    </SectionCard>
+  );
+}
+
 function DashboardContent({ data, schoolId, sessionId }: DashboardProps & { data: DashboardDto }) {
   const billingCurrencies = data.billing?.currencies ?? [];
   const billingHref = schoolSessionHref(schoolId, sessionId, "/billing/reports");
@@ -780,6 +840,11 @@ function DashboardContent({ data, schoolId, sessionId }: DashboardProps & { data
       <OverviewMetrics data={data} schoolId={schoolId} />
       <CrossDomainStatus data={data} schoolId={schoolId} sessionId={sessionId} />
       <CommonJobs data={data} schoolId={schoolId} sessionId={sessionId} />
+      <RequireFeature schoolId={schoolId} feature="notices">
+        <PermissionSection action={SCHOOL_ACTIONS.READ_NOTICE} schoolId={schoolId}>
+          <RecentNotices schoolId={schoolId} sessionId={sessionId} />
+        </PermissionSection>
+      </RequireFeature>
       {billingCurrencies.length ? (
         <PermissionSection action={SCHOOL_ACTIONS.READ_BILLING_REPORTS} schoolId={schoolId}>
           <div className="flex flex-col gap-5">

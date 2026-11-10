@@ -464,6 +464,15 @@ actions contains {
   "resourceKind": "school",
 } if { true }
 
+# Publishing a timetable shows it to the whole school (and, with the Cadet
+# Portal, to students) and withdrawing hides it again; editing a draft is
+# school.exam.timetable.update.
+actions contains {
+  "id": "school.exam.timetable.publish",
+  "key": "PUBLISH_EXAM_TIMETABLE",
+  "resourceKind": "school",
+} if { true }
+
 actions contains {"id": "school.exam.result.write", "key": "WRITE_EXAM_RESULTS", "resourceKind": "school"} if { true }
 actions contains {"id": "school.exam.result.delete", "key": "DELETE_EXAM_RESULTS", "resourceKind": "school"} if { true }
 
@@ -492,3 +501,12 @@ actions contains {"id": "school.notification.log.read", "key": "READ_NOTIFICATIO
 # each topic's audience is its own grant.
 actions contains {"id": "school.notification.failure.finance.receive", "key": "RECEIVE_FINANCE_NOTIFICATION_FAILURES", "resourceKind": "school"} if { true }
 actions contains {"id": "school.notification.failure.results.receive", "key": "RECEIVE_RESULT_NOTIFICATION_FAILURES", "resourceKind": "school"} if { true }
+actions contains {"id": "school.notification.failure.notices.receive", "key": "RECEIVE_NOTICE_NOTIFICATION_FAILURES", "resourceKind": "school"} if { true }
+
+# School notices (docs/notices.md). Reading covers every published notice and
+# the caller's own drafts; drafting covers creating notices and editing or
+# deleting one's own drafts (ownership is a data fact checked by the API,
+# not a role); publishing also covers every draft of the school.
+actions contains {"id": "school.notice.read", "key": "READ_NOTICE", "resourceKind": "school"} if { true }
+actions contains {"id": "school.notice.draft", "key": "DRAFT_NOTICE", "resourceKind": "school"} if { true }
+actions contains {"id": "school.notice.publish", "key": "PUBLISH_NOTICE", "resourceKind": "school"} if { true }

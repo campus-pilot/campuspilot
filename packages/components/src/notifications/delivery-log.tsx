@@ -11,6 +11,7 @@ import {
   type DeliverySkipReason,
   type DeliveryStatus,
 } from './delivery-labels';
+import type { AdmissionNotificationType } from './notification-renderers';
 import { formatNotificationTime } from './notification-row';
 
 /** One remote copy as the delivery log API returns it. */
@@ -43,11 +44,16 @@ export type DeliveryLogItem = {
   deliveries: DeliveryLogDelivery[];
 };
 
-const TYPE_LABELS: Record<string, string> = {
+/** Exhaustive over the student types: a new one fails the build until it has a label. */
+const ADMISSION_TYPE_LABELS: Record<AdmissionNotificationType, string> = {
   'bill.issued': 'Bill',
   'payment.received': 'Payment receipt',
   'exam.results_published': 'Results',
+  'notice.published': 'Notice',
+  'exam.timetable_published': 'Timetable',
 };
+/** Looked up by the row's stored type, which may be one this release retired. */
+const TYPE_LABELS: Record<string, string> = ADMISSION_TYPE_LABELS;
 
 function deliveryDetail(delivery: DeliveryLogDelivery) {
   if (delivery.interrupted) return 'Sending was interrupted; it may or may not have arrived.';
@@ -100,6 +106,34 @@ function DeliveryLine({ delivery, canResend, resending, onResend }: { delivery: 
   );
 }
 
+const countOf = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
+
+/**
+ * What the log does not list yet. A bulk action's notifications are
+ * prepared one student at a time after the action returns, so right after
+ * it the list is shorter than the audience: this line says how many are
+ * still to come (the caller keeps reading the log until none are) and how
+ * many could not be prepared at all. Renders nothing when the list is
+ * complete.
+ */
+export function DeliveryLogPreparation({ pendingCount, failedCount }: { pendingCount: number; failedCount: number }) {
+  if (pendingCount === 0 && failedCount === 0) return null;
+  return (
+    <div className="flex flex-col gap-1 text-sm">
+      {pendingCount > 0 ? (
+        <p role="status" className="text-muted-foreground">
+          {countOf(pendingCount, 'more notification is', 'more notifications are')} being prepared. This list updates by itself.
+        </p>
+      ) : null}
+      {failedCount > 0 ? (
+        <p role="alert" className="text-destructive">
+          {countOf(failedCount, 'notification', 'notifications')} could not be prepared and may be missing from this list.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 /**
  * The staff delivery log (presentational): each student notification with
  * the status of its device-notification and WhatsApp copies and why a copy
@@ -111,12 +145,19 @@ export function NotificationDeliveryLog({
   resendingDeliveryId,
   onResend,
   emptyMessage = 'No notifications yet.',
+  oneSubject = false,
 }: {
   items: DeliveryLogItem[];
   canResend: boolean;
   resendingDeliveryId: string | null;
   onResend: (deliveryId: string) => void;
   emptyMessage?: string;
+  /**
+   * True when every row is about the same thing, which the page already
+   * names (one notice's log on that notice's page): rows then name only
+   * the student instead of repeating the type and reference.
+   */
+  oneSubject?: boolean;
 }) {
   if (items.length === 0) return <p className="text-sm text-muted-foreground">{emptyMessage}</p>;
   return (
@@ -125,9 +166,15 @@ export function NotificationDeliveryLog({
         <li key={item.notificationId} className="flex flex-col gap-2 p-3">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
             <span className="text-sm font-medium">
-              {TYPE_LABELS[item.type] ?? 'Notification'}
-              {item.reference ? ` · ${item.reference}` : ''}
-              {item.studentName ? ` · ${item.studentName}` : ''}
+              {oneSubject && item.studentName ? (
+                item.studentName
+              ) : (
+                <>
+                  {TYPE_LABELS[item.type] ?? 'Notification'}
+                  {item.reference ? ` · ${item.reference}` : ''}
+                  {item.studentName ? ` · ${item.studentName}` : ''}
+                </>
+              )}
             </span>
             <time className="text-xs text-muted-foreground" dateTime={new Date(item.createdAt).toISOString()}>
               {formatNotificationTime(item.createdAt)}

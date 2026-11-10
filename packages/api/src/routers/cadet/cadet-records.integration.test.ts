@@ -48,7 +48,7 @@ describe('cadet results, growth and remarks', () => {
   let past: { sessionId: string; classId: string; meera: string; ravi: string };
 
   beforeAll(async () => {
-    const created = await createResultsSchool();
+    const created = await createResultsSchool({ features: ['cadet'] });
     principal = created.principal;
     schoolId = created.school.id;
     const meeraLogin = await createAdmissionWithLogin(principal, schoolId, 'Meera Singh');
@@ -299,7 +299,7 @@ describe('cadet class averages, moved students and scoping', () => {
   const classAStudentIds: string[] = [];
 
   beforeAll(async () => {
-    const created = await createResultsSchool();
+    const created = await createResultsSchool({ features: ['cadet'] });
     principal = created.principal;
     schoolId = created.school.id;
     const logins = [];
@@ -469,7 +469,7 @@ describe('cadet class averages, moved students and scoping', () => {
   });
 
   it("returns NOT_FOUND for another school's ids", async () => {
-    const other = await createResultsSchool();
+    const other = await createResultsSchool({ features: ['cadet'] });
     const login = await createAdmissionWithLogin(other.principal, other.school.id, 'Other School Student');
     const outsider = await cadetClient(login.credentials);
     await expectRpcCode(outsider.getExamResult({ examId: examId(ashaStudentId, classA.classId) }), 'NOT_FOUND');
@@ -481,7 +481,7 @@ describe('cadet class averages, moved students and scoping', () => {
 
 describe('cadet fees', () => {
   it('shows the own ledger, summary and bills and nothing of another admission', async () => {
-    const scenario = await createFinanceScenario();
+    const scenario = await createFinanceScenario({ features: ['cadet'] });
     const accountant = scenario.actors.accountant.client;
     const principal = scenario.actors.principal.client;
     const schoolId = scenario.school.id;

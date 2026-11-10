@@ -1,3 +1,6 @@
+import { db } from '@campuspilot/db';
+import { schoolFeatureFlagTable } from '@campuspilot/db/schema/school-feature-flag';
+import { eq } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { beforeAll, describe, expect, it } from 'vitest';
 
@@ -229,6 +232,20 @@ describe('systemAdmin.school Router Integration', () => {
       ).rejects.toThrowError(
         expect.objectContaining({ code: 'NOT_FOUND' }),
       );
+    });
+
+    it('deletes a school that has feature flag rows, and its flags with it', async () => {
+      // Every school that existed when flags were introduced has a row (the
+      // backfill), and any administrator toggle writes one, also when it
+      // switches a feature back off.
+      const school = await createTestSchool({ features: ['cadet', 'notices'] });
+      const client = createTestClient(adminSession);
+      await client.systemAdmin.updateSchoolFeatureFlag({ id: school.id, feature: 'notices', enabled: false, config: null });
+      expect(await db.select().from(schoolFeatureFlagTable).where(eq(schoolFeatureFlagTable.schoolId, school.id))).toHaveLength(2);
+
+      await expect(client.systemAdmin.deleteSchool({ id: school.id })).resolves.toMatchObject({ id: school.id });
+      expect(await db.select().from(schoolFeatureFlagTable).where(eq(schoolFeatureFlagTable.schoolId, school.id))).toEqual([]);
+      await expect(client.systemAdmin.getSchool({ id: school.id })).rejects.toMatchObject({ code: 'NOT_FOUND' });
     });
 
     it('returns NOT_FOUND when deleting non-existent school', async () => {

@@ -1,6 +1,7 @@
 import { SCHOOL_ACTIONS } from "@campuspilot/opa/policies/school";
 
 import { toRpcError } from "../../../errors";
+import { isSchoolFeatureEnabled } from "../../../feature-flags/feature-flags.service";
 import { protectedProcedure } from "../../../index";
 import { checkPermissions } from "../../../permissions/authorization";
 import { requireSchoolPermission } from "../../../permissions/school";
@@ -19,6 +20,7 @@ const dashboardPermissionActions = [
   SCHOOL_ACTIONS.LIST_SESSIONS,
   SCHOOL_ACTIONS.READ_ADMISSION_LEDGER,
   SCHOOL_ACTIONS.READ_SESSION_FINANCE,
+  SCHOOL_ACTIONS.DRAFT_NOTICE,
 ] as const;
 
 export const schoolDashboardRouter = {
@@ -70,6 +72,10 @@ export const schoolDashboardRouter = {
               decisions[9] === true &&
               decisions[10] === true,
             enterResults: decisions[7] === true && decisions[4] === true,
+            // A permission and a feature are separate facts; the job needs both.
+            createNotice:
+              decisions[11] === true &&
+              (await isSchoolFeatureEnabled(context.db, input.schoolId, "notices")),
           },
         );
       } catch (error) {

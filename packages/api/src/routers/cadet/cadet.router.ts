@@ -20,8 +20,11 @@ import {
   admissionDtoSchema,
   toAdmissionDto,
 } from '../school/admission/admission.dto';
+import { cadetNoticesRouter } from './cadet-notices.router';
+import { cadetTimetablesRouter } from './cadet-timetables.router';
 import { cadetNotificationRouter } from './cadet-notification.router';
 import { cadetPushRouter } from './cadet-push.router';
+import { cadetSchoolSearchRouter } from './cadet-school-search.router';
 
 /**
  * The Cadet Portal's router. It is deliberately not part of `appRouter`, so
@@ -32,6 +35,7 @@ import { cadetPushRouter } from './cadet-push.router';
 export const cadetRouter = {
   ...cadetNotificationRouter,
   ...cadetPushRouter,
+  ...cadetSchoolSearchRouter,
   getAdmission: cadetProcedure
     .route({
       summary: 'Get my admission',
@@ -136,6 +140,8 @@ export const cadetRouter = {
     }),
 
   ...cadetRecordsRouter,
+  ...cadetNoticesRouter,
+  ...cadetTimetablesRouter,
 };
 
 export type CadetRouter = typeof cadetRouter;

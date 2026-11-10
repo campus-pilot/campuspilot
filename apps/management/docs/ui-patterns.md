@@ -157,7 +157,18 @@ API orchestration belongs in the management app.
 
 Keep blank marks distinct from zero. Preview validates and shows the current draft
 without saving it. Preserve an editor's baseline through background query refetches;
-only an explicit save, discard or reload should replace that baseline. Confirm
+only an explicit save, discard or reload should replace that baseline.
+
+Resolve every read from the data it holds before its error flag. TanStack Query
+keeps the last good data when a refetch fails (a return to the tab on a weak
+connection) and reports `isError` beside it; a boundary that tests `isError`
+first replaces a page already on screen, and an editor with typed text under it,
+by an error panel. Use `resolveQueryBoundary` from
+`@campuspilot/components/query-boundary` (or a model built on it, such as
+`noticeBoundaryState`, `permissionsSatisfied`, `resolveSchoolFeature`): held data
+stays, the error is shown only when nothing is held, and only an answer that makes
+the held data untrue (not found, feature switched off) replaces it. This is about
+what stays on screen; the server decides every call again. Confirm
 discarding dirty input with the app's dialog pattern, offering Keep editing and
 Discard. When a save's outcome is ambiguous, reload saved state before retrying.
 

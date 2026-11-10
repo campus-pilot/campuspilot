@@ -20,6 +20,7 @@ export const documentTypeSchema = z.enum([
   "bill",
   "receipt",
   "statement",
+  "notice",
 ]);
 export type DocumentType = z.infer<typeof documentTypeSchema>;
 
@@ -32,7 +33,16 @@ export const FINANCE_DOCUMENT_TYPES: ReadonlySet<DocumentType> = new Set<Documen
 
 export const isFinanceDocumentType = (type: DocumentType) =>
   FINANCE_DOCUMENT_TYPES.has(type);
-export type AcademicDocumentType = Exclude<DocumentType, "bill" | "receipt" | "statement">;
+/**
+ * Document types that have a template but no generator source: they are
+ * rendered by their own feature, never through `previewDocument` /
+ * `generateDocument`, and never appear in the Documents workspace or in
+ * document history. A notice is rendered by the notices feature
+ * (`routers/school/notice`).
+ */
+export const TEMPLATE_ONLY_DOCUMENT_TYPES = ["notice"] as const satisfies readonly DocumentType[];
+export type TemplateOnlyDocumentType = (typeof TEMPLATE_ONLY_DOCUMENT_TYPES)[number];
+export type AcademicDocumentType = Exclude<DocumentType, "bill" | "receipt" | "statement" | TemplateOnlyDocumentType>;
 export const documentTemplatePageSizeSchema = z.enum(["full", "half"]);
 export type DocumentTemplatePageSize = z.infer<
   typeof documentTemplatePageSizeSchema
@@ -47,10 +57,27 @@ const halfPageDocumentTypes = new Set<DocumentType>(
   HALF_PAGE_DOCUMENT_TYPES,
 );
 
+/**
+ * A revision's `pageSize` is its paper footprint, so `half` is refused for
+ * a type that cannot be printed two-up. This includes `notice`: a Notice
+ * template has no footprint of its own. Each notice chooses its own print
+ * size (`notice.page_size`, full or half A4) and one Notice design prints
+ * both, adapting to the `print.size` context fact, so a Notice revision is
+ * always stored as `full` and its `pageSize` never decides a notice's
+ * layout.
+ */
 function validateTemplatePageSize(
   value: { documentType: DocumentType; pageSize: DocumentTemplatePageSize },
   context: z.RefinementCtx,
 ) {
+  if (value.pageSize === "half" && value.documentType === "notice") {
+    context.addIssue({
+      code: "custom",
+      path: ["pageSize"],
+      message: "A Notice design prints both sizes; each notice chooses full or half A4.",
+    });
+    return;
+  }
   if (value.pageSize === "half" && !halfPageDocumentTypes.has(value.documentType)) {
     context.addIssue({
       code: "custom",
@@ -67,6 +94,7 @@ export const DOCUMENT_LABELS: Record<DocumentType, string> = {
   bill: "Bills",
   receipt: "Receipts",
   statement: "Account statements",
+  notice: "Notices",
 };
 const id = z.string().trim().min(1).max(100);
 export const schoolScopeSchema = z.object({ schoolId: id });
@@ -137,12 +165,38 @@ export const listMarketplaceSchema = createListInputSchema({
 export const listMarketplaceOutputSchema = createPaginatedOutputSchema(
   marketplaceItemSchema,
 );
+/**
+ * The print size to preview a Notice design at. A Notice design prints
+ * notices of both sizes (each notice chooses its own and the design reads
+ * it as `print.size`), so its preview can be asked for either; it is not
+ * the revision's `pageSize`. Refused for every other type rather than
+ * ignored.
+ */
+export const noticePrintSizeSchema = documentTemplatePageSizeSchema
+  .optional()
+  .describe("Notice designs only: preview the design as it prints a full-A4 or half-A4 notice (print.size). Defaults to full.");
+function validateNoticePrintSize(
+  value: { documentType: DocumentType; printSize?: DocumentTemplatePageSize },
+  context: z.RefinementCtx,
+) {
+  if (value.printSize !== undefined && value.documentType !== "notice")
+    context.addIssue({
+      code: "custom",
+      path: ["printSize"],
+      message: "A print size can be previewed for Notice designs only.",
+    });
+}
 export const previewTemplateSchema = templateScopeSchema
   .extend({
     content: templateContentSchema,
     pageSize: documentTemplatePageSizeSchema.default("full"),
+    printSize: noticePrintSizeSchema,
   })
-  .superRefine(validateTemplatePageSize);
+  .superRefine(validateTemplatePageSize)
+  .superRefine(validateNoticePrintSize);
+export const marketplaceTemplateInputSchema = templateScopeSchema
+  .extend({ slug: z.string().min(1).max(100), printSize: noticePrintSizeSchema })
+  .superRefine(validateNoticePrintSize);
 export const previewOutputSchema = z.object({
   html: z.string(),
   studentCount: z.number().int(),

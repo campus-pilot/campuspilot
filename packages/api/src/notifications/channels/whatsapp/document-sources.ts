@@ -1,3 +1,4 @@
+import { createNoticeDocumentSource } from '../../documents/notice';
 import { createReceiptDocumentSource } from '../../documents/receipt';
 import { createReportCardDocumentSource } from '../../documents/report-card';
 import type { WhatsAppDocumentSources } from './documents';
@@ -9,4 +10,5 @@ import type { WhatsAppDocumentSources } from './documents';
 export const whatsappDocumentSources: WhatsAppDocumentSources = {
   payment_receipt: createReceiptDocumentSource(),
   report_card: createReportCardDocumentSource(),
+  notice: createNoticeDocumentSource(),
 };
