@@ -11,6 +11,7 @@ import { PDFDocument } from 'pdf-lib';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { expectFeatureDisabled, expectPermissionDenied } from '../../../../test/feature-flags';
+import { readPdfPageDrawing } from '../../../../test/pdf-placements';
 import {
   createAdminSession,
   createRegularUserSession,
@@ -817,6 +818,17 @@ describe('school notices', () => {
       expect(pdf.getPageCount()).toBe(1);
       expect(Math.round(pdf.getPage(0).getSize().width)).toBe(595);
       expect(Math.round(pdf.getPage(0).getSize().height)).toBe(842);
+      // The sheet draws Chromium's half page twice, at full size, one copy in each half, with no clipping (R4-3).
+      const { placements, clips } = readPdfPageDrawing(pdf, 0);
+      expect(clips).toBe(false);
+      expect(placements).toHaveLength(2);
+      expect(placements[1]!.object).toBe(placements[0]!.object);
+      for (const placement of placements) {
+        expect(placement.scaleX).toBeCloseTo(1, 1);
+        expect(placement.scaleY).toBeCloseTo(1, 1);
+      }
+      expect(placements[0]!.y).toBeCloseTo(841.89 / 2, 0);
+      expect(placements[1]!.y).toBeCloseTo(0, 0);
       // Cached under the half-size key only; no full-size object exists for it.
       await expect(getS3Client().send(new HeadObjectCommand({ Bucket: env.S3_BUCKET, Key: noticePdfKey(schoolId, draft.id, 'half') }))).resolves.toBeDefined();
       await expect(getS3Client().send(new HeadObjectCommand({ Bucket: env.S3_BUCKET, Key: noticePdfKey(schoolId, draft.id, 'full') }))).rejects.toBeDefined();

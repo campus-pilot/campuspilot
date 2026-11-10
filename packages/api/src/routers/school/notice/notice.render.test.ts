@@ -2,6 +2,8 @@ import Handlebars from 'handlebars';
 import { PDFDocument } from 'pdf-lib';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { type PdfPagePlacement, readPdfPageDrawing } from '../../../../test/pdf-placements';
+
 import { DOCUMENT_MARKETPLACE, NOTICE_DEFAULT_TEMPLATE_SLUG, SAMPLE_NOTICE_CONTEXT } from '../document/document.catalog';
 import { combineDocuments, renderDocument } from '../document/document.render';
 import { NOTICE_CONTEXT_FIELDS, NOTICE_TEMPLATE_STARTER, NOTICE_TEMPLATE_VARIABLES } from './notice-template-guide';
@@ -415,25 +417,82 @@ describe('flowing notice layout', () => {
 });
 
 describe('half-page notice imposition', () => {
-  /** A PDF of half-A4 pages (as Chromium prints a half-page notice), each page labelled by its size. */
-  async function halfPagePdf(pages: number) {
+  const A4 = { width: 595.28, height: 841.89 };
+  const HALF = A4.height / 2;
+
+  /** A PDF with one page of each given size (as Chromium prints a half-page notice), each page labelled. */
+  async function pdfOfPages(sizes: [number, number][]) {
     const pdf = await PDFDocument.create();
-    for (let index = 0; index < pages; index += 1) pdf.addPage([595.28, 420.94]).drawText(`Page ${index + 1}`, { x: 40, y: 380 });
+    sizes.forEach(([width, height], index) => pdf.addPage([width, height]).drawText(`Page ${index + 1}`, { x: 40, y: height - 40 }));
     return pdf.save();
   }
+  const halfPage: [number, number] = [595.28, 420.94];
 
-  it('prints every half page twice on one portrait A4 sheet, so it needs only plain A4 paper', async () => {
-    const imposed = await PDFDocument.load(await imposeHalfPageNoticeCopies(await halfPagePdf(1)));
+  /**
+   * Review round 4, R4-3: the page count and sheet size alone would pass with
+   * one copy, a crop or a wrong offset. These read the sheet's content stream
+   * back: which page object it draws, how often, at what scale and where.
+   */
+  function expectTwoCopiesOf(imposed: PDFDocument, sheet: number, [width, height]: [number, number], expected: { scale: number }) {
+    const { placements, clips } = readPdfPageDrawing(imposed, sheet);
+    // No clipping path anywhere on the sheet: nothing drawn can be cut off.
+    expect(clips).toBe(false);
+    expect(placements).toHaveLength(2);
+    const [upper, lower] = placements as [PdfPagePlacement, PdfPagePlacement];
+    // Both copies draw the same embedded page object (one copy of fonts and images, two placements).
+    expect(lower.object).toBe(upper.object);
+    const placedWidth = width * expected.scale;
+    const placedHeight = height * expected.scale;
+    for (const [copy, halfBottom] of [[upper, HALF], [lower, 0]] as const) {
+      // The whole source page is drawn (its bounding box is the full page, not a crop of it)…
+      expect(copy.bbox).toEqual([0, 0, expect.closeTo(width, 2), expect.closeTo(height, 2)]);
+      // …uniformly scaled, never enlarged…
+      expect(copy.scaleX).toBeCloseTo(expected.scale, 4);
+      expect(copy.scaleY).toBeCloseTo(expected.scale, 4);
+      // …centred in its own half of the A4 sheet…
+      expect(copy.x).toBeCloseTo((A4.width - placedWidth) / 2, 2);
+      expect(copy.y).toBeCloseTo(halfBottom + (HALF - placedHeight) / 2, 2);
+      // …and entirely on the sheet, inside that half.
+      expect(copy.x).toBeGreaterThanOrEqual(-0.01);
+      expect(copy.x + placedWidth).toBeLessThanOrEqual(A4.width + 0.01);
+      expect(copy.y).toBeGreaterThanOrEqual(halfBottom - 0.01);
+      expect(copy.y + placedHeight).toBeLessThanOrEqual(halfBottom + HALF + 0.01);
+    }
+  }
+
+  it('prints every half page twice on one portrait A4 sheet, at full size, one copy in each half', async () => {
+    const imposed = await PDFDocument.load(await imposeHalfPageNoticeCopies(await pdfOfPages([halfPage])));
     expect(imposed.getPageCount()).toBe(1);
     const { width, height } = imposed.getPage(0).getSize();
-    expect(width).toBeCloseTo(595.28, 1);
-    expect(height).toBeCloseTo(841.89, 1);
+    expect(width).toBeCloseTo(A4.width, 1);
+    expect(height).toBeCloseTo(A4.height, 1);
+    expectTwoCopiesOf(imposed, 0, halfPage, { scale: 1 });
   });
 
-  it('gives a long notice one sheet per half page, in order, never dropping a page', async () => {
-    const imposed = await PDFDocument.load(await imposeHalfPageNoticeCopies(await halfPagePdf(3)));
+  it('gives a long notice one sheet per half page, in order, each carrying its own page twice', async () => {
+    const imposed = await PDFDocument.load(await imposeHalfPageNoticeCopies(await pdfOfPages([halfPage, halfPage, halfPage])));
     expect(imposed.getPageCount()).toBe(3);
-    for (const page of imposed.getPages()) expect(page.getSize().height).toBeCloseTo(841.89, 1);
+    const drawn = imposed.getPages().map((page, sheet) => {
+      expect(page.getSize().height).toBeCloseTo(A4.height, 1);
+      expectTwoCopiesOf(imposed, sheet, halfPage, { scale: 1 });
+      return readPdfPageDrawing(imposed, sheet).placements[0]!.object;
+    });
+    // Three different source pages, not the first one three times.
+    expect(new Set(drawn).size).toBe(3);
+  });
+
+  it('scales a page larger than half A4 down to fit its half, centred and uncropped', async () => {
+    const oversized: [number, number] = [600, 430];
+    const imposed = await PDFDocument.load(await imposeHalfPageNoticeCopies(await pdfOfPages([oversized])));
+    // Height is the tighter fit: 420.945 / 430.
+    expectTwoCopiesOf(imposed, 0, oversized, { scale: Math.min(A4.width / 600, HALF / 430) });
+    expect(readPdfPageDrawing(imposed, 0).placements[0]!.scaleX).toBeLessThan(1);
+  });
+
+  it('centres a smaller page at its own size instead of enlarging it', async () => {
+    const small: [number, number] = [400, 300];
+    const imposed = await PDFDocument.load(await imposeHalfPageNoticeCopies(await pdfOfPages([small])));
+    expectTwoCopiesOf(imposed, 0, small, { scale: 1 });
   });
 });
 
