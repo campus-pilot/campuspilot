@@ -1,6 +1,14 @@
 import { roleEnum, roles } from '@campuspilot/db/schema/jsonb/role';
 import { z } from 'zod';
 
+import { withUsageRange } from '../../../assistant/usage';
+
+export {
+  assistantUsageSchema,
+  MAX_USAGE_RANGE_DAYS,
+  type AssistantUsage,
+} from '../../../assistant/usage';
+
 export const assistantAccessInputSchema = z.object({
   schoolId: z.string().min(1),
 });
@@ -41,3 +49,6 @@ export const updateAssistantRolesInputSchema = z.object({
 });
 
 export type UpdateAssistantRolesInput = z.infer<typeof updateAssistantRolesInputSchema>;
+
+/** A school's assistant spend over an inclusive range of IST calendar days. */
+export const schoolAssistantUsageInputSchema = withUsageRange({ schoolId: z.string().min(1) });

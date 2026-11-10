@@ -9,9 +9,11 @@ import { getSchoolFeatureConfig } from '../../../feature-flags/feature-flags.ser
 import { protectedProcedure } from '../../../index';
 import { requireSchoolFeature } from '../../../permissions/feature';
 import { requireSchoolPermission } from '../../../permissions/school';
+import { assistantUsageSchema, schoolAssistantUsage } from '../../../assistant/usage';
 import {
   assistantAccessDtoSchema,
   assistantAccessInputSchema,
+  schoolAssistantUsageInputSchema,
   updateAssistantRolesInputSchema,
   type AssistantAccessDto,
 } from './assistant-access.dto';
@@ -109,6 +111,26 @@ export const schoolAssistantAccessRouter = {
           }
           return readAssistantAccess(tx, input.schoolId);
         });
+      } catch (error) {
+        throw toRpcError(error);
+      }
+    }),
+
+  getAssistantUsage: protectedProcedure
+    .route({
+      summary: 'Get assistant usage',
+      description:
+        'Read what the in-app AI assistant cost the school per IST calendar day over a range (USD, from the costs saved with every model request), with request and token counts. May be up to an hour behind.',
+      tags: ['School', 'Assistant'],
+    })
+    .meta({ mcp: { exposure: 'hidden', access: 'read', destructive: false, module: 'schools' } })
+    .input(schoolAssistantUsageInputSchema)
+    .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_ASSISTANT_USAGE))
+    .use(requireSchoolFeature('assistant'))
+    .output(assistantUsageSchema)
+    .handler(async ({ context, input }) => {
+      try {
+        return await schoolAssistantUsage(context.db, input.schoolId, { from: input.from, to: input.to });
       } catch (error) {
         throw toRpcError(error);
       }

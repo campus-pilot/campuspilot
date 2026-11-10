@@ -88,6 +88,9 @@ const HIDDEN_TOOLS = [
   // Who may use the in-app assistant is a human setting; never offered to the assistant itself.
   'school.getAssistantAccess',
   'school.updateAssistantRoles',
+  'school.getAssistantUsage',
+  'systemAdmin.getSchoolAssistantUsage',
+  'systemAdmin.getPlatformAssistantUsage',
   // The staff notification inbox is app chrome with no agent value.
   'school.listNotifications',
   'school.getUnreadNotificationCount',
