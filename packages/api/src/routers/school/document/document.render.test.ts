@@ -436,6 +436,77 @@ describe('render budget: every output-producing construct is counted or refused'
       expect(() => measureDocumentRender('{{lookup a ))}}', {})).toThrowError(badRequest);
     });
 
+    /**
+     * Review round 4, R4-1: the lexer returns the closing `{{{{/raw}}}}` as the
+     * token *name* `'END_RAW_BLOCK'`, not its id, and the scan used to stop at
+     * the first non-numeric token, so anything after a raw block reached the
+     * parser unchecked (108 KB of nested sub-expressions parsed for 25 s).
+     * Every lexer state that can come before deep nesting is covered here:
+     * the scan must read past it and refuse in linear time.
+     */
+    describe('nesting after other lexer states', () => {
+      const deepBlocks = `${'{{#if a}}'.repeat(4_000)}x${'{{/if}}'.repeat(4_000)}`;
+      const deepSubExpressions = `{{lookup a ${'(lookup '.repeat(12_000)}a${')'.repeat(12_000)}}}`;
+      const longElseIfChain = `{{#if a}}x${'{{else if a}}x'.repeat(limits.blockNesting)}{{/if}}`;
+      /** [state, prefix that leaves the lexer in its normal state again]. */
+      const prefixes: [string, string][] = [
+        ['an empty raw block', '{{{{raw}}}}{{{{/raw}}}}'],
+        ['a raw block with nesting in its body', `{{{{raw}}}}${'{{#if a}}'.repeat(100)}{{{{/raw}}}}`],
+        ['a raw block with a nested raw opener in its body', '{{{{raw}}}}{{{{raw}}}}x{{{{/raw}}}}{{{{/raw}}}}'],
+        ['two raw blocks', '{{{{raw}}}}x{{{{/raw}}}}{{{{raw}}}}y{{{{/raw}}}}'],
+        ['a comment', '{{!-- {{#if a}} {{{{/raw}}}} --}}'],
+        ['a short comment', '{{! note }}'],
+        ['a string literal', '{{lookup a "}}{{{{/raw}}}}{{#if a}}"}}'],
+        ['an escaped mustache', '\\{{#if a}}'],
+        ['an escaped raw block', '\\{{{{raw}}}}{{{{/raw}}}}'],
+      ];
+      const payloads: [string, string][] = [
+        ['blocks', deepBlocks],
+        ['sub-expressions', deepSubExpressions],
+        ['an else-if chain', longElseIfChain],
+      ];
+      const cases = prefixes.flatMap(([state, prefix]) =>
+        payloads.map(([payload, body]) => [state, payload, prefix + body] as const),
+      );
+
+      it.each(cases)('after %s, refuses deep %s before parsing', (_state, _payload, template) => {
+        const started = performance.now();
+        expect(() => measureDocumentRender(template, {})).toThrowError(overLimit);
+        // The parser alone needs seconds for these; the scan is linear.
+        expect(performance.now() - started).toBeLessThan(250);
+      });
+
+      it('accepts legal nesting after a raw block, and a raw block between blocks', () => {
+        const legal = `{{{{raw}}}}{{{{/raw}}}}${'{{#if a}}'.repeat(limits.blockNesting)}x${'{{/if}}'.repeat(limits.blockNesting)}`;
+        expect(() => measureDocumentRender(legal, { a: true })).not.toThrow();
+        // The raw block closes its level: 63 blocks + a raw block inside them, then 64 more after it.
+        const around = `${'{{#if a}}'.repeat(limits.blockNesting - 1)}{{{{raw}}}}x{{{{/raw}}}}${'{{/if}}'.repeat(limits.blockNesting - 1)}${'{{#if a}}'.repeat(limits.blockNesting)}y${'{{/if}}'.repeat(limits.blockNesting)}`;
+        expect(() => measureDocumentRender(around, { a: true })).not.toThrow();
+      });
+
+      it('leaves input after an invalid token or a lexical error to the parser, which fails there', () => {
+        const started = performance.now();
+        // `INVALID` (an unterminated string) and an unterminated comment: the parser stops at the same point.
+        expect(() => measureDocumentRender(`{{a "x${deepBlocks}`, {})).toThrowError(badRequest);
+        expect(() => measureDocumentRender(`${'{{#if a}}'.repeat(10)}{{!-- open ${deepBlocks}`, {})).toThrowError(badRequest);
+        expect(() => measureDocumentRender(`{{{{raw}}}} unclosed ${deepBlocks}`, {})).toThrowError(badRequest);
+        expect(performance.now() - started).toBeLessThan(250);
+      });
+
+      it('refuses a template whose tokens the scan cannot classify, or that it cannot finish', () => {
+        const unsupported = expect.objectContaining({ code: 'BAD_REQUEST', message: expect.stringMatching(/not supported/) });
+        const lexer = (Handlebars as unknown as { Parser: { lexer: { lex(): number | string } } }).Parser.lexer;
+        // A token name outside the grammar, and an id outside it.
+        vi.spyOn(lexer, 'lex').mockReturnValue('NOT_A_TOKEN');
+        expect(() => measureDocumentRender('{{a}}', {})).toThrowError(unsupported);
+        vi.spyOn(lexer, 'lex').mockReturnValue(9_999);
+        expect(() => measureDocumentRender('{{a}}', {})).toThrowError(unsupported);
+        // A lexer that never reaches the end: the guard refuses instead of handing unchecked input on.
+        vi.spyOn(lexer, 'lex').mockReturnValue(15);
+        expect(() => measureDocumentRender('{{a}}', {})).toThrowError(unsupported);
+      });
+    });
+
     it('stays far above what every marketplace design uses', () => {
       // The marketplace test above renders each design; this pins the margin.
       const widest = { params: 0, hashPairs: 0, pathParts: 0 };

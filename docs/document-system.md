@@ -407,7 +407,16 @@ nested loops was charged two steps per run and blocked the process for
 minutes). Nesting is checked on Handlebars' own tokens **before** the template is
 parsed (`parseDocumentTemplate`), because the parser is superlinear in nesting
 (4,000 nested sub-expressions took 2.6 s to parse); every server-side parse goes
-through that function. Measured worst cases: a loop of empty bodies or of the
+through that function. The scan reads the whole template: the lexer returns most
+tokens as ids but the end of a raw block (`{{{{/raw}}}}`) and `INVALID` as names,
+and the scan maps names through the parser's own symbol table, as the parser does
+(before review round 4 it stopped at the first raw block, so everything after
+one was parsed unchecked). It stops early only where the parser is certain to
+fail at the same position (an `INVALID` token or a lexical error), and refuses a
+token it cannot classify or a scan that does not finish, so the parser never
+consumes a token the scan has not checked. `document.render.test.ts` holds this
+after raw blocks, comments, string literals and escaped mustaches, with a time
+limit. Measured worst cases: a loop of empty bodies or of the
 costliest allowed statement exhausts the 2 million notice budget in about 0.1 s
 and the 25 million document budget in about 1 s (`document.render.test.ts` and
 `notice.render.test.ts` hold this with time limits). The catalog's designs use at

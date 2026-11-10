@@ -332,8 +332,9 @@ Templates › Notice previews the design at either size ("Preview as";
   thousands of times, loops that print nothing) costs at most the budget and
   never builds the oversized string. Structural limits refused at parse time
   (at most 4 arguments and 4 hash pairs per call, 8 path parts, sub-expressions
-  4 deep, 32 nodes per statement, 64 nested blocks; nesting is checked before
-  Handlebars parses) keep each unit of budget a bounded amount of CPU, so the
+  4 deep, 32 nodes per statement, 64 nested blocks; nesting is checked on the
+  whole template's tokens, including after raw blocks, comments and strings,
+  before Handlebars parses) keep each unit of budget a bounded amount of CPU, so the
   budget bounds time too: the worst template that passes save exhausts the
   notice budget in about 0.1 s. Every Handlebars construct
   that can produce output is either counted or refused when the template is

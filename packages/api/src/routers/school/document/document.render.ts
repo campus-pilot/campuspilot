@@ -127,7 +127,9 @@ const UNCOUNTED_MESSAGE =
  * superlinear in it: 4,000 nested sub-expressions (32 KB) take 2.6 s to
  * parse and 25,000 (200 KB, the template size limit) would take minutes;
  * 4,000 nested blocks take 2 s, and a long `{{else if}}` chain nests the
- * same way. The lexer that finds the tokens is linear.
+ * same way. The lexer that finds the tokens is linear, and the check reads
+ * every token of the template, past raw blocks, comments and strings (see
+ * {@link checkTemplateNesting} for the only early stops).
  */
 export const DOCUMENT_TEMPLATE_STRUCTURE_LIMITS = {
   /** Positional arguments of one call (`each`, `if`, `lookup`, `add` take one or two). */
@@ -562,13 +564,19 @@ type TemplateLexer = {
 };
 const templateParser = (
   handlebars as unknown as {
-    Parser: { lexer: TemplateLexer; terminals_: Record<number, string> };
+    Parser: {
+      lexer: TemplateLexer;
+      terminals_: Record<number, string>;
+      symbols_: Record<string, number>;
+    };
   }
 ).Parser;
-/** Token ids of Handlebars' grammar by name (the lexer returns ids). */
+/** Token ids of Handlebars' grammar by name. */
 const TOKEN = Object.fromEntries(
   Object.entries(templateParser.terminals_).map(([id, name]) => [name, Number(id)]),
 ) as Record<string, number>;
+/** Every token id of the grammar: a lexer result that maps to none of these cannot be classified. */
+const TERMINAL_IDS = new Set(Object.values(TOKEN));
 /** Tokens that open a block whose end is an `{{/…}}` (or a raw block's end). */
 const BLOCK_OPENERS = new Set(
   ["OPEN_BLOCK", "OPEN_INVERSE", "OPEN_RAW_BLOCK", "OPEN_PARTIAL_BLOCK"].map(
@@ -580,11 +588,42 @@ const BLOCK_CLOSERS = new Set(
 );
 
 /**
+ * What one lexer result is to the scan: a grammar token id, the end of the
+ * input, or a point where the parser is certain to stop with a syntax error.
+ *
+ * The generated lexer returns numeric ids for every rule except two, which
+ * return the token **name**: `END_RAW_BLOCK` (`{{{{/raw}}}}`) and `INVALID`.
+ * The parser maps names through its symbol table (`symbols_`), and so does
+ * this: `END_RAW_BLOCK` becomes its id and closes the raw block. `INVALID` is
+ * not a grammar symbol, so the parser reports a syntax error at it, having
+ * consumed only tokens before it, all of them already scanned.
+ *
+ * Anything else that is not a grammar token is `null`: the scan cannot
+ * classify it and the template is refused, instead of being handed to the
+ * parser with input the scan never looked at.
+ */
+function classifyToken(token: number | string, lexer: TemplateLexer): number | "end" | "parser-error" | null {
+  if (token === lexer.EOF || token === TOKEN.EOF) return "end";
+  if (token === "INVALID") return "parser-error";
+  const id = typeof token === "number" ? token : templateParser.symbols_[token];
+  return id !== undefined && TERMINAL_IDS.has(id) ? id : null;
+}
+
+/**
  * Checks block nesting and sub-expression depth on the template's tokens,
  * in one linear pass of Handlebars' own lexer, before the parser (which is
  * superlinear in nesting, see {@link DOCUMENT_TEMPLATE_STRUCTURE_LIMITS})
- * sees it. Unbalanced or invalid input is not judged here: the scan only
- * ever refuses too much depth, and the parser reports the syntax error.
+ * sees it.
+ *
+ * The scan reads the whole template. It stops early only where the parser
+ * is certain to fail at the same point (an `INVALID` token, or a lexical
+ * error, which the parser's own copy of the lexer raises at the same
+ * position because it lexes lazily, one token ahead), so the parser never
+ * consumes a token the scan has not checked. A token the scan cannot
+ * classify, or a scan that does not finish, refuses the template.
+ *
+ * Unbalanced input is not judged here: the scan only ever refuses too much
+ * depth (or what it cannot classify), and the parser reports syntax errors.
  */
 function checkTemplateNesting(content: string) {
   const lexer = Object.create(templateParser.lexer) as TemplateLexer;
@@ -599,22 +638,25 @@ function checkTemplateNesting(content: string) {
     try {
       token = lexer.lex();
     } catch {
+      // A lexical error: the parser stops with it at this same position.
       return;
     }
-    if (token === lexer.EOF || typeof token !== "number") return;
-    if (BLOCK_OPENERS.has(token)) {
+    const id = classifyToken(token, lexer);
+    if (id === "end" || id === "parser-error") return;
+    if (id === null) refuse(UNCOUNTED_MESSAGE);
+    if (BLOCK_OPENERS.has(id)) {
       blocks.push(1);
       blockDepth += 1;
-    } else if (token === TOKEN.OPEN_INVERSE_CHAIN && blocks.length > 0) {
+    } else if (id === TOKEN.OPEN_INVERSE_CHAIN && blocks.length > 0) {
       blocks[blocks.length - 1]! += 1;
       blockDepth += 1;
-    } else if (BLOCK_CLOSERS.has(token)) {
+    } else if (BLOCK_CLOSERS.has(id)) {
       blockDepth -= blocks.pop() ?? 0;
-    } else if (token === TOKEN.OPEN_SEXPR) {
+    } else if (id === TOKEN.OPEN_SEXPR) {
       subExpressionDepth += 1;
       if (subExpressionDepth > DOCUMENT_TEMPLATE_STRUCTURE_LIMITS.subExpressionDepth)
         refuse(EXPRESSION_LIMIT_MESSAGES.subExpressionDepth);
-    } else if (token === TOKEN.CLOSE_SEXPR) {
+    } else if (id === TOKEN.CLOSE_SEXPR) {
       subExpressionDepth = Math.max(0, subExpressionDepth - 1);
     }
     if (blockDepth > DOCUMENT_TEMPLATE_STRUCTURE_LIMITS.blockNesting)
