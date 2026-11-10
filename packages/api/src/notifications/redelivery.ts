@@ -4,6 +4,8 @@ import { cadetPushSubscriptionTable, notificationDeliveryTable, notificationTabl
 import { and, eq, inArray, isNull } from 'drizzle-orm';
 
 import { rpcError } from '../errors';
+import { schoolFeatureDisabledError } from '../feature-flags/feature-flags.service';
+import { disabledFeatureOf } from './features';
 import { handOffNotificationEvents } from './notification.outbox';
 import { notify, type AnyNotifyInput } from './notify';
 
@@ -46,7 +48,9 @@ export function isPushSubscriptionGone(delivery: { channel: string; errorCode: s
  * notifications qualify; the inbox row is not duplicated. A web push copy
  * is resent to the device that missed it only (D-40); when that device no
  * longer receives notifications the resend is refused with a clear message
- * instead of sending anything.
+ * instead of sending anything. A notification whose type needs a platform
+ * feature the school no longer has is refused with the disabled-feature
+ * error (`disabledFeatureOf`).
  */
 export async function resendFailedDelivery(
   input: { schoolId: string; deliveryId: string; requestedBy: string },
@@ -76,6 +80,10 @@ export async function resendFailedDelivery(
     if (!isNotificationType(row.type) || notificationCatalogue[row.type].audience !== 'admission' || !row.admissionId) {
       throw rpcError.badRequest('This notification can no longer be resent.');
     }
+    // Nothing new goes out for a type whose feature the school no longer
+    // has (a notice copy after `notices` or `cadet` was switched off).
+    const disabledFeature = await disabledFeatureOf(tx, input.schoolId, row.type);
+    if (disabledFeature) throw schoolFeatureDisabledError(disabledFeature);
     const event = {
       type: row.type as NotificationType,
       data: row.data,

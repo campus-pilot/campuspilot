@@ -5,7 +5,7 @@ import { noticeTable } from '@campuspilot/db/schema/notice';
 import { notificationDeliveryTable, notificationEventTable, notificationTable } from '@campuspilot/db/schema/notification';
 import { env } from '@campuspilot/env/server';
 import { getS3Client } from '@campuspilot/s3/client';
-import { and, eq, inArray, like } from 'drizzle-orm';
+import { and, eq, inArray, like, sql } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { PDFDocument } from 'pdf-lib';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
@@ -58,7 +58,7 @@ describe('notice notifications', () => {
       .where(and(eq(notificationEventTable.schoolId, schoolId), like(notificationEventTable.key, `notice%:${noticeId}%`)));
   async function publish(overrides: Record<string, unknown>) {
     const draft = await principal.school.createNotice(body(overrides));
-    await principal.school.publishNotice({ schoolId, noticeId: draft.id });
+    await principal.school.publishNotice({ schoolId, noticeId: draft.id, expectedVersion: draft.version });
     return draft.id;
   }
   /** Fans out a notice's events and sends its WhatsApp copies through the real adapter with a mocked Graph API. */
@@ -222,6 +222,113 @@ describe('notice notifications', () => {
     // Other scopes of the log are unaffected by the notices feature.
     await expect(principal.school.listNotificationDeliveries({ schoolId, scope: { kind: 'admission', admissionId: asha } })).resolves.toMatchObject({ items: expect.any(Array) });
     await setTestSchoolFeature(schoolId, 'notices', true);
+  });
+
+  /**
+   * Review round 1, B7: with `notices` off (or `cadet` off, for the student
+   * type) nothing new goes out. Inbox rows are still written.
+   */
+  describe('while the school lacks a feature the notice needs', () => {
+    const ok = () =>
+      vi.fn<ChannelFetch>(async (url) =>
+        String(url).endsWith('/media')
+          ? new Response(JSON.stringify({ id: 'media' }), { status: 200 })
+          : new Response(JSON.stringify({ messages: [{ id: `wamid.${randomUUID()}` }] }), { status: 200 }),
+      );
+    const rejecting = () =>
+      vi.fn<ChannelFetch>(async (url) =>
+        String(url).endsWith('/media')
+          ? new Response(JSON.stringify({ id: 'media' }), { status: 200 })
+          : new Response(JSON.stringify({ error: { code: 131026, message: 'undeliverable' } }), { status: 400 }),
+      );
+
+    it.each(['notices', 'cadet'] as const)('plans copies of events not fanned out yet as skipped (%s off) and still writes the inbox rows', async (feature) => {
+      const noticeId = await publish({ title: `Planned while ${feature} off`, toStaff: true, cadetScope: 'selected_classes', classIds: [grade6] });
+      await setTestSchoolFeature(schoolId, feature, false);
+      try {
+        const graph = ok();
+        await deliver(noticeId, graph);
+        expect(graph).not.toHaveBeenCalled();
+        const copies = await whatsappCopies(noticeId);
+        expect(copies).toHaveLength(2);
+        expect(copies.every((copy) => copy.status === 'skipped' && copy.skipReason === 'feature_disabled')).toBe(true);
+        // The inbox is the record: both students and the staff have their row.
+        const rows = await db.select().from(notificationTable).where(and(eq(notificationTable.schoolId, schoolId), inArray(notificationTable.eventId, (await eventsOf(noticeId)).map((event) => event.id))));
+        expect(rows.filter((row) => row.recipientKind === 'admission')).toHaveLength(2);
+        expect(rows.filter((row) => row.recipientKind === 'staff_user').length).toBeGreaterThan(0);
+      } finally {
+        await setTestSchoolFeature(schoolId, feature, true);
+      }
+    });
+
+    it.each(['notices', 'cadet'] as const)('skips a copy that was already queued when %s was switched off, without calling the provider', async (feature) => {
+      const noticeId = await publish({ title: `Queued before ${feature} off`, toStaff: false, cadetScope: 'selected_classes', classIds: [grade6] });
+      const whatsapp = (fetchMock: ChannelFetch) => ({ web_push: pushOff, whatsapp: createWhatsAppAdapter({ config, fetch: fetchMock }) as NotificationChannelAdapter });
+      const graph = ok();
+      // Fanned out while the feature is on: two copies are owed...
+      for (const event of await eventsOf(noticeId)) await dispatchNow(event.id, whatsapp(graph));
+      expect((await whatsappCopies(noticeId)).every((copy) => copy.status === 'owed')).toBe(true);
+      // ...then the feature goes off before the sender reaches them.
+      await setTestSchoolFeature(schoolId, feature, false);
+      try {
+        await drainSchool(schoolId, { adapters: whatsapp(graph) });
+        expect(graph).not.toHaveBeenCalled();
+        const copies = await whatsappCopies(noticeId);
+        expect(copies.every((copy) => copy.status === 'skipped' && copy.skipReason === 'feature_disabled')).toBe(true);
+      } finally {
+        await setTestSchoolFeature(schoolId, feature, true);
+      }
+    });
+
+    it('refuses a staff resend with the disabled-feature error and creates no event; other types are unaffected', async () => {
+      const noticeId = await publish({ title: 'Resend gate', toStaff: false, cadetScope: 'selected_classes', classIds: [grade6] });
+      await deliver(noticeId, rejecting());
+      const [failed] = (await whatsappCopies(noticeId)).filter((copy) => copy.status === 'failed');
+      expect(failed).toBeDefined();
+      const resendEvents = () => db.select().from(notificationEventTable).where(and(eq(notificationEventTable.schoolId, schoolId), eq(notificationEventTable.key, `resend:${failed!.id}`)));
+      for (const feature of ['notices', 'cadet'] as const) {
+        await setTestSchoolFeature(schoolId, feature, false);
+        try {
+          await expectFeatureDisabled(principal.school.resendNotificationDelivery({ schoolId, deliveryId: failed!.id }), feature);
+          expect(await resendEvents()).toHaveLength(0);
+        } finally {
+          await setTestSchoolFeature(schoolId, feature, true);
+        }
+      }
+      // With both features back the same delivery is resendable.
+      await expect(principal.school.resendNotificationDelivery({ schoolId, deliveryId: failed!.id })).resolves.toBeDefined();
+      expect(await resendEvents()).toHaveLength(1);
+    });
+
+    it('produces no notice PDF', async () => {
+      const source = createNoticeDocumentSource();
+      const noticeId = await publish({ title: 'No PDF while off' });
+      const request = { kind: 'notice' as const, filename: 'Notice.pdf', noticeId };
+      for (const feature of ['notices', 'cadet'] as const) {
+        await setTestSchoolFeature(schoolId, feature, false);
+        try {
+          await expect(source.produce(request, { schoolId })).resolves.toBeNull();
+        } finally {
+          await setTestSchoolFeature(schoolId, feature, true);
+        }
+      }
+      await expect(source.produce(request, { schoolId })).resolves.toMatchObject({ mimeType: 'application/pdf' });
+    });
+  });
+
+  it('counts a notice\'s events still being prepared from that notice\'s batch only', async () => {
+    const first = await publish({ title: 'Preparing one', toStaff: false, cadetScope: 'selected_classes', classIds: [grade6] });
+    const second = await publish({ title: 'Preparing two', toStaff: false, cadetScope: 'all_classes' });
+    const log = (noticeId: string) => accountant.school.listNotificationDeliveries({ schoolId, scope: { kind: 'notice', noticeId } });
+    // Nothing fanned out yet: each notice reports its own pending events, not the other's.
+    expect((await log(first)).preparation).toEqual({ pendingCount: 2, failedCount: 0 });
+    expect((await log(second)).preparation).toEqual({ pendingCount: 3, failedCount: 0 });
+    for (const event of await eventsOf(first)) await dispatchNow(event.id);
+    expect((await log(first)).preparation).toEqual({ pendingCount: 0, failedCount: 0 });
+    expect((await log(second)).preparation).toEqual({ pendingCount: 3, failedCount: 0 });
+    // The batch-scoped read uses the batch index, the others the per-school partial index.
+    const indexes = await db.execute<{ indexname: string }>(sql`select indexname from pg_indexes where tablename = 'notification_event'`);
+    expect(indexes.rows.map((row) => row.indexname)).toEqual(expect.arrayContaining(['notification_event_batch_idx', 'notification_event_school_unsettled_idx']));
   });
 
   it('produces the PDF only for a published notice of the delivery\'s own school', async () => {

@@ -71,14 +71,25 @@ function scopeWhere(scope: DeliveryLogScope, row: ScopedRow): SQL {
  *   or partial; the outbox retries the retryable ones as pending again).
  * Staff resends are events too but add a copy to an existing notification;
  * they are not counted.
+ *
+ * Cost: this runs on every log read and is polled every two seconds while a
+ * bulk action fans out, so it must never read other schools' events.
+ * - A billing run and a notice are one batch: their events are found
+ *   through `notification_event_batch_idx (school_id, batch_kind, batch_id)`
+ *   ({@link scopeBatch}).
+ * - An admission and an examination have no single batch (one-off sends
+ *   belong to them too); they read only the school's own pending and failed
+ *   events through `notification_event_school_unsettled_idx`.
  */
 async function scopePreparation(db: DatabaseExecutor, schoolId: string, scope: DeliveryLogScope) {
+  const batch = scopeBatch(scope);
   const rows = await db
     .select({ status: notificationEventTable.status, value: count() })
     .from(notificationEventTable)
     .where(
       and(
         eq(notificationEventTable.schoolId, schoolId),
+        batch ? and(eq(notificationEventTable.batchKind, batch.kind), eq(notificationEventTable.batchId, batch.id)) : undefined,
         inArray(notificationEventTable.type, notificationTypesFor('admission')),
         inArray(notificationEventTable.status, ['pending', 'failed']),
         isNull(notificationEventTable.redeliveryOfDeliveryId),
@@ -88,6 +99,28 @@ async function scopePreparation(db: DatabaseExecutor, schoolId: string, scope: D
     .groupBy(notificationEventTable.status);
   const of = (status: 'pending' | 'failed') => rows.find((row) => row.status === status)?.value ?? 0;
   return { pendingCount: of('pending'), failedCount: of('failed') };
+}
+
+/**
+ * The bulk batch every first-delivery event of a scope belongs to, when the
+ * scope is exactly one batch: the emitters tag each event of a billing run
+ * (`emitters/finance.ts`) and of a notice (`emitters/notices.ts`) with it.
+ * Null for scopes that also hold events outside any batch.
+ */
+function scopeBatch(scope: DeliveryLogScope): { kind: 'billing_run' | 'notice'; id: string } | null {
+  switch (scope.kind) {
+    case 'bill_run':
+      return { kind: 'billing_run', id: scope.billRunId };
+    case 'notice':
+      return { kind: 'notice', id: scope.noticeId };
+    case 'admission':
+    case 'exam':
+      return null;
+    default: {
+      const unhandled: never = scope;
+      throw new Error(`Unhandled delivery log scope ${JSON.stringify(unhandled)}.`);
+    }
+  }
 }
 
 /** The human reference of a notification (never an amount). */
