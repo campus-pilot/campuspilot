@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 
 import {
   NOTICE_TEMPLATE_STARTER,
@@ -38,6 +40,7 @@ import {
   staffRecipientLine,
   type NoticeFormValues,
 } from './notice-model';
+import { NoticePrintSize } from './notice-print-size';
 
 const scope = { schoolId: 'sch 1', sessionId: 'ses_1' };
 
@@ -310,4 +313,11 @@ test('says how each print size comes out of the printer', () => {
   assert.match(noticePrintSizeDescription('half'), /two copies/);
   assert.match(noticePrintSizeDescription('half'), /continues/);
   assert.match(noticePrintSizeDescription('full'), /^Full A4/);
+});
+
+test('the notice page states the print size and how it prints as visible text, not a tooltip', () => {
+  const half = renderToStaticMarkup(createElement(NoticePrintSize, { pageSize: 'half' }));
+  assert.ok(half.includes(noticePrintSizeDescription('half')));
+  assert.doesNotMatch(half, /title=/);
+  assert.ok(renderToStaticMarkup(createElement(NoticePrintSize, { pageSize: 'full' })).includes(noticePrintSizeDescription('full')));
 });

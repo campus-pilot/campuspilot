@@ -16,6 +16,7 @@ import { FeatureUnavailable } from '../feature-unavailable';
 import { useSchoolFeature } from '../require-feature';
 import { NoticeActions } from './notice-actions';
 import { NoticeEditor } from './notice-editor';
+import { NoticePrintSize } from './notice-print-size';
 import {
   NOTICE_BODY_MODE_LABELS,
   NOTICE_UNPUBLISHABLE_REASON_ID,
@@ -25,7 +26,6 @@ import {
   noticeBoundaryState,
   noticeErrorMessage,
   noticeLoadFailure,
-  noticePrintSizeDescription,
   noticesHref,
   publishedRecipientSummary,
   type NoticeSessionScope,
@@ -147,7 +147,7 @@ function NoticeFacts({ notice }: { notice: NoticeDto }) {
       <Fact label="Published">{notice.publishedAt ? `${notice.publishedByName ?? 'Former staff member'} · ${dateTimeFormat.format(notice.publishedAt)}` : 'Not published'}</Fact>
       <Fact label={notified ? 'Delivery' : 'Format'}>{notified ?? NOTICE_BODY_MODE_LABELS[notice.bodyMode]}</Fact>
       <Fact label="Print size">
-        <span title={noticePrintSizeDescription(notice.pageSize)}>{NOTICE_PAGE_SIZE_LABELS[notice.pageSize]}{notice.pageSize === 'half' ? ' · two per A4 sheet' : ''}</span>
+        <NoticePrintSize pageSize={notice.pageSize} />
       </Fact>
     </dl>
   );
