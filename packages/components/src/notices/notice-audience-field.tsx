@@ -67,7 +67,7 @@ export function NoticeAudienceField({ value, choices, errorId, invalid = false, 
 export function NoticeCadetClassScopeField({ value, onChange, children }: { value: NoticeCadetClassScope; onChange: (value: NoticeCadetClassScope) => void; children?: ReactNode }) {
   return (
     <OptionRadioGroup
-      legend="Which cadets?"
+      legend="Which students?"
       value={value}
       className="grid gap-2 sm:grid-cols-2"
       options={NOTICE_CADET_CLASS_SCOPES.map((scope) => ({ value: scope, ...NOTICE_CADET_CLASS_SCOPE_OPTIONS[scope] }))}

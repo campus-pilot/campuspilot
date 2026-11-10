@@ -81,5 +81,10 @@ describe('AppFrame', () => {
     expect(isTabActive('/fees', '/')).toBe(false);
     expect(isTabActive('/fees/abc', '/fees')).toBe(true);
     expect(isTabActive('/feesx', '/fees')).toBe(false);
+    // Notices belongs to More (review round 3): highlighted on the list and on one notice.
+    expect(isTabActive('/notices', '/more', ['/notices'])).toBe(true);
+    expect(isTabActive('/notices/ntc_1', '/more', ['/notices'])).toBe(true);
+    expect(isTabActive('/noticesx', '/more', ['/notices'])).toBe(false);
+    expect(isTabActive('/notices', '/', ['/notices'])).toBe(false);
   });
 });

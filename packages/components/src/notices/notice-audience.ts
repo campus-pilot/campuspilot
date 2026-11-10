@@ -25,8 +25,8 @@ export const NOTICE_AUDIENCE_OPTIONS: Record<NoticeAudienceChoice, { label: stri
   staff: { label: 'Staff', description: 'Every staff member of the school, in this app.' },
   // Channel-neutral on purpose: which channels reach students depends on the
   // school and platform, and the publish confirmation states it from the forecast.
-  cadets: { label: 'Cadets', description: 'Students, in the Cadet Portal and by their notifications.' },
-  staff_and_cadets: { label: 'Staff and cadets', description: 'Everyone: staff here, students in the Cadet Portal and by their notifications.' },
+  cadets: { label: 'Students', description: 'In the Cadet Portal and by their notifications.' },
+  staff_and_cadets: { label: 'Staff and students', description: 'Everyone: staff here, students in the Cadet Portal and by their notifications.' },
 };
 
 export const NOTICE_CADET_CLASS_SCOPE_OPTIONS: Record<NoticeCadetClassScope, { label: string; description: string }> = {
@@ -94,7 +94,7 @@ function classCount(count: number) {
 
 /**
  * One line naming the audience, for lists and summaries: "Staff",
- * "Cadets · All classes", "Staff and cadets · Class 6, Class 7".
+ * "Students · All classes", "Staff and students · Class 6, Class 7".
  * `classNames` are the names of a selected-classes audience as the notice
  * records them (a published notice keeps the names it was published with,
  * also for classes deleted since). Up to three are listed; more, or none

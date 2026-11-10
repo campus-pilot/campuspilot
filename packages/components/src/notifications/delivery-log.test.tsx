@@ -57,6 +57,13 @@ describe('NotificationDeliveryLog', () => {
     expect(onResend).toHaveBeenCalledWith('ndl_failed');
   });
 
+  it("names only the student on a log of one notice, which the page already names", () => {
+    const item = { notificationId: 'ntf_9', type: 'notice.published', studentName: 'Advika', reference: 'Sports Day', createdAt: '2026-11-09T10:00:00Z', deliveries: [delivery({})] };
+    render(<NotificationDeliveryLog canResend={false} resendingDeliveryId={null} onResend={() => {}} items={[item]} oneSubject />);
+    expect(screen.getByText('Advika')).toBeTruthy();
+    expect(screen.queryByText(/Sports Day/)).toBeNull();
+  });
+
   it('never offers Resend for a device that no longer receives notifications, and shows a pending retry', () => {
     const items = [{
       notificationId: 'ntf_2', type: 'bill.issued', studentName: null, reference: null, createdAt: '2026-11-09T10:00:00Z',

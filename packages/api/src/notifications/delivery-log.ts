@@ -138,9 +138,17 @@ function referenceOf(type: string, data: Record<string, unknown>): string | null
   return typeof value === 'string' ? value : null;
 }
 
+/** The order of a notification's copies in the log, as in the delivery forecast; a channel added later sorts last. */
+const DELIVERY_LOG_CHANNEL_ORDER: readonly string[] = ['whatsapp', 'web_push'];
+function channelRank(channel: string) {
+  const rank = DELIVERY_LOG_CHANNEL_ORDER.indexOf(channel);
+  return rank === -1 ? DELIVERY_LOG_CHANNEL_ORDER.length : rank;
+}
+
 /**
  * One page of a scope's student notifications, newest first, each with all
- * of its deliveries (oldest first, resends after the copy they resend).
+ * of its deliveries: WhatsApp, then device notifications, each oldest first
+ * (resends after the copy they resend).
  * `onlyFailed` keeps notifications with at least one failed delivery.
  * Retired types are left out. `preparation` reports the part of the scope
  * that is not in the list yet (see {@link scopePreparation}); it describes
@@ -184,6 +192,11 @@ export async function listDeliveryLog(
         .where(and(eq(notificationDeliveryTable.schoolId, input.schoolId), inArray(notificationDeliveryTable.notificationId, rows.map((row) => row.id))))
         .orderBy(notificationDeliveryTable.createdAt, notificationDeliveryTable.id)
     : [];
+  // One row's copies in a fixed channel order (the forecast's), and by time
+  // within a channel, so a resend follows its original. Deliveries of one
+  // notification are created together with random ids, so time alone would
+  // swap the channels from row to row.
+  deliveries.sort((a, b) => channelRank(a.channel) - channelRank(b.channel));
   const resent = new Set(deliveries.flatMap((delivery) => (delivery.resendOfDeliveryId ? [delivery.resendOfDeliveryId] : [])));
   const failedPush = deliveries.filter((delivery) => delivery.channel === 'web_push' && delivery.status === 'failed');
   const activePush = await activePushDestinations(db, failedPush.flatMap((delivery) => (delivery.destination ? [delivery.destination] : [])));

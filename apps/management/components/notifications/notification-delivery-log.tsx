@@ -124,6 +124,7 @@ function DeliveryLogPage(props: {
         resendingDeliveryId={props.resendingDeliveryId}
         onResend={props.onResend}
         emptyMessage={props.onlyFailed ? 'No failed deliveries.' : query.data.preparation.pendingCount > 0 ? 'No notifications are ready yet.' : 'No notifications yet.'}
+        oneSubject={props.scope.kind === 'notice'}
       />
       {query.data.pagination.totalPages > 1 ? (
         <ExamPager page={props.page} pages={query.data.pagination.totalPages} total={query.data.pagination.totalItems} onPage={props.onPage} />

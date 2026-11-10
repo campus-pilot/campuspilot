@@ -13,22 +13,34 @@ import { cn } from '@campuspilot/ui/lib/utils';
 import { authClient } from '@/lib/auth-client';
 import { initialsOf } from '@/lib/format';
 import { orpc } from '@/lib/orpc';
+import { NOTICES_HREF } from '@/lib/route-param';
 import { CadetSchoolChrome } from './cadet-school-chrome';
 import { SignOutButton } from './more/more-screen';
 import { CadetNotificationBell } from './notifications/cadet-notifications';
 import { EmptyState, ScreenLoading } from './screen';
 
-const tabs = [
+/**
+ * The five tabs. `sections`: screens outside a tab's own route that belong
+ * to it: Notices has no tab of its own (the bar keeps five) and is listed
+ * under More, so More is highlighted there, also when a student arrives
+ * from a notification.
+ */
+const tabs: readonly { href: string; label: string; icon: typeof HouseIcon; sections?: readonly string[] }[] = [
   { href: '/', label: 'Home', icon: HouseIcon },
   { href: '/fees', label: 'Fees', icon: WalletIcon },
   { href: '/results', label: 'Results', icon: GraduationCapIcon },
   { href: '/growth', label: 'Growth', icon: ChartLineIcon },
-  { href: '/more', label: 'More', icon: MenuIcon },
-] as const;
+  { href: '/more', label: 'More', icon: MenuIcon, sections: [NOTICES_HREF] },
+];
 
-/** A tab is active on its own route and any route nested under it; Home only matches exactly. */
-export function isTabActive(pathname: string, href: string) {
-  return href === '/' ? pathname === '/' : pathname === href || pathname.startsWith(`${href}/`);
+function isUnder(pathname: string, href: string) {
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
+
+/** A tab is active on its own route, its `sections` and any route nested under them; Home only matches exactly. */
+export function isTabActive(pathname: string, href: string, sections: readonly string[] = []) {
+  if (href === '/') return pathname === '/';
+  return isUnder(pathname, href) || sections.some((section) => isUnder(pathname, section));
 }
 
 /** Whose records are shown (the student, their class and school) and their notification bell. */
@@ -64,14 +76,14 @@ function BottomNav() {
   return (
     <nav aria-label="Main" className="sticky bottom-0 z-20 border-t bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur">
       <ul className="mx-auto grid max-w-md grid-cols-5">
-        {tabs.map(({ href, label, icon: Icon }) => (
+        {tabs.map(({ href, label, icon: Icon, sections }) => (
           <li key={href}>
             <Link
               href={href}
-              aria-current={isTabActive(pathname, href) ? 'page' : undefined}
+              aria-current={isTabActive(pathname, href, sections) ? 'page' : undefined}
               className={cn(
                 'flex h-14 flex-col items-center justify-center gap-1 text-[0.6875rem] font-medium text-muted-foreground',
-                isTabActive(pathname, href) && 'text-primary',
+                isTabActive(pathname, href, sections) && 'text-primary',
               )}
             >
               <Icon className="size-5" />

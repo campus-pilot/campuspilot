@@ -69,7 +69,6 @@ describe('document rendering', () => {
     ['{{add value 1}}', { value: '3' }],
     ['{{add value 1}}', { value: Number.POSITIVE_INFINITY }],
     ['{{unknown value}}', { value: 1 }],
-    ['{{#if value}}', { value: true }],
   ])('maps invalid or unsupported templates to BAD_REQUEST', (template, context) => {
     expect(() => renderDocument(template, context)).toThrowError(
       expect.objectContaining({
@@ -78,6 +77,14 @@ describe('document rendering', () => {
           'The template contains invalid Handlebars syntax or an unsupported helper.',
       }),
     );
+  });
+
+  it('says on which line the syntax is invalid, without echoing the source', () => {
+    for (const [template, line] of [['{{#if value}}', 1], ['<p>\n\n{{#each list}}x{{/if}}', 3], ['a\n{{name bar=}}', 2]] as const) {
+      expect(() => renderDocument(template, {}), template).toThrowError(
+        expect.objectContaining({ code: 'BAD_REQUEST', message: `The template has invalid Handlebars syntax on line ${line}.` }),
+      );
+    }
   });
 
   it('registers exactly the documented helpers: an allowlist, so `log` and any future built-in are refused', () => {

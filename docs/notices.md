@@ -456,7 +456,9 @@ Screens (`apps/cadet/components/notices`, shared API-free pieces in
   scrolls, so the notice is readable at its real size.
 - **Entry points.** A notices block on Home (`HomeNotices`, the newest three,
   rendered only when there are notices) and a row on More (`MoreNoticesRow`).
-  The tab bar keeps its five tabs.
+  The tab bar keeps its five tabs; More is highlighted on `/notices` and
+  `/notices/{id}` (its `sections`), also when a student arrives from a
+  notification.
 - **Feature off.** There is no features read for students; the notice
   procedures' disabled-feature error is the signal (`noticesSwitchedOff`). The
   Home block and the More row do not appear, and both routes show the calm
@@ -498,14 +500,27 @@ Rules the screens follow (models in `notice-model.ts`, each with tests):
   background refetch fails; only "not found" or "feature switched off"
   replaces them. The Cadet Portal's notice screens, the dashboard card, the
   delivery log, the template settings page and the admin flag editor resolve
-  the same way.
+  the same way. Where notices are shown (notice page, saved preview, publish
+  forecast, Cadet list, notice and Home block) a held copy whose refresh failed
+  carries the shared `QueryRefreshNote` ("Couldn't refresh. Showing the last
+  loaded version." with Retry, from `refetchError`).
+- **The saved preview is cached per version** (`savedNoticePreviewQueryOptions`,
+  key + `{ version }`): a render of an older version never stands for the one
+  the page shows, so the publish dialog never confirms a page nobody was shown.
+- **Staff-facing copy says "students"** for the audience ("Students", "Staff
+  and students", "Which students?"); "Cadet Portal" names the portal. The stored
+  values (`cadets`, `cadet_scope`) are unchanged.
 - **The live preview never goes blank on an error**: the newest render that
   worked stays under the error message (`newestRenderedPreview`: a slow render
   of older text never replaces a newer one).
 - **A draft that cannot be published says why instead of offering a retry**
   (`cadetAudienceUnpublishable`): a draft addressed to students in a school
-  known not to have the Cadet Portal carries a note on its page, and the
-  publish dialog repeats it with "Edit audience".
+  known not to have the Cadet Portal carries a note on its page, its Publish
+  button is disabled and described by that note
+  (`NOTICE_UNPUBLISHABLE_REASON_ID`), and the publish dialog (still reachable
+  while the school's features are loading or could not be read) repeats it with "Edit audience".
+- **A notice's delivery log names only the student on each row** (`oneSubject`),
+  and every row lists its copies WhatsApp first, then device notifications.
 - **Field errors are linked to their inputs** (`aria-describedby`,
   `NOTICE_FIELD_IDS`) and a failed save moves focus to the first invalid field.
 
@@ -544,8 +559,8 @@ custom-template invitation, and two drafts.
   are held back (see "Nothing new goes out while a feature is off").
 - Copies skipped as `feature_disabled` are not sent when the feature returns.
 - A platform admin who is not a school member cannot use notices.
-- The Cadet Portal highlights no tab on the notice screens, and shows no
-  "unread notice" state beyond the notification inbox.
+- The Cadet Portal shows no "unread notice" state beyond the notification
+  inbox.
 - The "Notices:" line of `DOCUMENT_CONTEXT_HELP` is prose and not checked
   against the context.
 

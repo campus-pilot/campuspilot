@@ -11,21 +11,21 @@ describe('NoticeAudienceField', () => {
     const onChange = vi.fn();
     render(<NoticeAudienceField value="staff" choices={['staff', 'cadets', 'staff_and_cadets']} onChange={onChange} />);
     expect(screen.getAllByRole('radio')).toHaveLength(3);
-    fireEvent.click(screen.getByRole('radio', { name: /Staff and cadets/ }));
+    fireEvent.click(screen.getByRole('radio', { name: /Staff and students/ }));
     expect(onChange).toHaveBeenCalledWith('staff_and_cadets');
   });
 
   it('renders only the choices on offer', () => {
     render(<NoticeAudienceField value="staff" choices={['staff']} onChange={() => undefined} />);
     expect(screen.getAllByRole('radio')).toHaveLength(1);
-    expect(screen.queryByText('Cadets')).toBeNull();
-    expect(screen.queryByText('Staff and cadets')).toBeNull();
+    expect(screen.queryByText('Students')).toBeNull();
+    expect(screen.queryByText('Staff and students')).toBeNull();
   });
 
   it('shows a stored student audience as the checked choice when students cannot be addressed, and lets the author change it', () => {
     const onChange = vi.fn();
     render(<NoticeAudienceField value="cadets" choices={['staff', 'cadets']} onChange={onChange} />);
-    expect((screen.getByRole('radio', { name: /^Cadets/ }) as HTMLInputElement).getAttribute('aria-checked')).toBe('true');
+    expect((screen.getByRole('radio', { name: /^Students/ }) as HTMLInputElement).getAttribute('aria-checked')).toBe('true');
     expect(screen.getByRole('radio', { name: /^Staff/ }).getAttribute('aria-checked')).toBe('false');
     fireEvent.click(screen.getByRole('radio', { name: /^Staff/ }));
     expect(onChange).toHaveBeenCalledWith('staff');

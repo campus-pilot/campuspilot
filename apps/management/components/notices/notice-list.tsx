@@ -44,7 +44,7 @@ function NoNoticesYet({ scope }: { scope: NoticeSessionScope }) {
       <EmptyHeader>
         <EmptyMedia variant="icon"><Megaphone /></EmptyMedia>
         <EmptyTitle>No notices yet</EmptyTitle>
-        <EmptyDescription>Write a notice for staff, cadets or both. It stays a draft until a principal or manager publishes it.</EmptyDescription>
+        <EmptyDescription>Write a notice for staff, students or both. It stays a draft until a principal or manager publishes it.</EmptyDescription>
       </EmptyHeader>
       <EmptyContent><NewNoticeAction scope={scope} variant="outline" /></EmptyContent>
     </Empty>

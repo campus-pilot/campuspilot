@@ -27,12 +27,12 @@ describe('notice audience', () => {
 
   it('labels the audience with the recorded class names when they are few', () => {
     expect(noticeAudienceLabel({ toStaff: true, cadetScope: 'none' })).toBe('Staff');
-    expect(noticeAudienceLabel({ toStaff: false, cadetScope: 'all_classes' })).toBe('Cadets · All classes');
-    expect(noticeAudienceLabel({ toStaff: true, cadetScope: 'selected_classes' }, ['Class 1', 'Class 2'])).toBe('Staff and cadets · Class 1, Class 2');
+    expect(noticeAudienceLabel({ toStaff: false, cadetScope: 'all_classes' })).toBe('Students · All classes');
+    expect(noticeAudienceLabel({ toStaff: true, cadetScope: 'selected_classes' }, ['Class 1', 'Class 2'])).toBe('Staff and students · Class 1, Class 2');
     // A class deleted since publication is still named: the names are the notice's own record.
-    expect(noticeAudienceLabel({ toStaff: false, cadetScope: 'selected_classes' }, ['Class 5', 'Class 8'])).toBe('Cadets · Class 5, Class 8');
-    expect(noticeAudienceLabel({ toStaff: false, cadetScope: 'selected_classes' }, ['A', 'B', 'C', 'D'])).toBe('Cadets · 4 classes');
-    expect(noticeAudienceLabel({ toStaff: false, cadetScope: 'selected_classes' })).toBe('Cadets · 0 classes');
+    expect(noticeAudienceLabel({ toStaff: false, cadetScope: 'selected_classes' }, ['Class 5', 'Class 8'])).toBe('Students · Class 5, Class 8');
+    expect(noticeAudienceLabel({ toStaff: false, cadetScope: 'selected_classes' }, ['A', 'B', 'C', 'D'])).toBe('Students · 4 classes');
+    expect(noticeAudienceLabel({ toStaff: false, cadetScope: 'selected_classes' })).toBe('Students · 0 classes');
   });
 
   it('never promises a delivery channel in the audience descriptions', () => {

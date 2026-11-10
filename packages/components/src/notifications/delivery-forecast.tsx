@@ -30,7 +30,7 @@ function ChannelRow({ channel, forecast }: { channel: DeliveryChannel; forecast:
           {skips.map(([reason, count]) => (
             <li key={reason} className="flex justify-between gap-2">
               <span>{DELIVERY_SKIP_REASON_LABELS[reason]}</span>
-              <span>{count}</span>
+              <span className="shrink-0">{count} skipped</span>
             </li>
           ))}
         </ul>

@@ -112,6 +112,8 @@ describe('delivery log, resend and failure alerts', () => {
     expect(sender.available && sender.send).toHaveBeenCalledTimes(1);
     const after = await principal.school.listNotificationDeliveries({ schoolId, scope: { kind: 'admission', admissionId } });
     expect(after.items).toHaveLength(1);
+    // Copies are listed in one channel order on every row, WhatsApp first, a resend after its original (review round 3).
+    expect(after.items[0]!.deliveries.map((delivery) => delivery.channel)).toEqual(['whatsapp', 'whatsapp', 'web_push']);
     const whatsappCopies = after.items[0]!.deliveries.filter((delivery) => delivery.channel === 'whatsapp');
     expect(whatsappCopies).toEqual([
       expect.objectContaining({ id: failed.id, status: 'failed', resent: true }),

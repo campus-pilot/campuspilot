@@ -144,12 +144,19 @@ export function NotificationDeliveryLog({
   resendingDeliveryId,
   onResend,
   emptyMessage = 'No notifications yet.',
+  oneSubject = false,
 }: {
   items: DeliveryLogItem[];
   canResend: boolean;
   resendingDeliveryId: string | null;
   onResend: (deliveryId: string) => void;
   emptyMessage?: string;
+  /**
+   * True when every row is about the same thing, which the page already
+   * names (one notice's log on that notice's page): rows then name only
+   * the student instead of repeating the type and reference.
+   */
+  oneSubject?: boolean;
 }) {
   if (items.length === 0) return <p className="text-sm text-muted-foreground">{emptyMessage}</p>;
   return (
@@ -158,9 +165,15 @@ export function NotificationDeliveryLog({
         <li key={item.notificationId} className="flex flex-col gap-2 p-3">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
             <span className="text-sm font-medium">
-              {TYPE_LABELS[item.type] ?? 'Notification'}
-              {item.reference ? ` · ${item.reference}` : ''}
-              {item.studentName ? ` · ${item.studentName}` : ''}
+              {oneSubject && item.studentName ? (
+                item.studentName
+              ) : (
+                <>
+                  {TYPE_LABELS[item.type] ?? 'Notification'}
+                  {item.reference ? ` · ${item.reference}` : ''}
+                  {item.studentName ? ` · ${item.studentName}` : ''}
+                </>
+              )}
             </span>
             <time className="text-xs text-muted-foreground" dateTime={new Date(item.createdAt).toISOString()}>
               {formatNotificationTime(item.createdAt)}

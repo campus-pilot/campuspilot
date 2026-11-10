@@ -635,8 +635,25 @@ export function parseDocumentTemplate(content: string): hbs.AST.Program {
   try {
     return handlebars.parse(content);
   } catch (cause) {
-    throw rpcError.badRequest(SYNTAX_MESSAGE, cause);
+    const line = syntaxErrorLine(cause);
+    throw rpcError.badRequest(
+      line === null ? SYNTAX_MESSAGE : `The template has invalid Handlebars syntax on line ${line}.`,
+      cause,
+    );
   }
+}
+
+/**
+ * The line a Handlebars parse error points at, or null: the parser's own
+ * errors say "Parse error on line N:", block mismatches carry `lineNumber`.
+ * Only the number is passed on, never the parser's excerpt of the source.
+ */
+function syntaxErrorLine(cause: unknown): number | null {
+  if (!(cause instanceof Error)) return null;
+  const { lineNumber } = cause as Error & { lineNumber?: unknown };
+  if (typeof lineNumber === "number" && Number.isInteger(lineNumber) && lineNumber > 0) return lineNumber;
+  const match = /^Parse error on line (\d+):/.exec(cause.message);
+  return match ? Number(match[1]) : null;
 }
 
 type CompiledTemplate = (context: object) => string;

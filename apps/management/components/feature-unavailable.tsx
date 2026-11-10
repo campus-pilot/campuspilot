@@ -27,9 +27,10 @@ export function FeatureUnavailable({ feature }: { feature: SchoolFeatureKey }) {
         <EmptyMedia variant="icon">
           <PackageX />
         </EmptyMedia>
-        <EmptyTitle>{label} is not enabled</EmptyTitle>
+        {/* Worded without a verb that agrees with the label ("Notices", "Cadet Portal"). */}
+        <EmptyTitle>{label} not enabled for this school</EmptyTitle>
         <EmptyDescription>
-          {label} is not part of this school&apos;s CampusPilot setup. Contact CampusPilot support to enable it.
+          This feature is not part of this school&apos;s CampusPilot setup. Contact CampusPilot support to enable it.
         </EmptyDescription>
       </EmptyHeader>
     </Empty>
