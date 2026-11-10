@@ -3,7 +3,13 @@ import { assistantContract } from '@campuspilot/assistant-contract/contract';
 import { ASSISTANT_LIST_PAGE_SIZE, type AssistantStreamEvent } from '@campuspilot/assistant-contract/dto';
 import { implement, ORPCError } from '@orpc/server';
 
-import { canUseAssistant } from './access';
+import {
+  assertCanRead,
+  assertCanUse,
+  canRead,
+  loadAssistantAccess,
+  roleAllowed,
+} from './access';
 import { db } from './db';
 import { handOverApprovalResolution, handOverRun } from './dispatch';
 import { liveEvents, streamingTexts, subscribeAssistantEvents } from './events';
@@ -43,12 +49,14 @@ const authed = os.use(async ({ context, next }) => {
 
 type Authed = { session: AssistantSession };
 
-async function assertAssistantAccess(context: Authed, schoolId: string) {
-  if (!(await canUseAssistant(context.session, schoolId))) {
-    throw new ORPCError('FORBIDDEN', {
-      message: 'You do not have permission to use the assistant in this school.',
-    });
-  }
+/** Throws unless the user may read their assistant history in the school. */
+async function assertReadAccess(context: Authed, schoolId: string) {
+  assertCanRead(await loadAssistantAccess(context.session, schoolId));
+}
+
+/** Throws unless the user may start or continue a turn in the school now. */
+async function assertUseAccess(context: Authed, schoolId: string) {
+  assertCanUse(await loadAssistantAccess(context.session, schoolId));
 }
 
 /**
@@ -68,16 +76,16 @@ function selectedProvider() {
   return configuredProviderSettings().get(id) ?? null;
 }
 
-function availability() {
+/**
+ * Whether a model is configured for new conversations. Separate from the
+ * user's access: a deployment without a provider says so even to users who
+ * may use the assistant.
+ */
+function providerAvailability() {
   const provider = selectedProvider();
-  if (!provider) {
-    return {
-      configured: false,
-      available: false,
-      unavailableReason: missingProviderReason(selectedProviderId()),
-    };
-  }
-  return { configured: true, available: true, unavailableReason: null };
+  return provider
+    ? { configured: true, unavailableReason: null }
+    : { configured: false, unavailableReason: missingProviderReason(selectedProviderId()) };
 }
 
 /** Idle interval after which the stream sends a heartbeat. */
@@ -96,7 +104,7 @@ const ACCESS_RECHECK_MS = 2 * 60_000;
 async function streamStillAllowed(context: Authed, headers: Headers, schoolId: string): Promise<boolean> {
   try {
     const current = await resolveAssistantSession(headers);
-    return current?.user.id === context.session.user.id && (await canUseAssistant(current, schoolId));
+    return current?.user.id === context.session.user.id && canRead(await loadAssistantAccess(current, schoolId));
   } catch (err) {
     log.warn({ err, schoolId }, 'assistant.stream.access-recheck-failed');
     return true;
@@ -124,13 +132,28 @@ async function ownedConversation(context: Authed, schoolId: string, conversation
 }
 
 export const assistantRouter = os.router({
+  /**
+   * The user's assistant state in the school: whether their role may use it
+   * (`allowed`, which the app's entry points follow) and whether they can
+   * send now (`available`, with the reason when not: no model, their role,
+   * the school's limit).
+   */
   getStatus: authed.getStatus.handler(async ({ context, input }) => {
-    await assertAssistantAccess(context, input.schoolId);
-    return availability();
+    const access = await loadAssistantAccess(context.session, input.schoolId);
+    assertCanRead(access);
+    const provider = providerAvailability();
+    const allowed = roleAllowed(access);
+    if (!provider.configured) return { configured: false, allowed, available: false, unavailableReason: provider.unavailableReason };
+    return {
+      configured: true,
+      allowed,
+      available: access.allowed,
+      unavailableReason: access.refusal?.message ?? null,
+    };
   }),
 
   listConversations: authed.listConversations.handler(async ({ context, input }) => {
-    await assertAssistantAccess(context, input.schoolId);
+    await assertReadAccess(context, input.schoolId);
     const pageSize = ASSISTANT_LIST_PAGE_SIZE;
     const { items, totalItems } = await store.listConversations(db, {
       schoolId: input.schoolId,
@@ -152,7 +175,7 @@ export const assistantRouter = os.router({
   }),
 
   getConversation: authed.getConversation.handler(async ({ context, input }) => {
-    await assertAssistantAccess(context, input.schoolId);
+    await assertReadAccess(context, input.schoolId);
     const owned = await ownedConversation(context, input.schoolId, input.conversationId);
     const snapshot = await store.loadSnapshot(db, owned.id);
     if (!snapshot) throw new ORPCError('NOT_FOUND');
@@ -174,7 +197,7 @@ export const assistantRouter = os.router({
     signal,
   }) {
     const contextHeaders = context.headers;
-    await assertAssistantAccess(context, input.schoolId);
+    await assertReadAccess(context, input.schoolId);
     const owned = await ownedConversation(context, input.schoolId, input.conversationId);
 
     const subscription = await subscribeAssistantEvents(owned.id);
@@ -241,9 +264,9 @@ export const assistantRouter = os.router({
       };
     }
 
-    await assertAssistantAccess(context, input.schoolId);
-    const status = availability();
-    if (!status.available) {
+    await assertUseAccess(context, input.schoolId);
+    const status = providerAvailability();
+    if (!status.configured) {
       throw new ORPCError('PRECONDITION_FAILED', {
         message: status.unavailableReason ?? 'The assistant is unavailable.',
       });
@@ -306,7 +329,13 @@ export const assistantRouter = os.router({
     return created;
   }),
 
+  /**
+   * Approving continues the turn, so it needs use access (enforced by the
+   * fresh token it issues); declining only needs the history to be the
+   * user's to read.
+   */
   respondToApproval: authed.respondToApproval.handler(async ({ context, input }) => {
+    await assertReadAccess(context, input.schoolId);
     const approval = await store.findApproval(db, input.approvalId);
     if (!approval || approval.schoolId !== input.schoolId || approval.userId !== context.session.user.id) {
       throw new ORPCError('NOT_FOUND', { message: 'Assistant approval was not found.' });
@@ -343,7 +372,9 @@ export const assistantRouter = os.router({
     return store.toRunDto(run);
   }),
 
+  /** Stopping spends nothing, so it needs only read access: a user whose role was switched off can still stop. */
   stopRun: authed.stopRun.handler(async ({ context, input }) => {
+    await assertReadAccess(context, input.schoolId);
     const run = await store.findRun(db, input.runId);
     if (!run || run.schoolId !== input.schoolId || run.userId !== context.session.user.id) {
       throw new ORPCError('NOT_FOUND', { message: 'Assistant run was not found.' });
@@ -363,7 +394,7 @@ export const assistantRouter = os.router({
    * assistant first and nothing is deleted from under a working turn.
    */
   deleteConversation: authed.deleteConversation.handler(async ({ context, input }) => {
-    await assertAssistantAccess(context, input.schoolId);
+    await assertReadAccess(context, input.schoolId);
     const owned = await ownedConversation(context, input.schoolId, input.conversationId);
     const outcome = await store.deleteConversation(db, owned.id);
     if (outcome === 'busy') {

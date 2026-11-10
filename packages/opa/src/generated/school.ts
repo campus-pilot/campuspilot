@@ -33,6 +33,7 @@ export const SCHOOL_ACTIONS = {
   LIST_SECTIONS: 'school.section.list',
   LIST_SESSIONS: 'school.session.list',
   LIST_STUDENTS: 'school.student.list',
+  MANAGE_ASSISTANT_ACCESS: 'school.assistant.access.manage',
   MANAGE_DOCUMENT_TEMPLATES: 'school.document.templates.manage',
   MANAGE_FINANCE_DOCUMENT_TEMPLATES: 'school.finance.document.templates.manage',
   POST_BILLING_RUN: 'school.billing.run.post',
@@ -43,6 +44,8 @@ export const SCHOOL_ACTIONS = {
   READ_ADMISSION_FINANCE: 'school.admission.finance.read',
   READ_ADMISSION_LEDGER: 'school.admission.ledger.read',
   READ_ADMISSION_SETTINGS: 'school.admission.settings.read',
+  READ_ASSISTANT_ACCESS: 'school.assistant.access.read',
+  READ_ASSISTANT_USAGE: 'school.assistant.usage.read',
   READ_BILLING_REPORTS: 'school.billing.report.read',
   READ_BILLING_RUNS: 'school.billing.run.read',
   READ_CLASS: 'school.class.read',
@@ -96,7 +99,6 @@ export const SCHOOL_ACTIONS = {
   UPDATE_SESSION: 'school.session.update',
   UPDATE_SESSION_FINANCE: 'school.session.finance.update',
   UPDATE_STUDENT: 'school.student.update',
-  USE_ASSISTANT: 'school.assistant.use',
   WRITE_EXAM_RESULTS: 'school.exam.result.write',
 } as const;
 

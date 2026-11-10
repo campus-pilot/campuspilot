@@ -1,8 +1,10 @@
+import { resolveAssistantAccess } from '@campuspilot/api/assistant/access';
 import { env } from '@campuspilot/env/assistant';
 
 import { assistantControlService } from './control';
+import { db } from './db';
 import { log } from './log';
-import { createAssistantConversationObject } from './runtime/conversation';
+import { createAssistantConversationObject, type RunAccessCheck } from './runtime/conversation';
 import { configuredProviderSettings } from './runtime/providers/config';
 import { providerRegistry } from './runtime/providers/registry';
 
@@ -34,5 +36,9 @@ export function createAssistantWorkerServices() {
     // Every user of this deployment sees token counts, cost and raw errors.
     log.warn('assistant.diagnostics.on-in-production');
   }
-  return [assistantControlService, createAssistantConversationObject({ providers, log })] as const;
+  const checkAccess: RunAccessCheck = async (input) => {
+    const decision = await resolveAssistantAccess(db, input);
+    return decision.refusal ? { allowed: false, ...decision.refusal } : { allowed: true };
+  };
+  return [assistantControlService, createAssistantConversationObject({ providers, log, checkAccess })] as const;
 }

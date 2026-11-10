@@ -43,4 +43,8 @@ export function demoCredentialsS3Key(schoolId: string): string {
 export const DEMO_SCHOOL_FEATURE_DEFAULTS: Record<SchoolFeatureKey, boolean> = {
   cadet: true,
   notices: true,
+  // Off: every assistant request is paid model usage, so a platform admin
+  // enables it for a demo deliberately (with its limit and roles) on the
+  // school's AI page.
+  assistant: false,
 };

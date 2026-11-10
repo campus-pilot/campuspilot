@@ -119,3 +119,5 @@ grants contains {"role": role, "action": action} if {
   some role in {"platform.admin"}
   some action in {"school.exam.read", "school.exam.plan.read", "school.exam.result.read", "school.exam.timetable.read"}
 }
+
+grants contains {"role": "platform.admin", "action": "system.assistant.usage.read"} if { true }

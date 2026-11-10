@@ -24,6 +24,7 @@
     "@campuspilot/env": "workspace:*",
     "@campuspilot/logger": "workspace:*",
     "@campuspilot/opa": "workspace:*",
+    "@campuspilot/redis": "workspace:*",
     "@campuspilot/restate": "workspace:*",
     "@campuspilot/s3": "workspace:*",
     "@orpc/client": "catalog:",

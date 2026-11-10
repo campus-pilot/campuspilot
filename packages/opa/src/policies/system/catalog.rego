@@ -125,3 +125,12 @@ actions contains {
   "key": "UPDATE_SCHOOL_FEATURE_FLAGS",
   "resourceKind": "system",
 } if { true }
+
+# What the in-app assistant costs, per school and for the platform (saved
+# model-request costs in USD, tokens and the prices used). Its settings for a
+# school are the `assistant` feature flag (system.school.feature_flags.*).
+actions contains {
+  "id": "system.assistant.usage.read",
+  "key": "READ_PLATFORM_ASSISTANT_USAGE",
+  "resourceKind": "system",
+} if { true }

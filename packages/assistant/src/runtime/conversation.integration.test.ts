@@ -21,7 +21,13 @@ import {
   toolResultsTranscriptKey,
   userTranscriptKey,
 } from '../transcript';
-import { createRunProcessor, MAX_MODEL_STEPS, MODEL_STEP_RETRY, RECOVERED_OUTPUT_CUT_NOTE } from './conversation';
+import {
+  createRunProcessor,
+  MAX_MODEL_STEPS,
+  MODEL_STEP_RETRY,
+  RECOVERED_OUTPUT_CUT_NOTE,
+  type RunAccessCheck,
+} from './conversation';
 import {
   createFakeProvider,
   FAKE_USAGE,
@@ -102,6 +108,7 @@ async function arrange({
   providerModel = 'configured-model',
   conversationModel = 'conversation-start-model',
   configured = true,
+  checkAccess = async () => ({ allowed: true as const }),
 }: {
   script?: FakeModelStep[];
   whenExhausted?: FakeModelStep;
@@ -109,12 +116,14 @@ async function arrange({
   conversationModel?: string;
   /** False when the conversation's provider is no longer configured. */
   configured?: boolean;
+  /** The worker's access check before each model request (allows by default). */
+  checkAccess?: RunAccessCheck;
 } = {}) {
   const provider = createFakeProvider({ model: providerModel, script, whenExhausted });
   const turn = await seedTurn({ text: QUESTION, provider: provider.id, conversationModel });
   const events = await watchEvents(turn.conversationId);
   onTestFinished(() => events.close());
-  const processRun = createRunProcessor({ providers: fakeProviderRegistry(configured ? provider : null), log });
+  const processRun = createRunProcessor({ providers: fakeProviderRegistry(configured ? provider : null), log, checkAccess });
   /** Invokes the handler, as Restate does; pass a context with a journal to replay. */
   const invoke = (ctx: FakeRunContext = createFakeRunContext()) => ({ ctx, done: processRun(ctx, turn.input) });
   return { provider, turn, events, invoke };
@@ -989,5 +998,49 @@ describe('an expired delegated token', () => {
       ],
     });
     expect(toolCalls.map((call) => call.status)).toEqual(['failed']);
+  });
+});
+
+describe('the access check before each model request', () => {
+  it('stops a tool loop at the school’s limit with its own code, keeping what already ran', async () => {
+    let checks = 0;
+    const checkAccess: RunAccessCheck = async () => {
+      checks += 1;
+      return checks === 1
+        ? { allowed: true }
+        : { allowed: false, code: 'limit_reached', message: 'This school has reached its AI assistant limit for this month.' };
+    };
+    const { provider, turn, invoke } = await arrange({
+      script: [fakeReply({ toolUses: [readCall] })],
+      checkAccess,
+    });
+    callToolMock.mockResolvedValue(toolSuccess('[{"id":"stu_1"}]'));
+
+    await invoke().done;
+
+    // Only the first request was made; the read it asked for ran.
+    expect(provider.calls).toHaveLength(1);
+    expect(callToolMock).toHaveBeenCalledTimes(1);
+    const { run, toolCalls } = await readTurn(turn);
+    expect(run).toMatchObject({
+      status: 'failed',
+      errorCode: 'limit_reached',
+      errorMessage: 'This school has reached its AI assistant limit for this month.',
+      modelRequestCount: 1,
+    });
+    expect(toolCalls.map((call) => call.status)).toEqual(['succeeded']);
+  });
+
+  it('fails the run before any model request when the user may no longer use the assistant', async () => {
+    const { provider, turn, invoke } = await arrange({
+      script: [fakeReply({ text: 'never sent' })],
+      checkAccess: async () => ({ allowed: false, code: 'feature_disabled', message: 'The AI assistant is not enabled for this school.' }),
+    });
+
+    await invoke().done;
+
+    expect(provider.calls).toHaveLength(0);
+    const { run } = await readTurn(turn);
+    expect(run).toMatchObject({ status: 'failed', errorCode: 'feature_disabled', modelRequestCount: 0 });
   });
 });

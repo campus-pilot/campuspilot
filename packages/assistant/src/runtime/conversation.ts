@@ -79,9 +79,22 @@ export const OUTCOME_UNKNOWN_ERROR = {
     'The connection was lost while this change was being made, so it may or may not have been applied. Check the current data before trying it again.',
 };
 
+/**
+ * Whether the run's user may still use the assistant in its school, asked
+ * before every model request: the API's `resolveAssistantAccess` (feature,
+ * role, the school's monthly limit), injected by `apps/worker` so the turn
+ * loop itself imports no API code. A refusal ends the run with its code and
+ * message; writes that were already approved and made stay made.
+ */
+export type RunAccessCheck = (input: {
+  schoolId: string;
+  userId: string;
+}) => Promise<{ allowed: true } | { allowed: false; code: string; message: string }>;
+
 export type AssistantConversationDeps = {
   providers: ProviderRegistry;
   log: Logger;
+  checkAccess: RunAccessCheck;
 };
 
 type RunFailure = { code: string; message: string; detail?: string };
@@ -362,6 +375,12 @@ export function createRunProcessor(deps: AssistantConversationDeps) {
     if (saved) {
       return { kind: 'response', toolUses: provider.toolUsesOf(saved.content), paused: false };
     }
+
+    // Every request is paid: the feature, the user's role and the school's
+    // limit are checked again before each one, so a long tool loop stops
+    // once the school reaches its limit (within the spend cache's age).
+    const access = await deps.checkAccess({ schoolId: run.schoolId, userId: run.userId });
+    if (!access.allowed) throw runFailure(access.code, access.message);
 
     const catalog = await loadToolCatalog(await requireToken(run.runId));
     const transcript = await store.loadTranscript(db, run.conversationId);

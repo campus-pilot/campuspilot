@@ -26,6 +26,7 @@ import { Label } from '@campuspilot/ui/components/label';
 import { Switch } from '@campuspilot/ui/components/switch';
 import { toast } from '@campuspilot/ui/lib/toast';
 import { LoaderCircle } from 'lucide-react';
+import Link from 'next/link';
 import { client, orpc } from '@/lib/orpc';
 
 /** The features whose catalogue config is not `z.null()`, i.e. that have settings to edit. */
@@ -34,25 +35,35 @@ type FeaturesWithSettings = {
 }[SchoolFeatureKey];
 
 /**
- * Compile-time guard. No feature has settings today, so each card is only an
- * on/off switch and the stored config is sent back unchanged. As soon as a
- * catalogue entry declares a config schema this line stops compiling: add
- * that feature's config control to its card (a TanStack Form field validated
- * with the catalogue schema; see docs/feature-flags.md) and then update or
- * remove this guard.
+ * Where each feature with settings is edited. Its settings and its on/off
+ * switch belong together on that page (switching it on needs settings), so
+ * this editor shows such a feature's state and links there instead of
+ * offering a switch. Compile-time guard: the record is exhaustive over the
+ * features with settings, so a catalogue entry that gains a config schema
+ * does not compile until it names its settings page (or this editor grows a
+ * config control for it; see docs/feature-flags.md).
  */
-const EVERY_FEATURE_IS_SWITCH_ONLY: [FeaturesWithSettings] extends [never] ? true : never = true;
-void EVERY_FEATURE_IS_SWITCH_ONLY;
+const SETTINGS_PAGES: Record<FeaturesWithSettings, { label: string; href: (schoolId: string) => string }> = {
+  assistant: { label: 'Open AI settings', href: (schoolId) => `/school/${schoolId}/usage/ai` },
+};
+
+/** The settings page of a feature edited on its own page, or null for a switch-only feature. */
+function settingsPageOf(feature: SchoolFeatureKey) {
+  return feature in SETTINGS_PAGES ? SETTINGS_PAGES[feature as FeaturesWithSettings] : null;
+}
 
 /**
- * What switching a feature off does, shown before the change is saved.
- * Exhaustive, so every new feature states its consequence.
+ * What switching a feature off does, shown before the change is saved (here,
+ * or on the feature's own settings page). Exhaustive, so every new feature
+ * states its consequence.
  */
-const DISABLE_WARNINGS: Record<SchoolFeatureKey, string> = {
+export const DISABLE_WARNINGS: Record<SchoolFeatureKey, string> = {
   cadet:
     'Students of this school can no longer sign in or use the Cadet Portal, including connected AI apps. Staff can no longer issue portal passwords, release exam results to the portal, or save or publish a notice addressed to students. Logins, released results and notices are kept.',
   notices:
     'Staff of this school can no longer open, write or publish notices, or edit the Notice template. Students no longer see notices in the Cadet Portal, and notice notifications that have not gone out yet are not sent. Existing notices are kept.',
+  assistant:
+    'Staff of this school no longer see the AI assistant or their assistant conversations, and a turn in progress stops before its next model request. Conversations, usage and costs are kept and come back when the assistant is enabled again.',
 };
 
 const featureFormSchema = z.object({ enabled: z.boolean() });
@@ -72,9 +83,9 @@ function FeatureStatusBadge({ enabled }: { enabled: boolean }) {
 }
 
 /**
- * Saves one feature. The form holds `enabled`; the stored config is sent
- * back unchanged, because enabling or disabling never clears it (and no
- * feature has editable settings yet, see the guard above).
+ * Saves one switch-only feature. The form holds `enabled`; the stored config
+ * is sent back unchanged, because enabling or disabling never clears it.
+ * Features with settings are edited on their own page (`SETTINGS_PAGES`).
  *
  * `entry` is the feature's key and its own stored state as one discriminated
  * value (`SchoolFeatureEntry`), so the update is built by spreading it and no
@@ -219,8 +230,20 @@ function InvalidConfigWarning() {
   );
 }
 
+/** A feature edited on its own settings page: its state and a link there. */
+function FeatureSettingsLink({ schoolId, settings }: { schoolId: string; settings: { label: string; href: (schoolId: string) => string } }) {
+  return (
+    <div className="flex justify-end">
+      <Button asChild variant="outline">
+        <Link href={settings.href(schoolId)}>{settings.label}</Link>
+      </Button>
+    </div>
+  );
+}
+
 function FeatureFlagCard({ schoolId, entry, configInvalid }: FeatureFlagFormProps & { configInvalid: boolean }) {
   const { label, description } = schoolFeatureCatalogue[entry.feature];
+  const settings = settingsPageOf(entry.feature);
   return (
     <Card>
       <CardHeader>
@@ -232,8 +255,12 @@ function FeatureFlagCard({ schoolId, entry, configInvalid }: FeatureFlagFormProp
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
         {configInvalid ? <InvalidConfigWarning /> : null}
-        {/* Keyed by the saved state so the form restarts from what was stored. */}
-        <FeatureFlagForm key={JSON.stringify([entry, configInvalid])} schoolId={schoolId} entry={entry} configInvalid={configInvalid} />
+        {settings ? (
+          <FeatureSettingsLink schoolId={schoolId} settings={settings} />
+        ) : (
+          // Keyed by the saved state so the form restarts from what was stored.
+          <FeatureFlagForm key={JSON.stringify([entry, configInvalid])} schoolId={schoolId} entry={entry} configInvalid={configInvalid} />
+        )}
       </CardContent>
     </Card>
   );

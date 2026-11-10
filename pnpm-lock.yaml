@@ -621,6 +621,9 @@ importers:
       '@campuspilot/opa':
         specifier: workspace:*
         version: link:../opa
+      '@campuspilot/redis':
+        specifier: workspace:*
+        version: link:../redis
       '@campuspilot/restate':
         specifier: workspace:*
         version: link:../restate

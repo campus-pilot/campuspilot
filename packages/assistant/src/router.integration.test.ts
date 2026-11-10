@@ -12,7 +12,7 @@ import { call, ORPCError } from '@orpc/server';
 import { eq } from 'drizzle-orm';
 import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 
-import { canUseAssistant } from './access';
+import { loadAssistantAccess, type AssistantAccessDecision } from './access';
 import { db } from './db';
 import { configureDispatcher } from './dispatch';
 import { generateId } from './ids';
@@ -26,8 +26,8 @@ import { userMessageItemKey } from './transcript';
  * The history list, stopping and deleting a conversation, through the
  * assistant's own router against the real store and Postgres. Only the API's
  * in-process answers are replaced: who the session cookie belongs to
- * (`resolveAssistantSession`) and whether that user may use the assistant in
- * the school (`canUseAssistant`).
+ * (`resolveAssistantSession`) and the API's access decision for that user
+ * (`loadAssistantAccess`, itself tested in packages/api).
  */
 vi.mock('./session', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./session')>()),
@@ -35,11 +35,35 @@ vi.mock('./session', async (importOriginal) => ({
 }));
 vi.mock('./access', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./access')>()),
-  canUseAssistant: vi.fn(),
+  loadAssistantAccess: vi.fn(),
 }));
 
 const resolveSessionMock = vi.mocked(resolveAssistantSession);
-const canUseAssistantMock = vi.mocked(canUseAssistant);
+const loadAccessMock = vi.mocked(loadAssistantAccess);
+
+/** The access decision of a user who may use the assistant. */
+const ALLOWED: AssistantAccessDecision = {
+  featureEnabled: true,
+  member: true,
+  allowedRoles: ['principal'],
+  monthlyLimitUsd: null,
+  limitReached: false,
+  allowed: true,
+  refusal: null,
+};
+
+/** A decision refused for one reason, with the facts that reason implies. */
+function refusedAccess(code: NonNullable<AssistantAccessDecision['refusal']>['code']): AssistantAccessDecision {
+  return {
+    ...ALLOWED,
+    featureEnabled: code !== 'feature_disabled',
+    member: code !== 'feature_disabled' && code !== 'not_member',
+    allowedRoles: code === 'limit_reached' ? ['principal'] : [],
+    limitReached: code === 'limit_reached',
+    allowed: false,
+    refusal: { code, message: `Refused: ${code}.` },
+  };
+}
 
 /** The session cookie of a user, as the fake session lookup reads it back. */
 const cookieOf = (userId: string) => `session=${userId}`;
@@ -57,7 +81,7 @@ beforeEach(() => {
     const userId = headers.get('cookie')?.replace('session=', '');
     return userId ? sessionOf(userId) : null;
   });
-  canUseAssistantMock.mockReset().mockResolvedValue(true);
+  loadAccessMock.mockReset().mockResolvedValue(ALLOWED);
 });
 
 /** Calls a procedure as a signed-in user (or as nobody, without a cookie). */
@@ -356,12 +380,18 @@ describe('deleting a conversation', () => {
     expect(await rowsOf(turn.conversationId)).toMatchObject({ conversations: 1, runs: 1 });
   });
 
-  it('is refused for a user who may not use the assistant in the school', async () => {
+  it('is refused for a user who is no longer a member of the school', async () => {
     const turn = await finishedConversationWithEverything();
-    canUseAssistantMock.mockResolvedValue(false);
+    loadAccessMock.mockResolvedValue(refusedAccess('not_member'));
     await expect(remove(turn, turn.userId)).rejects.toMatchObject({ code: 'FORBIDDEN' });
-    expect(canUseAssistantMock).toHaveBeenCalledWith(expect.objectContaining({ user: expect.objectContaining({ id: turn.userId }) }), turn.schoolId);
+    expect(loadAccessMock).toHaveBeenCalledWith(expect.objectContaining({ user: expect.objectContaining({ id: turn.userId }) }), turn.schoolId);
     expect(await rowsOf(turn.conversationId)).toMatchObject({ conversations: 1 });
+  });
+
+  it('is allowed for a user whose role was switched off: their history stays theirs', async () => {
+    const turn = await finishedConversationWithEverything();
+    loadAccessMock.mockResolvedValue(refusedAccess('role_not_enabled'));
+    await expect(remove(turn, turn.userId)).resolves.toEqual({ id: turn.conversationId });
   });
 
   it('is refused without a session', async () => {
@@ -374,5 +404,66 @@ describe('deleting a conversation', () => {
     const turn = await finishedConversationWithEverything();
     await remove(turn, turn.userId);
     await expect(remove(turn, turn.userId)).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
+});
+
+describe('access', () => {
+  const send = (turn: Pick<SeededTurn, 'schoolId' | 'userId'>) =>
+    call(
+      assistantRouter.sendMessage,
+      { schoolId: turn.schoolId, clientRequestId: randomUUID(), text: 'How many students?', surface: 'panel' },
+      as(turn.userId),
+    );
+
+  it('makes everything disappear while the school does not have the feature', async () => {
+    const turn = await seedTurn();
+    loadAccessMock.mockResolvedValue(refusedAccess('feature_disabled'));
+    for (const attempt of [
+      list(turn),
+      call(assistantRouter.getStatus, { schoolId: turn.schoolId }, as(turn.userId)),
+      call(assistantRouter.getConversation, { schoolId: turn.schoolId, conversationId: turn.conversationId }, as(turn.userId)),
+      send(turn),
+    ]) {
+      const error = await attempt.catch((caught: unknown) => caught);
+      expect(error).toMatchObject({ code: 'FORBIDDEN', data: { reason: 'SCHOOL_FEATURE_DISABLED', feature: 'assistant' } });
+    }
+    // Nothing was deleted: the conversations come back with the feature.
+    expect(await rowsOf(turn.conversationId)).toMatchObject({ conversations: 1, runs: 1 });
+  });
+
+  it('keeps history readable but refuses a new message when the user’s role is not switched on', async () => {
+    const turn = await seedTurn();
+    loadAccessMock.mockResolvedValue(refusedAccess('role_not_enabled'));
+    await expect(list(turn)).resolves.toMatchObject({ pagination: { totalItems: 1 } });
+    await expect(call(assistantRouter.getStatus, { schoolId: turn.schoolId }, as(turn.userId))).resolves.toEqual({
+      configured: true,
+      allowed: false,
+      available: false,
+      unavailableReason: 'Refused: role_not_enabled.',
+    });
+    await expect(send(turn)).rejects.toMatchObject({ code: 'FORBIDDEN', data: { reason: 'role_not_enabled' } });
+    expect(await rowsOf(turn.conversationId)).toMatchObject({ runs: 1 });
+  });
+
+  it('keeps the assistant visible but refuses a new message once the school reached its monthly limit', async () => {
+    const turn = await seedTurn();
+    loadAccessMock.mockResolvedValue(refusedAccess('limit_reached'));
+    await expect(call(assistantRouter.getStatus, { schoolId: turn.schoolId }, as(turn.userId))).resolves.toEqual({
+      configured: true,
+      allowed: true,
+      available: false,
+      unavailableReason: 'Refused: limit_reached.',
+    });
+    await expect(send(turn)).rejects.toMatchObject({ code: 'PRECONDITION_FAILED', data: { reason: 'limit_reached' } });
+  });
+
+  it('reports a user who may use it as allowed and available', async () => {
+    const turn = await seedTurn();
+    await expect(call(assistantRouter.getStatus, { schoolId: turn.schoolId }, as(turn.userId))).resolves.toEqual({
+      configured: true,
+      allowed: true,
+      available: true,
+      unavailableReason: null,
+    });
   });
 });

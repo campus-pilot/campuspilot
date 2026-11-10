@@ -347,12 +347,30 @@ actions contains {
   "resourceKind": "school",
 } if { true }
 
-# Starting and continuing in-app assistant conversations. Granting this never
-# widens what the assistant can do: every tool call is still authorized as the
-# user, action by action.
+# In-app assistant. Who may *use* the assistant is not a grant: it is the
+# school's own role list (school_assistant_access_role, within the roles the
+# platform made eligible on the `assistant` feature flag), decided by the
+# API's resolveAssistantAccess. Using it never widens what the assistant can
+# do: every tool call is still authorized as the user, action by action.
+#
+# Reading the school's assistant role list.
 actions contains {
-  "id": "school.assistant.use",
-  "key": "USE_ASSISTANT",
+  "id": "school.assistant.access.read",
+  "key": "READ_ASSISTANT_ACCESS",
+  "resourceKind": "school",
+} if { true }
+
+# Switching the assistant on or off for a role (among the eligible roles).
+actions contains {
+  "id": "school.assistant.access.manage",
+  "key": "MANAGE_ASSISTANT_ACCESS",
+  "resourceKind": "school",
+} if { true }
+
+# Reading what the school spends on the assistant (USD, per day).
+actions contains {
+  "id": "school.assistant.usage.read",
+  "key": "READ_ASSISTANT_USAGE",
   "resourceKind": "school",
 } if { true }
 

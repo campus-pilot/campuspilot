@@ -85,6 +85,9 @@ const HIDDEN_TOOLS = [
   'systemAdmin.rotateOAuthClientSecret',
   'systemAdmin.deleteOAuthClient',
   'systemAdmin.setOAuthClientDisabled',
+  // Who may use the in-app assistant is a human setting; never offered to the assistant itself.
+  'school.getAssistantAccess',
+  'school.updateAssistantRoles',
   // The staff notification inbox is app chrome with no agent value.
   'school.listNotifications',
   'school.getUnreadNotificationCount',

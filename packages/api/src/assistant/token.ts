@@ -1,10 +1,9 @@
 import { assistantDelegationEnabled, signAssistantToken } from '@campuspilot/auth/assistant-token';
-import { SCHOOL_ACTIONS } from '@campuspilot/opa/policies/school';
 import { ORPCError } from '@orpc/server';
 
 import type { Context } from '../context';
 import { rpcError } from '../errors';
-import { checkPermissions } from '../permissions/authorization';
+import { assistantAccessError, resolveAssistantAccess } from './access';
 
 export type AssistantRunScope = { schoolId: string; conversationId: string; runId: string };
 
@@ -17,7 +16,9 @@ export type AssistantRunScope = { schoolId: string; conversationId: string; runI
  * OAuth connectors and assistant tokens never mint one, so delegation never
  * chains), the user is not being impersonated (the assistant's calls carry
  * no impersonation marker, so its changes would be recorded as the user's
- * own), and the user may use the assistant in the school now.
+ * own), and the user may use the assistant in the school now
+ * (`resolveAssistantAccess`: the feature, their role, the school's limit), so
+ * a refused user never holds a token.
  */
 export async function issueAssistantRunToken(
   context: Context,
@@ -33,9 +34,7 @@ export async function issueAssistantRunToken(
   if (context.session.session.impersonatedBy) {
     throw rpcError.forbidden('The assistant is not available while impersonating a user.');
   }
-  const [allowed] = await checkPermissions(context, [
-    { action: SCHOOL_ACTIONS.USE_ASSISTANT, resource: { kind: 'school', schoolId: scope.schoolId } },
-  ]);
-  if (!allowed) throw rpcError.forbidden('You do not have permission to use the assistant in this school.');
+  const access = await resolveAssistantAccess(context.db, { schoolId: scope.schoolId, userId: context.session.user.id });
+  if (access.refusal) throw assistantAccessError(access.refusal);
   return signAssistantToken({ userId: context.session.user.id, ...scope });
 }

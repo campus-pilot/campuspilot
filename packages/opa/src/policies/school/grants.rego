@@ -76,7 +76,6 @@ grants contains {
     "school.admission.read",
     "school.student.list",
     "school.student.read",
-    "school.assistant.use",
   }
 }
 
@@ -173,4 +172,15 @@ grants contains {"role": role, "action": action} if {
 
 grants contains {"role": role, "action": "school.notice.publish"} if {
   some role in {"school.principal", "school.manager"}
+}
+
+# In-app assistant: the principal and the manager see and manage which roles
+# may use it, and see what it costs the school.
+grants contains {"role": role, "action": action} if {
+  some role in {"school.principal", "school.manager"}
+  some action in {
+    "school.assistant.access.read",
+    "school.assistant.access.manage",
+    "school.assistant.usage.read",
+  }
 }

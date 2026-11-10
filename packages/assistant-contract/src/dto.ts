@@ -239,6 +239,14 @@ export const assistantStatusInputSchema = z.object(schoolScopeShape);
 export const assistantStatusOutputSchema = z.object({
   /** Whether the platform has an assistant model configured at all. */
   configured: z.boolean(),
+  /**
+   * Whether the user's role may use the assistant in this school (the school
+   * has the feature and switched one of the user's eligible roles on). The
+   * app shows the assistant's entry points only then. Independent of the
+   * monthly limit: a school at its limit keeps the assistant visible, with
+   * the composer disabled.
+   */
+  allowed: z.boolean(),
   /** Whether this user may start a run in this school right now. */
   available: z.boolean(),
   /** Why the assistant is unavailable, when it is. */

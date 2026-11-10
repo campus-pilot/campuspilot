@@ -3,16 +3,14 @@
 import type { AssistantConversationListItemDto } from '@campuspilot/assistant-contract/dto';
 import { Button } from '@campuspilot/ui/components/button';
 import { Skeleton } from '@campuspilot/ui/components/skeleton';
-import { Spinner } from '@campuspilot/ui/components/spinner';
 import { cn } from '@campuspilot/ui/lib/utils';
-import { SquarePen, Sparkles } from 'lucide-react';
+import { SquarePen } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
-import { ModulePlaceholder } from '@/components/module-placeholder';
 import { schoolHref } from '@/components/school-route';
 
-import { AssistantAccess } from './assistant-access';
+import { FeaturePage } from '@/components/feature-unavailable';
 import { AssistantChat } from './assistant-chat';
 import { ConversationRow, DeleteConversationDialog, useDeleteConversation } from './assistant-history-row';
 import { useAssistantConversations, useAssistantOpenConversation } from './use-assistant';
@@ -183,21 +181,6 @@ function ConversationList({
   );
 }
 
-const unavailable = (
-  <ModulePlaceholder
-    icon={Sparkles}
-    title="Assistant unavailable"
-    description="The assistant is not available for your account in this school."
-  />
-);
-
-/** While the permission check loads: neutral, in the place the answer will take. */
-const checkingAccess = (
-  <section className="flex min-h-[50vh] items-center justify-center" aria-busy="true">
-    <Spinner className="text-muted-foreground" />
-  </section>
-);
-
 /**
  * Variant 2, full page. It fills the content area edge to edge (cancelling the
  * shell's page padding) so the conversation reads as the page, not a card.
@@ -208,7 +191,10 @@ const checkingAccess = (
 export function AssistantWorkspace({ schoolId, conversationId }: { schoolId: string; conversationId: string | null }) {
   const router = useRouter();
   return (
-    <AssistantAccess schoolId={schoolId} fallback={unavailable} pending={checkingAccess}>
+    // The page exists while the school has the assistant; the history is
+    // the user's to read even when their role is switched off or the school
+    // is at its limit (the composer then says why it cannot send).
+    <FeaturePage feature="assistant">
       <div className="-m-4 flex h-[calc(100dvh-3.5rem)] min-h-0 flex-col sm:-m-6 md:h-[calc(100dvh-4.5rem)] md:flex-row lg:-m-8">
         <ConversationList
           schoolId={schoolId}
@@ -231,6 +217,6 @@ export function AssistantWorkspace({ schoolId, conversationId }: { schoolId: str
           />
         </div>
       </div>
-    </AssistantAccess>
+    </FeaturePage>
   );
 }

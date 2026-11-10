@@ -21,7 +21,7 @@ import { DEMO_SCHOOL_FEATURE_DEFAULTS } from '../workflows/demo-school/constants
 describe('school feature catalogue', () => {
   it('lists every catalogue key once, each with a label and description', () => {
     expect(SCHOOL_FEATURE_KEYS).toEqual(Object.keys(schoolFeatureCatalogue));
-    expect(SCHOOL_FEATURE_KEYS).toEqual(['cadet', 'notices']);
+    expect(SCHOOL_FEATURE_KEYS).toEqual(['cadet', 'notices', 'assistant']);
     for (const key of SCHOOL_FEATURE_KEYS) {
       expect(schoolFeatureCatalogue[key].label.length).toBeGreaterThan(0);
       expect(schoolFeatureCatalogue[key].description.length).toBeGreaterThan(0);
@@ -31,11 +31,27 @@ describe('school feature catalogue', () => {
   it('validates a config against its own feature schema only', () => {
     expect(parseSchoolFeatureConfig('cadet', null)).toBeNull();
     expect(parseSchoolFeatureConfig('notices', undefined)).toBeNull();
-    // Both current features declare no settings, so any value is refused.
+    // Features without settings refuse any value.
     expect(() => parseSchoolFeatureConfig('cadet', { anything: true })).toThrow();
     expect(() => parseSchoolFeatureConfig('notices', 'on')).toThrow();
     expect(schoolFeatureHasConfig('cadet')).toBe(false);
     expect(schoolFeatureHasConfig('notices')).toBe(false);
+    expect(schoolFeatureHasConfig('assistant')).toBe(true);
+  });
+
+  it('validates the assistant settings: a positive limit or none, and at least one eligible role, each once', () => {
+    const valid = { monthlyLimitUsd: 25, eligibleRoles: ['principal', 'teacher'] };
+    expect(parseSchoolFeatureConfig('assistant', valid)).toEqual(valid);
+    expect(parseSchoolFeatureConfig('assistant', { monthlyLimitUsd: null, eligibleRoles: ['manager'] })).toEqual({
+      monthlyLimitUsd: null,
+      eligibleRoles: ['manager'],
+    });
+    expect(() => parseSchoolFeatureConfig('assistant', { monthlyLimitUsd: 0, eligibleRoles: ['principal'] })).toThrow();
+    expect(() => parseSchoolFeatureConfig('assistant', { monthlyLimitUsd: -5, eligibleRoles: ['principal'] })).toThrow();
+    expect(() => parseSchoolFeatureConfig('assistant', { monthlyLimitUsd: 10, eligibleRoles: [] })).toThrow();
+    expect(() => parseSchoolFeatureConfig('assistant', { monthlyLimitUsd: 10, eligibleRoles: ['janitor'] })).toThrow();
+    expect(() => parseSchoolFeatureConfig('assistant', { monthlyLimitUsd: 10, eligibleRoles: ['teacher', 'teacher'] })).toThrow();
+    expect(() => parseSchoolFeatureConfig('assistant', { eligibleRoles: ['teacher'] })).toThrow();
   });
 
   it('describes all features in the flags schema and rejects a missing one', () => {
@@ -56,8 +72,9 @@ describe('school feature catalogue', () => {
     expect(schoolFeatureUpdateSchema.safeParse({ feature: 'notices', enabled: true }).success).toBe(false);
   });
 
-  it('decides every feature explicitly for demo schools', () => {
+  it('decides every feature explicitly for demo schools, with the assistant off', () => {
     expect(Object.keys(DEMO_SCHOOL_FEATURE_DEFAULTS).sort()).toEqual([...SCHOOL_FEATURE_KEYS].sort());
+    expect(DEMO_SCHOOL_FEATURE_DEFAULTS.assistant).toBe(false);
   });
 });
 
@@ -91,10 +108,16 @@ describe('keyed feature entries', () => {
   });
 
   it('lists a school\'s flags as entries in catalogue order', () => {
-    const entries: SchoolFeatureEntry[] = schoolFeatureEntries({ cadet: { enabled: true, config: null }, notices: DISABLED_SCHOOL_FEATURE });
+    const assistant = { enabled: true, config: { monthlyLimitUsd: null, eligibleRoles: ['principal' as const] } };
+    const entries: SchoolFeatureEntry[] = schoolFeatureEntries({
+      cadet: { enabled: true, config: null },
+      notices: DISABLED_SCHOOL_FEATURE,
+      assistant,
+    });
     expect(entries).toEqual([
       { feature: 'cadet', enabled: true, config: null },
       { feature: 'notices', enabled: false, config: null },
+      { feature: 'assistant', ...assistant },
     ]);
     // Each entry is a valid update as it stands.
     for (const entry of entries) expect(schoolFeatureUpdateSchema.parse(entry)).toEqual(entry);
