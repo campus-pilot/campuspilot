@@ -2,13 +2,14 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { LogOutIcon } from 'lucide-react';
+import Link from 'next/link';
+import { CalendarDaysIcon, ChevronRightIcon, LogOutIcon } from 'lucide-react';
 import type { CadetProfileDto } from '@campuspilot/api/routers/cadet/cadet.dto';
 import { ThemeToggle } from '@campuspilot/components/theme-toggle';
 import { Avatar, AvatarFallback } from '@campuspilot/ui/components/avatar';
 import { Button } from '@campuspilot/ui/components/button';
 import { Card, CardContent } from '@campuspilot/ui/components/card';
-import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemTitle } from '@campuspilot/ui/components/item';
+import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemMedia, ItemTitle } from '@campuspilot/ui/components/item';
 
 import { authClient } from '@/lib/auth-client';
 import { initialsOf } from '@/lib/format';
@@ -92,6 +93,28 @@ export function SignOutButton() {
   );
 }
 
+/** Examination timetables the school published; the portal is on, so the screen is always available. */
+function MoreTimetablesRow() {
+  return (
+    <ItemGroup className="gap-0 rounded-lg border">
+      <Item asChild>
+        <Link href="/timetables">
+          <ItemMedia variant="icon">
+            <CalendarDaysIcon />
+          </ItemMedia>
+          <ItemContent>
+            <ItemTitle>Timetables</ItemTitle>
+            <ItemDescription>Examination schedules for every class</ItemDescription>
+          </ItemContent>
+          <ItemActions>
+            <ChevronRightIcon className="size-4 text-muted-foreground" />
+          </ItemActions>
+        </Link>
+      </Item>
+    </ItemGroup>
+  );
+}
+
 export function MoreScreen() {
   const profile = useQuery(orpc.getProfile.queryOptions());
   return (
@@ -105,6 +128,7 @@ export function MoreScreen() {
         <ProfileCard profile={profile.data} />
       )}
       <MoreNoticesRow />
+      <MoreTimetablesRow />
       <ItemGroup className="gap-0 rounded-lg border">
         <Item>
           <ItemContent>

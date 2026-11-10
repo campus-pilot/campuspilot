@@ -3,6 +3,14 @@ import { describe, expect, it } from 'vitest';
 import { presentNotification } from './notification-renderers';
 
 describe('notification renderers', () => {
+  it('words a published timetable for students and staff alike', () => {
+    for (const type of ['exam.timetable_published', 'exam.timetable_published_staff'] as const) {
+      expect(
+        presentNotification({ type, data: { sessionId: 's', examSlug: 'final', examName: 'Final Examination', admissionId: 'a', studentName: 'Asha' } }).title,
+      ).toBe('Final Examination timetable');
+    }
+  });
+
   it('words a grouped WhatsApp failure by its batch', () => {
     expect(
       presentNotification({

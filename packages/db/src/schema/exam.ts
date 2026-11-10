@@ -107,11 +107,33 @@ export const examTimetableTable = pgTable(
       .references(() => schoolSessionTable.id),
     examSlug: text('exam_slug').notNull(),
     config: jsonb('config').$type<TimetableConfig>().notNull(),
+    /**
+     * When the timetable was published to the school's staff and, where the
+     * Cadet Portal is enabled, its students; null while it is a draft. A
+     * draft is visible and editable only to staff. A published timetable is
+     * frozen: staff withdraw it back to a draft (which clears this) to change
+     * it. Stays its own fact, independent of the exam's lifecycle `status`.
+     */
+    publishedAt: timestamp('published_at', { withTimezone: true }),
+    /** The staff user who performed the current publication; null when a draft or the account was deleted. */
+    publishedBy: text('published_by').references(() => user.id, {
+      onDelete: 'set null',
+    }),
+    /**
+     * How many times this timetable has been published (a withdrawal does not
+     * reduce it). It names each publication, so a re-publication after a
+     * withdrawal notifies again under a fresh notification key.
+     */
+    publicationCount: integer('publication_count').notNull().default(0),
     createdAt: timestamp('created_at').defaultNow(),
     updatedAt: timestamp('updated_at').defaultNow(),
   },
   (table) => [
     unique('exam_timetable_unique').on(table.sessionId, table.examSlug),
+    check(
+      'exam_timetable_publication_count_check',
+      sql`${table.publicationCount} >= 0 and (${table.publishedAt} is null or ${table.publicationCount} >= 1)`,
+    ),
   ],
 );
 

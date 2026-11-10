@@ -129,7 +129,15 @@ function mapUnsanitized(type: NotificationType, data: never, context: WhatsAppMa
         params: { student_name: facts.studentName, school_name: context.schoolName, update_text: 'a new school notice has been published', reference: facts.noticeTitle },
       };
     }
+    case 'exam.timetable_published': {
+      const facts = data as NotificationPayloads['exam.timetable_published'];
+      return {
+        template: 'school_update',
+        params: { student_name: facts.studentName, school_name: context.schoolName, update_text: `the timetable of ${facts.examName} has been published`, reference: facts.examName },
+      };
+    }
     case 'notice.published_staff':
+    case 'exam.timetable_published_staff':
     case 'exam.results_publish_finished':
     case 'notification.whatsapp_failed':
     case 'notification.whatsapp_batch_failed':

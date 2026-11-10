@@ -132,6 +132,12 @@ contract, the publish transaction and per-channel fan-out (including why a
 delivery log is still filling right after publication), the cached PDF, the
 Cadet visibility rule, and the checklist for extending notices.
 
+## Examination timetables
+
+Before changing exam timetable drafting, publishing or withdrawal, the
+`exam.timetable_published*` notifications, or the Cadet Portal timetable
+screens, read [Examination timetable publishing](docs/exam-timetable-publishing.md).
+
 ## School feature flags
 
 Before adding a per-school feature, gating a procedure, page or navigation item

@@ -372,3 +372,47 @@ export const cadetNoticeDocumentSchema = z.object({ noticeId: z.string(), pageSi
 export type CadetNoticeDocumentDto = z.infer<typeof cadetNoticeDocumentSchema>;
 
 export const cadetNoticeDownloadSchema = z.object({ url: z.url(), expiresIn: z.number().int() });
+
+// ---------------------------------------------------------------------------
+// Examination timetables
+
+/** A published examination timetable of a session the student is enrolled in (list row). */
+export const cadetTimetableListItemSchema = z.object({
+  sessionId: z.string(),
+  examSlug: z.string(),
+  examName: z.string(),
+  publishedAt: z.date(),
+});
+
+export const listCadetTimetablesInputSchema = createListInputSchema({});
+export const listCadetTimetablesOutputSchema = createPaginatedOutputSchema(cadetTimetableListItemSchema);
+
+export const getCadetTimetableInputSchema = z.object({
+  sessionId: z.string().trim().min(1).max(100).describe('sessionId from listTimetables.'),
+  examSlug: z.string().trim().min(1).max(100).describe('examSlug from listTimetables.'),
+});
+
+/**
+ * A published timetable in full. It is examination-wide: every student sees
+ * every class's column, in the order staff arranged them. Dates are
+ * `YYYY-MM-DD` and times local `HH:mm`, as scheduled.
+ */
+export const cadetTimetableSchema = cadetTimetableListItemSchema.extend({
+  columns: z.array(z.object({ classId: z.string(), label: z.string() })),
+  rows: z.array(
+    z.object({
+      id: z.string(),
+      date: z.string(),
+      startTime: z.string(),
+      endTime: z.string(),
+      /** In `columns` order; a class with no paper in this slot has no subjects. */
+      entries: z.array(
+        z.object({
+          classId: z.string(),
+          subjects: z.array(z.object({ subjectName: z.string(), modeName: z.string() })),
+        }),
+      ),
+    }),
+  ),
+});
+export type CadetTimetableDto = z.infer<typeof cadetTimetableSchema>;

@@ -17,6 +17,8 @@ const facts = {
   'billing.run_posted': { billRunId: 'r', sessionId: 's', periodKey: '2026-10', billCount: 1 },
   'notice.published': { noticeId: 'n', sessionId: 's', noticeTitle: 'Sports Day', admissionId: 'a', studentName: 'Asha' },
   'notice.published_staff': { noticeId: 'n', sessionId: 's', noticeTitle: 'Sports Day' },
+  'exam.timetable_published': { sessionId: 's', examSlug: 'half-yearly', examName: 'Half-Yearly Examination 2026', admissionId: 'a', studentName: 'Asha' },
+  'exam.timetable_published_staff': { sessionId: 's', examSlug: 'half-yearly', examName: 'Half-Yearly Examination 2026' },
 } as const;
 
 const noPdf = { schoolName: 'Maple Grove', canAttach: () => false };

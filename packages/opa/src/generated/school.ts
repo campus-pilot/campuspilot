@@ -37,6 +37,7 @@ export const SCHOOL_ACTIONS = {
   MANAGE_FINANCE_DOCUMENT_TEMPLATES: 'school.finance.document.templates.manage',
   POST_BILLING_RUN: 'school.billing.run.post',
   PREVIEW_BILLING_RUN: 'school.billing.run.preview',
+  PUBLISH_EXAM_TIMETABLE: 'school.exam.timetable.publish',
   PUBLISH_NOTICE: 'school.notice.publish',
   READ_ADMISSION: 'school.admission.read',
   READ_ADMISSION_FINANCE: 'school.admission.finance.read',

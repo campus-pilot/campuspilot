@@ -54,6 +54,8 @@ export const FAILURE_TOPIC: Record<AdmissionNotificationType, FailureTopic> = {
   'payment.received': 'finance',
   'exam.results_published': 'results',
   'notice.published': 'notices',
+  // Examination notifications share the results topic (same recipients as an exam's results).
+  'exam.timetable_published': 'results',
 };
 
 const TOPIC_ACTION = {

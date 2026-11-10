@@ -35,6 +35,14 @@ describe('web push rendering', () => {
     expect(
       renderWebPushMessage('ntf_4', 'notice.published', { noticeId: 'ntc_1', sessionId: 'sess_1', noticeTitle: 'Sports Day', admissionId: 'adm_1', studentName: 'Meera Singh' }),
     ).toEqual({ title: 'New notice for Meera Singh', body: 'Sports Day', url: '/notifications/open?type=notice.published&noticeId=ntc_1', tag: 'ntf_4' });
+    expect(
+      renderWebPushMessage('ntf_6', 'exam.timetable_published', { sessionId: 'sess_1', examSlug: 'half-yearly', examName: 'Half-Yearly', admissionId: 'adm_1', studentName: 'Meera Singh' }),
+    ).toEqual({
+      title: 'Half-Yearly timetable for Meera Singh',
+      body: 'The timetable is now available in the Cadet Portal.',
+      url: '/notifications/open?type=exam.timetable_published&sessionId=sess_1&examSlug=half-yearly',
+      tag: 'ntf_6',
+    });
     expect(renderWebPushMessage('ntf_5', 'notice.published_staff', { noticeId: 'ntc_1', sessionId: 'sess_1', noticeTitle: 'Sports Day' })).toBeNull();
     expect(renderWebPushMessage('ntf_2', 'billing.run_posted', { billRunId: 'x', sessionId: 's', periodKey: 'p', billCount: 1 })).toBeNull();
   });

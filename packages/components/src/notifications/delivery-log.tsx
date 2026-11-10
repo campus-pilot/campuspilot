@@ -50,6 +50,7 @@ const ADMISSION_TYPE_LABELS: Record<AdmissionNotificationType, string> = {
   'payment.received': 'Payment receipt',
   'exam.results_published': 'Results',
   'notice.published': 'Notice',
+  'exam.timetable_published': 'Timetable',
 };
 /** Looked up by the row's stored type, which may be one this release retired. */
 const TYPE_LABELS: Record<string, string> = ADMISSION_TYPE_LABELS;

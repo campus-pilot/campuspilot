@@ -367,6 +367,13 @@ export async function seedExamSetup(ctx: SeedContext, sessionId: string, exam: D
       },
     });
   }
+  // Upcoming exams keep their timetable as a draft so the demo shows both
+  // states; the others are published once, while the exam is still open
+  // (completion freezes publication, and a replay never publishes again).
+  const timetable = await ctx.rpc.school.getExamTimetable(scope);
+  if (timetable && exam.state !== 'ready' && overview.status !== 'completed' && timetable.publicationCount === 0) {
+    await ctx.rpc.school.publishExamTimetable(scope);
+  }
   if (exam.state !== 'ready' && overview.status === 'ready') {
     await ctx.rpc.school.transitionExam({ ...scope, status: 'active' });
     overview = await ctx.rpc.school.getExamOverview(scope);

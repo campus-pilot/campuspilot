@@ -39,3 +39,11 @@ export const examResultHref = (ids: { studentId: string; classId: string; examSl
  */
 export const NOTICES_HREF = '/notices';
 export const noticeHref = (noticeId: string) => `/notices/${encodeURIComponent(noticeId)}`;
+
+/**
+ * One examination's published timetable (`/timetables/{sessionId}/{examSlug}`).
+ * It shows every class's schedule; the server resolves it only for a student
+ * enrolled in that session and answers NOT_FOUND while it is a draft.
+ */
+export const timetableHref = (ids: { sessionId: string; examSlug: string }) =>
+  `/timetables/${encodeURIComponent(ids.sessionId)}/${encodeURIComponent(ids.examSlug)}`;
