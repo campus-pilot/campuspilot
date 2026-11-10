@@ -13,6 +13,8 @@ export type AssistantRecord = {
   /** A status badge, already styled by the caller's vocabulary. */
   badge?: ReactNode;
   href?: string;
+  /** A control at the end of the row, such as a download button. Not combined with `href`. */
+  action?: ReactNode;
 };
 
 /**
@@ -37,7 +39,7 @@ export function AssistantRecordList({
   return (
     <AssistantViewFrame title={title}>
       <ul className="flex flex-col overflow-hidden rounded-xl assistant-well">
-        {records.map((record) => {
+        {records.map((record, index) => {
           const content = (
             <>
               <span className="flex shrink-0">{record.leading}</span>
@@ -46,6 +48,7 @@ export function AssistantRecordList({
                 {record.subtitle ? <span className="truncate text-xs/4 text-muted-foreground">{record.subtitle}</span> : null}
               </span>
               {record.badge}
+              {record.action}
               {record.href ? (
                 <ChevronRight
                   className="size-3.5 shrink-0 text-assistant-dim transition-colors group-hover/record:text-foreground"
@@ -56,7 +59,7 @@ export function AssistantRecordList({
           );
           const rowClass = 'group/record flex min-h-12 items-center gap-3 px-3 py-2';
           return (
-            <li key={record.id} className="border-b border-assistant-hairline last:border-b-0">
+            <li key={`${index}:${record.id}`} className="border-b border-assistant-hairline last:border-b-0">
               {record.href
                 ? renderLink({
                     href: record.href,

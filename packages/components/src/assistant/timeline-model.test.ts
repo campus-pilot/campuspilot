@@ -2,7 +2,14 @@ import type { AssistantItemDto, AssistantRunDto } from '@campuspilot/assistant-c
 import { describe, expect, it } from 'vitest';
 
 import { splitMarkdownBlocks } from './assistant-markdown';
-import { activeRun, buildAssistantTimeline, pendingApprovals, queuedMessages, summarizeActivity } from './timeline-model';
+import {
+  activeRun,
+  assistantAnnouncement,
+  buildAssistantTimeline,
+  pendingApprovals,
+  queuedMessages,
+  summarizeActivity,
+} from './timeline-model';
 
 const at = new Date('2026-11-05T00:00:00Z');
 const base = { conversationId: 'c', runId: 'r1', sequence: 1, createdAt: at, updatedAt: at };
@@ -65,6 +72,65 @@ describe('buildAssistantTimeline', () => {
   });
 });
 
+describe('try again', () => {
+  const asked = (id: string, position: number, runId: string, text: string): AssistantItemDto => ({
+    ...base, id, position, runId, kind: 'user_message', status: 'complete', body: { text },
+  });
+  const notices = (items: AssistantItemDto[], runs: AssistantRunDto[]) =>
+    buildAssistantTimeline(items, runs).flatMap((row) => (row.kind === 'notice' ? [[row.run.id, row.retryText]] : []));
+
+  it('offers the latest failed or stopped turn its own question again', () => {
+    const items = [asked('u1', 1, 'r1', 'First'), asked('u2', 2, 'r2', 'Second')];
+    expect(notices(items, [run('r1', 'failed'), run('r2', 'failed')])).toEqual([['r1', null], ['r2', 'Second']]);
+    expect(notices(items, [run('r1', 'completed'), run('r2', 'cancelled', at)])).toEqual([['r2', 'Second']]);
+  });
+
+  it('offers nothing for a queued message the user removed before it started', () => {
+    const items = [asked('u1', 1, 'r1', 'First'), asked('u2', 2, 'r2', 'Second')];
+    expect(notices(items, [run('r1', 'completed'), run('r2', 'cancelled')])).toEqual([['r2', null]]);
+  });
+
+  it('offers nothing once the conversation has moved on', () => {
+    const items = [asked('u1', 1, 'r1', 'First'), asked('u2', 2, 'r2', 'Second')];
+    expect(notices(items, [run('r1', 'failed'), run('r2', 'completed')])).toEqual([['r1', null]]);
+  });
+
+  it('offers nothing while a turn is working, waiting for approval or queued', () => {
+    const items = [asked('u1', 1, 'r1', 'First'), asked('u2', 2, 'r2', 'Second')];
+    for (const status of ['running', 'awaiting_approval', 'queued'] as const) {
+      expect(notices(items, [run('r1', 'failed'), run('r2', status, at)])).toEqual([['r1', null]]);
+    }
+  });
+
+  it('picks the newest turn by when it was asked, not by list order', () => {
+    const older = { ...run('r1', 'failed'), createdAt: new Date(at.getTime() - 60_000) };
+    const items = [asked('u1', 1, 'r1', 'First'), asked('u2', 2, 'r2', 'Second')];
+    expect(notices(items, [run('r2', 'failed'), older])).toEqual([['r1', null], ['r2', 'Second']]);
+  });
+});
+
+describe('stopping', () => {
+  const stopRequested = (id: string, status: AssistantRunDto['status'], startedAt: Date | null = at): AssistantRunDto => ({
+    ...run(id, status, startedAt), stopRequestedAt: at,
+  });
+
+  it('marks a working turn that was asked to stop, until it has ended', () => {
+    expect(buildAssistantTimeline([user('u', 1)], [stopRequested('r1', 'running')])[1]).toMatchObject({ kind: 'work', stopRequested: true });
+    expect(buildAssistantTimeline([user('u', 1)], [run('r1', 'running', at)])[1]).toMatchObject({ kind: 'work', stopRequested: false });
+    expect(buildAssistantTimeline([user('u', 1), reply('a', 2, 'x')], [stopRequested('r1', 'cancelled')])[1]).toMatchObject({
+      kind: 'work', state: 'stopped', stopRequested: false,
+    });
+  });
+
+  it('takes a removed queued message out of the queue at once', () => {
+    const items = [user('u1', 1), user('u2', 2, 'r2'), user('u3', 3, 'r3')];
+    const runs = [run('r1', 'running', at), stopRequested('r2', 'queued', null), run('r3', 'queued')];
+    expect(queuedMessages(items, runs).map((item) => item.id)).toEqual(['u3']);
+    // It is not shown in the conversation either, until its run has ended as stopped.
+    expect(buildAssistantTimeline(items, runs).map((row) => row.id)).toEqual(['u1', 'work:r1', 'live:r1']);
+  });
+});
+
 describe('live row', () => {
   const streaming = (id: string, position: number): AssistantItemDto => ({
     ...base, id, position, kind: 'assistant_message', status: 'streaming', body: { text: '' },
@@ -120,5 +186,31 @@ describe('helpers', () => {
   it('splits markdown at blank lines outside code fences', () => {
     expect(splitMarkdownBlocks('a\n\nb')).toEqual(['a', 'b']);
     expect(splitMarkdownBlocks('```\nx\n\ny\n```\n\nz')).toEqual(['```\nx\n\ny\n```', 'z']);
+  });
+});
+
+describe('assistantAnnouncement', () => {
+  const answer = (sequence: number): AssistantItemDto => ({ ...reply('answer', 3, 'All 18 are registered.'), sequence });
+
+  it('says nothing while a turn works, then reads the finished answer', () => {
+    const items = [user('u', 1), answer(5)];
+    expect(assistantAnnouncement(items, [run('r1', 'running', at)], 2)).toBe('');
+    expect(assistantAnnouncement(items, [run('r1', 'completed', at)], 2)).toBe('Assistant replied: All 18 are registered.');
+  });
+
+  it('does not read answers that were there when the conversation was opened', () => {
+    expect(assistantAnnouncement([user('u', 1), answer(5)], [run('r1', 'completed', at)], 5)).toBe('');
+  });
+
+  it('names a change that waits for a decision, ahead of anything else', () => {
+    const waiting = call('w', 2, { access: 'write', approvalId: 'ap', title: 'Rename UKG' }, 'awaiting_approval');
+    expect(assistantAnnouncement([user('u', 1), waiting], [run('r1', 'awaiting_approval', at)], 0)).toBe('Approval needed: Rename UKG');
+  });
+
+  it('keeps the last answer while a follow-up waits in the queue', () => {
+    const items = [user('u', 1), answer(5), user('next', 4, 'r2')];
+    expect(assistantAnnouncement(items, [run('r1', 'completed', at), run('r2', 'queued')], 2)).toBe(
+      'Assistant replied: All 18 are registered.',
+    );
   });
 });

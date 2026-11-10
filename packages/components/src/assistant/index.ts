@@ -1,4 +1,5 @@
 export * from './assistant-approval-card';
+export * from './assistant-attention-dot';
 export * from './assistant-composer';
 export * from './assistant-copy-button';
 export * from './assistant-diagnostics';

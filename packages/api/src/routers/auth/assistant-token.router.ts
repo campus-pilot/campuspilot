@@ -51,6 +51,12 @@ export const assistantTokenRouter = {
       if (context.principal.authMethod !== 'session') {
         throw rpcError.forbidden('An assistant token needs the user’s own session.');
       }
+      // An admin impersonating a user must not act through the assistant:
+      // the assistant's calls carry no impersonation marker, so its changes
+      // would be recorded as the user's own.
+      if (context.session.session.impersonatedBy) {
+        throw rpcError.forbidden('The assistant is not available while impersonating a user.');
+      }
       if (!isAssistantServiceSecret(context.headers.get(ASSISTANT_SERVICE_SECRET_HEADER))) {
         throw rpcError.forbidden('Only the assistant service can request this token.');
       }

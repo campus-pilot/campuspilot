@@ -89,22 +89,42 @@ function documentTypesInInput(input: unknown): unknown[] {
 }
 
 /**
+ * The document domain a document tool is asked for (`filters.documentDomain`
+ * on listings), or undefined when the input names none. Listed per input
+ * shape, like the document types above.
+ */
+function documentDomainInInput(input: unknown): unknown {
+  if (typeof input !== 'object' || input === null) return undefined;
+  const filters = (input as Record<string, unknown>).filters;
+  return typeof filters === 'object' && filters !== null
+    ? (filters as Record<string, unknown>).documentDomain
+    : undefined;
+}
+
+const FINANCE_DOCUMENTS_REFUSAL = 'The assistant cannot work with bills, receipts or statements.';
+
+/**
  * Input-level rules that metadata cannot express. The documents module
  * serves academic and finance documents alike; finance types (bills,
  * receipts, statements) are money tasks and stay out of scope, like billing.
+ * Finance documents can be asked for by type or by domain, so both are
+ * checked. The domain is an allowlist: only `academic` (or no domain, which
+ * the API treats as academic) passes, so `finance`, `all` and any domain
+ * added later are refused until someone decides otherwise.
  */
 export function assistantToolInputDecision(
   meta: McpProcedureMeta,
   input: unknown,
 ): AssistantToolDecision {
   if (meta.module === 'documents') {
+    const domain = documentDomainInInput(input);
+    if (domain !== undefined && domain !== 'academic') {
+      return { allowed: false, reason: FINANCE_DOCUMENTS_REFUSAL };
+    }
     for (const value of documentTypesInInput(input)) {
       const parsed = documentTypeSchema.safeParse(value);
       if (parsed.success && isFinanceDocumentType(parsed.data)) {
-        return {
-          allowed: false,
-          reason: 'The assistant cannot work with bills, receipts or statements.',
-        };
+        return { allowed: false, reason: FINANCE_DOCUMENTS_REFUSAL };
       }
     }
   }

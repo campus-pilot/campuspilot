@@ -8,7 +8,9 @@
     "db:generate": "drizzle-kit generate",
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.mjs",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:integration": "vitest run --project integration",
+    "test:unit": "vitest run --project unit"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.5.0",
@@ -32,9 +34,12 @@
   "devDependencies": {
     "@campuspilot/api": "workspace:*",
     "@campuspilot/config": "workspace:*",
+    "@testcontainers/postgresql": "catalog:",
+    "@testcontainers/redis": "catalog:",
     "@types/node": "catalog:",
     "@types/pg": "catalog:",
     "drizzle-kit": "^0.31.10",
+    "testcontainers": "catalog:",
     "tsdown": "^0.22.14",
     "tsx": "^4.23.1",
     "typescript": "catalog:",

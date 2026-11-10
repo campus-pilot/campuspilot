@@ -15,6 +15,7 @@ import { buildUserTranscriptContent } from '../../transcript';
 import type { AssistantPrompt } from '../prompt';
 import { modelToolDescription, type AssistantTool } from '../tools';
 import type {
+  ModelFailureKind,
   ModelProvider,
   ModelStepInput,
   ModelStepResult,
@@ -125,6 +126,19 @@ function isAbort(error: unknown): boolean {
   return error instanceof Error && (error.name === 'AbortError' || /abort/i.test(error.message));
 }
 
+/**
+ * Classifies a Gemini API error by HTTP status. 429 covers both a
+ * per-minute rate limit and an exhausted quota or spending cap; the API
+ * reports them the same way, so both are `busy`.
+ */
+export function geminiFailureKind(error: unknown): ModelFailureKind {
+  if (!(error instanceof ApiError)) return 'unknown';
+  if (error.status === 400) return 'rejected';
+  if (error.status === 401 || error.status === 403 || error.status === 404) return 'unavailable';
+  if (error.status === 429 || error.status === 503) return 'busy';
+  return 'unknown';
+}
+
 export function createGeminiProvider({ apiKey, model }: { apiKey: string; model: string }): ModelProvider {
   const client = new GoogleGenAI({ apiKey });
 
@@ -201,7 +215,7 @@ export function createGeminiProvider({ apiKey, model }: { apiKey: string; model:
       text: geminiVisibleText(content),
       refusal,
       paused: false,
-      toolUses: refusal ? [] : toolUsesOf(content),
+      toolUses: toolUsesOf(content),
       content,
       model: modelVersion,
       usage: normalizeGeminiUsage(usage),
@@ -217,7 +231,6 @@ export function createGeminiProvider({ apiKey, model }: { apiKey: string; model:
     assistantTextContent: (text) => [{ text }],
     toolResultsContent: geminiToolResultParts,
     toolUsesOf,
-    isPermanentError: (error) =>
-      error instanceof ApiError && [400, 401, 403, 404].includes(error.status),
+    failureKind: geminiFailureKind,
   };
 }

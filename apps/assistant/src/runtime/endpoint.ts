@@ -28,10 +28,18 @@ async function registerDeployment(serviceUrl: string) {
 export async function startRestateEndpoint(): Promise<number> {
   const providers = providerRegistry();
   const conversationObject = createAssistantConversationObject({ providers, log });
+  const identityKeys = env.RESTATE_IDENTITY_KEYS?.split(',')
+    .map((key) => key.trim())
+    .filter(Boolean);
   const port = await restate.serve({
     services: [conversationObject],
     port: env.RESTATE_SERVICE_PORT,
+    ...(identityKeys?.length ? { identityKeys } : {}),
   });
+  if (!identityKeys?.length) {
+    // The endpoint trusts whoever can reach its port (see RESTATE_IDENTITY_KEYS).
+    log.warn({ port }, 'assistant.restate.unsigned-requests-accepted');
+  }
   if (env.RESTATE_SERVICE_URL) await registerDeployment(env.RESTATE_SERVICE_URL);
   if (providers.current) {
     log.info({ provider: providers.current.id, model: providers.current.model }, 'assistant.provider');

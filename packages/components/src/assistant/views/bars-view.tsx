@@ -10,8 +10,8 @@ export function AssistantBarsViewBlock({ view }: { view: AssistantBarsView }) {
   return (
     <AssistantViewFrame title={view.title}>
       <ul className="flex flex-col gap-2.5 rounded-xl assistant-well px-3 py-3">
-        {view.bars.map((bar) => (
-          <li key={bar.label} className="flex flex-col gap-1.5">
+        {view.bars.map((bar, index) => (
+          <li key={`${index}:${bar.label}`} className="flex flex-col gap-1.5">
             <div className="flex items-baseline justify-between gap-3 text-[13px]/5">
               <span className="truncate text-foreground">{bar.label}</span>
               <span className="shrink-0 text-muted-foreground tabular-nums">

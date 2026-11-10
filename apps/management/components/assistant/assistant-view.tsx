@@ -10,6 +10,7 @@ import {
   AssistantBarsViewBlock,
   AssistantDetailsViewBlock,
   AssistantNoticeViewBlock,
+  AssistantRecordList,
   AssistantStatsViewBlock,
   AssistantTableViewBlock,
   AssistantViewFrame,
@@ -21,7 +22,9 @@ import { useQuery } from '@tanstack/react-query';
 import { RequirePermissions } from '@/components/require-permissions';
 import { orpc } from '@/lib/orpc';
 
-import { AssistantRecordsViewBlock } from './assistant-record-views';
+import { AssistantDocumentsViewBlock } from './assistant-document-views';
+import { AssistantRecordsViewBlock, AssistantRecordsViewPlaceholder } from './assistant-record-views';
+import { retryUnlessRefused } from './assistant-stream';
 
 /** The read permission the API checks for each record type. */
 function recordPermission(entity: AssistantRecordEntity, schoolId: string) {
@@ -48,9 +51,23 @@ function NotAvailable({ title }: { title?: string }) {
   );
 }
 
+/** A result still loading, or its permission check: the shape it will take. */
+function ExamResultPlaceholder({ title }: { title?: string }) {
+  return (
+    <AssistantViewFrame title={title}>
+      <Skeleton className="h-40 w-full rounded-lg" />
+    </AssistantViewFrame>
+  );
+}
+
+/** Document rows while the permission to read documents is being checked. */
+function DocumentsPlaceholder({ title, count }: { title?: string; count: number }) {
+  return <AssistantRecordList title={title} records={[]} loadingCount={count} renderLink={() => null} />;
+}
+
 function ExamResultBlock({ schoolId, view }: { schoolId: string; view: AssistantExamResultView }) {
-  const result = useQuery(
-    orpc.school.getStudentExam.queryOptions({
+  const result = useQuery({
+    ...orpc.school.getStudentExam.queryOptions({
       input: {
         schoolId,
         sessionId: view.sessionId,
@@ -59,13 +76,14 @@ function ExamResultBlock({ schoolId, view }: { schoolId: string; view: Assistant
         studentId: view.studentId,
       },
     }),
-  );
+    // A result that is gone or not allowed says so at once instead of loading through retries.
+    retry: retryUnlessRefused,
+  });
+  if (result.isPending) return <ExamResultPlaceholder title={view.title} />;
   return (
     <AssistantViewFrame title={view.title}>
       {result.data ? (
         <StudentExamPreview data={result.data} />
-      ) : result.isPending ? (
-        <Skeleton className="h-40 w-full rounded-lg" />
       ) : (
         <p className="text-sm text-muted-foreground">This result is not available.</p>
       )}
@@ -76,7 +94,8 @@ function ExamResultBlock({ schoolId, view }: { schoolId: string; view: Assistant
 /**
  * Renders a view the assistant showed, with the app's own components. Every
  * record and result is fetched here with the user's session, behind the same
- * permission the API enforces.
+ * permission the API enforces. While that permission is being checked a view
+ * shows its loading shape, not the "no access" message it may never need.
  */
 export function AssistantViewBlock({ schoolId, view }: { schoolId: string; view: AssistantView }) {
   const resource = { kind: 'school' as const, schoolId };
@@ -93,8 +112,22 @@ export function AssistantViewBlock({ schoolId, view }: { schoolId: string; view:
       return <AssistantNoticeViewBlock view={view} />;
     case 'records':
       return (
-        <RequirePermissions permissions={recordPermission(view.entity, schoolId)} fallback={<NotAvailable title={view.title} />}>
+        <RequirePermissions
+          permissions={recordPermission(view.entity, schoolId)}
+          fallback={<NotAvailable title={view.title} />}
+          pending={<AssistantRecordsViewPlaceholder view={view} />}
+        >
           <AssistantRecordsViewBlock schoolId={schoolId} view={view} />
+        </RequirePermissions>
+      );
+    case 'documents':
+      return (
+        <RequirePermissions
+          permissions={{ action: SCHOOL_ACTIONS.READ_DOCUMENT_ARTIFACTS, resource }}
+          fallback={<NotAvailable title={view.title} />}
+          pending={<DocumentsPlaceholder title={view.title} count={view.documents.length} />}
+        >
+          <AssistantDocumentsViewBlock schoolId={schoolId} view={view} />
         </RequirePermissions>
       );
     case 'exam_result':
@@ -105,6 +138,7 @@ export function AssistantViewBlock({ schoolId, view }: { schoolId: string; view:
             { action: SCHOOL_ACTIONS.READ_EXAM_RESULTS, resource },
           ]}
           fallback={<NotAvailable title={view.title} />}
+          pending={<ExamResultPlaceholder title={view.title} />}
         >
           <ExamResultBlock schoolId={schoolId} view={view} />
         </RequirePermissions>

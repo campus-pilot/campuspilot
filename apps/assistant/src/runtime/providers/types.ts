@@ -56,7 +56,11 @@ export type ModelStepResult =
   | {
       stopped: false;
       text: string;
-      /** The provider declined to answer; that turn's tool calls must not run. */
+      /**
+       * The provider declined to answer; that turn's tool calls must not run.
+       * The loop enforces this for every provider: it drops the calls and
+       * saves only the visible text, so adapters need not filter them.
+       */
       refusal: boolean;
       /** The provider paused a server-side loop and expects to be resumed. */
       paused: boolean;
@@ -68,9 +72,27 @@ export type ModelStepResult =
       usage: ModelUsage;
     };
 
+/**
+ * How a failed model request should be treated. Each kind is its own fact
+ * about the failure, read from the provider's error, never guessed from
+ * another kind:
+ * - `rejected`: the provider refused this request (malformed, too long).
+ *   Sending the same request again cannot work.
+ * - `unavailable`: the key, its permissions or the model id are wrong.
+ *   Nothing works until an operator fixes the configuration.
+ * - `busy`: rate limit, quota or overload. Worth a few retries; if they all
+ *   fail the user is told to try later.
+ * - `unknown`: anything else. Retried, then reported as a generic failure.
+ */
+export type ModelFailureKind = 'rejected' | 'unavailable' | 'busy' | 'unknown';
+
 export interface ModelProvider {
   readonly id: ModelProviderId;
-  /** The model this provider is configured to call. */
+  /**
+   * The model this provider is configured to call now. A conversation stays
+   * on its provider, not on a model: changing the configured model moves
+   * every conversation of this provider to it from their next message.
+   */
   readonly model: string;
   step(input: ModelStepInput): Promise<ModelStepResult>;
   /** A user message as transcript content. */
@@ -81,6 +103,6 @@ export interface ModelProvider {
   toolResultsContent(results: readonly ModelToolResult[]): unknown[];
   /** Tool calls inside a saved response, for a step replayed after a crash. */
   toolUsesOf(content: readonly unknown[]): ModelToolUse[];
-  /** Errors no retry can fix, such as a rejected request or a bad key. */
-  isPermanentError(error: unknown): boolean;
+  /** Classifies an error thrown by `step`, so the loop knows whether to retry. */
+  failureKind(error: unknown): ModelFailureKind;
 }

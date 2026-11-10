@@ -11,11 +11,58 @@ import { schoolHref } from '@/components/school-route';
 
 import { AssistantAccess } from './assistant-access';
 import { AssistantChat } from './assistant-chat';
-import { useSendAssistantMessage } from './use-assistant';
+import { refusalMessage } from './assistant-stream';
+import { useSendAssistantMessage, useSurfaceLife } from './use-assistant';
+
+/**
+ * The "Ask" row. It is its own component because it calls the assistant
+ * service: it must only ever render inside `AssistantAccess`, which renders
+ * nothing when this deployment has no assistant.
+ */
+function AskAssistantItem({
+  schoolId,
+  question,
+  itemClassName,
+  onStarted,
+}: {
+  schoolId: string;
+  question: string;
+  itemClassName?: string;
+  onStarted: (conversationId: string) => void;
+}) {
+  const life = useSurfaceLife();
+  const { send, isPending } = useSendAssistantMessage(schoolId, 'palette');
+  return (
+    <CommandGroup ref={life.ref} heading="Assistant">
+      <CommandItem
+        className={itemClassName}
+        value="assistant:ask"
+        disabled={isPending}
+        onSelect={() =>
+          void send(question, null)
+            .then((result) => {
+              // The palette may have been closed meanwhile; reopening it must start at search.
+              if (life.isAlive()) onStarted(result.conversation.id);
+            })
+            .catch((error: unknown) =>
+              toast.error(refusalMessage(error) ?? 'The assistant could not start. Check your connection and try again.'),
+            )
+        }
+      >
+        <CommandRow
+          icon={isPending ? Loader2 : Sparkles}
+          label={`Ask “${question}”`}
+          description={isPending ? 'Starting…' : 'The assistant answers here, with your permissions'}
+        />
+      </CommandItem>
+    </CommandGroup>
+  );
+}
 
 /**
  * Variant 3, command palette: the typed query becomes a question. Sending
  * happens in the select handler, then the palette shows the conversation.
+ * Renders nothing when there is no assistant or the user may not use it.
  */
 export function AskAssistantCommand({
   schoolId,
@@ -28,35 +75,36 @@ export function AskAssistantCommand({
   itemClassName?: string;
   onStarted: (conversationId: string) => void;
 }) {
-  const { send, isPending } = useSendAssistantMessage(schoolId, 'palette');
   const question = query.trim();
   if (!question) return null;
   return (
     <AssistantAccess schoolId={schoolId}>
-      <CommandGroup heading="Assistant">
-        <CommandItem
-          className={itemClassName}
-          value="assistant:ask"
-          disabled={isPending}
-          onSelect={() =>
-            void send(question, null)
-              .then((result) => onStarted(result.conversation.id))
-              .catch((error: Error) => toast.error(error.message || 'The assistant could not start.'))
-          }
-        >
-          <CommandRow
-            icon={isPending ? Loader2 : Sparkles}
-            label={`Ask “${question}”`}
-            description={isPending ? 'Starting…' : 'The assistant answers here, with your permissions'}
-          />
-        </CommandItem>
-      </CommandGroup>
+      <AskAssistantItem schoolId={schoolId} question={question} itemClassName={itemClassName} onStarted={onStarted} />
     </AssistantAccess>
   );
 }
 
-/** The palette's assistant view: a compact chat with a way back to search. */
+/**
+ * The palette's assistant view: a compact chat with a way back to search.
+ * Behind `AssistantAccess` like every part that talks to the service.
+ */
 export function PaletteAssistantView({
+  schoolId,
+  conversationId,
+  onBack,
+}: {
+  schoolId: string;
+  conversationId: string;
+  onBack: () => void;
+}) {
+  return (
+    <AssistantAccess schoolId={schoolId}>
+      <PaletteAssistantLayout schoolId={schoolId} conversationId={conversationId} onBack={onBack} />
+    </AssistantAccess>
+  );
+}
+
+function PaletteAssistantLayout({
   schoolId,
   conversationId,
   onBack,
@@ -87,6 +135,8 @@ export function PaletteAssistantView({
           compact
           autoFocus
           onConversationStarted={() => undefined}
+          // The palette starts a conversation from search, so that is where a new one begins.
+          onNewConversation={onBack}
         />
       </div>
     </div>

@@ -15,6 +15,8 @@ import { roleLabels } from '@/components/staff-role-picker';
 import { getAdmissionPhotoUrl } from '@/lib/admission-photo';
 import { orpc } from '@/lib/orpc';
 
+import { retryUnlessRefused } from './assistant-stream';
+
 function initials(name: string) {
   return name
     .split(/\s+/)
@@ -47,6 +49,16 @@ const renderLink = ({ href, className, children }: { href: string; className: st
   </Link>
 );
 
+/**
+ * One record's query. A record that was deleted or is not the user's to see
+ * is refused by the API (a 4xx); that answer is final, so it is not retried
+ * and the row is counted as unavailable at once instead of loading for
+ * seconds. Network and server failures keep the usual retries.
+ */
+function recordQuery<TOptions extends object>(options: TOptions) {
+  return { ...options, retry: retryUnlessRefused };
+}
+
 /** Turns per-id query results into rows, counting the ones the user cannot see. */
 function RecordListFromQueries({
   title,
@@ -65,7 +77,7 @@ function RecordListFromQueries({
 
 function AdmissionRecords({ schoolId, view }: { schoolId: string; view: AssistantRecordsView }) {
   const results = useQueries({
-    queries: view.ids.map((admissionId) => orpc.school.getAdmission.queryOptions({ input: { schoolId, admissionId } })),
+    queries: view.ids.map((admissionId) => recordQuery(orpc.school.getAdmission.queryOptions({ input: { schoolId, admissionId } }))),
   });
   return (
     <RecordListFromQueries
@@ -89,7 +101,7 @@ function AdmissionRecords({ schoolId, view }: { schoolId: string; view: Assistan
 
 function StudentRecords({ schoolId, sessionId, view }: { schoolId: string; sessionId: string; view: AssistantRecordsView }) {
   const results = useQueries({
-    queries: view.ids.map((studentId) => orpc.school.getStudent.queryOptions({ input: { schoolId, sessionId, studentId } })),
+    queries: view.ids.map((studentId) => recordQuery(orpc.school.getStudent.queryOptions({ input: { schoolId, sessionId, studentId } }))),
   });
   return (
     <RecordListFromQueries
@@ -110,7 +122,7 @@ function StudentRecords({ schoolId, sessionId, view }: { schoolId: string; sessi
                 title: student.admission.name,
                 subtitle: [`Admission ${student.admission.admissionNo}`, student.rollNo ? `Roll ${student.rollNo}` : null]
                   .filter(Boolean)
-                  .join(' · '),
+                  .join(', '),
                 badge: student.classId ? undefined : <Badge variant="secondary">Unassigned</Badge>,
                 href: student.classId
                   ? schoolSessionHref(schoolId, sessionId, `/classroom/${student.classId}/students/${student.id}`)
@@ -125,7 +137,7 @@ function StudentRecords({ schoolId, sessionId, view }: { schoolId: string; sessi
 
 function ClassRecords({ schoolId, sessionId, view }: { schoolId: string; sessionId: string; view: AssistantRecordsView }) {
   const results = useQueries({
-    queries: view.ids.map((classId) => orpc.school.getClass.queryOptions({ input: { schoolId, classId } })),
+    queries: view.ids.map((classId) => recordQuery(orpc.school.getClass.queryOptions({ input: { schoolId, classId } }))),
   });
   return (
     <RecordListFromQueries
@@ -148,10 +160,10 @@ function ClassRecords({ schoolId, sessionId, view }: { schoolId: string; session
 
 function ExamRecords({ schoolId, sessionId, view }: { schoolId: string; sessionId: string; view: AssistantRecordsView }) {
   const exams = useQueries({
-    queries: view.ids.map((examSlug) => orpc.school.getExam.queryOptions({ input: { schoolId, sessionId, examSlug } })),
+    queries: view.ids.map((examSlug) => recordQuery(orpc.school.getExam.queryOptions({ input: { schoolId, sessionId, examSlug } }))),
   });
   const overviews = useQueries({
-    queries: view.ids.map((examSlug) => orpc.school.getExamOverview.queryOptions({ input: { schoolId, sessionId, examSlug } })),
+    queries: view.ids.map((examSlug) => recordQuery(orpc.school.getExamOverview.queryOptions({ input: { schoolId, sessionId, examSlug } }))),
   });
   return (
     <RecordListFromQueries
@@ -178,7 +190,7 @@ function ExamRecords({ schoolId, sessionId, view }: { schoolId: string; sessionI
 
 function StaffRecords({ schoolId, view }: { schoolId: string; view: AssistantRecordsView }) {
   const results = useQueries({
-    queries: view.ids.map((userId) => orpc.school.getMember.queryOptions({ input: { schoolId, userId } })),
+    queries: view.ids.map((userId) => recordQuery(orpc.school.getMember.queryOptions({ input: { schoolId, userId } }))),
   });
   return (
     <RecordListFromQueries
@@ -226,4 +238,9 @@ export function AssistantRecordsViewBlock({ schoolId, view }: { schoolId: string
     case 'exam':
       return view.sessionId ? <ExamRecords schoolId={schoolId} sessionId={view.sessionId} view={view} /> : missingSession();
   }
+}
+
+/** The records view while its permission check loads: one loading row per record. */
+export function AssistantRecordsViewPlaceholder({ view }: { view: AssistantRecordsView }) {
+  return <AssistantRecordList title={view.title} records={[]} loadingCount={view.ids.length} renderLink={renderLink} />;
 }

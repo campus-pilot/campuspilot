@@ -4,8 +4,12 @@ import { Kbd } from '@campuspilot/ui/components/kbd';
 import { Spinner } from '@campuspilot/ui/components/spinner';
 import { cn } from '@campuspilot/ui/lib/utils';
 import { AlertCircle, Check, CircleSlash, CornerDownLeft, Shield, ShieldQuestionMark, SquarePen, X } from 'lucide-react';
+import { useRef, useSyncExternalStore } from 'react';
 
-export type AssistantApprovalDecision = 'approve' | 'decline';
+import { APPROVE_BUTTON_ATTRIBUTE, approvalFocus, decisionKeys, type AssistantApprovalDecision } from './approval-keys';
+import { approvalValueDisplay, humanizeKey, type ApprovalValueDisplay } from './approval-values';
+
+export { ASSISTANT_SURFACE_PROPS, type AssistantApprovalDecision } from './approval-keys';
 
 /**
  * Input keys not shown on the card. `schoolId` is always the conversation's
@@ -13,29 +17,63 @@ export type AssistantApprovalDecision = 'approve' | 'decline';
  */
 const HIDDEN_INPUT_KEYS = new Set(['schoolId']);
 
-function humanizeKey(key: string): string {
-  return key
-    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
-    .replace(/[_-]+/g, ' ')
-    .replace(/^./, (first) => first.toUpperCase());
-}
-
-function displayValue(value: unknown): string {
-  if (value === null || value === undefined || value === '') return '—';
-  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return String(value);
-  return JSON.stringify(value);
-}
-
 /**
  * Keys that name which record changes rather than what changes (`classId`).
  * They stay visible, as a quiet reference, so the change reads first.
  */
 const isReference = (key: string) => /Ids?$/.test(key);
 
-function changeEntries(input: unknown): [string, unknown][] {
-  return typeof input === 'object' && input !== null
-    ? Object.entries(input as Record<string, unknown>).filter(([key]) => !HIDDEN_INPUT_KEYS.has(key))
-    : [];
+type ChangeField = Extract<ApprovalValueDisplay, { kind: 'fields' }>['fields'][number];
+
+/** What the change will set, as labelled values in the reader's words (never raw JSON). */
+function changeFields(input: unknown): ChangeField[] {
+  if (typeof input !== 'object' || input === null) return [];
+  return Object.entries(input as Record<string, unknown>)
+    .filter(([key]) => !HIDDEN_INPUT_KEYS.has(key))
+    .map(([key, value]) => ({ key, label: humanizeKey(key), value: approvalValueDisplay(value) }));
+}
+
+/**
+ * Labelled values of a change. A value that is itself a record renders as
+ * the same list one level in (`nested`), behind a hairline, so its fields
+ * read as belonging to their label.
+ */
+function ChangeFields({ fields, nested = false }: { fields: readonly ChangeField[]; nested?: boolean }) {
+  return (
+    <dl className={cn('grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1', nested && 'border-s border-assistant-hairline ps-3')}>
+      {fields.map((field) => (
+        <div key={field.key} className="contents">
+          <dt className="font-normal text-muted-foreground">{field.label}</dt>
+          <dd
+            className={cn(
+              'min-w-0 break-words',
+              field.value.kind === 'text' && isReference(field.key)
+                ? 'font-mono text-[11px]/5 text-assistant-dim'
+                : 'font-medium text-foreground',
+            )}
+          >
+            {field.value.kind === 'text' ? field.value.text : <ChangeFields fields={field.value.fields} nested />}
+          </dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+/**
+ * Whether Enter would approve right now, which depends on where focus is
+ * (see `approvalFocus`). Read with `useSyncExternalStore` over the
+ * document's focus events, so it follows focus without an effect. `hold`
+ * receives the request's element; the answer is false until it is known.
+ */
+function useEnterApproves() {
+  const request = useRef<HTMLElement | null>(null);
+  const approves = useSyncExternalStore(
+    approvalFocus.subscribe,
+    () => approvalFocus.enterApproves(request.current),
+    () => false,
+  );
+  return { approves, request };
 }
 
 const OUTCOME: Partial<Record<AssistantToolCallItemDto['status'], { label: string; icon: typeof Check; tone?: string }>> = {
@@ -83,34 +121,6 @@ export function AssistantApprovalCard({ call }: { call: AssistantToolCallItemDto
   );
 }
 
-/** Targets that keep their own Enter and Escape (T3 Code's approval keys). */
-const OWNS_KEYS =
-  'input, textarea, select, button, a[href], [role=button], [role=link], summary, [contenteditable]:not([contenteditable=false]), [role=dialog], [role=menu], [role=listbox]';
-
-/**
- * Enter approves and Escape declines, but only when nothing that uses those
- * keys has focus: typing in the message box, a menu or a dialog keeps its
- * own keys. Attached through a ref callback so it lives exactly as long as
- * the card does.
- */
-function decisionKeys(onDecide: (decision: AssistantApprovalDecision) => void, enabled: boolean) {
-  return (element: HTMLElement | null) => {
-    if (!element || !enabled) return;
-    const document = element.ownerDocument;
-    const handle = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || event.isComposing || event.repeat) return;
-      if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
-      if (event.key !== 'Enter' && event.key !== 'Escape') return;
-      const target = event.target instanceof Element ? event.target : null;
-      if (target?.closest(OWNS_KEYS)) return;
-      event.preventDefault();
-      onDecide(event.key === 'Enter' ? 'approve' : 'decline');
-    };
-    document.addEventListener('keydown', handle);
-    return () => document.removeEventListener('keydown', handle);
-  };
-}
-
 /**
  * The decision, as the top section of the composer, above the message box
  * (T3 Code's request card): what will change, in an inset well, then Decline and
@@ -120,22 +130,39 @@ export function AssistantApprovalRequest({
   call,
   waiting,
   pendingDecision,
+  error,
   onDecide,
 }: {
   call: AssistantToolCallItemDto;
   /** How many changes wait, including this one. */
   waiting: number;
-  /** The decision being sent, while it is in flight. */
+  /**
+   * The decision already made: set from the moment it is sent until the
+   * request leaves the tray, so it cannot be sent twice in between.
+   */
   pendingDecision?: AssistantApprovalDecision;
+  /** Why the last decision could not be sent; shown in place of the hint. */
+  error?: string | null;
   onDecide: (decision: AssistantApprovalDecision) => void;
 }) {
-  const entries = changeEntries(call.body.input);
+  const fields = changeFields(call.body.input);
   const busy = Boolean(pendingDecision);
+  const enter = useEnterApproves();
   return (
     <section
-      ref={decisionKeys(onDecide, !busy)}
+      // Holds the element for the Enter hint and listens for the decision keys, for as long as the request shows.
+      ref={(element) => {
+        enter.request.current = element;
+        const stopListening = decisionKeys(onDecide, !busy)(element);
+        return () => {
+          enter.request.current = null;
+          stopListening?.();
+        };
+      }}
       aria-label={`Approve ${call.body.title}`}
-      className="flex min-w-0 flex-col gap-1 p-1 text-xs"
+      // Focusable without a tab stop, so a click on the request puts focus in it (Escape then declines).
+      tabIndex={-1}
+      className="flex min-w-0 flex-col gap-1 p-1 text-xs outline-none"
     >
       <header className="flex min-h-8 min-w-0 items-center gap-2 px-2.5">
         <ShieldQuestionMark className="size-[13px] shrink-0 text-assistant-warning" aria-hidden />
@@ -143,40 +170,37 @@ export function AssistantApprovalRequest({
         <span className="min-w-0 flex-1 truncate text-assistant-dim">{call.body.title}</span>
         {waiting > 1 ? <span className="shrink-0 text-assistant-dim tabular-nums">1 of {waiting}</span> : null}
       </header>
-      {entries.length ? (
+      {fields.length ? (
         <div className="px-1.5">
-          <dl className="grid max-h-40 grid-cols-[max-content_1fr] gap-x-4 gap-y-1 overflow-y-auto rounded-lg bg-muted/60 px-3 py-2.5 text-xs/relaxed dark:bg-muted/40">
-            {entries.map(([key, value]) => (
-              <div key={key} className="contents">
-                <dt className="text-muted-foreground">{humanizeKey(key)}</dt>
-                <dd
-                  className={cn(
-                    'min-w-0 break-words',
-                    isReference(key) ? 'font-mono text-[11px]/5 text-assistant-dim' : 'font-medium text-foreground',
-                  )}
-                >
-                  {displayValue(value)}
-                </dd>
-              </div>
-            ))}
-          </dl>
+          <div className="max-h-60 overflow-y-auto rounded-lg bg-muted/60 px-3 py-2.5 text-xs/relaxed dark:bg-muted/40">
+            <ChangeFields fields={fields} />
+          </div>
         </div>
       ) : null}
       <footer className="flex min-w-0 flex-wrap items-center justify-end gap-2 py-1.5 ps-2.5 pe-1.5">
-        <p className="min-w-0 flex-1 truncate text-assistant-dim">
-          {call.body.destructive ? 'This changes existing data.' : 'Nothing changes until you approve.'}
-        </p>
+        {error ? (
+          <p role="alert" className="min-w-0 flex-1 text-destructive">
+            {error}
+          </p>
+        ) : (
+          <p className="min-w-0 flex-1 truncate text-assistant-dim">
+            {call.body.destructive ? 'This changes existing data.' : 'Nothing changes until you approve.'}
+          </p>
+        )}
         <div className="flex shrink-0 items-center gap-2">
           <Button type="button" variant="outline" disabled={busy} onClick={() => onDecide('decline')}>
             {pendingDecision === 'decline' ? <Spinner /> : null}
             Decline
           </Button>
-          <Button type="button" disabled={busy} onClick={() => onDecide('approve')}>
+          <Button type="button" disabled={busy} onClick={() => onDecide('approve')} {...{ [APPROVE_BUTTON_ATTRIBUTE]: '' }}>
             {pendingDecision === 'approve' ? <Spinner /> : null}
             Approve
-            <Kbd className="-me-0.5 h-4 min-w-4 bg-black/10 text-current dark:bg-white/15">
-              <CornerDownLeft className="size-2.5" aria-hidden />
-            </Kbd>
+            {/* Only while Enter would approve: with focus in the message box it sends the message instead. */}
+            {enter.approves && !busy ? (
+              <Kbd className="-me-0.5 h-4 min-w-4 bg-black/10 text-current dark:bg-white/15">
+                <CornerDownLeft className="size-2.5" aria-hidden />
+              </Kbd>
+            ) : null}
           </Button>
         </div>
       </footer>

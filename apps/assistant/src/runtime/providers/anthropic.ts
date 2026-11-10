@@ -5,6 +5,7 @@ import { buildUserTranscriptContent } from '../../transcript';
 import type { AssistantPrompt } from '../prompt';
 import { modelToolDescription, type AssistantTool } from '../tools';
 import type {
+  ModelFailureKind,
   ModelProvider,
   ModelStepInput,
   ModelStepResult,
@@ -199,14 +200,23 @@ export async function streamAssistantResponse({
   }
 }
 
-/** Errors no retry can fix: a malformed request or a credential problem. */
-export function isPermanentModelError(error: unknown): boolean {
-  return (
-    error instanceof Anthropic.BadRequestError ||
+/** HTTP statuses the Claude API uses for rate limits and overload. */
+const ANTHROPIC_BUSY_STATUSES: ReadonlySet<number> = new Set([429, 503, 529]);
+
+/** Classifies a Claude API error by its SDK error class and HTTP status. */
+export function anthropicFailureKind(error: unknown): ModelFailureKind {
+  if (error instanceof Anthropic.BadRequestError) return 'rejected';
+  if (
     error instanceof Anthropic.AuthenticationError ||
     error instanceof Anthropic.PermissionDeniedError ||
     error instanceof Anthropic.NotFoundError
-  );
+  ) {
+    return 'unavailable';
+  }
+  if (error instanceof Anthropic.APIError && error.status !== undefined && ANTHROPIC_BUSY_STATUSES.has(error.status)) {
+    return 'busy';
+  }
+  return 'unknown';
 }
 
 function toolUsesOf(content: readonly unknown[]): ModelToolUse[] {
@@ -256,6 +266,6 @@ export function createAnthropicProvider({ apiKey, model }: { apiKey: string; mod
         ...(result.isError ? { is_error: true } : {}),
       })),
     toolUsesOf,
-    isPermanentError: isPermanentModelError,
+    failureKind: anthropicFailureKind,
   };
 }

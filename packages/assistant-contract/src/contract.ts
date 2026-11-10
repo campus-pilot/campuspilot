@@ -7,6 +7,7 @@ import {
   assistantStatusInputSchema,
   assistantStatusOutputSchema,
   assistantStreamEventSchema,
+  deleteAssistantConversationOutputSchema,
   listAssistantConversationsInputSchema,
   listAssistantConversationsOutputSchema,
   respondToAssistantApprovalInputSchema,
@@ -42,6 +43,14 @@ export const assistantContract = {
     .input(respondToAssistantApprovalInputSchema)
     .output(assistantRunSchema),
   stopRun: oc.input(stopAssistantRunInputSchema).output(assistantRunSchema),
+  /**
+   * Deletes one of the user's conversations for good, with its messages,
+   * runs, approvals and transcript. Refused while the conversation has a
+   * run that has not finished: the assistant must be stopped first.
+   */
+  deleteConversation: oc
+    .input(assistantConversationInputSchema)
+    .output(deleteAssistantConversationOutputSchema),
 };
 
 export type AssistantContract = typeof assistantContract;

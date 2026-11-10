@@ -1,8 +1,9 @@
-import type {
-  AssistantConversationDto,
-  AssistantItemDto,
-  AssistantRunDto,
-  AssistantStreamEvent,
+import {
+  ASSISTANT_TERMINAL_RUN_STATUSES,
+  type AssistantConversationDto,
+  type AssistantItemDto,
+  type AssistantRunDto,
+  type AssistantStreamEvent,
 } from '@campuspilot/assistant-contract/dto';
 
 /**
@@ -18,7 +19,17 @@ export type AssistantConversationState = {
   text: Readonly<Record<string, string>>;
   /** Highest change sequence held: the cursor a reconnect resumes from. */
   sequence: number;
-  /** Whether the stream has caught up (after its snapshot or resume). */
+  /**
+   * The sequence held when the conversation was first loaded here. Anything
+   * newer arrived while it was open, which is how a finished answer is told
+   * apart from history (for the screen-reader announcement).
+   */
+  openedSequence: number;
+  /**
+   * Whether the stream is connected and has caught up (after its snapshot or
+   * resume). False from the moment a connection drops until the next one
+   * has caught up, which is what the "Reconnecting…" notice reads.
+   */
   synchronized: boolean;
 };
 
@@ -28,6 +39,7 @@ export const EMPTY_CONVERSATION_STATE: AssistantConversationState = {
   runs: [],
   text: {},
   sequence: 0,
+  openedSequence: 0,
   synchronized: false,
 };
 
@@ -75,21 +87,27 @@ export function applyAssistantEvent(
   event: AssistantStreamEvent,
 ): AssistantConversationState {
   switch (event.type) {
-    case 'snapshot':
+    case 'snapshot': {
+      const sequence = highestSequence(event.conversation, event.items, event.runs);
       return {
         conversation: event.conversation,
         items: [...event.items].sort(byPosition),
         runs: [...event.runs].sort(byCreation),
         text: {},
-        sequence: highestSequence(event.conversation, event.items, event.runs),
+        sequence,
+        // A later snapshot (a large catch-up after a reconnect) keeps the first one's mark.
+        openedSequence: state.conversation ? state.openedSequence : sequence,
         synchronized: false,
       };
+    }
     case 'resume': {
       // Changes since our cursor, merged over what is already on screen.
+      // `openedSequence` is spread in unchanged.
       const items = event.items.reduce((list, item) => upsertBySequence(list, item, byPosition), state.items);
       const runs = event.runs.reduce((list, run) => upsertBySequence(list, run, byCreation), state.runs);
       const finished = event.items.filter((item) => item.status !== 'streaming').map((item) => item.id);
       return {
+        ...state,
         conversation: event.conversation,
         items,
         runs,
@@ -132,4 +150,57 @@ export function applyAssistantEvent(
       return { ...state, text: { ...state.text, [event.itemId]: next } };
     }
   }
+}
+
+/** The state once its connection has dropped; the same object when already marked. */
+export function withConnectionLost(state: AssistantConversationState): AssistantConversationState {
+  return state.synchronized ? { ...state, synchronized: false } : state;
+}
+
+/** Whether an item is a change the assistant made that went through. */
+export function isSucceededWrite(item: AssistantItemDto): boolean {
+  return item.kind === 'tool_call' && item.status === 'succeeded' && item.body.access === 'write';
+}
+
+/**
+ * Whether a catch-up (`resume` or `snapshot`) carries a change that went
+ * through after `cursor`, the sequence held before reconnecting: such a
+ * change happened while this tab was not listening, so open screens have
+ * not been refreshed for it yet.
+ */
+export function hasSucceededWriteAfter(items: readonly AssistantItemDto[], cursor: number): boolean {
+  return items.some((item) => item.sequence > cursor && isSucceededWrite(item));
+}
+
+/**
+ * Whether an event means the assistant changed CampusPilot data, so open
+ * screens should refresh: a change going through live, or a catch-up after a
+ * reconnect that carries one made meanwhile. `cursor` is the sequence held
+ * before this connection, or null on a first load, whose snapshot is history
+ * the app has already loaded for itself.
+ */
+export function eventChangedSchoolData(event: AssistantStreamEvent, cursor: number | null): boolean {
+  if (event.type === 'item') return isSucceededWrite(event.item);
+  if (event.type === 'resume' || event.type === 'snapshot') {
+    return cursor !== null && hasSucceededWriteAfter(event.items, cursor);
+  }
+  return false;
+}
+
+/**
+ * Whether an event can change the conversation history list: the
+ * conversation itself (its title, its place in the order), or a run
+ * reaching a state the list shows as the row's dot: a new run in the queue,
+ * a run pausing for approval, a run ending. A running run reports every
+ * step it takes; those are left out, since the list refreshes itself every
+ * few seconds while a row is working.
+ */
+export function eventChangedConversationList(event: AssistantStreamEvent): boolean {
+  if (event.type === 'conversation') return true;
+  if (event.type !== 'run') return false;
+  return (
+    ASSISTANT_TERMINAL_RUN_STATUSES.has(event.run.status) ||
+    event.run.status === 'queued' ||
+    event.run.status === 'awaiting_approval'
+  );
 }

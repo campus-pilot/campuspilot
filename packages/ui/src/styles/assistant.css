@@ -19,23 +19,46 @@
   --color-assistant-dim: var(--assistant-dim);
   --color-assistant-hairline: var(--assistant-hairline);
   --color-assistant-warning: var(--assistant-warning);
-  --color-assistant-info: var(--assistant-info);
-  --color-assistant-success: var(--assistant-success);
+  --color-assistant-send-disabled: var(--assistant-send-disabled);
+  --color-assistant-send-disabled-foreground: var(--assistant-send-disabled-foreground);
 }
 
 :root {
   /* Width of the conversation and the composer, shared so their edges line up. */
   --assistant-lane: 45rem;
 
-  /* Text tier below muted: meta, captions, carets. */
-  --assistant-dim: color-mix(in oklab, var(--muted-foreground) 78%, var(--background));
+  /*
+   * Text tier below muted: meta, captions, carets. It is used for 12px text,
+   * so it must reach 4.5:1 on the page background (WCAG AA): 97% is the
+   * lowest whole step that does in light mode (4.56:1; the earlier 78% was
+   * 3.24:1). Dark mode keeps 78% below, which already passes (4.65:1).
+   */
+  --assistant-dim: color-mix(in oklab, var(--muted-foreground) 97%, var(--background));
   /* Separators inside a surface: lighter than its border. */
   --assistant-hairline: color-mix(in oklab, var(--border) 65%, transparent);
-  --assistant-warning: var(--color-amber-600);
+  /*
+   * Amber for 12px text on the light page background. amber-600 alone is
+   * 3.19:1; 76% of the way to amber-700 is the smallest step that reaches
+   * 4.5:1 (4.51:1). Dark mode keeps amber-500 (9.27:1).
+   */
+  --assistant-warning: color-mix(in oklab, var(--color-amber-700) 76%, var(--color-amber-600));
   --assistant-info: var(--color-blue-600);
-  --assistant-success: var(--color-emerald-600);
   --assistant-well-header: color-mix(in oklab, var(--muted) 50%, transparent);
   --assistant-inline-code: var(--muted);
+
+  /*
+   * The user's bubble and a Send that cannot be pressed were too faint on
+   * the white page: the bubble was 1.10:1 against it, the Send disc 1.31:1
+   * with a 3.69:1 arrow. The Send disc and arrow are set to the smallest
+   * whole step that reaches what dark mode already has (disc 1.41:1, arrow
+   * 4.81:1): 16% gives 1.44:1 and 21% gives 4.82:1. The bubble stops short of
+   * dark mode's 1.34:1 (that needs 8%, which reads as a heavy grey slab on
+   * white): 5% is clearly a bubble and still quiet. Dark mode keeps its
+   * values below.
+   */
+  --assistant-bubble: color-mix(in oklab, var(--foreground) 5%, var(--muted));
+  --assistant-send-disabled: color-mix(in oklab, var(--foreground) 16%, transparent);
+  --assistant-send-disabled-foreground: color-mix(in oklab, var(--foreground) 21%, var(--muted-foreground));
 
   --surface-outline: rgb(0 0 0 / 8%);
   --surface-highlight: transparent;
@@ -46,13 +69,18 @@
   --surface-outline: rgb(255 255 255 / 7%);
   --surface-highlight: rgb(255 255 255 / 3%);
   --composer-shadow: 0 14px 32px -18px rgb(0 0 0 / 75%);
+  /* Unchanged from before the light-mode contrast fix above. */
+  --assistant-dim: color-mix(in oklab, var(--muted-foreground) 78%, var(--background));
   --assistant-warning: var(--color-amber-500);
   --assistant-info: var(--color-blue-400);
-  --assistant-success: var(--color-emerald-400);
+  /* Unchanged from before the light-mode fix above (muted; 12% foreground; muted text). */
+  --assistant-bubble: var(--muted);
+  --assistant-send-disabled: color-mix(in oklab, var(--foreground) 12%, transparent);
+  --assistant-send-disabled-foreground: var(--muted-foreground);
 }
 
 @utility assistant-bubble {
-  background: var(--muted);
+  background: var(--assistant-bubble);
 }
 
 /* Contained content (tables, record lists, code, a change list): the app's card container. */
@@ -106,7 +134,7 @@
 
   .assistant-markdown h1 { font-size: 1.25rem; }
   .assistant-markdown h2 { font-size: 1.125rem; }
-  .assistant-markdown h3 { font-size: 0.9375rem; }
+  .assistant-markdown h3 { font-size: 1rem; }
   .assistant-markdown :is(h4, h5, h6) { font-size: 0.875rem; }
   .assistant-markdown h6 { color: var(--muted-foreground); }
 
@@ -136,6 +164,10 @@
   .assistant-markdown li + li {
     margin-top: 0.25rem;
   }
+
+  /* Nested numbered lists change their numbering, so each level reads apart (T3 Code). */
+  .assistant-markdown ol ol { list-style-type: lower-alpha; }
+  .assistant-markdown ol ol ol { list-style-type: lower-roman; }
 
   .assistant-markdown ul ul { list-style-type: circle; }
   .assistant-markdown ul ul ul { list-style-type: square; }
@@ -255,6 +287,81 @@
   }
 }
 
+/*
+ * Folds (a turn's work log, a group of steps) open and close over 200ms
+ * instead of snapping, so what is below them slides rather than jumps
+ * (T3 Code). Radix measures the content and exposes its height as a
+ * variable; it also keeps the content mounted until the closing animation
+ * ends, and skips the animation for a fold that is already open when it
+ * first renders. Only the vertical axis is clipped, so focus rings at the
+ * sides of a row are not cut off.
+ */
+@keyframes assistant-fold-open {
+  from { height: 0; }
+  to { height: var(--radix-collapsible-content-height); }
+}
+
+@keyframes assistant-fold-close {
+  from { height: var(--radix-collapsible-content-height); }
+  to { height: 0; }
+}
+
+[data-assistant-surface] [data-slot='collapsible-content'] {
+  overflow-y: clip;
+}
+
+[data-assistant-surface] [data-slot='collapsible-content'][data-state='open'] {
+  animation: assistant-fold-open 200ms ease-out;
+}
+
+[data-assistant-surface] [data-slot='collapsible-content'][data-state='closed'] {
+  animation: assistant-fold-close 200ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-assistant-surface] [data-slot='collapsible-content']:is([data-state='open'], [data-state='closed']) {
+    animation: none;
+  }
+}
+
+/*
+ * The conversation fades out under the header as well as above the
+ * composer, so a row scrolled half out of view is not sliced by the header's
+ * edge. The shared scroller only fades its bottom; this adds a 16px fade at
+ * the top, which appears as soon as the conversation is scrolled (there is
+ * nothing above the first row to fade into). These rules are unlayered on
+ * purpose: they must win over the scroller's own utility classes.
+ */
+@keyframes assistant-scroll-fade-top {
+  from { --scroll-fade-t: 0px; }
+  to { --scroll-fade-t: 1rem; }
+}
+
+[data-assistant-surface] [data-slot='message-scroller-viewport'] {
+  --scroll-fade-mask: linear-gradient(
+    to bottom,
+    transparent 0,
+    #000 var(--scroll-fade-t, 0px),
+    #000 calc(100% - var(--scroll-fade-b, 0px)),
+    transparent 100%
+  );
+
+  @supports (animation-timeline: scroll()) {
+    animation:
+      assistant-scroll-fade-top 1ms ease-in-out,
+      scroll-fade-reveal-b 1ms ease-in-out;
+    animation-timeline: scroll(self y), scroll(self y);
+    animation-range:
+      0 1rem,
+      calc(100% - var(--scroll-fade-reveal, calc(var(--spacing) * 24))) 100%;
+    animation-fill-mode: both;
+  }
+
+  @supports not (animation-timeline: scroll()) {
+    --scroll-fade-t: 1rem;
+  }
+}
+
 /* "Working" shimmer: a band of full colour sweeping across muted text. */
 @keyframes assistant-shimmer {
   from { background-position: 100% 0; }
@@ -279,6 +386,30 @@
     animation: none;
     color: var(--muted-foreground);
     background: none;
+  }
+}
+
+/*
+ * The same shimmer on a small solid shape (the "working" dot in the history
+ * list): the dot brightens as the band passes, on the shimmer's own clock.
+ * The band is wider than the text shimmer's, or it would cross a 6px dot too
+ * fast to be seen.
+ */
+@utility assistant-shimmer-dot {
+  background-image: linear-gradient(
+    90deg,
+    var(--muted-foreground) 0%,
+    var(--muted-foreground) 20%,
+    var(--foreground) 50%,
+    var(--muted-foreground) 80%,
+    var(--muted-foreground) 100%
+  );
+  background-size: 200% 100%;
+  animation: assistant-shimmer 2.2s steps(30) infinite;
+
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+    background: var(--muted-foreground);
   }
 }
 

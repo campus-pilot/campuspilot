@@ -1,11 +1,14 @@
-import { and, asc, eq, gt, sql } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gt, inArray, sql } from 'drizzle-orm';
 
 import { env } from '@campuspilot/env/assistant';
 
 import {
+  ASSISTANT_RUN_ATTENTION,
+  assistantConversationAttention,
   assistantConversationSchema,
   assistantItemSchema,
   assistantRunSchema,
+  type AssistantConversationAttention,
   type AssistantConversationDto,
   type AssistantItemDto,
   type AssistantRunDto,
@@ -35,11 +38,130 @@ export type AssistantChange = Exclude<AssistantStreamEvent, { type: 'snapshot' |
 /** Records a change to publish once the surrounding transaction commits. */
 export type EmitAssistantChange = (conversationId: string, change: AssistantChange) => void;
 
-export function toConversationDto(row: ConversationRow): AssistantConversationDto {
-  return assistantConversationSchema.parse(row);
+/**
+ * A conversation as clients see it. `attention` comes from the state of the
+ * conversation's latest run and is not stored, so it can never disagree
+ * with the runs. The caller must supply it: from `conversationAttention`,
+ * from the runs in hand, or from the list query's join.
+ */
+export function toConversationDto(
+  row: ConversationRow,
+  attention: AssistantConversationAttention | null,
+): AssistantConversationDto {
+  return assistantConversationSchema.parse({ ...row, attention });
 }
 
-/** A run's usage, cost estimate and raw error, for developer diagnostics. */
+/** The attention a latest run's status asks for; none when the conversation has no run. */
+const attentionOf = (latestRunStatus: AssistantRunStatus | null) =>
+  latestRunStatus ? ASSISTANT_RUN_ATTENTION[latestRunStatus] : null;
+
+/** A conversation's attention, read from its latest run (the one asked most recently). */
+export async function conversationAttention(
+  db: AssistantExecutor,
+  conversationId: string,
+): Promise<AssistantConversationAttention | null> {
+  const [row] = await db
+    .select({ status: assistantRunTable.status })
+    .from(assistantRunTable)
+    .where(eq(assistantRunTable.conversationId, conversationId))
+    .orderBy(desc(assistantRunTable.createdAt), desc(assistantRunTable.id))
+    .limit(1);
+  return attentionOf(row?.status ?? null);
+}
+
+/** A conversation by id as clients see it (with its attention), or null. */
+export async function findConversationDto(
+  db: AssistantExecutor,
+  conversationId: string,
+): Promise<AssistantConversationDto | null> {
+  const row = await findConversation(db, conversationId);
+  return row ? toConversationDto(row, await conversationAttention(db, conversationId)) : null;
+}
+
+/**
+ * One page of a user's conversations in a school, newest first, each with
+ * its attention, and how many there are in all.
+ *
+ * The page is one statement: every conversation is joined to its own latest
+ * run by a lateral subquery (an index lookup on conversation and creation
+ * time per row), so listing never runs a query per conversation.
+ */
+export async function listConversations(
+  db: AssistantExecutor,
+  input: { schoolId: string; userId: string; page: number; pageSize: number },
+): Promise<{ items: AssistantConversationDto[]; totalItems: number }> {
+  const where = and(
+    eq(assistantConversationTable.schoolId, input.schoolId),
+    eq(assistantConversationTable.userId, input.userId),
+  );
+  const latestRun = db
+    .select({ status: assistantRunTable.status })
+    .from(assistantRunTable)
+    .where(eq(assistantRunTable.conversationId, assistantConversationTable.id))
+    .orderBy(desc(assistantRunTable.createdAt), desc(assistantRunTable.id))
+    .limit(1)
+    .as('latest_run');
+  const [rows, [total]] = await Promise.all([
+    db
+      .select({ conversation: assistantConversationTable, latestRunStatus: latestRun.status })
+      .from(assistantConversationTable)
+      .leftJoinLateral(latestRun, sql`true`)
+      .where(where)
+      .orderBy(desc(assistantConversationTable.updatedAt), desc(assistantConversationTable.id))
+      .limit(input.pageSize)
+      .offset((input.page - 1) * input.pageSize),
+    db.select({ value: count() }).from(assistantConversationTable).where(where),
+  ]);
+  return {
+    items: rows.map((row) => toConversationDto(row.conversation, attentionOf(row.latestRunStatus))),
+    totalItems: total?.value ?? 0,
+  };
+}
+
+/** Statuses of a run that has not finished: it is waiting to start, working, or waiting for the user. */
+const UNFINISHED_RUN_STATUSES: AssistantRunStatus[] = ['queued', 'running', 'awaiting_approval'];
+
+/**
+ * Deletes a conversation with everything in it (the schema cascades its
+ * runs, items, approvals and transcript), unless one of its runs has not
+ * finished: a turn in progress would go on writing to rows that are gone.
+ *
+ * The conversation row is locked first. Saving a message or a run's
+ * progress updates that row, so nothing can start or advance a run between
+ * the check and the delete.
+ */
+export async function deleteConversation(
+  db: AssistantDatabase,
+  conversationId: string,
+): Promise<'deleted' | 'busy' | 'missing'> {
+  return db.transaction(async (tx) => {
+    const [locked] = await tx
+      .select({ id: assistantConversationTable.id })
+      .from(assistantConversationTable)
+      .where(eq(assistantConversationTable.id, conversationId))
+      .for('update');
+    if (!locked) return 'missing';
+    const [unfinished] = await tx
+      .select({ id: assistantRunTable.id })
+      .from(assistantRunTable)
+      .where(
+        and(
+          eq(assistantRunTable.conversationId, conversationId),
+          inArray(assistantRunTable.status, UNFINISHED_RUN_STATUSES),
+        ),
+      )
+      .limit(1);
+    if (unfinished) return 'busy';
+    await tx.delete(assistantConversationTable).where(eq(assistantConversationTable.id, conversationId));
+    return 'deleted';
+  });
+}
+
+/**
+ * A run's usage, cost estimate and raw error, for developer diagnostics.
+ * `model` is the model that served the run's latest request (see
+ * `modelStep`), so the estimate uses the price of what actually answered.
+ */
 function runDiagnostics(row: RunRow): AssistantRunDto['diagnostics'] {
   return {
     provider: row.provider,
@@ -49,7 +171,7 @@ function runDiagnostics(row: RunRow): AssistantRunDto['diagnostics'] {
     outputTokens: row.outputTokens,
     cacheReadInputTokens: row.cacheReadInputTokens,
     cacheCreationInputTokens: row.cacheCreationInputTokens,
-    estimatedCostUsd: estimateCostUsd(row.model, row),
+    estimatedCostUsd: estimateCostUsd(row.model, row, row.createdAt),
     errorDetail: row.errorDetail,
   };
 }
@@ -421,7 +543,8 @@ export async function loadSnapshot(
         .orderBy(asc(assistantRunTable.createdAt), asc(assistantRunTable.id)),
     ]);
     return {
-      conversation: toConversationDto(conversation),
+      // Every run is loaded here, so the latest one is among them.
+      conversation: toConversationDto(conversation, assistantConversationAttention(runs)),
       items: items.map(toItemDto),
       runs: runs.map(toRunDto),
     };
@@ -500,7 +623,12 @@ export async function setConversationTitle(
     .set({ title, updatedAt: new Date() })
     .where(eq(assistantConversationTable.id, conversationId))
     .returning();
-  if (row) emit(conversationId, { type: 'conversation', conversation: toConversationDto(row) });
+  if (row) {
+    emit(conversationId, {
+      type: 'conversation',
+      conversation: toConversationDto(row, await conversationAttention(tx, conversationId)),
+    });
+  }
 }
 
 export async function findTranscriptEntry(
@@ -564,6 +692,22 @@ export async function completeStreamingItems(
   }
 }
 
+/** A run's tool calls that have not reached a final status. */
+export async function findOpenToolCalls(
+  tx: AssistantExecutor,
+  run: { id: string },
+): Promise<ItemRow[]> {
+  return tx
+    .select()
+    .from(assistantItemTable)
+    .where(
+      and(
+        eq(assistantItemTable.runId, run.id),
+        eq(assistantItemTable.kind, 'tool_call'),
+        inArray(assistantItemTable.status, ['running', 'awaiting_approval']),
+      ),
+    );
+}
 
 /**
  * What changed after `afterSequence`: the entities whose latest change is
@@ -596,7 +740,8 @@ export async function loadChangesSince(
     ]);
     if (items.length + runs.length > limit) return null;
     return {
-      conversation: toConversationDto(conversation),
+      // Only the changed runs are loaded here, so the latest run is looked up.
+      conversation: toConversationDto(conversation, await conversationAttention(tx, conversationId)),
       items: items.map(toItemDto),
       runs: runs.map(toRunDto),
     };

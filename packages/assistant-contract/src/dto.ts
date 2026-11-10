@@ -148,11 +148,56 @@ export const assistantRunSchema = z.object({
 });
 export type AssistantRunDto = z.infer<typeof assistantRunSchema>;
 
+/**
+ * What a conversation needs noticing for, from the state of its latest run
+ * (the run asked most recently):
+ * - `approval`: it is waiting for the user to approve or decline a change.
+ * - `working`: it is queued or running.
+ * - `failed`: it failed.
+ * Null otherwise: the latest run completed or was stopped by the user, or
+ * the conversation has no run.
+ */
+export const assistantConversationAttentionSchema = z.enum(['approval', 'working', 'failed']);
+export type AssistantConversationAttention = z.infer<typeof assistantConversationAttentionSchema>;
+
+/** The attention each run status asks for, when that run is the conversation's latest. */
+export const ASSISTANT_RUN_ATTENTION: Record<AssistantRunStatus, AssistantConversationAttention | null> = {
+  queued: 'working',
+  running: 'working',
+  awaiting_approval: 'approval',
+  failed: 'failed',
+  completed: null,
+  cancelled: null,
+};
+
+/**
+ * The attention of a conversation, given all of its runs: that of the run
+ * asked most recently (by creation time, then id, the order runs are listed
+ * in). The service uses it where it has the runs in hand, and a client that
+ * holds a conversation's live runs can use it to stay current between list
+ * refreshes; both then agree by construction.
+ */
+export function assistantConversationAttention(
+  runs: readonly { id: string; status: AssistantRunStatus; createdAt: Date }[],
+): AssistantConversationAttention | null {
+  let latest: (typeof runs)[number] | null = null;
+  for (const run of runs) {
+    const newer =
+      !latest ||
+      run.createdAt.getTime() > latest.createdAt.getTime() ||
+      (run.createdAt.getTime() === latest.createdAt.getTime() && run.id > latest.id);
+    if (newer) latest = run;
+  }
+  return latest ? ASSISTANT_RUN_ATTENTION[latest.status] : null;
+}
+
 export const assistantConversationSchema = z.object({
   id: z.string(),
   schoolId: z.string(),
   title: z.string().nullable(),
   lastSequence: z.number().int(),
+  /** See `assistantConversationAttentionSchema`. */
+  attention: assistantConversationAttentionSchema.nullable(),
   createdAt: z.date(),
   updatedAt: z.date(),
 });
@@ -275,6 +320,9 @@ export const respondToAssistantApprovalInputSchema = z.object({
   approvalId: z.string().min(1),
   decision: assistantApprovalDecisionSchema,
 });
+
+/** The conversation that was deleted, with everything in it. */
+export const deleteAssistantConversationOutputSchema = z.object({ id: z.string() });
 
 export const stopAssistantRunInputSchema = z.object({
   ...schoolScopeShape,

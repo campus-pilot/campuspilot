@@ -3,8 +3,10 @@
 import type { AssistantSurface, AssistantToolCallItemDto, AssistantViewItemDto } from '@campuspilot/assistant-contract/dto';
 import {
   ASSISTANT_LANE_CLASS,
+  ASSISTANT_SURFACE_PROPS,
   AssistantApprovalRequest,
   AssistantComposer,
+  AssistantConversationUnavailable,
   AssistantConversationUsage,
   AssistantLiveStatus,
   AssistantQueuedMessages,
@@ -19,16 +21,22 @@ import {
 } from '@campuspilot/components/assistant';
 import { Button } from '@campuspilot/ui/components/button';
 import { Spinner } from '@campuspilot/ui/components/spinner';
+import { TooltipProvider } from '@campuspilot/ui/components/tooltip';
 import { toast } from '@campuspilot/ui/lib/toast';
 import { cn } from '@campuspilot/ui/lib/utils';
 import { ClipboardList, RotateCcw, ShieldCheck, UserPlus, UserRoundX } from 'lucide-react';
 import type { ReactNode } from 'react';
 
+import { refusalMessage, type AssistantConversationFailure } from './assistant-stream';
 import { AssistantViewBlock } from './assistant-view';
 import {
+  useApprovalDecisions,
   useAssistantActiveRun,
+  useAssistantAnnouncement,
   useAssistantConnection,
+  useAssistantConversationFailure,
   useAssistantConversationUsage,
+  useAssistantDraft,
   useAssistantPendingApprovals,
   useAssistantQueuedMessages,
   useAssistantReply,
@@ -40,6 +48,7 @@ import {
   useRespondToApproval,
   useSendAssistantMessage,
   useStopAssistantRun,
+  useSurfaceLife,
   type OptimisticMessage,
 } from './use-assistant';
 
@@ -69,7 +78,17 @@ export type AssistantChatProps = {
   /** Null for a new conversation, which starts with the first message. */
   conversationId: string | null;
   surface: AssistantSurface;
+  /**
+   * A first message started a conversation. Called only while this chat is
+   * still on screen: if the user left before the answer came back, nothing
+   * moves them.
+   */
   onConversationStarted: (conversationId: string) => void;
+  /**
+   * Starts a new conversation the way this surface does (a route, a state
+   * reset). Offered when the conversation cannot be shown.
+   */
+  onNewConversation: () => void;
   /** Smaller headline for tight surfaces (palette, panel). */
   compact?: boolean;
   autoFocus?: boolean;
@@ -92,18 +111,19 @@ function ReplyRow({
   return <AssistantReply text={reply?.text ?? ''} streaming={reply?.streaming ?? false} at={reply?.at ?? new Date()} meta={meta} />;
 }
 
+/**
+ * Deciding on changes. Where a decision stands is shared across the app, so
+ * a request stays disabled from the moment it is decided (here or in another
+ * chat showing it) until the stream takes it out of the tray; a decision
+ * that could not be sent re-enables it and says why, in the request.
+ */
 function useApprovals(schoolId: string) {
   const respond = useRespondToApproval();
+  const decisionOf = useApprovalDecisions();
   const decide = (call: AssistantToolCallItemDto, decision: AssistantApprovalDecision) => {
-    if (!call.body.approvalId) return;
-    respond.mutate(
-      { schoolId, approvalId: call.body.approvalId, decision },
-      { onError: (error) => toast.error(error.message || 'The decision could not be sent.') },
-    );
+    if (call.body.approvalId) respond({ schoolId, approvalId: call.body.approvalId, decision });
   };
-  const pendingDecision = (approvalId: string | undefined) =>
-    respond.isPending && approvalId && respond.variables?.approvalId === approvalId ? respond.variables.decision : undefined;
-  return { decide, pendingDecision };
+  return { decide, decisionOf };
 }
 
 /**
@@ -132,28 +152,59 @@ function OptimisticTurn({ messages, onRetry }: { messages: OptimisticMessage[]; 
   );
 }
 
+const FAILURE_MESSAGE: Record<AssistantConversationFailure, string> = {
+  unavailable: 'This conversation isn’t available.',
+  signed_out: 'You’ve been signed out. Sign in again to continue.',
+};
+
+/** What the timeline needs from the chat to act on a turn: asking it again, and showing a stop on its way. */
+type TurnActions = {
+  /** Undefined while asking again is not possible (a message is already on its way, or sending is unavailable). */
+  onRetry?: (text: string) => void;
+  stoppingRunId: string | null;
+};
+
 function ConversationTimeline({
   schoolId,
   conversationId,
   trailing,
   gutterClassName,
-}: {
+  failure,
+  onNewConversation,
+  onRetry,
+  stoppingRunId,
+}: TurnActions & {
   schoolId: string;
   conversationId: string;
   trailing: ReactNode;
   gutterClassName?: string;
+  failure: AssistantConversationFailure | null;
+  onNewConversation: () => void;
 }) {
-  const timeline = useAssistantTimeline(schoolId, conversationId);
-  if (!timeline.data) {
+  const rows = useAssistantTimeline(schoolId, conversationId);
+  if (failure) {
+    // A new conversation does not help someone who is signed out, so only the message shows then.
     return (
-      <div className="flex h-full items-center justify-center">
+      <AssistantConversationUnavailable
+        message={FAILURE_MESSAGE[failure]}
+        actionLabel={failure === 'unavailable' ? 'New conversation' : undefined}
+        onAction={onNewConversation}
+      />
+    );
+  }
+  if (!rows) {
+    // Shown only if loading takes a moment, so opening a conversation does not flash a spinner.
+    return (
+      <div className="flex h-full items-center justify-center opacity-0 animate-[assistant-reveal_0s_400ms_forwards]">
         <Spinner className="text-muted-foreground" />
       </div>
     );
   }
   return (
     <AssistantTimeline
-      rows={timeline.data}
+      rows={rows}
+      onRetry={onRetry}
+      stoppingRunId={stoppingRunId}
       trailing={trailing}
       gutterClassName={gutterClassName}
       renderReply={(itemId, meta) => <ReplyRow schoolId={schoolId} conversationId={conversationId} itemId={itemId} meta={meta} />}
@@ -186,9 +237,25 @@ function useTrayRequests(schoolId: string, conversationId: string | null, queued
   const approvals = useApprovals(schoolId);
   const pending = useAssistantPendingApprovals(schoolId, conversationId);
   const queued = useAssistantQueuedMessages(schoolId, conversationId);
+  // Its own request state, apart from the composer's Stop: removing a queued message is not stopping the working run.
+  const remove = useStopAssistantRun();
+  const removingRunId = remove.isPending ? remove.variables.runId : null;
+  /** Removes a queued message by stopping its run, which has not started (see `useStopAssistantRun`). */
+  const removeQueued = (itemId: string) => {
+    const item = queued.find((entry) => entry.id === itemId);
+    if (!item) return;
+    remove.mutate(
+      { schoolId, runId: item.runId },
+      { onError: (error) => toast.error(error.message || 'The message could not be removed from the queue.') },
+    );
+  };
   const first = pending[0];
   const queue = [
-    ...queued.map((item) => ({ id: item.id, text: item.body.text })),
+    ...queued.map((item) => ({
+      id: item.id,
+      text: item.body.text,
+      ...(item.runId === removingRunId ? { status: 'Removing…' } : { removable: true }),
+    })),
     ...queuedOptimistic.map((message) => ({
       id: message.clientRequestId,
       text: message.text,
@@ -206,6 +273,7 @@ function useTrayRequests(schoolId: string, conversationId: string | null, queued
     })),
   ];
   if (!first && queue.length === 0) return null;
+  const decided = approvals.decisionOf(first?.body.approvalId);
   return (
     <>
       {first ? (
@@ -213,12 +281,83 @@ function useTrayRequests(schoolId: string, conversationId: string | null, queued
           key={first.id}
           call={first}
           waiting={pending.length}
-          pendingDecision={approvals.pendingDecision(first.body.approvalId)}
+          pendingDecision={decided.decision}
+          error={decided.error}
           onDecide={(decision) => approvals.decide(first, decision)}
         />
       ) : null}
-      <AssistantQueuedMessages messages={queue} />
+      <AssistantQueuedMessages messages={queue} onRemove={removeQueued} />
     </>
+  );
+}
+
+/**
+ * The pill over the composer while the conversation is not live. It fades
+ * in only after a 2s grace, so a quick blip never flashes it.
+ */
+function ConnectionNotice({ offline }: { offline: boolean }) {
+  return (
+    <p
+      role="status"
+      className="absolute inset-x-0 -top-8 mx-auto flex h-7 w-fit items-center gap-1.5 rounded-full border border-border/60 bg-background px-2.5 text-xs text-assistant-warning opacity-0 shadow-sm animate-[assistant-reveal_0s_2s_forwards]"
+    >
+      <Spinner className="size-3" />
+      {offline ? 'You’re offline. Reconnecting when you’re back.' : 'Reconnecting…'}
+    </p>
+  );
+}
+
+/**
+ * The chat's one live region for screen readers: it speaks when its text
+ * changes, so a finished answer is read once (never frame by frame) and a
+ * change that needs a decision is named when it appears.
+ */
+function ChatAnnouncer({ schoolId, conversationId }: { schoolId: string; conversationId: string | null }) {
+  const message = useAssistantAnnouncement(schoolId, conversationId);
+  return (
+    <p role="status" aria-live="polite" className="sr-only">
+      {message}
+    </p>
+  );
+}
+
+/** The space above the docked composer: the conversation, or a first message on its way. */
+function ChatBody({
+  schoolId,
+  conversationId,
+  trailing,
+  gutterClassName,
+  failure,
+  onNewConversation,
+  onRetry,
+  stoppingRunId,
+}: TurnActions & {
+  schoolId: string;
+  conversationId: string | null;
+  trailing: ReactNode;
+  gutterClassName: string;
+  failure: AssistantConversationFailure | null;
+  onNewConversation: () => void;
+}) {
+  return (
+    <div className="min-h-0 flex-1">
+      {conversationId ? (
+        <ConversationTimeline
+          schoolId={schoolId}
+          conversationId={conversationId}
+          trailing={trailing}
+          gutterClassName={gutterClassName}
+          failure={failure}
+          onNewConversation={onNewConversation}
+          onRetry={onRetry}
+          stoppingRunId={stoppingRunId}
+        />
+      ) : (
+        <div className={cn('h-full overflow-y-auto pt-4', gutterClassName)}>
+          <div className={ASSISTANT_LANE_CLASS}>{trailing}</div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -226,99 +365,127 @@ function useTrayRequests(schoolId: string, conversationId: string | null, queued
  * A conversation with the assistant. New conversations start as a centred
  * welcome with the composer; once a message is on its way, the timeline
  * fills the space and the composer docks at the bottom of the same lane.
+ *
+ * Both layouts are one tree: the same three nested elements hold the
+ * composer in each, and only their classes and siblings differ. React
+ * therefore keeps the composer mounted when the first message turns the
+ * welcome into a conversation, so a send that fails can still put the draft
+ * back and show its error. Keep the composer's position in that tree fixed.
  */
 export function AssistantChat({
   schoolId,
   conversationId,
   surface,
   onConversationStarted,
+  onNewConversation,
   compact = false,
   autoFocus = false,
   gutterClassName = 'px-4 sm:px-6',
 }: AssistantChatProps) {
+  const life = useSurfaceLife();
   const status = useAssistantStatus(schoolId);
-  const { send, resend } = useSendAssistantMessage(schoolId, surface);
+  const { send, resend, isPending: sending } = useSendAssistantMessage(schoolId, surface);
   const stop = useStopAssistantRun();
   const running = useAssistantActiveRun(schoolId, conversationId);
   const confirmed = useConfirmedItemIds(schoolId, conversationId);
   const optimistic = useOptimisticMessages(schoolId, conversationId, confirmed);
   const lastSentText = useLastUserText(schoolId, conversationId);
   const connection = useAssistantConnection(schoolId, conversationId);
+  const failure = useAssistantConversationFailure(schoolId, conversationId);
+  const draft = useAssistantDraft(schoolId, conversationId);
   const retry = (message: OptimisticMessage) => resend(message.mutation);
   // While a run works, a new message waits in the tray; otherwise it starts a turn.
   const requests = useTrayRequests(schoolId, conversationId, running ? optimistic : [], retry);
 
   async function sendText(text: string) {
-    const result = await send(text, conversationId);
-    if (!conversationId) onConversationStarted(result.conversation.id);
+    const result = await send(text, conversationId).catch((error: unknown) => {
+      throw new Error(refusalMessage(error) ?? 'The message could not be sent. Check your connection and try again.');
+    });
+    // The answer can arrive after the user has left this chat; then it must not move them.
+    if (!conversationId && life.isAlive()) onConversationStarted(result.conversation.id);
   }
+
+  /** Sends text that did not come from the message box (a suggestion, "Try again"); a failure shows as a toast. */
+  const sendDirectly = (text: string) =>
+    void sendText(text).catch((error: Error) => toast.error(error.message || 'The message could not be sent.'));
 
   const disabledReason = status.data && !status.data.available ? status.data.unavailableReason : null;
-  const composer = (
-    <AssistantComposer
-      autoFocus={autoFocus}
-      disabledReason={disabledReason}
-      placeholder={running ? 'Queue a follow-up…' : undefined}
-      onSend={sendText}
-      lastSentText={lastSentText}
-      requests={requests}
-      leading={<ComposerToolbar schoolId={schoolId} conversationId={conversationId} />}
-      stopping={stop.isPending}
-      onStop={
-        running
-          ? () =>
-              stop.mutate(
-                { schoolId, runId: running.id },
-                { onError: (error) => toast.error(error.message || 'The assistant could not be stopped.') },
-              )
-          : undefined
-      }
-    />
-  );
-
+  // "Try again" asks a failed turn's question again. Not while a message is already on its way or sending is unavailable.
+  const canRetry = !sending && optimistic.length === 0 && !disabledReason;
+  // From the click until the run has ended: the request on its way, then the stop the run has recorded.
+  const stopping = stop.isPending || Boolean(running?.stopRequestedAt);
+  const welcome = !conversationId && optimistic.length === 0;
   const trailing = !running && optimistic.length ? <OptimisticTurn messages={optimistic} onRetry={retry} /> : null;
-
-  if (!conversationId && optimistic.length === 0) {
-    return (
-      <div className={cn('flex h-full min-h-0 flex-col justify-center overflow-y-auto py-8', gutterClassName)}>
-        <div className={cn(ASSISTANT_LANE_CLASS, 'flex flex-col gap-6', compact ? 'max-w-xl' : 'max-w-2xl')}>
-          <AssistantWelcome compact={compact} />
-          <div className="flex flex-col gap-3">
-            {composer}
-            <AssistantSuggestions
-              suggestions={SUGGESTIONS}
-              onPick={(prompt) => void sendText(prompt).catch((error: Error) => toast.error(error.message || 'The message could not be sent.'))}
-            />
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const notLive = Boolean(conversationId) && !failure && (connection.offline || connection.reconnecting);
 
   return (
-    <div className="relative flex h-full min-h-0 flex-col">
-      <div className="min-h-0 flex-1">
-        {conversationId ? (
-          <ConversationTimeline schoolId={schoolId} conversationId={conversationId} trailing={trailing} gutterClassName={gutterClassName} />
-        ) : (
-          <div className={cn('h-full overflow-y-auto pt-4', gutterClassName)}>
-            <div className={ASSISTANT_LANE_CLASS}>{trailing}</div>
-          </div>
+    // Tooltips in the chat wait 400ms, so crossing Send or Copy with the pointer does not pop one (the app's default is instant).
+    <TooltipProvider delayDuration={400}>
+      <div
+        ref={life.ref}
+        {...ASSISTANT_SURFACE_PROPS}
+        className={cn(
+          'flex h-full min-h-0 flex-col outline-none',
+          welcome ? cn('justify-center overflow-y-auto py-8', gutterClassName) : 'relative',
         )}
+      >
+        {welcome ? null : (
+          <ChatBody
+            schoolId={schoolId}
+            conversationId={conversationId}
+            trailing={trailing}
+            gutterClassName={gutterClassName}
+            failure={failure}
+            onNewConversation={onNewConversation}
+            onRetry={canRetry ? sendDirectly : undefined}
+            stoppingRunId={stop.isPending ? stop.variables.runId : null}
+          />
+        )}
+        <div
+          className={
+            welcome
+              ? // The welcome composer is as wide as the docked one (the lane), so sending the first message does not resize it.
+                cn(ASSISTANT_LANE_CLASS, 'flex flex-col gap-6', compact && 'max-w-xl')
+              : // The bottom padding grows to the phone's home-indicator inset when there is one.
+                cn('relative pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:pb-[max(1rem,env(safe-area-inset-bottom))]', gutterClassName)
+          }
+        >
+          {welcome ? (
+            <AssistantWelcome compact={compact} />
+          ) : (
+            <div className="pointer-events-none absolute inset-x-0 -top-6 h-6 bg-linear-to-t from-background to-transparent" aria-hidden />
+          )}
+          {notLive ? <ConnectionNotice offline={connection.offline} /> : null}
+          <div className={welcome ? 'flex flex-col gap-3' : ASSISTANT_LANE_CLASS}>
+            <AssistantComposer
+              autoFocus={autoFocus}
+              disabledReason={disabledReason}
+              placeholder={running ? 'Queue a follow-up…' : undefined}
+              onSend={sendText}
+              sending={sending}
+              lastSentText={lastSentText}
+              initialText={draft.initialText}
+              onDraftChange={draft.save}
+              requests={requests}
+              leading={<ComposerToolbar schoolId={schoolId} conversationId={conversationId} />}
+              stopping={stopping}
+              onStop={
+                running
+                  ? () =>
+                      stop.mutate(
+                        { schoolId, runId: running.id },
+                        { onError: (error) => toast.error(error.message || 'The assistant could not be stopped.') },
+                      )
+                  : undefined
+              }
+            />
+            {welcome ? (
+              <AssistantSuggestions suggestions={SUGGESTIONS} onPick={sendDirectly} />
+            ) : null}
+          </div>
+        </div>
+        <ChatAnnouncer schoolId={schoolId} conversationId={conversationId} />
       </div>
-      <div className={cn('relative pb-3 sm:pb-4', gutterClassName)}>
-        <div className="pointer-events-none absolute inset-x-0 -top-6 h-6 bg-linear-to-t from-background to-transparent" aria-hidden />
-        {connection.reconnecting ? (
-          <p
-            role="status"
-            className="absolute inset-x-0 -top-8 mx-auto flex h-7 w-fit items-center gap-1.5 rounded-full border border-border/60 bg-background px-2.5 text-xs text-assistant-warning opacity-0 shadow-sm animate-[assistant-reveal_0s_2s_forwards]"
-          >
-            <Spinner className="size-3" />
-            Reconnecting…
-          </p>
-        ) : null}
-        <div className={ASSISTANT_LANE_CLASS}>{composer}</div>
-      </div>
-    </div>
+    </TooltipProvider>
   );
 }

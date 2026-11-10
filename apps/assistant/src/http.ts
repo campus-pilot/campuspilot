@@ -40,6 +40,21 @@ export function createAssistantApp() {
     ],
   });
 
+  // CORS only stops another site from reading a response; the browser still
+  // sends the request, with the user's cookie. So a request that names an
+  // origin outside the allow list is refused before it runs. Browsers put
+  // `Origin` on every cross-site request that can change something; a
+  // request without one comes from a server or a script, which has no
+  // user's cookie to borrow.
+  app.use('/rpc/*', async (context, next) => {
+    const origin = context.req.header('origin');
+    if (origin !== undefined && !allowedOrigins.has(origin)) {
+      log.warn({ origin, path: context.req.path }, 'rpc.origin.refused');
+      return context.text('Forbidden', 403);
+    }
+    await next();
+  });
+
   app.use('/rpc/*', async (context, next) => {
     const result = await rpcHandler.handle(context.req.raw, {
       prefix: '/rpc',

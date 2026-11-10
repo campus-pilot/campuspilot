@@ -46,7 +46,8 @@ function rowSpacing(row: AssistantTimelineRow, previous: AssistantTimelineRow | 
     case 'reply':
       return row.meta ? 'pb-4' : 'pb-2';
     case 'notice':
-      return 'pb-4';
+      // The same room an answer leaves before the next question (50px, measured: its meta row and spacing).
+      return 'pb-12.5';
   }
 }
 
@@ -63,13 +64,26 @@ export type AssistantTimelineProps = {
   renderReply: (itemId: string, meta: boolean) => ReactNode;
   /** Renders a view with the app's components (records fetch their own data). */
   renderView: (item: AssistantViewItemDto) => ReactNode;
+  /**
+   * Asks a failed or stopped turn's question again. Offered on the latest
+   * turn only, and only while this is set, so the caller withholds it while
+   * a message is already on its way.
+   */
+  onRetry?: (text: string) => void;
+  /** The run a stop request is on its way for; its bar says "Stopping…" at once. */
+  stoppingRunId?: string | null;
   /** Rows the server has not confirmed yet (optimistic messages). */
   trailing?: ReactNode;
   /** Horizontal padding of the lane's container; the lane itself is centred. */
   gutterClassName?: string;
 };
 
-type RowRenderers = Pick<AssistantTimelineProps, 'renderReply' | 'renderView'>;
+type RowRenderers = Pick<AssistantTimelineProps, 'renderReply' | 'renderView' | 'onRetry' | 'stoppingRunId'>;
+
+/** The "Try again" action of a notice, when its turn may be asked again and the caller allows it now. */
+function retryOf(text: string | null, onRetry: AssistantTimelineProps['onRetry']) {
+  return text !== null && onRetry ? () => onRetry(text) : undefined;
+}
 
 function TimelineRow({ row, ...renderers }: RowRenderers & { row: AssistantTimelineRow }) {
   switch (row.kind) {
@@ -86,7 +100,7 @@ function TimelineRow({ row, ...renderers }: RowRenderers & { row: AssistantTimel
     case 'live':
       return <AssistantLiveStatus label={row.label} />;
     case 'notice':
-      return <AssistantRunNotice run={row.run} />;
+      return <AssistantRunNotice run={row.run} onRetry={retryOf(row.retryText, renderers.onRetry)} />;
     case 'work':
       return (
         <AssistantWorkBar
@@ -95,6 +109,7 @@ function TimelineRow({ row, ...renderers }: RowRenderers & { row: AssistantTimel
           until={row.until}
           pending={row.pending}
           changes={row.changes}
+          stopping={row.stopRequested || row.runId === renderers.stoppingRunId}
           diagnostics={row.diagnostics ? { runId: row.runId, usage: row.diagnostics } : null}
         >
           {row.folded.length
@@ -135,10 +150,13 @@ export function AssistantTimeline({ rows, trailing, gutterClassName = 'px-4 sm:p
         <MessageScrollerButton
           variant="outline"
           size="sm"
-          className="h-7 gap-1 rounded-full border-border/60 bg-background px-2.5 text-xs text-foreground shadow-sm hover:border-border hover:bg-background dark:bg-background dark:hover:bg-background data-[direction=end]:bottom-3"
+          // On phones the pill is a 28px disc: the lane is too narrow for its label not to cover the last row.
+          className="h-7 gap-1 rounded-full border-border/60 bg-background px-2.5 text-xs text-foreground shadow-sm hover:border-border hover:bg-background motion-reduce:transition-none max-sm:w-7 max-sm:px-0 dark:bg-background dark:hover:bg-background data-[direction=end]:bottom-3"
+          // Keeps focus (and the phone keyboard) in the message box when the pill is pressed.
+          onPointerDown={(event) => event.preventDefault()}
         >
           <ChevronDown aria-hidden />
-          Scroll to end
+          <span className="max-sm:sr-only">Scroll to end</span>
         </MessageScrollerButton>
       </MessageScroller>
     </MessageScrollerProvider>

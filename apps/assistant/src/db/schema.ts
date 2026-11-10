@@ -129,6 +129,13 @@ export type AssistantToolCallBody = {
   error?: AssistantToolError;
   /** The approval this call waited for, when it needed the user's decision. */
   approvalId?: string;
+  /**
+   * When a write was handed to the API (ISO time). Saved before the call is
+   * made, so a step retried after a crash can tell the write may already
+   * have happened and must not be sent a second time. Reads never set it:
+   * repeating a read is harmless.
+   */
+  executionStartedAt?: string;
 };
 
 /** A view the assistant showed (see @campuspilot/assistant-contract/views). */
@@ -151,8 +158,11 @@ export const assistantConversationTable = assistantSchema.table(
     userId: text("user_id").notNull(),
     title: text("title"),
     /**
-     * The provider and model the conversation started on. Its transcript is
-     * in that provider's format, so the conversation stays on it.
+     * The provider the conversation runs on, and the model it started on.
+     * Its transcript is in that provider's format, so the conversation stays
+     * on the provider. It does not stay on the model: each run calls the
+     * model the provider is configured with at that time, and records it on
+     * the run. `model` here is history, never used to pick a model.
      */
     provider: assistantModelProviderEnum("provider").notNull(),
     model: text("model").notNull(),
@@ -196,7 +206,10 @@ export const assistantRunTable = assistantSchema.table(
     clientRequestId: text("client_request_id").notNull(),
     surface: assistantSurfaceEnum("surface").notNull(),
     status: assistantRunStatusEnum("status").notNull().default("queued"),
-    /** Provider and model the run called; null until the run starts. */
+    /**
+     * The provider the run called and the model that answered its latest
+     * request, as the provider reported it; null until the run starts.
+     */
     provider: assistantModelProviderEnum("provider"),
     model: text("model"),
     stopRequestedAt: timestamp("stop_requested_at"),

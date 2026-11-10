@@ -236,6 +236,12 @@ importers:
       '@campuspilot/config':
         specifier: workspace:*
         version: link:../../packages/config
+      '@testcontainers/postgresql':
+        specifier: 'catalog:'
+        version: 12.1.0
+      '@testcontainers/redis':
+        specifier: 'catalog:'
+        version: 12.1.0
       '@types/node':
         specifier: 'catalog:'
         version: 26.5.1
@@ -245,6 +251,9 @@ importers:
       drizzle-kit:
         specifier: ^0.31.10
         version: 0.31.10
+      testcontainers:
+        specifier: 'catalog:'
+        version: 12.1.0
       tsdown:
         specifier: ^0.22.14
         version: 0.22.14(tsx@4.23.13)(typescript@6.0.3)

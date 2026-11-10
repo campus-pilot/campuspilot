@@ -29,7 +29,8 @@ function PanelHeader({
   onNewConversation: () => void;
 }) {
   return (
-    <SheetHeader className="h-12 flex-row items-center gap-0.5 border-b border-assistant-hairline py-0 ps-4 pe-2">
+    // As tall as the page header beside it (56px, and 64px where the page sits inset on md+), with the same rule, so the two lines meet.
+    <SheetHeader className="h-14 shrink-0 flex-row items-center gap-0.5 border-b py-0 ps-4 pe-2 md:h-16">
       <div className="flex min-w-0 flex-1 items-center gap-2">
         <Sparkles className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
         <SheetTitle className="text-[13px] font-medium">Assistant</SheetTitle>
@@ -82,7 +83,8 @@ export function AssistantPanel({ schoolId }: { schoolId: string }) {
         <SheetContent
           side="right"
           showCloseButton={false}
-          className="w-full gap-0 bg-background p-0 shadow-2xl data-[side=right]:sm:max-w-md"
+          // Full width on phones (the sheet's own default is three quarters, which leaves a sliver of page behind it).
+          className="gap-0 bg-background p-0 shadow-2xl data-[side=right]:w-full data-[side=right]:sm:max-w-md"
           onInteractOutside={(event) => event.preventDefault()}
           // Opening lands in the message box (its autoFocus), not on the first header button.
           onOpenAutoFocus={(event) => event.preventDefault()}
@@ -102,6 +104,7 @@ export function AssistantPanel({ schoolId }: { schoolId: string }) {
               autoFocus
               gutterClassName="px-4"
               onConversationStarted={setConversationId}
+              onNewConversation={() => setConversationId(null)}
             />
           </div>
         </SheetContent>

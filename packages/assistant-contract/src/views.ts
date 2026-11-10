@@ -8,6 +8,10 @@ import { z } from 'zod';
  * - `records` names platform records; the app fetches them itself, with the
  *   user's permissions, and renders the platform's record summaries.
  * - `exam_result` renders the platform's student result preview.
+ * - `documents` names generated documents; the app shows each with a
+ *   Download button and fetches the file itself, with the user's session. The
+ *   model never writes a download link: links are long, short-lived, and
+ *   models copy them unreliably.
  * - `table`, `stats`, `details`, `bars` and `notice` are composed from data
  *   the model already has (normally from a tool result).
  *
@@ -43,6 +47,22 @@ const examResultViewSchema = z.object({
   examSlug: text(100),
   classId: text(120),
   studentId: text(120),
+});
+
+const documentsViewSchema = z.object({
+  type: z.literal('documents'),
+  title,
+  documents: z
+    .array(
+      z.object({
+        artifactId: text(120).describe('The document artifact id exactly as a document tool returned it.'),
+        documentType: text(60).describe('Its documentType exactly as the tool returned it, such as report_card.'),
+        name: text(160).describe('What to call it, such as "Report card: Ananya Gupta, First Semester".'),
+        detail: text(160).optional().describe('One short line of context, such as the class or the date generated.'),
+      }),
+    )
+    .min(1)
+    .max(12),
 });
 
 const cellValueSchema = z.union([z.string().max(300), z.number(), z.null()]);
@@ -110,6 +130,7 @@ const noticeViewSchema = z.object({
 export const assistantViewSchema = z.discriminatedUnion('type', [
   recordsViewSchema,
   examResultViewSchema,
+  documentsViewSchema,
   tableViewSchema,
   statsViewSchema,
   detailsViewSchema,
@@ -119,6 +140,7 @@ export const assistantViewSchema = z.discriminatedUnion('type', [
 export type AssistantView = z.infer<typeof assistantViewSchema>;
 export type AssistantRecordsView = z.infer<typeof recordsViewSchema>;
 export type AssistantExamResultView = z.infer<typeof examResultViewSchema>;
+export type AssistantDocumentsView = z.infer<typeof documentsViewSchema>;
 export type AssistantTableView = z.infer<typeof tableViewSchema>;
 export type AssistantStatsView = z.infer<typeof statsViewSchema>;
 export type AssistantDetailsView = z.infer<typeof detailsViewSchema>;
@@ -137,6 +159,7 @@ export const SHOW_VIEW_TOOL_DESCRIPTION = [
   'Show information to the user as a view inside the chat, rendered with the app’s own components.',
   'Use it whenever an answer contains records, lists, numbers or comparisons, instead of writing tables or long lists in text:',
   'records for specific admissions, students, classes, exams or staff (pass their ids); exam_result for one student’s result in an exam;',
+  'documents for generated documents such as report cards, each shown with a Download button (this is the only way to give the user a document: never write a download link);',
   'table for rows of data; stats for a few headline numbers; details for one item’s facts; bars to compare amounts; notice for one important caution.',
   'Only use data you got from tools. After showing a view, add at most one or two sentences of explanation; do not repeat what the view shows.',
 ].join(' ');

@@ -1,3 +1,4 @@
+import { Button } from '@campuspilot/ui/components/button';
 import { cn } from '@campuspilot/ui/lib/utils';
 import { Sparkles, type LucideIcon } from 'lucide-react';
 
@@ -26,6 +27,32 @@ export function AssistantWelcome({ compact = false }: { compact?: boolean }) {
           I work with your permissions, and ask before changing anything.
         </p>
       </div>
+    </div>
+  );
+}
+
+/**
+ * A conversation that cannot be shown (it does not exist, belongs elsewhere,
+ * or the session ended): one muted line in the welcome's voice, centred
+ * where the conversation would be, and a way forward when there is one.
+ */
+export function AssistantConversationUnavailable({
+  message,
+  actionLabel,
+  onAction,
+}: {
+  message: string;
+  actionLabel?: string;
+  onAction?: () => void;
+}) {
+  return (
+    <div role="alert" className="flex h-full flex-col items-center justify-center gap-3 px-4 text-center">
+      <p className="max-w-sm text-sm/[1.45] text-balance text-muted-foreground">{message}</p>
+      {actionLabel && onAction ? (
+        <Button type="button" variant="outline" onClick={onAction}>
+          {actionLabel}
+        </Button>
+      ) : null}
     </div>
   );
 }

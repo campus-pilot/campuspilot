@@ -5,10 +5,8 @@ import {
   type AssistantStreamEvent,
 } from '@campuspilot/assistant-contract/dto';
 import { implement, ORPCError } from '@orpc/server';
-import { and, count, desc, eq } from 'drizzle-orm';
 
 import { db } from './db/client';
-import { assistantConversationTable } from './db/schema';
 import { entitlements } from './entitlements';
 import { signalAssistantRunStop, streamingTexts, subscribeAssistantEvents } from './events';
 import { generateId } from './ids';
@@ -82,6 +80,26 @@ async function availability(schoolId: string, userId: string) {
 /** Idle interval after which the stream sends a heartbeat. */
 const HEARTBEAT_MS = 15_000;
 
+/** How often an open stream confirms its user may still read it. */
+const ACCESS_RECHECK_MS = 2 * 60_000;
+
+/**
+ * Whether the user of an open stream is still signed in and still allowed
+ * to use the assistant in the school. A stream stays open for hours, so the
+ * check made when it opened says nothing about now. When the API cannot be
+ * asked, the stream is kept: an outage must not close every conversation,
+ * and the next check decides.
+ */
+async function streamStillAllowed(context: Authed, schoolId: string): Promise<boolean> {
+  try {
+    const user = await getSessionUser(context.cookie);
+    return user?.id === context.user.id && (await canUseAssistant(context.cookie, user.id, schoolId));
+  } catch (err) {
+    log.warn({ err, schoolId }, 'assistant.stream.access-recheck-failed');
+    return true;
+  }
+}
+
 /** Longest conversation title derived from the first message. */
 const TITLE_MAX_LENGTH = 80;
 
@@ -111,24 +129,15 @@ export const assistantRouter = os.router({
   listConversations: authed.listConversations.handler(async ({ context, input }) => {
     await assertAssistantAccess(context, input.schoolId);
     const pageSize = ASSISTANT_LIST_PAGE_SIZE;
-    const where = and(
-      eq(assistantConversationTable.schoolId, input.schoolId),
-      eq(assistantConversationTable.userId, context.user.id),
-    );
-    const [rows, [total]] = await Promise.all([
-      db
-        .select()
-        .from(assistantConversationTable)
-        .where(where)
-        .orderBy(desc(assistantConversationTable.updatedAt), desc(assistantConversationTable.id))
-        .limit(pageSize)
-        .offset((input.page - 1) * pageSize),
-      db.select({ value: count() }).from(assistantConversationTable).where(where),
-    ]);
-    const totalItems = total?.value ?? 0;
+    const { items, totalItems } = await store.listConversations(db, {
+      schoolId: input.schoolId,
+      userId: context.user.id,
+      page: input.page,
+      pageSize,
+    });
     const totalPages = Math.ceil(totalItems / pageSize);
     return {
-      items: rows.map(store.toConversationDto),
+      items,
       pagination: {
         nextCursor: input.page < totalPages ? String(input.page + 1) : null,
         currentPage: input.page,
@@ -182,6 +191,7 @@ export const assistantRouter = os.router({
       }
       yield { type: 'synchronized' } satisfies AssistantStreamEvent;
 
+      let accessCheckedAt = Date.now();
       while (true) {
         let timer: ReturnType<typeof setTimeout> | undefined;
         const event = await Promise.race([
@@ -191,6 +201,12 @@ export const assistantRouter = os.router({
           }),
         ]);
         clearTimeout(timer);
+        if (Date.now() - accessCheckedAt >= ACCESS_RECHECK_MS) {
+          accessCheckedAt = Date.now();
+          // Ending the stream makes the browser reconnect, and that request
+          // gets the real refusal (signed out, or no longer permitted).
+          if (!(await streamStillAllowed(context, input.schoolId))) return;
+        }
         if (event === 'heartbeat') {
           yield { type: 'heartbeat' } satisfies AssistantStreamEvent;
           continue;
@@ -215,19 +231,24 @@ export const assistantRouter = os.router({
       if (replay.schoolId !== input.schoolId) {
         throw new ORPCError('CONFLICT', { message: 'This request id was already used in another school.' });
       }
-      const [conversation, item] = await Promise.all([
+      const [conversation, item, attention] = await Promise.all([
         store.findOwnedConversation(db, {
           conversationId: replay.conversationId,
           schoolId: input.schoolId,
           userId,
         }),
         store.findItemByKey(db, replay.conversationId, userMessageItemKey(replay.id)),
+        store.conversationAttention(db, replay.conversationId),
       ]);
       const itemDto = item ? store.toItemDto(item) : null;
       if (!conversation || !itemDto || itemDto.kind !== 'user_message') {
         throw new ORPCError('NOT_FOUND', { message: 'Assistant conversation was not found.' });
       }
-      return { conversation: store.toConversationDto(conversation), run: store.toRunDto(replay), item: itemDto };
+      return {
+        conversation: store.toConversationDto(conversation, attention),
+        run: store.toRunDto(replay),
+        item: itemDto,
+      };
     }
 
     await assertAssistantAccess(context, input.schoolId);
@@ -288,9 +309,9 @@ export const assistantRouter = os.router({
         },
         itemKey: userMessageItemKey(runId),
       });
-      const conversation = await store.findConversation(tx, conversationId);
+      const conversation = await store.findConversationDto(tx, conversationId);
       if (item.kind !== 'user_message' || !conversation) throw new ORPCError('INTERNAL_SERVER_ERROR');
-      return { conversation: store.toConversationDto(conversation), run, item };
+      return { conversation, run, item };
     });
 
     try {
@@ -380,6 +401,25 @@ export const assistantRouter = os.router({
       });
     }
     return stopped;
+  }),
+
+  /**
+   * Deletes a conversation for good. The same checks as reading it: the
+   * user may use the assistant in the school, and the conversation is their
+   * own. It is refused while a run has not finished, so the user stops the
+   * assistant first and nothing is deleted from under a working turn.
+   */
+  deleteConversation: authed.deleteConversation.handler(async ({ context, input }) => {
+    await assertAssistantAccess(context, input.schoolId);
+    const owned = await ownedConversation(context, input.schoolId, input.conversationId);
+    const outcome = await store.deleteConversation(db, owned.id);
+    if (outcome === 'busy') {
+      throw new ORPCError('CONFLICT', { message: 'Stop the assistant before deleting this conversation.' });
+    }
+    // Deleted by another request in between: it is gone either way.
+    if (outcome === 'missing') throw new ORPCError('NOT_FOUND', { message: 'Assistant conversation was not found.' });
+    log.info({ conversationId: owned.id, schoolId: input.schoolId }, 'assistant.conversation.deleted');
+    return { id: owned.id };
   }),
 });
 

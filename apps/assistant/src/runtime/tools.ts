@@ -157,7 +157,16 @@ export async function loadToolCatalog(token: string): Promise<AssistantToolCatal
 export type ToolError = { code: string; message: string };
 
 export type ToolOutcome =
-  | { ok: true; modelContent: string; storedOutput: string; outputTruncated: boolean }
+  | {
+      ok: true;
+      /** The whole result. Only for code that parses it; never stored or journaled. */
+      text: string;
+      /** The result as the model reads it, cut at `MODEL_OUTPUT_LIMIT`. */
+      modelContent: string;
+      /** The result as shown on the item, cut at `STORED_OUTPUT_LIMIT`. */
+      storedOutput: string;
+      outputTruncated: boolean;
+    }
   | { ok: false; error: ToolError };
 
 function truncate(text: string, limit: number) {
@@ -204,6 +213,7 @@ export async function callTool(
   const stored = truncate(text, STORED_OUTPUT_LIMIT);
   return {
     ok: true,
+    text,
     modelContent: forModel.truncated
       ? `${forModel.text}\n[Result truncated; request a narrower page or filter.]`
       : forModel.text,

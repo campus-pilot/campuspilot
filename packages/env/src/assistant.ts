@@ -38,6 +38,14 @@ export const env = createEnv({
      * left to the deployment tooling.
      */
     RESTATE_SERVICE_URL: z.url().optional(),
+    /**
+     * Restate's request-signing public keys (`publickeyv1_…`), comma
+     * separated. When set, the service endpoint only accepts requests signed
+     * by that Restate server. Without it, anything that can reach the
+     * endpoint's port can drive a turn, including approving a waiting change,
+     * so leave it unset only where the port is private to Restate.
+     */
+    RESTATE_IDENTITY_KEYS: z.string().min(1).optional(),
 
     /**
      * Model provider for new conversations. Existing conversations keep the

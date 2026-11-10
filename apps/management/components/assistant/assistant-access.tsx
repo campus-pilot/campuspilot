@@ -14,16 +14,20 @@ export function AssistantAccess({
   schoolId,
   children,
   fallback = null,
+  pending,
 }: {
   schoolId: string;
   children: ReactNode;
   fallback?: ReactNode;
+  /** Shown while the permission check loads; defaults to `fallback`. */
+  pending?: ReactNode;
 }) {
   if (!assistantClient) return fallback;
   return (
     <RequirePermissions
       permissions={{ action: SCHOOL_ACTIONS.USE_ASSISTANT, resource: { kind: 'school', schoolId } }}
       fallback={fallback}
+      pending={pending}
     >
       {children}
     </RequirePermissions>

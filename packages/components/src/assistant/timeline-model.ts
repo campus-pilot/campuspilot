@@ -6,6 +6,8 @@ import type {
   AssistantViewItemDto,
 } from '@campuspilot/assistant-contract/dto';
 
+import { plural } from './plural';
+
 /**
  * Where a turn stands, as its work bar says it: "Working for 12s",
  * "Paused at 8s" (waiting on the user, so the clock stops), "Worked for 18s",
@@ -39,6 +41,8 @@ export type AssistantTimelineRow =
       pending: AssistantToolCallItemDto | null;
       /** Writes that went through, for the bar's right side. */
       changes: number;
+      /** The user asked this turn to stop and it has not ended yet ("Stopping…"). */
+      stopRequested: boolean;
       /** Developer diagnostics of the run; null unless the service sends them. */
       diagnostics: AssistantRunDto['diagnostics'];
     }
@@ -52,7 +56,12 @@ export type AssistantTimelineRow =
   | { kind: 'view'; id: string; item: AssistantViewItemDto }
   /** The live line while the model thinks and nothing else shows progress. */
   | { kind: 'live'; id: string; label: 'Thinking' }
-  | { kind: 'notice'; id: string; run: AssistantRunDto };
+  /**
+   * Why a turn ended early. `retryText` is the question to ask again, set
+   * only on the conversation's latest turn while nothing is working or
+   * waiting; it is what "Try again" sends.
+   */
+  | { kind: 'notice'; id: string; run: AssistantRunDto; retryText: string | null };
 
 /** Whether a tool call is shown as a decision rather than activity. */
 export function isDecisionCall(call: AssistantToolCallItemDto): boolean {
@@ -117,7 +126,21 @@ function contentRows(items: readonly AssistantItemDto[]): AssistantTimelineRow[]
   return rows;
 }
 
-function turnRows(run: AssistantRunDto | undefined, items: readonly AssistantItemDto[]): AssistantTimelineRow[] {
+/** The text of a turn's last question, which is what trying it again sends. */
+function lastUserText(items: readonly AssistantItemDto[]): string | null {
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index]!;
+    if (item.kind === 'user_message') return item.body.text;
+  }
+  return null;
+}
+
+function turnRows(
+  run: AssistantRunDto | undefined,
+  items: readonly AssistantItemDto[],
+  /** Whether this turn may offer "Try again" (see `retryableRunId`). */
+  retryable: boolean,
+): AssistantTimelineRow[] {
   const rows = contentRows(items);
   const users = rows.filter((row) => row.kind === 'user');
   const content = rows.filter((row) => row.kind !== 'user');
@@ -128,7 +151,9 @@ function turnRows(run: AssistantRunDto | undefined, items: readonly AssistantIte
   const calls = items.filter((item): item is AssistantToolCallItemDto => item.kind === 'tool_call');
   const pending = calls.find((call) => call.status === 'awaiting_approval') ?? null;
   const notice: AssistantTimelineRow[] =
-    run.status === 'failed' || run.status === 'cancelled' ? [{ kind: 'notice', id: `notice:${run.id}`, run }] : [];
+    run.status === 'failed' || run.status === 'cancelled'
+      ? [{ kind: 'notice', id: `notice:${run.id}`, run, retryText: retryable ? lastUserText(items) : null }]
+      : [];
 
   // A run stopped before it began has nothing to time; only say it stopped.
   if (!run.startedAt && content.length === 0) return [...users, ...notice];
@@ -143,6 +168,7 @@ function turnRows(run: AssistantRunDto | undefined, items: readonly AssistantIte
     pending: state === 'paused' ? pending : null,
     changes: calls.filter((call) => call.body.access === 'write' && call.status === 'succeeded').length,
     diagnostics: run.diagnostics,
+    stopRequested: (state === 'working' || state === 'paused') && run.stopRequestedAt !== null,
   };
 
   if (state === 'working' || state === 'paused') {
@@ -157,16 +183,37 @@ function turnRows(run: AssistantRunDto | undefined, items: readonly AssistantIte
   return [...users, { ...bar, folded }, ...visible, ...notice];
 }
 
+/**
+ * The turn that may offer "Try again": the conversation's newest one, when
+ * it failed or was stopped and nothing is working, waiting for approval or
+ * queued. Older failed turns never offer it (the conversation has moved on),
+ * and neither does anything while a turn is in progress, so a retry cannot
+ * pile onto work that is still running. A queued message the user removed
+ * (cancelled before it ever started) offers nothing: they took it back on
+ * purpose.
+ */
+function retryableRunId(runs: readonly AssistantRunDto[]): string | null {
+  if (activeRun(runs)) return null;
+  const newest = runs.reduce<AssistantRunDto | null>(
+    (latest, run) => (!latest || run.createdAt.getTime() >= latest.createdAt.getTime() ? run : latest),
+    null,
+  );
+  if (!newest) return null;
+  const removedBeforeStart = newest.status === 'cancelled' && !newest.startedAt;
+  return (newest.status === 'failed' || newest.status === 'cancelled') && !removedBeforeStart ? newest.id : null;
+}
+
 export function buildAssistantTimeline(
   items: readonly AssistantItemDto[],
   runs: readonly AssistantRunDto[],
 ): AssistantTimelineRow[] {
   const runById = new Map(runs.map((run) => [run.id, run]));
+  const retryable = retryableRunId(runs);
   const rows: AssistantTimelineRow[] = [];
   for (const [runId, runItems] of itemsByRun(items)) {
     // Queued messages wait in the composer tray, not the timeline.
     if (runById.get(runId)?.status === 'queued') continue;
-    rows.push(...turnRows(runById.get(runId), runItems));
+    rows.push(...turnRows(runById.get(runId), runItems, runId === retryable));
   }
   return rows;
 }
@@ -187,12 +234,19 @@ function liveRows(run: AssistantRunDto, items: readonly AssistantItemDto[]): Ass
   return [{ kind: 'live', id: `live:${run.id}`, label: 'Thinking' }];
 }
 
-/** Messages waiting behind the run that is working, oldest first. */
+/**
+ * Messages waiting behind the run that is working, oldest first. A queued
+ * message the user removed (its run has a stop request) is left out at
+ * once: the service ends that run as stopped the moment its turn comes,
+ * before anything is sent to the model, so it will never be answered.
+ */
 export function queuedMessages(
   items: readonly AssistantItemDto[],
   runs: readonly AssistantRunDto[],
 ): AssistantUserMessageItemDto[] {
-  const queued = new Set(runs.filter((run) => run.status === 'queued').map((run) => run.id));
+  const queued = new Set(
+    runs.filter((run) => run.status === 'queued' && run.stopRequestedAt === null).map((run) => run.id),
+  );
   return items.filter(
     (item): item is AssistantUserMessageItemDto => item.kind === 'user_message' && queued.has(item.runId),
   );
@@ -204,8 +258,6 @@ export function pendingApprovals(items: readonly AssistantItemDto[]): AssistantT
     (item): item is AssistantToolCallItemDto => item.kind === 'tool_call' && item.status === 'awaiting_approval',
   );
 }
-
-const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
 
 /**
  * One-line summary of an activity group: the running call's title, or what
@@ -224,6 +276,33 @@ export function summarizeActivity(calls: readonly AssistantToolCallItemDto[]): s
   ].filter((part): part is string => Boolean(part));
   const text = parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}` : (parts[0] ?? '');
   return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/**
+ * What a screen reader should be told about the conversation right now, as
+ * the text of one polite live region; it speaks when this text changes.
+ *
+ * - A change waiting for a decision is named, since it needs the user.
+ * - Otherwise the finished answer of the latest turn is read, once: nothing
+ *   is said while the turn works (no streamed frames), and answers that were
+ *   already there when the conversation was opened (`openedSequence`) are
+ *   not read out again.
+ */
+export function assistantAnnouncement(
+  items: readonly AssistantItemDto[],
+  runs: readonly AssistantRunDto[],
+  openedSequence: number,
+): string {
+  const waiting = pendingApprovals(items)[0];
+  if (waiting) return `Approval needed: ${waiting.body.title}`;
+  const latest = [...runs].reverse().find((run) => run.status !== 'queued');
+  if (latest?.status !== 'completed') return '';
+  const answer = [...items]
+    .reverse()
+    .find((item) => item.runId === latest.id && item.kind === 'assistant_message' && item.status === 'complete');
+  if (answer?.kind !== 'assistant_message' || answer.sequence <= openedSequence) return '';
+  const text = answer.body.text.trim();
+  return text ? `Assistant replied: ${text}` : '';
 }
 
 /** The run still doing work, if any: the one to stop. */

@@ -15,6 +15,7 @@ import {
   ChevronRight,
   CircleSlash,
   Eye,
+  Info,
   PencilLine,
   RotateCcw,
   ShieldQuestionMark,
@@ -26,16 +27,26 @@ import { useState, type ReactNode } from 'react';
 import { AssistantCopyButton } from './assistant-copy-button';
 import { AssistantRunDiagnostics } from './assistant-diagnostics';
 import { AssistantMarkdown } from './assistant-markdown';
+import { formatDayAware, formatElapsed, formatStepDuration } from './message-time';
+import { plural } from './plural';
 import { summarizeActivity, type AssistantWorkState } from './timeline-model';
 
-const timeFormat = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
 const fullFormat = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 
+/**
+ * When a message was sent: the time today, the day as well once it is older
+ * (see `formatDayAware`), and the full date and time in a tooltip.
+ */
 function MessageTime({ at }: { at: Date }) {
   return (
-    <time className="text-xs text-assistant-dim tabular-nums" dateTime={at.toISOString()} title={fullFormat.format(at)}>
-      {timeFormat.format(at)}
-    </time>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <time className="text-xs text-assistant-dim tabular-nums" dateTime={at.toISOString()}>
+          {formatDayAware(at)}
+        </time>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">{fullFormat.format(at)}</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -177,13 +188,6 @@ export function AssistantReply({
   );
 }
 
-function formatElapsed(totalSeconds: number): string {
-  const seconds = Math.max(0, Math.floor(totalSeconds));
-  const minutes = Math.floor(seconds / 60);
-  if (minutes === 0) return `${seconds}s`;
-  return `${minutes}m ${String(seconds % 60).padStart(2, '0')}s`;
-}
-
 /**
  * Writes the elapsed time straight into the element once a second, so a
  * ticking clock never re-renders React (T3 Code's tickTextContent).
@@ -207,8 +211,6 @@ const WORK_LABEL: Record<AssistantWorkState, string> = {
   failed: 'Failed after',
   stopped: 'Stopped at',
 };
-
-const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
 
 /** The bar's one status item on the right: what needs the user, else what changed. */
 function WorkBarStatus({ pending, changes }: { pending: AssistantToolCallItemDto | null; changes: number }) {
@@ -246,6 +248,7 @@ export function AssistantWorkBar({
   until,
   pending,
   changes,
+  stopping = false,
   diagnostics,
   children,
 }: {
@@ -254,6 +257,12 @@ export function AssistantWorkBar({
   until: Date | null;
   pending: AssistantToolCallItemDto | null;
   changes: number;
+  /**
+   * The user asked this turn to stop and it has not ended yet. The bar then
+   * says "Stopping…" and its clock stops, so it does not keep counting work
+   * that is being wound down.
+   */
+  stopping?: boolean;
   /** Developer diagnostics, shown at the far right when present. */
   diagnostics?: { runId: string; usage: AssistantRunDiagnosticsDto } | null;
   /** The folded work, if there is any. */
@@ -261,7 +270,8 @@ export function AssistantWorkBar({
 }) {
   const [open, setOpen] = useState(false);
   const foldable = Boolean(children);
-  const live = state === 'working';
+  const winding = stopping && (state === 'working' || state === 'paused');
+  const live = state === 'working' && !winding;
   const elapsed = since && until ? formatElapsed((until.getTime() - since.getTime()) / 1000) : null;
   const tone = state === 'failed' ? 'text-destructive' : 'text-muted-foreground';
   return (
@@ -276,7 +286,9 @@ export function AssistantWorkBar({
         >
           {state === 'failed' ? <AlertCircle className="size-3 shrink-0" aria-hidden /> : null}
           <span>
-            {live && since ? (
+            {winding ? (
+              'Stopping…'
+            ) : live && since ? (
               <>
                 {WORK_LABEL[state]} <span ref={tickElapsed(since)} />
               </>
@@ -288,7 +300,7 @@ export function AssistantWorkBar({
           </span>
           <ChevronRight
             className={cn(
-              'size-3 shrink-0 text-assistant-dim transition-[rotate,opacity] duration-200 group-data-[state=open]/bar:rotate-90',
+              'size-3 shrink-0 text-assistant-dim transition-[rotate,opacity] duration-200 group-data-[state=open]/bar:rotate-90 motion-reduce:transition-none',
               !foldable && 'opacity-0',
             )}
             aria-hidden
@@ -332,6 +344,19 @@ function WorkRow({ icon, children, className }: { icon: ReactNode; children: Rea
   );
 }
 
+/**
+ * How long a finished step took, when that is worth saying (a tenth of a
+ * second or more). Shown only for a step that succeeded: its item is
+ * created when the step begins and next written when its result is saved,
+ * so the two timestamps are exactly its duration. A step that failed or was
+ * stopped may have been closed later, when its turn ended, so its
+ * timestamps say nothing reliable and it shows none.
+ */
+function ToolDuration({ call }: { call: AssistantToolCallItemDto }) {
+  const duration = call.status === 'succeeded' ? formatStepDuration(call.createdAt, call.updatedAt) : null;
+  return duration ? <span className="shrink-0 text-xs text-assistant-dim tabular-nums">{duration}</span> : null;
+}
+
 /** One line per group of tool calls; expands to list them (after T3 Code). */
 export function AssistantActivity({ calls }: { calls: AssistantToolCallItemDto[] }) {
   const running = calls.some((call) => call.status === 'running');
@@ -348,12 +373,13 @@ export function AssistantActivity({ calls }: { calls: AssistantToolCallItemDto[]
   );
   return (
     <Collapsible className="px-0.5">
-      <CollapsibleTrigger className="group/activity flex w-full min-w-0 cursor-pointer items-center rounded-md pe-1 text-left transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 [&:hover>span]:text-foreground">
-        <WorkRow icon={icon}>
+      {/* The caret follows its label (6px after it), like the work bar's; the whole row still opens it. */}
+      <CollapsibleTrigger className="group/activity flex w-full min-w-0 cursor-pointer items-center gap-1.5 rounded-md pe-1 text-left transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 [&:hover>span]:text-foreground">
+        <WorkRow icon={icon} className="flex-initial">
           <span className={cn('truncate', running && 'assistant-shimmer')}>{summarizeActivity(calls)}</span>
         </WorkRow>
         <ChevronRight
-          className="size-3 shrink-0 text-assistant-dim transition-[rotate] duration-200 group-data-[state=open]/activity:rotate-90"
+          className="size-3 shrink-0 text-assistant-dim transition-[rotate] duration-200 group-data-[state=open]/activity:rotate-90 motion-reduce:transition-none"
           aria-hidden
         />
       </CollapsibleTrigger>
@@ -364,6 +390,7 @@ export function AssistantActivity({ calls }: { calls: AssistantToolCallItemDto[]
               <WorkRow icon={<ToolIcon call={call} />} className="ps-5">
                 <span className="truncate">{call.body.title}</span>
                 {call.body.error ? <span className="truncate text-destructive">{call.body.error.message}</span> : null}
+                <ToolDuration call={call} />
               </WorkRow>
             </li>
           ))}
@@ -384,24 +411,37 @@ export function AssistantLiveStatus({ label }: { label: string }) {
   );
 }
 
-const NOTICE_TEXT: Record<'failed' | 'cancelled', string> = {
+const NOTICE_TEXT: Record<'failed' | 'cancelled' | 'removed', string> = {
   failed: 'The assistant stopped with an error.',
   cancelled: 'Stopped by you. Changes already made are kept.',
+  removed: 'Removed before the assistant started on it.',
 };
 
-/** Why a run ended early, shown where it ended. */
-export function AssistantRunNotice({ run, action }: { run: AssistantRunDto; action?: ReactNode }) {
-  const status = run.status === 'cancelled' ? 'cancelled' : 'failed';
+/**
+ * Why a run ended early, shown where it ended, as a quiet work row: the
+ * bar above it already carries the red, so the reason does not shout a
+ * second time. On the latest turn it offers "Try again" (`onRetry`), which
+ * asks the same question again; it is a button only, never a shortcut,
+ * because asking again starts a new paid run.
+ */
+export function AssistantRunNotice({ run, onRetry }: { run: AssistantRunDto; onRetry?: () => void }) {
+  // A run stopped before it began was a queued message the user removed.
+  const reason = run.status !== 'cancelled' ? 'failed' : run.startedAt ? 'cancelled' : 'removed';
+  const Icon = reason === 'failed' ? Info : CircleSlash;
   return (
-    <div
-      className={cn(
-        'flex min-h-6 items-center gap-1.5 px-1 text-sm/relaxed',
-        status === 'failed' ? 'text-destructive' : 'text-muted-foreground',
-      )}
-    >
-      {status === 'failed' ? <AlertCircle className="size-4 shrink-0" aria-hidden /> : null}
-      <span>{run.errorMessage ?? NOTICE_TEXT[status]}</span>
-      {action}
+    <div className="flex min-w-0 items-start gap-1.5 px-0.5 text-[13px]/6 text-muted-foreground">
+      <span className="flex h-6 w-5 shrink-0 items-center justify-center">
+        <Icon className="size-3.5" aria-hidden />
+      </span>
+      {/* The action follows the reason on one line, or wraps under it, lined up with its text (the button's own padding is pulled back). */}
+      <div className="flex min-w-0 flex-wrap items-center gap-x-3">
+        <p className="min-w-0">{run.errorMessage ?? NOTICE_TEXT[reason]}</p>
+        {onRetry ? (
+          <Button type="button" variant="ghost" size="sm" className="-ms-2 text-muted-foreground" onClick={onRetry}>
+            <RotateCcw /> Try again
+          </Button>
+        ) : null}
+      </div>
     </div>
   );
 }

@@ -59,7 +59,19 @@ const components: Components = {
   a: ({ href, ...props }: ComponentProps<'a'>) => (
     <a href={href} target="_blank" rel="noreferrer noopener" {...props} />
   ),
+  img: MarkdownImage,
 };
+
+/**
+ * An image in a reply is shown as its description, never loaded. A browser
+ * fetches an image the moment it renders, with no click, so an image URL is
+ * a way to send data out: text planted in school records (a student's name,
+ * a note) could talk the model into writing one whose address carries what
+ * it just read. The assistant shows data through views, so nothing is lost.
+ */
+function MarkdownImage({ alt }: ComponentProps<'img'>) {
+  return alt ? <span>{alt}</span> : null;
+}
 
 const MarkdownBlock = memo(function MarkdownBlock({ source }: { source: string }) {
   return (
@@ -70,7 +82,8 @@ const MarkdownBlock = memo(function MarkdownBlock({ source }: { source: string }
 });
 
 /**
- * Assistant prose. Raw HTML is never rendered (react-markdown's default).
+ * Assistant prose. Raw HTML is never rendered (react-markdown's default)
+ * and images are never loaded (see `MarkdownImage`).
  * While `streaming`, each newly appended block fades in (see assistant.css).
  */
 export function AssistantMarkdown({ text, streaming = false }: { text: string; streaming?: boolean }) {

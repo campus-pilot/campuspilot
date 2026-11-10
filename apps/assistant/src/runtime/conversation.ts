@@ -28,42 +28,90 @@ import type { ProviderRegistry } from './providers/registry';
 import type { ModelProvider, ModelToolResult, TranscriptEntry } from './providers/types';
 import { showViewInputSchema } from '@campuspilot/assistant-contract/views';
 
-import { callTool, loadToolCatalog, requiresApproval, toModelToolName } from './tools';
+import {
+  callTool,
+  loadToolCatalog,
+  requiresApproval,
+  toModelToolName,
+  type AssistantTool,
+  type ToolOutcome,
+} from './tools';
 
 /** Model requests one run may make before it stops to protect against loops. */
-const MAX_MODEL_STEPS = 20;
+export const MAX_MODEL_STEPS = 20;
 
-const MODEL_STEP_RETRY = { maxRetryAttempts: 3, initialRetryInterval: 2_000 };
+/**
+ * Retries of one model request. A request that failed is paid for at most
+ * once more per retry, so this stays small. Failures the provider says
+ * cannot be fixed by retrying never get here (see `modelStep`).
+ */
+export const MODEL_STEP_RETRY = { maxRetryAttempts: 3, initialRetryInterval: 2_000 };
+/**
+ * Retries of steps that only touch the assistant's own database, and of
+ * tool steps. Every such step is safe to repeat: inserts are keyed (see
+ * transcript.ts), reads are harmless, and a write is sent to the API at
+ * most once however often its step runs (see `executeToolCall`).
+ */
 const DB_STEP_RETRY = { maxRetryAttempts: 5, initialRetryInterval: 500 };
 
-const DECLINED_RESULT = 'The user declined this action. Do not retry it; ask what they would like instead.';
-const CANCELLED_RESULT = 'The user stopped the assistant before this action ran.';
+export const DECLINED_RESULT = 'The user declined this action. Do not retry it; ask what they would like instead.';
+export const CANCELLED_RESULT = 'The user stopped the assistant before this action ran.';
+const REFUSAL_TEXT = 'I can’t help with that request.';
+
+/**
+ * Reported when a write was handed to the API but its outcome never came
+ * back (the connection dropped, or the service restarted mid-call). The
+ * write is not sent again: it may already have been applied.
+ */
+export const OUTCOME_UNKNOWN_ERROR = {
+  code: 'OUTCOME_UNKNOWN',
+  message:
+    'The connection was lost while this change was being made, so it may or may not have been applied. Check the current data before trying it again.',
+};
 
 export type AssistantConversationDeps = {
   providers: ProviderRegistry;
   log: Logger;
 };
 
+type RunFailure = { code: string; message: string; detail?: string };
+
+const failureJson = (failure: RunFailure) => JSON.stringify(failure);
+
 /**
- * A run failure with an explicit code. Restate replays terminal errors with
- * their message only, so the code travels inside it as JSON.
+ * A run failure with an explicit code that ends the run at once. Restate
+ * replays terminal errors with their message only, so the code, the user's
+ * message and the raw detail for developers travel inside it as JSON.
  */
-function runFailure(code: string, message: string) {
-  return new restate.TerminalError(JSON.stringify({ code, message }));
+function runFailure(code: string, message: string, detail?: string) {
+  return new restate.TerminalError(failureJson({ code, message, ...(detail ? { detail } : {}) }));
 }
 
-type RunFailure = { code: string; message: string; detail?: string };
+/**
+ * A failure worth retrying. Thrown as a plain error so the step's retry
+ * policy applies; if every retry fails, Restate ends the step with this
+ * message and the run reports this code instead of a generic one.
+ */
+function retryableRunFailure(code: string, message: string, detail?: string) {
+  return new Error(failureJson({ code, message, ...(detail ? { detail } : {}) }));
+}
+
+const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 /**
  * Our own failures carry their code and message. Anything else (for example
- * ctx.run giving up after its retries on a provider error) gets the generic
- * message, and its raw text is kept as `detail` for developers.
+ * ctx.run giving up after its retries on an unclassified error) gets the
+ * generic message, and its raw text is kept as `detail` for developers.
  */
 function readRunFailure(error: restate.TerminalError): RunFailure {
   try {
-    const parsed = JSON.parse(error.message) as { code?: unknown; message?: unknown };
+    const parsed = JSON.parse(error.message) as { code?: unknown; message?: unknown; detail?: unknown };
     if (typeof parsed.code === 'string' && typeof parsed.message === 'string') {
-      return { code: parsed.code, message: parsed.message };
+      return {
+        code: parsed.code,
+        message: parsed.message,
+        ...(typeof parsed.detail === 'string' ? { detail: parsed.detail } : {}),
+      };
     }
   } catch {
     // Not one of ours.
@@ -112,6 +160,38 @@ type PreparedToolCall =
 const tx = <T>(work: Parameters<typeof store.assistantTransaction<T>>[1]) =>
   store.assistantTransaction(db, work);
 
+const NOT_RUN_ERROR = {
+  code: 'NOT_RUN',
+  message: 'This action did not run because the assistant stopped first.',
+};
+
+/**
+ * Gives every tool call of an ending run a final status, so the chat never
+ * shows a spinner or an approval request on a turn that is over. A call
+ * waiting for approval never ran. A running write that was already handed
+ * to the API (`executionStartedAt`) may have been applied, so it is reported
+ * as unknown rather than as not run.
+ */
+async function settleOpenToolCalls(
+  t: Parameters<Parameters<typeof tx>[0]>[0],
+  emit: Parameters<Parameters<typeof tx>[0]>[1],
+  run: { id: string; conversationId: string },
+  runStatus: 'completed' | 'failed' | 'cancelled',
+) {
+  for (const item of await store.findOpenToolCalls(t, run)) {
+    const body = item.body as AssistantToolCallBody;
+    if (item.status === 'awaiting_approval') {
+      await store.updateItem(t, emit, item, { status: 'cancelled' });
+    } else if (body.executionStartedAt) {
+      await store.updateItem(t, emit, item, { status: 'failed', body: { ...body, error: OUTCOME_UNKNOWN_ERROR } });
+    } else if (runStatus === 'cancelled') {
+      await store.updateItem(t, emit, item, { status: 'cancelled' });
+    } else {
+      await store.updateItem(t, emit, item, { status: 'failed', body: { ...body, error: NOT_RUN_ERROR } });
+    }
+  }
+}
+
 async function finishRun(
   run: { id: string; conversationId: string },
   status: 'completed' | 'failed' | 'cancelled',
@@ -119,6 +199,7 @@ async function finishRun(
 ) {
   await tx(async (t, emit) => {
     await store.completeStreamingItems(t, emit, run);
+    await settleOpenToolCalls(t, emit, run, status);
     await store.updateRun(t, emit, run, {
       status,
       completedAt: new Date(),
@@ -162,7 +243,14 @@ function runRef(run: RunFacts) {
   return { id: run.runId, conversationId: run.conversationId };
 }
 
-export function createAssistantConversationObject(deps: AssistantConversationDeps) {
+/**
+ * What a turn needs from Restate: durable steps and awakeables. Narrowed
+ * from the object context so tests can drive a turn without a Restate server.
+ */
+export type RunContext = Pick<restate.ObjectContext, 'run' | 'awakeable'>;
+
+/** Builds the handler that processes one turn (see `processRun` inside). */
+export function createRunProcessor(deps: AssistantConversationDeps) {
   /** The provider a run uses; it was checked when the run began. */
   const providerFor = (run: RunFacts): ModelProvider => {
     const provider = deps.providers.get(run.providerId);
@@ -208,11 +296,15 @@ export function createAssistantConversationObject(deps: AssistantConversationDep
         content: provider.userContent(item.body as AssistantUserMessageBody),
         entryKey: userTranscriptKey(run.id),
       });
+      // The model the provider is configured to call now, which is what this
+      // run will request. Not `conversation.model`: that is only the model
+      // the conversation started on. Each model step then replaces it with
+      // the model that actually answered.
       await store.updateRun(t, emit, run, {
         status: 'running',
         startedAt: run.startedAt ?? new Date(),
         provider: provider.id,
-        model: conversation.model,
+        model: provider.model,
       });
     });
 
@@ -242,7 +334,9 @@ export function createAssistantConversationObject(deps: AssistantConversationDep
       if (!tool) return null;
       const outcome = await callTool(token, tool, {});
       if (!outcome.ok) return null;
-      const schools = JSON.parse(outcome.storedOutput) as Array<{ id: string; name: string }>;
+      // The whole result: the stored and model copies are cut to a length
+      // and would not parse for a user with many schools.
+      const schools = JSON.parse(outcome.text) as Array<{ id: string; name: string }>;
       return schools.find((school) => school.id === schoolId)?.name ?? null;
     } catch (err) {
       deps.log.warn({ err, runId }, 'assistant.school-name.failed');
@@ -305,11 +399,41 @@ export function createAssistantConversationObject(deps: AssistantConversationDep
         isStopRequested: () => isAssistantRunStopSignalled(run.runId),
       });
     } catch (error) {
-      deps.log.error({ err: error, runId: run.runId, step, provider: provider.id }, 'assistant.model.error');
-      if (provider.isPermanentError(error)) {
+      const kind = provider.failureKind(error);
+      deps.log.error(
+        {
+          err: error,
+          runId: run.runId,
+          conversationId: run.conversationId,
+          schoolId: run.schoolId,
+          step,
+          provider: provider.id,
+          model: provider.model,
+          kind,
+        },
+        'assistant.model.error',
+      );
+      const detail = errorText(error);
+      if (kind === 'rejected') {
         throw runFailure(
           'model_rejected',
           'The assistant could not process this request. Please try rephrasing it.',
+          detail,
+        );
+      }
+      if (kind === 'unavailable') {
+        // A wrong key or model id: retrying, or rephrasing, cannot help.
+        throw runFailure(
+          'provider_unavailable',
+          'The assistant is not available right now. Please try again later.',
+          detail,
+        );
+      }
+      if (kind === 'busy') {
+        throw retryableRunFailure(
+          'model_busy',
+          'The assistant is busy right now. Please try again in a few minutes.',
+          detail,
         );
       }
       throw error;
@@ -333,7 +457,13 @@ export function createAssistantConversationObject(deps: AssistantConversationDep
       return { kind: 'stopped' };
     }
 
-    const text = result.text || (result.refusal ? 'I can’t help with that request.' : '');
+    const text = result.text || (result.refusal ? REFUSAL_TEXT : '');
+    // A refused turn's tool calls must not run, whatever the provider sent.
+    // Only its visible text is saved: calls left in the transcript without
+    // results would make every later request in this conversation invalid,
+    // and a step replayed from the saved entry must find no calls either.
+    const toolUses = result.refusal ? [] : result.toolUses;
+    const content = result.refusal ? provider.assistantTextContent(text) : result.content;
     const item = text ? await ensureItem() : itemPromise ? await itemPromise : null;
     await tx(async (t, emit) => {
       if (item) {
@@ -343,13 +473,15 @@ export function createAssistantConversationObject(deps: AssistantConversationDep
         conversationId: run.conversationId,
         runId: run.runId,
         role: 'assistant',
-        content: result.content,
+        content,
         entryKey,
       });
-      await store.updateRun(t, emit, runRef(run), {}, result.usage);
+      // The model that answered: a provider may serve a request with a
+      // different model than the one asked for (a fallback, a dated version).
+      await store.updateRun(t, emit, runRef(run), { model: result.model }, result.usage);
     });
 
-    return { kind: 'response', toolUses: result.toolUses, paused: result.paused };
+    return { kind: 'response', toolUses, paused: result.refusal ? false : result.paused };
   }
 
   /** Records the tool call and decides whether it runs or waits for approval. */
@@ -483,6 +615,58 @@ export function createAssistantConversationObject(deps: AssistantConversationDep
     });
   }
 
+  /**
+   * Hands a write to the API at most once, however often this step runs.
+   * The intent is saved on the item first (`executionStartedAt`); a step
+   * repeated after a crash or a failed save finds it and never sends the
+   * write again. It then reports what the item already recorded, or, when
+   * nothing was recorded, that the outcome is unknown. A dropped connection
+   * is an unknown outcome too: the API may have applied the change.
+   */
+  async function callWriteOnce(
+    run: RunFacts,
+    token: string,
+    tool: AssistantTool,
+    toolUse: ToolUse,
+    itemId: string,
+  ): Promise<ToolOutcome | { recorded: ModelToolResult }> {
+    const earlier = await tx(async (t, emit) => {
+      const item = await store.findItem(t, itemId);
+      if (!item) return null;
+      const body = item.body as AssistantToolCallBody;
+      if (body.executionStartedAt) return { status: item.status, body };
+      await store.updateItem(t, emit, item, {
+        body: { ...body, executionStartedAt: new Date().toISOString() },
+      });
+      return null;
+    });
+    if (earlier) {
+      deps.log.warn(
+        { runId: run.runId, conversationId: run.conversationId, tool: tool.mcpName, status: earlier.status },
+        'assistant.tool.write-not-repeated',
+      );
+      if (earlier.status === 'succeeded' && earlier.body.output !== undefined) {
+        return {
+          recorded: { toolUseId: toolUse.id, toolName: toolUse.name, content: earlier.body.output, isError: false },
+        };
+      }
+      return { ok: false, error: earlier.body.error ?? OUTCOME_UNKNOWN_ERROR };
+    }
+    try {
+      return await callTool(token, tool, toolUse.input ?? {});
+    } catch (err) {
+      deps.log.error(
+        { err, runId: run.runId, conversationId: run.conversationId, tool: tool.mcpName },
+        'assistant.tool.write-outcome-unknown',
+      );
+      return { ok: false, error: OUTCOME_UNKNOWN_ERROR };
+    }
+  }
+
+  /**
+   * Runs one tool call and records its result on the item. Reads may run
+   * more than once when the step is retried; writes never do.
+   */
   async function executeToolCall(
     run: RunFacts,
     toolUse: ToolUse,
@@ -490,10 +674,20 @@ export function createAssistantConversationObject(deps: AssistantConversationDep
   ): Promise<ModelToolResult> {
     const token = await requireToken(run.runId);
     const catalog = await loadToolCatalog(token);
-    const tool = catalog.tools.get(toolUse.name)!;
-    const outcome = await callTool(token, tool, toolUse.input ?? {});
+    const tool = catalog.tools.get(toolUse.name);
+    // The API can stop offering a tool while a call waits for approval.
+    const outcome: ToolOutcome | { recorded: ModelToolResult } = !tool
+      ? { ok: false, error: { code: 'NOT_FOUND', message: `The tool ${toolUse.name} is no longer available.` } }
+      : tool.readOnly
+        ? await callTool(token, tool, toolUse.input ?? {})
+        : await callWriteOnce(run, token, tool, toolUse, itemId);
+    if ('recorded' in outcome) return outcome.recorded;
+
     if (!outcome.ok) {
-      deps.log.info({ runId: run.runId, tool: tool.mcpName, code: outcome.error.code }, 'assistant.tool.failed');
+      deps.log.info(
+        { runId: run.runId, conversationId: run.conversationId, tool: tool?.mcpName ?? toolUse.name, code: outcome.error.code },
+        'assistant.tool.failed',
+      );
     }
     await tx(async (t, emit) => {
       const item = await store.findItem(t, itemId);
@@ -511,7 +705,21 @@ export function createAssistantConversationObject(deps: AssistantConversationDep
       : { toolUseId: toolUse.id, toolName: toolUse.name, content: JSON.stringify(outcome.error), isError: true };
   }
 
-  async function processRun(ctx: restate.ObjectContext, input: ProcessRunInput) {
+  /**
+   * One turn, as a durable Restate handler. Restate records the result of
+   * every `ctx.run` and, after a crash, replays the handler: finished steps
+   * return their recorded result without running again, and only the step
+   * that was interrupted runs a second time. That is why:
+   * - every step's name is fixed by its place in the turn (`model-<step>`,
+   *   `tool-<toolUseId>`), so a replay lines up with the record. Renaming or
+   *   reordering steps breaks turns that are waiting for approval during a
+   *   deploy;
+   * - every step is safe to run twice (keyed inserts, at-most-once writes);
+   * - nothing outside a step may read the clock, the database or Redis.
+   * The three `cancelled` steps share a name on purpose: a turn reaches at
+   * most one of them.
+   */
+  async function processRun(ctx: RunContext, input: ProcessRunInput) {
     const run = await ctx.run('begin', () => beginRun(input), DB_STEP_RETRY);
     if (!run) return;
 
@@ -635,9 +843,16 @@ export function createAssistantConversationObject(deps: AssistantConversationDep
     }
   }
 
+  return processRun;
+}
+
+export function createAssistantConversationObject(deps: AssistantConversationDeps) {
+  const processRun = createRunProcessor(deps);
   return restate.object({
     name: ASSISTANT_CONVERSATION_OBJECT,
-    handlers: { processRun } satisfies Record<keyof AssistantConversationHandlers, unknown>,
+    handlers: {
+      processRun: (ctx: restate.ObjectContext, input: ProcessRunInput) => processRun(ctx, input),
+    } satisfies Record<keyof AssistantConversationHandlers, unknown>,
     options: {
       // A model step can stream for minutes; approvals suspend instead.
       inactivityTimeout: 10 * 60_000,
