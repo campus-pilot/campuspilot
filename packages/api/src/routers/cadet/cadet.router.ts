@@ -22,6 +22,7 @@ import {
 } from '../school/admission/admission.dto';
 import { cadetNotificationRouter } from './cadet-notification.router';
 import { cadetPushRouter } from './cadet-push.router';
+import { cadetSchoolSearchRouter } from './cadet-school-search.router';
 
 /**
  * The Cadet Portal's router. It is deliberately not part of `appRouter`, so
@@ -32,6 +33,7 @@ import { cadetPushRouter } from './cadet-push.router';
 export const cadetRouter = {
   ...cadetNotificationRouter,
   ...cadetPushRouter,
+  ...cadetSchoolSearchRouter,
   getAdmission: cadetProcedure
     .route({
       summary: 'Get my admission',
