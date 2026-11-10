@@ -1,7 +1,9 @@
 import { GetObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
 import { db } from '@campuspilot/db';
+import { classTable } from '@campuspilot/db/schema/class';
 import { noticeClassTable, noticeTable } from '@campuspilot/db/schema/notice';
 import { notificationEventTable } from '@campuspilot/db/schema/notification';
+import { schoolSessionTable } from '@campuspilot/db/schema/session';
 import { env } from '@campuspilot/env/server';
 import { getS3Client } from '@campuspilot/s3/client';
 import { and, eq, like } from 'drizzle-orm';
@@ -93,11 +95,11 @@ describe('school notices', () => {
         () => anonymous.school.listNotices({ schoolId, sessionId }),
         () => anonymous.school.getNotice(scope),
         () => anonymous.school.createNotice(plain()),
-        () => anonymous.school.updateNotice({ ...plain(), noticeId: 'ntc_missing' }),
+        () => anonymous.school.updateNotice({ ...plain(), noticeId: 'ntc_missing', expectedVersion: 1 }),
         () => anonymous.school.deleteNotice(scope),
         () => anonymous.school.previewNotice({ schoolId, source: { kind: 'saved', noticeId: 'ntc_missing' } }),
         () => anonymous.school.previewNoticePublish(scope),
-        () => anonymous.school.publishNotice(scope),
+        () => anonymous.school.publishNotice({ ...scope, expectedVersion: 1 }),
         () => anonymous.school.getNoticeDownload(scope),
       ]) {
         await expect(call()).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
@@ -116,7 +118,7 @@ describe('school notices', () => {
         await expectPermissionDenied(outsider.school.listNotices({ schoolId, sessionId }));
         await expectPermissionDenied(outsider.school.getNotice({ schoolId, noticeId: draft.id }));
         await expectPermissionDenied(outsider.school.createNotice(plain()));
-        await expectPermissionDenied(outsider.school.publishNotice({ schoolId, noticeId: draft.id }));
+        await expectPermissionDenied(outsider.school.publishNotice({ schoolId, noticeId: draft.id, expectedVersion: draft.version }));
         await expectPermissionDenied(outsider.school.getNoticeDownload({ schoolId, noticeId: draft.id }));
       }
     });
@@ -129,10 +131,10 @@ describe('school notices', () => {
       }
       const draft = await teacher.school.createNotice(plain());
       for (const client of [teacher, accountant, examCoordinator]) {
-        await expectPermissionDenied(client.school.publishNotice({ schoolId, noticeId: draft.id }));
+        await expectPermissionDenied(client.school.publishNotice({ schoolId, noticeId: draft.id, expectedVersion: draft.version }));
         await expectPermissionDenied(client.school.previewNoticePublish({ schoolId, noticeId: draft.id }));
       }
-      await expect(manager.school.publishNotice({ schoolId, noticeId: draft.id })).resolves.toMatchObject({ status: 'published' });
+      await expect(manager.school.publishNotice({ schoolId, noticeId: draft.id, expectedVersion: draft.version })).resolves.toMatchObject({ status: 'published' });
     });
 
     it('refuses every procedure while the school has no notices feature, after the permission check, and writes nothing', async () => {
@@ -144,11 +146,11 @@ describe('school notices', () => {
       await expectFeatureDisabled(offPrincipal.school.listNotices({ schoolId: off.id, sessionId: offSession }), 'notices');
       await expectFeatureDisabled(offPrincipal.school.getNotice(scope), 'notices');
       await expectFeatureDisabled(offPrincipal.school.createNotice(body), 'notices');
-      await expectFeatureDisabled(offPrincipal.school.updateNotice({ ...body, noticeId: 'ntc_missing' }), 'notices');
+      await expectFeatureDisabled(offPrincipal.school.updateNotice({ ...body, noticeId: 'ntc_missing', expectedVersion: 1 }), 'notices');
       await expectFeatureDisabled(offPrincipal.school.deleteNotice(scope), 'notices');
       await expectFeatureDisabled(offPrincipal.school.previewNotice({ schoolId: off.id, source: { kind: 'unsaved', sessionId: offSession, title: 'T', bodyMode: 'plain', body: 'B' } }), 'notices');
       await expectFeatureDisabled(offPrincipal.school.previewNoticePublish(scope), 'notices');
-      await expectFeatureDisabled(offPrincipal.school.publishNotice(scope), 'notices');
+      await expectFeatureDisabled(offPrincipal.school.publishNotice({ ...scope, expectedVersion: 1 }), 'notices');
       await expectFeatureDisabled(offPrincipal.school.getNoticeDownload(scope), 'notices');
       expect(await db.select().from(noticeTable).where(eq(noticeTable.schoolId, off.id))).toHaveLength(0);
       // A caller without access cannot tell whether the school has the feature.
@@ -192,9 +194,9 @@ describe('school notices', () => {
       await expect(principal.school.createNotice(plain({ bodyMode: 'template', body: '<p>{{#if notice.title}}</p>' }))).rejects.toMatchObject({ code: 'BAD_REQUEST' });
       await expect(principal.school.createNotice(plain({ bodyMode: 'template', body: '{{unknownHelper notice.title}}' }))).rejects.toMatchObject({ code: 'BAD_REQUEST' });
       const draft = await principal.school.createNotice(plain({ bodyMode: 'template', body: '<h1>{{notice.title}}</h1>' }));
-      await expect(principal.school.updateNotice({ ...plain({ bodyMode: 'template', body: '{{> partial}}' }), noticeId: draft.id })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+      await expect(principal.school.updateNotice({ ...plain({ bodyMode: 'template', body: '{{> partial}}' }), noticeId: draft.id, expectedVersion: draft.version })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
       // The same text is fine as plain text: it is data there, never compiled.
-      await expect(principal.school.updateNotice({ ...plain({ body: '{{#if notice.title}}' }), noticeId: draft.id })).resolves.toMatchObject({ bodyMode: 'plain', body: '{{#if notice.title}}' });
+      await expect(principal.school.updateNotice({ ...plain({ body: '{{#if notice.title}}' }), noticeId: draft.id, expectedVersion: draft.version })).resolves.toMatchObject({ bodyMode: 'plain', body: '{{#if notice.title}}' });
     });
   });
 
@@ -215,11 +217,11 @@ describe('school notices', () => {
       // Naming our school with their notice id finds nothing, for every procedure.
       const scope = { schoolId, noticeId: theirs.id };
       await expect(principal.school.getNotice(scope)).rejects.toMatchObject({ code: 'NOT_FOUND' });
-      await expect(principal.school.updateNotice({ ...plain(), noticeId: theirs.id })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      await expect(principal.school.updateNotice({ ...plain(), noticeId: theirs.id, expectedVersion: theirs.version })).rejects.toMatchObject({ code: 'NOT_FOUND' });
       await expect(principal.school.deleteNotice(scope)).rejects.toMatchObject({ code: 'NOT_FOUND' });
       await expect(principal.school.previewNotice({ schoolId, source: { kind: 'saved', noticeId: theirs.id } })).rejects.toMatchObject({ code: 'NOT_FOUND' });
       await expect(principal.school.previewNoticePublish(scope)).rejects.toMatchObject({ code: 'NOT_FOUND' });
-      await expect(principal.school.publishNotice(scope)).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      await expect(principal.school.publishNotice({ ...scope, expectedVersion: 1 })).rejects.toMatchObject({ code: 'NOT_FOUND' });
       await expect(principal.school.getNoticeDownload(scope)).rejects.toMatchObject({ code: 'NOT_FOUND' });
       await expect(otherPrincipal.school.getNotice({ schoolId: other.id, noticeId: theirs.id })).resolves.toMatchObject({ status: 'draft' });
       expect((await principal.school.listNotices({ schoolId, sessionId })).items.map((item) => item.id)).not.toContain(theirs.id);
@@ -238,6 +240,12 @@ describe('school notices', () => {
         cadetScope: 'selected_classes',
         // Class display order, not input order.
         classIds: [grade6, grade7],
+        classes: [
+          { classId: grade6, name: 'Grade 6' },
+          { classId: grade7, name: 'Grade 7' },
+        ],
+        version: 1,
+        issuedOn: null,
         createdBy: teacherId,
         publishedAt: null,
         publishedBy: null,
@@ -261,7 +269,7 @@ describe('school notices', () => {
       for (const client of [otherTeacher, accountant, examCoordinator]) {
         await expect(client.school.getNotice(scope)).rejects.toMatchObject({ code: 'NOT_FOUND' });
         await expect(client.school.previewNotice({ schoolId, source: { kind: 'saved', noticeId: draft.id } })).rejects.toMatchObject({ code: 'NOT_FOUND' });
-        await expect(client.school.updateNotice({ ...plain({ title: 'Hijacked' }), noticeId: draft.id })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+        await expect(client.school.updateNotice({ ...plain({ title: 'Hijacked' }), noticeId: draft.id, expectedVersion: draft.version })).rejects.toMatchObject({ code: 'NOT_FOUND' });
         await expect(client.school.deleteNotice(scope)).rejects.toMatchObject({ code: 'NOT_FOUND' });
         await expect(client.school.getNoticeDownload(scope)).rejects.toMatchObject({ code: 'NOT_FOUND' });
         expect((await client.school.listNotices({ schoolId, sessionId, searchQuery: 'Teacher draft' })).items).toHaveLength(0);
@@ -276,11 +284,13 @@ describe('school notices', () => {
 
     it('lets the author and a publisher replace a draft, and replaces its classes', async () => {
       const draft = await teacher.school.createNotice(plain({ toStaff: false, cadetScope: 'selected_classes', classIds: [grade6] }));
-      const byAuthor = await teacher.school.updateNotice({ ...plain({ title: 'Edited', toStaff: true, cadetScope: 'all_classes' }), noticeId: draft.id });
+      const byAuthor = await teacher.school.updateNotice({ ...plain({ title: 'Edited', toStaff: true, cadetScope: 'all_classes' }), noticeId: draft.id, expectedVersion: draft.version });
       expect(byAuthor).toMatchObject({ title: 'Edited', toStaff: true, cadetScope: 'all_classes', classIds: [] });
       expect(await db.select().from(noticeClassTable).where(eq(noticeClassTable.noticeId, draft.id))).toHaveLength(0);
-      const byManager = await manager.school.updateNotice({ ...plain({ title: 'Manager edit', cadetScope: 'selected_classes', classIds: [grade7] }), noticeId: draft.id });
-      expect(byManager).toMatchObject({ title: 'Manager edit', classIds: [grade7], createdBy: teacherId });
+      const byManager = await manager.school.updateNotice({ ...plain({ title: 'Manager edit', cadetScope: 'selected_classes', classIds: [grade7] }), noticeId: draft.id, expectedVersion: byAuthor.version });
+      expect(byManager).toMatchObject({ title: 'Manager edit', classIds: [grade7], classes: [{ classId: grade7, name: 'Grade 7' }], createdBy: teacherId });
+      // Every saved change is one version.
+      expect([draft.version, byAuthor.version, byManager.version]).toEqual([1, 2, 3]);
       expect(new Date(byManager.updatedAt).getTime()).toBeGreaterThanOrEqual(new Date(draft.updatedAt).getTime());
     });
 
@@ -302,8 +312,8 @@ describe('school notices', () => {
       const alpha = await client.school.createNotice({ ...base, title: 'Alpha staff' });
       const beta = await client.school.createNotice({ ...base, title: 'Beta cadets 100%', toStaff: false, cadetScope: 'all_classes' });
       const gamma = await client.school.createNotice({ ...base, title: 'Gamma both', cadetScope: 'all_classes' });
-      await client.school.publishNotice({ schoolId: listSchool.id, noticeId: gamma.id });
-      await client.school.publishNotice({ schoolId: listSchool.id, noticeId: alpha.id });
+      await client.school.publishNotice({ schoolId: listSchool.id, noticeId: gamma.id, expectedVersion: gamma.version });
+      await client.school.publishNotice({ schoolId: listSchool.id, noticeId: alpha.id, expectedVersion: alpha.version });
       const list = (input: Record<string, unknown> = {}) => client.school.listNotices({ schoolId: listSchool.id, sessionId: listSession, ...input } as never);
       const ids = async (input: Record<string, unknown> = {}) => (await list(input)).items.map((item) => item.id);
 
@@ -348,7 +358,7 @@ describe('school notices', () => {
       await expectFeatureDisabled(client.school.createNotice({ ...base, toStaff: false, cadetScope: 'selected_classes', classIds: [classId] }), 'cadet');
       expect(await db.select().from(noticeTable).where(eq(noticeTable.schoolId, school.id))).toHaveLength(0);
       const staffOnly = await client.school.createNotice(base);
-      await expectFeatureDisabled(client.school.updateNotice({ ...base, noticeId: staffOnly.id, cadetScope: 'all_classes' }), 'cadet');
+      await expectFeatureDisabled(client.school.updateNotice({ ...base, noticeId: staffOnly.id, expectedVersion: staffOnly.version, cadetScope: 'all_classes' }), 'cadet');
       await expect(client.school.getNotice({ schoolId: school.id, noticeId: staffOnly.id })).resolves.toMatchObject({ cadetScope: 'none' });
 
       // A draft saved while the school had the portal cannot be published once it is switched off.
@@ -356,11 +366,11 @@ describe('school notices', () => {
       const draft = await client.school.createNotice({ ...base, cadetScope: 'all_classes' });
       await setTestSchoolFeature(school.id, 'cadet', false);
       await expectFeatureDisabled(client.school.previewNoticePublish({ schoolId: school.id, noticeId: draft.id }), 'cadet');
-      await expectFeatureDisabled(client.school.publishNotice({ schoolId: school.id, noticeId: draft.id }), 'cadet');
+      await expectFeatureDisabled(client.school.publishNotice({ schoolId: school.id, noticeId: draft.id, expectedVersion: draft.version }), 'cadet');
       expect((await db.select().from(noticeTable).where(eq(noticeTable.id, draft.id)))[0]).toMatchObject({ status: 'draft', publishedAt: null });
       expect(await db.select().from(notificationEventTable).where(eq(notificationEventTable.schoolId, school.id))).toHaveLength(0);
       // Staff-only notices never need the portal.
-      await expect(client.school.publishNotice({ schoolId: school.id, noticeId: staffOnly.id })).resolves.toMatchObject({ status: 'published', publishedCadetCount: 0 });
+      await expect(client.school.publishNotice({ schoolId: school.id, noticeId: staffOnly.id, expectedVersion: staffOnly.version })).resolves.toMatchObject({ status: 'published', publishedCadetCount: 0 });
     });
   });
 
@@ -413,6 +423,7 @@ describe('school notices', () => {
       const staffOnly = await principal.school.createNotice(plain());
       await expect(principal.school.previewNoticePublish({ schoolId, noticeId: staffOnly.id })).resolves.toEqual({
         kind: 'ready',
+        version: 1,
         toStaff: true,
         staffRecipientCount: staffCount,
         cadetScope: 'none',
@@ -437,7 +448,7 @@ describe('school notices', () => {
     it('publishes once: records who and when, notifies each addressed student and the staff, and freezes the notice', async () => {
       const draft = await teacher.school.createNotice(plain({ title: 'Parent meeting', cadetScope: 'selected_classes', classIds: [grade6] }));
       const scope = { schoolId, noticeId: draft.id };
-      const published = await principal.school.publishNotice(scope);
+      const published = await principal.school.publishNotice({ ...scope, expectedVersion: 1 });
       expect(published).toMatchObject({
         status: 'published',
         publishedBy: principalId,
@@ -464,10 +475,10 @@ describe('school notices', () => {
       expect((staffEvents[0]!.recipients as { userIds: string[] }).userIds).toHaveLength(staffCount);
 
       // Published is final: no second publication, no edit, no delete; nothing more is emitted.
-      await expect(principal.school.publishNotice(scope)).rejects.toMatchObject({ code: 'CONFLICT' });
-      await expect(manager.school.publishNotice(scope)).rejects.toMatchObject({ code: 'CONFLICT' });
-      await expect(principal.school.updateNotice({ ...plain({ title: 'Changed' }), noticeId: draft.id })).rejects.toMatchObject({ code: 'CONFLICT' });
-      await expect(teacher.school.updateNotice({ ...plain({ title: 'Changed' }), noticeId: draft.id })).rejects.toMatchObject({ code: 'CONFLICT' });
+      await expect(principal.school.publishNotice({ ...scope, expectedVersion: 1 })).rejects.toMatchObject({ code: 'CONFLICT' });
+      await expect(manager.school.publishNotice({ ...scope, expectedVersion: 1 })).rejects.toMatchObject({ code: 'CONFLICT' });
+      await expect(principal.school.updateNotice({ ...plain({ title: 'Changed' }), noticeId: draft.id, expectedVersion: draft.version })).rejects.toMatchObject({ code: 'CONFLICT' });
+      await expect(teacher.school.updateNotice({ ...plain({ title: 'Changed' }), noticeId: draft.id, expectedVersion: draft.version })).rejects.toMatchObject({ code: 'CONFLICT' });
       await expect(principal.school.deleteNotice(scope)).rejects.toMatchObject({ code: 'CONFLICT' });
       await expect(principal.school.previewNoticePublish(scope)).resolves.toMatchObject({ kind: 'already_published', publishedAt: published.publishedAt });
       expect(await eventsOf(draft.id)).toHaveLength(3);
@@ -482,7 +493,7 @@ describe('school notices', () => {
     it('fans out exactly once when two people publish at the same moment', async () => {
       const draft = await principal.school.createNotice(plain({ cadetScope: 'all_classes' }));
       const scope = { schoolId, noticeId: draft.id };
-      const results = await Promise.allSettled([principal.school.publishNotice(scope), manager.school.publishNotice(scope), principal.school.publishNotice(scope)]);
+      const results = await Promise.allSettled([principal.school.publishNotice({ ...scope, expectedVersion: 1 }), manager.school.publishNotice({ ...scope, expectedVersion: 1 }), principal.school.publishNotice({ ...scope, expectedVersion: 1 })]);
       expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
       for (const result of results) {
         if (result.status === 'rejected') expect(result.reason).toMatchObject({ code: 'CONFLICT' });
@@ -496,14 +507,142 @@ describe('school notices', () => {
     it('publishes a notice nobody is enrolled for, and refuses a selected-classes draft left without classes', async () => {
       const emptyClass = (await createTestClass({ schoolId, label: 'Grade 12' })).schoolClass.id;
       const draft = await principal.school.createNotice(plain({ toStaff: false, cadetScope: 'selected_classes', classIds: [emptyClass] }));
-      await expect(principal.school.publishNotice({ schoolId, noticeId: draft.id })).resolves.toMatchObject({ status: 'published', publishedStaffCount: 0, publishedCadetCount: 0 });
+      await expect(principal.school.publishNotice({ schoolId, noticeId: draft.id, expectedVersion: draft.version })).resolves.toMatchObject({ status: 'published', publishedStaffCount: 0, publishedCadetCount: 0 });
       expect(await eventsOf(draft.id)).toHaveLength(0);
 
-      const orphan = await principal.school.createNotice(plain({ toStaff: false, cadetScope: 'selected_classes', classIds: [emptyClass] }));
-      await db.delete(noticeClassTable).where(eq(noticeClassTable.noticeId, orphan.id));
+      // A draft whose only class is deleted afterwards (through the real procedure) addresses nobody.
+      const doomed = (await createTestClass({ schoolId, label: 'Grade 13' })).schoolClass.id;
+      const orphan = await principal.school.createNotice(plain({ toStaff: false, cadetScope: 'selected_classes', classIds: [doomed] }));
+      await principal.school.deleteClass({ schoolId, classId: doomed });
+      await expect(principal.school.getNotice({ schoolId, noticeId: orphan.id })).resolves.toMatchObject({ classIds: [], classes: [{ classId: null, name: 'Grade 13' }] });
       await expect(principal.school.previewNoticePublish({ schoolId, noticeId: orphan.id })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
-      await expect(principal.school.publishNotice({ schoolId, noticeId: orphan.id })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+      await expect(principal.school.publishNotice({ schoolId, noticeId: orphan.id, expectedVersion: orphan.version })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
       expect((await db.select().from(noticeTable).where(eq(noticeTable.id, orphan.id)))[0]).toMatchObject({ status: 'draft' });
+    });
+
+    it('keeps a published notice\'s audience record when a class is renamed or deleted, without blocking the deletion', async () => {
+      const keep = (await createTestClass({ schoolId, label: 'Grade 9' })).schoolClass.id;
+      const renamed = (await createTestClass({ schoolId, label: 'Grade 10' })).schoolClass.id;
+      const deleted = (await createTestClass({ schoolId, label: 'Grade 11' })).schoolClass.id;
+      const goneBeforePublishing = (await createTestClass({ schoolId, label: 'Grade 14' })).schoolClass.id;
+      const draft = await principal.school.createNotice(plain({ toStaff: false, cadetScope: 'selected_classes', classIds: [keep, renamed, deleted, goneBeforePublishing] }));
+      // A class deleted while the notice is still a draft was never addressed: publication drops it from the record.
+      await principal.school.deleteClass({ schoolId, classId: goneBeforePublishing });
+      // A class renamed while it is a draft is recorded under the name it has at publication.
+      await db.update(classTable).set({ label: 'Grade 10 (Science)' }).where(eq(classTable.id, renamed));
+      await expect(principal.school.getNotice({ schoolId, noticeId: draft.id })).resolves.toMatchObject({
+        classIds: [keep, renamed, deleted],
+        classes: [
+          { classId: keep, name: 'Grade 9' },
+          { classId: renamed, name: 'Grade 10 (Science)' },
+          { classId: deleted, name: 'Grade 11' },
+          { classId: null, name: 'Grade 14' },
+        ],
+      });
+      const published = await principal.school.publishNotice({ schoolId, noticeId: draft.id, expectedVersion: draft.version });
+      const audience = [
+        { classId: keep, name: 'Grade 9' },
+        { classId: renamed, name: 'Grade 10 (Science)' },
+        { classId: deleted, name: 'Grade 11' },
+      ];
+      expect(published.classes).toEqual(audience);
+
+      // After publication: the reviewer's scenario. Deleting a class succeeds, and the record still names it.
+      await expect(principal.school.deleteClass({ schoolId, classId: deleted })).resolves.toMatchObject({ id: deleted });
+      await db.update(classTable).set({ label: 'Grade 10 (Commerce)' }).where(eq(classTable.id, renamed));
+      const after = await principal.school.getNotice({ schoolId, noticeId: draft.id });
+      expect(after.cadetScope).toBe('selected_classes');
+      expect(after.classIds).toEqual([keep, renamed]);
+      expect(after.classes).toEqual([
+        { classId: keep, name: 'Grade 9' },
+        // The name at publication, not the class's later name.
+        { classId: renamed, name: 'Grade 10 (Science)' },
+        { classId: null, name: 'Grade 11' },
+      ]);
+      const listed = (await principal.school.listNotices({ schoolId, sessionId, searchQuery: draft.title, filters: { toStaff: false } })).items.find((item) => item.id === draft.id);
+      expect(listed?.classes).toEqual(after.classes);
+      // Even with every class gone the notice still says whom it went to.
+      await principal.school.deleteClass({ schoolId, classId: keep });
+      await principal.school.deleteClass({ schoolId, classId: renamed });
+      const orphaned = await principal.school.getNotice({ schoolId, noticeId: draft.id });
+      expect(orphaned.classIds).toEqual([]);
+      expect(orphaned.classes.map((entry) => entry.name).sort()).toEqual(['Grade 10 (Science)', 'Grade 11', 'Grade 9']);
+    });
+
+    it('publishes only the version the publisher reviewed: an edit in between is a CONFLICT and notifies nobody', async () => {
+      const draft = await teacher.school.createNotice(plain({ title: 'Reviewed', toStaff: false, cadetScope: 'selected_classes', classIds: [grade6] }));
+      const scope = { schoolId, noticeId: draft.id };
+      // The principal opens the notice and the forecast...
+      const reviewed = await principal.school.getNotice(scope);
+      await expect(principal.school.previewNoticePublish(scope)).resolves.toMatchObject({ kind: 'ready', version: reviewed.version });
+      // ...the author widens the audience and replaces the text...
+      const edited = await teacher.school.updateNotice({ ...plain({ title: 'Not reviewed', body: 'Different text.', toStaff: true, cadetScope: 'all_classes' }), noticeId: draft.id, expectedVersion: draft.version });
+      expect(edited.version).toBe(reviewed.version + 1);
+      // ...and the principal's click publishes nothing.
+      await expect(principal.school.publishNotice({ ...scope, expectedVersion: reviewed.version })).rejects.toMatchObject({
+        code: 'CONFLICT',
+        message: 'This notice changed since you opened it. Review it again.',
+      });
+      expect((await db.select().from(noticeTable).where(eq(noticeTable.id, draft.id)))[0]).toMatchObject({ status: 'draft', title: 'Not reviewed', publishedAt: null });
+      expect(await eventsOf(draft.id)).toHaveLength(0);
+      // The forecast now names the new version; publishing that one works.
+      await expect(principal.school.previewNoticePublish(scope)).resolves.toMatchObject({ kind: 'ready', version: edited.version });
+      const published = await principal.school.publishNotice({ ...scope, expectedVersion: edited.version });
+      expect(published).toMatchObject({ status: 'published', title: 'Not reviewed', version: edited.version + 1 });
+      // Input validation: the version is required and positive.
+      await expect(principal.school.publishNotice(scope as never)).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+      await expect(principal.school.publishNotice({ ...scope, expectedVersion: 0 })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    });
+
+    it('refuses to overwrite a draft someone else changed since it was opened', async () => {
+      const draft = await teacher.school.createNotice(plain({ title: 'Shared draft' }));
+      const byManager = await manager.school.updateNotice({ ...plain({ title: 'Manager wording' }), noticeId: draft.id, expectedVersion: draft.version });
+      // The author still holds version 1.
+      await expect(teacher.school.updateNotice({ ...plain({ title: 'Author wording' }), noticeId: draft.id, expectedVersion: draft.version })).rejects.toMatchObject({
+        code: 'CONFLICT',
+        message: 'This notice changed since you opened it. Review it again.',
+      });
+      expect((await db.select().from(noticeTable).where(eq(noticeTable.id, draft.id)))[0]).toMatchObject({ title: 'Manager wording', version: byManager.version });
+      // Two saves of the same version at once: exactly one wins.
+      const results = await Promise.allSettled([
+        teacher.school.updateNotice({ ...plain({ title: 'A' }), noticeId: draft.id, expectedVersion: byManager.version }),
+        manager.school.updateNotice({ ...plain({ title: 'B' }), noticeId: draft.id, expectedVersion: byManager.version }),
+      ]);
+      expect(results.map((result) => result.status).sort()).toEqual(['fulfilled', 'rejected']);
+      expect(results.find((result) => result.status === 'rejected')).toMatchObject({ reason: { code: 'CONFLICT' } });
+      await expect(teacher.school.updateNotice({ ...plain(), noticeId: draft.id } as never)).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    });
+
+    it('fixes the issued-on date at publication: a later change of the session time zone does not move it', async () => {
+      const school = await createTestSchool({ name: 'Dated School', features: ['notices'] });
+      const session = (await createTestSession({ schoolId: school.id, sessionStartYear: 2026, sessionEndYear: 2027 })).id;
+      const client = createTestClient((await createSchoolStaffSession(school.id, [{ role: 'principal' }])).session);
+      // These two zones are 25 hours apart, so they never share a calendar date.
+      const setZone = (timeZone: string) => db.update(schoolSessionTable).set({ financeConfig: { timeZone } as never }).where(eq(schoolSessionTable.id, session));
+      const dateIn = (timeZone: string, instant: Date) => new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(instant);
+      const html = async (noticeId: string) => (await client.school.previewNotice({ schoolId: school.id, source: { kind: 'saved', noticeId } })).html;
+      const body = '<p id="d">{{notice.issuedOn}}|{{notice.issuedOnDisplay}}</p>';
+
+      await setZone('Pacific/Kiritimati');
+      const draft = await client.school.createNotice({ ...plain({ bodyMode: 'template', body }), schoolId: school.id, sessionId: session });
+      const stillDraft = await client.school.createNotice({ ...plain({ bodyMode: 'template', body }), schoolId: school.id, sessionId: session });
+      expect(draft.issuedOn).toBeNull();
+      const published = await client.school.publishNotice({ schoolId: school.id, noticeId: draft.id, expectedVersion: draft.version });
+      const issuedOn = dateIn('Pacific/Kiritimati', new Date(published.publishedAt!));
+      expect(published.issuedOn).toBe(issuedOn);
+      expect((await db.select().from(noticeTable).where(eq(noticeTable.id, draft.id)))[0]).toMatchObject({ issuedOn });
+      const before = await html(draft.id);
+      expect(before).toContain(`${issuedOn}|`);
+
+      await setZone('Pacific/Pago_Pago');
+      // The published notice keeps its date, in the page and in the PDF rendered afterwards...
+      expect(await html(draft.id)).toBe(before);
+      const download = await client.school.getNoticeDownload({ schoolId: school.id, noticeId: draft.id });
+      expect((await fetch(download.url)).status).toBe(200);
+      expect((await client.school.getNotice({ schoolId: school.id, noticeId: draft.id })).issuedOn).toBe(issuedOn);
+      // ...while a draft, which has no date yet, shows today's in the session's current zone.
+      expect(await html(stillDraft.id)).toContain(`${dateIn('Pacific/Pago_Pago', new Date())}|`);
+      expect(await html(stillDraft.id)).not.toContain(`${issuedOn}|`);
     });
 
     it('pins the template revision, so a later template change never alters a published notice', async () => {
@@ -516,16 +655,16 @@ describe('school notices', () => {
 
       // Published with the built-in default (nothing selected): null is pinned and stays the default.
       const builtIn = await client.school.createNotice(base);
-      const builtInPublished = await client.school.publishNotice({ schoolId: school.id, noticeId: builtIn.id });
+      const builtInPublished = await client.school.publishNotice({ schoolId: school.id, noticeId: builtIn.id, expectedVersion: builtIn.version });
       expect(builtInPublished.templateRevisionId).toBeNull();
 
       const first = await client.school.saveDocumentTemplate({ schoolId: school.id, documentType: 'notice', name: 'First', content: template('first'), pageSize: 'full', expectedRevisionId: null });
       const pinned = await client.school.createNotice(base);
-      const pinnedPublished = await client.school.publishNotice({ schoolId: school.id, noticeId: pinned.id });
+      const pinnedPublished = await client.school.publishNotice({ schoolId: school.id, noticeId: pinned.id, expectedVersion: pinned.version });
       expect(pinnedPublished.templateRevisionId).toBe(first.artifact.id);
       const draft = await client.school.createNotice(base);
       const custom = await client.school.createNotice({ ...base, bodyMode: 'template', body: '<h1 class="own">{{notice.title}}</h1>' });
-      const customPublished = await client.school.publishNotice({ schoolId: school.id, noticeId: custom.id });
+      const customPublished = await client.school.publishNotice({ schoolId: school.id, noticeId: custom.id, expectedVersion: custom.version });
       expect(customPublished.templateRevisionId).toBeNull();
       const pinnedBefore = await html(pinned.id);
       expect(pinnedBefore).toContain('first: Sports Day');
@@ -544,7 +683,7 @@ describe('school notices', () => {
       const draft = await principal.school.createNotice(plain({ bodyMode: 'template', body: '<p>{{notice.title}}</p>' }));
       // A source saved by an older release that the renderer now rejects.
       await db.update(noticeTable).set({ body: '{{unknownHelper notice.title}}' }).where(eq(noticeTable.id, draft.id));
-      await expect(principal.school.publishNotice({ schoolId, noticeId: draft.id })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+      await expect(principal.school.publishNotice({ schoolId, noticeId: draft.id, expectedVersion: draft.version })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
       expect((await db.select().from(noticeTable).where(eq(noticeTable.id, draft.id)))[0]).toMatchObject({ status: 'draft' });
       expect(await eventsOf(draft.id)).toHaveLength(0);
     });
@@ -558,7 +697,7 @@ describe('school notices', () => {
 
     it('renders a published notice once, caches it under the school prefix and serves the same file to every reader', async () => {
       const draft = await principal.school.createNotice(plain({ title: 'Holiday list' }));
-      await principal.school.publishNotice({ schoolId, noticeId: draft.id });
+      await principal.school.publishNotice({ schoolId, noticeId: draft.id, expectedVersion: draft.version });
       const key = noticePdfKey(schoolId, draft.id);
       await expect(getS3Client().send(new HeadObjectCommand({ Bucket: env.S3_BUCKET, Key: key }))).rejects.toBeDefined();
 
@@ -588,7 +727,7 @@ describe('school notices', () => {
       const paragraph = 'This paragraph is repeated to make the notice longer than a single printed page. '.repeat(6);
       const body = Array.from({ length: 40 }, (_, index) => `${index + 1}. ${paragraph}`).join('\n\n');
       const draft = await principal.school.createNotice(plain({ title: 'Long notice', body }));
-      await principal.school.publishNotice({ schoolId, noticeId: draft.id });
+      await principal.school.publishNotice({ schoolId, noticeId: draft.id, expectedVersion: draft.version });
       const download = await principal.school.getNoticeDownload({ schoolId, noticeId: draft.id });
       const pdf = await PDFDocument.load(new Uint8Array(await (await fetch(download.url)).arrayBuffer()));
       expect(pdf.getPageCount()).toBeGreaterThan(1);

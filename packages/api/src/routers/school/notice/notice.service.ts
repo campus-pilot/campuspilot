@@ -10,7 +10,7 @@ import {
   type NoticeRow,
 } from '@campuspilot/db/schema/notice';
 import { schoolSessionTable } from '@campuspilot/db/schema/session';
-import { and, asc, count, desc, eq, ilike, inArray, ne, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, count, desc, eq, ilike, inArray, isNotNull, isNull, ne, or, sql, type SQL } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import type { z } from 'zod';
 
@@ -25,25 +25,27 @@ import { handOffNotificationEvents } from '../../../notifications/notification.o
 import { createNextPageCursor, createPaginatedResult, resolvePaginationInput } from '../../../paginations';
 import { documentDownloadUrl } from '../document/document.storage';
 import type { NoticePublishPreview } from './notice-delivery.dto';
-import type {
-  createNoticeInputSchema,
-  listNoticesInputSchema,
-  NOTICE_BODY_MODES,
-  NOTICE_CADET_SCOPES,
-  NOTICE_STATUSES,
-  NoticeCadetScope,
-  NoticeDto,
-  NoticeSummaryDto,
-  previewNoticeInputSchema,
-  updateNoticeInputSchema,
+import {
+  NOTICE_CHANGED_MESSAGE,
+  type createNoticeInputSchema,
+  type listNoticesInputSchema,
+  type NOTICE_BODY_MODES,
+  type NOTICE_CADET_SCOPES,
+  type NOTICE_STATUSES,
+  type NoticeCadetScope,
+  type NoticeDto,
+  type NoticeSummaryDto,
+  type previewNoticeInputSchema,
+  type publishNoticeInputSchema,
+  type updateNoticeInputSchema,
 } from './notice.dto';
 import {
+  asPublishedNotice,
   assertValidNoticeTemplate,
   ensureNoticePdfStored,
   renderNoticeHtml,
   renderPublishedNoticeHtml,
   type NoticeContent,
-  type PublishedNotice,
 } from './notice.render';
 
 /**
@@ -92,23 +94,38 @@ function viewerFacts(row: Pick<NoticeRow, 'status' | 'createdBy'>, viewer: Notic
   };
 }
 
-/** Class IDs per notice, in class display order (tenant-scoped on both tables). */
-async function classIdsByNotice(db: DatabaseExecutor, schoolId: string, noticeIds: string[]) {
-  const byNotice = new Map<string, string[]>();
+type NoticeClass = { classId: string | null; name: string };
+
+/**
+ * The class rows per notice, in class display order with deleted classes
+ * last (tenant-scoped on both tables). `name` is the class's current label
+ * while it exists and the recorded name once it is gone; `recordedName` is
+ * the snapshot itself (what a published notice shows, see `notice_class`).
+ */
+async function classesByNotice(db: DatabaseExecutor, schoolId: string, noticeIds: string[]) {
+  const byNotice = new Map<string, { classId: string | null; currentName: string; recordedName: string }[]>();
   if (noticeIds.length === 0) return byNotice;
   const rows = await db
-    .select({ noticeId: noticeClassTable.noticeId, classId: noticeClassTable.classId })
+    .select({
+      noticeId: noticeClassTable.noticeId,
+      classId: classTable.id,
+      currentName: sql<string>`coalesce(${classTable.label}, ${noticeClassTable.className})`,
+      recordedName: noticeClassTable.className,
+    })
     .from(noticeClassTable)
-    .innerJoin(classTable, and(eq(classTable.id, noticeClassTable.classId), eq(classTable.schoolId, schoolId)))
+    .leftJoin(classTable, and(eq(classTable.id, noticeClassTable.classId), eq(classTable.schoolId, schoolId)))
     .where(and(eq(noticeClassTable.schoolId, schoolId), inArray(noticeClassTable.noticeId, noticeIds)))
-    .orderBy(asc(classTable.displayOrder), asc(classTable.id));
-  for (const row of rows) byNotice.set(row.noticeId, [...(byNotice.get(row.noticeId) ?? []), row.classId]);
+    .orderBy(sql`${classTable.displayOrder} asc nulls last`, asc(noticeClassTable.className), asc(noticeClassTable.id));
+  for (const row of rows) byNotice.set(row.noticeId, [...(byNotice.get(row.noticeId) ?? []), row]);
   return byNotice;
 }
 
 type NoticeWithNames = { notice: NoticeRow; createdByName: string | null; publishedByName: string | null };
+type NoticeClassRows = NonNullable<ReturnType<Awaited<ReturnType<typeof classesByNotice>>['get']>>;
 
-function toSummary({ notice, createdByName, publishedByName }: NoticeWithNames, classIds: string[], viewer: NoticeViewer): NoticeSummaryDto {
+function toSummary({ notice, createdByName, publishedByName }: NoticeWithNames, classRows: NoticeClassRows, viewer: NoticeViewer): NoticeSummaryDto {
+  const published = notice.status === 'published';
+  const classes: NoticeClass[] = classRows.map((row) => ({ classId: row.classId, name: published ? row.recordedName : row.currentName }));
   return {
     id: notice.id,
     schoolId: notice.schoolId,
@@ -118,7 +135,9 @@ function toSummary({ notice, createdByName, publishedByName }: NoticeWithNames, 
     status: notice.status,
     toStaff: notice.toStaff,
     cadetScope: notice.cadetScope,
-    classIds,
+    classIds: classRows.flatMap((row) => (row.classId ? [row.classId] : [])),
+    classes,
+    version: notice.version,
     createdBy: notice.createdBy,
     createdByName,
     createdAt: notice.createdAt,
@@ -126,6 +145,7 @@ function toSummary({ notice, createdByName, publishedByName }: NoticeWithNames, 
     publishedBy: notice.publishedBy,
     publishedByName,
     publishedAt: notice.publishedAt,
+    issuedOn: notice.issuedOn,
     publishedStaffCount: notice.publishedStaffCount,
     publishedCadetCount: notice.publishedCadetCount,
     viewer: viewerFacts(notice, viewer),
@@ -146,8 +166,8 @@ export async function getNotice(db: DatabaseExecutor, input: { schoolId: string;
     .where(and(eq(noticeTable.id, input.noticeId), visibleTo(input.schoolId, viewer)))
     .limit(1);
   if (!row) throw rpcError.notFound('Notice');
-  const classIds = (await classIdsByNotice(db, input.schoolId, [row.notice.id])).get(row.notice.id) ?? [];
-  return { ...toSummary(row, classIds, viewer), body: row.notice.body, templateRevisionId: row.notice.templateRevisionId };
+  const classes = (await classesByNotice(db, input.schoolId, [row.notice.id])).get(row.notice.id) ?? [];
+  return { ...toSummary(row, classes, viewer), body: row.notice.body, templateRevisionId: row.notice.templateRevisionId };
 }
 
 async function assertSessionOfSchool(db: DatabaseExecutor, schoolId: string, sessionId: string) {
@@ -184,7 +204,7 @@ export async function listNotices(db: DatabaseExecutor, input: z.infer<typeof li
     withNames(db).where(where).orderBy(...order, asc(noticeTable.id)).limit(pageSize).offset(offset),
     db.select({ value: count() }).from(noticeTable).where(where),
   ]);
-  const classes = await classIdsByNotice(db, input.schoolId, rows.map((row) => row.notice.id));
+  const classes = await classesByNotice(db, input.schoolId, rows.map((row) => row.notice.id));
   const totalItems = total?.value ?? 0;
   const totalPages = Math.ceil(totalItems / pageSize);
   return createPaginatedResult({
@@ -203,20 +223,25 @@ type AudienceInput = { toStaff: boolean; cadetScope: NoticeCadetScope; classIds:
  * Checks an audience against the school: any student scope needs the
  * school's `cadet` feature (decision D1: the flag is "the school has the
  * Cadet Portal"), and every class named must be a class of this school.
+ * Returns the named classes with their current labels (the name recorded
+ * with the audience).
  */
 async function assertAudienceAllowed(db: DatabaseExecutor, schoolId: string, audience: AudienceInput) {
   if (audience.cadetScope !== 'none') await assertSchoolFeatureEnabled(db, schoolId, 'cadet');
-  if (audience.classIds.length === 0) return;
+  if (audience.classIds.length === 0) return [];
   const found = await db
-    .select({ id: classTable.id })
+    .select({ id: classTable.id, label: classTable.label })
     .from(classTable)
     .where(and(eq(classTable.schoolId, schoolId), inArray(classTable.id, audience.classIds)));
   if (found.length !== audience.classIds.length) throw rpcError.notFound('School class');
+  return found;
 }
 
-async function replaceNoticeClasses(tx: DatabaseExecutor, schoolId: string, noticeId: string, classIds: string[]) {
+async function replaceNoticeClasses(tx: DatabaseExecutor, schoolId: string, noticeId: string, classes: { id: string; label: string }[]) {
   await tx.delete(noticeClassTable).where(and(eq(noticeClassTable.noticeId, noticeId), eq(noticeClassTable.schoolId, schoolId)));
-  if (classIds.length > 0) await tx.insert(noticeClassTable).values(classIds.map((classId) => ({ noticeId, classId, schoolId })));
+  if (classes.length > 0) {
+    await tx.insert(noticeClassTable).values(classes.map((schoolClass) => ({ noticeId, classId: schoolClass.id, className: schoolClass.label, schoolId })));
+  }
 }
 
 /** Creates a draft owned by the caller. */
@@ -224,7 +249,7 @@ export async function createNotice(db: Database, input: z.infer<typeof createNot
   if (input.bodyMode === 'template') assertValidNoticeTemplate(input.body);
   const noticeId = await db.transaction(async (tx) => {
     await assertSessionOfSchool(tx, input.schoolId, input.sessionId);
-    await assertAudienceAllowed(tx, input.schoolId, input);
+    const classes = await assertAudienceAllowed(tx, input.schoolId, input);
     const [row] = await tx
       .insert(noticeTable)
       .values({
@@ -238,7 +263,7 @@ export async function createNotice(db: Database, input: z.infer<typeof createNot
         createdBy: viewer.userId,
       })
       .returning({ id: noticeTable.id });
-    await replaceNoticeClasses(tx, input.schoolId, row!.id, input.classIds);
+    await replaceNoticeClasses(tx, input.schoolId, row!.id, classes);
     return row!.id;
   });
   return getNotice(db, { schoolId: input.schoolId, noticeId }, viewer);
@@ -262,19 +287,34 @@ async function lockEditableDraft(tx: DatabaseExecutor, input: { schoolId: string
   return row;
 }
 
-/** Replaces a draft's content and audience. */
+/**
+ * Replaces a draft's content and audience. The caller names the version
+ * they edited (`expectedVersion`); when someone else saved in between, the
+ * write is refused with CONFLICT instead of silently overwriting their
+ * change. Checked under the row lock, so two simultaneous saves of one
+ * version cannot both succeed.
+ */
 export async function updateNotice(db: Database, input: z.infer<typeof updateNoticeInputSchema>, viewer: NoticeViewer): Promise<NoticeDto> {
   if (input.bodyMode === 'template') assertValidNoticeTemplate(input.body);
   await db.transaction(async (tx) => {
-    await lockEditableDraft(tx, input, viewer, 'changed');
-    await assertAudienceAllowed(tx, input.schoolId, input);
+    const row = await lockEditableDraft(tx, input, viewer, 'changed');
+    if (row.version !== input.expectedVersion) throw rpcError.conflict(NOTICE_CHANGED_MESSAGE);
+    const classes = await assertAudienceAllowed(tx, input.schoolId, input);
     const [updated] = await tx
       .update(noticeTable)
-      .set({ title: input.title, bodyMode: input.bodyMode, body: input.body, toStaff: input.toStaff, cadetScope: input.cadetScope, updatedAt: new Date() })
+      .set({
+        title: input.title,
+        bodyMode: input.bodyMode,
+        body: input.body,
+        toStaff: input.toStaff,
+        cadetScope: input.cadetScope,
+        version: row.version + 1,
+        updatedAt: new Date(),
+      })
       .where(and(eq(noticeTable.id, input.noticeId), eq(noticeTable.schoolId, input.schoolId), eq(noticeTable.status, 'draft')))
       .returning({ id: noticeTable.id });
     if (!updated) throw rpcError.conflict('A published notice cannot be changed.');
-    await replaceNoticeClasses(tx, input.schoolId, input.noticeId, input.classIds);
+    await replaceNoticeClasses(tx, input.schoolId, input.noticeId, classes);
   });
   return getNotice(db, input, viewer);
 }
@@ -301,61 +341,87 @@ async function visibleRow(db: DatabaseExecutor, input: { schoolId: string; notic
   return row;
 }
 
-function asPublished(row: NoticeRow): PublishedNotice | null {
-  return row.status === 'published' && row.publishedAt ? { ...row, publishedAt: row.publishedAt } : null;
+/**
+ * Renders a notice to sanitized HTML without persisting anything: a saved
+ * notice as stored (a published one from what was fixed at publication, a
+ * draft with the school's current template and today's date), or unsaved
+ * content.
+ */
+export async function previewNotice(db: DatabaseExecutor, input: z.infer<typeof previewNoticeInputSchema>, viewer: NoticeViewer) {
+  const draftOptions = { generatedAt: new Date(), issuedOn: null, template: { kind: 'current' } } as const;
+  if (input.source.kind === 'saved') {
+    const row = await visibleRow(db, { schoolId: input.schoolId, noticeId: input.source.noticeId }, viewer);
+    const published = asPublishedNotice(row);
+    if (published) return { html: (await renderPublishedNoticeHtml(db, published)).html };
+    return { html: (await renderNoticeHtml(db, row, draftOptions)).html };
+  }
+  const content: NoticeContent = { schoolId: input.schoolId, sessionId: input.source.sessionId, title: input.source.title, bodyMode: input.source.bodyMode, body: input.source.body };
+  return { html: (await renderNoticeHtml(db, content, draftOptions)).html };
 }
 
 /**
- * Renders a notice to sanitized HTML without persisting anything: a saved
- * notice as stored (a published one exactly as published, a draft with the
- * school's current template and today's date), or unsaved content.
+ * A selected-classes draft needs at least one class that still exists: a
+ * class deleted since the draft was saved addresses nobody.
  */
-export async function previewNotice(db: DatabaseExecutor, input: z.infer<typeof previewNoticeInputSchema>, viewer: NoticeViewer) {
-  if (input.source.kind === 'saved') {
-    const row = await visibleRow(db, { schoolId: input.schoolId, noticeId: input.source.noticeId }, viewer);
-    const published = asPublished(row);
-    if (published) return { html: (await renderPublishedNoticeHtml(db, published)).html };
-    return { html: (await renderNoticeHtml(db, row, { issuedAt: new Date(), template: { kind: 'current' } })).html };
-  }
-  const content: NoticeContent = { schoolId: input.schoolId, sessionId: input.source.sessionId, title: input.source.title, bodyMode: input.source.bodyMode, body: input.source.body };
-  return { html: (await renderNoticeHtml(db, content, { issuedAt: new Date(), template: { kind: 'current' } })).html };
-}
-
-/** A selected-classes draft whose classes were all deleted since cannot be published. */
 async function assertHasAudienceClasses(db: DatabaseExecutor, notice: Pick<NoticeRow, 'id' | 'schoolId' | 'cadetScope'>) {
   if (notice.cadetScope !== 'selected_classes') return;
   const [row] = await db
     .select({ value: count() })
     .from(noticeClassTable)
-    .where(and(eq(noticeClassTable.noticeId, notice.id), eq(noticeClassTable.schoolId, notice.schoolId)));
+    .where(and(eq(noticeClassTable.noticeId, notice.id), eq(noticeClassTable.schoolId, notice.schoolId), isNotNull(noticeClassTable.classId)));
   if (!row || row.value === 0) throw rpcError.badRequest('Choose at least one class before publishing this notice.');
 }
 
-/** What publishing would notify (the caller holds the publish permission, so every draft is visible). */
+/**
+ * Makes a draft's class rows the audience record of its publication: rows
+ * whose class was deleted since the draft was saved are dropped (that class
+ * is not addressed), and every remaining row takes its class's name as it
+ * is now. From here on the rows are never rewritten; `class_id` only goes
+ * null if the class is deleted later.
+ */
+async function recordPublishedClasses(tx: DatabaseExecutor, notice: Pick<NoticeRow, 'id' | 'schoolId'>) {
+  const ofNotice = and(eq(noticeClassTable.noticeId, notice.id), eq(noticeClassTable.schoolId, notice.schoolId));
+  await tx.delete(noticeClassTable).where(and(ofNotice, isNull(noticeClassTable.classId)));
+  await tx
+    .update(noticeClassTable)
+    .set({ className: classTable.label })
+    .from(classTable)
+    .where(and(ofNotice, eq(classTable.id, noticeClassTable.classId), eq(classTable.schoolId, notice.schoolId)));
+}
+
+/**
+ * What publishing would notify (the caller holds the publish permission, so
+ * every draft is visible). `version` is the version this forecast was made
+ * for: the dialog compares it with the notice the publisher is looking at.
+ */
 export async function previewNoticePublish(db: DatabaseExecutor, input: { schoolId: string; noticeId: string }, viewer: NoticeViewer): Promise<NoticePublishPreview> {
   const row = await visibleRow(db, input, viewer);
   if (row.status === 'published' && row.publishedAt) return { kind: 'already_published', publishedAt: row.publishedAt };
   if (row.cadetScope !== 'none') await assertSchoolFeatureEnabled(db, input.schoolId, 'cadet');
   await assertHasAudienceClasses(db, row);
   const delivery = await previewNoticeDelivery(db, row);
-  return { kind: 'ready', toStaff: row.toStaff, cadetScope: row.cadetScope, ...delivery };
+  return { kind: 'ready', version: row.version, toStaff: row.toStaff, cadetScope: row.cadetScope, ...delivery };
 }
 
 /**
- * Publishes a draft, once.
+ * Publishes a draft, once, and only the version the publisher reviewed.
  *
  * One transaction: lock the notice row, refuse an already published notice
- * with CONFLICT, re-check the audience against the school as it is now (the
- * `cadet` feature may have been switched off since the draft was saved),
- * render it once to prove it renders and to learn the template revision to
- * pin, resolve the recipients, flip `draft -> published` conditionally and
- * emit one notification event per student plus the staff events. The row
- * lock serializes a double click and concurrent publishers: the second
- * finds the notice published and gets CONFLICT, so there is exactly one
- * fan-out (the event keys would deduplicate besides). The events commit
- * with the publication and are handed over only after the commit.
+ * with CONFLICT, refuse with CONFLICT when the draft is no longer the
+ * `expectedVersion` (its author may keep editing while a publisher reads
+ * it; publication is irreversible, so it must never send text or an
+ * audience nobody approved), re-check the audience against the school as it
+ * is now (the `cadet` feature may have been switched off since the draft
+ * was saved), render it once to prove it renders and to learn the template
+ * revision to pin and the issued-on date to store, resolve the recipients,
+ * flip `draft -> published` conditionally and emit one notification event
+ * per student plus the staff events. The row lock serializes a double click
+ * and concurrent publishers: the second finds the notice published and gets
+ * CONFLICT, so there is exactly one fan-out (the event keys would
+ * deduplicate besides). The events commit with the publication and are
+ * handed over only after the commit.
  */
-export async function publishNotice(db: Database, input: { schoolId: string; noticeId: string }, viewer: NoticeViewer): Promise<NoticeDto> {
+export async function publishNotice(db: Database, input: z.infer<typeof publishNoticeInputSchema>, viewer: NoticeViewer): Promise<NoticeDto> {
   const eventIds = await db.transaction(async (tx) => {
     const [row] = await tx
       .select()
@@ -365,20 +431,24 @@ export async function publishNotice(db: Database, input: { schoolId: string; not
       .limit(1);
     if (!row) throw rpcError.notFound('Notice');
     if (row.status !== 'draft') throw rpcError.conflict('This notice is already published.');
+    if (row.version !== input.expectedVersion) throw rpcError.conflict(NOTICE_CHANGED_MESSAGE);
     if (row.cadetScope !== 'none') await assertSchoolFeatureEnabled(tx, input.schoolId, 'cadet');
     await assertHasAudienceClasses(tx, row);
+    await recordPublishedClasses(tx, row);
     const publishedAt = new Date();
-    const rendered = await renderNoticeHtml(tx, row, { issuedAt: publishedAt, template: { kind: 'current' } });
+    const rendered = await renderNoticeHtml(tx, row, { generatedAt: publishedAt, issuedOn: null, template: { kind: 'current' } });
     const recipients = await resolveNoticeRecipients(tx, row);
     const [published] = await tx
       .update(noticeTable)
       .set({
         status: 'published',
         publishedAt,
+        issuedOn: rendered.issuedOn,
         publishedBy: viewer.userId,
         templateRevisionId: rendered.templateRevisionId,
         publishedStaffCount: recipients.staff.length,
         publishedCadetCount: recipients.roster.length,
+        version: row.version + 1,
         updatedAt: publishedAt,
       })
       .where(and(eq(noticeTable.id, input.noticeId), eq(noticeTable.schoolId, input.schoolId), eq(noticeTable.status, 'draft')))
@@ -393,7 +463,7 @@ export async function publishNotice(db: Database, input: { schoolId: string; not
 /** A five-minute download URL of a published notice's PDF (rendered and cached on first use). */
 export async function getNoticeDownload(db: Database, input: { schoolId: string; noticeId: string }, viewer: NoticeViewer) {
   const row = await visibleRow(db, input, viewer);
-  const published = asPublished(row);
+  const published = asPublishedNotice(row);
   if (!published) throw rpcError.conflict('Publish the notice to download its PDF.');
   const key = await ensureNoticePdfStored(db, published);
   return { url: await documentDownloadUrl(key, `Notice ${row.title}`), expiresIn: 300 };

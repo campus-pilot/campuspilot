@@ -15,6 +15,8 @@ import { NOTICE_CADET_SCOPES } from './notice.dto';
 export const noticePublishPreviewSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('ready'),
+    /** The notice version this forecast was made for; publish with it as `expectedVersion` only if it is the version reviewed. */
+    version: z.number().int().positive(),
     toStaff: z.boolean(),
     staffRecipientCount: z.number().int().nonnegative(),
     cadetScope: z.enum(NOTICE_CADET_SCOPES),

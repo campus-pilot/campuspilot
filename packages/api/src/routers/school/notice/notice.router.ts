@@ -16,6 +16,7 @@ import {
   noticeDtoSchema,
   noticePreviewOutputSchema,
   noticeScopeInputSchema,
+  publishNoticeInputSchema,
   previewNoticeInputSchema,
   updateNoticeInputSchema,
 } from './notice.dto';
@@ -172,9 +173,9 @@ export const schoolNoticeRouter = {
     }),
 
   publishNotice: protectedProcedure
-    .route(route('Publish a notice', 'Publish a draft, once and irreversibly: it becomes visible to its audience, can no longer be changed, and its recipients are notified (staff in the app; students in the Cadet Portal, by device notification and by WhatsApp with the notice PDF). Publishing an already published notice is refused.'))
+    .route(route('Publish a notice', 'Publish a draft, once and irreversibly: it becomes visible to its audience, can no longer be changed, and its recipients are notified (staff in the app; students in the Cadet Portal, by device notification and by WhatsApp with the notice PDF). Send expectedVersion, the version you reviewed: a notice edited since, or already published, is refused with CONFLICT.'))
     .meta(meta('write', true))
-    .input(noticeScopeInputSchema)
+    .input(publishNoticeInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.PUBLISH_NOTICE))
     .use(requireSchoolFeature('notices'))
     .output(noticeDtoSchema)

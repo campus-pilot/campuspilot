@@ -1,6 +1,10 @@
+import { PutObjectCommand } from '@aws-sdk/client-s3';
 import { db } from '@campuspilot/db';
 import { noticeClassTable, noticeTable } from '@campuspilot/db/schema/notice';
+import { schoolTable } from '@campuspilot/db/schema/school';
 import { studentTable } from '@campuspilot/db/schema/student';
+import { env } from '@campuspilot/env/server';
+import { getS3Client } from '@campuspilot/s3/client';
 import { createRouterClient } from '@orpc/server';
 import { and, eq } from 'drizzle-orm';
 import { PDFDocument } from 'pdf-lib';
@@ -48,7 +52,7 @@ describe('cadet notices', () => {
   });
   async function create(key: string, overrides: Record<string, unknown>, publish = true) {
     const draft = await principal.school.createNotice(body({ title: key, ...overrides }));
-    if (publish) await principal.school.publishNotice({ schoolId, noticeId: draft.id });
+    if (publish) await principal.school.publishNotice({ schoolId, noticeId: draft.id, expectedVersion: draft.version });
     notices[key] = draft.id;
     return draft.id;
   }
@@ -97,22 +101,51 @@ describe('cadet notices', () => {
     await expect(asha.listNotices({ limit: 21 })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
   });
 
-  it('returns an addressed notice rendered, escaped and with its text', async () => {
+  it('returns an addressed notice as text only, and its printed page from the separate document read', async () => {
     const notice = await asha.getNotice({ noticeId: notices['Grade 6 only']! });
-    expect(notice).toMatchObject({ noticeId: notices['Grade 6 only'], title: 'Grade 6 only', text: 'First paragraph.\n\nSecond <b>paragraph</b>.' });
+    expect(notice).toMatchObject({ noticeId: notices['Grade 6 only'], title: 'Grade 6 only', bodyMode: 'plain', text: 'First paragraph.\n\nSecond <b>paragraph</b>.' });
     expect(notice.publishedAt).toBeInstanceOf(Date);
-    expect(notice.html).toContain('Content-Security-Policy');
-    expect(notice.html).toContain('Cadet Notice School');
-    expect(notice.html).toContain('Second &lt;b&gt;paragraph&lt;/b&gt;.');
-    expect(notice.html).not.toContain('<b>');
-    // Nothing staff-only leaves with it.
-    expect(Object.keys(notice).sort()).toEqual(['html', 'noticeId', 'publishedAt', 'text', 'title']);
+    // Nothing staff-only leaves with it, and no markup: the Cadet MCP serves this as a core tool.
+    expect(Object.keys(notice).sort()).toEqual(['bodyMode', 'noticeId', 'publishedAt', 'text', 'title']);
 
-    const designed = await create('Designed', { bodyMode: 'template', body: '<h1 class="own">{{notice.title}}</h1><script>bad()</script>', cadetScope: 'all_classes' });
-    const rendered = await asha.getNotice({ noticeId: designed });
-    expect(rendered.text).toBeNull();
+    const page = await asha.getNoticeDocument({ noticeId: notices['Grade 6 only']! });
+    expect(Object.keys(page).sort()).toEqual(['html', 'noticeId']);
+    expect(page.html).toContain('Content-Security-Policy');
+    expect(page.html).toContain('Cadet Notice School');
+    expect(page.html).toContain('Second &lt;b&gt;paragraph&lt;/b&gt;.');
+    expect(page.html).not.toContain('<b>');
+
+    const designed = await create('Designed', {
+      bodyMode: 'template',
+      body: '<style>.own{color:red}</style><h1 class="own">{{notice.title}}</h1><p>Bring water &amp; a cap.</p><p>Gates open at 8.</p><img src="{{school.logoUrl}}"><script>bad()</script>',
+      cadetScope: 'all_classes',
+    });
+    const read = await asha.getNotice({ noticeId: designed });
+    // The wording of the designed document, without layout, styles, scripts or images.
+    expect(read).toMatchObject({ bodyMode: 'template', text: 'Designed\n\nBring water & a cap.\n\nGates open at 8.' });
+    const rendered = await asha.getNoticeDocument({ noticeId: designed });
     expect(rendered.html).toContain('<h1 class="own">Designed</h1>');
     expect(rendered.html).not.toContain('<script');
+  });
+
+  it('keeps megabytes of logo out of the content read: a school with a logo returns text of the same size', async () => {
+    const logoKey = `schools/${schoolId}/logo-test.png`;
+    // A valid 1x1 PNG, padded: only its size matters here.
+    const png = Buffer.concat([Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64'), Buffer.alloc(300_000)]);
+    await getS3Client().send(new PutObjectCommand({ Bucket: env.S3_BUCKET, Key: logoKey, Body: png, ContentType: 'image/png' }));
+    await db.update(schoolTable).set({ logoS3Key: logoKey }).where(eq(schoolTable.id, schoolId));
+    try {
+      const designed = await create('With letterhead', { bodyMode: 'template', body: '<img src="{{school.logoUrl}}"><p>Fee reminder.</p>', cadetScope: 'all_classes' });
+      const read = await asha.getNotice({ noticeId: designed });
+      expect(read.text).toBe('Fee reminder.');
+      expect(JSON.stringify(read).length).toBeLessThan(1_000);
+      // The printed page does carry the logo, once.
+      const page = await asha.getNoticeDocument({ noticeId: designed });
+      expect(page.html.length).toBeGreaterThan(300_000);
+      expect(page.html.split('data:image/png;base64,').length - 1).toBe(1);
+    } finally {
+      await db.update(schoolTable).set({ logoS3Key: null }).where(eq(schoolTable.id, schoolId));
+    }
   });
 
   it('answers NOT_FOUND for every notice not addressed to the student, exactly like an unknown one', async () => {
@@ -128,6 +161,7 @@ describe('cadet notices', () => {
     ];
     for (const [client, noticeId] of refused) {
       await expect(client.getNotice({ noticeId }), noticeId).rejects.toMatchObject({ code: 'NOT_FOUND', message: 'Notice was not found.' });
+      await expect(client.getNoticeDocument({ noticeId }), noticeId).rejects.toMatchObject({ code: 'NOT_FOUND' });
       await expect(client.getNoticeDownload({ noticeId }), noticeId).rejects.toMatchObject({ code: 'NOT_FOUND' });
     }
     await expect(asha.getNotice({ noticeId: '' })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
@@ -137,11 +171,11 @@ describe('cadet notices', () => {
     const otherSession = (await createTestSession({ schoolId: other.id, sessionStartYear: 2026, sessionEndYear: 2027 })).id;
     const otherPrincipal = createTestClient((await createSchoolStaffSession(other.id, [{ role: 'principal' }])).session);
     const theirs = await otherPrincipal.school.createNotice({ ...body(), schoolId: other.id, sessionId: otherSession });
-    await otherPrincipal.school.publishNotice({ schoolId: other.id, noticeId: theirs.id });
+    await otherPrincipal.school.publishNotice({ schoolId: other.id, noticeId: theirs.id, expectedVersion: theirs.version });
     await expect(asha.getNotice({ noticeId: theirs.id })).rejects.toMatchObject({ code: 'NOT_FOUND' });
     // Not even with a forged class row pointing at the student's class from the other school's notice.
     await db.update(noticeTable).set({ cadetScope: 'selected_classes' }).where(eq(noticeTable.id, theirs.id));
-    await db.insert(noticeClassTable).values({ noticeId: theirs.id, classId: grade6, schoolId: other.id });
+    await db.insert(noticeClassTable).values({ noticeId: theirs.id, classId: grade6, className: 'Grade 6', schoolId: other.id });
     await expect(asha.getNotice({ noticeId: theirs.id })).rejects.toMatchObject({ code: 'NOT_FOUND' });
     expect(await titles(asha)).not.toContain('Notice');
   });
@@ -173,6 +207,7 @@ describe('cadet notices', () => {
     const anonymous = createCadetTestClient(new Headers());
     await expect(anonymous.listNotices({})).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
     await expect(anonymous.getNotice({ noticeId: notices['All classes']! })).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+    await expect(anonymous.getNoticeDocument({ noticeId: notices['All classes']! })).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
     await expect(anonymous.getNoticeDownload({ noticeId: notices['All classes']! })).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
     // Identity fields in the input are ignored: Chetan still gets his own list, never Asha's.
     const forged = await chetan.listNotices({ admissionId: ashaId, schoolId: 'other' } as never);
@@ -188,6 +223,7 @@ describe('cadet notices', () => {
     const client = (await createCadetLogin(admissionId)).client;
     await expectFeatureDisabled(client.listNotices({}), 'notices');
     await expectFeatureDisabled(client.getNotice({ noticeId: 'ntc_any' }), 'notices');
+    await expectFeatureDisabled(client.getNoticeDocument({ noticeId: 'ntc_any' }), 'notices');
     await expectFeatureDisabled(client.getNoticeDownload({ noticeId: 'ntc_any' }), 'notices');
     await setTestSchoolFeature(school.id, 'notices', true);
     await expect(client.listNotices({})).resolves.toMatchObject({ items: [] });
@@ -213,6 +249,7 @@ describe('cadet notices', () => {
     await expect(connected.getNotice({ noticeId: notices['Grade 6 only']! })).rejects.toMatchObject({ code: 'NOT_FOUND' });
     expect(cadetRouter.listNotices['~orpc'].meta.mcp).toEqual({ exposure: 'core', access: 'read', destructive: false, module: 'notices' });
     expect(cadetRouter.getNotice['~orpc'].meta.mcp).toEqual({ exposure: 'core', access: 'read', destructive: false, module: 'notices' });
+    expect(cadetRouter.getNoticeDocument['~orpc'].meta.mcp).toEqual({ exposure: 'hidden', access: 'read', destructive: false, module: 'notices' });
     expect(cadetRouter.getNoticeDownload['~orpc'].meta.mcp).toEqual({ exposure: 'hidden', access: 'read', destructive: false, module: 'notices' });
   });
 });

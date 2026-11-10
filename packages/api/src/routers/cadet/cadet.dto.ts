@@ -336,15 +336,30 @@ export const getCadetNoticeInputSchema = z.object({
   noticeId: z.string().trim().min(1).max(100).describe('noticeId from listNotices.'),
 });
 
+/**
+ * One notice as content to read. It carries no markup and no images, so it
+ * is small enough for every caller, including the Cadet MCP (a core tool):
+ * the printed page with the school's letterhead is a separate, app-only
+ * read (`getNoticeDocument`).
+ */
 export const cadetNoticeSchema = cadetNoticeListItemSchema.extend({
   /**
-   * The notice as plain text when it was written as text; null for a notice
-   * designed as a document, which can only be read as `html` or as its PDF.
+   * How the notice was written, which decides how the app shows it:
+   * `plain` = text (shown as text); `template` = a designed document (shown
+   * as its printed page). `text` is filled for both.
    */
-  text: z.string().nullable(),
-  /** The rendered notice: sanitized, network-free HTML for an empty-sandbox iframe. */
-  html: z.string(),
+  bodyMode: z.enum(['plain', 'template']),
+  /**
+   * The notice's wording. For a `plain` notice, exactly the text staff
+   * wrote (blank lines separate paragraphs). For a `template` notice, the
+   * readable text of the designed document without its layout.
+   */
+  text: z.string(),
 });
 export type CadetNoticeDto = z.infer<typeof cadetNoticeSchema>;
+
+/** The printed page of a notice: sanitized, network-free HTML for an empty-sandbox iframe. */
+export const cadetNoticeDocumentSchema = z.object({ noticeId: z.string(), html: z.string() });
+export type CadetNoticeDocumentDto = z.infer<typeof cadetNoticeDocumentSchema>;
 
 export const cadetNoticeDownloadSchema = z.object({ url: z.url(), expiresIn: z.number().int() });

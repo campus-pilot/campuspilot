@@ -1,7 +1,7 @@
 import { fireEvent, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { designedNotice, featureDisabledError, notices, plainNotice } from '@/test/fixtures';
+import { designedNotice, designedNoticePage, featureDisabledError, notices, plainNotice } from '@/test/fixtures';
 import { page, renderWithQuery, resetHandlers } from '@/test/orpc-mock';
 import { NoticeScreen } from './notice-screen';
 import { NoticesScreen } from './notices-screen';
@@ -79,13 +79,41 @@ describe('NoticeScreen', () => {
     expect(container.querySelector('iframe')).toBeNull();
   });
 
-  it('shows a designed notice as its printed page in an empty sandbox', async () => {
-    resetHandlers({ getNotice: () => designedNotice });
+  it('never asks for the printed page of a notice written as text', async () => {
+    const getNoticeDocument = vi.fn(() => designedNoticePage);
+    resetHandlers({ getNotice: () => plainNotice, getNoticeDocument });
+    renderWithQuery(<NoticeScreen noticeId="ntc_uniform" />);
+    await screen.findByRole('heading', { name: 'Winter uniform from Monday' });
+    expect(getNoticeDocument).not.toHaveBeenCalled();
+  });
+
+  it('shows a designed notice as its printed page in an empty sandbox, loaded separately from the notice', async () => {
+    const getNoticeDocument = vi.fn(() => designedNoticePage);
+    resetHandlers({ getNotice: () => designedNotice, getNoticeDocument });
     renderWithQuery(<NoticeScreen noticeId="ntc_sports" />);
     const frame = (await screen.findByTitle('Notice as printed')) as HTMLIFrameElement;
     expect(frame.getAttribute('sandbox')).toBe('');
-    expect(frame.getAttribute('srcdoc')).toBe(designedNotice.html);
+    expect(frame.getAttribute('srcdoc')).toBe(designedNoticePage.html);
     expect(screen.getByRole('heading', { name: 'Annual Sports Day' })).toBeTruthy();
+    expect(getNoticeDocument).toHaveBeenCalledWith({ noticeId: 'ntc_sports' });
+  });
+
+  it('keeps a designed notice readable as text when its printed page cannot be loaded, and offers to try again', async () => {
+    let fail = true;
+    resetHandlers({
+      getNotice: () => designedNotice,
+      getNoticeDocument: () => {
+        if (fail) throw new Error('Network down');
+        return designedNoticePage;
+      },
+    });
+    const { container } = renderWithQuery(<NoticeScreen noticeId="ntc_sports" />);
+    expect((await screen.findByRole('alert')).textContent).toContain('The printed page could not be loaded');
+    expect([...container.querySelectorAll('article p')].map((p) => p.textContent)).toEqual(['Annual Sports Day', 'Gates open at 8 AM.']);
+    expect(container.querySelector('iframe')).toBeNull();
+    fail = false;
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(await screen.findByTitle('Notice as printed')).toBeTruthy();
   });
 
   it('downloads the PDF through a URL issued on the tap', async () => {

@@ -21,7 +21,7 @@ import { retryFinanceConflict } from '../../../test/finance/assertions';
 import { dispatchNow, drainSchool } from '../../../test/notifications';
 import type { NotificationChannelAdapter } from '../../notifications/channels';
 import { createAdminSession, createTestClient, createTestUser, type UserSession } from '../../../test/fixtures';
-import { getCadetNotice, listCadetNotices } from '../../routers/cadet/cadet-notices.service';
+import { getCadetNotice, getCadetNoticeDocument, listCadetNotices } from '../../routers/cadet/cadet-notices.service';
 import { noticePdfKey } from '../../routers/school/notice/notice.render';
 import { loadDemoJob, startDemoJob, type DemoJobSnapshot } from './job-store';
 import { buildDemoPlan } from './plan';
@@ -214,11 +214,13 @@ describe('demo school seed steps (2 classes, without Restate)', () => {
     const visible = await listCadetNotices(db, cadet, { limit: 20 });
     expect(visible.items.map((item) => item.title)).toEqual(['Annual Sports Day invitation', 'Science exhibition: models and group lists', 'Revised school timings']);
     const designed = await getCadetNotice(db, cadet, sportsDay.id);
-    expect(designed.text).toBeNull();
-    expect(designed.html).toContain('Integration Valley School');
-    expect(designed.html).toContain('18 December 2026');
-    expect(designed.html).toContain('1 January 2027');
-    expect(designed.html).not.toContain('{date:');
+    expect(designed.bodyMode).toBe('template');
+    expect(designed.text).toContain('18 December 2026');
+    const designedPage = await getCadetNoticeDocument(db, cadet, sportsDay.id);
+    expect(designedPage.html).toContain('Integration Valley School');
+    expect(designedPage.html).toContain('18 December 2026');
+    expect(designedPage.html).toContain('1 January 2027');
+    expect(designedPage.html).not.toContain('{date:');
     // Downloading renders the PDF once and caches it under the school's own prefix.
     await client.school.getNoticeDownload({ schoolId: job.schoolId, noticeId: sportsDay.id });
     await expect(getS3Client().send(new HeadObjectCommand({ Bucket: env.S3_BUCKET, Key: noticePdfKey(job.schoolId, sportsDay.id) }))).resolves.toMatchObject({ ContentType: 'application/pdf' });

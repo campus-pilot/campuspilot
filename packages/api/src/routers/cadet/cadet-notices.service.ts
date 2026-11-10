@@ -6,7 +6,13 @@ import { and, count, desc, eq, ne, sql, type SQL } from 'drizzle-orm';
 import { rpcError } from '../../errors';
 import { createNextPageCursor, createPaginatedResult, resolvePaginationInput } from '../../paginations';
 import { documentDownloadUrl } from '../school/document/document.storage';
-import { ensureNoticePdfStored, renderPublishedNoticeHtml, type PublishedNotice } from '../school/notice/notice.render';
+import {
+  asPublishedNotice,
+  ensureNoticePdfStored,
+  renderPublishedNoticeHtml,
+  renderPublishedNoticeText,
+  type PublishedNotice,
+} from '../school/notice/notice.render';
 
 /**
  * Notices in the Cadet Portal. A student sees a notice only when all of
@@ -87,21 +93,33 @@ async function addressedNotice(db: DatabaseExecutor, cadet: CadetScope, noticeId
     .from(noticeTable)
     .where(and(eq(noticeTable.id, noticeId), addressedTo(cadet)))
     .limit(1);
-  if (!row?.publishedAt) throw rpcError.notFound('Notice');
-  return { ...row, publishedAt: row.publishedAt };
+  const published = row ? asPublishedNotice(row) : null;
+  if (!published) throw rpcError.notFound('Notice');
+  return published;
 }
 
-/** One notice with its rendered HTML, exactly as it was published. */
+/**
+ * One notice as content: its facts and its wording as text, never HTML. A
+ * plain notice returns what staff wrote without rendering anything; a
+ * custom-template notice is rendered (without the logo) and reduced to its
+ * text, so an AI app reading it over the Cadet MCP gets sentences, not
+ * megabytes of markup and base64.
+ */
 export async function getCadetNotice(db: DatabaseExecutor, cadet: CadetScope, noticeId: string) {
   const notice = await addressedNotice(db, cadet, noticeId);
-  const { html } = await renderPublishedNoticeHtml(db, notice);
   return {
     noticeId: notice.id,
     title: notice.title,
     publishedAt: notice.publishedAt,
-    text: notice.bodyMode === 'plain' ? notice.body : null,
-    html,
+    bodyMode: notice.bodyMode,
+    text: notice.bodyMode === 'plain' ? notice.body : await renderPublishedNoticeText(db, notice),
   };
+}
+
+/** The printed page of one notice (with the letterhead), for the portal's sandboxed preview. */
+export async function getCadetNoticeDocument(db: DatabaseExecutor, cadet: CadetScope, noticeId: string) {
+  const notice = await addressedNotice(db, cadet, noticeId);
+  return { noticeId: notice.id, html: (await renderPublishedNoticeHtml(db, notice)).html };
 }
 
 /** A five-minute download URL of the notice's cached PDF (the same file staff download). */

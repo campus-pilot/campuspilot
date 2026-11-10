@@ -3,13 +3,14 @@ import type { CadetContext } from '../../cadet/context';
 import { toRpcError } from '../../errors';
 import { assertSchoolFeatureEnabled } from '../../feature-flags/feature-flags.service';
 import {
+  cadetNoticeDocumentSchema,
   cadetNoticeDownloadSchema,
   cadetNoticeSchema,
   getCadetNoticeInputSchema,
   listCadetNoticesInputSchema,
   listCadetNoticesOutputSchema,
 } from './cadet.dto';
-import { getCadetNotice, getCadetNoticeDownload, listCadetNotices } from './cadet-notices.service';
+import { getCadetNotice, getCadetNoticeDocument, getCadetNoticeDownload, listCadetNotices } from './cadet-notices.service';
 
 const route = (summary: string, description: string) => ({ summary, description, tags: ['Cadet'] });
 
@@ -45,7 +46,7 @@ export const cadetNoticesRouter = {
     }),
 
   getNotice: cadetProcedure
-    .route(route('Get a notice', 'One notice addressed to the signed-in student: its title, publication time, plain text when it was written as text, and the rendered notice.'))
+    .route(route('Get a notice', 'One notice addressed to the signed-in student: its title, publication time and its wording as text.'))
     .meta({ mcp: { exposure: 'core', access: 'read', destructive: false, module: 'notices' } })
     .input(getCadetNoticeInputSchema)
     .output(cadetNoticeSchema)
@@ -53,6 +54,23 @@ export const cadetNoticesRouter = {
       try {
         await assertNoticesEnabled(context, context.cadet.schoolId);
         return await getCadetNotice(context.db, context.cadet, input.noticeId);
+      } catch (error) {
+        throw toRpcError(error);
+      }
+    }),
+
+  getNoticeDocument: cadetProcedure
+    .route(route('Get a notice as its printed page', "The printed page of one notice addressed to the signed-in student, with the school's letterhead, as sanitized HTML for the portal's preview."))
+    // Hidden from the cadet MCP: the page is megabytes of markup with the
+    // school logo embedded; `getNotice` gives an AI app the same wording as
+    // text. The portal asks for it only to show a designed notice.
+    .meta({ mcp: { exposure: 'hidden', access: 'read', destructive: false, module: 'notices' } })
+    .input(getCadetNoticeInputSchema)
+    .output(cadetNoticeDocumentSchema)
+    .handler(async ({ context, input }) => {
+      try {
+        await assertNoticesEnabled(context, context.cadet.schoolId);
+        return await getCadetNoticeDocument(context.db, context.cadet, input.noticeId);
       } catch (error) {
         throw toRpcError(error);
       }

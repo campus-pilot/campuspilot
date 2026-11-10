@@ -137,6 +137,8 @@ export type DemoNotice = {
   createdAt: string;
   /** When the demo published it (ISO instant, before `asOf`), or null for a draft. */
   publishedAt: string | null;
+  /** The date printed on it: the local calendar date of `publishedAt` (`YYYY-MM-DD`), or null for a draft. */
+  issuedOn: LocalDate | null;
 };
 
 export type DemoPlan = {
@@ -340,6 +342,7 @@ function buildNotices(selected: DemoClassSeed[], asOfLocal: LocalDate, timeZone:
       classSlugs: picked.map((item) => item.slug),
       createdAt: at(notice.createdDaysAgo, localHours.created),
       publishedAt: notice.publishedDaysAgo === null ? null : at(notice.publishedDaysAgo, localHours.published),
+      issuedOn: notice.publishedDaysAgo === null ? null : addDays(asOfLocal, -notice.publishedDaysAgo),
     };
   });
 }

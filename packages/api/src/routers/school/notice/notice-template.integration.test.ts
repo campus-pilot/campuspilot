@@ -37,7 +37,7 @@ describe('notice document template', () => {
   });
 
   it('builds a real notice context with exactly the fields of the sample and of the editor\'s variable guide', async () => {
-    const context = await buildNoticeContext(db, { schoolId, sessionId, title: 'Holiday', bodyMode: 'plain', body: 'School is closed.' }, new Date('2026-11-10T06:00:00.000Z'));
+    const context = await buildNoticeContext(db, { schoolId, sessionId, title: 'Holiday', bodyMode: 'plain', body: 'School is closed.' }, { generatedAt: new Date('2026-11-10T06:00:00.000Z'), issuedOn: null });
     const paths = leafPaths(context).sort();
     expect(paths).toEqual(leafPaths(SAMPLE_NOTICE_CONTEXT).sort());
     expect(paths).toEqual(Object.keys(NOTICE_CONTEXT_FIELDS).sort());

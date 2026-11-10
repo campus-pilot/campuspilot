@@ -788,7 +788,7 @@ export async function seedNotice(
       classIds,
     }));
   const publish = notice.status === 'published' && saved.status === 'draft';
-  if (publish) await ctx.rpc.school.publishNotice({ schoolId: ctx.schoolId, noticeId: saved.id });
+  if (publish) await ctx.rpc.school.publishNotice({ schoolId: ctx.schoolId, noticeId: saved.id, expectedVersion: saved.version });
   await backdateDemoNotice({ schoolId: ctx.schoolId, noticeId: saved.id }, notice);
   return { noticeId: saved.id, outcome: publish ? 'published' : existing ? 'unchanged' : 'created' };
 }
@@ -798,21 +798,24 @@ export async function seedNotice(
  * the API and MCP cannot back-date a notice (the procedures always record
  * "now"); only this seed step can, and only for a demo school
  * (`school.is_demo`), so it can never rewrite a real school's history. The
- * publication time is changed only on a notice that is published, and a
- * notice's printed "issued on" date follows it, because a published notice
- * is always rendered from its stored publication time. Nothing has read the
- * notice's PDF yet (it is rendered on first download), so no cached file can
- * disagree with the new date.
+ * publication time and the printed "issued on" date are changed together,
+ * and only on a notice that is published: the date is a stored fact of the
+ * publication (`notice.issued_on`), so the plan supplies both. Nothing has
+ * read the notice's PDF yet (it is rendered on first download), so no cached
+ * file can disagree with the new date.
  */
-async function backdateDemoNotice(scope: { schoolId: string; noticeId: string }, notice: Pick<DemoNotice, 'createdAt' | 'publishedAt'>) {
+async function backdateDemoNotice(scope: { schoolId: string; noticeId: string }, notice: Pick<DemoNotice, 'createdAt' | 'publishedAt' | 'issuedOn'>) {
   const [school] = await db.select({ isDemo: schoolTable.isDemo }).from(schoolTable).where(eq(schoolTable.id, scope.schoolId)).limit(1);
   if (!school?.isDemo) throw new DemoSeedError('Only a demo school’s notices can be back-dated.');
   const mine = and(eq(noticeTable.id, scope.noticeId), eq(noticeTable.schoolId, scope.schoolId));
   const createdAt = new Date(notice.createdAt);
   await db.update(noticeTable).set({ createdAt, updatedAt: createdAt }).where(and(mine, eq(noticeTable.status, 'draft')));
-  if (notice.publishedAt) {
+  if (notice.publishedAt && notice.issuedOn) {
     const publishedAt = new Date(notice.publishedAt);
-    await db.update(noticeTable).set({ createdAt, publishedAt, updatedAt: publishedAt }).where(and(mine, eq(noticeTable.status, 'published')));
+    await db
+      .update(noticeTable)
+      .set({ createdAt, publishedAt, issuedOn: notice.issuedOn, updatedAt: publishedAt })
+      .where(and(mine, eq(noticeTable.status, 'published')));
   }
 }
 

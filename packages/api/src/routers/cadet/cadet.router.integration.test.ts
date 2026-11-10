@@ -211,6 +211,7 @@ describe('cadet and staff sessions are isolated', () => {
       'getFeeSummary',
       'getGrowth',
       'getNotice',
+      'getNoticeDocument',
       'getNoticeDownload',
       'getOAuthConsentClient',
       'getProfile',

@@ -61,12 +61,37 @@ function NoticeHeading({ notice }: { notice: CadetNoticeDto }) {
 }
 
 /**
- * The notice in the form that reads best on a phone: text for a notice
- * written as text, the printed page for a designed one (`text` is null
- * then; see the shared components for why).
+ * A designed notice as its printed page. The page (megabytes of markup with
+ * the school's letterhead) is a separate read from the notice itself, asked
+ * for only here; a plain-text notice never loads it. While it loads, and if
+ * it cannot be loaded, the notice's wording is shown as text, so the notice
+ * is always readable.
+ */
+function NoticePrintedPage({ notice }: { notice: CadetNoticeDto }) {
+  const page = useQuery(orpc.getNoticeDocument.queryOptions({ input: { noticeId: notice.noticeId } }));
+  if (page.data) return <CadetNoticeDocument html={page.data.html} />;
+  return (
+    <div className="flex flex-col gap-3">
+      {page.isError ? (
+        <p role="alert" className="text-sm text-muted-foreground">
+          The printed page could not be loaded, so the notice is shown as text.{' '}
+          <button type="button" className="font-medium text-foreground underline underline-offset-4" onClick={() => void page.refetch()}>
+            Try again
+          </button>
+        </p>
+      ) : null}
+      <CadetNoticeText text={notice.text} />
+    </div>
+  );
+}
+
+/**
+ * The notice in the form that reads best on a phone, decided by how it was
+ * written (`bodyMode`): text for a notice written as text, the printed page
+ * for a designed one (see the shared components for why).
  */
 export function NoticeBody({ notice }: { notice: CadetNoticeDto }) {
-  return notice.text === null ? <CadetNoticeDocument html={notice.html} /> : <CadetNoticeText text={notice.text} />;
+  return notice.bodyMode === 'plain' ? <CadetNoticeText text={notice.text} /> : <NoticePrintedPage notice={notice} />;
 }
 
 /**

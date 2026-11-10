@@ -87,13 +87,31 @@ const contentShape = {
 
 export const noticeScopeInputSchema = z.object({ schoolId: id, noticeId: id });
 
+/**
+ * The `version` of the notice the caller last read (`getNotice`,
+ * `previewNoticePublish`). The write is refused with CONFLICT when the
+ * stored notice has a different version, so nobody overwrites or publishes
+ * content they have not seen.
+ */
+const expectedVersionSchema = z
+  .number()
+  .int()
+  .positive()
+  .describe('version from getNotice (or previewNoticePublish) of the notice as you last read it; a different stored version is refused with CONFLICT.');
+
+/** Publishing names the version that was reviewed: publication is irreversible. */
+export const publishNoticeInputSchema = z.object({ schoolId: id, noticeId: id, expectedVersion: expectedVersionSchema });
+
+/** The CONFLICT message of a stale `expectedVersion` (the UI shows it and reloads the notice). */
+export const NOTICE_CHANGED_MESSAGE = 'This notice changed since you opened it. Review it again.';
+
 export const createNoticeInputSchema = z
   .object({ schoolId: id, sessionId: id, ...contentShape, ...audienceShape })
   .superRefine(validateNoticeAudience);
 
-/** A full replacement of a draft's content and audience. */
+/** A full replacement of a draft's content and audience, based on the version the caller read. */
 export const updateNoticeInputSchema = z
-  .object({ schoolId: id, noticeId: id, ...contentShape, ...audienceShape })
+  .object({ schoolId: id, noticeId: id, expectedVersion: expectedVersionSchema, ...contentShape, ...audienceShape })
   .superRefine(validateNoticeAudience);
 
 export const listNoticesInputSchema = createListInputSchema({
@@ -133,8 +151,21 @@ const noticeSummaryShape = {
   status: z.enum(NOTICE_STATUSES),
   toStaff: z.boolean(),
   cadetScope: z.enum(NOTICE_CADET_SCOPES),
-  /** Classes addressed, in class display order; empty unless `selected_classes`. */
+  /**
+   * The existing classes addressed, in class display order; empty unless
+   * `selected_classes`. This is the selection to edit: a class deleted since
+   * is not in it (see `classes`).
+   */
   classIds: z.array(z.string()),
+  /**
+   * The audience record of a `selected_classes` notice, for display. A
+   * published notice lists each class by the name it had at publication,
+   * also after the class was renamed or deleted (`classId` null = deleted).
+   * A draft lists its classes by their current names.
+   */
+  classes: z.array(z.object({ classId: z.string().nullable(), name: z.string() })),
+  /** Counts saved changes; send it back as `expectedVersion` to update or publish. */
+  version: z.number().int().positive(),
   /** The author's account ID and name; null after the account is deleted. */
   createdBy: z.string().nullable(),
   createdByName: z.string().nullable(),
@@ -143,6 +174,8 @@ const noticeSummaryShape = {
   publishedBy: z.string().nullable(),
   publishedByName: z.string().nullable(),
   publishedAt: z.date().nullable(),
+  /** The calendar date printed on the notice (`YYYY-MM-DD`), fixed at publication; null for a draft. */
+  issuedOn: z.string().nullable(),
   /** School members and students notified at publication; null for a draft. */
   publishedStaffCount: z.number().int().nonnegative().nullable(),
   publishedCadetCount: z.number().int().nonnegative().nullable(),

@@ -1,10 +1,20 @@
 import Handlebars from 'handlebars';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { DOCUMENT_MARKETPLACE, NOTICE_DEFAULT_TEMPLATE_SLUG, SAMPLE_NOTICE_CONTEXT } from '../document/document.catalog';
 import { combineDocuments, renderDocument } from '../document/document.render';
 import { NOTICE_CONTEXT_FIELDS, NOTICE_TEMPLATE_STARTER, NOTICE_TEMPLATE_VARIABLES } from './notice-template-guide';
-import { assertValidNoticeTemplate, NOTICE_TEMPLATE_MAX_BLOCK_DEPTH, noticeParagraphs, noticePdfKey } from './notice.render';
+import {
+  assertValidNoticeTemplate,
+  assertValidSchoolNoticeTemplate,
+  NOTICE_MAX_LOGO_USES,
+  NOTICE_RENDER_MAX_CHARS,
+  NOTICE_TEMPLATE_MAX_BLOCK_DEPTH,
+  noticeDocumentText,
+  noticeParagraphs,
+  noticePdfKey,
+  renderNoticeDocument,
+} from './notice.render';
 
 const defaultTemplate = DOCUMENT_MARKETPLACE.find((item) => item.slug === NOTICE_DEFAULT_TEMPLATE_SLUG)!.content;
 
@@ -102,6 +112,104 @@ describe('template notices', () => {
     for (const source of ['{{#if notice.title}}', '{{unknownHelper notice.title}}', '{{> somePartial}}']) {
       expect(() => assertValidNoticeTemplate(source), source).toThrowError(expect.objectContaining({ code: 'BAD_REQUEST' }));
     }
+  });
+});
+
+/**
+ * Review round 1, B1/B2/B4: an author's template must not be able to make a
+ * render expensive, write to the server's log, or be refused for an ordinary
+ * else-if chain. The context here carries a logo as large as the server
+ * accepts (5 MB of image, ~6.7 MB as a data URI).
+ */
+describe('hostile and ordinary author templates', () => {
+  const bigLogo = `data:image/png;base64,${'A'.repeat(6_700_000)}`;
+  const withBigLogo = { ...SAMPLE_NOTICE_CONTEXT, school: { ...SAMPLE_NOTICE_CONTEXT.school, logoUrl: bigLogo }, notice: { ...SAMPLE_NOTICE_CONTEXT.notice, paragraphs: [] } };
+  const render = (source: string) => renderNoticeDocument(source, withBigLogo, NOTICE_RENDER_MAX_CHARS);
+  const badRequest = expect.objectContaining({ code: 'BAD_REQUEST' });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('never hands the logo to the template: repeating it is refused cheaply, whatever its size', () => {
+    const started = performance.now();
+    for (const source of [
+      // The reviewer's proofs: ~0.5 GB of output, and a 24 MB document that used to be accepted.
+      '{{{school.logoUrl}}}'.repeat(9000),
+      `<p>${'{{{school.logoUrl}}}'.repeat(24)}</p>`,
+      // Every way of reaching the value is the same placeholder.
+      `${'<img src="{{@root.school.logoUrl}}">'.repeat(2)}${'{{lookup school "logoUrl"}}'.repeat(2)}`,
+      `{{#with school}}${'{{logoUrl}}'.repeat(NOTICE_MAX_LOGO_USES + 1)}{{/with}}`,
+      '{{#each school}}{{#each ../school}}<img src="{{../../school.logoUrl}}">{{/each}}{{/each}}',
+    ]) {
+      expect(() => render(source), source.slice(0, 60)).toThrowError(badRequest);
+    }
+    // Refusing all of them costs far less than building one of those strings would.
+    expect(performance.now() - started).toBeLessThan(5_000);
+  });
+
+  it('places the real logo only after rendering, at most three times, so the size is bounded by the budget plus three logos', () => {
+    const html = render(`<img src="{{school.logoUrl}}" alt="Logo"><p>{{notice.title}}</p>${'<img src="{{school.logoUrl}}">'.repeat(NOTICE_MAX_LOGO_USES - 1)}`);
+    expect(html.split(bigLogo).length - 1).toBe(NOTICE_MAX_LOGO_USES);
+    expect(html.length).toBeLessThan(NOTICE_RENDER_MAX_CHARS + NOTICE_MAX_LOGO_USES * bigLogo.length);
+    // No placeholder is left behind.
+    expect(html.replaceAll(bigLogo, '')).not.toMatch(/data:image/);
+  });
+
+  it('drops a logo the sanitizer would not keep instead of placing it', () => {
+    const svg = { ...withBigLogo, school: { ...withBigLogo.school, logoUrl: 'data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=' } };
+    const html = renderNoticeDocument('<img src="{{school.logoUrl}}"><p>Text</p>', svg, NOTICE_RENDER_MAX_CHARS);
+    expect(html).not.toContain('svg+xml');
+    expect(html).toContain('<p>Text</p>');
+  });
+
+  it('stops a multiplying template while it renders, at the notice budget', () => {
+    // Four nested `each` over the school's fields run a 50 KB body a few hundred times: far over 2 MB.
+    const filler = `<p>${'x'.repeat(50_000)}</p>`;
+    const multiplying = `{{#each school}}{{#each ../school}}{{#each ../../school}}{{#each ../../../school}}${filler}{{/each}}{{/each}}{{/each}}{{/each}}`;
+    expect(() => render(multiplying)).toThrowError(expect.objectContaining({ code: 'BAD_REQUEST', message: expect.stringContaining('rendering limit') }));
+    // The same template is refused when it is saved: one limit for the save check and for every render.
+    expect(() => assertValidNoticeTemplate(multiplying)).toThrowError(badRequest);
+    // A school Notice template is held to the same budget and logo limit when a template manager saves it.
+    expect(() => assertValidSchoolNoticeTemplate(multiplying)).toThrowError(badRequest);
+    expect(() => assertValidSchoolNoticeTemplate('{{{school.logoUrl}}}'.repeat(NOTICE_MAX_LOGO_USES + 1))).toThrowError(badRequest);
+    // A flat repetition of a small value is ordinary and stays well inside the budget.
+    expect(() => assertValidNoticeTemplate('<p>{{school.name}}</p>'.repeat(5_000))).not.toThrow();
+  });
+
+  it('cannot write to the server log: `log` is not a helper, and nothing reaches the console', () => {
+    const spies = (['log', 'info', 'warn', 'error', 'debug'] as const).map((level) => vi.spyOn(console, level).mockImplementation(() => undefined));
+    for (const source of [
+      '{{log "INJECTED LOG LINE" level="error"}}',
+      '{{log school}}',
+      '{{#each school}}{{log ../school.logoUrl level="error"}}{{/each}}',
+      '<p>{{#if (log "x")}}a{{/if}}</p>',
+    ]) {
+      expect(() => assertValidNoticeTemplate(source), source).toThrowError(badRequest);
+      expect(() => render(source), source).toThrowError(badRequest);
+    }
+    // Without arguments it is an unknown variable, which prints nothing.
+    expect(render('<p>[{{log}}]</p>')).toContain('<p>[]</p>');
+    for (const spy of spies) expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('accepts an else-if chain of any length as one level, and still refuses real nesting inside it', () => {
+    const chain = (branches: number) =>
+      `{{#if notice.title}}A${Array.from({ length: branches }, (_, index) => `{{else if school.x${index}}}B${index}`).join('')}{{else}}C{{/if}}`;
+    expect(() => assertValidNoticeTemplate(chain(4))).not.toThrow();
+    expect(() => assertValidNoticeTemplate(chain(40))).not.toThrow();
+    expect(render(chain(12))).toContain('A');
+    // A chain is one level: three more levels fit inside a branch, four do not.
+    const inBranch = (depth: number) => `{{#if a}}A{{else if b}}${'{{#each school}}'.repeat(depth)}x${'{{/each}}'.repeat(depth)}{{else}}C{{/if}}`;
+    expect(() => assertValidNoticeTemplate(inBranch(NOTICE_TEMPLATE_MAX_BLOCK_DEPTH - 1))).not.toThrow();
+    expect(() => assertValidNoticeTemplate(inBranch(NOTICE_TEMPLATE_MAX_BLOCK_DEPTH))).toThrowError(badRequest);
+  });
+});
+
+describe('the text of a rendered notice', () => {
+  it('keeps the wording and drops markup, styles and images', () => {
+    const html = renderTemplate('<style>.a{color:red}</style><h1>{{notice.title}}</h1><p>Bring water &amp; a cap.<br>Gates open at 8 &lt; 9.</p><ul><li>One</li><li>Two</li></ul><img src="{{school.logoUrl}}">');
+    expect(noticeDocumentText(html)).toBe('Annual Sports Day\n\nBring water & a cap.\n\nGates open at 8 < 9.\n\nOne\n\nTwo');
   });
 });
 

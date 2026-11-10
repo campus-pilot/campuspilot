@@ -4,6 +4,7 @@ import type {
   CadetFeeSummaryDto,
   CadetGrowthDto,
   CadetLedgerEntryDto,
+  CadetNoticeDocumentDto,
   CadetNoticeDto,
   CadetProfileDto,
 } from '@campuspilot/api/routers/cadet/cadet.dto';
@@ -101,14 +102,20 @@ export const notices: Pick<CadetNoticeDto, 'noticeId' | 'title' | 'publishedAt'>
 /** A notice written as plain text. */
 export const plainNotice: CadetNoticeDto = {
   ...notices[0]!,
+  bodyMode: 'plain',
   text: 'Winter uniform is compulsory from Monday, 9 November.\nBlazers may be collected from the school store.\n\nClass teachers will check uniforms during assembly.',
-  html: '<!doctype html><html><body><p>Winter uniform is compulsory from Monday, 9 November.</p></body></html>',
 };
 
-/** A notice designed as a document: no text form, only the rendered page. */
+/** A notice designed as a document: its wording as text, and its printed page from a separate read. */
 export const designedNotice: CadetNoticeDto = {
   ...notices[1]!,
-  text: null,
+  bodyMode: 'template',
+  text: 'Annual Sports Day\n\nGates open at 8 AM.',
+};
+
+/** The printed page of {@link designedNotice} (`getNoticeDocument`). */
+export const designedNoticePage: CadetNoticeDocumentDto = {
+  noticeId: designedNotice.noticeId,
   html: '<!doctype html><html><body><h1>Annual Sports Day</h1></body></html>',
 };
 
