@@ -3,6 +3,8 @@
   "include": [
     "components/exam/**/*.ts",
     "components/exam/**/*.tsx",
+    "components/notices/**/*.ts",
+    "components/notices/**/*.tsx",
     "lib/navigation-guard.ts",
     "../../packages/**/*.ts",
     "../../packages/**/*.tsx"

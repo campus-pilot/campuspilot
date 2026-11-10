@@ -4,6 +4,8 @@ import type {
   CadetFeeSummaryDto,
   CadetGrowthDto,
   CadetLedgerEntryDto,
+  CadetNoticeDocumentDto,
+  CadetNoticeDto,
   CadetProfileDto,
 } from '@campuspilot/api/routers/cadet/cadet.dto';
 
@@ -90,3 +92,41 @@ export const growth: CadetGrowthDto = {
     ],
   },
 };
+
+/** Notices addressed to the student, newest first. */
+export const notices: Pick<CadetNoticeDto, 'noticeId' | 'title' | 'publishedAt'>[] = [
+  { noticeId: 'ntc_uniform', title: 'Winter uniform from Monday', publishedAt: new Date('2026-11-03T05:30:00Z') },
+  { noticeId: 'ntc_sports', title: 'Annual Sports Day', publishedAt: new Date('2026-10-20T05:30:00Z') },
+];
+
+/** A notice written as plain text. */
+export const plainNotice: CadetNoticeDto = {
+  ...notices[0]!,
+  bodyMode: 'plain',
+  pageSize: 'full',
+  text: 'Winter uniform is compulsory from Monday, 9 November.\nBlazers may be collected from the school store.\n\nClass teachers will check uniforms during assembly.',
+};
+
+/** A notice designed as a document: its wording as text, and its printed page from a separate read. */
+export const designedNotice: CadetNoticeDto = {
+  ...notices[1]!,
+  bodyMode: 'template',
+  pageSize: 'half',
+  text: 'Annual Sports Day\n\nGates open at 8 AM.',
+};
+
+/** The printed page of {@link designedNotice} (`getNoticeDocument`). */
+export const designedNoticePage: CadetNoticeDocumentDto = {
+  noticeId: designedNotice.noticeId,
+  pageSize: 'half',
+  html: '<!doctype html><html><body><h1>Annual Sports Day</h1></body></html>',
+};
+
+/** The server's answer when the school does not have a feature (`docs/feature-flags.md`). */
+export function featureDisabledError(feature: 'cadet' | 'notices') {
+  return Object.assign(new Error(`${feature} is not enabled for this school.`), {
+    code: 'FORBIDDEN',
+    status: 403,
+    data: { reason: 'SCHOOL_FEATURE_DISABLED', feature },
+  });
+}

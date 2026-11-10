@@ -9,7 +9,10 @@ the slug, the staff email domain or the existence of a job.
 
 1. `systemAdmin.createDemoSchool` creates, in one transaction, the school
    (`is_demo = true`, `demo_created_by = admin`), the admin's membership with
-   the `principal` role, and a `demo_school_job` row (`queued`). The dialog
+   the `principal` role, the school's platform feature flags
+   (`DEMO_SCHOOL_FEATURE_DEFAULTS`: every feature on, unlike a real school,
+   which starts with none; see [School feature flags](feature-flags.md)), and a
+   `demo_school_job` row (`queued`). The dialog
    closes at once and a persistent toast follows the job.
 2. The client uploads the optional logo through the normal logo endpoint,
    then calls `systemAdmin.startDemoSchoolJob`. It **returns immediately**:
@@ -84,7 +87,7 @@ the workflow keeps running.
 
 Steps: staff (+ generated monogram logo when none was uploaded) → session →
 classes → students (with illustrated photos) → exams → finance → templates →
-credentials. The seed and `asOf` are drawn once and stored on the job, so a
+notices → credentials. The seed and `asOf` are drawn once and stored on the job, so a
 retry rebuilds the same plan and every idempotent step finds its earlier work.
 Exam state and billing months follow from `asOf` (see `dates.ts`, `plan.ts`).
 The exams step also writes a teacher remark for every registered student of
@@ -101,6 +104,28 @@ was made. The step releases through the real `releaseExamToCadet` procedure
 directly on `exam_lifecycle`, refusing any school that is not `is_demo`; that
 keeps a retried workflow on the same journaled time. Back-dating is deliberately not part of the API or MCP: staff
 releases always record when they happened.
+
+### Notices
+
+The `notices` step runs after `templates`, so a plain notice pins the school's
+seeded Notice design. It writes the notices of `seed/notices.json` through the
+real `createNotice` and `publishNotice` procedures as the demo's principal
+(`seedNotice`): four published ones (staff only; every class; staff and the two
+seniormost of the demo's classes; a custom-template invitation for everyone)
+and two drafts, so a fresh demo shows the notices list, the dashboard card, the
+delivery log and the Cadet Portal's notices with realistic content.
+
+The seed states dates relative to `asOf`: `createdDaysAgo`, `publishedDaysAgo`
+and `{date:±N}` tokens in titles and text (`buildNotices`, `fillDemoNoticeDates`
+in `plan.ts`). `selected_classes` notices name no class: the admin chooses the
+demo's classes, so the seed picks from the senior or junior end of whatever was
+chosen (`classPick`). The procedures stamp the current time and
+`backdateDemoNotice` then sets the planned creation and publication times,
+refusing any school that is not `is_demo`; a notice's printed "issued on" date
+is a stored fact of its publication (`notice.issued_on`), so the plan supplies
+it together with the publication time (`DemoNotice.issuedOn`). The step is idempotent on the notice title
+within the session, so a replay neither writes a second copy nor publishes (and
+notifies) twice. All content is invented. See [School notices](notices.md).
 
 ### Credentials
 
@@ -285,14 +310,23 @@ ingress.
 
 - New user-visible feature: extend the seed JSON and a step so a new demo shows it.
 - New school-owned table: add it to `purge_demo_school` in a migration.
+- New platform feature: decide it in `DEMO_SCHOOL_FEATURE_DEFAULTS` (the build
+  fails until you do); a seed step that calls a feature-gated procedure relies
+  on the flag written at creation.
 - New school-owned S3 object: make sure purge collects its key or it lives under
-  `schools/{schoolId}/`.
+  `schools/{schoolId}/`. Cached notice PDFs
+  (`schools/{schoolId}/notices/{noticeId}.pdf`) have no database row, so
+  `deleteDemoSchoolData` records the key of every published notice.
+- New seed step: add it to `DEMO_SCHOOL_STEPS` (`constants.ts`) and to the admin
+  app's `STEP_LABELS` / `STEP_ACTIVITY` (`demo-job-labels.ts`; the build fails
+  until both have it).
 - `packages/api/scripts/local-demo.ts` is kept as the separate one-off seeder of
   the dedicated `docker/local-demo` stack; it is not used by this feature.
 - Notifications: the seed's real posting procedures emit one notification event
-  per bill, billing run and payment, and each released exam's real
+  per bill, billing run and payment, each released exam's real
   `releaseExamToCadet` call one `exam.results_published` per registered student
-  (plus the releaser's finished message), so a fresh demo's student and staff
+  (plus the releaser's finished message), and each published notice one
+  `notice.published` per addressed student plus one staff event, so a fresh demo's student and staff
   inboxes fill once the worker fans them out. Inbox items carry the time the
   seed ran, not the back-dated bill or release dates. Demo schools never send outside the inbox:
   every web push and WhatsApp copy is recorded `skipped: demo_school` (or

@@ -10,7 +10,7 @@ import { createCadetLogin, fakePushSubscription } from '../../../test/notificati
 import { MAX_ACTIVE_PUSH_SUBSCRIPTIONS } from '../../notifications/channels/web-push/subscriptions';
 
 async function student(headers?: Headers) {
-  const school = await createTestSchool();
+  const school = await createTestSchool({ features: ['cadet'] });
   const admission = await createTestAdmission({ schoolId: school.id });
   return { school, admission, ...(await createCadetLogin(admission.id, headers)) };
 }

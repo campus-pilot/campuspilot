@@ -1,10 +1,11 @@
 import type { DatabaseExecutor } from '@campuspilot/db';
-import type { RemoteNotificationChannel } from '@campuspilot/db/notifications/catalogue';
-import { notificationDeliveryTable } from '@campuspilot/db/schema/notification';
+import { isNotificationType, type RemoteNotificationChannel } from '@campuspilot/db/notifications/catalogue';
+import { notificationDeliveryTable, notificationTable } from '@campuspilot/db/schema/notification';
 import { and, eq, lte, min, sql, type SQL } from 'drizzle-orm';
 
 import type { DeliverySendOutcome, NotificationChannelAdapter } from '../channels';
 import { claimDelivery, recordDeliveryOutcome, skipOwedDelivery } from '../deliveries';
+import { disabledFeatureOf } from '../features';
 import type { SenderTarget } from './lanes';
 
 /**
@@ -99,6 +100,24 @@ export async function dueSenderTargets(db: DatabaseExecutor, now: Date = new Dat
 }
 
 /**
+ * Whether the delivery's notification type needs a platform feature its
+ * school does not have right now. Read just before the claim, so a copy
+ * planned while the feature was on is not sent after it was switched off.
+ * A type that needs no feature (every type but notices) stops after the
+ * one indexed read of its type.
+ */
+async function deliveryFeatureDisabled(db: DatabaseExecutor, deliveryId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ schoolId: notificationDeliveryTable.schoolId, type: notificationTable.type })
+    .from(notificationDeliveryTable)
+    .innerJoin(notificationTable, eq(notificationTable.id, notificationDeliveryTable.notificationId))
+    .where(eq(notificationDeliveryTable.id, deliveryId))
+    .limit(1);
+  if (!row || !isNotificationType(row.type)) return false;
+  return (await disabledFeatureOf(db, row.schoolId, row.type)) !== null;
+}
+
+/**
  * What one send attempt did; JSON-only so it can be journaled. `retry`
  * means rescheduled. `channelThrottle` is set whenever the provider
  * throttled the whole channel (even when this delivery's retries ran out),
@@ -124,7 +143,10 @@ export type SendAttemptResult = {
  * Claims, sends and records one due delivery (claim before send, D-25). A
  * delivery no longer owed or not yet due (already sent, stuck in `sending`
  * after a crash, rescheduled) is left alone. A channel switched off since
- * the delivery was planned records it `skipped: disabled` without a claim.
+ * the delivery was planned records it `skipped: disabled` without a claim,
+ * and one whose notification type lost a school feature it needs since then
+ * (a notice copy still queued when `notices` was switched off) is recorded
+ * `skipped: feature_disabled` the same way: nothing new goes out.
  * An adapter that throws is treated as a transient failure of this
  * delivery before the provider call (adapters classify every provider
  * answer themselves and must not throw after a request may have been
@@ -144,6 +166,9 @@ export async function sendDelivery(
 ): Promise<SendAttemptResult> {
   if (!adapter.available) {
     return { kind: (await skipOwedDelivery(db, deliveryId, 'disabled')) ? 'skipped' : 'not_owed', channelThrottle: null, outcomeUnknown: false, definiteAnswer: false };
+  }
+  if (await deliveryFeatureDisabled(db, deliveryId)) {
+    return { kind: (await skipOwedDelivery(db, deliveryId, 'feature_disabled')) ? 'skipped' : 'not_owed', channelThrottle: null, outcomeUnknown: false, definiteAnswer: false };
   }
   const claimed = await claimDelivery(db, deliveryId, options.now);
   if (!claimed) return { kind: 'not_owed', channelThrottle: null, outcomeUnknown: false, definiteAnswer: false };

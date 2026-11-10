@@ -15,6 +15,8 @@ const facts = {
   'notification.whatsapp_failed': { admissionId: 'a', studentName: 'Asha', failedType: 'bill.issued' },
   'notification.whatsapp_batch_failed': { batchKind: 'billing_run', failedType: 'bill.issued', failedCount: 2, sessionId: 's', billRunId: 'r' },
   'billing.run_posted': { billRunId: 'r', sessionId: 's', periodKey: '2026-10', billCount: 1 },
+  'notice.published': { noticeId: 'n', sessionId: 's', noticeTitle: 'Sports Day', admissionId: 'a', studentName: 'Asha' },
+  'notice.published_staff': { noticeId: 'n', sessionId: 's', noticeTitle: 'Sports Day' },
 } as const;
 
 const noPdf = { schoolName: 'Maple Grove', canAttach: () => false };
@@ -39,6 +41,23 @@ describe('WhatsApp template mapper', () => {
       params: { document_name: 'report card for Half-Yearly Examination 2026' },
       document: { kind: 'report_card', sessionId: 's', examSlug: 'half-yearly', admissionId: 'a' },
     });
+  });
+
+  it('sends a notice as its PDF, or as text when no PDF can be attached, and never to staff', () => {
+    expect(mapWhatsAppMessage('notice.published', facts['notice.published'], { schoolName: 'Maple Grove', canAttach: (kind) => kind === 'notice' })).toEqual({
+      template: 'school_document',
+      params: { student_name: 'Asha', school_name: 'Maple Grove', document_name: 'school notice', reference: 'Sports Day' },
+      document: { kind: 'notice', noticeId: 'n', filename: 'Notice Sports Day.pdf' },
+    });
+    expect(mapWhatsAppMessage('notice.published', facts['notice.published'], noPdf)).toEqual({
+      template: 'school_update',
+      params: { student_name: 'Asha', school_name: 'Maple Grove', update_text: 'a new school notice has been published', reference: 'Sports Day' },
+    });
+    // A title with line breaks or of any length still makes a parameter Meta accepts.
+    const long = mapWhatsAppMessage('notice.published', { ...facts['notice.published'], noticeTitle: `Line one\nline two ${'x'.repeat(400)}` }, noPdf);
+    expect(long?.params.reference).toHaveLength(300);
+    expect(long?.params.reference).not.toContain('\n');
+    expect(mapWhatsAppMessage('notice.published_staff', facts['notice.published_staff'], { schoolName: 'Maple Grove', canAttach: () => true })).toBeNull();
   });
 
   it('describes manual bills by issue date', () => {

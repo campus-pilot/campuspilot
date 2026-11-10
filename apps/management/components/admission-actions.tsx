@@ -25,6 +25,7 @@ import { z } from 'zod';
 import { client, orpc } from '@/lib/orpc';
 import { admissionActionsFor, issuePortalPasswordConfirmation, issuePortalPasswordPermission } from './admission-actions-model';
 import { FormErrors } from './form-errors';
+import { RequireFeature } from './require-feature';
 import { RequirePermissions } from './require-permissions';
 
 function EditAdmissionAction({ admission }: { admission: AdmissionDto }) {
@@ -144,8 +145,12 @@ function AdmissionOverflowMenu({ admission }: { admission: AdmissionDto }) {
   </RequirePermissions>;
 }
 
-/** Header actions of an admission; see {@link admissionActionsFor} for which apply. */
+/**
+ * Header actions of an admission; see {@link admissionActionsFor} for which
+ * apply. The overflow menu holds only the Cadet Portal password action, so
+ * it is drawn only for schools that have the `cadet` feature.
+ */
 export function AdmissionActions({ admission }: { admission: AdmissionDto }) {
   const actions = admissionActionsFor(admission);
-  return <div className="flex flex-wrap items-center gap-2">{actions.edit ? <EditAdmissionAction admission={admission} /> : null}{actions.unregister ? <UnregisterAdmissionAction admission={admission} /> : null}{actions.issuePortalPassword ? <AdmissionOverflowMenu admission={admission} /> : null}</div>;
+  return <div className="flex flex-wrap items-center gap-2">{actions.edit ? <EditAdmissionAction admission={admission} /> : null}{actions.unregister ? <UnregisterAdmissionAction admission={admission} /> : null}{actions.issuePortalPassword ? <RequireFeature schoolId={admission.schoolId} feature="cadet"><AdmissionOverflowMenu admission={admission} /></RequireFeature> : null}</div>;
 }

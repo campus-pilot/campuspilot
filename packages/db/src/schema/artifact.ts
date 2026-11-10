@@ -20,6 +20,7 @@ export const documentTypeEnum = pgEnum("document_type", [
   "bill",
   "receipt",
   "statement",
+  "notice",
 ]);
 export const artifactKindEnum = pgEnum("artifact_kind", ["template", "pdf"]);
 export const artifactStatusEnum = pgEnum("artifact_status", [

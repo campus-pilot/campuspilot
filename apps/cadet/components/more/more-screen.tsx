@@ -14,6 +14,7 @@ import { authClient } from '@/lib/auth-client';
 import { initialsOf } from '@/lib/format';
 import { orpc } from '@/lib/orpc';
 import { turnOffDeviceNotifications } from '@/lib/web-push.client';
+import { MoreNoticesRow } from '../notices/recent-notices';
 import { CadetDeviceNotifications } from '../notifications/cadet-device-notifications';
 import { ScreenError, ScreenHeader, ScreenLoading } from '../screen';
 
@@ -55,8 +56,12 @@ export function ProfileCard({ profile }: { profile: CadetProfileDto }) {
  * Signs out of the Cadet Portal only (a staff session in the same browser
  * stays) and drops every cached record, so the next person on a shared
  * phone never sees this student's data. This device's notifications for
- * the student are turned off first (best effort), so a signed-out device
- * stops showing their notifications.
+ * the student are turned off first, which also removes the browser's own
+ * push subscription. That request is best effort: what guarantees that a
+ * signed-out device stops receiving the student's notifications is the
+ * server, which revokes the session's subscriptions when the session row is
+ * deleted (the `cadet_session` trigger of migration 0052), also when this
+ * request fails or the school's portal is switched off.
  */
 export function SignOutButton() {
   const router = useRouter();
@@ -99,6 +104,7 @@ export function MoreScreen() {
       ) : (
         <ProfileCard profile={profile.data} />
       )}
+      <MoreNoticesRow />
       <ItemGroup className="gap-0 rounded-lg border">
         <Item>
           <ItemContent>

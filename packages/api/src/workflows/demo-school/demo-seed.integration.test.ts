@@ -1,4 +1,4 @@
-import { GetObjectCommand } from '@aws-sdk/client-s3';
+import { GetObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
 import { auth } from '@campuspilot/auth/server';
 import { db } from '@campuspilot/db';
 import { admissionTable } from '@campuspilot/db/schema/admission';
@@ -7,19 +7,22 @@ import { demoSchoolJobTable } from '@campuspilot/db/schema/demo-school-job';
 import { examLifecycleTable, examStudentRemarkTable } from '@campuspilot/db/schema/exam';
 import { examResultPublicationTable } from '@campuspilot/db/schema/exam-result-publication';
 import { financeBillRunTable, financeBillTable, financePaymentTable } from '@campuspilot/db/schema/finance';
+import { noticeTable } from '@campuspilot/db/schema/notice';
 import { notificationDeliveryTable, notificationEventTable, notificationTable } from '@campuspilot/db/schema/notification';
 import { schoolMemberTable } from '@campuspilot/db/schema/school-member';
 import { schoolUserRoleTable } from '@campuspilot/db/schema/school-user-role';
 import { studentTable } from '@campuspilot/db/schema/student';
 import { env } from '@campuspilot/env/server';
 import { getS3Client } from '@campuspilot/s3/client';
-import { and, count, eq, isNotNull } from 'drizzle-orm';
+import { and, asc, count, eq, isNotNull } from 'drizzle-orm';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { retryFinanceConflict } from '../../../test/finance/assertions';
 import { dispatchNow, drainSchool } from '../../../test/notifications';
 import type { NotificationChannelAdapter } from '../../notifications/channels';
 import { createAdminSession, createTestClient, createTestUser, type UserSession } from '../../../test/fixtures';
+import { getCadetNotice, getCadetNoticeDocument, listCadetNotices } from '../../routers/cadet/cadet-notices.service';
+import { noticePdfKey } from '../../routers/school/notice/notice.render';
 import { loadDemoJob, startDemoJob, type DemoJobSnapshot } from './job-store';
 import { buildDemoPlan } from './plan';
 import { DemoSeedError, createSeedContext, seedStaffMember } from './steps';
@@ -30,7 +33,7 @@ const AS_OF = '2026-12-20T06:30:00.000Z';
 const SEED = 'integration-seed';
 
 async function snapshotCounts(schoolId: string) {
-  const [[admissions], [students], [bills], [payments], [demoUsers], [events], [remarks]] = await Promise.all([
+  const [[admissions], [students], [bills], [payments], [demoUsers], [events], [remarks], [notices]] = await Promise.all([
     db.select({ value: count() }).from(admissionTable).where(eq(admissionTable.schoolId, schoolId)),
     db.select({ value: count() }).from(studentTable).where(eq(studentTable.schoolId, schoolId)),
     db.select({ value: count() }).from(financeBillTable).where(eq(financeBillTable.schoolId, schoolId)),
@@ -38,8 +41,14 @@ async function snapshotCounts(schoolId: string) {
     db.select({ value: count() }).from(user).where(eq(user.demoSchoolId, schoolId)),
     db.select({ value: count() }).from(notificationEventTable).where(eq(notificationEventTable.schoolId, schoolId)),
     db.select({ value: count() }).from(examStudentRemarkTable).where(eq(examStudentRemarkTable.schoolId, schoolId)),
+    db.select({ value: count() }).from(noticeTable).where(eq(noticeTable.schoolId, schoolId)),
   ]);
-  return { admissions: admissions!.value, students: students!.value, bills: bills!.value, payments: payments!.value, demoUsers: demoUsers!.value, notificationEvents: events!.value, remarks: remarks!.value };
+  return { admissions: admissions!.value, students: students!.value, bills: bills!.value, payments: payments!.value, demoUsers: demoUsers!.value, notificationEvents: events!.value, remarks: remarks!.value, notices: notices!.value };
+}
+
+/** The seeded notices exactly as stored, oldest first, for comparing before and after a replay. */
+function noticeRows(schoolId: string) {
+  return db.select().from(noticeTable).where(eq(noticeTable.schoolId, schoolId)).orderBy(asc(noticeTable.createdAt), asc(noticeTable.id));
 }
 
 async function readCredentials(key: string) {
@@ -79,7 +88,7 @@ describe('demo school seed steps (2 classes, without Restate)', () => {
       'monthly:2026-04', 'monthly:2026-05', 'monthly:2026-06', 'monthly:2026-07', 'monthly:2026-08',
       'monthly:2026-09', 'monthly:2026-10', 'monthly:2026-11', 'monthly:2026-12',
     ]);
-    expect(result.counts).toMatchObject({ staff: 5, classes: 2, students: plannedStudents, templates: 7 });
+    expect(result.counts).toMatchObject({ staff: 5, classes: 2, students: plannedStudents, templates: 8 });
     expect(result.counts.bills).toBeGreaterThan(plannedStudents * 8);
     expect(BigInt(result.amounts.collectedMinor)).toBeGreaterThan(0n);
 
@@ -161,7 +170,68 @@ describe('demo school seed steps (2 classes, without Restate)', () => {
     expect(releases.length).toBe(released!.value);
     expect(releases.length).toBeGreaterThan(0);
     const releaseRecipients = releases.reduce((total, release) => total + release.admissionIds.length, 0);
-    expect(counts.notificationEvents).toBe(counts.bills + counts.payments + runs!.value + releaseRecipients);
+    // Notices: the planned handful, written and published through the real
+    // procedures and then back-dated from asOf like every other demo date.
+    const listedNotices = await client.school.listNotices({ schoolId: job.schoolId, sessionId: session.id });
+    const classes = await client.school.listClasses({ schoolId: job.schoolId, sessionId: session.id });
+    const classIdOf = (slug: string) => classes.find((item) => item.slug === slug)!.id;
+    expect(listedNotices.items).toHaveLength(plan.notices.length);
+    for (const planned of plan.notices) {
+      const stored = listedNotices.items.find((item) => item.title === planned.title);
+      expect(stored, planned.key).toMatchObject({
+        status: planned.status,
+        bodyMode: planned.bodyMode,
+        toStaff: planned.toStaff,
+        cadetScope: planned.cadetScope,
+        createdBy: admin.user.id,
+        publishedBy: planned.status === 'published' ? admin.user.id : null,
+      });
+      expect([...stored!.classIds].sort(), planned.key).toEqual(planned.classSlugs.map(classIdOf).sort());
+      expect(new Date(stored!.createdAt).toISOString(), planned.key).toBe(planned.createdAt);
+      expect(stored!.publishedAt ? new Date(stored!.publishedAt).toISOString() : null, planned.key).toBe(planned.publishedAt);
+      expect(new Date(stored!.createdAt).getTime(), planned.key).toBeLessThan(new Date(AS_OF).getTime());
+    }
+    const registered = await db.select({ id: admissionTable.id }).from(admissionTable).where(and(eq(admissionTable.schoolId, job.schoolId), eq(admissionTable.registered, true)));
+    const noticeByKey = async (key: string) => {
+      const planned = plan.notices.find((item) => item.key === key)!;
+      return client.school.getNotice({ schoolId: job.schoolId, noticeId: listedNotices.items.find((item) => item.title === planned.title)!.id });
+    };
+    const [staffMeeting, timings, sportsDay, homework] = await Promise.all([noticeByKey('staff-meeting'), noticeByKey('school-timings'), noticeByKey('sports-day'), noticeByKey('holiday-homework')]);
+    // Notified audiences are the real ones at publication: every member, every registered student (leavers are already unregistered).
+    expect(staffMeeting).toMatchObject({ publishedStaffCount: 6, publishedCadetCount: 0 });
+    expect(timings).toMatchObject({ publishedStaffCount: 0, publishedCadetCount: registered.length, pageSize: 'half' });
+    expect(staffMeeting).toMatchObject({ pageSize: 'full' });
+    expect(sportsDay).toMatchObject({ publishedStaffCount: 6, publishedCadetCount: registered.length, templateRevisionId: null });
+    expect(homework).toMatchObject({ status: 'draft', publishedStaffCount: null, publishedCadetCount: null, templateRevisionId: null });
+    // Templates were seeded first, so a plain notice pinned the school's selected Notice design.
+    const noticeTemplate = await client.school.getActiveDocumentTemplate({ schoolId: job.schoolId, documentType: 'notice' });
+    expect(staffMeeting.templateRevisionId).toBe(noticeTemplate!.artifact.id);
+    // The printed "issued on" date is the back-dated publication day (16 days before 20 December), not the day the seed ran.
+    const printed = await client.school.previewNotice({ schoolId: job.schoolId, source: { kind: 'saved', noticeId: staffMeeting.id } });
+    expect(printed.html).toContain('4 December 2026');
+    expect(printed.html).toContain('on 6 December 2026 at 2:30 PM');
+    // A student of the demo sees the notices addressed to students, newest first, and never the staff-only one or a draft.
+    const cadet = { schoolId: job.schoolId, admissionId: registered[0]!.id };
+    const visible = await listCadetNotices(db, cadet, { limit: 20 });
+    expect(visible.items.map((item) => item.title)).toEqual(['Annual Sports Day invitation', 'Science exhibition: models and group lists', 'Revised school timings']);
+    const designed = await getCadetNotice(db, cadet, sportsDay.id);
+    expect(designed.bodyMode).toBe('template');
+    expect(designed.text).toContain('18 December 2026');
+    const designedPage = await getCadetNoticeDocument(db, cadet, sportsDay.id);
+    expect(designedPage.html).toContain('Integration Valley School');
+    expect(designedPage.html).toContain('18 December 2026');
+    expect(designedPage.html).toContain('1 January 2027');
+    expect(designedPage.html).not.toContain('{date:');
+    // Downloading renders the PDF once and caches it under the school's own prefix.
+    await client.school.getNoticeDownload({ schoolId: job.schoolId, noticeId: sportsDay.id });
+    await expect(getS3Client().send(new HeadObjectCommand({ Bucket: env.S3_BUCKET, Key: noticePdfKey(job.schoolId, sportsDay.id, sportsDay.pageSize) }))).resolves.toMatchObject({ ContentType: 'application/pdf' });
+
+    // One event per student of each published notice, plus one staff event when it addresses staff.
+    const noticeEvents = (await noticeRows(job.schoolId))
+      .filter((row) => row.status === 'published')
+      .reduce((total, row) => total + (row.publishedCadetCount ?? 0) + (row.toStaff ? 1 : 0), 0);
+    expect(noticeEvents).toBe(registered.length * 3 + 3);
+    expect(counts.notificationEvents).toBe(counts.bills + counts.payments + runs!.value + releaseRecipients + noticeEvents);
     // A demo never sends outside the inbox, even with both channels switched on.
     const send = vi.fn(async () => ({ kind: 'sent' as const, providerMessageId: 'never' }));
     const available = (channel: 'web_push' | 'whatsapp'): NotificationChannelAdapter => ({ channel, available: true, decide: () => [{ status: 'owed', destination: 'x' }], send });
@@ -181,8 +251,11 @@ describe('demo school seed steps (2 classes, without Restate)', () => {
 
   it('changes nothing when every step runs again', async () => {
     const before = await snapshotCounts(job.schoolId);
+    const noticesBefore = await noticeRows(job.schoolId);
     await runDemoSeedSteps({ job, attempt: 1, run, step });
     expect(await snapshotCounts(job.schoolId)).toEqual(before);
+    // No second copy, no second publication (no new events above), same back-dated times.
+    expect(await noticeRows(job.schoolId)).toEqual(noticesBefore);
     const memberCount = await db.select({ value: count() }).from(schoolMemberTable).where(eq(schoolMemberTable.schoolId, job.schoolId));
     expect(memberCount[0]!.value).toBe(6);
   }, 600_000);

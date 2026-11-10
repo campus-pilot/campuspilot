@@ -12,6 +12,7 @@ import { Badge } from '@campuspilot/ui/components/reui/badge';
 
 import { absMinor, firstNameOf, formatDate, formatMoney, formatPercent, greetingFor, isZeroMinor } from '@/lib/format';
 import { orpc } from '@/lib/orpc';
+import { HomeNotices } from '../notices/recent-notices';
 import { ScreenError, ScreenLoading } from '../screen';
 
 /** Greets by first name and states the session so a guardian knows which year they are looking at. */
@@ -123,7 +124,12 @@ function HomeFees() {
   return <FeeCard summary={summary.data} />;
 }
 
-/** Greeting, then a fresh result, then the fee balance. Sections are reached through the bottom nav. */
+/**
+ * Greeting, then a fresh result, then the fee balance, then the newest
+ * notices (only for a school with notices and a student who has some; the
+ * block is last so its late arrival never pushes the others down). Sections
+ * are reached through the bottom nav; Notices from here and from More.
+ */
 export function HomeScreen() {
   const profile = useQuery(orpc.getProfile.queryOptions());
   if (profile.isPending) return <ScreenLoading blocks={2} />;
@@ -133,6 +139,7 @@ export function HomeScreen() {
       <Greeting profile={profile.data} hour={new Date().getHours()} />
       <HomeResults classKnown={profile.data.current !== null} />
       <HomeFees />
+      <HomeNotices />
     </>
   );
 }

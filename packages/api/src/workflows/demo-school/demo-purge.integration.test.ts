@@ -1,3 +1,4 @@
+import { HeadObjectCommand } from '@aws-sdk/client-s3';
 import { cadetAuth } from '@campuspilot/auth/cadet';
 import { CADET_OAUTH_GRANT_TABLES, findLiveOAuthGrant } from '@campuspilot/auth/mcp-credential';
 import { db } from '@campuspilot/db';
@@ -12,21 +13,28 @@ import {
   cadetUser,
 } from '@campuspilot/db/schema/cadet';
 import { demoSchoolPurgeTable } from '@campuspilot/db/schema/demo-school-job';
+import { noticeClassTable, noticeTable } from '@campuspilot/db/schema/notice';
 import { cadetPushSubscriptionTable } from '@campuspilot/db/schema/notification';
 import { schoolTable } from '@campuspilot/db/schema/school';
+import { env } from '@campuspilot/env/server';
+import { getS3Client } from '@campuspilot/s3/client';
 import { eq, inArray, sql } from 'drizzle-orm';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { connectCadetMcp, signInCadet } from '../../../test/cadet';
 import { createCadetOAuthContext } from '../../cadet/context';
-import { deleteDemoSchoolData, revokeDemoSchoolSessions, revokeManifestSessions } from './purge-workflow';
+import { noticePdfKey } from '../../routers/school/notice/notice.render';
+import { collectDemoSchoolObjectKeys, deleteDemoSchoolData, revokeDemoSchoolSessions, revokeManifestSessions, runDemoSchoolPurgeStages } from './purge-workflow';
 
 import { examResultPublicationTable } from '@campuspilot/db/schema/exam-result-publication';
-import { createTestUser } from '../../../test/fixtures';
+import { createSchoolStaffSession, createTestClient, createTestSchool, createTestSession, createTestUser } from '../../../test/fixtures';
 import { retryFinanceConflict } from '../../../test/finance/assertions';
 import { billIssuedData, billingRunPostedData, emitAndDispatch } from '../../../test/notifications';
 import { createFinanceIdempotencyKey } from '../../../test/finance/factories';
 import { createFinanceScenario, type FinanceScenario } from '../../../test/finance/scenario';
+
+// No seed run is live in these tests; the purge's stop stage asks Restate for them.
+vi.mock('./restate-admin', () => ({ listLiveDemoSeedInvocations: vi.fn(async () => []) }));
 
 /** Every table with a `school_id` foreign key to `school` (checked against pg_constraint). */
 async function rowsReferencingSchool(schoolId: string) {
@@ -88,7 +96,12 @@ describe('purge_demo_school and the demo-only finance exception', () => {
   let real: FinanceScenario;
 
   beforeEach(async () => {
-    [demo, real] = await Promise.all([createFinanceScenario({ isDemo: true }), createFinanceScenario()]);
+    // Both schools have the Cadet Portal; the demo also has notices, like a
+    // school made by createDemoSchool, so the purge has flag rows to delete.
+    [demo, real] = await Promise.all([
+      createFinanceScenario({ isDemo: true, features: ['cadet', 'notices'] }),
+      createFinanceScenario({ features: ['cadet'] }),
+    ]);
     // Serializable finance postings conflict when run concurrently; post in turn.
     await postFinanceHistory(demo, 'demo');
     await postFinanceHistory(real, 'real');
@@ -124,7 +137,7 @@ describe('purge_demo_school and the demo-only finance exception', () => {
       sql`SELECT purge_demo_school(${demo.school.id}) AS counts`,
     );
     // Events: the two emitted above plus the bill's and the payment's own (Phase 5); only the two above were fanned out.
-    expect(result.rows[0]!.counts).toMatchObject({ finance_payment: 1, finance_bill: 1, exam_student_remark: 1, user: 1, school_member: expect.any(Number), notification_event: 4, notification: 2, notification_delivery: 2, exam_result_publication: 1 });
+    expect(result.rows[0]!.counts).toMatchObject({ finance_payment: 1, finance_bill: 1, exam_student_remark: 1, user: 1, school_member: expect.any(Number), notification_event: 4, notification: 2, notification_delivery: 2, exam_result_publication: 1, school_feature_flag: 2 });
 
     const remaining = await rowsReferencingSchool(demo.school.id);
     expect(Object.values(remaining).every((count) => count === 0)).toBe(true);
@@ -135,6 +148,73 @@ describe('purge_demo_school and the demo-only finance exception', () => {
     // The real school is untouched.
     const realRows = await rowsReferencingSchool(real.school.id);
     expect(realRows.finance_payment).toBe(1);
+    expect(realRows.school_feature_flag).toBe(1);
+  });
+
+  it('removes the notices of a demo school with their class rows, before the template revisions and accounts they reference', async () => {
+    const principal = demo.actors.principal.client.school;
+    const base = { schoolId: demo.school.id, sessionId: demo.activeSession.id, title: 'Demo notice', bodyMode: 'plain' as const, body: 'Text', toStaff: true };
+    // A published notice pins the school's selected Notice template revision (an artifact row).
+    const template = await principal.selectMarketplaceTemplate({ schoolId: demo.school.id, documentType: 'notice', slug: 'notice-default', expectedRevisionId: null });
+    const published = await principal.createNotice({ ...base, cadetScope: 'selected_classes', classIds: [demo.schoolClass.id] });
+    await expect(principal.publishNotice({ schoolId: demo.school.id, noticeId: published.id, expectedVersion: published.version, expectedTemplateRevisionId: template.artifact.id })).resolves.toMatchObject({ templateRevisionId: template.artifact.id });
+    // A draft written by a demo-only account, which the purge deletes as well.
+    const demoUser = await createTestUser({ name: 'Demo teacher' });
+    await db.update(user).set({ demoSchoolId: demo.school.id }).where(eq(user.id, demoUser.id));
+    await db.insert(noticeTable).values({ schoolId: demo.school.id, sessionId: demo.activeSession.id, title: 'Demo draft', bodyMode: 'plain', body: 'Text', toStaff: true, cadetScope: 'none', createdBy: demoUser.id });
+    // A real school's notice must survive the demo purge.
+    const [kept] = await db
+      .insert(noticeTable)
+      .values({ schoolId: real.school.id, sessionId: real.activeSession.id, title: 'Real notice', bodyMode: 'plain', body: 'Text', toStaff: true, cadetScope: 'none' })
+      .returning({ id: noticeTable.id });
+
+    const result = await db.execute<{ counts: Record<string, number> }>(sql`SELECT purge_demo_school(${demo.school.id}) AS counts`);
+    expect(result.rows[0]!.counts).toMatchObject({ notice: 2, notice_class: 1 });
+    expect(await db.select().from(noticeTable).where(eq(noticeTable.schoolId, demo.school.id))).toHaveLength(0);
+    expect(await db.select().from(noticeClassTable).where(eq(noticeClassTable.schoolId, demo.school.id))).toHaveLength(0);
+    const remaining = await rowsReferencingSchool(demo.school.id);
+    expect(Object.values(remaining).every((count) => count === 0)).toBe(true);
+    expect(await db.select().from(noticeTable).where(eq(noticeTable.id, kept!.id))).toHaveLength(1);
+  });
+
+  it('deletes the cached notice PDFs of a demo school with its notices, and nothing of another school', async () => {
+    // The file stage only accepts production-format school IDs, so these schools are made with one.
+    const productionId = () => `sch_${crypto.randomUUID().replaceAll('-', '').slice(0, 21)}`;
+    const publishWithPdf = async (isDemo: boolean) => {
+      const school = await createTestSchool({ id: productionId(), isDemo, features: ['notices'] });
+      const session = await createTestSession({ schoolId: school.id, sessionStartYear: 2026, sessionEndYear: 2027 });
+      const principal = createTestClient((await createSchoolStaffSession(school.id, [{ role: 'principal' }])).session).school;
+      const notice = await principal.createNotice({ schoolId: school.id, sessionId: session.id, title: 'Staff meeting', bodyMode: 'plain', body: 'In the staff room at 2:30 PM.', toStaff: true, cadetScope: 'none' });
+      await principal.publishNotice({ schoolId: school.id, noticeId: notice.id, expectedVersion: notice.version, expectedTemplateRevisionId: null });
+      // The first download renders the PDF and caches it under the school's prefix.
+      await principal.getNoticeDownload({ schoolId: school.id, noticeId: notice.id });
+      const draft = await principal.createNotice({ schoolId: school.id, sessionId: session.id, title: 'Draft', bodyMode: 'plain', body: 'Not yet.', toStaff: true, cadetScope: 'none' });
+      return { schoolId: school.id, pdfKey: noticePdfKey(school.id, notice.id, 'full'), draftPdfKey: noticePdfKey(school.id, draft.id, 'full') };
+    };
+    const exists = (key: string) =>
+      getS3Client().send(new HeadObjectCommand({ Bucket: env.S3_BUCKET, Key: key })).then(() => true, () => false);
+    const demoNotice = await publishWithPdf(true);
+    const realNotice = await publishWithPdf(false);
+    expect(demoNotice.pdfKey).toBe(`schools/${demoNotice.schoolId}/notices/${demoNotice.pdfKey.split('/').at(-1)}`);
+    expect(await exists(demoNotice.pdfKey)).toBe(true);
+    expect(await exists(realNotice.pdfKey)).toBe(true);
+
+    await db.insert(demoSchoolPurgeTable).values({ schoolId: demoNotice.schoolId, status: 'pending', attempt: 1 });
+    const purged = await runDemoSchoolPurgeStages({ schoolId: demoNotice.schoolId, attempt: 1, step: (_name, action) => action(), stopSeedRuns: async () => undefined });
+    expect(purged.status).toBe('completed');
+    expect(purged.deleted).toBeGreaterThanOrEqual(1);
+
+    expect(await db.select().from(noticeTable).where(eq(noticeTable.schoolId, demoNotice.schoolId))).toHaveLength(0);
+    // The manifest names the PDF of every published notice (a draft has none) ...
+    const [manifest] = await db.select().from(demoSchoolPurgeTable).where(eq(demoSchoolPurgeTable.schoolId, demoNotice.schoolId));
+    expect(manifest!.objectKeys).toContain(demoNotice.pdfKey);
+    expect(manifest!.objectKeys).not.toContain(demoNotice.draftPdfKey);
+    // ... and nothing is left under the school's prefix.
+    expect(await exists(demoNotice.pdfKey)).toBe(false);
+    expect(await collectDemoSchoolObjectKeys({ keys: [], prefixes: [`schools/${demoNotice.schoolId}/`] })).toEqual([]);
+    // The real school keeps its notice and its PDF.
+    expect(await exists(realNotice.pdfKey)).toBe(true);
+    expect(await db.select().from(noticeTable).where(eq(noticeTable.schoolId, realNotice.schoolId))).toHaveLength(2);
   });
 
   it('purges the Cadet Portal logins of a demo school and revokes their sessions and MCP tokens', async () => {

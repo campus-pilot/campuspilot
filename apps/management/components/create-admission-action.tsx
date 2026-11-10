@@ -9,6 +9,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus } from 'lucide-react';
 
 import { client, orpc } from '@/lib/orpc';
+import { RequireFeature } from './require-feature';
 import { RequirePermissions } from './require-permissions';
 
 /**
@@ -59,14 +60,17 @@ export function CreateAdmissionAction({ schoolId }: { schoolId: string }) {
     <>
       <Button type="button" size="sm" onClick={() => setOpen(true)}><Plus aria-hidden />New admission</Button>
       {open ? (
-        // The checkbox is offered only to staff who may issue Cadet Portal
-        // passwords; the server checks the same permission again.
-        <RequirePermissions
-          permissions={{ action: SCHOOL_ACTIONS.ISSUE_ADMISSION_CADET_PASSWORD, resource: { kind: 'school', schoolId } }}
-          fallback={dialog(false)}
-        >
-          {dialog(true)}
-        </RequirePermissions>
+        // The checkbox is offered only in schools that have the Cadet Portal
+        // and only to staff who may issue its passwords; the server checks
+        // the feature and the permission again.
+        <RequireFeature schoolId={schoolId} feature="cadet" fallback={dialog(false)}>
+          <RequirePermissions
+            permissions={{ action: SCHOOL_ACTIONS.ISSUE_ADMISSION_CADET_PASSWORD, resource: { kind: 'school', schoolId } }}
+            fallback={dialog(false)}
+          >
+            {dialog(true)}
+          </RequirePermissions>
+        </RequireFeature>
       ) : null}
       <IssuedCadetPasswordDialog
         details={issued?.details ?? null}

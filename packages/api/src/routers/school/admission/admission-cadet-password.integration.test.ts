@@ -15,9 +15,11 @@ import { eq } from "drizzle-orm";
 import { describe, expect, it, vi } from "vitest";
 
 import { connectCadetMcp, signInCadet } from "../../../../test/cadet";
+import { expectFeatureDisabled, expectPermissionDenied } from "../../../../test/feature-flags";
 import { expectRpcCode } from "../../../../test/finance/assertions";
 import {
   createSchoolStaffSession,
+  setTestSchoolFeature,
   createTestAdmission,
   createTestClient,
   createTestSchool,
@@ -49,8 +51,8 @@ function admissionInput(schoolId: string, admissionNo: string) {
 }
 
 async function setup() {
-  const school = await createTestSchool();
-  const otherSchool = await createTestSchool();
+  const school = await createTestSchool({ features: ['cadet'] });
+  const otherSchool = await createTestSchool({ features: ['cadet'] });
   const [principal, manager, teacher, accountant, outsider] = await Promise.all([
     createSchoolStaffSession(school.id, [{ role: "principal", meta: null }]),
     createSchoolStaffSession(school.id, [{ role: "manager", meta: null }]),
@@ -236,6 +238,58 @@ describe("issueAdmissionCadetPassword", () => {
     const retried = await principal.client.school.issueAdmissionCadetPassword(input);
     expect(await sessionOf(browser.cookie)).toBeNull();
     expect((await signInCadet(retried)).response.status).toBe(200);
+  });
+});
+
+describe("password issuing needs the school's cadet feature", () => {
+  async function schoolWithoutPortal() {
+    const school = await createTestSchool();
+    const [principal, teacher] = await Promise.all([
+      createSchoolStaffSession(school.id, [{ role: "principal", meta: null }]),
+      createSchoolStaffSession(school.id, [{ role: "teacher", meta: { classIds: [] } }]),
+    ]);
+    return { school, principal: createTestClient(principal.session), teacher: createTestClient(teacher.session) };
+  }
+
+  it("refuses issueAdmissionCadetPassword and creates no login while the feature is off", async () => {
+    const { school, principal, teacher } = await schoolWithoutPortal();
+    const admission = await createTestAdmission({ schoolId: school.id });
+    await expectFeatureDisabled(
+      principal.school.issueAdmissionCadetPassword({ schoolId: school.id, admissionId: admission.id }),
+      "cadet",
+    );
+    expect(await loginRows(admission.id)).toEqual([]);
+    // The permission answers first: a teacher learns nothing about the feature.
+    await expectPermissionDenied(
+      teacher.school.issueAdmissionCadetPassword({ schoolId: school.id, admissionId: admission.id }),
+    );
+
+    await setTestSchoolFeature(school.id, "cadet", true);
+    const issued = await principal.school.issueAdmissionCadetPassword({ schoolId: school.id, admissionId: admission.id });
+    expect((await signInCadet(issued)).response.status).toBe(200);
+
+    // Switching the feature off again refuses a reset and the sign-in.
+    await setTestSchoolFeature(school.id, "cadet", false);
+    await expectFeatureDisabled(
+      principal.school.issueAdmissionCadetPassword({ schoolId: school.id, admissionId: admission.id }),
+      "cadet",
+    );
+    expect((await signInCadet(issued)).response.status).toBe(401);
+    // The login itself is kept for when the feature returns.
+    expect(await loginRows(admission.id)).toHaveLength(1);
+  });
+
+  it("refuses createAdmission with generateCadetPassword, creating nothing, but still creates plain admissions", async () => {
+    const { school, principal } = await schoolWithoutPortal();
+    await expectFeatureDisabled(
+      principal.school.createAdmission({ ...admissionInput(school.id, "FF-PASS"), generateCadetPassword: true }),
+      "cadet",
+    );
+    expect(await db.select().from(admissionTable).where(eq(admissionTable.schoolId, school.id))).toEqual([]);
+
+    const plain = await principal.school.createAdmission(admissionInput(school.id, "FF-PLAIN"));
+    expect(plain.cadetPassword).toBeNull();
+    expect(await loginRows(plain.id)).toEqual([]);
   });
 });
 

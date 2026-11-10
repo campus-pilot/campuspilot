@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 
 import { rpcError, toRpcError } from "../../../errors";
 import { protectedProcedure } from "../../../index";
+import { requireSchoolFeature } from "../../../permissions/feature";
 import { requireSchoolPermission } from "../../../permissions/school";
 import {
   cadetPortalSettingsDtoSchema,
@@ -13,7 +14,8 @@ import {
 
 /**
  * School-level Cadet Portal settings. They are school details, so they use
- * the school details read/update permissions.
+ * the school details read/update permissions. They exist only for schools
+ * with the `cadet` feature: both procedures refuse a school without it.
  */
 export const schoolCadetSettingsRouter = {
   getCadetPortalSettings: protectedProcedure
@@ -33,6 +35,7 @@ export const schoolCadetSettingsRouter = {
     })
     .input(cadetPortalSettingsInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_DETAILS))
+    .use(requireSchoolFeature("cadet"))
     .output(cadetPortalSettingsDtoSchema)
     .handler(async ({ context, input }) => {
       try {
@@ -65,6 +68,7 @@ export const schoolCadetSettingsRouter = {
     })
     .input(updateCadetPortalSettingsInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.UPDATE_DETAILS))
+    .use(requireSchoolFeature("cadet"))
     .output(cadetPortalSettingsDtoSchema)
     .handler(async ({ context, input }) => {
       try {

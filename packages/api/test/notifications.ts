@@ -1,6 +1,6 @@
 import { db } from '@campuspilot/db';
 import type { NotificationType } from '@campuspilot/db/notifications/catalogue';
-import { cadetUser } from '@campuspilot/db/schema/cadet';
+import { cadetSession, cadetUser } from '@campuspilot/db/schema/cadet';
 import { createRouterClient } from '@orpc/server';
 import { createECDH, randomBytes, randomUUID } from 'node:crypto';
 
@@ -150,7 +150,7 @@ export function createCadetClientForAdmission(admissionId: string): CadetRouterC
     db,
     headers: new Headers(),
     login: { userId: `cadet_${randomUUID()}`, admissionId },
-    principal: { authMethod: 'session' },
+    principal: { authMethod: 'session', sessionId: `cadet_session_${randomUUID()}` },
   };
   return createRouterClient(cadetRouter, { context });
 }
@@ -169,8 +169,11 @@ export async function createCadetLogin(admissionId: string, headers: Headers = n
     passwordSource: 'issued',
     issuedAt: new Date(),
   });
-  const context: CadetContext = { db, headers, login: { userId, admissionId }, principal: { authMethod: 'session' } };
-  return { userId, client: createRouterClient(cadetRouter, { context }) as CadetRouterClient };
+  // A real session row: push subscriptions reference the session that made them.
+  const sessionId = `cadet_session_${randomUUID()}`;
+  await db.insert(cadetSession).values({ id: sessionId, token: randomUUID(), userId, expiresAt: new Date(Date.now() + 86_400_000), updatedAt: new Date() });
+  const context: CadetContext = { db, headers, login: { userId, admissionId }, principal: { authMethod: 'session', sessionId } };
+  return { userId, sessionId, client: createRouterClient(cadetRouter, { context }) as CadetRouterClient };
 }
 
 /** A browser-like push subscription (valid P-256 key and auth secret) on FCM. */

@@ -33,6 +33,7 @@ import {
   seedExamRemarks,
   seedExamSetup,
   seedFinanceConfiguration,
+  seedNotice,
   seedSchoolLogo,
   seedSession,
   seedStaffMember,
@@ -169,6 +170,15 @@ export async function runDemoSeedSteps(options: {
 
   await phase('templates', async () => {
     await step('templates', async () => seedTemplates(await seed()));
+  });
+
+  // After templates: publishing a plain notice pins the school's selected
+  // Notice template revision, so the demo's notices use the seeded design.
+  await phase('notices', async () => {
+    const classIdsBySlug = Object.fromEntries([...placements].map(([slug, placement]) => [slug, placement.classId]));
+    for (const notice of plan.notices) {
+      await step(`notice:${notice.key}`, async () => seedNotice(await seed(), { sessionId, classIdsBySlug, notice }));
+    }
   });
 
   let credentialsS3Key = '';

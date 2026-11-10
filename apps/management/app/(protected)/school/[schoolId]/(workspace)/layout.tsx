@@ -3,15 +3,16 @@
 import type { ReactNode } from 'react';
 import { useParams, usePathname } from 'next/navigation';
 import { SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
+import { RequireFeature } from '@/components/require-feature';
 import { RequirePermissions } from '@/components/require-permissions';
 import type { AppShellNavigationEntry } from '@campuspilot/components/app-shell';
 import {
-  Bell,
   Files,
   ClipboardCheck,
   CreditCard,
   GraduationCap,
   LayoutDashboard,
+  Megaphone,
   Settings,
   UserRoundPlus,
   Users,
@@ -45,7 +46,7 @@ import {
 } from './sessions/[sessionId]/classroom/_route';
 import { dashboardPage } from './sessions/[sessionId]/_route';
 import { examPage, examDetailsPage } from './sessions/[sessionId]/exam/_route';
-import { noticesPage } from './sessions/[sessionId]/notices/_route';
+import { noticePages } from './sessions/[sessionId]/notices/_route';
 import { notificationsPage } from './notifications/_route';
 import { staffPage } from './staff/_route';
 
@@ -58,7 +59,7 @@ const pages: ManagementPageDescriptor<any>[] = [
   dashboardPage,
   staffPage,
   notificationsPage,
-  noticesPage,
+  ...noticePages,
   admissionPage,
   admissionDetailsPage,
   classroomPage,
@@ -151,7 +152,9 @@ function navigationFor(
           id: 'notices',
           label: 'Notices',
           href: sessionHref('/notices'),
-          icon: Bell,
+          icon: Megaphone,
+          // A feature and a permission are separate gates; the item needs both.
+          wrap: children => <RequireFeature schoolId={schoolId} feature="notices"><RequirePermissions permissions={{ action: SCHOOL_ACTIONS.READ_NOTICE, resource: { kind: 'school', schoolId } }}>{children}</RequirePermissions></RequireFeature>,
         },
       ],
     },

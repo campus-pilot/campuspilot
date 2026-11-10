@@ -7,6 +7,7 @@ import {
   examStudentAssessmentTable,
   examStudentRemarkTable,
 } from '@campuspilot/db/schema/exam';
+import { notificationEventTable } from '@campuspilot/db/schema/notification';
 import { studentTable } from '@campuspilot/db/schema/student';
 import { schoolTable } from '@campuspilot/db/schema/school';
 import { and, eq } from 'drizzle-orm';
@@ -21,8 +22,9 @@ import {
   enroll,
   runExam,
 } from '../../../../test/exam-results';
+import { expectFeatureDisabled, expectPermissionDenied } from '../../../../test/feature-flags';
 import { expectRpcCode } from '../../../../test/finance/assertions';
-import { createSchoolStaffSession, createTestClient, type TestClient } from '../../../../test/fixtures';
+import { createSchoolStaffSession, createTestClient, setTestSchoolFeature, type TestClient } from '../../../../test/fixtures';
 
 type Scope = { schoolId: string; sessionId: string; examSlug: string };
 
@@ -36,7 +38,7 @@ describe('Cadet Portal release and teacher remarks (staff procedures)', () => {
   let accountant: TestClient;
 
   beforeEach(async () => {
-    const school = await createResultsSchool();
+    const school = await createResultsSchool({ features: ['cadet'] });
     const principalSession = await createSchoolStaffSession(school.school.id, [{ role: 'principal', meta: null }]);
     principal = createTestClient(principalSession.session);
     principalUserId = principalSession.user.id;
@@ -101,7 +103,7 @@ describe('Cadet Portal release and teacher remarks (staff procedures)', () => {
       await expectRpcCode(createTestClient(null).school.releaseExamToCadet(scope), 'UNAUTHORIZED');
       await principal.school.releaseExamToCadet(scope);
       await expectRpcCode(teacher.school.withdrawExamFromCadet(scope), 'FORBIDDEN');
-      const other = await createResultsSchool();
+      const other = await createResultsSchool({ features: ['cadet'] });
       await expectRpcCode(other.principal.school.withdrawExamFromCadet(scope), 'FORBIDDEN');
     });
 
@@ -128,6 +130,37 @@ describe('Cadet Portal release and teacher remarks (staff procedures)', () => {
 
       await principal.school.withdrawExamFromCadet(scope);
       expect(await principal.school.createExamPlan({ ...scope, classId, subjectSlug: 'english' })).toMatchObject({ subjectSlug: 'english' });
+    });
+
+    it('needs the school to have the Cadet Portal to release or to send a result, but not to withdraw', async () => {
+      await completeExam();
+      const one = { ...scope, classId, studentId };
+      const lifecycle = async () => (await db.select().from(examLifecycleTable).where(and(eq(examLifecycleTable.sessionId, scope.sessionId), eq(examLifecycleTable.examSlug, 'term'))))[0]!;
+      const events = () => db.select().from(notificationEventTable).where(eq(notificationEventTable.schoolId, scope.schoolId));
+      await setTestSchoolFeature(scope.schoolId, 'cadet', false);
+
+      // Switched off: nothing is released, stamped or notified, and the forecasts are refused too.
+      await expectFeatureDisabled(principal.school.releaseExamToCadet(scope), 'cadet');
+      await expectFeatureDisabled(principal.school.previewExamCadetRelease(scope), 'cadet');
+      await expectFeatureDisabled(principal.school.previewStudentResultNotification(one), 'cadet');
+      await expectFeatureDisabled(principal.school.sendStudentResultNotification({ ...one, idempotencyKey: 'send-while-off-0001' }), 'cadet');
+      expect((await lifecycle()).cadetReleasedAt).toBeNull();
+      expect((await events()).filter((event) => event.type === 'exam.results_published')).toHaveLength(0);
+      // A caller without the permission still gets the ordinary denial, so the flag cannot be probed.
+      await expectPermissionDenied(accountant.school.releaseExamToCadet(scope));
+      await expectPermissionDenied(accountant.school.previewExamCadetRelease(scope));
+
+      // The first release after the portal is enabled notifies (it was never stamped while off).
+      await setTestSchoolFeature(scope.schoolId, 'cadet', true);
+      await expect(principal.school.previewExamCadetRelease(scope)).resolves.toMatchObject({ kind: 'first_release' });
+      await principal.school.releaseExamToCadet(scope);
+      expect((await events()).filter((event) => event.type === 'exam.results_published')).toHaveLength(1);
+
+      // An examination released earlier can always be withdrawn, also while the portal is off.
+      await setTestSchoolFeature(scope.schoolId, 'cadet', false);
+      const withdrawn = await principal.school.withdrawExamFromCadet(scope);
+      expect(withdrawn.cadetReleasedAt).toBeNull();
+      expect((await lifecycle()).cadetReleasedAt).toBeNull();
     });
 
     it('validates input and unknown exams', async () => {
@@ -194,7 +227,7 @@ describe('Cadet Portal release and teacher remarks (staff procedures)', () => {
       await runExam(principal, scope, [{ classId, studentId, subjects: { maths: 72 } }]);
       await expectRpcCode(accountant.school.saveStudentExamRemark({ ...studentScope(), text: 'No' }), 'FORBIDDEN');
       await expectRpcCode(createTestClient(null).school.getStudentExamRemark(studentScope()), 'UNAUTHORIZED');
-      const other = await createResultsSchool();
+      const other = await createResultsSchool({ features: ['cadet'] });
       await expectRpcCode(other.principal.school.getStudentExamRemark(studentScope()), 'FORBIDDEN');
       await expectRpcCode(principal.school.saveStudentExamRemark({ ...studentScope(), text: 'x'.repeat(1001) }), 'BAD_REQUEST');
       await expectRpcCode(principal.school.saveStudentExamRemark({ ...studentScope(), studentId: 'missing', text: 'Hi' }), 'NOT_FOUND');
@@ -205,7 +238,7 @@ describe('Cadet Portal release and teacher remarks (staff procedures)', () => {
 
 describe('Cadet Portal settings', () => {
   it('defaults to hiding class averages and lets school details editors change it', async () => {
-    const { school, principal } = await createResultsSchool();
+    const { school, principal } = await createResultsSchool({ features: ['cadet'] });
     const teacher = createTestClient((await createSchoolStaffSession(school.id, [{ role: 'teacher', meta: { classIds: [] } }])).session);
     expect(await principal.school.getCadetPortalSettings({ schoolId: school.id })).toEqual({ schoolId: school.id, showClassAverages: false });
 
@@ -218,7 +251,7 @@ describe('Cadet Portal settings', () => {
 
     await expectRpcCode(teacher.school.updateCadetPortalSettings({ schoolId: school.id, showClassAverages: false }), 'FORBIDDEN');
     await expectRpcCode(createTestClient(null).school.getCadetPortalSettings({ schoolId: school.id }), 'UNAUTHORIZED');
-    const other = await createResultsSchool();
+    const other = await createResultsSchool({ features: ['cadet'] });
     await expectRpcCode(other.principal.school.updateCadetPortalSettings({ schoolId: school.id, showClassAverages: false }), 'FORBIDDEN');
     // @ts-expect-error showClassAverages is required
     await expectRpcCode(principal.school.updateCadetPortalSettings({ schoolId: school.id }), 'BAD_REQUEST');

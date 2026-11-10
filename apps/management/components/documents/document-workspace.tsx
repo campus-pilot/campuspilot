@@ -37,7 +37,7 @@ import { FinanceDocumentGenerator } from "./finance-document-generator";
 import { DocumentHistory } from "./document-history";
 
 export type DocumentInitialSelection = {
-  documentType?: Exclude<DocumentType, "statement">;
+  documentType?: WorkspaceDocumentType;
   classId?: string;
   examSlug?: string;
   studentId?: string;
@@ -56,10 +56,17 @@ const sections = [
   },
 ] as const;
 
+/**
+ * Types the Documents workspace can create. Statements stay contextual to an
+ * admission ledger, and a notice is written and published in Notices: it
+ * only shares the template system.
+ */
+type WorkspaceDocumentType = Exclude<DocumentType, "statement" | "notice">;
+
 /** Settings slugs are existing product vocabulary, not a transformation of the
  * API enum. Keep this mapping exhaustive when adding a document type.
  */
-const templateSettingsSlugs: Record<Exclude<DocumentType, "statement">, string> = {
+const templateSettingsSlugs: Record<WorkspaceDocumentType, string> = {
   report_card: "examination",
   id_card: "id-card",
   admit_card: "admit-card",
@@ -68,7 +75,7 @@ const templateSettingsSlugs: Record<Exclude<DocumentType, "statement">, string> 
   receipt: "receipt",
 };
 
-const documentCreateTitles: Record<Exclude<DocumentType, "statement">, string> = {
+const documentCreateTitles: Record<WorkspaceDocumentType, string> = {
   report_card: "Create report cards",
   id_card: "Create student IDs",
   admit_card: "Create admit cards",
@@ -153,7 +160,9 @@ function DocumentWorkspaceAccess({
     }),
   );
   if (permissions.isPending) return <DocumentLoading />;
-  if (permissions.isError || permissions.data.results.length !== actions.length)
+  // An answer already held keeps applying when a refetch fails (as in
+  // `permissionsSatisfied`); only a check that never answered fails closed.
+  if (permissions.data?.results.length !== actions.length)
     return <DocumentNotice>Document access could not be checked.</DocumentNotice>;
   const [
     academicTemplates,
@@ -291,7 +300,7 @@ function DocumentWorkspaceContent({
     defaultValues: {
       documentType:
         initial.documentType ??
-        ("" as Exclude<DocumentType, "statement"> | ""),
+        ("" as WorkspaceDocumentType | ""),
     },
     validators: {
       onChange: z.object({
@@ -312,7 +321,7 @@ function DocumentWorkspaceContent({
   const createHref = `/school/${encodeURIComponent(scope.schoolId)}/sessions/${encodeURIComponent(scope.sessionId)}/documents`;
   const href = (
     target: DocumentSection,
-    type?: Exclude<DocumentType, "statement">,
+    type?: WorkspaceDocumentType,
   ) => {
     const query = new URLSearchParams({
       ...(target === "generate" && type ? { type } : {}),
@@ -402,7 +411,7 @@ function DocumentWorkspaceContent({
                       onChange={(value) =>
                         form.setFieldValue(
                           "documentType",
-                          value as Exclude<DocumentType, "statement">,
+                          value as WorkspaceDocumentType,
                         )
                       }
                     />

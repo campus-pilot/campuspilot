@@ -1,9 +1,11 @@
 'use client';
 
+import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useForm } from '@tanstack/react-form';
-import { useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import { resolveQueryBoundary } from '@campuspilot/components/query-boundary';
 import { Check, Eye, LayoutTemplate, Store } from 'lucide-react';
 import { z } from 'zod';
 import {
@@ -17,9 +19,12 @@ import {
   DocumentNotice,
   DocumentPanel,
   DocumentPreview,
+  DocumentSelect,
   allDocumentKinds,
+  noticeDocumentKind,
 } from '@campuspilot/components/documents/document-controls';
 import { client, orpc } from '@/lib/orpc';
+import { useSchoolFeature } from '../require-feature';
 import {
   DocumentLoading,
   DocumentPermission,
@@ -29,6 +34,12 @@ import {
   useDocumentCache,
   type DocumentTemplateScope,
 } from './document-common';
+import {
+  marketplaceTemplatePreviewInput,
+  noticePreviewPrintSizeSchema,
+  noticePrintSizeOptions,
+  type NoticePreviewPrintSize,
+} from './notice-print-size-preview';
 
 type MarketplaceItem = {
   slug: string;
@@ -47,6 +58,7 @@ const settingsSlugs: Record<DocumentType, string> = {
   bill: 'bill',
   receipt: 'receipt',
   statement: 'statement',
+  notice: 'notice',
 };
 
 function settingsHref(scope: DocumentTemplateScope) {
@@ -68,6 +80,10 @@ export function DocumentTemplateMarketplace({
   initialType?: DocumentType;
 }) {
   const router = useRouter();
+  // The Notice template exists only for schools with the notices feature
+  // (the server refuses it otherwise), so its card is offered only then.
+  const notices = useSchoolFeature(schoolId, 'notices');
+  const kinds = notices.enabled ? [...allDocumentKinds, noticeDocumentKind] : allDocumentKinds;
   const form = useForm({
     defaultValues: { documentType: initialType },
     validators: {
@@ -100,7 +116,7 @@ export function DocumentTemplateMarketplace({
                   scroll: false,
                 });
               }}
-              items={allDocumentKinds}
+              items={kinds}
             />
           )}
         </form.Field>
@@ -118,18 +134,21 @@ function MarketplaceTypeSection({ scope }: { scope: DocumentTemplateScope }) {
   const active = useQuery(
     orpc.school.getActiveDocumentTemplate.queryOptions({ input: scope }),
   );
-  if (market.isPending || active.isPending) return <DocumentLoading />;
-  if (market.isError)
-    return <DocumentReadError error={market.error} retry={market.refetch} />;
-  if (active.isError)
-    return <DocumentReadError error={active.error} retry={active.refetch} />;
+  // Designs already listed stay when a background refetch fails; see `resolveQueryBoundary`.
+  const marketState = resolveQueryBoundary(market);
+  const activeState = resolveQueryBoundary(active);
+  if (marketState.kind === 'failed')
+    return <DocumentReadError error={marketState.error} retry={market.refetch} />;
+  if (activeState.kind === 'failed')
+    return <DocumentReadError error={activeState.error} retry={active.refetch} />;
+  if (marketState.kind === 'pending' || activeState.kind === 'pending') return <DocumentLoading />;
 
   return (
     <DocumentPanel
       title={DOCUMENT_LABELS[scope.documentType]}
-      description={`${market.data.pagination.totalItems} designs available for this document type.`}
+      description={`${marketState.data.pagination.totalItems} designs available for this document type.`}
       actions={
-        active.data ? (
+        activeState.data ? (
           <DocumentButton asChild variant="ghost">
             <Link href={settingsHref(scope)}>Open current template</Link>
           </DocumentButton>
@@ -137,13 +156,13 @@ function MarketplaceTypeSection({ scope }: { scope: DocumentTemplateScope }) {
       }
     >
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {market.data.items.map((item) => (
+        {marketState.data.items.map((item) => (
           <MarketplaceCard
             key={item.slug}
             scope={scope}
             item={item}
-            activeRevisionId={active.data?.artifact.id ?? null}
-            selected={active.data?.artifact.marketplaceSlug === item.slug}
+            activeRevisionId={activeState.data?.artifact.id ?? null}
+            selected={activeState.data?.artifact.marketplaceSlug === item.slug}
           />
         ))}
       </div>
@@ -152,7 +171,7 @@ function MarketplaceTypeSection({ scope }: { scope: DocumentTemplateScope }) {
 }
 
 function TemplateThumbnail({ item }: { item: MarketplaceItem }) {
-  const kind = allDocumentKinds.find(({ value }) => value === item.documentType)!;
+  const kind = [...allDocumentKinds, noticeDocumentKind].find(({ value }) => value === item.documentType)!;
   const palette = item.slug.endsWith('classic')
     ? 'border-blue-900/50 text-blue-900'
     : item.slug.endsWith('minimal')
@@ -208,9 +227,12 @@ function MarketplaceCard({
       <div className="flex min-h-16 flex-col gap-1">
         <h3 className="text-sm font-semibold">{item.name}</h3>
         <p className="text-xs font-medium text-foreground/80">
-          {item.pageSize === 'half'
-            ? 'Half A4 · two per sheet'
-            : 'Full A4 · one per sheet'}
+          {/* Notice designs adapt to each notice's print size; they have no footprint. */}
+          {item.documentType === 'notice'
+            ? 'Full or half A4 · each notice chooses'
+            : item.pageSize === 'half'
+              ? 'Half A4 · two per sheet'
+              : 'Full A4 · one per sheet'}
         </p>
         <p className="text-xs leading-relaxed text-muted-foreground">
           {item.description}
@@ -306,6 +328,12 @@ function UseMarketplaceTemplate({
   );
 }
 
+/**
+ * A marketplace design in context. A Notice design adapts to each notice's
+ * print size (`print.size`), so its preview offers "Preview as" full or half
+ * A4, the same choice as Settings › Templates › Notice. The choice is a form
+ * field; the preview query is keyed by it.
+ */
 export function DocumentTemplateMarketplaceDetail({
   scope,
   slug,
@@ -313,21 +341,78 @@ export function DocumentTemplateMarketplaceDetail({
   scope: DocumentTemplateScope;
   slug: string;
 }) {
-  const preview = useQuery(
-    orpc.school.getMarketplaceTemplate.queryOptions({
-      input: { ...scope, slug },
-    }),
+  const form = useForm({
+    defaultValues: { printSize: 'full' as NoticePreviewPrintSize },
+    validators: {
+      onChange: z.object({ printSize: noticePreviewPrintSizeSchema }),
+    },
+  });
+  const printSizeControl =
+    scope.documentType === 'notice' ? (
+      <form.Field name="printSize">
+        {(field) => (
+          <DocumentSelect
+            field={field}
+            label="Preview as"
+            options={noticePrintSizeOptions}
+          />
+        )}
+      </form.Field>
+    ) : null;
+  return (
+    <form.Subscribe selector={(state) => state.values.printSize}>
+      {(printSize) => (
+        <MarketplaceDetail
+          scope={scope}
+          slug={slug}
+          printSize={printSize}
+          printSizeControl={printSizeControl}
+        />
+      )}
+    </form.Subscribe>
   );
+}
+
+/**
+ * The preview of one design at one print size. While another size renders,
+ * the page keeps the design's name, actions and the "Preview as" control
+ * (`keepPreviousData`), but never shows the previous size's render as the
+ * new one: the preview is empty until the requested size arrives.
+ */
+function MarketplaceDetail({
+  scope,
+  slug,
+  printSize,
+  printSizeControl,
+}: {
+  scope: DocumentTemplateScope;
+  slug: string;
+  printSize: NoticePreviewPrintSize;
+  printSizeControl: ReactNode;
+}) {
+  const preview = useQuery({
+    ...orpc.school.getMarketplaceTemplate.queryOptions({
+      input: marketplaceTemplatePreviewInput(scope, slug, printSize),
+    }),
+    placeholderData: keepPreviousData,
+  });
   const active = useQuery(
     orpc.school.getActiveDocumentTemplate.queryOptions({ input: scope }),
   );
-  if (preview.isPending || active.isPending) return <DocumentLoading />;
-  if (preview.isError)
-    return <DocumentReadError error={preview.error} retry={preview.refetch} />;
-  if (active.isError)
-    return <DocumentReadError error={active.error} retry={active.refetch} />;
+  // A design already shown stays when a background refetch fails; see `resolveQueryBoundary`.
+  const previewState = resolveQueryBoundary(preview);
+  const activeState = resolveQueryBoundary(active);
+  if (previewState.kind === 'failed')
+    return <DocumentReadError error={previewState.error} retry={preview.refetch} />;
+  if (activeState.kind === 'failed')
+    return <DocumentReadError error={activeState.error} retry={active.refetch} />;
+  if (previewState.kind === 'pending' || activeState.kind === 'pending') return <DocumentLoading />;
 
-  const selected = active.data?.artifact.marketplaceSlug === slug;
+  const selected = activeState.data?.artifact.marketplaceSlug === slug;
+  const sizeLabel =
+    scope.documentType === 'notice'
+      ? noticePrintSizeOptions.find((option) => option.value === printSize)?.label
+      : undefined;
   return (
     <DocumentPermission
       schoolId={scope.schoolId}
@@ -345,10 +430,10 @@ export function DocumentTemplateMarketplaceDetail({
               {DOCUMENT_LABELS[scope.documentType]} · Marketplace preview
             </p>
             <h1 className="text-2xl font-semibold tracking-tight">
-              {preview.data.name}
+              {previewState.data.name}
             </h1>
             <p className="max-w-2xl text-sm text-muted-foreground">
-              {preview.data.description}
+              {previewState.data.description}
             </p>
           </div>
           <div className="flex shrink-0 flex-wrap gap-2">
@@ -359,13 +444,19 @@ export function DocumentTemplateMarketplaceDetail({
             ) : null}
             <UseMarketplaceTemplate
               scope={scope}
-              item={preview.data}
-              activeRevisionId={active.data?.artifact.id ?? null}
+              item={previewState.data}
+              activeRevisionId={activeState.data?.artifact.id ?? null}
               selected={selected}
             />
           </div>
         </header>
-        <DocumentPreview html={preview.data.html} label={preview.data.name} sample />
+        {printSizeControl ? <div className="w-full max-w-xs">{printSizeControl}</div> : null}
+        <DocumentPreview
+          html={preview.isPlaceholderData ? undefined : previewState.data.html}
+          label={sizeLabel ? `${previewState.data.name} · ${sizeLabel}` : previewState.data.name}
+          placeholder="Rendering the preview…"
+          sample
+        />
       </div>
     </DocumentPermission>
   );

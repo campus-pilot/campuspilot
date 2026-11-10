@@ -11,7 +11,9 @@ import {
   examDays,
   examStateAt,
   formatLocalDate,
+  formatLocalDateInWords,
   localDateOf,
+  localTimeInstant,
   workingDaysBetween,
   type BillingMonth,
   type ExamState,
@@ -19,7 +21,7 @@ import {
 } from './dates';
 import { demoStaffEmail } from './identity';
 import { createRandom } from './prng';
-import { demoSeed, type DemoClassSeed } from './seed';
+import { DEMO_NOTICE_DATE_TOKEN, demoSeed, type DemoClassSeed } from './seed';
 
 /**
  * The job input the seed runs from, stored on `demo_school_job.input`. School
@@ -118,6 +120,28 @@ export type DemoExam = {
   totalWorkingDays: number;
 };
 
+/** One notice the demo writes, with every date already derived from `asOf`. */
+export type DemoNotice = {
+  key: string;
+  /** Unique within the demo; the seed step's natural key. */
+  title: string;
+  status: 'draft' | 'published';
+  bodyMode: 'plain' | 'template';
+  body: string;
+  /** The paper it prints on. */
+  pageSize: 'full' | 'half';
+  toStaff: boolean;
+  cadetScope: 'none' | 'all_classes' | 'selected_classes';
+  /** Slugs of the demo's classes a `selected_classes` notice names; empty otherwise. */
+  classSlugs: string[];
+  /** When it was written (ISO instant, before `asOf`). */
+  createdAt: string;
+  /** When the demo published it (ISO instant, before `asOf`), or null for a draft. */
+  publishedAt: string | null;
+  /** The date printed on it: the local calendar date of `publishedAt` (`YYYY-MM-DD`), or null for a draft. */
+  issuedOn: LocalDate | null;
+};
+
 export type DemoPlan = {
   schoolSlug: string;
   schoolName: string;
@@ -132,6 +156,7 @@ export type DemoPlan = {
   classes: DemoClass[];
   exams: DemoExam[];
   billingMonths: BillingMonth[];
+  notices: DemoNotice[];
 };
 
 function personName(random: ReturnType<typeof createRandom>, gender: Gender, pool: 'child' | 'adult', surname?: string) {
@@ -286,6 +311,44 @@ function scheduleExams(input: DemoSeedInput, sessionStart: LocalDate, asOfLocal:
     });
 }
 
+/** Replaces `{date:±N}` with the written date N days from the demo's `asOf` day. */
+export function fillDemoNoticeDates(text: string, asOfLocal: LocalDate): string {
+  return text.replace(DEMO_NOTICE_DATE_TOKEN, (_token, days: string) => formatLocalDateInWords(addDays(asOfLocal, Number(days))));
+}
+
+/**
+ * The demo's notices, dated from `asOf`: written `createdDaysAgo` and
+ * published `publishedDaysAgo` days before the `asOf` day at the seed's
+ * local hours, so both are always in the past and a notice is never
+ * published before it was written. `selected` are the demo's classes in
+ * catalogue (junior to senior) order.
+ */
+function buildNotices(selected: DemoClassSeed[], asOfLocal: LocalDate, timeZone: string): DemoNotice[] {
+  const { localHours, notices } = demoSeed.notices;
+  const at = (daysAgo: number, hour: number) => localTimeInstant(addDays(asOfLocal, -daysAgo), hour, 0, timeZone);
+  return notices.map((notice) => {
+    const picked = notice.classPick
+      ? notice.classPick.from === 'seniormost'
+        ? selected.slice(-notice.classPick.count)
+        : selected.slice(0, notice.classPick.count)
+      : [];
+    return {
+      key: notice.key,
+      title: fillDemoNoticeDates(notice.title, asOfLocal),
+      status: notice.status,
+      bodyMode: notice.bodyMode,
+      pageSize: notice.pageSize,
+      body: fillDemoNoticeDates(notice.body.join(notice.bodyMode === 'plain' ? '\n\n' : '\n'), asOfLocal),
+      toStaff: notice.toStaff,
+      cadetScope: notice.cadetScope,
+      classSlugs: picked.map((item) => item.slug),
+      createdAt: at(notice.createdDaysAgo, localHours.created),
+      publishedAt: notice.publishedDaysAgo === null ? null : at(notice.publishedDaysAgo, localHours.published),
+      issuedOn: notice.publishedDaysAgo === null ? null : addDays(asOfLocal, -notice.publishedDaysAgo),
+    };
+  });
+}
+
 /**
  * The complete, deterministic demo plan for `(input, seed, asOf)`. It is pure,
  * so every workflow step can rebuild it instead of journaling it; only IDs and
@@ -319,6 +382,7 @@ export function buildDemoPlan(options: {
     classes: buildClasses(seed, input, months),
     exams: buildExams(input, sessionStart, options.asOf),
     billingMonths: months,
+    notices: buildNotices(selected, asOfLocal, timeZone),
   };
 }
 

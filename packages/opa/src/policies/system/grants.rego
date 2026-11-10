@@ -50,6 +50,13 @@ grants contains {"role": "platform.admin", "action": action} if {
   }
 }
 
+grants contains {"role": "platform.admin", "action": action} if {
+  some action in {
+    "system.school.feature_flags.read",
+    "system.school.feature_flags.update",
+  }
+}
+
 grants contains {
   "role": "platform.admin",
   "action": "system.oauth_client.list",

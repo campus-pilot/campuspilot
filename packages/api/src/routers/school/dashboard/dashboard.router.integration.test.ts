@@ -16,6 +16,7 @@ import {
   createTestClass,
   createTestClient,
   createTestSchool,
+  setTestSchoolFeature,
   createTestSession,
   createTestStudent,
 } from "../../../../test/fixtures";
@@ -359,6 +360,23 @@ describe("school.getDashboard integration", () => {
       billing: { primaryCurrency: "INR" },
       actions: { recordPayment: true, enterResults: true },
     });
+  });
+
+  it("offers the create-notice job only with both the notices feature and the draft permission", async () => {
+    // This school has no notices feature: the job is off for everyone.
+    for (const client of [principal, teacher, accountant]) {
+      expect((await client.school.getDashboard({ schoolId, sessionId })).actions.createNotice).toBe(false);
+    }
+    await setTestSchoolFeature(schoolId, "notices", true);
+    try {
+      // Every staff role may write a draft.
+      for (const client of [principal, teacher, accountant, examCoordinator]) {
+        expect((await client.school.getDashboard({ schoolId, sessionId })).actions.createNotice).toBe(true);
+      }
+    } finally {
+      await setTestSchoolFeature(schoolId, "notices", false);
+    }
+    expect((await principal.school.getDashboard({ schoolId, sessionId })).actions.createNotice).toBe(false);
   });
 
   it("rejects malformed input and does not accept a session from another school", async () => {

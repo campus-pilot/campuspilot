@@ -15,7 +15,9 @@ export type RequirePermissionsProps = {
 
 /**
  * Renders children when the requested all/any permission policy is satisfied.
- * Pending, failed, incomplete, and denied checks fail closed.
+ * Pending, never-answered, incomplete, and denied checks fail closed; an
+ * answer already held keeps applying through a failed background refetch
+ * (see `permissionsSatisfied`).
  */
 export function RequirePermissions({
   children,

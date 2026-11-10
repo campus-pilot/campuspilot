@@ -63,6 +63,36 @@ describe('isAuthorized Integration with OPA Container', () => {
       expect(allowed).toBe(false);
     });
 
+    it('grants school feature flag actions to platform.admin only', async () => {
+      const decide = (
+        action:
+          | typeof SYSTEM_ACTIONS.READ_SCHOOL_FEATURE_FLAGS
+          | typeof SYSTEM_ACTIONS.UPDATE_SCHOOL_FEATURE_FLAGS,
+        roleAssignments: Parameters<typeof isAuthorized>[0]['subject']['roleAssignments'],
+      ) =>
+        isAuthorized(
+          { action, subject: { userId: 'user-1', roleAssignments }, resource: { kind: 'system' } },
+          { client },
+        );
+
+      for (const action of [
+        SYSTEM_ACTIONS.READ_SCHOOL_FEATURE_FLAGS,
+        SYSTEM_ACTIONS.UPDATE_SCHOOL_FEATURE_FLAGS,
+      ] as const) {
+        expect(
+          await decide(action, [{ role: 'platform.admin', scope: { kind: 'platform' } }]),
+        ).toBe(true);
+        expect(
+          await decide(action, [{ role: 'platform.user', scope: { kind: 'platform' } }]),
+        ).toBe(false);
+        expect(
+          await decide(action, [
+            { role: 'school.principal', scope: { kind: 'school', schoolId: 'school-1' }, meta: null },
+          ]),
+        ).toBe(false);
+      }
+    });
+
   });
 
   describe('School Actions', () => {

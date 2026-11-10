@@ -25,6 +25,7 @@ import { Tabs, TabsList, TabsTrigger } from '@campuspilot/ui/components/tabs';
 import { ExamNavigationLayout } from '@campuspilot/components/exam/exam-navigation-layout';
 import type { ExamContextDto } from '@campuspilot/api/routers/school/exam/exam.dto';
 import { CLASS_ACTIONS, SCHOOL_ACTIONS, type PermissionCheck } from '@campuspilot/api/routers/authorization/authorization.dto';
+import { useSchoolFeature } from '@/components/require-feature';
 import { RequirePermissions } from '@/components/require-permissions';
 import {
   documentWorkspaceHref,
@@ -231,6 +232,7 @@ function ExamDocumentsMenu({
     'report_card',
   );
   const notificationPermissions = notificationPermission ? [notificationPermission] : [];
+  const cadetPortal = useSchoolFeature(scope.schoolId, 'cadet');
   const permissions = useQuery(
     orpc.authorization.checkPermissions.queryOptions({
       input: {
@@ -238,9 +240,10 @@ function ExamDocumentsMenu({
       },
     }),
   );
+  // Permissions already known keep applying when a refetch fails (as in
+  // `permissionsSatisfied`); with no answer yet the menu stays hidden.
   if (
     !permissions.data ||
-    permissions.isError ||
     permissions.data.results.length !==
       admitCardPermissions.length + reportCardPermissions.length + notificationPermissions.length
   )
@@ -251,7 +254,8 @@ function ExamDocumentsMenu({
   const canCreateResults = permissions.data.results
     .slice(admitCardPermissions.length, admitCardPermissions.length + reportCardPermissions.length)
     .every(Boolean);
-  const canSendResult = notificationPermissions.length > 0 && permissions.data.results.slice(-1)[0] === true;
+  // Sending a result is a Cadet Portal action: offered only to a school that has the portal (the server refuses it otherwise).
+  const canSendResult = cadetPortal.enabled && notificationPermissions.length > 0 && permissions.data.results.slice(-1)[0] === true;
   if (!canDownloadAdmitCards && !canCreateResults && !canSendResult) return null;
   return (
     <>

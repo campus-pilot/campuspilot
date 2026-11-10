@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { cadetProcedure } from '../../cadet/procedure';
+import { cadetLoginProcedure, cadetProcedure } from '../../cadet/procedure';
 import { toRpcError } from '../../errors';
 import { isAllowedPushEndpoint } from '../../notifications/channels/web-push/endpoints';
 import {
@@ -33,6 +33,9 @@ const pushEndpointInputSchema = z.object({ endpoint: z.string().min(1).max(2048)
  * endpoint its browser issued. Writes are `access: 'write'`, so the
  * read-only cadet MCP cannot call them; all are hidden from MCP (device
  * plumbing, no agent value).
+ *
+ * Subscribing and reading need the school's `cadet` feature like the rest of
+ * the portal; unsubscribing does not (see below).
  */
 export const cadetPushRouter = {
   subscribePush: cadetProcedure
@@ -48,14 +51,20 @@ export const cadetPushRouter = {
     .handler(async ({ context, input }) => {
       try {
         const userAgent = context.headers.get('user-agent')?.slice(0, 500) ?? null;
-        await upsertPushSubscription(context.db, context.cadet.userId, input, userAgent);
+        const sessionId = context.principal.authMethod === 'session' ? context.principal.sessionId : null;
+        await upsertPushSubscription(context.db, context.cadet.userId, input, userAgent, sessionId);
         return { active: true as const };
       } catch (error) {
         throw toRpcError(error);
       }
     }),
 
-  unsubscribePush: cadetProcedure
+  // On `cadetLoginProcedure`, not `cadetProcedure`: a student must be able to
+  // turn a device's notifications off (the app does it when signing out)
+  // also while the school's Cadet Portal is switched off. Signing out
+  // revokes the session's subscriptions on the server as well; this call
+  // covers subscriptions stored before sessions were recorded.
+  unsubscribePush: cadetLoginProcedure
     .route({
       summary: 'Turn off notifications on this device',
       description:

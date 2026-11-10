@@ -4,7 +4,8 @@ import { describe, expect, it } from 'vitest';
 import { billingMonths, daysBetween, examStateAt } from './dates';
 import { demoStaffEmail, generateRegistrationNumber, slugifySchoolName, uniqueSlug } from './identity';
 import { encodePng, renderAvatar } from './images';
-import { buildDemoPlan, demoSeedInputSchema, paymentEvents } from './plan';
+import { assertValidNoticeTemplate } from '../../routers/school/notice/notice.render';
+import { buildDemoPlan, demoSeedInputSchema, fillDemoNoticeDates, paymentEvents } from './plan';
 import { createRandom } from './prng';
 import { demoClassCatalogue, demoSeed } from './seed';
 
@@ -152,5 +153,46 @@ describe('demo passwords', () => {
     expect(new Set(samples).size).toBe(samples.length);
     // Every symbol of the alphabet is reachable.
     expect(new Set(samples.join('').replaceAll('-', '')).size).toBe(32);
+  });
+
+  it('plans a realistic handful of notices, every date derived from asOf', () => {
+    const asOf = new Date('2026-11-06T06:00:00Z');
+    const { notices } = buildDemoPlan({ input, seed: 's', asOf, school });
+    const audience = (key: string) => {
+      const notice = notices.find((item) => item.key === key)!;
+      return [notice.status, notice.bodyMode, notice.toStaff, notice.cadetScope, notice.classSlugs] as const;
+    };
+    // One of each kind a school user should see: staff only, all classes, staff + selected classes, a designed notice, drafts.
+    expect(audience('staff-meeting')).toEqual(['published', 'plain', true, 'none', []]);
+    expect(audience('school-timings')).toEqual(['published', 'plain', false, 'all_classes', []]);
+    // "Seniormost two" of the classes this demo has, whatever they are.
+    expect(audience('science-exhibition')).toEqual(['published', 'plain', true, 'selected_classes', ['class-1', 'class-5']]);
+    expect(audience('sports-day')).toEqual(['published', 'template', true, 'all_classes', []]);
+    expect(notices.filter((notice) => notice.status === 'draft').map((notice) => notice.key)).toEqual(['holiday-homework', 'parent-teacher-meeting']);
+    expect(new Set(notices.map((notice) => notice.title)).size).toBe(notices.length);
+    // Both print sizes are shown: the timings circular is a half-A4 notice.
+    expect(notices.filter((notice) => notice.pageSize === 'half').map((notice) => notice.key)).toEqual(['school-timings']);
+
+    for (const notice of notices) {
+      // Written and published in the past, in that order; drafts are unpublished.
+      expect(new Date(notice.createdAt).getTime(), notice.key).toBeLessThan(asOf.getTime());
+      expect(notice.publishedAt === null, notice.key).toBe(notice.status === 'draft');
+      if (notice.publishedAt) {
+        expect(new Date(notice.publishedAt).getTime(), notice.key).toBeLessThan(asOf.getTime());
+        expect(new Date(notice.publishedAt).getTime(), notice.key).toBeGreaterThan(new Date(notice.createdAt).getTime());
+      }
+      // Every date token was replaced, and what remains is what the API accepts.
+      expect(`${notice.title}\n${notice.body}`, notice.key).not.toMatch(/\{date:/);
+      expect(notice.body.length, notice.key).toBeLessThanOrEqual(200_000);
+      if (notice.bodyMode === 'template') expect(() => assertValidNoticeTemplate(notice.body, notice.pageSize), notice.key).not.toThrow();
+    }
+    // 16 days before 6 November 2026 at 11:00 in the demo's time zone (Asia/Kolkata).
+    expect(notices.find((notice) => notice.key === 'staff-meeting')!.publishedAt).toBe('2026-10-21T05:30:00.000Z');
+    expect(notices.find((notice) => notice.key === 'staff-meeting')!.body).toContain('on 23 October 2026 at 2:30 PM');
+    expect(fillDemoNoticeDates('From {date:-6} until {date:+10}.', '2026-11-06')).toBe('From 31 October 2026 until 16 November 2026.');
+
+    // A one-class demo still gets a valid selected-classes notice.
+    const single = buildDemoPlan({ input: { ...input, classSlugs: ['class-5'] }, seed: 's', asOf, school });
+    expect(single.notices.find((notice) => notice.key === 'science-exhibition')!.classSlugs).toEqual(['class-5']);
   });
 });

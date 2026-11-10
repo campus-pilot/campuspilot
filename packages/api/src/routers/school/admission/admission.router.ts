@@ -32,7 +32,9 @@ import {
   createPaginatedResult,
   resolvePaginationInput,
 } from "../../../paginations";
+import { assertSchoolFeatureEnabled } from "../../../feature-flags/feature-flags.service";
 import { assertPermission } from "../../../permissions/authorization";
+import { requireSchoolFeature } from "../../../permissions/feature";
 import { requireSchoolPermission } from "../../../permissions/school";
 import {
   admissionDtoSchema,
@@ -503,6 +505,10 @@ export const schoolAdmissionRouter = {
             },
             signal,
           );
+          // A school without the Cadet Portal cannot issue portal passwords.
+          // Checked after the permission, and only when a password was asked
+          // for: creating an admission itself needs no feature.
+          await assertSchoolFeatureEnabled(context.db, input.schoolId, "cadet");
         }
         return await context.db.transaction(async (transaction) => {
           const [school] = await transaction
@@ -557,6 +563,7 @@ export const schoolAdmissionRouter = {
     })
     .input(admissionIdInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.ISSUE_ADMISSION_CADET_PASSWORD))
+    .use(requireSchoolFeature("cadet"))
     .output(issuedCadetPasswordSchema)
     .handler(async ({ context, input }) => {
       try {

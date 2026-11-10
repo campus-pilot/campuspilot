@@ -3,7 +3,7 @@ import { useForm } from '@tanstack/react-form';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
 import { ExamPager, ReadError } from '@campuspilot/components/exam/exam-controls';
-import { NotificationDeliveryLog, type DeliveryLogItem } from '@campuspilot/components/notifications';
+import { DeliveryLogPreparation, NotificationDeliveryLog, type DeliveryLogItem } from '@campuspilot/components/notifications';
 import { Label } from '@campuspilot/ui/components/label';
 import { Switch } from '@campuspilot/ui/components/switch';
 import { toast } from '@campuspilot/ui/lib/toast';
@@ -16,13 +16,23 @@ import { client, orpc } from '@/lib/orpc';
 export type DeliveryLogScope =
   | { kind: 'admission'; admissionId: string }
   | { kind: 'bill_run'; billRunId: string }
-  | { kind: 'exam'; sessionId: string; examSlug: string };
+  | { kind: 'exam'; sessionId: string; examSlug: string }
+  | { kind: 'notice'; noticeId: string };
 
 const PAGE_SIZE = 20;
+/**
+ * How often the log is read again while the server reports notifications
+ * that are still being prepared. A bulk action (a published notice, a
+ * billing run, a results release) writes one request per student and the
+ * worker turns them into log rows afterwards, so a log opened right after
+ * the action is incomplete; it fills in by itself and the polling stops
+ * when nothing is pending.
+ */
+const PREPARING_POLL_MS = 2_000;
 const viewSchema = z.object({ page: z.number().int().positive(), onlyFailed: z.boolean() });
 
 /**
- * The delivery log section for one admission, billing run or examination
+ * The delivery log section for one admission, billing run, examination or notice
  * (Phase 7): rendered only for staff with `READ_NOTIFICATION_LOG`; "Resend"
  * on failed copies only with `SEND_NOTIFICATIONS`.
  */
@@ -99,18 +109,22 @@ function DeliveryLogPage(props: {
   const query = useQuery(
     orpc.school.listNotificationDeliveries.queryOptions({
       input: { schoolId: props.schoolId, scope: props.scope, onlyFailed: props.onlyFailed, page: props.page, limit: PAGE_SIZE },
+      refetchInterval: (current) => ((current.state.data?.preparation.pendingCount ?? 0) > 0 ? PREPARING_POLL_MS : false),
     }),
   );
   if (query.isPending) return <p className="text-sm text-muted-foreground">Loading deliveries…</p>;
-  if (query.isError) return <ReadError error={query.error} retry={query.refetch} />;
+  // A page of the log already shown stays when a refetch (or a poll while events are prepared) fails.
+  if (query.data === undefined) return <ReadError error={query.error} retry={query.refetch} />;
   return (
     <>
+      <DeliveryLogPreparation pendingCount={query.data.preparation.pendingCount} failedCount={query.data.preparation.failedCount} />
       <NotificationDeliveryLog
         items={query.data.items as DeliveryLogItem[]}
         canResend={props.canResend}
         resendingDeliveryId={props.resendingDeliveryId}
         onResend={props.onResend}
-        emptyMessage={props.onlyFailed ? 'No failed deliveries.' : 'No notifications yet.'}
+        emptyMessage={props.onlyFailed ? 'No failed deliveries.' : query.data.preparation.pendingCount > 0 ? 'No notifications are ready yet.' : 'No notifications yet.'}
+        oneSubject={props.scope.kind === 'notice'}
       />
       {query.data.pagination.totalPages > 1 ? (
         <ExamPager page={props.page} pages={query.data.pagination.totalPages} total={query.data.pagination.totalItems} onPage={props.onPage} />

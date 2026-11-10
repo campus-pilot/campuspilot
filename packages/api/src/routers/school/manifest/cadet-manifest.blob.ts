@@ -5,6 +5,7 @@ import { z } from 'zod';
 
 import type { Context } from '../../../context';
 import { rpcError, rpcErrorResponse } from '../../../errors';
+import { isSchoolFeatureEnabled } from '../../../feature-flags/feature-flags.service';
 import { SCHOOL_LOGO_BLOB_SIZES } from '../logo/logo.blob';
 
 /** Matches the Cadet Portal's `viewport.themeColor`. */
@@ -34,6 +35,10 @@ type HttpErrorReporter = (error: unknown) => void;
  * from the session; before sign-in it offers no manifest at all. Icon URLs
  * are relative to this manifest (the public logo blob); without a logo the
  * portal's own CampusPilot icons are used.
+ *
+ * A school whose `cadet` feature is disabled has no portal to install, so it
+ * answers 404 exactly like an unknown school; this public route therefore
+ * does not reveal which schools have the feature.
  */
 export async function handleCadetManifestBlob(
   context: Pick<Context, 'db'>,
@@ -51,6 +56,9 @@ export async function handleCadetManifestBlob(
       .where(eq(schoolTable.id, schoolId))
       .limit(1);
     if (!school) throw rpcError.notFound('School');
+    if (!(await isSchoolFeatureEnabled(context.db, schoolId, 'cadet'))) {
+      throw rpcError.notFound('School');
+    }
 
     const cadetUrl = (path: string) => new URL(path, env.CADET_APP_URL).toString();
     const icons = school.logoS3Key

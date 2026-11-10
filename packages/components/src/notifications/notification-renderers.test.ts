@@ -16,6 +16,22 @@ describe('notification renderers', () => {
         data: { batchKind: 'result_publication', failedType: 'exam.results_published', failedCount: 1, sessionId: 's', examSlug: 'final', examName: 'Final Examination' },
       }).title,
     ).toBe('1 WhatsApp message of Final Examination results failed');
+    expect(
+      presentNotification({
+        type: 'notification.whatsapp_batch_failed',
+        data: { batchKind: 'notice', failedType: 'notice.published', failedCount: 2, sessionId: 's', noticeId: 'n', noticeTitle: 'Sports Day' },
+      }).title,
+    ).toBe('2 WhatsApp messages of the notice "Sports Day" failed');
+  });
+
+  it('shows a notice by its title, for students and for staff', () => {
+    expect(
+      presentNotification({ type: 'notice.published', data: { noticeId: 'n', sessionId: 's', noticeTitle: 'Sports Day', admissionId: 'a', studentName: 'Asha' } }),
+    ).toMatchObject({ title: 'Sports Day', description: 'New notice from your school.' });
+    expect(presentNotification({ type: 'notice.published_staff', data: { noticeId: 'n', sessionId: 's', noticeTitle: 'Staff meeting' } })).toMatchObject({
+      title: 'Staff meeting',
+      description: 'New notice from your school.',
+    });
   });
 
   it('shows a failed WhatsApp message by its explanation, not its raw error code', () => {

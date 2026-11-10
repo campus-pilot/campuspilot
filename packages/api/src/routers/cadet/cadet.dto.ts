@@ -318,3 +318,57 @@ const cadetRemarkListItemSchema = cadetRemarkSchema.extend({
   releasedAt: z.date(),
 });
 export const listCadetRemarksOutputSchema = createPaginatedOutputSchema(cadetRemarkListItemSchema);
+
+// ---------------------------------------------------------------------------
+// Notices
+
+/** A published notice addressed to the student (list row). */
+export const cadetNoticeListItemSchema = z.object({
+  noticeId: z.string(),
+  title: z.string(),
+  publishedAt: z.date(),
+});
+
+export const listCadetNoticesInputSchema = createListInputSchema({});
+export const listCadetNoticesOutputSchema = createPaginatedOutputSchema(cadetNoticeListItemSchema);
+
+export const getCadetNoticeInputSchema = z.object({
+  noticeId: z.string().trim().min(1).max(100).describe('noticeId from listNotices.'),
+});
+
+/**
+ * One notice as content to read. It carries no markup and no images, so it
+ * is small enough for every caller, including the Cadet MCP (a core tool):
+ * the printed page with the school's letterhead is a separate, app-only
+ * read (`getNoticeDocument`).
+ */
+export const cadetNoticeSchema = cadetNoticeListItemSchema.extend({
+  /**
+   * How the notice was written, which decides how the app shows it:
+   * `plain` = text (shown as text); `template` = a designed document (shown
+   * as its printed page). `text` is filled for both.
+   */
+  bodyMode: z.enum(['plain', 'template']),
+  /**
+   * The paper the notice is printed on: `full` A4, or `half` A4 (its PDF
+   * carries two copies on every A4 sheet, to be cut apart).
+   */
+  pageSize: z.enum(['full', 'half']),
+  /**
+   * The notice's wording. For a `plain` notice, exactly the text staff
+   * wrote (blank lines separate paragraphs). For a `template` notice, the
+   * readable text of the designed document without its layout.
+   */
+  text: z.string(),
+});
+export type CadetNoticeDto = z.infer<typeof cadetNoticeSchema>;
+
+/**
+ * The printed page of a notice: sanitized, network-free HTML for an
+ * empty-sandbox iframe, laid out for its print size (`pageSize`; a half-A4
+ * notice shows where each half page ends).
+ */
+export const cadetNoticeDocumentSchema = z.object({ noticeId: z.string(), pageSize: z.enum(['full', 'half']), html: z.string() });
+export type CadetNoticeDocumentDto = z.infer<typeof cadetNoticeDocumentSchema>;
+
+export const cadetNoticeDownloadSchema = z.object({ url: z.url(), expiresIn: z.number().int() });

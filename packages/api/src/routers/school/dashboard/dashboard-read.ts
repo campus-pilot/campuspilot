@@ -34,6 +34,7 @@ export type DashboardPermissions = {
   createAdmission: boolean;
   recordPayment: boolean;
   enterResults: boolean;
+  createNotice: boolean;
 };
 
 type ClassAccess = {
@@ -455,7 +456,7 @@ export async function readDashboard(
       createAdmission: permissions.createAdmission,
       recordPayment: permissions.recordPayment,
       enterResults: permissions.enterResults,
-      createNotice: false,
+      createNotice: permissions.createNotice,
     },
   };
 }

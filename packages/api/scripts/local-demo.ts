@@ -212,8 +212,10 @@ try {
   if ((error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode !== 404) throw error;
   await getS3Client().send(new CreateBucketCommand({ Bucket: env.S3_BUCKET }));
 }
-const templates = new Map<DocumentType, string>();
-const types: DocumentType[] = ['report_card', 'id_card', 'admit_card', 'timetable', 'bill', 'receipt', 'statement'];
+/** Types with a generator source; `notice` has a template but is rendered by the notices feature. */
+type GeneratedDocumentType = Exclude<DocumentType, 'notice'>;
+const templates = new Map<GeneratedDocumentType, string>();
+const types: GeneratedDocumentType[] = ['report_card', 'id_card', 'admit_card', 'timetable', 'bill', 'receipt', 'statement'];
 for (const documentType of types) {
   let active = await rpc.school.getActiveDocumentTemplate({ schoolId, documentType });
   if (!active) active = await rpc.school.selectMarketplaceTemplate({ schoolId, documentType, slug: `${documentType}-default`, expectedRevisionId: null });
@@ -230,7 +232,7 @@ if (!school.hasCompletedOnboarding) await admin.rpc.systemAdmin.updateSchool({ i
 
 const first = enrolled[0]!;
 const payments = await accountant.school.listPayments({ schoolId, filters: { sessionId } });
-const sourceByType: Record<DocumentType, DocumentSource> = {
+const sourceByType: Record<GeneratedDocumentType, DocumentSource> = {
   report_card: { documentType: 'report_card', sessionId, examSlug: 'semester-1', resultPolicy: 'require_all', reportSections: { includeModeMarks: true, includeAttendance: true, includeCoScholastics: true, includeGradingScale: true } },
   id_card: { documentType: 'id_card', sessionId, classId: first.classId! },
   admit_card: { documentType: 'admit_card', sessionId, examSlug: 'semester-3' },

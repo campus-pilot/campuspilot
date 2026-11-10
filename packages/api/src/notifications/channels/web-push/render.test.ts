@@ -31,6 +31,11 @@ describe('web push rendering', () => {
         sessionId: 'sess_1', examSlug: 'final', examName: 'Final', admissionId: 'adm_1', studentId: 'stu_1', classId: 'cls_1', studentName: 'Meera Singh',
       })!.url,
     ).toBe('/notifications/open?type=exam.results_published&sessionId=sess_1&examSlug=final&studentId=stu_1&classId=cls_1');
+    // A notice names the student in the title and links by the notice ID only.
+    expect(
+      renderWebPushMessage('ntf_4', 'notice.published', { noticeId: 'ntc_1', sessionId: 'sess_1', noticeTitle: 'Sports Day', admissionId: 'adm_1', studentName: 'Meera Singh' }),
+    ).toEqual({ title: 'New notice for Meera Singh', body: 'Sports Day', url: '/notifications/open?type=notice.published&noticeId=ntc_1', tag: 'ntf_4' });
+    expect(renderWebPushMessage('ntf_5', 'notice.published_staff', { noticeId: 'ntc_1', sessionId: 'sess_1', noticeTitle: 'Sports Day' })).toBeNull();
     expect(renderWebPushMessage('ntf_2', 'billing.run_posted', { billRunId: 'x', sessionId: 's', periodKey: 'p', billCount: 1 })).toBeNull();
   });
 

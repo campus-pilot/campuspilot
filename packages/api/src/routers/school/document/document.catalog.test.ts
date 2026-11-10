@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DOCUMENT_MARKETPLACE,
   SAMPLE_DOCUMENT_CONTEXT,
+  sampleDocumentContext,
 } from './document.catalog';
 import { scopeLegacyDocumentCss } from './document.catalog.marketplace';
 import { renderDocument } from './document.render';
@@ -83,6 +84,7 @@ describe('document template marketplace', () => {
       bill: ['default', 'compact', 'default-full'],
       receipt: ['default', 'compact', 'default-full'],
       statement: ['default', 'compact', 'default-full'],
+      notice: ['default', 'compact'],
     } as const;
     for (const [documentType, variants] of Object.entries(expected)) {
       const items = DOCUMENT_MARKETPLACE.filter(
@@ -115,6 +117,13 @@ describe('document template marketplace', () => {
     ]);
   });
 
+  it('stores every Notice design as full: designs adapt to each notice\'s print size instead of having a footprint', () => {
+    for (const item of DOCUMENT_MARKETPLACE.filter(({ documentType }) => documentType === 'notice')) {
+      expect(item.pageSize, item.slug).toBe('full');
+      expect(item.content, item.slug).toContain('{{print.size}}');
+    }
+  });
+
   it('keeps marketplace slugs unique', () => {
     const slugs = DOCUMENT_MARKETPLACE.map((item) => item.slug);
     expect(new Set(slugs).size).toBe(slugs.length);
@@ -122,7 +131,7 @@ describe('document template marketplace', () => {
 
   it('renders every imported design with the current documented context', () => {
     for (const item of DOCUMENT_MARKETPLACE) {
-      const html = renderDocument(item.content, SAMPLE_DOCUMENT_CONTEXT);
+      const html = renderDocument(item.content, sampleDocumentContext(item.documentType));
       expect(html, item.slug).toContain('Greenwood Public School');
       expect(html, item.slug).not.toContain('{{');
     }
@@ -246,7 +255,7 @@ describe('document template marketplace', () => {
       // Strict mode throws on a path that does not exist where it is read,
       // which catches wrong-scope paths and mis-renamed legacy fields.
       expect(
-        () => strict.compile(item.content, { strict: true })(SAMPLE_DOCUMENT_CONTEXT),
+        () => strict.compile(item.content, { strict: true })(sampleDocumentContext(item.documentType)),
         item.slug,
       ).not.toThrow();
     }

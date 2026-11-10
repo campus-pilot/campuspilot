@@ -91,7 +91,12 @@ export function SchoolAccessBoundary({
     return <AuthLoading label="Checking school access…" />;
   }
 
-  if (schoolsQuery.isError) {
+  // Only a list that was never read is an error screen. A background
+  // refetch that fails (returning to the tab on a flaky network) leaves the
+  // last good list in `data`; replacing the whole workspace then would
+  // unmount every open page and drop unsaved input, such as a half-written
+  // notice. The known list keeps deciding access until a read succeeds.
+  if (!schoolsQuery.data) {
     return (
       <main className="grid min-h-svh place-items-center px-6">
         <p className="text-sm text-destructive">Unable to load your schools.</p>

@@ -1,4 +1,5 @@
 import { db } from '@campuspilot/db';
+import type { SchoolFeatureKey } from '@campuspilot/db/feature-flags/catalogue';
 import { admissionTable } from '@campuspilot/db/schema/admission';
 import { classTable, sectionTable } from '@campuspilot/db/schema/class';
 import type {
@@ -28,6 +29,8 @@ export type FinanceScenarioOptions = {
   activeStartYear?: number;
   /** Create the scenario school as a demo school (`is_demo` is fixed at insert). */
   isDemo?: boolean;
+  /** Platform features to enable for the scenario school (default: none, like a new school). */
+  features?: readonly SchoolFeatureKey[];
 };
 
 export type FinanceScenario = {
@@ -54,7 +57,7 @@ export async function createFinanceScenario(
 ): Promise<FinanceScenario> {
   const activeStartYear = options.activeStartYear ?? 2040;
   const [school, outsiderSchool] = await Promise.all([
-    createTestSchool({ isDemo: options.isDemo ?? false }),
+    createTestSchool({ isDemo: options.isDemo ?? false, features: options.features }),
     createTestSchool(),
   ]);
   const [activeSession, historicalSession] = await Promise.all([

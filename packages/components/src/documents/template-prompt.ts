@@ -1,5 +1,5 @@
 export type TemplatePromptKind =
-  "report_card" | "id_card" | "admit_card" | "timetable" | "bill" | "receipt" | "statement";
+  "report_card" | "id_card" | "admit_card" | "timetable" | "bill" | "receipt" | "statement" | "notice";
 export type TemplatePromptPageSize = "full" | "half";
 const labels: Record<TemplatePromptKind, string> = {
   report_card: "student report card",
@@ -9,6 +9,7 @@ const labels: Record<TemplatePromptKind, string> = {
   bill: "finance bill",
   receipt: "payment or refund receipt",
   statement: "admission account statement",
+  notice: "school notice",
 };
 
 /** Build an exportable editing brief, never a provider request. The caller
@@ -27,6 +28,8 @@ export function createTemplateEditingPrompt(input: {
       ? "Each card must fit exactly 86mm × 54mm. CampusPilot imposes the cards onto A4 sheets."
       : input.documentType === "timetable"
         ? "Use landscape A4."
+        : input.documentType === "notice"
+          ? "One design prints notices of two sizes, chosen per notice and given to the template as print.size: \"full\" (portrait A4 pages, 16mm margin) or \"half\" (210mm × 148.5mm pages, 10mm margin; CampusPilot prints two copies on each A4 sheet). Adapt to it with a class such as notice--{{print.size}} (for example a compact letterhead and smaller type for .notice--half). A notice flows over as many pages as its text needs: do not set a fixed height, overflow:hidden or outer page padding."
         : input.pageSize === "half"
           ? "Design one half-A4 document (210mm × 148.5mm). CampusPilot places two documents vertically on each portrait A4 sheet."
           : "Use portrait A4. Each student document starts on a new printed page.";

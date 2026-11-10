@@ -1,4 +1,5 @@
 'use client';
+import type { ReactNode } from 'react';
 import { useForm } from '@tanstack/react-form';
 import { useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
@@ -21,6 +22,7 @@ import {
   DialogDescription,
   DialogFooter,
 } from '@campuspilot/ui/components/dialog';
+import { RequireFeature } from '@/components/require-feature';
 import { RequirePermissions } from '@/components/require-permissions';
 import { client, orpc } from '@/lib/orpc';
 import { ExamButton, ExamInput, Issues } from './exam-common';
@@ -119,14 +121,16 @@ export function ExamActions(props: Props) {
               action={lifecycleAction} blockedReason={lifecycleAction === 'reopen' ? reopenBlockedReason(overview) : null}
               onSelect={() => ui.setFieldValue('action', lifecycleAction)} />
           </section>
-          <section className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3">
-            <div className="flex flex-col gap-1">
-              <h3 className="text-sm font-medium">Cadet Portal</h3>
-              <p className="text-sm text-muted-foreground">{cadetStatusText(overview)}</p>
-            </div>
-            <CadetReleaseTrigger scope={scope} visible={cadetVisible}
-              action={cadetAction} onSelect={() => ui.setFieldValue('action', cadetAction)} />
-          </section>
+          <CadetPortalGate schoolId={scope.schoolId} action={cadetAction}>
+            <section className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3">
+              <div className="flex flex-col gap-1">
+                <h3 className="text-sm font-medium">Cadet Portal</h3>
+                <p className="text-sm text-muted-foreground">{cadetStatusText(overview)}</p>
+              </div>
+              <CadetReleaseTrigger scope={scope} visible={cadetVisible}
+                action={cadetAction} onSelect={() => ui.setFieldValue('action', cadetAction)} />
+            </section>
+          </CadetPortalGate>
         </div>
       )}
       {placement === 'navbar' && (
@@ -134,8 +138,10 @@ export function ExamActions(props: Props) {
           <LifecycleTrigger scope={scope} visible={active && overview.planCount > 0}
             action={lifecycleAction} blockedReason={lifecycleAction === 'reopen' ? reopenBlockedReason(overview) : null}
             onSelect={() => ui.setFieldValue('action', lifecycleAction)} />
-          <CadetReleaseTrigger scope={scope} visible={cadetVisible} compact
-            action={cadetAction} onSelect={() => ui.setFieldValue('action', cadetAction)} />
+          <CadetPortalGate schoolId={scope.schoolId} action={cadetAction}>
+            <CadetReleaseTrigger scope={scope} visible={cadetVisible} compact
+              action={cadetAction} onSelect={() => ui.setFieldValue('action', cadetAction)} />
+          </CadetPortalGate>
         </div>
       )}
       <ui.Subscribe selector={(state) => state.values.action}>
@@ -164,6 +170,18 @@ export function ExamActions(props: Props) {
     </>
   );
 }
+/**
+ * The examination's Cadet Portal controls exist only for a school that has
+ * the portal (`cadet` feature): releasing results there is refused by the
+ * server otherwise. One exception, by the same rule as the server's: an
+ * examination that is already released keeps its Withdraw, so a school whose
+ * portal was switched off can still take its results back.
+ */
+function CadetPortalGate({ schoolId, action, children }: { schoolId: string; action: CadetAction; children: ReactNode }) {
+  if (action === 'withdraw') return children;
+  return <RequireFeature schoolId={schoolId} feature="cadet">{children}</RequireFeature>;
+}
+
 /** Release state in words; the release time is its own fact, shown when known. */
 function cadetStatusText(overview: ExamOverviewDto) {
   if (overview.cadetReleasedAt)

@@ -10,6 +10,7 @@ import {
   sendStudentResult,
 } from '../../../notifications/emitters/results';
 import { requireClassPermission } from '../../../permissions/class';
+import { requireSchoolFeature } from '../../../permissions/feature';
 import { requireSchoolPermission } from '../../../permissions/school';
 import { route } from './exam.pagination';
 import * as dto from './exam-result-notification.dto';
@@ -31,7 +32,9 @@ function publicationDto(row: NonNullable<Awaited<ReturnType<typeof getResultPubl
  * notified by its first Cadet release (`releaseExamToCadet`); this router
  * reads that batch and sends one student's result, which is class-scoped
  * (`class.notification.result.send`), so a teacher may send only for
- * assigned classes, and also needs result read access.
+ * assigned classes, and also needs result read access. Sending a result
+ * (and its preview) is a Cadet Portal action like the release: both need the
+ * school's `cadet` feature, checked after the permissions.
  */
 export const schoolExamResultNotificationRouter = {
   getExamResultPublication: protectedProcedure
@@ -55,6 +58,7 @@ export const schoolExamResultNotificationRouter = {
     .input(dto.studentResultNotificationInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_EXAM_RESULTS))
     .use(requireClassPermission(CLASS_ACTIONS.SEND_RESULT_NOTIFICATION))
+    .use(requireSchoolFeature('cadet'))
     .output(dto.deliveryForecastSchema)
     .handler(async ({ context, input }) => {
       try {
@@ -70,6 +74,7 @@ export const schoolExamResultNotificationRouter = {
     .input(dto.sendStudentResultNotificationInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_EXAM_RESULTS))
     .use(requireClassPermission(CLASS_ACTIONS.SEND_RESULT_NOTIFICATION))
+    .use(requireSchoolFeature('cadet'))
     .output(z.object({ forecast: dto.deliveryForecastSchema }))
     .handler(async ({ context, input }) => {
       try {
