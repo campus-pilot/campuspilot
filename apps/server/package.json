@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@campuspilot/api": "workspace:*",
+    "@campuspilot/assistant": "workspace:*",
     "@campuspilot/assistant-contract": "workspace:*",
     "@campuspilot/auth": "workspace:*",
     "@campuspilot/db": "workspace:*",

@@ -1,23 +1,19 @@
-import { timingSafeEqual } from 'node:crypto';
-
-import { ASSISTANT_SERVICE_SECRET_HEADER } from '@campuspilot/assistant-contract/protocol';
 import { env } from '@campuspilot/env/server';
 import { jwtVerify, SignJWT } from 'jose';
 
 /**
- * Delegated access for the separate assistant service (apps/assistant).
+ * Delegated access for the in-app assistant (`packages/assistant`).
  *
- * The assistant calls the CampusPilot MCP endpoint as a user, with a token
- * the API issues for exactly one user, school, conversation and run. The API
- * only issues one when the request carries both that user's live session and
- * the assistant's service secret, so the service can never act for a user
- * who is not actively using it, and nothing else can use the endpoint.
+ * The assistant's turn loop (in `apps/worker`) calls the CampusPilot MCP
+ * endpoint as a user, with a token the API issues in-process for exactly one
+ * user, school, conversation and run (`issueAssistantRunToken` in
+ * `@campuspilot/api/assistant/token`). It is only issued while that user's
+ * own browser session is making a request, so the assistant can never act for
+ * a user who is not actively using it.
  */
 
 /** How long one delegated token is valid. */
 export const ASSISTANT_TOKEN_TTL_SECONDS = 30 * 60;
-
-export { ASSISTANT_SERVICE_SECRET_HEADER };
 
 const ISSUER = 'campuspilot-api';
 /** Distinguishes these tokens from every other JWT the platform verifies. */
@@ -32,7 +28,7 @@ export type AssistantTokenClaims = {
 };
 
 function signingKey(): Uint8Array | null {
-  return env.ASSISTANT_TOKEN_SIGNING_SECRET && env.ASSISTANT_SERVICE_SECRET
+  return env.ASSISTANT_TOKEN_SIGNING_SECRET
     ? new TextEncoder().encode(env.ASSISTANT_TOKEN_SIGNING_SECRET)
     : null;
 }
@@ -40,15 +36,6 @@ function signingKey(): Uint8Array | null {
 /** Whether this deployment is configured to delegate to the assistant. */
 export function assistantDelegationEnabled(): boolean {
   return signingKey() !== null;
-}
-
-/** Constant-time check of a presented service secret. */
-export function isAssistantServiceSecret(presented: string | null | undefined): boolean {
-  const expected = env.ASSISTANT_SERVICE_SECRET;
-  if (!expected || !presented) return false;
-  const a = Buffer.from(presented);
-  const b = Buffer.from(expected);
-  return a.length === b.length && timingSafeEqual(a, b);
 }
 
 export async function signAssistantToken(

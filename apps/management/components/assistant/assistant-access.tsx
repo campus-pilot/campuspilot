@@ -4,11 +4,10 @@ import { SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authoriza
 import type { ReactNode } from 'react';
 
 import { RequirePermissions } from '@/components/require-permissions';
-import { assistantClient } from '@/lib/assistant-client';
 
 /**
- * Renders the assistant UI only when this deployment has an assistant and the
- * user may use it in the school. The service checks the same permission.
+ * Renders the assistant UI only when the user may use it in the school. The
+ * API checks the same permission.
  */
 export function AssistantAccess({
   schoolId,
@@ -22,7 +21,6 @@ export function AssistantAccess({
   /** Shown while the permission check loads; defaults to `fallback`. */
   pending?: ReactNode;
 }) {
-  if (!assistantClient) return fallback;
   return (
     <RequirePermissions
       permissions={{ action: SCHOOL_ACTIONS.USE_ASSISTANT, resource: { kind: 'school', schoolId } }}

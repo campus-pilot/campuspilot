@@ -146,7 +146,7 @@ async function* watchedEvents(
         void queryClient.invalidateQueries({ queryKey: orpc.school.key() });
       }
       if (eventChangedConversationList(event)) {
-        void queryClient.invalidateQueries({ queryKey: assistantOrpc!.listConversations.key() });
+        void queryClient.invalidateQueries({ queryKey: assistantOrpc.listConversations.key() });
       }
       yield event;
     }
@@ -204,7 +204,7 @@ function conversationStream(
       const cursor = held?.conversation ? held.sequence : null;
       const watch = watchConnection(streamSignal);
       try {
-        const events = await assistantClient!.subscribeConversation(
+        const events = await assistantClient.subscribeConversation(
           { schoolId, conversationId, ...(cursor === null ? {} : { afterSequence: cursor }) },
           { signal: watch.signal },
         );
@@ -401,7 +401,7 @@ export function useAssistantAnnouncement(schoolId: string, conversationId: strin
 
 export function useAssistantStatus(schoolId: string) {
   return useQuery({
-    ...assistantOrpc!.getStatus.queryOptions({ input: { schoolId } }),
+    ...assistantOrpc.getStatus.queryOptions({ input: { schoolId } }),
     staleTime: 60_000,
   });
 }
@@ -421,7 +421,7 @@ const HISTORY_REFRESH_MS = 4000;
  */
 export function useAssistantConversations(schoolId: string) {
   return useInfiniteQuery(
-    assistantOrpc!.listConversations.infiniteOptions({
+    assistantOrpc.listConversations.infiniteOptions({
       input: (page: number) => ({ schoolId, page }),
       initialPageParam: 1,
       getNextPageParam: ({ pagination }) =>
@@ -445,11 +445,11 @@ export function useDeleteAssistantConversation(schoolId: string) {
   const queryClient = useQueryClient();
   const userId = useSignedInUserId();
   return useMutation({
-    ...assistantOrpc!.deleteConversation.mutationOptions(),
+    ...assistantOrpc.deleteConversation.mutationOptions(),
     onSuccess: async ({ id }) => {
       if (userId) writeDraft(sessionDraftStorage(), draftKey(userId, schoolId, id), '');
       queryClient.removeQueries({ queryKey: ['assistant', 'conversation', schoolId, id] });
-      await queryClient.invalidateQueries({ queryKey: assistantOrpc!.listConversations.key() });
+      await queryClient.invalidateQueries({ queryKey: assistantOrpc.listConversations.key() });
     },
   });
 }
@@ -472,20 +472,20 @@ export function equalJitterDelay(attempt: number): number {
 const sendKey = (schoolId: string) => ['assistant', 'send', schoolId] as const;
 
 type SendVariables = Parameters<
-  NonNullable<ReturnType<NonNullable<typeof assistantOrpc>['sendMessage']['mutationOptions']>['mutationFn']>
+  NonNullable<ReturnType<typeof assistantOrpc['sendMessage']['mutationOptions']>['mutationFn']>
 >[0];
 
 export function useSendAssistantMessage(schoolId: string, surface: AssistantSurface) {
   const queryClient = useQueryClient();
   const mutation = useMutation({
-    ...assistantOrpc!.sendMessage.mutationOptions(),
+    ...assistantOrpc.sendMessage.mutationOptions(),
     mutationKey: sendKey(schoolId),
     // Only network and server failures are retried; a refusal is final.
     // Retrying is safe: the request id makes the server return the original
     // run instead of creating another.
     retry: retryUnlessRefused,
     retryDelay: equalJitterDelay,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: assistantOrpc!.listConversations.key() }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: assistantOrpc.listConversations.key() }),
   });
   const send = (text: string, conversationId: string | null) =>
     mutation.mutateAsync({
@@ -602,7 +602,7 @@ const approvalOf = (variables: unknown) => (variables as ApprovalVariables | und
  */
 export function useRespondToApproval() {
   const queryClient = useQueryClient();
-  const mutation = useMutation({ ...assistantOrpc!.respondToApproval.mutationOptions(), mutationKey: approvalKey });
+  const mutation = useMutation({ ...assistantOrpc.respondToApproval.mutationOptions(), mutationKey: approvalKey });
   return (variables: ApprovalVariables) => {
     const decided = queryClient
       .getMutationCache()
@@ -639,7 +639,7 @@ export function useApprovalDecisions() {
  * queued message does not show the working run as stopping.
  */
 export function useStopAssistantRun() {
-  return useMutation(assistantOrpc!.stopRun.mutationOptions());
+  return useMutation(assistantOrpc.stopRun.mutationOptions());
 }
 
 /**

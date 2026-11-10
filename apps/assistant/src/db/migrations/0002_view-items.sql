@@ -1,1 +1,0 @@
-ALTER TYPE "assistant"."assistant_item_kind" ADD VALUE 'view';

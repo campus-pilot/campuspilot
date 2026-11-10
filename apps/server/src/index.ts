@@ -6,6 +6,7 @@ import {
 import { db } from '@campuspilot/db';
 import { runMigrations } from '@campuspilot/db/migrate';
 import { env } from '@campuspilot/env/server';
+import { sweepAssistantOutbox } from '@campuspilot/assistant/dispatch';
 import { sweepDemoSchoolOutbox } from '@campuspilot/api/routers/system-admin/demo-school/demo-school.outbox';
 import { sweepDataMigrationOutbox } from '@campuspilot/api/data-migrations/data-migration.outbox';
 import { DATA_MIGRATIONS } from '@campuspilot/api/data-migrations/registry';
@@ -69,6 +70,15 @@ async function sweepNotifications() {
   if (Object.values(result).some((value) => value > 0)) log.info(result, 'notification.outbox.ok');
 }
 
+/**
+ * One assistant outbox sweep: hands over runs and approval decisions whose
+ * hand-over after commit failed, and fails runs Restate never accepted.
+ */
+async function sweepAssistant() {
+  const result = await sweepAssistantOutbox();
+  if (Object.values(result).some((value) => value > 0)) log.info(result, 'assistant.outbox.ok');
+}
+
 /** Finishes result publications whose deliveries settled (publisher notified once). */
 async function sweepPublications() {
   const publications = await sweepResultPublications();
@@ -83,6 +93,7 @@ async function sweepPublications() {
 const OUTBOX_SWEEPS: ReadonlyArray<{ errorMessage: string; run: () => Promise<void> }> = [
   { errorMessage: 'demo-school.outbox.error', run: sweepDemoOutbox },
   { errorMessage: 'notification.outbox.error', run: sweepNotifications },
+  { errorMessage: 'assistant.outbox.error', run: sweepAssistant },
   { errorMessage: 'notification.results.sweep.error', run: sweepPublications },
   // Reports failed WhatsApp deliveries to staff granted to receive them (D-30).
   { errorMessage: 'notification.failure-alerts.error', run: async () => { await sweepWhatsAppFailureAlerts(); } },

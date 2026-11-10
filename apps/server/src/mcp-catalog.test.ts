@@ -71,7 +71,6 @@ const CORE_TOOLS = [
 ];
 
 const HIDDEN_TOOLS = [
-  'auth.issueAssistantToken',
   'auth.setPassword',
   'auth.getOAuthConsentClient',
   'auth.listOAuthConnections',

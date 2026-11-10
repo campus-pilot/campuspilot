@@ -1,0 +1,379 @@
+import { issueAssistantRunToken } from '@campuspilot/api/assistant/token';
+import { assistantContract } from '@campuspilot/assistant-contract/contract';
+import { ASSISTANT_LIST_PAGE_SIZE, type AssistantStreamEvent } from '@campuspilot/assistant-contract/dto';
+import { implement, ORPCError } from '@orpc/server';
+
+import { canUseAssistant } from './access';
+import { db } from './db';
+import { handOverApprovalResolution, handOverRun } from './dispatch';
+import { liveEvents, streamingTexts, subscribeAssistantEvents } from './events';
+import { generateId } from './ids';
+import { log } from './log';
+import { stopRun } from './run-stop';
+import { storeRunToken } from './run-token';
+import {
+  configuredProviderSettings,
+  missingProviderReason,
+  selectedProviderId,
+} from './runtime/providers/config';
+import { resolveAssistantSession, type AssistantSession } from './session';
+import * as store from './store';
+import { userMessageItemKey } from './transcript';
+
+/**
+ * The assistant's browser procedures, served by the API server at
+ * `/model/rpc/*` (http.ts). They run in the API process: the session, the
+ * access checks and the delegated token are the API's own, in-process. The
+ * turn itself runs in `apps/worker`, handed over through the outbox
+ * (dispatch.ts), so no request waits for the worker.
+ */
+export type AssistantRequestContext = { headers: Headers };
+
+const os = implement(assistantContract).$context<AssistantRequestContext>();
+
+/**
+ * Every procedure is for a signed-in CampusPilot user with a browser
+ * session (see `resolveAssistantSession`).
+ */
+const authed = os.use(async ({ context, next }) => {
+  const session = await resolveAssistantSession(context.headers);
+  if (!session) throw new ORPCError('UNAUTHORIZED');
+  return next({ context: { session } });
+});
+
+type Authed = { session: AssistantSession };
+
+async function assertAssistantAccess(context: Authed, schoolId: string) {
+  if (!(await canUseAssistant(context.session, schoolId))) {
+    throw new ORPCError('FORBIDDEN', {
+      message: 'You do not have permission to use the assistant in this school.',
+    });
+  }
+}
+
+/**
+ * Issues the run's delegated token in-process and keeps it for the worker.
+ * Called whenever the user is present (sending, approving), so a run that
+ * waited a long time for approval resumes with a fresh token. Throws the
+ * API's refusal (for example FORBIDDEN) unchanged.
+ */
+async function refreshRunToken(context: Authed, scope: { schoolId: string; conversationId: string; runId: string }) {
+  const { token, expiresAt } = await issueAssistantRunToken(context.session.context, scope);
+  await storeRunToken(scope.runId, token, expiresAt);
+}
+
+/** The provider new conversations start on, when it is configured. */
+function selectedProvider() {
+  const id = selectedProviderId();
+  return configuredProviderSettings().get(id) ?? null;
+}
+
+function availability() {
+  const provider = selectedProvider();
+  if (!provider) {
+    return {
+      configured: false,
+      available: false,
+      unavailableReason: missingProviderReason(selectedProviderId()),
+    };
+  }
+  return { configured: true, available: true, unavailableReason: null };
+}
+
+/** Idle interval after which the stream sends a heartbeat. */
+const HEARTBEAT_MS = 15_000;
+
+/** How often an open stream confirms its user may still read it. */
+const ACCESS_RECHECK_MS = 2 * 60_000;
+
+/**
+ * Whether the user of an open stream is still signed in and still allowed
+ * to use the assistant in the school. A stream stays open for hours, so the
+ * check made when it opened says nothing about now. When the API cannot be
+ * asked, the stream is kept: an outage must not close every conversation,
+ * and the next check decides.
+ */
+async function streamStillAllowed(context: Authed, headers: Headers, schoolId: string): Promise<boolean> {
+  try {
+    const current = await resolveAssistantSession(headers);
+    return current?.user.id === context.session.user.id && (await canUseAssistant(current, schoolId));
+  } catch (err) {
+    log.warn({ err, schoolId }, 'assistant.stream.access-recheck-failed');
+    return true;
+  }
+}
+
+/** Longest conversation title derived from the first message. */
+const TITLE_MAX_LENGTH = 80;
+
+function titleFromMessage(text: string): string {
+  const firstLine = text.split('\n').find((line) => line.trim())?.trim() ?? text.trim();
+  return firstLine.length > TITLE_MAX_LENGTH
+    ? `${firstLine.slice(0, TITLE_MAX_LENGTH - 1)}…`
+    : firstLine;
+}
+
+async function ownedConversation(context: Authed, schoolId: string, conversationId: string) {
+  const owned = await store.findOwnedConversation(db, {
+    conversationId,
+    schoolId,
+    userId: context.session.user.id,
+  });
+  if (!owned) throw new ORPCError('NOT_FOUND', { message: 'Assistant conversation was not found.' });
+  return owned;
+}
+
+export const assistantRouter = os.router({
+  getStatus: authed.getStatus.handler(async ({ context, input }) => {
+    await assertAssistantAccess(context, input.schoolId);
+    return availability();
+  }),
+
+  listConversations: authed.listConversations.handler(async ({ context, input }) => {
+    await assertAssistantAccess(context, input.schoolId);
+    const pageSize = ASSISTANT_LIST_PAGE_SIZE;
+    const { items, totalItems } = await store.listConversations(db, {
+      schoolId: input.schoolId,
+      userId: context.session.user.id,
+      page: input.page,
+      pageSize,
+    });
+    const totalPages = Math.ceil(totalItems / pageSize);
+    return {
+      items,
+      pagination: {
+        nextCursor: input.page < totalPages ? String(input.page + 1) : null,
+        currentPage: input.page,
+        totalPages,
+        totalItems,
+        pageSize,
+      },
+    };
+  }),
+
+  getConversation: authed.getConversation.handler(async ({ context, input }) => {
+    await assertAssistantAccess(context, input.schoolId);
+    const owned = await ownedConversation(context, input.schoolId, input.conversationId);
+    const snapshot = await store.loadSnapshot(db, owned.id);
+    if (!snapshot) throw new ORPCError('NOT_FOUND');
+    return snapshot;
+  }),
+
+  /**
+   * The subscription opens before state is read, so nothing committed in
+   * between can be missed; clients drop upserts not newer than their state.
+   * A client that already holds data passes `afterSequence` and gets only
+   * what changed (a `resume`), falling back to a snapshot when that is large.
+   * Text already streamed for unfinished messages follows, then a
+   * `synchronized` marker; while idle, a heartbeat every 15s lets the client
+   * tell a quiet stream from a dead connection.
+   */
+  subscribeConversation: authed.subscribeConversation.handler(async function* ({
+    context,
+    input,
+    signal,
+  }) {
+    const contextHeaders = context.headers;
+    await assertAssistantAccess(context, input.schoolId);
+    const owned = await ownedConversation(context, input.schoolId, input.conversationId);
+
+    const subscription = await subscribeAssistantEvents(owned.id);
+    const onAbort = () => void subscription.close();
+    signal?.addEventListener('abort', onAbort, { once: true });
+    try {
+      const resumed =
+        input.afterSequence === undefined ? null : await store.loadChangesSince(db, owned.id, input.afterSequence);
+      const state = resumed ?? (await store.loadSnapshot(db, owned.id));
+      if (!state) throw new ORPCError('NOT_FOUND');
+      yield { type: resumed ? 'resume' : 'snapshot', ...state } satisfies AssistantStreamEvent;
+
+      const streaming = (resumed ? (await store.loadSnapshot(db, owned.id))?.items ?? [] : state.items).filter(
+        (item) => item.kind === 'assistant_message' && item.status === 'streaming',
+      );
+      for (const [itemId, text] of await streamingTexts(streaming.map((item) => item.id))) {
+        yield { type: 'text', itemId, offset: 0, delta: text } satisfies AssistantStreamEvent;
+      }
+      yield { type: 'synchronized' } satisfies AssistantStreamEvent;
+
+      let accessCheckedAt = Date.now();
+      for await (const event of liveEvents(subscription, HEARTBEAT_MS)) {
+        if (Date.now() - accessCheckedAt >= ACCESS_RECHECK_MS) {
+          accessCheckedAt = Date.now();
+          // Ending the stream makes the browser reconnect, and that request
+          // gets the real refusal (signed out, or no longer permitted).
+          if (!(await streamStillAllowed(context, contextHeaders, input.schoolId))) return;
+        }
+        yield event === 'heartbeat' ? ({ type: 'heartbeat' } satisfies AssistantStreamEvent) : event;
+      }
+    } finally {
+      signal?.removeEventListener('abort', onAbort);
+      await subscription.close();
+    }
+  }),
+
+  sendMessage: authed.sendMessage.handler(async ({ context, input }) => {
+    const userId = context.session.user.id;
+
+    const replay = await store.findRunByClientRequest(db, {
+      userId,
+      clientRequestId: input.clientRequestId,
+    });
+    if (replay) {
+      if (replay.schoolId !== input.schoolId) {
+        throw new ORPCError('CONFLICT', { message: 'This request id was already used in another school.' });
+      }
+      const [conversation, item] = await Promise.all([
+        store.findOwnedConversation(db, {
+          conversationId: replay.conversationId,
+          schoolId: input.schoolId,
+          userId,
+        }),
+        store.findItemByKey(db, replay.conversationId, userMessageItemKey(replay.id)),
+      ]);
+      const itemDto = item ? store.toItemDto(item) : null;
+      if (!conversation || !itemDto || itemDto.kind !== 'user_message') {
+        throw new ORPCError('NOT_FOUND', { message: 'Assistant conversation was not found.' });
+      }
+      return {
+        conversation: store.toConversationDto(conversation),
+        run: store.toRunDto(replay),
+        item: itemDto,
+      };
+    }
+
+    await assertAssistantAccess(context, input.schoolId);
+    const status = availability();
+    if (!status.available) {
+      throw new ORPCError('PRECONDITION_FAILED', {
+        message: status.unavailableReason ?? 'The assistant is unavailable.',
+      });
+    }
+    // A conversation stays on the provider it started with; new ones use the
+    // currently selected provider.
+    const provider = input.conversationId
+      ? configuredProviderSettings().get((await ownedConversation(context, input.schoolId, input.conversationId)).provider) ?? null
+      : selectedProvider();
+    if (!provider) {
+      throw new ORPCError('PRECONDITION_FAILED', {
+        message: 'This conversation runs on a model provider that is not configured now. Start a new conversation.',
+      });
+    }
+
+    const conversationId = input.conversationId ?? generateId('conversation');
+    const runId = generateId('run');
+    // The token is requested before anything is saved: if the API refuses,
+    // nothing is left behind.
+    await refreshRunToken(context, { schoolId: input.schoolId, conversationId, runId });
+
+    const created = await store.assistantTransaction(db, async (tx, emit) => {
+      if (!input.conversationId) {
+        await store.createConversation(tx, {
+          id: conversationId,
+          schoolId: input.schoolId,
+          userId,
+          title: titleFromMessage(input.text),
+          provider: provider.id,
+          model: provider.model,
+        });
+      }
+      const run = await store.insertRun(tx, emit, {
+        id: runId,
+        conversationId,
+        schoolId: input.schoolId,
+        userId,
+        clientRequestId: input.clientRequestId,
+        surface: input.surface,
+      });
+      const item = await store.insertItem(tx, emit, {
+        conversationId,
+        runId,
+        kind: 'user_message',
+        status: 'complete',
+        body: {
+          text: input.text,
+          ...(input.pageContext ? { pageContext: input.pageContext } : {}),
+        },
+        itemKey: userMessageItemKey(runId),
+      });
+      const conversation = await store.findConversation(tx, conversationId);
+      if (item.kind !== 'user_message' || !conversation) throw new ORPCError('INTERNAL_SERVER_ERROR');
+      return { conversation: store.toConversationDto(conversation), run, item };
+    });
+
+    // After commit: the run is saved, so a failed hand-over is only delayed
+    // (the outbox sweep sends it), never lost.
+    await handOverRun(runId);
+    return created;
+  }),
+
+  respondToApproval: authed.respondToApproval.handler(async ({ context, input }) => {
+    const approval = await store.findApproval(db, input.approvalId);
+    if (!approval || approval.schoolId !== input.schoolId || approval.userId !== context.session.user.id) {
+      throw new ORPCError('NOT_FOUND', { message: 'Assistant approval was not found.' });
+    }
+    if (approval.status !== 'pending') {
+      throw new ORPCError('CONFLICT', { message: 'This action was already decided.' });
+    }
+    // Once a stop is asked the change must not be approved, even in the
+    // moment before the stop cancels this approval.
+    const stoppedRun = await store.findRun(db, approval.runId);
+    if (input.decision === 'approve' && stoppedRun?.stopRequestedAt) {
+      throw new ORPCError('CONFLICT', { message: 'The assistant was stopped, so this change will not be made.' });
+    }
+    if (input.decision === 'approve') {
+      // The user is present now, so the run resumes with a fresh token even
+      // after a long wait.
+      await refreshRunToken(context, {
+        schoolId: approval.schoolId,
+        conversationId: approval.conversationId,
+        runId: approval.runId,
+      });
+    }
+    const decided = await store.decideApproval(
+      db,
+      approval.id,
+      input.decision === 'approve' ? 'approved' : 'declined',
+    );
+    if (!decided) throw new ORPCError('CONFLICT', { message: 'This action was already decided.' });
+    // The decision is saved, which is what the run wakes with; a hand-over
+    // that fails now is sent by the outbox sweep.
+    await handOverApprovalResolution(decided.id);
+    const run = await store.findRun(db, approval.runId);
+    if (!run) throw new ORPCError('NOT_FOUND');
+    return store.toRunDto(run);
+  }),
+
+  stopRun: authed.stopRun.handler(async ({ context, input }) => {
+    const run = await store.findRun(db, input.runId);
+    if (!run || run.schoolId !== input.schoolId || run.userId !== context.session.user.id) {
+      throw new ORPCError('NOT_FOUND', { message: 'Assistant run was not found.' });
+    }
+    try {
+      return await stopRun(run, (approvalId) => handOverApprovalResolution(approvalId));
+    } catch (error) {
+      log.error({ err: error, runId: run.id }, 'assistant.run.stop.failed');
+      throw new ORPCError('INTERNAL_SERVER_ERROR', { message: 'The assistant could not be stopped. Please try again.' });
+    }
+  }),
+
+  /**
+   * Deletes a conversation for good. The same checks as reading it: the
+   * user may use the assistant in the school, and the conversation is their
+   * own. It is refused while a run has not finished, so the user stops the
+   * assistant first and nothing is deleted from under a working turn.
+   */
+  deleteConversation: authed.deleteConversation.handler(async ({ context, input }) => {
+    await assertAssistantAccess(context, input.schoolId);
+    const owned = await ownedConversation(context, input.schoolId, input.conversationId);
+    const outcome = await store.deleteConversation(db, owned.id);
+    if (outcome === 'busy') {
+      throw new ORPCError('CONFLICT', { message: 'Stop the assistant before deleting this conversation.' });
+    }
+    // Deleted by another request in between: it is gone either way.
+    if (outcome === 'missing') throw new ORPCError('NOT_FOUND', { message: 'Assistant conversation was not found.' });
+    log.info({ conversationId: owned.id, schoolId: input.schoolId }, 'assistant.conversation.deleted');
+    return { id: owned.id };
+  }),
+});
+
+export type AssistantRouter = typeof assistantRouter;

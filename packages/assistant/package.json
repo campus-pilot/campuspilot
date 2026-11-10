@@ -1,0 +1,44 @@
+{
+  "name": "@campuspilot/assistant",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "check-types": "tsc --noEmit",
+    "test": "vitest run",
+    "test:integration": "vitest run --project integration",
+    "test:unit": "vitest run --project unit"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.5.0",
+    "@campuspilot/api": "workspace:*",
+    "@campuspilot/assistant-contract": "workspace:*",
+    "@campuspilot/auth": "workspace:*",
+    "@campuspilot/db": "workspace:*",
+    "@campuspilot/env": "workspace:*",
+    "@campuspilot/logger": "workspace:*",
+    "@campuspilot/opa": "workspace:*",
+    "@campuspilot/redis": "workspace:*",
+    "@campuspilot/restate": "workspace:*",
+    "@google/genai": "^2.32.0",
+    "@modelcontextprotocol/client": "^2.4.0",
+    "@orpc/server": "catalog:",
+    "@restatedev/restate-sdk": "~1.17.4",
+    "drizzle-orm": "^0.45.2",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@campuspilot/config": "workspace:*",
+    "@testcontainers/postgresql": "catalog:",
+    "@testcontainers/redis": "catalog:",
+    "@types/node": "catalog:",
+    "@types/pg": "catalog:",
+    "pg": "catalog:",
+    "testcontainers": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "4.1.4"
+  }
+}

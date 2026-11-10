@@ -10,21 +10,19 @@ import { createTanstackQueryUtils } from '@orpc/tanstack-query';
 export type AssistantClient = ContractRouterClient<AssistantContract>;
 
 /**
- * Client for the separate assistant service. It sends the CampusPilot session
- * cookie, which the service checks with the API. Null when this deployment
- * has no assistant (`NEXT_PUBLIC_ASSISTANT_URL` unset).
+ * Client for the in-app assistant's procedures, which the API server serves
+ * at `/model/rpc` on its own origin. It sends the CampusPilot session cookie
+ * like every other API call. Whether the assistant is shown at all is the
+ * school's `assistant` feature and the user's access (`AssistantAccess`),
+ * never whether this client exists.
  */
-export const assistantClient: AssistantClient | null = env.NEXT_PUBLIC_ASSISTANT_URL
-  ? createORPCClient(
-      new RPCLink({
-        url: new URL('/rpc', env.NEXT_PUBLIC_ASSISTANT_URL).toString(),
-        fetch(url, options) {
-          return fetch(url, { ...options, credentials: 'include' });
-        },
-      }),
-    )
-  : null;
+export const assistantClient: AssistantClient = createORPCClient(
+  new RPCLink({
+    url: new URL('/model/rpc', env.NEXT_PUBLIC_SERVER_URL).toString(),
+    fetch(url, options) {
+      return fetch(url, { ...options, credentials: 'include' });
+    },
+  }),
+);
 
-export const assistantOrpc = assistantClient
-  ? createTanstackQueryUtils(assistantClient, { path: ['assistant'] })
-  : null;
+export const assistantOrpc = createTanstackQueryUtils(assistantClient, { path: ['assistant'] });

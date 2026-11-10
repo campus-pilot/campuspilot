@@ -5,6 +5,7 @@ import {
   createContextFromHeaders,
   createOAuthContext,
 } from '@campuspilot/api/context';
+import { createAssistantRequestHandler } from '@campuspilot/assistant/http';
 import { verifyAssistantToken } from '@campuspilot/auth/assistant-token';
 import {
   type CadetContext,
@@ -269,6 +270,19 @@ app.get('/api/blob/users/me/profile-image', async (context) => {
       error,
     ),
   );
+});
+
+/**
+ * The in-app assistant's browser procedures (`packages/assistant`), with the
+ * user's session cookie: conversations, sending, approvals, stop and the live
+ * stream (an SSE event iterator, so nothing on this path may buffer the
+ * response). The turn itself runs in `apps/worker`.
+ */
+const handleAssistantRequest = createAssistantRequestHandler();
+app.all('/model/rpc/*', async (context) => {
+  const response = await handleAssistantRequest(context.req.raw);
+  if (!response) return context.notFound();
+  return context.newResponse(response.body, response);
 });
 
 export const mcpCatalog = buildMcpCatalog(appRouter);

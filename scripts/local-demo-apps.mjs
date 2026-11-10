@@ -19,7 +19,8 @@ const apps = [
   { name: 'server', port: 3100, module: 'apps/server/node_modules/tsx/dist/cli.mjs', args: ['watch', 'src/index.ts'] },
   { name: 'management', port: 3102, module: 'apps/management/node_modules/next/dist/bin/next', args: ['dev', '--port', '3102', '--hostname', '127.0.0.1'] },
   { name: 'admin', port: 3103, module: 'apps/admin/node_modules/next/dist/bin/next', args: ['dev', '--port', '3103', '--hostname', '127.0.0.1'] },
-  { name: 'assistant', port: 3104, module: 'apps/assistant/node_modules/tsx/dist/cli.mjs', args: ['watch', 'src/index.ts'] },
+  // Runs the assistant's turns (and the other Restate workflows).
+  { name: 'worker', port: 9080, module: 'apps/worker/node_modules/tsx/dist/cli.mjs', args: ['watch', 'src/index.ts'] },
 ];
 
 /** Check both PID and command before treating a process group as ours. */
@@ -42,7 +43,7 @@ async function portInUse(port) {
 const action = process.argv[2] ?? 'status';
 if (!['start', 'stop', 'status'].includes(action)) throw new Error('Use start, stop, or status.');
 const requestedApps = process.argv.slice(3);
-if (requestedApps.some((name) => !apps.some((app) => app.name === name))) throw new Error('Unknown app; use server, management, admin, or assistant.');
+if (requestedApps.some((name) => !apps.some((app) => app.name === name))) throw new Error('Unknown app; use server, management, admin, or worker.');
 for (const app of apps.filter((app) => requestedApps.length === 0 || requestedApps.includes(app.name))) {
   const owned = isOwned(app);
   if (action === 'stop' && owned) {
