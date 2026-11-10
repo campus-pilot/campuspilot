@@ -1,0 +1,100 @@
+'use client';
+
+import { useId, type ReactNode } from 'react';
+import { Check, ChevronsUpDown } from 'lucide-react';
+import { Button } from '@campuspilot/ui/components/button';
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@campuspilot/ui/components/command';
+import { Label } from '@campuspilot/ui/components/label';
+import { Popover, PopoverContent, PopoverTrigger } from '@campuspilot/ui/components/popover';
+
+import { classScopeSummary, filterClassScopeOptions, pageClassScopeOptions, toggleClassScopeId, type ClassScopeOption } from './class-scope-picker-model';
+
+export type { ClassScopeOption } from './class-scope-picker-model';
+
+export type ClassScopePickerProps = {
+  /** Every class on offer, in display order. */
+  classes: readonly ClassScopeOption[];
+  /** The checked classes, as explicit IDs. What "none" or "all" means is the caller's decision. */
+  selectedIds: readonly string[];
+  onSelectedIdsChange: (ids: string[]) => void;
+  /** Search text and page are owned by the caller's form, like every other input. */
+  search: string;
+  page: number;
+  onSearchChange: (search: string) => void;
+  onPageChange: (page: number) => void;
+  isPending?: boolean;
+  isError?: boolean;
+  label?: string;
+  /** Trigger text; defaults to "N of M classes". */
+  summary?: string;
+  /** Marks the trigger invalid for assistive technology. */
+  invalid?: boolean;
+  /** Extra controls under the list (for example "Select all classes"). */
+  footer?: ReactNode;
+  /** Help text or field errors under the trigger. */
+  children?: ReactNode;
+};
+
+function ClassScopePager({ currentPage, totalPages, onPageChange }: { currentPage: number; totalPages: number; onPageChange: (page: number) => void }) {
+  return (
+    <div className="flex items-center justify-end gap-2">
+      <span className="text-xs text-muted-foreground">Page {currentPage} of {totalPages}</span>
+      <Button type="button" size="sm" variant="outline" disabled={currentPage <= 1} onClick={() => onPageChange(currentPage - 1)}>Previous</Button>
+      <Button type="button" size="sm" variant="outline" disabled={currentPage >= totalPages} onClick={() => onPageChange(currentPage + 1)}>Next</Button>
+    </div>
+  );
+}
+
+function ClassScopeList({ classes, selectedIds, search, page, footer, onSelectedIdsChange, onSearchChange, onPageChange }: Pick<ClassScopePickerProps, 'classes' | 'selectedIds' | 'search' | 'page' | 'footer' | 'onSelectedIdsChange' | 'onSearchChange' | 'onPageChange'>) {
+  const selected = new Set(selectedIds);
+  const { visible, totalPages, currentPage } = pageClassScopeOptions(filterClassScopeOptions(classes, search), page);
+  return (
+    <Command shouldFilter={false}>
+      <CommandInput value={search} placeholder="Search classes…" onValueChange={(value) => { onSearchChange(value); onPageChange(1); }} />
+      <CommandList>
+        <CommandEmpty>No classes match this search.</CommandEmpty>
+        <CommandGroup heading="Classes in this session">
+          {visible.map((item) => (
+            <CommandItem key={item.id} value={item.id} onSelect={() => onSelectedIdsChange(toggleClassScopeId(classes, selectedIds, item.id))}>
+              <Check className={selected.has(item.id) ? 'size-4 opacity-100' : 'size-4 opacity-0'} aria-hidden />
+              <span className="truncate">{item.label}</span>
+            </CommandItem>
+          ))}
+        </CommandGroup>
+      </CommandList>
+      <div className="flex flex-col gap-2 border-t p-2">
+        {footer}
+        <ClassScopePager currentPage={currentPage} totalPages={totalPages} onPageChange={onPageChange} />
+      </div>
+    </Command>
+  );
+}
+
+/**
+ * A searchable, paginated multi-select of a session's classes in a popover.
+ * It is API-free and fully controlled: the caller supplies the classes and
+ * owns the selection, the search text and the page (in its form), and
+ * decides what an empty or complete selection means. Built on Radix Popover
+ * and cmdk, so it stays interactive inside a Radix dialog.
+ */
+export function ClassScopePicker({ classes, selectedIds, isPending = false, isError = false, label = 'Classes', summary, invalid = false, children, ...list }: ClassScopePickerProps) {
+  const id = useId();
+  const text = isPending ? 'Loading classes…' : (summary ?? classScopeSummary(selectedIds.length, classes.length));
+  return (
+    <div className="flex min-w-0 flex-col gap-1.5">
+      <Label htmlFor={id}>{label}</Label>
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button id={id} type="button" variant="outline" role="combobox" aria-invalid={invalid || undefined} className="w-full justify-between" disabled={isPending || isError}>
+            <span className="truncate">{text}</span>
+            <ChevronsUpDown className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent align="start" className="w-80 max-w-[calc(100vw-2rem)] p-0">
+          <ClassScopeList classes={classes} selectedIds={selectedIds} {...list} />
+        </PopoverContent>
+      </Popover>
+      {isError ? <p className="text-xs text-destructive">Unable to load classes.</p> : children}
+    </div>
+  );
+}
