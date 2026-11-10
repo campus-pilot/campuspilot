@@ -5,7 +5,7 @@ import {
   type NotificationListItem,
 } from '@campuspilot/components/notifications';
 
-import { billHref, examResultHref, FEES_HREF, noticeHref } from '@/lib/route-param';
+import { billHref, examResultHref, FEES_HREF, noticeHref, timetableHref } from '@/lib/route-param';
 
 type CadetRouteBuilder<T extends AdmissionNotificationType> = (facts: NotificationLinkFacts<T>) => string | null;
 
@@ -23,6 +23,7 @@ export const cadetNotificationRoutes: { [T in AdmissionNotificationType]: CadetR
   'payment.received': () => FEES_HREF,
   'exam.results_published': ({ studentId, classId, examSlug }) => examResultHref({ studentId, classId, examSlug }),
   'notice.published': ({ noticeId }) => noticeHref(noticeId),
+  'exam.timetable_published': ({ sessionId, examSlug }) => timetableHref({ sessionId, examSlug }),
 };
 
 function isAdmissionType(type: string): type is AdmissionNotificationType {

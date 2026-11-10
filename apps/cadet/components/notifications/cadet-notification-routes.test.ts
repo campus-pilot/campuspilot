@@ -19,6 +19,14 @@ describe('cadetRouteFromLink', () => {
     expect(cadetRouteFromLink(new URLSearchParams('type=notice.published_staff&noticeId=ntc_1&sessionId=s'))).toBe('/notifications');
   });
 
+  it('opens a published timetable from its session and exam', () => {
+    expect(cadetRouteFromLink(new URLSearchParams('type=exam.timetable_published&sessionId=sess_1&examSlug=half-yearly'))).toBe(
+      '/timetables/sess_1/half-yearly',
+    );
+    expect(cadetRouteFromLink(new URLSearchParams('type=exam.timetable_published&sessionId=sess_1'))).toBe('/notifications');
+    expect(cadetRouteFromLink(new URLSearchParams('type=exam.timetable_published_staff&sessionId=sess_1&examSlug=x'))).toBe('/notifications');
+  });
+
   it('encodes identifiers as one path segment', () => {
     expect(cadetRouteFromLink(new URLSearchParams('type=bill.issued&billId=a%2Fb&sessionId=s'))).toBe('/fees/a%2Fb');
   });

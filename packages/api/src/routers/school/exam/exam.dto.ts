@@ -217,6 +217,10 @@ export const timetableDtoSchema = z.object({
   sessionId: z.string(),
   examSlug: z.string(),
   config: timetableConfigSchema,
+  /** Null while the timetable is a draft that only staff can see. */
+  publishedAt: z.date().nullable(),
+  publishedBy: z.string().nullable(),
+  publicationCount: z.number().int().nonnegative(),
   createdAt: z.date().nullable(),
   updatedAt: z.date().nullable(),
 });

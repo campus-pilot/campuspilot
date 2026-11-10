@@ -130,7 +130,7 @@ function referenceOf(type: string, data: Record<string, unknown>): string | null
       ? data.billNumber
       : type === 'payment.received'
         ? data.receiptNumber
-        : type === 'exam.results_published'
+        : type === 'exam.results_published' || type === 'exam.timetable_published'
           ? data.examName
           : type === 'notice.published'
             ? data.noticeTitle

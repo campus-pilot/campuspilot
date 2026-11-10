@@ -4,6 +4,7 @@ import type {
 } from '@campuspilot/db/notifications/catalogue';
 import {
   BellRing,
+  CalendarDays,
   ClipboardCheck,
   CreditCard,
   Megaphone,
@@ -102,6 +103,16 @@ export const notificationRenderers: { [T in NotificationType]: NotificationRende
     // The same words as the student type: a staff notice may be addressed to students too,
     // and the notification does not carry the audience.
     description: 'New notice from your school.',
+  }),
+  'exam.timetable_published': (data) => ({
+    icon: CalendarDays,
+    title: `${data.examName} timetable`,
+    description: 'The examination timetable has been published.',
+  }),
+  'exam.timetable_published_staff': (data) => ({
+    icon: CalendarDays,
+    title: `${data.examName} timetable`,
+    description: 'The examination timetable has been published.',
   }),
 };
 

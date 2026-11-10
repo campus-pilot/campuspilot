@@ -186,6 +186,24 @@ export const notificationPayloadSchemas = {
     sessionId: id,
     noticeTitle: label,
   }),
+  /**
+   * An examination's timetable was published. One event per student, so the
+   * WhatsApp copy can name them. Every student sees the whole timetable, so
+   * the facts name the exam and never a class.
+   */
+  "exam.timetable_published": z.object({
+    sessionId: id,
+    examSlug: id,
+    examName: label,
+    admissionId: id,
+    studentName: label,
+  }),
+  /** An examination's timetable was published; addressed to the school's staff. */
+  "exam.timetable_published_staff": z.object({
+    sessionId: id,
+    examSlug: id,
+    examName: label,
+  }),
 } as const;
 
 export type NotificationType = keyof typeof notificationPayloadSchemas;
@@ -216,6 +234,8 @@ export const notificationCatalogue = {
   "billing.run_posted": { audience: "staff_user", channels: ["in_app"] },
   "notice.published": { audience: "admission", channels: ["in_app", "web_push", "whatsapp"] },
   "notice.published_staff": { audience: "staff_user", channels: ["in_app"] },
+  "exam.timetable_published": { audience: "admission", channels: ["in_app", "web_push", "whatsapp"] },
+  "exam.timetable_published_staff": { audience: "staff_user", channels: ["in_app"] },
 } as const satisfies Record<NotificationType, NotificationCatalogueEntry>;
 
 /**
@@ -235,6 +255,8 @@ export const notificationLinkFactKeys = {
   "billing.run_posted": ["billRunId", "sessionId"],
   "notice.published": ["noticeId"],
   "notice.published_staff": ["noticeId", "sessionId"],
+  "exam.timetable_published": ["sessionId", "examSlug"],
+  "exam.timetable_published_staff": ["sessionId", "examSlug"],
 } as const satisfies { [T in NotificationType]: readonly (keyof NotificationPayloads[T])[] };
 
 /** The link facts of a type. */
@@ -280,6 +302,11 @@ export const notificationRequiredFeatures = {
   "billing.run_posted": [],
   "notice.published": ["notices", "cadet"],
   "notice.published_staff": ["notices"],
+  // Timetables belong to the examination, not to notices. The Cadet Portal
+  // decides the student copies when the timetable is published: with the
+  // `cadet` feature off, only the staff event is emitted.
+  "exam.timetable_published": [],
+  "exam.timetable_published_staff": [],
 } as const satisfies Record<NotificationType, readonly SchoolFeatureKey[]>;
 
 /** Every known type, in catalogue order. */

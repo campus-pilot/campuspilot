@@ -37,6 +37,8 @@ export const staffNotificationRoutes: { [T in StaffNotificationType]: StaffRoute
   'billing.run_posted': (schoolId, data) =>
     schoolSessionHref(schoolId, data.sessionId, `/billing/runs/${encodeURIComponent(data.billRunId)}`),
   'notice.published_staff': (schoolId, data) => noticeHref(schoolId, data.sessionId, data.noticeId),
+  'exam.timetable_published_staff': (schoolId, data) =>
+    schoolSessionHref(schoolId, data.sessionId, `/exam/${encodeURIComponent(data.examSlug)}/timetable`),
 };
 
 function isStaffType(type: string): type is StaffNotificationType {

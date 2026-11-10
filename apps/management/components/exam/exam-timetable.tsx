@@ -15,7 +15,7 @@ import {
 import { useForm } from '@tanstack/react-form';
 import { useQuery } from '@tanstack/react-query';
 import { z } from 'zod';
-import { FileDown, MoreVertical, Pencil, Trash2 } from 'lucide-react';
+import { FileDown, MoreVertical, Pencil, Send, Trash2, Undo2 } from 'lucide-react';
 import {
   saveExamTimetableInputSchema,
   type ExamContextDto,
@@ -41,6 +41,11 @@ import {
 import { errorMessage, schoolPermission, type ExamScope } from './exam-model';
 
 import { TimetableEditor } from './exam-timetable-editor';
+import {
+  PublishTimetableDialog,
+  TimetableStatusNote,
+  WithdrawTimetableDialog,
+} from './exam-timetable-publication';
 
 type Config = z.infer<typeof saveExamTimetableInputSchema>['config'];
 
@@ -86,10 +91,13 @@ export function ExamTimetable({
           </RequirePermissions>
         </Empty>
       ) : (
-        <TimetablePreview
-          config={query.data.config}
-          classes={context.classes}
-        />
+        <>
+          <TimetableStatusNote timetable={query.data} />
+          <TimetablePreview
+            config={query.data.config}
+            classes={context.classes}
+          />
+        </>
       )}
     </div>
   );
@@ -141,9 +149,14 @@ function TimetableActions({
   const timetable = useQuery(
     orpc.school.getExamTimetable.queryOptions({ input: scope }),
   );
+  const overview = useQuery(
+    orpc.school.getExamOverview.queryOptions({ input: scope }),
+  );
   const queries = useExamCache();
   const form = useForm({
     defaultValues: {
+      publishing: false,
+      withdrawing: false,
       editing: false,
       baseline: null as Config | null,
       version: '',
@@ -153,6 +166,8 @@ function TimetableActions({
     },
     validators: {
       onChange: z.object({
+        publishing: z.boolean(),
+        withdrawing: z.boolean(),
         editing: z.boolean(),
         baseline: saveExamTimetableInputSchema.shape.config.nullable(),
         version: z.string(),
@@ -178,8 +193,13 @@ function TimetableActions({
       }
     },
   });
+  /** An ended examination's timetable is history: no drafting, publishing or withdrawing. */
+  const ended = overview.data?.status === 'completed';
+  const published = Boolean(timetable.data?.publishedAt);
   const editable =
     active &&
+    !ended &&
+    !published &&
     !completed.isPending &&
     !completed.isFetching &&
     !completed.isError &&
@@ -222,9 +242,13 @@ function TimetableActions({
             !completed.isPending &&
             !completed.isFetching && (
               <Notice>
-                {completed.data?.pagination.totalItems
-                  ? 'The examination is completed. Reopen result entry to edit the timetable.'
-                  : 'Timetable is read-only.'}
+                {ended
+                  ? 'The examination has ended, so its timetable can no longer be changed.'
+                  : published
+                    ? 'Withdraw the timetable to a draft to edit it.'
+                    : completed.data?.pagination.totalItems
+                      ? 'The examination is completed. Reopen result entry to edit the timetable.'
+                      : 'Timetable is read-only.'}
               </Notice>
             )}
           <RequirePermissions
@@ -294,6 +318,34 @@ function TimetableActions({
                         </DropdownMenuItem>
                       </RequirePermissions>
                     )}
+                    {active && !ended && (
+                      <RequirePermissions
+                        permissions={schoolPermission(
+                          scope.schoolId,
+                          SCHOOL_ACTIONS.PUBLISH_EXAM_TIMETABLE,
+                        )}
+                      >
+                        {published ? (
+                          <DropdownMenuItem
+                            onSelect={() =>
+                              form.setFieldValue('withdrawing', true)
+                            }
+                          >
+                            <Undo2 aria-hidden />
+                            Withdraw to draft
+                          </DropdownMenuItem>
+                        ) : (
+                          <DropdownMenuItem
+                            onSelect={() =>
+                              form.setFieldValue('publishing', true)
+                            }
+                          >
+                            <Send aria-hidden />
+                            Publish timetable
+                          </DropdownMenuItem>
+                        )}
+                      </RequirePermissions>
+                    )}
                     <RequirePermissions
                       permissions={documentWorkspacePermissions(
                         scope.schoolId,
@@ -335,6 +387,18 @@ function TimetableActions({
                   </DropdownMenuGroup>
                 </DropdownMenuContent>
               </DropdownMenu>
+              <PublishTimetableDialog
+                scope={scope}
+                examName={context.exam.name}
+                open={values.publishing}
+                onOpenChange={(open) => form.setFieldValue('publishing', open)}
+              />
+              <WithdrawTimetableDialog
+                scope={scope}
+                examName={context.exam.name}
+                open={values.withdrawing}
+                onOpenChange={(open) => form.setFieldValue('withdrawing', open)}
+              />
               <ConfirmationDialog
                 open={values.confirmingDelete}
                 title="Delete timetable"

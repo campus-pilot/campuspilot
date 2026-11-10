@@ -379,6 +379,13 @@
       "when": 1794289376964,
       "tag": "0053_notification-event-unsettled-index",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1794325527400,
+      "tag": "0054_exam-timetable-publication",
+      "breakpoints": true
     }
   ]
 }

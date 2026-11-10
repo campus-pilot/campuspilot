@@ -455,6 +455,15 @@ actions contains {
   "resourceKind": "school",
 } if { true }
 
+# Publishing a timetable shows it to the whole school (and, with the Cadet
+# Portal, to students) and withdrawing hides it again; editing a draft is
+# school.exam.timetable.update.
+actions contains {
+  "id": "school.exam.timetable.publish",
+  "key": "PUBLISH_EXAM_TIMETABLE",
+  "resourceKind": "school",
+} if { true }
+
 actions contains {"id": "school.exam.result.write", "key": "WRITE_EXAM_RESULTS", "resourceKind": "school"} if { true }
 actions contains {"id": "school.exam.result.delete", "key": "DELETE_EXAM_RESULTS", "resourceKind": "school"} if { true }
 
