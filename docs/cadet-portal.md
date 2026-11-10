@@ -356,7 +356,8 @@ evaluated on each request, so a student moved to another class sees that
 class's notices. Who was *notified* is fixed when the notice is published
 (`notice.published`: inbox, web push, WhatsApp with the PDF; route
 `/notices/{noticeId}`). The three procedures also require the school's
-`notices` feature. The screens are not built yet.
+`notices` feature. The screens are `/notices` and `/notices/{noticeId}` (see
+"Front end"); [School notices](notices.md) is the canonical guide.
 
 ## Cadet MCP
 
@@ -414,19 +415,20 @@ Mirrors management: Next.js 16, oRPC + TanStack Query, TanStack Form,
 | --- | --- |
 | `app/layout.tsx` | `QueryProvider` + `ThemeProvider`; title "Cadet Portal". |
 | `app/(portal)/layout.tsx` → `components/app-frame.tsx` (`AppFrame`) | Session check (`authClient.useSession`, `redirect('/sign-in')`), top bar from `getProfile.current`, bottom nav; phone-sized frame from `md` up. |
-| `app/(portal)/page.tsx`, `fees/`, `fees/[billId]/`, `results/`, `results/[examId]/`, `results/class/[recordId]/`, `growth/`, `growth/class/[recordId]/`, `more/` | Screens in `components/{home,fees,results,growth,more}`; shared headers and loading/error/empty states in `components/screen.tsx`. More holds Sign out (cadet session only; clears the query cache). |
+| `app/(portal)/page.tsx`, `fees/`, `fees/[billId]/`, `results/`, `results/[examId]/`, `results/class/[recordId]/`, `growth/`, `growth/class/[recordId]/`, `more/`, `notices/`, `notices/[noticeId]/` | Screens in `components/{home,fees,results,growth,more,notices}`; shared headers and loading/error/empty states in `components/screen.tsx`. More holds Sign out (cadet session only; clears the query cache). |
 | `app/sign-in/page.tsx` → `components/sign-in-form.tsx` | `useForm` with a Zod `onSubmit` validator and per-field errors; the request is a `useMutation`, so a rejected sign-in does not disable Submit. Full navigation on success. |
 | `app/oauth/consent/page.tsx` → `components/oauth-consent.tsx` | Cadet MCP consent. |
 | `lib/orpc.ts` | `RPCLink` to `/api/cadet/rpc` with `credentials: 'include'`, typed `CadetRouterClient`. Never the staff `/rpc`. |
 | `lib/auth-client.ts` | Better Auth clients at `CADET_AUTH_BASE_PATH`. |
 | `components/cadet-school-chrome.tsx` | Signed-in pages only: links the school's Cadet manifest (`/blob/school/{id}/cadet.webmanifest`, per-school app id, scope = whole portal) and home-screen icon, and shows the phone install screen (shared `useInstallAppScreen`). Before sign-in the portal is not installable (the school is unknown). |
-| `app/(portal)/notifications` → `components/notifications/` | The inbox inside the portal frame; the top bar's bell links to it. `/notifications/open` resolves push clicks with the route builders in `cadet-notification-routes.ts`: a bill opens `/fees/{billId}`, a payment `/fees`, a result `/results/{examId}` built from the enrollment, class and exam named in the notification (`examResultHref` in `lib/route-param.ts`); anything else stays in the inbox. The device notification toggle is on the inbox and on More. |
+| `app/(portal)/notices`, `notices/[noticeId]` → `components/notices/` | The student's notices (`NoticesScreen`, infinite list) and one notice (`NoticeScreen`). A notice written as text is shown as text; a custom-template notice as its printed page in the shared empty-sandbox `DocumentPreview` (`fitPageWidth`); both offer Download PDF (`getNoticeDownload`, a five-minute URL issued on the tap). Reached from Home's notices block (`HomeNotices`, shown only when the student has notices) and a row on More (`MoreNoticesRow`); the tab bar keeps five tabs. When the school's `notices` feature is off, the notice procedures answer the disabled-feature error: the block and the row do not appear and both routes show "Notices are not available" (`noticesSwitchedOff` in `notices-model.ts`), never an error. API-free pieces are in `packages/components/src/cadet-portal/cadet-notice.tsx`. |
+| `app/(portal)/notifications` → `components/notifications/` | The inbox inside the portal frame; the top bar's bell links to it. `/notifications/open` resolves push clicks with the route builders in `cadet-notification-routes.ts`: a bill opens `/fees/{billId}`, a payment `/fees`, a result `/results/{examId}` built from the enrollment, class and exam named in the notification (`examResultHref` in `lib/route-param.ts`), a notice `/notices/{noticeId}` (`noticeHref`); anything else stays in the inbox. The device notification toggle is on the inbox and on More. |
 | `public/sw.js` + `lib/web-push.client.ts` + `components/notifications/cadet-device-notifications.tsx` | Web push: the service worker (push → notification, click → `/notifications/open?type=…&<ids>` → route builders), registered only when the student taps **Turn on notifications** (permission requested inside the tap). One row per login and endpoint (`cadet_push_subscription`), so siblings on one phone each get their own; a login keeps its 10 most recently subscribed devices (older ones are revoked); sign-out turns this device off for that student. A staff resend of a failed push goes to that same device only, never to a device that no longer receives notifications. iPhone/iPad: only inside the installed app. |
 
 Env comes from `@campuspilot/env/cadet.client` (`NEXT_PUBLIC_SERVER_URL`). No
 identity inputs: who the student is always comes from the `cpc_` session. Record
 ids are path segments, not query parameters (`/results/class/{recordId}`,
-`/growth/class/{recordId}`, `/results/{examId}`, `/fees/{billId}`; build class
+`/growth/class/{recordId}`, `/results/{examId}`, `/fees/{billId}`, `/notices/{noticeId}`; build class
 links with `classResultsHref`/`classGrowthHref` in `lib/route-param.ts`). They
 are only looked up within the signed-in admission, and anything else is
 NOT_FOUND. `/results` and `/growth` without a class show the server's current class. No `useEffect`;
@@ -447,6 +449,7 @@ data, small components). Shared, API-free UI belongs in
 | `apps/server/src/cadet-http.integration.test.ts` | Well-known order, cadet issuer discovery, MCP challenge and token isolation, RPC cookie isolation, CORS scoping, sign-in through the server. |
 | `packages/opa/src/__tests__/authorization.integration.test.ts`, `packages/opa/src/policies/school/permissions_test.rego` | The issue permission's grants. |
 | `apps/cadet/lib/auth-client.test.ts`, `apps/cadet/components/{sign-in-form,oauth-consent}.test.tsx` | Signed-query helpers, sign-in form, consent redirect. |
+| `packages/api/src/routers/cadet/cadet-notices.integration.test.ts`, `apps/cadet/components/notices/notices-screen.test.tsx`, `apps/cadet/components/{home/home-screen,more/more-screen}.test.tsx`, `packages/components/src/cadet-portal/cadet-notice.test.tsx` | Notice visibility and the `notices` feature; the list, text and printed-page reading, PDF download, not found and unavailable states; the Home block and More row appearing only for a school with notices. |
 | `packages/components/src/cadet-portal/issued-cadet-password-dialog.test.tsx` | Shown-once dialog and copy. |
 | `apps/management/components/admission-actions-model.test.ts` | Menu gating and confirmation copy. |
 
@@ -534,6 +537,9 @@ not involve cadet files.
    input; no `useEffect`.
 3. Put reusable, API-free pieces in `packages/components/src/cadet-portal`.
 4. Check the screen at phone width, as for management screens.
+5. If the area is a per-school feature, handle its disabled-feature error as a
+   state (hide entry points, show a calm unavailable screen), as the notice
+   screens do with `noticesSwitchedOff`.
 
 **Adding a cadet table**: prefix `cadet_`, reference the login by
 `cadet_user.id` (cascade) or the admission by `admission.id`, never the admission
@@ -542,11 +548,15 @@ add it to `cadetAuthSchema`.
 
 ## Known gaps and deferred decisions
 
-- **Hidden, not built**: the notices screens (the API exists, see above), the notification bell, calendar, the Updates
+- **Hidden, not built**: calendar, the Updates
   screen, push/WhatsApp settings, online payment (a disabled "coming soon"
   button), guardian/sibling switching and connected-AI-app settings.
-- **No PDFs for cadets**: bill, receipt, adjustment and statement downloads are
-  out of scope until the document system can serve documents to cadets safely.
+- **No finance PDFs for cadets**: bill, receipt, adjustment and statement
+  downloads are out of scope until the document system can serve them to cadets
+  safely. The only document a student can download is a notice addressed to
+  them (one cached file, identical for every reader; see [School notices](notices.md)).
+- **Notices have no tab and no unread state** of their own: they are reached
+  from Home, More and the notification inbox.
 - **No bill due dates** exist in the data; none is shown.
 - **Release is per exam**, not per class; release times come from the server
   clock (also in demos). Averages have known limits (collusion at exactly 5,

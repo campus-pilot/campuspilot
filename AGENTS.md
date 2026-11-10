@@ -117,6 +117,21 @@ isolation, route order and CORS scoping, the admission-id-only identity model,
 sign-in limits, issue/reset and revocation semantics, and the checklist for
 adding a cadet procedure, screen or table.
 
+## Notices
+
+Before changing anything notice-related (the `notice` / `notice_class` tables,
+the staff notice procedures in `routers/school/notice`, the Cadet notice
+procedures, notice rendering and the custom-template guide, the `notice.*`
+notification types and the notice PDF cache, the notice screens in
+`apps/management` and `apps/cadet`, or the demo seed's notices), read the
+canonical [Notices guide](docs/notices.md). It records the two independent
+audience facts (`to_staff`, `cadet_scope`), the one-way draft to published
+lifecycle and who may do what, the `notices` and `cadet` feature gates, the
+rendering rules for plain and custom-template notices with their security
+contract, the publish transaction and per-channel fan-out (including why a
+delivery log is still filling right after publication), the cached PDF, the
+Cadet visibility rule, and the checklist for extending notices.
+
 ## School feature flags
 
 Before adding a per-school feature, gating a procedure, page or navigation item

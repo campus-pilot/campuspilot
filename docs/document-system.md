@@ -449,6 +449,9 @@ marketplace designs, backend context, and permissions are complete.
 
 ## Notices
 
+[School notices](notices.md) is the canonical guide to the feature; this section
+records only how it uses the document system.
+
 `packages/api/src/routers/school/notice` renders notices through this system:
 the same restricted Handlebars instance, sanitizer, CSP wrapper and Gotenberg
 conversion. What differs is recorded here because it is easy to get wrong.
@@ -474,7 +477,10 @@ conversion. What differs is recorded here because it is easy to get wrong.
   sanitized like a school template, with `paragraphs` empty. Because every
   staff role can write one, an author's source is additionally refused when
   it uses partials or inline partials, or nests block helpers more than four
-  deep (`assertBoundedNoticeTemplate`), on save and on every render.
+  deep (`assertBoundedNoticeTemplate`), on save and on every render. What the
+  custom-template editor tells authors (variable list, starter document) is
+  owned by `notice-template-guide.ts` next to the renderer and is exhaustive
+  over `SAMPLE_NOTICE_CONTEXT`; do not copy it into an app.
 - **Which template.** A draft or unsaved preview uses the school's selected
   Notice revision, or the built-in `notice-default` design when none is
   selected (a notice never needs a selected template). Publishing pins the

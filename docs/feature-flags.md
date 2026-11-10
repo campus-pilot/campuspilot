@@ -123,6 +123,7 @@ push, WhatsApp) still run for a school without the portal.
 | Document template procedures with `documentType: 'notice'` | Disabled-feature error after the permission check. Other document types are unaffected. |
 | `listNotificationDeliveries` with a `notice` scope | Disabled-feature error. Other scopes are unaffected. |
 | Cadet `listNotices`, `getNotice`, `getNoticeDownload` | Disabled-feature error (`feature: 'notices'`); the rest of the portal keeps working. |
+| Cadet app | The Home notices block and the More row do not appear; `/notices` and `/notices/{id}` show "Notices are not available". The app reads the feature from the notice procedures' own error; there is no features read for students. |
 | `getDashboard` | `actions.createNotice` is false. |
 
 Addressing students also needs `cadet`: a notice whose `cadetScope` is not
