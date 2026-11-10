@@ -1,4 +1,5 @@
 import { db } from '@campuspilot/db';
+import { cadetSession } from '@campuspilot/db/schema/cadet';
 import { cadetPushSubscriptionTable, notificationDeliveryTable, notificationTable } from '@campuspilot/db/schema/notification';
 import { eq, inArray, isNotNull, and } from 'drizzle-orm';
 import { generateVAPIDKeys } from 'web-push';
@@ -238,6 +239,91 @@ describe('web push channel', () => {
       expect((await rowsOf(device.endpoint))[0]!.revokedAt).toBeNull();
       await signOut(second.cookie);
       expect((await rowsOf(device.endpoint))[0]!.revokedAt).toBeInstanceOf(Date);
+    });
+  });
+
+  /**
+   * Review round 2, R2B2: signing out is one of several ways a Cadet Portal
+   * session ends. The device's subscription is revoked where the session row
+   * is deleted (a trigger on `cadet_session`), so every path is covered,
+   * including ones nobody has written yet.
+   */
+  describe('a session that ends by any path stops its device', () => {
+    const CADET_AUTH_URL = `${env.BETTER_AUTH_URL}/api/cadet/auth`;
+    const post = (path: string, cookie: string, body: object = {}) =>
+      cadetAuth.handler(new Request(`${CADET_AUTH_URL}${path}`, { method: 'POST', headers: { cookie, origin: new URL(env.CADET_APP_URL).origin, 'content-type': 'application/json' }, body: JSON.stringify(body) }));
+    const rowOf = async (endpoint: string) => (await db.select().from(cadetPushSubscriptionTable).where(eq(cadetPushSubscriptionTable.endpoint, endpoint)))[0]!;
+    const sessionOf = async (cookie: string) => (await cadetAuth.api.getSession({ headers: new Headers({ cookie }) }))?.session ?? null;
+
+    /** One student signed in on a phone and a tablet, both with notifications on. */
+    async function twoDevices() {
+      const school = await createTestSchool({ features: ['cadet'] });
+      const principal = createTestClient((await createSchoolStaffSession(school.id, [{ role: 'principal', meta: null }])).session);
+      const { admission, credentials } = await createAdmissionWithLogin(principal, school.id, 'Push Student');
+      const signIn = async () => {
+        const { response, cookie } = await signInCadet(credentials);
+        expect(response.status).toBe(200);
+        const device = fakePushSubscription();
+        const client = createCadetTestClient(new Headers({ cookie }));
+        await client.subscribePush(device);
+        return { cookie, client, device };
+      };
+      return { school, principal, admission, phone: await signIn(), tablet: await signIn() };
+    }
+
+    it('revoke-sessions (sign out everywhere) stops every device of the student', async () => {
+      const { school, admission, phone, tablet } = await twoDevices();
+      expect((await post('/revoke-sessions', phone.cookie)).status).toBe(200);
+      await expect(tablet.client.getPushSubscription({ endpoint: tablet.device.endpoint })).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+      expect((await rowOf(phone.device.endpoint)).revokedAt).toBeInstanceOf(Date);
+      expect((await rowOf(tablet.device.endpoint)).revokedAt).toBeInstanceOf(Date);
+      // Nothing is pushed to either signed-out device.
+      const fetchMock = vi.fn<ChannelFetch>(async () => new Response(null, { status: 201 }));
+      await dispatchBill(school.id, admission.id, fetchMock);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('revoke-other-sessions stops the other devices and keeps the caller subscribed', async () => {
+      const { phone, tablet } = await twoDevices();
+      expect((await post('/revoke-other-sessions', phone.cookie)).status).toBe(200);
+      expect((await rowOf(tablet.device.endpoint)).revokedAt).toBeInstanceOf(Date);
+      expect((await rowOf(phone.device.endpoint)).revokedAt).toBeNull();
+      await expect(phone.client.getPushSubscription({ endpoint: phone.device.endpoint })).resolves.toEqual({ active: true });
+    });
+
+    it('revoke-session stops exactly the device of the session it names', async () => {
+      const { phone, tablet } = await twoDevices();
+      const tabletSession = await sessionOf(tablet.cookie);
+      expect((await post('/revoke-session', phone.cookie, { token: tabletSession!.token })).status).toBe(200);
+      expect((await rowOf(tablet.device.endpoint)).revokedAt).toBeInstanceOf(Date);
+      expect((await rowOf(phone.device.endpoint)).revokedAt).toBeNull();
+    });
+
+    it('a staff password reset stops every device, also one whose subscription names no session', async () => {
+      const { school, principal, admission, phone, tablet } = await twoDevices();
+      // A subscription stored before sessions were recorded.
+      await db.update(cadetPushSubscriptionTable).set({ cadetSessionId: null }).where(eq(cadetPushSubscriptionTable.endpoint, tablet.device.endpoint));
+      await principal.school.issueAdmissionCadetPassword({ schoolId: school.id, admissionId: admission.id });
+      expect((await rowOf(phone.device.endpoint)).revokedAt).toBeInstanceOf(Date);
+      expect((await rowOf(tablet.device.endpoint)).revokedAt).toBeInstanceOf(Date);
+    });
+
+    it('cleaning up an expired session stops its device, whoever deletes the row', async () => {
+      const { phone, tablet } = await twoDevices();
+      const phoneSession = await sessionOf(phone.cookie);
+      const tabletSession = await sessionOf(tablet.cookie);
+      // Better Auth deletes an expired session when its cookie is next presented.
+      await db.update(cadetSession).set({ expiresAt: new Date(Date.now() - 60_000) }).where(eq(cadetSession.id, phoneSession!.id));
+      const context = await cadetAuth.$context;
+      await context.internalAdapter.deleteSession(phoneSession!.token);
+      expect((await rowOf(phone.device.endpoint)).revokedAt).toBeInstanceOf(Date);
+      expect((await rowOf(tablet.device.endpoint)).revokedAt).toBeNull();
+      // A path that is not Better Auth at all (a maintenance job, a future feature): a plain delete.
+      await db.delete(cadetSession).where(eq(cadetSession.id, tabletSession!.id));
+      const row = await rowOf(tablet.device.endpoint);
+      expect(row.revokedAt).toBeInstanceOf(Date);
+      // The link is gone with the session; the revocation is what remains.
+      expect(row.cadetSessionId).toBeNull();
     });
   });
 });

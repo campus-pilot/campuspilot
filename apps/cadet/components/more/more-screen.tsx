@@ -59,8 +59,8 @@ export function ProfileCard({ profile }: { profile: CadetProfileDto }) {
  * the student are turned off first, which also removes the browser's own
  * push subscription. That request is best effort: what guarantees that a
  * signed-out device stops receiving the student's notifications is the
- * server, which revokes the session's subscriptions when it signs out (see
- * `revokeDevicePushOnSignOut` in `@campuspilot/auth/cadet`), also when this
+ * server, which revokes the session's subscriptions when the session row is
+ * deleted (the `cadet_session` trigger of migration 0052), also when this
  * request fails or the school's portal is switched off.
  */
 export function SignOutButton() {

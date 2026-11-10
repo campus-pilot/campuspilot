@@ -475,14 +475,18 @@ export const cadetPushSubscriptionTable = pgTable(
     auth: text("auth").notNull(),
     /**
      * The Cadet Portal session that last turned notifications on for this
-     * device. Signing that session out revokes the subscription on the
-     * server (`revokePushSubscriptionsOfSession`, run by the cadet auth
-     * instance's sign-out hook), so a signed-out device stops receiving the
-     * student's notifications even when the app's own "turn off" call
-     * never arrives. Null for subscriptions stored before this column
-     * existed and once the session row is gone (expired sessions keep their
-     * device subscribed, as before); such a row is still revoked by the
-     * app's `unsubscribePush` call and by `revokeCadetLoginAccess`.
+     * device. When that session ends, by any path, the subscription is
+     * revoked on the server: a `BEFORE DELETE` trigger on `cadet_session`
+     * (`cadet_session_revoke_push_subscriptions`, migration 0052; triggers
+     * are not part of the Drizzle schema) sets `revoked_at` before the
+     * foreign key clears this column. A signed-out device therefore stops
+     * receiving the student's notifications even when the app's own "turn
+     * off" call never arrives. Null for subscriptions stored before this
+     * column existed and for revoked rows whose session is gone; a row
+     * without a session is still revoked by the app's `unsubscribePush`
+     * call and by `revokeCadetLoginAccess`. An expired session keeps its
+     * device subscribed until its row is deleted (Better Auth deletes it
+     * when the expired cookie is next presented).
      */
     cadetSessionId: text("cadet_session_id").references(() => cadetSession.id, {
       onDelete: "set null",

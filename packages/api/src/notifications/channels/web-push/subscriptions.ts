@@ -32,8 +32,9 @@ export const MAX_ACTIVE_PUSH_SUBSCRIPTIONS = 10;
  *
  * `cadetSessionId` is the portal session doing this (null only for a caller
  * without one). It replaces any earlier session on the row: the device now
- * belongs to this sign-in, and signing it out revokes the subscription
- * ({@link revokePushSubscriptionsOfSession}).
+ * belongs to this sign-in, and the end of that session (sign-out or any
+ * other deletion of the `cadet_session` row) revokes the subscription
+ * through the database trigger of migration 0052.
  */
 export async function upsertPushSubscription(
   db: DatabaseExecutor,
