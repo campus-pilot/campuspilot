@@ -43,6 +43,13 @@ grants contains {"role": "platform.admin", "action": action} if {
   }
 }
 
+grants contains {"role": "platform.admin", "action": action} if {
+  some action in {
+    "system.data_migration.read",
+    "system.data_migration.run",
+  }
+}
+
 grants contains {
   "role": "platform.admin",
   "action": "system.oauth_client.list",

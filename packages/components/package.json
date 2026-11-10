@@ -30,6 +30,7 @@
     "@tanstack/react-form": "^1.33.2",
     "@tanstack/react-query": "^5.101.4",
     "@tanstack/react-table": "^8.21.3",
+    "libphonenumber-js": "^1.13.15",
     "lucide-react": "catalog:",
     "react": "catalog:",
     "react-markdown": "^10.1.0",

@@ -13,3 +13,6 @@ export * from "./artifact";
 export * from "./finance";
 export * from "./demo-school-job";
 export * from "./cadet";
+export * from "./data-migration";
+export * from "./notification";
+export * from "./exam-result-publication";

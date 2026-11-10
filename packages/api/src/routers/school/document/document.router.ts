@@ -32,10 +32,10 @@ import {
   deleteDocumentObject,
   documentDownloadUrl,
   persistDocumentObject,
-  readDocumentTemplate,
 } from "./document.storage";
 import { buildDocumentContexts } from "./document.context";
 import { buildFinanceDocumentContexts } from "./finance-document.context";
+import { getSelectedDocumentTemplate as getTemplate } from "./document.selected-template";
 
 const isFinanceDocument = dto.isFinanceDocumentType;
 
@@ -128,41 +128,6 @@ function page<T>(
     totalPages,
     nextCursor: createNextPageCursor(currentPage, totalPages),
   });
-}
-async function getTemplate(
-  db: Database,
-  input: { schoolId: string; documentType: dto.DocumentType },
-  revision?: string,
-) {
-  const [selected] = await db
-    .select({ artifact: artifactTable })
-    .from(schoolDocumentTemplateTable)
-    .innerJoin(
-      artifactTable,
-      and(
-        eq(artifactTable.id, schoolDocumentTemplateTable.artifactId),
-        eq(artifactTable.schoolId, input.schoolId),
-        eq(artifactTable.documentType, input.documentType),
-        eq(artifactTable.kind, "template"),
-        eq(artifactTable.status, "ready"),
-      ),
-    )
-    .where(
-      and(
-        eq(schoolDocumentTemplateTable.schoolId, input.schoolId),
-        eq(schoolDocumentTemplateTable.documentType, input.documentType),
-      ),
-    )
-    .limit(1);
-  if (!selected) throw rpcError.notFound("Configured document template");
-  if (revision && selected.artifact.id !== revision)
-    throw rpcError.conflict(
-      "The template changed. Refresh the template and preview again.",
-    );
-  return {
-    row: selected.artifact,
-    content: await readDocumentTemplate(selected.artifact.s3Key),
-  };
 }
 async function saveTemplate(
   db: Database,

@@ -10,11 +10,13 @@ export const SYSTEM_ACTIONS = {
   LIST_OAUTH_CLIENTS: 'system.oauth_client.list',
   LIST_SCHOOLS: 'system.school.list',
   PURGE_DEMO_SCHOOL: 'system.school.demo.purge',
+  READ_DATA_MIGRATIONS: 'system.data_migration.read',
   READ_DEMO_SCHOOL: 'system.school.demo.read',
   READ_DEMO_SCHOOL_CREDENTIALS: 'system.school.demo.credentials.read',
   READ_PLATFORM_STATS: 'system.platform.stats.read',
   READ_SCHOOL: 'system.school.read',
   READ_SCHOOL_STATS: 'system.school.stats.read',
+  RUN_DATA_MIGRATION: 'system.data_migration.run',
   UPDATE_OAUTH_CLIENT: 'system.oauth_client.update',
   UPDATE_SCHOOL: 'system.school.update',
 } as const;

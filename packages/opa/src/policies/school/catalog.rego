@@ -476,3 +476,19 @@ actions contains {"id": "school.document.generate", "key": "GENERATE_DOCUMENTS",
 actions contains {"id": "school.document.artifacts.read", "key": "READ_DOCUMENT_ARTIFACTS", "resourceKind": "school"} if { true }
 
 actions contains {"id": "school.document.artifacts.delete", "key": "DELETE_DOCUMENT_ARTIFACTS", "resourceKind": "school"} if { true }
+
+# Notifications. Resending a failed delivery (delivery log) is school-wide.
+# An examination's students are notified by its first Cadet release, which
+# needs only the release permission (D-43); sending one student's result is
+# class-scoped (class/catalog.rego) so teacher assignments can restrict it.
+actions contains {"id": "school.notification.send", "key": "SEND_NOTIFICATIONS", "resourceKind": "school"} if { true }
+
+# Notifications (Phase 7): the staff delivery log (per-channel status and
+# skip/failure reasons, never message content). Resending a failed delivery
+# uses school.notification.send.
+actions contains {"id": "school.notification.log.read", "key": "READ_NOTIFICATION_LOG", "resourceKind": "school"} if { true }
+# Who is told about failed WhatsApp deliveries (D-38), by topic: finance
+# messages (bills, receipts) and result messages are separate actions, so
+# each topic's audience is its own grant.
+actions contains {"id": "school.notification.failure.finance.receive", "key": "RECEIVE_FINANCE_NOTIFICATION_FAILURES", "resourceKind": "school"} if { true }
+actions contains {"id": "school.notification.failure.results.receive", "key": "RECEIVE_RESULT_NOTIFICATION_FAILURES", "resourceKind": "school"} if { true }

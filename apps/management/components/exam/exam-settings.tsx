@@ -6,6 +6,7 @@ import { orpc } from '@/lib/orpc';
 import { LoadingExam, Notice, ReadError } from './exam-common';
 import { ExamActions } from './exam-lifecycle';
 import { schoolPermission, type ExamScope } from './exam-model';
+import { NotificationDeliveryLogSection } from '@/components/notifications/notification-delivery-log';
 
 export function ExamSettings({ scope, placement = 'settings' }: {
   scope: ExamScope; placement?: 'settings' | 'navbar';
@@ -43,6 +44,11 @@ function SettingsData({ scope, placement }: {
       <h2 className="text-lg font-semibold">Settings</h2>
       {!session.data.isActive && <Notice>Historical session · Read-only</Notice>}
       {controls}
+      <NotificationDeliveryLogSection
+        schoolId={scope.schoolId}
+        scope={{ kind: 'exam', sessionId: scope.sessionId, examSlug: scope.examSlug }}
+        title="Result notifications"
+      />
     </div>
   );
 }

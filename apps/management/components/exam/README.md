@@ -23,6 +23,16 @@ A persistent AppShellAlert links to the working-days editor when
 attendance is enabled but not configured. Shared compact control sizes are used
 without feature height overrides. Old subject-first URLs redirect to the new class/student routes.
 
+Students are notified of an examination's results by its first release to the
+Cadet Portal (D-43): the release confirmation (`exam-lifecycle.tsx`) shows
+`ReleaseNotificationPreview`, the per-channel forecast (copies to send, skips by
+reason) read when it opens, or that nobody is notified again after an earlier
+release. There is no separate publish action. On a student page, "Send result"
+(class-scoped `SEND_RESULT_NOTIFICATION`, so teachers only for assigned classes)
+in the overflow is enabled once the examination has started and opens a
+confirmation with the same forecast; the server snapshots its own at press time.
+Settings lists the examination's deliveries under "Result notifications".
+
 The student workspace previews all subject scores plus one shared attendance/activity
 assessment. Opening a student URL during an active examination goes directly to
 the result form when the user has write access (and revision access if any saved

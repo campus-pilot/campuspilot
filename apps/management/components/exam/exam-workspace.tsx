@@ -3,11 +3,13 @@ import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { useParams, usePathname, useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
+import { useForm } from '@tanstack/react-form';
 import {
   ClipboardCheck,
   FileDown,
   Files,
   MoreVertical,
+  Send,
 } from 'lucide-react';
 import { Badge } from '@campuspilot/ui/components/badge';
 import { Button } from '@campuspilot/ui/components/button';
@@ -16,12 +18,13 @@ import {
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@campuspilot/ui/components/dropdown-menu';
 import { Tabs, TabsList, TabsTrigger } from '@campuspilot/ui/components/tabs';
 import { ExamNavigationLayout } from '@campuspilot/components/exam/exam-navigation-layout';
 import type { ExamContextDto } from '@campuspilot/api/routers/school/exam/exam.dto';
-import { SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
+import { CLASS_ACTIONS, SCHOOL_ACTIONS, type PermissionCheck } from '@campuspilot/api/routers/authorization/authorization.dto';
 import { RequirePermissions } from '@/components/require-permissions';
 import {
   documentWorkspaceHref,
@@ -38,6 +41,7 @@ import {
 } from './exam-model';
 import { ExamActions } from './exam-lifecycle';
 import { ExamTimetableMenu } from './exam-timetable';
+import { SendStudentResultDialog } from './exam-result-notifications';
 import { confirmNavigation } from '@/lib/navigation-guard';
 
 export function ExamWorkspace({
@@ -160,24 +164,45 @@ function WorkspaceActions(
             reportCardsEnabled={canCreateExamReportCards(
               props.overview.status,
             )}
+            examStatus={props.overview.status}
           />
         ))}
     </>
   );
 }
 
-/** Keeps admit-card and result permissions independent while sharing one menu. */
+/**
+ * The result notification action of the page, if any: "Send result" on a
+ * student page (class-scoped, so a teacher only for assigned classes). The
+ * whole examination is notified by its release to the Cadet Portal (D-43),
+ * so the examination root and class pages have none.
+ */
+function resultNotificationPermission(scope: ExamScope, classId?: string, studentId?: string): PermissionCheck | null {
+  if (classId && studentId)
+    return { action: CLASS_ACTIONS.SEND_RESULT_NOTIFICATION, resource: { kind: 'class', schoolId: scope.schoolId, classId } } as PermissionCheck;
+  return null;
+}
+
+/**
+ * Keeps admit-card, result-document and result-notification permissions
+ * independent while sharing one menu. Send result is enabled once the
+ * examination has started.
+ */
 function ExamDocumentsMenu({
   scope,
   classId,
   studentId,
   reportCardsEnabled,
+  examStatus,
 }: {
   scope: ExamScope;
   classId?: string;
   studentId?: string;
   reportCardsEnabled: boolean;
+  examStatus: 'ready' | 'active' | 'completed' | null;
 }) {
+  const ui = useForm({ defaultValues: { dialog: '' as '' | 'send' } });
+  const notificationPermission = resultNotificationPermission(scope, classId, studentId);
   const reportCardHref = documentWorkspaceHref({
     scope,
     type: 'report_card',
@@ -205,10 +230,11 @@ function ExamDocumentsMenu({
     scope.schoolId,
     'report_card',
   );
+  const notificationPermissions = notificationPermission ? [notificationPermission] : [];
   const permissions = useQuery(
     orpc.authorization.checkPermissions.queryOptions({
       input: {
-        permissions: [...admitCardPermissions, ...reportCardPermissions],
+        permissions: [...admitCardPermissions, ...reportCardPermissions, ...notificationPermissions],
       },
     }),
   );
@@ -216,17 +242,19 @@ function ExamDocumentsMenu({
     !permissions.data ||
     permissions.isError ||
     permissions.data.results.length !==
-      admitCardPermissions.length + reportCardPermissions.length
+      admitCardPermissions.length + reportCardPermissions.length + notificationPermissions.length
   )
     return null;
   const canDownloadAdmitCards = permissions.data.results
     .slice(0, admitCardPermissions.length)
     .every(Boolean);
   const canCreateResults = permissions.data.results
-    .slice(admitCardPermissions.length)
+    .slice(admitCardPermissions.length, admitCardPermissions.length + reportCardPermissions.length)
     .every(Boolean);
-  if (!canDownloadAdmitCards && !canCreateResults) return null;
+  const canSendResult = notificationPermissions.length > 0 && permissions.data.results.slice(-1)[0] === true;
+  if (!canDownloadAdmitCards && !canCreateResults && !canSendResult) return null;
   return (
+    <>
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button
@@ -263,8 +291,30 @@ function ExamDocumentsMenu({
               </DropdownMenuItem>
             ))}
         </DropdownMenuGroup>
+        {canSendResult && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuGroup>
+              <DropdownMenuItem
+                disabled={examStatus === null || examStatus === 'ready'}
+                onSelect={() => ui.setFieldValue('dialog', 'send')}
+              >
+                <Send aria-hidden />
+                Send result
+              </DropdownMenuItem>
+            </DropdownMenuGroup>
+          </>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
+    <ui.Subscribe selector={(state) => state.values.dialog}>
+      {(dialog) =>
+        dialog === 'send' && classId && studentId ? (
+          <SendStudentResultDialog scope={{ ...scope, classId, studentId }} onClose={() => ui.setFieldValue('dialog', '')} />
+        ) : null
+      }
+    </ui.Subscribe>
+    </>
   );
 }
 function WorkspaceLayout({

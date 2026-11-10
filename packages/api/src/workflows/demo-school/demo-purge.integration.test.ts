@@ -12,6 +12,7 @@ import {
   cadetUser,
 } from '@campuspilot/db/schema/cadet';
 import { demoSchoolPurgeTable } from '@campuspilot/db/schema/demo-school-job';
+import { cadetPushSubscriptionTable } from '@campuspilot/db/schema/notification';
 import { schoolTable } from '@campuspilot/db/schema/school';
 import { eq, inArray, sql } from 'drizzle-orm';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -20,8 +21,10 @@ import { connectCadetMcp, signInCadet } from '../../../test/cadet';
 import { createCadetOAuthContext } from '../../cadet/context';
 import { deleteDemoSchoolData, revokeDemoSchoolSessions, revokeManifestSessions } from './purge-workflow';
 
+import { examResultPublicationTable } from '@campuspilot/db/schema/exam-result-publication';
 import { createTestUser } from '../../../test/fixtures';
 import { retryFinanceConflict } from '../../../test/finance/assertions';
+import { billIssuedData, billingRunPostedData, emitAndDispatch } from '../../../test/notifications';
 import { createFinanceIdempotencyKey } from '../../../test/finance/factories';
 import { createFinanceScenario, type FinanceScenario } from '../../../test/finance/scenario';
 
@@ -95,6 +98,19 @@ describe('purge_demo_school and the demo-only finance exception', () => {
     const demoUser = await createTestUser({ name: 'Demo teacher' });
     await db.update(user).set({ demoSchoolId: demo.school.id }).where(eq(user.id, demoUser.id));
     const principalId = demo.actors.principal.session.user.id;
+    // Inbox rows and their delivery rows for a student and a staff member.
+    await emitAndDispatch({ type: 'bill.issued', data: billIssuedData(demo.admission.id), schoolId: demo.school.id, recipients: { kind: 'admissions', admissionIds: [demo.admission.id] } });
+    await emitAndDispatch({ type: 'billing.run_posted', data: billingRunPostedData(), schoolId: demo.school.id, recipients: { kind: 'staff_users', userIds: [principalId] } });
+
+    await db.insert(examResultPublicationTable).values({
+      schoolId: demo.school.id,
+      sessionId: demo.activeSession.id,
+      examSlug: 'term-1',
+      examName: 'Term 1',
+      publishedBy: principalId,
+      admissionIds: [demo.admission.id],
+      snapshot: { recipientCount: 1, channels: {} },
+    });
     await db.insert(examStudentRemarkTable).values({
       schoolId: demo.school.id,
       sessionId: demo.activeSession.id,
@@ -107,7 +123,8 @@ describe('purge_demo_school and the demo-only finance exception', () => {
     const result = await db.execute<{ counts: Record<string, number> }>(
       sql`SELECT purge_demo_school(${demo.school.id}) AS counts`,
     );
-    expect(result.rows[0]!.counts).toMatchObject({ finance_payment: 1, finance_bill: 1, exam_student_remark: 1, user: 1, school_member: expect.any(Number) });
+    // Events: the two emitted above plus the bill's and the payment's own (Phase 5); only the two above were fanned out.
+    expect(result.rows[0]!.counts).toMatchObject({ finance_payment: 1, finance_bill: 1, exam_student_remark: 1, user: 1, school_member: expect.any(Number), notification_event: 4, notification: 2, notification_delivery: 2, exam_result_publication: 1 });
 
     const remaining = await rowsReferencingSchool(demo.school.id);
     expect(Object.values(remaining).every((count) => count === 0)).toBe(true);
@@ -127,6 +144,7 @@ describe('purge_demo_school and the demo-only finance exception', () => {
     expect(browser.response.status).toBe(200);
     const mcp = await connectCadetMcp(issued);
     const [login] = await db.select({ id: cadetUser.id }).from(cadetUser).where(eq(cadetUser.admissionId, demo.admission.id));
+    await db.insert(cadetPushSubscriptionTable).values({ cadetUserId: login!.id, endpoint: 'https://fcm.googleapis.com/fcm/send/demo', p256dh: 'p', auth: 'a' });
     // A real school's cadet login must survive the demo purge.
     const realIssued = await real.actors.principal.client.school.issueAdmissionCadetPassword({ schoolId: real.school.id, admissionId: real.admission.id });
 
@@ -136,7 +154,7 @@ describe('purge_demo_school and the demo-only finance exception', () => {
     await revokeDemoSchoolSessions(demo.school.id);
     const deleted = await deleteDemoSchoolData(demo.school.id, 1);
     await revokeManifestSessions(demo.school.id);
-    expect(deleted.deletedRows).toMatchObject({ cadet_user: 1, cadet_account: 1 });
+    expect(deleted.deletedRows).toMatchObject({ cadet_user: 1, cadet_account: 1, cadet_push_subscription: 1 });
 
     const loginIds = [login!.id];
     const remaining = await Promise.all([
@@ -146,8 +164,9 @@ describe('purge_demo_school and the demo-only finance exception', () => {
       db.select().from(cadetOauthConsent).where(inArray(cadetOauthConsent.userId, loginIds)),
       db.select().from(cadetOauthRefreshToken).where(inArray(cadetOauthRefreshToken.userId, loginIds)),
       db.select().from(cadetOauthAccessToken).where(inArray(cadetOauthAccessToken.userId, loginIds)),
+      db.select().from(cadetPushSubscriptionTable).where(inArray(cadetPushSubscriptionTable.cadetUserId, loginIds)),
     ]);
-    expect(remaining).toEqual([[], [], [], [], [], []]);
+    expect(remaining).toEqual([[], [], [], [], [], [], []]);
     const [manifest] = await db.select().from(demoSchoolPurgeTable).where(eq(demoSchoolPurgeTable.schoolId, demo.school.id));
     expect(manifest?.cadetUserIds).toEqual(loginIds);
 

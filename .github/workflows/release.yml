@@ -186,6 +186,7 @@ jobs:
             image: ghcr.io/campus-pilot/campuspilot-plus-cadet
             build_args: |
               NEXT_PUBLIC_SERVER_URL=${{ vars.NEXT_PUBLIC_SERVER_URL }}
+              NEXT_PUBLIC_VAPID_PUBLIC_KEY=${{ vars.NEXT_PUBLIC_VAPID_PUBLIC_KEY }}
           - name: web
             file: apps/web/Dockerfile
             image: ghcr.io/campus-pilot/campuspilot-plus-web

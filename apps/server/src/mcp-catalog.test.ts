@@ -86,6 +86,16 @@ const HIDDEN_TOOLS = [
   'systemAdmin.rotateOAuthClientSecret',
   'systemAdmin.deleteOAuthClient',
   'systemAdmin.setOAuthClientDisabled',
+  // The staff notification inbox is app chrome with no agent value.
+  'school.listNotifications',
+  'school.getUnreadNotificationCount',
+  'school.markNotificationsRead',
+  'school.markAllNotificationsRead',
+  'school.dismissNotifications',
+  // Data migrations change every school's data: human platform-admin actions.
+  'systemAdmin.listDataMigrations',
+  'systemAdmin.listDataMigrationSkippedItems',
+  'systemAdmin.requestDataMigrationRun',
   // Demo provisioning, credentials and purge stay human admin actions.
   'systemAdmin.listDemoClassCatalogue',
   'systemAdmin.createDemoSchool',
@@ -201,8 +211,10 @@ describe('catalog metadata', () => {
     expect(catalog.core.map(({ name }) => name).sort()).toEqual(CORE_TOOLS);
     expect(catalog.core).toHaveLength(36);
     // 85 on main, plus releaseExamToCadet, withdrawExamFromCadet,
-    // get/saveStudentExamRemark and get/updateCadetPortalSettings.
-    expect(catalog.advanced).toHaveLength(91);
+    // get/saveStudentExamRemark and get/updateCadetPortalSettings (+6);
+    // +4 result notification tools (release preview, release batch read,
+    // single preview/send) and +2 delivery log tools (list, resend).
+    expect(catalog.advanced).toHaveLength(97);
   });
 });
 

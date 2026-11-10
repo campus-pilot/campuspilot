@@ -50,6 +50,7 @@ import {
 } from "./finance-ui";
 import { invalidateFinanceReadModels } from "./finance-invalidation";
 import { FinanceDocumentAction } from "./finance-document-action";
+import { NotificationDeliveryLogSection } from "@/components/notifications/notification-delivery-log";
 
 const reversalSchema = z.object({
   reason: z
@@ -534,6 +535,11 @@ export function BillingRunDetail({
       />
       <BillingRunSummary run={run} />
       <PostedBills run={run} onPageChange={setPage} />
+      <NotificationDeliveryLogSection
+        schoolId={schoolId}
+        scope={{ kind: 'bill_run', billRunId }}
+        title="Bill notifications"
+      />
       {reversalOpen ? (
         <RunReversalDialog
           schoolId={schoolId}

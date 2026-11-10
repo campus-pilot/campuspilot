@@ -1,3 +1,4 @@
+import { toE164PhoneNumber } from '@campuspilot/db/phone';
 import { describe, expect, it } from 'vitest';
 
 import { billingMonths, daysBetween, examStateAt } from './dates';
@@ -117,6 +118,16 @@ describe('demo seed data and plan', () => {
       expect(item.students.map((student) => student.name)).toEqual([...item.students.map((student) => student.name)].sort((a, b) => a.localeCompare(b)));
     }
     expect(students.map((student) => student.admissionNo)).toEqual(students.map((_, index) => `2026${String(index + 1).padStart(3, '0')}`));
+  });
+
+  it('plans phone numbers that pass phone validation as Indian numbers outside the mobile ranges', () => {
+    for (const seed of ['s', 'other-seed', 'third']) {
+      const plan = buildDemoPlan({ input, seed, asOf: new Date('2026-11-06T06:00:00Z'), school });
+      for (const student of plan.classes.flatMap((item) => item.students)) {
+        expect(toE164PhoneNumber(student.phoneNo)).toBe(`+91${student.phoneNo}`);
+        expect(student.phoneNo).toMatch(/^5/);
+      }
+    }
   });
 
   it('makes slugs unique with numeric suffixes', async () => {

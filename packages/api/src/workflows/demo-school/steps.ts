@@ -267,6 +267,12 @@ export async function seedClassStudents(
         admissionClassId: input.classId,
         address: student.address,
         phoneNo: student.phoneNo,
+        // Demo guardians "confirmed" their number, but no consent is ever
+        // recorded: a demo must not be able to send WhatsApp messages to
+        // whoever owns a fake number (D-12 enforcement is still to come).
+        whatsappSameAsPhone: true,
+        whatsappVerified: true,
+        whatsappConsent: false,
         dob: student.dob,
         fatherName: student.fatherName,
         motherName: student.motherName,

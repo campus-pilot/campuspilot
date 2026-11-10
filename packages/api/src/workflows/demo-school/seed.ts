@@ -155,7 +155,13 @@ const peopleSeedSchema = z.object({
   localities: z.array(z.string().min(1)).min(1),
   sampleCity: z.string().min(1),
   postalCodePrefix: z.string().regex(/^\d{3}$/),
-  phonePrefix: z.string().regex(/^0+$/),
+  /**
+   * First five digits of every demo phone number (the rest is random). Demo
+   * numbers must pass phone validation (E.164, read as Indian numbers), so
+   * the old all-zero prefix no longer works; `55555` is outside the Indian
+   * mobile ranges (6–9), so a demo number cannot reach a real WhatsApp user.
+   */
+  phonePrefix: z.string().regex(/^5\d{4}$/),
 });
 
 const staffRoleSchema = z.object({

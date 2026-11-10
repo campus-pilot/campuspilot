@@ -331,3 +331,22 @@ multi-session scenarios and the complete actor matrix. Tests use fresh schools
 and admissions rather than a shared ledger, exercise routers rather than mocked
 services, distinguish authorization denial from tenant-ID not-found behavior,
 and verify persisted state after every mutation.
+
+## Notifications
+
+Posting commands emit notification outbox events in their own transaction
+(`packages/api/src/notifications/emitters/finance.ts`), so a notification
+exists if and only if the posted fact does:
+
+- a billing run: one `bill.issued` per bill (to its admission, key
+  `bill:<billId>`) plus `billing.run_posted` to the staff member who posted it
+  (key `billing-run:<runId>`);
+- a manual bill: one `bill.issued`;
+- a payment (with or without its discount): one `payment.received` (key
+  `payment:<paymentId>`).
+
+An idempotent replay returns the existing fact before any write, and the keys
+are the posted facts' IDs, so nothing is notified twice. Reversals, refunds and
+adjustments emit nothing (D-11); a corrected bill or payment is a new fact and
+is notified as such. Events are handed to the worker after commit (bounded
+concurrency); the API's 30 s sweep sends whatever was not handed over.

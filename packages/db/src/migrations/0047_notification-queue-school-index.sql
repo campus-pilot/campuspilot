@@ -1,0 +1,1 @@
+CREATE INDEX "notification_delivery_queue_school_idx" ON "notification_delivery" USING btree ("channel","send_lane","send_priority","school_id","next_attempt_at","id") WHERE "notification_delivery"."status" = 'owed';

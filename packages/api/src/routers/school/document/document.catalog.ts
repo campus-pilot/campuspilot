@@ -21,7 +21,8 @@ const SAMPLE_DOCUMENT_SOURCE = {
     fatherName: "Raj Sharma",
     motherName: "Meera Sharma",
     dob: "2013-06-15",
-    phoneNo: "9876543210",
+    phoneNo: "+91 98765 43210",
+    whatsappNo: "+91 98765 43210",
     address: "School Road, Bengaluru",
     photoUrl: null,
   },
@@ -116,7 +117,7 @@ const SAMPLE_DOCUMENT_SOURCE = {
 /** The sample carries the same derived report mode columns as live contexts. */
 export const SAMPLE_DOCUMENT_CONTEXT = withReportModeLayout(SAMPLE_DOCUMENT_SOURCE);
 export const DOCUMENT_CONTEXT_HELP = `All documents: school.{name,location,registrationNo,logoUrl}, session.{startYear,endYear}, generatedAt.
-Student documents: student.{name,admissionNo,rollNo,className,sectionName,dob,fatherName,motherName,address,phoneNo,photoUrl}.
+Student documents: student.{name,admissionNo,rollNo,className,sectionName,dob,fatherName,motherName,address,phoneNo,whatsappNo,photoUrl}; phoneNo and whatsappNo are display-formatted with the country code (+91 98765 43210), whatsappNo is null when there is none.
 Examination documents: exam.{name,slug,order,status,startedAt,completedAt}; unknown historical lifecycle/timestamps are null.
 Report cards: subjects[] with slug,name,total,totalMarks,percentage,grade,marks[modeSlug],modeConfig[modeSlug].{name,percentage,maxMarks}, modeCells[] aligned with modeColumns, each {slug,applicable,mark,maxMarks} (applicable is false and mark/maxMarks null when the subject has no such mode); modeColumns[] is the union of every subject's modes ordered by name then slug, each {slug,name,maxMarks} where maxMarks is null unless every subject with the mode shares one maximum. Build mode-mark tables from modeColumns and subjects[].modeCells, never from one subject's modeConfig; grandTotal,grandMaxMarks,overallPercentage,overallGrade; gradingScale[gradeKey].{label,minScore}, sorted highest threshold first.
 Exam-wide assessment: attendanceEnabled is the session configuration flag; attendance is nullable or {daysAttended,totalWorkingDays,percentage}; coScholastics[areaSlug].{areaName,grade} is nullable; coScholasticAreas[areaSlug].{name} holds configured definitions; assessmentApproved is true/false/null. Missing values stay null; zero attendance/marks remain zero. Shared values come only from the approved student exam assessment and exam working-day settings. Never infer shared values from legacy subject metadata.

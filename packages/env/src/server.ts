@@ -6,6 +6,8 @@ import { ASSISTANT_DELEGATION_ENV_SHAPE } from './server/assistant.env';
 import { AUTH_ENV_SHAPE } from './server/auth.env';
 import { S3_ENV_SHAPE } from './server/s3.env';
 import { requireWorkerControlSecretInProduction, SERVICES_ENV_SHAPE } from './server/services.env';
+import { requireWebPushConfigWhenEnabled, WEB_PUSH_ENV_SHAPE } from './server/web-push.env';
+import { requireSafeWhatsAppGraphBaseUrl, requireWhatsAppConfigWhenEnabled, WHATSAPP_ENV_SHAPE } from './server/whatsapp.env';
 
 export const env = createEnv({
   server: {
@@ -22,8 +24,16 @@ export const env = createEnv({
     ...S3_ENV_SHAPE,
     ...SERVICES_ENV_SHAPE,
     ...ASSISTANT_DELEGATION_ENV_SHAPE,
+    ...WEB_PUSH_ENV_SHAPE,
+    ...WHATSAPP_ENV_SHAPE,
   },
-  createFinalSchema: (shape) => z.object(shape).superRefine(requireWorkerControlSecretInProduction),
+  createFinalSchema: (shape) =>
+    z.object(shape).superRefine((value, context) => {
+      requireWorkerControlSecretInProduction(value, context);
+      requireWebPushConfigWhenEnabled(value, context);
+      requireWhatsAppConfigWhenEnabled(value, context);
+      requireSafeWhatsAppGraphBaseUrl(value, context);
+    }),
   runtimeEnv: process.env,
   skipValidation: !!process.env.SKIP_ENV_VALIDATION,
   emptyStringAsUndefined: true,

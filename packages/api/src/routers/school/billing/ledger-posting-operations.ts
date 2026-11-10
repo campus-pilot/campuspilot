@@ -15,6 +15,8 @@ import { classTable, sectionTable } from "@campuspilot/db/schema/class";
 import { and, eq, inArray } from "drizzle-orm";
 
 import { isRetryableTransactionError, rpcError } from "../../../errors";
+import { notifyPaymentRecorded } from "../../../notifications/emitters/finance";
+import { handOffNotificationEvents } from "../../../notifications/notification.outbox";
 import { lockFinanceAdmissionAccount } from "./account-lock";
 import { billSettlementMap } from "./ledger-read";
 import { appendFinanceLedgerEntry } from "./ledger-posting";
@@ -106,9 +108,14 @@ function paymentTransport(value: NonNullable<Awaited<ReturnType<typeof readPayme
   return { ...value.payment, amountMinor: value.payment.amountMinor.toString() };
 }
 
-/** Posts a cash receipt as an admission-level credit without assigning it to any bill. */
+/**
+ * Posts a cash receipt as an admission-level credit without assigning it to
+ * any bill, with its `payment.received` notification event (handed over
+ * after commit). A replayed command returns the existing payment before any
+ * write and emits nothing, so a payment is notified once.
+ */
 export async function recordPayment(db: Database, command: RecordPaymentCommand, recordedBy: string) {
-  return runSerializable(db, async (transaction) => {
+  const { value, notificationEventIds } = await runSerializable(db, async (transaction) => {
     const session = await lockSession(transaction, command.schoolId, command.sessionId);
     await lockFinanceAdmissionAccount(transaction, command.schoolId, command.admissionId);
     const commandSnapshot = paymentCommandSnapshot(command);
@@ -116,7 +123,7 @@ export async function recordPayment(db: Database, command: RecordPaymentCommand,
     const existing = await readPaymentByKey(transaction, command.schoolId, command.idempotencyKey);
     if (existing) {
       if (existing.payment.commandHash !== commandHash) throw rpcError.conflict("This payment idempotency key was already used with a different payload.");
-      return paymentTransport(existing);
+      return { value: paymentTransport(existing), notificationEventIds: [] as string[] };
     }
     const [identity] = await transaction
       .select({
@@ -184,8 +191,15 @@ export async function recordPayment(db: Database, command: RecordPaymentCommand,
     }
     const created = await readPaymentByKey(transaction, command.schoolId, command.idempotencyKey);
     if (!created) throw new Error("Payment could not be read after posting");
-    return paymentTransport(created);
+    const notificationEventIds = await notifyPaymentRecorded(
+      transaction,
+      { ...payment, studentName: identity.admissionName },
+      recordedBy,
+    );
+    return { value: paymentTransport(created), notificationEventIds };
   });
+  handOffNotificationEvents(notificationEventIds);
+  return value;
 }
 
 type RecordAdjustmentCommand = {

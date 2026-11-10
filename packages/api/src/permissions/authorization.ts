@@ -1,4 +1,7 @@
+import type { DatabaseExecutor } from '@campuspilot/db';
+import { schoolMemberTable } from '@campuspilot/db/schema/school-member';
 import { schoolUserRoleTable } from '@campuspilot/db/schema/school-user-role';
+import type { SchoolAction } from '@campuspilot/opa/policies/school';
 import {
   isAuthorized,
   type AuthorizationAction,
@@ -119,4 +122,44 @@ export async function checkPermissions(
   } catch (error) {
     throw rpcError.internal(error);
   }
+}
+
+/**
+ * Members of a school whose school role assignments are granted `action`
+ * on that school, decided by OPA per member exactly as for their own
+ * requests (platform roles are not considered: a school action concerns
+ * the school's staff). Used where the system addresses "whoever holds this
+ * grant" rather than a fixed role, so grants stay the only role list.
+ * Members without any role assignment are never allowed.
+ */
+export async function schoolMembersWithPermission(
+  db: DatabaseExecutor,
+  schoolId: string,
+  action: SchoolAction,
+): Promise<string[]> {
+  const rows = await db
+    .select({ userId: schoolUserRoleTable.userId, role: schoolUserRoleTable.role, meta: schoolUserRoleTable.meta })
+    .from(schoolUserRoleTable)
+    .innerJoin(
+      schoolMemberTable,
+      and(eq(schoolMemberTable.schoolId, schoolUserRoleTable.schoolId), eq(schoolMemberTable.userId, schoolUserRoleTable.userId)),
+    )
+    .where(eq(schoolUserRoleTable.schoolId, schoolId));
+  const assignmentsByUser = new Map<string, RoleAssignment[]>();
+  for (const row of rows) {
+    const assignments = assignmentsByUser.get(row.userId) ?? [];
+    assignments.push({ role: `school.${row.role}` as const, scope: { kind: 'school', schoolId }, meta: row.meta });
+    assignmentsByUser.set(row.userId, assignments);
+  }
+  const users = [...assignmentsByUser.keys()].sort();
+  const decisions = await Promise.all(
+    users.map((userId) =>
+      isAuthorized({
+        action,
+        resource: { kind: 'school', schoolId },
+        subject: { userId, roleAssignments: assignmentsByUser.get(userId)! },
+      } as AuthorizationInput),
+    ),
+  );
+  return users.filter((_, index) => decisions[index]);
 }

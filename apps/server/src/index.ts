@@ -7,6 +7,12 @@ import { db } from '@campuspilot/db';
 import { runMigrations } from '@campuspilot/db/migrate';
 import { env } from '@campuspilot/env/server';
 import { sweepDemoSchoolOutbox } from '@campuspilot/api/routers/system-admin/demo-school/demo-school.outbox';
+import { sweepDataMigrationOutbox } from '@campuspilot/api/data-migrations/data-migration.outbox';
+import { DATA_MIGRATIONS } from '@campuspilot/api/data-migrations/registry';
+import { sweepNotificationOutbox } from '@campuspilot/api/notifications/notification.outbox';
+import { sweepNotificationRetention } from '@campuspilot/api/notifications/retention';
+import { sweepResultPublications } from '@campuspilot/api/notifications/emitters/results';
+import { sweepWhatsAppFailureAlerts } from '@campuspilot/api/notifications/failure-alerts';
 
 import { app, cadetMcpCatalog, cadetMcpHandler, mcpCatalog, mcpHandler } from './http';
 import { log } from './log';
@@ -41,6 +47,57 @@ async function sweepDemoOutbox() {
 }
 
 /**
+ * One data migration sweep. It registers an apply run for each migration in
+ * `register` that needs one and returns those still without one (a dry run
+ * was active); the run is handed to the worker and the server never waits
+ * for it (D-36), so the code must tolerate rows a migration has not reached
+ * yet.
+ */
+async function sweepDataMigrations(register: readonly string[]) {
+  const result = await sweepDataMigrationOutbox({ register });
+  if (Object.values(result.counts).some((value) => value > 0)) log.info(result.counts, 'data-migration.outbox.ok');
+  return result.awaitingRegistration;
+}
+
+/**
+ * One notification outbox sweep: re-sends events whose hand-over after
+ * commit failed or never happened, and fails fan-outs Restate paused or
+ * ended. Requests never wait for it.
+ */
+async function sweepNotifications() {
+  const result = await sweepNotificationOutbox();
+  if (Object.values(result).some((value) => value > 0)) log.info(result, 'notification.outbox.ok');
+}
+
+/** Finishes result publications whose deliveries settled (publisher notified once). */
+async function sweepPublications() {
+  const publications = await sweepResultPublications();
+  if (publications.finished > 0) log.info(publications, 'notification.results.sweep.ok');
+}
+
+/**
+ * The sweeps of the chained 30 s loop, in order. Each runs in isolation: a
+ * failing sweep (for example Restate unreachable) is logged under its own
+ * error message and never keeps the later, database-only sweeps from running.
+ */
+const OUTBOX_SWEEPS: ReadonlyArray<{ errorMessage: string; run: () => Promise<void> }> = [
+  { errorMessage: 'demo-school.outbox.error', run: sweepDemoOutbox },
+  { errorMessage: 'notification.outbox.error', run: sweepNotifications },
+  { errorMessage: 'notification.results.sweep.error', run: sweepPublications },
+  // Reports failed WhatsApp deliveries to staff granted to receive them (D-30).
+  { errorMessage: 'notification.failure-alerts.error', run: async () => { await sweepWhatsAppFailureAlerts(); } },
+];
+
+/** How often old notifications are deleted (see `@campuspilot/api/notifications/retention`). */
+const NOTIFICATION_RETENTION_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
+/** One retention pass; idempotent, so concurrent instances are safe. */
+async function removeExpiredNotifications() {
+  const result = await sweepNotificationRetention(db);
+  log.info(result, 'notification.retention.ok');
+}
+
+/**
  * Removes dynamically registered OAuth clients that never got a grant, for
  * the staff and the cadet authorization servers.
  */
@@ -68,16 +125,38 @@ async function main() {
     });
   }, DCR_CLEANUP_INTERVAL_MS);
   dcrCleanup.unref();
+  // Notification retention: once after boot (not awaited), then daily.
+  void removeExpiredNotifications().catch((err) => {
+    log.error({ err }, 'notification.retention.error');
+  });
+  const notificationRetention = setInterval(() => {
+    void removeExpiredNotifications().catch((err) => {
+      log.error({ err }, 'notification.retention.error');
+    });
+  }, NOTIFICATION_RETENTION_INTERVAL_MS);
+  notificationRetention.unref();
   // Chained, not setInterval: the next sweep is scheduled only after the
   // previous one finished, so slow sweeps never overlap on this instance.
-  // Across replicas, the sweep claims rows with FOR UPDATE SKIP LOCKED.
+  // Across replicas, every write of a sweep is conditional, so overlapping
+  // sweeps on two instances change nothing twice.
   let demoOutbox: NodeJS.Timeout | undefined;
   let stopped = false;
+  // Every data migration is registered on the first sweep after boot; one
+  // whose registration was blocked (an admin's dry run was active) is retried
+  // on every sweep until it has an apply run. A failed sweep retries the same set.
+  let dataMigrationsToRegister: readonly string[] = DATA_MIGRATIONS.map((migration) => migration.id);
   const sweepOutbox = async () => {
     try {
-      await sweepDemoOutbox();
+      dataMigrationsToRegister = await sweepDataMigrations(dataMigrationsToRegister);
     } catch (err) {
-      log.error({ err }, 'demo-school.outbox.error');
+      log.error({ err }, 'data-migration.outbox.error');
+    }
+    for (const sweep of OUTBOX_SWEEPS) {
+      try {
+        await sweep.run();
+      } catch (err) {
+        log.error({ err }, sweep.errorMessage);
+      }
     }
     if (stopped) return;
     demoOutbox = setTimeout(() => void sweepOutbox(), DEMO_OUTBOX_INTERVAL_MS);
@@ -101,6 +180,7 @@ async function main() {
   const shutdown = (signal: string) => {
     log.info({ signal }, 'boot.shutdown.start');
     clearInterval(dcrCleanup);
+    clearInterval(notificationRetention);
     stopped = true;
     clearTimeout(demoOutbox);
     void mcpHandler.close().catch((err) => {

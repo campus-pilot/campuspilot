@@ -137,3 +137,24 @@ grants contains {"role": role, "action": action} if {
   some role in {"school.principal", "school.manager", "school.exam_coordinator"}
   some action in {"school.document.templates.manage", "school.document.generate", "school.document.artifacts.delete"}
 }
+
+# Resending failed deliveries: D-35 roles minus teachers, since a
+# school-wide delivery log cannot honour a teacher's class restriction;
+# teachers send single results only (class.notification.result.send).
+grants contains {"role": role, "action": "school.notification.send"} if {
+  some role in {"school.principal", "school.manager", "school.exam_coordinator", "school.accountant"}
+}
+
+grants contains {"role": role, "action": "school.notification.log.read"} if {
+  some role in {"school.principal", "school.manager", "school.exam_coordinator", "school.accountant"}
+}
+
+# D-38: principal and manager are told about every failed WhatsApp
+# delivery; accountants about finance ones only, never about results.
+grants contains {"role": role, "action": "school.notification.failure.finance.receive"} if {
+  some role in {"school.principal", "school.manager", "school.accountant"}
+}
+
+grants contains {"role": role, "action": "school.notification.failure.results.receive"} if {
+  some role in {"school.principal", "school.manager"}
+}

@@ -22,6 +22,7 @@ import { Progress } from '@campuspilot/ui/components/progress';
 import { ImageUp, LoaderCircle, Pencil } from 'lucide-react';
 import { z } from 'zod';
 
+import { CameraCapture } from './camera-capture';
 import { Dropzone, formatFileSize } from './dropzone';
 
 function imageFormSchema(subject: string) {
@@ -228,6 +229,10 @@ export function ProfileImageEditor({
                         onFilesRejected={(files) =>
                           field.handleChange(files[0] ?? null)
                         }
+                      />
+                      <CameraCapture
+                        disabled={isSubmitting}
+                        onCapture={(file) => field.handleChange(file)}
                       />
                       <ErrorMessages errors={field.state.meta.errors} />
                     </div>

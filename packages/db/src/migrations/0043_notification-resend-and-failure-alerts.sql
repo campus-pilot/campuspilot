@@ -1,0 +1,8 @@
+ALTER TABLE "notification_delivery" ADD COLUMN "resend_of_delivery_id" text;--> statement-breakpoint
+ALTER TABLE "notification_delivery" ADD COLUMN "failure_alerted_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "notification_event" ADD COLUMN "redelivery_of_delivery_id" text;--> statement-breakpoint
+ALTER TABLE "notification_delivery" ADD CONSTRAINT "notification_delivery_resend_of_delivery_id_notification_delivery_id_fk" FOREIGN KEY ("resend_of_delivery_id") REFERENCES "public"."notification_delivery"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "notification_event" ADD CONSTRAINT "notification_event_redelivery_of_delivery_id_notification_delivery_id_fk" FOREIGN KEY ("redelivery_of_delivery_id") REFERENCES "public"."notification_delivery"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "notification_delivery_unalerted_failure_idx" ON "notification_delivery" USING btree ("failed_at") WHERE "notification_delivery"."channel" = 'whatsapp' and "notification_delivery"."status" = 'failed' and "notification_delivery"."failure_alerted_at" is null;--> statement-breakpoint
+CREATE INDEX "notification_delivery_resend_idx" ON "notification_delivery" USING btree ("resend_of_delivery_id");--> statement-breakpoint
+CREATE INDEX "notification_event_redelivery_idx" ON "notification_event" USING btree ("redelivery_of_delivery_id") WHERE "notification_event"."redelivery_of_delivery_id" is not null;

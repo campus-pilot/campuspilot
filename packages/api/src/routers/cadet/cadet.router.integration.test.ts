@@ -35,6 +35,7 @@ async function cadetWithLogin() {
     admissionNo: `CAD-${randomUUID().slice(0, 6)}`,
     address: 'Test address',
     phoneNo: '9999999999',
+    whatsappSameAsPhone: true,
     dob: '2017-02-03',
     fatherName: 'Father',
     motherName: 'Mother',
@@ -145,19 +146,30 @@ describe('cadet and staff sessions are isolated', () => {
   });
 
   it('keeps cadet procedures out of the staff router and staff procedures out of the cadet router', () => {
-    expect(Object.keys(cadetRouter)).toEqual([
+    expect(Object.keys(cadetRouter).sort()).toEqual([
+      'dismissNotifications',
       'getAdmission',
-      'getOAuthConsentClient',
-      'getProfile',
-      'getFeeSummary',
-      'listFeeLedger',
       'getBill',
-      'listExams',
       'getExam',
       'getExamResult',
+      'getFeeSummary',
       'getGrowth',
+      'getOAuthConsentClient',
+      'getProfile',
+      'getPushSubscription',
+      'getSchool',
+      'getUnreadNotificationCount',
+      'listExams',
+      'listFeeLedger',
+      'listNotifications',
       'listRemarks',
+      'markAllNotificationsRead',
+      'markNotificationsRead',
+      'subscribePush',
+      'unsubscribePush',
     ]);
+    // Same-named staff inbox procedures live under `school`, scoped by membership.
+    expect(appRouter).not.toHaveProperty('listNotifications');
     expect(appRouter).not.toHaveProperty('getAdmission');
     expect(appRouter).not.toHaveProperty('getOAuthConsentClient');
     expect(Object.values(appRouter)).not.toContain(cadetRouter);

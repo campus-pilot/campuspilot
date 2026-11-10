@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   boolean,
+  check,
   index,
   date,
   jsonb,
@@ -34,7 +35,34 @@ export const admissionTable = pgTable("admission", {
   admissionNo: varchar("admission_no").notNull(),
   admissionClassId: text("admission_class_id").references(() => classTable.id),
   address: varchar("address").notNull(),
+  /**
+   * The household phone number. New and edited values are E.164 (validated
+   * with `@campuspilot/db/phone`). Values entered before validation existed
+   * are converted by the `admission-phone-e164` data migration; one it could
+   * not parse keeps its text with a `+91` prefix (D-32), so readers must
+   * tolerate a non-E.164 value.
+   */
   phoneNo: varchar("phone_no").notNull(),
+  /**
+   * The WhatsApp number in E.164, its own fact (D-4). Null when there is
+   * none. While `whatsappSameAsPhone` is true it equals `phoneNo` (CHECK),
+   * and the API keeps it equal when the phone number changes.
+   */
+  whatsappNo: varchar("whatsapp_no"),
+  /**
+   * Whether the WhatsApp number is the phone number, as chosen by staff
+   * (D-4). Null means no choice was ever recorded: the admission predates the
+   * WhatsApp fields and the phone backfill has not reached it yet. Every
+   * create and the backfill set it explicitly.
+   */
+  whatsappSameAsPhone: boolean("whatsapp_same_as_phone"),
+  /** Staff confirmed the WhatsApp number with the guardian (D-4). Never derived. */
+  whatsappVerified: boolean("whatsapp_verified").notNull().default(false),
+  /**
+   * The guardian consented to WhatsApp notifications (D-8). Unticking it is
+   * the opt-out. WhatsApp is sent only with a number, verified and consent.
+   */
+  whatsappConsent: boolean("whatsapp_consent").notNull().default(false),
   email: varchar("email"),
   dob: date("dob").notNull(),
   fatherName: varchar("father_name").notNull(),
@@ -68,6 +96,10 @@ export const admissionTable = pgTable("admission", {
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (table) => [
   unique("admission_id_school_id_unique").on(table.id, table.schoolId),
+  check(
+    "admission_whatsapp_same_as_phone_check",
+    sql`${table.whatsappSameAsPhone} is not true or ${table.whatsappNo} = ${table.phoneNo}`,
+  ),
   unique("admission_school_id_admission_no_unique").on(
     table.schoolId,
     table.admissionNo,
