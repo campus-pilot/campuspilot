@@ -12,6 +12,7 @@ import {
   financePaymentAllocationTable,
   financePaymentTable,
 } from "@campuspilot/db/schema/finance";
+import { notificationEventTable } from "@campuspilot/db/schema/notification";
 import { schoolSessionTable } from "@campuspilot/db/schema/session";
 import { studentTable } from "@campuspilot/db/schema/student";
 import { and, count, eq, sql } from "drizzle-orm";
@@ -715,6 +716,37 @@ describe("school billing operations", () => {
     await expect(
       scenario.actors.accountant.client.school.postBillingRun(command),
     ).resolves.toMatchObject({ id: posted.id });
+    // One bill.issued per bill (to its admission) and billing.run_posted to
+    // the poster, written with the run; the replay above added nothing.
+    const [postedBill] = await db
+      .select()
+      .from(financeBillTable)
+      .where(eq(financeBillTable.billRunId, posted.id));
+    const events = await db
+      .select()
+      .from(notificationEventTable)
+      .where(eq(notificationEventTable.schoolId, scenario.school.id));
+    expect(events.map((event) => event.key).sort()).toEqual(
+      [`bill:${postedBill!.id}`, `billing-run:${posted.id}`].sort(),
+    );
+    expect(events.find((event) => event.type === "bill.issued")).toMatchObject({
+      recipients: { kind: "admissions", admissionIds: [postedBill!.admissionId] },
+      createdBy: scenario.actors.accountant.session.user.id,
+      data: {
+        billId: postedBill!.id,
+        billRunId: posted.id,
+        billNumber: postedBill!.billNumber,
+        totalAmountMinor: "12500",
+        currency: "INR",
+        issueDate: "2040-05-10",
+        periodKey: posted.periodKey,
+        studentName: postedBill!.admissionNameSnapshot,
+      },
+    });
+    expect(events.find((event) => event.type === "billing.run_posted")).toMatchObject({
+      recipients: { kind: "staff_users", userIds: [scenario.actors.accountant.session.user.id] },
+      data: { billRunId: posted.id, billCount: 1, periodKey: posted.periodKey },
+    });
     await expect(
       scenario.actors.accountant.client.school.postBillingRun({
         ...command,

@@ -12,6 +12,8 @@ import { cn } from '@campuspilot/ui/lib/utils';
 import { authClient } from '@/lib/auth-client';
 import { initialsOf } from '@/lib/format';
 import { orpc } from '@/lib/orpc';
+import { CadetSchoolChrome } from './cadet-school-chrome';
+import { CadetNotificationBell } from './notifications/cadet-notifications';
 import { ScreenLoading } from './screen';
 
 const tabs = [
@@ -27,7 +29,7 @@ export function isTabActive(pathname: string, href: string) {
   return href === '/' ? pathname === '/' : pathname === href || pathname.startsWith(`${href}/`);
 }
 
-/** Whose records are shown: the student, their class and school. */
+/** Whose records are shown (the student, their class and school) and their notification bell. */
 function TopBar() {
   const profile = useQuery(orpc.getProfile.queryOptions());
   const enrollment = profile.data?.current ?? null;
@@ -49,6 +51,7 @@ function TopBar() {
       ) : (
         <Skeleton className="h-8 flex-1" />
       )}
+      <CadetNotificationBell />
     </header>
   );
 }
@@ -97,13 +100,16 @@ function Frame({ children }: { children: ReactNode }) {
 
 /**
  * The signed-in portal. Who the student is comes from the cadet session;
- * signed-out visitors go to sign-in before any record is requested.
+ * signed-out visitors go to sign-in before any record is requested. Signed-in
+ * pages also carry the school's install chrome (manifest, icon, install
+ * invitation), which needs the school and so never renders before sign-in.
  */
 export function AppFrame({ children }: { children: ReactNode }) {
   const { data: session, isPending } = authClient.useSession();
   if (!isPending && !session) redirect('/sign-in');
   return (
     <Frame>
+      {session ? <CadetSchoolChrome /> : null}
       {session ? <TopBar /> : null}
       <main className="flex flex-1 flex-col gap-5 px-4 pb-6 pt-4 md:min-h-0 md:overflow-y-auto md:*:shrink-0">
         {session ? children : <ScreenLoading />}

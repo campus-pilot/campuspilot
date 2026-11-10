@@ -1,6 +1,7 @@
 'use client';
 
 import type { ReactNode } from 'react';
+import { formatPhoneNumberForDisplay } from '@campuspilot/db/phone';
 import { Badge } from '@campuspilot/ui/components/badge';
 import { Frame, FrameDescription, FrameHeader, FramePanel, FrameTitle } from '@campuspilot/ui/components/frame';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@campuspilot/ui/components/select';
@@ -8,6 +9,18 @@ import type { AcademicPlacement, AdmissionRecord } from './types';
 
 function Detail({ label, value }: { label: string; value: string | number | null }) {
   return <div className="flex min-w-0 flex-col gap-1"><dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</dt><dd className="break-words text-sm">{value ?? '—'}</dd></div>;
+}
+
+/** WhatsApp number with its source, or why there is none. */
+function whatsappSummary(admission: AdmissionRecord) {
+  if (admission.whatsappNo === null) return admission.whatsappSameAsPhone === null ? 'Not recorded yet' : 'None';
+  const number = formatPhoneNumberForDisplay(admission.whatsappNo);
+  return admission.whatsappSameAsPhone ? `${number} (same as phone)` : number;
+}
+
+/** Verified and consent are separate facts; both are needed before WhatsApp messages are sent. */
+function WhatsappStatus({ admission }: { admission: AdmissionRecord }) {
+  return <div className="flex flex-col gap-1"><dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">WhatsApp status</dt><dd className="flex flex-wrap gap-2"><Badge variant={admission.whatsappVerified ? 'default' : 'secondary'}>{admission.whatsappVerified ? 'Verified' : 'Not verified'}</Badge><Badge variant={admission.whatsappConsent ? 'default' : 'secondary'}>{admission.whatsappConsent ? 'Consent given' : 'No consent'}</Badge></dd></div>;
 }
 
 function SectionHeading({ title, description, action }: { title: string; description: string; action?: ReactNode }) {
@@ -35,7 +48,7 @@ export function AdmissionDetailsView({ admission, sessions, selectedSessionId, s
     </FramePanel>
     <FramePanel fit>
       <SectionHeading title="Contact information" description="How the school can reach the family." />
-      <dl className="grid gap-5 px-4 pb-4 sm:grid-cols-2"><Detail label="Phone number" value={admission.phoneNo} /><Detail label="Email" value={admission.email} /><div className="sm:col-span-2"><Detail label="Address" value={admission.address} /></div></dl>
+      <dl className="grid gap-5 px-4 pb-4 sm:grid-cols-2"><Detail label="Phone number" value={formatPhoneNumberForDisplay(admission.phoneNo)} /><Detail label="Email" value={admission.email} /><Detail label="WhatsApp number" value={whatsappSummary(admission)} /><WhatsappStatus admission={admission} /><div className="sm:col-span-2"><Detail label="Address" value={admission.address} /></div></dl>
     </FramePanel>
   </Frame>;
 }

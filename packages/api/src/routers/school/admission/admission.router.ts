@@ -15,6 +15,8 @@ import {
   inArray,
   exists,
   isNotNull,
+  isNull,
+  not,
   notExists,
   or,
   sql,
@@ -43,7 +45,13 @@ import {
   updateAdmissionInputSchema,
   type AdmissionDto,
 } from "./admission.dto";
+import { phoneSearchDigits } from "./admission-phone-search";
 import { assertAdmissionRegistered } from "./admission-registration";
+import {
+  AdmissionContactError,
+  resolveAdmissionWhatsapp,
+  type AdmissionContactChanges,
+} from "./admission-whatsapp";
 import {
   issueAdmissionCadetPassword,
   issuedCadetPasswordSchema,
@@ -111,6 +119,29 @@ async function validateAdmissionReferences(
       .limit(1);
     if (!schoolClass) throw rpcError.notFound("Admission class");
   }
+}
+
+/** Resolves the WhatsApp facts to store, refusing inconsistent input as a bad request. */
+function resolveWhatsappOrThrow(
+  ...args: Parameters<typeof resolveAdmissionWhatsapp>
+) {
+  try {
+    return resolveAdmissionWhatsapp(...args);
+  } catch (error) {
+    if (error instanceof AdmissionContactError) throw rpcError.badRequest(error.message);
+    throw error;
+  }
+}
+
+/** Whether an update touches the phone number or any WhatsApp fact. */
+function changesContact(changes: AdmissionContactChanges) {
+  return (
+    changes.phoneNo !== undefined ||
+    changes.whatsappNo !== undefined ||
+    changes.whatsappSameAsPhone !== undefined ||
+    changes.whatsappVerified !== undefined ||
+    changes.whatsappConsent !== undefined
+  );
 }
 
 export const schoolAdmissionRouter = {
@@ -184,6 +215,7 @@ export const schoolAdmissionRouter = {
           admissionNoWordSimilarity
             ? sql<number>`greatest(${nameSimilarity}, ${admissionNoSimilarity}, ${nameWordSimilarity}, ${admissionNoWordSimilarity})`
             : undefined;
+        const phoneDigits = input.searchQuery ? phoneSearchDigits(input.searchQuery) : null;
         const searchCondition = input.searchQuery
           ? input.searchMode === "fuzzy"
             ? or(
@@ -198,6 +230,10 @@ export const schoolAdmissionRouter = {
                 ilike(admissionTable.name, `%${input.searchQuery}%`),
                 ilike(admissionTable.admissionNo, `%${input.searchQuery}%`),
                 ilike(admissionTable.phoneNo, `%${input.searchQuery}%`),
+                // Typed as staff say it (spaces, trunk 0, +91): match digits only.
+                phoneDigits
+                  ? sql`regexp_replace(${admissionTable.phoneNo}, '[^0-9]', '', 'g') like ${`%${phoneDigits}%`}`
+                  : undefined,
                 ilike(admissionTable.email, `%${input.searchQuery}%`),
               )
           : undefined;
@@ -235,6 +271,18 @@ export const schoolAdmissionRouter = {
               ? exists(assignedPlacement)
               : notExists(assignedPlacement)
             : undefined;
+        const whatsappReady = and(
+          isNotNull(admissionTable.whatsappNo),
+          eq(admissionTable.whatsappVerified, true),
+          eq(admissionTable.whatsappConsent, true),
+        );
+        const whatsappCondition = {
+          ready: whatsappReady,
+          needs_attention: not(whatsappReady!),
+          no_number: isNull(admissionTable.whatsappNo),
+          not_verified: and(isNotNull(admissionTable.whatsappNo), eq(admissionTable.whatsappVerified, false)),
+          no_consent: and(isNotNull(admissionTable.whatsappNo), eq(admissionTable.whatsappVerified, true), eq(admissionTable.whatsappConsent, false)),
+        }[input.filters?.whatsappStatus ?? "ready"];
         const placementClassId = input.filters?.placementClassId;
         /**
          * Matches on the student row's class alone, so it agrees with the
@@ -259,6 +307,7 @@ export const schoolAdmissionRouter = {
         const where = and(
           eq(admissionTable.schoolId, input.schoolId),
           searchCondition,
+          input.filters?.whatsappStatus ? whatsappCondition : undefined,
           input.filters?.registered === undefined
             ? undefined
             : eq(admissionTable.registered, input.filters.registered),
@@ -428,7 +477,21 @@ export const schoolAdmissionRouter = {
     .output(createAdmissionOutputSchema)
     .handler(async ({ context, input, signal }) => {
       try {
-        const { generateCadetPassword, ...values } = input;
+        const {
+          generateCadetPassword,
+          whatsappNo,
+          whatsappSameAsPhone,
+          whatsappVerified,
+          whatsappConsent,
+          ...values
+        } = input;
+        const whatsapp = resolveWhatsappOrThrow(null, {
+          phoneNo: values.phoneNo,
+          whatsappNo,
+          whatsappSameAsPhone,
+          whatsappVerified,
+          whatsappConsent,
+        });
         // Issuing a password is its own permission, checked in addition to
         // admission creation and only when one is requested.
         if (generateCadetPassword) {
@@ -454,7 +517,7 @@ export const schoolAdmissionRouter = {
             .insert(admissionTable)
             // Registration is a backend-owned initial state. Clients cannot
             // create an inactive admission or revive an old one.
-            .values({ ...values, registered: true })
+            .values({ ...values, ...whatsapp, registered: true })
             .returning();
           if (!admission) throw rpcError.internal();
           // The login and its hash commit or roll back with the admission.
@@ -552,9 +615,33 @@ export const schoolAdmissionRouter = {
           const { schoolId, admissionId, ...changes } = input;
           await assertAdmissionRegistered(transaction, { schoolId, admissionId });
           await validateAdmissionReferences(transaction, schoolId, changes);
+          let whatsapp = {};
+          if (changesContact(changes)) {
+            // Locked so a concurrent phone change cannot leave the WhatsApp
+            // number following a stale phone number.
+            const [current] = await transaction
+              .select({
+                phoneNo: admissionTable.phoneNo,
+                whatsappNo: admissionTable.whatsappNo,
+                whatsappSameAsPhone: admissionTable.whatsappSameAsPhone,
+                whatsappVerified: admissionTable.whatsappVerified,
+                whatsappConsent: admissionTable.whatsappConsent,
+              })
+              .from(admissionTable)
+              .where(
+                and(
+                  eq(admissionTable.schoolId, schoolId),
+                  eq(admissionTable.id, admissionId),
+                ),
+              )
+              .limit(1)
+              .for("update");
+            if (!current) throw rpcError.notFound("Admission");
+            whatsapp = resolveWhatsappOrThrow(current, changes);
+          }
           const [admission] = await transaction
             .update(admissionTable)
-            .set({ ...changes, updatedAt: new Date() })
+            .set({ ...changes, ...whatsapp, updatedAt: new Date() })
             .where(
               and(
                 eq(admissionTable.schoolId, schoolId),

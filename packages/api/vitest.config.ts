@@ -22,12 +22,15 @@ const SERIAL_FINANCE_TEST_FILES = [
 
 /**
  * Test files that assert platform-wide aggregates (counts across every
- * school). Every other file writes rows for its own schools, so these files
+ * school) or change rows of every school. Every other file writes rows for its own schools, so these files
  * can only be deterministic while nothing else writes: they run last, after
- * every other group has finished.
+ * every other group has finished, one file at a time (the backfill changes
+ * rows the stats file counts, so the two must not overlap either).
  */
 const PLATFORM_WIDE_TEST_FILES = [
   'src/routers/system-admin/stats/stats.router.integration.test.ts',
+  // Runs the real admission phone backfill over every admission.
+  'src/data-migrations/migrations/admission-phone-e164.integration.test.ts',
 ];
 
 const sharedTestOptions = {
@@ -69,6 +72,7 @@ export default defineConfig({
           ...sharedTestOptions,
           name: 'platform-wide',
           include: PLATFORM_WIDE_TEST_FILES,
+          fileParallelism: false,
           sequence: { groupOrder: 2 },
         },
       },

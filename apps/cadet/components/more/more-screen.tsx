@@ -13,6 +13,8 @@ import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemTitle }
 import { authClient } from '@/lib/auth-client';
 import { initialsOf } from '@/lib/format';
 import { orpc } from '@/lib/orpc';
+import { turnOffDeviceNotifications } from '@/lib/web-push.client';
+import { CadetDeviceNotifications } from '../notifications/cadet-device-notifications';
 import { ScreenError, ScreenHeader, ScreenLoading } from '../screen';
 
 function Fact({ label, value }: { label: string; value: string }) {
@@ -52,13 +54,16 @@ export function ProfileCard({ profile }: { profile: CadetProfileDto }) {
 /**
  * Signs out of the Cadet Portal only (a staff session in the same browser
  * stays) and drops every cached record, so the next person on a shared
- * phone never sees this student's data.
+ * phone never sees this student's data. This device's notifications for
+ * the student are turned off first (best effort), so a signed-out device
+ * stops showing their notifications.
  */
 export function SignOutButton() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const signOut = useMutation({
     mutationFn: async () => {
+      await turnOffDeviceNotifications().catch(() => undefined);
       // Better Auth reports failures in `error` rather than throwing.
       const result = await authClient.signOut();
       if (result.error) throw new Error(result.error.message ?? 'Unable to sign out. Please try again.');
@@ -105,6 +110,7 @@ export function MoreScreen() {
           </ItemActions>
         </Item>
       </ItemGroup>
+      <CadetDeviceNotifications />
       <SignOutButton />
     </>
   );

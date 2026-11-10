@@ -1,4 +1,5 @@
 import type { DatabaseExecutor } from "@campuspilot/db";
+import { formatPhoneNumberForDisplay } from "@campuspilot/db/phone";
 import { admissionTable } from "@campuspilot/db/schema/admission";
 import { classTable, sectionTable } from "@campuspilot/db/schema/class";
 import {
@@ -453,7 +454,9 @@ export async function buildDocumentContexts(
       fatherName: admission.fatherName,
       motherName: admission.motherName,
       address: admission.address,
-      phoneNo: admission.phoneNo,
+      // Display form (`+91 98765 43210`); an unmigrated value is shown as stored.
+      phoneNo: formatPhoneNumberForDisplay(admission.phoneNo),
+      whatsappNo: admission.whatsappNo === null ? null : formatPhoneNumberForDisplay(admission.whatsappNo),
       className: schoolClass.label,
       sectionName: section?.label ?? null,
       rollNo: student.rollNo?.toString() ?? null,

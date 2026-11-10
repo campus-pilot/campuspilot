@@ -19,6 +19,12 @@ import {
 import { handleSchoolLogoUpload } from '@campuspilot/api/routers/system-admin/school/school.http';
 import { handleSchoolLogoBlob } from '@campuspilot/api/routers/school/logo/logo.blob';
 import { handleSchoolManifestBlob } from '@campuspilot/api/routers/school/manifest/manifest.blob';
+import { handleCadetManifestBlob } from '@campuspilot/api/routers/school/manifest/cadet-manifest.blob';
+import {
+  handleWhatsAppWebhook,
+  handleWhatsAppWebhookVerification,
+  whatsappWebhookConfigFromEnv,
+} from '@campuspilot/api/notifications/channels/whatsapp/webhook';
 import {
   handleAdmissionDocumentDelete,
   handleAdmissionDocumentRead,
@@ -96,6 +102,28 @@ app.get('/blob/school/:schoolId/manifest.webmanifest', (context) => {
     reportUploadError(context.var.logger, 'school.manifest.blob.error', input, error),
   );
 });
+
+/** Installs a school's Cadet Portal as its own app (school name and logo only). */
+app.get('/blob/school/:schoolId/cadet.webmanifest', (context) => {
+  const input = { schoolId: context.req.param('schoolId') };
+  return handleCadetManifestBlob({ db }, input, (error) =>
+    reportUploadError(context.var.logger, 'school.cadet-manifest.blob.error', input, error),
+  );
+});
+
+/**
+ * WhatsApp Cloud API webhook (Meta): GET answers the subscription check,
+ * POST carries delivery receipts and inbound messages (STOP → consent
+ * withdrawn), trusted only after the X-Hub-Signature-256 check over the raw
+ * body. 404 while the webhook secrets are not configured.
+ */
+app.get('/webhooks/whatsapp', (context) =>
+  handleWhatsAppWebhookVerification(
+    whatsappWebhookConfigFromEnv(),
+    new URL(context.req.url).searchParams,
+  ),
+);
+app.post('/webhooks/whatsapp', (context) => handleWhatsAppWebhook(context.req.raw));
 
 /**
  * The Cadet Portal's own Better Auth instance (`cpc_` cookies, cadet tables,

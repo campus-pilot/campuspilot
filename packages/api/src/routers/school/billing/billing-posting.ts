@@ -27,6 +27,11 @@ import { z } from "zod";
 
 import { rpcError } from "../../../errors";
 import {
+  notifyBillingRunPosted,
+  notifyManualBillPosted,
+} from "../../../notifications/emitters/finance";
+import { handOffNotificationEvents } from "../../../notifications/notification.outbox";
+import {
   lockFinanceAdmissionAccount,
   lockFinanceAdmissionAccounts,
 } from "./account-lock";
@@ -195,13 +200,18 @@ async function readRunReversedCount(
   return row?.value ?? 0;
 }
 
-/** Posts a reviewed regular or reasoned supplemental run in one transaction. */
+/**
+ * Posts a reviewed regular or reasoned supplemental run in one transaction,
+ * together with its notification events (one `bill.issued` per bill and
+ * `billing.run_posted` to the poster). The events are handed over after
+ * commit; a replayed command returns the existing run and emits nothing.
+ */
 export async function postPreparedBillingRun(
   db: Database,
   command: PostBillingRunCommand,
   recordedBy: string,
 ) {
-  return db.transaction(
+  const { value, notificationEventIds } = await db.transaction(
     async (transaction) => {
       await lockBillingScope(transaction, command);
       const payloadHash = commandHash({
@@ -228,10 +238,13 @@ export async function postPreparedBillingRun(
             "This billing-run idempotency key was already used with a different payload.",
           );
         }
-        return runTransport(
-          existing,
-          await readRunReversedCount(transaction, command.schoolId, existing.id),
-        );
+        return {
+          value: runTransport(
+            existing,
+            await readRunReversedCount(transaction, command.schoolId, existing.id),
+          ),
+          notificationEventIds: [] as string[],
+        };
       }
 
       const prepared = await prepareBillingRun(transaction, command);
@@ -299,7 +312,7 @@ export async function postPreparedBillingRun(
         command.billingDate,
         prepared.period.timeZone,
       );
-      await insertRunBillsBatched(
+      const bills = await insertRunBillsBatched(
         transaction,
         run.id,
         command,
@@ -315,10 +328,23 @@ export async function postPreparedBillingRun(
         .where(eq(financeBillRunTable.id, run.id))
         .returning();
       if (!posted) throw new Error("Billing run was not finalized");
-      return runTransport(posted);
+      const notificationEventIds = await notifyBillingRunPosted(
+        transaction,
+        {
+          id: posted.id,
+          schoolId: posted.schoolId,
+          sessionId: posted.sessionId,
+          periodKey: posted.periodKey,
+          recordedBy,
+        },
+        bills,
+      );
+      return { value: runTransport(posted), notificationEventIds };
     },
     { isolationLevel: "serializable" },
   );
+  handOffNotificationEvents(notificationEventIds);
+  return value;
 }
 
 const RUN_WRITE_CHUNK_SIZE = 300;
@@ -426,6 +452,7 @@ async function insertRunBillsBatched(
       .set({ status: "posted", finalizedAt })
       .where(inArray(financeBillTable.id, group.map(({ id }) => id)));
   }
+  return bills;
 }
 
 async function readManualBillByIdempotency(
@@ -484,13 +511,17 @@ function manualBillTransport(
   };
 }
 
-/** Creates one ordinary, enrollment-backed manual bill. */
+/**
+ * Creates one ordinary, enrollment-backed manual bill and its `bill.issued`
+ * notification event, handed over after commit. A replayed command returns
+ * the existing bill and emits nothing.
+ */
 export async function createPostedManualBill(
   db: Database,
   command: ManualBillCommand,
   recordedBy: string,
 ) {
-  return db.transaction(
+  const { value, notificationEventIds } = await db.transaction(
     async (transaction) => {
       const [session] = await transaction
         .select({
@@ -539,7 +570,7 @@ export async function createPostedManualBill(
             "This manual-bill idempotency key was already used with a different payload.",
           );
         }
-        return manualBillTransport(existing);
+        return { value: manualBillTransport(existing), notificationEventIds: [] as string[] };
       }
 
       const config = manualBillFinanceContextSchema.safeParse(
@@ -707,10 +738,17 @@ export async function createPostedManualBill(
         command.idempotencyKey,
       );
       if (!created) throw new Error("Manual bill could not be read after posting");
-      return manualBillTransport(created);
+      const notificationEventIds = await notifyManualBillPosted(
+        transaction,
+        { ...bill, billRunId: null, periodKey: null },
+        recordedBy,
+      );
+      return { value: manualBillTransport(created), notificationEventIds };
     },
     { isolationLevel: "serializable" },
   );
+  handOffNotificationEvents(notificationEventIds);
+  return value;
 }
 
 async function assertBillCanReverse(

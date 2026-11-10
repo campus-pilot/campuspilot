@@ -134,6 +134,33 @@ Result entry also locks the referenced student and admission rows for the durati
 of the write. Completion evaluates the current roster; student placement after
 completion does not automatically create or rewrite historical results.
 
+## Result notifications
+
+`exam-result-notification.router.ts` (service in
+`packages/api/src/notifications/emitters/results.ts`):
+
+- The first `releaseExamToCadet` of an examination notifies its students
+  (D-43), in the release's transaction and with no permission beyond the
+  release: every registered student of the examination's classes gets one
+  `exam.results_published` event (key `exam-results:<publicationId>:<admissionId>`,
+  data naming the student's enrollment and class for the Cadet result link),
+  recorded as the batch row `exam_result_publication` (unique per
+  school/session/exam) with the recipients and per-channel forecast. Withdraw
+  sends nothing, and a re-release finds the batch and notifies nobody again;
+  corrections use the single send. A release with no registered students
+  writes no batch, so a later release that addresses students notifies them.
+- `previewExamCadetRelease` (exam transition permission) returns what a release
+  would notify: `first_release` with the forecast, or `already_notified`.
+- `getExamResultPublication` (read exams) returns the batch or `null`.
+- `previewStudentResultNotification` / `sendStudentResultNotification`
+  (`class.notification.result.send`, teachers only for assigned classes): any
+  started examination, independent of the release. The student's report card
+  must be buildable (registered, every included subject approved); otherwise
+  BAD_REQUEST. Each new client idempotency key sends again.
+- The API sweep finishes a batch once every delivery settled (or 4 days
+  passed) and notifies the releaser with `exam.results_publish_finished`
+  (WhatsApp outcome per student: sent, skipped, failed = the rest).
+
 ## Cadet Portal release and remarks
 
 `releaseExamToCadet` / `withdrawExamFromCadet` (exam transition permission)

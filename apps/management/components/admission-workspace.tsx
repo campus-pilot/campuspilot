@@ -15,7 +15,14 @@ type WorkspaceItem = { id: string; label: string };
 const items: WorkspaceItem[] = [
   { id: 'details', label: 'Details' },
   { id: 'ledger', label: 'Ledger' },
+  { id: 'notifications', label: 'Notifications' },
 ];
+
+/** Sections shown only with their own read permission. */
+const itemPermissions: Partial<Record<string, typeof SCHOOL_ACTIONS.READ_ADMISSION_LEDGER | typeof SCHOOL_ACTIONS.READ_NOTIFICATION_LOG>> = {
+  ledger: SCHOOL_ACTIONS.READ_ADMISSION_LEDGER,
+  notifications: SCHOOL_ACTIONS.READ_NOTIFICATION_LOG,
+};
 
 export function AdmissionWorkspace({ children, schoolId, admissionId }: { children: ReactNode; schoolId: string; admissionId: string }) {
   const pathname = usePathname();
@@ -23,7 +30,7 @@ export function AdmissionWorkspace({ children, schoolId, admissionId }: { childr
   const admissionQuery = useQuery(orpc.school.getAdmission.queryOptions({ input: { schoolId, admissionId } }));
   const activeItem = items.find(({ id }) => pathname.endsWith(`/${id}`)) ?? items[0]!;
   const baseHref = `/school/${encodeURIComponent(schoolId)}/admission/${encodeURIComponent(admissionId)}`;
-  const visibleItems: Array<WorkspaceItem & { permission?: typeof SCHOOL_ACTIONS.READ_ADMISSION_LEDGER }> = items.map((item) => item.id === 'ledger' ? { ...item, permission: SCHOOL_ACTIONS.READ_ADMISSION_LEDGER } : item);
+  const visibleItems = items.map((item) => ({ ...item, permission: itemPermissions[item.id] }));
   return (
     <section className="mx-auto flex w-full max-w-7xl flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">

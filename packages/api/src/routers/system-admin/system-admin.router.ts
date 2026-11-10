@@ -1,3 +1,4 @@
+import { dataMigrationRouter } from "./data-migration/data-migration.router";
 import { demoSchoolRouter } from "./demo-school/demo-school.router";
 import { oauthClientRouter } from "./oauth-client/oauth-client.router";
 import { schoolRouter } from "./school/school.router";
@@ -8,4 +9,5 @@ export const systemAdminRouter = {
   ...oauthClientRouter,
   ...demoSchoolRouter,
   ...statsRouter,
+  ...dataMigrationRouter,
 };

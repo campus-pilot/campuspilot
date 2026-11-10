@@ -24,6 +24,7 @@ import {
 import { RequirePermissions } from '@/components/require-permissions';
 import { client, orpc } from '@/lib/orpc';
 import { ExamButton, ExamInput, Issues } from './exam-common';
+import { ReleaseNotificationPreview } from './exam-result-notifications';
 import {
   cadetReleaseAction,
   examActionDescription,
@@ -313,6 +314,7 @@ function ExamActionDialog({
                   )}
                 </form.Field>
               )}
+              {action === 'release' && <ReleaseNotificationPreview scope={scope} />}
               <Issues errors={errors} />
               <DialogFooter>
                 <ExamButton

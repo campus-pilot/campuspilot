@@ -283,6 +283,7 @@ so an unexpired access token stops working immediately. It is idempotent.
 | --- | --- | --- |
 | `getAdmission` | core, read, module `account` | The signed-in admission, returned with management's `admissionDtoSchema` / `toAdmissionDto` (reuse DTOs; do not fork a cadet copy). |
 | `getOAuthConsentClient({ clientId })` | hidden | Consent-screen facts from `cadet_oauth_client` only (`oauthConsentClientSchema` from `routers/auth/auth.dto.ts`); a staff client id is never found. |
+| `listNotifications`, `getUnreadNotificationCount`, `markNotificationsRead`, `markAllNotificationsRead`, `dismissNotifications` | hidden | The student's notification inbox (`cadet-notification.router.ts`), bound to the session's admission through the shared visibility predicate in `packages/api/src/notifications/inbox.ts`; no delivery status. |
 | `getProfile` | core, read, `account` | Name, admission number, school, the server-chosen **current** class record (active-session placement, else newest) and enrollments. Clients use `current`; they never pick "current" themselves. |
 | `getFeeSummary` | core, read, `billing` | Lifetime balance, billed, paid, concessions, refunds per currency (staff `getAdmissionFinanceSummary`). |
 | `listFeeLedger` | core, read, `billing` | Paginated ledger with running balances (staff `getAdmissionLedger`), narrowed: no recorder ids, notes or idempotency keys. |
@@ -303,7 +304,13 @@ Remark, attendance and activities attach only to the record holding the results.
 `releaseExamToCadet` (staff, exam transition permission), which needs a
 completed exam and blocks reopening and legacy plan changes until
 `withdrawExamFromCadet`. The release time is always when the call was made;
-only the demo seed back-dates it (see `docs/demo-school.md`). Release freezes marks and remarks, not labels or grading
+only the demo seed back-dates it (see `docs/demo-school.md`). The **first**
+release also notifies every registered student of the examination
+(`exam.results_published`: inbox, web push, WhatsApp) in the same transaction,
+recorded once per exam in `exam_result_publication`; the confirmation shows the
+per-channel forecast (`previewExamCadetRelease`). Withdraw notifies nobody, and
+neither does a re-release (D-43; see `packages/api/src/routers/school/exam/README.md`).
+Release freezes marks and remarks, not labels or grading
 (no snapshot). Remarks (`exam_student_remark`) are written in the management
 student result page and are locked while released. Class averages appear only
 when the school setting `cadet_show_class_averages` is on (school settings) and
@@ -371,6 +378,9 @@ Mirrors management: Next.js 16, oRPC + TanStack Query, TanStack Form,
 | `app/oauth/consent/page.tsx` → `components/oauth-consent.tsx` | Cadet MCP consent. |
 | `lib/orpc.ts` | `RPCLink` to `/api/cadet/rpc` with `credentials: 'include'`, typed `CadetRouterClient`. Never the staff `/rpc`. |
 | `lib/auth-client.ts` | Better Auth clients at `CADET_AUTH_BASE_PATH`. |
+| `components/cadet-school-chrome.tsx` | Signed-in pages only: links the school's Cadet manifest (`/blob/school/{id}/cadet.webmanifest`, per-school app id, scope = whole portal) and home-screen icon, and shows the phone install screen (shared `useInstallAppScreen`). Before sign-in the portal is not installable (the school is unknown). |
+| `app/(portal)/notifications` → `components/notifications/` | The inbox inside the portal frame; the top bar's bell links to it. `/notifications/open` resolves push clicks with the route builders in `cadet-notification-routes.ts`: a bill opens `/fees/{billId}`, a payment `/fees`, a result `/results/{examId}` built from the enrollment, class and exam named in the notification (`examResultHref` in `lib/route-param.ts`); anything else stays in the inbox. The device notification toggle is on the inbox and on More. |
+| `public/sw.js` + `lib/web-push.client.ts` + `components/notifications/cadet-device-notifications.tsx` | Web push: the service worker (push → notification, click → `/notifications/open?type=…&<ids>` → route builders), registered only when the student taps **Turn on notifications** (permission requested inside the tap). One row per login and endpoint (`cadet_push_subscription`), so siblings on one phone each get their own; a login keeps its 10 most recently subscribed devices (older ones are revoked); sign-out turns this device off for that student. A staff resend of a failed push goes to that same device only, never to a device that no longer receives notifications. iPhone/iPad: only inside the installed app. |
 
 Env comes from `@campuspilot/env/cadet.client` (`NEXT_PUBLIC_SERVER_URL`). No
 identity inputs: who the student is always comes from the `cpc_` session. Record
@@ -525,6 +535,8 @@ add it to `cadetAuthSchema`.
 | `CADET_APP_URL` | `@campuspilot/env/server` (`packages/env/src/server/auth.env.ts`); the worker needs it too, because the purge workflow imports the cadet auth instance | Cadet app origin: cadet trusted origin, CORS on `/api/cadet/*` and `/cadet/mcp`, MCP login/consent pages. Its own value, never derived from `PUBLIC_APP_URL`. Local: `http://localhost:3004`; production: `https://cadet.campuspilot.in`. |
 | `CADET_MCP_RESOURCE_URL` | server, worker | Canonical cadet MCP URL and token audience; no query, fragment or trailing slash. Local: `http://localhost:3000/cadet/mcp`; production: `https://api.campuspilot.in/cadet/mcp`. |
 | `NEXT_PUBLIC_SERVER_URL` | cadet app (`packages/env/src/cadet.client.ts`) | API origin. Local: `http://localhost:3000`; production: `https://api.campuspilot.in`. |
+| `NEXT_PUBLIC_VAPID_PUBLIC_KEY` | cadet app (build time) | Web push public key, equal to the server's `VAPID_PUBLIC_KEY`. Unset: the portal does not offer notifications. |
+| `WEB_PUSH_ENABLED`, `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | server, worker (`packages/env/src/server/web-push.env.ts`) | Web push kill switch (default off, off locally) and VAPID identity (`npx web-push generate-vapid-keys`; subject `mailto:`/`https:`), required when enabled. |
 
 Example values are in `apps/server/.env.example` and `apps/cadet/.env.example`.
 Cookie attributes (`COOKIE_DOMAIN`, `SAME_SITE_COOKIE`, `SECURE_COOKIES`) are

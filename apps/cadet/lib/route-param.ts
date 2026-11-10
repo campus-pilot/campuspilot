@@ -18,3 +18,16 @@ export function decodeRouteParam(value: string): string | null {
  */
 export const classResultsHref = (recordId: string) => `/results/class/${encodeURIComponent(recordId)}`;
 export const classGrowthHref = (recordId: string) => `/growth/class/${encodeURIComponent(recordId)}`;
+
+/** The Fees screen and one bill on it (`/fees/{billId}`, the finance bill id). */
+export const FEES_HREF = '/fees';
+export const billHref = (billId: string) => `/fees/${encodeURIComponent(billId)}`;
+
+/**
+ * One exam's result screen (`/results/{examId}`). The exam id is the
+ * server's `{studentId}.{classId}.{examSlug}` (class record id + exam slug,
+ * see `parseExamId` in the cadet academics service); the server resolves it
+ * only within the signed-in admission and answers NOT_FOUND otherwise.
+ */
+export const examResultHref = (ids: { studentId: string; classId: string; examSlug: string }) =>
+  `/results/${encodeURIComponent(`${ids.studentId}.${ids.classId}.${ids.examSlug}`)}`;

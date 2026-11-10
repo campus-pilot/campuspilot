@@ -11,7 +11,26 @@ import { Plus } from 'lucide-react';
 import { client, orpc } from '@/lib/orpc';
 import { RequirePermissions } from './require-permissions';
 
-const emptyAdmission: AdmissionFormValue = { name: '', admissionNo: '', admissionClassId: null, address: '', phoneNo: '', email: null, dob: '', fatherName: '', motherName: '' };
+/**
+ * A new admission. "WhatsApp number is the same as phone number" starts
+ * checked, and with it "WhatsApp number verified" (D-4: both are form
+ * defaults only; staff can untick either and the dialog submits the choices).
+ */
+const emptyAdmission: AdmissionFormValue = {
+  name: '',
+  admissionNo: '',
+  admissionClassId: null,
+  address: '',
+  phoneNo: '',
+  whatsappNo: null,
+  whatsappSameAsPhone: true,
+  whatsappVerified: true,
+  whatsappConsent: false,
+  email: null,
+  dob: '',
+  fatherName: '',
+  motherName: '',
+};
 
 /** A password issued with a new admission, kept only until staff close the dialog. */
 type IssuedForAdmission = { studentName: string; details: IssuedCadetPasswordDetails };
