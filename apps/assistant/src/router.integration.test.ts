@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
 
-import type { AssistantRunStatus } from '@campuspilot/assistant-contract/dto';
+import { assistantConversationAttention, type AssistantRunStatus } from '@campuspilot/assistant-contract/dto';
 import { call, ORPCError } from '@orpc/server';
 import { eq } from 'drizzle-orm';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 
 import { db } from './db/client';
 import {
@@ -15,7 +15,7 @@ import {
 } from './db/schema';
 import { generateId } from './ids';
 import { canUseAssistant, getSessionUser } from './platform';
-import { assistantRouter } from './router';
+import { assistantRouter, configureDispatcher } from './router';
 import * as store from './store';
 import { seedTurn, type SeededTurn } from './testing/turn';
 import { userMessageItemKey } from './transcript';
@@ -156,16 +156,16 @@ async function finishedConversationWithEverything() {
 }
 
 describe('a conversation’s attention', () => {
-  const EXPECTED: [AssistantRunStatus, 'approval' | 'working' | 'failed' | null][] = [
+  const EXPECTED: [AssistantRunStatus, 'approval' | 'working' | null][] = [
     ['queued', 'working'],
     ['running', 'working'],
     ['awaiting_approval', 'approval'],
-    ['failed', 'failed'],
+    ['failed', null],
     ['completed', null],
     ['cancelled', null],
   ];
 
-  it.each(EXPECTED)('is read from its latest run: %s gives %s, in the list, the snapshot and a resume', async (status, attention) => {
+  it.each(EXPECTED)('in the list, a run that is %s gives %s, as the contract’s rule does', async (status, attention) => {
     const turn = await seedTurn();
     if (status !== 'queued') await setRunStatus(turn, status);
 
@@ -173,9 +173,10 @@ describe('a conversation’s attention', () => {
     expect(listed.items).toHaveLength(1);
     expect(listed.items[0]).toMatchObject({ id: turn.conversationId, attention });
 
+    // The open conversation's row is worked out in the browser from the
+    // live runs; both must agree.
     const snapshot = await call(assistantRouter.getConversation, { schoolId: turn.schoolId, conversationId: turn.conversationId }, as(turn.userId));
-    expect(snapshot.conversation.attention).toBe(attention);
-    expect((await store.loadChangesSince(db, turn.conversationId, 0))?.conversation.attention).toBe(attention);
+    expect(assistantConversationAttention(snapshot.runs)).toBe(attention);
   });
 
   it('is null for a conversation that has no run', async () => {
@@ -188,20 +189,22 @@ describe('a conversation’s attention', () => {
     expect(listed.items.find((item) => item.id === conversationId)).toMatchObject({ attention: null });
   });
 
-  it('follows the newest run, whatever the older ones ended as', async () => {
-    const first = await seedTurn();
-    await setRunStatus(first, 'failed');
-    const second = await addRun(first);
-    expect((await list(first)).items[0]).toMatchObject({ attention: 'working' });
+  it('stays on approval while a follow-up is queued behind it', async () => {
+    const waiting = await seedTurn();
+    await setRunStatus(waiting, 'awaiting_approval');
+    await addRun(waiting);
+    expect((await list(waiting)).items[0]).toMatchObject({ attention: 'approval' });
+  });
 
-    await setRunStatus(second, 'completed');
-    expect((await list(first)).items[0]).toMatchObject({ attention: null });
+  it('stays working while an older run works, whatever newer runs ended as', async () => {
+    const working = await seedTurn();
+    await setRunStatus(working, 'running');
+    const removed = await addRun(working);
+    await setRunStatus(removed, 'cancelled');
+    expect((await list(working)).items[0]).toMatchObject({ attention: 'working' });
 
-    // The older run changing afterwards does not bring its state back.
-    await setRunStatus(first, 'failed');
-    expect((await list(first)).items[0]).toMatchObject({ attention: null });
-    const snapshot = await store.loadSnapshot(db, first.conversationId);
-    expect(snapshot?.conversation.attention).toBeNull();
+    await setRunStatus(working, 'completed');
+    expect((await list(working)).items[0]).toMatchObject({ attention: null });
   });
 
   it('is given per conversation, for every row of the page, newest conversation first', async () => {
@@ -217,7 +220,7 @@ describe('a conversation’s attention', () => {
     expect(listed.items.map((item) => [item.title, item.attention])).toEqual([
       ['Working', 'working'],
       ['Done', null],
-      ['Failed', 'failed'],
+      ['Failed', null],
       ['Waiting', 'approval'],
     ]);
     expect(listed.pagination).toMatchObject({ totalItems: 4, totalPages: 1, currentPage: 1 });
@@ -230,6 +233,53 @@ describe('a conversation’s attention', () => {
     expect((await list(mine)).items.map((item) => item.id)).toEqual([mine.conversationId]);
     // The same user in another school sees nothing of this one.
     expect((await list({ schoolId: theirs.schoolId, userId: mine.userId })).items).toEqual([]);
+  });
+});
+
+describe('stopping a run that waits for approval', () => {
+  /** A turn waiting on the user's approval of one change. */
+  async function waitingForApproval() {
+    const turn = await seedTurn({ text: 'Rename Class 3 to Grade 3.' });
+    const approval = await store.assistantTransaction(db, async (tx, emit) => {
+      const item = await store.insertItem(tx, emit, {
+        conversationId: turn.conversationId,
+        runId: turn.runId,
+        kind: 'tool_call',
+        status: 'awaiting_approval',
+        body: { toolUseId: 'tu_1', toolName: 'classes.update', title: 'Update a class', access: 'write', destructive: false, module: 'classes', input: {} },
+        itemKey: 'tool:tu_1',
+      });
+      return store.insertApproval(tx, {
+        conversationId: turn.conversationId,
+        runId: turn.runId,
+        itemId: item.id,
+        schoolId: turn.schoolId,
+        userId: turn.userId,
+        toolName: 'classes.update',
+        awakeableId: 'awk_waiting',
+      });
+    });
+    await setRunStatus(turn, 'awaiting_approval');
+    return { turn, approval };
+  }
+
+  it('can be pressed again after waking the run failed, and the change cannot be approved meanwhile', async () => {
+    const { turn, approval } = await waitingForApproval();
+    const resolveApproval = vi.fn().mockRejectedValueOnce(new Error('Restate is unreachable')).mockResolvedValue(undefined);
+    configureDispatcher({ startRun: vi.fn(), resolveApproval });
+    onTestFinished(() => configureDispatcher(null));
+    const stop = () => call(assistantRouter.stopRun, { schoolId: turn.schoolId, runId: turn.runId }, as(turn.userId));
+
+    await expect(stop()).rejects.toMatchObject({ code: 'INTERNAL_SERVER_ERROR' });
+    expect((await store.findApproval(db, approval.id))?.status).toBe('pending');
+    await expect(
+      call(assistantRouter.respondToApproval, { schoolId: turn.schoolId, approvalId: approval.id, decision: 'approve' }, as(turn.userId)),
+    ).rejects.toMatchObject({ code: 'CONFLICT' });
+
+    await expect(stop()).resolves.toMatchObject({ id: turn.runId });
+    expect(resolveApproval).toHaveBeenCalledTimes(2);
+    expect(resolveApproval).toHaveBeenLastCalledWith({ awakeableId: 'awk_waiting', resolution: { decision: 'cancel' } });
+    expect((await store.findApproval(db, approval.id))?.status).toBe('cancelled');
   });
 });
 

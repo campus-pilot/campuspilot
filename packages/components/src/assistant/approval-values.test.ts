@@ -39,9 +39,41 @@ describe('approvalValueDisplay', () => {
     expect(text(['Maths', 'Science', 3, true])).toEqual({ kind: 'text', text: 'Maths, Science, 3, Yes' });
   });
 
-  it('counts a list of records instead of printing them', () => {
-    expect(text([{ name: 'Asha' }])).toEqual({ kind: 'text', text: '1 item' });
-    expect(text([{ name: 'Asha' }, { name: 'Ravi' }, 'x'])).toEqual({ kind: 'text', text: '3 items' });
+  it('shows every record of a list as its own numbered rows, never a count', () => {
+    // Exam marks as the API takes them: what is approved must be visible.
+    expect(text({ subjects: [{ subject: 'English', marks: 45 }, { subject: 'Hindi', marks: 38 }] })).toEqual({
+      kind: 'fields',
+      fields: [
+        {
+          key: 'subjects',
+          label: 'Subjects',
+          value: {
+            kind: 'fields',
+            fields: [
+              { key: '0', label: '1', value: { kind: 'fields', fields: [
+                { key: 'subject', label: 'Subject', value: { kind: 'text', text: 'English' } },
+                { key: 'marks', label: 'Marks', value: { kind: 'text', text: '45' } },
+              ] } },
+              { key: '1', label: '2', value: { kind: 'fields', fields: [
+                { key: 'subject', label: 'Subject', value: { kind: 'text', text: 'Hindi' } },
+                { key: 'marks', label: 'Marks', value: { kind: 'text', text: '38' } },
+              ] } },
+            ],
+          },
+        },
+      ],
+    });
+  });
+
+  it('numbers the entries of a list that mixes plain values, records and lists', () => {
+    expect(text(['A', { slug: 'b' }, [1, 2]])).toEqual({
+      kind: 'fields',
+      fields: [
+        { key: '0', label: '1', value: { kind: 'text', text: 'A' } },
+        { key: '1', label: '2', value: { kind: 'fields', fields: [{ key: 'slug', label: 'Slug', value: { kind: 'text', text: 'b' } }] } },
+        { key: '2', label: '3', value: { kind: 'text', text: '1, 2' } },
+      ],
+    });
   });
 
   it('turns a record into labelled rows', () => {
@@ -55,9 +87,8 @@ describe('approvalValueDisplay', () => {
     });
   });
 
-  it('nests records two levels deep and counts anything deeper', () => {
-    const display = text({ guardian: { address: { city: 'Pune', pin: '411001' } } });
-    expect(display).toEqual({
+  it('shows a record however deep it is nested', () => {
+    expect(text({ guardian: { address: { city: 'Pune' } } })).toEqual({
       kind: 'fields',
       fields: [
         {
@@ -65,7 +96,13 @@ describe('approvalValueDisplay', () => {
           label: 'Guardian',
           value: {
             kind: 'fields',
-            fields: [{ key: 'address', label: 'Address', value: { kind: 'text', text: '2 details' } }],
+            fields: [
+              {
+                key: 'address',
+                label: 'Address',
+                value: { kind: 'fields', fields: [{ key: 'city', label: 'City', value: { kind: 'text', text: 'Pune' } }] },
+              },
+            ],
           },
         },
       ],

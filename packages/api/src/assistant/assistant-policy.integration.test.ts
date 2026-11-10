@@ -2,7 +2,13 @@ import { db } from '@campuspilot/db';
 import { createRouterClient } from '@orpc/server';
 import { describe, expect, it } from 'vitest';
 
-import { createSchoolStaffSession, createTestSchool, createTestSession } from '../../test/fixtures';
+import {
+  createSchoolStaffSession,
+  createTestClient,
+  createTestSchool,
+  createTestSchoolMember,
+  createTestSession,
+} from '../../test/fixtures';
 import type { Context } from '../context';
 import { appRouter } from '../routers/index';
 import { assistantToolDecision, assistantToolInputDecision } from './tool-policy';
@@ -115,6 +121,26 @@ describe('assistant principal on procedures', () => {
       slug: 'by-principal',
     });
     await expect(principal.school.listClasses({ schoolId: school.id })).resolves.toHaveLength(1);
+  });
+
+  it('lists only the conversation’s school, even for a member of several', async () => {
+    const school = await createTestSchool({ name: 'Alpha Academy' });
+    const other = await createTestSchool({ name: 'Beta School' });
+    const { session, user } = await createSchoolStaffSession(school.id, [{ role: 'principal' }]);
+    await createTestSchoolMember({ schoolId: other.id, userId: user.id, roles: [{ role: 'principal' }] });
+
+    // The same user sees both schools in the app, and only this one through the assistant.
+    const own = await createTestClient(session).school.listMySchools();
+    expect(own.map(({ id }) => id)).toEqual([school.id, other.id]);
+    const client = createRouterClient(appRouter, {
+      context: {
+        db,
+        headers: new Headers(),
+        session: session as Context['session'],
+        principal: { authMethod: 'assistant', assistantRun: { conversationId: 'asc_test', runId: 'asr_test', schoolId: school.id } },
+      },
+    });
+    await expect(client.school.listMySchools()).resolves.toEqual([expect.objectContaining({ id: school.id })]);
   });
 
   it('cannot call billing procedures', async () => {

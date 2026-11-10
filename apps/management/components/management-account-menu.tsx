@@ -8,6 +8,7 @@ import { env } from '@campuspilot/env/management.client';
 import { authClient } from '@/lib/auth-client';
 import { useInstallApp } from '@/lib/install-app.client';
 import { AccountDialog } from './account-dialog';
+import { forgetDrafts } from './assistant/assistant-draft';
 
 /** Reuses the shell account actions with a compact navbar avatar trigger. */
 export function ManagementAccountMenu() {
@@ -26,6 +27,7 @@ export function ManagementAccountMenu() {
 
   async function logout() {
     await authClient.signOut();
+    forgetDrafts();
     router.replace('/auth/login');
   }
 

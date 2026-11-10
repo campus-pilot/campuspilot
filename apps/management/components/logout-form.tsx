@@ -6,6 +6,7 @@ import { Button } from '@campuspilot/ui/components/button';
 import { FieldError } from '@campuspilot/ui/components/field';
 import { ArrowLeft, LogOut } from 'lucide-react';
 import { authClient } from '@/lib/auth-client';
+import { forgetDrafts } from './assistant/assistant-draft';
 import { AuthLoading } from './auth-loading';
 
 export function LogoutForm() {
@@ -27,6 +28,7 @@ export function LogoutForm() {
         return;
       }
 
+      forgetDrafts();
       router.replace('/auth/login');
       router.refresh();
     },

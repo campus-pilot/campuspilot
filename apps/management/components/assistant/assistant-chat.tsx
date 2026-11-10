@@ -25,7 +25,7 @@ import { TooltipProvider } from '@campuspilot/ui/components/tooltip';
 import { toast } from '@campuspilot/ui/lib/toast';
 import { cn } from '@campuspilot/ui/lib/utils';
 import { ClipboardList, RotateCcw, ShieldCheck, UserPlus, UserRoundX } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { useRef, type ReactNode } from 'react';
 
 import { refusalMessage, type AssistantConversationFailure } from './assistant-stream';
 import { AssistantViewBlock } from './assistant-view';
@@ -393,16 +393,37 @@ export function AssistantChat({
   const connection = useAssistantConnection(schoolId, conversationId);
   const failure = useAssistantConversationFailure(schoolId, conversationId);
   const draft = useAssistantDraft(schoolId, conversationId);
-  const retry = (message: OptimisticMessage) => resend(message.mutation);
+  // What the message box holds, as its draft reports say; for sends that do
+  // not come from the box (a retry, a suggestion), whose text stays in it.
+  const boxText = useRef(draft.initialText);
+  const saveDraft = (text: string) => {
+    boxText.current = text;
+    draft.save(text);
+  };
+
+  /**
+   * A send of this chat started conversation `id`. The box's text moves with
+   * it, then the chat follows; neither happens once the user has left this
+   * chat, since the answer must not move them or another chat's draft.
+   */
+  function started(id: string, textInBox: string) {
+    if (conversationId || !life.isAlive()) return;
+    draft.start(id, textInBox);
+    onConversationStarted(id);
+  }
+
+  const retry = (message: OptimisticMessage) =>
+    void resend(message.mutation).then((result) => {
+      if (result) started(result.conversation.id, boxText.current);
+    });
   // While a run works, a new message waits in the tray; otherwise it starts a turn.
   const requests = useTrayRequests(schoolId, conversationId, running ? optimistic : [], retry);
 
-  async function sendText(text: string) {
+  async function sendText(text: string, box: { text: () => string } = { text: () => boxText.current }) {
     const result = await send(text, conversationId).catch((error: unknown) => {
       throw new Error(refusalMessage(error) ?? 'The message could not be sent. Check your connection and try again.');
     });
-    // The answer can arrive after the user has left this chat; then it must not move them.
-    if (!conversationId && life.isAlive()) onConversationStarted(result.conversation.id);
+    started(result.conversation.id, box.text());
   }
 
   /** Sends text that did not come from the message box (a suggestion, "Try again"); a failure shows as a toast. */
@@ -465,7 +486,7 @@ export function AssistantChat({
               sending={sending}
               lastSentText={lastSentText}
               initialText={draft.initialText}
-              onDraftChange={draft.save}
+              onDraftChange={saveDraft}
               requests={requests}
               leading={<ComposerToolbar schoolId={schoolId} conversationId={conversationId} />}
               stopping={stopping}

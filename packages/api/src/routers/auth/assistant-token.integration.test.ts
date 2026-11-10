@@ -45,6 +45,15 @@ describe('auth.issueAssistantToken', () => {
     ).rejects.toMatchObject({ code: 'FORBIDDEN' });
   });
 
+  it('refuses an admin who is impersonating the user', async () => {
+    const school = await createTestSchool();
+    const { session } = await createSchoolStaffSession(school.id, [{ role: 'principal' }]);
+    const impersonated = { ...session, session: { ...session.session, impersonatedBy: 'usr_admin' } };
+    await expect(
+      createTestClient(impersonated, serviceHeaders()).auth.issueAssistantToken(scope(school.id)),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+
   it('validates the scope before issuing', async () => {
     const school = await createTestSchool();
     const { session } = await createSchoolStaffSession(school.id, [{ role: 'principal' }]);

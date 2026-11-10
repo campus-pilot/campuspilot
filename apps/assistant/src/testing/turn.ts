@@ -11,7 +11,8 @@ import {
   assistantTranscriptEntryTable,
   type AssistantToolCallBody,
 } from '../db/schema';
-import { publishAssistantEvent, signalAssistantRunStop, subscribeAssistantEvents } from '../events';
+import { publishAssistantEvent, subscribeAssistantEvents } from '../events';
+import { stopRun } from '../run-stop';
 import { generateId } from '../ids';
 import type { ProcessRunInput } from '../runtime/contract';
 import type { ModelProviderId } from '../runtime/providers/types';
@@ -212,22 +213,17 @@ export async function respondToApproval(
 }
 
 /**
- * The user's stop, as the router's `stopRun` applies it: the request is
- * recorded on the run and signalled in Redis, and an approval the run is
- * waiting on is cancelled so the run wakes up.
+ * The user's stop, through the same `stopRun` the router uses; the fake run
+ * context stands in for Restate when an approval the run waits on is
+ * cancelled.
  */
 export async function requestStop(ctx: FakeRunContext | null, turn: Pick<SeededTurn, 'runId'>) {
   const run = await store.findRun(db, turn.runId);
   if (!run) throw new Error(`Run ${turn.runId} does not exist.`);
-  await store.assistantTransaction(db, (tx, emit) =>
-    store.updateRun(tx, emit, run, { stopRequestedAt: new Date() }),
-  );
-  await signalAssistantRunStop(run.id);
-  const pending = await store.findPendingApprovalForRun(db, run.id);
-  if (pending && (await store.decideApproval(db, pending.id, 'cancelled'))) {
+  await stopRun(run, async (awakeableId) => {
     if (!ctx) throw new Error('A run context is needed to cancel a pending approval.');
-    ctx.resolveAwakeable(pending.awakeableId, { decision: 'cancel' });
-  }
+    ctx.resolveAwakeable(awakeableId, { decision: 'cancel' });
+  });
 }
 
 /** A CampusPilot tool as the API's MCP listing would describe it. */

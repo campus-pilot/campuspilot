@@ -41,14 +41,16 @@ import {
 export const MAX_MODEL_STEPS = 20;
 
 /**
- * Retries of one model request. A request that failed is paid for at most
- * once more per retry, so this stays small. Failures the provider says
- * cannot be fixed by retrying never get here (see `modelStep`).
+ * Attempts of one model request. Restate's `maxRetryAttempts` counts the
+ * first attempt too, so this is the first request and 2 retries. A request
+ * that failed is paid for at most once more per retry, so this stays small.
+ * Failures the provider says cannot be fixed by retrying never get here
+ * (see `modelStep`).
  */
 export const MODEL_STEP_RETRY = { maxRetryAttempts: 3, initialRetryInterval: 2_000 };
 /**
- * Retries of steps that only touch the assistant's own database, and of
- * tool steps. Every such step is safe to repeat: inserts are keyed (see
+ * Attempts (the first included) of steps that only touch the assistant's
+ * own database, and of tool steps. Every such step is safe to repeat: inserts are keyed (see
  * transcript.ts), reads are harmless, and a write is sent to the API at
  * most once however often its step runs (see `executeToolCall`).
  */
@@ -57,6 +59,14 @@ const DB_STEP_RETRY = { maxRetryAttempts: 5, initialRetryInterval: 500 };
 export const DECLINED_RESULT = 'The user declined this action. Do not retry it; ask what they would like instead.';
 export const CANCELLED_RESULT = 'The user stopped the assistant before this action ran.';
 const REFUSAL_TEXT = 'I can’t help with that request.';
+
+/**
+ * Added to a write's result when it is reported from the item after a
+ * replay and the item kept only the start of it (the model's own copy is
+ * longer and was lost with the crash).
+ */
+export const RECOVERED_OUTPUT_CUT_NOTE =
+  '[Only the start of this result was kept. Read the data again if you need the rest.]';
 
 /**
  * Reported when a write was handed to the API but its outcome never came
@@ -79,21 +89,16 @@ type RunFailure = { code: string; message: string; detail?: string };
 const failureJson = (failure: RunFailure) => JSON.stringify(failure);
 
 /**
- * A run failure with an explicit code that ends the run at once. Restate
- * replays terminal errors with their message only, so the code, the user's
- * message and the raw detail for developers travel inside it as JSON.
+ * A run failure with an explicit code. Restate replays errors with their
+ * message only, so the code, the user's message and the raw detail for
+ * developers travel inside it as JSON. By default it ends the run at once
+ * (a terminal error). A `retryable` one is a plain error, so the step's
+ * retry policy applies; if every attempt fails, Restate ends the step with
+ * this message and the run reports this code instead of a generic one.
  */
-function runFailure(code: string, message: string, detail?: string) {
-  return new restate.TerminalError(failureJson({ code, message, ...(detail ? { detail } : {}) }));
-}
-
-/**
- * A failure worth retrying. Thrown as a plain error so the step's retry
- * policy applies; if every retry fails, Restate ends the step with this
- * message and the run reports this code instead of a generic one.
- */
-function retryableRunFailure(code: string, message: string, detail?: string) {
-  return new Error(failureJson({ code, message, ...(detail ? { detail } : {}) }));
+function runFailure(code: string, message: string, { detail, retryable = false }: { detail?: string; retryable?: boolean } = {}) {
+  const json = failureJson({ code, message, ...(detail ? { detail } : {}) });
+  return retryable ? new Error(json) : new restate.TerminalError(json);
 }
 
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
@@ -418,7 +423,7 @@ export function createRunProcessor(deps: AssistantConversationDeps) {
         throw runFailure(
           'model_rejected',
           'The assistant could not process this request. Please try rephrasing it.',
-          detail,
+          { detail },
         );
       }
       if (kind === 'unavailable') {
@@ -426,14 +431,14 @@ export function createRunProcessor(deps: AssistantConversationDeps) {
         throw runFailure(
           'provider_unavailable',
           'The assistant is not available right now. Please try again later.',
-          detail,
+          { detail },
         );
       }
       if (kind === 'busy') {
-        throw retryableRunFailure(
+        throw runFailure(
           'model_busy',
           'The assistant is busy right now. Please try again in a few minutes.',
-          detail,
+          { detail, retryable: true },
         );
       }
       throw error;
@@ -566,7 +571,12 @@ export function createRunProcessor(deps: AssistantConversationDeps) {
 
   /**
    * Creates the approval the user decides on. Returns false when the run was
-   * stopped first, in which case nothing waits.
+   * stopped first, in which case nothing waits. The stop check and the
+   * approval are one transaction holding the run's row lock: a Stop either
+   * commits before it (and the approval is refused here) or after it (and
+   * then finds the approval and cancels it). Checked outside the lock, a
+   * Stop landing in between would find no approval, and the run would wait
+   * on one nobody can answer.
    */
   async function requestApproval(
     run: RunFacts,
@@ -574,9 +584,9 @@ export function createRunProcessor(deps: AssistantConversationDeps) {
     toolName: string,
     awakeableId: string,
   ): Promise<boolean> {
-    const current = await store.findRun(db, run.runId);
-    if (!current || current.stopRequestedAt) return false;
-    await tx(async (t, emit) => {
+    return tx(async (t, emit) => {
+      const current = await store.lockRun(t, run.runId);
+      if (!current || current.stopRequestedAt) return false;
       const approval = await store.insertApproval(t, {
         conversationId: run.conversationId,
         runId: run.runId,
@@ -593,8 +603,8 @@ export function createRunProcessor(deps: AssistantConversationDeps) {
         });
       }
       await store.updateRun(t, emit, runRef(run), { status: 'awaiting_approval' });
+      return true;
     });
-    return true;
   }
 
   async function applyResolution(
@@ -647,7 +657,12 @@ export function createRunProcessor(deps: AssistantConversationDeps) {
       );
       if (earlier.status === 'succeeded' && earlier.body.output !== undefined) {
         return {
-          recorded: { toolUseId: toolUse.id, toolName: toolUse.name, content: earlier.body.output, isError: false },
+          recorded: {
+            toolUseId: toolUse.id,
+            toolName: toolUse.name,
+            content: earlier.body.outputTruncated ? `${earlier.body.output}\n${RECOVERED_OUTPUT_CUT_NOTE}` : earlier.body.output,
+            isError: false,
+          },
         };
       }
       return { ok: false, error: earlier.body.error ?? OUTCOME_UNKNOWN_ERROR };

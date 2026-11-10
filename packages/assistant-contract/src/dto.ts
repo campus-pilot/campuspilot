@@ -149,46 +149,28 @@ export const assistantRunSchema = z.object({
 export type AssistantRunDto = z.infer<typeof assistantRunSchema>;
 
 /**
- * What a conversation needs noticing for, from the state of its latest run
- * (the run asked most recently):
- * - `approval`: it is waiting for the user to approve or decline a change.
- * - `working`: it is queued or running.
- * - `failed`: it failed.
- * Null otherwise: the latest run completed or was stopped by the user, or
- * the conversation has no run.
+ * What a conversation needs noticing for in the history list, from its runs
+ * that have not finished:
+ * - `approval`: one of them waits for the user to approve or decline a change.
+ * - `working`: otherwise, one of them is queued or running.
+ * Null when every run has finished (or there is none). These are exactly
+ * the runs that make the service refuse to delete the conversation, so the
+ * list never offers what the service would refuse.
  */
-export const assistantConversationAttentionSchema = z.enum(['approval', 'working', 'failed']);
+export const assistantConversationAttentionSchema = z.enum(['approval', 'working']);
 export type AssistantConversationAttention = z.infer<typeof assistantConversationAttentionSchema>;
 
-/** The attention each run status asks for, when that run is the conversation's latest. */
-export const ASSISTANT_RUN_ATTENTION: Record<AssistantRunStatus, AssistantConversationAttention | null> = {
-  queued: 'working',
-  running: 'working',
-  awaiting_approval: 'approval',
-  failed: 'failed',
-  completed: null,
-  cancelled: null,
-};
-
 /**
- * The attention of a conversation, given all of its runs: that of the run
- * asked most recently (by creation time, then id, the order runs are listed
- * in). The service uses it where it has the runs in hand, and a client that
- * holds a conversation's live runs can use it to stay current between list
- * refreshes; both then agree by construction.
+ * The attention of a conversation, given its runs (see the schema above).
+ * The service's list query applies the same rule in SQL; a client that holds
+ * a conversation's live runs uses this to stay current between refreshes.
  */
 export function assistantConversationAttention(
-  runs: readonly { id: string; status: AssistantRunStatus; createdAt: Date }[],
+  runs: readonly { status: AssistantRunStatus }[],
 ): AssistantConversationAttention | null {
-  let latest: (typeof runs)[number] | null = null;
-  for (const run of runs) {
-    const newer =
-      !latest ||
-      run.createdAt.getTime() > latest.createdAt.getTime() ||
-      (run.createdAt.getTime() === latest.createdAt.getTime() && run.id > latest.id);
-    if (newer) latest = run;
-  }
-  return latest ? ASSISTANT_RUN_ATTENTION[latest.status] : null;
+  if (runs.some((run) => run.status === 'awaiting_approval')) return 'approval';
+  if (runs.some((run) => run.status === 'queued' || run.status === 'running')) return 'working';
+  return null;
 }
 
 export const assistantConversationSchema = z.object({
@@ -196,12 +178,16 @@ export const assistantConversationSchema = z.object({
   schoolId: z.string(),
   title: z.string().nullable(),
   lastSequence: z.number().int(),
-  /** See `assistantConversationAttentionSchema`. */
-  attention: assistantConversationAttentionSchema.nullable(),
   createdAt: z.date(),
   updatedAt: z.date(),
 });
 export type AssistantConversationDto = z.infer<typeof assistantConversationSchema>;
+
+/** A conversation as a row of the history list: with its attention. */
+export const assistantConversationListItemSchema = assistantConversationSchema.extend({
+  attention: assistantConversationAttentionSchema.nullable(),
+});
+export type AssistantConversationListItemDto = z.infer<typeof assistantConversationListItemSchema>;
 
 /**
  * Stream envelope, after T3 Code's thread subscription:
@@ -267,7 +253,7 @@ export const listAssistantConversationsInputSchema = z.object({
   page: z.number().int().positive().default(1),
 });
 export const listAssistantConversationsOutputSchema = z.object({
-  items: z.array(assistantConversationSchema),
+  items: z.array(assistantConversationListItemSchema),
   pagination: z.object({
     nextCursor: z.string().nullable(),
     currentPage: z.number().int().positive(),

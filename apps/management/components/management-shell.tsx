@@ -17,6 +17,7 @@ import { Command, Search } from 'lucide-react';
 import { authClient } from '@/lib/auth-client';
 import { useInstallApp } from '@/lib/install-app.client';
 import { AccountDialog } from './account-dialog';
+import { forgetDrafts } from './assistant/assistant-draft';
 import { AssistantPanel } from './assistant/assistant-panel';
 import { ManagementCommandPalette } from './management-command-palette';
 import { commandPaletteContextKey } from './management-command-model';
@@ -87,6 +88,7 @@ export function ManagementShell({
 
   async function logout() {
     await authClient.signOut();
+    forgetDrafts();
     router.replace('/auth/login');
   }
 

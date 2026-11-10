@@ -21,7 +21,7 @@ import {
   toolResultsTranscriptKey,
   userTranscriptKey,
 } from '../transcript';
-import { createRunProcessor } from './conversation';
+import { createRunProcessor, MAX_MODEL_STEPS, MODEL_STEP_RETRY, RECOVERED_OUTPUT_CUT_NOTE } from './conversation';
 import {
   createFakeProvider,
   FAKE_USAGE,
@@ -49,6 +49,24 @@ vi.mock('./tools', async (importOriginal) => ({
   callTool: vi.fn(),
   loadToolCatalog: vi.fn(),
 }));
+/**
+ * A hook that runs once, inside the transaction that creates an approval,
+ * just before the approval row is written: the moment a Stop must not slip
+ * through. Everything else in the store is real.
+ */
+const beforeApprovalInsert = vi.hoisted(() => ({ current: null as null | (() => Promise<void>) }));
+vi.mock('../store', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../store')>();
+  return {
+    ...actual,
+    insertApproval: async (...args: Parameters<typeof actual.insertApproval>) => {
+      const hook = beforeApprovalInsert.current;
+      beforeApprovalInsert.current = null;
+      await hook?.();
+      return actual.insertApproval(...args);
+    },
+  };
+});
 vi.mock('../platform', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../platform')>()),
   getRunToken: vi.fn(),
@@ -64,13 +82,8 @@ const QUESTION = 'Rename student stu_1 to Asha R.';
 const listStudents = mcpTool('students.list', 'read');
 const updateStudent = mcpTool('students.update', 'write');
 
-/**
- * Model requests one run may make. Mirrors `MAX_MODEL_STEPS` in
- * conversation.ts, which does not export it.
- */
-const MAX_MODEL_STEPS = 20;
-/** Attempts of one model request, the first included (`MODEL_STEP_RETRY`, not exported either). */
-const MODEL_STEP_ATTEMPTS = 3;
+/** Attempts of one model request, the first included (Restate counts it). */
+const MODEL_STEP_ATTEMPTS = MODEL_STEP_RETRY.maxRetryAttempts;
 
 const log = createLogger({ pkg: 'assistant-test' });
 
@@ -420,6 +433,29 @@ describe('a write tool call', () => {
     ]);
   });
 
+  it('is never left waiting when the stop lands while its approval is being created', async () => {
+    const { turn, invoke } = await arrange({
+      script: [fakeReply({ toolUses: [writeCall] }), fakeReply({ text: 'never requested' })],
+    });
+    const { ctx, done } = invoke();
+    let stopping: Promise<void> | null = null;
+    beforeApprovalInsert.current = async () => {
+      stopping = requestStop(ctx, turn);
+      // Give the stop the time to finish if nothing holds it back. With the
+      // run's row locked here, it waits for this transaction instead.
+      await Promise.race([stopping, new Promise((resolve) => setTimeout(resolve, 300))]);
+    };
+
+    await vi.waitFor(async () => expect((await readTurn(turn)).run.status).toBe('cancelled'), { timeout: 5_000 });
+    await stopping;
+    await done;
+
+    expect(callToolMock).not.toHaveBeenCalled();
+    const { approvals, toolCalls } = await readTurn(turn);
+    expect(approvals.map((row) => row.status)).toEqual(['cancelled']);
+    expect(toolCalls.map((call) => call.status)).toEqual(['cancelled']);
+  });
+
   it('is never called when the run is stopped while it waits, and the run ends cancelled', async () => {
     // The read after the write must not run either once the run is stopped.
     const { provider, turn, events, invoke } = await arrange({
@@ -484,9 +520,12 @@ describe('a write tool call', () => {
 describe('at-most-once writes', () => {
   const script = () => [fakeReply({ toolUses: [writeCall] }), fakeReply({ text: 'Renamed.' })];
 
-  it('does not call the tool again when its step is replayed after the call succeeded, and reports the recorded output', async () => {
+  it.each([
+    ['whole', false, ''],
+    ['cut short, with a note saying so', true, `\n${RECOVERED_OUTPUT_CUT_NOTE}`],
+  ])('does not call the tool again when its step is replayed after the call succeeded, and reports the recorded output (%s)', async (_label, outputTruncated, note) => {
     const { provider, turn, invoke } = await arrange({ script: script() });
-    const outcome = toolSuccess('{"id":"stu_1","name":"Asha R."}');
+    const outcome = { ...toolSuccess('{"id":"stu_1","name":"Asha R."}'), outputTruncated };
     callToolMock.mockResolvedValueOnce(outcome);
 
     // First invocation: the write is approved and applied, then the service
@@ -515,7 +554,7 @@ describe('at-most-once writes', () => {
     expect(callToolMock).toHaveBeenCalledTimes(1);
     expect(provider.calls).toHaveLength(2);
     expect(toolResultsSentTo(provider.calls[1])).toEqual([
-      { type: 'tool_result', toolUseId: writeCall.id, toolName: writeCall.name, content: outcome.storedOutput, isError: false },
+      { type: 'tool_result', toolUseId: writeCall.id, toolName: writeCall.name, content: `${outcome.storedOutput}${note}`, isError: false },
     ]);
 
     const { run, toolCalls, approvals } = await readTurn(turn);
@@ -922,7 +961,12 @@ describe('an expired delegated token', () => {
     expect(run).toMatchObject({ status: 'failed', errorCode: 'session_expired', modelRequestCount: 0 });
   });
 
-  it('fails the run and answers the open tool call when the token expired while the user decided', async () => {
+  /**
+   * The run fails, the open call is answered in the transcript so the
+   * conversation can go on, and the call itself gets a final status
+   * (`settleOpenToolCalls`) instead of a spinner on a turn that is over.
+   */
+  it('fails the run, answers the open tool call and settles it when the token expired while the user decided', async () => {
     const { provider, turn, invoke } = await arrange({
       script: [fakeReply({ toolUses: [writeCall] }), fakeReply({ text: 'never requested' })],
     });
@@ -935,7 +979,7 @@ describe('an expired delegated token', () => {
 
     expect(callToolMock).not.toHaveBeenCalled();
     expect(provider.calls).toHaveLength(1);
-    const { run, transcript } = await readTurn(turn);
+    const { run, transcript, toolCalls } = await readTurn(turn);
     expect(run).toMatchObject({ status: 'failed', errorCode: 'session_expired' });
     expect(transcript.at(-1)).toEqual({
       role: 'user',
@@ -944,27 +988,6 @@ describe('an expired delegated token', () => {
         { type: 'tool_result', toolUseId: writeCall.id, toolName: writeCall.name, content: expect.any(String), isError: true },
       ],
     });
-  });
-
-  /**
-   * A run that fails while a tool call is `running` must give that call a
-   * final status (`settleOpenToolCalls`), or the chat shows a spinner on a
-   * turn that is over. Reached here through an expired token after approval.
-   */
-  it('does not leave the approved tool call running once the run has failed', async () => {
-    const { turn, invoke } = await arrange({
-      script: [fakeReply({ toolUses: [writeCall] }), fakeReply({ text: 'never requested' })],
-    });
-    const { ctx, done } = invoke();
-
-    const approval = await waitForPendingApproval(turn, done);
-    getRunTokenMock.mockResolvedValue(null);
-    await respondToApproval(ctx, approval, 'approve');
-    await done;
-
-    const { run, toolCalls } = await readTurn(turn);
-    expect(run.status).toBe('failed');
-    expect(toolCalls).toHaveLength(1);
-    expect(toolCalls[0]?.status).not.toBe('running');
+    expect(toolCalls.map((call) => call.status)).toEqual(['failed']);
   });
 });

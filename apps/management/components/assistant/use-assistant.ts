@@ -2,7 +2,7 @@
 
 import {
   assistantConversationAttention,
-  type AssistantConversationDto,
+  type AssistantConversationListItemDto,
   type AssistantItemDto,
   type AssistantRunDto,
   type AssistantStreamEvent,
@@ -12,6 +12,7 @@ import {
   activeRun,
   assistantAnnouncement,
   buildAssistantTimeline,
+  lastUserText,
   sumAssistantUsage,
   pendingApprovals,
   queuedMessages,
@@ -30,10 +31,10 @@ import {
   type Mutation,
   type QueryClient,
 } from '@tanstack/react-query';
-import { ORPCError } from '@orpc/client';
-import { useState, useSyncExternalStore } from 'react';
+import { useRef, useState, useSyncExternalStore } from 'react';
 
 import { assistantClient, assistantOrpc } from '@/lib/assistant-client';
+import { authClient } from '@/lib/auth-client';
 import { orpc } from '@/lib/orpc';
 
 import {
@@ -45,7 +46,7 @@ import {
   type AssistantConversationState,
 } from './assistant-conversation-state';
 import { draftKey, readDraft, sessionDraftStorage, writeDraft } from './assistant-draft';
-import { conversationFailure, isClientError, reconnectingStream, refusalMessage } from './assistant-stream';
+import { conversationFailure, isClientError, reconnectingStream, refusalMessage, retryUnlessRefused } from './assistant-stream';
 
 /**
  * Longest silence accepted from a live stream. The server sends a heartbeat
@@ -296,20 +297,14 @@ const selectUsage = structural((state) => {
   const usage = state.runs.flatMap((run) => (run.diagnostics ? [run.diagnostics] : []));
   return usage.length ? sumAssistantUsage(usage) : null;
 });
-const selectLastUserText = structural((state) => {
-  for (let index = state.items.length - 1; index >= 0; index -= 1) {
-    const item = state.items[index]!;
-    if (item.kind === 'user_message') return item.body.text;
-  }
-  return undefined;
-});
+const selectLastUserText = structural((state) => lastUserText(state.items) ?? undefined);
 /**
  * The open conversation with its attention as of now. The stream holds
  * every run of the conversation, live, so the attention is worked out from
  * them (by the contract's own rule) instead of read from the snapshot, which
  * is only as fresh as the moment it was taken.
  */
-const selectConversation = (state: AssistantConversationState): AssistantConversationDto | null =>
+const selectConversation = (state: AssistantConversationState): AssistantConversationListItemDto | null =>
   state.conversation ? { ...state.conversation, attention: assistantConversationAttention(state.runs) } : null;
 /** Has data on screen, but its connection has dropped or not caught up yet. */
 const selectDisconnected = (state: AssistantConversationState) => Boolean(state.conversation) && !state.synchronized;
@@ -448,10 +443,11 @@ export function useAssistantConversations(schoolId: string) {
  */
 export function useDeleteAssistantConversation(schoolId: string) {
   const queryClient = useQueryClient();
+  const userId = useSignedInUserId();
   return useMutation({
     ...assistantOrpc!.deleteConversation.mutationOptions(),
     onSuccess: async ({ id }) => {
-      writeDraft(sessionDraftStorage(), draftKey(schoolId, id), '');
+      if (userId) writeDraft(sessionDraftStorage(), draftKey(userId, schoolId, id), '');
       queryClient.removeQueries({ queryKey: ['assistant', 'conversation', schoolId, id] });
       await queryClient.invalidateQueries({ queryKey: assistantOrpc!.listConversations.key() });
     },
@@ -473,16 +469,6 @@ export function equalJitterDelay(attempt: number): number {
   return ceiling / 2 + Math.random() * (ceiling / 2);
 }
 
-/**
- * Sends are retried only when the network or server failed; a refusal (for
- * example FORBIDDEN) is final. Retrying is safe: the request id makes the
- * server return the original run instead of creating another.
- */
-function retryableSend(failureCount: number, error: unknown) {
-  if (failureCount >= 3) return false;
-  return !(error instanceof ORPCError) || error.status >= 500;
-}
-
 const sendKey = (schoolId: string) => ['assistant', 'send', schoolId] as const;
 
 type SendVariables = Parameters<
@@ -494,7 +480,10 @@ export function useSendAssistantMessage(schoolId: string, surface: AssistantSurf
   const mutation = useMutation({
     ...assistantOrpc!.sendMessage.mutationOptions(),
     mutationKey: sendKey(schoolId),
-    retry: retryableSend,
+    // Only network and server failures are retried; a refusal is final.
+    // Retrying is safe: the request id makes the server return the original
+    // run instead of creating another.
+    retry: retryUnlessRefused,
     retryDelay: equalJitterDelay,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: assistantOrpc!.listConversations.key() }),
   });
@@ -507,12 +496,16 @@ export function useSendAssistantMessage(schoolId: string, surface: AssistantSurf
       surface,
       pageContext: currentPageContext(),
     });
-  /** Re-sends a failed message with its original request id. */
-  const resend = (failed: Mutation<unknown, unknown, SendVariables>) => {
+  /**
+   * Re-sends a failed message with its original request id. Resolves with
+   * the send's result, or null when it failed again (the message then shows
+   * "Not sent" once more), so the caller can open a conversation it started.
+   */
+  const resend = async (failed: Mutation<unknown, unknown, SendVariables>) => {
     const variables = failed.state.variables;
-    if (!variables) return;
+    if (!variables) return null;
     queryClient.getMutationCache().remove(failed);
-    void mutation.mutateAsync(variables).catch(() => undefined);
+    return mutation.mutateAsync(variables).catch(() => null);
   };
   return { send, resend, isPending: mutation.isPending };
 }
@@ -656,7 +649,45 @@ export function useStopAssistantRun() {
  * message box holds, and removes the entry once it is empty.
  */
 export function useAssistantDraft(schoolId: string, conversationId: string | null) {
-  const key = draftKey(schoolId, conversationId);
-  const [initialText] = useState(() => readDraft(sessionDraftStorage(), key));
-  return { initialText, save: (text: string) => writeDraft(sessionDraftStorage(), key, text) };
+  const userId = useSignedInUserId();
+  // The conversation the box's text belongs to. It starts as the open one and
+  // moves to a conversation the box's first message started (`start`), so
+  // what is typed while that first send is on its way lands there too.
+  const target = useRef(conversationId);
+  const keyOf = (id: string | null) => (userId ? draftKey(userId, schoolId, id) : null);
+  const [initialText] = useState(() => {
+    const key = keyOf(conversationId);
+    return key ? readDraft(sessionDraftStorage(), key) : '';
+  });
+  return {
+    initialText,
+    save: (text: string) => {
+      const key = keyOf(target.current);
+      if (key) writeDraft(sessionDraftStorage(), key, text);
+    },
+    /**
+     * The first message started conversation `id`: `boxText` (what the box
+     * holds right now, empty included) becomes that conversation's draft and
+     * the shared new-conversation draft is cleared. Called before the chat
+     * moves to the conversation, so its next mount reads the text back. Never
+     * the text that was sent: the box no longer holds it.
+     */
+    start: (id: string, boxText: string) => {
+      const fresh = keyOf(id);
+      const pending = keyOf(null);
+      if (fresh && pending) {
+        writeDraft(sessionDraftStorage(), fresh, boxText);
+        writeDraft(sessionDraftStorage(), pending, '');
+      }
+      target.current = id;
+    },
+  };
+}
+
+/**
+ * The signed-in user's id, or null until the session has loaded. Drafts are
+ * kept per user, so none is read or written before it is known.
+ */
+function useSignedInUserId(): string | null {
+  return authClient.useSession().data?.user.id ?? null;
 }

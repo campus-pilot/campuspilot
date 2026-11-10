@@ -1,14 +1,11 @@
 import { assistantContract } from '@campuspilot/assistant-contract/contract';
-import {
-  ASSISTANT_LIST_PAGE_SIZE,
-  ASSISTANT_TERMINAL_RUN_STATUSES,
-  type AssistantStreamEvent,
-} from '@campuspilot/assistant-contract/dto';
+import { ASSISTANT_LIST_PAGE_SIZE, type AssistantStreamEvent } from '@campuspilot/assistant-contract/dto';
 import { implement, ORPCError } from '@orpc/server';
 
 import { db } from './db/client';
 import { entitlements } from './entitlements';
-import { signalAssistantRunStop, streamingTexts, subscribeAssistantEvents } from './events';
+import { liveEvents, streamingTexts, subscribeAssistantEvents } from './events';
+import { stopRun } from './run-stop';
 import { generateId } from './ids';
 import { log } from './log';
 import {
@@ -192,27 +189,14 @@ export const assistantRouter = os.router({
       yield { type: 'synchronized' } satisfies AssistantStreamEvent;
 
       let accessCheckedAt = Date.now();
-      while (true) {
-        let timer: ReturnType<typeof setTimeout> | undefined;
-        const event = await Promise.race([
-          subscription.next(),
-          new Promise<'heartbeat'>((resolve) => {
-            timer = setTimeout(() => resolve('heartbeat'), HEARTBEAT_MS);
-          }),
-        ]);
-        clearTimeout(timer);
+      for await (const event of liveEvents(subscription, HEARTBEAT_MS)) {
         if (Date.now() - accessCheckedAt >= ACCESS_RECHECK_MS) {
           accessCheckedAt = Date.now();
           // Ending the stream makes the browser reconnect, and that request
           // gets the real refusal (signed out, or no longer permitted).
           if (!(await streamStillAllowed(context, input.schoolId))) return;
         }
-        if (event === 'heartbeat') {
-          yield { type: 'heartbeat' } satisfies AssistantStreamEvent;
-          continue;
-        }
-        if (!event) return;
-        yield event;
+        yield event === 'heartbeat' ? ({ type: 'heartbeat' } satisfies AssistantStreamEvent) : event;
       }
     } finally {
       signal?.removeEventListener('abort', onAbort);
@@ -231,21 +215,20 @@ export const assistantRouter = os.router({
       if (replay.schoolId !== input.schoolId) {
         throw new ORPCError('CONFLICT', { message: 'This request id was already used in another school.' });
       }
-      const [conversation, item, attention] = await Promise.all([
+      const [conversation, item] = await Promise.all([
         store.findOwnedConversation(db, {
           conversationId: replay.conversationId,
           schoolId: input.schoolId,
           userId,
         }),
         store.findItemByKey(db, replay.conversationId, userMessageItemKey(replay.id)),
-        store.conversationAttention(db, replay.conversationId),
       ]);
       const itemDto = item ? store.toItemDto(item) : null;
       if (!conversation || !itemDto || itemDto.kind !== 'user_message') {
         throw new ORPCError('NOT_FOUND', { message: 'Assistant conversation was not found.' });
       }
       return {
-        conversation: store.toConversationDto(conversation, attention),
+        conversation: store.toConversationDto(conversation),
         run: store.toRunDto(replay),
         item: itemDto,
       };
@@ -309,9 +292,9 @@ export const assistantRouter = os.router({
         },
         itemKey: userMessageItemKey(runId),
       });
-      const conversation = await store.findConversationDto(tx, conversationId);
+      const conversation = await store.findConversation(tx, conversationId);
       if (item.kind !== 'user_message' || !conversation) throw new ORPCError('INTERNAL_SERVER_ERROR');
-      return { conversation, run, item };
+      return { conversation: store.toConversationDto(conversation), run, item };
     });
 
     try {
@@ -344,6 +327,12 @@ export const assistantRouter = os.router({
     }
     if (approval.status !== 'pending') {
       throw new ORPCError('CONFLICT', { message: 'This action was already decided.' });
+    }
+    // A stop that could not wake the run puts its approval back to pending so
+    // the next Stop can retry; the change must not be approved meanwhile.
+    const stoppedRun = await store.findRun(db, approval.runId);
+    if (input.decision === 'approve' && stoppedRun?.stopRequestedAt) {
+      throw new ORPCError('CONFLICT', { message: 'The assistant was stopped, so this change will not be made.' });
     }
     if (input.decision === 'approve') {
       // The user is present now, so the run resumes with a fresh token even
@@ -385,22 +374,14 @@ export const assistantRouter = os.router({
     if (!run || run.schoolId !== input.schoolId || run.userId !== context.user.id) {
       throw new ORPCError('NOT_FOUND', { message: 'Assistant run was not found.' });
     }
-    if (ASSISTANT_TERMINAL_RUN_STATUSES.has(run.status) || run.stopRequestedAt) {
-      return store.toRunDto(run);
+    try {
+      return await stopRun(run, (awakeableId) =>
+        dispatcher.resolveApproval({ awakeableId, resolution: { decision: 'cancel' } }),
+      );
+    } catch (error) {
+      log.error({ err: error, runId: run.id }, 'assistant.run.stop.failed');
+      throw new ORPCError('INTERNAL_SERVER_ERROR', { message: 'The assistant could not be stopped. Please try again.' });
     }
-    const stopped = await store.assistantTransaction(db, (tx, emit) =>
-      store.updateRun(tx, emit, run, { stopRequestedAt: new Date() }),
-    );
-    await signalAssistantRunStop(run.id);
-
-    const pending = await store.findPendingApprovalForRun(db, run.id);
-    if (pending && (await store.decideApproval(db, pending.id, 'cancelled'))) {
-      await dispatcher.resolveApproval({
-        awakeableId: pending.awakeableId,
-        resolution: { decision: 'cancel' },
-      });
-    }
-    return stopped;
   }),
 
   /**

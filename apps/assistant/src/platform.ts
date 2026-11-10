@@ -44,7 +44,11 @@ const cacheKey = (...parts: string[]) =>
 
 /**
  * Resolves the signed-in user from the browser's CampusPilot session cookie
- * by asking the API, which owns authentication.
+ * by asking the API, which owns authentication. Only the API's own answer
+ * (a 200, with a session or with null) says whether someone is signed in;
+ * any other response is an outage and throws, uncached, so it reaches the
+ * browser as a server error that it retries instead of as "signed out",
+ * which it would treat as final.
  */
 export async function getSessionUser(cookie: string | undefined): Promise<SessionUser | null> {
   if (!cookie) return null;
@@ -55,9 +59,8 @@ export async function getSessionUser(cookie: string | undefined): Promise<Sessio
   const response = await fetch(new URL('/api/auth/get-session', env.CAMPUSPILOT_API_URL), {
     headers: { cookie },
   });
-  const user = response.ok
-    ? (sessionResponseSchema.parse(await response.json())?.user ?? null)
-    : null;
+  if (!response.ok) throw new Error(`The CampusPilot session check failed (${response.status}).`);
+  const user = sessionResponseSchema.parse(await response.json())?.user ?? null;
   sessionCache.set(key, { user, until: Date.now() + SESSION_CACHE_MS });
   if (sessionCache.size > 10_000) sessionCache.clear();
   return user;

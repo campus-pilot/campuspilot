@@ -35,6 +35,11 @@ endpoint, as the signed-in user, with the same permissions.
    (Anthropic); Gemini gets every tool on each request.
 5. A write pauses on a Restate awakeable until the user approves or declines it
    in the UI. Stop cancels a pending approval and aborts a streaming step.
+   Stop can be pressed again if it failed halfway (`run-stop.ts`): every step
+   of it is repeatable, and an approval it could not cancel goes back to
+   pending but can no longer be approved. The run checks for a stop while
+   holding its row lock before it creates an approval, so a Stop never lands
+   between the check and the approval.
    An approved write is handed to the API **at most once**: the intent is saved
    on the item before the call, so a step repeated after a crash never sends it
    again. If the outcome never came back (the connection dropped mid-call), the
@@ -79,12 +84,12 @@ with like. Add a provider by implementing `ModelProvider` and registering it in
 Each adapter classifies its provider's errors (`failureKind`), and the user
 sees a message that matches:
 
-| Kind | Examples | Retried | Run error code | The user is told |
+| Kind | Examples | Attempts | Run error code | The user is told |
 | --- | --- | --- | --- | --- |
-| `rejected` | malformed or too-long request (400) | no | `model_rejected` | to rephrase |
-| `unavailable` | wrong key, no permission, unknown model (401, 403, 404) | no | `provider_unavailable` | to try again later |
-| `busy` | rate limit, exhausted quota or spending cap, overload (429, 503, 529) | 3 times | `model_busy` | to try again in a few minutes |
-| `unknown` | anything else | 3 times | `model_error` | to try again |
+| `rejected` | malformed or too-long request (400) | 1 | `model_rejected` | to rephrase |
+| `unavailable` | wrong key, no permission, unknown model (401, 403, 404) | 1 | `provider_unavailable` | to try again later |
+| `busy` | rate limit, exhausted quota or spending cap, overload (429, 503, 529) | 3 (the first and 2 retries) | `model_busy` | to try again in a few minutes |
+| `unknown` | anything else | 3 (the first and 2 retries) | `model_error` | to try again |
 
 The provider's raw error is saved on the run (`assistant_run.error_detail`) and
 logged with the run, conversation, school, provider and model.
@@ -205,14 +210,16 @@ and describe it in `SHOW_VIEW_TOOL_DESCRIPTION`.
 
 ## Conversation status and deleting
 
-- **`attention`** on a conversation (`approval`, `working`, `failed` or null)
-  is the state of its latest run: the one asked most recently. It is not
-  stored. The service derives it wherever it returns a conversation: the
-  list reads each conversation's latest run in the same statement (a lateral
-  join, one index lookup per row, never a query per conversation), and a
-  snapshot works it out from the runs it already loaded.
-  `assistantConversationAttention` in the contract is the one rule, shared
-  with the app, which applies it to the open conversation's live runs.
+- **`attention`** on a history row (`approval`, `working` or null) comes
+  from the conversation's runs that have not finished: `approval` when one
+  waits for the user, otherwise `working` when one is queued or running.
+  These are exactly the runs that make the service refuse a delete, so the
+  list never offers what would be refused. It is not stored, and only list
+  rows carry it: the list query checks it in the same statement (two
+  `exists` lookups per row, never a query per conversation).
+  `assistantConversationAttention` in the contract is the same rule; the app
+  applies it to the open conversation's live runs, which it shows as a row
+  when that conversation is older than the loaded pages.
 - **`deleteConversation`** deletes one of the user's conversations for good,
   with the same checks as reading it (may use the assistant in the school;
   owns the conversation). The schema cascades its runs, items, approvals and
@@ -287,7 +294,9 @@ painting their own.
   disabled until the stream removes it, so it cannot be sent twice;
   its timeline row only names it, in amber. The values of a change are shown
   in plain words, never as JSON (`approval-values.ts`): yes/no, dates, comma
-  lists, nested records as nested rows, lists of records as a count.
+  lists, records as nested rows and lists of records as numbered rows, at
+  any depth. Every value that will be written is shown, never a count, so
+  the person approving can check each one; the section scrolls.
 - **Queued messages**: messages sent while a run works wait in the composer
   as queued rows, not in the timeline. Each can be removed before it starts:
   the row's button asks the service to stop that queued run, and

@@ -1,6 +1,6 @@
 'use client';
 
-import type { AssistantConversationDto } from '@campuspilot/assistant-contract/dto';
+import type { AssistantConversationListItemDto } from '@campuspilot/assistant-contract/dto';
 import { Button } from '@campuspilot/ui/components/button';
 import { Skeleton } from '@campuspilot/ui/components/skeleton';
 import { Spinner } from '@campuspilot/ui/components/spinner';
@@ -36,9 +36,9 @@ function historyGroup(at: Date, now: Date): string {
   return 'Earlier';
 }
 
-function groupConversations(conversations: readonly AssistantConversationDto[]) {
+function groupConversations(conversations: readonly AssistantConversationListItemDto[]) {
   const now = new Date();
-  const groups: { label: string; conversations: AssistantConversationDto[] }[] = [];
+  const groups: { label: string; conversations: AssistantConversationListItemDto[] }[] = [];
   for (const conversation of conversations) {
     const label = historyGroup(conversation.updatedAt, now);
     const group = groups.at(-1);
@@ -84,7 +84,7 @@ function HistoryError({ message, onRetry }: { message: string; onRetry: () => vo
  * conversation started between two fetches can push one onto the next page
  * as well; each is kept once.
  */
-function loadedConversations(pages: readonly { items: AssistantConversationDto[] }[] | undefined) {
+function loadedConversations(pages: readonly { items: AssistantConversationListItemDto[] }[] | undefined) {
   const seen = new Set<string>();
   return (pages ?? []).flatMap((page) =>
     page.items.filter((conversation) => !seen.has(conversation.id) && Boolean(seen.add(conversation.id))),
@@ -117,7 +117,7 @@ function HistoryEnd({ schoolId, empty }: { schoolId: string; empty: boolean }) {
 function useOpenConversationOutsideHistory(
   schoolId: string,
   conversationId: string | null,
-  loaded: readonly AssistantConversationDto[],
+  loaded: readonly AssistantConversationListItemDto[],
   historyLoaded: boolean,
 ) {
   const open = useAssistantOpenConversation(schoolId, conversationId);
@@ -145,7 +145,7 @@ function ConversationList({
   const groups = groupConversations(loaded);
   const openOutside = useOpenConversationOutsideHistory(schoolId, conversationId, loaded, Boolean(conversations.data));
   const deletion = useDeleteConversation(schoolId, onDeleted);
-  const row = (conversation: AssistantConversationDto) => (
+  const row = (conversation: AssistantConversationListItemDto) => (
     <ConversationRow
       key={conversation.id}
       href={conversationHref(schoolId, conversation.id)}

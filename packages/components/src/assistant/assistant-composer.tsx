@@ -104,8 +104,10 @@ export type AssistantComposerProps = {
    * Sends a message. The box clears at once (the message shows optimistically
    * elsewhere); a rejection shows the error and puts the text back, unless
    * the user has typed something else meanwhile, which is kept instead.
+   * `box.text()` reads what the box holds at that moment (text typed while
+   * the send is on its way, or nothing), never the text being sent.
    */
-  onSend: (text: string) => Promise<void>;
+  onSend: (text: string, box: { text: () => string }) => Promise<void>;
   /**
    * Whether a send is in flight. The send button shows it and nothing else
    * can be sent until it settles; a draft typed meanwhile stays in the box.
@@ -187,7 +189,7 @@ export function AssistantComposer({
       // has succeeded, so a failed send (or a reload meanwhile) keeps the text.
       formApi.reset();
       try {
-        await onSend(text);
+        await onSend(text, { text: () => formApi.getFieldValue('text') });
       } catch (error) {
         if (!formApi.getFieldValue('text')) formApi.setFieldValue('text', text);
         formApi.setErrorMap({

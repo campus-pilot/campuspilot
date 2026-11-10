@@ -127,7 +127,8 @@ function contentRows(items: readonly AssistantItemDto[]): AssistantTimelineRow[]
 }
 
 /** The text of a turn's last question, which is what trying it again sends. */
-function lastUserText(items: readonly AssistantItemDto[]): string | null {
+/** The text of the newest message the user sent among `items`, or null. */
+export function lastUserText(items: readonly AssistantItemDto[]): string | null {
   for (let index = items.length - 1; index >= 0; index -= 1) {
     const item = items[index]!;
     if (item.kind === 'user_message') return item.body.text;

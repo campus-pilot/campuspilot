@@ -1,6 +1,6 @@
 'use client';
 
-import type { AssistantConversationDto } from '@campuspilot/assistant-contract/dto';
+import type { AssistantConversationListItemDto } from '@campuspilot/assistant-contract/dto';
 import { AssistantAttentionDot } from '@campuspilot/components/assistant';
 import { ConfirmationDialog } from '@campuspilot/components/confirmation-dialog';
 import { Button } from '@campuspilot/ui/components/button';
@@ -19,7 +19,7 @@ import Link from 'next/link';
 import { refusalMessage } from './assistant-stream';
 import { useDeleteAssistantConversation } from './use-assistant';
 
-const titleOf = (conversation: Pick<AssistantConversationDto, 'title'>) => conversation.title ?? 'Untitled conversation';
+const titleOf = (conversation: Pick<AssistantConversationListItemDto, 'title'>) => conversation.title ?? 'Untitled conversation';
 
 /** "now", "5m", "3h", "2d": compact, like a thread list. */
 function relativeAge(at: Date): string {
@@ -55,7 +55,7 @@ function bringIntoView(row: HTMLElement | null) {
  * words; null when it can. The service refuses while a run has not
  * finished, which is exactly when the row says it is working or waiting.
  */
-const deleteBlockedReason = (conversation: AssistantConversationDto) =>
+const deleteBlockedReason = (conversation: AssistantConversationListItemDto) =>
   conversation.attention === 'working' || conversation.attention === 'approval'
     ? 'Stop the assistant before deleting this conversation.'
     : null;
@@ -71,9 +71,9 @@ function ConversationMenu({
   active,
   onDelete,
 }: {
-  conversation: AssistantConversationDto;
+  conversation: AssistantConversationListItemDto;
   active: boolean;
-  onDelete: (conversation: AssistantConversationDto) => void;
+  onDelete: (conversation: AssistantConversationListItemDto) => void;
 }) {
   const blocked = deleteBlockedReason(conversation);
   return (
@@ -115,9 +115,9 @@ export function ConversationRow({
   onDelete,
 }: {
   href: string;
-  conversation: AssistantConversationDto;
+  conversation: AssistantConversationListItemDto;
   active: boolean;
-  onDelete: (conversation: AssistantConversationDto) => void;
+  onDelete: (conversation: AssistantConversationListItemDto) => void;
 }) {
   return (
     <div
@@ -158,7 +158,7 @@ export function ConversationRow({
 export function useDeleteConversation(schoolId: string, onDeleted: (conversationId: string) => void) {
   const remove = useDeleteAssistantConversation(schoolId);
   const form = useForm({
-    defaultValues: { target: null as AssistantConversationDto | null, error: '' },
+    defaultValues: { target: null as AssistantConversationListItemDto | null, error: '' },
     onSubmit: async ({ value, formApi }) => {
       const target = value.target;
       if (!target) return;
@@ -177,7 +177,7 @@ export function useDeleteConversation(schoolId: string, onDeleted: (conversation
   return {
     form,
     /** Opens the confirmation for a conversation, clear of any earlier failure. */
-    ask: (conversation: AssistantConversationDto) => {
+    ask: (conversation: AssistantConversationListItemDto) => {
       form.setFieldValue('error', '');
       form.setFieldValue('target', conversation);
     },

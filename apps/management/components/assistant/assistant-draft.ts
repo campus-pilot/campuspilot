@@ -1,13 +1,17 @@
 /** The part of `Storage` drafts need; tests pass a plain object. */
-export type DraftStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
+export type DraftStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem' | 'key' | 'length'>;
+
+const DRAFT_PREFIX = 'assistant:draft:';
 
 /**
- * Where a conversation's unsent text is kept. A conversation that has not
- * started yet has no id, so all new conversations in a school share one
- * draft (`new`), on every surface.
+ * Where a conversation's unsent text is kept. Drafts belong to the signed-in
+ * user: an office computer is shared, and the next person signing in on the
+ * same tab must not see the last one's unsent text. A conversation that has
+ * not started yet has no id, so a user's new conversations in a school share
+ * one draft (`new`), on every surface.
  */
-export function draftKey(schoolId: string, conversationId: string | null): string {
-  return `assistant:draft:${schoolId}:${conversationId ?? 'new'}`;
+export function draftKey(userId: string, schoolId: string, conversationId: string | null): string {
+  return `${DRAFT_PREFIX}${userId}:${schoolId}:${conversationId ?? 'new'}`;
 }
 
 /**
@@ -34,6 +38,25 @@ export function writeDraft(storage: DraftStorage | null, key: string, text: stri
     else storage?.removeItem(key);
   } catch {
     // Nothing to do: the text is still in the box.
+  }
+}
+
+/**
+ * Removes every assistant draft this tab kept, whoever wrote it. Called on
+ * sign-out: the keys already separate users, but unsent text should not
+ * stay behind on a shared computer at all.
+ */
+export function forgetDrafts(storage: DraftStorage | null = sessionDraftStorage()): void {
+  try {
+    if (!storage) return;
+    const keys: string[] = [];
+    for (let index = 0; index < storage.length; index += 1) {
+      const key = storage.key(index);
+      if (key?.startsWith(DRAFT_PREFIX)) keys.push(key);
+    }
+    for (const key of keys) storage.removeItem(key);
+  } catch {
+    // Storage unavailable: there is nothing to forget.
   }
 }
 

@@ -97,6 +97,40 @@ export async function subscribeAssistantEvents(
   };
 }
 
+/**
+ * A subscription's events, with `'heartbeat'` whenever none arrived for
+ * `heartbeatMs`, until the subscription closes. The subscription hands each
+ * event to the one `next()` call waiting for it, so when the heartbeat wins
+ * a round that call is kept for the next round instead of asking again: a
+ * second call would take its place, and an event delivered to the first one
+ * would be lost for good (a resume never resends it, the cursor has moved
+ * past it). Nothing is lost while the consumer is busy between rounds.
+ */
+export async function* liveEvents(
+  subscription: AssistantEventSubscription,
+  heartbeatMs: number,
+): AsyncGenerator<AssistantStreamEvent | 'heartbeat'> {
+  let pending: Promise<AssistantStreamEvent | null> | null = null;
+  while (true) {
+    pending ??= subscription.next();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const event = await Promise.race([
+      pending,
+      new Promise<'heartbeat'>((resolve) => {
+        timer = setTimeout(() => resolve('heartbeat'), heartbeatMs);
+      }),
+    ]);
+    clearTimeout(timer);
+    if (event === 'heartbeat') {
+      yield event;
+      continue;
+    }
+    pending = null;
+    if (!event) return;
+    yield event;
+  }
+}
+
 const stopKey = (runId: string) => `assistant:run:${runId}:stop`;
 
 /** How long a stop request stays visible to a running model step. */

@@ -13,7 +13,7 @@ import {
 } from './assistant-conversation-state';
 
 const at = new Date('2026-11-05T00:00:00Z');
-const conversation = { id: 'c', schoolId: 's', title: 't', lastSequence: 3, attention: null, createdAt: at, updatedAt: at };
+const conversation = { id: 'c', schoolId: 's', title: 't', lastSequence: 3, createdAt: at, updatedAt: at };
 const reply = (sequence: number, status: 'streaming' | 'complete', text = ''): AssistantItemDto => ({
   id: 'i2', conversationId: 'c', runId: 'r', position: 2, sequence, createdAt: at, updatedAt: at,
   kind: 'assistant_message', status, body: { text },

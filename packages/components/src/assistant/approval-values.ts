@@ -1,5 +1,3 @@
-import { plural } from './plural';
-
 /**
  * How one value of a change is shown to the person approving it. School
  * office staff decide on these, so nothing is shown as raw JSON:
@@ -47,9 +45,6 @@ function dateText(value: string, locale?: string): string | null {
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
-/** Records nested deeper than this are summarised, so a change stays readable. */
-const MAX_DEPTH = 2;
-
 function primitiveText(value: unknown, locale?: string): string | null {
   if (value === null || value === undefined || value === '') return EMPTY_VALUE;
   if (typeof value === 'boolean') return value ? 'Yes' : 'No';
@@ -60,36 +55,43 @@ function primitiveText(value: unknown, locale?: string): string | null {
 
 /**
  * Turns one input value of a change into what the approval request shows.
+ * Every value the change will write is shown: the person approving must be
+ * able to check each one (marks, sections, timetable slots), so nothing is
+ * ever replaced by a count. The request section scrolls when it is long.
  *
  * - Empty values are a dash; true and false are "Yes" and "No".
  * - Dates written as text are shown as dates.
- * - A list of plain values is joined with commas; a list of records is
- *   counted ("3 items"), since its rows would not fit the request.
- * - A record becomes nested rows, up to two levels; deeper ones are counted
- *   ("4 details").
+ * - A list of plain values is joined with commas.
+ * - Any other list shows each entry as its own numbered row ("1", "2", …),
+ *   and a record becomes labelled rows; both nest as deep as the value goes.
  *
  * `locale` is a parameter for tests; callers leave it out.
  */
-export function approvalValueDisplay(value: unknown, locale?: string, depth = 0): ApprovalValueDisplay {
+export function approvalValueDisplay(value: unknown, locale?: string): ApprovalValueDisplay {
   const text = primitiveText(value, locale);
   if (text !== null) return { kind: 'text', text };
   if (Array.isArray(value)) {
     if (value.length === 0) return { kind: 'text', text: EMPTY_VALUE };
     const parts = value.map((entry) => primitiveText(entry, locale));
-    return parts.every((part): part is string => part !== null)
-      ? { kind: 'text', text: parts.join(', ') }
-      : { kind: 'text', text: plural(value.length, 'item', 'items') };
+    if (parts.every((part): part is string => part !== null)) return { kind: 'text', text: parts.join(', ') };
+    return {
+      kind: 'fields',
+      fields: value.map((entry, index) => ({
+        key: String(index),
+        label: String(index + 1),
+        value: approvalValueDisplay(entry, locale),
+      })),
+    };
   }
   if (isPlainObject(value)) {
     const entries = Object.entries(value);
     if (entries.length === 0) return { kind: 'text', text: EMPTY_VALUE };
-    if (depth >= MAX_DEPTH) return { kind: 'text', text: plural(entries.length, 'detail', 'details') };
     return {
       kind: 'fields',
       fields: entries.map(([key, entry]) => ({
         key,
         label: humanizeKey(key),
-        value: approvalValueDisplay(entry, locale, depth + 1),
+        value: approvalValueDisplay(entry, locale),
       })),
     };
   }
