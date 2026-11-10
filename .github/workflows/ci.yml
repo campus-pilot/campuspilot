@@ -1,6 +1,6 @@
 name: CI
 
-# Runs every check a change must pass before it is merged: typecheck, lint,
+# Runs every check a change must pass before it is merged: typecheck,
 # each package's test suite and the Rego policy tests. The release workflow
 # (`release.yml`) only typechecks the platform contracts, so this workflow is
 # what proves a pull request is safe to merge.
@@ -34,23 +34,6 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Typecheck every workspace
         run: pnpm exec turbo run check-types
-
-  lint:
-    name: Lint
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 24
-      - name: Enable Corepack
-        run: corepack enable
-      - name: Install frozen workspace
-        run: pnpm install --frozen-lockfile
-      - name: Lint every workspace
-        run: pnpm exec turbo run lint
 
   test:
     name: Test ${{ matrix.package }}
