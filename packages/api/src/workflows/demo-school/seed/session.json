@@ -6,7 +6,6 @@
     { "slug": "annual-examination", "name": "Annual Examination", "order": 4, "monthOffset": 11, "startDay": 2, "slots": 10, "chargesFee": true }
   ],
   "activeWithinDaysAfterWindow": 30,
-  "cadetRelease": { "daysAfterWindow": 12, "hour": 16 },
   "gradingScale": {
     "a1": { "label": "A1", "minScore": 91 },
     "a2": { "label": "A2", "minScore": 81 },
