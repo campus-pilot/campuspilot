@@ -87,9 +87,30 @@ function chunks<T>(items: T[], size: number) {
   return result;
 }
 
+/** Margin of every physical page of a flowing notice. */
+const NOTICE_PAGE_MARGIN = "16mm";
+
+/**
+ * Notices flow: their length is whatever the author wrote, so they are not
+ * clipped to one fixed sheet like every other document. Each notice starts
+ * on a new portrait A4 page and continues over as many pages as it needs.
+ * The page margin belongs to `@page`, so every continuation page keeps it
+ * (padding on the template's root would apply to the first and last page
+ * only). On screen (the sandboxed preview, where `@page` does not apply) the
+ * same margin is shown as padding around an A4-wide column.
+ */
+function flowingNoticeLayout(documents: string[]) {
+  const notices = documents
+    .map((doc) => `<article class="notice-document">${doc}</article>`)
+    .join("");
+  return `<div class="batch">${notices}</div><style>@page{size:A4;margin:${NOTICE_PAGE_MARGIN}}html,body{margin:0!important;padding:0!important}.notice-document{box-sizing:border-box;width:100%;break-after:page;overflow-wrap:anywhere}.notice-document:last-child{break-after:auto}@media screen{.notice-document{max-width:210mm;margin:0 auto;padding:${NOTICE_PAGE_MARGIN}}}</style>`;
+}
+
 /** Templates own the design inside one slot; this wrapper exclusively owns
  * physical A4 imposition. Half templates are paired vertically, ID cards are
- * placed eight-up, and every other document gets one physical sheet.
+ * placed eight-up, and every other document gets one physical sheet, except
+ * notices, which flow over as many pages as they need
+ * ({@link flowingNoticeLayout}).
  */
 export function combineDocuments(
   documents: string[],
@@ -103,6 +124,7 @@ export function combineDocuments(
     throw rpcError.badRequest(
       "This document exceeds the 25 MB rendering limit. Select fewer students or use smaller photos.",
     );
+  if (type === "notice") return safeHtml(flowingNoticeLayout(documents));
   const landscape = type === "timetable";
   const perSheet = type === "id_card" ? 8 : pageSize === "half" ? 2 : 1;
   const sheets = chunks(documents, perSheet)

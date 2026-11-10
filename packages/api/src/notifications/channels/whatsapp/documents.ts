@@ -15,10 +15,14 @@
 /** Which document a message needs, by identifiers only. */
 export type WhatsAppDocumentRequest =
   | { kind: 'payment_receipt'; paymentId: string; sessionId: string; admissionId: string; filename: string }
-  | { kind: 'report_card'; sessionId: string; examSlug: string; admissionId: string; filename: string };
+  | { kind: 'report_card'; sessionId: string; examSlug: string; admissionId: string; filename: string }
+  | { kind: 'notice'; noticeId: string; filename: string };
 
 export type WhatsAppDocumentKind = WhatsAppDocumentRequest['kind'];
-export const WHATSAPP_DOCUMENT_KINDS = ['payment_receipt', 'report_card'] as const satisfies readonly WhatsAppDocumentKind[];
+export const WHATSAPP_DOCUMENT_KINDS = ['payment_receipt', 'report_card', 'notice'] as const satisfies readonly WhatsAppDocumentKind[];
+// Every kind is listed (a kind left out would never be attachable).
+const _everyKindListed: Exclude<WhatsAppDocumentKind, (typeof WHATSAPP_DOCUMENT_KINDS)[number]> extends never ? true : never = true;
+void _everyKindListed;
 
 /** A produced PDF and the template revision it was rendered with (provenance). */
 export type NotificationDocument = { bytes: Uint8Array; mimeType: 'application/pdf'; templateRevisionId: string | null };

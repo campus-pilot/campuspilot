@@ -31,3 +31,11 @@ export const billHref = (billId: string) => `/fees/${encodeURIComponent(billId)}
  */
 export const examResultHref = (ids: { studentId: string; classId: string; examSlug: string }) =>
   `/results/${encodeURIComponent(`${ids.studentId}.${ids.classId}.${ids.examSlug}`)}`;
+
+/**
+ * The Notices screen and one notice on it (`/notices/{noticeId}`). The
+ * server only resolves a notice addressed to the signed-in student and
+ * answers NOT_FOUND otherwise.
+ */
+export const NOTICES_HREF = '/notices';
+export const noticeHref = (noticeId: string) => `/notices/${encodeURIComponent(noticeId)}`;

@@ -18,10 +18,11 @@ import {
   ReceiptText,
   CreditCard,
   ScrollText,
+  Megaphone,
   type LucideIcon,
 } from "lucide-react";
 export type DocumentKind =
-  "report_card" | "id_card" | "admit_card" | "timetable" | "bill" | "receipt" | "statement";
+  "report_card" | "id_card" | "admit_card" | "timetable" | "bill" | "receipt" | "statement" | "notice";
 type DocumentKindItem = {
   value: DocumentKind;
   label: string;
@@ -67,6 +68,18 @@ export const allDocumentKinds = [
   { value: "receipt", label: "Receipts", description: "Payments and refunds", icon: ReceiptText },
   { value: "statement", label: "Statements", description: "Account activity as of a date", icon: ScrollText },
 ] as const;
+/**
+ * The Notice template. It is not in {@link allDocumentKinds}: a notice has a
+ * template but no generator, and exists only for schools with the notices
+ * feature, so the caller adds it where that feature is known to be enabled
+ * (the template marketplace).
+ */
+export const noticeDocumentKind = {
+  value: "notice",
+  label: "Notices",
+  description: "Letterhead for school notices",
+  icon: Megaphone,
+} as const satisfies DocumentKindItem;
 export function DocumentButton(props: ComponentProps<typeof Button>) {
   return <Button {...props} type={props.type ?? "button"} />;
 }

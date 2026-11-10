@@ -1,0 +1,25 @@
+import { z } from 'zod';
+
+import { deliveryForecastSchema } from '../exam/exam-result-notification.dto';
+import { NOTICE_CADET_SCOPES } from './notice.dto';
+
+/**
+ * What publishing a notice would notify (server-only schema: the forecast
+ * schema reads the notification enums of the database package).
+ * - `ready`: the draft can be published; `staffRecipientCount` is the school
+ *   members who get the in-app notification (0 when not addressed to staff)
+ *   and `cadetForecast` the students addressed with, per remote channel, the
+ *   copies owed and skipped by reason (null when not addressed to students).
+ * - `already_published`: nobody is notified again.
+ */
+export const noticePublishPreviewSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('ready'),
+    toStaff: z.boolean(),
+    staffRecipientCount: z.number().int().nonnegative(),
+    cadetScope: z.enum(NOTICE_CADET_SCOPES),
+    cadetForecast: deliveryForecastSchema.nullable(),
+  }),
+  z.object({ kind: z.literal('already_published'), publishedAt: z.date() }),
+]);
+export type NoticePublishPreview = z.infer<typeof noticePublishPreviewSchema>;

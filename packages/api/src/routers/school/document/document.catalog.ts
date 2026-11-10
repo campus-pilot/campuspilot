@@ -1,4 +1,8 @@
-export { DOCUMENT_MARKETPLACE } from "./document.catalog.marketplace";
+export {
+  DOCUMENT_MARKETPLACE,
+  NOTICE_DEFAULT_TEMPLATE_SLUG,
+} from "./document.catalog.marketplace";
+import type { DocumentType } from "./document.dto";
 import { withReportModeLayout } from "./document.report-modes";
 
 /** Synthetic editor data never reads another school's students or results. */
@@ -116,6 +120,33 @@ const SAMPLE_DOCUMENT_SOURCE = {
 };
 /** The sample carries the same derived report mode columns as live contexts. */
 export const SAMPLE_DOCUMENT_CONTEXT = withReportModeLayout(SAMPLE_DOCUMENT_SOURCE);
+
+/**
+ * Synthetic notice data. A notice context holds school, session and notice
+ * facts only (no student, exam or finance data), so notice templates are
+ * previewed and validated against exactly the shape they are rendered with
+ * (`buildNoticeContext` in `routers/school/notice`).
+ */
+export const SAMPLE_NOTICE_CONTEXT = {
+  school: SAMPLE_DOCUMENT_SOURCE.school,
+  session: SAMPLE_DOCUMENT_SOURCE.session,
+  generatedAt: SAMPLE_DOCUMENT_SOURCE.generatedAt,
+  notice: {
+    title: "Annual Sports Day",
+    issuedOn: "2026-10-15",
+    issuedOnDisplay: "15 October 2026",
+    paragraphs: [
+      "The Annual Sports Day will be held on Saturday, 24 October 2026, on the school grounds. Students should report by 8:00 AM in their house uniform.",
+      "Parents are warmly invited to attend. Kindly be seated by 8:30 AM.\nRefreshments will be served after the prize distribution.",
+    ],
+  },
+};
+
+/** The synthetic context a template of `documentType` is previewed with. */
+export function sampleDocumentContext(documentType: DocumentType): object {
+  return documentType === "notice" ? SAMPLE_NOTICE_CONTEXT : SAMPLE_DOCUMENT_CONTEXT;
+}
+
 export const DOCUMENT_CONTEXT_HELP = `All documents: school.{name,location,registrationNo,logoUrl}, session.{startYear,endYear}, generatedAt.
 Student documents: student.{name,admissionNo,rollNo,className,sectionName,dob,fatherName,motherName,address,phoneNo,whatsappNo,photoUrl}; phoneNo and whatsappNo are display-formatted with the country code (+91 98765 43210), whatsappNo is null when there is none.
 Examination documents: exam.{name,slug,order,status,startedAt,completedAt}; unknown historical lifecycle/timestamps are null.
@@ -125,4 +156,5 @@ Report printing flags: reportSections.{includeModeMarks,includeAttendance,includ
 Admit cards: exam, timetable[] with date (ISO),displayDate,dayOfWeek,startTime,endTime (HH:mm),displayStartTime,displayEndTime,subjectSlug,subjectName,modeSlug,modeName; may be empty.
 Timetables: columns[] with classId,label; rows[] with date,displayDate,dayOfWeek,startTime,endTime,displayStartTime,displayEndTime. rows[].entries[] follows column order, each with classId,subjects[] of subjectSlug,subjectName,modeSlug,modeName. Unscheduled cells have an empty subjects array. For v1 template compatibility, rows[].cells[classId] is a resolved single subject, an array preserving all subjects/modes, or null. Calendar formatting never shifts dates through the host timezone.
 Finance documents: admission.{name,number,fatherName,motherName,classLabel,sectionLabel,rollNumber}; currency.{code,exponent}. Bills expose bill.{id,number,issueDate,periodKey,total,totalMinor}, lines[].{slug,name,amount,amountMinor,pricingSource}, balanceBefore and balanceAfter. Receipts expose transaction.{kind,isRefund,id,documentNumber}, payment.{id,receiptNumber,receivedAt,amount,amountMinor,method,externalReference,payerName,note}, previousBalance and remainingBalance. Payments are admission-account credits and receipts never expose bill allocations. Refund contexts set transaction.isRefund and the payment fields describe returned funds. Statements expose statement.{periodStartDate,throughDate,asOfSequence,openingBalance,openingBalanceMinor,closingBalance,closingBalanceMinor} and period entries[].{sequence,effectiveAt,reference,description,debit,credit,balance}. Bill and receipt balances are pinned to the source fact's effective-date ledger position; statement balances are pinned to the reviewed cutoff. They never use current projections.
+Notices: only school, session, generatedAt and notice.{title,issuedOn,issuedOnDisplay,paragraphs[]} exist; there is no student, exam or finance data. issuedOn is an ISO date (the publication date; today for a draft) and issuedOnDisplay the same date in words. paragraphs[] holds the plain text of the notice split at blank lines, each a string that may contain line breaks: render each with {{this}} inside an element styled white-space:pre-wrap. Notices flow over as many portrait A4 pages as they need: do not set a fixed height, overflow:hidden or outer page padding (every page gets a 16mm margin).
 Use standard Handlebars each/if/unless/with/lookup helpers and the finite-numeric add helper (for example add columns.length 2). Images use provided data URIs. No scripts, forms, links, external URLs/fonts or network assets. Self-contained CSS is allowed. ID cards fit 86mm by 54mm; timetables use landscape A4; report cards use full portrait A4. Admit cards, bills, receipts, and statements use the selected template revision's explicit full-A4 or half-A4 footprint; half-A4 revisions are imposed two per portrait A4 sheet.`;

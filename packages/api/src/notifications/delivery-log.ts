@@ -12,7 +12,7 @@ import { stuckSendingCutoff } from './stuck-sending';
  * student notifications of one scope with every channel copy's status and
  * skip or failure reason. It shows which notification it was (type, the
  * student's name and a human reference such as the bill or receipt number
- * or the exam name) but never amounts or message text: log readers include
+ * the exam name or the notice title) but never amounts or message text: log readers include
  * roles without finance access. Students never see delivery rows (D-20).
  */
 
@@ -20,7 +20,8 @@ import { stuckSendingCutoff } from './stuck-sending';
 export type DeliveryLogScope =
   | { kind: 'admission'; admissionId: string }
   | { kind: 'bill_run'; billRunId: string }
-  | { kind: 'exam'; sessionId: string; examSlug: string };
+  | { kind: 'exam'; sessionId: string; examSlug: string }
+  | { kind: 'notice'; noticeId: string };
 
 
 function scopeWhere(scope: DeliveryLogScope): SQL {
@@ -35,6 +36,8 @@ function scopeWhere(scope: DeliveryLogScope): SQL {
         sql`${notificationTable.data}->>'sessionId' = ${scope.sessionId}`,
         sql`${notificationTable.data}->>'examSlug' = ${scope.examSlug}`,
       )!;
+    case 'notice':
+      return and(eq(notificationTable.type, 'notice.published'), sql`${notificationTable.data}->>'noticeId' = ${scope.noticeId}`)!;
     default: {
       const unhandled: never = scope;
       throw new Error(`Unhandled delivery log scope ${JSON.stringify(unhandled)}.`);
@@ -44,7 +47,16 @@ function scopeWhere(scope: DeliveryLogScope): SQL {
 
 /** The human reference of a notification (never an amount). */
 function referenceOf(type: string, data: Record<string, unknown>): string | null {
-  const value = type === 'bill.issued' ? data.billNumber : type === 'payment.received' ? data.receiptNumber : type === 'exam.results_published' ? data.examName : null;
+  const value =
+    type === 'bill.issued'
+      ? data.billNumber
+      : type === 'payment.received'
+        ? data.receiptNumber
+        : type === 'exam.results_published'
+          ? data.examName
+          : type === 'notice.published'
+            ? data.noticeTitle
+            : null;
   return typeof value === 'string' ? value : null;
 }
 

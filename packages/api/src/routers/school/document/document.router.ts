@@ -12,6 +12,7 @@ import { SCHOOL_ACTIONS } from "@campuspilot/opa/policies/school";
 import { o, protectedProcedure } from "../../../index";
 import { rpcError, toRpcError } from "../../../errors";
 import { assertPermission } from "../../../permissions/authorization";
+import { assertSchoolFeatureEnabled } from "../../../feature-flags/feature-flags.service";
 import {
   createNextPageCursor,
   createPaginatedResult,
@@ -21,7 +22,7 @@ import * as dto from "./document.dto";
 import {
   DOCUMENT_CONTEXT_HELP,
   DOCUMENT_MARKETPLACE,
-  SAMPLE_DOCUMENT_CONTEXT,
+  sampleDocumentContext,
 } from "./document.catalog";
 import {
   combineDocuments,
@@ -50,6 +51,11 @@ function requireDocumentTypePermission(
         action: isFinanceDocument(input.documentType) ? financeAction : academicAction,
         resource: { kind: "school", schoolId: input.schoolId },
       }, signal);
+      // The Notice template belongs to the notices feature: a school without
+      // it has no notice template to read, preview, import or save. Checked
+      // after the permission, so a caller without access learns nothing.
+      if (input.documentType === "notice")
+        await assertSchoolFeatureEnabled(context.db, input.schoolId, "notices");
       return next();
     },
   );
@@ -136,7 +142,7 @@ async function saveTemplate(
   input: z.infer<typeof dto.saveTemplateSchema>,
   marketplaceSlug: string | null,
 ) {
-  renderDocument(input.content, SAMPLE_DOCUMENT_CONTEXT);
+  renderDocument(input.content, sampleDocumentContext(input.documentType));
   const id = generateId("artifact");
   return persistDocumentObject(
     db,
@@ -325,7 +331,7 @@ export const schoolDocumentRouter = {
       return {
         ...item,
         html: combineDocuments(
-          [renderDocument(item.content, SAMPLE_DOCUMENT_CONTEXT)],
+          [renderDocument(item.content, sampleDocumentContext(item.documentType))],
           item.documentType,
           item.pageSize,
         ),
@@ -458,7 +464,7 @@ export const schoolDocumentRouter = {
     .output(z.object({ html: z.string(), contextHelp: z.string() }))
     .handler(async ({ input }) => ({
       html: combineDocuments(
-        [renderDocument(input.content, SAMPLE_DOCUMENT_CONTEXT)],
+        [renderDocument(input.content, sampleDocumentContext(input.documentType))],
         input.documentType,
         input.pageSize,
       ),

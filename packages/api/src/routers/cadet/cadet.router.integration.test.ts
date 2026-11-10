@@ -210,6 +210,8 @@ describe('cadet and staff sessions are isolated', () => {
       'getExamResult',
       'getFeeSummary',
       'getGrowth',
+      'getNotice',
+      'getNoticeDownload',
       'getOAuthConsentClient',
       'getProfile',
       'getPushSubscription',
@@ -217,6 +219,7 @@ describe('cadet and staff sessions are isolated', () => {
       'getUnreadNotificationCount',
       'listExams',
       'listFeeLedger',
+      'listNotices',
       'listNotifications',
       'listRemarks',
       'markAllNotificationsRead',
@@ -226,6 +229,8 @@ describe('cadet and staff sessions are isolated', () => {
     ]);
     // Same-named staff inbox procedures live under `school`, scoped by membership.
     expect(appRouter).not.toHaveProperty('listNotifications');
+    expect(appRouter).not.toHaveProperty('listNotices');
+    expect(appRouter).not.toHaveProperty('getNotice');
     expect(appRouter).not.toHaveProperty('getAdmission');
     expect(appRouter).not.toHaveProperty('getOAuthConsentClient');
     expect(Object.values(appRouter)).not.toContain(cadetRouter);

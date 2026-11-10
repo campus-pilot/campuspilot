@@ -79,7 +79,7 @@ describe('demo school seed steps (2 classes, without Restate)', () => {
       'monthly:2026-04', 'monthly:2026-05', 'monthly:2026-06', 'monthly:2026-07', 'monthly:2026-08',
       'monthly:2026-09', 'monthly:2026-10', 'monthly:2026-11', 'monthly:2026-12',
     ]);
-    expect(result.counts).toMatchObject({ staff: 5, classes: 2, students: plannedStudents, templates: 7 });
+    expect(result.counts).toMatchObject({ staff: 5, classes: 2, students: plannedStudents, templates: 8 });
     expect(result.counts.bills).toBeGreaterThan(plannedStudents * 8);
     expect(BigInt(result.amounts.collectedMinor)).toBeGreaterThan(0n);
 

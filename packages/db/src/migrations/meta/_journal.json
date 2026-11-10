@@ -351,6 +351,20 @@
       "when": 1794275837328,
       "tag": "0049_demo-purge-feature-flags",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1794277229417,
+      "tag": "0050_notices",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1794277240301,
+      "tag": "0051_demo-purge-notices",
+      "breakpoints": true
     }
   ]
 }

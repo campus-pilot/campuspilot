@@ -114,11 +114,14 @@ export const notificationSendPriorityEnum = pgEnum("notification_send_priority",
  * are grouped into one staff notification.
  * - `billing_run`: one `bill.issued` per bill of a posted billing run;
  * - `result_publication`: one `exam.results_published` per student of a
- *   results publication.
+ *   results publication;
+ * - `notice`: one `notice.published` per student a published notice is
+ *   addressed to (the batch ID is the notice ID).
  */
 export const notificationBatchKindEnum = pgEnum("notification_batch_kind", [
   "billing_run",
   "result_publication",
+  "notice",
 ]);
 
 /**
@@ -160,7 +163,7 @@ export const notificationEventTable = pgTable(
      * both null for a one-off event. Failure alerts are grouped per batch.
      */
     batchKind: notificationBatchKindEnum("batch_kind"),
-    /** The billing run or results publication ID (see `batch_kind`). */
+    /** The billing run, results publication or notice ID (see `batch_kind`). */
     batchId: text("batch_id"),
     /**
      * Whether `created_by` asked for this very send (a single result send,

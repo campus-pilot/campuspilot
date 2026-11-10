@@ -42,6 +42,10 @@ export const webPushRenderers: { [T in AdmissionNotificationType]: PushTextRende
     title: `${data.examName} results for ${data.studentName}`,
     body: 'The results are now available in the Cadet Portal.',
   }),
+  'notice.published': (data) => ({
+    title: `New notice for ${data.studentName}`,
+    body: data.noticeTitle,
+  }),
 };
 
 /** The Cadet Portal page that turns a push click into the item's route. */

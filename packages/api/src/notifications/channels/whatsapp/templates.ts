@@ -115,6 +115,21 @@ function mapUnsanitized(type: NotificationType, data: never, context: WhatsAppMa
         params: { student_name: facts.studentName, school_name: context.schoolName, update_text: `the results of ${facts.examName} are now available`, reference: facts.examName },
       };
     }
+    case 'notice.published': {
+      const facts = data as NotificationPayloads['notice.published'];
+      if (context.canAttach('notice')) {
+        return {
+          template: 'school_document',
+          params: { student_name: facts.studentName, school_name: context.schoolName, document_name: 'school notice', reference: facts.noticeTitle },
+          document: { kind: 'notice', noticeId: facts.noticeId, filename: `Notice ${facts.noticeTitle}.pdf` },
+        };
+      }
+      return {
+        template: 'school_update',
+        params: { student_name: facts.studentName, school_name: context.schoolName, update_text: 'a new school notice has been published', reference: facts.noticeTitle },
+      };
+    }
+    case 'notice.published_staff':
     case 'exam.results_publish_finished':
     case 'notification.whatsapp_failed':
     case 'notification.whatsapp_batch_failed':

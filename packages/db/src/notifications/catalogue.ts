@@ -140,11 +140,11 @@ export const notificationPayloadSchemas = {
   }),
   /**
    * WhatsApp copies of one bulk send failed (D-38): one alert per billing
-   * run or results publication once its WhatsApp copies settled, counting
+   * run, results publication or published notice once its WhatsApp copies settled, counting
    * the failures not reported before.
    */
   "notification.whatsapp_batch_failed": z.object({
-    batchKind: z.enum(["billing_run", "result_publication"]),
+    batchKind: z.enum(["billing_run", "result_publication", "notice"]),
     /** The type of the notifications whose WhatsApp copies failed. */
     failedType: z.string().min(1).max(100),
     failedCount: count,
@@ -155,6 +155,9 @@ export const notificationPayloadSchemas = {
     /** Results publications: the examination. */
     examSlug: id.optional(),
     examName: label.optional(),
+    /** Notices: the notice and its title when it was published. */
+    noticeId: id.optional(),
+    noticeTitle: label.optional(),
   }),
   /** A billing run the staff member posted has finished posting (Phase 5, D-30). */
   "billing.run_posted": z.object({
@@ -162,6 +165,24 @@ export const notificationPayloadSchemas = {
     sessionId: id,
     periodKey: z.string().min(1).max(100),
     billCount: count,
+  }),
+  /**
+   * A school notice addressed to the student was published. One event per
+   * student, so the WhatsApp copy can name them.
+   */
+  "notice.published": z.object({
+    noticeId: id,
+    sessionId: id,
+    /** The notice's title when it was published (a published notice is immutable). */
+    noticeTitle: label,
+    admissionId: id,
+    studentName: label,
+  }),
+  /** A school notice addressed to the staff was published. */
+  "notice.published_staff": z.object({
+    noticeId: id,
+    sessionId: id,
+    noticeTitle: label,
   }),
 } as const;
 
@@ -191,6 +212,8 @@ export const notificationCatalogue = {
   "notification.whatsapp_failed": { audience: "staff_user", channels: ["in_app"] },
   "notification.whatsapp_batch_failed": { audience: "staff_user", channels: ["in_app"] },
   "billing.run_posted": { audience: "staff_user", channels: ["in_app"] },
+  "notice.published": { audience: "admission", channels: ["in_app", "web_push", "whatsapp"] },
+  "notice.published_staff": { audience: "staff_user", channels: ["in_app"] },
 } as const satisfies Record<NotificationType, NotificationCatalogueEntry>;
 
 /**
@@ -206,8 +229,10 @@ export const notificationLinkFactKeys = {
   "exam.results_published": ["sessionId", "examSlug", "studentId", "classId"],
   "exam.results_publish_finished": ["sessionId", "examSlug"],
   "notification.whatsapp_failed": ["admissionId"],
-  "notification.whatsapp_batch_failed": ["sessionId", "billRunId", "examSlug"],
+  "notification.whatsapp_batch_failed": ["sessionId", "billRunId", "examSlug", "noticeId"],
   "billing.run_posted": ["billRunId", "sessionId"],
+  "notice.published": ["noticeId"],
+  "notice.published_staff": ["noticeId", "sessionId"],
 } as const satisfies { [T in NotificationType]: readonly (keyof NotificationPayloads[T])[] };
 
 /** The link facts of a type. */

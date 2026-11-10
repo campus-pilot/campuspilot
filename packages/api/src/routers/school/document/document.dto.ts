@@ -20,9 +20,19 @@ export const documentTypeSchema = z.enum([
   "bill",
   "receipt",
   "statement",
+  "notice",
 ]);
 export type DocumentType = z.infer<typeof documentTypeSchema>;
-export type AcademicDocumentType = Exclude<DocumentType, "bill" | "receipt" | "statement">;
+/**
+ * Document types that have a template but no generator source: they are
+ * rendered by their own feature, never through `previewDocument` /
+ * `generateDocument`, and never appear in the Documents workspace or in
+ * document history. A notice is rendered by the notices feature
+ * (`routers/school/notice`).
+ */
+export const TEMPLATE_ONLY_DOCUMENT_TYPES = ["notice"] as const satisfies readonly DocumentType[];
+export type TemplateOnlyDocumentType = (typeof TEMPLATE_ONLY_DOCUMENT_TYPES)[number];
+export type AcademicDocumentType = Exclude<DocumentType, "bill" | "receipt" | "statement" | TemplateOnlyDocumentType>;
 export const documentTemplatePageSizeSchema = z.enum(["full", "half"]);
 export type DocumentTemplatePageSize = z.infer<
   typeof documentTemplatePageSizeSchema
@@ -57,6 +67,7 @@ export const DOCUMENT_LABELS: Record<DocumentType, string> = {
   bill: "Bills",
   receipt: "Receipts",
   statement: "Account statements",
+  notice: "Notices",
 };
 const id = z.string().trim().min(1).max(100);
 export const schoolScopeSchema = z.object({ schoolId: id });

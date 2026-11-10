@@ -20,6 +20,7 @@ import {
   admissionDtoSchema,
   toAdmissionDto,
 } from '../school/admission/admission.dto';
+import { cadetNoticesRouter } from './cadet-notices.router';
 import { cadetNotificationRouter } from './cadet-notification.router';
 import { cadetPushRouter } from './cadet-push.router';
 
@@ -136,6 +137,7 @@ export const cadetRouter = {
     }),
 
   ...cadetRecordsRouter,
+  ...cadetNoticesRouter,
 };
 
 export type CadetRouter = typeof cadetRouter;

@@ -6,6 +6,7 @@ import {
   BellRing,
   ClipboardCheck,
   CreditCard,
+  Megaphone,
   MessageCircleWarning,
   ReceiptText,
   WalletCards,
@@ -23,6 +24,22 @@ export type NotificationPresentation = {
 
 /** Renders one type's facts. Facts added later are optional, so renderers tolerate their absence. */
 export type NotificationRenderer<T extends NotificationType> = (data: NotificationPayloads[T]) => NotificationPresentation;
+
+/** Names the bulk send of a batch failure alert (exhaustive over the batch kinds). */
+function whatsappBatchLabel(data: NotificationPayloads['notification.whatsapp_batch_failed']): string {
+  switch (data.batchKind) {
+    case 'billing_run':
+      return data.periodKey ? `billing run ${data.periodKey}` : 'a billing run';
+    case 'result_publication':
+      return `${data.examName ?? 'the examination'} results`;
+    case 'notice':
+      return data.noticeTitle ? `the notice "${data.noticeTitle}"` : 'a notice';
+    default: {
+      const unhandled: never = data.batchKind;
+      return String(unhandled);
+    }
+  }
+}
 
 /**
  * The per-type row registry (D-22, D-28): every catalogue type's wording, in
@@ -62,9 +79,7 @@ export const notificationRenderers: { [T in NotificationType]: NotificationRende
   }),
   'notification.whatsapp_batch_failed': (data) => {
     const messages = `${data.failedCount} WhatsApp ${data.failedCount === 1 ? 'message' : 'messages'}`;
-    const batch = data.batchKind === 'billing_run'
-      ? (data.periodKey ? `billing run ${data.periodKey}` : 'a billing run')
-      : `${data.examName ?? 'the examination'} results`;
+    const batch = whatsappBatchLabel(data);
     return {
       icon: MessageCircleWarning,
       title: `${messages} of ${batch} failed`,
@@ -75,6 +90,16 @@ export const notificationRenderers: { [T in NotificationType]: NotificationRende
     icon: CreditCard,
     title: `Billing run ${data.periodKey} posted`,
     description: `${data.billCount} ${data.billCount === 1 ? 'bill' : 'bills'} issued.`,
+  }),
+  'notice.published': (data) => ({
+    icon: Megaphone,
+    title: data.noticeTitle,
+    description: 'New notice from your school.',
+  }),
+  'notice.published_staff': (data) => ({
+    icon: Megaphone,
+    title: data.noticeTitle,
+    description: 'New staff notice.',
   }),
 };
 

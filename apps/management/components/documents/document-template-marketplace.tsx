@@ -18,8 +18,10 @@ import {
   DocumentPanel,
   DocumentPreview,
   allDocumentKinds,
+  noticeDocumentKind,
 } from '@campuspilot/components/documents/document-controls';
 import { client, orpc } from '@/lib/orpc';
+import { useSchoolFeature } from '../require-feature';
 import {
   DocumentLoading,
   DocumentPermission,
@@ -47,6 +49,7 @@ const settingsSlugs: Record<DocumentType, string> = {
   bill: 'bill',
   receipt: 'receipt',
   statement: 'statement',
+  notice: 'notice',
 };
 
 function settingsHref(scope: DocumentTemplateScope) {
@@ -68,6 +71,10 @@ export function DocumentTemplateMarketplace({
   initialType?: DocumentType;
 }) {
   const router = useRouter();
+  // The Notice template exists only for schools with the notices feature
+  // (the server refuses it otherwise), so its card is offered only then.
+  const notices = useSchoolFeature(schoolId, 'notices');
+  const kinds = notices.enabled ? [...allDocumentKinds, noticeDocumentKind] : allDocumentKinds;
   const form = useForm({
     defaultValues: { documentType: initialType },
     validators: {
@@ -100,7 +107,7 @@ export function DocumentTemplateMarketplace({
                   scroll: false,
                 });
               }}
-              items={allDocumentKinds}
+              items={kinds}
             />
           )}
         </form.Field>
@@ -152,7 +159,7 @@ function MarketplaceTypeSection({ scope }: { scope: DocumentTemplateScope }) {
 }
 
 function TemplateThumbnail({ item }: { item: MarketplaceItem }) {
-  const kind = allDocumentKinds.find(({ value }) => value === item.documentType)!;
+  const kind = [...allDocumentKinds, noticeDocumentKind].find(({ value }) => value === item.documentType)!;
   const palette = item.slug.endsWith('classic')
     ? 'border-blue-900/50 text-blue-900'
     : item.slug.endsWith('minimal')

@@ -714,7 +714,7 @@ export async function seedUnregistrations(ctx: SeedContext): Promise<{ unregiste
 // ---------------------------------------------------------------------------
 // §6.8 Templates
 
-const DOCUMENT_TYPES: DocumentType[] = ['report_card', 'id_card', 'admit_card', 'timetable', 'bill', 'receipt', 'statement'];
+const DOCUMENT_TYPES: DocumentType[] = ['report_card', 'id_card', 'admit_card', 'timetable', 'bill', 'receipt', 'statement', 'notice'];
 
 /** Selects each type's `<type>-default` marketplace design unless one is active. */
 export async function seedTemplates(ctx: SeedContext): Promise<{ templates: number }> {

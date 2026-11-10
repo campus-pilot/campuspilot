@@ -19,7 +19,7 @@ import type { WhatsAppDocumentSources } from './documents';
 
 const config = { accessToken: 'test-token-0123456789', phoneNumberId: '1234567890', graphApiVersion: 'v24.0', graphBaseUrl: 'https://graph.test' };
 const pushOff = { channel: 'web_push', available: false, unavailableReason: 'test' } as const;
-const noDocuments: WhatsAppDocumentSources = { payment_receipt: null, report_card: null };
+const noDocuments: WhatsAppDocumentSources = { payment_receipt: null, report_card: null, notice: null };
 
 type Contact = { whatsappNo: string | null; whatsappVerified: boolean; whatsappConsent: boolean };
 const reachable: Contact = { whatsappNo: '+919876543210', whatsappVerified: true, whatsappConsent: true };
@@ -135,7 +135,7 @@ describe('WhatsApp channel', () => {
       .fn<ChannelFetch>()
       .mockResolvedValueOnce(new Response(JSON.stringify({ id: 'media-1' }), { status: 200 }))
       .mockResolvedValueOnce(sent('wamid.doc'));
-    const { byAdmission } = await dispatch(payment, withPdf, { documentSources: { payment_receipt: receipt, report_card: null } });
+    const { byAdmission } = await dispatch(payment, withPdf, { documentSources: { payment_receipt: receipt, report_card: null, notice: null } });
     expect(produce).toHaveBeenCalledWith(expect.objectContaining({ kind: 'payment_receipt', paymentId: 'fpay_1', admissionId: admission.id }), { schoolId: school.id });
     const [uploadUrl, uploadInit] = withPdf.mock.calls[0]!;
     expect(uploadUrl).toBe('https://graph.test/v24.0/1234567890/media');
@@ -160,7 +160,7 @@ describe('WhatsApp channel', () => {
     };
     const receipt = { available: async () => true, produce: vi.fn(async () => 'template_unavailable' as const) };
     const fetchMock = vi.fn<ChannelFetch>(async () => sent('wamid.text'));
-    const { byAdmission } = await dispatch(payment, fetchMock, { documentSources: { payment_receipt: receipt, report_card: null } });
+    const { byAdmission } = await dispatch(payment, fetchMock, { documentSources: { payment_receipt: receipt, report_card: null, notice: null } });
     expect(receipt.produce).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(requestBody(fetchMock.mock.calls[0]!).template.name).toBe('school_update');
@@ -288,7 +288,7 @@ describe('WhatsApp channel', () => {
         recipients: { kind: 'admissions' as const, admissionIds: [admission.id] },
       },
       fetchMock,
-      { documentSources: { payment_receipt: receipt, report_card: null } },
+      { documentSources: { payment_receipt: receipt, report_card: null, notice: null } },
     );
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(byAdmission.get(admission.id)).toMatchObject({ status: 'sent', providerMessageId: 'wamid.doc2', attempts: 2 });

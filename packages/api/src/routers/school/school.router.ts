@@ -19,6 +19,7 @@ import { schoolFeatureFlagsRouter } from "./feature-flags/feature-flags.router";
 import { schoolExamRouter } from "./exam/exam.router";
 import { schoolLogoRouter } from "./logo/logo.router";
 import { schoolMemberRouter } from "./member/member.router";
+import { schoolNoticeRouter } from "./notice/notice.router";
 import { schoolNotificationRouter } from "./notification/notification.router";
 import { schoolNotificationLogRouter } from "./notification/notification-log.router";
 import {
@@ -38,6 +39,7 @@ export const schoolRouter = {
   ...schoolNotificationRouter,
   ...schoolNotificationLogRouter,
   ...schoolFeatureFlagsRouter,
+  ...schoolNoticeRouter,
   listMySchools: protectedProcedure
     .route({
       summary: "List my schools",

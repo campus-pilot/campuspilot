@@ -11,6 +11,7 @@ import {
   type DeliverySkipReason,
   type DeliveryStatus,
 } from './delivery-labels';
+import type { AdmissionNotificationType } from './notification-renderers';
 import { formatNotificationTime } from './notification-row';
 
 /** One remote copy as the delivery log API returns it. */
@@ -43,11 +44,15 @@ export type DeliveryLogItem = {
   deliveries: DeliveryLogDelivery[];
 };
 
-const TYPE_LABELS: Record<string, string> = {
+/** Exhaustive over the student types: a new one fails the build until it has a label. */
+const ADMISSION_TYPE_LABELS: Record<AdmissionNotificationType, string> = {
   'bill.issued': 'Bill',
   'payment.received': 'Payment receipt',
   'exam.results_published': 'Results',
+  'notice.published': 'Notice',
 };
+/** Looked up by the row's stored type, which may be one this release retired. */
+const TYPE_LABELS: Record<string, string> = ADMISSION_TYPE_LABELS;
 
 function deliveryDetail(delivery: DeliveryLogDelivery) {
   if (delivery.interrupted) return 'Sending was interrupted; it may or may not have arrived.';

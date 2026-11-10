@@ -13,6 +13,9 @@ type CatalogTemplate = {
   content: string;
 };
 
+/** Types whose designs were imported from the legacy application. */
+type LegacyDocumentType = Exclude<DocumentType, "statement" | "notice">;
+
 const logo = `{{#if school.logoUrl}}<img class="legacy-school-logo" src="{{school.logoUrl}}" alt="School logo">{{/if}}`;
 
 function wrapSection(
@@ -206,7 +209,7 @@ export function scopeLegacyDocumentCss(css: string) {
  */
 function normalizeLegacyTemplate(
   original: string,
-  documentType: Exclude<DocumentType, "statement">,
+  documentType: LegacyDocumentType,
 ) {
   let source =
     documentType === "report_card"
@@ -258,7 +261,7 @@ function normalizeLegacyTemplate(
 }
 
 function legacyPageSize(
-  documentType: Exclude<DocumentType, "statement">,
+  documentType: LegacyDocumentType,
   slug: string,
 ): DocumentTemplatePageSize {
   if (documentType === "admit_card") return "half";
@@ -269,7 +272,7 @@ function legacyPageSize(
 
 const legacyTemplates = Object.entries(LEGACY_DOCUMENT_TEMPLATES).flatMap(
   ([type, templates]) => {
-    const documentType = type as Exclude<DocumentType, "statement">;
+    const documentType = type as LegacyDocumentType;
     return templates.map(
       (template): CatalogTemplate => ({
         slug: `${documentType}-${template.slug}`,
@@ -320,6 +323,50 @@ const statementTemplates: CatalogTemplate[] = [
   },
 ];
 
+/**
+ * The built-in notice design. It is also what a plain-text notice is
+ * rendered with while the school has selected no Notice template, so it
+ * must always render a title and the paragraphs.
+ *
+ * It has no fixed height and no outer padding: notices flow over as many
+ * pages as they need and the renderer's `@page` margin frames every page
+ * (`flowingNoticeLayout`). Paragraph text keeps the author's line breaks
+ * through `white-space: pre-wrap`; values are escaped by Handlebars.
+ */
+export const NOTICE_DEFAULT_TEMPLATE_SLUG = "notice-default";
+const noticeDefaultTemplate = `<style>.notice{font:14px/1.55 Arial,Helvetica,sans-serif;color:#1f2933}.notice *{box-sizing:border-box}.notice-head{display:flex;align-items:center;gap:5mm;padding-bottom:4mm;border-bottom:2px solid #1f2933}.notice-head img{width:20mm;height:20mm;object-fit:contain;flex:none}.notice-school{flex:1;min-width:0}.notice-school h1{margin:0;font-size:22px;line-height:1.2}.notice-school p{margin:1mm 0 0;font-size:12px;color:#52606d}.notice-meta{display:flex;justify-content:space-between;gap:6mm;margin:5mm 0 0;font-size:12px;color:#52606d}.notice-label{margin:7mm 0 2mm;text-align:center;font-size:13px;font-weight:bold;letter-spacing:3px;text-transform:uppercase}.notice-title{margin:0 0 6mm;text-align:center;font-size:18px;line-height:1.3}.notice-body p{margin:0 0 4mm;white-space:pre-wrap;overflow-wrap:anywhere;orphans:2;widows:2}</style>
+<div class="notice">
+  <header class="notice-head">
+    {{#if school.logoUrl}}<img src="{{school.logoUrl}}" alt="School logo">{{/if}}
+    <div class="notice-school">
+      <h1>{{school.name}}</h1>
+      {{#if school.location}}<p>{{school.location}}</p>{{/if}}
+      {{#if school.registrationNo}}<p>Registration no. {{school.registrationNo}}</p>{{/if}}
+    </div>
+  </header>
+  <div class="notice-meta">
+    <span>Session {{session.startYear}}-{{session.endYear}}</span>
+    <span>Date: {{notice.issuedOnDisplay}}</span>
+  </div>
+  <p class="notice-label">Notice</p>
+  <h2 class="notice-title">{{notice.title}}</h2>
+  <main class="notice-body">
+    {{#each notice.paragraphs}}<p>{{this}}</p>{{/each}}
+  </main>
+</div>`;
+
+const noticeTemplates: CatalogTemplate[] = [
+  {
+    slug: NOTICE_DEFAULT_TEMPLATE_SLUG,
+    documentType: "notice",
+    name: "Standard Notice",
+    description:
+      "A school letterhead with the notice date, title and text. Long notices continue on further A4 pages.",
+    pageSize: "full",
+    content: noticeDefaultTemplate,
+  },
+];
+
 /** Published slugs are immutable provenance. The current catalog intentionally
  * replaces the former generated style families with the legacy application’s
  * named designs, plus matching statement designs which had no legacy source.
@@ -327,4 +374,5 @@ const statementTemplates: CatalogTemplate[] = [
 export const DOCUMENT_MARKETPLACE: CatalogTemplate[] = [
   ...legacyTemplates,
   ...statementTemplates,
+  ...noticeTemplates,
 ];

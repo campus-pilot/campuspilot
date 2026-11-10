@@ -12,6 +12,7 @@ import {
   cadetUser,
 } from '@campuspilot/db/schema/cadet';
 import { demoSchoolPurgeTable } from '@campuspilot/db/schema/demo-school-job';
+import { noticeClassTable, noticeTable } from '@campuspilot/db/schema/notice';
 import { cadetPushSubscriptionTable } from '@campuspilot/db/schema/notification';
 import { schoolTable } from '@campuspilot/db/schema/school';
 import { eq, inArray, sql } from 'drizzle-orm';
@@ -141,6 +142,32 @@ describe('purge_demo_school and the demo-only finance exception', () => {
     const realRows = await rowsReferencingSchool(real.school.id);
     expect(realRows.finance_payment).toBe(1);
     expect(realRows.school_feature_flag).toBe(1);
+  });
+
+  it('removes the notices of a demo school with their class rows, before the template revisions and accounts they reference', async () => {
+    const principal = demo.actors.principal.client.school;
+    const base = { schoolId: demo.school.id, sessionId: demo.activeSession.id, title: 'Demo notice', bodyMode: 'plain' as const, body: 'Text', toStaff: true };
+    // A published notice pins the school's selected Notice template revision (an artifact row).
+    const template = await principal.selectMarketplaceTemplate({ schoolId: demo.school.id, documentType: 'notice', slug: 'notice-default', expectedRevisionId: null });
+    const published = await principal.createNotice({ ...base, cadetScope: 'selected_classes', classIds: [demo.schoolClass.id] });
+    await expect(principal.publishNotice({ schoolId: demo.school.id, noticeId: published.id })).resolves.toMatchObject({ templateRevisionId: template.artifact.id });
+    // A draft written by a demo-only account, which the purge deletes as well.
+    const demoUser = await createTestUser({ name: 'Demo teacher' });
+    await db.update(user).set({ demoSchoolId: demo.school.id }).where(eq(user.id, demoUser.id));
+    await db.insert(noticeTable).values({ schoolId: demo.school.id, sessionId: demo.activeSession.id, title: 'Demo draft', bodyMode: 'plain', body: 'Text', toStaff: true, cadetScope: 'none', createdBy: demoUser.id });
+    // A real school's notice must survive the demo purge.
+    const [kept] = await db
+      .insert(noticeTable)
+      .values({ schoolId: real.school.id, sessionId: real.activeSession.id, title: 'Real notice', bodyMode: 'plain', body: 'Text', toStaff: true, cadetScope: 'none' })
+      .returning({ id: noticeTable.id });
+
+    const result = await db.execute<{ counts: Record<string, number> }>(sql`SELECT purge_demo_school(${demo.school.id}) AS counts`);
+    expect(result.rows[0]!.counts).toMatchObject({ notice: 2, notice_class: 1 });
+    expect(await db.select().from(noticeTable).where(eq(noticeTable.schoolId, demo.school.id))).toHaveLength(0);
+    expect(await db.select().from(noticeClassTable).where(eq(noticeClassTable.schoolId, demo.school.id))).toHaveLength(0);
+    const remaining = await rowsReferencingSchool(demo.school.id);
+    expect(Object.values(remaining).every((count) => count === 0)).toBe(true);
+    expect(await db.select().from(noticeTable).where(eq(noticeTable.id, kept!.id))).toHaveLength(1);
   });
 
   it('purges the Cadet Portal logins of a demo school and revokes their sessions and MCP tokens', async () => {

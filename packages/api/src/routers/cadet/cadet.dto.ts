@@ -318,3 +318,33 @@ const cadetRemarkListItemSchema = cadetRemarkSchema.extend({
   releasedAt: z.date(),
 });
 export const listCadetRemarksOutputSchema = createPaginatedOutputSchema(cadetRemarkListItemSchema);
+
+// ---------------------------------------------------------------------------
+// Notices
+
+/** A published notice addressed to the student (list row). */
+export const cadetNoticeListItemSchema = z.object({
+  noticeId: z.string(),
+  title: z.string(),
+  publishedAt: z.date(),
+});
+
+export const listCadetNoticesInputSchema = createListInputSchema({});
+export const listCadetNoticesOutputSchema = createPaginatedOutputSchema(cadetNoticeListItemSchema);
+
+export const getCadetNoticeInputSchema = z.object({
+  noticeId: z.string().trim().min(1).max(100).describe('noticeId from listNotices.'),
+});
+
+export const cadetNoticeSchema = cadetNoticeListItemSchema.extend({
+  /**
+   * The notice as plain text when it was written as text; null for a notice
+   * designed as a document, which can only be read as `html` or as its PDF.
+   */
+  text: z.string().nullable(),
+  /** The rendered notice: sanitized, network-free HTML for an empty-sandbox iframe. */
+  html: z.string(),
+});
+export type CadetNoticeDto = z.infer<typeof cadetNoticeSchema>;
+
+export const cadetNoticeDownloadSchema = z.object({ url: z.url(), expiresIn: z.number().int() });

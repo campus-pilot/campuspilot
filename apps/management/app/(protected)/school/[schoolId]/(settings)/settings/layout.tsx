@@ -193,9 +193,10 @@ function navigationFor(
         {
           type: 'item',
           id: 'notice-template',
+          // A feature and a permission are separate gates; the item needs both.
           wrap: (children) => (
             <RequireFeature schoolId={schoolId} feature="notices">
-              {children}
+              {withTemplatePermission(children)}
             </RequireFeature>
           ),
           label: 'Notice',

@@ -24,6 +24,13 @@ describe("portable template editing brief", () => {
     );
     expect(prompt).not.toContain("current template HTML separately");
   });
+  it("tells the author that a notice flows over pages with a margin on each", () => {
+    const prompt = createTemplateEditingPrompt({ ...input, documentType: "notice" });
+    expect(prompt).toContain("Edit my CampusPilot school notice template.");
+    expect(prompt).toContain("flows over as many pages");
+    expect(prompt).toContain("16mm margin");
+    expect(prompt).not.toContain("86mm × 54mm");
+  });
   it.each(["report_card", "admit_card", "timetable"] as const)(
     "uses explicit page rules for %s",
     (documentType) => {
