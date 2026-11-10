@@ -18,9 +18,12 @@ function procedure(name: string) {
     return handler(input);
   };
   return {
-    queryOptions: (options: { input?: unknown } = {}) => ({
-      queryKey: [name, options.input ?? null],
-      queryFn: () => call(options.input),
+    queryKey: ({ input }: { input?: unknown } = {}) => [name, input ?? null],
+    // Other options (`enabled`, `staleTime`, …) pass through, as with oRPC.
+    queryOptions: ({ input, ...rest }: { input?: unknown } & Record<string, unknown> = {}) => ({
+      ...rest,
+      queryKey: [name, input ?? null],
+      queryFn: () => call(input),
     }),
     infiniteOptions: (options: {
       input: (pageParam: unknown) => unknown;

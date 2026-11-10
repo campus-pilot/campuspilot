@@ -68,13 +68,10 @@ describe('demo seed data and plan', () => {
     expect(at('2026-05-01T06:00:00Z').every(([, released]) => !released)).toBe(true);
   });
 
-  it('back-dates each release to a fixed time after its exam window, before asOf', () => {
+  it('releases on the day the demo is created (asOf)', () => {
     const asOf = new Date('2026-11-06T06:00:00Z');
     const [periodic] = buildDemoPlan({ input, seed: 's', asOf, school }).exams;
-    expect(periodic!.window.end).toBe('2026-06-17');
-    // 12 days after the window, 16:00 in Asia/Kolkata.
-    expect(periodic!.cadetReleasedAt).toBe('2026-06-29T10:30:00.000Z');
-    expect(new Date(periodic!.cadetReleasedAt!).getTime()).toBeLessThan(asOf.getTime());
+    expect(periodic!.cadetReleasedAt).toBe(asOf.toISOString());
   });
 
   it('charges the examination fee only for exams that charge one', () => {

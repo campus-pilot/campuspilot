@@ -217,6 +217,7 @@ describe('cadet and staff sessions are isolated', () => {
       'getProfile',
       'getPushSubscription',
       'getSchool',
+      'getSignInSchool',
       'getUnreadNotificationCount',
       'listExams',
       'listFeeLedger',
@@ -225,6 +226,7 @@ describe('cadet and staff sessions are isolated', () => {
       'listRemarks',
       'markAllNotificationsRead',
       'markNotificationsRead',
+      'searchSchools',
       'subscribePush',
       'unsubscribePush',
     ]);

@@ -13,18 +13,28 @@ import { z } from 'zod';
 
 import { authClient, isOAuthRequestExpired, isSignedOAuthRequest, oauthAuthClient, oauthRedirectUrl } from '@/lib/auth-client';
 
+import { SCHOOL_QUERY_PARAM, SchoolCombobox, SignInSchoolBadge, useSignInSchool } from './school-combobox';
+
+/**
+ * `schoolSlug` is the chosen school's code, the value the sign-in sends; it
+ * starts from a shared link's `?school=` and changes when a suggestion is
+ * picked. `schoolSearch` is only the combobox's search text and is never sent.
+ */
 const signInSchema = z.object({
-  schoolSlug: z.string().trim().min(1, 'Enter your school code.').max(100),
+  schoolSlug: z.string().trim().min(1, 'Choose your school.').max(100),
+  schoolSearch: z.string(),
   admissionNo: z.string().trim().min(1, 'Enter your admission number.').max(100),
   password: z.string().min(1, 'Enter your password.').max(128),
 });
 
 type SignInValues = z.infer<typeof signInSchema>;
 
+/** The admission sign-in body built from the validated form. */
+type SignInRequest = Omit<SignInValues, 'schoolSearch'>;
+
 const OAUTH_REQUEST_EXPIRED_MESSAGE = 'This connection request has expired. Go back to the app and connect again.';
 
 const fields = [
-  { name: 'schoolSlug', label: 'School code', type: 'text', autoComplete: 'organization' },
   { name: 'admissionNo', label: 'Admission number', type: 'text', autoComplete: 'username' },
   { name: 'password', label: 'Password', type: 'password', autoComplete: 'current-password' },
 ] as const;
@@ -49,7 +59,7 @@ function useSignInForm() {
   const oauthRequest = isSignedOAuthRequest(searchParams);
   const redirectPath = sanitizeAuthRedirectPath(searchParams.get(AUTH_REDIRECT_QUERY_PARAM));
   const signIn = useMutation({
-    mutationFn: async (values: SignInValues) => {
+    mutationFn: async (values: SignInRequest) => {
       const expired = () => oauthRequest && isOAuthRequestExpired(searchParams, Date.now());
       if (expired()) throw new Error(OAUTH_REQUEST_EXPIRED_MESSAGE);
       const client = oauthRequest ? oauthAuthClient : authClient;
@@ -64,11 +74,17 @@ function useSignInForm() {
     },
   });
   const form = useForm({
-    defaultValues: { schoolSlug: '', admissionNo: '', password: '' } satisfies SignInValues,
+    defaultValues: {
+      schoolSlug: searchParams.get(SCHOOL_QUERY_PARAM)?.trim() ?? '',
+      schoolSearch: '',
+      admissionNo: '',
+      password: '',
+    } satisfies SignInValues,
     validators: { onSubmit: signInSchema },
     onSubmit: async ({ value }) => {
+      const { schoolSearch: _search, ...request } = signInSchema.parse(value);
       // Failures surface through `signIn.error`.
-      await signIn.mutateAsync(signInSchema.parse(value)).catch(() => undefined);
+      await signIn.mutateAsync(request).catch(() => undefined);
     },
   });
   const oauthExpired = oauthRequest && isOAuthRequestExpired(searchParams, Date.now());
@@ -110,6 +126,52 @@ function ExpiredOAuthRequest() {
   );
 }
 
+type SignInFormApi = ReturnType<typeof useSignInForm>['form'];
+
+/** Said when a shared link's school code matches no school. */
+function UnknownSchoolCode({ slug }: { slug: string }) {
+  const { notFound } = useSignInSchool(slug);
+  if (!notFound) return null;
+  return <p className="text-sm text-destructive">No school has the code “{slug.trim()}”. Search for your school instead.</p>;
+}
+
+/**
+ * The school picker, bound to two form fields: the chosen `schoolSlug`
+ * (validated) and its search text, both kept in the form rather than
+ * component state.
+ */
+function SchoolField({ form }: { form: SignInFormApi }) {
+  return (
+    <form.Field name="schoolSlug">
+      {(schoolField) => (
+        <form.Field name="schoolSearch">
+          {(searchField) => (
+            <Field data-invalid={schoolField.state.meta.errors.length > 0}>
+              <FieldLabel htmlFor="school">School</FieldLabel>
+              <SchoolCombobox
+                id="school"
+                slug={schoolField.state.value}
+                search={searchField.state.value}
+                invalid={schoolField.state.meta.errors.length > 0}
+                onSlugChange={schoolField.handleChange}
+                onSearchChange={searchField.handleChange}
+                onBlur={schoolField.handleBlur}
+              />
+              <UnknownSchoolCode slug={schoolField.state.value} />
+              <FieldError errors={schoolField.state.meta.errors} />
+            </Field>
+          )}
+        </form.Field>
+      )}
+    </form.Field>
+  );
+}
+
+/** The chosen school's badge, following the form's `schoolSlug`. */
+function ChosenSchool({ form }: { form: SignInFormApi }) {
+  return <form.Subscribe selector={(state) => state.values.schoolSlug}>{(slug) => <SignInSchoolBadge slug={slug} />}</form.Subscribe>;
+}
+
 export function SignInForm() {
   const { data: session, isPending } = authClient.useSession();
   const { form, signIn, oauthRequest, oauthExpired } = useSignInForm();
@@ -120,6 +182,7 @@ export function SignInForm() {
 
   return (
     <div className="flex flex-col gap-6">
+      <ChosenSchool form={form} />
       <SignInHeading oauthRequest={oauthRequest} />
       <form
         className="flex flex-col gap-6"
@@ -130,6 +193,7 @@ export function SignInForm() {
         }}
       >
         <FieldGroup>
+          <SchoolField form={form} />
           {fields.map((item) => (
             <form.Field key={item.name} name={item.name}>
               {(field) => (

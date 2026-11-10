@@ -13,7 +13,6 @@ import {
   formatLocalDate,
   formatLocalDateInWords,
   localDateOf,
-  localTimeInstant,
   workingDaysBetween,
   type BillingMonth,
   type ExamState,
@@ -111,9 +110,8 @@ export type DemoExam = {
    * When the demo released this exam's results to the Cadet Portal (an ISO
    * instant), or null when it stays unreleased. Every completed exam except
    * the latest one is released, so a demo shows both states; a single
-   * completed exam is released. The time is `cadetRelease.daysAfterWindow`
-   * days after the exam window at `cadetRelease.hour` local time, which is
-   * always before `asOf` because a completed exam is past its active period.
+   * completed exam is released. The time is `asOf`, the demo's creation, so
+   * a fresh demo shows its results as published the day the school was made.
    */
   cadetReleasedAt: string | null;
   /** Share of students with marks while the exam is `active`. */
@@ -271,15 +269,15 @@ function buildClasses(seed: string, input: DemoSeedInput, months: BillingMonth[]
   });
 }
 
-function buildExams(input: DemoSeedInput, sessionStart: LocalDate, asOfLocal: LocalDate, timeZone: string): DemoExam[] {
+function buildExams(input: DemoSeedInput, sessionStart: LocalDate, asOf: Date): DemoExam[] {
+  const asOfLocal = localDateOf(asOf, demoSeed.finance.timeZone);
   const exams = scheduleExams(input, sessionStart, asOfLocal);
   const completed = exams.filter((exam) => exam.state === 'completed');
   const held = completed.length > 1 ? completed.at(-1) : undefined;
-  const { daysAfterWindow, hour } = demoSeed.session.cadetRelease;
+  const releasedAt = asOf.toISOString();
   return exams.map((exam) => ({
     ...exam,
-    cadetReleasedAt:
-      exam.state === 'completed' && exam !== held ? localTimeInstant(addDays(exam.window.end, daysAfterWindow), hour, 0, timeZone) : null,
+    cadetReleasedAt: exam.state === 'completed' && exam !== held ? releasedAt : null,
   }));
 }
 
@@ -378,7 +376,7 @@ export function buildDemoPlan(options: {
     timeZone,
     staff: buildStaff(seed, school.slug, selected),
     classes: buildClasses(seed, input, months),
-    exams: buildExams(input, sessionStart, asOfLocal, timeZone),
+    exams: buildExams(input, sessionStart, options.asOf),
     billingMonths: months,
     notices: buildNotices(selected, asOfLocal, timeZone),
   };

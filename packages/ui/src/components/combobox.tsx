@@ -53,6 +53,8 @@ type ComboboxSingleProps<T> = ComboboxBaseProps<T> & {
   multiple?: false
   value: T | null
   onValueChange: (value: T | null) => void
+  /** Trigger content for the selected value; defaults to `itemLabel`. */
+  renderValue?: (item: T) => React.ReactNode
   /** Shows a button that clears the selection. */
   showClear?: boolean
   clearLabel?: string
@@ -166,7 +168,9 @@ function ComboboxField<T>(props: ComboboxProps<T> & { open: boolean }) {
  */
 function ComboboxTrigger<T>(props: ComboboxProps<T> & { open: boolean }) {
   const label =
-    !props.multiple && props.value !== null ? props.itemLabel(props.value) : null
+    !props.multiple && props.value !== null
+      ? (props.renderValue?.(props.value) ?? props.itemLabel(props.value))
+      : null
   return (
     <PopoverTrigger asChild>
       <button
