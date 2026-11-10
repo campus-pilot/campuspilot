@@ -13,7 +13,13 @@ import {
   noticeBelongsToSession,
   noticeFormSchemaFor,
   noticeLoadFailure,
-  publishReviewIsCurrent,
+  PUBLISH_REVIEW_CHANGE_MESSAGES,
+  cadetAudienceUnpublishable,
+  newestRenderedPreview,
+  noticeBoundaryState,
+  publishReviewChange,
+  publishReviewOf,
+  savedNoticePreviewInput,
   whatsappPdfLine,
   draftNotice,
   editNoticeHref,
@@ -145,13 +151,71 @@ test('a notice is shown only under its own session (review U4)', () => {
   assert.equal(noticeBelongsToSession({ sessionId: 'ses_2' }, scope), false);
 });
 
-test('publishing is offered only for the version that was read (review B3)', () => {
-  assert.equal(publishReviewIsCurrent(3, null), true);
-  assert.equal(publishReviewIsCurrent(3, 3), true);
-  assert.equal(publishReviewIsCurrent(3, 4), false);
+test('publishing is offered only for the preview that was read: its version and its template revision (review B3, R2B3)', () => {
+  // The review is what the rendered preview on the page says it rendered.
+  assert.deepEqual(publishReviewOf({ version: 3, templateRevisionId: 'art_1' }), { version: 3, templateRevisionId: 'art_1' });
+  assert.deepEqual(publishReviewOf({ version: 3, templateRevisionId: null }), { version: 3, templateRevisionId: null });
+  // No preview on the page, or one of unsaved text: nothing has been reviewed.
+  assert.equal(publishReviewOf(undefined), null);
+  assert.equal(publishReviewOf({ version: null, templateRevisionId: null }), null);
+  assert.deepEqual(savedNoticePreviewInput({ schoolId: 'sch_1', id: 'ntc_1' }), { schoolId: 'sch_1', source: { kind: 'saved', noticeId: 'ntc_1' } });
+
+  const reviewed = { version: 3, templateRevisionId: 'art_1' };
+  assert.equal(publishReviewChange(reviewed, null), null);
+  assert.equal(publishReviewChange(reviewed, { version: 3, templateRevisionId: 'art_1' }), null);
+  assert.equal(publishReviewChange(reviewed, { version: 4, templateRevisionId: 'art_1' }), 'notice');
+  // The same notice inside another template is a change too, in both directions of "no template".
+  assert.equal(publishReviewChange(reviewed, { version: 3, templateRevisionId: 'art_2' }), 'template');
+  assert.equal(publishReviewChange(reviewed, { version: 3, templateRevisionId: null }), 'template');
+  assert.equal(publishReviewChange({ version: 3, templateRevisionId: null }, { version: 3, templateRevisionId: 'art_2' }), 'template');
+  assert.equal(publishReviewChange({ version: 3, templateRevisionId: null }, { version: 3, templateRevisionId: null }), null);
+  assert.match(PUBLISH_REVIEW_CHANGE_MESSAGES.template, /Notice template changed/);
+  assert.match(PUBLISH_REVIEW_CHANGE_MESSAGES.notice, /notice changed/);
+
   assert.equal(isNoticeConflict({ code: 'CONFLICT' }), true);
   assert.equal(isNoticeConflict({ code: 'BAD_REQUEST' }), false);
   assert.equal(isNoticeConflict(null), false);
+});
+
+test('a loaded notice survives a failed refetch; only "gone" or "feature off" replaces it (review R2U1)', () => {
+  const notice = { sessionId: scope.sessionId, title: 'Draft' };
+  const network = new Error('Failed to fetch');
+  const notFound = Object.assign(new Error('Notice was not found.'), { code: 'NOT_FOUND' });
+  const featureOff = { code: 'FORBIDDEN', data: { reason: 'SCHOOL_FEATURE_DISABLED', feature: 'notices' } };
+
+  assert.deepEqual(noticeBoundaryState({ data: undefined, error: null }, scope), { kind: 'pending' });
+  assert.deepEqual(noticeBoundaryState({ data: undefined, error: network }, scope), { kind: 'unavailable', error: network });
+  assert.deepEqual(noticeBoundaryState({ data: notice, error: null }, scope), { kind: 'ready', notice });
+  // The defect: one failed request on returning to the tab unmounted the editor and discarded the typed text.
+  assert.deepEqual(noticeBoundaryState({ data: notice, error: network }, scope), { kind: 'ready', notice });
+  assert.deepEqual(noticeBoundaryState({ data: notice, error: { code: 'INTERNAL_SERVER_ERROR' } }, scope), { kind: 'ready', notice });
+  // Answers that make the held notice untrue still replace it.
+  assert.deepEqual(noticeBoundaryState({ data: notice, error: notFound }, scope), { kind: 'unavailable', error: notFound });
+  assert.deepEqual(noticeBoundaryState({ data: notice, error: featureOff }, scope), { kind: 'unavailable', error: featureOff });
+  // Another session's notice is not shown under this route, loaded or not.
+  assert.deepEqual(noticeBoundaryState({ data: { ...notice, sessionId: 'ses_other' }, error: null }, scope), { kind: 'elsewhere' });
+});
+
+test('a draft for cadets in a school without the portal says why it cannot be published (review R2U2)', () => {
+  const draft = { status: 'draft' as const, cadetScope: 'all_classes' as const };
+  assert.match(cadetAudienceUnpublishable(draft, 'disabled') ?? '', /Cadet Portal is not enabled/);
+  // Not when the portal is there, not when nobody knows, and not for other notices.
+  assert.equal(cadetAudienceUnpublishable(draft, 'available'), null);
+  assert.equal(cadetAudienceUnpublishable(draft, 'unknown'), null);
+  assert.equal(cadetAudienceUnpublishable(draft, 'pending'), null);
+  assert.equal(cadetAudienceUnpublishable({ status: 'draft', cadetScope: 'none' }, 'disabled'), null);
+  assert.equal(cadetAudienceUnpublishable({ status: 'published', cadetScope: 'all_classes' }, 'disabled'), null);
+});
+
+test('the last preview that worked is the newest content, whatever order the renders resolve in (review R2U5)', () => {
+  const a = { sequence: 1, html: 'A' };
+  const b = { sequence: 2, html: 'B' };
+  assert.deepEqual(newestRenderedPreview(undefined, a), a);
+  assert.deepEqual(newestRenderedPreview(a, b), b);
+  // A slow render of older content resolves after a newer one: the newer stays.
+  assert.deepEqual(newestRenderedPreview(b, a), b);
+  // The same content rendered again replaces itself.
+  assert.deepEqual(newestRenderedPreview(b, { sequence: 2, html: 'B2' }), { sequence: 2, html: 'B2' });
 });
 
 test('the PDF line is said only when WhatsApp will send something (review U7)', () => {

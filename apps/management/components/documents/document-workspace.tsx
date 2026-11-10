@@ -160,7 +160,9 @@ function DocumentWorkspaceAccess({
     }),
   );
   if (permissions.isPending) return <DocumentLoading />;
-  if (permissions.isError || permissions.data.results.length !== actions.length)
+  // An answer already held keeps applying when a refetch fails (as in
+  // `permissionsSatisfied`); only a check that never answered fails closed.
+  if (permissions.data?.results.length !== actions.length)
     return <DocumentNotice>Document access could not be checked.</DocumentNotice>;
   const [
     academicTemplates,

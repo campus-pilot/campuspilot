@@ -10,6 +10,7 @@ import {
 } from 'react';
 import { useForm } from '@tanstack/react-form';
 import { useQuery } from '@tanstack/react-query';
+import { resolveQueryBoundary } from '@campuspilot/components/query-boundary';
 import {
   FileText,
   Maximize2,
@@ -127,11 +128,15 @@ export function DocumentTemplates({ scope }: { scope: DocumentTemplateScope }) {
   const active = useQuery(
     orpc.school.getActiveDocumentTemplate.queryOptions({ input: scope }),
   );
-  if (active.isPending) return <DocumentLoading />;
-  if (active.isError)
-    return <DocumentReadError error={active.error} retry={active.refetch} />;
+  // The template already loaded (and the editor with unsaved code under it)
+  // stays when a background refetch fails; see `resolveQueryBoundary`.
+  const state = resolveQueryBoundary(active);
+  if (state.kind === 'pending') return <DocumentLoading />;
+  if (state.kind === 'failed')
+    return <DocumentReadError error={state.error} retry={active.refetch} />;
+  const template = state.data;
 
-  if (!active.data) {
+  if (!template) {
     return <NoTemplateSelected scope={scope} />;
   }
 
@@ -139,12 +144,12 @@ export function DocumentTemplates({ scope }: { scope: DocumentTemplateScope }) {
     <DocumentPermission
       schoolId={scope.schoolId}
       action={templateManageAction(scope.documentType)}
-      fallback={<SavedTemplatePreview scope={scope} template={active.data} />}
+      fallback={<SavedTemplatePreview scope={scope} template={template} />}
     >
       <TemplateEditor
-        key={active.data.artifact.id}
+        key={template.artifact.id}
         scope={scope}
-        template={active.data}
+        template={template}
         onReload={async () => {
           await active.refetch();
         }}
@@ -219,7 +224,7 @@ function SavedTemplatePreview({
   return (
     <div className="flex flex-col gap-5">
       <TemplatePageHeader scope={scope} />
-      {preview.isError ? (
+      {preview.isError && preview.data === undefined ? (
         <DocumentReadError error={preview.error} retry={preview.refetch} />
       ) : (
         <DocumentPreview

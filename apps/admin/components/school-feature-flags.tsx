@@ -10,6 +10,7 @@ import {
   type SchoolFeatureEntry,
   type SchoolFeatureKey,
 } from '@campuspilot/api/routers/school/feature-flags/feature-flags.dto';
+import { resolveQueryBoundary } from '@campuspilot/components/query-boundary';
 import { Badge } from '@campuspilot/ui/components/badge';
 import { Button } from '@campuspilot/ui/components/button';
 import {
@@ -115,7 +116,12 @@ type FeatureFlagFormProps = {
   entry: SchoolFeatureEntry;
 };
 
-function FeatureFlagForm({ schoolId, entry }: FeatureFlagFormProps) {
+/**
+ * `configInvalid`: the stored settings are unusable, so saving is offered
+ * even when the switch was not moved; the save stores the entry's (valid)
+ * settings in their place.
+ */
+function FeatureFlagForm({ schoolId, entry, configInvalid }: FeatureFlagFormProps & { configInvalid: boolean }) {
   const { feature } = entry;
   const form = useFeatureFlagForm(schoolId, entry);
   const switchId = `feature-${feature}-enabled`;
@@ -160,7 +166,7 @@ function FeatureFlagForm({ schoolId, entry }: FeatureFlagFormProps) {
               </p>
             ))}
             <div className="flex justify-end">
-              <Button type="submit" disabled={!isDirty || isSubmitting}>
+              <Button type="submit" disabled={(!isDirty && !configInvalid) || isSubmitting}>
                 {isSubmitting ? <LoaderCircle className="animate-spin" aria-hidden /> : null}
                 {isSubmitting ? 'Saving…' : 'Save changes'}
               </Button>
@@ -172,7 +178,22 @@ function FeatureFlagForm({ schoolId, entry }: FeatureFlagFormProps) {
   );
 }
 
-function FeatureFlagCard({ schoolId, entry }: FeatureFlagFormProps) {
+/**
+ * Said on a feature whose stored settings no longer match their schema (the
+ * server lists it in `invalidConfigs`). Whether the feature is enabled is
+ * still the stored fact shown on the card; only what reads the settings is
+ * unavailable. Saving the card stores valid settings again.
+ */
+function InvalidConfigWarning() {
+  return (
+    <p className="text-xs text-destructive" role="alert">
+      The stored settings of this feature are not valid, so whatever reads them is unavailable for this school. Its
+      on/off state still applies. Save this feature to store valid settings again.
+    </p>
+  );
+}
+
+function FeatureFlagCard({ schoolId, entry, configInvalid }: FeatureFlagFormProps & { configInvalid: boolean }) {
   const { label, description } = schoolFeatureCatalogue[entry.feature];
   return (
     <Card>
@@ -183,9 +204,10 @@ function FeatureFlagCard({ schoolId, entry }: FeatureFlagFormProps) {
         </CardTitle>
         <CardDescription>{description}</CardDescription>
       </CardHeader>
-      <CardContent>
+      <CardContent className="flex flex-col gap-4">
+        {configInvalid ? <InvalidConfigWarning /> : null}
         {/* Keyed by the saved state so the form restarts from what was stored. */}
-        <FeatureFlagForm key={JSON.stringify(entry)} schoolId={schoolId} entry={entry} />
+        <FeatureFlagForm key={JSON.stringify([entry, configInvalid])} schoolId={schoolId} entry={entry} configInvalid={configInvalid} />
       </CardContent>
     </Card>
   );
@@ -209,7 +231,11 @@ export function SchoolFeatureFlags({ schoolId }: { schoolId: string }) {
     orpc.systemAdmin.getSchoolFeatureFlags.queryOptions({ input: { id: schoolId } }),
   );
 
-  if (flagsQuery.isPending) {
+  // Flags already shown (and a switch the administrator has just moved) stay
+  // when a background refetch fails; see `resolveQueryBoundary`.
+  const state = resolveQueryBoundary(flagsQuery);
+
+  if (state.kind === 'pending') {
     return (
       <section className="mx-auto flex w-full max-w-4xl animate-pulse flex-col gap-5">
         <div className="h-14 w-52 rounded-lg bg-muted" />
@@ -219,25 +245,35 @@ export function SchoolFeatureFlags({ schoolId }: { schoolId: string }) {
     );
   }
 
-  if (flagsQuery.isError) {
+  if (state.kind === 'failed') {
     return (
       <Card className="mx-auto w-full max-w-4xl">
         <CardHeader>
           <CardTitle>Unable to load feature flags</CardTitle>
           <CardDescription>
-            {flagsQuery.error instanceof Error ? flagsQuery.error.message : 'Try refreshing the page.'}
+            {state.error instanceof Error ? state.error.message : 'Try refreshing the page.'}
           </CardDescription>
         </CardHeader>
+        <CardContent>
+          <Button type="button" variant="outline" onClick={() => void flagsQuery.refetch()}>
+            Retry
+          </Button>
+        </CardContent>
       </Card>
     );
   }
 
-  const { features } = flagsQuery.data;
+  const { features, invalidConfigs } = state.data;
   return (
     <section className="mx-auto flex w-full max-w-4xl flex-col gap-5">
       <FeatureFlagsHeading />
       {schoolFeatureEntries(features).map((entry) => (
-        <FeatureFlagCard key={entry.feature} schoolId={schoolId} entry={entry} />
+        <FeatureFlagCard
+          key={entry.feature}
+          schoolId={schoolId}
+          entry={entry}
+          configInvalid={invalidConfigs.includes(entry.feature)}
+        />
       ))}
     </section>
   );

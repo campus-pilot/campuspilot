@@ -4,11 +4,12 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { DownloadIcon, FileQuestionIcon } from 'lucide-react';
 import type { CadetNoticeDto } from '@campuspilot/api/routers/cadet/cadet.dto';
 import { CadetNoticeDocument, CadetNoticeText } from '@campuspilot/components/cadet-portal';
+import { resolveQueryBoundary } from '@campuspilot/components/query-boundary';
 import { Button } from '@campuspilot/ui/components/button';
 
 import { client, orpc } from '@/lib/orpc';
 import { EmptyState, ScreenError, ScreenLoading } from '../screen';
-import { noticeMissing, noticesSwitchedOff, publishedLabel } from './notices-model';
+import { noticeGone, noticeMissing, noticesSwitchedOff, publishedLabel } from './notices-model';
 import { NoticesUnavailable } from './notices-unavailable';
 
 export const NoticeNotFound = () => (
@@ -61,6 +62,14 @@ function NoticeHeading({ notice }: { notice: CadetNoticeDto }) {
 }
 
 /**
+ * The printed page of a published notice is fixed at publication and can be
+ * megabytes (the letterhead logo), so once loaded it is kept for as long as
+ * the portal stays open: it is not downloaded again each time the student
+ * switches back to the tab or app (the portal's default for other reads).
+ */
+const PRINTED_PAGE_QUERY = { staleTime: Number.POSITIVE_INFINITY, refetchOnWindowFocus: false, refetchOnReconnect: false } as const;
+
+/**
  * A designed notice as its printed page. The page (megabytes of markup with
  * the school's letterhead) is a separate read from the notice itself, asked
  * for only here; a plain-text notice never loads it. While it loads, and if
@@ -68,7 +77,7 @@ function NoticeHeading({ notice }: { notice: CadetNoticeDto }) {
  * is always readable.
  */
 function NoticePrintedPage({ notice }: { notice: CadetNoticeDto }) {
-  const page = useQuery(orpc.getNoticeDocument.queryOptions({ input: { noticeId: notice.noticeId } }));
+  const page = useQuery({ ...orpc.getNoticeDocument.queryOptions({ input: { noticeId: notice.noticeId } }), ...PRINTED_PAGE_QUERY });
   if (page.data) return <CadetNoticeDocument html={page.data.html} />;
   return (
     <div className="flex flex-col gap-3">
@@ -102,16 +111,19 @@ export function NoticeBody({ notice }: { notice: CadetNoticeDto }) {
  */
 export function NoticeScreen({ noticeId }: { noticeId: string }) {
   const notice = useQuery(orpc.getNotice.queryOptions({ input: { noticeId } }));
-  if (notice.isPending) return <ScreenLoading blocks={2} />;
-  if (notice.isError) {
-    if (noticesSwitchedOff(notice.error)) return <NoticesUnavailable />;
-    if (noticeMissing(notice.error)) return <NoticeNotFound />;
-    return <ScreenError title="Could not load this notice" error={notice.error} onRetry={() => void notice.refetch()} />;
+  // A notice already on screen stays when a refetch fails; only "not found"
+  // or "notices switched off" replaces it (`resolveQueryBoundary`).
+  const state = resolveQueryBoundary(notice, { replaces: noticeGone });
+  if (state.kind === 'pending') return <ScreenLoading blocks={2} />;
+  if (state.kind === 'failed') {
+    if (noticesSwitchedOff(state.error)) return <NoticesUnavailable />;
+    if (noticeMissing(state.error)) return <NoticeNotFound />;
+    return <ScreenError title="Could not load this notice" error={state.error} onRetry={() => void notice.refetch()} />;
   }
   return (
     <>
-      <NoticeHeading notice={notice.data} />
-      <NoticeBody notice={notice.data} />
+      <NoticeHeading notice={state.data} />
+      <NoticeBody notice={state.data} />
     </>
   );
 }

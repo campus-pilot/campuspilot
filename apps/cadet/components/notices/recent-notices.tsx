@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronRightIcon, MegaphoneIcon } from 'lucide-react';
 import { CadetNoticeList } from '@campuspilot/components/cadet-portal';
+import { resolveQueryBoundary } from '@campuspilot/components/query-boundary';
 import { Button } from '@campuspilot/ui/components/button';
 import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemMedia, ItemTitle } from '@campuspilot/ui/components/item';
 
@@ -32,12 +33,14 @@ function useRecentNotices() {
  */
 export function HomeNotices() {
   const notices = useRecentNotices();
-  if (notices.isPending) return null;
-  if (notices.isError) {
-    if (noticesSwitchedOff(notices.error)) return null;
-    return <ScreenError title="Could not load notices" error={notices.error} onRetry={() => void notices.refetch()} />;
+  // Notices already listed stay when a refetch fails; only "notices switched off" removes them.
+  const state = resolveQueryBoundary(notices, { replaces: noticesSwitchedOff });
+  if (state.kind === 'pending') return null;
+  if (state.kind === 'failed') {
+    if (noticesSwitchedOff(state.error)) return null;
+    return <ScreenError title="Could not load notices" error={state.error} onRetry={() => void notices.refetch()} />;
   }
-  if (notices.data.items.length === 0) return null;
+  if (state.data.items.length === 0) return null;
   return (
     <section className="flex flex-col gap-2">
       <SectionLabel
@@ -49,7 +52,7 @@ export function HomeNotices() {
       >
         Notices
       </SectionLabel>
-      <CadetNoticeList entries={noticeEntries(notices.data.items)} renderLink={renderNoticeLink} />
+      <CadetNoticeList entries={noticeEntries(state.data.items)} renderLink={renderNoticeLink} />
     </section>
   );
 }

@@ -1,4 +1,5 @@
-import { fireEvent, screen } from '@testing-library/react';
+import { focusManager, type QueryClient } from '@tanstack/react-query';
+import { act, fireEvent, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { designedNotice, designedNoticePage, featureDisabledError, notices, plainNotice } from '@/test/fixtures';
@@ -63,6 +64,69 @@ describe('NoticesScreen', () => {
     renderWithQuery(<NoticesScreen />);
     expect(await screen.findByText('Could not load notices')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
+  });
+});
+
+/**
+ * Review round 2, R2U1 and R2U3: what a student is reading survives a failed
+ * refetch (a weak connection on returning to the app), and the printed page
+ * of a designed notice is downloaded once.
+ */
+describe('notices already on screen', () => {
+  const offline = () => {
+    throw new Error('Network down');
+  };
+  /**
+   * A return to the tab: every read is asked again, and the screen has
+   * rendered the outcome before the test looks (TanStack Query notifies its
+   * observers on the next timer tick, after the refetch promise settles).
+   */
+  const refetchAll = (queryClient: QueryClient) =>
+    act(async () => {
+      await queryClient.refetchQueries();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+  it('keeps the list when a refetch fails, and still hides it once notices are switched off', async () => {
+    const { queryClient } = renderWithQuery(<NoticesScreen />);
+    expect(await screen.findAllByRole('link')).toHaveLength(2);
+    resetHandlers({ listNotices: offline });
+    await refetchAll(queryClient);
+    expect(screen.getAllByRole('link')).toHaveLength(2);
+    expect(screen.queryByText('Could not load notices')).toBeNull();
+    resetHandlers({ listNotices: () => { throw featureDisabledError('notices'); } });
+    await refetchAll(queryClient);
+    expect(await screen.findByText('Notices are not available')).toBeTruthy();
+    expect(screen.queryAllByRole('link')).toHaveLength(0);
+  });
+
+  it('keeps an open notice when a refetch fails, and replaces it only when it is gone', async () => {
+    const { queryClient } = renderWithQuery(<NoticeScreen noticeId="ntc_uniform" />);
+    expect(await screen.findByRole('heading', { name: 'Winter uniform from Monday' })).toBeTruthy();
+    resetHandlers({ getNotice: offline });
+    await refetchAll(queryClient);
+    expect(screen.getByRole('heading', { name: 'Winter uniform from Monday' })).toBeTruthy();
+    expect(screen.queryByText('Could not load this notice')).toBeNull();
+    resetHandlers({ getNotice: () => { throw Object.assign(new Error('Notice was not found.'), { code: 'NOT_FOUND' }); } });
+    await refetchAll(queryClient);
+    expect(await screen.findByText('Notice not found')).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'Winter uniform from Monday' })).toBeNull();
+  });
+
+  it('downloads the printed page of a designed notice once: returning to the app does not ask for it again', async () => {
+    const getNotice = vi.fn(() => designedNotice);
+    const getNoticeDocument = vi.fn(() => designedNoticePage);
+    resetHandlers({ getNotice, getNoticeDocument });
+    renderWithQuery(<NoticeScreen noticeId="ntc_sports" />);
+    await screen.findByTitle('Notice as printed');
+    expect(getNoticeDocument).toHaveBeenCalledTimes(1);
+    // The browser reports the tab hidden and visible again, as when a student switches apps.
+    focusManager.setFocused(false);
+    focusManager.setFocused(true);
+    // The notice itself follows the portal's default and is read again; its megabytes of page are not.
+    await vi.waitFor(() => expect(getNotice).toHaveBeenCalledTimes(2));
+    expect(getNoticeDocument).toHaveBeenCalledTimes(1);
+    focusManager.setFocused(undefined);
   });
 });
 

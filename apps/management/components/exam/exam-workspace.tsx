@@ -240,9 +240,10 @@ function ExamDocumentsMenu({
       },
     }),
   );
+  // Permissions already known keep applying when a refetch fails (as in
+  // `permissionsSatisfied`); with no answer yet the menu stays hidden.
   if (
     !permissions.data ||
-    permissions.isError ||
     permissions.data.results.length !==
       admitCardPermissions.length + reportCardPermissions.length + notificationPermissions.length
   )

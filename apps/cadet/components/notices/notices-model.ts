@@ -23,6 +23,16 @@ export function noticeMissing(error: unknown): boolean {
   return (error as { code?: unknown } | null)?.code === 'NOT_FOUND';
 }
 
+/**
+ * Whether a failed notice read makes what is already on screen untrue: the
+ * school no longer has notices, or the notice is not (any longer) the
+ * student's to read. Any other failure, such as a refetch on a weak
+ * connection, leaves a loaded screen as it is.
+ */
+export function noticeGone(error: unknown): boolean {
+  return noticesSwitchedOff(error) || noticeMissing(error);
+}
+
 /** "Published 3 Nov 2026" under a notice title. */
 export function publishedLabel(publishedAt: Date | string): string {
   return `Published ${formatDate(publishedAt)}`;

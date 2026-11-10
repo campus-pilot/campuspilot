@@ -113,7 +113,8 @@ function DeliveryLogPage(props: {
     }),
   );
   if (query.isPending) return <p className="text-sm text-muted-foreground">Loading deliveries…</p>;
-  if (query.isError) return <ReadError error={query.error} retry={query.refetch} />;
+  // A page of the log already shown stays when a refetch (or a poll while events are prepared) fails.
+  if (query.data === undefined) return <ReadError error={query.error} retry={query.refetch} />;
   return (
     <>
       <DeliveryLogPreparation pendingCount={query.data.preparation.pendingCount} failedCount={query.data.preparation.failedCount} />

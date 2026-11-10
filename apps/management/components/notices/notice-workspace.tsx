@@ -7,6 +7,7 @@ import { Megaphone } from 'lucide-react';
 import type { NoticeDto } from '@campuspilot/api/routers/school/notice/notice.dto';
 import { DocumentButton, DocumentNotice, DocumentPreview } from '@campuspilot/components/documents/document-controls';
 import { NoticeStatusBadge, noticeAudienceLabel } from '@campuspilot/components/notices';
+import { resolveQueryBoundary } from '@campuspilot/components/query-boundary';
 
 import { orpc } from '@/lib/orpc';
 import { NotificationDeliveryLogSection } from '../notifications/notification-delivery-log';
@@ -17,12 +18,14 @@ import { NoticeEditor } from './notice-editor';
 import {
   NOTICE_BODY_MODE_LABELS,
   cadetAudienceAvailability,
+  cadetAudienceUnpublishable,
   draftNotice,
-  noticeBelongsToSession,
+  noticeBoundaryState,
   noticeErrorMessage,
   noticeLoadFailure,
   noticesHref,
   publishedRecipientSummary,
+  savedNoticePreviewInput,
   type NoticeSessionScope,
 } from './notice-model';
 
@@ -37,14 +40,15 @@ function useNotice({ schoolId, noticeId }: NoticeScope) {
 
 /**
  * The breadcrumb label of a notice route: its title while the notice is
- * loaded. A notice that failed to load (deleted, not visible), or that
- * belongs to another session than the route's, reads "Notice", also when an
- * older title is still cached.
+ * shown by the page (the same resolution, `noticeBoundaryState`). A notice
+ * that is gone or not visible, or that belongs to another session than the
+ * route's, reads "Notice", also when an older title is still cached; a
+ * refetch that merely failed keeps the title.
  */
 export function NoticeBreadcrumbValue({ schoolId, sessionId, noticeId }: NoticeScope) {
   const notice = useQuery(orpc.school.getNotice.queryOptions({ input: { schoolId, noticeId }, retry: false }));
-  const shown = !notice.isError && notice.data && noticeBelongsToSession(notice.data, { schoolId, sessionId });
-  return <span className="inline-block max-w-[12rem] truncate align-bottom">{shown ? notice.data.title : 'Notice'}</span>;
+  const state = noticeBoundaryState(notice, { schoolId, sessionId });
+  return <span className="inline-block max-w-[12rem] truncate align-bottom">{state.kind === 'ready' ? state.notice.title : 'Notice'}</span>;
 }
 
 function AllNoticesLink({ scope }: { scope: NoticeSessionScope }) {
@@ -80,16 +84,18 @@ function NoticeUnavailable({ scope, error, retry }: { scope: NoticeSessionScope;
 }
 
 /**
- * Loading, unavailable, or the loaded notice handed to `children`. A notice
- * of another session than the route's is not found here
- * (`noticeBelongsToSession`). A failed background refetch keeps showing the
- * notice already loaded.
+ * Loading, unavailable, or the loaded notice handed to `children`, as
+ * `noticeBoundaryState` resolves the read: a notice already on screen (and
+ * an editor with typed text under it) stays when a background refetch
+ * fails; only "not found" or "feature switched off" replaces it. A notice
+ * of another session than the route's is not found here.
  */
 function NoticeBoundary({ scope, notice, children }: { scope: NoticeSessionScope; notice: UseQueryResult<NoticeDto>; children: (notice: NoticeDto) => ReactNode }) {
-  if (notice.isPending) return <div role="status" aria-label="Loading notice" className="mx-auto h-60 w-full max-w-7xl animate-pulse rounded-xl bg-muted" />;
-  if (notice.isError) return <section className="mx-auto w-full max-w-7xl"><NoticeUnavailable scope={scope} error={notice.error} retry={notice.refetch} /></section>;
-  if (!noticeBelongsToSession(notice.data, scope)) return <section className="mx-auto w-full max-w-7xl"><NoticeNotFound scope={scope} /></section>;
-  return children(notice.data);
+  const state = noticeBoundaryState(notice, scope);
+  if (state.kind === 'pending') return <div role="status" aria-label="Loading notice" className="mx-auto h-60 w-full max-w-7xl animate-pulse rounded-xl bg-muted" />;
+  if (state.kind === 'unavailable') return <section className="mx-auto w-full max-w-7xl"><NoticeUnavailable scope={scope} error={state.error} retry={notice.refetch} /></section>;
+  if (state.kind === 'elsewhere') return <section className="mx-auto w-full max-w-7xl"><NoticeNotFound scope={scope} /></section>;
+  return children(state.notice);
 }
 
 function NoticeHeader({ notice }: { notice: NoticeDto }) {
@@ -135,13 +141,28 @@ function NoticeFacts({ notice }: { notice: NoticeDto }) {
   );
 }
 
-/** The saved notice exactly as the server renders it: a draft with today's date, a published notice as published. */
+/**
+ * The saved notice exactly as the server renders it: a draft with today's
+ * date and the school's current Notice template, a published notice as
+ * published. This render is what a publisher reviews: the publish dialog
+ * reads the version and template revision of the same cached result
+ * (`savedNoticePreviewInput`). A render already shown stays when a refetch
+ * fails; the error replaces it only when there is nothing to show.
+ */
 function SavedNoticePreview({ notice }: { notice: NoticeDto }) {
-  const preview = useQuery(orpc.school.previewNotice.queryOptions({ input: { schoolId: notice.schoolId, source: { kind: 'saved', noticeId: notice.id } }, retry: false }));
-  if (preview.isError) {
-    return <DocumentNotice error>{noticeErrorMessage(preview.error, 'Unable to render this notice.')}<DocumentButton variant="outline" className="ml-3" onClick={() => void preview.refetch()}>Retry</DocumentButton></DocumentNotice>;
+  const preview = useQuery(orpc.school.previewNotice.queryOptions({ input: savedNoticePreviewInput(notice), retry: false }));
+  const state = resolveQueryBoundary(preview);
+  if (state.kind === 'failed') {
+    return <DocumentNotice error>{noticeErrorMessage(state.error, 'Unable to render this notice.')}<DocumentButton variant="outline" className="ml-3" onClick={() => void preview.refetch()}>Retry</DocumentButton></DocumentNotice>;
   }
-  return <DocumentPreview fitPageWidth html={preview.data?.html} label={notice.status === 'published' ? 'Published notice' : 'Draft preview'} placeholder="Rendering the notice…" />;
+  return <DocumentPreview fitPageWidth html={state.kind === 'ready' ? state.data.html : undefined} label={notice.status === 'published' ? 'Published notice' : 'Draft preview'} placeholder="Rendering the notice…" />;
+}
+
+/** Said on a draft that cannot be published as addressed (students, in a school known not to have the Cadet Portal). */
+function UnpublishableAudienceNotice({ scope, notice }: { scope: NoticeSessionScope; notice: NoticeDto }) {
+  const cadet = useSchoolFeature(scope.schoolId, 'cadet');
+  const reason = cadetAudienceUnpublishable(notice, cadet.status === 'pending' ? 'pending' : cadetAudienceAvailability(cadet));
+  return reason ? <DocumentNotice>{reason}</DocumentNotice> : null;
 }
 
 function NoticeDetail({ scope, notice }: { scope: NoticeSessionScope; notice: NoticeDto }) {
@@ -150,6 +171,7 @@ function NoticeDetail({ scope, notice }: { scope: NoticeSessionScope; notice: No
     <section className="mx-auto flex w-full max-w-7xl flex-col gap-4">
       <NoticeHeader notice={notice} />
       {draft ? <DocumentNotice>{draft}</DocumentNotice> : null}
+      <UnpublishableAudienceNotice scope={scope} notice={notice} />
       <NoticeFacts notice={notice} />
       <SavedNoticePreview key={`${notice.status}-${notice.version}`} notice={notice} />
       {notice.status === 'published' ? <NotificationDeliveryLogSection schoolId={scope.schoolId} scope={{ kind: 'notice', noticeId: notice.id }} /> : null}

@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { MegaphoneIcon } from 'lucide-react';
 import { CadetNoticeList, type CadetNoticeLinkProps } from '@campuspilot/components/cadet-portal';
+import { resolveQueryBoundary } from '@campuspilot/components/query-boundary';
 import { Button } from '@campuspilot/ui/components/button';
 
 import { orpc } from '@/lib/orpc';
@@ -27,15 +28,17 @@ function NoticeList() {
       getNextPageParam: (page) => page.pagination.nextCursor ?? undefined,
     }),
   );
-  if (notices.isPending) return <ScreenLoading blocks={1} />;
-  if (notices.isError) {
-    return noticesSwitchedOff(notices.error) ? (
+  // A list already shown stays when a refetch fails; only "notices switched off" replaces it.
+  const state = resolveQueryBoundary(notices, { replaces: noticesSwitchedOff });
+  if (state.kind === 'pending') return <ScreenLoading blocks={1} />;
+  if (state.kind === 'failed') {
+    return noticesSwitchedOff(state.error) ? (
       <NoticesUnavailable />
     ) : (
-      <ScreenError title="Could not load notices" error={notices.error} onRetry={() => void notices.refetch()} />
+      <ScreenError title="Could not load notices" error={state.error} onRetry={() => void notices.refetch()} />
     );
   }
-  const items = notices.data.pages.flatMap((page) => page.items);
+  const items = state.data.pages.flatMap((page) => page.items);
   if (items.length === 0)
     return <EmptyState icon={MegaphoneIcon} title="No notices yet" description="Notices your school publishes for you or your class appear here." />;
   return (

@@ -793,7 +793,8 @@ function RecentNotices({ schoolId, sessionId }: DashboardProps) {
     <SectionCard title="Recent notices" description="Latest notices published to staff this session" href={noticesHref({ schoolId, sessionId })}>
       {notices.isPending ? (
         <Skeleton className="h-24 w-full" />
-      ) : notices.isError ? (
+      ) : notices.data === undefined ? (
+        // Only when nothing was ever loaded: a list already shown stays when a refetch fails.
         <p className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
           Notices could not be loaded.
         </p>

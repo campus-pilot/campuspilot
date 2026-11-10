@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { NoticeDto } from '@campuspilot/api/routers/school/notice/notice.dto';
 import type { NoticePublishPreview } from '@campuspilot/api/routers/school/notice/notice-delivery.dto';
@@ -8,10 +9,24 @@ import { ConfirmationDialog } from '@campuspilot/components/confirmation-dialog'
 import { DocumentButton, DocumentNotice } from '@campuspilot/components/documents/document-controls';
 import { NOTICE_CADET_CLASS_SCOPE_OPTIONS } from '@campuspilot/components/notices';
 import { DeliveryForecastSummary } from '@campuspilot/components/notifications';
+import { readSchoolFeatureDisabled } from '@campuspilot/api/routers/school/feature-flags/feature-flags.dto';
+import { resolveQueryBoundary } from '@campuspilot/components/query-boundary';
 import { toast } from '@campuspilot/ui/lib/toast';
 
 import { client, orpc } from '@/lib/orpc';
-import { isNoticeConflict, noticeErrorMessage, publishReviewIsCurrent, staffRecipientLine, whatsappPdfLine } from './notice-model';
+import {
+  PUBLISH_REVIEW_CHANGE_MESSAGES,
+  cadetAudienceUnpublishable,
+  editNoticeHref,
+  isNoticeConflict,
+  noticeErrorMessage,
+  publishReviewChange,
+  publishReviewOf,
+  savedNoticePreviewInput,
+  staffRecipientLine,
+  whatsappPdfLine,
+  type PublishReview,
+} from './notice-model';
 
 type ReadyPreview = Extract<NoticePublishPreview, { kind: 'ready' }>;
 
@@ -61,11 +76,29 @@ function PublishForecast({ notice, preview }: { notice: NoticeDto; preview: Noti
   );
 }
 
-/** Said when the notice on the page is no longer the one the confirmation was opened for. */
-function ChangedSinceReview() {
+/**
+ * Why the forecast could not be made. A school that lacks the feature the
+ * publication needs is not worth a retry: for a draft addressed to students
+ * without the Cadet Portal the dialog repeats what the editor says and
+ * links to the audience (when the caller may edit); any other failure is
+ * shown with Retry.
+ */
+function ForecastUnavailable({ notice, error, retry }: { notice: NoticeDto; error: unknown; retry: () => unknown }) {
+  const feature = readSchoolFeatureDisabled(error);
+  if (feature === 'cadet') {
+    return (
+      <DocumentNotice error>
+        {cadetAudienceUnpublishable({ status: 'draft', cadetScope: notice.cadetScope }, 'disabled') ?? noticeErrorMessage(error, 'The Cadet Portal is not enabled for this school.')}
+        {notice.viewer.canEdit ? <DocumentButton asChild variant="outline" className="ml-3"><Link href={editNoticeHref(notice, notice.id)}>Edit audience</Link></DocumentButton> : null}
+      </DocumentNotice>
+    );
+  }
+  // Any other feature the school lacks (notices itself): the server's sentence says which; retrying cannot help.
+  if (feature) return <DocumentNotice error>{noticeErrorMessage(error, 'This school cannot publish notices.')}</DocumentNotice>;
   return (
     <DocumentNotice error>
-      This notice changed since you opened it. Close this dialog and review it again before publishing.
+      {noticeErrorMessage(error, 'Unable to check who will receive this notice.')}
+      <DocumentButton variant="outline" className="ml-3" onClick={() => void retry()}>Retry</DocumentButton>
     </DocumentNotice>
   );
 }
@@ -73,18 +106,22 @@ function ChangedSinceReview() {
 /**
  * The forecast, the publication and whether the review is still current.
  *
- * `reviewedVersion` is the version of the notice that was on the page when
- * Publish was pressed, held for the life of the dialog (it does not follow
- * the `notice` prop, which updates when the page refetches). Publishing
- * sends it as `expectedVersion`. If the forecast was made for another
- * version, or the server answers CONFLICT, someone saved in between: the
- * page's notice and preview are refreshed behind the dialog and publishing
- * stays blocked until the dialog is closed and opened again on what is now
- * stored, so nobody publishes text or an audience they have not read.
+ * `reviewed` is what the publisher read: the version and the school Notice
+ * template revision of the preview that was on the page when Publish was
+ * pressed (the cached render of `SavedNoticePreview`), held for the life of
+ * the dialog. It does not follow the page, which may refetch underneath.
+ * Publishing sends both; the server refuses with CONFLICT when the draft
+ * was saved again or would now be printed inside another template. If the
+ * forecast was already made for something else, the page's notice and
+ * preview are refreshed behind the dialog and publishing stays blocked
+ * until the dialog is closed and opened again on what is now stored, so
+ * nobody publishes a page they have not read. With no preview on the page
+ * (still rendering, or failed) there is nothing to confirm yet: `reviewed`
+ * is null, no forecast is asked for and Publish stays disabled.
  */
 function usePublishNotice(notice: NoticeDto, onClose: () => void) {
   const cache = useQueryClient();
-  const [reviewedVersion] = useState(notice.version);
+  const [reviewed] = useState<PublishReview | null>(() => publishReviewOf(cache.getQueryData(orpc.school.previewNotice.queryKey({ input: savedNoticePreviewInput(notice) }))));
   const scope = { schoolId: notice.schoolId, noticeId: notice.id };
   const refreshNotice = () =>
     Promise.all([
@@ -95,14 +132,18 @@ function usePublishNotice(notice: NoticeDto, onClose: () => void) {
     queryKey: orpc.school.previewNoticePublish.queryKey({ input: scope }),
     queryFn: async () => {
       const preview = await client.school.previewNoticePublish(scope);
-      // A forecast for another version: bring the page up to date (an event of this request, not an effect).
-      if (preview.kind === 'ready' && !publishReviewIsCurrent(reviewedVersion, preview.version)) void refreshNotice();
+      // A forecast for something else than was reviewed: bring the page up to date (an event of this request, not an effect).
+      if (preview.kind === 'ready' && reviewed && publishReviewChange(reviewed, preview)) void refreshNotice();
       return preview;
     },
+    enabled: reviewed !== null,
     ...FORECAST_QUERY,
   });
   const publish = useMutation({
-    mutationFn: () => client.school.publishNotice({ ...scope, expectedVersion: reviewedVersion }),
+    mutationFn: async () => {
+      if (!reviewed) throw new Error('Read the notice preview before publishing.');
+      return client.school.publishNotice({ ...scope, expectedVersion: reviewed.version, expectedTemplateRevisionId: reviewed.templateRevisionId });
+    },
     onSuccess: async (published) => {
       cache.setQueryData(orpc.school.getNotice.queryKey({ input: scope }), published);
       toast.success('Notice published.');
@@ -112,12 +153,32 @@ function usePublishNotice(notice: NoticeDto, onClose: () => void) {
         cache.invalidateQueries({ queryKey: orpc.school.previewNotice.key() }),
       ]);
     },
-    // A refusal usually means the notice changed underneath (edited, published or deleted by someone else): show the current one.
+    // A refusal usually means the notice or its template changed underneath: show the current one.
     onError: () => refreshNotice(),
   });
-  const forecastVersion = forecast.data?.kind === 'ready' ? forecast.data.version : null;
-  const changed = !publishReviewIsCurrent(reviewedVersion, forecastVersion) || isNoticeConflict(publish.error);
-  return { forecast, publish, changed };
+  const forecastChange = reviewed && forecast.data?.kind === 'ready' ? publishReviewChange(reviewed, forecast.data) : null;
+  /** Why the review is no longer current, as the publisher is told it; null while it is. The server's own CONFLICT wording says which of the two changed. */
+  const changed = forecastChange ? PUBLISH_REVIEW_CHANGE_MESSAGES[forecastChange] : isNoticeConflict(publish.error) ? `${noticeErrorMessage(publish.error, PUBLISH_REVIEW_CHANGE_MESSAGES.notice)} Close this dialog first.` : null;
+  return { reviewed, forecast, publish, changed };
+}
+
+/** What the dialog shows under its description: one state at a time, the most decisive first. */
+function PublishDialogBody({ notice, state }: { notice: NoticeDto; state: ReturnType<typeof usePublishNotice> }) {
+  const { reviewed, forecast, publish, changed } = state;
+  if (!reviewed) {
+    return <DocumentNotice>The preview of this notice has not loaded yet, so there is nothing to confirm. Close this dialog and read the notice as it will be published first.</DocumentNotice>;
+  }
+  if (changed) return <DocumentNotice error>{changed}</DocumentNotice>;
+  // A forecast already shown stays when a refetch fails; the failure replaces it only when it means the publication cannot happen.
+  const resolved = resolveQueryBoundary(forecast, { replaces: (error) => readSchoolFeatureDisabled(error) !== null });
+  if (resolved.kind === 'pending') return <p className="text-sm text-muted-foreground" role="status">Checking who will receive it…</p>;
+  if (resolved.kind === 'failed') return <ForecastUnavailable notice={notice} error={resolved.error} retry={forecast.refetch} />;
+  return (
+    <>
+      <PublishForecast notice={notice} preview={resolved.data} />
+      {publish.isError ? <p className="text-sm text-destructive" role="alert">{noticeErrorMessage(publish.error, 'Unable to publish this notice.')}</p> : null}
+    </>
+  );
 }
 
 /**
@@ -125,11 +186,13 @@ function usePublishNotice(notice: NoticeDto, onClose: () => void) {
  * through which channels (the server's forecast, read when the dialog
  * opens), and that publishing is final. Publish stays disabled until the
  * forecast has loaded, so nobody confirms without seeing the recipients,
- * and once the notice is found to have changed since it was opened; the
+ * while there is no reviewed preview, and once the notice or the school's
+ * Notice template is found to have changed since the preview was read; the
  * server decides again when the button is pressed.
  */
 export function NoticePublishDialog({ notice, onClose }: { notice: NoticeDto; onClose: () => void }) {
-  const { forecast, publish, changed } = usePublishNotice(notice, onClose);
+  const state = usePublishNotice(notice, onClose);
+  const { forecast, publish, changed } = state;
   return (
     <ConfirmationDialog
       open
@@ -137,15 +200,12 @@ export function NoticePublishDialog({ notice, onClose }: { notice: NoticeDto; on
       description={`"${notice.title}" becomes visible to its audience and they are notified now. Publishing cannot be undone: a published notice cannot be edited, withdrawn or deleted.`}
       confirmLabel={publish.isPending ? 'Publishing…' : 'Publish notice'}
       confirmVariant="default"
-      confirmDisabled={forecast.data?.kind !== 'ready' || changed}
+      confirmDisabled={forecast.data?.kind !== 'ready' || changed !== null || readSchoolFeatureDisabled(forecast.error) !== null}
       pending={publish.isPending}
       onOpenChange={(open) => { if (!open) onClose(); }}
       onConfirm={() => publish.mutate()}
     >
-      {forecast.isPending ? <p className="text-sm text-muted-foreground" role="status">Checking who will receive it…</p> : null}
-      {forecast.isError ? <DocumentNotice error>{noticeErrorMessage(forecast.error, 'Unable to check who will receive this notice.')}<DocumentButton variant="outline" className="ml-3" onClick={() => void forecast.refetch()}>Retry</DocumentButton></DocumentNotice> : null}
-      {changed ? <ChangedSinceReview /> : forecast.data ? <PublishForecast notice={notice} preview={forecast.data} /> : null}
-      {publish.isError && !changed ? <p className="text-sm text-destructive" role="alert">{noticeErrorMessage(publish.error, 'Unable to publish this notice.')}</p> : null}
+      <PublishDialogBody notice={notice} state={state} />
     </ConfirmationDialog>
   );
 }

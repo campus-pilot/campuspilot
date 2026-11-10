@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useForm } from '@tanstack/react-form';
 import { useQuery } from '@tanstack/react-query';
+import { resolveQueryBoundary } from '@campuspilot/components/query-boundary';
 import { Check, Eye, LayoutTemplate, Store } from 'lucide-react';
 import { z } from 'zod';
 import {
@@ -125,18 +126,21 @@ function MarketplaceTypeSection({ scope }: { scope: DocumentTemplateScope }) {
   const active = useQuery(
     orpc.school.getActiveDocumentTemplate.queryOptions({ input: scope }),
   );
-  if (market.isPending || active.isPending) return <DocumentLoading />;
-  if (market.isError)
-    return <DocumentReadError error={market.error} retry={market.refetch} />;
-  if (active.isError)
-    return <DocumentReadError error={active.error} retry={active.refetch} />;
+  // Designs already listed stay when a background refetch fails; see `resolveQueryBoundary`.
+  const marketState = resolveQueryBoundary(market);
+  const activeState = resolveQueryBoundary(active);
+  if (marketState.kind === 'failed')
+    return <DocumentReadError error={marketState.error} retry={market.refetch} />;
+  if (activeState.kind === 'failed')
+    return <DocumentReadError error={activeState.error} retry={active.refetch} />;
+  if (marketState.kind === 'pending' || activeState.kind === 'pending') return <DocumentLoading />;
 
   return (
     <DocumentPanel
       title={DOCUMENT_LABELS[scope.documentType]}
-      description={`${market.data.pagination.totalItems} designs available for this document type.`}
+      description={`${marketState.data.pagination.totalItems} designs available for this document type.`}
       actions={
-        active.data ? (
+        activeState.data ? (
           <DocumentButton asChild variant="ghost">
             <Link href={settingsHref(scope)}>Open current template</Link>
           </DocumentButton>
@@ -144,13 +148,13 @@ function MarketplaceTypeSection({ scope }: { scope: DocumentTemplateScope }) {
       }
     >
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {market.data.items.map((item) => (
+        {marketState.data.items.map((item) => (
           <MarketplaceCard
             key={item.slug}
             scope={scope}
             item={item}
-            activeRevisionId={active.data?.artifact.id ?? null}
-            selected={active.data?.artifact.marketplaceSlug === item.slug}
+            activeRevisionId={activeState.data?.artifact.id ?? null}
+            selected={activeState.data?.artifact.marketplaceSlug === item.slug}
           />
         ))}
       </div>
@@ -328,13 +332,16 @@ export function DocumentTemplateMarketplaceDetail({
   const active = useQuery(
     orpc.school.getActiveDocumentTemplate.queryOptions({ input: scope }),
   );
-  if (preview.isPending || active.isPending) return <DocumentLoading />;
-  if (preview.isError)
-    return <DocumentReadError error={preview.error} retry={preview.refetch} />;
-  if (active.isError)
-    return <DocumentReadError error={active.error} retry={active.refetch} />;
+  // A design already shown stays when a background refetch fails; see `resolveQueryBoundary`.
+  const previewState = resolveQueryBoundary(preview);
+  const activeState = resolveQueryBoundary(active);
+  if (previewState.kind === 'failed')
+    return <DocumentReadError error={previewState.error} retry={preview.refetch} />;
+  if (activeState.kind === 'failed')
+    return <DocumentReadError error={activeState.error} retry={active.refetch} />;
+  if (previewState.kind === 'pending' || activeState.kind === 'pending') return <DocumentLoading />;
 
-  const selected = active.data?.artifact.marketplaceSlug === slug;
+  const selected = activeState.data?.artifact.marketplaceSlug === slug;
   return (
     <DocumentPermission
       schoolId={scope.schoolId}
@@ -352,10 +359,10 @@ export function DocumentTemplateMarketplaceDetail({
               {DOCUMENT_LABELS[scope.documentType]} · Marketplace preview
             </p>
             <h1 className="text-2xl font-semibold tracking-tight">
-              {preview.data.name}
+              {previewState.data.name}
             </h1>
             <p className="max-w-2xl text-sm text-muted-foreground">
-              {preview.data.description}
+              {previewState.data.description}
             </p>
           </div>
           <div className="flex shrink-0 flex-wrap gap-2">
@@ -366,13 +373,13 @@ export function DocumentTemplateMarketplaceDetail({
             ) : null}
             <UseMarketplaceTemplate
               scope={scope}
-              item={preview.data}
-              activeRevisionId={active.data?.artifact.id ?? null}
+              item={previewState.data}
+              activeRevisionId={activeState.data?.artifact.id ?? null}
               selected={selected}
             />
           </div>
         </header>
-        <DocumentPreview html={preview.data.html} label={preview.data.name} sample />
+        <DocumentPreview html={previewState.data.html} label={previewState.data.name} sample />
       </div>
     </DocumentPermission>
   );

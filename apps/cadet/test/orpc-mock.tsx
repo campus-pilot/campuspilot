@@ -47,7 +47,8 @@ export function resetHandlers(next: Handlers) {
 export function renderWithQuery(ui: ReactElement) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
-  return render(ui, { wrapper });
+  // The client is returned so a test can refetch (a return to the tab) after changing a handler.
+  return { ...render(ui, { wrapper }), queryClient };
 }
 
 export const page = <T,>(items: T[]) => ({

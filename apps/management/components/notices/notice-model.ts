@@ -20,6 +20,8 @@ import {
   type NoticeAudienceFacts,
 } from '@campuspilot/components/notices';
 
+import { resolveQueryBoundary, type QueryBoundaryInput } from '@campuspilot/components/query-boundary';
+
 import { noticeHref } from '../notifications/notification-routes';
 import { schoolSessionHref } from '../school-route';
 
@@ -224,13 +226,84 @@ export function isNoticeConflict(error: unknown): boolean {
 }
 
 /**
- * Whether the publish confirmation still describes the notice the publisher
- * read. `reviewedVersion` is the version on screen when Publish was
- * pressed; `forecastVersion` the one the server forecast (null until it
- * loaded). They differ when the author saved in between.
+ * What a publisher reviewed: the notice version and the school Notice
+ * template revision of the preview that was on the page when Publish was
+ * pressed. Both are sent with the publication, which the server refuses
+ * (CONFLICT) when either is no longer what would be published.
  */
-export function publishReviewIsCurrent(reviewedVersion: number, forecastVersion: number | null) {
-  return forecastVersion === null || forecastVersion === reviewedVersion;
+export type PublishReview = { version: number; templateRevisionId: string | null };
+
+/** The input of the saved notice's preview on the notice page; the publish dialog reads the same cached render. */
+export function savedNoticePreviewInput(notice: { schoolId: string; id: string }) {
+  return { schoolId: notice.schoolId, source: { kind: 'saved' as const, noticeId: notice.id } };
+}
+
+/**
+ * The review a rendered preview stands for, or null when there is none to
+ * confirm: the preview has not loaded (or failed), so the publisher has not
+ * seen the notice as it would be published.
+ */
+export function publishReviewOf(preview: { version: number | null; templateRevisionId: string | null } | undefined): PublishReview | null {
+  return preview && preview.version !== null ? { version: preview.version, templateRevisionId: preview.templateRevisionId } : null;
+}
+
+/**
+ * What changed between the reviewed preview and the server's forecast for
+ * the publication, or null while they agree (or the forecast has not
+ * loaded). `notice`: the draft was saved again; `template`: the school's
+ * Notice template was replaced, so the same text would be printed inside a
+ * page nobody reviewed.
+ */
+export function publishReviewChange(reviewed: PublishReview, forecast: PublishReview | null): 'notice' | 'template' | null {
+  if (!forecast) return null;
+  if (forecast.version !== reviewed.version) return 'notice';
+  return forecast.templateRevisionId === reviewed.templateRevisionId ? null : 'template';
+}
+
+/** What the publisher is told for each reason the review is no longer current. */
+export const PUBLISH_REVIEW_CHANGE_MESSAGES: Record<'notice' | 'template', string> = {
+  notice: 'This notice changed since you opened it. Close this dialog and review it again before publishing.',
+  template: "The school's Notice template changed since you opened this notice, so it would be printed differently from the preview you read. Close this dialog and review it again before publishing.",
+};
+
+/**
+ * Why a draft cannot be published as it is addressed, or null. A draft for
+ * students in a school that is known not to have the Cadet Portal is
+ * refused by the server; the page and the publish dialog say so and point
+ * at the audience instead of offering a retry that cannot help.
+ */
+export function cadetAudienceUnpublishable(notice: { status: NoticeStatus; cadetScope: NoticeAudienceFacts['cadetScope'] }, availability: CadetAudienceAvailability | 'pending'): string | null {
+  if (notice.status !== 'draft' || notice.cadetScope === 'none' || availability !== 'disabled') return null;
+  return 'This draft is addressed to cadets, but the Cadet Portal is not enabled for this school. To publish it, edit it and choose Staff.';
+}
+
+/**
+ * One notice read, resolved for the page: the notice it holds, or why none
+ * is shown. Data already held wins over a failed refetch
+ * (`resolveQueryBoundary`): only an answer that makes it untrue (not found,
+ * feature switched off) replaces a notice, or an editor with typed text,
+ * that is on screen. A notice of another session than the route's is not
+ * found there.
+ */
+export type NoticeBoundaryState<T> = { kind: 'pending' } | { kind: 'unavailable'; error: unknown } | { kind: 'elsewhere' } | { kind: 'ready'; notice: T };
+
+export function noticeBoundaryState<T extends { sessionId: string }>(query: QueryBoundaryInput<T>, scope: NoticeSessionScope): NoticeBoundaryState<T> {
+  const state = resolveQueryBoundary(query, { replaces: (error) => noticeLoadFailure(error).kind !== 'failed' });
+  if (state.kind === 'pending') return state;
+  if (state.kind === 'failed') return { kind: 'unavailable', error: state.error };
+  return noticeBelongsToSession(state.data, scope) ? { kind: 'ready', notice: state.data } : { kind: 'elsewhere' };
+}
+
+/**
+ * The newest successful render of the live preview. Renders resolve in any
+ * order (each content is its own request), so a slow, older one must not
+ * replace a newer one as "the last preview that worked": `sequence` is the
+ * order in which the contents were typed.
+ */
+export type RenderedPreview = { sequence: number; html: string };
+
+export function newestRenderedPreview(current: RenderedPreview | undefined, resolved: RenderedPreview): RenderedPreview {
+  return current && current.sequence > resolved.sequence ? current : resolved;
 }
 
 /**

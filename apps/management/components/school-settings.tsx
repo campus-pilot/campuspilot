@@ -7,6 +7,7 @@ import { SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authoriza
 import type { SchoolDetailsDto } from '@campuspilot/api/routers/school/school.dto';
 import { SCHOOL_LOGO_MIME_TYPES } from '@campuspilot/api/routers/system-admin/school/school.constants';
 import { Dropzone, formatFileSize } from '@campuspilot/components/dropzone';
+import { resolveQueryBoundary } from '@campuspilot/components/query-boundary';
 import { Button } from '@campuspilot/ui/components/button';
 import {
   Card,
@@ -428,7 +429,10 @@ export function SchoolSettings({ schoolId }: { schoolId: string }) {
     orpc.school.getSchool.queryOptions({ input: { schoolId } }),
   );
 
-  if (schoolQuery.isPending) {
+  // The settings already shown (and anything typed into their forms) stay
+  // when a background refetch fails; see `resolveQueryBoundary`.
+  const state = resolveQueryBoundary(schoolQuery);
+  if (state.kind === 'pending') {
     return (
       <section className="mx-auto flex w-full max-w-4xl animate-pulse flex-col gap-5">
         <div className="h-14 w-52 rounded-lg bg-muted" />
@@ -436,19 +440,19 @@ export function SchoolSettings({ schoolId }: { schoolId: string }) {
       </section>
     );
   }
-  if (schoolQuery.isError) {
+  if (state.kind === 'failed') {
     return (
       <Card className="mx-auto w-full max-w-4xl">
         <CardHeader>
           <CardTitle>Unable to load school settings</CardTitle>
           <CardDescription>
-            {schoolQuery.error instanceof Error
-              ? schoolQuery.error.message
+            {state.error instanceof Error
+              ? state.error.message
               : 'Try refreshing the page.'}
           </CardDescription>
         </CardHeader>
       </Card>
     );
   }
-  return <SchoolSettingsContent school={schoolQuery.data} />;
+  return <SchoolSettingsContent school={state.data} />;
 }

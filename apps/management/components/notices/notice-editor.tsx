@@ -31,6 +31,7 @@ import {
   cadetAudienceNote,
   firstInvalidNoticeField,
   isNoticeConflict,
+  newestRenderedPreview,
   noticeAudienceChoicesFor,
   noticeErrorMessage,
   noticeFormDefaults,
@@ -40,6 +41,7 @@ import {
   noticesHref,
   type CadetAudienceAvailability,
   type NoticePreviewContent,
+  type RenderedPreview,
   type NoticeSessionScope,
 } from './notice-model';
 
@@ -65,24 +67,30 @@ type EditorProps = {
 
 type NoticePreview = UseQueryResult<{ html: string }>;
 
+/** What the live preview renders and the order in which it was typed (see `newestRenderedPreview`). */
+type PreviewRequest = { content: NoticePreviewContent | null; sequence: number };
+
 /**
  * The live preview's render. Each content is its own query, so an
- * out-of-date response can never replace a newer one. `lastGoodHtml` is the
+ * out-of-date response can never replace a newer one. `lastGood` is the
  * last render that succeeded: `keepPreviousData` only bridges the wait for a
  * new render, and a render that **fails** (every keystroke inside an
  * unfinished `{{#if …}}`) has no data, which used to blank the panel. The
  * successful render is recorded when its request resolves (an event, not an
  * effect), and `staleTime: 0` makes every shown content pass through there.
+ * Renders resolve in any order, so each carries the `sequence` of the
+ * content it was asked for and an older one never replaces a newer one as
+ * "the last preview that worked".
  */
-function useNoticePreview(scope: NoticeSessionScope, content: NoticePreviewContent | null) {
-  const [lastGoodHtml, setLastGoodHtml] = useState<string>();
+function useNoticePreview(scope: NoticeSessionScope, { content, sequence }: PreviewRequest) {
+  const [lastGood, setLastGood] = useState<RenderedPreview>();
   const input = content ? { schoolId: scope.schoolId, source: { kind: 'unsaved' as const, sessionId: scope.sessionId, ...content } } : null;
   const preview: NoticePreview = useQuery({
     queryKey: input ? orpc.school.previewNotice.queryKey({ input }) : [...orpc.school.previewNotice.key(), 'nothing-to-render'],
     queryFn: input
       ? async () => {
           const rendered = await client.school.previewNotice(input);
-          setLastGoodHtml(rendered.html);
+          setLastGood((current) => newestRenderedPreview(current, { sequence, html: rendered.html }));
           return rendered;
         }
       : skipToken,
@@ -90,7 +98,7 @@ function useNoticePreview(scope: NoticeSessionScope, content: NoticePreviewConte
     retry: false,
     staleTime: 0,
   });
-  return { preview, lastGoodHtml };
+  return { preview, lastGoodHtml: lastGood?.html };
 }
 
 /**
@@ -106,7 +114,7 @@ function useNoticePreview(scope: NoticeSessionScope, content: NoticePreviewConte
  *   field; it never rewrites the form.
  * - **The preview** follows the form through the form's own debounced
  *   change listener (no effect): after a pause it records what to render.
- *   `previewContent` is derived request state, not an input value.
+ *   `previewRequest` is derived request state, not an input value.
  */
 function useNoticeEditor({ scope, baseline, cadetAudience }: EditorProps) {
   const router = useRouter();
@@ -114,14 +122,14 @@ function useNoticeEditor({ scope, baseline, cadetAudience }: EditorProps) {
   const [opened] = useState(baseline);
   const [conflict, setConflict] = useState(false);
   const defaultValues = noticeFormDefaults(opened);
-  const [previewContent, setPreviewContent] = useState<NoticePreviewContent | null>(() => noticePreviewContent(defaultValues));
+  const [previewRequest, setPreviewRequest] = useState<PreviewRequest>(() => ({ content: noticePreviewContent(defaultValues), sequence: 0 }));
   const form = useForm({
     defaultValues,
     // Rebuilt each render, so the check uses the features as they are when Save is pressed.
     validators: { onSubmit: noticeFormSchemaFor(() => cadetAudience) },
     listeners: {
       onChangeDebounceMs: PREVIEW_DEBOUNCE_MS,
-      onChange: ({ formApi }) => setPreviewContent(noticePreviewContent(formApi.state.values)),
+      onChange: ({ formApi }) => setPreviewRequest((current) => ({ content: noticePreviewContent(formApi.state.values), sequence: current.sequence + 1 })),
     },
     onSubmitInvalid: ({ formApi }) => {
       const errors = Object.fromEntries(Object.entries(formApi.state.fieldMeta).map(([name, meta]) => [name, meta?.errors ?? []]));
@@ -152,7 +160,7 @@ function useNoticeEditor({ scope, baseline, cadetAudience }: EditorProps) {
       }
     },
   });
-  return { form, opened, conflict, hasPreviewContent: previewContent !== null, ...useNoticePreview(scope, previewContent) };
+  return { form, opened, conflict, hasPreviewContent: previewRequest.content !== null, ...useNoticePreview(scope, previewRequest) };
 }
 
 type NoticeEditorState = ReturnType<typeof useNoticeEditor>;
@@ -275,7 +283,8 @@ function SelectedClassesField({ form, scope }: { form: NoticeForm; scope: Notice
               classes={(classes.data ?? []).map(({ id, label }) => ({ id, label }))}
               selectedIds={field.state.value}
               isPending={classes.isPending}
-              isError={classes.isError}
+              // The classes already loaded stay usable when a refetch fails.
+              isError={classes.isError && classes.data === undefined}
               invalid={field.state.meta.errors.length > 0}
               id={NOTICE_FIELD_IDS.classIds.control}
               errorId={NOTICE_FIELD_IDS.classIds.error}
