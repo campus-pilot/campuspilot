@@ -8,14 +8,13 @@ import { env } from '@campuspilot/env/server';
 import { getS3Client } from '@campuspilot/s3/client';
 import { ORPCError } from '@orpc/server';
 import { and, eq } from 'drizzle-orm';
-import Handlebars from 'handlebars';
 import { randomBytes } from 'node:crypto';
 import sanitizeHtml from 'sanitize-html';
 
 import { rpcError } from '../../../errors';
 import { DOCUMENT_MARKETPLACE, NOTICE_DEFAULT_TEMPLATE_SLUG, SAMPLE_NOTICE_CONTEXT } from '../document/document.catalog';
 import { buildSchoolDocumentContext } from '../document/document.context';
-import { combineDocuments, convertDocumentPdf, isEmbeddableDocumentImage, renderDocument } from '../document/document.render';
+import { combineDocuments, convertDocumentPdf, isEmbeddableDocumentImage, parseDocumentTemplate, renderDocument } from '../document/document.render';
 import { getSelectedDocumentTemplate } from '../document/document.selected-template';
 import { readDocumentTemplate } from '../document/document.storage';
 import { NOTICE_BODY_MAX_LENGTH, NOTICE_TITLE_MAX_LENGTH, type NoticeBodyMode } from './notice.dto';
@@ -292,23 +291,23 @@ export const NOTICE_TEMPLATE_MAX_BLOCK_DEPTH = 4;
  * see `document.render.ts`). A notice template can be written by every
  * staff role (school templates only by roles that manage templates), so
  * block helpers may nest at most {@link NOTICE_TEMPLATE_MAX_BLOCK_DEPTH}
- * deep. An `{{else if}}` chain is one level however long it is: Handlebars
- * parses each `else if` as a block inside the previous one's else branch,
- * but a chain only ever runs one branch, so it is counted as flat.
+ * deep. An `{{else if}}` chain is one level here: Handlebars parses each
+ * `else if` as a block inside the previous one's else branch, but a chain
+ * only ever runs one branch, so it is counted as flat. (The shared parse
+ * still limits a chain's length with every template's nesting limit,
+ * `DOCUMENT_TEMPLATE_STRUCTURE_LIMITS.blockNesting`, because the parser's
+ * cost grows with it.)
  *
  * The limit keeps templates simple; it does **not** bound the output
  * (nested `each` multiplies whatever depth is allowed). The cost of a render
  * is bounded by the renderer's budget and the logo placeholder, see
- * {@link renderNoticeDocument}. Invalid syntax is left to the renderer,
- * which reports it as BAD_REQUEST.
+ * {@link renderNoticeDocument}. Invalid syntax is a BAD_REQUEST from the
+ * shared parse, as in the renderer.
  */
 function assertBoundedNoticeTemplate(source: string) {
-  let program: hbs.AST.Program;
-  try {
-    program = Handlebars.parse(source);
-  } catch {
-    return;
-  }
+  // The shared parse: invalid syntax and nesting the parser could not handle
+  // in linear time are BAD_REQUEST before any tree is built.
+  const program = parseDocumentTemplate(source);
   const visit = (node: hbs.AST.Node | null | undefined, depth: number): void => {
     if (!node) return;
     if (node.type === 'Program') {

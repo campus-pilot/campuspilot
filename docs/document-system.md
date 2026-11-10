@@ -369,11 +369,12 @@ templates and notices alike (one shared instance).
 | `{{value}}`, `{{helper a b}}`, `{{@index}}`, `{{../a}}`, block params | Counted after HTML escaping. |
 | `{{{value}}}`, `{{&value}}` | Counted. |
 | Sub-expressions `(lookup a b)`, hash arguments | Produce no output; printed only through the two rows above. |
-| `{{#each}}`, `{{#if}}`, `{{#unless}}`, `{{#with}}`, `{{else}}`, `{{else if}}`, `{{^}}` | Their output is the bodies they run, and each run counts itself. Every run also costs one step plus one per expression or block written in that body, so loops that print nothing (or evaluate thousands of empty values) are bounded in time too. |
+| `{{#each}}`, `{{#if}}`, `{{#unless}}`, `{{#with}}`, `{{else}}`, `{{else if}}`, `{{^}}` | Their output is the bodies they run, and each run counts itself. Every run also costs one step plus, for every expression or block written in that body, its expression nodes (path parts, literals and sub-expression heads; `{{x}}` is one, `{{lookup a.b "c"}}` four). See "CPU" below. |
 | `{{#value}}…{{/value}}` sections, `{{{{raw}}}}` | As above. |
 | `{{#lookup}}`, `{{#add}}`, any other registered helper opened as a block (also spelled `{{#"lookup"}}`, `{{#@lookup}}`, `{{#lookup.x}}`) | **Refused.** Their result would be printed without passing a counted value. |
 | `{{> partial}}`, `{{#> partial}}`, `{{#*inline}}`, `{{* decorator}}` | **Refused**; no partial or decorator is registered. |
 | The renderer's own helpers (`__document…`), any unknown AST node | **Refused.** |
+| A call with more than 4 arguments or 4 hash pairs, a path of more than 8 parts, sub-expressions nested more than 4 deep, more than 32 expression nodes in one statement or 10,000 in a template, blocks nested more than 64 deep (every `{{else if}}` of a chain counts as a level) | **Refused** (`DOCUMENT_TEMPLATE_STRUCTURE_LIMITS`). |
 
 Two further lines of defence keep this true for constructs nobody listed: the
 result of any helper called as a block is charged for whatever its bodies did
@@ -391,10 +392,26 @@ later render run under the same budget, a template that was accepted cannot
 cost more than the budget when it is rendered with real data; real data that
 does not fit is a BAD_REQUEST for that render.
 
+**CPU.** The budget bounds time as well as output because every unit of it is a
+bounded amount of work. Handlebars evaluates every argument, hash value and path
+part of a statement on every run, so a statement is charged its expression
+nodes on every run, and the structural limits above keep each statement to a
+few nodes (before them, one `{{lookup a a … a}}` with 60,000 arguments inside
+nested loops was charged two steps per run and blocked the process for
+minutes). Nesting is checked on Handlebars' own tokens **before** the template is
+parsed (`parseDocumentTemplate`), because the parser is superlinear in nesting
+(4,000 nested sub-expressions took 2.6 s to parse); every server-side parse goes
+through that function. Measured worst cases: a loop of empty bodies or of the
+costliest allowed statement exhausts the 2 million notice budget in about 0.1 s
+and the 25 million document budget in about 1 s (`document.render.test.ts` and
+`notice.render.test.ts` hold this with time limits). The catalog's designs use at
+most 2 arguments, no hash, 3 path parts, sub-expressions one deep and blocks five
+deep, far inside the limits.
+
 Before shipping this to a database with stored school templates, run them
 through `renderDocument` against their sample context: a stored template that
-uses a partial or a block `lookup` (no catalog design does) would now be
-refused.
+uses a partial or a block `lookup`, or exceeds a structural limit (no catalog
+design does), would now be refused.
 Rendered HTML is sanitized, wrapped in a restrictive content-security policy, and
 shown in an iframe with an empty `sandbox` attribute. Gotenberg runs with JavaScript
 and public/private outbound network access disabled.

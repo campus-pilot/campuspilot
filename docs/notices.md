@@ -267,9 +267,15 @@ must not set a fixed height, `overflow: hidden` or outer page padding.
   server's console with no size limit. A call to anything else is BAD_REQUEST.
 - **Every render has a budget, enforced while it runs.** The renderer counts
   every character as it is produced and, for every run of a block body, one
-  step plus one per expression or block in it, and aborts at the budget, so a template that multiplies (nested `each`,
-  a value repeated thousands of times, loops that print nothing) costs at most
-  the budget and never builds the oversized string. Every Handlebars construct
+  step plus the expression nodes of every expression or block in it, and aborts
+  at the budget, so a template that multiplies (nested `each`, a value repeated
+  thousands of times, loops that print nothing) costs at most the budget and
+  never builds the oversized string. Structural limits refused at parse time
+  (at most 4 arguments and 4 hash pairs per call, 8 path parts, sub-expressions
+  4 deep, 32 nodes per statement, 64 nested blocks; nesting is checked before
+  Handlebars parses) keep each unit of budget a bounded amount of CPU, so the
+  budget bounds time too: the worst template that passes save exhausts the
+  notice budget in about 0.1 s. Every Handlebars construct
   that can produce output is either counted or refused when the template is
   parsed; the table is in [the document system guide](document-system.md)
   ("Render budget"). Partials, inline partials and decorators are refused for
@@ -297,7 +303,8 @@ must not set a fixed height, `overflow: hidden` or outer page padding.
   per-paragraph markup) is a BAD_REQUEST for that notice.
 - **A structural limit** (`assertBoundedNoticeTemplate`) keeps author templates
   simple: block helpers nested at most four deep. An `{{else if}}` chain is one
-  level however long it is. The limit does not bound the cost; the budget does.
+  level here (its length is limited only by the shared 64-level nesting limit,
+  which every template has). The limit does not bound the cost; the budget does.
 - Browsers show notice HTML only in an **empty-sandbox** iframe
   (`DocumentPreview` in `@campuspilot/components/documents`). Never add sandbox
   capabilities and never inject notice HTML into a page.

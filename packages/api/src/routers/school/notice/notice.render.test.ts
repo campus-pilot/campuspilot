@@ -194,7 +194,7 @@ describe('hostile and ordinary author templates', () => {
     for (const spy of spies) expect(spy).not.toHaveBeenCalled();
   });
 
-  it('accepts an else-if chain of any length as one level, and still refuses real nesting inside it', () => {
+  it('accepts a long else-if chain as one level, and still refuses real nesting inside it', () => {
     const chain = (branches: number) =>
       `{{#if notice.title}}A${Array.from({ length: branches }, (_, index) => `{{else if school.x${index}}}B${index}`).join('')}{{else}}C{{/if}}`;
     expect(() => assertValidNoticeTemplate(chain(4))).not.toThrow();
@@ -278,6 +278,55 @@ describe('school Notice templates and the render budget', () => {
       renderNoticeDocument('{{#each notice.paragraphs}}{{#each ../notice.paragraphs}}{{/each}}{{/each}}', many, NOTICE_RENDER_MAX_CHARS),
     ).toThrowError(expect.objectContaining({ code: 'BAD_REQUEST', message: expect.stringContaining('rendering limit') }));
     expect(performance.now() - started).toBeLessThan(5_000);
+  });
+});
+
+/**
+ * Review round 3, R3B1: the budget bounded output but not CPU, because one
+ * statement's arguments were free. The reviewer's school template took
+ * ~60 s per render of a long notice at 2,000 arguments, and an author's
+ * notice ~1.1 s per unsaved preview with a 32,000-pair hash. Oversized
+ * calls are now refused at parse time and every allowed node is charged.
+ */
+describe('notice templates and CPU', () => {
+  const badRequest = expect.objectContaining({ code: 'BAD_REQUEST' });
+  const overBudget = expect.objectContaining({ code: 'BAD_REQUEST', message: expect.stringContaining('rendering limit') });
+  const plainNotice = (paragraphs: string[]) => ({ ...SAMPLE_NOTICE_CONTEXT, notice: { ...SAMPLE_NOTICE_CONTEXT.notice, paragraphs } });
+  const hashOf = (count: number) => Array.from({ length: count }, (_, index) => `k${index.toString(36)}=a`).join(' ');
+  const overParagraphs = (statement: string) =>
+    `<p>{{#each notice.paragraphs}}{{#each @root.notice.paragraphs}}${statement}{{/each}}{{/each}}</p>{{#each notice.paragraphs}}<p>{{this}}</p>{{/each}}`;
+  const overRoot = (statement: string) => `${'{{#each @root}}'.repeat(4)}${statement}${'{{/each}}'.repeat(4)}`;
+
+  it("refuses the reviewer's templates on save, quickly", () => {
+    const started = performance.now();
+    for (const template of [overParagraphs(`{{lookup${' a'.repeat(2_000)}}}`), overParagraphs(`{{lookup${' a'.repeat(20_000)}}}`), overParagraphs(`{{a${'.a'.repeat(20_000)}}}`)]) {
+      expect(() => assertValidSchoolNoticeTemplate(template), template.slice(0, 80)).toThrowError(badRequest);
+    }
+    for (const template of [overRoot(`{{lookup${' a'.repeat(60_000)}}}`), overRoot(`{{lookup a "b" ${hashOf(32_000)}}}`)]) {
+      expect(() => assertValidNoticeTemplate(template), template.slice(0, 80)).toThrowError(badRequest);
+    }
+    expect(performance.now() - started).toBeLessThan(3_000);
+  });
+
+  it('renders a maximum-size notice through the costliest school template that passes save within a small time budget', () => {
+    // The most expensive statement the limits allow, run once per pair of paragraphs.
+    const template = overParagraphs('{{lookup (lookup @root.notice.title "length") "x" k0=@root.notice.title k1=@root.notice.title k2=@root.notice.title k3=@root.notice.title}}');
+    expect(() => assertValidSchoolNoticeTemplate(template)).not.toThrow();
+    // The longest text the DTO accepts, as the most paragraphs it can hold (`a` and a blank line each).
+    const longest = plainNotice(noticeParagraphs('a\n\n'.repeat(66_666)));
+    expect(longest.notice.paragraphs).toHaveLength(66_666);
+    for (const budget of [NOTICE_RENDER_MAX_CHARS, NOTICE_PUBLISHED_RENDER_MAX_CHARS]) {
+      const started = performance.now();
+      expect(() => renderNoticeDocument(template, longest, budget)).toThrowError(overBudget);
+      expect(performance.now() - started).toBeLessThan(1_500);
+    }
+  });
+
+  it("bounds an author's deepest allowed loops over the context to milliseconds", () => {
+    const template = overRoot('{{lookup (lookup @root.school "name") "length" k0=@root.school.name k1=@root.school.name k2=@root.school.name k3=@root.school.name}}');
+    const started = performance.now();
+    expect(() => assertValidNoticeTemplate(template)).not.toThrow();
+    expect(performance.now() - started).toBeLessThan(500);
   });
 });
 

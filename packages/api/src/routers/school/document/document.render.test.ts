@@ -8,6 +8,7 @@ import {
   convertDocumentPdf,
   DOCUMENT_RENDER_MAX_CHARS,
   DOCUMENT_TEMPLATE_BLOCK_HELPERS,
+  DOCUMENT_TEMPLATE_STRUCTURE_LIMITS,
   DOCUMENT_TEMPLATE_HELPERS,
   measureDocumentRender,
   registeredDocumentHelpers,
@@ -358,10 +359,123 @@ describe('render budget: every output-producing construct is counted or refused'
     const started = performance.now();
     expect(() => measureDocumentRender(template, { people }, 3_000_000)).toThrowError(overBudget);
     expect(performance.now() - started).toBeLessThan(2_000);
-    // One run of the body costs one step plus one per statement in it.
+    // One run of a body costs one step plus the expression nodes of its statements.
     const measured = measureDocumentRender('a{{x}}{{#if x}}b{{/if}}', { x: 'y' });
-    // The template: one run, two statements; the if body: one run, no statements.
-    expect(measured.steps).toBe(1 + 2 + 1);
+    // The template: one run, `x` (one node) and `if x` (two); the if body: one run, no statements.
+    expect(measured.steps).toBe(1 + 1 + 2 + 1);
+    // A call costs its head, arguments, hash values and path parts: `lookup a.b "c"` is 1 + 2 + 1.
+    expect(measureDocumentRender('{{lookup a.b "c"}}', {}).steps).toBe(1 + 4);
+    expect(measureDocumentRender('{{add (add n 1) 2 k=n}}', { n: 1 }).steps).toBe(1 + (1 + (1 + 1 + 1) + 1 + 1));
+  });
+
+  /**
+   * Review round 3, R3B1: a statement's arguments used to be free, so one
+   * `{{lookup a a … a}}` with 60,000 arguments (or 30,000 hash pairs, or a
+   * path of 20,000 parts) inside nested loops cost tens of thousands of
+   * evaluations per run while being charged two steps. Such calls are now
+   * refused when the template is parsed, and every node that is allowed is
+   * charged on every run.
+   */
+  describe('expression limits (CPU)', () => {
+    const limits = DOCUMENT_TEMPLATE_STRUCTURE_LIMITS;
+    /** A refusal for a structural limit (not a render error of a helper given odd arguments). */
+    const overLimit = expect.objectContaining({ code: 'BAD_REQUEST', message: expect.stringMatching(/at most|too complex|too many/) });
+    const nested = (body: string) => `{{#each l}}{{#each @root.l}}${body}{{/each}}{{/each}}`;
+    const hashOf = (count: number) => Array.from({ length: count }, (_, index) => `k${index}=a`).join(' ');
+    /** `with`, an inverted section, `count` × `each` and a raw block inside them: `count` + 3 levels. */
+    const mixedNesting = (count: number) =>
+      `{{#with a}}{{^a}}${'{{#each a}}'.repeat(count)}{{{{raw}}}}x{{{{/raw}}}}${'{{/each}}'.repeat(count)}{{/a}}{{/with}}`;
+    const subOf = (depth: number) => `${'(add '.repeat(depth)}1${' 1)'.repeat(depth)}`;
+
+    /** [limit, template within it, template one past it]. */
+    const edges: [string, string, string][] = [
+      ['arguments', `{{lookup${' a'.repeat(limits.params)}}}`, `{{lookup${' a'.repeat(limits.params + 1)}}}`],
+      ['arguments of a block', `{{#if${' a'.repeat(limits.params)}}}x{{/if}}`, `{{#if${' a'.repeat(limits.params + 1)}}}x{{/if}}`],
+      ['arguments of a sub-expression', `{{lookup (lookup${' a'.repeat(limits.params)}) "b"}}`, `{{lookup (lookup${' a'.repeat(limits.params + 1)}) "b"}}`],
+      ['hash pairs', `{{lookup a "b" ${hashOf(limits.hashPairs)}}}`, `{{lookup a "b" ${hashOf(limits.hashPairs + 1)}}}`],
+      ['hash pairs of a block', `{{#if a ${hashOf(limits.hashPairs)}}}x{{/if}}`, `{{#if a ${hashOf(limits.hashPairs + 1)}}}x{{/if}}`],
+      ['path parts', `{{a${'.a'.repeat(limits.pathParts - 1)}}}`, `{{a${'.a'.repeat(limits.pathParts)}}}`],
+      ['path parts of an argument', `{{lookup a${'.a'.repeat(limits.pathParts - 1)} "b"}}`, `{{lookup a${'.a'.repeat(limits.pathParts)} "b"}}`],
+      ['sub-expression depth', `{{add ${subOf(limits.subExpressionDepth)} 1}}`, `{{add ${subOf(limits.subExpressionDepth + 1)} 1}}`],
+      // Four arguments of four path parts each, then one more argument's worth of nodes.
+      ['nodes in one statement', `{{lookup (lookup a.a.a.a a.a.a.a a.a.a.a) a.a.a.a a.a.a.a a.a.a.a}}`, `{{lookup (lookup a.a.a.a a.a.a.a a.a.a.a a.a.a.a) (lookup a.a.a.a a.a.a.a a.a.a.a) a.a.a.a a.a.a.a}}`],
+      ['nodes in a template', '{{a}}'.repeat(limits.templateNodes), '{{a}}'.repeat(limits.templateNodes + 1)],
+      ['block nesting', `${'{{#if a}}'.repeat(limits.blockNesting)}x${'{{/if}}'.repeat(limits.blockNesting)}`, `${'{{#if a}}'.repeat(limits.blockNesting + 1)}x${'{{/if}}'.repeat(limits.blockNesting + 1)}`],
+      ['an else-if chain', `{{#if a}}x${'{{else if a}}x'.repeat(limits.blockNesting - 1)}{{/if}}`, `{{#if a}}x${'{{else if a}}x'.repeat(limits.blockNesting)}{{/if}}`],
+      ['nesting of every block kind', mixedNesting(limits.blockNesting - 3), mixedNesting(limits.blockNesting - 2)],
+    ];
+
+    it.each(edges)('accepts %s up to the limit and refuses one more at parse time', (_limit, within, past) => {
+      // Within the limit the template is not refused for it (a helper given more arguments than it reads may still fail at render).
+      expect(() => measureDocumentRender(within, {})).not.toThrowError(overLimit);
+      expect(() => measureDocumentRender(past, {})).toThrowError(overLimit);
+    });
+
+    it('limits nesting before the parser runs, so deep nesting is refused in linear time', () => {
+      const started = performance.now();
+      // 200 KB each, the template size limit. Handlebars' parser alone needs 2.6 s for 4,000 nested
+      // sub-expressions and 2 s for 4,000 nested blocks, and grows faster than the square.
+      for (const template of [
+        `{{lookup a ${'(add '.repeat(25_000)}1${' 1)'.repeat(25_000)}}}`,
+        `${'{{#if a}}'.repeat(12_000)}x${'{{/if}}'.repeat(12_000)}`,
+        `{{#if a}}x${'{{else if a}}x'.repeat(14_000)}{{/if}}`,
+        `${'{{^a}}'.repeat(25_000)}x`,
+      ]) {
+        expect(() => measureDocumentRender(template, {}), template.slice(0, 30)).toThrowError(overLimit);
+      }
+      expect(performance.now() - started).toBeLessThan(2_000);
+      // Unbalanced input is left to the parser, which reports it as invalid syntax.
+      expect(() => measureDocumentRender('{{/if}}{{/if}}{{#if a}}', {})).toThrowError(badRequest);
+      expect(() => measureDocumentRender('{{lookup a ))}}', {})).toThrowError(badRequest);
+    });
+
+    it('stays far above what every marketplace design uses', () => {
+      // The marketplace test above renders each design; this pins the margin.
+      const widest = { params: 0, hashPairs: 0, pathParts: 0 };
+      const visit = (node: unknown): void => {
+        if (!node || typeof node !== 'object') return;
+        const value = node as { type?: string; params?: unknown[]; hash?: { pairs: unknown[] }; parts?: unknown[] };
+        if (Array.isArray(value.params)) widest.params = Math.max(widest.params, value.params.length);
+        if (value.hash) widest.hashPairs = Math.max(widest.hashPairs, value.hash.pairs.length);
+        if (value.type === 'PathExpression' && value.parts) widest.pathParts = Math.max(widest.pathParts, value.parts.length);
+        for (const child of Object.values(value)) if (child && typeof child === 'object') visit(child);
+      };
+      for (const item of DOCUMENT_MARKETPLACE) visit(Handlebars.parse(item.content));
+      expect(widest.params * 2).toBeLessThanOrEqual(limits.params);
+      expect(widest.hashPairs).toBeLessThan(limits.hashPairs);
+      expect(widest.pathParts * 2).toBeLessThanOrEqual(limits.pathParts);
+    });
+
+    it("refuses the reviewer's statements quickly, before running them", () => {
+      const list = { l: Array.from({ length: 100 }, () => 1) };
+      const started = performance.now();
+      for (const template of [
+        nested(`{{lookup${' a'.repeat(60_000)}}}`),
+        nested(`{{lookup a "b" ${hashOf(32_000)}}}`),
+        nested(`{{a${'.a'.repeat(20_000)}}}`),
+        nested(`{{#if a ${hashOf(32_000)}}}{{/if}}`),
+        nested(`{{lookup a ${subOf(5_000)}}}`),
+      ]) {
+        expect(() => measureDocumentRender(template, list), template.slice(0, 40)).toThrowError(badRequest);
+      }
+      expect(performance.now() - started).toBeLessThan(2_000);
+    });
+
+    it('bounds the time of the most expensive statements the limits allow by the budget', () => {
+      const people = { people: Array.from({ length: 2_000 }, (_, index) => index), a: { a: { a: { a: 1 } } } };
+      const loops = (body: string) => `{{#each people}}{{#each @root.people}}{{#each @root.people}}${body}{{/each}}{{/each}}{{/each}}`;
+      const heaviest = [
+        loops(''),
+        loops('{{@root.a.a.a.a}}'),
+        loops('{{lookup (lookup @root.a.a.a "a") "a" k0=@root.a.a.a k1=@root.a.a.a k2=@root.a.a.a k3=@root.a.a.a}}'),
+        loops('{{#if @root.a.a.a.a k0=@root.a k1=@root.a k2=@root.a k3=@root.a}}{{/if}}'),
+      ];
+      // 2,000^3 runs each if nothing stopped them; the notice budget stops each in tens of milliseconds.
+      const started = performance.now();
+      for (const template of heaviest)
+        expect(() => measureDocumentRender(template, people, 2_000_000), template.slice(-60)).toThrowError(overBudget);
+      expect(performance.now() - started).toBeLessThan(2_000);
+    });
   });
 
   /** [construct, template]: refused when the template is parsed, with or without a large value in the context. */

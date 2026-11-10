@@ -106,6 +106,62 @@ const UNCOUNTED_MESSAGE =
   "The template uses a construct that is not supported.";
 
 /**
+ * Structural limits on a template, checked when it is parsed: block nesting
+ * and sub-expression depth on the tokens **before** Handlebars builds its
+ * tree ({@link parseDocumentTemplate}), the rest on the tree
+ * ({@link checkCall}). Together with the per-run charge in
+ * {@link prepareProgram} they make the budget bound CPU, not only output:
+ * Handlebars evaluates every argument, hash pair and path part of a
+ * statement on every run, so the work of one run must be a small, counted
+ * multiple of one step. A statement such as `{{lookup a a … a}}` with
+ * 60,000 arguments, or 30,000 hash pairs, would otherwise cost tens of
+ * thousands of evaluations per run while being charged as one.
+ *
+ * The limits are far above what any catalog design or the notice starter
+ * uses (at most 2 arguments, no hash, 3 path parts, sub-expressions one
+ * level deep, 5 nodes in one statement, 111 in a whole template and blocks
+ * 5 levels deep; `document.render.test.ts` pins this for every marketplace
+ * design).
+ *
+ * Nesting is limited before parsing because Handlebars' parser itself is
+ * superlinear in it: 4,000 nested sub-expressions (32 KB) take 2.6 s to
+ * parse and 25,000 (200 KB, the template size limit) would take minutes;
+ * 4,000 nested blocks take 2 s, and a long `{{else if}}` chain nests the
+ * same way. The lexer that finds the tokens is linear.
+ */
+export const DOCUMENT_TEMPLATE_STRUCTURE_LIMITS = {
+  /** Positional arguments of one call (`each`, `if`, `lookup`, `add` take one or two). */
+  params: 4,
+  /** Named (hash) arguments of one call (`{{#if x includeZero=true}}`). */
+  hashPairs: 4,
+  /** Parts of one path (`student.guardian.name` has three). */
+  pathParts: 8,
+  /** How deeply sub-expressions may nest (`(add (add a 1) 2)` is two deep). */
+  subExpressionDepth: 4,
+  /** Expression nodes in one statement: path parts, literals and sub-expression heads. */
+  statementNodes: 32,
+  /** Expression nodes in the whole template. */
+  templateNodes: 10_000,
+  /**
+   * How deeply blocks may nest, counting every `{{else if}}` (or other
+   * `{{else x}}`) of a chain as one level, because Handlebars nests each
+   * branch of a chain inside the previous one.
+   */
+  blockNesting: 64,
+} as const;
+const EXPRESSION_LIMIT_MESSAGES = {
+  params: `A template expression can take at most ${DOCUMENT_TEMPLATE_STRUCTURE_LIMITS.params} arguments.`,
+  hashPairs: `A template expression can take at most ${DOCUMENT_TEMPLATE_STRUCTURE_LIMITS.hashPairs} named arguments.`,
+  pathParts: `A template value can have at most ${DOCUMENT_TEMPLATE_STRUCTURE_LIMITS.pathParts} parts (such as student.guardian.name).`,
+  subExpressionDepth: `Template sub-expressions such as (lookup a b) can nest at most ${DOCUMENT_TEMPLATE_STRUCTURE_LIMITS.subExpressionDepth} levels deep.`,
+  statementNodes: `A template expression is too complex. Split it into simpler ones.`,
+  templateNodes: `This template has too many expressions (at most ${DOCUMENT_TEMPLATE_STRUCTURE_LIMITS.templateNodes.toLocaleString("en-IN")}).`,
+  blockNesting: `Blocks such as each and if, counting every else-if branch, can nest at most ${DOCUMENT_TEMPLATE_STRUCTURE_LIMITS.blockNesting} levels deep.`,
+} as const;
+const SYNTAX_MESSAGE =
+  "The template contains invalid Handlebars syntax or an unsupported helper.";
+
+/**
  * The render budget: how the cost of a render is bounded **while** it runs.
  *
  * Why not check the finished string: a template multiplies. A large value
@@ -122,7 +178,8 @@ const UNCOUNTED_MESSAGE =
  * | `{{value}}`, `{{helper a b}}`, `{{@index}}`, `{{../a}}`, block params | counted after escaping (`__documentOutput` wraps the expression) |
  * | `{{{value}}}`, `{{&value}}` | counted (`__documentRawOutput`) |
  * | Sub-expressions `(lookup a b)`, hash arguments | produce no output; printed only through one of the two rows above |
- * | `{{#each}}`, `{{#if}}`, `{{#unless}}`, `{{#with}}`, `{{else}}`, `{{else if}}`, `{{^}}` | output is the bodies they run: each run counts itself; every run also costs one step plus one per statement in the body, so loops that print nothing are bounded too |
+ * | `{{#each}}`, `{{#if}}`, `{{#unless}}`, `{{#with}}`, `{{else}}`, `{{else if}}`, `{{^}}` | output is the bodies they run: each run counts itself; every run also costs one step plus, for every statement in the body, its expression nodes (path parts, literals, sub-expression heads; at least one), so loops that print nothing are bounded too |
+ * | Expressions with many arguments, hash pairs, path parts or nested sub-expressions | refused at parse time beyond {@link DOCUMENT_TEMPLATE_STRUCTURE_LIMITS} |
  * | `{{#value}}…{{/value}}` sections (incl. `{{{{raw}}}}`) | as above (the runtime's `blockHelperMissing` only runs bodies) |
  * | `{{#lookup}}`, `{{#add}}`, any other registered helper as a block | refused at parse time (their result would be printed uncounted) |
  * | `{{> partial}}`, `{{#> partial}}`, `{{#*inline}}`, `{{* decorator}}` | refused at parse time; none is registered |
@@ -143,8 +200,12 @@ type RenderMeter = {
   chars: number;
   /**
    * Work that need not print anything: one unit per run of a block body (or
-   * of the template) plus one per expression or block written in that body,
-   * so loops that print nothing still end, and in time proportional to the budget.
+   * of the template) plus, for every expression or block written in that
+   * body, the number of expression nodes Handlebars evaluates for it. Every
+   * node is a bounded amount of work (the limits of
+   * {@link DOCUMENT_TEMPLATE_STRUCTURE_LIMITS} hold each statement to a
+   * few), so loops that print nothing still end, in time proportional to
+   * the budget.
    */
   steps: number;
   /** The most `chars + steps` may reach. */
@@ -168,18 +229,19 @@ function spend(chars: number, steps = 0) {
 }
 
 /**
- * One run of a body: its static text, and as steps one for the run plus one
- * per expression or block written directly in it. Charging the expressions
- * makes the work of a run (not only its output) count: a body of thousands
- * of `{{missing}}` inside nested loops prints nothing, yet each run
- * evaluates every one of them.
+ * One run of a body: its static text, and as steps one for the run plus the
+ * expression nodes of the statements written directly in it. Charging the
+ * expressions makes the work of a run (not only its output) count: a body
+ * of thousands of `{{missing}}` inside nested loops prints nothing, yet each
+ * run evaluates every one of them, and `{{lookup a b}}` evaluates three
+ * nodes where `{{a}}` evaluates one.
  */
 handlebars.registerHelper(
   RUN_METER_HELPER,
-  (staticChars: unknown, statements: unknown) => {
+  (staticChars: unknown, expressionNodes: unknown) => {
     spend(
       typeof staticChars === "number" ? staticChars : 0,
-      1 + (typeof statements === "number" ? statements : 0),
+      1 + (typeof expressionNodes === "number" ? expressionNodes : 0),
     );
     return "";
   },
@@ -289,39 +351,68 @@ function isSimpleId(path: hbs.AST.PathExpression) {
   );
 }
 
-/** Checks one expression (a path, literal or sub-expression) and everything inside it. */
-function checkExpression(node: hbs.AST.Node | null | undefined): void {
-  if (!node) return;
+/**
+ * Checks one expression (a path, literal or sub-expression) and everything
+ * inside it, and returns its expression nodes: the parts of a path (at least
+ * one, for `this`), one per literal, and the nodes of a sub-expression's
+ * head, arguments and hash. `depth` is how many sub-expressions enclose it.
+ */
+function checkExpression(
+  node: hbs.AST.Node | null | undefined,
+  depth: number,
+): number {
+  if (!node) return 0;
   switch (node.type) {
     case "PathExpression": {
+      const parts = (node as hbs.AST.PathExpression).parts;
       // The first part is what Handlebars resolves a helper by, also for
       // `@name` and `name.more`.
-      const first = (node as hbs.AST.PathExpression).parts[0];
+      const first = parts[0];
       if (typeof first === "string" && first.startsWith(RESERVED_PREFIX))
         refuse(UNCOUNTED_MESSAGE);
-      return;
+      if (parts.length > DOCUMENT_TEMPLATE_STRUCTURE_LIMITS.pathParts)
+        refuse(EXPRESSION_LIMIT_MESSAGES.pathParts);
+      return Math.max(1, parts.length);
     }
     case "SubExpression":
-      checkCall(node as hbs.AST.SubExpression);
-      return;
+      if (depth + 1 > DOCUMENT_TEMPLATE_STRUCTURE_LIMITS.subExpressionDepth)
+        refuse(EXPRESSION_LIMIT_MESSAGES.subExpressionDepth);
+      return checkCall(node as hbs.AST.SubExpression, depth + 1).nodes;
     case "StringLiteral":
     case "NumberLiteral":
     case "BooleanLiteral":
     case "UndefinedLiteral":
     case "NullLiteral":
-      return;
+      return 1;
     default:
       refuse(UNCOUNTED_MESSAGE);
   }
 }
 
-/** Checks the head, arguments and hash of a mustache, block or sub-expression. */
-function checkCall(node: CallNode): hbs.AST.PathExpression {
+/**
+ * Checks the head, arguments and hash of a mustache, block or sub-expression
+ * against the rules above and {@link DOCUMENT_TEMPLATE_STRUCTURE_LIMITS},
+ * and returns its head path and expression nodes (what one evaluation of it
+ * costs, in steps). The argument and pair counts are checked before any of
+ * them is walked, so an oversized call is refused without visiting it.
+ */
+function checkCall(
+  node: CallNode,
+  depth = 0,
+): { path: hbs.AST.PathExpression; nodes: number } {
+  const params = node.params ?? [];
+  const pairs = node.hash?.pairs ?? [];
+  if (params.length > DOCUMENT_TEMPLATE_STRUCTURE_LIMITS.params)
+    refuse(EXPRESSION_LIMIT_MESSAGES.params);
+  if (pairs.length > DOCUMENT_TEMPLATE_STRUCTURE_LIMITS.hashPairs)
+    refuse(EXPRESSION_LIMIT_MESSAGES.hashPairs);
   const path = headPath(node);
-  checkExpression(path);
-  for (const param of node.params ?? []) checkExpression(param);
-  for (const pair of node.hash?.pairs ?? []) checkExpression(pair.value);
-  return path;
+  let nodes = checkExpression(path, depth);
+  for (const param of params) nodes += checkExpression(param, depth);
+  for (const pair of pairs) nodes += checkExpression(pair.value, depth);
+  if (nodes > DOCUMENT_TEMPLATE_STRUCTURE_LIMITS.statementNodes)
+    refuse(EXPRESSION_LIMIT_MESSAGES.statementNodes);
+  return { path, nodes };
 }
 
 /**
@@ -331,8 +422,11 @@ function checkCall(node: CallNode): hbs.AST.PathExpression {
  * call stays a call, a bare name that is a helper stays a call of it, and
  * anything else stays the same context, data or block-param lookup.
  */
-function meterMustache(mustache: hbs.AST.MustacheStatement, scope: string[][]) {
-  const path = checkCall(mustache);
+function meterMustache(
+  mustache: hbs.AST.MustacheStatement,
+  scope: string[][],
+): number {
+  const { path, nodes } = checkCall(mustache);
   const name = path.parts[0];
   const hasArguments = mustache.params.length > 0 || Boolean(mustache.hash);
   const shadowed = scope.some((names) => names.includes(name ?? ""));
@@ -355,6 +449,7 @@ function meterMustache(mustache: hbs.AST.MustacheStatement, scope: string[][]) {
   mustache.hash = undefined as unknown as hbs.AST.Hash;
   // The helper returns exactly what is appended (escaped already, as a SafeString).
   mustache.escaped = false;
+  return nodes;
 }
 
 /**
@@ -363,8 +458,9 @@ function meterMustache(mustache: hbs.AST.MustacheStatement, scope: string[][]) {
  * part of the head whatever follows it (`{{#lookup.x a b}}` and
  * `{{#@lookup a b}}` both call `lookup`), so the rule is on that first part.
  */
-function checkBlockHead(block: hbs.AST.BlockStatement) {
-  const name = checkCall(block).parts[0];
+function checkBlockHead(block: hbs.AST.BlockStatement): number {
+  const { path, nodes } = checkCall(block);
+  const name = path.parts[0];
   if (
     isRegisteredHelper(name) &&
     !(DOCUMENT_TEMPLATE_BLOCK_HELPERS as readonly string[]).includes(name ?? "")
@@ -372,24 +468,39 @@ function checkBlockHead(block: hbs.AST.BlockStatement) {
     refuse(
       `"${name}" cannot open a block. Blocks are each, if, unless and with; write {{${name} …}} to print a value.`,
     );
+  return nodes;
 }
+
+/** What {@link prepareProgram} carries through one template. */
+type PrepareState = {
+  /** The block params in scope, innermost last. */
+  scope: string[][];
+  /** Expression nodes seen so far in the whole template. */
+  templateNodes: number;
+};
 
 /**
  * Prepares one block body (or the template itself): checks and rewrites each
  * statement, then inserts the statement that counts the body's static text
- * and its steps (one, plus one per expression or block in it) on every run. Returns nothing; the AST is changed in place.
+ * and its steps (one, plus the expression nodes of every expression or block
+ * in it) on every run. Returns nothing; the AST is changed in place.
  */
 function prepareProgram(
   program: hbs.AST.Program | null | undefined,
-  scope: string[][],
+  state: PrepareState,
 ): void {
   if (!program) return;
+  const { scope } = state;
   scope.push(program.blockParams ?? []);
   let staticChars = 0;
-  let statements = 0;
+  let expressionNodes = 0;
+  const charge = (nodes: number) => {
+    expressionNodes += nodes;
+    state.templateNodes += nodes;
+    if (state.templateNodes > DOCUMENT_TEMPLATE_STRUCTURE_LIMITS.templateNodes)
+      refuse(EXPRESSION_LIMIT_MESSAGES.templateNodes);
+  };
   for (const statement of program.body) {
-    if (statement.type === "MustacheStatement" || statement.type === "BlockStatement")
-      statements += 1;
     switch (statement.type) {
       case "ContentStatement": {
         const value = (statement as hbs.AST.ContentStatement).value;
@@ -400,13 +511,13 @@ function prepareProgram(
       case "CommentStatement":
         break;
       case "MustacheStatement":
-        meterMustache(statement as hbs.AST.MustacheStatement, scope);
+        charge(meterMustache(statement as hbs.AST.MustacheStatement, scope));
         break;
       case "BlockStatement": {
         const block = statement as hbs.AST.BlockStatement;
-        checkBlockHead(block);
-        prepareProgram(block.program, scope);
-        prepareProgram(block.inverse, scope);
+        charge(checkBlockHead(block));
+        prepareProgram(block.program, state);
+        prepareProgram(block.inverse, state);
         break;
       }
       case "PartialStatement":
@@ -432,8 +543,8 @@ function prepareProgram(
       } as hbs.AST.NumberLiteral,
       {
         type: "NumberLiteral",
-        value: statements,
-        original: statements,
+        value: expressionNodes,
+        original: expressionNodes,
         loc: program.loc,
       } as hbs.AST.NumberLiteral,
     ],
@@ -442,6 +553,90 @@ function prepareProgram(
     strip: { open: false, close: false },
     loc: program.loc,
   } as hbs.AST.MustacheStatement);
+}
+
+type TemplateLexer = {
+  EOF: number;
+  setInput(input: string, yy: object): void;
+  lex(): number | string;
+};
+const templateParser = (
+  handlebars as unknown as {
+    Parser: { lexer: TemplateLexer; terminals_: Record<number, string> };
+  }
+).Parser;
+/** Token ids of Handlebars' grammar by name (the lexer returns ids). */
+const TOKEN = Object.fromEntries(
+  Object.entries(templateParser.terminals_).map(([id, name]) => [name, Number(id)]),
+) as Record<string, number>;
+/** Tokens that open a block whose end is an `{{/…}}` (or a raw block's end). */
+const BLOCK_OPENERS = new Set(
+  ["OPEN_BLOCK", "OPEN_INVERSE", "OPEN_RAW_BLOCK", "OPEN_PARTIAL_BLOCK"].map(
+    (name) => TOKEN[name],
+  ),
+);
+const BLOCK_CLOSERS = new Set(
+  ["OPEN_ENDBLOCK", "END_RAW_BLOCK"].map((name) => TOKEN[name]),
+);
+
+/**
+ * Checks block nesting and sub-expression depth on the template's tokens,
+ * in one linear pass of Handlebars' own lexer, before the parser (which is
+ * superlinear in nesting, see {@link DOCUMENT_TEMPLATE_STRUCTURE_LIMITS})
+ * sees it. Unbalanced or invalid input is not judged here: the scan only
+ * ever refuses too much depth, and the parser reports the syntax error.
+ */
+function checkTemplateNesting(content: string) {
+  const lexer = Object.create(templateParser.lexer) as TemplateLexer;
+  lexer.setInput(content, {});
+  /** Levels of each open block: one for the block plus one per `{{else x}}` branch. */
+  const blocks: number[] = [];
+  let blockDepth = 0;
+  let subExpressionDepth = 0;
+  // Every token but EOF consumes input; the cap only guards that assumption.
+  for (let guard = 2 * content.length + 16; guard > 0; guard -= 1) {
+    let token: number | string;
+    try {
+      token = lexer.lex();
+    } catch {
+      return;
+    }
+    if (token === lexer.EOF || typeof token !== "number") return;
+    if (BLOCK_OPENERS.has(token)) {
+      blocks.push(1);
+      blockDepth += 1;
+    } else if (token === TOKEN.OPEN_INVERSE_CHAIN && blocks.length > 0) {
+      blocks[blocks.length - 1]! += 1;
+      blockDepth += 1;
+    } else if (BLOCK_CLOSERS.has(token)) {
+      blockDepth -= blocks.pop() ?? 0;
+    } else if (token === TOKEN.OPEN_SEXPR) {
+      subExpressionDepth += 1;
+      if (subExpressionDepth > DOCUMENT_TEMPLATE_STRUCTURE_LIMITS.subExpressionDepth)
+        refuse(EXPRESSION_LIMIT_MESSAGES.subExpressionDepth);
+    } else if (token === TOKEN.CLOSE_SEXPR) {
+      subExpressionDepth = Math.max(0, subExpressionDepth - 1);
+    }
+    if (blockDepth > DOCUMENT_TEMPLATE_STRUCTURE_LIMITS.blockNesting)
+      refuse(EXPRESSION_LIMIT_MESSAGES.blockNesting);
+  }
+  refuse(UNCOUNTED_MESSAGE);
+}
+
+/**
+ * Parses a template with the restricted instance after the nesting check
+ * that keeps parsing linear ({@link checkTemplateNesting}). Every server
+ * parse of a template goes through here, including the notice editor's
+ * structural check, so no caller can hand the parser deep nesting.
+ * Invalid syntax is a BAD_REQUEST.
+ */
+export function parseDocumentTemplate(content: string): hbs.AST.Program {
+  checkTemplateNesting(content);
+  try {
+    return handlebars.parse(content);
+  } catch (cause) {
+    throw rpcError.badRequest(SYNTAX_MESSAGE, cause);
+  }
 }
 
 type CompiledTemplate = (context: object) => string;
@@ -457,8 +652,8 @@ type CompiledTemplate = (context: object) => string;
  * has already applied it once).
  */
 function prepareTemplate(content: string): CompiledTemplate {
-  const program = handlebars.parse(content);
-  prepareProgram(program, []);
+  const program = parseDocumentTemplate(content);
+  prepareProgram(program, { scope: [], templateNodes: 0 });
   const compiler = handlebars as unknown as {
     Compiler: new () => { compile(program: hbs.AST.Program, options: object): unknown };
     JavaScriptCompiler: new () => {
@@ -513,10 +708,7 @@ function renderMetered(
     };
   } catch (cause) {
     if (cause instanceof ORPCError) throw cause;
-    throw rpcError.badRequest(
-      "The template contains invalid Handlebars syntax or an unsupported helper.",
-      cause,
-    );
+    throw rpcError.badRequest(SYNTAX_MESSAGE, cause);
   } finally {
     activeMeter = null;
   }
