@@ -511,9 +511,13 @@ export const cadetPushSubscriptionTable = pgTable(
     index("cadet_push_subscription_active_idx")
       .on(table.cadetUserId)
       .where(sql`${table.revokedAt} is null`),
-    index("cadet_push_subscription_session_idx")
-      .on(table.cadetSessionId)
-      .where(sql`${table.revokedAt} is null`),
+    /**
+     * Deliberately not partial: the foreign key's `ON DELETE SET NULL`
+     * looks rows up by `cadet_session_id` alone (revoked rows included), and
+     * a partial index on `revoked_at is null` cannot serve that predicate,
+     * so every session delete would scan the whole table.
+     */
+    index("cadet_push_subscription_session_idx").on(table.cadetSessionId),
   ],
 );
 

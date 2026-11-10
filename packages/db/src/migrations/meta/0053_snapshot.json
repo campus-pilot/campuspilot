@@ -9402,7 +9402,6 @@
             }
           ],
           "isUnique": false,
-          "where": "\"cadet_push_subscription\".\"revoked_at\" is null",
           "concurrently": false,
           "method": "btree",
           "with": {}

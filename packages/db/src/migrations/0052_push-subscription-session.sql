@@ -1,6 +1,6 @@
 ALTER TABLE "cadet_push_subscription" ADD COLUMN "cadet_session_id" text;--> statement-breakpoint
 ALTER TABLE "cadet_push_subscription" ADD CONSTRAINT "cadet_push_subscription_cadet_session_id_cadet_session_id_fk" FOREIGN KEY ("cadet_session_id") REFERENCES "public"."cadet_session"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-CREATE INDEX "cadet_push_subscription_session_idx" ON "cadet_push_subscription" USING btree ("cadet_session_id") WHERE "cadet_push_subscription"."revoked_at" is null;--> statement-breakpoint
+CREATE INDEX "cadet_push_subscription_session_idx" ON "cadet_push_subscription" USING btree ("cadet_session_id");--> statement-breakpoint
 -- A device's notifications end with the Cadet Portal session that turned
 -- them on, whichever way that session ends: sign-out, "sign out everywhere"
 -- (revoke-session, revoke-sessions, revoke-other-sessions), a staff password

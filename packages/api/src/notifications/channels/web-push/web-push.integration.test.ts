@@ -1,7 +1,7 @@
 import { db } from '@campuspilot/db';
 import { cadetSession } from '@campuspilot/db/schema/cadet';
 import { cadetPushSubscriptionTable, notificationDeliveryTable, notificationTable } from '@campuspilot/db/schema/notification';
-import { eq, inArray, isNotNull, and } from 'drizzle-orm';
+import { eq, inArray, isNotNull, and, sql } from 'drizzle-orm';
 import { generateVAPIDKeys } from 'web-push';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -324,6 +324,17 @@ describe('web push channel', () => {
       expect(row.revokedAt).toBeInstanceOf(Date);
       // The link is gone with the session; the revocation is what remains.
       expect(row.cadetSessionId).toBeNull();
+    });
+
+    it('finds the subscriptions of a deleted session through an index, revoked ones included (review round 3, R3B2)', async () => {
+      // The foreign key's ON DELETE SET NULL looks rows up by session id alone. A partial
+      // index (revoked_at is null) cannot serve that, and every session delete scanned the table.
+      const result = await db.execute<{ indexdef: string }>(
+        sql`select indexdef from pg_indexes where schemaname = 'public' and indexname = 'cadet_push_subscription_session_idx'`,
+      );
+      expect(result.rows).toHaveLength(1);
+      expect(result.rows[0]!.indexdef).toContain('(cadet_session_id)');
+      expect(result.rows[0]!.indexdef).not.toMatch(/\bWHERE\b/i);
     });
   });
 });
