@@ -33,14 +33,13 @@ export const ASSISTANT_TEST_ENV: Record<string, string> = {
   REDIS_URL: 'redis://redis.invalid:6379',
 
   CAMPUSPILOT_API_URL: 'http://api.invalid',
-  CAMPUSPILOT_MCP_URL: 'http://api.invalid/api/mcp',
+  CAMPUSPILOT_MCP_URL: 'http://api.invalid/mcp',
   ASSISTANT_SERVICE_SECRET: 'assistant-service-secret-for-tests-0123456789',
 
   RESTATE_INGRESS_URL: 'http://restate.invalid:8080',
   RESTATE_ADMIN_URL: 'http://restate.invalid:9070',
   RESTATE_SERVICE_PORT: '9081',
   RESTATE_SERVICE_URL: '',
-  RESTATE_IDENTITY_KEYS: '',
 
   ASSISTANT_PROVIDER: 'anthropic',
   // Not real keys. Tests never call a model provider: every model step comes

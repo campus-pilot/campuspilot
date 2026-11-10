@@ -1,15 +1,18 @@
 'use client';
 
-import { MCP_WRITE_SCOPE } from '@campuspilot/auth/mcp-oauth-policy';
+import {
+  MCP_WRITE_SCOPE,
+  OAUTH_LOGIN_PATH,
+} from '@campuspilot/auth/mcp-oauth-policy';
 import { BrandLogo } from '@campuspilot/components/brand-logo';
 import { Button } from '@campuspilot/ui/components/button';
 import { Checkbox } from '@campuspilot/ui/components/checkbox';
 import { Label } from '@campuspilot/ui/components/label';
 import { useForm } from '@tanstack/react-form';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { BadgeCheck, LoaderCircle, ShieldAlert } from 'lucide-react';
+import { BadgeCheck, KeyRound, LoaderCircle, ShieldAlert } from 'lucide-react';
 import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { z } from 'zod';
 
 import { authClient } from '@/lib/auth-client';
@@ -97,6 +100,52 @@ function ClientIdentity({ client }: { client: ConsentClient }) {
   );
 }
 
+/**
+ * Signs the current user out and reopens the sign-in page with the same
+ * signed OAuth query. The login form forwards that query when signing in, so
+ * Better Auth resumes this authorization for the newly signed-in user (who
+ * then sees this consent page, or returns to the app if they already
+ * consented). The plain `authClient` is used for sign-out so the OAuth query
+ * is not attached to that request.
+ */
+function useSwitchAccount() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  return useMutation({
+    mutationFn: async () => {
+      const result = await authClient.signOut();
+      if (result.error) {
+        throw new Error(result.error.message ?? 'Unable to sign out.');
+      }
+      router.replace(`${OAUTH_LOGIN_PATH}?${searchParams.toString()}`);
+    },
+  });
+}
+
+function SwitchAccount({ email }: { email: string }) {
+  const switchAccount = useSwitchAccount();
+  return (
+    <div className="flex flex-col gap-1">
+      <p className="flex flex-wrap items-center gap-x-2 text-sm text-muted-foreground">
+        Signed in as <span className="font-medium text-foreground">{email}</span>
+        <Button
+          type="button"
+          variant="link"
+          className="h-auto p-0"
+          disabled={switchAccount.isPending}
+          onClick={() => switchAccount.mutate()}
+        >
+          {switchAccount.isPending ? <LoaderCircle className="animate-spin" /> : null}
+          Use a different account
+        </Button>
+      </p>
+      {switchAccount.error ? (
+        <p className="text-xs text-destructive">{switchAccount.error.message}</p>
+      ) : null}
+    </div>
+  );
+}
+
 function ConsentSummary({
   client,
   request,
@@ -116,8 +165,8 @@ function ConsentSummary({
       <p className="text-sm leading-6 text-muted-foreground">
         {appName} can access CampusPilot data for every school you can access,
         with your permissions.
-        {email ? ` You are signed in as ${email}.` : null}
       </p>
+      {email ? <SwitchAccount email={email} /> : null}
       {request.redirectHost ? (
         <p className="text-xs text-muted-foreground">
           After you decide, you return to {request.redirectHost}.
@@ -192,7 +241,7 @@ function ConsentForm({ request }: { request: ConsentRequest }) {
         })}
       >
         {({ submitting, submitError }) => (
-          <ConsentButtons
+          <ConsentActions
             submitting={submitting}
             denying={deny.isPending}
             errors={[
@@ -207,7 +256,12 @@ function ConsentForm({ request }: { request: ConsentRequest }) {
   );
 }
 
-function ConsentButtons({
+/**
+ * Allow is the one primary action. Cancel stays available as a quiet text
+ * link below it, because denying tells the app right away instead of leaving
+ * it waiting for an authorization that never completes.
+ */
+function ConsentActions({
   submitting,
   denying,
   errors,
@@ -219,27 +273,29 @@ function ConsentButtons({
   onDeny: () => void;
 }) {
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col items-start gap-3">
       {errors.map((error) => (
         <p key={error} className="text-xs text-destructive">
           {error}
         </p>
       ))}
-      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-        <Button
-          type="button"
-          variant="outline"
-          disabled={submitting || denying}
-          onClick={onDeny}
-        >
-          {denying ? <LoaderCircle className="animate-spin" /> : null}
-          Cancel
-        </Button>
-        <Button type="submit" disabled={submitting || denying}>
-          {submitting ? <LoaderCircle className="animate-spin" /> : null}
-          Allow access
-        </Button>
-      </div>
+      <Button type="submit" variant="outline" disabled={submitting || denying}>
+        {submitting ? (
+          <LoaderCircle className="animate-spin" />
+        ) : (
+          <KeyRound aria-hidden="true" />
+        )}
+        Allow access
+      </Button>
+      <Button
+        type="button"
+        variant="link"
+        className="h-auto p-0 text-xs text-muted-foreground underline"
+        disabled={submitting || denying}
+        onClick={onDeny}
+      >
+        {denying ? 'Cancelling…' : 'Cancel'}
+      </Button>
     </div>
   );
 }

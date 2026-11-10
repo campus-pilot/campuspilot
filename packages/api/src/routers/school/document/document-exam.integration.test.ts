@@ -223,7 +223,8 @@ describe("examination document parity", () => {
     });
     const context = result.contexts[0] as {
       gradingScale: Record<string, unknown>;
-      subjects: { name: string; modeConfig: unknown }[];
+      modeColumns: unknown[];
+      subjects: { name: string; modeConfig: unknown; modeCells: unknown[] }[];
     };
     expect(Object.keys(context.gradingScale)).toEqual(["a", "b"]);
     expect(context.subjects).toHaveLength(2);
@@ -231,6 +232,18 @@ describe("examination document parity", () => {
       context.subjects.find((subject) => subject.name === "Mathematics")!
         .modeConfig,
     ).toMatchObject({ oral: { name: "Oral", maxMarks: 20 } });
+    // Mathematics has Written and Oral, English only Written: the columns are
+    // their union, and English gets a non-applicable Oral cell.
+    expect(context.modeColumns).toEqual([
+      { slug: "oral", name: "Oral", maxMarks: 20 },
+      { slug: "written", name: "Written", maxMarks: null },
+    ]);
+    expect(
+      context.subjects.find((subject) => subject.name === "English")!.modeCells,
+    ).toEqual([
+      { slug: "oral", applicable: false, mark: null, maxMarks: null },
+      { slug: "written", applicable: true, mark: 90, maxMarks: 100 },
+    ]);
   });
   it("supports school-wide approved batches and reports explicit exclusions", async () => {
     const result = await buildDocumentContexts(db, schoolId, source());

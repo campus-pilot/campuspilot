@@ -1,13 +1,16 @@
 # Container release workflow
 
 `release.yml` assigns a strict `vMAJOR.MINOR.PATCH` version to each successful
-push to `main`. For a new version, it publishes all five images with immutable
+push to `main`. For a new version, it publishes all seven images with immutable
 semver and `sha-<commit>` tags. Only after every image succeeds does it push the
 Git tag and create the GitHub release. No mutable image tag is published;
 deployments must pin a semver or commit-SHA tag.
 
-The five images are `campuspilot-plus-management`, `campuspilot-plus-admin`,
-`campuspilot-plus-web`, `campuspilot-plus-api`, and `campuspilot-plus-opa`. The
+The seven images are `campuspilot-plus-management`, `campuspilot-plus-admin`,
+`campuspilot-plus-cadet` (the Cadet Portal, `https://cadet.campuspilot.in`, see
+`docs/cadet-portal.md`), `campuspilot-plus-web`, `campuspilot-plus-api`, `campuspilot-plus-worker`
+(the Restate workflow host, see `docs/demo-school.md`), and
+`campuspilot-plus-opa`. The
 admin image serves `https://admin.campuspilot.in`; its sign-in route is
 `https://admin.campuspilot.in/sign-in`.
 
@@ -30,8 +33,8 @@ They are browser-public build settings embedded into frontend assets.
 
 | Variable | Image | Production value or owner input |
 | --- | --- | --- |
-| `NEXT_PUBLIC_SERVER_URL` | `campuspilot-plus-management`, `campuspilot-plus-admin` | `https://api.campuspilot.in` |
-| `NEXT_PUBLIC_MCP_URL` | `campuspilot-plus-management`, `campuspilot-plus-admin` | `https://api.campuspilot.in/api/mcp` (must equal the server's `MCP_RESOURCE_URL`) |
+| `NEXT_PUBLIC_SERVER_URL` | `campuspilot-plus-management`, `campuspilot-plus-admin`, `campuspilot-plus-cadet` | `https://api.campuspilot.in` |
+| `NEXT_PUBLIC_MCP_URL` | `campuspilot-plus-management`, `campuspilot-plus-admin` | `https://api.campuspilot.in/mcp` (must equal the server's `MCP_RESOURCE_URL`) |
 | `VITE_SERVER_URL` | `campuspilot-plus-web` | `https://api.campuspilot.in` |
 | `VITE_CONTACT_EMAIL` | `campuspilot-plus-web` | `shubhaman47@gmail.com` |
 | `VITE_CONTACT_PHONE_NUMBER` | `campuspilot-plus-web` | `+917023908472` |
@@ -46,7 +49,9 @@ The workflow passes an empty `VITE_STUDENT_LOGIN_URL` build argument when the
 repository Variable is unset. The web environment normalizes that empty string
 to `undefined`; it is not replaced with a placeholder or admin URL.
 
-The API and OPA images consume no build variables. Runtime database, auth,
+The API, worker and OPA images consume no build variables. The worker
+registers itself with Restate on every start (it needs `RESTATE_ADMIN_URL` and
+`RESTATE_WORKER_URL` at runtime). Runtime database, auth,
 Google OAuth, S3, Redis, OPA, Restate, and service credentials must be supplied
 only by the deployment environment; they must never be passed as image build
 arguments.

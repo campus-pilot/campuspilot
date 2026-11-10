@@ -205,6 +205,8 @@ export async function createTestSchool(overrides: {
   registrationNo?: string | null;
   logoS3Key?: string | null;
   hasCompletedOnboarding?: boolean;
+  /** Fixed at insert: a database trigger makes `is_demo` immutable afterwards. */
+  isDemo?: boolean;
 } = {}) {
   const id = overrides.id ?? randomUUID();
   const slug = overrides.slug ?? `school-${randomUUID().toLowerCase()}`;
@@ -221,6 +223,7 @@ export async function createTestSchool(overrides: {
       registrationNo: overrides.registrationNo ?? null,
       logoS3Key: overrides.logoS3Key ?? null,
       hasCompletedOnboarding: overrides.hasCompletedOnboarding ?? false,
+      isDemo: overrides.isDemo ?? false,
       createdAt: new Date(),
       updatedAt: new Date(),
     })

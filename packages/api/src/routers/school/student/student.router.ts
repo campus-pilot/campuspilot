@@ -39,6 +39,29 @@ import {
   type StudentDto,
 } from "./student.dto";
 import { assertAdmissionRegistered } from "../admission/admission-registration";
+import {
+  examResultTable,
+  examStudentAssessmentTable,
+  examStudentRemarkTable,
+} from "@campuspilot/db/schema/exam";
+
+/**
+ * Examination results, shared assessments and teacher remarks reference the
+ * enrollment and are school records that deletion must not silently discard
+ * (none of them cascades). Refuse with a readable conflict instead of letting
+ * the foreign key fail as an internal error.
+ */
+async function assertNoExamRecords(db: DatabaseExecutor, studentId: string) {
+  const [[result], [assessment], [remark]] = await Promise.all([
+    db.select({ id: examResultTable.id }).from(examResultTable).where(eq(examResultTable.studentId, studentId)).limit(1),
+    db.select({ id: examStudentAssessmentTable.studentId }).from(examStudentAssessmentTable).where(eq(examStudentAssessmentTable.studentId, studentId)).limit(1),
+    db.select({ id: examStudentRemarkTable.studentId }).from(examStudentRemarkTable).where(eq(examStudentRemarkTable.studentId, studentId)).limit(1),
+  ]);
+  if (result || assessment || remark)
+    throw rpcError.conflict(
+      "This enrollment has examination results, assessments or teacher remarks, so it cannot be deleted. Remove the student from their class instead.",
+    );
+}
 
 const studentSelection = {
   id: studentTable.id,
@@ -484,7 +507,7 @@ export const schoolStudentRouter = {
     .route({
       summary: "Delete a student enrollment",
       description:
-        "Delete the student row for the explicitly supplied session while retaining the underlying admission.",
+        "Delete the student row for the explicitly supplied session while retaining the underlying admission. Refused with CONFLICT while examination results, assessments or teacher remarks reference the enrollment.",
       tags: ["School", "Students"],
     })
     .meta({
@@ -507,6 +530,7 @@ export const schoolStudentRouter = {
             schoolId: input.schoolId,
             admissionId: student.admissionId,
           });
+          await assertNoExamRecords(transaction, input.studentId);
           await transaction
             .delete(studentTable)
             .where(

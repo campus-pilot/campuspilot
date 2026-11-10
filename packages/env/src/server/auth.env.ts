@@ -5,7 +5,7 @@ export const AUTH_ENV_SHAPE = {
   BETTER_AUTH_SECRET: z.string().min(32),
   BETTER_AUTH_URL: z.url(),
   /**
-   * Canonical URL of the MCP endpoint (`<API origin>/api/mcp`): the OAuth
+   * Canonical URL of the MCP endpoint (`<API origin>/mcp`): the OAuth
    * protected resource, published in its metadata and required as the access
    * token audience. Its own value, never derived from BETTER_AUTH_URL, because
    * it must equal the URL users paste into their AI client, which can sit
@@ -17,6 +17,24 @@ export const AUTH_ENV_SHAPE = {
       const url = new URL(value);
       return !url.search && !url.hash && !url.pathname.endsWith('/');
     }, 'MCP_RESOURCE_URL must have no query, fragment or trailing slash.'),
+
+  /**
+   * Origin of the Cadet Portal app (`apps/cadet`). The cadet auth instance
+   * trusts only this origin, and its MCP OAuth login and consent pages live
+   * here. Its own value; never derived from PUBLIC_APP_URL.
+   */
+  CADET_APP_URL: z.url(),
+  /**
+   * Canonical URL of the cadet MCP endpoint (`<API origin>/cadet/mcp`):
+   * the cadet OAuth protected resource and the required access token
+   * audience. Its own value for the same reason as MCP_RESOURCE_URL.
+   */
+  CADET_MCP_RESOURCE_URL: z
+    .url()
+    .refine((value) => {
+      const url = new URL(value);
+      return !url.search && !url.hash && !url.pathname.endsWith('/');
+    }, 'CADET_MCP_RESOURCE_URL must have no query, fragment or trailing slash.'),
 
   SECURE_COOKIES: z
     .enum(['true', 'false'])

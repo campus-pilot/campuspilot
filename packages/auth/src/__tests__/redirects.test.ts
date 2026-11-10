@@ -19,7 +19,12 @@ describe('authentication redirects', () => {
     '/\\evil.example/path',
     '/%2f%2fevil.example/path',
   ])('rejects unsafe redirect path %s', (value) => {
-    expect(sanitizeAuthRedirectPath(value)).toBe('/dashboard');
+    expect(sanitizeAuthRedirectPath(value)).toBe('/');
+  });
+
+  it('falls back to the app root when no redirect was requested', () => {
+    expect(sanitizeAuthRedirectPath(null)).toBe('/');
+    expect(sanitizeAuthRedirectPath(undefined)).toBe('/');
   });
 
   it('carries the return path through the sign-in URL', () => {

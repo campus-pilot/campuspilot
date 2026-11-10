@@ -1,10 +1,14 @@
 import { serve } from '@hono/node-server';
-import { deleteUnusedDynamicOAuthClients } from '@campuspilot/auth/mcp-oauth';
+import {
+  CADET_OAUTH_SERVER_TABLES,
+  deleteUnusedDynamicOAuthClients,
+} from '@campuspilot/auth/mcp-oauth';
 import { db } from '@campuspilot/db';
 import { runMigrations } from '@campuspilot/db/migrate';
 import { env } from '@campuspilot/env/server';
+import { sweepDemoSchoolOutbox } from '@campuspilot/api/routers/system-admin/demo-school/demo-school.outbox';
 
-import { app, mcpCatalog, mcpHandler } from './http';
+import { app, cadetMcpCatalog, cadetMcpHandler, mcpCatalog, mcpHandler } from './http';
 import { log } from './log';
 
 async function phase<T>(name: string, fn: () => Promise<T>): Promise<T> {
@@ -23,11 +27,27 @@ async function phase<T>(name: string, fn: () => Promise<T>): Promise<T> {
 }
 
 const DCR_CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
+/**
+ * How often the demo outbox re-sends starts and purges Restate has not
+ * accepted and checks accepted runs for pauses. Kick-offs hand over
+ * immediately; this is the fallback, so it bounds the delay after an outage.
+ */
+const DEMO_OUTBOX_INTERVAL_MS = 30 * 1000;
 
-/** Removes dynamically registered OAuth clients that never got a grant. */
+/** One demo outbox sweep; failures are retried next sweep. */
+async function sweepDemoOutbox() {
+  const result = await sweepDemoSchoolOutbox();
+  if (Object.values(result).some((value) => value > 0)) log.info(result, 'demo-school.outbox.ok');
+}
+
+/**
+ * Removes dynamically registered OAuth clients that never got a grant, for
+ * the staff and the cadet authorization servers.
+ */
 async function removeUnusedDynamicClients() {
   const deleted = await deleteUnusedDynamicOAuthClients(db);
-  log.info({ deleted }, 'oauth.dcr-cleanup.ok');
+  const cadetDeleted = await deleteUnusedDynamicOAuthClients(db, new Date(), CADET_OAUTH_SERVER_TABLES);
+  log.info({ deleted, cadetDeleted }, 'oauth.dcr-cleanup.ok');
 }
 
 async function main() {
@@ -35,6 +55,9 @@ async function main() {
   await phase('db.migrate', () => runMigrations());
   await phase('mcp.catalog', async () => {
     await mcpCatalog;
+  });
+  await phase('cadet.mcp.catalog', async () => {
+    await cadetMcpCatalog;
   });
   // await phase('auth.seed', () => seedIamDatabase());
   await phase('oauth.dcr-cleanup', removeUnusedDynamicClients);
@@ -45,6 +68,22 @@ async function main() {
     });
   }, DCR_CLEANUP_INTERVAL_MS);
   dcrCleanup.unref();
+  // Chained, not setInterval: the next sweep is scheduled only after the
+  // previous one finished, so slow sweeps never overlap on this instance.
+  // Across replicas, the sweep claims rows with FOR UPDATE SKIP LOCKED.
+  let demoOutbox: NodeJS.Timeout | undefined;
+  let stopped = false;
+  const sweepOutbox = async () => {
+    try {
+      await sweepDemoOutbox();
+    } catch (err) {
+      log.error({ err }, 'demo-school.outbox.error');
+    }
+    if (stopped) return;
+    demoOutbox = setTimeout(() => void sweepOutbox(), DEMO_OUTBOX_INTERVAL_MS);
+    demoOutbox.unref();
+  };
+  void sweepOutbox();
 
   const server = serve(
     {
@@ -62,8 +101,13 @@ async function main() {
   const shutdown = (signal: string) => {
     log.info({ signal }, 'boot.shutdown.start');
     clearInterval(dcrCleanup);
+    stopped = true;
+    clearTimeout(demoOutbox);
     void mcpHandler.close().catch((err) => {
       log.error({ err }, 'mcp.shutdown.error');
+    });
+    void cadetMcpHandler.close().catch((err) => {
+      log.error({ err }, 'cadet.mcp.shutdown.error');
     });
     server.close((err) => {
       if (err) log.error({ err }, 'boot.shutdown.error');

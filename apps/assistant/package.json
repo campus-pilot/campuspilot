@@ -24,7 +24,7 @@
     "@modelcontextprotocol/client": "^2.4.0",
     "@orpc/client": "catalog:",
     "@orpc/server": "catalog:",
-    "@restatedev/restate-sdk": "^1.18.3",
+    "@restatedev/restate-sdk": "~1.17.4",
     "dotenv": "catalog:",
     "drizzle-orm": "^0.45.2",
     "hono": "catalog:",

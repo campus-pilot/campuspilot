@@ -6,13 +6,21 @@ import {
   createOAuthContext,
 } from '@campuspilot/api/context';
 import { verifyAssistantToken } from '@campuspilot/auth/assistant-token';
+import {
+  type CadetContext,
+  createCadetContextFromHeaders,
+  createCadetOAuthContext,
+} from '@campuspilot/api/cadet/context';
 import { toRpcError } from '@campuspilot/api/errors';
+import { cadetRouter } from '@campuspilot/api/routers/cadet/cadet.router';
 import { appRouter } from '@campuspilot/api/routers/index';
 import {
   handleProfileImageRead,
   handleProfileImageUpload,
 } from '@campuspilot/api/routers/auth/auth.http';
 import { handleSchoolLogoUpload } from '@campuspilot/api/routers/system-admin/school/school.http';
+import { handleSchoolLogoBlob } from '@campuspilot/api/routers/school/logo/logo.blob';
+import { handleSchoolManifestBlob } from '@campuspilot/api/routers/school/manifest/manifest.blob';
 import {
   handleAdmissionDocumentDelete,
   handleAdmissionDocumentRead,
@@ -21,7 +29,10 @@ import {
   handleAdmissionPhotoUpload,
 } from '@campuspilot/api/routers/school/admission/admission.http';
 import { normalizeApiKeyRequest } from '@campuspilot/auth/api-key-headers';
+import { cadetAuth, cadetOauthIssuer } from '@campuspilot/auth/cadet';
+import { CADET_MCP_DEFAULT_SCOPES } from '@campuspilot/auth/cadet-policy';
 import {
+  CADET_OAUTH_GRANT_TABLES,
   findLiveOAuthGrant,
   recordOAuthGrantUse,
   verifyMcpAccessToken,
@@ -41,6 +52,7 @@ import { createConfiguredApp } from './config';
 import { log } from './log';
 import { buildMcpCatalog, createCampusPilotMcpHandler } from './mcp';
 import { createMcpGate } from './mcp-auth';
+import { createRateLimit } from './rate-limit';
 
 const app = createConfiguredApp();
 
@@ -60,6 +72,66 @@ function reportUploadError(
 app.on(['POST', 'GET'], '/api/auth/*', (context) =>
   auth.handler(normalizeApiKeyRequest(context.req.raw)),
 );
+
+/**
+ * `/blob/*` serves public assets at URLs that never expire, without session
+ * or permission checks. Use it only for assets that must outlive a presigned
+ * URL and are safe for anyone to read (see the root AGENTS.md). Private files
+ * stay on the authenticated `/api/blob/*` routes. Each client IP may make 20
+ * `/blob/*` requests per second, since no session bounds who can call them.
+ */
+app.use('/blob/*', createRateLimit({ id: 'blob', limit: 20, windowMs: 1_000 }));
+
+app.get('/blob/school/:schoolId/logo', (context) => {
+  const input = {
+    schoolId: context.req.param('schoolId'),
+    size: context.req.query('size'),
+  };
+  return handleSchoolLogoBlob({ db }, input, context.req.raw, (error) =>
+    reportUploadError(context.var.logger, 'school.logo.blob.error', input, error),
+  );
+});
+
+app.get('/blob/school/:schoolId/manifest.webmanifest', (context) => {
+  const input = { schoolId: context.req.param('schoolId') };
+  return handleSchoolManifestBlob({ db }, input, (error) =>
+    reportUploadError(context.var.logger, 'school.manifest.blob.error', input, error),
+  );
+});
+
+/**
+ * The Cadet Portal's own Better Auth instance (`cpc_` cookies, cadet tables,
+ * admission sign-in, cadet MCP OAuth). API keys do not exist for cadets, so
+ * the request is passed through unchanged.
+ */
+app.on(['POST', 'GET'], '/api/cadet/auth/*', (context) =>
+  cadetAuth.handler(context.req.raw),
+);
+
+/**
+ * `cadetRouter` over RPC for the Cadet Portal app. Its context is resolved by
+ * the cadet instance only, so staff cookies and API keys are anonymous here,
+ * and `appRouter` is never reachable through this handler.
+ */
+export const cadetRpcHandler = new RPCHandler(cadetRouter, {
+  interceptors: [
+    onError((error) => {
+      log.error({ err: error }, 'cadet.rpc.error');
+    }),
+  ],
+});
+
+app.all('/api/cadet/rpc/*', async (context) => {
+  const cadetContext: CadetContext = await createCadetContextFromHeaders(
+    context.req.raw.headers,
+  );
+  const result = await cadetRpcHandler.handle(context.req.raw, {
+    prefix: '/api/cadet/rpc',
+    context: cadetContext,
+  });
+  if (!result.matched) return context.notFound();
+  return context.newResponse(result.response.body, result.response);
+});
 
 app.post('/api/blob/schools/:schoolId/logo', async (context) => {
   const schoolId = context.req.param('schoolId');
@@ -166,7 +238,7 @@ export const mcpCatalog = buildMcpCatalog(appRouter);
  */
 const mcpRequestContext = new AsyncLocalStorage<Context>();
 
-export const mcpHandler = createCampusPilotMcpHandler({
+export const mcpHandler = createCampusPilotMcpHandler<Context>({
   catalog: mcpCatalog,
   currentContext: () => mcpRequestContext.getStore(),
   reportError: (error, toolName) => {
@@ -178,7 +250,7 @@ export const mcpHandler = createCampusPilotMcpHandler({
   },
 });
 
-const authenticateMcpRequest = createMcpGate({
+const authenticateMcpRequest = createMcpGate<Context>({
   catalog: mcpCatalog,
   resource: env.MCP_RESOURCE_URL,
   verifyAccessToken: (token) => verifyMcpAccessToken(auth, token),
@@ -187,17 +259,68 @@ const authenticateMcpRequest = createMcpGate({
   createApiKeyContext: (apiKey) =>
     createContextFromHeaders(new Headers({ 'x-api-key': apiKey })),
   createOAuthContext,
-  verifyAssistantToken,
-  createAssistantContext,
+  assistant: { verifyToken: verifyAssistantToken, createContext: createAssistantContext },
   recordGrantUse: (grantId) => recordOAuthGrantUse(db, grantId),
 });
 
-app.all('/api/mcp', async (context) => {
+app.all('/mcp', async (context) => {
   const request = context.req.raw;
   const result = await authenticateMcpRequest(request);
   if (!result.ok) return result.response;
   return mcpRequestContext.run(result.credential.context, () =>
     mcpHandler.fetch(
+      request,
+      result.credential.authInfo ? { authInfo: result.credential.authInfo } : {},
+    ),
+  );
+});
+
+/**
+ * The cadet MCP: a second catalog built from `cadetRouter` and a second gate
+ * bound to CADET_MCP_RESOURCE_URL and the cadet issuer. OAuth only (no API
+ * keys for students), read-only scope; grants are checked in the cadet
+ * consent table, so a staff token can never pass this gate and a cadet token
+ * can never pass the staff one (different issuer and audience).
+ */
+export const cadetMcpCatalog = buildMcpCatalog(cadetRouter);
+
+/** The cadet MCP's own verified context, separate from the staff store. */
+const cadetMcpRequestContext = new AsyncLocalStorage<CadetContext>();
+
+export const cadetMcpHandler = createCampusPilotMcpHandler<CadetContext>({
+  catalog: cadetMcpCatalog,
+  serverName: 'campuspilot-cadet',
+  currentContext: () => cadetMcpRequestContext.getStore(),
+  reportError: (error, toolName) => {
+    log.error({ err: error, toolName }, 'cadet.mcp.error');
+  },
+  reportToolCall: (event) => {
+    log.info(event, 'cadet.mcp.tool.call');
+  },
+});
+
+const authenticateCadetMcpRequest = createMcpGate<CadetContext>({
+  catalog: cadetMcpCatalog,
+  resource: env.CADET_MCP_RESOURCE_URL,
+  challengeScopes: CADET_MCP_DEFAULT_SCOPES,
+  verifyAccessToken: (token) =>
+    verifyMcpAccessToken(cadetAuth, token, {
+      issuer: cadetOauthIssuer(),
+      audience: env.CADET_MCP_RESOURCE_URL,
+    }),
+  findLiveGrant: (claims) =>
+    findLiveOAuthGrant(db, claims, CADET_OAUTH_GRANT_TABLES),
+  createOAuthContext: createCadetOAuthContext,
+  recordGrantUse: (grantId) =>
+    recordOAuthGrantUse(db, grantId, new Date(), CADET_OAUTH_GRANT_TABLES),
+});
+
+app.all('/cadet/mcp', async (context) => {
+  const request = context.req.raw;
+  const result = await authenticateCadetMcpRequest(request);
+  if (!result.ok) return result.response;
+  return cadetMcpRequestContext.run(result.credential.context, () =>
+    cadetMcpHandler.fetch(
       request,
       result.credential.authInfo ? { authInfo: result.credential.authInfo } : {},
     ),
@@ -214,6 +337,17 @@ app.all('/api/mcp', async (context) => {
  * application auth handlers, so they live here rather than as oRPC
  * procedures (recorded exception in packages/api/AGENTS.md).
  */
+// The cadet resource's metadata and the cadet issuer's discovery documents
+// come first: the staff wildcard below would otherwise answer for them.
+app.get('/.well-known/oauth-protected-resource/cadet/mcp', (context) =>
+  cadetAuth.handler(context.req.raw),
+);
+app.get('/.well-known/oauth-authorization-server/api/cadet/auth', async (context) =>
+  context.json(await cadetAuth.api.getOAuthServerConfig()),
+);
+app.get('/.well-known/openid-configuration/api/cadet/auth', async (context) =>
+  context.json(await cadetAuth.api.getOpenIdConfig()),
+);
 app.get('/.well-known/oauth-protected-resource', (context) =>
   auth.handler(context.req.raw),
 );

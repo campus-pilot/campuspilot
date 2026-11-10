@@ -8,6 +8,7 @@ import type { SchoolRouteParams } from '@/components/school-route';
 
 export const staffPage = defineManagementPage<SchoolRouteParams>({
   matches: (pathname) => /^\/school\/[^/]+\/staff$/.test(pathname),
+  title: 'Staff',
   breadcrumbs: ({ schoolId }) =>
     schoolPageBreadcrumbs(schoolId, { id: 'staff', label: 'Staff', icon: Users }),
   actions: ({ schoolId }) => (

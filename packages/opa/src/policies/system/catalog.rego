@@ -32,6 +32,20 @@ actions contains {
   "resourceKind": "system",
 } if { true }
 
+# Aggregate, platform-admin-only metrics. Counts never expose individual
+# student records, so they are granted separately from school student actions.
+actions contains {
+  "id": "system.platform.stats.read",
+  "key": "READ_PLATFORM_STATS",
+  "resourceKind": "system",
+} if { true }
+
+actions contains {
+  "id": "system.school.stats.read",
+  "key": "READ_SCHOOL_STATS",
+  "resourceKind": "system",
+} if { true }
+
 actions contains {
   "id": "system.oauth_client.list",
   "key": "LIST_OAUTH_CLIENTS",
@@ -53,5 +67,32 @@ actions contains {
 actions contains {
   "id": "system.oauth_client.delete",
   "key": "DELETE_OAUTH_CLIENT",
+  "resourceKind": "system",
+} if { true }
+
+# Demo school provisioning and purge (docs/demo-school.md). Each operation has
+# its own action so reading generated credentials or purging can be granted
+# independently of creating a demo.
+actions contains {
+  "id": "system.school.demo.create",
+  "key": "CREATE_DEMO_SCHOOL",
+  "resourceKind": "system",
+} if { true }
+
+actions contains {
+  "id": "system.school.demo.read",
+  "key": "READ_DEMO_SCHOOL",
+  "resourceKind": "system",
+} if { true }
+
+actions contains {
+  "id": "system.school.demo.credentials.read",
+  "key": "READ_DEMO_SCHOOL_CREDENTIALS",
+  "resourceKind": "system",
+} if { true }
+
+actions contains {
+  "id": "system.school.demo.purge",
+  "key": "PURGE_DEMO_SCHOOL",
   "resourceKind": "system",
 } if { true }

@@ -5,6 +5,7 @@ import { settingsBreadcrumbs } from '../../settings-breadcrumbs';
 
 export const noticeTemplatePage = defineManagementPage<SchoolRouteParams>({
   matches: (pathname) => /^\/school\/[^/]+\/settings\/templates\/notice$/.test(pathname),
+  title: 'Notice template',
   breadcrumbs: ({ schoolId }) => settingsBreadcrumbs(schoolId, { id: 'notice-template', label: 'Notice', icon: BookOpenCheck }),
 });
 

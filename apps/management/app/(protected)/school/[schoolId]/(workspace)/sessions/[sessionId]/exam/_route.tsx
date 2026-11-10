@@ -13,6 +13,7 @@ import { ExamNavbarActions } from '@/components/exam/exam-navbar-actions';
 export const examPage = defineManagementPage<SchoolSessionRouteParams>({
   matches: (pathname) =>
     /^\/school\/[^/]+\/sessions\/[^/]+\/exam$/.test(pathname),
+  title: 'Examinations',
   breadcrumbs: ({ schoolId, sessionId }) =>
     sessionPageBreadcrumbs(schoolId, sessionId, {
       id: 'exam',
@@ -34,6 +35,7 @@ export const examDetailsPage = defineManagementPage<
   matches: (pathname) =>
     /^\/school\/[^/]+\/sessions\/[^/]+\/exam\/[^/]+(?:\/|$)/.test(pathname),
   actions: (scope) => <ExamNavbarActions scope={scope} />,
+  title: 'Examination',
   breadcrumbs: (scope) => [
     ...examPage
       .breadcrumbs(scope)

@@ -4,8 +4,57 @@
     {
       "name": "web",
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["--filter", "web", "dev", "--port", "5174", "--strictPort"],
+      "runtimeArgs": [
+        "--filter",
+        "web",
+        "dev",
+        "--port",
+        "5174",
+        "--strictPort"
+      ],
       "port": 5174
+    },
+    {
+      "name": "server",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "dev:server"
+      ],
+      "port": 3000
+    },
+    {
+      "name": "worker",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "dev:worker"
+      ],
+      "port": 9080
+    },
+    {
+      "name": "admin",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "--filter",
+        "admin",
+        "dev"
+      ],
+      "port": 3003
+    },
+    {
+      "name": "management",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "dev:management"
+      ],
+      "port": 3002
+    },
+    {
+      "name": "cadet",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "dev:cadet"
+      ],
+      "port": 3004
     }
   ]
 }

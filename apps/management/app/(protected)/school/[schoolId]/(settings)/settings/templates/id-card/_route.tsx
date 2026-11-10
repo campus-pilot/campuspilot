@@ -5,6 +5,7 @@ import { settingsBreadcrumbs } from '../../settings-breadcrumbs';
 
 export const idCardTemplatePage = defineManagementPage<SchoolRouteParams>({
   matches: (pathname) => /^\/school\/[^/]+\/settings\/templates\/id-card$/.test(pathname),
+  title: 'ID card template',
   breadcrumbs: ({ schoolId }) => settingsBreadcrumbs(schoolId, { id: 'id-card-template', label: 'ID card', icon: FileBadge }),
 });
 

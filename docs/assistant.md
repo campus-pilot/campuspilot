@@ -15,6 +15,21 @@ endpoint, as the signed-in user, with the same permissions.
 | Management surfaces | `apps/management/components/assistant` | Data hooks and the three surfaces (panel, page, palette) |
 | API side | `packages/auth/src/assistant-token.ts`, `packages/api/src/routers/auth/assistant-token.router.ts`, `packages/api/src/assistant/tool-policy.ts`, `apps/server/src/mcp*.ts` | Delegated tokens, the `assistant` principal, the policy, the MCP assistant view |
 
+### Why its own service, not `apps/worker`
+
+`apps/worker` hosts the platform's own Restate workflows (the demo school) and
+runs with the API's environment: database credentials and the API's secrets.
+The assistant runs model-driven code, and its safety rests on having none of
+that: it reaches school data only through the API's MCP endpoint, as the
+signed-in user, so the API's policy and OPA decide every call. Hosting its
+turn loop in the worker, or in the API server, would put that code next to
+credentials it must never hold. It follows the worker's conventions instead:
+its Restate endpoint runs on its own HTTP/2 server so shutdown can close it,
+it registers with Restate on every start until accepted, it uses no request
+signing inside the private network, and it uses the same Restate SDK line.
+One process serves both of its ports (the browser API and the Restate
+endpoint); replicas scale them together.
+
 ## How a message flows
 
 1. The management app calls the service with the user's CampusPilot session
@@ -130,10 +145,11 @@ day the run was made; a model that is not listed gets no estimate.
 - **Cross-site requests are refused.** The service's `/rpc` routes reject a
   request whose `Origin` is not in `CORS_ORIGIN`. CORS alone only hides the
   response; the request would still run with the user's cookie.
-- **The Restate endpoint trusts its caller** unless `RESTATE_IDENTITY_KEYS` is
-  set. Whoever can reach `RESTATE_SERVICE_PORT` can drive a turn, and whoever
-  can reach the Restate ingress can resolve an approval. In production set the
-  identity keys and keep both ports private.
+- **The Restate endpoint trusts its network**, as `apps/worker` does: it
+  uses no request signing, because Restate and the service run in the same
+  private network and `RESTATE_SERVICE_PORT` is never routed from outside it.
+  Whoever can reach that port can drive a turn, and whoever can reach the
+  Restate ingress can resolve an approval, so both must stay private.
 - **Open streams are rechecked** every two minutes: a user who signed out or
   lost `school.assistant.use` stops receiving events.
 - **The delegated token** is bound to a user and a school and lasts 30
@@ -173,8 +189,8 @@ Each run records the surface it started from (`assistant_run.surface`).
    and set `ASSISTANT_PROVIDER` with that provider's key (and `GEMINI_MODEL`
    for Gemini). `RESTATE_SERVICE_URL` must be reachable from the
    Restate container (locally `http://host.docker.internal:9081`); when set, the
-   service registers itself with Restate at boot. `RESTATE_IDENTITY_KEYS` is
-   not needed locally.
+   service registers itself with Restate on every start, retrying until
+   Restate accepts (as `apps/worker` does).
 3. In `apps/management/.env`, set `NEXT_PUBLIC_ASSISTANT_URL`. Without it the
    assistant UI is hidden.
 4. Start the service (`pnpm --filter assistant dev`, or

@@ -8,6 +8,7 @@ import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import {
   deleteUnusedDynamicOAuthClients,
   mcpOAuthPlugins,
+  staffMcpOAuthConfig,
 } from '../mcp-oauth';
 import {
   MCP_ACCESS_TOKEN_TTL_SECONDS,
@@ -25,8 +26,10 @@ import {
   navigate,
   pkce,
   postForm,
+  postJson,
   refresh,
   registerDynamicClient,
+  signedQueryFrom,
   signUpUser,
   StubMetadataHost,
   type TestAuth,
@@ -137,6 +140,64 @@ describe('Client ID Metadata Documents', () => {
     expect(decodeJwt(tokens.access_token).scope).toBe('mcp:read offline_access');
   });
 
+  it('lets the user switch accounts from the consent page and grants the new account', async () => {
+    const client = metadataHost.publish('/cimd-switch-account.json');
+    const { verifier, challenge } = pkce();
+    const first = await signUpUser(auth, 'first');
+    const second = await signUpUser(auth, 'second');
+
+    const consentPage = await navigate(
+      auth,
+      authorizeUrl({ ...client, codeChallenge: challenge }),
+      first.cookie,
+    );
+    const consentLocation = consentPage.headers.get('location')!;
+    expect(consentLocation.startsWith(`${APP_ORIGIN}/oauth/consent`)).toBe(true);
+
+    // The consent page signs out without the OAuth query, then reopens the
+    // login page with the same signed query.
+    expect((await postJson(auth, '/sign-out', {}, first.cookie)).status).toBe(200);
+    const signIn = await postJson(auth, '/sign-in/email', {
+      email: second.email,
+      password: second.password,
+      oauth_query: signedQueryFrom(consentLocation),
+    });
+    const signInBody = (await signIn.json()) as { url?: string };
+    expect(signInBody.url?.startsWith(`${APP_ORIGIN}/oauth/consent`)).toBe(true);
+    const secondCookie = signIn.headers
+      .getSetCookie()
+      .map((value) => value.split(';')[0])
+      .join('; ');
+
+    const consent = await postJson(
+      auth,
+      '/oauth2/consent',
+      { accept: true, oauth_query: signedQueryFrom(signInBody.url!) },
+      secondCookie,
+    );
+    const callback = new URL(((await consent.json()) as { url: string }).url);
+    const token = await exchangeCode(
+      auth,
+      {
+        code: callback.searchParams.get('code')!,
+        iss: callback.searchParams.get('iss'),
+        state: callback.searchParams.get('state'),
+        verifier,
+        user: second,
+      },
+      client,
+    );
+    expect(token.status).toBe(200);
+    const tokens = (await token.json()) as TokenResponse;
+    expect(decodeJwt(tokens.access_token).sub).toBe(second.userId);
+
+    const consents = await db
+      .select()
+      .from(schema.oauthConsent)
+      .where(eq(schema.oauthConsent.clientId, client.clientId));
+    expect(consents.map(({ userId }) => userId)).toEqual([second.userId]);
+  });
+
   it('rejects a metadata document whose client_id does not match its URL', async () => {
     const client = metadataHost.publish('/cimd-mismatch.json', {
       client_id: 'https://client.example/other.json',
@@ -197,7 +258,7 @@ describe('Client ID Metadata Documents', () => {
       auth,
       authorizeUrl({
         ...client,
-        resource: 'https://evil.example/api/mcp',
+        resource: 'https://evil.example/mcp',
         codeChallenge: pkce().challenge,
       }),
       user.cookie,
@@ -207,7 +268,7 @@ describe('Client ID Metadata Documents', () => {
     const completed = await authorizeWithConsent(auth, client);
     const token = await exchangeCode(auth, completed, {
       ...client,
-      resource: 'https://evil.example/api/mcp',
+      resource: 'https://evil.example/mcp',
     });
     expect(token.status).toBe(400);
   });
@@ -241,7 +302,7 @@ describe('Dynamic Client Registration', () => {
       secret: 'a-super-secret-key-that-is-at-least-32-chars-long!',
       baseURL: 'http://localhost:3000',
       rateLimit: { enabled: true },
-      plugins: mcpOAuthPlugins({
+      plugins: mcpOAuthPlugins(staffMcpOAuthConfig(), {
         fetchClientMetadataResource: metadataHost.fetch,
       }),
     }) as unknown as TestAuth;

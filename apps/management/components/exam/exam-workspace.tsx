@@ -279,6 +279,7 @@ function WorkspaceLayout({
   overview: {
     planCount: number;
     status: 'ready' | 'active' | 'completed' | null;
+    cadetReleasedAt: Date | null;
   };
   actions: ReactNode;
   children: ReactNode;
@@ -321,9 +322,16 @@ function WorkspaceLayout({
         <h1 className="truncate text-xl font-semibold tracking-tight">
           {title}
         </h1>
-        <Badge variant="outline" className="w-fit">
-          {examStatusLabel(overview.status)}
-        </Badge>
+        <div className="flex flex-wrap gap-1.5">
+          <Badge variant="outline" className="w-fit">
+            {examStatusLabel(overview.status)}
+          </Badge>
+          {overview.cadetReleasedAt ? (
+            <Badge variant="secondary" className="w-fit">
+              Released to Cadet Portal
+            </Badge>
+          ) : null}
+        </div>
       </div>
     </div>
   );

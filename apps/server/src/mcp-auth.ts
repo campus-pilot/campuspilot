@@ -1,8 +1,4 @@
-import type {
-  AssistantContextInput,
-  Context,
-  OAuthContextInput,
-} from '@campuspilot/api/context';
+import type { AssistantContextInput, OAuthGrant } from '@campuspilot/api/context';
 import type { AssistantTokenClaims } from '@campuspilot/auth/assistant-token';
 import type { McpAccess } from '@campuspilot/api/mcp-metadata';
 import type {
@@ -12,34 +8,55 @@ import type {
 import { MCP_DEFAULT_SCOPES } from '@campuspilot/auth/mcp-oauth-policy';
 import type { AuthInfo } from '@modelcontextprotocol/server';
 
-import { type McpCatalog, requiredScopes } from './mcp';
+import { type McpCatalog, type McpContext, requiredScopes } from './mcp';
 import { META_TOOL_NAMES } from './mcp-meta-tools';
 
 /** What the gate verified for one MCP request, handed to the tool layer. */
-export type McpRequestCredential = {
-  context: Context;
+export type McpRequestCredential<TContext extends McpContext = McpContext> = {
+  context: TContext;
   /** SDK auth info, set for OAuth access tokens only. */
   authInfo?: AuthInfo;
 };
 
-export type McpGateOptions = {
+/** What the gate hands the context factory for a verified OAuth access token. */
+export type McpOAuthContextInput = {
+  headers: Headers;
+  userId: string;
+  oauthGrant: OAuthGrant;
+  /** Access-token expiry, which bounds the request-scoped session. */
+  expiresAt: Date;
+};
+
+export type McpGateOptions<TContext extends McpContext> = {
   catalog: Promise<McpCatalog>;
-  /** Canonical MCP URL (MCP_RESOURCE_URL). */
+  /** Canonical MCP URL (MCP_RESOURCE_URL or CADET_MCP_RESOURCE_URL). */
   resource: string;
+  /** Scopes advertised in the 401 challenge; defaults to MCP_DEFAULT_SCOPES. */
+  challengeScopes?: readonly string[];
   verifyAccessToken: (token: string) => Promise<McpAccessTokenClaims | null>;
   findLiveGrant: (claims: McpAccessTokenClaims) => Promise<LiveOAuthGrant | null>;
-  /** Builds the context for an API key; anonymous when the key is invalid. */
-  createApiKeyContext: (apiKey: string) => Promise<Context>;
-  createOAuthContext: (input: OAuthContextInput) => Promise<Context | null>;
-  /** Verifies a bearer value as a delegated assistant-service token. */
-  verifyAssistantToken: (token: string) => Promise<AssistantTokenClaims | null>;
-  createAssistantContext: (input: AssistantContextInput) => Promise<Context | null>;
+  /**
+   * Builds the context for an API key; anonymous when the key is invalid.
+   * Omitted on endpoints that accept OAuth only (the cadet MCP): API keys are
+   * then refused, and a bearer value that is not an access token is too.
+   */
+  createApiKeyContext?: (apiKey: string) => Promise<TContext>;
+  createOAuthContext: (input: McpOAuthContextInput) => Promise<TContext | null>;
+  /**
+   * Delegated assistant-service tokens (see `@campuspilot/auth/assistant-token`).
+   * Only the staff endpoint supplies these; elsewhere such a token is refused
+   * like any other unknown bearer value.
+   */
+  assistant?: {
+    verifyToken: (token: string) => Promise<AssistantTokenClaims | null>;
+    createContext: (input: AssistantContextInput) => Promise<TContext | null>;
+  };
   /** Records that the grant was used (throttled by the implementation). */
   recordGrantUse: (grantId: string) => Promise<void>;
 };
 
-export type McpGateResult =
-  | { ok: true; credential: McpRequestCredential }
+export type McpGateResult<TContext extends McpContext = McpContext> =
+  | { ok: true; credential: McpRequestCredential<TContext> }
   | { ok: false; response: Response };
 
 /**
@@ -119,20 +136,26 @@ function requiredAccess(catalog: McpCatalog, message: JsonRpcMessage): McpAccess
  * 1. `x-api-key` present → API key only.
  * 2. `Authorization: Bearer` → CampusPilot OAuth access token (signature,
  *    issuer, audience, expiry, then a live grant); if it is not one, as a
- *    delegated assistant-service token (its own key, type and claims); if it
- *    is neither, the same value is tried as an API key.
+ *    delegated assistant-service token where the endpoint accepts those (its
+ *    own key, type and claims); if it is neither, the same value is tried as
+ *    an API key.
  * 3. Otherwise, or when both fail → 401.
  * Cookies are never accepted here. OAuth requests then need the scopes of
  * the tools they call; API keys carry the user's full rights.
  */
-export function createMcpGate(options: McpGateOptions) {
+/**
+ * Generic over the endpoint's context type, so `/mcp` yields the staff
+ * `Context` and `/cadet/mcp` the `CadetContext`, never either one.
+ */
+export function createMcpGate<TContext extends McpContext>(options: McpGateOptions<TContext>) {
   const metadataUrl = protectedResourceMetadataUrl(options.resource);
+  const challengeScopes = options.challengeScopes ?? MCP_DEFAULT_SCOPES;
   const unauthorized = (description?: string) =>
     jsonRpcError(
       401,
       challenge({
         resource_metadata: metadataUrl,
-        scope: MCP_DEFAULT_SCOPES.join(' '),
+        scope: challengeScopes.join(' '),
         ...(description
           ? { error: 'invalid_token', error_description: description }
           : {}),
@@ -140,7 +163,8 @@ export function createMcpGate(options: McpGateOptions) {
       description ?? 'Authentication required.',
     );
 
-  async function apiKeyCredential(apiKey: string): Promise<McpRequestCredential | null> {
+  async function apiKeyCredential(apiKey: string): Promise<McpRequestCredential<TContext> | null> {
+    if (!options.createApiKeyContext) return null;
     const context = await options.createApiKeyContext(apiKey);
     return context.principal.authMethod === 'apiKey' ? { context } : null;
   }
@@ -148,7 +172,7 @@ export function createMcpGate(options: McpGateOptions) {
   async function oauthCredential(
     token: string,
     request: Request,
-  ): Promise<McpRequestCredential | 'revoked' | null> {
+  ): Promise<McpRequestCredential<TContext> | 'revoked' | null> {
     const claims = await options.verifyAccessToken(token);
     if (!claims) return null;
     const grant = await options.findLiveGrant(claims);
@@ -177,10 +201,11 @@ export function createMcpGate(options: McpGateOptions) {
     };
   }
 
-  async function assistantCredential(token: string): Promise<McpRequestCredential | null> {
-    const claims = await options.verifyAssistantToken(token);
+  async function assistantCredential(token: string): Promise<McpRequestCredential<TContext> | null> {
+    if (!options.assistant) return null;
+    const claims = await options.assistant.verifyToken(token);
     if (!claims) return null;
-    const context = await options.createAssistantContext({
+    const context = await options.assistant.createContext({
       userId: claims.userId,
       assistantRun: {
         conversationId: claims.conversationId,
@@ -235,7 +260,7 @@ export function createMcpGate(options: McpGateOptions) {
     return null;
   }
 
-  return async function authenticate(request: Request): Promise<McpGateResult> {
+  return async function authenticate(request: Request): Promise<McpGateResult<TContext>> {
     const apiKey = request.headers.get('x-api-key')?.trim();
     if (apiKey) {
       const credential = await apiKeyCredential(apiKey);

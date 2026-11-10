@@ -12,6 +12,8 @@ export const schoolDtoSchema = z.object({
   createdAt: z.date().nullable(),
   updatedAt: z.date().nullable(),
   hasCompletedOnboarding: z.boolean(),
+  /** Explicit demo fact (`school.is_demo`); never inferred from slug or email. */
+  isDemo: z.boolean(),
 });
 
 export type SchoolDto = z.infer<typeof schoolDtoSchema>;
@@ -56,7 +58,9 @@ export const updateSchoolInputSchema = z
     name: addSchoolInputSchema.shape.name.optional(),
     location: addSchoolInputSchema.shape.location.optional(),
     registrationNo: optionalNullableText,
-    logoS3Key: optionalNullableText,
+    // No `logoS3Key`: the logo upload handler is the only writer of a
+    // school's logo key, so it always points under `schools/{id}/logo/`.
+    // An arbitrary key would let a later demo purge target foreign objects.
     hasCompletedOnboarding: z.boolean().optional(),
   })
   .refine(

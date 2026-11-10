@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "@campuspilot/env": "workspace:*",
-    "@restatedev/restate-sdk-clients": "^1.18.3"
+    "@restatedev/restate-sdk-clients": "~1.17.4"
   },
   "devDependencies": {
     "@campuspilot/config": "workspace:*",

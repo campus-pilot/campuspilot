@@ -8,6 +8,7 @@ type AdmissionRouteParams = { schoolId: string; admissionId: string };
 
 export const admissionDetailsPage = defineManagementPage<AdmissionRouteParams>({
   matches: (pathname) => /^\/school\/[^/]+\/admission\/[^/]+(?:\/.*)?$/.test(pathname),
+  title: 'Admission',
   breadcrumbs: ({ schoolId, admissionId }) => [
     ...schoolPageBreadcrumbs(schoolId, { id: 'admission', label: 'Admission', icon: UserRound }).map((breadcrumb) => breadcrumb.id === 'admission' ? { ...breadcrumb, href: schoolHref(schoolId, '/admission') } : breadcrumb),
     { id: 'admission-name', label: <AdmissionBreadcrumbValue schoolId={schoolId} admissionId={admissionId} />, href: schoolHref(schoolId, `/admission/${encodeURIComponent(admissionId)}/details`), icon: UserRound },

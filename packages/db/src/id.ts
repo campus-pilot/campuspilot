@@ -20,6 +20,7 @@ export const PREFIX_MAP = {
   financePaymentAllocation: "fall",
   financeRefund: "frfd",
   class: "cls",
+  demoSchoolJob: "dsj",
   section: "sec",
   school: "sch",
   schoolSession: "sess",

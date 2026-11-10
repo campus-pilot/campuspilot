@@ -23,7 +23,7 @@ async function phase<T>(name: string, fn: () => Promise<T>): Promise<T> {
 
 async function main() {
   await phase('db.migrate', migrateAssistantDatabase);
-  await phase('restate.endpoint', startRestateEndpoint);
+  const restateEndpoint = await phase('restate.endpoint', startRestateEndpoint);
   const app = createAssistantApp();
   const server = serve({ fetch: app.fetch, port: env.ASSISTANT_PORT }, (info) => {
     log.info({ port: info.port }, 'boot.server.listening');
@@ -33,19 +33,23 @@ async function main() {
     log.warn('assistant.diagnostics.on-in-production');
   }
   /**
-   * Stops taking requests and exits. Open conversation streams never end on
-   * their own, so `close` alone would hang until the process is killed:
-   * after the grace period the process exits anyway. Browsers reconnect to
-   * another instance and resume from their last event; turns in flight are
-   * Restate's and continue there.
+   * Stops taking requests on both ports and exits. Open conversation
+   * streams never end on their own, so closing alone could hang until the
+   * process is killed: after the grace period the process exits anyway.
+   * Browsers reconnect to another instance and resume from their last event;
+   * turns in flight are Restate's and continue there.
    */
   const shutdown = (signal: string) => {
     log.info({ signal }, 'boot.shutdown.start');
-    server.close(() => process.exit(0));
+    const api = new Promise<void>((closed) => server.close(() => closed()));
+    void Promise.all([api, restateEndpoint.close()]).then(() => {
+      log.info('boot.shutdown.ok');
+      process.exit(0);
+    });
     setTimeout(() => process.exit(0), SHUTDOWN_GRACE_MS).unref();
   };
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
-  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.once('SIGTERM', () => shutdown('SIGTERM'));
+  process.once('SIGINT', () => shutdown('SIGINT'));
 }
 
 main().catch((err) => {

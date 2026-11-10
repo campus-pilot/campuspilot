@@ -21,6 +21,12 @@ import { ASSISTANT_TOOL_META } from '@campuspilot/assistant-contract/protocol';
 vi.mock('@campuspilot/auth/server', () => ({
   createAuth: vi.fn(),
 }));
+// The catalog never runs auth; like the staff instance, the cadet instance
+// (which needs CADET_APP_URL) is not built in this env-less unit test.
+vi.mock('@campuspilot/auth/cadet', () => ({
+  cadetAuth: {},
+  revokeCadetLoginAccess: vi.fn(),
+}));
 
 type JsonSchema = Record<string, unknown>;
 
@@ -73,11 +79,27 @@ const HIDDEN_TOOLS = [
   'authorization.checkPermissions',
   'healthCheck',
   'school.getLogo',
+  // Returns a credential and signs a student out everywhere: a human action.
+  'school.issueAdmissionCadetPassword',
   'systemAdmin.listOAuthClients',
   'systemAdmin.createOAuthClient',
   'systemAdmin.rotateOAuthClientSecret',
   'systemAdmin.deleteOAuthClient',
   'systemAdmin.setOAuthClientDisabled',
+  // Demo provisioning, credentials and purge stay human admin actions.
+  'systemAdmin.listDemoClassCatalogue',
+  'systemAdmin.createDemoSchool',
+  'systemAdmin.startDemoSchoolJob',
+  'systemAdmin.retryDemoSchoolJob',
+  'systemAdmin.getDemoSchoolJob',
+  'systemAdmin.getSchoolDemoJob',
+  'systemAdmin.getDemoCredentialsDownload',
+  'systemAdmin.purgeDemoSchool',
+  'systemAdmin.watchDemoSchoolJob',
+  'systemAdmin.retryDemoSchoolPurge',
+  'systemAdmin.getDemoSchoolPurge',
+  'systemAdmin.watchDemoSchoolPurge',
+  'systemAdmin.listDemoSchoolPurges',
 ];
 
 /**
@@ -148,7 +170,7 @@ async function connect(oauthScopes?: string[] | 'assistant'): Promise<Client> {
   });
   const client = new Client({ name: 'catalog-test', version: '0.1.0' });
   await client.connect(
-    new StreamableHTTPClientTransport(new URL('http://localhost/api/mcp'), {
+    new StreamableHTTPClientTransport(new URL('http://localhost/mcp'), {
       fetch: async (input, init) => handler.fetch(new Request(input, init)),
     }),
   );
@@ -178,7 +200,20 @@ describe('catalog metadata', () => {
     expect(classified).toEqual([...leafNames].sort());
     expect(catalog.core.map(({ name }) => name).sort()).toEqual(CORE_TOOLS);
     expect(catalog.core).toHaveLength(36);
-    expect(catalog.advanced).toHaveLength(83);
+    // 85 on main, plus releaseExamToCadet, withdrawExamFromCadet,
+    // get/saveStudentExamRemark and get/updateCadetPortalSettings.
+    expect(catalog.advanced).toHaveLength(91);
+  });
+});
+
+describe('cadet catalog', () => {
+  it('builds from cadetRouter alone: read-only core tools and no staff tools', async () => {
+    const { cadetRouter } = await import('@campuspilot/api/routers/cadet/cadet.router');
+    const cadetCatalog = await buildMcpCatalog(cadetRouter);
+    expect(cadetCatalog.core.map(({ name }) => name)).toEqual(['getAdmission', 'getProfile', 'getFeeSummary', 'listFeeLedger', 'getBill', 'listExams', 'getExam', 'getExamResult', 'getGrowth', 'listRemarks']);
+    expect(cadetCatalog.advanced).toEqual([]);
+    expect(cadetCatalog.core.every((tool) => tool.mcp.access === 'read')).toBe(true);
+    expect(catalog.core.map(({ name }) => name)).not.toContain('getAdmission');
   });
 });
 

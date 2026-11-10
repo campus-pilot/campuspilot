@@ -6,6 +6,7 @@ import type { SchoolRouteParams } from '@/components/school-route';
 /** The assistant page and its conversations share one breadcrumb trail. */
 export const assistantPage = defineManagementPage<SchoolRouteParams>({
   matches: (pathname) => /^\/school\/[^/]+\/assistant(\/[^/]+)?$/.test(pathname),
+  title: 'Assistant',
   breadcrumbs: ({ schoolId }) =>
     schoolPageBreadcrumbs(schoolId, { id: 'assistant', label: 'Assistant', icon: Sparkles }),
 });

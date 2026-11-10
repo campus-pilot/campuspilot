@@ -1,0 +1,25 @@
+{
+  "singleHolders": [
+    {
+      "role": "manager",
+      "emailRole": "manager",
+      "label": "Manager"
+    },
+    {
+      "role": "accountant",
+      "emailRole": "accountant",
+      "label": "Accountant"
+    },
+    {
+      "role": "exam_coordinator",
+      "emailRole": "exam-coordinator",
+      "label": "Exam coordinator"
+    }
+  ],
+  "teacher": {
+    "role": "teacher",
+    "emailRole": "teacher",
+    "label": "Class teacher"
+  },
+  "emailDomain": "campuspilot.in"
+}

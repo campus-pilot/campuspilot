@@ -53,7 +53,7 @@ Exports support a whole examination, one class, or up to 500 explicitly selected
 
 Root attendance and co-scholastic areas use the explicit exam-wide assessment and working-day settings. Printing configured assessments requires their independent approval. Zero attendance remains zero; missing data remains null. Legacy per-subject values remain available only under each subject and are never promoted to shared facts. Four explicit print options control mode marks, attendance, co-scholastic areas and the grading key, without changing saved results or calculations. Hidden attendance does not require working-day configuration.
 
-The context retains v1 report fields, heterogeneous subject modes and grade thresholds. Timetables expose both modern entries and legacy `rows[].cells[classId]` (single cell, array or null), plus calendar-safe display dates, weekdays and times. The numeric `add` helper supports existing table column spans.
+The context retains v1 report fields, heterogeneous subject modes and grade thresholds. Report contexts add `modeColumns` (the union of subject modes) and per-subject `modeCells` aligned with it, so mode-mark tables stay aligned when subjects use different modes. Timetables expose both modern entries and legacy `rows[].cells[classId]` (single cell, array or null), plus calendar-safe display dates, weekdays and times. The numeric `add` helper supports existing table column spans.
 
 ## Persistence
 

@@ -142,3 +142,93 @@ test_school_principal_cannot_manage_oauth_clients if {
     "resource": {"kind": "system"},
   }
 }
+
+test_admin_can_provision_read_and_purge_demo_schools if {
+  every action in {
+    "system.school.demo.create",
+    "system.school.demo.read",
+    "system.school.demo.credentials.read",
+    "system.school.demo.purge",
+  } {
+    authorization.allow with input as {
+      "action": action,
+      "subject": {
+        "userId": "admin-1",
+        "roleAssignments": [{"role": "platform.admin", "scope": {"kind": "platform"}}],
+      },
+      "resource": {"kind": "system"},
+    }
+  }
+}
+
+test_regular_user_cannot_use_demo_school_actions if {
+  every action in {
+    "system.school.demo.create",
+    "system.school.demo.read",
+    "system.school.demo.credentials.read",
+    "system.school.demo.purge",
+  } {
+    not authorization.allow with input as {
+      "action": action,
+      "subject": {
+        "userId": "user-2",
+        "roleAssignments": [{"role": "platform.user", "scope": {"kind": "platform"}}],
+      },
+      "resource": {"kind": "system"},
+    }
+  }
+}
+
+test_demo_principal_cannot_read_demo_credentials_or_purge if {
+  every action in {"system.school.demo.credentials.read", "system.school.demo.purge"} {
+    not authorization.allow with input as {
+      "action": action,
+      "subject": {
+        "userId": "user-3",
+        "roleAssignments": [{"role": "school.principal", "scope": {"kind": "school", "schoolId": "school-1"}}],
+      },
+      "resource": {"kind": "system"},
+    }
+  }
+}
+
+test_demo_actions_reject_school_resources if {
+  not authorization.allow with input as {
+    "action": "system.school.demo.purge",
+    "subject": {
+      "userId": "admin-1",
+      "roleAssignments": [{"role": "platform.admin", "scope": {"kind": "platform"}}],
+    },
+    "resource": {"kind": "school", "schoolId": "school-1"},
+  }
+}
+
+test_admin_can_read_aggregate_stats if {
+  every action in {"system.platform.stats.read", "system.school.stats.read"} {
+    authorization.allow with input as {
+      "action": action,
+      "subject": {
+        "userId": "user-1",
+        "roleAssignments": [{"role": "platform.admin", "scope": {"kind": "platform"}}],
+      },
+      "resource": {"kind": "system"},
+    }
+  }
+}
+
+test_school_principal_cannot_read_aggregate_stats if {
+  every action in {"system.platform.stats.read", "system.school.stats.read"} {
+    not authorization.allow with input as {
+      "action": action,
+      "subject": {
+        "userId": "user-1",
+        "roleAssignments": [{
+          "role": "school.principal",
+          "scope": {"kind": "school", "schoolId": "school-1"},
+          "meta": {},
+        }],
+      },
+      "resource": {"kind": "system"},
+    }
+  }
+}

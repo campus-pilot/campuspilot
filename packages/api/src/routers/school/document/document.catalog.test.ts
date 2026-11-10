@@ -3,7 +3,75 @@ import {
   DOCUMENT_MARKETPLACE,
   SAMPLE_DOCUMENT_CONTEXT,
 } from './document.catalog';
+import { scopeLegacyDocumentCss } from './document.catalog.marketplace';
 import { renderDocument } from './document.render';
+import { withReportModeLayout } from './document.report-modes';
+
+function template(slug: string) {
+  const item = DOCUMENT_MARKETPLACE.find((entry) => entry.slug === slug);
+  if (!item) throw new Error(`Missing catalog template ${slug}`);
+  return item;
+}
+
+function cssOf(html: string) {
+  return [...html.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/gi)]
+    .map((match) => match[1])
+    .join('\n');
+}
+
+/** Sample context with two assessment modes, so a mode column cannot be
+ * confused with the single total column, and explicit print choices. */
+function reportContext(includeModeMarks: boolean) {
+  return withReportModeLayout({
+    ...SAMPLE_DOCUMENT_CONTEXT,
+    subjects: SAMPLE_DOCUMENT_CONTEXT.subjects.map((subject, index) => ({
+      ...subject,
+      marks: { written: 70 + index, oral: 17 + index },
+      modeConfig: {
+        written: { name: 'Written', percentage: 80, maxMarks: 80 },
+        oral: { name: 'Oral', percentage: 20, maxMarks: 20 },
+      },
+    })),
+    reportSections: {
+      ...SAMPLE_DOCUMENT_CONTEXT.reportSections,
+      includeModeMarks,
+    },
+  });
+}
+
+/** Mathematics has Written and Oral, English only Written (with a different
+ * maximum), as when a school configures modes per subject. */
+function mixedModeContext() {
+  const [mathematics, english] = SAMPLE_DOCUMENT_CONTEXT.subjects;
+  const subjects: Array<
+    Record<string, unknown> & {
+      marks: Record<string, number>;
+      modeConfig: Record<string, { name: string; percentage: number; maxMarks: number }>;
+    }
+  > = [
+    {
+      ...english!,
+      marks: { written: 0 },
+      modeConfig: { written: { name: 'Written', percentage: 100, maxMarks: 100 } },
+    },
+    {
+      ...mathematics!,
+      marks: { oral: 18, written: 70 },
+      modeConfig: {
+        oral: { name: 'Oral', percentage: 20, maxMarks: 20 },
+        written: { name: 'Written', percentage: 80, maxMarks: 80 },
+      },
+    },
+  ];
+  return withReportModeLayout({ ...SAMPLE_DOCUMENT_CONTEXT, subjects });
+}
+
+function rowCellCounts(html: string) {
+  return [...html.matchAll(/<tr>([\s\S]*?)<\/tr>/g)].map((row) => {
+    const cells = [...row[1]!.matchAll(/<t[dh](?: colspan="(\d+)")?[^>]*>/g)];
+    return cells.reduce((sum, cell) => sum + Number(cell[1] ?? 1), 0);
+  });
+}
 
 describe('document template marketplace', () => {
   it('offers the legacy catalog plus matching statement designs', () => {
@@ -80,5 +148,192 @@ describe('document template marketplace', () => {
       );
       expect(content, slug).toContain('reportSections.includeGradingScale');
     }
+  });
+
+  it('shows per-subject mode marks only when the independent print flag is set', () => {
+    for (const slug of [
+      'report_card-default',
+      'report_card-default-attendance',
+      'report_card-minimal',
+    ]) {
+      const shown = renderDocument(template(slug).content, reportContext(true));
+      // Body cells come from inside {{#each subjects}}; the flag must be read
+      // from the root context there, not from the subject.
+      expect(shown, slug).toContain('Written');
+      expect(shown, slug).toContain('>70</td>');
+      expect(shown, slug).toContain('>17</td>');
+      expect(shown, slug).toContain('>71</td>');
+      expect(shown, slug).toContain('>18</td>');
+
+      const hidden = renderDocument(template(slug).content, reportContext(false));
+      expect(hidden, slug).not.toContain('Written');
+      expect(hidden, slug).not.toContain('>70</td>');
+      expect(hidden, slug).not.toContain('>17</td>');
+    }
+  });
+
+  it('keeps every marks-table row aligned with its header', () => {
+    for (const includeModeMarks of [true, false]) {
+      for (const slug of ['report_card-default', 'report_card-minimal']) {
+        const html = renderDocument(
+          template(slug).content,
+          reportContext(includeModeMarks),
+        );
+        const table = html.match(/<table>[\s\S]*?<\/table>/)![0];
+        const counts = rowCellCounts(table);
+        expect(new Set(counts).size, `${slug} ${includeModeMarks}`).toBe(1);
+      }
+      // The attendance design has a two-row header; its body rows and the
+      // spanned summary rows must still have equal widths.
+      const html = renderDocument(
+        template('report_card-default-attendance').content,
+        reportContext(includeModeMarks),
+      );
+      const body = html.match(/<tbody>([\s\S]*?)<\/tbody>/)![1]!;
+      expect(new Set(rowCellCounts(body)).size, String(includeModeMarks)).toBe(1);
+      expect(html.includes('Obtained Marks'), String(includeModeMarks)).toBe(
+        includeModeMarks,
+      );
+    }
+  });
+
+  it('builds mode columns from every subject and leaves a blank cell where a subject lacks a mode', () => {
+    const context = mixedModeContext();
+    expect(context.modeColumns).toEqual([
+      { slug: 'oral', name: 'Oral', maxMarks: 20 },
+      { slug: 'written', name: 'Written', maxMarks: null },
+    ]);
+    for (const slug of [
+      'report_card-default',
+      'report_card-default-attendance',
+      'report_card-minimal',
+    ]) {
+      const html = renderDocument(template(slug).content, context);
+      const header = html.match(/<thead>([\s\S]*?)<\/thead>/)![1]!;
+      expect(header.indexOf('Oral'), slug).toBeGreaterThan(-1);
+      expect(header.indexOf('Oral'), slug).toBeLessThan(header.indexOf('Written'));
+      const rows = [...html.match(/<tbody>([\s\S]*?)<\/tbody>/)![1]!.matchAll(/<tr>([\s\S]*?)<\/tr>/g)]
+        .map((row) => [...row[1]!.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map((cell) => cell[1]!.trim()));
+      // English: blank Oral cell, zero Written mark kept as zero.
+      expect(rows[0]!.slice(1, 3), slug).toEqual(['', '0']);
+      // Mathematics: Oral then Written, under their own headers.
+      expect(rows[1]!.slice(1, 3), slug).toEqual(['18', '70']);
+    }
+  });
+
+  it('honors the co-scholastic and grading-scale print flags', () => {
+    for (const slug of ['report_card-default', 'report_card-default-attendance']) {
+      const html = renderDocument(template(slug).content, {
+        ...SAMPLE_DOCUMENT_CONTEXT,
+        reportSections: {
+          includeModeMarks: true,
+          includeAttendance: true,
+          includeCoScholastics: false,
+          includeGradingScale: false,
+        },
+      });
+      expect(html, slug).not.toContain('Art &amp; Craft');
+      expect(html, slug).not.toContain('Minimum Score');
+      expect(html, slug).not.toContain('&amp; above');
+    }
+  });
+
+  it('resolves every context path of every design against the documented sample', async () => {
+    const Handlebars = (await import('handlebars')).default;
+    const strict = Handlebars.create();
+    strict.registerHelper('add', (a: number, b: number) => a + b);
+    for (const item of DOCUMENT_MARKETPLACE) {
+      // Strict mode throws on a path that does not exist where it is read,
+      // which catches wrong-scope paths and mis-renamed legacy fields.
+      expect(
+        () => strict.compile(item.content, { strict: true })(SAMPLE_DOCUMENT_CONTEXT),
+        item.slug,
+      ).not.toThrow();
+    }
+  });
+
+  it('renames legacy bill fields to whole current paths only', () => {
+    for (const slug of ['bill-default', 'bill-compact', 'bill-default-full']) {
+      const { content } = template(slug);
+      expect(content, slug).not.toContain('periodKeyKey');
+      expect(content, slug).toContain('bill.periodKey');
+      expect(
+        renderDocument(content, SAMPLE_DOCUMENT_CONTEXT),
+        slug,
+      ).toContain('2026-10');
+    }
+  });
+
+  it('keeps legacy class selectors that contain "body" when scoping the page root', () => {
+    for (const [slug, selector] of [
+      ['id_card-default', '.body'],
+      ['id_card-classic', '.body'],
+      ['admit_card-default', '.ac-body'],
+      ['admit_card-minimal', '.acm-body'],
+    ] as const) {
+      const css = cssOf(template(slug).content);
+      expect(css, slug).toMatch(
+        new RegExp(`(^|[\\s,}])${selector.replace('.', '\\.')}\\s*\\{`),
+      );
+      expect(css, slug).not.toContain('..legacy-template');
+      expect(css, slug).not.toContain('-.legacy-template');
+    }
+    for (const item of DOCUMENT_MARKETPLACE) {
+      expect(cssOf(item.content), item.slug).not.toMatch(
+        /(^|[\s,{};])(html|body)\s*[{,]/,
+      );
+    }
+  });
+
+  it('sizes admit-card fragments with border-box so they fit their slot', () => {
+    for (const item of DOCUMENT_MARKETPLACE.filter(
+      ({ documentType }) => documentType === 'admit_card',
+    )) {
+      expect(cssOf(item.content), item.slug).toContain(
+        ':where(.legacy-template,.legacy-template *,.legacy-template *::before,.legacy-template *::after){box-sizing:border-box}',
+      );
+    }
+  });
+});
+
+describe('legacy document CSS scoping', () => {
+  it('rewrites only real html/body type selectors', () => {
+    expect(scopeLegacyDocumentCss('body { margin: 0 }')).toBe(
+      '.legacy-template { margin: 0 }',
+    );
+    expect(scopeLegacyDocumentCss('html, body{color:red}')).toBe(
+      '.legacy-template {color:red}',
+    );
+    expect(scopeLegacyDocumentCss('html body .x{a:b}')).toBe(
+      '.legacy-template .x {a:b}',
+    );
+    expect(scopeLegacyDocumentCss('body.dark > p{a:b}')).toBe(
+      '.legacy-template.dark > p {a:b}',
+    );
+  });
+
+  it('leaves class, id, attribute, compound names and declarations alone', () => {
+    const css = [
+      '.body{a:b}',
+      '.ac-body{a:b}',
+      '.acm-body .grid .k{a:b}',
+      '#body{a:b}',
+      'tbody td{a:b}',
+      '.tbody{a:b}',
+      '[data-part="body"]{a:b}',
+      "[class~=body] span{a:b}",
+      '.x{font-family:body, serif}',
+      '@media print{.body{a:b}}',
+    ];
+    expect(scopeLegacyDocumentCss(css.join('\n'))).not.toContain(
+      'legacy-template',
+    );
+    expect(scopeLegacyDocumentCss('@media print{body{a:b}}')).toBe(
+      '@media print{.legacy-template {a:b}}',
+    );
+  });
+
+  it('ignores selector-like text in comments', () => {
+    expect(scopeLegacyDocumentCss('/* body */ .body{a:b}')).toBe('.body {a:b}');
   });
 });

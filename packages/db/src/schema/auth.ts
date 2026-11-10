@@ -7,7 +7,10 @@ import {
   integer,
   jsonb,
   index,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
+
+import { schoolTable } from "./school";
 
 export const user = pgTable("user", {
   id: text("id").primaryKey(),
@@ -26,6 +29,17 @@ export const user = pgTable("user", {
   banned: boolean("banned").default(false),
   banReason: text("ban_reason"),
   banExpires: timestamp("ban_expires"),
+  /**
+   * Set only on accounts that exist solely because of that demo school, so
+   * the demo purge knows which accounts it may remove. Null for every real
+   * user, including the platform admin who requested the demo. The foreign
+   * key deliberately does not cascade or null out: `purge_demo_school`
+   * deletes these accounts before the school, so a school can never be
+   * removed while silently orphaning its demo logins.
+   */
+  demoSchoolId: text("demo_school_id").references(
+    (): AnyPgColumn => schoolTable.id,
+  ),
 });
 
 export const session = pgTable(

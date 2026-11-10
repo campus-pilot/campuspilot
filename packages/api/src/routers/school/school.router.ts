@@ -10,6 +10,7 @@ import { rpcError, toRpcError } from "../../errors";
 import { protectedProcedure } from "../../index";
 import { requireSchoolPermission } from "../../permissions/school";
 import { schoolAdmissionSettingsRouter } from "./admission-settings/admission-settings.router";
+import { schoolCadetSettingsRouter } from "./cadet-settings/cadet-settings.router";
 import { schoolAdmissionRouter } from "./admission/admission.router";
 import { schoolBillingRouter } from "./billing/billing.router";
 import { schoolClassRouter } from "./class/class.router";
@@ -66,6 +67,7 @@ export const schoolRouter = {
             name: schoolTable.name,
             location: schoolTable.location,
             logoS3Key: schoolTable.logoS3Key,
+            isDemo: schoolTable.isDemo,
           })
           .from(schoolMemberTable)
           .innerJoin(
@@ -113,6 +115,7 @@ export const schoolRouter = {
             location: schoolTable.location,
             registrationNo: schoolTable.registrationNo,
             logoS3Key: schoolTable.logoS3Key,
+            isDemo: schoolTable.isDemo,
           })
           .from(schoolTable)
           .where(eq(schoolTable.id, input.schoolId))
@@ -155,6 +158,7 @@ export const schoolRouter = {
             location: schoolTable.location,
             registrationNo: schoolTable.registrationNo,
             logoS3Key: schoolTable.logoS3Key,
+            isDemo: schoolTable.isDemo,
           });
         if (!school) throw rpcError.notFound("School");
         return schoolDetailsDtoSchema.parse(school);
@@ -163,6 +167,7 @@ export const schoolRouter = {
       }
     }),
   ...schoolAdmissionSettingsRouter,
+  ...schoolCadetSettingsRouter,
   ...schoolAdmissionRouter,
   ...schoolBillingRouter,
   ...schoolLogoRouter,

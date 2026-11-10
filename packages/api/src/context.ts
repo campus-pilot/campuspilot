@@ -28,12 +28,16 @@ export type OAuthGrant = {
  *   the MCP endpoint, whose resource it is bound to.
  * - `assistant`: the in-app assistant running a user's request; never
  *   accepted from a request credential, only created by the assistant runtime.
+ * - `system-job`: a durable background job acting as the admin who requested
+ *   it. Created only by the worker's job context factory
+ *   (`workflows/demo-school/job-context.ts`); no HTTP path can produce it.
  */
 export type AuthPrincipal =
   | { authMethod: 'anonymous' }
   | { authMethod: 'session' }
   | { authMethod: 'apiKey' }
   | { authMethod: 'oauth'; oauthGrant: OAuthGrant }
+  | { authMethod: 'system-job'; jobId: string }
   | { authMethod: 'assistant'; assistantRun: AssistantRunPrincipal };
 
 /**
