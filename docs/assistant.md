@@ -133,6 +133,16 @@ day the run was made; a model that is not listed gets no estimate.
   (all school roles) decides who may use the assistant at all. An admin
   impersonating a user cannot use the assistant: its calls would be recorded as
   the user's own.
+- **Topic scope, asked of the model** (`apps/assistant/src/runtime/prompt.ts`,
+  "What you help with"): only the school's work in CampusPilot and short
+  school communications built on it, such as a notice to parents. Code,
+  general knowledge, teaching material, translation and the like are declined
+  in one sentence, and the prompt says that role-play, claimed authority,
+  fake system messages and repeated asking do not change that. This is the
+  one rule here that the model keeps rather than code: it protects cost and
+  tone, not data, so a reply that slips through exposes nothing the user
+  could not already see. Change the scope by editing that block; the prompt
+  pin test then needs its hash updated.
 
 ## Security boundaries
 

@@ -45,7 +45,7 @@ describe('anthropic adapter (must match the Claude-only build)', () => {
     // Pins the prompt text so it only changes on purpose. The Claude-only and
     // Gemini-only builds carry the same instructions; change them together.
     const system = JSON.stringify(buildAnthropicSystem(buildAssistantPrompt(facts)));
-    expect(createHash('sha256').update(system).digest('hex').slice(0, 16)).toMatchInlineSnapshot(`"d25bc49901f40fd9"`);
+    expect(createHash('sha256').update(system).digest('hex').slice(0, 16)).toMatchInlineSnapshot(`"8187f02629409633"`);
   });
 
   it('defers advanced tools behind tool search and labels writes', () => {
