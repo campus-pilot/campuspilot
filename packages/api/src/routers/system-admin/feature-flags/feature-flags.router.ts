@@ -76,11 +76,12 @@ export const featureFlagsRouter = {
             .limit(1)
             .for('update');
           if (!school) throw rpcError.notFound('School');
+          // Spread, not field by field: the input is a union discriminated on
+          // `feature`, and spreading keeps each key paired with its own config.
+          const { id: _schoolId, ...update } = input;
           await setSchoolFeature(transaction, {
+            ...update,
             schoolId: school.id,
-            feature: input.feature,
-            enabled: input.enabled,
-            config: input.config,
             updatedBy: context.session.user.id,
           });
           return {

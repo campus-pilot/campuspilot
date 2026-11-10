@@ -3,10 +3,9 @@ import {
   parseSchoolFeatureConfig,
   SCHOOL_FEATURE_DISABLED_REASON,
   schoolFeatureCatalogue,
-  type SchoolFeatureConfig,
   type SchoolFeatureDisabledData,
+  type SchoolFeatureEntry,
   type SchoolFeatureKey,
-  type SchoolFeatureState,
 } from '@campuspilot/db/feature-flags/catalogue';
 import {
   getSchoolFeature,
@@ -41,42 +40,48 @@ export function schoolFeatureDisabledError(feature: SchoolFeatureKey) {
 }
 
 /**
- * Returns the feature's state when it is enabled and throws the
- * feature-disabled error otherwise. Every enforcement point that is not an
- * oRPC middleware (Cadet procedures, the Cadet MCP gate, the manifest blob,
- * password issuing inside `createAdmission`) calls this, so they cannot
- * drift apart.
+ * Throws the feature-disabled error unless the school has the feature.
+ * Every enforcement point that is not the oRPC middleware (Cadet procedures,
+ * the Cadet MCP gate, the manifest blob, password issuing inside
+ * `createAdmission`) calls this, so they cannot drift apart.
+ *
+ * It decides from `enabled` alone (`isSchoolFeatureEnabled`) and never parses
+ * the stored config: a gate must not fail because of a setting it does not
+ * read. Code that needs the config uses `requireSchoolFeature` (typed
+ * `context.feature`) or `getSchoolFeature`.
  */
-export async function assertSchoolFeatureEnabled<K extends SchoolFeatureKey>(
+export async function assertSchoolFeatureEnabled(
   db: DatabaseExecutor,
   schoolId: string,
-  key: K,
-): Promise<SchoolFeatureState<K> & { enabled: true }> {
-  const state = await getSchoolFeature(db, schoolId, key);
-  if (!state.enabled) throw schoolFeatureDisabledError(key);
-  return { ...state, enabled: true };
+  key: SchoolFeatureKey,
+): Promise<void> {
+  if (!(await isSchoolFeatureEnabled(db, schoolId, key))) {
+    throw schoolFeatureDisabledError(key);
+  }
 }
 
-export type SetSchoolFeatureInput<K extends SchoolFeatureKey> = {
+/**
+ * One feature's new state for one school. A union discriminated on
+ * `feature` (`SchoolFeatureEntry`), so a caller whose key is not a literal
+ * cannot pass one feature's config under another feature's key.
+ */
+export type SetSchoolFeatureInput = SchoolFeatureEntry & {
   schoolId: string;
-  feature: K;
-  enabled: boolean;
-  /** Validated against the schema of `feature`; null stores no config. */
-  config: SchoolFeatureConfig<K> | null;
   /** The administrator making the change; null only for system writes. */
   updatedBy: string | null;
 };
 
 /**
  * Writes one feature's state for a school (insert or replace). `enabled` and
- * `config` are both stored as given: disabling does not clear the config.
+ * `config` are both stored as given: disabling does not clear the config,
+ * and the config is validated against the schema of `feature`.
  * The caller verifies that the school exists and that the actor may change
  * flags; pass a transaction to write together with other rows.
  */
-export async function setSchoolFeature<K extends SchoolFeatureKey>(
+export async function setSchoolFeature(
   db: DatabaseExecutor,
-  input: SetSchoolFeatureInput<K>,
-): Promise<SchoolFeatureState<K>> {
+  input: SetSchoolFeatureInput,
+): Promise<void> {
   const config = parseSchoolFeatureConfig(input.feature, input.config);
   const updatedAt = new Date();
   await db
@@ -93,5 +98,4 @@ export async function setSchoolFeature<K extends SchoolFeatureKey>(
       target: [schoolFeatureFlagTable.schoolId, schoolFeatureFlagTable.feature],
       set: { enabled: input.enabled, config, updatedBy: input.updatedBy, updatedAt },
     });
-  return { enabled: input.enabled, config };
 }

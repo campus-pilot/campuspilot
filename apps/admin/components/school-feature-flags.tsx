@@ -4,12 +4,11 @@ import { useForm } from '@tanstack/react-form';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
 import {
-  SCHOOL_FEATURE_KEYS,
   schoolFeatureCatalogue,
+  schoolFeatureEntries,
   type SchoolFeatureConfig,
+  type SchoolFeatureEntry,
   type SchoolFeatureKey,
-  type SchoolFeatureState,
-  type SchoolFeatureUpdate,
 } from '@campuspilot/api/routers/school/feature-flags/feature-flags.dto';
 import { Badge } from '@campuspilot/ui/components/badge';
 import { Button } from '@campuspilot/ui/components/button';
@@ -48,9 +47,9 @@ void EVERY_FEATURE_IS_SWITCH_ONLY;
  */
 const DISABLE_WARNINGS: Record<SchoolFeatureKey, string> = {
   cadet:
-    'Students of this school can no longer sign in or use the Cadet Portal, including connected AI apps, and staff can no longer issue portal passwords. Logins and data are kept.',
+    'Students of this school can no longer sign in or use the Cadet Portal, including connected AI apps. Staff can no longer issue portal passwords, release exam results to the portal, or save or publish a notice addressed to students. Logins, released results and notices are kept.',
   notices:
-    'Staff of this school can no longer open or publish notices. Existing notices are kept.',
+    'Staff of this school can no longer open, write or publish notices, or edit the Notice template. Students no longer see notices in the Cadet Portal, and notice notifications that have not gone out yet are not sent. Existing notices are kept.',
 };
 
 const featureFormSchema = z.object({ enabled: z.boolean() });
@@ -69,27 +68,28 @@ function FeatureStatusBadge({ enabled }: { enabled: boolean }) {
   );
 }
 
-type AnyFeatureState = SchoolFeatureState<SchoolFeatureKey>;
-
 /**
  * Saves one feature. The form holds `enabled`; the stored config is sent
  * back unchanged, because enabling or disabling never clears it (and no
  * feature has editable settings yet, see the guard above).
+ *
+ * `entry` is the feature's key and its own stored state as one discriminated
+ * value (`SchoolFeatureEntry`), so the update is built by spreading it and no
+ * cast can pair one feature's config with another feature's key.
  */
-function useFeatureFlagForm(schoolId: string, feature: SchoolFeatureKey, state: AnyFeatureState) {
+function useFeatureFlagForm(schoolId: string, entry: SchoolFeatureEntry) {
+  const { feature } = entry;
   const queryClient = useQueryClient();
   const form = useForm({
-    defaultValues: { enabled: state.enabled },
+    defaultValues: { enabled: entry.enabled },
     validators: { onSubmit: featureFormSchema },
     onSubmit: async ({ value }) => {
       form.setErrorMap({});
       try {
         const saved = await client.systemAdmin.updateSchoolFeatureFlag({
           id: schoolId,
-          // The union member is chosen by `feature`, and `state` is that
-          // feature's own stored state; TypeScript cannot correlate the two
-          // across the union, and the server validates the config again.
-          ...({ feature, enabled: value.enabled, config: state.config } as SchoolFeatureUpdate),
+          ...entry,
+          enabled: value.enabled,
         });
         queryClient.setQueryData(
           orpc.systemAdmin.getSchoolFeatureFlags.queryKey({ input: { id: schoolId } }),
@@ -112,12 +112,12 @@ function useFeatureFlagForm(schoolId: string, feature: SchoolFeatureKey, state: 
 
 type FeatureFlagFormProps = {
   schoolId: string;
-  feature: SchoolFeatureKey;
-  state: AnyFeatureState;
+  entry: SchoolFeatureEntry;
 };
 
-function FeatureFlagForm({ schoolId, feature, state }: FeatureFlagFormProps) {
-  const form = useFeatureFlagForm(schoolId, feature, state);
+function FeatureFlagForm({ schoolId, entry }: FeatureFlagFormProps) {
+  const { feature } = entry;
+  const form = useFeatureFlagForm(schoolId, entry);
   const switchId = `feature-${feature}-enabled`;
   return (
     <form
@@ -149,7 +149,7 @@ function FeatureFlagForm({ schoolId, feature, state }: FeatureFlagFormProps) {
       >
         {({ enabled, isDirty, isSubmitting, errors }) => (
           <div className="flex flex-col gap-3">
-            {state.enabled && !enabled ? (
+            {entry.enabled && !enabled ? (
               <p className="text-xs text-destructive" role="alert">
                 {DISABLE_WARNINGS[feature]}
               </p>
@@ -172,25 +172,20 @@ function FeatureFlagForm({ schoolId, feature, state }: FeatureFlagFormProps) {
   );
 }
 
-function FeatureFlagCard({ schoolId, feature, state }: FeatureFlagFormProps) {
-  const { label, description } = schoolFeatureCatalogue[feature];
+function FeatureFlagCard({ schoolId, entry }: FeatureFlagFormProps) {
+  const { label, description } = schoolFeatureCatalogue[entry.feature];
   return (
     <Card>
       <CardHeader>
         <CardTitle className="flex flex-wrap items-center gap-2">
           {label}
-          <FeatureStatusBadge enabled={state.enabled} />
+          <FeatureStatusBadge enabled={entry.enabled} />
         </CardTitle>
         <CardDescription>{description}</CardDescription>
       </CardHeader>
       <CardContent>
         {/* Keyed by the saved state so the form restarts from what was stored. */}
-        <FeatureFlagForm
-          key={JSON.stringify(state)}
-          schoolId={schoolId}
-          feature={feature}
-          state={state}
-        />
+        <FeatureFlagForm key={JSON.stringify(entry)} schoolId={schoolId} entry={entry} />
       </CardContent>
     </Card>
   );
@@ -241,8 +236,8 @@ export function SchoolFeatureFlags({ schoolId }: { schoolId: string }) {
   return (
     <section className="mx-auto flex w-full max-w-4xl flex-col gap-5">
       <FeatureFlagsHeading />
-      {SCHOOL_FEATURE_KEYS.map((feature) => (
-        <FeatureFlagCard key={feature} schoolId={schoolId} feature={feature} state={features[feature]} />
+      {schoolFeatureEntries(features).map((entry) => (
+        <FeatureFlagCard key={entry.feature} schoolId={schoolId} entry={entry} />
       ))}
     </section>
   );

@@ -20,6 +20,7 @@ import {
   setTestSchoolFeature,
 } from '../../../../test/fixtures';
 import {
+  assertSchoolFeatureEnabled,
   getSchoolFeature,
   getSchoolFeatureFlags,
   isSchoolFeatureEnabled,
@@ -75,6 +76,21 @@ describe('school feature flag storage', () => {
 
     await db.insert(schoolFeatureFlagTable).values({ schoolId: school.id, feature: 'notices', enabled: true, config: { stale: true } });
     await expect(getSchoolFeature(db, school.id, 'notices')).rejects.toThrow();
+  });
+
+  it('answers "is it enabled" from the enabled fact alone, whatever the stored config looks like', async () => {
+    // A config that no longer matches its schema (as after a schema change):
+    // reading the config fails loudly, but every gate must keep deciding.
+    const school = await createTestSchool();
+    await db.insert(schoolFeatureFlagTable).values([
+      { schoolId: school.id, feature: 'cadet', enabled: true, config: { stale: true } },
+      { schoolId: school.id, feature: 'notices', enabled: false, config: { stale: true } },
+    ]);
+    await expect(getSchoolFeature(db, school.id, 'cadet')).rejects.toThrow();
+    expect(await isSchoolFeatureEnabled(db, school.id, 'cadet')).toBe(true);
+    expect(await isSchoolFeatureEnabled(db, school.id, 'notices')).toBe(false);
+    await expect(assertSchoolFeatureEnabled(db, school.id, 'cadet')).resolves.toBeUndefined();
+    await expectFeatureDisabled(assertSchoolFeatureEnabled(db, school.id, 'notices'), 'notices');
   });
 });
 

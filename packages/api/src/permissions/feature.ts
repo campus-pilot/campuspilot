@@ -3,7 +3,10 @@ import type {
   SchoolFeatureState,
 } from '@campuspilot/db/feature-flags/catalogue';
 
-import { assertSchoolFeatureEnabled } from '../feature-flags/feature-flags.service';
+import {
+  getSchoolFeature,
+  schoolFeatureDisabledError,
+} from '../feature-flags/feature-flags.service';
 import { o } from '../index';
 
 type SchoolScopedInput = {
@@ -33,12 +36,11 @@ export function requireSchoolFeature<
 >(feature: K) {
   return o.middleware<{ feature: SchoolFeatureState<K> & { enabled: true } }, TInput>(
     async ({ context, next }, input) => {
-      const state = await assertSchoolFeatureEnabled(
-        context.db,
-        input.schoolId,
-        feature,
-      );
-      return next({ context: { feature: state } });
+      // The handler receives the typed config, so this read parses it
+      // (and throws on a stored config that no longer matches its schema).
+      const state = await getSchoolFeature(context.db, input.schoolId, feature);
+      if (!state.enabled) throw schoolFeatureDisabledError(feature);
+      return next({ context: { feature: { ...state, enabled: true } } });
     },
   );
 }
