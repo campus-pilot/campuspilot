@@ -115,6 +115,22 @@ again when it is enabled. Not gated today: `releaseExamToCadet` /
 `withdrawExamFromCadet` and the student notification fan-out (inbox rows, web
 push, WhatsApp) still run for a school without the portal.
 
+## The `notices` feature: where it is enforced
+
+| Surface | Behaviour when off |
+| --- | --- |
+| Staff notice procedures (`routers/school/notice`: list, get, create, update, delete, preview, publish preview, publish, download) | Disabled-feature error (`feature: 'notices'`) after the permission check; nothing is written. |
+| Document template procedures with `documentType: 'notice'` | Disabled-feature error after the permission check. Other document types are unaffected. |
+| `listNotificationDeliveries` with a `notice` scope | Disabled-feature error. Other scopes are unaffected. |
+| Cadet `listNotices`, `getNotice`, `getNoticeDownload` | Disabled-feature error (`feature: 'notices'`); the rest of the portal keeps working. |
+| `getDashboard` | `actions.createNotice` is false. |
+
+Addressing students also needs `cadet`: a notice whose `cadetScope` is not
+`none` is refused with the disabled-feature error for `cadet` when it is
+saved and again when it is published or its publication is previewed.
+Notices, their cached PDFs and already emitted notifications are kept while
+either feature is off.
+
 ## UI
 
 Management (`apps/management/components`):

@@ -321,6 +321,9 @@ delivery are not gated by the flag.
 | `getExamResult({ examId })` | core, read, `exams` | Released exams only (otherwise NOT_FOUND): subjects, overall, delta to the previous released exam of the same class, attendance and activities (report-card rules, `exam/exam-assessment-rules.ts`), remark, optional class averages. |
 | `getGrowth({ recordId? })` | core, read, `exams` | Every class record, overall % per released exam of the selected one; subject ids are scoped to the class record and never compared across classes. |
 | `listRemarks({ filters.recordId? })` | core, read, `exams` | Teacher remarks of released exams, dated by the exam's release. |
+| `listNotices({})` | core, read, `notices` | Published notices addressed to the student (paginated, newest first): `{ noticeId, title, publishedAt }`. Needs the school's `notices` feature. |
+| `getNotice({ noticeId })` | core, read, `notices` | One addressed notice with its sanitized `html` (for the sandboxed iframe) and `text` (plain notices only); anything else is NOT_FOUND. |
+| `getNoticeDownload({ noticeId })` | hidden, read | A five-minute URL of the notice's cached PDF (the file staff download). |
 
 A **class record** is one class within one session's enrollment
 (`{studentId}.{classId}`); an `examId` is `{recordId}.{examSlug}`. Records come
@@ -344,6 +347,16 @@ student result page and are locked while released. Class averages appear only
 when the school setting `cadet_show_class_averages` is on (school settings) and
 at least `CADET_CLASS_AVERAGE_MIN_STUDENTS` (5) approved, registered students
 contribute; the server returns null otherwise.
+
+**Notices.** A student sees a notice when it is published, belongs to their
+school, addresses students (`cadet_scope` is not `none`) and they are enrolled
+in the notice's session; for `selected_classes` the enrollment's class must be
+one of the notice's classes (`cadet-notices.service.ts`). Membership is
+evaluated on each request, so a student moved to another class sees that
+class's notices. Who was *notified* is fixed when the notice is published
+(`notice.published`: inbox, web push, WhatsApp with the PDF; route
+`/notices/{noticeId}`). The three procedures also require the school's
+`notices` feature. The screens are not built yet.
 
 ## Cadet MCP
 
@@ -529,7 +542,7 @@ add it to `cadetAuthSchema`.
 
 ## Known gaps and deferred decisions
 
-- **Hidden, not built**: notices, the notification bell, calendar, the Updates
+- **Hidden, not built**: the notices screens (the API exists, see above), the notification bell, calendar, the Updates
   screen, push/WhatsApp settings, online payment (a disabled "coming soon"
   button), guardian/sibling switching and connected-AI-app settings.
 - **No PDFs for cadets**: bill, receipt, adjustment and statement downloads are
