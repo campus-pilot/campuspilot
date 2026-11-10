@@ -246,6 +246,11 @@ describe('document rendering', () => {
  * in exactly one of them.
  */
 describe('render budget: every output-producing construct is counted or refused', () => {
+  // The lexer spies below must not outlive their test: a later Handlebars.parse would never end.
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   /** Plain Handlebars with the same `add` helper: what a template means without any accounting. */
   const reference = Handlebars.create();
   reference.registerHelper('add', (a: unknown, b: unknown) => {
@@ -365,7 +370,9 @@ describe('render budget: every output-producing construct is counted or refused'
     const template = `{{#each people}}{{#each ../people}}${'{{missing}}'.repeat(5_000)}{{/each}}{{/each}}`;
     const started = performance.now();
     expect(() => measureDocumentRender(template, { people }, 3_000_000)).toThrowError(overBudget);
-    expect(performance.now() - started).toBeLessThan(2_000);
+    // About 0.9 s alone; the bound leaves room for a loaded machine running files in parallel,
+    // and is still far below the minutes the 450 million evaluations would take.
+    expect(performance.now() - started).toBeLessThan(5_000);
     // One run of a body costs one step plus the expression nodes of its statements.
     const measured = measureDocumentRender('a{{x}}{{#if x}}b{{/if}}', { x: 'y' });
     // The template: one run, `x` (one node) and `if x` (two); the if body: one run, no statements.

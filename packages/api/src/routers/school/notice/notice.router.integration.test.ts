@@ -428,6 +428,7 @@ describe('school notices', () => {
         kind: 'ready',
         version: 1,
         templateRevisionId: null,
+        pageSize: 'full',
         toStaff: true,
         staffRecipientCount: staffCount,
         cadetScope: 'none',

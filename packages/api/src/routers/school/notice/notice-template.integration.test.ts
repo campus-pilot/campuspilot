@@ -48,9 +48,10 @@ describe('notice document template', () => {
   it('offers the built-in design in the marketplace, previewed with notice-only sample data in the flowing layout', async () => {
     const list = await teacher.school.listMarketplaceTemplates(scope());
     // Notice designs adapt to each notice's print size, so every one is stored as full (not a footprint).
+    // Listed by name: "Compact Notice" before "Standard Notice".
     expect(list.items).toEqual([
-      expect.objectContaining({ slug: 'notice-default', documentType: 'notice', pageSize: 'full' }),
       expect.objectContaining({ slug: 'notice-compact', documentType: 'notice', pageSize: 'full' }),
+      expect.objectContaining({ slug: 'notice-default', documentType: 'notice', pageSize: 'full' }),
     ]);
     const item = await teacher.school.getMarketplaceTemplate({ ...scope(), slug: 'notice-default' });
     expect(item.html).toContain('Annual Sports Day');
