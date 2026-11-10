@@ -158,7 +158,8 @@ function SharedAssessmentPreview({
             {data.context.coScholasticAreas[slug]?.name ??
               `${slug} (historical)`}
           </span>
-          <strong>{grade}</strong>
+          {/* Imported grades may be stored lower-case ("a1"); display them capitalized. */}
+          <strong className="capitalize">{grade}</strong>
         </div>
       ))}
     </section>
