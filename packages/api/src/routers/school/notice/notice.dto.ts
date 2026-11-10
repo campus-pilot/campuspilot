@@ -96,11 +96,29 @@ const contentShape = {
   title: noticeTitleSchema,
   bodyMode: z.enum(NOTICE_BODY_MODES),
   body: noticeBodySchema.describe('Plain text (blank lines separate paragraphs) or, for bodyMode template, the complete Handlebars/HTML document.'),
-  pageSize: z
-    .enum(NOTICE_PAGE_SIZES)
-    .default('full')
-    .describe('Paper the notice prints on, for either body mode: full (portrait A4 pages) or half (half-A4 pages, two copies per printed A4 sheet). Templates adapt to it through print.size.'),
 };
+
+const PAGE_SIZE_DESCRIPTION =
+  'Paper the notice prints on, for either body mode: full (portrait A4 pages) or half (half-A4 pages, two copies per printed A4 sheet). Templates adapt to it through print.size.';
+
+/**
+ * The print size of a new notice or of unsaved preview content: a notice
+ * starts on full A4 unless the caller says otherwise.
+ */
+const pageSizeWithDefaultSchema = z
+  .enum(NOTICE_PAGE_SIZES)
+  .default('full')
+  .describe(`${PAGE_SIZE_DESCRIPTION} Defaults to full.`);
+
+/**
+ * The print size of a draft being replaced. Required, never defaulted:
+ * `updateNotice` is a full replacement, and a caller that leaves the size
+ * out (an older client, a script, an agent) must not silently turn a
+ * half-A4 draft back into full A4 (review round 4, R4-2).
+ */
+const requiredPageSizeSchema = z
+  .enum(NOTICE_PAGE_SIZES)
+  .describe(`${PAGE_SIZE_DESCRIPTION} Required: send the draft's current pageSize from getNotice to keep it.`);
 
 export const noticeScopeInputSchema = z.object({ schoolId: id, noticeId: id });
 
@@ -146,12 +164,15 @@ export const NOTICE_CHANGED_MESSAGE = 'This notice changed since you opened it. 
 export const NOTICE_TEMPLATE_CHANGED_MESSAGE = "The school's Notice template changed since you opened this notice. Review it again.";
 
 export const createNoticeInputSchema = z
-  .object({ schoolId: id, sessionId: id, ...contentShape, ...audienceShape })
+  .object({ schoolId: id, sessionId: id, ...contentShape, pageSize: pageSizeWithDefaultSchema, ...audienceShape })
   .superRefine(validateNoticeAudience);
 
-/** A full replacement of a draft's content and audience, based on the version the caller read. */
+/**
+ * A full replacement of a draft's content, print size and audience, based on
+ * the version the caller read. Every field is required, `pageSize` included.
+ */
 export const updateNoticeInputSchema = z
-  .object({ schoolId: id, noticeId: id, expectedVersion: expectedVersionSchema, ...contentShape, ...audienceShape })
+  .object({ schoolId: id, noticeId: id, expectedVersion: expectedVersionSchema, ...contentShape, pageSize: requiredPageSizeSchema, ...audienceShape })
   .superRefine(validateNoticeAudience);
 
 export const listNoticesInputSchema = createListInputSchema({
@@ -254,7 +275,7 @@ export const previewNoticeInputSchema = z.object({
   schoolId: id,
   source: z.discriminatedUnion('kind', [
     z.object({ kind: z.literal('saved'), noticeId: id }),
-    z.object({ kind: z.literal('unsaved'), sessionId: id, ...contentShape }),
+    z.object({ kind: z.literal('unsaved'), sessionId: id, ...contentShape, pageSize: pageSizeWithDefaultSchema }),
   ]),
 });
 

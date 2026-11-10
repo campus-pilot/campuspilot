@@ -47,6 +47,8 @@ describe('school notices', () => {
     toStaff: true,
     cadetScope: 'none' as const,
     classIds: [] as string[],
+    // updateNotice requires it (a full replacement); createNotice would default it.
+    pageSize: 'full' as const,
     ...overrides,
   });
   const eventsOf = (noticeId: string) =>
@@ -780,6 +782,23 @@ describe('school notices', () => {
       expect(resized).toMatchObject({ pageSize: 'half', version: draft.version + 1 });
       await expect(principal.school.publishNotice({ schoolId, noticeId: draft.id, expectedVersion: draft.version, expectedTemplateRevisionId: null })).rejects.toMatchObject({ code: 'CONFLICT' });
       await expect(principal.school.previewNoticePublish({ schoolId, noticeId: draft.id })).resolves.toMatchObject({ kind: 'ready', pageSize: 'half' });
+    });
+
+    /**
+     * Review round 4, R4-2: `pageSize` used to default on the update too, so
+     * an update that left it out reset a half-A4 draft to full A4.
+     */
+    it('defaults the size of a new notice but requires it when a draft is replaced', async () => {
+      const { pageSize: _omitted, ...withoutSize } = plain({ title: 'Sized' });
+      const created = await teacher.school.createNotice(withoutSize);
+      expect(created).toMatchObject({ pageSize: 'full' });
+      const half = await teacher.school.updateNotice({ ...plain({ title: 'Sized', pageSize: 'half' }), noticeId: created.id, expectedVersion: created.version });
+      const { pageSize: _dropped, ...replacementWithoutSize } = plain({ title: 'Sized again' });
+      await expect(
+        teacher.school.updateNotice({ ...replacementWithoutSize, noticeId: created.id, expectedVersion: half.version } as never),
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+      // Nothing was written: the draft is still half A4 at the same version.
+      expect((await db.select().from(noticeTable).where(eq(noticeTable.id, created.id)))[0]).toMatchObject({ title: 'Sized', pageSize: 'half', version: half.version });
     });
 
     it('pins the size at publication: the notice, its preview and its cached PDF stay half A4, imposed two copies per A4 sheet', async () => {

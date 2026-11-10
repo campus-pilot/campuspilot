@@ -93,7 +93,7 @@ export const schoolNoticeRouter = {
     }),
 
   createNotice: protectedProcedure
-    .route(route('Create a notice draft', 'Save a new draft notice for one academic session with its title, text (plain text or a complete Handlebars document) and audience (staff, students of every class, or students of chosen classes). Nothing is sent until it is published.'))
+    .route(route('Create a notice draft', 'Save a new draft notice for one academic session with its title, text (plain text or a complete Handlebars document), print size (full A4 unless pageSize is half) and audience (staff, students of every class, or students of chosen classes). Nothing is sent until it is published.'))
     .meta(meta('write', false))
     .input(createNoticeInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.DRAFT_NOTICE))
@@ -108,7 +108,7 @@ export const schoolNoticeRouter = {
     }),
 
   updateNotice: protectedProcedure
-    .route(route('Update a notice draft', "Replace a draft's title, text and audience. Authors change their own drafts; staff who may publish change any draft. A published notice cannot be changed."))
+    .route(route('Update a notice draft', "Replace a draft's title, text, print size and audience; every field is required, so send pageSize from getNotice to keep the draft's size. Authors change their own drafts; staff who may publish change any draft. A published notice cannot be changed."))
     .meta(meta('write', true))
     .input(updateNoticeInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.DRAFT_NOTICE))

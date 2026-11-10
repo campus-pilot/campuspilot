@@ -220,6 +220,10 @@ alike, never inferred from a template.
   of both sizes (a compact letterhead and smaller type on half A4, typically
   through a `notice--{{print.size}}` class); a custom template can do the
   same. See "Rendering".
+- **Stated on every write.** `createNotice` and an unsaved `previewNotice`
+  default to `full`; `updateNotice` is a full replacement and **requires**
+  `pageSize` (a missing size is `BAD_REQUEST`), so a client or agent that
+  leaves it out cannot turn a half-A4 draft back into full A4 unnoticed.
 - **Versioned and pinned.** A size change is a saved edit and increments
   `version`, so a publisher never confirms a stale size. A published row is
   immutable, so `page_size` is the size pinned at publication; the cached
