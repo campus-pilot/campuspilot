@@ -17,7 +17,9 @@ export { MAX_USAGE_RANGE_DAYS };
  * pages), from the saved `assistant_model_request` rows: nothing is
  * recomputed from prices. Days are IST calendar days. Results are cached in
  * Redis for {@link USAGE_CACHE_SECONDS}, so these pages may be up to an hour
- * behind; limits use their own, shorter cache (`spend.ts`).
+ * behind; every answer says when it was computed (`computedAt`) and a caller
+ * may ask for a fresh one (`refresh`). Limits use their own, shorter cache
+ * (`spend.ts`), which a refresh does not touch.
  */
 
 /** How long a usage answer is reused. */
@@ -37,13 +39,21 @@ export const usageRangeShape = {
 };
 
 /**
+ * Whether to skip the cached answer: the usage is computed again from the
+ * saved rows and replaces the cached answer for everyone. Bounded like any
+ * other read (one range of at most {@link MAX_USAGE_RANGE_DAYS} days).
+ */
+const refreshShape = { refresh: z.boolean().optional() };
+
+/**
  * An input object with a usage range: its fields plus the range's own rules
- * (ordered, at most {@link MAX_USAGE_RANGE_DAYS} days). Inputs stay plain
- * top-level objects, as every procedure input must be.
+ * (ordered, at most {@link MAX_USAGE_RANGE_DAYS} days) and the `refresh`
+ * option. Inputs stay plain top-level objects, as every procedure input must
+ * be.
  */
 export function withUsageRange<T extends z.ZodRawShape>(shape: T) {
   return z
-    .object({ ...shape, ...usageRangeShape })
+    .object({ ...shape, ...usageRangeShape, ...refreshShape })
     .refine((value) => rangeOf(value).from <= rangeOf(value).to, { message: 'The range must not end before it starts.', path: ['to'] })
     .refine((value) => rangeDays(rangeOf(value)) <= MAX_USAGE_RANGE_DAYS, {
       message: `Ask for at most ${MAX_USAGE_RANGE_DAYS} days at a time.`,
@@ -61,7 +71,10 @@ const rangeDays = (range: { from: string; to: string }) =>
 /** An inclusive range of IST calendar dates. */
 export const usageRangeSchema = withUsageRange({});
 
-export type UsageRange = z.infer<typeof usageRangeSchema>;
+export type UsageRange = { from: string; to: string };
+
+/** How a usage answer is read: from the cache when it has one, or computed again (`refresh`). */
+export type UsageReadOptions = { refresh?: boolean };
 
 /** A token sum: a number while it is a safe integer, its decimal text beyond (see `TokenCount`). */
 const tokenCountSchema = z.union([z.number().int().nonnegative(), z.string().regex(/^\d+$/)]);
@@ -124,6 +137,8 @@ export const usageUserSchema = z.object({
 });
 
 export const assistantUsageSchema = z.object({
+  /** When these figures were computed from the saved rows (ISO 8601); a cached answer keeps its original time. */
+  computedAt: z.iso.datetime(),
   from: isoDate,
   to: isoDate,
   total: z.object(tokenShape),
@@ -198,6 +213,8 @@ function datesOf(range: UsageRange): string[] {
 const trimUsd = (amount: string) => (amount.includes('.') ? amount.replace(/0+$/, '').replace(/\.$/, '') : amount);
 
 async function computeUsage(db: DatabaseExecutor, range: UsageRange, schoolId: string | null): Promise<AssistantUsage> {
+  // Taken before the reads, so a request saved while they run is never claimed as included.
+  const computedAt = new Date();
   const where = rangeFilter(range, schoolId);
   // The zone is a constant written into the statement, not a parameter:
   // grouping needs the select and group-by expressions to be identical.
@@ -234,6 +251,7 @@ async function computeUsage(db: DatabaseExecutor, range: UsageRange, schoolId: s
   ]);
   const byDay = new Map(dayRows.map((row) => [row.date, row]));
   return {
+    computedAt: computedAt.toISOString(),
     from: range.from,
     to: range.to,
     total: toTotals(totalRows[0]),
@@ -256,12 +274,14 @@ async function computeUsage(db: DatabaseExecutor, range: UsageRange, schoolId: s
 }
 
 /**
- * Reuses a cached answer for an hour. Redis being unreachable only costs the
- * query; it never changes the answer.
+ * Reuses a cached answer for an hour, unless `refresh` asks for a new one,
+ * which then replaces it. Redis being unreachable only costs the query; it
+ * never changes the answer. An answer cached in an older shape fails the
+ * schema and is computed again.
  */
-async function cached<T>(key: string, schema: z.ZodType<T>, compute: () => Promise<T>): Promise<T> {
+async function cached<T>(key: string, schema: z.ZodType<T>, options: UsageReadOptions, compute: () => Promise<T>): Promise<T> {
   const redis = getRedisClient();
-  const hit = await redis.get(key).catch(() => null);
+  const hit = options.refresh ? null : await redis.get(key).catch(() => null);
   if (hit) {
     const parsed = schema.safeParse(JSON.parse(hit));
     if (parsed.success) return parsed.data;
@@ -272,8 +292,8 @@ async function cached<T>(key: string, schema: z.ZodType<T>, compute: () => Promi
 }
 
 /** A school's assistant spend over a range of IST days. */
-export function schoolAssistantUsage(db: DatabaseExecutor, schoolId: string, range: UsageRange) {
-  return cached(`assistant:usage:school:${schoolId}:${range.from}:${range.to}`, assistantUsageSchema, () =>
+export function schoolAssistantUsage(db: DatabaseExecutor, schoolId: string, range: UsageRange, options: UsageReadOptions = {}) {
+  return cached(`assistant:usage:school:${schoolId}:${range.from}:${range.to}`, assistantUsageSchema, options, () =>
     computeUsage(db, range, schoolId),
   );
 }
@@ -284,8 +304,8 @@ export const schoolAssistantUsageDetailSchema = assistantUsageSchema.extend({
 });
 
 /** A school's spend with its top users, for platform administrators. */
-export function schoolAssistantUsageDetail(db: DatabaseExecutor, schoolId: string, range: UsageRange) {
-  return cached(`assistant:usage:school-detail:${schoolId}:${range.from}:${range.to}`, schoolAssistantUsageDetailSchema, async () => {
+export function schoolAssistantUsageDetail(db: DatabaseExecutor, schoolId: string, range: UsageRange, options: UsageReadOptions = {}) {
+  return cached(`assistant:usage:school-detail:${schoolId}:${range.from}:${range.to}`, schoolAssistantUsageDetailSchema, options, async () => {
     const [usage, users] = await Promise.all([
       computeUsage(db, range, schoolId),
       db
@@ -313,8 +333,8 @@ export const platformAssistantUsageSchema = assistantUsageSchema.extend({
 });
 
 /** The platform's assistant spend (every school), per day, per model and per school. */
-export function platformAssistantUsage(db: DatabaseExecutor, range: UsageRange) {
-  return cached(`assistant:usage:platform:${range.from}:${range.to}`, platformAssistantUsageSchema, async () => {
+export function platformAssistantUsage(db: DatabaseExecutor, range: UsageRange, options: UsageReadOptions = {}) {
+  return cached(`assistant:usage:platform:${range.from}:${range.to}`, platformAssistantUsageSchema, options, async () => {
     const [usage, schools] = await Promise.all([
       computeUsage(db, range, null),
       db

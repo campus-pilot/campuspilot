@@ -10,7 +10,7 @@ import {
   type UsageGrouping,
   type UsageRangeFormApi,
 } from '@campuspilot/components/assistant-usage';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@campuspilot/ui/components/card';
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@campuspilot/ui/components/card';
 import type { ReactNode } from 'react';
 
 import { InrRateControl } from './inr-rate';
@@ -35,6 +35,7 @@ export function UsageSpendCard({
   total,
   grouping,
   inrPerUsd,
+  action,
   children,
 }: {
   title: string;
@@ -42,6 +43,8 @@ export function UsageSpendCard({
   total: UsageTotals;
   grouping: UsageGrouping;
   inrPerUsd: string | null;
+  /** Shown at the header's end: when the figures were computed and the refresh button. */
+  action?: ReactNode;
   children?: ReactNode;
 }) {
   const periods = groupUsage(days, grouping);
@@ -50,12 +53,12 @@ export function UsageSpendCard({
       <CardHeader>
         <CardTitle>{title}</CardTitle>
         <CardDescription>
-          {formatSpend(total.costUsd, inrPerUsd)} over {total.requests} model requests. Days are IST; figures may be up to two hours
-          behind.
+          {formatSpend(total.costUsd, inrPerUsd)} over {total.requests} model requests. Days are IST.
           {total.incompleteRequests > 0
             ? ` ${total.incompleteRequests} stopped requests were saved with incomplete usage, so the provider may bill a little more.`
             : null}
         </CardDescription>
+        {action ? <CardAction>{action}</CardAction> : null}
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
         <UsageChart periods={periods} inrPerUsd={inrPerUsd} label={`${title} per ${grouping}`} />

@@ -1,9 +1,9 @@
 'use client';
 
-import { formatSpend, useUsageRangeForm, useUsageSelection } from '@campuspilot/components/assistant-usage';
+import { formatSpend, UsageFreshness, useUsageRangeForm, useUsageSelection } from '@campuspilot/components/assistant-usage';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@campuspilot/ui/components/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@campuspilot/ui/components/table';
-import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
 import { useState } from 'react';
 
@@ -68,6 +68,20 @@ function TableCard({ title, description, children }: { title: string; descriptio
 }
 
 /**
+ * Computes the platform's usage again (`refresh`), bypassing the API's
+ * hour-long cache, and shows the answer under the range it was asked for.
+ */
+function useRefreshPlatformUsage() {
+  const queryClient = useQueryClient();
+  return useMutation(
+    orpc.systemAdmin.getPlatformAssistantUsage.mutationOptions({
+      onSuccess: (usage, { refresh: _refresh, ...input }) =>
+        queryClient.setQueryData(orpc.systemAdmin.getPlatformAssistantUsage.queryKey({ input }), usage),
+    }),
+  );
+}
+
+/**
  * AI billing: the platform's assistant spend for drift checks against the
  * providers' consoles. Totals per provider and model show the prices that
  * were saved, so a wrong env price is visible.
@@ -84,6 +98,7 @@ export function PlatformAiBilling() {
     placeholderData: keepPreviousData,
   });
   const usage = usageQuery.data;
+  const refresh = useRefreshPlatformUsage();
   return (
     <section className="mx-auto flex w-full max-w-6xl flex-col gap-5">
       <div className="flex flex-col gap-1">
@@ -96,7 +111,20 @@ export function PlatformAiBilling() {
       <UsageToolbar form={form} />
       {usage && selection ? (
         <>
-          <UsageSpendCard title="Platform spend" days={usage.days} total={usage.total} grouping={selection.grouping} inrPerUsd={inrPerUsd} />
+          <UsageSpendCard
+            title="Platform spend"
+            days={usage.days}
+            total={usage.total}
+            grouping={selection.grouping}
+            inrPerUsd={inrPerUsd}
+            action={
+              <UsageFreshness
+                computedAt={usage.computedAt}
+                refreshing={refresh.isPending}
+                onRefresh={() => refresh.mutate({ from: selection.from, to: selection.to, refresh: true })}
+              />
+            }
+          />
           <TableCard title="Per provider and model" description="Tokens, requests and spend, with the prices that were saved.">
             <ModelTotalsTable models={usage.models} inrPerUsd={inrPerUsd} />
           </TableCard>

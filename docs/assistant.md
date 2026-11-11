@@ -230,7 +230,11 @@ Days and months are **IST** (Asia/Kolkata, fixed UTC+05:30): a month is the
 1st to the last day. The prompt's "today" is the IST date too. The AI billing
 page opens on the current IST month; the other usage views on the last 7
 days. Usage reads (`packages/api/src/assistant/usage.ts`) are
-cached in Redis for an hour, so these pages can be one to two hours behind.
+cached in Redis for an hour. Every answer carries `computedAt`, which each
+usage page shows ("Updated 11 Nov, 7:12 pm IST") next to a Refresh button;
+Refresh sends `refresh: true`, which computes the figures again from the saved
+rows and replaces the cached answer for everyone reading that range. Refresh
+does not touch the 10-minute spend cache the monthly limit uses.
 Provider consoles group days in their own time zone: compare months, not days.
 INR is shown only in the admin app, at a rate the viewer types, kept in the
 browser's localStorage and never sent to the API.

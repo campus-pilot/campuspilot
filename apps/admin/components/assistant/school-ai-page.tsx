@@ -1,12 +1,12 @@
 'use client';
 
 import { schoolFeatureCatalogue } from '@campuspilot/api/routers/school/feature-flags/feature-flags.dto';
-import { formatSpend, useUsageRangeForm, useUsageSelection } from '@campuspilot/components/assistant-usage';
+import { formatSpend, UsageFreshness, useUsageRangeForm, useUsageSelection } from '@campuspilot/components/assistant-usage';
 import { resolveQueryBoundary } from '@campuspilot/components/query-boundary';
 import { Badge } from '@campuspilot/ui/components/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@campuspilot/ui/components/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@campuspilot/ui/components/table';
-import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 
 import { orpc } from '@/lib/orpc';
@@ -85,11 +85,25 @@ function SchoolUsage({ schoolId }: { schoolId: string }) {
     enabled: selection !== null,
     placeholderData: keepPreviousData,
   });
+  const refresh = useRefreshSchoolUsage();
   return (
     <section className="flex flex-col gap-4">
       <UsageToolbar form={form} />
       {usageQuery.data && selection ? (
-        <UsageSpendCard title="Spend" days={usageQuery.data.days} total={usageQuery.data.total} grouping={selection.grouping} inrPerUsd={inrPerUsd}>
+        <UsageSpendCard
+          title="Spend"
+          days={usageQuery.data.days}
+          total={usageQuery.data.total}
+          grouping={selection.grouping}
+          inrPerUsd={inrPerUsd}
+          action={
+            <UsageFreshness
+              computedAt={usageQuery.data.computedAt}
+              refreshing={refresh.isPending}
+              onRefresh={() => refresh.mutate({ id: schoolId, from: selection.from, to: selection.to, refresh: true })}
+            />
+          }
+        >
           <ModelTotalsTable models={usageQuery.data.models} inrPerUsd={inrPerUsd} />
           <TopUsersTable users={usageQuery.data.users} inrPerUsd={inrPerUsd} />
         </UsageSpendCard>
@@ -97,6 +111,20 @@ function SchoolUsage({ schoolId }: { schoolId: string }) {
         <UsageStateCard failed={usageQuery.isError} onRetry={() => void usageQuery.refetch()} />
       )}
     </section>
+  );
+}
+
+/**
+ * Computes the school's usage again (`refresh`), bypassing the API's
+ * hour-long cache, and shows the answer under the range it was asked for.
+ */
+function useRefreshSchoolUsage() {
+  const queryClient = useQueryClient();
+  return useMutation(
+    orpc.systemAdmin.getSchoolAssistantUsage.mutationOptions({
+      onSuccess: (usage, { refresh: _refresh, ...input }) =>
+        queryClient.setQueryData(orpc.systemAdmin.getSchoolAssistantUsage.queryKey({ input }), usage),
+    }),
   );
 }
 

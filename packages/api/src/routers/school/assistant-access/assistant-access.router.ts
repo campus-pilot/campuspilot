@@ -120,7 +120,7 @@ export const schoolAssistantAccessRouter = {
     .route({
       summary: 'Get assistant usage',
       description:
-        'Read what the in-app AI assistant cost the school per IST calendar day over a range (USD, from the costs saved with every model request), with request and token counts. May be up to an hour behind.',
+        'Read what the in-app AI assistant cost the school per IST calendar day over a range (USD, from the costs saved with every model request), with request and token counts. May be up to an hour behind unless `refresh` is set, which computes it again.',
       tags: ['School', 'Assistant'],
     })
     .meta({ mcp: { exposure: 'hidden', access: 'read', destructive: false, module: 'schools' } })
@@ -130,7 +130,7 @@ export const schoolAssistantAccessRouter = {
     .output(assistantUsageSchema)
     .handler(async ({ context, input }) => {
       try {
-        return await schoolAssistantUsage(context.db, input.schoolId, { from: input.from, to: input.to });
+        return await schoolAssistantUsage(context.db, input.schoolId, { from: input.from, to: input.to }, { refresh: input.refresh });
       } catch (error) {
         throw toRpcError(error);
       }

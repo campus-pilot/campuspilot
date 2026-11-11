@@ -126,7 +126,7 @@ describe('school.getAssistantUsage', () => {
     expect(usage.models[0]).toMatchObject({ inputTokens: 6_442_450_941, incompleteRequests: 1 });
   });
 
-  it('is cached for an hour: a request saved after the first read is not seen yet', async () => {
+  it('is cached for an hour: a request saved after the first read is not seen until a refresh', async () => {
     const school = await createTestSchool();
     await enable(school.id);
     const principal = await createSchoolStaffSession(school.id, [{ role: 'principal' }]);
@@ -135,7 +135,14 @@ describe('school.getAssistantUsage', () => {
     await request({ schoolId: school.id, userId: principal.user.id, at: '2031-05-01T06:00:00Z', costUsd: '1' });
     expect((await client.school.getAssistantUsage(range)).total.costUsd).toBe('1');
     await request({ schoolId: school.id, userId: principal.user.id, at: '2031-05-01T07:00:00Z', costUsd: '1' });
-    expect((await client.school.getAssistantUsage(range)).total.costUsd).toBe('1');
+    const stale = await client.school.getAssistantUsage(range);
+    expect(stale.total.costUsd).toBe('1');
+
+    // A refresh computes the figures again and replaces the cached answer for later reads.
+    const refreshed = await client.school.getAssistantUsage({ ...range, refresh: true });
+    expect(refreshed.total.costUsd).toBe('2');
+    expect(Date.parse(refreshed.computedAt)).toBeGreaterThanOrEqual(Date.parse(stale.computedAt));
+    expect(await client.school.getAssistantUsage(range)).toEqual(refreshed);
   });
 
   it('is for the principal and manager, behind the feature, with a validated range', async () => {
@@ -194,6 +201,23 @@ describe('systemAdmin assistant usage', () => {
     await expect(admin.systemAdmin.getSchoolAssistantUsage({ id: 'sch_missing', from: '2032-01-01', to: '2032-01-31' })).rejects.toMatchObject({
       code: 'NOT_FOUND',
     });
+  });
+
+  it('serves cached figures for an hour unless asked to refresh', async () => {
+    const admin = createTestClient(await createAdminSession());
+    const school = await createTestSchool();
+    const userId = `usr_refresh_${randomUUID()}`;
+    const range = { from: '2032-03-01', to: '2032-03-01' };
+    await request({ schoolId: school.id, userId, at: '2032-03-01T06:00:00Z', costUsd: '1' });
+    expect((await admin.systemAdmin.getSchoolAssistantUsage({ id: school.id, ...range })).total.costUsd).toBe('1');
+    const platformBefore = (await admin.systemAdmin.getPlatformAssistantUsage(range)).total.costUsd;
+    await request({ schoolId: school.id, userId, at: '2032-03-01T07:00:00Z', costUsd: '1' });
+
+    expect((await admin.systemAdmin.getSchoolAssistantUsage({ id: school.id, ...range })).total.costUsd).toBe('1');
+    expect((await admin.systemAdmin.getSchoolAssistantUsage({ id: school.id, ...range, refresh: true })).total.costUsd).toBe('2');
+    expect((await admin.systemAdmin.getPlatformAssistantUsage(range)).total.costUsd).toBe(platformBefore);
+    const platformAfter = await admin.systemAdmin.getPlatformAssistantUsage({ ...range, refresh: true });
+    expect(Number(platformAfter.total.costUsd)).toBe(Number(platformBefore) + 1);
   });
 
   it('is for platform administrators only', async () => {
