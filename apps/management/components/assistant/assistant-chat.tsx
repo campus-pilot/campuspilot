@@ -27,6 +27,7 @@ import { cn } from '@campuspilot/ui/lib/utils';
 import { ClipboardList, RotateCcw, ShieldCheck, UserPlus, UserRoundX } from 'lucide-react';
 import { useRef, type ReactNode } from 'react';
 
+import { useApprovalMoney } from './assistant-approval-currency';
 import { refusalMessage, type AssistantConversationFailure } from './assistant-stream';
 import { AssistantViewBlock } from './assistant-view';
 import {
@@ -250,6 +251,7 @@ function useTrayRequests(schoolId: string, conversationId: string | null, queued
     );
   };
   const first = pending[0];
+  const money = useApprovalMoney(schoolId, first);
   const queue = [
     ...queued.map((item) => ({
       id: item.id,
@@ -283,6 +285,8 @@ function useTrayRequests(schoolId: string, conversationId: string | null, queued
           waiting={pending.length}
           pendingDecision={decided.decision}
           error={decided.error}
+          currency={money.currency}
+          moneyMaps={money.moneyMaps}
           onDecide={(decision) => approvals.decide(first, decision)}
         />
       ) : null}

@@ -9,16 +9,18 @@ import {
   createTestSchoolMember,
   createTestSession,
 } from '../../test/fixtures';
+import { retryFinanceConflict } from '../../test/finance/assertions';
+import { createFinanceIdempotencyKey } from '../../test/finance/factories';
+import { createFinanceScenario } from '../../test/finance/scenario';
 import type { Context } from '../context';
+import type { McpModule } from '../mcp-metadata';
 import { appRouter } from '../routers/index';
-import { assistantToolDecision, assistantToolInputDecision } from './tool-policy';
+import { assistantToolDecision } from './tool-policy';
 
-/** A client acting as the assistant for a user in one school, as the MCP gate builds it. */
-async function assistantClient(
-  schoolId: string,
-  role: 'principal' | 'teacher' | 'accountant' | 'exam_coordinator' = 'principal',
-) {
-  const { session } = await createSchoolStaffSession(schoolId, [{ role }]);
+type StaffSession = Awaited<ReturnType<typeof createSchoolStaffSession>>['session'];
+
+/** A client acting as the assistant for this signed-in user, in one school's conversation, as the MCP gate builds it. */
+function assistantClientFor(schoolId: string, session: StaffSession) {
   const context: Context = {
     db,
     headers: new Headers(),
@@ -31,47 +33,40 @@ async function assistantClient(
   return createRouterClient(appRouter, { context });
 }
 
+/** A client acting as the assistant for a new user with one role in one school. */
+async function assistantClient(
+  schoolId: string,
+  role: 'principal' | 'teacher' | 'accountant' | 'exam_coordinator' = 'principal',
+) {
+  const { session } = await createSchoolStaffSession(schoolId, [{ role }]);
+  return assistantClientFor(schoolId, session);
+}
+
+/** The assistant gate's own refusal, so a test cannot pass on OPA's refusal alone. */
+const OWN_SCHOOL_ONLY = { code: 'FORBIDDEN', message: 'This assistant conversation can only act in its own school.' };
+
 describe('assistant tool policy', () => {
-  it('allows school modules and excludes money, platform and account tools', () => {
-    const meta = (module: 'students' | 'billing' | 'dashboard' | 'platform' | 'account') =>
-      ({ exposure: 'core', access: 'read', destructive: false, module }) as const;
-    expect(assistantToolDecision(meta('students'))).toEqual({ allowed: true, requiresApproval: false });
-    for (const module of ['billing', 'dashboard', 'platform', 'account'] as const) {
+  it('allows school modules, money included, and excludes platform, account and unreviewed tools', () => {
+    const meta = (module: McpModule) => ({ exposure: 'core', access: 'read', destructive: false, module }) as const;
+    for (const module of ['students', 'billing', 'dashboard', 'documents'] as const) {
+      expect(assistantToolDecision(meta(module))).toEqual({ allowed: true, requiresApproval: false });
+    }
+    for (const module of ['platform', 'system', 'account', 'notices', 'notifications'] as const) {
       expect(assistantToolDecision(meta(module)).allowed).toBe(false);
     }
     expect(
-      assistantToolDecision({ exposure: 'hidden', access: 'read', destructive: false, module: 'students' })
+      assistantToolDecision({ exposure: 'hidden', access: 'read', destructive: false, module: 'billing' })
         .allowed,
     ).toBe(false);
   });
 
-  it('requires approval for every write', () => {
-    expect(
-      assistantToolDecision({ exposure: 'core', access: 'write', destructive: false, module: 'admissions' }),
-    ).toEqual({ allowed: true, requiresApproval: true });
-  });
-
-  it('rejects finance document types in document inputs', () => {
-    const documents = { exposure: 'core', access: 'read', destructive: false, module: 'documents' } as const;
-    expect(assistantToolInputDecision(documents, { filters: { documentType: 'receipt' } }).allowed).toBe(false);
-    expect(assistantToolInputDecision(documents, { source: { documentType: 'bill' } }).allowed).toBe(false);
-    expect(assistantToolInputDecision(documents, { filters: { documentType: 'report_card' } }).allowed).toBe(true);
-  });
-
-  it('rejects finance documents asked for by domain in document inputs', () => {
-    const documents = { exposure: 'core', access: 'read', destructive: false, module: 'documents' } as const;
-    // `all` includes finance documents, so it is refused like `finance`.
-    expect(assistantToolInputDecision(documents, { filters: { documentDomain: 'finance' } }).allowed).toBe(false);
-    expect(assistantToolInputDecision(documents, { filters: { documentDomain: 'all' } }).allowed).toBe(false);
-    expect(assistantToolInputDecision(documents, { filters: { documentDomain: 'academic' } })).toEqual({
-      allowed: true,
-      requiresApproval: false,
-    });
-    // No domain is the API's default, which lists academic documents only.
-    expect(assistantToolInputDecision(documents, { filters: {} })).toEqual({
-      allowed: true,
-      requiresApproval: false,
-    });
+  it('requires approval for every write, billing writes included', () => {
+    for (const module of ['admissions', 'billing'] as const) {
+      expect(assistantToolDecision({ exposure: 'core', access: 'write', destructive: false, module })).toEqual({
+        allowed: true,
+        requiresApproval: true,
+      });
+    }
   });
 });
 
@@ -86,11 +81,13 @@ describe('assistant principal on procedures', () => {
 
   it('cannot act in another school, even where the user is a member', async () => {
     const school = await createTestSchool();
-    const client = await assistantClient(school.id);
     const other = await createTestSchool();
-    await expect(client.school.listSessions({ schoolId: other.id })).rejects.toMatchObject({
-      code: 'FORBIDDEN',
-    });
+    const { session, user } = await createSchoolStaffSession(school.id, [{ role: 'principal' }]);
+    await createTestSchoolMember({ schoolId: other.id, userId: user.id, roles: [{ role: 'principal' }] });
+    // The user may read the other school in the app; only the assistant gate refuses.
+    await expect(createTestClient(session).school.listSessions({ schoolId: other.id })).resolves.toBeDefined();
+    const client = assistantClientFor(school.id, session);
+    await expect(client.school.listSessions({ schoolId: other.id })).rejects.toMatchObject(OWN_SCHOOL_ONLY);
   });
 
   /**
@@ -132,22 +129,91 @@ describe('assistant principal on procedures', () => {
     // The same user sees both schools in the app, and only this one through the assistant.
     const own = await createTestClient(session).school.listMySchools();
     expect(own.map(({ id }) => id)).toEqual([school.id, other.id]);
-    const client = createRouterClient(appRouter, {
-      context: {
-        db,
-        headers: new Headers(),
-        session: session as Context['session'],
-        principal: { authMethod: 'assistant', assistantRun: { conversationId: 'asc_test', runId: 'asr_test', schoolId: school.id } },
-      },
-    });
+    const client = assistantClientFor(school.id, session);
     await expect(client.school.listMySchools()).resolves.toEqual([expect.objectContaining({ id: school.id })]);
   });
 
-  it('cannot call billing procedures', async () => {
-    const school = await createTestSchool();
-    const client = await assistantClient(school.id);
-    await expect(client.school.listPayments({ schoolId: school.id })).rejects.toMatchObject({
-      code: 'FORBIDDEN',
-    });
+  /**
+   * Money tools are open to the assistant, but only as far as the user's role
+   * goes: a teacher cannot read or record payments in the app, so neither can
+   * a teacher's assistant, while an accountant's assistant can do both.
+   */
+  it('reads and records payments only as far as the user’s role allows', async () => {
+    const scenario = await createFinanceScenario();
+    const schoolId = scenario.school.id;
+    const payment = {
+      schoolId,
+      admissionId: scenario.admission.id,
+      sessionId: scenario.activeSession.id,
+      amountMinor: '125000',
+      currency: 'INR',
+      method: 'cash' as const,
+      receivedAt: '2040-05-02T10:00:00Z',
+      effectiveAt: '2040-05-02T10:00:00Z',
+      idempotencyKey: createFinanceIdempotencyKey('assistant-payment'),
+    };
+    const listInput = { schoolId, filters: { admissionId: scenario.admission.id } };
+
+    const teacher = await assistantClient(schoolId, 'teacher');
+    await expect(teacher.school.listPayments(listInput)).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(teacher.school.recordPayment(payment)).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    // The dashboard is open to every role; its money totals only to roles that may read them.
+    const teacherDashboard = await teacher.school.getDashboard({ schoolId, sessionId: scenario.activeSession.id });
+    expect(teacherDashboard.billing).toBeNull();
+
+    const accountant = await assistantClient(schoolId, 'accountant');
+    const recorded = await retryFinanceConflict(() => accountant.school.recordPayment(payment));
+    expect(recorded).toMatchObject({ amountMinor: '125000', receiptNumber: expect.any(String) });
+    const payments = await accountant.school.listPayments(listInput);
+    expect(payments.items.map(({ id }) => id)).toEqual([recorded.id]);
+    const accountantDashboard = await accountant.school.getDashboard({ schoolId, sessionId: scenario.activeSession.id });
+    expect(accountantDashboard.billing).not.toBeNull();
+  });
+
+  it('cannot read or record money in another school, even where the user is its accountant', async () => {
+    const scenario = await createFinanceScenario();
+    const other = await createFinanceScenario();
+    const { session, user } = await createSchoolStaffSession(scenario.school.id, [{ role: 'accountant' }]);
+    await createTestSchoolMember({ schoolId: other.school.id, userId: user.id, roles: [{ role: 'accountant' }] });
+    const otherPayments = { schoolId: other.school.id, filters: { admissionId: other.admission.id } };
+    // The user may read the other school's payments in the app; only the assistant gate refuses.
+    await expect(createTestClient(session).school.listPayments(otherPayments)).resolves.toMatchObject({ items: [] });
+
+    const accountant = assistantClientFor(scenario.school.id, session);
+    await expect(accountant.school.listPayments(otherPayments)).rejects.toMatchObject(OWN_SCHOOL_ONLY);
+    await expect(
+      accountant.school.recordPayment({
+        schoolId: other.school.id,
+        admissionId: other.admission.id,
+        sessionId: other.activeSession.id,
+        amountMinor: '100',
+        currency: 'INR',
+        method: 'cash',
+        receivedAt: '2040-05-02T10:00:00Z',
+        effectiveAt: '2040-05-02T10:00:00Z',
+        idempotencyKey: createFinanceIdempotencyKey('assistant-other-school'),
+      }),
+    ).rejects.toMatchObject(OWN_SCHOOL_ONLY);
+    await expect(createTestClient(session).school.listPayments(otherPayments)).resolves.toMatchObject({ items: [] });
+  });
+
+  /**
+   * Finance documents are asked for like any other: by type or by domain.
+   * Only the user's own finance document permission decides.
+   */
+  it('lists finance documents only for roles that may read them', async () => {
+    const scenario = await createFinanceScenario();
+    const schoolId = scenario.school.id;
+    const teacher = await assistantClient(schoolId, 'teacher');
+    await expect(
+      teacher.school.listDocumentArtifacts({ schoolId, filters: { documentDomain: 'finance' } }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    const accountant = await assistantClient(schoolId, 'accountant');
+    await expect(
+      accountant.school.listDocumentArtifacts({ schoolId, filters: { documentDomain: 'finance' } }),
+    ).resolves.toMatchObject({ items: [] });
+    await expect(
+      accountant.school.listDocumentArtifacts({ schoolId, filters: { documentType: 'receipt' } }),
+    ).resolves.toMatchObject({ items: [] });
   });
 });

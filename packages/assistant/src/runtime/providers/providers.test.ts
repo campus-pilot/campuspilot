@@ -19,7 +19,7 @@ const tool = (name: string, exposure: 'core' | 'advanced', readOnly: boolean): A
   modelName: name, mcpName: name.replace('_', '.'), title: 'Title', description: 'Description.',
   inputSchema: { type: 'object', properties: {} }, readOnly, destructive: false, exposure, module: 'students',
 });
-const facts = { schoolId: 's', schoolName: 'Maple', userName: 'U', userEmail: 'u@x', today: '2026-11-05' };
+const facts = { schoolId: 's', schoolName: 'Maple', userName: 'U', userEmail: 'u@x', today: '2026-11-05', now: '2026-11-05T09:30:00+05:30' };
 const results = [
   { toolUseId: 'a', toolName: 'school_listStudents', content: '{"items":[]}', isError: false },
   { toolUseId: 'b', toolName: 'school_updateStudent', content: 'declined', isError: true },
@@ -45,7 +45,7 @@ describe('anthropic adapter (must match the Claude-only build)', () => {
     // Pins the prompt text so it only changes on purpose. The Claude-only and
     // Gemini-only builds carry the same instructions; change them together.
     const system = JSON.stringify(buildAnthropicSystem(buildAssistantPrompt(facts)));
-    expect(createHash('sha256').update(system).digest('hex').slice(0, 16)).toMatchInlineSnapshot(`"8187f02629409633"`);
+    expect(createHash('sha256').update(system).digest('hex').slice(0, 16)).toMatchInlineSnapshot(`"3abf478e2ef0a9d0"`);
   });
 
   it('defers advanced tools behind tool search and labels writes', () => {

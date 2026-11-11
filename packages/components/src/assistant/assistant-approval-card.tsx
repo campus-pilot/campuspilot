@@ -7,7 +7,7 @@ import { AlertCircle, Check, CircleSlash, CornerDownLeft, Shield, ShieldQuestion
 import { useRef, useSyncExternalStore } from 'react';
 
 import { APPROVE_BUTTON_ATTRIBUTE, approvalFocus, decisionKeys, type AssistantApprovalDecision } from './approval-keys';
-import { approvalValueDisplay, humanizeKey, type ApprovalValueDisplay } from './approval-values';
+import { approvalRecordFields, type ApprovalPath, type ApprovalValueDisplay } from './approval-values';
 
 export { ASSISTANT_SURFACE_PROPS, type AssistantApprovalDecision } from './approval-keys';
 
@@ -25,12 +25,16 @@ const isReference = (key: string) => /Ids?$/.test(key);
 
 type ChangeField = Extract<ApprovalValueDisplay, { kind: 'fields' }>['fields'][number];
 
-/** What the change will set, as labelled values in the reader's words (never raw JSON). */
-function changeFields(input: unknown): ChangeField[] {
-  if (typeof input !== 'object' || input === null) return [];
-  return Object.entries(input as Record<string, unknown>)
-    .filter(([key]) => !HIDDEN_INPUT_KEYS.has(key))
-    .map(([key, value]) => ({ key, label: humanizeKey(key), value: approvalValueDisplay(value) }));
+/**
+ * What the change will set, as labelled values in the reader's words (never
+ * raw JSON). `currency` and `moneyMaps` say how to read its money (see
+ * `ApprovalDisplayOptions`).
+ */
+function changeFields(input: unknown, currency?: string, moneyMaps?: readonly ApprovalPath[]): ChangeField[] {
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) return [];
+  return approvalRecordFields(input as Record<string, unknown>, { currency, moneyMaps }).filter(
+    (field) => !HIDDEN_INPUT_KEYS.has(field.key),
+  );
 }
 
 /**
@@ -131,6 +135,8 @@ export function AssistantApprovalRequest({
   waiting,
   pendingDecision,
   error,
+  currency,
+  moneyMaps,
   onDecide,
 }: {
   call: AssistantToolCallItemDto;
@@ -143,9 +149,20 @@ export function AssistantApprovalRequest({
   pendingDecision?: AssistantApprovalDecision;
   /** Why the last decision could not be sent; shown in place of the hint. */
   error?: string | null;
+  /**
+   * The currency of money amounts in the input that do not name their own,
+   * when the app knows it for this tool. Without it those amounts show as
+   * minor units; the card never guesses a currency.
+   */
+  currency?: string;
+  /**
+   * Paths of fee-slug maps in the input whose values are minor-unit amounts,
+   * declared by the app per tool (see `ApprovalDisplayOptions.moneyMaps`).
+   */
+  moneyMaps?: readonly ApprovalPath[];
   onDecide: (decision: AssistantApprovalDecision) => void;
 }) {
-  const fields = changeFields(call.body.input);
+  const fields = changeFields(call.body.input, currency, moneyMaps);
   const busy = Boolean(pendingDecision);
   const enter = useEnterApproves();
   return (
