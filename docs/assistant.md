@@ -53,9 +53,9 @@ permissions.
 3. One transaction saves the conversation, the run and the user's message.
    After commit the run is handed to Restate (`AssistantControl.startRun`,
    signed, idempotent per run); the run row is the outbox entry
-   (`handed_over_at`). A run Restate never accepts within 10 minutes is failed
+   (`handed_over_at`). A run Restate never accepts within 5 minutes is failed
    visibly (`dispatch_failed`) so the user can send again; so is a run
-   Restate accepted that never started within 10 minutes (`not_started`),
+   Restate accepted that never started within 5 minutes (`not_started`),
    unless an earlier run of the conversation is still unfinished (runs of a
    conversation queue behind each other). A late start of such a run does
    nothing.

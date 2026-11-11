@@ -42,7 +42,7 @@ import * as store from './store';
 /** Rows handled per kind and sweep; the next sweep continues with the rest. */
 const SWEEP_LIMIT = 20;
 /** A run Restate has not accepted after this long fails visibly. */
-export const RUN_HANDOVER_DEADLINE_MS = 10 * 60 * 1000;
+export const RUN_HANDOVER_DEADLINE_MS = 5 * 60 * 1000;
 /** Rows younger than this are left to the request that saved them. */
 const SWEEP_GRACE_MS = 15 * 1000;
 /** Bound for one send: Restate itself, not the worker, must answer within it. */
