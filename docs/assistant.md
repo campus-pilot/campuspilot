@@ -213,9 +213,14 @@ nothing arrived. Its cost is therefore a lower bound; the admin pages count
 such rows ("incomplete usage") so the gap is visible next to the provider's
 bill.
 
-Saved costs outlive conversations: deleting a conversation clears the
-`run_id` of its model requests (`ON DELETE SET NULL`) and keeps every row, so
-spend, limits and bills never drop. Limits, the usage tab and the admin pages
+Saved costs stay linked to their run and conversation for good: users delete
+conversations softly (below), and `assistant_model_request.run_id` is
+`NOT NULL` with `ON DELETE NO ACTION`, so no run or conversation delete can
+drop or unlink a cost. Cost rows are removed only with their school
+(`school_id` cascades on every assistant table; Postgres checks `NO ACTION` at
+the end of that one statement, when the cost rows are gone too) and by
+`purge_demo_school`, which deletes them first. Spend, limits and bills never
+drop when a conversation is deleted. Limits, the usage tab and the admin pages
 read only `assistant_model_request`, never runs. Amounts travel as decimal
 text and are added exactly (`sumUsd`), never as floats; token sums are
 `bigint` and reach clients as a number while it is a safe integer and as
@@ -366,12 +371,19 @@ and describe it in `SHOW_VIEW_TOOL_DESCRIPTION`.
   `assistantConversationAttention` in the contract is the same rule; the app
   applies it to the open conversation's live runs, which it shows as a row
   when that conversation is older than the loaded pages.
-- **`deleteConversation`** deletes one of the user's conversations for good,
-  with the same checks as reading it (may see the assistant in the school;
-  owns the conversation). The schema cascades its runs, items, approvals and
-  transcript. Its saved model-request costs are kept, with their run
-  reference cleared, so the school's spend and limit do not change. It is refused with "Stop the assistant before deleting this
-  conversation." while a run is queued, running or waiting for approval: the
+- **`deleteConversation`** deletes one of the user's conversations,
+  **softly**, with the same checks as reading it (may see the assistant in
+  the school; owns the conversation). It sets `deleted_at` and `deleted_by`
+  and keeps every row (runs, items, approvals, transcript), so its saved
+  model-request costs stay linked to their run and conversation for future
+  tracking, and the school's spend and limit do not change. For the user it
+  is gone everywhere: the list (served by a partial index on live rows), get,
+  subscribe, sending into it, the replay of a message sent to it, approve,
+  decline and stop all answer NOT_FOUND, and so does a second delete. The
+  worker never starts a run of a deleted conversation (`begin` ends it
+  `cancelled` with `conversation_deleted` before any model request) and
+  checks again before every model request. It is refused with "Stop the
+  assistant before deleting this conversation." while a run is queued, running or waiting for approval: the
   conversation row is locked for the check and the delete, and saving a
   message or a run's progress updates that row, so no run can start in
   between. Changes the assistant already made to school data are not

@@ -68,6 +68,7 @@ export async function listConversations(
   const where = and(
     eq(assistantConversationTable.schoolId, input.schoolId),
     eq(assistantConversationTable.userId, input.userId),
+    isNull(assistantConversationTable.deletedAt),
   );
   const [rows, [total]] = await Promise.all([
     db
@@ -98,9 +99,13 @@ export async function listConversations(
 const UNFINISHED_RUN_STATUSES: AssistantRunStatus[] = ['queued', 'running', 'awaiting_approval'];
 
 /**
- * Deletes a conversation with everything in it (the schema cascades its
- * runs, items, approvals and transcript), unless one of its runs has not
- * finished: a turn in progress would go on writing to rows that are gone.
+ * Deletes a conversation for its user, softly: `deleted_at` and `deleted_by`
+ * are set and every row stays (runs, items, approvals, transcript), so the
+ * costs of its model requests stay linked to their run and conversation.
+ * From then on every user-facing read treats it as not found
+ * (`findOwnedConversation`, the list) and the worker does not start or
+ * continue its runs. Refused while one of its runs has not finished: a turn
+ * in progress would go on with a conversation that is gone for its user.
  *
  * The conversation row is locked first. Saving a message or a run's
  * progress updates that row, so nothing can start or advance a run between
@@ -109,14 +114,15 @@ const UNFINISHED_RUN_STATUSES: AssistantRunStatus[] = ['queued', 'running', 'awa
 export async function deleteConversation(
   db: AssistantDatabase,
   conversationId: string,
+  deletedBy: string,
 ): Promise<'deleted' | 'busy' | 'missing'> {
   return db.transaction(async (tx) => {
     const [locked] = await tx
-      .select({ id: assistantConversationTable.id })
+      .select({ id: assistantConversationTable.id, deletedAt: assistantConversationTable.deletedAt })
       .from(assistantConversationTable)
       .where(eq(assistantConversationTable.id, conversationId))
       .for('update');
-    if (!locked) return 'missing';
+    if (!locked || locked.deletedAt) return 'missing';
     const [unfinished] = await tx
       .select({ id: assistantRunTable.id })
       .from(assistantRunTable)
@@ -128,9 +134,26 @@ export async function deleteConversation(
       )
       .limit(1);
     if (unfinished) return 'busy';
-    await tx.delete(assistantConversationTable).where(eq(assistantConversationTable.id, conversationId));
+    await tx
+      .update(assistantConversationTable)
+      .set({ deletedAt: new Date(), deletedBy })
+      .where(eq(assistantConversationTable.id, conversationId));
     return 'deleted';
   });
+}
+
+/**
+ * Locks a conversation for a new run and says whether it is still live. A
+ * message saved into a conversation takes this lock before its run, so it
+ * cannot slip in after a concurrent delete (which takes the same lock).
+ */
+export async function lockLiveConversation(tx: AssistantExecutor, conversationId: string): Promise<boolean> {
+  const [row] = await tx
+    .select({ deletedAt: assistantConversationTable.deletedAt })
+    .from(assistantConversationTable)
+    .where(eq(assistantConversationTable.id, conversationId))
+    .for('update');
+  return Boolean(row) && row!.deletedAt === null;
 }
 
 /**
@@ -238,7 +261,7 @@ export async function createConversation(
   return row!;
 }
 
-/** A conversation the user owns in that school, or null. */
+/** A live conversation the user owns in that school, or null (a deleted one is not found). */
 export async function findOwnedConversation(
   db: AssistantExecutor,
   input: { conversationId: string; schoolId: string; userId: string },
@@ -251,6 +274,7 @@ export async function findOwnedConversation(
         eq(assistantConversationTable.id, input.conversationId),
         eq(assistantConversationTable.schoolId, input.schoolId),
         eq(assistantConversationTable.userId, input.userId),
+        isNull(assistantConversationTable.deletedAt),
       ),
     )
     .limit(1);

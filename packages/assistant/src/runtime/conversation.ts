@@ -307,6 +307,14 @@ export function createRunProcessor(deps: AssistantConversationDeps) {
       });
       return null;
     }
+    if (conversation.deletedAt) {
+      // Deleted by its user: the run never starts and nothing is sent to the model.
+      await finishRun(run, 'cancelled', {
+        code: 'conversation_deleted',
+        message: 'This conversation was deleted.',
+      });
+      return null;
+    }
     const provider = deps.providers.get(conversation.provider);
     if (!provider) {
       await finishRun(run, 'failed', {
@@ -384,6 +392,14 @@ export function createRunProcessor(deps: AssistantConversationDeps) {
     const provider = providerFor(run);
     if (saved) {
       return { kind: 'response', toolUses: provider.toolUsesOf(saved.content), paused: false };
+    }
+
+    // A deleted conversation never continues. Deleting is refused while a
+    // run is unfinished and takes the conversation's lock that every run
+    // write takes, so this cannot normally be true; it is checked anyway
+    // because each request is paid.
+    if ((await store.findConversation(db, run.conversationId))?.deletedAt) {
+      throw runFailure('conversation_deleted', 'This conversation was deleted.');
     }
 
     // Every request is paid: the feature, the user's role and the school's

@@ -291,6 +291,11 @@ export const assistantRouter = os.router({
     await refreshRunToken(context, { schoolId: input.schoolId, conversationId, runId });
 
     const created = await store.assistantTransaction(db, async (tx, emit) => {
+      // Continuing a conversation: locked and checked again here, so a delete
+      // that committed since the check above cannot be followed by a new run.
+      if (input.conversationId && !(await store.lockLiveConversation(tx, conversationId))) {
+        throw new ORPCError('NOT_FOUND', { message: 'Assistant conversation was not found.' });
+      }
       if (!input.conversationId) {
         await store.createConversation(tx, {
           id: conversationId,
@@ -342,6 +347,8 @@ export const assistantRouter = os.router({
     if (!approval || approval.schoolId !== input.schoolId || approval.userId !== context.session.user.id) {
       throw new ORPCError('NOT_FOUND', { message: 'Assistant approval was not found.' });
     }
+    // An approval of a deleted conversation is gone with it.
+    await ownedConversation(context, input.schoolId, approval.conversationId);
     if (approval.status !== 'pending') {
       throw new ORPCError('CONFLICT', { message: 'This action was already decided.' });
     }
@@ -387,6 +394,7 @@ export const assistantRouter = os.router({
     if (!run || run.schoolId !== input.schoolId || run.userId !== context.session.user.id) {
       throw new ORPCError('NOT_FOUND', { message: 'Assistant run was not found.' });
     }
+    await ownedConversation(context, input.schoolId, run.conversationId);
     try {
       return await stopRun(run, (approvalId) => handOverApprovalResolution(approvalId));
     } catch (error) {
@@ -401,13 +409,14 @@ export const assistantRouter = os.router({
    * eligible role switched on; not the limit), and the conversation is their
    * own. It is refused while a run has not finished, so the user stops the
    * assistant first and nothing is deleted from under a working turn. The
-   * saved costs of its model requests are kept (their run reference is
-   * cleared), so spend and limits do not change.
+   * delete is soft (`deleted_at`): every row stays and the costs of its
+   * model requests stay linked to their run, so spend and limits do not
+   * change; for the user it is gone from every procedure.
    */
   deleteConversation: authed.deleteConversation.handler(async ({ context, input }) => {
     await assertReadAccess(context, input.schoolId);
     const owned = await ownedConversation(context, input.schoolId, input.conversationId);
-    const outcome = await store.deleteConversation(db, owned.id);
+    const outcome = await store.deleteConversation(db, owned.id, context.session.user.id);
     if (outcome === 'busy') {
       throw new ORPCError('CONFLICT', { message: 'Stop the assistant before deleting this conversation.' });
     }

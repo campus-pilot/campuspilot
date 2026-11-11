@@ -188,13 +188,22 @@ export const assistantConversationTable = pgTable(
     lastTranscriptPosition: integer("last_transcript_position").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+    /**
+     * When the user deleted the conversation; null while it is live. Deleting
+     * is soft: the conversation, its runs, items and transcript stay, so its
+     * model requests' costs stay linked to their run and conversation. Every
+     * user-facing read treats a deleted conversation as not found, and the
+     * worker never starts or continues a run of one.
+     */
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    /** Who deleted it (today always its owner); its own fact, null while live. No foreign key, like `user_id`. */
+    deletedBy: text("deleted_by"),
   },
   (table) => [
-    index("assistant_conversation_school_user_updated_idx").on(
-      table.schoolId,
-      table.userId,
-      table.updatedAt,
-    ),
+    /** The history list: a user's live conversations in a school, newest first. */
+    index("assistant_conversation_school_user_updated_idx")
+      .on(table.schoolId, table.userId, table.updatedAt)
+      .where(sql`${table.deletedAt} is null`),
   ],
 );
 
@@ -407,12 +416,17 @@ export const assistantModelRequestTable = pgTable(
       .primaryKey()
       .$default(() => generateId("assistantModelRequest")),
     /**
-     * The run that made the request; null once its conversation was deleted.
-     * The row itself is kept (`ON DELETE SET NULL`): saved costs are the
-     * billing truth and the month's spend must not drop when a user deletes
-     * a conversation. Every spend and usage read uses this table, never runs.
+     * The run that made the request. `ON DELETE NO ACTION`: a run can never be
+     * deleted while it has cost rows, so costs are never dropped or unlinked
+     * by deleting a run or conversation (users delete conversations softly).
+     * Rows go only with their school (`school_id` cascades, and Postgres
+     * checks this constraint at the end of that statement, when the rows are
+     * gone too) or through `purge_demo_school`, which deletes them first.
+     * Every spend and usage read uses this table, never runs.
      */
-    runId: text("run_id").references(() => assistantRunTable.id, { onDelete: "set null" }),
+    runId: text("run_id")
+      .notNull()
+      .references(() => assistantRunTable.id, { onDelete: "no action" }),
     schoolId: text("school_id")
       .notNull()
       .references(() => schoolTable.id, { onDelete: "cascade" }),

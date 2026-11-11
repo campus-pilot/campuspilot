@@ -1,6 +1,6 @@
 {
-  "id": "f7392647-5f3a-4e9a-8811-59518474909c",
-  "prevId": "a562c2d0-aee6-4b4c-87f0-9450d9172b45",
+  "id": "99a13c1e-6642-4367-a53a-266f0a5aa850",
+  "prevId": "5251c325-5b5f-4d4e-b2ce-61b64e4eeea5",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -821,6 +821,18 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deleted_by": {
+          "name": "deleted_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
@@ -849,6 +861,7 @@
           "isUnique": false,
           "with": {},
           "method": "btree",
+          "where": "\"assistant_conversation\".\"deleted_at\" is null",
           "concurrently": false
         }
       },
@@ -1051,7 +1064,7 @@
           "name": "run_id",
           "type": "text",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "school_id": {
           "name": "school_id",
@@ -1223,7 +1236,7 @@
             "id"
           ],
           "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "no action"
         },
         "assistant_model_request_school_id_school_id_fk": {
           "name": "assistant_model_request_school_id_school_id_fk",

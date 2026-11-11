@@ -1,4 +1,4 @@
-import { assistantModelRequestTable } from '@campuspilot/db/schema/assistant';
+import { assistantConversationTable, assistantModelRequestTable } from '@campuspilot/db/schema/assistant';
 import { createLogger } from '@campuspilot/logger';
 import { asc, eq } from 'drizzle-orm';
 import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
@@ -1202,5 +1202,21 @@ describe('a billed request that failed', () => {
     const { turn, invoke } = await arrange({ script: [new FakeModelError('busy', '429'), fakeReply({ text: 'Done.' })] });
     await invoke().done;
     expect((await modelRequestsOf(turn.runId)).map((request) => request.requestKey)).toEqual([modelTranscriptKey(turn.runId, 0)]);
+  });
+});
+
+describe('a deleted conversation', () => {
+  it('never starts a run: nothing is sent to the model and the run ends cancelled', async () => {
+    const { provider, turn, invoke } = await arrange({ script: [fakeReply({ text: 'never sent' })] });
+    await db
+      .update(assistantConversationTable)
+      .set({ deletedAt: new Date(), deletedBy: turn.userId })
+      .where(eq(assistantConversationTable.id, turn.conversationId));
+
+    await invoke().done;
+
+    expect(provider.calls).toHaveLength(0);
+    const { run } = await readTurn(turn);
+    expect(run).toMatchObject({ status: 'cancelled', errorCode: 'conversation_deleted', modelRequestCount: 0 });
   });
 });

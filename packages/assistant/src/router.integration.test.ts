@@ -367,7 +367,7 @@ describe('stopping a run that waits for approval', () => {
 });
 
 describe('deleting a conversation', () => {
-  it('removes the conversation and everything in it, and nothing else', async () => {
+  it('is soft: every row stays, marked deleted by its user, and nothing else changes', async () => {
     const turn = await finishedConversationWithEverything();
     const other = await addConversation(turn, 'Keep me');
     await setRunStatus(other, 'completed');
@@ -375,12 +375,38 @@ describe('deleting a conversation', () => {
 
     await expect(remove(turn, turn.userId)).resolves.toEqual({ id: turn.conversationId });
 
-    expect(await rowsOf(turn.conversationId)).toEqual({ conversations: 0, runs: 0, items: 0, approvals: 0, transcript: 0 });
-    expect(await rowsOf(other.conversationId)).toMatchObject({ conversations: 1, runs: 1, items: 1 });
+    expect(await rowsOf(turn.conversationId)).toEqual({ conversations: 1, runs: 1, items: 2, approvals: 1, transcript: 1 });
+    const [deleted] = await db.select().from(assistantConversationTable).where(eq(assistantConversationTable.id, turn.conversationId));
+    expect(deleted?.deletedAt).toBeInstanceOf(Date);
+    expect(deleted?.deletedBy).toBe(turn.userId);
+    const [kept] = await db.select().from(assistantConversationTable).where(eq(assistantConversationTable.id, other.conversationId));
+    expect(kept?.deletedAt).toBeNull();
     expect((await list(turn)).items.map((item) => item.id)).toEqual([other.conversationId]);
-    await expect(
-      call(assistantRouter.getConversation, { schoolId: turn.schoolId, conversationId: turn.conversationId }, as(turn.userId)),
-    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    expect((await list(turn)).pagination.totalItems).toBe(1);
+  });
+
+  it('makes the conversation not found for every procedure', async () => {
+    const turn = await finishedConversationWithEverything();
+    const approval = (await db.select().from(assistantApprovalTable).where(eq(assistantApprovalTable.runId, turn.runId)))[0]!;
+    const run = await store.findRun(db, turn.runId);
+    await remove(turn, turn.userId);
+    const ids = { schoolId: turn.schoolId, conversationId: turn.conversationId };
+
+    // Called one at a time, so no refusal is left unobserved.
+    const attempts: Array<() => Promise<unknown>> = [
+      () => call(assistantRouter.getConversation, ids, as(turn.userId)),
+      async () => {
+        const events = await call(assistantRouter.subscribeConversation, ids, as(turn.userId));
+        await events.next();
+      },
+      () => call(assistantRouter.sendMessage, { ...ids, clientRequestId: randomUUID(), text: 'More?', surface: 'page' }, as(turn.userId)),
+      // The replay of the message that started it.
+      () => call(assistantRouter.sendMessage, { ...ids, clientRequestId: run!.clientRequestId, text: 'x', surface: 'page' }, as(turn.userId)),
+      () => call(assistantRouter.respondToApproval, { schoolId: turn.schoolId, approvalId: approval.id, decision: 'decline' }, as(turn.userId)),
+      () => call(assistantRouter.stopRun, { schoolId: turn.schoolId, runId: turn.runId }, as(turn.userId)),
+      () => remove(turn, turn.userId),
+    ];
+    for (const attempt of attempts) await expect(attempt()).rejects.toMatchObject({ code: 'NOT_FOUND' });
   });
 
   it.each(['queued', 'running', 'awaiting_approval'] as const)(
@@ -408,7 +434,8 @@ describe('deleting a conversation', () => {
     const turn = await seedTurn();
     await setRunStatus(turn, status);
     await expect(remove(turn, turn.userId)).resolves.toEqual({ id: turn.conversationId });
-    expect(await rowsOf(turn.conversationId)).toMatchObject({ conversations: 0, runs: 0, items: 0 });
+    expect(await rowsOf(turn.conversationId)).toMatchObject({ conversations: 1, runs: 1, items: 1 });
+    expect((await list(turn)).items).toEqual([]);
   });
 
   it('answers “not found” for someone else’s conversation, and leaves it alone', async () => {
@@ -436,7 +463,7 @@ describe('deleting a conversation', () => {
     expect(await rowsOf(turn.conversationId)).toMatchObject({ conversations: 1 });
   });
 
-  it('keeps the saved costs of its model requests, so the month’s spend does not drop', async () => {
+  it('keeps the saved costs of its model requests linked to their run, so the month’s spend does not drop', async () => {
     const turn = await finishedConversationWithEverything();
     await store.assistantTransaction(db, (tx) =>
       store.recordModelRequest(tx, {
@@ -459,7 +486,9 @@ describe('deleting a conversation', () => {
     await expect(remove(turn, turn.userId)).resolves.toEqual({ id: turn.conversationId });
 
     const kept = await db.select().from(assistantModelRequestTable).where(eq(assistantModelRequestTable.schoolId, turn.schoolId));
-    expect(kept).toMatchObject([{ runId: null, userId: turn.userId, costUsd: '0.75000000', inputTokens: 1_000_000 }]);
+    expect(kept).toMatchObject([{ runId: turn.runId, userId: turn.userId, costUsd: '0.75000000', inputTokens: 1_000_000 }]);
+    // A run with costs cannot be hard-deleted: the costs would be dropped or unlinked.
+    await expect(db.delete(assistantRunTable).where(eq(assistantRunTable.id, turn.runId))).rejects.toThrow();
     await getRedisClient().del(monthKey);
     expect(await schoolMonthSpendUsd(db, turn.schoolId)).toBe('0.75000000');
   });

@@ -34,7 +34,9 @@ CREATE TABLE "assistant_conversation" (
 	"last_position" integer DEFAULT 0 NOT NULL,
 	"last_transcript_position" integer DEFAULT 0 NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"deleted_at" timestamp with time zone,
+	"deleted_by" text
 );
 --> statement-breakpoint
 CREATE TABLE "assistant_item" (
@@ -55,7 +57,7 @@ CREATE TABLE "assistant_item" (
 --> statement-breakpoint
 CREATE TABLE "assistant_model_request" (
 	"id" text PRIMARY KEY NOT NULL,
-	"run_id" text,
+	"run_id" text NOT NULL,
 	"school_id" text NOT NULL,
 	"user_id" text NOT NULL,
 	"request_key" text NOT NULL,
@@ -133,7 +135,7 @@ ALTER TABLE "assistant_approval" ADD CONSTRAINT "assistant_approval_school_id_sc
 ALTER TABLE "assistant_conversation" ADD CONSTRAINT "assistant_conversation_school_id_school_id_fk" FOREIGN KEY ("school_id") REFERENCES "public"."school"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "assistant_item" ADD CONSTRAINT "assistant_item_conversation_id_assistant_conversation_id_fk" FOREIGN KEY ("conversation_id") REFERENCES "public"."assistant_conversation"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "assistant_item" ADD CONSTRAINT "assistant_item_run_id_assistant_run_id_fk" FOREIGN KEY ("run_id") REFERENCES "public"."assistant_run"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "assistant_model_request" ADD CONSTRAINT "assistant_model_request_run_id_assistant_run_id_fk" FOREIGN KEY ("run_id") REFERENCES "public"."assistant_run"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "assistant_model_request" ADD CONSTRAINT "assistant_model_request_run_id_assistant_run_id_fk" FOREIGN KEY ("run_id") REFERENCES "public"."assistant_run"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "assistant_model_request" ADD CONSTRAINT "assistant_model_request_school_id_school_id_fk" FOREIGN KEY ("school_id") REFERENCES "public"."school"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "assistant_run" ADD CONSTRAINT "assistant_run_conversation_id_assistant_conversation_id_fk" FOREIGN KEY ("conversation_id") REFERENCES "public"."assistant_conversation"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "assistant_run" ADD CONSTRAINT "assistant_run_school_id_school_id_fk" FOREIGN KEY ("school_id") REFERENCES "public"."school"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
@@ -143,7 +145,7 @@ ALTER TABLE "school_assistant_access_role" ADD CONSTRAINT "school_assistant_acce
 ALTER TABLE "school_assistant_access_role" ADD CONSTRAINT "school_assistant_access_role_updated_by_user_id_fk" FOREIGN KEY ("updated_by") REFERENCES "public"."user"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "assistant_approval_run_idx" ON "assistant_approval" USING btree ("run_id");--> statement-breakpoint
 CREATE INDEX "assistant_approval_resolution_pending_idx" ON "assistant_approval" USING btree ("decided_at") WHERE "assistant_approval"."resolution_handed_over_at" is null;--> statement-breakpoint
-CREATE INDEX "assistant_conversation_school_user_updated_idx" ON "assistant_conversation" USING btree ("school_id","user_id","updated_at");--> statement-breakpoint
+CREATE INDEX "assistant_conversation_school_user_updated_idx" ON "assistant_conversation" USING btree ("school_id","user_id","updated_at") WHERE "assistant_conversation"."deleted_at" is null;--> statement-breakpoint
 CREATE INDEX "assistant_item_conversation_sequence_idx" ON "assistant_item" USING btree ("conversation_id","sequence");--> statement-breakpoint
 CREATE INDEX "assistant_item_run_idx" ON "assistant_item" USING btree ("run_id");--> statement-breakpoint
 CREATE INDEX "assistant_model_request_school_created_idx" ON "assistant_model_request" USING btree ("school_id","created_at");--> statement-breakpoint

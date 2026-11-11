@@ -4,6 +4,8 @@ import {
   assistantModelRequestTable,
   assistantRunTable,
 } from '@campuspilot/db/schema/assistant';
+import { schoolTable } from '@campuspilot/db/schema/school';
+import { eq } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 
@@ -203,5 +205,23 @@ describe('systemAdmin assistant usage', () => {
     await expect(
       principal.systemAdmin.getSchoolAssistantUsage({ id: school.id, from: '2032-02-01', to: '2032-02-02' }),
     ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+});
+
+describe('deleting a school', () => {
+  it('removes its assistant rows and saved costs in one statement, although a run with costs cannot be deleted on its own', async () => {
+    const school = await createTestSchool();
+    const principal = await createSchoolStaffSession(school.id, [{ role: 'principal' }]);
+    await request({ schoolId: school.id, userId: principal.user.id, at: '2034-01-01T06:00:00Z', costUsd: '1' });
+    const [run] = await db.select().from(assistantRunTable).where(eq(assistantRunTable.schoolId, school.id));
+    await expect(db.delete(assistantRunTable).where(eq(assistantRunTable.id, run!.id))).rejects.toThrow();
+
+    const admin = createTestClient(await createAdminSession());
+    await expect(admin.systemAdmin.deleteSchool({ id: school.id })).resolves.toMatchObject({ id: school.id });
+    expect(await db.select().from(schoolTable).where(eq(schoolTable.id, school.id))).toEqual([]);
+
+    for (const table of [assistantModelRequestTable, assistantRunTable, assistantConversationTable]) {
+      expect(await db.select().from(table).where(eq(table.schoolId, school.id))).toEqual([]);
+    }
   });
 });
