@@ -26,6 +26,8 @@ import {
   MCP_READ_SCOPE,
   MCP_WRITE_SCOPE,
 } from '@campuspilot/auth/mcp-oauth-policy';
+import { assistantToolDecision } from '@campuspilot/api/assistant/tool-policy';
+import { ASSISTANT_TOOL_META } from '@campuspilot/assistant-contract/protocol';
 import { APIError } from 'better-auth';
 import { z } from 'zod';
 
@@ -126,9 +128,14 @@ type CreateCampusPilotMcpServerOptions = McpToolCallOptions & {
    * not shown them. Defaults to true (sessions and API keys).
    */
   writeAccess?: boolean;
+  /**
+   * Serve the assistant-service view instead of the connector view: see
+   * `registerAssistantTools`.
+   */
+  assistantView?: boolean;
 };
 
-type McpErrorPayload = {
+export type McpErrorPayload = {
   code: string;
   message: string;
   /** Validation problems, so a model can correct its arguments. */
@@ -435,7 +442,7 @@ function validationIssues(error: ORPCError<string, unknown>) {
   }));
 }
 
-function expectedMcpError(error: unknown): McpErrorPayload | null {
+export function expectedMcpError(error: unknown): McpErrorPayload | null {
   if (error instanceof ORPCError) {
     if (error.status >= 500) return null;
     const issues = validationIssues(error);
@@ -504,13 +511,52 @@ export async function callMcpTool(
  * Creates one stateless MCP server instance for a protocol request: the core
  * tools directly, plus the advanced-tool meta tools when advanced tools exist.
  */
+/**
+ * The CampusPilot assistant service view. It lists every tool the assistant
+ * tool policy allows, core and advanced alike, each tagged with its exposure
+ * and module, and no meta tools: the service hands advanced tools to the
+ * model's own tool search instead of the four discovery tools external
+ * connectors use. Calls still pass the full oRPC chain, where the assistant
+ * policy is enforced again with the call's input.
+ */
+function registerAssistantTools(
+  server: McpServer,
+  catalog: McpCatalog,
+  options: McpToolCallOptions,
+) {
+  for (const tool of [...catalog.core, ...catalog.advanced]) {
+    if (!assistantToolDecision(tool.mcp).allowed) continue;
+    server.registerTool(
+      tool.name,
+      {
+        title: tool.title,
+        description: tool.description,
+        inputSchema: toMcpToolInputSchema(tool),
+        annotations: toolAnnotations(tool),
+        _meta: {
+          ...securitySchemesMeta(tool.mcp.access),
+          [ASSISTANT_TOOL_META.exposure]: tool.mcp.exposure,
+          [ASSISTANT_TOOL_META.module]: tool.mcp.module,
+        },
+      },
+      async (input, requestContext) =>
+        callMcpTool(tool, input, requestContext.mcpReq.signal, options),
+    );
+  }
+}
+
 export function createCampusPilotMcpServer({
   catalog,
   writeAccess = true,
+  assistantView = false,
   serverName = 'campuspilot',
   ...options
 }: CreateCampusPilotMcpServerOptions): McpServer {
   const server = new McpServer({ name: serverName, version: '0.1.0' });
+  if (assistantView) {
+    registerAssistantTools(server, catalog, options);
+    return server;
+  }
   const view = writeAccess ? catalog : catalog.readOnly;
 
   for (const tool of view.core) {
@@ -559,6 +605,7 @@ export function createCampusPilotMcpHandler<TContext extends McpContext>({
       return createCampusPilotMcpServer({
         catalog: await catalog,
         writeAccess: credentialWriteAccess(context),
+        assistantView: context.principal.authMethod === 'assistant',
         serverName,
         createContext: async () => context,
         reportError,

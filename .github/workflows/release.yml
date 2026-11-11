@@ -31,6 +31,7 @@ jobs:
         run: |
           pnpm exec tsc -p packages/db/tsconfig.json --noEmit
           pnpm exec tsc -p packages/api/tsconfig.json --noEmit
+          pnpm exec tsc -p packages/assistant/tsconfig.json --noEmit
           pnpm exec tsc -p apps/server/tsconfig.json --noEmit
           pnpm exec tsc -p apps/worker/tsconfig.json --noEmit
 

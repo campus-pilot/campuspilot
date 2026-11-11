@@ -1,5 +1,10 @@
 import { db } from '@campuspilot/db';
-import type { SchoolFeatureKey } from '@campuspilot/db/feature-flags/catalogue';
+import type {
+  SchoolFeatureConfig,
+  SchoolFeatureEntry,
+  SchoolFeatureKey,
+} from '@campuspilot/db/feature-flags/catalogue';
+import { readSchoolFeatureConfig } from '@campuspilot/db/feature-flags/store';
 import { admissionTable } from '@campuspilot/db/schema/admission';
 import { studentTable } from '@campuspilot/db/schema/student';
 import { user } from '@campuspilot/db/schema/auth';
@@ -213,8 +218,12 @@ export async function createTestSchool(overrides: {
   hasCompletedOnboarding?: boolean;
   /** Fixed at insert: a database trigger makes `is_demo` immutable afterwards. */
   isDemo?: boolean;
-  /** Platform features to enable for the school (default: none). */
-  features?: readonly SchoolFeatureKey[];
+  /**
+   * Platform features to enable for the school (default: none): a key for a
+   * feature without settings, or `{ feature, config }` for one with settings
+   * (enabling such a feature needs them).
+   */
+  features?: readonly (SchoolFeatureKey | TestSchoolFeature)[];
 } = {}) {
   const id = overrides.id ?? randomUUID();
   const slug = overrides.slug ?? `school-${randomUUID().toLowerCase()}`;
@@ -237,24 +246,40 @@ export async function createTestSchool(overrides: {
     })
     .returning();
   for (const feature of overrides.features ?? []) {
-    await setTestSchoolFeature(id, feature, true);
+    if (typeof feature === 'string') await setTestSchoolFeature(id, feature, true);
+    else await setTestSchoolFeature(id, feature.feature, true, feature.config as never);
   }
 
   return school!;
 }
+
+/** A feature with its settings, for `createTestSchool({ features })`. */
+export type TestSchoolFeature = {
+  [K in SchoolFeatureKey]: { feature: K; config: SchoolFeatureConfig<K> };
+}[SchoolFeatureKey];
 
 /**
  * Enables or disables one platform feature for a test school, writing the
  * same row an administrator's change writes (`setSchoolFeature`). Use it to
  * flip a feature mid-test, for example to prove that disabling the Cadet
  * Portal stops an existing session.
+ *
+ * `config` sets the feature's settings; when it is omitted the stored
+ * settings are kept (as an administrator's switch keeps them), so disabling
+ * and enabling again never wipes them.
  */
-export async function setTestSchoolFeature(
+export async function setTestSchoolFeature<K extends SchoolFeatureKey>(
   schoolId: string,
-  feature: SchoolFeatureKey,
+  feature: K,
   enabled: boolean,
+  config?: SchoolFeatureConfig<K> | null,
 ) {
-  await setSchoolFeature(db, { schoolId, feature, enabled, config: null, updatedBy: null });
+  const stored = config === undefined ? await readSchoolFeatureConfig(db, schoolId, feature) : null;
+  const kept = config !== undefined ? config : stored?.status === 'valid' ? stored.config : null;
+  await setSchoolFeature(db, { schoolId, feature, enabled, config: kept, updatedBy: null } as SchoolFeatureEntry & {
+    schoolId: string;
+    updatedBy: null;
+  });
 }
 
 /**

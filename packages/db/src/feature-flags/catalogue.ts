@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { roleEnum } from "../schema/jsonb/role";
+
 /**
  * The school feature catalogue: the single authority on which per-school
  * platform features exist and what configuration each one carries. A platform
@@ -9,7 +11,8 @@ import { z } from "zod";
  * It lives in `@campuspilot/db` because it is the contract of the
  * `school_feature_flag.config` jsonb column and must be importable by the
  * API, the auth package and the browser apps alike (same precedent as
- * `@campuspilot/db/notifications/catalogue`). It imports nothing but Zod.
+ * `@campuspilot/db/notifications/catalogue`). It imports nothing but Zod
+ * (and the school role names, themselves only a Zod enum).
  *
  * Adding a feature: add one entry here. Every consumer is a
  * `Record<SchoolFeatureKey, …>` or is derived from this object, so the build
@@ -37,6 +40,30 @@ export const schoolFeatureCatalogue = {
     description:
       "Staff write and publish school notices to staff and, when the Cadet Portal is enabled, to students.",
     config: z.null(),
+  },
+  assistant: {
+    label: "AI assistant",
+    description:
+      "Staff ask the in-app assistant to read and change school data as themselves.",
+    config: z.object({
+      /**
+       * The school's spend on the assistant per calendar month (IST, the 1st
+       * to the last day), in USD; null means no limit. Once the month's
+       * saved model-request costs reach it, nobody in the school can start
+       * or continue a turn until the next month.
+       */
+      monthlyLimitUsd: z.number().positive().max(1_000_000).nullable(),
+      /**
+       * The school roles the platform lets this school open the assistant
+       * to (the ceiling). The school itself switches each of these roles on
+       * or off (`school_assistant_access_role`); a role outside this list
+       * grants nothing even if the school switched it on.
+       */
+      eligibleRoles: z
+        .array(roleEnum)
+        .min(1)
+        .refine((roles) => new Set(roles).size === roles.length, "Name each role once."),
+    }),
   },
 } as const satisfies Record<
   string,
@@ -137,12 +164,22 @@ export function schoolFeatureHasConfig(key: SchoolFeatureKey): boolean {
   return !(schoolFeatureCatalogue[key].config instanceof z.ZodNull);
 }
 
-/** Zod schema of one feature's state, typed per key. */
-export function schoolFeatureStateSchema<K extends SchoolFeatureKey>(key: K) {
+/** The Zod schema type of one feature's state, with that key's config only. */
+type SchoolFeatureStateSchema<K extends SchoolFeatureKey> = z.ZodObject<{
+  enabled: z.ZodBoolean;
+  config: z.ZodNullable<(typeof schoolFeatureCatalogue)[K]["config"]>;
+}>;
+
+/**
+ * Zod schema of one feature's state, typed per key. The return type is
+ * stated: inferred, TypeScript widens `schoolFeatureCatalogue[key]` to every
+ * key's config, so one feature's state would accept another's settings.
+ */
+export function schoolFeatureStateSchema<K extends SchoolFeatureKey>(key: K): SchoolFeatureStateSchema<K> {
   return z.object({
     enabled: z.boolean(),
     config: schoolFeatureCatalogue[key].config.nullable(),
-  });
+  }) as unknown as SchoolFeatureStateSchema<K>;
 }
 
 /**

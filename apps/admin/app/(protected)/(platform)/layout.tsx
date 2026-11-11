@@ -10,11 +10,13 @@ import {
   DatabaseZap,
   House,
   KeyRound,
+  Receipt,
 } from 'lucide-react';
 import { AdminShell, type AdminShellState } from '@/components/admin-shell';
 import { resolveAdminPageActions } from '@/components/admin-route';
 import { NewSchoolAction } from '@/components/new-school-action';
 import { DemoPurgeAlerts } from '@/components/demo-school/demo-purge-alerts';
+import { aiBillingPage } from './ai-billing/_route';
 import { dataMigrationsPage } from './data-migrations/_route';
 import { demoRequestsPage } from './demo-requests/_route';
 import { homePage } from './_route';
@@ -66,6 +68,13 @@ const navigation: AppShellNavigationEntry[] = [
       },
       {
         type: 'item',
+        id: 'ai-billing',
+        label: 'AI billing',
+        href: '/ai-billing',
+        icon: Receipt,
+      },
+      {
+        type: 'item',
         id: 'data-migrations',
         label: 'Data migrations',
         href: '/data-migrations',
@@ -81,6 +90,7 @@ const pages = [
   organizationsPage,
   oauthClientsPage,
   platformUsagePage,
+  aiBillingPage,
   dataMigrationsPage,
 ];
 

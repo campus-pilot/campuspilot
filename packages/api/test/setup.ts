@@ -27,6 +27,7 @@ process.env.GOTENBERG_URL = inject('GOTENBERG_URL');
 process.env.RESTATE_ADMIN_URL = 'http://localhost:9070';
 process.env.RESTATE_FABRIC_URL = 'http://localhost:8080';
 process.env.RESTATE_INGRESS_URL = 'http://localhost:8080';
+process.env.ASSISTANT_TOKEN_SIGNING_SECRET = 'assistant-token-signing-secret-for-tests-0123';
 
 // Ignore postgres pool connection termination on container shutdown (57P01 admin_shutdown)
 process.on('uncaughtException', (err: unknown) => {

@@ -14,6 +14,7 @@ import {
   LayoutDashboard,
   Megaphone,
   Settings,
+  Sparkles,
   UserRoundPlus,
   Users,
 } from 'lucide-react';
@@ -35,7 +36,9 @@ import {
 } from '@/components/session-selection';
 import { SchoolDocumentHead } from '@/components/school-document-head';
 import { SessionSwitcher } from '@/components/session-switcher';
+import { AssistantAccess } from '@/components/assistant/assistant-access';
 import { admissionPage } from './admission/_route';
+import { assistantPage } from './assistant/_route';
 import { admissionDetailsPage } from './admission/[admissionId]/_route';
 import { billingPages, billingRunDetailPage } from './sessions/[sessionId]/billing/_route';
 import {
@@ -56,6 +59,7 @@ import { templateMarketplacePages } from './marketplace/templates/_route';
 const pages: ManagementPageDescriptor<any>[] = [
   ...templateMarketplacePages,
   ...documentPages,
+  assistantPage,
   dashboardPage,
   staffPage,
   notificationsPage,
@@ -89,6 +93,14 @@ function navigationFor(
       href: sessionHref(),
       icon: LayoutDashboard,
       match: 'exact',
+    },
+    {
+      type: 'item',
+      id: 'assistant',
+      label: 'Assistant',
+      href: schoolHref(schoolId, '/assistant'),
+      icon: Sparkles,
+      wrap: (children) => <AssistantAccess schoolId={schoolId}>{children}</AssistantAccess>,
     },
     {
       type: 'group',

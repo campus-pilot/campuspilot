@@ -1,4 +1,4 @@
-/** Keep this checkout's three local app processes alive across terminal closure. */
+/** Keep this checkout's local app processes alive across terminal closure. */
 import { spawn, execFileSync } from 'node:child_process';
 import { openSync, closeSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -19,6 +19,8 @@ const apps = [
   { name: 'server', port: 3100, module: 'apps/server/node_modules/tsx/dist/cli.mjs', args: ['watch', 'src/index.ts'] },
   { name: 'management', port: 3102, module: 'apps/management/node_modules/next/dist/bin/next', args: ['dev', '--port', '3102', '--hostname', '127.0.0.1'] },
   { name: 'admin', port: 3103, module: 'apps/admin/node_modules/next/dist/bin/next', args: ['dev', '--port', '3103', '--hostname', '127.0.0.1'] },
+  // Runs the assistant's turns (and the other Restate workflows).
+  { name: 'worker', port: 9080, module: 'apps/worker/node_modules/tsx/dist/cli.mjs', args: ['watch', 'src/index.ts'] },
 ];
 
 /** Check both PID and command before treating a process group as ours. */
@@ -41,7 +43,7 @@ async function portInUse(port) {
 const action = process.argv[2] ?? 'status';
 if (!['start', 'stop', 'status'].includes(action)) throw new Error('Use start, stop, or status.');
 const requestedApps = process.argv.slice(3);
-if (requestedApps.some((name) => !apps.some((app) => app.name === name))) throw new Error('Unknown app; use server, management, or admin.');
+if (requestedApps.some((name) => !apps.some((app) => app.name === name))) throw new Error('Unknown app; use server, management, admin, or worker.');
 for (const app of apps.filter((app) => requestedApps.length === 0 || requestedApps.includes(app.name))) {
   const owned = isOwned(app);
   if (action === 'stop' && owned) {

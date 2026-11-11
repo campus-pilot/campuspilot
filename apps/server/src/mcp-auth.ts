@@ -1,4 +1,5 @@
-import type { OAuthGrant } from '@campuspilot/api/context';
+import type { AssistantContextInput, OAuthGrant } from '@campuspilot/api/context';
+import type { AssistantTokenClaims } from '@campuspilot/auth/assistant-token';
 import type { McpAccess } from '@campuspilot/api/mcp-metadata';
 import type {
   LiveOAuthGrant,
@@ -41,6 +42,15 @@ export type McpGateOptions<TContext extends McpContext> = {
    */
   createApiKeyContext?: (apiKey: string) => Promise<TContext>;
   createOAuthContext: (input: McpOAuthContextInput) => Promise<TContext | null>;
+  /**
+   * Delegated assistant-service tokens (see `@campuspilot/auth/assistant-token`).
+   * Only the staff endpoint supplies these; elsewhere such a token is refused
+   * like any other unknown bearer value.
+   */
+  assistant?: {
+    verifyToken: (token: string) => Promise<AssistantTokenClaims | null>;
+    createContext: (input: AssistantContextInput) => Promise<TContext | null>;
+  };
   /** Records that the grant was used (throttled by the implementation). */
   recordGrantUse: (grantId: string) => Promise<void>;
 };
@@ -125,8 +135,10 @@ function requiredAccess(catalog: McpCatalog, message: JsonRpcMessage): McpAccess
  * on its own evidence:
  * 1. `x-api-key` present → API key only.
  * 2. `Authorization: Bearer` → CampusPilot OAuth access token (signature,
- *    issuer, audience, expiry, then a live grant); if it is not one, the same
- *    value is tried as an API key.
+ *    issuer, audience, expiry, then a live grant); if it is not one, as a
+ *    delegated assistant-service token where the endpoint accepts those (its
+ *    own key, type and claims); if it is neither, the same value is tried as
+ *    an API key.
  * 3. Otherwise, or when both fail → 401.
  * Cookies are never accepted here. OAuth requests then need the scopes of
  * the tools they call; API keys carry the user's full rights.
@@ -187,6 +199,21 @@ export function createMcpGate<TContext extends McpContext>(options: McpGateOptio
         resource: new URL(options.resource),
       },
     };
+  }
+
+  async function assistantCredential(token: string): Promise<McpRequestCredential<TContext> | null> {
+    if (!options.assistant) return null;
+    const claims = await options.assistant.verifyToken(token);
+    if (!claims) return null;
+    const context = await options.assistant.createContext({
+      userId: claims.userId,
+      assistantRun: {
+        conversationId: claims.conversationId,
+        runId: claims.runId,
+        schoolId: claims.schoolId,
+      },
+    });
+    return context ? { context } : null;
   }
 
   async function insufficientScope(
@@ -258,6 +285,9 @@ export function createMcpGate<TContext extends McpContext>(options: McpGateOptio
       const denied = await insufficientScope(request, scopes);
       return denied ? { ok: false, response: denied } : { ok: true, credential: oauth };
     }
+
+    const assistant = await assistantCredential(token);
+    if (assistant) return { ok: true, credential: assistant };
 
     const keyCredential = await apiKeyCredential(token);
     return keyCredential

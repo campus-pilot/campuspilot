@@ -5,6 +5,13 @@ const nanoid = customAlphabet("0123456789abcdefghijklmnopqrstuvwxyz", 21);
 
 export const PREFIX_MAP = {
   artifact: "art",
+  // In-app assistant rows keep the prefixes they had in the assistant
+  // service's own database.
+  assistantApproval: "asa",
+  assistantConversation: "asc",
+  assistantItem: "asi",
+  assistantModelRequest: "asm",
+  assistantRun: "asr",
   // Keep examination prefixes compatible with the legacy IDs so migration can
   // preserve primary keys and every raw cross-reference without translation.
   examPlan: "expl",

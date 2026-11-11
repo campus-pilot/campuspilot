@@ -5,6 +5,7 @@ import { featureFlagsOutdatedBy, resolveSchoolFeature } from './require-feature-
 const features = {
   cadet: { enabled: true, config: null },
   notices: { enabled: false, config: null },
+  assistant: { enabled: false, config: null },
 };
 const closed = { enabled: false, config: null };
 

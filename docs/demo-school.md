@@ -10,8 +10,9 @@ the slug, the staff email domain or the existence of a job.
 1. `systemAdmin.createDemoSchool` creates, in one transaction, the school
    (`is_demo = true`, `demo_created_by = admin`), the admin's membership with
    the `principal` role, the school's platform feature flags
-   (`DEMO_SCHOOL_FEATURE_DEFAULTS`: every feature on, unlike a real school,
-   which starts with none; see [School feature flags](feature-flags.md)), and a
+   (`DEMO_SCHOOL_FEATURE_DEFAULTS`: the Cadet Portal and notices on, unlike a
+   real school, which starts with none; the AI assistant off, since its use is
+   paid per request: an administrator enables it on the demo's AI page; see [School feature flags](feature-flags.md)), and a
    `demo_school_job` row (`queued`). The dialog
    closes at once and a persistent toast follows the job.
 2. The client uploads the optional logo through the normal logo endpoint,
@@ -171,8 +172,9 @@ and the admin follows it through `watchDemoSchoolPurge`:
 2. `revoking-sessions`: revokes demo users' sessions (including Redis).
 3. `deleting-data`: one transaction locks the purge row and the school,
    records the manifest (`object_keys`, `demo_user_ids`), runs
-   `purge_demo_school(schoolId)` (every row the school owns and its demo-only
-   users) and sets `data_deleted_at`; a replay after commit does nothing.
+   `purge_demo_school(schoolId)` (every row the school owns, including the
+   in-app assistant's conversations, runs, saved costs and role list, and its
+   demo-only users) and sets `data_deleted_at`; a replay after commit does nothing.
    Finance trigger functions allow those `DELETE`s only for a demo school
    (`is_demo`, immutable after insert since 0027) that has a
    `demo_purge_marker` row for the current transaction, which only

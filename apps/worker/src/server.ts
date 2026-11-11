@@ -13,6 +13,7 @@ import {
   notificationDispatchWorkflow,
   notificationSenderObject,
 } from '@campuspilot/api/workflows/notification';
+import { createAssistantWorkerServices } from '@campuspilot/assistant/worker';
 import { env } from '@campuspilot/env/worker';
 import { createEndpointHandler } from '@restatedev/restate-sdk';
 
@@ -39,6 +40,7 @@ export function startWorker() {
       notificationControlService,
       notificationDispatchWorkflow,
       notificationSenderObject,
+      ...createAssistantWorkerServices(),
     ],
   });
   const server = createServer(handler);

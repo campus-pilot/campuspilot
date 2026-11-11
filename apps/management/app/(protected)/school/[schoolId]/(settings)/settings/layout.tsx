@@ -9,6 +9,7 @@ import {
   ArrowLeft,
   BookOpenCheck,
   CalendarDays,
+  ChartNoAxesColumn,
   CalendarRange,
   ClipboardCheck,
   CreditCard,
@@ -19,6 +20,7 @@ import {
   School,
   ScrollText,
   Settings,
+  Sparkles,
 } from 'lucide-react';
 import {
   ManagementShell,
@@ -43,6 +45,8 @@ import { orpc } from '@/lib/orpc';
 import { RequireFeature } from '@/components/require-feature';
 import { RequirePermissions } from '@/components/require-permissions';
 import { schoolSettingsPage } from './_route';
+import { assistantSettingsPage } from './assistant/_route';
+import { usageSettingsPage } from './usage/_route';
 import { documentSettingsPage } from './documents/_route';
 import { sessionSettingsPage } from './session/_route';
 import { sessionDetailPage } from './session/[sessionId]/_route';
@@ -60,6 +64,8 @@ type SettingsRouteParams = SchoolRouteParams & { sessionId: string };
 const pages: ManagementPageDescriptor<SettingsRouteParams>[] = [
   schoolSettingsPage,
   documentSettingsPage,
+  assistantSettingsPage,
+  usageSettingsPage,
   sessionDetailPage,
   sessionSettingsPage,
   examinationTemplatePage,
@@ -126,6 +132,36 @@ function navigationFor(
           } satisfies AppShellNavigationEntry,
         ]
       : []),
+    {
+      type: 'item',
+      id: 'assistant-settings',
+      // A feature and a permission are separate gates; the item needs both.
+      wrap: (children) => (
+        <RequireFeature schoolId={schoolId} feature="assistant">
+          <RequirePermissions permissions={{ action: SCHOOL_ACTIONS.MANAGE_ASSISTANT_ACCESS, resource: { kind: 'school', schoolId } }}>
+            {children}
+          </RequirePermissions>
+        </RequireFeature>
+      ),
+      label: 'AI assistant',
+      href: schoolHref(schoolId, '/settings/assistant'),
+      icon: Sparkles,
+    },
+    {
+      type: 'item',
+      id: 'usage',
+      // Its only tab is AI usage, so it needs that tab's feature and permission.
+      wrap: (children) => (
+        <RequireFeature schoolId={schoolId} feature="assistant">
+          <RequirePermissions permissions={{ action: SCHOOL_ACTIONS.READ_ASSISTANT_USAGE, resource: { kind: 'school', schoolId } }}>
+            {children}
+          </RequirePermissions>
+        </RequireFeature>
+      ),
+      label: 'Usage',
+      href: schoolHref(schoolId, '/settings/usage'),
+      icon: ChartNoAxesColumn,
+    },
     {
       type: 'item',
       id: 'templates',

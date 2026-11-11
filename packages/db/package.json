@@ -13,6 +13,7 @@
     "db:migrate": "drizzle-kit migrate"
   },
   "dependencies": {
+    "@campuspilot/assistant-contract": "workspace:*",
     "@campuspilot/env": "workspace:*",
     "@campuspilot/logger": "workspace:*",
     "dotenv": "catalog:",

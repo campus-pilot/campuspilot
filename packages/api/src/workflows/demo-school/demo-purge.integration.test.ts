@@ -12,6 +12,15 @@ import {
   cadetSession,
   cadetUser,
 } from '@campuspilot/db/schema/cadet';
+import {
+  assistantApprovalTable,
+  assistantConversationTable,
+  assistantItemTable,
+  assistantModelRequestTable,
+  assistantRunTable,
+  assistantTranscriptEntryTable,
+  schoolAssistantAccessRoleTable,
+} from '@campuspilot/db/schema/assistant';
 import { demoSchoolPurgeTable } from '@campuspilot/db/schema/demo-school-job';
 import { noticeClassTable, noticeTable } from '@campuspilot/db/schema/notice';
 import { cadetPushSubscriptionTable } from '@campuspilot/db/schema/notification';
@@ -175,6 +184,48 @@ describe('purge_demo_school and the demo-only finance exception', () => {
     const remaining = await rowsReferencingSchool(demo.school.id);
     expect(Object.values(remaining).every((count) => count === 0)).toBe(true);
     expect(await db.select().from(noticeTable).where(eq(noticeTable.id, kept!.id))).toHaveLength(1);
+  });
+
+  it('removes the in-app assistant data of a demo school (conversations, runs, costs, its role list), and nothing of another school', async () => {
+    /** One conversation with every kind of assistant row, as the assistant writes them. */
+    async function assistantRowsFor(schoolId: string, userId: string) {
+      const [conversation] = await db.insert(assistantConversationTable).values({ schoolId, userId, provider: 'gemini', model: 'm' }).returning();
+      const [run] = await db
+        .insert(assistantRunTable)
+        .values({ conversationId: conversation!.id, schoolId, userId, clientRequestId: crypto.randomUUID(), surface: 'panel', sequence: 1 })
+        .returning();
+      const [item] = await db
+        .insert(assistantItemTable)
+        .values({ conversationId: conversation!.id, runId: run!.id, kind: 'user_message', status: 'complete', position: 1, sequence: 2, body: { text: 'Hi' }, itemKey: 'user' })
+        .returning();
+      await db.insert(assistantApprovalTable).values({ conversationId: conversation!.id, runId: run!.id, itemId: item!.id, schoolId, userId, toolName: 't', awakeableId: 'a' });
+      await db.insert(assistantTranscriptEntryTable).values({ conversationId: conversation!.id, position: 1, runId: run!.id, role: 'user', content: [], entryKey: 'user' });
+      await db.insert(assistantModelRequestTable).values({
+        runId: run!.id, schoolId, userId, requestKey: `${run!.id}:model:0`, provider: 'gemini', requestedModel: 'm', answeredModel: 'm', usageComplete: true,
+        inputTokens: 1, outputTokens: 1, cacheReadInputTokens: 0, cacheCreationInputTokens: 0,
+        inputUsdPerMtok: '1', outputUsdPerMtok: '1', cacheReadUsdPerMtok: '0', cacheWriteUsdPerMtok: '0', costUsd: '0.000002',
+      });
+      await db.insert(schoolAssistantAccessRoleTable).values({ schoolId, role: 'teacher' });
+      return conversation!.id;
+    }
+    const demoUser = await createTestUser({ name: 'Demo assistant user' });
+    await assistantRowsFor(demo.school.id, demoUser.id);
+    const keptConversation = await assistantRowsFor(real.school.id, demoUser.id);
+
+    const result = await db.execute<{ counts: Record<string, number> }>(sql`SELECT purge_demo_school(${demo.school.id}) AS counts`);
+    expect(result.rows[0]!.counts).toMatchObject({
+      assistant_model_request: 1,
+      assistant_approval: 1,
+      assistant_transcript_entry: 1,
+      assistant_item: 1,
+      assistant_run: 1,
+      assistant_conversation: 1,
+      school_assistant_access_role: 1,
+    });
+    const remaining = await rowsReferencingSchool(demo.school.id);
+    expect(Object.values(remaining).every((count) => count === 0)).toBe(true);
+    expect(await db.select().from(assistantConversationTable).where(eq(assistantConversationTable.id, keptConversation))).toHaveLength(1);
+    expect(await db.select().from(schoolAssistantAccessRoleTable).where(eq(schoolAssistantAccessRoleTable.schoolId, real.school.id))).toHaveLength(1);
   });
 
   it('deletes the cached notice PDFs of a demo school with its notices, and nothing of another school', async () => {

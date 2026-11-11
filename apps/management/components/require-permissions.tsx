@@ -10,6 +10,13 @@ export type RequirePermissionsProps = {
   children: ReactNode;
   permissions: PermissionCheck | readonly PermissionCheck[];
   fallback?: ReactNode;
+  /**
+   * Shown while the check is still loading. Defaults to `fallback`, so a
+   * caller that does not pass it behaves as before. Pass a neutral
+   * placeholder where `fallback` is a refusal ("you don't have access"),
+   * which would otherwise flash on every cold load before the answer is in.
+   */
+  pending?: ReactNode;
   mode?: 'all' | 'any';
 };
 
@@ -23,6 +30,7 @@ export function RequirePermissions({
   children,
   permissions,
   fallback = null,
+  pending = fallback,
   mode = 'all',
 }: RequirePermissionsProps) {
   const permissionList: PermissionCheck[] = Array.isArray(permissions)
@@ -33,6 +41,8 @@ export function RequirePermissions({
       input: { permissions: permissionList },
     }),
   );
+
+  if (permissionsQuery.isPending) return pending;
 
   const satisfied = permissionsSatisfied(
     {

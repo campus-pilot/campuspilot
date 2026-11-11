@@ -1,0 +1,419 @@
+/*
+ * Assistant surfaces. The structure follows T3 Code's redesign (maria-rcks,
+ * #28839/#28840): a 45rem lane, requests that live in the composer, and
+ * contained boxes for tables, records and code. The
+ * paint is CampusPilot's own flat shadcn language: solid app tokens
+ * (card, muted, border), 1px borders, no gradients and no decorative shadows,
+ * the same as the app's `rounded-xl border bg-card` data containers.
+ *
+ * Components pick a recipe below; they never paint their own surface.
+ */
+
+@theme inline {
+  /* The composer's surface (kept from the first polish pass). */
+  --color-surface-outline: var(--surface-outline);
+  --shadow-composer: var(--composer-shadow);
+  --inset-shadow-control-highlight: 0 1px rgb(255 255 255 / 16%);
+  --inset-shadow-control-pressed: 0 1px rgb(0 0 0 / 8%);
+  --inset-shadow-surface-highlight: inset 0 1px var(--surface-highlight);
+  --color-assistant-dim: var(--assistant-dim);
+  --color-assistant-hairline: var(--assistant-hairline);
+  --color-assistant-warning: var(--assistant-warning);
+  --color-assistant-send-disabled: var(--assistant-send-disabled);
+  --color-assistant-send-disabled-foreground: var(--assistant-send-disabled-foreground);
+}
+
+:root {
+  /* Width of the conversation and the composer, shared so their edges line up. */
+  --assistant-lane: 45rem;
+
+  /*
+   * Text tier below muted: meta, captions, carets. It is used for 12px text,
+   * so it must reach 4.5:1 on the page background (WCAG AA): 97% is the
+   * lowest whole step that does in light mode (4.56:1; the earlier 78% was
+   * 3.24:1). Dark mode keeps 78% below, which already passes (4.65:1).
+   */
+  --assistant-dim: color-mix(in oklab, var(--muted-foreground) 97%, var(--background));
+  /* Separators inside a surface: lighter than its border. */
+  --assistant-hairline: color-mix(in oklab, var(--border) 65%, transparent);
+  /*
+   * Amber for 12px text on the light page background. amber-600 alone is
+   * 3.19:1; 76% of the way to amber-700 is the smallest step that reaches
+   * 4.5:1 (4.51:1). Dark mode keeps amber-500 (9.27:1).
+   */
+  --assistant-warning: color-mix(in oklab, var(--color-amber-700) 76%, var(--color-amber-600));
+  --assistant-info: var(--color-blue-600);
+  --assistant-well-header: color-mix(in oklab, var(--muted) 50%, transparent);
+  --assistant-inline-code: var(--muted);
+
+  /*
+   * The user's bubble and a Send that cannot be pressed were too faint on
+   * the white page: the bubble was 1.10:1 against it, the Send disc 1.31:1
+   * with a 3.69:1 arrow. The Send disc and arrow are set to the smallest
+   * whole step that reaches what dark mode already has (disc 1.41:1, arrow
+   * 4.81:1): 16% gives 1.44:1 and 21% gives 4.82:1. The bubble stops short of
+   * dark mode's 1.34:1 (that needs 8%, which reads as a heavy grey slab on
+   * white): 5% is clearly a bubble and still quiet. Dark mode keeps its
+   * values below.
+   */
+  --assistant-bubble: color-mix(in oklab, var(--foreground) 5%, var(--muted));
+  --assistant-send-disabled: color-mix(in oklab, var(--foreground) 16%, transparent);
+  --assistant-send-disabled-foreground: color-mix(in oklab, var(--foreground) 21%, var(--muted-foreground));
+
+  --surface-outline: rgb(0 0 0 / 8%);
+  --surface-highlight: transparent;
+  --composer-shadow: 0 1px 2px rgb(0 0 0 / 5%);
+}
+
+.dark {
+  --surface-outline: rgb(255 255 255 / 7%);
+  --surface-highlight: rgb(255 255 255 / 3%);
+  --composer-shadow: 0 14px 32px -18px rgb(0 0 0 / 75%);
+  /* Unchanged from before the light-mode contrast fix above. */
+  --assistant-dim: color-mix(in oklab, var(--muted-foreground) 78%, var(--background));
+  --assistant-warning: var(--color-amber-500);
+  --assistant-info: var(--color-blue-400);
+  /* Unchanged from before the light-mode fix above (muted; 12% foreground; muted text). */
+  --assistant-bubble: var(--muted);
+  --assistant-send-disabled: color-mix(in oklab, var(--foreground) 12%, transparent);
+  --assistant-send-disabled-foreground: var(--muted-foreground);
+}
+
+@utility assistant-bubble {
+  background: var(--assistant-bubble);
+}
+
+/* Contained content (tables, record lists, code, a change list): the app's card container. */
+@utility assistant-well {
+  background: var(--card);
+  border: 1px solid var(--border);
+}
+
+/* Small objects: key caps, the empty-state disc. */
+@utility assistant-raised {
+  background: var(--card);
+  border: 1px solid var(--border);
+}
+
+/* Neutral hover, the same as the app's table rows. */
+@utility assistant-ghost-hover {
+  background: color-mix(in oklab, var(--muted) 50%, transparent);
+}
+
+@utility assistant-selected {
+  background: var(--muted);
+}
+
+@layer components {
+  .assistant-markdown {
+    font-size: 0.875rem;
+    line-height: 1.625;
+    color: color-mix(in oklab, var(--foreground) 90%, transparent);
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .assistant-markdown > :first-child {
+    margin-top: 0;
+  }
+
+  .assistant-markdown > :last-child {
+    margin-bottom: 0;
+  }
+
+  .assistant-markdown :is(p, ul, ol, blockquote, .assistant-codeblock, .assistant-markdown-table) {
+    margin: 0.65rem 0;
+  }
+
+  .assistant-markdown :is(h1, h2, h3, h4, h5, h6) {
+    margin: 1.25rem 0 0.5rem;
+    font-weight: 600;
+    line-height: 1.3;
+    color: var(--foreground);
+  }
+
+  .assistant-markdown h1 { font-size: 1.25rem; }
+  .assistant-markdown h2 { font-size: 1.125rem; }
+  .assistant-markdown h3 { font-size: 1rem; }
+  .assistant-markdown :is(h4, h5, h6) { font-size: 0.875rem; }
+  .assistant-markdown h6 { color: var(--muted-foreground); }
+
+  .assistant-markdown :is(strong, b) {
+    font-weight: 600;
+    color: var(--foreground);
+  }
+
+  .assistant-markdown ul {
+    padding-inline-start: 1.25rem;
+    list-style-type: disc;
+  }
+
+  .assistant-markdown ol {
+    padding-inline-start: 1.25rem;
+    list-style-type: decimal;
+  }
+
+  .assistant-markdown li::marker {
+    color: var(--muted-foreground);
+  }
+
+  .assistant-markdown ol > li::marker {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .assistant-markdown li + li {
+    margin-top: 0.25rem;
+  }
+
+  /* Nested numbered lists change their numbering, so each level reads apart (T3 Code). */
+  .assistant-markdown ol ol { list-style-type: lower-alpha; }
+  .assistant-markdown ol ol ol { list-style-type: lower-roman; }
+
+  .assistant-markdown ul ul { list-style-type: circle; }
+  .assistant-markdown ul ul ul { list-style-type: square; }
+  .assistant-markdown :is(ul, ol) :is(ul, ol) { margin: 0.25rem 0; }
+
+  .assistant-markdown :not(pre) > code {
+    border-radius: 5px;
+    background: var(--assistant-inline-code);
+    padding: calc(0.1rem + 1px) calc(0.35rem + 1px);
+    color: var(--foreground);
+    font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+    font-size: 0.8125em;
+  }
+
+  /* Code: an inset well with a 32px header (language, copy). */
+  .assistant-codeblock pre {
+    overflow-x: auto;
+    padding: 0.75rem 0.875rem;
+    font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+    font-size: 0.8125rem;
+    line-height: 1.5;
+    scrollbar-width: thin;
+  }
+
+  /* Links read as links without underlining every word; a dotted rule on hover. */
+  .assistant-markdown a {
+    color: var(--assistant-info);
+    text-decoration: none;
+  }
+
+  .assistant-markdown a:is(:hover, :focus-visible) {
+    background: radial-gradient(circle, currentcolor 0.75px, transparent 1px) bottom / 4px 2px repeat-x;
+  }
+
+  .assistant-markdown blockquote {
+    border-inline-start: 2px solid color-mix(in oklab, currentcolor 35%, transparent);
+    padding-inline-start: 0.8rem;
+    color: var(--muted-foreground);
+  }
+
+  .assistant-markdown hr {
+    margin: 1rem 0;
+    border-color: var(--assistant-hairline);
+  }
+
+  /* Tables: an inset well with a tinted header, hairline rows and columns. */
+  .assistant-markdown-table {
+    overflow-x: auto;
+    border-radius: var(--radius-xl);
+    scrollbar-width: thin;
+  }
+
+  .assistant-markdown table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    overflow-wrap: normal;
+    word-break: normal;
+  }
+
+  .assistant-markdown :is(th, td) {
+    max-width: 24rem;
+    padding: 0.5rem 0.75rem;
+    text-align: start;
+    text-wrap: pretty;
+    vertical-align: top;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .assistant-markdown :is(th, td):not(:last-child) {
+    border-inline-end: 1px solid var(--assistant-hairline);
+  }
+
+  /* Centred columns read as misaligned in a reading lane; keep start/end only. */
+  .assistant-markdown :is(th, td)[style*='center'] {
+    text-align: start !important;
+  }
+
+  .assistant-markdown thead th {
+    border-bottom: 1px solid var(--border);
+    background: var(--assistant-well-header);
+    font-weight: 500;
+    color: var(--foreground);
+    white-space: nowrap;
+  }
+
+  .assistant-markdown tbody tr:not(:last-child) td {
+    border-bottom: 1px solid var(--assistant-hairline);
+  }
+
+  /* New blocks of a streaming reply fade in instead of popping. */
+  .assistant-markdown[data-streaming] > * {
+    transition: opacity 200ms ease-out;
+    @starting-style {
+      opacity: 0;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .assistant-markdown[data-streaming] > * {
+      transition: none;
+    }
+  }
+
+  /* Rows revealed by opening a fold fade in rather than pop. */
+  [data-assistant-fold-content] > * {
+    transition: opacity 200ms ease-out;
+    @starting-style {
+      opacity: 0;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    [data-assistant-fold-content] > * {
+      transition: none;
+    }
+  }
+}
+
+/*
+ * Folds (a turn's work log, a group of steps) open and close over 200ms
+ * instead of snapping, so what is below them slides rather than jumps
+ * (T3 Code). Radix measures the content and exposes its height as a
+ * variable; it also keeps the content mounted until the closing animation
+ * ends, and skips the animation for a fold that is already open when it
+ * first renders. Only the vertical axis is clipped, so focus rings at the
+ * sides of a row are not cut off.
+ */
+@keyframes assistant-fold-open {
+  from { height: 0; }
+  to { height: var(--radix-collapsible-content-height); }
+}
+
+@keyframes assistant-fold-close {
+  from { height: var(--radix-collapsible-content-height); }
+  to { height: 0; }
+}
+
+[data-assistant-surface] [data-slot='collapsible-content'] {
+  overflow-y: clip;
+}
+
+[data-assistant-surface] [data-slot='collapsible-content'][data-state='open'] {
+  animation: assistant-fold-open 200ms ease-out;
+}
+
+[data-assistant-surface] [data-slot='collapsible-content'][data-state='closed'] {
+  animation: assistant-fold-close 200ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-assistant-surface] [data-slot='collapsible-content']:is([data-state='open'], [data-state='closed']) {
+    animation: none;
+  }
+}
+
+/*
+ * The conversation fades out under the header as well as above the
+ * composer, so a row scrolled half out of view is not sliced by the header's
+ * edge. The shared scroller only fades its bottom; this adds a 16px fade at
+ * the top, which appears as soon as the conversation is scrolled (there is
+ * nothing above the first row to fade into). These rules are unlayered on
+ * purpose: they must win over the scroller's own utility classes.
+ */
+@keyframes assistant-scroll-fade-top {
+  from { --scroll-fade-t: 0px; }
+  to { --scroll-fade-t: 1rem; }
+}
+
+[data-assistant-surface] [data-slot='message-scroller-viewport'] {
+  --scroll-fade-mask: linear-gradient(
+    to bottom,
+    transparent 0,
+    #000 var(--scroll-fade-t, 0px),
+    #000 calc(100% - var(--scroll-fade-b, 0px)),
+    transparent 100%
+  );
+
+  @supports (animation-timeline: scroll()) {
+    animation:
+      assistant-scroll-fade-top 1ms ease-in-out,
+      scroll-fade-reveal-b 1ms ease-in-out;
+    animation-timeline: scroll(self y), scroll(self y);
+    animation-range:
+      0 1rem,
+      calc(100% - var(--scroll-fade-reveal, calc(var(--spacing) * 24))) 100%;
+    animation-fill-mode: both;
+  }
+
+  @supports not (animation-timeline: scroll()) {
+    --scroll-fade-t: 1rem;
+  }
+}
+
+/* "Working" shimmer: a band of full colour sweeping across muted text. */
+@keyframes assistant-shimmer {
+  from { background-position: 100% 0; }
+  to { background-position: -100% 0; }
+}
+
+@utility assistant-shimmer {
+  background-image: linear-gradient(
+    90deg,
+    var(--muted-foreground) 0%,
+    var(--muted-foreground) 40%,
+    var(--foreground) 50%,
+    var(--muted-foreground) 60%,
+    var(--muted-foreground) 100%
+  );
+  background-size: 200% 100%;
+  background-clip: text;
+  color: transparent;
+  animation: assistant-shimmer 2.2s steps(30) infinite;
+
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+    color: var(--muted-foreground);
+    background: none;
+  }
+}
+
+/*
+ * The same shimmer on a small solid shape (the "working" dot in the history
+ * list): the dot brightens as the band passes, on the shimmer's own clock.
+ * The band is wider than the text shimmer's, or it would cross a 6px dot too
+ * fast to be seen.
+ */
+@utility assistant-shimmer-dot {
+  background-image: linear-gradient(
+    90deg,
+    var(--muted-foreground) 0%,
+    var(--muted-foreground) 20%,
+    var(--foreground) 50%,
+    var(--muted-foreground) 80%,
+    var(--muted-foreground) 100%
+  );
+  background-size: 200% 100%;
+  animation: assistant-shimmer 2.2s steps(30) infinite;
+
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+    background: var(--muted-foreground);
+  }
+}
+
+/* Delayed reveal: keeps fast transitions from flashing interim states. */
+@keyframes assistant-reveal {
+  to { opacity: 1; }
+}

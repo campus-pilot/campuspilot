@@ -143,6 +143,7 @@ describe('systemAdmin demo school procedures', () => {
     expect((await adminClient.systemAdmin.getSchoolFeatureFlags({ id: created.school.id })).features).toEqual({
       cadet: { enabled: true, config: null },
       notices: { enabled: true, config: null },
+      assistant: { enabled: false, config: null },
     });
 
     const second = await adminClient.systemAdmin.createDemoSchool({ ...validInput, registrationNo: 'REG-KEEP-1' });

@@ -3,7 +3,7 @@ import { schoolDashboardRouter } from './dashboard/dashboard.router';
 import { schoolMemberTable } from "@campuspilot/db/schema/school-member";
 import { schoolTable } from "@campuspilot/db/schema/school";
 import { SCHOOL_ACTIONS } from "@campuspilot/opa/policies/school";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { z } from "zod";
 
 import { rpcError, toRpcError } from "../../errors";
@@ -16,6 +16,7 @@ import { schoolBillingRouter } from "./billing/billing.router";
 import { schoolClassRouter } from "./class/class.router";
 import { schoolSectionRouter } from "./class/section.router";
 import { schoolFeatureFlagsRouter } from "./feature-flags/feature-flags.router";
+import { schoolAssistantAccessRouter } from "./assistant-access/assistant-access.router";
 import { schoolExamRouter } from "./exam/exam.router";
 import { schoolLogoRouter } from "./logo/logo.router";
 import { schoolMemberRouter } from "./member/member.router";
@@ -39,6 +40,7 @@ export const schoolRouter = {
   ...schoolNotificationRouter,
   ...schoolNotificationLogRouter,
   ...schoolFeatureFlagsRouter,
+  ...schoolAssistantAccessRouter,
   ...schoolNoticeRouter,
   listMySchools: protectedProcedure
     .route({
@@ -59,6 +61,14 @@ export const schoolRouter = {
     // small bounded set and the client needs the complete set for switching.
     .output(z.array(mySchoolDtoSchema))
     .handler(async ({ context }) => {
+      // This procedure takes no schoolId, so the assistant's school check in
+      // `assertAssistantToolPolicy` has nothing to compare. An assistant
+      // conversation belongs to one school and must not learn the user's
+      // other schools, so for it the list is that one school.
+      const assistantSchoolId =
+        context.principal.authMethod === "assistant"
+          ? context.principal.assistantRun.schoolId
+          : undefined;
       try {
         return await context.db
           .select({
@@ -74,7 +84,14 @@ export const schoolRouter = {
             schoolTable,
             eq(schoolMemberTable.schoolId, schoolTable.id),
           )
-          .where(eq(schoolMemberTable.userId, context.session.user.id))
+          .where(
+            and(
+              eq(schoolMemberTable.userId, context.session.user.id),
+              assistantSchoolId === undefined
+                ? undefined
+                : eq(schoolTable.id, assistantSchoolId),
+            ),
+          )
           .orderBy(asc(schoolTable.name), asc(schoolTable.id));
       } catch (error) {
         throw toRpcError(error);
