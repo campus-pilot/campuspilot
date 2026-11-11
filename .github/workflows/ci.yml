@@ -48,6 +48,7 @@ jobs:
       matrix:
         package:
           - "@campuspilot/api"
+          - "@campuspilot/assistant"
           - "@campuspilot/auth"
           - "@campuspilot/components"
           - "@campuspilot/logger"
