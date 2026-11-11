@@ -21,6 +21,12 @@ export type HandOverApproval = (approvalId: string) => Promise<unknown>;
  *    outbox sweep sends it until Restate accepts it. It cannot be approved
  *    meanwhile (the approval is no longer pending, and `respondToApproval`
  *    refuses once a stop is asked).
+ * Approving takes the run's row lock too and refuses once `stopRequestedAt`
+ * is set (`decideApprovalUnlessStopped`), so an approve and a stop are
+ * ordered: a stop that commits first wins; an approve that commits first
+ * leaves no pending approval here, and the turn then checks the stop again
+ * before it hands the approved write to the API (`callWriteOnce`), so the
+ * change is not made either way unless it had already started.
  * A run that has already ended is returned as it is.
  */
 export async function stopRun(run: store.RunRow, handOverApproval: HandOverApproval): Promise<AssistantRunDto> {

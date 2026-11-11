@@ -3,21 +3,11 @@ import { schoolAssistantAccessRoleTable } from '@campuspilot/db/schema/assistant
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 
-import { setSchoolFeature } from '../../../feature-flags/feature-flags.service';
 import { expectFeatureDisabled, expectPermissionDenied } from '../../../../test/feature-flags';
-import { createSchoolStaffSession, createTestClient, createTestSchool } from '../../../../test/fixtures';
+import { createSchoolStaffSession, createTestClient, createTestSchool, setTestSchoolFeature } from '../../../../test/fixtures';
 
-async function schoolWithAssistant(eligibleRoles: Array<'principal' | 'manager' | 'teacher' | 'accountant' | 'exam_coordinator'>) {
-  const school = await createTestSchool();
-  await setSchoolFeature(db, {
-    schoolId: school.id,
-    feature: 'assistant',
-    enabled: true,
-    config: { monthlyLimitUsd: 20, eligibleRoles },
-    updatedBy: null,
-  });
-  return school;
-}
+const schoolWithAssistant = (eligibleRoles: Array<'principal' | 'manager' | 'teacher' | 'accountant' | 'exam_coordinator'>) =>
+  createTestSchool({ features: [{ feature: 'assistant', config: { monthlyLimitUsd: 20, eligibleRoles } }] });
 
 const principalOf = async (schoolId: string) =>
   createTestClient((await createSchoolStaffSession(schoolId, [{ role: 'principal' }])).session);
@@ -74,13 +64,7 @@ describe('school.getAssistantAccess / school.updateAssistantRoles', () => {
     expect(await storedRoles(school.id)).toEqual([]);
 
     await principal.school.updateAssistantRoles({ schoolId: school.id, roles: [{ role: 'teacher', enabled: true }] });
-    await setSchoolFeature(db, {
-      schoolId: school.id,
-      feature: 'assistant',
-      enabled: true,
-      config: { monthlyLimitUsd: null, eligibleRoles: ['principal'] },
-      updatedBy: null,
-    });
+    await setTestSchoolFeature(school.id, 'assistant', true, { monthlyLimitUsd: null, eligibleRoles: ['principal'] });
     const access = await principal.school.getAssistantAccess({ schoolId: school.id });
     expect(access.roles.find((role) => role.role === 'teacher')).toEqual({ role: 'teacher', eligible: false, enabled: true });
     // It can still be switched off.

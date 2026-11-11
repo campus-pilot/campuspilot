@@ -33,8 +33,10 @@ export type AssistantAccessRefusal = { code: AssistantAccessRefusalCode; message
 
 /**
  * Who may use the assistant, as facts. `allowed` (may start or continue a
- * turn now) holds only when every one of them does; reading one's own
- * history needs only `featureEnabled` and `member`.
+ * turn now) holds only when every one of them does. Seeing the assistant at
+ * all (its pages, one's own history, delete, stop, decline) needs every fact
+ * but the limit: `featureEnabled`, `member` and a non-empty `allowedRoles`
+ * (`canSee` in `packages/assistant/src/access.ts`).
  */
 export type AssistantAccessDecision = {
   featureEnabled: boolean;
@@ -78,9 +80,9 @@ function refused(
 /**
  * Whether a user may use the in-app assistant in a school, and why not. The
  * one decision every enforcement point uses: the `/model/*` procedures (use
- * for sending and approving, the read facts for history and streams), the
- * in-process token issue, the open-stream recheck and the worker before every
- * model request.
+ * for sending and approving, every fact but the limit for history, streams,
+ * delete, stop and decline), the in-process token issue, the open-stream
+ * recheck and the worker before every model request and tool call.
  *
  * Use is role-based only: the flag is enabled AND the user holds at least
  * one role that is in the flag's `eligibleRoles` AND that the school switched

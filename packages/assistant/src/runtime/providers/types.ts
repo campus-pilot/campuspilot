@@ -117,3 +117,26 @@ export interface ModelProvider {
   /** Classifies an error thrown by `step`, so the loop knows whether to retry. */
   failureKind(error: unknown): ModelFailureKind;
 }
+
+/**
+ * What a failed request had used, when the provider reported usage before it
+ * failed (for example a Gemini response that ended in a malformed function
+ * call, or a stream that broke after its first usage report). Such a request
+ * is billed, so the loop saves it before the step is retried. `complete`
+ * says whether this is the provider's final usage for the response or only
+ * what it had reported so far; it is never inferred from the numbers.
+ */
+export type FailedRequestUsage = { usage: ModelUsage; complete: boolean; model: string | null };
+
+const billedUsage = new WeakMap<object, FailedRequestUsage>();
+
+/** Attaches a failed request's usage to the error the adapter throws. */
+export function withBilledUsage<E extends object>(error: E, billed: FailedRequestUsage): E {
+  billedUsage.set(error, billed);
+  return error;
+}
+
+/** The usage attached to a failed request's error, or null when the provider reported none. */
+export function billedUsageOf(error: unknown): FailedRequestUsage | null {
+  return typeof error === 'object' && error !== null ? (billedUsage.get(error) ?? null) : null;
+}

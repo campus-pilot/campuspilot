@@ -54,11 +54,15 @@ permissions.
    After commit the run is handed to Restate (`AssistantControl.startRun`,
    signed, idempotent per run); the run row is the outbox entry
    (`handed_over_at`). A run Restate never accepts within 10 minutes is failed
-   visibly (`dispatch_failed`) so the user can send again.
+   visibly (`dispatch_failed`) so the user can send again; so is a run
+   Restate accepted that never started within 10 minutes (`not_started`),
+   unless an earlier run of the conversation is still unfinished (runs of a
+   conversation queue behind each other). A late start of such a run does
+   nothing.
 4. The worker runs the turn on the conversation's object (messages queue
    behind an active run). Each model step and tool call is a durable Restate
-   step. **Before every model request** it asks the same access decision
-   again, so a long tool loop stops at the school's limit (`limit_reached`)
+   step. **Before every model request and every tool call** it asks the same
+   access decision again, so a long tool loop stops at the school's limit (`limit_reached`)
    or when the feature or the user's role is switched off; changes already
    approved and made stay made. Tools are the MCP tools the API's **assistant
    view** lists: every procedure the policy allows, core and advanced, tagged
@@ -72,8 +76,10 @@ permissions.
    decision is never lost and the request never fails because Restate is
    briefly away. Stop records the stop, signals a streaming step, and cancels
    a pending approval the same way (`run-stop.ts`); every step of it is
-   repeatable, and once a stop is asked the change can no longer be approved.
-   The run checks for a stop while holding its row lock before it creates an
+   repeatable, and once a stop is asked the change can no longer be approved:
+   an approve takes the run's row lock and is refused once
+   `stop_requested_at` is set, and the turn checks the stop again, under the
+   same lock, before it hands an approved write to the API. The run checks for a stop while holding its row lock before it creates an
    approval, so a Stop never lands between the check and the approval.
    An approved write is handed to the API **at most once**: the intent is saved
    on the item before the call, so a step repeated after a crash never sends it
@@ -192,6 +198,13 @@ in Postgres `numeric(14,8)`) and adds the tokens and exactly that cost to
 `assistant_run` (`cost_usd`). The insert is idempotent per step
 (`request_key`). One row per request, not per run, because a release with new
 prices can land mid-run. A provider without prices is never called.
+
+A request that **failed** after the provider reported usage (a Gemini
+response ending in a malformed function call, a stream that broke midway) is
+billed, so it is saved before the step is retried, one row per attempt
+(`<runId>:model:<step>:attempt:<n>`), with `usage_complete` saying whether
+that was the provider's final usage. A failure with no usage reported (a 429
+refusal) saves nothing.
 
 A request **stopped** mid-stream is saved too, with `usage_complete = false`
 and the usage the provider had reported before the abort (Gemini's

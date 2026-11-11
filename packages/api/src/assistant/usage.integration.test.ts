@@ -7,13 +7,13 @@ import {
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 
-import { setSchoolFeature } from '../feature-flags/feature-flags.service';
 import { expectFeatureDisabled, expectPermissionDenied } from '../../test/feature-flags';
 import {
   createAdminSession,
   createSchoolStaffSession,
   createTestClient,
   createTestSchool,
+  setTestSchoolFeature,
 } from '../../test/fixtures';
 
 /**
@@ -22,15 +22,8 @@ import {
  * other tests never overlap with it.
  */
 
-async function enable(schoolId: string) {
-  await setSchoolFeature(db, {
-    schoolId,
-    feature: 'assistant',
-    enabled: true,
-    config: { monthlyLimitUsd: null, eligibleRoles: ['principal'] },
-    updatedBy: null,
-  });
-}
+const enable = (schoolId: string) =>
+  setTestSchoolFeature(schoolId, 'assistant', true, { monthlyLimitUsd: null, eligibleRoles: ['principal'] });
 
 /** Saves one model request as the worker would, at a given instant. */
 async function request(options: {

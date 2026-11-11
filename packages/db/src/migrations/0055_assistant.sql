@@ -142,6 +142,7 @@ ALTER TABLE "assistant_transcript_entry" ADD CONSTRAINT "assistant_transcript_en
 ALTER TABLE "school_assistant_access_role" ADD CONSTRAINT "school_assistant_access_role_school_id_school_id_fk" FOREIGN KEY ("school_id") REFERENCES "public"."school"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "school_assistant_access_role" ADD CONSTRAINT "school_assistant_access_role_updated_by_user_id_fk" FOREIGN KEY ("updated_by") REFERENCES "public"."user"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "assistant_approval_run_idx" ON "assistant_approval" USING btree ("run_id");--> statement-breakpoint
+CREATE INDEX "assistant_approval_resolution_pending_idx" ON "assistant_approval" USING btree ("decided_at") WHERE "assistant_approval"."resolution_handed_over_at" is null;--> statement-breakpoint
 CREATE INDEX "assistant_conversation_school_user_updated_idx" ON "assistant_conversation" USING btree ("school_id","user_id","updated_at");--> statement-breakpoint
 CREATE INDEX "assistant_item_conversation_sequence_idx" ON "assistant_item" USING btree ("conversation_id","sequence");--> statement-breakpoint
 CREATE INDEX "assistant_item_run_idx" ON "assistant_item" USING btree ("run_id");--> statement-breakpoint
@@ -150,5 +151,7 @@ CREATE INDEX "assistant_model_request_created_idx" ON "assistant_model_request" 
 CREATE INDEX "assistant_model_request_run_idx" ON "assistant_model_request" USING btree ("run_id");--> statement-breakpoint
 CREATE INDEX "assistant_run_conversation_idx" ON "assistant_run" USING btree ("conversation_id","created_at");--> statement-breakpoint
 CREATE INDEX "assistant_run_school_created_idx" ON "assistant_run" USING btree ("school_id","created_at");--> statement-breakpoint
+CREATE INDEX "assistant_run_handover_pending_idx" ON "assistant_run" USING btree ("created_at") WHERE "assistant_run"."handed_over_at" is null and "assistant_run"."status" = 'queued';--> statement-breakpoint
+CREATE INDEX "assistant_run_unstarted_idx" ON "assistant_run" USING btree ("handed_over_at") WHERE "assistant_run"."started_at" is null and "assistant_run"."status" = 'queued';--> statement-breakpoint
 CREATE INDEX "assistant_transcript_entry_run_idx" ON "assistant_transcript_entry" USING btree ("run_id");--> statement-breakpoint
 CREATE INDEX "school_assistant_access_role_updated_by_idx" ON "school_assistant_access_role" USING btree ("updated_by");

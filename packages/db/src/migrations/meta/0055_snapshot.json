@@ -1,5 +1,5 @@
 {
-  "id": "5feabfc3-0a8e-4f79-8e13-b0b77cb8eea2",
+  "id": "a562c2d0-aee6-4b4c-87f0-9450d9172b45",
   "prevId": "f2673503-e74f-4b59-8515-9e217f32da92",
   "version": "7",
   "dialect": "postgresql",
@@ -657,6 +657,22 @@
             }
           ],
           "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "assistant_approval_resolution_pending_idx": {
+          "name": "assistant_approval_resolution_pending_idx",
+          "columns": [
+            {
+              "expression": "decided_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"assistant_approval\".\"resolution_handed_over_at\" is null",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -1449,6 +1465,38 @@
             }
           ],
           "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "assistant_run_handover_pending_idx": {
+          "name": "assistant_run_handover_pending_idx",
+          "columns": [
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"assistant_run\".\"handed_over_at\" is null and \"assistant_run\".\"status\" = 'queued'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "assistant_run_unstarted_idx": {
+          "name": "assistant_run_unstarted_idx",
+          "columns": [
+            {
+              "expression": "handed_over_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"assistant_run\".\"started_at\" is null and \"assistant_run\".\"status\" = 'queued'",
           "concurrently": false,
           "method": "btree",
           "with": {}

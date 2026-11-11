@@ -35,18 +35,44 @@ const ROLE_LABELS: Record<Role, string> = {
 /** A limit in whole dollars and cents, or empty for none. */
 const LIMIT_PATTERN = /^\d{1,7}(\.\d{1,2})?$/;
 
-const settingsSchema = z.object({
-  enabled: z.boolean(),
-  monthlyLimitUsd: z
-    .string()
-    .trim()
-    .refine((value) => value === '' || (LIMIT_PATTERN.test(value) && Number(value) > 0 && Number(value) <= 1_000_000), {
-      message: 'Enter a positive amount in USD (at most two decimals), or leave it empty for no limit.',
-    }),
-  eligibleRoles: z.array(roleEnum).min(1, 'Choose at least one role.'),
-});
+const limitIsValid = (value: string) =>
+  value.trim() === '' || (LIMIT_PATTERN.test(value.trim()) && Number(value) > 0 && Number(value) <= 1_000_000);
+
+/**
+ * Enabling needs valid settings (a limit or none, and at least one role).
+ * Switching off never does: invalid or incomplete settings are then not
+ * saved and the stored ones are kept (see `configToSave`).
+ */
+const settingsSchema = z
+  .object({ enabled: z.boolean(), monthlyLimitUsd: z.string(), eligibleRoles: z.array(roleEnum) })
+  .superRefine((value, context) => {
+    if (!value.enabled) return;
+    if (!limitIsValid(value.monthlyLimitUsd)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['monthlyLimitUsd'],
+        message: 'Enter a positive amount in USD (at most two decimals), or leave it empty for no limit.',
+      });
+    }
+    if (value.eligibleRoles.length === 0) {
+      context.addIssue({ code: 'custom', path: ['eligibleRoles'], message: 'Choose at least one role.' });
+    }
+  });
 
 type SettingsValues = z.infer<typeof settingsSchema>;
+
+/**
+ * The settings sent with a save: the form's when they are valid; when
+ * switching off with settings that are not, the stored ones (possibly none),
+ * so the switch never fails on them and nothing valid is lost.
+ */
+function configToSave(value: SettingsValues, stored: AssistantConfig | null): AssistantConfig | null {
+  const limit = value.monthlyLimitUsd.trim();
+  if (limitIsValid(limit) && value.eligibleRoles.length > 0) {
+    return { monthlyLimitUsd: limit === '' ? null : Number(limit), eligibleRoles: value.eligibleRoles };
+  }
+  return stored;
+}
 
 const errorText = (error: unknown) => (typeof error === 'string' ? error : (error as { message?: string } | undefined)?.message);
 
@@ -69,12 +95,11 @@ function useAssistantSettingsForm(schoolId: string, stored: { enabled: boolean; 
     onSubmit: async ({ value }) => {
       form.setErrorMap({});
       try {
-        const limit = value.monthlyLimitUsd.trim();
         const saved = await client.systemAdmin.updateSchoolFeatureFlag({
           id: schoolId,
           feature: 'assistant',
           enabled: value.enabled,
-          config: { monthlyLimitUsd: limit === '' ? null : Number(limit), eligibleRoles: value.eligibleRoles },
+          config: configToSave(value, stored.config),
         });
         queryClient.setQueryData(orpc.systemAdmin.getSchoolFeatureFlags.queryKey({ input: { id: schoolId } }), saved);
         toast.success('AI assistant settings saved.');

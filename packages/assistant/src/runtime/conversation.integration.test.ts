@@ -4,6 +4,7 @@ import { asc, eq } from 'drizzle-orm';
 import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 
 import { db } from '../db';
+import * as store from '../store';
 import { getRunToken } from '../run-token';
 import { createFakeRunContext, SimulatedCrash, type FakeRunContext } from '../testing/run-context';
 import {
@@ -34,6 +35,7 @@ import {
 import {
   createFakeProvider,
   FAKE_PRICES,
+  FAKE_REPORTED_MODEL,
   FAKE_USAGE,
   FakeModelError,
   fakeProviderRegistry,
@@ -43,6 +45,7 @@ import {
   type FakeModelStep,
   type FakeToolResultBlock,
 } from './providers/fake';
+import { withBilledUsage } from './providers/types';
 import { callTool, loadToolCatalog } from './tools';
 
 /**
@@ -515,6 +518,25 @@ describe('a write tool call', () => {
       'awaiting_approval',
       'cancelled',
     ]);
+  });
+
+  it('is not handed to the API when a stop lands after the approval was decided', async () => {
+    const { turn, invoke } = await arrange({
+      script: [fakeReply({ toolUses: [writeCall] }), fakeReply({ text: 'never requested' })],
+    });
+    const { ctx, done } = invoke();
+
+    const approval = await waitForPendingApproval(turn, done);
+    // The approve committed first; the stop then finds no pending approval.
+    const decided = await store.decideApproval(db, approval.id, 'approved');
+    await requestStop(ctx, turn);
+    ctx.resolveAwakeable(decided!.awakeableId, { decision: 'approve' });
+    await done;
+
+    expect(callToolMock).not.toHaveBeenCalled();
+    const { run, toolCalls } = await readTurn(turn);
+    expect(run).toMatchObject({ status: 'cancelled', errorCode: null });
+    expect(toolCalls.map((call) => [call.status, call.body.executionStartedAt])).toEqual([['cancelled', undefined]]);
   });
 
   it('fails with NOT_FOUND, without crashing the run, when the tool left the catalog before its approved call ran', async () => {
@@ -1038,7 +1060,8 @@ describe('the access check before each model request', () => {
     let checks = 0;
     const checkAccess: RunAccessCheck = async () => {
       checks += 1;
-      return checks === 1
+      // Allowed for the first model request and the read it asks for.
+      return checks <= 2
         ? { allowed: true }
         : { allowed: false, code: 'limit_reached', message: 'This school has reached its AI assistant limit for this month.' };
     };
@@ -1128,5 +1151,56 @@ describe('the cost of each model request', () => {
     const { run } = await readTurn(turn);
     expect(run).toMatchObject({ status: 'failed', errorCode: 'provider_unavailable', costUsd: '0.00000000' });
     expect(await modelRequestsOf(turn.runId)).toEqual([]);
+  });
+});
+
+describe('the access check before each tool call', () => {
+  it('fails the run with the refusal’s code and runs no tool once access is revoked', async () => {
+    let checks = 0;
+    const checkAccess: RunAccessCheck = async () => {
+      checks += 1;
+      return checks === 1
+        ? { allowed: true }
+        : { allowed: false, code: 'role_not_enabled', message: 'Your role cannot use the AI assistant in this school.' };
+    };
+    const { turn, invoke } = await arrange({ script: [fakeReply({ toolUses: [readCall] })], checkAccess });
+
+    await invoke().done;
+
+    expect(callToolMock).not.toHaveBeenCalled();
+    const { run, toolCalls } = await readTurn(turn);
+    expect(run).toMatchObject({ status: 'failed', errorCode: 'role_not_enabled' });
+    expect(toolCalls.map((call) => call.status)).toEqual(['failed']);
+  });
+});
+
+describe('a billed request that failed', () => {
+  it('is saved per attempt before the step is retried, with its usage marked complete or not', async () => {
+    const { provider, turn, invoke } = await arrange({
+      script: [
+        withBilledUsage(new FakeModelError('busy', 'stream broke'), { usage: FAKE_USAGE, complete: false, model: 'partial-model' }),
+        withBilledUsage(new Error('malformed function call'), { usage: FAKE_USAGE, complete: true, model: 'final-model' }),
+        fakeReply({ text: 'Done.' }),
+      ],
+    });
+
+    await invoke().done;
+
+    expect(provider.calls).toHaveLength(3);
+    const requests = await modelRequestsOf(turn.runId);
+    const stepKey = modelTranscriptKey(turn.runId, 0);
+    expect(requests.map((request) => [request.requestKey, request.usageComplete, request.answeredModel, request.costUsd])).toEqual([
+      [stepKey, true, FAKE_REPORTED_MODEL, '0.00047313'],
+      [`${stepKey}:attempt:1`, false, 'partial-model', '0.00047313'],
+      [`${stepKey}:attempt:2`, true, 'final-model', '0.00047313'],
+    ]);
+    const { run } = await readTurn(turn);
+    expect(run).toMatchObject({ status: 'completed', modelRequestCount: 3, costUsd: '0.00141939' });
+  });
+
+  it('saves nothing for a failure the provider reported no usage for', async () => {
+    const { turn, invoke } = await arrange({ script: [new FakeModelError('busy', '429'), fakeReply({ text: 'Done.' })] });
+    await invoke().done;
+    expect((await modelRequestsOf(turn.runId)).map((request) => request.requestKey)).toEqual([modelTranscriptKey(turn.runId, 0)]);
   });
 });

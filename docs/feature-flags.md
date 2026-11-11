@@ -279,7 +279,9 @@ showing past spend.
    feature; then backfill `enabled = true` for existing schools in the same
    release, as 0048 did for `cadet`.
 6. Tests: fixtures create schools with no feature. Name what a suite needs:
-   `createTestSchool({ features: ['<key>'] })`, `createFinanceScenario({ features })`,
+   `createTestSchool({ features: ['<key>'] })` (a feature with settings as
+   `{ feature: '<key>', config }`), `createFinanceScenario({ features })`,
    `createResultsSchool({ features })`, or flip one with
-   `setTestSchoolFeature(schoolId, key, enabled)`.
+   `setTestSchoolFeature(schoolId, key, enabled, config?)`. Without `config`
+   the stored settings are kept, as an administrator's switch keeps them.
 7. Update this guide's tables.

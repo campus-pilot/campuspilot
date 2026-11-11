@@ -1,4 +1,5 @@
 import type { AssistantView } from "@campuspilot/assistant-contract/views";
+import { sql } from "drizzle-orm";
 import {
   boolean,
   index,
@@ -267,6 +268,14 @@ export const assistantRunTable = pgTable(
     unique("assistant_run_user_client_request_unique").on(table.userId, table.clientRequestId),
     index("assistant_run_conversation_idx").on(table.conversationId, table.createdAt),
     index("assistant_run_school_created_idx").on(table.schoolId, table.createdAt),
+    /** The outbox sweep's scan: runs whose start Restate has not accepted. */
+    index("assistant_run_handover_pending_idx")
+      .on(table.createdAt)
+      .where(sql`${table.handedOverAt} is null and ${table.status} = 'queued'`),
+    /** The sweep's scan for runs Restate accepted that never started. */
+    index("assistant_run_unstarted_idx")
+      .on(table.handedOverAt)
+      .where(sql`${table.startedAt} is null and ${table.status} = 'queued'`),
   ],
 );
 
@@ -343,7 +352,13 @@ export const assistantApprovalTable = pgTable(
     lastResolutionHandoverError: text("last_resolution_handover_error"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
-  (table) => [index("assistant_approval_run_idx").on(table.runId)],
+  (table) => [
+    index("assistant_approval_run_idx").on(table.runId),
+    /** The outbox sweep's scan: decisions Restate has not accepted. */
+    index("assistant_approval_resolution_pending_idx")
+      .on(table.decidedAt)
+      .where(sql`${table.resolutionHandedOverAt} is null`),
+  ],
 );
 
 /** The model conversation, one message per entry, in model order. */

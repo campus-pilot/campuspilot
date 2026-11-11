@@ -25,7 +25,7 @@ import {
 } from './contract';
 import { buildAssistantPrompt, type AssistantConversationFacts } from './prompt';
 import type { ProviderRegistry } from './providers/registry';
-import type { ModelProvider, ModelToolResult, TranscriptEntry } from './providers/types';
+import { billedUsageOf, type ModelProvider, type ModelToolResult, type TranscriptEntry } from './providers/types';
 import { showViewInputSchema } from '@campuspilot/assistant-contract/views';
 
 import {
@@ -91,7 +91,7 @@ export const OUTCOME_UNKNOWN_ERROR = {
 
 /**
  * Whether the run's user may still use the assistant in its school, asked
- * before every model request: the API's `resolveAssistantAccess` (feature,
+ * before every model request and every tool call: the API's `resolveAssistantAccess` (feature,
  * role, the school's monthly limit), injected by `apps/worker` so the turn
  * loop itself imports no API code. A refusal ends the run with its code and
  * message; writes that were already approved and made stay made.
@@ -442,6 +442,26 @@ export function createRunProcessor(deps: AssistantConversationDeps) {
         isStopRequested: () => isAssistantRunStopSignalled(run.runId),
       });
     } catch (error) {
+      // A request that failed after the provider reported usage is billed:
+      // save it, under its own attempt key, before the step is retried or fails.
+      const billed = billedUsageOf(error);
+      if (billed) {
+        await tx(async (t, emit) => {
+          await store.recordModelRequest(t, {
+            runId: run.runId,
+            schoolId: run.schoolId,
+            userId: run.userId,
+            requestKey: await store.nextFailedAttemptKey(t, entryKey),
+            provider: provider.id,
+            requestedModel: provider.model,
+            answeredModel: billed.model ?? provider.model,
+            usage: billed.usage,
+            usageComplete: billed.complete,
+            prices,
+          });
+          await store.updateRun(t, emit, runRef(run), {});
+        });
+      }
       const kind = provider.failureKind(error);
       deps.log.error(
         {
@@ -708,17 +728,25 @@ export function createRunProcessor(deps: AssistantConversationDeps) {
     tool: AssistantTool,
     toolUse: ToolUse,
     itemId: string,
-  ): Promise<ToolOutcome | { recorded: ModelToolResult }> {
+  ): Promise<ToolOutcome | { recorded: ModelToolResult } | { stopped: true }> {
     const earlier = await tx(async (t, emit) => {
+      // The run's row first (the order a stop takes), so a stop that
+      // committed after the approval is seen here and the write never starts.
+      const current = await store.lockRun(t, run.runId);
       const item = await store.findItem(t, itemId);
       if (!item) return null;
       const body = item.body as AssistantToolCallBody;
       if (body.executionStartedAt) return { status: item.status, body };
+      if (current?.stopRequestedAt) {
+        await store.updateItem(t, emit, item, { status: 'cancelled' });
+        return 'stopped' as const;
+      }
       await store.updateItem(t, emit, item, {
         body: { ...body, executionStartedAt: new Date().toISOString() },
       });
       return null;
     });
+    if (earlier === 'stopped') return { stopped: true };
     if (earlier) {
       deps.log.warn(
         { runId: run.runId, conversationId: run.conversationId, tool: tool.mcpName, status: earlier.status },
@@ -756,16 +784,26 @@ export function createRunProcessor(deps: AssistantConversationDeps) {
     toolUse: ToolUse,
     itemId: string,
   ): Promise<ModelToolResult> {
+    // The same check as before every model request: a call the model asked
+    // for (or the user approved) before access was revoked or the limit was
+    // reached does not run; the run fails with the refusal's code.
+    const access = await deps.checkAccess({ schoolId: run.schoolId, userId: run.userId });
+    if (!access.allowed) throw runFailure(access.code, access.message);
+
     const token = await requireToken(run.runId);
     const catalog = await loadToolCatalog(token);
     const tool = catalog.tools.get(toolUse.name);
     // The API can stop offering a tool while a call waits for approval.
-    const outcome: ToolOutcome | { recorded: ModelToolResult } = !tool
+    const outcome: ToolOutcome | { recorded: ModelToolResult } | { stopped: true } = !tool
       ? { ok: false, error: { code: 'NOT_FOUND', message: `The tool ${toolUse.name} is no longer available.` } }
       : tool.readOnly
         ? await callTool(token, tool, toolUse.input ?? {})
         : await callWriteOnce(run, token, tool, toolUse, itemId);
     if ('recorded' in outcome) return outcome.recorded;
+    if ('stopped' in outcome) {
+      // The user stopped the assistant after approving: the write was not made.
+      return { toolUseId: toolUse.id, toolName: toolUse.name, content: CANCELLED_RESULT, isError: true };
+    }
 
     if (!outcome.ok) {
       deps.log.info(

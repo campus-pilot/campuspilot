@@ -2,7 +2,13 @@ import { assistantApprovalTable, assistantRunTable } from '@campuspilot/db/schem
 import { eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 
+import { createLogger } from '@campuspilot/logger';
+
 import { db } from './db';
+import { generateId } from './ids';
+import { createRunProcessor } from './runtime/conversation';
+import { createFakeProvider, fakeProviderRegistry, fakeReply } from './runtime/providers/fake';
+import { createFakeRunContext } from './testing/run-context';
 import { configureDispatcher, handOverRun, RUN_HANDOVER_DEADLINE_MS, sweepAssistantOutbox } from './dispatch';
 import * as store from './store';
 import { seedTurn } from './testing/turn';
@@ -117,5 +123,44 @@ describe('the decision outbox', () => {
     expect(handed?.resolutionHandoverAttempts).toBe(2);
     expect(dispatcher.resolveApproval).toHaveBeenCalledTimes(2);
     expect(dispatcher.resolveApproval).toHaveBeenLastCalledWith({ approvalId: approval.id });
+  });
+});
+
+describe('runs Restate accepted but never started', () => {
+  const handedOver = (runId: string, ms: number) =>
+    db.update(assistantRunTable).set({ handedOverAt: new Date(Date.now() - ms) }).where(eq(assistantRunTable.id, runId));
+
+  it('are failed with not_started after the deadline, and a late start then does nothing', async () => {
+    fakeDispatcher();
+    const turn = await seedTurn();
+    await handedOver(turn.runId, RUN_HANDOVER_DEADLINE_MS + 60_000);
+
+    await sweepAssistantOutbox();
+
+    const run = await runOf(turn.runId);
+    expect(run).toMatchObject({ status: 'failed', errorCode: 'not_started', startedAt: null });
+    // The worker's first step sees a run that ended and leaves it alone.
+    const provider = createFakeProvider({ script: [fakeReply({ text: 'never' })] });
+    const processRun = createRunProcessor({ providers: fakeProviderRegistry(provider), log: createLogger({ pkg: 'test' }), checkAccess: async () => ({ allowed: true }) });
+    await processRun(createFakeRunContext(), turn.input);
+    expect(provider.calls).toHaveLength(0);
+    expect(await runOf(turn.runId)).toMatchObject({ status: 'failed', errorCode: 'not_started' });
+  });
+
+  it('are left queued while an earlier run of the conversation is unfinished (they wait behind it)', async () => {
+    fakeDispatcher();
+    const first = await seedTurn();
+    await store.assistantTransaction(db, (tx, emit) =>
+      store.updateRun(tx, emit, { id: first.runId, conversationId: first.conversationId }, { status: 'awaiting_approval', startedAt: new Date() }),
+    );
+    const secondId = generateId('run');
+    await store.assistantTransaction(db, (tx, emit) =>
+      store.insertRun(tx, emit, { id: secondId, conversationId: first.conversationId, schoolId: first.schoolId, userId: first.userId, clientRequestId: crypto.randomUUID(), surface: 'panel' }),
+    );
+    await handedOver(secondId, RUN_HANDOVER_DEADLINE_MS + 60_000);
+
+    await sweepAssistantOutbox();
+
+    expect(await runOf(secondId)).toMatchObject({ status: 'queued' });
   });
 });

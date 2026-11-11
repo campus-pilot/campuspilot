@@ -23,6 +23,7 @@ import type {
   ModelToolUse,
   ModelUsage,
 } from './types';
+import { withBilledUsage } from './types';
 
 /**
  * Gemini through the Gemini API (`@google/genai`), using its own conventions
@@ -207,6 +208,10 @@ export function createGeminiProvider({ apiKey, model }: { apiKey: string; model:
           model: usage ? modelVersion : null,
         };
       }
+      // A stream that broke after a usage report was billed for that much.
+      if (usage && typeof error === 'object' && error !== null) {
+        throw withBilledUsage(error, { usage: normalizeGeminiUsage(usage), complete: false, model: modelVersion });
+      }
       throw error;
     } finally {
       clearInterval(stopPoll);
@@ -214,7 +219,10 @@ export function createGeminiProvider({ apiKey, model }: { apiKey: string; model:
     }
 
     if (finishReason === FinishReason.MALFORMED_FUNCTION_CALL) {
-      throw new MalformedFunctionCallError('Gemini returned a malformed function call.');
+      // The response finished, so its usage is final and billed even though
+      // the step is retried.
+      const error = new MalformedFunctionCallError('Gemini returned a malformed function call.');
+      throw usage ? withBilledUsage(error, { usage: normalizeGeminiUsage(usage), complete: true, model: modelVersion }) : error;
     }
     const content = prepareGeminiParts(parts);
     const refusal = blocked || (finishReason !== undefined && REFUSAL_REASONS.has(finishReason));

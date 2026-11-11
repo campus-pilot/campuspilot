@@ -13,6 +13,7 @@ import type {
   ModelToolUse,
   ModelUsage,
 } from './types';
+import { withBilledUsage } from './types';
 
 /**
  * Claude through the Anthropic API, with every feature the Claude-only build
@@ -208,6 +209,11 @@ export async function streamAssistantResponse({
   } catch (error) {
     if (stopped && error instanceof Anthropic.APIUserAbortError) {
       return { stopped: true, text, partialUsage, model: answeringModel };
+    }
+    // A stream that broke after `message_start` was billed for what it reported.
+    const reported = partialUsage as ModelUsage | null;
+    if (reported && typeof error === 'object' && error !== null) {
+      throw withBilledUsage(error, { usage: reported, complete: false, model: answeringModel });
     }
     throw error;
   } finally {

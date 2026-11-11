@@ -364,6 +364,20 @@ export async function updateRun(
 }
 
 /**
+ * The request key for the next failed-but-billed attempt of a model step:
+ * `<stepKey>:attempt:<n>`, one more than the attempts saved so far. A step's
+ * attempts run one after another (the conversation's object is exclusive),
+ * so counting is enough; the unique key still refuses a duplicate.
+ */
+export async function nextFailedAttemptKey(db: AssistantExecutor, stepKey: string): Promise<string> {
+  const [row] = await db
+    .select({ attempts: count() })
+    .from(assistantModelRequestTable)
+    .where(sql`${assistantModelRequestTable.requestKey} like ${`${stepKey}:attempt:%`}`);
+  return `${stepKey}:attempt:${(row?.attempts ?? 0) + 1}`;
+}
+
+/**
  * Saves one answered model request with its tokens, the prices it was made
  * at and its cost, and adds them to the run's totals, in the caller's
  * transaction. The cost is computed once, in Postgres `numeric` (USD per
@@ -647,6 +661,24 @@ export async function decideApproval(
     )
     .returning();
   return row ?? null;
+}
+
+/**
+ * Approves or declines a pending approval unless its run was asked to stop,
+ * atomically with a stop: the run's row is locked first (the order a stop
+ * takes it in), so either the stop committed before (and the decision is
+ * refused, `stopped`) or it runs after (and finds the approval decided).
+ * `decided` is null when the approval was no longer pending.
+ */
+export async function decideApprovalUnlessStopped(
+  db: AssistantDatabase,
+  input: { approvalId: string; runId: string; status: 'approved' | 'declined' },
+): Promise<{ stopped: true } | { stopped: false; decided: ApprovalRow | null }> {
+  return db.transaction(async (tx) => {
+    const run = await lockRun(tx, input.runId);
+    if (!run || run.stopRequestedAt) return { stopped: true };
+    return { stopped: false, decided: await decideApproval(tx, input.approvalId, input.status) };
+  });
 }
 
 /**

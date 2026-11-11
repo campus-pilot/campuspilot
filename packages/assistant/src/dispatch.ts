@@ -32,7 +32,11 @@ import * as store from './store';
  * never fails, or waits for the worker, because Restate is briefly away. A
  * run Restate has not accepted within {@link RUN_HANDOVER_DEADLINE_MS} is
  * failed visibly so the user can send again; a decision is re-sent until it
- * is accepted, since the run waits for it.
+ * is accepted, since the run waits for it. A run Restate accepted that never
+ * started within the same deadline (the worker never ran it) is failed too
+ * (`not_started`), unless an earlier run of its conversation is still
+ * unfinished: the conversation's object runs one turn at a time, so a run
+ * may rightly wait behind one that waits for approval.
  */
 
 /** Rows handled per kind and sweep; the next sweep continues with the rest. */
@@ -164,9 +168,13 @@ export async function handOverApprovalResolution(approvalId: string, db: Assista
 }
 
 /**
- * Claims queued runs Restate has not accepted (`FOR UPDATE SKIP LOCKED`, so
- * replicas take disjoint rows) and fails those past the deadline, through
- * the store so open conversations see it. Returns the rest to send.
+ * Finds queued runs Restate has not accepted and fails those past the
+ * deadline, through the store so open conversations see it. Returns the rest
+ * to send. Replicas sweeping at the same time may pick the same rows: that is
+ * harmless, because a send joins Restate's first invocation (same
+ * idempotency key) and every write is conditional on the row still being
+ * owed. (The `FOR UPDATE SKIP LOCKED` only spreads a busy sweep; its lock
+ * ends with the select.)
  */
 async function claimRunsToHandOver(db: AssistantDatabase): Promise<{ toSend: string[]; expired: number }> {
   const graceCutoff = new Date(Date.now() - SWEEP_GRACE_MS);
@@ -213,6 +221,54 @@ async function claimRunsToHandOver(db: AssistantDatabase): Promise<{ toSend: str
   return { toSend, expired };
 }
 
+/**
+ * Fails runs Restate accepted more than {@link RUN_HANDOVER_DEADLINE_MS} ago
+ * that never started, unless an earlier run of the same conversation is not
+ * finished (they queue behind it). Each is failed under its row lock and only
+ * while still queued and unstarted; if the worker starts it later, `begin`
+ * finds it ended and does nothing.
+ */
+async function failUnstartedRuns(db: AssistantDatabase): Promise<number> {
+  const cutoff = new Date(Date.now() - RUN_HANDOVER_DEADLINE_MS);
+  const rows = await db
+    .select({ id: assistantRunTable.id })
+    .from(assistantRunTable)
+    .where(
+      and(
+        eq(assistantRunTable.status, 'queued'),
+        isNull(assistantRunTable.startedAt),
+        lt(assistantRunTable.handedOverAt, cutoff),
+        sql`not exists (select 1 from ${assistantRunTable} as earlier
+          where earlier.conversation_id = ${assistantRunTable}.conversation_id
+            and earlier.id <> ${assistantRunTable}.id
+            and earlier.created_at <= ${assistantRunTable}.created_at
+            and earlier.status in ('queued', 'running', 'awaiting_approval'))`,
+      ),
+    )
+    .orderBy(asc(assistantRunTable.handedOverAt))
+    .limit(SWEEP_LIMIT);
+  let failed = 0;
+  for (const row of rows) {
+    const done = await store.assistantTransaction(db, async (tx, emit) => {
+      const current = await store.lockRun(tx, row.id);
+      if (!current || current.status !== 'queued' || current.startedAt) return false;
+      await store.updateRun(tx, emit, current, {
+        status: 'failed',
+        errorCode: 'not_started',
+        errorMessage: 'The assistant did not start on this message. Please try again.',
+        errorDetail: 'Restate accepted the run but the worker never started it.',
+        completedAt: new Date(),
+      });
+      return true;
+    });
+    if (done) {
+      failed += 1;
+      log.warn({ runId: row.id }, 'assistant.run.not-started');
+    }
+  }
+  return failed;
+}
+
 /** Decided approvals whose decision Restate has not accepted yet. */
 async function approvalsToHandOver(db: AssistantDatabase): Promise<string[]> {
   const rows = await db
@@ -234,14 +290,22 @@ async function approvalsToHandOver(db: AssistantDatabase): Promise<string[]> {
  * One outbox sweep, safe across API replicas and bounded per kind. A
  * replica sending the same row again joins one Restate invocation (same
  * idempotency key), and every write is conditional on the row still being
- * owed.
+ * owed, so overlapping sweeps change nothing twice.
  */
 export async function sweepAssistantOutbox(db: AssistantDatabase = defaultDb) {
   const runs = await claimRunsToHandOver(db);
   let runsSent = 0;
   for (const runId of runs.toSend) if (await handOverRun(runId, db)) runsSent += 1;
+  const runsNotStarted = await failUnstartedRuns(db);
   const approvals = await approvalsToHandOver(db);
   let approvalsSent = 0;
   for (const approvalId of approvals) if (await handOverApprovalResolution(approvalId, db)) approvalsSent += 1;
-  return { runs: runs.toSend.length, runsSent, runsExpired: runs.expired, approvals: approvals.length, approvalsSent };
+  return {
+    runs: runs.toSend.length,
+    runsSent,
+    runsExpired: runs.expired,
+    runsNotStarted,
+    approvals: approvals.length,
+    approvalsSent,
+  };
 }

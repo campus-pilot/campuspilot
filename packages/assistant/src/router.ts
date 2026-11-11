@@ -235,6 +235,9 @@ export const assistantRouter = os.router({
 
   sendMessage: authed.sendMessage.handler(async ({ context, input }) => {
     const userId = context.session.user.id;
+    // Even a replay returns the conversation, so it needs the user to see the
+    // assistant first; sending anew then needs full use access below.
+    await assertReadAccess(context, input.schoolId);
 
     const replay = await store.findRunByClientRequest(db, {
       userId,
@@ -357,11 +360,17 @@ export const assistantRouter = os.router({
         runId: approval.runId,
       });
     }
-    const decided = await store.decideApproval(
-      db,
-      approval.id,
-      input.decision === 'approve' ? 'approved' : 'declined',
-    );
+    // Decided under the run's lock, so a stop that lands while the token was
+    // issued wins: the change is then never approved.
+    const outcome = await store.decideApprovalUnlessStopped(db, {
+      approvalId: approval.id,
+      runId: approval.runId,
+      status: input.decision === 'approve' ? 'approved' : 'declined',
+    });
+    if (outcome.stopped) {
+      throw new ORPCError('CONFLICT', { message: 'The assistant was stopped, so this change will not be made.' });
+    }
+    const decided = outcome.decided;
     if (!decided) throw new ORPCError('CONFLICT', { message: 'This action was already decided.' });
     // The decision is saved, which is what the run wakes with; a hand-over
     // that fails now is sent by the outbox sweep.

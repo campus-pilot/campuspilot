@@ -18,10 +18,19 @@ import { z } from 'zod';
 const STORAGE_KEY = 'campuspilot.admin.inrPerUsd';
 const listeners = new Set<() => void>();
 
+/**
+ * The rate set on this page, in memory. It is what applies when it was set
+ * here (so a rate still applies for the page's lifetime when storage refuses
+ * to keep it); `undefined` means "not set on this page, read storage".
+ */
+let pageRate: string | null | undefined;
+
+const validRate = (value: string | null) => (value && INR_RATE_PATTERN.test(value) && Number(value) > 0 ? value : null);
+
 function readStoredRate(): string | null {
+  if (pageRate !== undefined) return pageRate;
   try {
-    const value = window.localStorage.getItem(STORAGE_KEY);
-    return value && INR_RATE_PATTERN.test(value) && Number(value) > 0 ? value : null;
+    return validRate(window.localStorage.getItem(STORAGE_KEY));
   } catch {
     return null;
   }
@@ -30,7 +39,10 @@ function readStoredRate(): string | null {
 function subscribe(onChange: () => void) {
   listeners.add(onChange);
   const onStorage = (event: StorageEvent) => {
-    if (event.key === STORAGE_KEY) onChange();
+    if (event.key !== STORAGE_KEY) return;
+    // Another tab changed the stored rate: storage is the source again.
+    pageRate = undefined;
+    onChange();
   };
   window.addEventListener('storage', onStorage);
   return () => {
@@ -39,12 +51,14 @@ function subscribe(onChange: () => void) {
   };
 }
 
+/** Keeps the rate in this browser; when storage refuses, it still applies until the page is left. */
 function storeRate(rate: string | null) {
+  pageRate = rate;
   try {
     if (rate) window.localStorage.setItem(STORAGE_KEY, rate);
     else window.localStorage.removeItem(STORAGE_KEY);
   } catch {
-    // Not kept: the rate applies until the page is left.
+    // Not kept across visits; `pageRate` still applies on this page.
   }
   for (const listener of listeners) listener();
 }

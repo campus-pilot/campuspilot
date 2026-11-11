@@ -37,6 +37,19 @@ vi.mock('./session', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./session')>()),
   resolveAssistantSession: vi.fn(),
 }));
+/**
+ * The API's in-process token issue, replaced so a test can make something
+ * happen while it is awaited (the moment a concurrent stop may land).
+ */
+const tokenIssue = vi.hoisted(() => ({ during: null as null | (() => Promise<void>) }));
+vi.mock('@campuspilot/api/assistant/token', () => ({
+  issueAssistantRunToken: vi.fn(async () => {
+    const during = tokenIssue.during;
+    tokenIssue.during = null;
+    await during?.();
+    return { token: 'delegated-token-for-tests', expiresAt: new Date(Date.now() + 60_000) };
+  }),
+}));
 vi.mock('./access', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./access')>()),
   loadAssistantAccess: vi.fn(),
@@ -305,6 +318,30 @@ describe('stopping a run that waits for approval', () => {
     return { turn, approval };
   }
 
+  it('never approves a change when the stop lands while the approval is being made', async () => {
+    const { turn, approval } = await waitingForApproval();
+    const resolveApproval = vi.fn().mockResolvedValue(undefined);
+    configureDispatcher({ startRun: vi.fn(), resolveApproval });
+    onTestFinished(() => configureDispatcher(null));
+    // The stop commits after the approve's first stop check, while it awaits the token.
+    tokenIssue.during = async () => {
+      await store.assistantTransaction(db, async (tx, emit) => {
+        const run = await store.lockRun(tx, turn.runId);
+        await store.updateRun(tx, emit, run!, { stopRequestedAt: new Date() });
+      });
+    };
+
+    await expect(
+      call(assistantRouter.respondToApproval, { schoolId: turn.schoolId, approvalId: approval.id, decision: 'approve' }, as(turn.userId)),
+    ).rejects.toMatchObject({ code: 'CONFLICT', message: 'The assistant was stopped, so this change will not be made.' });
+    expect((await store.findApproval(db, approval.id))?.status).toBe('pending');
+    expect(resolveApproval).not.toHaveBeenCalled();
+
+    // The stop then cancels it, as it would have.
+    await call(assistantRouter.stopRun, { schoolId: turn.schoolId, runId: turn.runId }, as(turn.userId));
+    expect((await store.findApproval(db, approval.id))?.status).toBe('cancelled');
+  });
+
   it('cancels the approval for good even when the worker cannot be reached, and the outbox wakes the run later', async () => {
     const { turn, approval } = await waitingForApproval();
     const resolveApproval = vi.fn().mockRejectedValueOnce(new Error('Restate is unreachable')).mockResolvedValue(undefined);
@@ -483,6 +520,19 @@ describe('access', () => {
       unavailableReason: 'Refused: role_not_enabled.',
     });
     expect(await rowsOf(turn.conversationId)).toMatchObject({ conversations: 1, runs: 1 });
+  });
+
+  it('does not replay a sent message to a user who may no longer see the assistant', async () => {
+    const turn = await seedTurn();
+    const run = await store.findRun(db, turn.runId);
+    loadAccessMock.mockResolvedValue(refusedAccess('role_not_enabled'));
+    await expect(
+      call(
+        assistantRouter.sendMessage,
+        { schoolId: turn.schoolId, clientRequestId: run!.clientRequestId, text: 'How many students?', surface: 'panel' },
+        as(turn.userId),
+      ),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN', data: { reason: 'role_not_enabled' } });
   });
 
   it('keeps the assistant and its history visible but refuses a new message once the school reached its monthly limit', async () => {

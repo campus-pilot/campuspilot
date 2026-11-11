@@ -1,5 +1,4 @@
 import { db } from '@campuspilot/db';
-import { setSchoolFeature } from '../feature-flags/feature-flags.service';
 import {
   assistantConversationTable,
   assistantModelRequestTable,
@@ -14,7 +13,7 @@ import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 
-import { createHandlerContext, createSchoolStaffSession, createTestSchool } from '../../test/fixtures';
+import { createHandlerContext, createSchoolStaffSession, createTestSchool, setTestSchoolFeature } from '../../test/fixtures';
 import { expectFeatureDisabled } from '../../test/feature-flags';
 import { resolveAssistantAccess } from './access';
 import { istMonthOf } from './ist';
@@ -26,9 +25,8 @@ import { issueAssistantRunToken } from './token';
  */
 
 /** Turns the assistant on for a school with the given settings. */
-async function enableAssistant(schoolId: string, config: { monthlyLimitUsd: number | null; eligibleRoles: Role[] }) {
-  await setSchoolFeature(db, { schoolId, feature: 'assistant', enabled: true, config, updatedBy: null });
-}
+const enableAssistant = (schoolId: string, config: { monthlyLimitUsd: number | null; eligibleRoles: Role[] }) =>
+  setTestSchoolFeature(schoolId, 'assistant', true, config);
 
 async function switchOn(schoolId: string, ...roles: Role[]) {
   await db.insert(schoolAssistantAccessRoleTable).values(roles.map((role) => ({ schoolId, role })));
