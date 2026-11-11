@@ -1,0 +1,82 @@
+name: CI
+
+# Runs every check a change must pass before it is merged: typecheck,
+# each package's test suite and the Rego policy tests. The release workflow
+# (`release.yml`) only typechecks the platform contracts, so this workflow is
+# what proves a pull request is safe to merge.
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # A newer push to a pull request supersedes the older run; main keeps every run.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check_types:
+    name: Typecheck
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - name: Enable Corepack
+        run: corepack enable
+      - name: Install frozen workspace
+        run: pnpm install --frozen-lockfile
+      - name: Typecheck every workspace
+        run: pnpm exec turbo run check-types
+
+  test:
+    name: Test ${{ matrix.package }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      # One job per package with a `test` script. The API, auth, server and
+      # OPA suites start their own Postgres, Redis, OPA, S3 and Gotenberg
+      # containers through Testcontainers on the runner's Docker daemon.
+      matrix:
+        package:
+          - "@campuspilot/api"
+          - "@campuspilot/auth"
+          - "@campuspilot/components"
+          - "@campuspilot/logger"
+          - "@campuspilot/opa"
+          - cadet
+          - management
+          - server
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - name: Enable Corepack
+        run: corepack enable
+      - name: Install frozen workspace
+        run: pnpm install --frozen-lockfile
+      # Runs the package script directly rather than `turbo run test`, whose
+      # `^build` dependency would build every Next.js app (and need their
+      # browser build variables) before any test runs.
+      - name: Run tests
+        run: pnpm --filter "${{ matrix.package }}" test
+
+  opa_policies:
+    name: OPA policy tests
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Run Rego tests
+        working-directory: packages/opa
+        run: docker run --rm -v "$PWD/src/policies:/policies:ro" openpolicyagent/opa:1.20.2 test /policies
