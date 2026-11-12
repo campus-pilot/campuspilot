@@ -14,7 +14,7 @@ type CatalogTemplate = {
 };
 
 /** Types whose designs were imported from the legacy application. */
-type LegacyDocumentType = Exclude<DocumentType, "statement" | "notice">;
+type LegacyDocumentType = Exclude<DocumentType, "statement" | "notice" | "question_paper">;
 
 const logo = `{{#if school.logoUrl}}<img class="legacy-school-logo" src="{{school.logoUrl}}" alt="School logo">{{/if}}`;
 
@@ -405,6 +405,91 @@ const noticeTemplates: CatalogTemplate[] = [
   },
 ];
 
+/**
+ * Question paper designs (design.md D4). A school's question paper template
+ * owns only the heading and the footer: the questions are the constant
+ * `questionPaper.bodyHtml` slot, placed exactly once in element content with
+ * triple braces, and replaced by the printed questions after the template is
+ * sanitised (`question-paper.slot.ts`).
+ *
+ * Rules every design follows, see `DOCUMENT_CONTEXT_HELP`:
+ * - always full A4 (`pageSize: "full"`), no fixed height, no
+ *   `overflow:hidden`, no outer page padding: the paper flows over as many
+ *   pages as it needs and `@page` owns the margins (14mm 14mm 10mm);
+ * - the heading is in normal flow, so it appears on the first page only;
+ * - the footer is `position:fixed; bottom:0`, at most 12mm tall. Chromium
+ *   repeats it on every printed page, and the renderer reserves a 14mm band
+ *   at the bottom of every page so it never covers a question
+ *   (`flowingQuestionPaperLayout`). A negative `bottom` cannot work: the
+ *   margin area is not paintable for a fixed element (verified, I5.1);
+ * - the sanitiser keeps `class`, `style` and `id` only, so the text direction
+ *   is a CSS `direction:` value read from the context, not a `dir`
+ *   attribute. The questions carry their own `dir`/`lang`/script fonts;
+ * - the optional facts (location, time allowed, maximum marks, registration
+ *   number) are guarded by `{{#if}}`, because the context may carry null.
+ */
+const questionPaperClassicTemplate = `<style>.qpc{font-family:'Noto Serif','Noto Serif Devanagari','Noto Sans','Noto Sans Devanagari',serif;color:#111;font-size:12pt;line-height:1.4}.qpc *{box-sizing:border-box}.qpc-head{text-align:center;padding-bottom:3mm;border-bottom:1.5px solid #111}.qpc-head img{display:block;width:18mm;height:18mm;margin:0 auto 2mm;object-fit:contain}.qpc-head h1{margin:0;font-size:20pt;line-height:1.2;letter-spacing:.5px}.qpc-head p{margin:1mm 0 0;font-size:10pt}.qpc-exam{margin:3mm 0 0;font-size:13pt;font-weight:bold}.qpc-subject{margin:1mm 0 0;font-size:12pt}.qpc-rule{display:flex;justify-content:space-between;gap:6mm;margin:3mm 0 4mm;padding:1.5mm 0;border-top:1px solid #111;border-bottom:1px solid #111;font-weight:bold}.qpc-foot{position:fixed;bottom:0;left:0;right:0;display:flex;justify-content:space-between;gap:6mm;padding-top:1.5mm;border-top:1px solid #555;font-size:9pt;color:#444}</style>
+<div class="qpc" style="direction:{{questionPaper.direction}}">
+  <header class="qpc-head">
+    {{#if school.logoUrl}}<img src="{{school.logoUrl}}" alt="School logo">{{/if}}
+    <h1>{{school.name}}</h1>
+    {{#if school.location}}<p>{{school.location}}</p>{{/if}}
+    <p class="qpc-exam">{{exam.name}} ({{session.startYear}}-{{session.endYear}})</p>
+    <p class="qpc-subject">{{questionPaper.className}} &middot; {{questionPaper.subjectName}} ({{questionPaper.modeName}})</p>
+  </header>
+  <div class="qpc-rule">
+    <span>{{#if questionPaper.timeAllowed}}Time: {{questionPaper.timeAllowed}}{{/if}}</span>
+    <span>{{#if questionPaper.maxMarks}}Maximum marks: {{questionPaper.maxMarks}}{{/if}}</span>
+  </div>
+  {{{questionPaper.bodyHtml}}}
+  <footer class="qpc-foot">
+    <span>{{school.name}}</span>
+    <span>{{exam.name}} - {{questionPaper.subjectName}}</span>
+  </footer>
+</div>`;
+
+const questionPaperCompactTemplate = `<style>.qpk{font-family:'Noto Sans','Noto Sans Devanagari','Noto Sans Bengali','Noto Sans Tamil',sans-serif;color:#1f2933;font-size:11pt;line-height:1.4}.qpk *{box-sizing:border-box}.qpk-head{display:flex;align-items:center;gap:4mm;padding-bottom:2.5mm;border-bottom:2px solid #1f2933}.qpk-head img{flex:none;width:14mm;height:14mm;object-fit:contain}.qpk-school{flex:1;min-width:0}.qpk-school strong{display:block;font-size:16pt;line-height:1.2}.qpk-school span{font-size:9pt;color:#52606d}.qpk-meta{width:100%;margin:2.5mm 0 4mm;border-collapse:collapse;font-size:10pt}.qpk-meta td{width:50%;padding:1mm 2mm;border:1px solid #9aa5b1}.qpk-foot{position:fixed;bottom:0;left:0;right:0;display:flex;justify-content:space-between;gap:6mm;padding-top:1.5mm;border-top:1px solid #9aa5b1;font-size:8.5pt;color:#52606d}</style>
+<div class="qpk" style="direction:{{questionPaper.direction}}">
+  <header class="qpk-head">
+    {{#if school.logoUrl}}<img src="{{school.logoUrl}}" alt="School logo">{{/if}}
+    <div class="qpk-school">
+      <strong>{{school.name}}</strong>
+      {{#if school.location}}<span>{{school.location}}</span>{{/if}}
+    </div>
+  </header>
+  <table class="qpk-meta">
+    <tr><td><b>Examination:</b> {{exam.name}} ({{session.startYear}}-{{session.endYear}})</td><td><b>Class:</b> {{questionPaper.className}}</td></tr>
+    <tr><td><b>Subject:</b> {{questionPaper.subjectName}} ({{questionPaper.modeName}})</td><td>{{#if questionPaper.timeAllowed}}<b>Time:</b> {{questionPaper.timeAllowed}}{{/if}}</td></tr>
+    <tr><td colspan="2">{{#if questionPaper.maxMarks}}<b>Maximum marks:</b> {{questionPaper.maxMarks}}{{/if}}</td></tr>
+  </table>
+  {{{questionPaper.bodyHtml}}}
+  <footer class="qpk-foot">
+    <span>{{#if school.registrationNo}}Registration no. {{school.registrationNo}}{{/if}}</span>
+    <span>Session {{session.startYear}}-{{session.endYear}}</span>
+  </footer>
+</div>`;
+
+const questionPaperTemplates: CatalogTemplate[] = [
+  {
+    slug: "question-paper-classic",
+    documentType: "question_paper",
+    name: "Classic Question Paper",
+    description:
+      "A traditional serif heading with a centred letterhead, a ruled time and marks line, and a footer that repeats on every page.",
+    pageSize: "full",
+    content: questionPaperClassicTemplate,
+  },
+  {
+    slug: "question-paper-compact",
+    documentType: "question_paper",
+    name: "Compact Question Paper",
+    description:
+      "A sans-serif heading with a left-aligned logo and a two-column details table that leaves more room for the questions.",
+    pageSize: "full",
+    content: questionPaperCompactTemplate,
+  },
+];
+
 /** Published slugs are immutable provenance. The current catalog intentionally
  * replaces the former generated style families with the legacy application’s
  * named designs, plus matching statement designs which had no legacy source.
@@ -413,4 +498,5 @@ export const DOCUMENT_MARKETPLACE: CatalogTemplate[] = [
   ...legacyTemplates,
   ...statementTemplates,
   ...noticeTemplates,
+  ...questionPaperTemplates,
 ];

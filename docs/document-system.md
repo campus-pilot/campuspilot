@@ -293,12 +293,14 @@ the object and row; storage failure leaves a visible record that can be retried.
 ## Document source rules
 
 The supported `DocumentType` values are `report_card`, `id_card`, `admit_card`,
-`timetable`, `bill`, `receipt`, `statement`, and `notice`. The first seven have
-source DTOs in a strict discriminated union. `notice` is a **template-only**
-type (`TEMPLATE_ONLY_DOCUMENT_TYPES`): it has a school template, marketplace
-design and settings page, but no generator source, no card in the Documents
-workspace and no PDF artifacts or history; notices are written, rendered and
-published by the notices feature (see "Notices" below). Do not add optional
+`timetable`, `bill`, `receipt`, `statement`, `notice`, and `question_paper`. The
+first seven have source DTOs in a strict discriminated union. `notice` is a
+**template-only** type (`TEMPLATE_ONLY_DOCUMENT_TYPES`): it has a school template,
+marketplace design and settings page, but no generator source, no card in the
+Documents workspace and no PDF artifacts or history; notices are written, rendered
+and published by the notices feature (see "Notices" below). `question_paper` is
+template-only too, rendered by the question paper feature (see "Question papers"
+below), but it does store a PDF artifact per saved version. Do not add optional
 fields to a common base merely because two types happen to use the same value today.
 
 - Report cards can target a complete examination, one class, or up to 500 explicit
@@ -447,6 +449,7 @@ executable source of truth.
 | --- | --- |
 | Every document | `school.{name,location,registrationNo,logoUrl}`, `session.{startYear,endYear}`, nullable `exam`, ISO `generatedAt` |
 | Notices | Only `school`, `session`, `generatedAt` and `notice.{title,issuedOn,issuedOnDisplay,paragraphs[]}`; nothing else from this table |
+| Question papers | Only `school`, `session`, `generatedAt`, `exam.{name,slug,order}` and `questionPaper.{className,subjectName,subjectSlug,modeName,modeSlug,maxMarks,totalMarks,timeAllowed,language,script,direction,versionNo,bodyHtml}`; `maxMarks` and `totalMarks` may be null; `bodyHtml` is the body slot placeholder (see "Question papers") |
 | Student documents | `student.{name,admissionNo,rollNo,className,sectionName,dob,fatherName,motherName,address,phoneNo,whatsappNo,photoUrl}` (phone numbers display-formatted with country code; `whatsappNo` nullable) |
 | Report cards | `subjects[]`, totals, overall percentage/grade, grading scale, attendance, co-scholastic data, approval/configuration flags, and independent report-section flags |
 | Admit cards | `timetable[]` entries for the student's class with ISO/display date, weekday, raw/display time, subject, and mode |
@@ -597,6 +600,60 @@ conversion. What differs is recorded here because it is easy to get wrong.
   WhatsApp attachment. The key is deterministic: concurrent first requests in
   different processes may each write an equivalent object. The demo purge's
   school-prefix sweep removes it.
+
+## Question papers
+
+`question_paper` is the template of the heading and footer of AI-assisted question
+papers (feature design: `.sks/handlebar-based-question-paper-generation/design.md`;
+the canonical feature guide `docs/question-papers.md` is written with the last
+phase). The questions themselves are a structured JSON document
+(`@campuspilot/question-paper`) turned into an HTML body by a fixed renderer, never
+by the template. What this document system owns for the type:
+
+- **Template-only, full A4 only.** In `TEMPLATE_ONLY_DOCUMENT_TYPES`; `half` is
+  refused by `validateTemplatePageSize`. No default design is shipped: generation is
+  blocked until the school has selected a question paper template.
+- **Body slot.** The template places `{{{questionPaper.bodyHtml}}}` exactly once, in
+  element content. The context value is the constant `QUESTION_PAPER_SLOT`
+  (`question-paper.slot.ts`). The template is rendered and sanitised like any other
+  document; only then does `substituteQuestionPaperBody` replace the slot with the
+  body, using `indexOf` and slicing (never `String.replace`). Zero or several slots
+  are BAD_REQUEST ("Place {{{questionPaper.bodyHtml}}} exactly once, in element
+  content.").
+- **Two deliberate security differences (design K1, acknowledged).** (1) The body is
+  *not* sanitised after the template: it is trusted because our renderer builds it
+  from validated JSON with every string escaped and a fixed element and class
+  vocabulary. The document sanitiser would strip the inline SVG that KaTeX draws
+  roots and arrows with. (2) The CSP of this type, and only this type, adds
+  `font-src data:` (`documentContentSecurityPolicy`) so the KaTeX fonts, inlined as
+  data URIs, load. Nothing else is widened: no network, no script, no frames. Do not
+  extend this to another type, add a second trusted insertion point, or weaken the
+  policy for a marketplace design without repeating that review.
+- **Layout.** `combineDocuments(..., 'question_paper')` flows over full A4 pages with
+  `@page{size:A4;margin:14mm 14mm 10mm}` and never clips. The heading is in normal
+  flow (first page); the footer is `position:fixed; bottom:0` (at most 12mm tall),
+  which Chromium repeats on every page. The wrapper is a table whose
+  `table-footer-group` reserves a 14mm band at the bottom of every page, so the
+  footer never covers a question. A footer placed in the margin (negative `bottom`,
+  a transform, `top:100%`) does **not** work: verified against the Gotenberg of the
+  stack, a fixed element can only be painted inside the page content area, and one
+  placed outside it vanishes from page 1 and reappears at the top of the next pages.
+  Templates must not set a fixed height, `overflow:hidden` or outer page padding.
+- **Direction.** The sanitiser keeps `class`, `style` and `id` only, so a template
+  sets text direction with `style="direction:{{questionPaper.direction}}"`, not a
+  `dir` attribute. The body carries its own `dir`, `lang` and script fonts because it
+  is not sanitised.
+- **Context.** `QuestionPaperContext` (`question-paper.context.ts`): school, session,
+  `generatedAt`, `exam.{name,slug,order}` and
+  `questionPaper.{className,subjectName,subjectSlug,modeName,modeSlug,maxMarks,totalMarks,timeAllowed,language,script,direction,versionNo,bodyHtml}`.
+  No student, staff, finance or result data. `SAMPLE_QUESTION_PAPER_CONTEXT`
+  (`sampleDocumentContext('question_paper')`) is its synthetic twin.
+- **Designs.** `question-paper-classic` and `question-paper-compact` (slugs use
+  hyphens, unlike the type). The catalog test asserts the slot appears exactly once
+  in every `question_paper` design.
+- **Generic history.** Question paper PDFs are not part of Document history: the
+  class-level question paper permissions differ from the school-level history
+  permissions, so versions and downloads live in the Question paper tab.
 
 ## Notification attachments (WhatsApp)
 

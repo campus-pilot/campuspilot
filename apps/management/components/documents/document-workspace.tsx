@@ -58,10 +58,14 @@ const sections = [
 
 /**
  * Types the Documents workspace can create. Statements stay contextual to an
- * admission ledger, and a notice is written and published in Notices: it
- * only shares the template system.
+ * admission ledger, a notice is written and published in Notices, and a
+ * question paper is generated in an examination's Question paper tab: those
+ * only share the template system.
  */
-type WorkspaceDocumentType = Exclude<DocumentType, "statement" | "notice">;
+type WorkspaceDocumentType = Exclude<
+  DocumentType,
+  "statement" | "notice" | "question_paper"
+>;
 
 /** Settings slugs are existing product vocabulary, not a transformation of the
  * API enum. Keep this mapping exhaustive when adding a document type.

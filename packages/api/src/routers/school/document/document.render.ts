@@ -776,6 +776,18 @@ function renderMetered(
 const EMBEDDABLE_IMAGE = /^data:image\/(png|jpeg|webp);base64,[a-z0-9+/=]+$/i;
 const policy =
   "default-src 'none'; img-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'";
+/**
+ * The Content-Security-Policy of a document of `type`. Every type gets the
+ * same policy except `question_paper`, which adds `font-src data:` so the
+ * KaTeX fonts, inlined as data URIs in the question paper body, can load.
+ * That is the only widening: no network, no script, no frames, images still
+ * from data URIs only. See the SECURITY note on `QUESTION_PAPER_SLOT`
+ * (design.md K1): this is a deliberate, narrow, single-type exception and
+ * must not become a general way to relax the policy for a template design.
+ */
+export function documentContentSecurityPolicy(type?: DocumentType) {
+  return type === "question_paper" ? `${policy}; font-src data:` : policy;
+}
 const options: sanitizeHtml.IOptions = {
   allowedTags: [
     ...sanitizeHtml.defaults.allowedTags,
@@ -805,7 +817,7 @@ const options: sanitizeHtml.IOptions = {
  * elements and attributes; data-only images keep previews and Chromium offline.
  * Handlebars' own-property lookup protections remain enabled.
  */
-function safeHtml(raw: string) {
+function safeHtml(raw: string, type?: DocumentType) {
   if (Buffer.byteLength(raw, "utf8") > 25_000_000)
     throw rpcError.badRequest(
       "This document exceeds the 25 MB rendering limit. Select fewer students or use smaller photos.",
@@ -816,7 +828,7 @@ function safeHtml(raw: string) {
       (tag) => !["html", "head", "body"].includes(tag),
     ),
   });
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${policy}"></head><body>${clean}</body></html>`;
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${documentContentSecurityPolicy(type)}"></head><body>${clean}</body></html>`;
 }
 /** Whether a value is an image the sanitizer keeps: a base64 PNG, JPEG or WebP data URI. */
 export function isEmbeddableDocumentImage(value: string) {
@@ -854,7 +866,7 @@ export function renderDocuments(
     contexts,
     options.maxOutputChars ?? DOCUMENT_RENDER_MAX_CHARS,
   );
-  return raws.map(safeHtml);
+  return raws.map((raw) => safeHtml(raw));
 }
 
 /**
@@ -924,11 +936,52 @@ function flowingNoticeLayout(documents: string[], pageSize: DocumentTemplatePage
   return `<div class="batch">${notices}</div><style>@page{${page}}html,body{margin:0!important;padding:0!important}.notice-document{box-sizing:border-box;width:100%;break-after:page;overflow-wrap:anywhere}.notice-document:last-child{break-after:auto}@media screen{.notice-document{max-width:210mm;margin:0 auto;padding:${margin}}${halfFrame}}</style>`;
 }
 
+/** Margins of every physical page of a question paper. The footer is NOT in the bottom margin, see below. */
+const QUESTION_PAPER_PAGE_MARGIN = "14mm 14mm 10mm";
+/**
+ * Height of the band at the bottom of every page that flowing content never
+ * enters: the room for the template's `position: fixed; bottom: 0` footer.
+ * A footer must be shorter than this (the context help says 12mm).
+ */
+const QUESTION_PAPER_FOOTER_BAND = "14mm";
+
+/**
+ * Question papers flow over as many full A4 pages as their questions need
+ * (the length is the AI's or the teacher's, not the template's), so like
+ * notices they are never clipped to one sheet. `@page` owns the margin so
+ * every continuation page keeps it. The school's template draws the heading
+ * in normal flow on the first page and the footer as a `position: fixed;
+ * bottom: 0` element that Chromium repeats on every printed page.
+ *
+ * Why the table: verified against the Gotenberg/Chromium of the stack
+ * (design.md I5.1), a fixed element can only be painted inside the page's
+ * content area. Anything placed in the margin (negative `bottom`, a
+ * transform, `top: 100%`) is dropped from page 1 and re-appears at the top of
+ * the following pages. A fixed footer at `bottom: 0` is repeated correctly
+ * but would be painted over the last lines of every page. A
+ * `table-footer-group` is repeated by Chromium on every page and takes its
+ * height out of the flowing area, so the wrapper reserves the footer band at
+ * the bottom of every page and the fixed footer sits in that band.
+ *
+ * On screen (the sandboxed preview, where `@page` does not apply) the same
+ * margin is shown as padding around an A4-wide column.
+ */
+function flowingQuestionPaperLayout(documents: string[]) {
+  const papers = documents
+    .map(
+      (doc) =>
+        `<article class="question-paper-document"><table class="qp-frame"><tbody><tr><td>${doc}</td></tr></tbody><tfoot><tr><td><div class="qp-footer-band"></div></td></tr></tfoot></table></article>`,
+    )
+    .join("");
+  return `<div class="batch">${papers}</div><style>@page{size:A4;margin:${QUESTION_PAPER_PAGE_MARGIN}}html,body{margin:0!important;padding:0!important}.question-paper-document{box-sizing:border-box;width:100%;overflow-wrap:anywhere}.qp-frame{width:100%;border-collapse:collapse;border-spacing:0}.qp-frame>tbody>tr>td,.qp-frame>tfoot>tr>td{padding:0;border:0;vertical-align:top}.qp-footer-band{height:${QUESTION_PAPER_FOOTER_BAND}}@media screen{.question-paper-document{max-width:210mm;margin:0 auto;padding:${QUESTION_PAPER_PAGE_MARGIN}}}</style>`;
+}
+
 /** Templates own the design inside one slot; this wrapper exclusively owns
  * physical A4 imposition. Half templates are paired vertically, ID cards are
  * placed eight-up, and every other document gets one physical sheet, except
  * notices, which flow over as many full- or half-A4 pages as they need
- * ({@link flowingNoticeLayout}).
+ * ({@link flowingNoticeLayout}), and question papers, which flow over full
+ * A4 pages ({@link flowingQuestionPaperLayout}).
  */
 export function combineDocuments(
   documents: string[],
@@ -943,6 +996,8 @@ export function combineDocuments(
       "This document exceeds the 25 MB rendering limit. Select fewer students or use smaller photos.",
     );
   if (type === "notice") return safeHtml(flowingNoticeLayout(documents, pageSize));
+  if (type === "question_paper")
+    return safeHtml(flowingQuestionPaperLayout(documents), type);
   const landscape = type === "timetable";
   const perSheet = type === "id_card" ? 8 : pageSize === "half" ? 2 : 1;
   const sheets = chunks(documents, perSheet)

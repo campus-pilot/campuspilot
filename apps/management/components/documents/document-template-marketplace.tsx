@@ -59,6 +59,7 @@ const settingsSlugs: Record<DocumentType, string> = {
   receipt: 'receipt',
   statement: 'statement',
   notice: 'notice',
+  question_paper: 'question-paper',
 };
 
 function settingsHref(scope: DocumentTemplateScope) {

@@ -19,10 +19,11 @@ import {
   CreditCard,
   ScrollText,
   Megaphone,
+  FileQuestionMark,
   type LucideIcon,
 } from "lucide-react";
 export type DocumentKind =
-  "report_card" | "id_card" | "admit_card" | "timetable" | "bill" | "receipt" | "statement" | "notice";
+  "report_card" | "id_card" | "admit_card" | "timetable" | "bill" | "receipt" | "statement" | "notice" | "question_paper";
 type DocumentKindItem = {
   value: DocumentKind;
   label: string;
@@ -79,6 +80,19 @@ export const noticeDocumentKind = {
   label: "Notices",
   description: "Letterhead for school notices",
   icon: Megaphone,
+} as const satisfies DocumentKindItem;
+/**
+ * The question paper template (heading and footer of generated question
+ * papers). Like the notice it is not in {@link allDocumentKinds}: it has a
+ * template but no generator, and exists only for schools with the
+ * `assistant` feature, so the caller adds it where that feature is known to
+ * be enabled (the template marketplace).
+ */
+export const questionPaperDocumentKind = {
+  value: "question_paper",
+  label: "Question papers",
+  description: "Heading and footer for question papers",
+  icon: FileQuestionMark,
 } as const satisfies DocumentKindItem;
 export function DocumentButton(props: ComponentProps<typeof Button>) {
   return <Button {...props} type={props.type ?? "button"} />;

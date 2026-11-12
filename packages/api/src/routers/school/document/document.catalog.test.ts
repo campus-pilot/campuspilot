@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   DOCUMENT_MARKETPLACE,
   SAMPLE_DOCUMENT_CONTEXT,
+  SAMPLE_QUESTION_PAPER_CONTEXT,
   sampleDocumentContext,
 } from './document.catalog';
+import { countQuestionPaperSlots } from '../question-paper/question-paper.slot';
 import { scopeLegacyDocumentCss } from './document.catalog.marketplace';
 import { renderDocument } from './document.render';
 import { withReportModeLayout } from './document.report-modes';
@@ -85,13 +87,18 @@ describe('document template marketplace', () => {
       receipt: ['default', 'compact', 'default-full'],
       statement: ['default', 'compact', 'default-full'],
       notice: ['default', 'compact'],
+      question_paper: ['classic', 'compact'],
     } as const;
+    // Slugs follow the document type, except that the question paper designs
+    // use hyphens (`question-paper-classic`).
+    const slugPrefix = (documentType: string) =>
+      documentType === 'question_paper' ? 'question-paper' : documentType;
     for (const [documentType, variants] of Object.entries(expected)) {
       const items = DOCUMENT_MARKETPLACE.filter(
         (item) => item.documentType === documentType,
       );
       expect(items.map((item) => item.slug)).toEqual(
-        variants.map((variant) => `${documentType}-${variant}`),
+        variants.map((variant) => `${slugPrefix(documentType)}-${variant}`),
       );
       for (const item of items) {
         expect(item.content).toContain('school.logoUrl');
@@ -122,6 +129,76 @@ describe('document template marketplace', () => {
       expect(item.pageSize, item.slug).toBe('full');
       expect(item.content, item.slug).toContain('{{print.size}}');
     }
+  });
+
+  describe('question paper designs', () => {
+    const designs = DOCUMENT_MARKETPLACE.filter(
+      ({ documentType }) => documentType === 'question_paper',
+    );
+
+    it('are full A4 only', () => {
+      expect(designs.length).toBeGreaterThanOrEqual(2);
+      for (const item of designs) expect(item.pageSize, item.slug).toBe('full');
+    });
+
+    it('place the body slot exactly once, in element content', () => {
+      for (const item of designs) {
+        expect(item.content.split('{{{questionPaper.bodyHtml}}}'), item.slug).toHaveLength(2);
+        expect(item.content, item.slug).not.toMatch(/(?<!\{)\{\{questionPaper\.bodyHtml\}\}(?!\})/);
+        const html = renderDocument(item.content, SAMPLE_QUESTION_PAPER_CONTEXT);
+        expect(countQuestionPaperSlots(html), item.slug).toBe(1);
+      }
+    });
+
+    it('flow: no clipping, and a repeating fixed footer after the body', () => {
+      for (const item of designs) {
+        const css = cssOf(item.content);
+        expect(css, item.slug).not.toMatch(/overflow\s*:\s*hidden/);
+        expect(css, item.slug).toMatch(/position\s*:\s*fixed;\s*bottom\s*:\s*0;/);
+        // The header is in normal flow, the footer is after the body.
+        const body = item.content.indexOf('{{{questionPaper.bodyHtml}}}');
+        expect(item.content.indexOf('</header>'), item.slug).toBeLessThan(body);
+        expect(item.content.indexOf('<footer'), item.slug).toBeGreaterThan(body);
+      }
+    });
+
+    it('set the direction through CSS, because the sanitiser drops the dir attribute', () => {
+      for (const item of designs) {
+        expect(item.content, item.slug).toContain('style="direction:{{questionPaper.direction}}"');
+        const html = renderDocument(item.content, {
+          ...SAMPLE_QUESTION_PAPER_CONTEXT,
+          questionPaper: { ...SAMPLE_QUESTION_PAPER_CONTEXT.questionPaper, direction: 'rtl' },
+        });
+        expect(html, item.slug).toContain('direction:rtl');
+      }
+    });
+
+    it('keep Devanagari-capable font stacks and guard every optional fact', () => {
+      for (const item of designs) {
+        expect(item.content, item.slug).toContain('Noto Sans Devanagari');
+        const sparse = renderDocument(item.content, {
+          ...SAMPLE_QUESTION_PAPER_CONTEXT,
+          school: { ...SAMPLE_QUESTION_PAPER_CONTEXT.school, location: null, registrationNo: null, logoUrl: null },
+          questionPaper: { ...SAMPLE_QUESTION_PAPER_CONTEXT.questionPaper, timeAllowed: null, maxMarks: null, totalMarks: null },
+        });
+        expect(sparse, item.slug).not.toContain('Maximum marks');
+        expect(sparse, item.slug).not.toContain('Time:');
+        expect(sparse, item.slug).not.toContain('null');
+        expect(sparse, item.slug).not.toContain('<img');
+      }
+    });
+
+    it('print a Hindi heading when the school and exam names are Hindi', () => {
+      for (const item of designs) {
+        const html = renderDocument(item.content, {
+          ...SAMPLE_QUESTION_PAPER_CONTEXT,
+          school: { ...SAMPLE_QUESTION_PAPER_CONTEXT.school, name: 'ग्रीनवुड पब्लिक स्कूल' },
+          exam: { ...SAMPLE_QUESTION_PAPER_CONTEXT.exam, name: 'अर्धवार्षिक परीक्षा' },
+        });
+        expect(html, item.slug).toContain('ग्रीनवुड पब्लिक स्कूल');
+        expect(html, item.slug).toContain('अर्धवार्षिक परीक्षा');
+      }
+    });
   });
 
   it('keeps marketplace slugs unique', () => {

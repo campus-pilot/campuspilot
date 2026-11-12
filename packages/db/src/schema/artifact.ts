@@ -21,6 +21,7 @@ export const documentTypeEnum = pgEnum("document_type", [
   "receipt",
   "statement",
   "notice",
+  "question_paper",
 ]);
 export const artifactKindEnum = pgEnum("artifact_kind", ["template", "pdf"]);
 export const artifactStatusEnum = pgEnum("artifact_status", [
