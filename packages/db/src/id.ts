@@ -8,6 +8,7 @@ export const PREFIX_MAP = {
   // In-app assistant rows keep the prefixes they had in the assistant
   // service's own database.
   assistantApproval: "asa",
+  assistantAttachment: "asat",
   assistantConversation: "asc",
   assistantItem: "asi",
   assistantModelRequest: "asm",
@@ -15,6 +16,11 @@ export const PREFIX_MAP = {
   // Keep examination prefixes compatible with the legacy IDs so migration can
   // preserve primary keys and every raw cross-reference without translation.
   examPlan: "expl",
+  examQuestionPaper: "qpp",
+  examQuestionPaperFigure: "qpf",
+  examQuestionPaperJob: "qpj",
+  examQuestionPaperPage: "qpg",
+  examQuestionPaperVersion: "qpv",
   examResult: "exrs",
   examResultPublication: "expub",
   examTimetable: "ett",

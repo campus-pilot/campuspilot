@@ -1,8 +1,12 @@
 import type { AssistantUserMessageBody } from '@campuspilot/db/schema/assistant';
+import { type AttachmentMarker } from '../../transcript';
+import { attachmentLabel, attachmentNote, stubLongInputFields } from '../context';
 import type { AssistantPrompt } from '../prompt';
 import type { ModelPrices } from './config';
 import type { ProviderRegistry } from './registry';
 import type {
+  AttachmentFile,
+  ContextAdapter,
   ModelFailureKind,
   ModelProvider,
   ModelProviderId,
@@ -11,6 +15,8 @@ import type {
   ModelToolResult,
   ModelToolUse,
   ModelUsage,
+  TextRequest,
+  TextResult,
   TranscriptEntry,
 } from './types';
 
@@ -29,7 +35,50 @@ import type {
 export type FakeTextBlock = { type: 'text'; text: string };
 export type FakeToolUseBlock = { type: 'tool_use'; id: string; name: string; input: unknown };
 export type FakeToolResultBlock = { type: 'tool_result' } & ModelToolResult;
-export type FakeBlock = FakeTextBlock | FakeToolUseBlock | FakeToolResultBlock;
+/** An image as the fake's context shows it: the type and size, not the bytes. */
+export type FakeImageBlock = { type: 'image'; mimeType: string; byteLength: number };
+export type FakeAttachmentMarkerBlock = AttachmentMarker;
+export type FakeBlock = FakeTextBlock | FakeToolUseBlock | FakeToolResultBlock | FakeImageBlock | FakeAttachmentMarkerBlock;
+
+/** The fake's pruning and attachment rules (see {@link ContextAdapter}); same shape as the real adapters, in its own format. */
+export const fakeContext: ContextAdapter = {
+  isHumanTurn: (entry) => entry.role === 'user' && !(entry.content as FakeBlock[]).some((block) => block.type === 'tool_result'),
+  toolNamesByUseId(entries) {
+    const names = new Map<string, string>();
+    for (const entry of entries) {
+      for (const block of entry.content as FakeBlock[]) if (block.type === 'tool_use') names.set(block.id, block.name);
+    }
+    return names;
+  },
+  stubToolResults(entry, toolNames, stub, minChars) {
+    if (!(entry.content as FakeBlock[]).some((block) => block.type === 'tool_result')) return entry;
+    return {
+      ...entry,
+      content: (entry.content as FakeBlock[]).map((block) =>
+        block.type === 'tool_result' && block.content.length >= minChars
+          ? { ...block, content: stub({ toolName: toolNames.get(block.toolUseId) ?? block.toolName, chars: block.content.length }) }
+          : block,
+      ),
+    };
+  },
+  stubToolInputs(entry, stub, minChars) {
+    if (!(entry.content as FakeBlock[]).some((block) => block.type === 'tool_use')) return entry;
+    return {
+      ...entry,
+      content: (entry.content as FakeBlock[]).map((block) =>
+        block.type === 'tool_use' ? { ...block, input: stubLongInputFields(block.name, block.input, stub, minChars) } : block,
+      ),
+    };
+  },
+  materializeAttachment(marker: AttachmentMarker, file: AttachmentFile) {
+    if (file.kind !== 'image') return [{ type: 'text', text: attachmentNote(marker, file.kind) }];
+    return [
+      { type: 'text', text: attachmentLabel(marker) },
+      { type: 'image', mimeType: file.mimeType, byteLength: file.bytes.byteLength },
+    ];
+  },
+  stubAttachment: (marker) => [{ type: 'text', text: attachmentNote(marker, 'old') }],
+};
 
 /** A response that was not stopped, as the fake's script holds it. */
 export type FakeReply = Extract<ModelStepResult, { stopped: false }>;
@@ -70,7 +119,32 @@ export type FakeModelCall = {
   transcript: TranscriptEntry[];
 };
 
+/**
+ * One scripted `generateText`: a result, an `Error` to throw (a
+ * `FakeModelError` to choose its failure kind) or a function of the request
+ * and the 0-based call index.
+ */
+export type FakeTextStep =
+  | TextResult
+  | Error
+  | ((input: TextRequest, call: number) => TextResult | Promise<TextResult>);
+
+/** A finished text answer, as the fake's script holds it. */
+export function fakeTextResult({
+  text = '<p>paper</p>',
+  model = FAKE_REPORTED_MODEL,
+  usage = FAKE_USAGE,
+  refusal = false,
+  unfinished = false,
+}: Partial<TextResult> = {}): TextResult {
+  return { text, model, usage, refusal, unfinished };
+}
+
 export type FakeModelProvider = ModelProvider & {
+  /** Every `generateText` request so far, in order, including calls that threw. */
+  readonly textCalls: readonly { input: TextRequest; model: string }[];
+  /** Appends text steps to their own script. */
+  enqueueText: (...steps: FakeTextStep[]) => void;
   /** Every `step` call so far, in order, including calls that threw. */
   readonly calls: readonly FakeModelCall[];
   /** Appends steps to the script. */
@@ -131,6 +205,7 @@ export function createFakeProvider({
   model = 'fake-configured-model',
   script = [],
   whenExhausted,
+  imageMimeTypes = ['image/jpeg', 'image/png', 'image/webp'],
 }: {
   /** A real provider id: conversations and runs store it in an enum column. */
   id?: ModelProviderId;
@@ -143,14 +218,33 @@ export function createFakeProvider({
    * makes more model requests than it scripted fails instead of hanging.
    */
   whenExhausted?: FakeModelStep;
+  /** Image types the fake "can read" (`ModelProvider.imageMimeTypes`). */
+  imageMimeTypes?: readonly string[];
 } = {}): FakeModelProvider {
   const queue = [...script];
   const calls: FakeModelCall[] = [];
+  const textQueue: FakeTextStep[] = [];
+  const textCalls: { input: TextRequest; model: string }[] = [];
 
   return {
     id,
     model,
+    imageMimeTypes,
+    context: fakeContext,
     calls,
+    textCalls,
+    enqueueText: (...steps) => void textQueue.push(...steps),
+
+    async generateText(input) {
+      const call = textCalls.length;
+      textCalls.push({ input, model });
+      const next = textQueue.shift();
+      if (next === undefined) {
+        throw new Error(`The fake model provider's text script is exhausted (call ${call + 1}).`);
+      }
+      if (next instanceof Error) throw next;
+      return typeof next === 'function' ? next(input, call) : next;
+    },
     enqueue: (...steps) => void queue.push(...steps),
     remaining: () => queue.length,
 
@@ -169,7 +263,17 @@ export function createFakeProvider({
       return typeof next === 'function' ? next(input, call) : next;
     },
 
-    userContent: (body: AssistantUserMessageBody): FakeBlock[] => [{ type: 'text', text: body.text }],
+    userContent: (body: AssistantUserMessageBody): FakeBlock[] => [
+      ...(body.attachments ?? []).map((attachment, index, all): FakeBlock => ({
+        type: 'campuspilot_attachment',
+        attachmentId: attachment.id,
+        fileName: attachment.fileName,
+        contentType: attachment.contentType,
+        ordinal: index + 1,
+        total: all.length,
+      })),
+      ...(body.text.length > 0 ? [{ type: 'text' as const, text: body.text }] : []),
+    ],
     assistantTextContent: (text: string): FakeBlock[] => [{ type: 'text', text }],
     toolResultsContent: (results: readonly ModelToolResult[]): FakeBlock[] =>
       results.map((result) => ({ type: 'tool_result', ...result })),

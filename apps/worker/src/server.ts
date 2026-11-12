@@ -9,10 +9,16 @@ import {
   dataMigrationWorkflow,
 } from '@campuspilot/api/workflows/data-migration';
 import {
+  questionPaperControlService,
+  questionPaperGenerationWorkflow,
+} from '@campuspilot/api/workflows/question-paper';
+import { configureQuestionPaperModel } from '@campuspilot/api/workflows/question-paper/model';
+import {
   notificationControlService,
   notificationDispatchWorkflow,
   notificationSenderObject,
 } from '@campuspilot/api/workflows/notification';
+import { createQuestionPaperModel } from '@campuspilot/assistant/question-paper-model';
 import { createAssistantWorkerServices } from '@campuspilot/assistant/worker';
 import { env } from '@campuspilot/env/worker';
 import { createEndpointHandler } from '@restatedev/restate-sdk';
@@ -30,6 +36,13 @@ import { registerUntilAccepted } from './register';
  * (see `registerUntilAccepted`); there is no separate deploy-time step.
  */
 export function startWorker() {
+  // The model is injected (the API package cannot import the assistant). With
+  // none configured the services are still served, so queued jobs fail with a
+  // clear message instead of waiting in Restate.
+  const questionPaperModel = createQuestionPaperModel();
+  configureQuestionPaperModel(questionPaperModel);
+  if (questionPaperModel) log.info({ provider: questionPaperModel.provider, model: questionPaperModel.model }, 'question-paper.model');
+  else log.warn('question-paper.not-configured');
   const handler = createEndpointHandler({
     services: [
       demoSchoolControlService,
@@ -40,6 +53,8 @@ export function startWorker() {
       notificationControlService,
       notificationDispatchWorkflow,
       notificationSenderObject,
+      questionPaperControlService,
+      questionPaperGenerationWorkflow,
       ...createAssistantWorkerServices(),
     ],
   });

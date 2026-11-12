@@ -1,11 +1,17 @@
 'use client';
 
+import {
+  QUESTION_PAPER_SEED_DRAFT,
+  type AssistantAttachmentRef,
+  type QuestionPaperSeed,
+} from '@campuspilot/assistant-contract/attachments';
 import type { AssistantSurface, AssistantToolCallItemDto, AssistantViewItemDto } from '@campuspilot/assistant-contract/dto';
 import {
   ASSISTANT_LANE_CLASS,
   ASSISTANT_SURFACE_PROPS,
-  AssistantApprovalRequest,
   AssistantComposer,
+  type AssistantComposerControls,
+  AssistantContextChip,
   AssistantConversationUnavailable,
   AssistantConversationUsage,
   AssistantLiveStatus,
@@ -15,21 +21,31 @@ import {
   AssistantTimeline,
   AssistantUserMessage,
   AssistantWelcome,
+  AttachmentsMissingError,
+  imagesOnlyLabel,
   AssistantWorkBar,
   type AssistantApprovalDecision,
   type AssistantSuggestion,
 } from '@campuspilot/components/assistant';
+import { draftSaveSpent, saveEventsOf, supersededDrafts } from '@campuspilot/components/question-paper/chat-cards-model';
 import { Button } from '@campuspilot/ui/components/button';
 import { Spinner } from '@campuspilot/ui/components/spinner';
 import { TooltipProvider } from '@campuspilot/ui/components/tooltip';
 import { toast } from '@campuspilot/ui/lib/toast';
 import { cn } from '@campuspilot/ui/lib/utils';
+import { skipToken, useQuery } from '@tanstack/react-query';
 import { ClipboardList, RotateCcw, ShieldCheck, UserPlus, UserRoundX } from 'lucide-react';
 import { useRef, type ReactNode } from 'react';
 
+import { assistantAttachmentThumbUrl } from '@/lib/assistant-attachments';
+import { orpc } from '@/lib/orpc';
+
 import { useApprovalMoney } from './assistant-approval-currency';
-import { refusalMessage, type AssistantConversationFailure } from './assistant-stream';
+import { AssistantApprovalWithSummary } from './assistant-approval-request';
+import { AssistantDraftCard, useDraftVerdicts } from './assistant-question-paper';
+import { missingAttachmentIdsOf, refusalMessage, type AssistantConversationFailure } from './assistant-stream';
 import { AssistantViewBlock } from './assistant-view';
+import { useAssistantAttachmentUpload } from './use-assistant-attachments';
 import {
   useApprovalDecisions,
   useAssistantActiveRun,
@@ -95,7 +111,45 @@ export type AssistantChatProps = {
   autoFocus?: boolean;
   /** Horizontal padding around the lane, per surface. */
   gutterClassName?: string;
+  /**
+   * The screen a new conversation starts from ("Continue in chat" on a
+   * question paper). Only used without a `conversationId`: the box starts
+   * with a prefilled sentence and a removable chip, and nothing is sent until
+   * the user sends (decision D31).
+   */
+  seed?: QuestionPaperSeed | null;
+  /** The user removed the seed's chip: start a plain conversation. */
+  onSeedRemoved?: () => void;
 };
+
+/**
+ * The chip over the message box: which paper this conversation is about.
+ * While the paper loads it says only "Question paper"; when it cannot be read
+ * (a wrong link, no access) it says so and the seed is not sent
+ * (`useSeedPaper`), so the chip never vouches for a paper that was not found.
+ */
+function SeedChip({ paper, failed, onRemove }: { paper: { subjectName: string; modeName: string; className: string; examName: string } | undefined; failed: boolean; onRemove: () => void }) {
+  const label = failed
+    ? 'This question paper could not be opened'
+    : paper
+      ? `${paper.subjectName} (${paper.modeName}), ${paper.className}, ${paper.examName}`
+      : 'Question paper';
+  return <AssistantContextChip label={label} onRemove={onRemove} />;
+}
+
+/**
+ * Reads the paper a seeded conversation is about. A paper that cannot be read
+ * (not found, or the person may not see it) makes the seed unusable: the
+ * conversation then starts plain, without the seed text in the model's context.
+ */
+function useSeedPaper(schoolId: string, seed: QuestionPaperSeed | null) {
+  const detail = useQuery({
+    ...orpc.school.getQuestionPaperDetail.queryOptions({ input: seed ? { ...seed, schoolId } : skipToken }),
+    retry: false,
+  });
+  const failed = seed !== null && detail.isError;
+  return { paper: detail.data?.paper, failed, usableSeed: failed ? null : seed };
+}
 
 function ReplyRow({
   schoolId,
@@ -132,13 +186,27 @@ function useApprovals(schoolId: string) {
  * same work bar and "Thinking" line the server's rows will show, so the
  * confirmed rows replace these without the conversation moving.
  */
-function OptimisticTurn({ messages, onRetry }: { messages: OptimisticMessage[]; onRetry: (message: OptimisticMessage) => void }) {
+function OptimisticTurn({
+  schoolId,
+  messages,
+  onRetry,
+}: {
+  schoolId: string;
+  messages: OptimisticMessage[];
+  onRetry: (message: OptimisticMessage) => void;
+}) {
   const sending = messages.find((message) => message.delivery === 'sending');
   return (
     <>
       {messages.map((message) => (
         <div key={message.clientRequestId} className="pb-1">
-          <AssistantUserMessage text={message.text} at={message.submittedAt} delivery={message.delivery} onRetry={() => onRetry(message)} />
+          <AssistantUserMessage
+            text={message.text}
+            at={message.submittedAt}
+            delivery={message.delivery}
+            onRetry={() => onRetry(message)}
+            attachments={message.attachmentIds.map((id) => ({ id, fileName: 'Attached image', previewUrl: assistantAttachmentThumbUrl(schoolId, id) }))}
+          />
         </div>
       ))}
       {sending ? (
@@ -162,6 +230,8 @@ const FAILURE_MESSAGE: Record<AssistantConversationFailure, string> = {
 type TurnActions = {
   /** Undefined while asking again is not possible (a message is already on its way, or sending is unavailable). */
   onRetry?: (text: string) => void;
+  /** Sends a message the user chose with a button (a draft card's Save); undefined when sending is not possible now. */
+  onSendMessage?: (text: string) => void;
   stoppingRunId: string | null;
 };
 
@@ -173,6 +243,7 @@ function ConversationTimeline({
   failure,
   onNewConversation,
   onRetry,
+  onSendMessage,
   stoppingRunId,
 }: TurnActions & {
   schoolId: string;
@@ -183,6 +254,9 @@ function ConversationTimeline({
   onNewConversation: () => void;
 }) {
   const rows = useAssistantTimeline(schoolId, conversationId);
+  // Draft cards a later ready draft of the same paper replaced shrink to one quiet line.
+  const verdicts = useDraftVerdicts(rows ?? []);
+  const superseded = supersededDrafts(rows ?? [], verdicts);
   if (failure) {
     // A new conversation does not help someone who is signed out, so only the message shows then.
     return (
@@ -210,6 +284,18 @@ function ConversationTimeline({
       gutterClassName={gutterClassName}
       renderReply={(itemId, meta) => <ReplyRow schoolId={schoolId} conversationId={conversationId} itemId={itemId} meta={meta} />}
       renderView={(item: AssistantViewItemDto) => <AssistantViewBlock schoolId={schoolId} view={item.body.view} />}
+      attachmentPreviewUrl={(attachment: AssistantAttachmentRef) => assistantAttachmentThumbUrl(schoolId, attachment.id)}
+      renderCard={(row) => (
+        <AssistantDraftCard
+          schoolId={schoolId}
+          call={row.call}
+          // "Draft n": the card's place among this conversation's drafts.
+          ordinal={rows.filter((candidate) => candidate.kind === 'card').findIndex((candidate) => candidate.id === row.id) + 1}
+          onSendMessage={onSendMessage}
+          supersededBy={superseded.get(row.call.id)}
+          saveRequested={(request) => draftSaveSpent(saveEventsOf(rows), request)}
+        />
+      )}
     />
   );
 }
@@ -255,12 +341,12 @@ function useTrayRequests(schoolId: string, conversationId: string | null, queued
   const queue = [
     ...queued.map((item) => ({
       id: item.id,
-      text: item.body.text,
+      text: item.body.text || imagesOnlyLabel(item.body.attachments?.length ?? 0),
       ...(item.runId === removingRunId ? { status: 'Removing…' } : { removable: true }),
     })),
     ...queuedOptimistic.map((message) => ({
       id: message.clientRequestId,
-      text: message.text,
+      text: message.text || imagesOnlyLabel(message.attachmentIds.length),
       status:
         message.delivery === 'failed' ? (
           <span className="flex items-center gap-1 text-destructive">
@@ -278,9 +364,11 @@ function useTrayRequests(schoolId: string, conversationId: string | null, queued
   const decided = approvals.decisionOf(first?.body.approvalId);
   return (
     <>
-      {first ? (
-        <AssistantApprovalRequest
+      {first && conversationId ? (
+        <AssistantApprovalWithSummary
           key={first.id}
+          schoolId={schoolId}
+          conversationId={conversationId}
           call={first}
           waiting={pending.length}
           pendingDecision={decided.decision}
@@ -334,6 +422,7 @@ function ChatBody({
   failure,
   onNewConversation,
   onRetry,
+  onSendMessage,
   stoppingRunId,
 }: TurnActions & {
   schoolId: string;
@@ -354,6 +443,7 @@ function ChatBody({
           failure={failure}
           onNewConversation={onNewConversation}
           onRetry={onRetry}
+          onSendMessage={onSendMessage}
           stoppingRunId={stoppingRunId}
         />
       ) : (
@@ -385,8 +475,14 @@ export function AssistantChat({
   compact = false,
   autoFocus = false,
   gutterClassName = 'px-4 sm:px-6',
+  seed = null,
+  onSeedRemoved,
 }: AssistantChatProps) {
   const life = useSurfaceLife();
+  const imageUpload = useAssistantAttachmentUpload(schoolId);
+  // The seed only means something for a conversation that has not started.
+  const activeSeed = conversationId ? null : seed;
+  const seedPaper = useSeedPaper(schoolId, activeSeed);
   const status = useAssistantStatus(schoolId);
   const { send, resend, isPending: sending } = useSendAssistantMessage(schoolId, surface);
   const stop = useStopAssistantRun();
@@ -399,7 +495,8 @@ export function AssistantChat({
   const draft = useAssistantDraft(schoolId, conversationId);
   // What the message box holds, as its draft reports say; for sends that do
   // not come from the box (a retry, a suggestion), whose text stays in it.
-  const boxText = useRef(draft.initialText);
+  const initialText = draft.initialText || (activeSeed ? QUESTION_PAPER_SEED_DRAFT : '');
+  const boxText = useRef(initialText);
   const saveDraft = (text: string) => {
     boxText.current = text;
     draft.save(text);
@@ -421,10 +518,36 @@ export function AssistantChat({
       if (result) started(result.conversation.id, boxText.current);
     });
   // While a run works, a new message waits in the tray; otherwise it starts a turn.
-  const requests = useTrayRequests(schoolId, conversationId, running ? optimistic : [], retry);
+  const tray = useTrayRequests(schoolId, conversationId, running ? optimistic : [], retry);
+  // Removing the seed's chip takes the prefilled sentence out of the box unless the user edited it (then their draft stays).
+  // The box stays mounted: remounting it would drop the images attached in it, which are already stored on the server.
+  const composer = useRef<AssistantComposerControls>(null);
+  const removeSeed = () => {
+    composer.current?.clearTextIf(QUESTION_PAPER_SEED_DRAFT);
+    onSeedRemoved?.();
+  };
+  const requests =
+    activeSeed && onSeedRemoved ? (
+      <>
+        <SeedChip paper={seedPaper.paper} failed={seedPaper.failed} onRemove={removeSeed} />
+        {tray}
+      </>
+    ) : (
+      tray
+    );
 
-  async function sendText(text: string, box: { text: () => string } = { text: () => boxText.current }) {
-    const result = await send(text, conversationId).catch((error: unknown) => {
+  async function sendText(
+    text: string,
+    box: { text: () => string } = { text: () => boxText.current },
+    attachments: AssistantAttachmentRef[] = [],
+  ) {
+    const result = await send(text, conversationId, {
+      attachmentIds: attachments.map((attachment) => attachment.id),
+      seed: seedPaper.usableSeed,
+    }).catch((error: unknown) => {
+      const missing = missingAttachmentIdsOf(error);
+      // The composer marks these tiles, so the failed copy of the message is dropped: its Retry would name the same missing images.
+      if (missing) throw new AttachmentsMissingError(refusalMessage(error) ?? 'An attached image is no longer available.', missing);
       throw new Error(refusalMessage(error) ?? 'The message could not be sent. Check your connection and try again.');
     });
     started(result.conversation.id, box.text());
@@ -440,7 +563,7 @@ export function AssistantChat({
   // From the click until the run has ended: the request on its way, then the stop the run has recorded.
   const stopping = stop.isPending || Boolean(running?.stopRequestedAt);
   const welcome = !conversationId && optimistic.length === 0;
-  const trailing = !running && optimistic.length ? <OptimisticTurn messages={optimistic} onRetry={retry} /> : null;
+  const trailing = !running && optimistic.length ? <OptimisticTurn schoolId={schoolId} messages={optimistic} onRetry={retry} /> : null;
   const notLive = Boolean(conversationId) && !failure && (connection.offline || connection.reconnecting);
 
   return (
@@ -463,6 +586,7 @@ export function AssistantChat({
             failure={failure}
             onNewConversation={onNewConversation}
             onRetry={canRetry ? sendDirectly : undefined}
+            onSendMessage={canRetry ? sendDirectly : undefined}
             stoppingRunId={stop.isPending ? stop.variables.runId : null}
           />
         )}
@@ -483,13 +607,15 @@ export function AssistantChat({
           {notLive ? <ConnectionNotice offline={connection.offline} /> : null}
           <div className={welcome ? 'flex flex-col gap-3' : ASSISTANT_LANE_CLASS}>
             <AssistantComposer
+              controlsRef={composer}
               autoFocus={autoFocus}
               disabledReason={disabledReason}
               placeholder={running ? 'Queue a follow-up…' : undefined}
               onSend={sendText}
               sending={sending}
               lastSentText={lastSentText}
-              initialText={draft.initialText}
+              initialText={initialText}
+              attachments={{ upload: imageUpload.upload, remove: imageUpload.remove, onNotice: (message) => toast.error(message) }}
               onDraftChange={saveDraft}
               requests={requests}
               leading={<ComposerToolbar schoolId={schoolId} conversationId={conversationId} />}
@@ -504,7 +630,7 @@ export function AssistantChat({
                   : undefined
               }
             />
-            {welcome ? (
+            {welcome && !activeSeed ? (
               <AssistantSuggestions suggestions={SUGGESTIONS} onPick={sendDirectly} />
             ) : null}
           </div>

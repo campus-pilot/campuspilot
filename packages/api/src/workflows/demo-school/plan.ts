@@ -142,6 +142,22 @@ export type DemoNotice = {
   issuedOn: LocalDate | null;
 };
 
+/** One question paper the demo writes, placed in a class and exam and dated from `asOf`. */
+export type DemoQuestionPaper = {
+  key: string;
+  example: DemoSeed['questionPapers']['papers'][number]['example'];
+  examSlug: string;
+  classSlug: string;
+  subjectSlug: string;
+  modeSlug: string;
+  /** The pages of the photographed handwritten paper, in order. */
+  pages: DemoSeed['questionPapers']['papers'][number]['pages'];
+  /** When the pages were uploaded (ISO instant, before `asOf`). */
+  uploadedAt: string;
+  /** When version 1 was saved (ISO instant, at or after `uploadedAt`, before `asOf`). */
+  savedAt: string;
+};
+
 export type DemoPlan = {
   schoolSlug: string;
   schoolName: string;
@@ -157,6 +173,7 @@ export type DemoPlan = {
   exams: DemoExam[];
   billingMonths: BillingMonth[];
   notices: DemoNotice[];
+  questionPapers: DemoQuestionPaper[];
 };
 
 function personName(random: ReturnType<typeof createRandom>, gender: Gender, pool: 'child' | 'adult', surname?: string) {
@@ -350,6 +367,43 @@ function buildNotices(selected: DemoClassSeed[], asOfLocal: LocalDate, timeZone:
 }
 
 /**
+ * The demo's question papers. Each is placed in the first class (from the
+ * senior or junior end of the demo's classes) that teaches its subject with
+ * one of the paper's modes, and in the first exam whose state is one the paper
+ * allows. A paper that fits nowhere (for example science in a nursery-only
+ * demo) is left out, so the plan never names a class, exam or mode that the
+ * seed will not have created. Completed exams are never chosen: their papers
+ * are read-only.
+ */
+function buildQuestionPapers(classes: DemoClass[], exams: DemoExam[], asOfLocal: LocalDate, timeZone: string): DemoQuestionPaper[] {
+  const { localHours, papers } = demoSeed.questionPapers;
+  const at = (daysAgo: number, hour: number) => localTimeInstant(addDays(asOfLocal, -daysAgo), hour, 0, timeZone);
+  return papers.flatMap((paper) => {
+    const exam = paper.examStates.map((state) => exams.find((item) => item.state === state)).find((item) => item !== undefined);
+    const ordered = paper.classFrom === 'seniormost' ? [...classes].reverse() : classes;
+    for (const demoClass of ordered) {
+      const subject = demoClass.config.subjects[paper.subjectSlug];
+      const modeSlug = paper.modeSlugs.find((slug) => subject && Object.hasOwn(subject.examModes, slug));
+      if (!exam || !modeSlug) continue;
+      return [
+        {
+          key: paper.key,
+          example: paper.example,
+          examSlug: exam.slug,
+          classSlug: demoClass.seed.slug,
+          subjectSlug: paper.subjectSlug,
+          modeSlug,
+          pages: paper.pages,
+          uploadedAt: at(paper.uploadedDaysAgo, localHours.uploaded),
+          savedAt: at(paper.savedDaysAgo, localHours.saved),
+        },
+      ];
+    }
+    return [];
+  });
+}
+
+/**
  * The complete, deterministic demo plan for `(input, seed, asOf)`. It is pure,
  * so every workflow step can rebuild it instead of journaling it; only IDs and
  * counts travel through the Restate journal.
@@ -368,6 +422,8 @@ export function buildDemoPlan(options: {
   const sessionEnd = addDays(formatLocalDate(end.year, end.month, 1), -1);
   const months = billingMonths({ startYear: input.sessionStartYear, cycleStartMonth: input.cycleStartMonth, asOfLocal });
   const selected = demoSeed.classes.classes.filter((item) => input.classSlugs.includes(item.slug));
+  const plannedClasses = buildClasses(seed, input, months);
+  const plannedExams = buildExams(input, sessionStart, options.asOf);
   return {
     schoolSlug: school.slug,
     schoolName: school.name,
@@ -379,10 +435,11 @@ export function buildDemoPlan(options: {
     asOfLocal,
     timeZone,
     staff: buildStaff(seed, school.slug, selected),
-    classes: buildClasses(seed, input, months),
-    exams: buildExams(input, sessionStart, options.asOf),
+    classes: plannedClasses,
+    exams: plannedExams,
     billingMonths: months,
     notices: buildNotices(selected, asOfLocal, timeZone),
+    questionPapers: buildQuestionPapers(plannedClasses, plannedExams, asOfLocal, timeZone),
   };
 }
 

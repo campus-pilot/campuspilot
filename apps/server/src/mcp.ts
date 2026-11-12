@@ -282,6 +282,9 @@ function toMcpToolInputSchema(
   };
 }
 
+/** The most characters of one tool result a procedure may ask the assistant to read (`outputChars`). */
+const MAX_TOOL_OUTPUT_CHARS = 200_000;
+
 /** Rejects missing or malformed `.meta({ mcp })` with the procedure name. */
 function readMcpMetadata(name: string, meta: unknown): McpProcedureMeta {
   const mcp = (meta as { mcp?: Partial<McpProcedureMeta> } | undefined)?.mcp;
@@ -303,6 +306,14 @@ function readMcpMetadata(name: string, meta: unknown): McpProcedureMeta {
   if (mcp.access === 'read' && mcp.destructive) {
     throw new TypeError(
       `oRPC procedure ${name} cannot be both read-only and destructive.`,
+    );
+  }
+  if (
+    mcp.outputChars !== undefined &&
+    (!Number.isInteger(mcp.outputChars) || mcp.outputChars < 1 || mcp.outputChars > MAX_TOOL_OUTPUT_CHARS)
+  ) {
+    throw new TypeError(
+      `oRPC procedure ${name} declares an invalid outputChars: ${JSON.stringify(mcp.outputChars)}.`,
     );
   }
   return mcp as McpProcedureMeta;
@@ -537,6 +548,9 @@ function registerAssistantTools(
           ...securitySchemesMeta(tool.mcp.access),
           [ASSISTANT_TOOL_META.exposure]: tool.mcp.exposure,
           [ASSISTANT_TOOL_META.module]: tool.mcp.module,
+          ...(tool.mcp.outputChars === undefined
+            ? {}
+            : { [ASSISTANT_TOOL_META.outputChars]: tool.mcp.outputChars }),
         },
       },
       async (input, requestContext) =>

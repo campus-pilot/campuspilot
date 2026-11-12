@@ -7,7 +7,8 @@ import {
   ExamClassBreadcrumbValue,
   ExamStudentBreadcrumbValue,
 } from '@/components/exam/exam-breadcrumb-value';
-import { examHref, examClassHref } from '@/components/exam/exam-model';
+import { examHref, examClassHref, examResultsHref, questionPaperHref } from '@/components/exam/exam-model';
+import { QuestionPaperBreadcrumbValue } from '@/components/question-paper/question-paper-breadcrumb-value';
 import { ExamNavbarActions } from '@/components/exam/exam-navbar-actions';
 
 export const examPage = defineManagementPage<SchoolSessionRouteParams>({
@@ -45,7 +46,9 @@ export const examDetailsPage = defineManagementPage<
     {
       id: 'exam-name',
       label: <ExamBreadcrumbValue scope={scope} />,
-      href: examHref(scope, scope.examSlug),
+      // Results, not the exam root: the root is a landing that redirects to Question paper when it is the default,
+      // which would change section under someone clicking back from a class or student result.
+      href: examResultsHref(scope),
     },
     ...(scope.classId
       ? [
@@ -78,3 +81,60 @@ export const examDetailsPage = defineManagementPage<
       : []),
   ],
 });
+
+type QuestionPaperRouteParams = SchoolSessionRouteParams & {
+  examSlug: string;
+  classId?: string;
+  subjectSlug?: string;
+  modeSlug?: string;
+};
+
+/** Exam crumbs down to the exam, shared by the Question paper pages. */
+function questionPaperTrail(scope: SchoolSessionRouteParams & { examSlug: string }) {
+  return [
+    ...examPage
+      .breadcrumbs(scope)
+      .map((crumb) => (crumb.id === 'exam' ? { ...crumb, href: examHref(scope) } : crumb)),
+    {
+      id: 'exam-name',
+      label: <ExamBreadcrumbValue scope={scope} />,
+      href: examHref(scope, scope.examSlug),
+    },
+  ];
+}
+
+/**
+ * The Question paper tab. It is listed before `examDetailsPage`, which also
+ * matches every path below the exam: its class crumb would otherwise link
+ * these pages to the results class page.
+ */
+export const questionPaperListPage = defineManagementPage<QuestionPaperRouteParams>({
+  matches: (pathname) => /^\/school\/[^/]+\/sessions\/[^/]+\/exam\/[^/]+\/question-paper\/?$/.test(pathname),
+  title: 'Question paper',
+  breadcrumbs: (scope) => [...questionPaperTrail(scope), { id: 'question-paper', label: 'Question paper' }],
+});
+
+/** One paper: the crumb names its class, subject and mode. */
+export const questionPaperDetailsPage = defineManagementPage<QuestionPaperRouteParams>({
+  matches: (pathname) =>
+    /^\/school\/[^/]+\/sessions\/[^/]+\/exam\/[^/]+\/question-paper\/[^/]+\/[^/]+\/[^/]+\/?$/.test(pathname),
+  title: 'Question paper',
+  breadcrumbs: (scope) => [
+    ...questionPaperTrail(scope),
+    { id: 'question-paper', label: 'Question paper', href: questionPaperHref(scope) },
+    ...(scope.classId && scope.subjectSlug && scope.modeSlug
+      ? [
+          {
+            id: 'question-paper-paper',
+            label: (
+              <QuestionPaperBreadcrumbValue
+                scope={{ ...scope, classId: scope.classId, subjectSlug: scope.subjectSlug, modeSlug: scope.modeSlug }}
+              />
+            ),
+          },
+        ]
+      : []),
+  ],
+});
+
+export const questionPaperPages = [questionPaperListPage, questionPaperDetailsPage];

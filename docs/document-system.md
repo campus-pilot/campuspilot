@@ -293,12 +293,14 @@ the object and row; storage failure leaves a visible record that can be retried.
 ## Document source rules
 
 The supported `DocumentType` values are `report_card`, `id_card`, `admit_card`,
-`timetable`, `bill`, `receipt`, `statement`, and `notice`. The first seven have
-source DTOs in a strict discriminated union. `notice` is a **template-only**
-type (`TEMPLATE_ONLY_DOCUMENT_TYPES`): it has a school template, marketplace
-design and settings page, but no generator source, no card in the Documents
-workspace and no PDF artifacts or history; notices are written, rendered and
-published by the notices feature (see "Notices" below). Do not add optional
+`timetable`, `bill`, `receipt`, `statement`, `notice`, and `question_paper`. The
+first seven have source DTOs in a strict discriminated union. `notice` is a
+**template-only** type (`TEMPLATE_ONLY_DOCUMENT_TYPES`): it has a school template,
+marketplace design and settings page, but no generator source, no card in the
+Documents workspace and no PDF artifacts or history; notices are written, rendered
+and published by the notices feature (see "Notices" below). `question_paper` is
+template-only too, rendered by the question paper feature (see "Question papers"
+below), but it does store a PDF artifact per saved version. Do not add optional
 fields to a common base merely because two types happen to use the same value today.
 
 - Report cards can target a complete examination, one class, or up to 500 explicit
@@ -447,6 +449,7 @@ executable source of truth.
 | --- | --- |
 | Every document | `school.{name,location,registrationNo,logoUrl}`, `session.{startYear,endYear}`, nullable `exam`, ISO `generatedAt` |
 | Notices | Only `school`, `session`, `generatedAt` and `notice.{title,issuedOn,issuedOnDisplay,paragraphs[]}`; nothing else from this table |
+| Question papers | Only `school`, `session`, `generatedAt`, `exam.{name,slug,order}` and `questionPaper.{className,subjectName,subjectSlug,modeName,modeSlug,maxMarks,totalMarks,timeAllowed,language,script,direction,versionNo,bodyHtml}`; `maxMarks` may be null; `totalMarks`, `timeAllowed`, `language` and `script` are always null and `direction` always `ltr` (kept for old template revisions); `bodyHtml` is the body slot placeholder (see "Question papers") |
 | Student documents | `student.{name,admissionNo,rollNo,className,sectionName,dob,fatherName,motherName,address,phoneNo,whatsappNo,photoUrl}` (phone numbers display-formatted with country code; `whatsappNo` nullable) |
 | Report cards | `subjects[]`, totals, overall percentage/grade, grading scale, attendance, co-scholastic data, approval/configuration flags, and independent report-section flags |
 | Admit cards | `timetable[]` entries for the student's class with ISO/display date, weekday, raw/display time, subject, and mode |
@@ -597,6 +600,106 @@ conversion. What differs is recorded here because it is easy to get wrong.
   WhatsApp attachment. The key is deterministic: concurrent first requests in
   different processes may each write an equivalent object. The demo purge's
   school-prefix sweep removes it.
+
+## Question papers
+
+`question_paper` is the template of the heading and footer of AI-assisted question
+papers. The canonical feature guide is [Question papers](question-papers.md)
+(product model, data model, the HTML fragment and its sanitiser, permissions, the generation
+job and chat); this section owns only what the document system does for the type. The
+questions themselves are an HTML fragment written by a model, sanitised with the
+`question_paper_body` profile and turned into the body by the question paper renderer, never
+by the template. What this document system owns for the type:
+
+- **Template-only, full A4 only.** In `TEMPLATE_ONLY_DOCUMENT_TYPES`; `half` is
+  refused by `validateTemplatePageSize`. No default design is shipped: generation is
+  blocked until the school has selected a question paper template.
+- **Body slot.** The template places `{{{questionPaper.bodyHtml}}}` exactly once, in
+  element content. The context value is the constant `QUESTION_PAPER_SLOT`
+  (`question-paper.slot.ts`). The template is rendered and sanitised like any other
+  document; only then does `substituteQuestionPaperBody` replace the slot with the
+  body, using `indexOf` and slicing (never `String.replace`). Zero or several slots
+  are BAD_REQUEST ("Place {{{questionPaper.bodyHtml}}} exactly once, in element
+  content.").
+- **Two deliberate security differences (design K1, acknowledged).** (1) The body is
+  *not* sanitised after the template. The fragment is untrusted model output: it is
+  sanitised with the stricter `question_paper_body` profile when saved and again at every
+  render, **before** the only two things inserted afterwards, both produced by our code (KaTeX
+  output from a formula's plain LaTeX string, and the data URIs of figures loaded from the
+  paper's own stored images). The document sanitiser itself would strip the inline SVG that
+  KaTeX draws roots and arrows with, which is why the body skips the second pass. (2) The CSP of this type, and only this type, adds
+  `font-src data:` (`documentContentSecurityPolicy`) so the KaTeX fonts, inlined as
+  data URIs, load. Nothing else is widened: no network, no script, no frames. Do not
+  extend this to another type, add a second trusted insertion point, or weaken the
+  policy for a marketplace design without repeating that review.
+- **Layout.** `combineDocuments(..., 'question_paper')` flows over full A4 pages with
+  `@page{size:A4;margin:14mm 14mm 10mm}` and never clips. The heading is in normal
+  flow (first page); the footer is `position:fixed; bottom:0` (at most 12mm tall),
+  which Chromium repeats on every page. The wrapper is a table whose
+  `table-footer-group` reserves a 14mm band at the bottom of every page, so the
+  footer never covers a question. A footer placed in the margin (negative `bottom`,
+  a transform, `top:100%`) does **not** work: verified against the Gotenberg of the
+  stack, a fixed element can only be painted inside the page content area, and one
+  placed outside it vanishes from page 1 and reappears at the top of the next pages.
+  Templates must not set a fixed height, `overflow:hidden` or outer page padding.
+- **Direction.** The sanitiser keeps `class`, `style` and `id` only, so a template
+  sets text direction with `style="direction:{{questionPaper.direction}}"`, not a
+  `dir` attribute. `questionPaper.direction` is always `ltr` (the page frame); the body sets
+  its own `dir` and `lang` on the elements that need them and the renderer picks script fonts
+  from `lang`, because the body does not pass through the document sanitiser.
+- **Context.** `QuestionPaperContext` (`question-paper.context.ts`): school, session,
+  `generatedAt`, `exam.{name,slug,order}` and
+  `questionPaper.{className,subjectName,subjectSlug,modeName,modeSlug,maxMarks,totalMarks,timeAllowed,language,script,direction,versionNo,bodyHtml}`.
+  Of these `totalMarks`, `timeAllowed`, `language` and `script` are **always null** and
+  `direction` is always `ltr`: nothing reads facts out of the free-HTML paper. The keys remain
+  so template revisions written against the earlier structured paper keep rendering (their
+  `{{#if}}` blocks print nothing). `maxMarks` is the exam plan's maximum for the mode (null only
+  for samples). No student, staff, finance or result data. `SAMPLE_QUESTION_PAPER_CONTEXT`
+  (`sampleDocumentContext('question_paper')`) is its synthetic twin.
+- **Designs.** `question-paper-classic` and `question-paper-compact` (slugs use
+  hyphens, unlike the type). The catalog test asserts the slot appears exactly once
+  in every `question_paper` design.
+- **Generic history.** Question paper PDFs are not part of Document history: the
+  class-level question paper permissions differ from the school-level history
+  permissions, so versions and downloads live in the Question paper tab.
+  `listDocumentArtifacts` never returns a `question_paper` artifact and
+  `getDocumentDownload` / `deleteDocumentArtifact` answer NOT_FOUND for one (the
+  artifact rows are real: one PDF per saved version, `kind: pdf`,
+  `documentType: question_paper`, with the class, session and exam filled).
+- **Who may configure the template.** The usual academic template permissions
+  (`READ_/MANAGE_DOCUMENT_TEMPLATES`), plus the school's `assistant` feature
+  (`requireDocumentTypePermission`, checked after the permission so a caller
+  without access learns nothing). Only the *feature* is checked there, not the
+  caller's own assistant role: a principal whose role is not switched on for the
+  assistant can still choose the school's template. The papers themselves use the
+  full assistant gate (`requireQuestionPaperAssistantAccess`).
+- **Saving and previewing a template.** `saveTemplate` checks a `question_paper`
+  template with `assertValidSchoolQuestionPaperTemplate`: it renders the sample
+  context with the rendered English example paper in the slot, so the slot must be
+  placed exactly once, the render must fit `QUESTION_PAPER_TEMPLATE_RENDER_MAX_CHARS`
+  (2,000,000, the notice budget; the body never counts against it because the
+  template only ever prints the constant placeholder), the school logo may appear at
+  most 3 times (the notice technique: the template is given a random placeholder and
+  the real data URI is substituted after sanitising) and the whole document must stay
+  within 25 MB. Template previews and marketplace previews show the example paper.
+- **Rendering a paper.** `question-paper.render.ts` composes the document:
+  `renderTemplate` -> `substituteQuestionPaperBody`. A saved version pins the
+  template revision it was printed with (`template_revision_id`); previews and
+  re-downloads use that revision, never the school's current choice. The body is
+  `question-paper.body.ts` (sanitise again, figures and placeholders, KaTeX,
+  the default stylesheet and the `qp-body` wrapper) with KaTeX
+  (`question-paper.math.ts`: HTML output only, `trust: false`, no macros, 2 s wall
+  budget; the stylesheet with `data:font/woff2` fonts is built once per process from
+  the pinned `katex` package and added only to papers that contain math).
+- **Demo schools.** The demo seed selects the `question-paper-classic` design for a
+  demo school (`seedTemplates`) although the demo has the `assistant` feature off:
+  the procedures refuse the type without the feature, so the seed saves the
+  catalogue design with the same `saveTemplate` function after the same
+  `MANAGE_DOCUMENT_TEMPLATES` check. The seeded papers' PDFs are printed with it.
+- **Extending.** A new design needs the slot exactly once and must follow the layout
+  rules above; changing the slot, the CSP exception or the sanitising order needs the
+  review the slot file asks for. Other changes to papers: see "Extending" in
+  [Question papers](question-papers.md#extending).
 
 ## Notification attachments (WhatsApp)
 

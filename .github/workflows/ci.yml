@@ -53,6 +53,7 @@ jobs:
           - "@campuspilot/components"
           - "@campuspilot/logger"
           - "@campuspilot/opa"
+          - "@campuspilot/question-paper"
           - cadet
           - management
           - server

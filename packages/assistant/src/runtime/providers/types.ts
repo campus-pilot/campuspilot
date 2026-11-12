@@ -1,4 +1,5 @@
 import type { AssistantUserMessageBody } from '@campuspilot/db/schema/assistant';
+import type { AttachmentMarker } from '../../transcript';
 import type { AssistantPrompt } from '../prompt';
 import type { AssistantTool } from '../tools';
 
@@ -97,8 +98,103 @@ export type ModelStepResult =
  */
 export type ModelFailureKind = 'rejected' | 'unavailable' | 'busy' | 'unknown';
 
+/** One part of a one-shot request's single user turn. */
+export type TextPart =
+  | { type: 'text'; text: string }
+  | { type: 'image'; mimeType: string; data: Uint8Array };
+
+/**
+ * A one-shot plain text request with images in the input (question paper
+ * generation: the answer is an HTML fragment). One request, no tools, no
+ * structured-output mode, no streaming to a UI, no transcript: the caller owns
+ * everything around it, including finding the fragment in the text.
+ */
+export type TextRequest = {
+  system: string;
+  /** The user turn, in order. */
+  parts: readonly TextPart[];
+  maxOutputTokens: number;
+  signal?: AbortSignal;
+};
+
+export type TextResult = {
+  /** The answer's text as returned, unparsed (it may sit inside a Markdown code fence). */
+  text: string;
+  /** The model that actually answered. */
+  model: string;
+  usage: ModelUsage;
+  /** The provider declined to answer (safety or policy); `text` may be empty. */
+  refusal: boolean;
+  /**
+   * The answer did not end with the provider's positive completion signal (Gemini `STOP`, Anthropic `end_turn` or
+   * `stop_sequence`): it stopped on the output-token limit, or for any other or unreported reason, so `text` may be cut off.
+   */
+  unfinished: boolean;
+};
+
+/**
+ * The bytes of an attached image as a model request will carry them, or why
+ * they cannot be carried (the note then replaces the image; an image is never
+ * silently dropped, decision D46).
+ */
+export type AttachmentFile =
+  | { kind: 'image'; bytes: Uint8Array; mimeType: string }
+  | { kind: 'unreadable' }
+  | { kind: 'missing' }
+  /** Left out so the request stays within the image budget. */
+  | { kind: 'omitted' };
+
+/** A tool result found in a stored entry, for pruning. */
+export type ToolResultStubInput = { toolName: string; chars: number };
+
+/** One long text field of a tool call's input, for pruning. */
+export type ToolInputStubInput = { toolName: string; field: string; chars: number };
+
+/**
+ * How `buildModelContext` (runtime/context.ts) reads and rewrites this
+ * provider's stored transcript. Everything format-specific lives here, so the
+ * pruning algorithm itself is one function for every provider.
+ */
+export interface ContextAdapter {
+  /** A user entry that carries the person's words or images, not just tool results. */
+  isHumanTurn(entry: TranscriptEntry): boolean;
+  /** Model-facing tool name by tool call id, for every call in the transcript. */
+  toolNamesByUseId(entries: readonly TranscriptEntry[]): Map<string, string>;
+  /**
+   * The entry with every tool result of at least `minChars` characters
+   * replaced by `stub`'s text. Only a result's content changes: the entry,
+   * its ids and the calls they answer stay exactly as they were.
+   */
+  stubToolResults(
+    entry: TranscriptEntry,
+    toolNames: ReadonlyMap<string, string>,
+    stub: (result: ToolResultStubInput) => string,
+    minChars: number,
+  ): TranscriptEntry;
+  /**
+   * The entry with every long top-level text field of its tool call inputs
+   * (at least `minChars` characters) replaced by `stub`'s text. The call, its
+   * id, its name and every other field stay exactly as they were, so each call
+   * keeps its result. Use `stubLongInputFields` (runtime/context.ts) for the
+   * input itself.
+   */
+  stubToolInputs(
+    entry: TranscriptEntry,
+    stub: (input: ToolInputStubInput) => string,
+    minChars: number,
+  ): TranscriptEntry;
+  /** The parts that show an attachment to the model: a label, then the image or a note. */
+  materializeAttachment(marker: AttachmentMarker, file: AttachmentFile): unknown[];
+  /** The part that tells the model an older attachment is no longer shown. */
+  stubAttachment(marker: AttachmentMarker): unknown[];
+}
+
 export interface ModelProvider {
   readonly id: ModelProviderId;
+  /** Media types this provider can read as image input (D46: never silently dropped). */
+  readonly imageMimeTypes: readonly string[];
+  /** The largest single image the provider accepts, in bytes before base64; absent when only the request total is limited. */
+  readonly maxImageBytes?: number;
   /**
    * The model this provider is configured to call now. A conversation stays
    * on its provider, not on a model: changing the configured model moves
@@ -106,6 +202,16 @@ export interface ModelProvider {
    */
   readonly model: string;
   step(input: ModelStepInput): Promise<ModelStepResult>;
+  /**
+   * One plain text request (see {@link TextRequest}). Throws
+   * like `step`: an error whose billed usage, when the provider reported any,
+   * is attached with {@link withBilledUsage}, and which `failureKind` classifies.
+   * It runs on `model`: a caller that wants another model for this kind of
+   * request creates its own provider with it (see `question-paper-model.ts`).
+   */
+  generateText(input: TextRequest): Promise<TextResult>;
+  /** Reads and rewrites this provider's transcript for each request (pruning, attachments). */
+  readonly context: ContextAdapter;
   /** A user message as transcript content. */
   userContent(body: AssistantUserMessageBody): unknown[];
   /** Partial text kept after a stop, as assistant transcript content. */

@@ -30,6 +30,35 @@ const run = (id: string, status: AssistantRunDto['status'], startedAt: Date | nu
   diagnostics: null,
 });
 
+describe('question paper draft cards', () => {
+  const validate = (id: string, position: number, status: 'succeeded' | 'awaiting_approval' = 'succeeded'): AssistantItemDto =>
+    call(id, position, { toolName: 'school.validateQuestionPaperDraft', title: 'Validate a question paper draft' }, status);
+
+  it('shows a succeeded draft check as a card that stays visible when the turn folds', () => {
+    const rows = buildAssistantTimeline(
+      [user('u', 1), call('a', 2), validate('d1', 3), reply('answer', 4, 'Here is the draft')],
+      [run('r1', 'completed', at)],
+    );
+    expect(rows.map((row) => row.kind)).toEqual(['user', 'work', 'card', 'reply']);
+    expect(rows[2]).toMatchObject({ kind: 'card', card: 'question_paper_draft', call: { id: 'd1' } });
+    // The read before it is folded away, as ever.
+    expect(rows[1]).toMatchObject({ kind: 'work', folded: [{ kind: 'activity' }] });
+  });
+
+  it('keeps several drafts as several cards, in order, and does not group them with other reads', () => {
+    const rows = buildAssistantTimeline([user('u', 1), validate('d1', 2), call('a', 3), validate('d2', 4)], [run('r1', 'running', at)]);
+    expect(rows.map((row) => row.kind)).toEqual(['user', 'work', 'card', 'activity', 'card', 'live']);
+    expect(rows.filter((row) => row.kind === 'card').map((row) => row.id)).toEqual(['d1', 'd2']);
+  });
+
+  it('shows no card for a check that failed or other question paper tools', () => {
+    const failed = { ...validate('d1', 2), status: 'failed' } as AssistantItemDto;
+    const save = call('s', 3, { toolName: 'school.saveQuestionPaperVersion', access: 'write' });
+    const rows = buildAssistantTimeline([user('u', 1), failed, save], [run('r1', 'running', at)]);
+    expect(rows.some((row) => row.kind === 'card')).toBe(false);
+  });
+});
+
 describe('buildAssistantTimeline', () => {
   it('groups reads, keeps approvals separate and skips empty replies', () => {
     const rows = buildAssistantTimeline(

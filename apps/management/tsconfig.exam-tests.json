@@ -5,6 +5,9 @@
     "components/exam/**/*.tsx",
     "components/notices/**/*.ts",
     "components/notices/**/*.tsx",
+    "components/question-paper/**/*.ts",
+    "components/question-paper/**/*.tsx",
+    "components/assistant/assistant-gate-model.ts",
     "lib/navigation-guard.ts",
     "../../packages/**/*.ts",
     "../../packages/**/*.tsx"

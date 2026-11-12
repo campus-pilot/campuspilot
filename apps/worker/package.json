@@ -15,7 +15,9 @@
     "@campuspilot/env": "workspace:*",
     "@campuspilot/logger": "workspace:*",
     "@restatedev/restate-sdk": "~1.17.4",
-    "dotenv": "catalog:"
+    "dotenv": "catalog:",
+    "katex": "0.16.11",
+    "sharp": "^0.34.5"
   },
   "devDependencies": {
     "@campuspilot/config": "workspace:*",

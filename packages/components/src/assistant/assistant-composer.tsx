@@ -1,3 +1,8 @@
+import {
+  ASSISTANT_ATTACHMENT_ACCEPT,
+  ASSISTANT_ATTACHMENTS_PER_MESSAGE,
+  type AssistantAttachmentRef,
+} from '@campuspilot/assistant-contract/attachments';
 import { ASSISTANT_MESSAGE_MAX_LENGTH } from '@campuspilot/assistant-contract/dto';
 import { Button } from '@campuspilot/ui/components/button';
 import { InputGroup, InputGroupAddon, InputGroupTextarea } from '@campuspilot/ui/components/input-group';
@@ -5,15 +10,31 @@ import { Spinner } from '@campuspilot/ui/components/spinner';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@campuspilot/ui/components/tooltip';
 import { cn } from '@campuspilot/ui/lib/utils';
 import { useForm } from '@tanstack/react-form';
-import { ListPlus, X } from 'lucide-react';
-import type { KeyboardEvent, PointerEvent, ReactNode } from 'react';
+import { ListPlus, Paperclip, X } from 'lucide-react';
+import { useImperativeHandle, useRef, type ClipboardEvent, type DragEvent, type KeyboardEvent, type PointerEvent, type ReactNode, type Ref } from 'react';
 import { z } from 'zod';
+
+import { AssistantAttachmentStrip } from './assistant-attachment-strip';
+import {
+  AttachmentsMissingError,
+  attachmentSendBlock,
+  hasMessageContent,
+  markMissingAttachments,
+  planAttachmentPicks,
+  readyAttachments,
+  rejectionSummary,
+  type ComposerAttachment,
+} from './assistant-attachments-model';
 
 const composerSchema = z.object({
   text: z
     .string()
     .max(ASSISTANT_MESSAGE_MAX_LENGTH, `Keep messages under ${ASSISTANT_MESSAGE_MAX_LENGTH} characters.`),
+  attachments: z.array(z.custom<ComposerAttachment>()).max(ASSISTANT_ATTACHMENTS_PER_MESSAGE, `A message can carry at most ${ASSISTANT_ATTACHMENTS_PER_MESSAGE} images.`),
 });
+
+/** How many images upload at once; the rest wait their turn, in the order picked. */
+const UPLOAD_CONCURRENCY = 3;
 
 /** Buttons never take focus from the message box when clicked (T3 Code). */
 const keepComposerFocus = (event: PointerEvent) => event.preventDefault();
@@ -99,7 +120,15 @@ function SendButton({
   );
 }
 
+/** What a parent may do to the box without remounting it (a remount would drop the images attached in it). */
+export type AssistantComposerControls = {
+  /** Empties the text field when it holds exactly `text` (an untouched prefilled sentence); anything the user edited stays. */
+  clearTextIf: (text: string) => void;
+};
+
 export type AssistantComposerProps = {
+  /** Receives {@link AssistantComposerControls}. */
+  controlsRef?: Ref<AssistantComposerControls>;
   /**
    * Sends a message. The box clears at once (the message shows optimistically
    * elsewhere); a rejection shows the error and puts the text back, unless
@@ -107,7 +136,7 @@ export type AssistantComposerProps = {
    * `box.text()` reads what the box holds at that moment (text typed while
    * the send is on its way, or nothing), never the text being sent.
    */
-  onSend: (text: string, box: { text: () => string }) => Promise<void>;
+  onSend: (text: string, box: { text: () => string }, attachments: AssistantAttachmentRef[]) => Promise<void>;
   /**
    * Whether a send is in flight. The send button shows it and nothing else
    * can be sent until it settles; a draft typed meanwhile stays in the box.
@@ -136,6 +165,21 @@ export type AssistantComposerProps = {
   onDraftChange?: (text: string) => void;
   /** Up arrow in an empty box recalls this (the last message sent). */
   lastSentText?: string;
+  /**
+   * Turns on image attachments (paperclip, drop, paste). `upload` stores one
+   * file for the next message and resolves with the stored attachment and the
+   * address of its thumbnail (the caller converts HEIC where the browser can,
+   * and posts it). `onNotice` hears why picked files were refused. A message
+   * is sent only when no image is still uploading or failed. `remove` deletes
+   * a stored image from the server when the user takes it out of the box (an
+   * unsent image counts against the user's cap until it is deleted); it is
+   * also called for an upload that finished after its tile was removed.
+   */
+  attachments?: {
+    upload: (file: File) => Promise<{ ref: AssistantAttachmentRef; previewUrl: string | null }>;
+    remove: (ref: AssistantAttachmentRef) => Promise<void>;
+    onNotice: (message: string) => void;
+  };
   /** Left side of the toolbar, e.g. the trust cue. */
   leading?: ReactNode;
   /**
@@ -158,6 +202,7 @@ function errorText(errors: unknown[]): string | null {
  * requests (approval, queue) are sections at its top, divided by one rule.
  */
 export function AssistantComposer({
+  controlsRef,
   onSend,
   sending = false,
   onStop,
@@ -170,9 +215,11 @@ export function AssistantComposer({
   lastSentText,
   leading,
   requests,
+  attachments,
 }: AssistantComposerProps) {
+  const fileInput = useRef<HTMLInputElement>(null);
   const form = useForm({
-    defaultValues: { text: '' },
+    defaultValues: { text: '', attachments: [] as ComposerAttachment[] },
     validators: { onSubmit: composerSchema },
     listeners: {
       // A saved draft goes into the box as the form mounts. It is deliberately
@@ -184,14 +231,27 @@ export function AssistantComposer({
     },
     onSubmit: async ({ value, formApi }) => {
       const text = value.text.trim();
-      if (!text || sending) return;
+      if (!hasMessageContent(text, value.attachments) || sending) return;
+      const blocked = attachmentSendBlock(value.attachments);
+      if (blocked) {
+        formApi.setErrorMap({ onSubmit: { form: blocked, fields: {} } });
+        return;
+      }
+      const sentAttachments = value.attachments;
       // The saved draft is left alone here: it is cleared only once the send
       // has succeeded, so a failed send (or a reload meanwhile) keeps the text.
       formApi.reset();
       try {
-        await onSend(text, { text: () => formApi.getFieldValue('text') });
+        await onSend(text, { text: () => formApi.getFieldValue('text') }, readyAttachments(sentAttachments));
       } catch (error) {
         if (!formApi.getFieldValue('text')) formApi.setFieldValue('text', text);
+        // The images stay with the draft, as the words do, unless new ones were added meanwhile.
+        if (formApi.getFieldValue('attachments').length === 0) {
+          formApi.setFieldValue(
+            'attachments',
+            error instanceof AttachmentsMissingError ? markMissingAttachments(sentAttachments, error.attachmentIds) : sentAttachments,
+          );
+        }
         formApi.setErrorMap({
           onSubmit: { form: error instanceof Error ? error.message : 'The message could not be sent.', fields: {} },
         });
@@ -202,6 +262,88 @@ export function AssistantComposer({
     },
   });
   const disabled = Boolean(disabledReason);
+  useImperativeHandle(
+    controlsRef,
+    () => ({
+      clearTextIf: (text) => {
+        if (form.getFieldValue('text') === text) form.setFieldValue('text', '');
+      },
+    }),
+    [form],
+  );
+
+  /** Replaces one image in the box by id; an image the user removed meanwhile stays removed. */
+  const updateAttachment = (localId: string, change: Partial<ComposerAttachment>) =>
+    form.setFieldValue('attachments', (items) => items.map((item) => (item.localId === localId ? { ...item, ...change } : item)));
+
+  const removeAttachment = (localId: string) => {
+    const removed = form.getFieldValue('attachments').find((item) => item.localId === localId);
+    if (removed?.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(removed.previewUrl);
+    form.setFieldValue('attachments', (items) => items.filter((item) => item.localId !== localId));
+    if (removed?.ref) void discardStored(removed.ref);
+  };
+
+  /** Deletes a stored image nobody will send; a failure is reported once, the server sweeps it later. */
+  async function discardStored(ref: AssistantAttachmentRef) {
+    try {
+      await attachments?.remove(ref);
+    } catch {
+      attachments?.onNotice(`${ref.fileName} could not be removed from the server. It is deleted automatically after a day.`);
+    }
+  }
+
+  /** Uploads one picked file and settles its tile; a failure keeps the tile with the reason. */
+  async function uploadOne(upload: NonNullable<typeof attachments>['upload'], file: File, localId: string) {
+    try {
+      const stored = await upload(file);
+      const tile = form.getFieldValue('attachments').find((item) => item.localId === localId);
+      // The user removed the tile while it was uploading: the stored copy has no tile and would count against the cap.
+      if (!tile) return void (await discardStored(stored.ref));
+      if (tile.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(tile.previewUrl);
+      updateAttachment(localId, { status: 'ready', ref: stored.ref, previewUrl: stored.previewUrl, error: null });
+    } catch (error) {
+      updateAttachment(localId, { status: 'failed', error: error instanceof Error ? error.message : 'The image could not be uploaded.' });
+    }
+  }
+
+  /** Adds picked files: refused ones are reported, the rest show at once and upload three at a time. */
+  async function addFiles(picked: readonly File[]) {
+    if (!attachments || picked.length === 0) return;
+    const plan = planAttachmentPicks(picked, form.getFieldValue('attachments').length);
+    const notice = rejectionSummary(plan.rejected);
+    if (notice) attachments.onNotice(notice);
+    const queue = plan.accepted.map((file) => ({ file, localId: crypto.randomUUID() }));
+    form.setFieldValue('attachments', (items) => [
+      ...items,
+      ...queue.map(({ file, localId }): ComposerAttachment => ({
+        localId,
+        fileName: file.name,
+        previewUrl: URL.createObjectURL(file),
+        status: 'uploading',
+        ref: null,
+        error: null,
+      })),
+    ]);
+    const next = async (): Promise<void> => {
+      const job = queue.shift();
+      if (!job) return;
+      await uploadOne(attachments.upload, job.file, job.localId);
+      return next();
+    };
+    await Promise.all(Array.from({ length: Math.min(UPLOAD_CONCURRENCY, queue.length) }, next));
+  }
+
+  const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    const files = [...event.clipboardData.files].filter((file) => file.type.startsWith('image/'));
+    if (!attachments || files.length === 0) return;
+    event.preventDefault();
+    void addFiles(files);
+  };
+  const handleDrop = (event: DragEvent<HTMLFormElement>) => {
+    if (!attachments || event.dataTransfer.files.length === 0) return;
+    event.preventDefault();
+    void addFiles([...event.dataTransfer.files]);
+  };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>, value: string) => {
     // IME composition (and Safari's keyCode 229) must never send half a word.
@@ -220,6 +362,10 @@ export function AssistantComposer({
   return (
     <form
       className="flex flex-col gap-1.5"
+      onDragOver={(event) => {
+        if (attachments && event.dataTransfer.types.includes('Files')) event.preventDefault();
+      }}
+      onDrop={handleDrop}
       onSubmit={(event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -238,6 +384,9 @@ export function AssistantComposer({
         {requests ? (
           <div className="flex w-full min-w-0 flex-col divide-y divide-surface-outline border-b border-surface-outline">{requests}</div>
         ) : null}
+        <form.Subscribe selector={(state) => state.values.attachments}>
+          {(items) => <AssistantAttachmentStrip items={items} onRemove={removeAttachment} />}
+        </form.Subscribe>
         <form.Field name="text" listeners={{ onChange: ({ value }) => onDraftChange?.(value) }}>
           {(field) => (
             <InputGroupTextarea
@@ -252,25 +401,61 @@ export function AssistantComposer({
               onBlur={field.handleBlur}
               onChange={(event) => field.handleChange(event.target.value)}
               onKeyDown={(event) => handleKeyDown(event, field.state.value)}
+              onPaste={handlePaste}
             />
           )}
         </form.Field>
         <InputGroupAddon align="block-end" className="cursor-default gap-2 px-2 pt-1 pb-2">
+          {attachments ? (
+            <>
+              <input
+                ref={fileInput}
+                type="file"
+                multiple
+                hidden
+                accept={ASSISTANT_ATTACHMENT_ACCEPT}
+                aria-label="Attach images"
+                onChange={(event) => {
+                  void addFiles([...(event.target.files ?? [])]);
+                  // The same file can be picked again after it was removed.
+                  event.target.value = '';
+                }}
+              />
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label="Attach images"
+                    disabled={disabled}
+                    className="shrink-0 rounded-full text-muted-foreground"
+                    onPointerDown={keepComposerFocus}
+                    onClick={() => fileInput.current?.click()}
+                  >
+                    <Paperclip />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Attach images (up to {ASSISTANT_ATTACHMENTS_PER_MESSAGE})</TooltipContent>
+              </Tooltip>
+            </>
+          ) : null}
           <div className="flex min-w-0 flex-1 items-center gap-1.5 ps-2 text-xs font-normal text-muted-foreground">
             {leading}
           </div>
-          <form.Subscribe selector={(state) => state.values.text.trim().length > 0}>
-            {(hasText) =>
-              onStop && !hasText ? (
+          <form.Subscribe selector={(state) => [state.values.text, state.values.attachments] as const}>
+            {([text, items]) => {
+              const hasContent = hasMessageContent(text, items);
+              return onStop && !hasContent ? (
                 <StopButton onStop={onStop} stopping={stopping} />
               ) : (
                 <SendButton
-                  disabledReason={disabledReason ?? (hasText ? null : 'Type a message')}
+                  disabledReason={disabledReason ?? (hasContent ? attachmentSendBlock(items) : 'Type a message')}
                   busy={sending}
                   queue={Boolean(onStop)}
                 />
-              )
-            }
+              );
+            }}
           </form.Subscribe>
         </InputGroupAddon>
       </InputGroup>

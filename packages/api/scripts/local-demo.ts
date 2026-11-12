@@ -213,7 +213,7 @@ try {
   await getS3Client().send(new CreateBucketCommand({ Bucket: env.S3_BUCKET }));
 }
 /** Types with a generator source; `notice` has a template but is rendered by the notices feature. */
-type GeneratedDocumentType = Exclude<DocumentType, 'notice'>;
+type GeneratedDocumentType = Exclude<DocumentType, 'notice' | 'question_paper'>;
 const templates = new Map<GeneratedDocumentType, string>();
 const types: GeneratedDocumentType[] = ['report_card', 'id_card', 'admit_card', 'timetable', 'bill', 'receipt', 'statement'];
 for (const documentType of types) {

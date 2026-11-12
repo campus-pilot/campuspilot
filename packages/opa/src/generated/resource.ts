@@ -21,6 +21,8 @@ export type ClassResource = {
 };
 
 export type AuthorizationResourceByAction = {
+  [CLASS_ACTIONS.MANAGE_EXAM_QUESTION_PAPERS]: ClassResource;
+  [CLASS_ACTIONS.READ_EXAM_QUESTION_PAPERS]: ClassResource;
   [CLASS_ACTIONS.APPROVE_EXAM_RESULTS]: ClassResource;
   [CLASS_ACTIONS.SEND_RESULT_NOTIFICATION]: ClassResource;
   [CLASS_ACTIONS.ADD_STUDENT]: ClassResource;

@@ -1,12 +1,14 @@
 import type { AssistantToolCallItemDto } from '@campuspilot/assistant-contract/dto';
 import { Button } from '@campuspilot/ui/components/button';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@campuspilot/ui/components/collapsible';
 import { Kbd } from '@campuspilot/ui/components/kbd';
 import { Spinner } from '@campuspilot/ui/components/spinner';
 import { cn } from '@campuspilot/ui/lib/utils';
-import { AlertCircle, Check, CircleSlash, CornerDownLeft, Shield, ShieldQuestionMark, SquarePen, X } from 'lucide-react';
+import { AlertCircle, Check, ChevronDown, CircleSlash, CornerDownLeft, Shield, ShieldQuestionMark, SquarePen, X } from 'lucide-react';
 import { useRef, useSyncExternalStore } from 'react';
 
 import { APPROVE_BUTTON_ATTRIBUTE, approvalFocus, decisionKeys, type AssistantApprovalDecision } from './approval-keys';
+import type { ApprovalSummary } from './approval-summaries';
 import { approvalRecordFields, type ApprovalPath, type ApprovalValueDisplay } from './approval-values';
 
 export { ASSISTANT_SURFACE_PROPS, type AssistantApprovalDecision } from './approval-keys';
@@ -27,14 +29,20 @@ type ChangeField = Extract<ApprovalValueDisplay, { kind: 'fields' }>['fields'][n
 
 /**
  * What the change will set, as labelled values in the reader's words (never
- * raw JSON). `currency` and `moneyMaps` say how to read its money (see
+ * raw JSON). A key the tool's summary has a note for shows that note instead of
+ * its value. `currency` and `moneyMaps` say how to read its money (see
  * `ApprovalDisplayOptions`).
  */
-function changeFields(input: unknown, currency?: string, moneyMaps?: readonly ApprovalPath[]): ChangeField[] {
+function changeFields(
+  input: unknown,
+  notes: Readonly<Record<string, string>> = {},
+  currency?: string,
+  moneyMaps?: readonly ApprovalPath[],
+): ChangeField[] {
   if (typeof input !== 'object' || input === null || Array.isArray(input)) return [];
-  return approvalRecordFields(input as Record<string, unknown>, { currency, moneyMaps }).filter(
-    (field) => !HIDDEN_INPUT_KEYS.has(field.key),
-  );
+  return approvalRecordFields(input as Record<string, unknown>, { currency, moneyMaps })
+    .filter((field) => !HIDDEN_INPUT_KEYS.has(field.key))
+    .map((field) => (field.key in notes ? { ...field, value: { kind: 'text', text: notes[field.key]! } satisfies ApprovalValueDisplay } : field));
 }
 
 /**
@@ -61,6 +69,36 @@ function ChangeFields({ fields, nested = false }: { fields: readonly ChangeField
         </div>
       ))}
     </dl>
+  );
+}
+
+/**
+ * The change as a tool's own sentence, with the values behind it in a
+ * collapsed "Details" disclosure. Fields the summary does not move to Details
+ * stay visible under the sentence.
+ */
+function SummarizedChange({ summary, fields }: { summary: ApprovalSummary; fields: readonly ChangeField[] }) {
+  const shown = fields.filter((field) => !summary.detailKeys.has(field.key) && !(field.key in summary.notes));
+  const details = fields.filter((field) => summary.detailKeys.has(field.key) || field.key in summary.notes);
+  return (
+    <div className="flex min-w-0 flex-col gap-2">
+      <p className="font-medium break-words text-foreground">{summary.sentence}</p>
+      {shown.length ? <ChangeFields fields={shown} /> : null}
+      {details.length ? (
+        <Collapsible className="flex min-w-0 flex-col gap-1">
+          {/* The shared ghost button, as on the draft cards: it carries the focus ring, hover state and hit area a bare trigger lacks. */}
+          <CollapsibleTrigger asChild>
+            <Button type="button" variant="ghost" size="sm" className="self-start text-muted-foreground">
+              Details
+              <ChevronDown data-icon="inline-end" aria-hidden />
+            </Button>
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <ChangeFields fields={details} />
+          </CollapsibleContent>
+        </Collapsible>
+      ) : null}
+    </div>
   );
 }
 
@@ -135,6 +173,7 @@ export function AssistantApprovalRequest({
   waiting,
   pendingDecision,
   error,
+  summary,
   currency,
   moneyMaps,
   onDecide,
@@ -149,6 +188,8 @@ export function AssistantApprovalRequest({
   pendingDecision?: AssistantApprovalDecision;
   /** Why the last decision could not be sent; shown in place of the hint. */
   error?: string | null;
+  /** The tool's own sentence for this change (`approvalSummaryOf`), when it has one: replaces the list of ids and values. */
+  summary?: ApprovalSummary | null;
   /**
    * The currency of money amounts in the input that do not name their own,
    * when the app knows it for this tool. Without it those amounts show as
@@ -162,7 +203,7 @@ export function AssistantApprovalRequest({
   moneyMaps?: readonly ApprovalPath[];
   onDecide: (decision: AssistantApprovalDecision) => void;
 }) {
-  const fields = changeFields(call.body.input, currency, moneyMaps);
+  const fields = changeFields(call.body.input, summary?.notes, currency, moneyMaps);
   const busy = Boolean(pendingDecision);
   const enter = useEnterApproves();
   return (
@@ -190,7 +231,7 @@ export function AssistantApprovalRequest({
       {fields.length ? (
         <div className="px-1.5">
           <div className="max-h-60 overflow-y-auto rounded-lg bg-muted/60 px-3 py-2.5 text-xs/relaxed dark:bg-muted/40">
-            <ChangeFields fields={fields} />
+            {summary ? <SummarizedChange summary={summary} fields={fields} /> : <ChangeFields fields={fields} />}
           </div>
         </div>
       ) : null}

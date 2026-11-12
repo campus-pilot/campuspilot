@@ -14,17 +14,18 @@ type Rgb = readonly [number, number, number];
 
 class Canvas {
   readonly pixels: Uint8Array;
-  constructor(readonly size: number, background: Rgb) {
-    this.pixels = new Uint8Array(size * size * 4);
-    for (let index = 0; index < size * size; index += 1) {
+  /** `height` defaults to `width`: the avatars and the logo are square, a paper page is not. */
+  constructor(readonly width: number, background: Rgb, readonly height: number = width) {
+    this.pixels = new Uint8Array(width * height * 4);
+    for (let index = 0; index < width * height; index += 1) {
       this.pixels.set([background[0], background[1], background[2], 255], index * 4);
     }
   }
 
   /** Blends `color` into a pixel with coverage `alpha` in [0, 1]. */
   private blend(x: number, y: number, color: Rgb, alpha: number) {
-    if (alpha <= 0 || x < 0 || y < 0 || x >= this.size || y >= this.size) return;
-    const offset = (y * this.size + x) * 4;
+    if (alpha <= 0 || x < 0 || y < 0 || x >= this.width || y >= this.height) return;
+    const offset = (y * this.width + x) * 4;
     const a = Math.min(1, alpha);
     for (let channel = 0; channel < 3; channel += 1) {
       this.pixels[offset + channel] = Math.round(this.pixels[offset + channel]! * (1 - a) + color[channel]! * a);
@@ -33,23 +34,80 @@ class Canvas {
 
   /** Fills a shape given its signed distance function (negative inside), anti-aliased over one pixel. */
   fill(distance: (x: number, y: number) => number, color: Rgb) {
-    for (let y = 0; y < this.size; y += 1) {
-      for (let x = 0; x < this.size; x += 1) {
+    for (let y = 0; y < this.height; y += 1) {
+      for (let x = 0; x < this.width; x += 1) {
         this.blend(x, y, color, 0.5 - distance(x + 0.5, y + 0.5));
       }
     }
   }
 
   rect(x: number, y: number, width: number, height: number, color: Rgb) {
-    for (let row = Math.max(0, Math.floor(y)); row < Math.min(this.size, Math.ceil(y + height)); row += 1) {
-      for (let column = Math.max(0, Math.floor(x)); column < Math.min(this.size, Math.ceil(x + width)); column += 1) {
+    for (let row = Math.max(0, Math.floor(y)); row < Math.min(this.height, Math.ceil(y + height)); row += 1) {
+      for (let column = Math.max(0, Math.floor(x)); column < Math.min(this.width, Math.ceil(x + width)); column += 1) {
         this.blend(column, row, color, 1);
       }
     }
   }
 
+  /** An anti-aliased disc, touching only the pixels around it (unlike {@link fill}, which visits the whole canvas). */
+  dot(cx: number, cy: number, radius: number, color: Rgb) {
+    for (let y = Math.floor(cy - radius - 1); y <= Math.ceil(cy + radius + 1); y += 1) {
+      for (let x = Math.floor(cx - radius - 1); x <= Math.ceil(cx + radius + 1); x += 1) {
+        this.blend(x, y, color, 0.5 - (Math.hypot(x + 0.5 - cx, y + 0.5 - cy) - radius));
+      }
+    }
+  }
+
+  /**
+   * Ruled notebook paper: evenly spaced pale blue rules and a red margin
+   * line, the way a school exercise book looks in a photo.
+   */
+  ruledPaper(options: { top: number; spacing: number; marginX: number }) {
+    for (let y = options.top; y < this.height - options.spacing / 2; y += options.spacing) {
+      this.rect(0, y, this.width, 1.5, [186, 210, 236]);
+    }
+    this.rect(options.marginX, 0, 2, this.height, [226, 136, 136]);
+  }
+
+  /**
+   * A line of pen "handwriting": a wavy stroke with a varying height that
+   * breaks into word-sized runs. It reads as writing at thumbnail size and
+   * carries no text, so the demo has nothing to copy from or to translate.
+   */
+  scribbleLine(random: Random, options: { x: number; y: number; length: number; ink: Rgb; height: number }) {
+    let cursor = options.x;
+    const end = options.x + options.length;
+    while (cursor < end) {
+      const wordLength = Math.min(end - cursor, random.int(18, 70));
+      const phase = random.next() * Math.PI * 2;
+      const frequency = 0.2 + random.next() * 0.3;
+      const lift = options.height * (0.35 + random.next() * 0.5);
+      let previous: number | null = null;
+      for (let step = 0; step < wordLength; step += 1) {
+        const x = cursor + step;
+        const letter = Math.sin(x * frequency + phase) * lift;
+        const drift = Math.sin(x * 0.05 + phase) * 0.9;
+        const y = options.y - options.height / 2 + letter + drift;
+        // Join this column to the previous one so a steep stroke is one line, not a row of dots.
+        const from: number = previous ?? y;
+        const steps = Math.max(1, Math.ceil(Math.abs(y - from)));
+        for (let part = 1; part <= steps; part += 1) this.dot(x, from + ((y - from) * part) / steps, 1.15, options.ink);
+        previous = y;
+      }
+      cursor += wordLength + random.int(7, 14);
+    }
+  }
+
+  /** A hollow rectangle with a line `thickness` wide. */
+  frame(x: number, y: number, width: number, height: number, thickness: number, color: Rgb) {
+    this.rect(x, y, width, thickness, color);
+    this.rect(x, y + height - thickness, width, thickness, color);
+    this.rect(x, y, thickness, height, color);
+    this.rect(x + width - thickness, y, thickness, height, color);
+  }
+
   toPng(): Buffer {
-    return encodePng(this.size, this.size, this.pixels);
+    return encodePng(this.width, this.height, this.pixels);
   }
 }
 
@@ -185,6 +243,54 @@ export function renderMonogramLogo(random: Random, schoolName: string): Buffer {
         }
       }
     }
+  }
+  return canvas.toPng();
+}
+
+/** What one photographed page of a demo question paper shows. */
+export type PaperPageSpec = {
+  /** Lines of handwriting, top to bottom. */
+  lines: number;
+  /** Whether a hand-drawn diagram box sits in the lower part of the page. */
+  figureBox: boolean;
+};
+
+const PAPER: Rgb = [253, 251, 243];
+const INK: Rgb = [38, 52, 128];
+
+/**
+ * A synthetic 640×900 "photo" of a handwritten question paper page: ruled
+ * paper, a heading scribble, `lines` lines of pen strokes with ragged ends
+ * and optionally a diagram box with a drawn circle in it. Illustrative only
+ * (D33): it holds no text and no real handwriting, so nothing in it can be
+ * read back, and it is deterministic for the same `random`.
+ */
+export function renderPaperPage(random: Random, spec: PaperPageSpec): Buffer {
+  const width = 640;
+  const height = 900;
+  const canvas = new Canvas(width, PAPER, height);
+  const spacing = 34;
+  const left = 74;
+  canvas.ruledPaper({ top: 96, spacing, marginX: 58 });
+  // Heading: a short, taller scribble centred on the first rule.
+  canvas.scribbleLine(random, { x: 190, y: 74, length: 260, ink: INK, height: 18 });
+  const figureTop = 560;
+  const figureHeight = 190;
+  for (let line = 0; line < spec.lines; line += 1) {
+    const y = 96 + (line + 1) * spacing - 6;
+    if (y > height - 40) break;
+    if (spec.figureBox && y > figureTop - 8 && y < figureTop + figureHeight + 12) continue;
+    // Question numbers start a line short of the margin; answers run to a ragged edge.
+    const length = width - left - 36 - random.int(0, 190);
+    canvas.scribbleLine(random, { x: left, y, length, ink: INK, height: 14 });
+  }
+  if (spec.figureBox) {
+    canvas.frame(left, figureTop, width - left - 40, figureHeight, 2, INK);
+    const cx = left + (width - left - 40) / 2;
+    const cy = figureTop + figureHeight / 2;
+    canvas.fill((x, y) => Math.abs(Math.hypot(x - cx, y - cy) - 58) - 1.5, INK);
+    canvas.rect(cx - 58, cy, 116, 2, INK);
+    canvas.rect(cx, cy - 58, 2, 58, INK);
   }
   return canvas.toPng();
 }

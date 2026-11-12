@@ -12,7 +12,7 @@ permissions.
 | Piece | Where | Owns |
 | --- | --- | --- |
 | Assistant package | `packages/assistant` | Agent loop and model providers (`src/runtime`), store, live events, the `/model/*` router (`router.ts`, `http.ts`), the outbox (`dispatch.ts`), the signed worker service (`control.ts`, `worker.ts`) |
-| Tables | `packages/db/src/schema/assistant.ts` (main migrations, `assistant_` prefix) | Conversations, runs, items, approvals, transcript, `assistant_model_request` (saved costs), `school_assistant_access_role` |
+| Tables | `packages/db/src/schema/assistant.ts` (main migrations, `assistant_` prefix) | Conversations, runs, items, approvals, transcript, `assistant_model_request` (saved costs, also the question paper job's), `assistant_attachment` (chat images), `school_assistant_access_role` |
 | Contract | `packages/assistant-contract` | DTOs, the oRPC contract of `/model/*`, shared protocol constants, exact USD sums (`money.ts`) |
 | Chat UI pieces | `packages/components/src/assistant` | Presentational timeline, approval card, composer (props and callbacks only) |
 | Usage UI pieces | `packages/components/src/assistant-usage` | Date range form, spend chart and table (props only) |
@@ -189,6 +189,131 @@ million tokens, `<P>_PRICE_INPUT_USD_PER_MTOK`, `_OUTPUT_`, `_CACHE_READ_`,
 `_CACHE_WRITE_`. A provider is configured only when all six are set; setting
 some of them refuses to start. There is no price list in code.
 
+### One-shot text requests (question papers)
+
+Besides the agent loop, a provider can make one **plain text request**
+(`ModelProvider.generateText`): one user turn of text and image parts, a system
+prompt, no tools, no transcript and no structured-output mode, answered with the
+text, the answering model, normalised usage and two flags, `refusal` and
+`unfinished` (the provider did not report a normal finish: the output limit or any other finish reason, or none). Question paper generation (the
+"Generate with AI" job, `docs/question-papers.md`) is its only caller; the answer
+is an HTML fragment, which the caller finds in the text (it strips a Markdown
+code fence), sanitises and validates. It reaches the provider through
+`createQuestionPaperModel()` (`packages/assistant/src/question-paper-model.ts`,
+outside `src/runtime`), which the API process and the worker call at boot and
+pass to `configureQuestionPaperModel`; the API package cannot import this one,
+so the job sees only the structural `QuestionPaperModel`
+(`packages/api/src/workflows/question-paper/model.ts`). The turn loop is
+untouched, so `boundary.test.ts` still holds.
+
+| | Anthropic | Gemini |
+| --- | --- | --- |
+| Images read | JPEG, PNG, WebP, GIF (**not HEIC**) | JPEG, PNG, WebP, HEIC, HEIF |
+| Request | `beta.messages.stream`, effort `medium`, no caching (pages differ per job) | `models.generateContentStream`, `mediaResolution: HIGH` (streamed so a long answer survives idle limits and a broken stream still reports usage) |
+| Truncated | `stop_reason = max_tokens` | `finishReason = MAX_TOKENS` |
+| Refused | `stop_reason = refusal` | prompt block, or a safety/image-safety finish reason |
+
+There is no response schema, so no provider-specific schema fitting: an earlier
+design asked the providers for a JSON document and had to fit its schema to
+Gemini's undocumented complexity limits; that is gone. What the model may write
+is governed by the prompt (the shared fragment rules) and enforced by the
+`question_paper_body` sanitiser and the validator after the answer. A page the
+active provider cannot read (HEIC on Anthropic) fails the job before any request,
+naming the page (decision D46); pages are never dropped silently. The job
+records the provider's real error message in `error_detail` (`error-detail.ts`)
+so a refused request is diagnosable.
+
+**Settings.** Question paper generation uses `QUESTION_PAPER_PROVIDER`
+(default `ASSISTANT_PROVIDER`) and `QUESTION_PAPER_MODEL` (default the
+provider's `<P>_MODEL`). The provider's API key is always its own. When
+`QUESTION_PAPER_MODEL` is set, all four `QUESTION_PAPER_PRICE_*_USD_PER_MTOK`
+are required and are the prices saved with its requests; when it is not set
+they must be unset and the provider's own prices apply, so a model never
+inherits another model's prices. An explicit `QUESTION_PAPER_PROVIDER` needs
+that provider's key and a model (its own or `QUESTION_PAPER_MODEL`), or
+startup is refused. `QUESTION_PAPER_MAX_OUTPUT_TOKENS` (default 32000) bounds
+one request; `QUESTION_PAPER_JOB_TIMEOUT_MINUTES` (default 40) is how long a
+running job may take before the API's sweep fails it (read by the API server);
+`QUESTION_PAPER_MAX_RUNNING_JOBS_PER_SCHOOL` (default 3) caps the jobs (queued plus
+running) one school may have at once, which bounds how many run at the same time (not how far
+the cached spend check can be overshot by jobs started one after another).
+The worker needs the same `QUESTION_PAPER_*` values as the API server.
+
+### Image attachments, question paper tools and context pruning
+
+Chat can carry images, mainly photographs of a handwritten question paper
+(feature guide: [Question papers](question-papers.md#chat-attachments-tools-drafts-pruning)).
+
+- **Attachments.** The composer takes up to 20 images per message (paperclip, drop,
+  paste; JPEG, PNG, WebP and the HEIC family, 15 MB each). Each file is uploaded
+  first, alone, to `POST /api/blob/schools/:schoolId/assistant/attachments`
+  (`packages/assistant/src/attachments.http.ts`, mounted in `apps/server`): browser
+  session only, origin checked, `assertCanUse`, 60 per minute per IP. The three objects are written
+  first and a short transaction (per user and school advisory lock) then counts the cap, frees
+  stale or surplus rows (their objects are deleted after the commit, best effort, logged by key)
+  and inserts the row; no connection or lock is held across storage calls. It becomes an
+  `assistant_attachment` row (the original, a 1800 px model copy and a thumbnail in
+  S3 under `schools/{schoolId}/`; `unsupported` when the server cannot decode it, as
+  for HEIC) and an id. `sendMessage` takes `attachmentIds` (text may then be empty) and binds
+  them in the same transaction as the message; a message that names an image that is
+  foreign, already sent or missing is refused whole; for missing ones the BAD_REQUEST carries
+  `data = { reason: 'attachments_missing', attachmentIds }` and the composer marks exactly
+  those tiles as failed (the failed copy of the message is dropped, so Retry cannot loop). Reads redirect to a 5 minute
+  presigned URL and only the owner may read. A user may hold 40 unsent attachments
+  per school; removing one from the composer deletes it (`DELETE` on the attachment,
+  owner and unsent only), an upload at the cap frees that user's unsent images older
+  than an hour and then, if still at the cap, the oldest beyond the newest 20 (a composer
+  holds at most 20; the rest were left by a composer that unmounted), an unsent one is deleted after 24 hours (the outbox sweep, which also
+  retries attachments of deleted conversations whose objects could not be deleted;
+  objects go before rows), the others
+  with their conversation (`deleteConversation`, a soft delete, deletes them
+  explicitly) and with the school (demo purge). A file the active provider cannot
+  read (HEIC on Anthropic) refuses the send with a message asking for a JPEG; an image is
+  never dropped silently.
+- **Transcript.** A stored user turn holds provider-neutral markers, never bytes; the
+  provider adapters turn a marker into an image part when they build a request, always
+  preceded by a line carrying the attachment's `asat_` id, sanitised file name and type so
+  the model can use the id as `data-figure-id` on an `<img>` (old/unshown attachments keep the id in their
+  note; see [Question papers](question-papers.md#chat-attachments-tools-drafts-pruning)).
+  `AssistantUserMessageBody` carries `attachments` and an optional `seed` (the
+  question paper "Continue in chat" context, accepted only on a new conversation).
+- **Tools.** The question paper tools are ordinary advanced MCP tools of module
+  `exams` (`listQuestionPapers`, `getQuestionPaper`, `listQuestionPaperVersions`,
+  `getQuestionPaperDraft` (reads an unsaved draft back by `draftId`; in-app only),
+  `learn_question_paper_generation`, `validateQuestionPaperDraft` and
+  `saveQuestionPaperVersion`, the only write and so the usual approval card). The prompt
+  has one bullet that sends the model to the learn tool first (Anthropic reaches it
+  through tool search, Gemini has every tool declared). `ASSISTANT_TOOL_META.outputChars`
+  lets a tool raise the 24,000 character cap on its result, carried end to end
+  (`_meta['campuspilot/output-chars']`).
+- **Cards and views.** A successful `validateQuestionPaperDraft` call becomes a
+  `card` timeline row (`ASSISTANT_CARD_TOOLS`, keyed by the stored MCP name
+  `school.validateQuestionPaperDraft`) that the app renders as a draft card (the problems
+  in plain sentences, or: a collapsed "what was removed" list, a placeholder-figure note,
+  Preview and *Save as new version*, which sends the plain message "Save draft {id} as
+  a new version of {paper}."; a draft replaced by a later ready draft of the same paper shrinks to a
+  collapsed "Replaced by Draft N" line). No marks are shown anywhere. The `question_paper` view shows a saved version with Preview and
+  Download (see Views below). Drafts exist only in the conversation.
+- **Context pruning** (`runtime/context.ts`, `buildModelContext`, applied after the
+  transcript is read and before the provider adapter; the stored transcript and the UI
+  are never changed). The window is the last two human messages. Outside it a tool
+  result of 8,000 characters or more is replaced by a stub naming the tool and its size
+  ("Call the tool again if you need it"), a top-level text field of 4,000 characters or more in
+  the input of an older tool call (the paper `html` of a draft or save call) by a stub naming
+  the field, the tool and the size (`stubToolInputs` of the adapter). The stub (`toolInputStub`)
+  names the way back per tool: `getQuestionPaperDraft` with the result's draft id (unsaved draft)
+  or `getQuestionPaper` (saved) for a validate input, `getQuestionPaper` for a save input, and no
+  draft id for any other tool; it says it is not the content, so copying it into `html` is
+  refused as an empty paper, and an attachment by a note
+  that keeps its id and says the image is no longer visible. The stored transcript keeps the
+  full text: a draft id is resolved from it when the user saves. Inside it, images are materialised newest first within a 16 MiB
+  budget counted as base64, with a note for any that are missing, unreadable or omitted. Entry count,
+  order, tool call ids and thought signatures are never touched, and the function is
+  pure and idempotent. Each provider supplies a `ContextAdapter` (`anthropicContext`,
+  `geminiContext`, `fakeContext`) for its own message format. One threshold per kind (results,
+  inputs) applies to every tool, so the learn payload (about 10 KB) is pruned too and the agent calls it
+  again when it needs it.
+
 ### Cost: saved, never recomputed
 
 After each answered model request, one transaction (the step's own) inserts an
@@ -215,8 +340,24 @@ bill.
 
 Saved costs stay linked to their run and conversation for good: users delete
 conversations softly (below), and `assistant_model_request.run_id` is
-`NOT NULL` with `ON DELETE NO ACTION`, so no run or conversation delete can
-drop or unlink a cost. Cost rows are removed only with their school
+`ON DELETE NO ACTION`, so no run or conversation delete can drop or unlink a
+cost.
+
+**Source.** `assistant_model_request.source` (`chat` | `question_paper`, no
+default: every writer states it) says what a request was for. A `chat` row
+has a `run_id` and no job; a `question_paper` row has no run and carries the
+generation job's id in `question_paper_job_id` (a plain value, deliberately no
+foreign key, so deleting a paper never drops or unlinks what it cost). A CHECK
+ties the three columns together. Question paper rows are written by
+`recordQuestionPaperRequest` (`packages/api/src/workflows/question-paper/cost.ts`)
+with the same cost expression, one row per model request (the transcription,
+the optional repair, and every failed attempt the provider billed), keyed
+`qp:<jobId>.<attempt>:model:<n>[:attempt:<k>]`. Because spend, the monthly
+limit and every usage read use this table only, question paper cost counts
+toward the school's AI limit and usage with no other change. The usage
+answers carry `sources` (every source listed, a quiet one with zeros); the
+usage tab and the admin AI pages show it as "By feature" (Assistant chat,
+Question paper). Cost rows are removed only with their school
 (`school_id` cascades on every assistant table; Postgres checks `NO ACTION` at
 the end of that one statement, when the cost rows are gone too) and by
 `purge_demo_school`, which deletes them first. Spend, limits and bills never
@@ -278,7 +419,13 @@ the worker logs a warning when it is on in production.
   every type, bills, receipts and statements included, follow the user's own
   document permissions. The assistant cannot widen any of this.
 - **Approval policy, owned by the assistant** (`packages/assistant/src/runtime/tools.ts`,
-  `requiresApproval`): every write waits for the user. Reads run immediately.
+  `requiresApproval`): every write waits for the user. Reads run immediately. The approval
+  request lists the tool's input as labelled values; a tool whose input cannot be checked by a
+  person (ids, a draft hash, a whole paper) has an entry in the approval summary registry
+  (`packages/components/src/assistant/approval-summaries.ts`, keyed by the MCP tool name): one
+  sentence the app fills with names it resolves ("Save Draft 2 as version 4 of Mathematics (Oral),
+  Class 5, Annual Examination."), the ids behind a collapsed "Details" and long text replaced by its size.
+  Add an entry there rather than a second code path in the card.
 - **Permissions**: OPA decides every tool call as the user. Who may use the
   assistant at all is the role-based access above. An admin impersonating a
   user cannot use the assistant: its calls would be recorded as the user's own.
@@ -381,6 +528,9 @@ and stores it as a `view` item, and the app renders it with its own components:
   receipts and statements are offered like any other type; the download asks
   for the user's own finance document permission. Only a type the API does
   not know is shown as unavailable.
+- `question_paper`: a saved version of a question paper by its natural key and
+  `versionNo`, with Preview and Download. The app reads the paper with the user's
+  session behind the class read permission (`assistant-question-paper.tsx`).
 - `table`, `stats`, `details`, `bars`, `notice`: composed from design-system
   pieces in `packages/components/src/assistant/views` (dashboard tiles and bar
   lists, row-hairline tables, the app's badge tones).

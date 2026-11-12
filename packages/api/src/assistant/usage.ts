@@ -6,7 +6,7 @@ import { getRedisClient } from '@campuspilot/redis/client';
 import { and, desc, eq, gte, lt, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 
-import { MAX_USAGE_RANGE_DAYS, tokenCountFromText } from '@campuspilot/assistant-contract/usage';
+import { ASSISTANT_USAGE_SOURCES, MAX_USAGE_RANGE_DAYS, tokenCountFromText } from '@campuspilot/assistant-contract/usage';
 
 import { IST_TIME_ZONE, istDate, istDayStart } from './ist';
 
@@ -119,6 +119,16 @@ export const usageModelSchema = z.object({
   prices: z.array(usagePriceSchema),
 });
 
+/**
+ * Spend per feature (`assistant_model_request.source`): the assistant chat and
+ * question paper generation. Every source is listed, a quiet one with zeros,
+ * so the breakdown always adds up to `total`.
+ */
+export const usageSourceSchema = z.object({
+  source: z.enum(ASSISTANT_USAGE_SOURCES),
+  ...tokenShape,
+});
+
 export const usageSchoolSchema = z.object({
   schoolId: z.string(),
   /** Null when the school no longer exists. */
@@ -144,6 +154,8 @@ export const assistantUsageSchema = z.object({
   total: z.object(tokenShape),
   days: z.array(usageDaySchema),
   models: z.array(usageModelSchema),
+  /** The same spend broken down by what the requests were for. */
+  sources: z.array(usageSourceSchema),
 });
 
 export type AssistantUsage = z.infer<typeof assistantUsageSchema>;
@@ -219,7 +231,7 @@ async function computeUsage(db: DatabaseExecutor, range: UsageRange, schoolId: s
   // The zone is a constant written into the statement, not a parameter:
   // grouping needs the select and group-by expressions to be identical.
   const istDay = sql<string>`to_char((${assistantModelRequestTable.createdAt} at time zone ${sql.raw(`'${IST_TIME_ZONE}'`)}), 'YYYY-MM-DD')`;
-  const [totalRows, dayRows, modelRows, priceRows] = await Promise.all([
+  const [totalRows, dayRows, modelRows, priceRows, sourceRows] = await Promise.all([
     db.select(sums).from(assistantModelRequestTable).where(where),
     db.select({ date: istDay, ...sums }).from(assistantModelRequestTable).where(where).groupBy(istDay),
     db
@@ -248,14 +260,17 @@ async function computeUsage(db: DatabaseExecutor, range: UsageRange, schoolId: s
         assistantModelRequestTable.cacheReadUsdPerMtok,
         assistantModelRequestTable.cacheWriteUsdPerMtok,
       ),
+    db.select({ source: assistantModelRequestTable.source, ...sums }).from(assistantModelRequestTable).where(where).groupBy(assistantModelRequestTable.source),
   ]);
   const byDay = new Map(dayRows.map((row) => [row.date, row]));
+  const bySource = new Map(sourceRows.map((row) => [row.source, row]));
   return {
     computedAt: computedAt.toISOString(),
     from: range.from,
     to: range.to,
     total: toTotals(totalRows[0]),
     days: datesOf(range).map((date) => ({ date, ...toTotals(byDay.get(date)) })),
+    sources: ASSISTANT_USAGE_SOURCES.map((source) => ({ source, ...toTotals(bySource.get(source)) })),
     models: modelRows.map(({ provider, model, ...row }) => ({
       provider,
       model,

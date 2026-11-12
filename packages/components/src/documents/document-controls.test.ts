@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   allDocumentKinds,
   noticeDocumentKind,
+  questionPaperDocumentKind,
   workspaceDocumentKinds,
 } from "./document-controls";
 
@@ -31,5 +32,16 @@ describe("document kind collections", () => {
     expect(workspaceDocumentKinds.map(({ value }) => value)).not.toContain("notice");
     expect(allDocumentKinds.map(({ value }) => value)).not.toContain("notice");
     expect(noticeDocumentKind).toMatchObject({ value: "notice", label: "Notices" });
+  });
+
+  it("keeps the question paper template out of the generator and marketplace defaults", () => {
+    // Like a notice, it has a template but no generator; the marketplace adds
+    // its card only for schools with the assistant feature.
+    expect(workspaceDocumentKinds.map(({ value }) => value)).not.toContain("question_paper");
+    expect(allDocumentKinds.map(({ value }) => value)).not.toContain("question_paper");
+    expect(questionPaperDocumentKind).toMatchObject({
+      value: "question_paper",
+      label: "Question papers",
+    });
   });
 });

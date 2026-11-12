@@ -2,8 +2,9 @@
 
 import type { ReactNode } from 'react';
 
-import { RequireFeature } from '@/components/require-feature';
+import { RequireFeature, useSchoolFeature } from '@/components/require-feature';
 
+import { resolveAssistantGate, type AssistantGate } from './assistant-gate-model';
 import { useAssistantStatus } from './use-assistant';
 
 type AssistantAccessProps = {
@@ -31,6 +32,18 @@ export function AssistantAccess({ schoolId, children, fallback = null, pending }
       </AssistantRoleGate>
     </RequireFeature>
   );
+}
+
+/**
+ * The same decision as {@link AssistantAccess} as a value, for screens that
+ * branch on it (the examination's default tab, the Question paper tab). The
+ * role status is asked only once the school has the feature. `pending` while
+ * either fact is still loading; see `resolveAssistantGate`.
+ */
+export function useAssistantGate(schoolId: string): AssistantGate {
+  const feature = useSchoolFeature(schoolId, 'assistant');
+  const status = useAssistantStatus(schoolId, feature.enabled);
+  return resolveAssistantGate(feature, { isPending: status.isPending, allowed: status.data?.allowed });
 }
 
 /** The role half of {@link AssistantAccess}; asked only once the feature is known to be on. */

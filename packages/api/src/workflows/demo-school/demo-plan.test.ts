@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import { billingMonths, daysBetween, examStateAt } from './dates';
 import { demoStaffEmail, generateRegistrationNumber, slugifySchoolName, uniqueSlug } from './identity';
-import { encodePng, renderAvatar } from './images';
+import { encodePng, renderAvatar, renderPaperPage } from './images';
 import { assertValidNoticeTemplate } from '../../routers/school/notice/notice.render';
 import { buildDemoPlan, demoSeedInputSchema, fillDemoNoticeDates, paymentEvents } from './plan';
 import { createRandom } from './prng';
@@ -194,5 +194,38 @@ describe('demo passwords', () => {
     // A one-class demo still gets a valid selected-classes notice.
     const single = buildDemoPlan({ input: { ...input, classSlugs: ['class-5'] }, seed: 's', asOf, school });
     expect(single.notices.find((notice) => notice.key === 'science-exhibition')!.classSlugs).toEqual(['class-5']);
+  });
+
+  it('places each question paper in the senior-most class that teaches its subject, in an exam that is not completed', () => {
+    const asOf = new Date('2026-12-20T06:30:00Z');
+    const plan = (classSlugs: string[], at = asOf) => buildDemoPlan({ input: { ...input, classSlugs }, seed: 's', asOf: at, school }).questionPapers;
+    const place = (papers: ReturnType<typeof plan>) => papers.map((paper) => [paper.key, paper.examSlug, paper.classSlug, paper.modeSlug]);
+    // Preschool has neither subject, so a nursery-only demo has no paper; Class 1 has maths only (modes written/oral).
+    expect(plan(['nursery'])).toEqual([]);
+    expect(place(plan(['nursery', 'class-1']))).toEqual([['mathematics-hindi', 'annual-examination', 'class-1', 'written']]);
+    // The annual exam is still `ready` in December; the paper goes to the senior-most class with the subject, with its own mode.
+    expect(place(plan(['class-1', 'class-7', 'class-9']))).toEqual([
+      ['science-english', 'annual-examination', 'class-9', 'theory'],
+      ['mathematics-hindi', 'annual-examination', 'class-9', 'theory'],
+    ]);
+    // Once the annual exam is under way ("active") that one is used; once every exam is completed there is nowhere to put a paper.
+    expect(plan(['class-7'], new Date('2027-03-10T06:30:00Z')).map((paper) => paper.examSlug)).toEqual(['annual-examination', 'annual-examination']);
+    expect(plan(['class-7'], new Date('2028-01-10T06:30:00Z'))).toEqual([]);
+    // Dates come from asOf: pages are uploaded before the version is saved, both in the past.
+    for (const paper of plan(['class-7'])) {
+      expect(new Date(paper.uploadedAt).getTime()).toBeLessThanOrEqual(new Date(paper.savedAt).getTime());
+      expect(new Date(paper.savedAt).getTime()).toBeLessThan(asOf.getTime());
+    }
+  });
+
+  it('draws the same synthetic page photo from the same seed, and a different one from another', () => {
+    const page = (scope: string, spec = { lines: 20, figureBox: true }) => renderPaperPage(createRandom('seed', 'paper', scope), spec);
+    const first = page('a');
+    expect(first.subarray(0, 8)).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+    // IHDR: 640 x 900 pixels.
+    expect([first.readUInt32BE(16), first.readUInt32BE(20)]).toEqual([640, 900]);
+    expect(page('a').equals(first)).toBe(true);
+    expect(page('b').equals(first)).toBe(false);
+    expect(page('a', { lines: 20, figureBox: false }).equals(first)).toBe(false);
   });
 });

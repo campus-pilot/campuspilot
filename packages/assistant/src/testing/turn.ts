@@ -11,6 +11,7 @@ import {
   assistantTranscriptEntryTable,
   type AssistantToolCallBody,
 } from '@campuspilot/db/schema/assistant';
+import type { AssistantUserMessageBody } from '@campuspilot/db/schema/assistant';
 import { publishAssistantEvent, subscribeAssistantEvents } from '../events';
 import { stopRun } from '../run-stop';
 import { generateId } from '../ids';
@@ -47,8 +48,11 @@ export async function seedTurn({
   provider = 'anthropic',
   conversationModel = 'conversation-start-model',
   schoolId: givenSchoolId,
+  body: extraBody = {},
 }: {
   text?: string;
+  /** More fields of the user message's body (attachments, a seed). */
+  body?: Partial<AssistantUserMessageBody>;
   /** The school to seed the turn in; a new one when omitted. */
   schoolId?: string;
   /** The provider the conversation is recorded on. */
@@ -82,7 +86,7 @@ export async function seedTurn({
       runId,
       kind: 'user_message',
       status: 'complete',
-      body: { text },
+      body: { text, ...extraBody },
       itemKey: userMessageItemKey(runId),
     });
   });

@@ -4,17 +4,22 @@ import {
   ApiError,
   FinishReason,
   GoogleGenAI,
+  MediaResolution,
   type Content,
+  type GenerateContentConfig,
   type FunctionDeclaration,
   type GenerateContentResponseUsageMetadata,
   type Part,
 } from '@google/genai';
 
 import type { AssistantUserMessageBody } from '@campuspilot/db/schema/assistant';
-import { buildUserTranscriptContent } from '../../transcript';
+import { buildUserTranscriptContent, isAttachmentMarker, type AttachmentMarker } from '../../transcript';
+import { attachmentLabel, attachmentNote, stubLongInputFields } from '../context';
 import type { AssistantPrompt } from '../prompt';
 import { modelToolDescription, type AssistantTool } from '../tools';
 import type {
+  AttachmentFile,
+  ContextAdapter,
   ModelFailureKind,
   ModelProvider,
   ModelStepInput,
@@ -22,7 +27,11 @@ import type {
   ModelToolResult,
   ModelToolUse,
   ModelUsage,
+  TextPart,
+  TextRequest,
+  TextResult,
 } from './types';
+import { GEMINI_IMAGE_MIME_TYPES } from './image-types';
 import { withBilledUsage } from './types';
 
 /**
@@ -44,7 +53,11 @@ const REFUSAL_REASONS: ReadonlySet<FinishReason> = new Set([
   FinishReason.PROHIBITED_CONTENT,
   FinishReason.SPII,
   FinishReason.RECITATION,
+  FinishReason.IMAGE_SAFETY,
+  FinishReason.IMAGE_PROHIBITED_CONTENT,
 ]);
+
+export { GEMINI_IMAGE_MIME_TYPES };
 
 /** A malformed call is the model's mistake; the step is retried rather than failed. */
 class MalformedFunctionCallError extends Error {}
@@ -121,6 +134,135 @@ export function geminiToolResultParts(results: readonly ModelToolResult[]): Part
       response: result.isError ? { error: result.content } : { output: result.content },
     },
   }));
+}
+
+/**
+ * Pruning and attachment rules of Gemini's transcript (design G3). A human
+ * turn is a user entry without `functionResponse` parts. Only the text of a
+ * response's `output`/`error` changes when it is stubbed: `id` and `name`
+ * stay, so every `functionCall` keeps its response; call parts and thought
+ * signatures are never touched.
+ */
+export const geminiContext: ContextAdapter = {
+  isHumanTurn: (entry) => entry.role === 'user' && !(entry.content as Part[]).some((part) => part.functionResponse),
+  toolNamesByUseId(entries) {
+    const names = new Map<string, string>();
+    for (const entry of entries) {
+      for (const part of entry.content as Part[]) {
+        if (part.functionCall?.id && part.functionCall.name) names.set(part.functionCall.id, part.functionCall.name);
+      }
+    }
+    return names;
+  },
+  stubToolResults(entry, toolNames, stub, minChars) {
+    if (!(entry.content as Part[]).some((part) => part.functionResponse)) return entry;
+    return {
+      ...entry,
+      content: (entry.content as Part[]).map((part) => {
+        const response = part.functionResponse;
+        if (!response) return part;
+        const body = (response.response ?? {}) as { output?: unknown; error?: unknown };
+        const key = typeof body.error === 'string' ? 'error' : 'output';
+        const text = typeof body[key] === 'string' ? (body[key] as string) : JSON.stringify(body[key] ?? '');
+        if (text.length < minChars) return part;
+        const toolName = response.name ?? toolNames.get(response.id ?? '') ?? 'a tool';
+        return { ...part, functionResponse: { ...response, response: { [key]: stub({ toolName, chars: text.length }) } } };
+      }),
+    };
+  },
+  stubToolInputs(entry, stub, minChars) {
+    if (!(entry.content as Part[]).some((part) => part.functionCall)) return entry;
+    return {
+      ...entry,
+      content: (entry.content as Part[]).map((part) => {
+        const call = part.functionCall;
+        if (!call) return part;
+        // Only `args` changes: id, name and the part's thought signature stay.
+        const args = stubLongInputFields(call.name ?? 'a tool', call.args, stub, minChars) as typeof call.args;
+        return args === call.args ? part : { ...part, functionCall: { ...call, args } };
+      }),
+    };
+  },
+  materializeAttachment(marker: AttachmentMarker, file: AttachmentFile) {
+    if (file.kind !== 'image') return [{ text: attachmentNote(marker, file.kind) }];
+    if (!GEMINI_IMAGE_MIME_TYPES.some((supported) => supported === file.mimeType)) {
+      return [{ text: attachmentNote(marker, 'unreadable') }];
+    }
+    return [{ text: attachmentLabel(marker) }, { inlineData: { mimeType: file.mimeType, data: Buffer.from(file.bytes).toString('base64') } }];
+  },
+  stubAttachment: (marker) => [{ text: attachmentNote(marker, 'old') }],
+};
+
+/** A user message as Gemini parts: text blocks become `{ text }`, attachment markers stay markers (replaced per request). */
+export function geminiUserContent(body: AssistantUserMessageBody): unknown[] {
+  return buildUserTranscriptContent(body).map((block) => (isAttachmentMarker(block) ? block : { text: (block as { text: string }).text }));
+}
+
+function geminiPartOf(part: TextPart): Part {
+  if (part.type === 'text') return { text: part.text };
+  if (!GEMINI_IMAGE_MIME_TYPES.some((supported) => supported === part.mimeType)) {
+    throw new Error(`Gemini cannot read ${part.mimeType} images.`);
+  }
+  return { inlineData: { mimeType: part.mimeType, data: Buffer.from(part.data).toString('base64') } };
+}
+
+/**
+ * The Gemini request of a one-shot text request (pinned by a test): plain
+ * text out, no JSON mode and no response schema.
+ * High media resolution is requested because handwriting is read from
+ * photographs. Thinking and caching stay at the model's defaults.
+ */
+export function buildGeminiTextRequest(model: string, input: TextRequest) {
+  const config: GenerateContentConfig = {
+    systemInstruction: input.system,
+    maxOutputTokens: input.maxOutputTokens,
+    mediaResolution: MediaResolution.MEDIA_RESOLUTION_HIGH,
+    ...(input.signal ? { abortSignal: input.signal } : {}),
+  };
+  return {
+    model,
+    contents: [{ role: 'user', parts: input.parts.map(geminiPartOf) }] satisfies Content[],
+    config,
+  };
+}
+
+/**
+ * Runs a one-shot text request. It streams (like `step`) rather than
+ * waiting for one response: a long answer then survives idle-connection
+ * limits, and a stream that breaks after its first usage report still says
+ * what it was billed for.
+ */
+export async function generateGeminiText(client: GoogleGenAI, model: string, input: TextRequest): Promise<TextResult> {
+  const parts: Part[] = [];
+  let usage: GenerateContentResponseUsageMetadata | undefined;
+  let finishReason: FinishReason | undefined;
+  let blocked = false;
+  let modelVersion = model;
+  try {
+    const stream = await client.models.generateContentStream(buildGeminiTextRequest(model, input));
+    for await (const chunk of stream) {
+      const candidate = chunk.candidates?.[0];
+      if (candidate?.content?.parts) parts.push(...candidate.content.parts);
+      finishReason = candidate?.finishReason ?? finishReason;
+      if (chunk.promptFeedback?.blockReason) blocked = true;
+      usage = chunk.usageMetadata ?? usage;
+      modelVersion = chunk.modelVersion ?? modelVersion;
+    }
+  } catch (error) {
+    if (usage && typeof error === 'object' && error !== null) {
+      throw withBilledUsage(error, { usage: normalizeGeminiUsage(usage), complete: false, model: modelVersion });
+    }
+    throw error;
+  }
+  return {
+    text: geminiVisibleText(parts),
+    model: modelVersion,
+    usage: normalizeGeminiUsage(usage),
+    refusal: blocked || (finishReason !== undefined && REFUSAL_REASONS.has(finishReason)),
+    // A POSITIVE completion signal is required: a stream that ended without a finish reason, or with OTHER, LANGUAGE,
+    // MALFORMED_RESPONSE... may be cut off mid-answer, and a cut-off fragment cannot be told from a finished one.
+    unfinished: finishReason !== FinishReason.STOP,
+  };
 }
 
 function isAbort(error: unknown): boolean {
@@ -241,9 +383,11 @@ export function createGeminiProvider({ apiKey, model }: { apiKey: string; model:
   return {
     id: 'gemini',
     model,
+    imageMimeTypes: GEMINI_IMAGE_MIME_TYPES,
+    generateText: (input) => generateGeminiText(client, model, input),
     step,
-    userContent: (body: AssistantUserMessageBody) =>
-      buildUserTranscriptContent(body).map((block) => ({ text: (block as { text: string }).text })),
+    context: geminiContext,
+    userContent: geminiUserContent,
     assistantTextContent: (text) => [{ text }],
     toolResultsContent: geminiToolResultParts,
     toolUsesOf,

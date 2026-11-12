@@ -21,6 +21,7 @@ export const documentTypeSchema = z.enum([
   "receipt",
   "statement",
   "notice",
+  "question_paper",
 ]);
 export type DocumentType = z.infer<typeof documentTypeSchema>;
 
@@ -38,9 +39,10 @@ export const isFinanceDocumentType = (type: DocumentType) =>
  * rendered by their own feature, never through `previewDocument` /
  * `generateDocument`, and never appear in the Documents workspace or in
  * document history. A notice is rendered by the notices feature
- * (`routers/school/notice`).
+ * (`routers/school/notice`); a question paper by the question paper feature
+ * (`routers/school/question-paper`), which stores its own PDF per version.
  */
-export const TEMPLATE_ONLY_DOCUMENT_TYPES = ["notice"] as const satisfies readonly DocumentType[];
+export const TEMPLATE_ONLY_DOCUMENT_TYPES = ["notice", "question_paper"] as const satisfies readonly DocumentType[];
 export type TemplateOnlyDocumentType = (typeof TEMPLATE_ONLY_DOCUMENT_TYPES)[number];
 export type AcademicDocumentType = Exclude<DocumentType, "bill" | "receipt" | "statement" | TemplateOnlyDocumentType>;
 export const documentTemplatePageSizeSchema = z.enum(["full", "half"]);
@@ -78,6 +80,14 @@ function validateTemplatePageSize(
     });
     return;
   }
+  if (value.pageSize === "half" && value.documentType === "question_paper") {
+    context.addIssue({
+      code: "custom",
+      path: ["pageSize"],
+      message: "Question papers print on full A4.",
+    });
+    return;
+  }
   if (value.pageSize === "half" && !halfPageDocumentTypes.has(value.documentType)) {
     context.addIssue({
       code: "custom",
@@ -95,6 +105,7 @@ export const DOCUMENT_LABELS: Record<DocumentType, string> = {
   receipt: "Receipts",
   statement: "Account statements",
   notice: "Notices",
+  question_paper: "Question papers",
 };
 const id = z.string().trim().min(1).max(100);
 export const schoolScopeSchema = z.object({ schoolId: id });

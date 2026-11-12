@@ -240,6 +240,61 @@ the implementation and APIs in more detail.
   its right. Keep the editor header to its title rather than repeating instructions
   above the table.
 
+### Question paper tab
+
+- Tabs: Results, **Question paper** (with the shared `AiBadge`), Timetable, More. The
+  tab exists only when the examination has a plan and `useAssistantGate` says
+  `allowed` (the `assistant` feature, plus a role that is eligible and switched
+  on). While the gate loads or is closed the tab is absent and Results stays the
+  default.
+- Results lives at `<exam>/results`. The exam root is a landing (`ExamLanding`)
+  that renders nothing and redirects with a render-time `redirect()` (no effect,
+  Back does not loop). `defaultExamSection` picks Question paper only for plan
+  count > 0, lifecycle status `ready` (never inferred from plans) and gate
+  `allowed`; otherwise Results. Existing links to the root keep working. The landing
+  is wrapped in the same `READ_EXAM_PLANS` gate as Results, and the exam-name
+  breadcrumb on class and student pages links to `/results`, never the landing. The
+  lifecycle navbar action shows on the root and on `/results`.
+- `/question-paper` is one table per accessible class (row per subject and mode,
+  sticky subject column, status badge, Open/View). `/question-paper/<class>/<subject>/<mode>`
+  is the paper workspace: line tabs Pages / Result / Versions (section and version
+  live in `?section=&version=`), heading, top-right overflow (Download latest PDF,
+  Delete paper with an app confirmation), breadcrumbs for navigation, no back button.
+- Uploading, reordering, deleting and generating are closed when the exam is
+  completed (D43), when a generation is queued/running, or when the user can only
+  read; the reason is written beside the control. Preview, download and versions
+  always work. Reordering is optimistic and persisted with `expectedPageRevision`;
+  a conflict reloads and toasts "Someone changed the pages; reloaded."
+- Uploads are strictly sequential in the order chosen (the server numbers pages
+  when stored). HEIC is redrawn to JPEG on a canvas where the browser can,
+  otherwise the original is uploaded. The upload queue is TanStack Form state owned by
+  the workspace layout (`usePageUploads` in `PaperLayout`), above the sections, so
+  switching section keeps it; leaving the paper while photos upload asks first
+  (`DirtyGuard`). Generate with AI is closed while photos upload. A failed photo does
+  not stop the chain, so its message says it is not in the paper and must be added again.
+- The Question paper screens are wrapped in `QuestionPaperAssistantGate`
+  (`useAssistantGate`): a typed address with the assistant closed shows a notice.
+- Generation status comes from polling `getQuestionPaperDetail` (`refetchInterval`
+  callback, 3 s while a job is active). Failed jobs show the stored safe
+  `errorMessage`, never developer detail.
+- No marks are computed or shown for a paper (the heading names the exam plan's maximum
+  only). A version shows its sanitiser notices as a collapsed "N notices about what was removed" list
+  (`RemovedList`) and, when figures are still placeholders, a note with the Continue in chat
+  link (`PlaceholderNote`, from the preview's `placeholderFigures`). Chat draft cards use the
+  same two pieces and plain-sentence problems (raw formula/KaTeX text only behind a collapsed
+  "Details"), never paths; a draft replaced by a later ready draft of the same paper collapses to
+  "Replaced by Draft N". Approval requests with a registry summary (`approval-summaries.ts`) show one
+  sentence and keep ids behind "Details".
+- Missing school template: `AppShellAlert` slug `school/:schoolId/question-paper-template-missing`,
+  action "Choose template" (needs `MANAGE_DOCUMENT_TEMPLATES`) closes the alert list and
+  opens the marketplace on the question paper type.
+- "Want to update something? Continue in chat" is quiet underlined text under the
+  result. It links to `/school/:id/assistant?seed=question_paper&sessionId=&examSlug=&classId=&subjectSlug=&modeSlug=`
+  (ids and slugs only); the assistant page owns seeding.
+- Mobile 320/390 px: the class table scrolls inside its wrapper, the thumbnail
+  grid is two columns with a drag handle (touch-safe) and keyboard reordering, the
+  tab bar scrolls sideways inside itself, the preview is fitted to A4 width.
+
 ## Documents and template decisions to preserve
 
 The [document system guide](../../../docs/document-system.md) is the canonical
@@ -274,6 +329,12 @@ deliberate and must remain visible in future redesigns:
   only the academic, finance, or combined domain the user is authorized to read.
 - Billing does not own a duplicate Documents section. Its legacy documents route
   redirects to the session-wide Documents history.
+
+- The question paper template is settings-only and belongs to the `assistant`
+  feature: settings route `/settings/templates/question-paper` (nav item behind
+  `RequireFeature assistant`), a marketplace type card offered only with that
+  feature, no footprint control (full A4). No default design is shipped; the body
+  slot is placed exactly once.
 
 ## Corrections from the redesign
 

@@ -31,6 +31,17 @@ describe("portable template editing brief", () => {
     expect(prompt).toContain("16mm margin");
     expect(prompt).not.toContain("86mm × 54mm");
   });
+  it("tells the author the question paper template owns only the heading and footer", () => {
+    const prompt = createTemplateEditingPrompt({ ...input, documentType: "question_paper" });
+    expect(prompt).toContain("Edit my CampusPilot question paper heading and footer template.");
+    expect(prompt).toContain("{{{questionPaper.bodyHtml}}} (triple braces) exactly once");
+    expect(prompt).toContain("position:fixed; bottom:0");
+    expect(prompt).toContain("never use a negative bottom");
+    expect(prompt).toContain("flows over as many pages");
+    expect(prompt).toContain("direction:{{questionPaper.direction}}");
+    expect(prompt).not.toContain("86mm × 54mm");
+    expect(prompt).not.toContain("starts on a new printed page");
+  });
   it("asks for one notice design that adapts to both print sizes", () => {
     // The revision's footprint is irrelevant for a notice: the same brief whatever is passed.
     for (const pageSize of ["full", "half"] as const) {

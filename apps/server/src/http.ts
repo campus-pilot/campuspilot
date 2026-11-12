@@ -5,6 +5,11 @@ import {
   createContextFromHeaders,
   createOAuthContext,
 } from '@campuspilot/api/context';
+import {
+  handleAssistantAttachmentDelete,
+  handleAssistantAttachmentRead,
+  handleAssistantAttachmentUpload,
+} from '@campuspilot/assistant/attachments.http';
 import { createAssistantRequestHandler } from '@campuspilot/assistant/http';
 import { verifyAssistantToken } from '@campuspilot/auth/assistant-token';
 import {
@@ -21,6 +26,10 @@ import {
 } from '@campuspilot/api/routers/auth/auth.http';
 import { handleSchoolLogoUpload } from '@campuspilot/api/routers/system-admin/school/school.http';
 import { handleSchoolLogoBlob } from '@campuspilot/api/routers/school/logo/logo.blob';
+import {
+  handleQuestionPaperPageRead,
+  handleQuestionPaperPageUpload,
+} from '@campuspilot/api/routers/school/question-paper/question-paper.http';
 import { handleSchoolManifestBlob } from '@campuspilot/api/routers/school/manifest/manifest.blob';
 import { handleCadetManifestBlob } from '@campuspilot/api/routers/school/manifest/cadet-manifest.blob';
 import {
@@ -248,6 +257,51 @@ app.delete('/api/blob/schools/:schoolId/admissions/:admissionId/documents/:fileI
   );
 });
 
+/**
+ * Question paper page photos. Each client IP may upload 120 pages a minute: a
+ * school usually shares one public IP, so several teachers uploading 20 page
+ * papers at once must not starve each other. The limit is not what protects
+ * the server from heavy photos: the handler caps a photo at 15 MiB and 40
+ * megapixels and the decoder runs two photos at a time per process. Reads are
+ * not limited here: they are permissioned redirects.
+ */
+const QUESTION_PAPER_PAGES_PATH =
+  '/api/blob/schools/:schoolId/sessions/:sessionId/exams/:examSlug/classes/:classId/question-papers/:subjectSlug/:modeSlug/pages';
+const questionPaperUploadRateLimit = createRateLimit({
+  id: 'question-paper-upload',
+  limit: 120,
+  windowMs: 60_000,
+});
+
+/** The paper a question paper route names; the handlers validate every part. */
+const questionPaperKey = (context: { req: { param: (name: string) => string } }) => ({
+  schoolId: context.req.param('schoolId'),
+  sessionId: context.req.param('sessionId'),
+  examSlug: context.req.param('examSlug'),
+  classId: context.req.param('classId'),
+  subjectSlug: context.req.param('subjectSlug'),
+  modeSlug: context.req.param('modeSlug'),
+});
+
+app.post(QUESTION_PAPER_PAGES_PATH, questionPaperUploadRateLimit, async (context) => {
+  const key = questionPaperKey(context);
+  const apiContext = await createContext({ context });
+  return handleQuestionPaperPageUpload(context.req.raw, apiContext, key, (error) =>
+    reportUploadError(context.var.logger, 'question-paper.page.upload.error', key, error),
+  );
+});
+
+app.get(`${QUESTION_PAPER_PAGES_PATH}/:pageId/:variant`, async (context) => {
+  const key = questionPaperKey(context);
+  const apiContext = await createContext({ context });
+  return handleQuestionPaperPageRead(
+    apiContext,
+    key,
+    { pageId: context.req.param('pageId'), variant: context.req.param('variant') },
+    (error) => reportUploadError(context.var.logger, 'question-paper.page.read.error', key, error),
+  );
+});
+
 app.post('/api/blob/users/me/profile-image', async (context) => {
   const apiContext = await createContext({ context });
   return handleProfileImageUpload(context.req.raw, apiContext, (error) =>
@@ -279,6 +333,48 @@ app.get('/api/blob/users/me/profile-image', async (context) => {
  * response). The turn itself runs in `apps/worker`.
  */
 const handleAssistantRequest = createAssistantRequestHandler();
+
+/**
+ * Images attached to chat messages (`packages/assistant/src/attachments.http.ts`).
+ * Each client IP may upload 60 images a minute (a 20 image message plus
+ * retries); the file itself is capped at 15 MiB by the handler. The session,
+ * the assistant access and the origin are decided by the handler, not here.
+ * Reads are permissioned redirects for the uploader only.
+ */
+const ASSISTANT_ATTACHMENTS_PATH = '/api/blob/schools/:schoolId/assistant/attachments';
+const assistantAttachmentUploadRateLimit = createRateLimit({
+  id: 'assistant-attachment-upload',
+  limit: 60,
+  windowMs: 60_000,
+});
+
+app.post(ASSISTANT_ATTACHMENTS_PATH, assistantAttachmentUploadRateLimit, (context) => {
+  const schoolId = context.req.param('schoolId');
+  return handleAssistantAttachmentUpload(context.req.raw, schoolId, (error) =>
+    reportUploadError(context.var.logger, 'assistant.attachment.upload.error', { schoolId }, error),
+  );
+});
+
+app.delete(`${ASSISTANT_ATTACHMENTS_PATH}/:attachmentId`, (context) => {
+  const input = {
+    schoolId: context.req.param('schoolId'),
+    attachmentId: context.req.param('attachmentId'),
+  };
+  return handleAssistantAttachmentDelete(context.req.raw, input, (error) =>
+    reportUploadError(context.var.logger, 'assistant.attachment.delete.error', input, error),
+  );
+});
+
+app.get(`${ASSISTANT_ATTACHMENTS_PATH}/:attachmentId/:variant`, (context) => {
+  const input = {
+    schoolId: context.req.param('schoolId'),
+    attachmentId: context.req.param('attachmentId'),
+    variant: context.req.param('variant'),
+  };
+  return handleAssistantAttachmentRead(context.req.raw.headers, input, (error) =>
+    reportUploadError(context.var.logger, 'assistant.attachment.read.error', input, error),
+  );
+});
 app.all('/model/rpc/*', async (context) => {
   const response = await handleAssistantRequest(context.req.raw);
   if (!response) return context.notFound();

@@ -16,6 +16,7 @@
     "@campuspilot/assistant-contract": "workspace:*",
     "@campuspilot/env": "workspace:*",
     "@campuspilot/logger": "workspace:*",
+    "@campuspilot/question-paper": "workspace:*",
     "dotenv": "catalog:",
     "drizzle-orm": "^0.45.2",
     "libphonenumber-js": "^1.13.15",

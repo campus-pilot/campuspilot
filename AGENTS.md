@@ -132,6 +132,24 @@ contract, the publish transaction and per-channel fan-out (including why a
 delivery log is still filling right after publication), the cached PDF, the
 Cadet visibility rule, and the checklist for extending notices.
 
+## Question papers
+
+Before changing anything question-paper-related (the `exam_question_paper_*`
+tables, `routers/school/question-paper` and its MCP tools, the HTML fragment
+rules and limits in `packages/question-paper`, the `question_paper_body`
+sanitiser, the renderer and the `question_paper`
+document type and its template slot, the durable generation job in
+`workflows/question-paper`, chat image attachments and chat drafts, the Question
+paper tab in `apps/management`, or the demo seed's question papers), read the
+canonical [Question papers guide](docs/question-papers.md). It records the product
+model (a paper per class, subject and mode of an exam, immutable versions with a
+PDF each), the permission order and the `assistant` gate (there is no separate
+flag), the data model, the HTML fragment vocabulary, the sanitiser profile and its
+no-animation rule, the renderer contract with its deliberate CSP and
+post-sanitiser insertion exceptions, the job's steps and failure codes,
+how chat attachments, tools, drafts and context pruning work, and the checklist
+for extending papers.
+
 ## Examination timetables
 
 Before changing exam timetable drafting, publishing or withdrawal, the

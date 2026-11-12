@@ -6,6 +6,8 @@ import type {
   AssistantViewItemDto,
 } from '@campuspilot/assistant-contract/dto';
 
+import { assistantCardOf, type AssistantCardKind } from '@campuspilot/assistant-contract/protocol';
+
 import { plural } from './plural';
 
 /**
@@ -54,6 +56,12 @@ export type AssistantTimelineRow =
   | { kind: 'approval'; id: string; call: AssistantToolCallItemDto }
   /** Platform UI the assistant showed. */
   | { kind: 'view'; id: string; item: AssistantViewItemDto }
+  /**
+   * A tool call the chat shows as a card of its own (a question paper draft),
+   * never folded under the work bar like other tool calls. Only a call that
+   * succeeded becomes a card.
+   */
+  | { kind: 'card'; id: string; card: AssistantCardKind; call: AssistantToolCallItemDto }
   /** The live line while the model thinks and nothing else shows progress. */
   | { kind: 'live'; id: string; label: 'Thinking' }
   /**
@@ -118,6 +126,9 @@ function contentRows(items: readonly AssistantItemDto[]): AssistantTimelineRow[]
     } else if (isDecisionCall(item)) {
       flush();
       rows.push({ kind: 'approval', id: item.id, call: item });
+    } else if (item.status === 'succeeded' && assistantCardOf(item.body.toolName)) {
+      flush();
+      rows.push({ kind: 'card', id: item.id, card: assistantCardOf(item.body.toolName)!, call: item });
     } else {
       activity.push(item);
     }

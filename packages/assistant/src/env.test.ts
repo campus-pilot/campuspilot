@@ -33,4 +33,34 @@ describe('the assistant environment', () => {
     expect(issuesOf({ ...GEMINI, GEMINI_PRICE_INPUT_USD_PER_MTOK: '0,75' })).toEqual(['GEMINI_PRICE_INPUT_USD_PER_MTOK']);
     expect(z.string().safeParse('ok').success).toBe(true);
   });
+
+  describe('question paper settings', () => {
+    const PRICES = {
+      QUESTION_PAPER_PRICE_INPUT_USD_PER_MTOK: '1.5',
+      QUESTION_PAPER_PRICE_OUTPUT_USD_PER_MTOK: '6',
+      QUESTION_PAPER_PRICE_CACHE_READ_USD_PER_MTOK: '0.15',
+      QUESTION_PAPER_PRICE_CACHE_WRITE_USD_PER_MTOK: '0',
+    };
+
+    it('needs nothing and uses its defaults', () => {
+      const parsed = assistantEnvSchema.parse({});
+      expect(parsed.QUESTION_PAPER_MAX_OUTPUT_TOKENS).toBe(32_000);
+      expect(parsed.QUESTION_PAPER_JOB_TIMEOUT_MINUTES).toBe(40);
+    });
+
+    it('requires all four prices with a model, and refuses prices without one', () => {
+      expect(assistantEnvSchema.safeParse({ ...GEMINI, QUESTION_PAPER_MODEL: 'gemini-3.8-pro', ...PRICES }).success).toBe(true);
+      const { QUESTION_PAPER_PRICE_OUTPUT_USD_PER_MTOK: _output, ...partial } = PRICES;
+      expect(issuesOf({ ...GEMINI, QUESTION_PAPER_MODEL: 'gemini-3.8-pro', ...partial })).toEqual([
+        'QUESTION_PAPER_PRICE_OUTPUT_USD_PER_MTOK',
+      ]);
+      expect(issuesOf({ ...GEMINI, ...PRICES })).toHaveLength(4);
+    });
+
+    it('refuses an explicit provider that has no key or no model to call', () => {
+      expect(issuesOf({ QUESTION_PAPER_PROVIDER: 'anthropic' })).toEqual(['QUESTION_PAPER_PROVIDER', 'QUESTION_PAPER_PROVIDER']);
+      expect(issuesOf({ ...GEMINI, QUESTION_PAPER_PROVIDER: 'gemini' })).toEqual([]);
+      expect(issuesOf({ GEMINI_API_KEY: 'key', QUESTION_PAPER_PROVIDER: 'gemini' })).toContain('QUESTION_PAPER_PROVIDER');
+    });
+  });
 });

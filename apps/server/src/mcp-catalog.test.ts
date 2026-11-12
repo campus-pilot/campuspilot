@@ -119,6 +119,17 @@ const HIDDEN_TOOLS = [
   // platform decision (systemAdmin.getSchoolFeatureFlags stays advanced).
   'school.getFeatureFlags',
   'systemAdmin.updateSchoolFeatureFlag',
+  // Question paper actions that must stay a person's: the AI generation job
+  // (chat agents author papers themselves), page photo management, previews
+  // and downloads (the app and the paper's versions tools cover agents).
+  'school.startQuestionPaperGeneration',
+  'school.getQuestionPaperDetail',
+  'school.reorderQuestionPaperPages',
+  'school.deleteQuestionPaperPage',
+  'school.deleteQuestionPaper',
+  'school.getQuestionPaperPreview',
+  'school.previewQuestionPaperDraft',
+  'school.getQuestionPaperDownload',
 ];
 
 /**
@@ -225,8 +236,9 @@ describe('catalog metadata', () => {
     // single preview/send) and +2 delivery log tools (list, resend);
     // +1 systemAdmin.getSchoolFeatureFlags; +9 notice tools (list, get,
     // create, update, delete, preview, publish preview, publish, download);
-    // +3 exam timetable publication tools (publish preview, publish, withdraw).
-    expect(catalog.advanced).toHaveLength(110);
+    // +3 exam timetable publication tools (publish preview, publish, withdraw);
+    // +7 question paper tools (list, get, versions, learn, validate, save, get draft).
+    expect(catalog.advanced).toHaveLength(117);
   });
 });
 
@@ -643,5 +655,76 @@ describe('assistant service view', () => {
       expect(typeof tool._meta?.[ASSISTANT_TOOL_META.module]).toBe('string');
     }
     expect(allowed.some((tool) => tool.mcp.exposure === 'advanced')).toBe(true);
+  });
+
+  it('tells the assistant how much of a result it may read only for the tools that declare it', async () => {
+    const client = await connect('assistant');
+    const { tools } = await client.listTools();
+    const declared = Object.fromEntries(
+      tools
+        .filter((tool) => tool._meta?.[ASSISTANT_TOOL_META.outputChars] !== undefined)
+        .map((tool) => [tool.name, tool._meta![ASSISTANT_TOOL_META.outputChars]]),
+    );
+    expect(declared).toEqual({
+      'school.getQuestionPaper': 200_000,
+      'school.getQuestionPaperDraft': 200_000,
+      'school.validateQuestionPaperDraft': 40_000,
+      'school.learn_question_paper_generation': 40_000,
+    });
+    // Procedures the assistant may not use are not listed at all.
+    expect(tools.map((tool) => tool.name)).not.toContain('school.startQuestionPaperGeneration');
+    expect(tools.map((tool) => tool.name)).toEqual(expect.arrayContaining(['school.saveQuestionPaperVersion', 'school.listQuestionPapers']));
+  });
+
+  /** The question paper tools by name: what each is for, and how the in-app assistant and external clients reach it. */
+  const QUESTION_PAPER_TOOLS = {
+    reads: ['school.listQuestionPapers', 'school.getQuestionPaper', 'school.listQuestionPaperVersions', 'school.getQuestionPaperDraft', 'school.learn_question_paper_generation', 'school.validateQuestionPaperDraft'],
+    writes: ['school.saveQuestionPaperVersion'],
+    // The UI's own procedures: a person does these, never the assistant.
+    humanOnly: ['school.startQuestionPaperGeneration', 'school.getQuestionPaperDetail', 'school.getQuestionPaperPreview', 'school.previewQuestionPaperDraft', 'school.getQuestionPaperDownload'],
+  };
+
+  it('gives the in-app assistant the question paper tools, with the save behind an approval and the human-only ones withheld', async () => {
+    const byName = new Map(exposedTools().map((tool) => [tool.name, tool]));
+    for (const name of [...QUESTION_PAPER_TOOLS.reads, ...QUESTION_PAPER_TOOLS.writes]) {
+      const tool = byName.get(name);
+      expect(tool, name).toBeDefined();
+      expect(tool!.mcp.module).toBe('exams');
+      expect(assistantToolDecision(tool!.mcp), name).toMatchObject({ allowed: true });
+    }
+    for (const name of QUESTION_PAPER_TOOLS.writes) expect(assistantToolDecision(byName.get(name)!.mcp)).toEqual({ allowed: true, requiresApproval: true });
+    for (const name of QUESTION_PAPER_TOOLS.reads) expect(assistantToolDecision(byName.get(name)!.mcp)).toEqual({ allowed: true, requiresApproval: false });
+    for (const name of QUESTION_PAPER_TOOLS.humanOnly) expect(byName.has(name), name).toBe(false);
+
+    const client = await connect('assistant');
+    const { tools } = await client.listTools();
+    const listed = new Map(tools.map((tool) => [tool.name, tool]));
+    // The in-app assistant has no meta tools: the learn tool is simply one of its (deferred) tools.
+    const learn = listed.get('school.learn_question_paper_generation');
+    expect(learn?._meta?.[ASSISTANT_TOOL_META.exposure]).toBe('advanced');
+    for (const name of [...QUESTION_PAPER_TOOLS.reads, ...QUESTION_PAPER_TOOLS.writes]) expect(listed.has(name), name).toBe(true);
+    for (const name of QUESTION_PAPER_TOOLS.humanOnly) expect(listed.has(name), name).toBe(false);
+  });
+
+  it('gives external clients the learn tool through the advanced tools', async () => {
+    expect(catalog.advanced.map(({ name }) => name)).toEqual(expect.arrayContaining([...QUESTION_PAPER_TOOLS.reads, ...QUESTION_PAPER_TOOLS.writes]));
+    expect(catalog.core.map(({ name }) => name)).not.toContain('school.learn_question_paper_generation');
+    const client = await connect();
+    const listed = textJson(await client.callTool({ name: META_TOOL_NAMES.list, arguments: {} })) as Array<{ name: string }>;
+    expect(listed.map(({ name }) => name)).toContain('school.learn_question_paper_generation');
+    const described = textJson(
+      await client.callTool({ name: META_TOOL_NAMES.describe, arguments: { names: ['school.learn_question_paper_generation'] } }),
+    ) as Array<{ name: string; inputSchema: JsonSchema }>;
+    expect(described.map(({ name }) => name)).toEqual(['school.learn_question_paper_generation']);
+    expect(described[0]!.inputSchema.type).toBe('object');
+  });
+
+  it('refuses an invalid outputChars declaration while the catalog is built', async () => {
+    const { os } = await import('@orpc/server');
+    const broken = os
+      .meta({ mcp: { exposure: 'advanced', access: 'read', destructive: false, module: 'exams', outputChars: 0 } })
+      .route({ summary: 'x', description: 'y' })
+      .handler(() => 'ok');
+    await expect(buildMcpCatalog({ broken })).rejects.toThrow(/invalid outputChars/);
   });
 });

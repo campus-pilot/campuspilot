@@ -46,6 +46,12 @@ export type AssistantTool = {
   /** `core` tools are loaded up front, the rest through tool search. */
   exposure: string;
   module: string;
+  /**
+   * How many characters of this tool's result the model reads, when the
+   * procedure declares it (`outputChars`); the default limit applies
+   * otherwise.
+   */
+  outputChars?: number;
 };
 
 export type AssistantToolCatalog = {
@@ -151,6 +157,9 @@ export async function loadToolCatalog(token: string): Promise<AssistantToolCatal
       destructive: listedTool.annotations?.destructiveHint === true,
       exposure: String(meta[ASSISTANT_TOOL_META.exposure] ?? 'advanced'),
       module: String(meta[ASSISTANT_TOOL_META.module] ?? 'unknown'),
+      ...(typeof meta[ASSISTANT_TOOL_META.outputChars] === 'number'
+        ? { outputChars: meta[ASSISTANT_TOOL_META.outputChars] as number }
+        : {}),
     };
     if (tools.has(tool.modelName)) {
       throw new Error(`Assistant tool name collision: ${tool.modelName}.`);
@@ -171,7 +180,7 @@ export type ToolOutcome =
       ok: true;
       /** The whole result. Only for code that parses it; never stored or journaled. */
       text: string;
-      /** The result as the model reads it, cut at `MODEL_OUTPUT_LIMIT`. */
+      /** The result as the model reads it, cut at the tool's `outputChars` (`MODEL_OUTPUT_LIMIT` by default). */
       modelContent: string;
       /** The result as shown on the item, cut at `STORED_OUTPUT_LIMIT`. */
       storedOutput: string;
@@ -219,13 +228,13 @@ export async function callTool(
     .join('\n');
   if (result.isError) return { ok: false, error: parseError(text) };
 
-  const forModel = truncate(text, MODEL_OUTPUT_LIMIT);
+  const forModel = truncate(text, tool.outputChars ?? MODEL_OUTPUT_LIMIT);
   const stored = truncate(text, STORED_OUTPUT_LIMIT);
   return {
     ok: true,
     text,
     modelContent: forModel.truncated
-      ? `${forModel.text}\n[Result truncated; request a narrower page or filter.]`
+      ? `${forModel.text}\n[Result truncated: showing the first ${(tool.outputChars ?? MODEL_OUTPUT_LIMIT).toLocaleString('en-US')} of ${text.length.toLocaleString('en-US')} characters; request a narrower page or filter.]`
       : forModel.text,
     storedOutput: stored.text,
     outputTruncated: stored.truncated,

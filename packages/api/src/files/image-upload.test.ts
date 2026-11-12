@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { parseImageUpload } from './image-upload';
+import { parseImageUpload, QUESTION_PAPER_IMAGE_FAMILY } from './image-upload';
 
 const PNG = Uint8Array.from([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x01,
@@ -52,6 +52,7 @@ describe('parseImageUpload', () => {
         bytes: Buffer.from(bytes),
         contentType: type,
         extension,
+        fileName: filename,
       });
     },
   );
@@ -186,5 +187,71 @@ describe('parseImageUpload', () => {
       code: 'PAYLOAD_TOO_LARGE',
       message: 'The avatar must be 0 MB or smaller.',
     });
+  });
+});
+
+/** An ISO-BMFF `ftyp` box with the given major brand and compatible brands. */
+function ftyp(major: string, ...compatible: string[]) {
+  const size = 16 + compatible.length * 4;
+  const bytes = new Uint8Array(size + 8);
+  new DataView(bytes.buffer).setUint32(0, size);
+  bytes.set(Buffer.from(`ftyp${major}`), 4);
+  compatible.forEach((brand, index) => bytes.set(Buffer.from(brand), 16 + index * 4));
+  return bytes;
+}
+
+describe('parseImageUpload with the question paper family', () => {
+  const paperOptions = { ...options, maxBytes: 4096, family: QUESTION_PAPER_IMAGE_FAMILY, subject: 'page' };
+
+  it.each([
+    ['heic major brand', ftyp('heic', 'mif1', 'heic'), 'image/heic', 'IMG_1.HEIC', 'heic'],
+    ['mif1 major with an HEVC compatible brand', ftyp('mif1', 'MiHE', 'heic'), 'image/heif', 'scan.heif', 'heif'],
+    ['image/heif declared for a .heic file', ftyp('heix'), 'image/heif', 'IMG_2.heic', 'heic'],
+  ])('accepts %s', async (_label, bytes, type, filename, extension) => {
+    const result = await parseImageUpload(imageRequest(bytes as Uint8Array<ArrayBuffer>, type, filename), paperOptions);
+    expect(result).toMatchObject({ contentType: type, extension });
+  });
+
+  it('still accepts JPEG, PNG and WebP', async () => {
+    await expect(parseImageUpload(imageRequest(JPEG, 'image/jpeg', 'p.jpg'), paperOptions)).resolves.toMatchObject({ contentType: 'image/jpeg' });
+  });
+
+  it('treats a generic media type as HEIC only for a .heic or .heif name whose bytes are HEIF', async () => {
+    const ok = await parseImageUpload(imageRequest(ftyp('heic', 'mif1'), 'application/octet-stream', 'IMG.HEIC'), paperOptions);
+    expect(ok).toMatchObject({ contentType: 'image/heic', extension: 'heic' });
+    await expect(parseImageUpload(imageRequest(JPEG, 'application/octet-stream', 'photo.jpg'), paperOptions)).rejects.toMatchObject({
+      code: 'UNSUPPORTED_MEDIA_TYPE',
+      message: 'The page must be a JPEG, PNG, WebP, HEIC, or HEIF image.',
+    });
+    await expect(parseImageUpload(imageRequest(PNG, 'application/octet-stream', 'x.heic'), paperOptions)).rejects.toMatchObject({
+      message: 'The uploaded file does not match its image format.',
+    });
+  });
+
+  it.each([
+    ['AVIF with a mif1 compatible brand', ftyp('avif', 'mif1', 'miaf')],
+    ['AVIF that lists avif only as a compatible brand', ftyp('mif1', 'avif')],
+    ['an MP4 video', ftyp('isom', 'iso2', 'mp41')],
+    ['a file shorter than a box', Uint8Array.from([0, 0, 0, 12, ...Buffer.from('ftypheic')])],
+    ['a box that claims to be longer than the file', (() => { const bytes = ftyp('heic'); new DataView(bytes.buffer).setUint32(0, 400); return bytes; })()],
+    ['bytes without ftyp', Uint8Array.from(new Array(40).fill(7))],
+  ])('rejects %s even when declared as image/heic', async (_label, bytes) => {
+    await expect(parseImageUpload(imageRequest(bytes as Uint8Array<ArrayBuffer>, 'image/heic', 'a.heic'), paperOptions)).rejects.toMatchObject({
+      code: 'UNSUPPORTED_MEDIA_TYPE',
+      message: 'The uploaded file does not match its image format.',
+    });
+  });
+
+  it('keeps the default routes JPEG, PNG and WebP only', async () => {
+    await expect(parseImageUpload(imageRequest(ftyp('heic'), 'image/heic', 'a.heic'), options)).rejects.toMatchObject({
+      code: 'UNSUPPORTED_MEDIA_TYPE',
+      message: 'The avatar must be a JPEG, PNG, or WebP image.',
+    });
+  });
+
+  it('rejects a HEIC over the byte limit', async () => {
+    await expect(
+      parseImageUpload(imageRequest(Uint8Array.from([...ftyp('heic'), ...new Uint8Array(5000)]), 'image/heic', 'a.heic'), { ...paperOptions, maxBytes: 4096 }),
+    ).rejects.toMatchObject({ code: 'PAYLOAD_TOO_LARGE' });
   });
 });

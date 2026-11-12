@@ -4,6 +4,8 @@
 export const CLASS_ACTIONS = {
   ADD_STUDENT: 'class.student.add',
   APPROVE_EXAM_RESULTS: 'class.exam.result.approve',
+  MANAGE_EXAM_QUESTION_PAPERS: 'class.exam.question_paper.manage',
+  READ_EXAM_QUESTION_PAPERS: 'class.exam.question_paper.read',
   SEND_RESULT_NOTIFICATION: 'class.notification.result.send',
 } as const;
 

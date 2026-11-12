@@ -1,8 +1,11 @@
 import { issueAssistantRunToken } from '@campuspilot/api/assistant/token';
+import { resolvePaperScope } from '@campuspilot/api/routers/school/question-paper/question-paper.scope';
+import type { AssistantMessageSeed } from '@campuspilot/assistant-contract/attachments';
 import { assistantContract } from '@campuspilot/assistant-contract/contract';
 import { ASSISTANT_LIST_PAGE_SIZE, type AssistantStreamEvent } from '@campuspilot/assistant-contract/dto';
 import { implement, ORPCError } from '@orpc/server';
 
+import { bindAttachments, deleteConversationAttachments, lockUnsentAttachments, toAttachmentRef, unreadableAttachmentMessage } from './attachments';
 import { assertCanSee, assertCanUse, assertMember, canSee, loadAssistantAccess } from './access';
 import { db } from './db';
 import { handOverApprovalResolution, handOverRun } from './dispatch';
@@ -16,6 +19,7 @@ import {
   missingProviderReason,
   selectedProviderId,
 } from './runtime/providers/config';
+import { imageMimeTypesOf } from './runtime/providers/image-types';
 import { resolveAssistantSession, type AssistantSession } from './session';
 import * as store from './store';
 import { userMessageItemKey } from './transcript';
@@ -28,6 +32,25 @@ import { userMessageItemKey } from './transcript';
  * (dispatch.ts), so no request waits for the worker.
  */
 export type AssistantRequestContext = { headers: Headers };
+
+/**
+ * Refuses a "Continue in chat" seed whose paper key does not resolve in the
+ * school (session, exam, class, subject and mode are all checked by the same
+ * function the question paper procedures use). Permission is not decided
+ * here: the tools the model then calls check it. A seed never reaches the
+ * model without this check, and its parts are limited to the slug charset by
+ * the contract.
+ */
+async function assertSeedNamesAPaper(schoolId: string, seed: NonNullable<AssistantMessageSeed>) {
+  try {
+    await resolvePaperScope(db, { schoolId, sessionId: seed.sessionId, examSlug: seed.examSlug, classId: seed.classId, subjectSlug: seed.subjectSlug, modeSlug: seed.modeSlug });
+  } catch (error) {
+    if (error instanceof ORPCError && (error.code === 'NOT_FOUND' || error.code === 'BAD_REQUEST')) {
+      throw new ORPCError('BAD_REQUEST', { message: 'The question paper this chat was started from was not found. Start a new chat from the Question paper screen.' });
+    }
+    throw error;
+  }
+}
 
 const os = implement(assistantContract).$context<AssistantRequestContext>();
 
@@ -111,7 +134,8 @@ async function streamStillAllowed(context: Authed, headers: Headers, schoolId: s
 /** Longest conversation title derived from the first message. */
 const TITLE_MAX_LENGTH = 80;
 
-function titleFromMessage(text: string): string {
+function titleFromMessage(text: string, attachmentCount = 0): string {
+  if (!text.trim()) return attachmentCount === 1 ? 'Attached image' : 'Attached images';
   const firstLine = text.split('\n').find((line) => line.trim())?.trim() ?? text.trim();
   return firstLine.length > TITLE_MAX_LENGTH
     ? `${firstLine.slice(0, TITLE_MAX_LENGTH - 1)}…`
@@ -267,6 +291,8 @@ export const assistantRouter = os.router({
     }
 
     await assertUseAccess(context, input.schoolId);
+    // The seed is written into the model's context: it must name a paper that exists in this school (not free text).
+    if (input.seed) await assertSeedNamesAPaper(input.schoolId, input.seed);
     const status = providerAvailability();
     if (!status.configured) {
       throw new ORPCError('PRECONDITION_FAILED', {
@@ -301,7 +327,7 @@ export const assistantRouter = os.router({
           id: conversationId,
           schoolId: input.schoolId,
           userId,
-          title: titleFromMessage(input.text),
+          title: titleFromMessage(input.text, input.attachmentIds.length),
           provider: provider.id,
           model: provider.model,
         });
@@ -314,6 +340,11 @@ export const assistantRouter = os.router({
         clientRequestId: input.clientRequestId,
         surface: input.surface,
       });
+      // Images are bound in this transaction: the message either carries every
+      // one of them or is not saved (decision D46 is checked here, before any cost).
+      const attachments = await lockUnsentAttachments(tx, { schoolId: input.schoolId, userId, ids: input.attachmentIds });
+      const unreadable = unreadableAttachmentMessage(attachments, imageMimeTypesOf(provider.id));
+      if (unreadable) throw new ORPCError('BAD_REQUEST', { message: unreadable });
       const item = await store.insertItem(tx, emit, {
         conversationId,
         runId,
@@ -322,9 +353,12 @@ export const assistantRouter = os.router({
         body: {
           text: input.text,
           ...(input.pageContext ? { pageContext: input.pageContext } : {}),
+          ...(attachments.length > 0 ? { attachments: attachments.map(toAttachmentRef) } : {}),
+          ...(input.seed ? { seed: input.seed } : {}),
         },
         itemKey: userMessageItemKey(runId),
       });
+      await bindAttachments(tx, { rows: attachments, conversationId, itemId: item.id });
       const conversation = await store.findConversation(tx, conversationId);
       if (item.kind !== 'user_message' || !conversation) throw new ORPCError('INTERNAL_SERVER_ERROR');
       return { conversation: store.toConversationDto(conversation), run, item };
@@ -422,6 +456,10 @@ export const assistantRouter = os.router({
     }
     // Deleted by another request in between: it is gone either way.
     if (outcome === 'missing') throw new ORPCError('NOT_FOUND', { message: 'Assistant conversation was not found.' });
+    // The images the user attached go with the chat they deleted; nothing reads them any more.
+    await deleteConversationAttachments(db, owned.id).catch((err) =>
+      log.warn({ err, conversationId: owned.id }, 'assistant.conversation.attachments.cleanup.failed'),
+    );
     log.info({ conversationId: owned.id, schoolId: input.schoolId }, 'assistant.conversation.deleted');
     return { id: owned.id };
   }),

@@ -22,6 +22,8 @@ import { protectedProcedure } from '../../../index';
 import { requireSchoolPermission } from '../../../permissions/school';
 import { rpcError, toRpcError } from '../../../errors';
 import * as dto from './exam.dto';
+import { deleteQuestionPapersOfPlan } from '../question-paper/question-paper.service';
+import { deleteObjectsBestEffort } from '../question-paper/question-paper.storage';
 
 import {
   prepareExamPlan,
@@ -367,16 +369,23 @@ export const schoolExamPlanRouter = {
     .output(dto.examPlanDtoSchema)
     .handler(async ({ context, input }) => {
       try {
-        return await context.db.transaction(async (tx) => {
+        const { plan, questionPaperObjects } = await context.db.transaction(async (tx) => {
           const { plan } = await getPlan(tx, input, true);
           await requireNotReleasedToCadet(tx, plan);
           if (!['draft', 'approved'].includes(plan.status))
             throw rpcError.badRequest(
               'Active and completed exam plans cannot be deleted.',
             );
+          // Question papers are keyed by the plan's class and subject, not
+          // linked to the plan row (plans are deleted and regenerated), so
+          // they are removed here, in the same transaction.
+          const questionPaperObjects = await deleteQuestionPapersOfPlan(tx, plan);
           await tx.delete(examPlanTable).where(eq(examPlanTable.id, plan.id));
-          return plan;
+          return { plan, questionPaperObjects };
         });
+        // Storage is outside the transaction: removed once it has committed.
+        await deleteObjectsBestEffort(questionPaperObjects);
+        return plan;
       } catch (error) {
         throw toRpcError(error);
       }

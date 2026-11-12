@@ -48,7 +48,7 @@ import {
   classroomPage,
 } from './sessions/[sessionId]/classroom/_route';
 import { dashboardPage } from './sessions/[sessionId]/_route';
-import { examPage, examDetailsPage } from './sessions/[sessionId]/exam/_route';
+import { examPage, examDetailsPage, questionPaperPages } from './sessions/[sessionId]/exam/_route';
 import { noticePages } from './sessions/[sessionId]/notices/_route';
 import { notificationsPage } from './notifications/_route';
 import { staffPage } from './staff/_route';
@@ -71,6 +71,8 @@ const pages: ManagementPageDescriptor<any>[] = [
   classStudentsPage,
   classroomDetailsPage,
   examPage,
+  // Before examDetailsPage, which matches every path below an exam.
+  ...questionPaperPages,
   examDetailsPage,
   ...billingPages,
   billingRunDetailPage,

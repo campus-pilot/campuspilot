@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { readProviderSettings } from './config';
+import { readProviderSettings, readQuestionPaperSettings } from './config';
 
 const GEMINI = {
   GEMINI_API_KEY: 'key',
@@ -34,5 +34,40 @@ describe('readProviderSettings', () => {
     expect(readProviderSettings(GEMINI, 'anthropic')).toBeNull();
     const anthropic = Object.fromEntries(Object.entries(GEMINI).map(([key, value]) => [key.replace('GEMINI', 'ANTHROPIC'), value]));
     expect(readProviderSettings(anthropic, 'anthropic')).toMatchObject({ id: 'anthropic', model: 'gemini-3.8-flash' });
+  });
+});
+
+describe('readQuestionPaperSettings', () => {
+  const OVERRIDE = {
+    QUESTION_PAPER_MODEL: 'gemini-3.8-pro',
+    QUESTION_PAPER_PRICE_INPUT_USD_PER_MTOK: '1.5',
+    QUESTION_PAPER_PRICE_OUTPUT_USD_PER_MTOK: '6',
+    QUESTION_PAPER_PRICE_CACHE_READ_USD_PER_MTOK: '0.15',
+    QUESTION_PAPER_PRICE_CACHE_WRITE_USD_PER_MTOK: '0',
+  };
+
+  it('falls back to the assistant provider, model and prices', () => {
+    expect(readQuestionPaperSettings(GEMINI, 'gemini')).toEqual(readProviderSettings(GEMINI, 'gemini'));
+    expect(readQuestionPaperSettings({}, 'gemini')).toBeNull();
+  });
+
+  it('uses the question paper model with its own prices and the provider key', () => {
+    expect(readQuestionPaperSettings({ GEMINI_API_KEY: 'key', ...OVERRIDE }, 'gemini')).toEqual({
+      id: 'gemini',
+      apiKey: 'key',
+      model: 'gemini-3.8-pro',
+      prices: { inputUsdPerMtok: '1.5', outputUsdPerMtok: '6', cacheReadUsdPerMtok: '0.15', cacheWriteUsdPerMtok: '0' },
+    });
+  });
+
+  it('never gives a model another model\'s prices, nor a missing key', () => {
+    const { QUESTION_PAPER_PRICE_OUTPUT_USD_PER_MTOK: _output, ...partial } = OVERRIDE;
+    expect(readQuestionPaperSettings({ ...GEMINI, ...partial }, 'gemini')).toBeNull();
+    expect(readQuestionPaperSettings(OVERRIDE, 'gemini')).toBeNull();
+  });
+
+  it('takes the provider from QUESTION_PAPER_PROVIDER', () => {
+    const anthropic = Object.fromEntries(Object.entries(GEMINI).map(([key, value]) => [key.replace('GEMINI', 'ANTHROPIC'), value]));
+    expect(readQuestionPaperSettings({ ...GEMINI, ...anthropic, QUESTION_PAPER_PROVIDER: 'anthropic' }, 'gemini')?.id).toBe('anthropic');
   });
 });

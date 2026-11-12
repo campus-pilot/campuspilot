@@ -19,6 +19,7 @@ export const DEMO_SCHOOL_STEPS = [
   'finance',
   'templates',
   'notices',
+  'question-papers',
   'credentials',
 ] as const;
 

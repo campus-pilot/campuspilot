@@ -3,9 +3,12 @@
 import {
   formatSpend,
   groupUsage,
+  sourceRows,
   UsageChart,
   UsageRangeControls,
+  UsageSourcesTable,
   UsageTable,
+  type UsageSource,
   type UsageDay,
   type UsageGrouping,
   type UsageRangeFormApi,
@@ -66,6 +69,16 @@ export function UsageSpendCard({
         {children}
       </CardContent>
     </Card>
+  );
+}
+
+/** The "By feature" breakdown: what the requests of the range were for (assistant chat, question papers). */
+export function SourceTotals({ sources, inrPerUsd }: { sources: readonly UsageSource[]; inrPerUsd: string | null }) {
+  return (
+    <div className="flex flex-col gap-2">
+      <h3 className="text-sm font-medium">By feature</h3>
+      <UsageSourcesTable rows={sourceRows(sources)} inrPerUsd={inrPerUsd} />
+    </div>
   );
 }
 

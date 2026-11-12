@@ -80,6 +80,7 @@ const TEMPLATE_TITLES: Record<DocumentTemplateScope['documentType'], string> = {
   receipt: 'Receipt Template',
   statement: 'Account Statement Template',
   notice: 'Notice Template',
+  question_paper: 'Question Paper Template',
 };
 
 const halfPageDocumentTypes = new Set<DocumentTemplateScope['documentType']>(

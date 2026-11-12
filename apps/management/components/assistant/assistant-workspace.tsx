@@ -1,5 +1,6 @@
 'use client';
 
+import type { QuestionPaperSeed } from '@campuspilot/assistant-contract/attachments';
 import type { AssistantConversationListItemDto } from '@campuspilot/assistant-contract/dto';
 import { Button } from '@campuspilot/ui/components/button';
 import { Skeleton } from '@campuspilot/ui/components/skeleton';
@@ -206,7 +207,16 @@ const checkingAccess = (
  * frame, so the height comes from the viewport: minus the 3.5rem header, and
  * on md+ also the inset's 0.5rem top and bottom margins.
  */
-export function AssistantWorkspace({ schoolId, conversationId }: { schoolId: string; conversationId: string | null }) {
+export function AssistantWorkspace({
+  schoolId,
+  conversationId,
+  seed = null,
+}: {
+  schoolId: string;
+  conversationId: string | null;
+  /** The screen the new conversation starts from (a question paper), read from the address by the page. */
+  seed?: QuestionPaperSeed | null;
+}) {
   const router = useRouter();
   return (
     // The page exists while the school has the assistant, and only for a user
@@ -225,8 +235,13 @@ export function AssistantWorkspace({ schoolId, conversationId }: { schoolId: str
         />
         <div className="min-h-0 min-w-0 flex-1">
           <AssistantChat
+            // Keyed by the conversation only. The seed is deliberately not part of the key: removing its chip
+            // clears the address's seed, and a key that followed it would remount the chat and lose the images
+            // already attached (stored on the server, never sent).
             key={conversationId ?? 'new'}
             schoolId={schoolId}
+            seed={conversationId ? null : seed}
+            onSeedRemoved={() => router.replace(conversationHref(schoolId))}
             conversationId={conversationId}
             surface="page"
             autoFocus

@@ -47,6 +47,8 @@ export const rpcError = {
     new ORPCError("CONFLICT", { message, cause }),
   payloadTooLarge: (message: string) =>
     new ORPCError("PAYLOAD_TOO_LARGE", { message }),
+  tooManyRequests: (message: string) =>
+    new ORPCError("TOO_MANY_REQUESTS", { message }),
   unsupportedMediaType: (message: string) =>
     new ORPCError("UNSUPPORTED_MEDIA_TYPE", { message }),
   internal: (cause?: unknown) =>

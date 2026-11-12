@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import Handlebars from 'handlebars';
+import { PDFDocument } from 'pdf-lib';
+
+import { QUESTION_PAPER_LIMITS } from '@campuspilot/question-paper/limits';
 
 import { DOCUMENT_MARKETPLACE, sampleDocumentContext } from './document.catalog';
 import {
@@ -220,6 +223,33 @@ describe('document rendering', () => {
       expect(form.get('files')).toBeInstanceOf(Blob);
     },
   );
+
+  describe('question paper conversion (M2: a hard page cap and a timeout)', () => {
+    const pdfWithPages = async (pages: number) => {
+      const pdf = await PDFDocument.create();
+      for (let page = 0; page < pages; page += 1) pdf.addPage();
+      return Buffer.from(await pdf.save());
+    };
+
+    it('asks the converter for one page more than the cap and passes a paper within the cap', async () => {
+      const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(await pdfWithPages(QUESTION_PAPER_LIMITS.pdfPages), { status: 200 }));
+      const bytes = await convertDocumentPdf('<p>Paper</p>', 'question_paper');
+      expect(bytes.subarray(0, 5).toString()).toBe('%PDF-');
+      const form = fetchMock.mock.calls[0]![1]!.body as FormData;
+      expect(form.get('nativePageRanges')).toBe(`1-${QUESTION_PAPER_LIMITS.pdfPages + 1}`);
+    });
+
+    it('refuses, with a clear message, a paper that would print on more pages than the cap (never cuts it)', async () => {
+      vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(await pdfWithPages(QUESTION_PAPER_LIMITS.pdfPages + 1), { status: 200 }));
+      await expect(convertDocumentPdf('<p>Paper</p>', 'question_paper')).rejects.toThrow(/more than 40 pages/);
+    });
+
+    it('leaves the other documents without a page range', async () => {
+      const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('%PDF-1.7\nvalid', { status: 200 }));
+      await convertDocumentPdf('<p>Document</p>', 'report_card');
+      expect((fetchMock.mock.calls[0]![1]!.body as FormData).get('nativePageRanges')).toBeNull();
+    });
+  });
 
   it('rejects failed and malformed converter responses', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
