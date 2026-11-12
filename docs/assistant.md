@@ -593,6 +593,15 @@ Adapted from T3 Code's data layer:
   "Not sent · Retry" if they still fail. One message is sent at a time; the
   draft is restored only if the field is still empty, so text typed meanwhile
   is never overwritten.
+- **Starting a conversation stays on the same screen**: the chat that sent the
+  first message moves into the conversation it started without remounting
+  (`assistant-chat-key.ts`), and shows that message in the same timeline from
+  the send until the stream delivers the server's copy, so it never blanks or
+  falls back to the welcome. On the full page the address then changes to
+  `/assistant/<id>`; the page is rendered by the assistant route's
+  `layout.tsx` (its pages render nothing), so that change keeps the history,
+  the chat and the focus instead of building a new page. Any other change of
+  conversation remounts the chat.
 - **Drafts**: the unsent text of each conversation is kept in the browser's
   `sessionStorage` (`assistant-draft.ts`), so switching conversation or
   reloading does not lose it. It is kept per school and conversation (new
