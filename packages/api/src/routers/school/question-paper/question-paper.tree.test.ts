@@ -1,6 +1,6 @@
 import { QUESTION_PAPER_LIMITS as L } from '@campuspilot/question-paper/limits';
 import { EXAMPLE_ENGLISH_SCIENCE_HTML, EXAMPLE_HINDI_MATH_HTML } from '@campuspilot/question-paper/examples';
-import { defaultTreeAdapter, parse } from 'parse5';
+import { defaultTreeAdapter, parse, type DefaultTreeAdapterMap } from 'parse5';
 import { describe, expect, it } from 'vitest';
 
 import { renderQuestionPaperBodyHtml } from './question-paper.body';
@@ -16,8 +16,8 @@ import { sanitizeQuestionPaperBody } from './question-paper.sanitize';
 const clean = (html: string) => sanitizeQuestionPaperBody(html);
 const render = (stored: string) => renderQuestionPaperBodyHtml(stored, { figures: new Map(), math: createMathRenderer(10_000) }).html;
 
-type Node = ReturnType<typeof parse>['childNodes'][number];
-const children = (node: Node) => ('childNodes' in node ? (node.childNodes as Node[]) : []);
+type Node = DefaultTreeAdapterMap['node'];
+const children = (node: Node): Node[] => ('childNodes' in node ? node.childNodes : []);
 const find = (node: Node, test: (element: Node) => boolean): Node | undefined => {
   if (test(node)) return node;
   for (const child of children(node)) {
