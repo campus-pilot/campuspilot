@@ -368,7 +368,10 @@ text and are added exactly (`sumUsd`), never as floats; token sums are
 decimal text beyond (`TokenCount`).
 
 Days and months are **IST** (Asia/Kolkata, fixed UTC+05:30): a month is the
-1st to the last day. The prompt's "today" is the IST date too. The AI billing
+1st to the last day. The prompt's "today" is the IST date too, and its
+"current time" is the run's start as an IST instant with its offset
+(`2026-11-12T04:55:12+05:30`), read in the run's first durable step so a
+replay keeps it; the model uses it for "received today" payment times. The AI billing
 page opens on the current IST month; the other usage views on the last 7
 days. Usage reads (`packages/api/src/assistant/usage.ts`) are
 cached in Redis for an hour. Every answer carries `computedAt`, which each
@@ -407,12 +410,14 @@ the worker logs a warning when it is on in production.
 ## Rules and where they live
 
 - **Security policy, enforced by the API** (`packages/api/src/assistant/tool-policy.ts`,
-  applied in `requireAuth` for the `assistant` principal): only school modules;
-  no billing, dashboard (money totals), platform, account or hidden procedures;
-  no bills, receipts or statements through document tools, whether asked for
-  by document type or by document domain (only the academic domain passes);
-  only the conversation's own school, including the list of the user's
-  schools, which holds just that school. The assistant cannot widen any of this.
+  applied in `requireAuth` for the `assistant` principal): only allowlisted
+  school modules (`ASSISTANT_TOOL_MODULES`), which include billing and the
+  dashboard's money totals; no platform, system, account, assistant or hidden
+  procedures; notices and notifications are not yet reviewed for the
+  assistant, so they stay off; only the conversation's own school, including
+  the list of the user's schools, which holds just that school. Documents of
+  every type, bills, receipts and statements included, follow the user's own
+  document permissions. The assistant cannot widen any of this.
 - **Approval policy, owned by the assistant** (`packages/assistant/src/runtime/tools.ts`,
   `requiresApproval`): every write waits for the user. Reads run immediately. The approval
   request lists the tool's input as labelled values; a tool whose input cannot be checked by a
@@ -434,6 +439,23 @@ the worker logs a warning when it is on in production.
   tone, not data, so a reply that slips through exposes nothing the user
   could not already see. Change the scope by editing that block; the prompt
   pin test then needs its hash updated.
+- **Money, asked of the model** (same prompt, "How to work"): report only
+  amounts the tools return, never a balance, due or total worked out from
+  other amounts; `…Minor` fields and fee configuration amounts are minor
+  units of the result's currency, or of the session's finance currency when
+  the result names none (paise for INR), shown in the main unit and sent to
+  tools as minor units; every write gets a new idempotency key. Bill and
+  payment writes wait for approval like every other write.
+- **Money on the approval request** (`packages/components/src/assistant/approval-values.ts`):
+  a `*Minor` amount is shown as money in its record's own `currency`, else
+  in the currency the app passes for that tool; fee-slug maps the app
+  declares per tool (billing run values, admission fee values, session
+  class overrides) are shown as money the same way. The per-tool table is
+  `TOOL_MONEY` in `apps/management/components/assistant/assistant-approval-money.ts`:
+  the input's `currency` (payment discount, adjustment), the input's
+  `financeConfig.currency` (session finance update), else the session's
+  finance currency, read only when the user may read session finance.
+  Anything else shows as "… (minor units)"; the currency is never guessed.
 
 ## Security boundaries
 
@@ -498,11 +520,14 @@ and stores it as a `view` item, and the app renders it with its own components:
   checks (`apps/management/components/assistant/assistant-view.tsx`), so the
   assistant can name records but never decides what a user sees.
 - `exam_result`: the platform's student result preview.
-- `documents`: generated documents (report cards and other academic types),
+- `documents`: generated documents (report cards, bills, receipts and the
+  other types),
   each a row with a **Download** button. The app asks the API for a fresh
   download link on click, with the user's session; the model never writes a
   link (they are long and short-lived, and models copy them unreliably). Bills,
-  receipts and statements are shown as unavailable.
+  receipts and statements are offered like any other type; the download asks
+  for the user's own finance document permission. Only a type the API does
+  not know is shown as unavailable.
 - `question_paper`: a saved version of a question paper by its natural key and
   `versionNo`, with Preview and Download. The app reads the paper with the user's
   session behind the class read permission (`assistant-question-paper.tsx`).

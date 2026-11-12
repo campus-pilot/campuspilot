@@ -1,23 +1,25 @@
 import type { McpModule, McpProcedureMeta } from '../mcp-metadata';
-import {
-  documentTypeSchema,
-  isFinanceDocumentType,
-} from '../routers/school/document/document.dto';
 
 /**
  * Modules whose procedures the in-app assistant may call. This is an
  * allowlist so a newly added module stays unavailable until someone decides
- * otherwise. Every exclusion is an explicit product decision, not a guess:
- * - `billing`: money tasks are out of scope for the assistant for now.
- * - `dashboard`: the school dashboard reports collections and dues, which is
- *   money data; excluded with billing until money tasks are in scope.
+ * otherwise. Money work (`billing`, and `dashboard` with its collections and
+ * dues) is in scope: the assistant acts as the signed-in user, OPA decides
+ * every call for that user's role, and every write waits for the user's
+ * approval, exactly as for any other module. Every exclusion is an explicit
+ * product decision, not a guess:
  * - `platform`, `system`: platform administration, not school work.
  * - `account`: the user's own credentials (API keys, connected apps, profile).
  * - `assistant`: the assistant's own procedures.
+ * - `notices`, `notifications`: added after the assistant and not yet
+ *   reviewed for it, so they keep the allowlist's default (unavailable)
+ *   until someone decides to add them.
  */
 export const ASSISTANT_TOOL_MODULES = [
   'admissions',
+  'billing',
   'classes',
+  'dashboard',
   'documents',
   'exams',
   'members',
@@ -66,67 +68,6 @@ export function assistantToolDecision(
       allowed: false,
       reason: `The assistant cannot use ${meta.module} tools.`,
     };
-  }
-  return { allowed: true, requiresApproval: assistantToolRequiresApproval(meta) };
-}
-
-/**
- * Where document tools name a document type in their input. Listed per input
- * shape instead of searched for, so a new field is a deliberate addition.
- */
-function documentTypesInInput(input: unknown): unknown[] {
-  if (typeof input !== 'object' || input === null) return [];
-  const record = input as Record<string, unknown>;
-  const nested = (key: string) => {
-    const value = record[key];
-    return typeof value === 'object' && value !== null
-      ? (value as Record<string, unknown>).documentType
-      : undefined;
-  };
-  return [record.documentType, nested('source'), nested('filters')].filter(
-    (value) => value !== undefined,
-  );
-}
-
-/**
- * The document domain a document tool is asked for (`filters.documentDomain`
- * on listings), or undefined when the input names none. Listed per input
- * shape, like the document types above.
- */
-function documentDomainInInput(input: unknown): unknown {
-  if (typeof input !== 'object' || input === null) return undefined;
-  const filters = (input as Record<string, unknown>).filters;
-  return typeof filters === 'object' && filters !== null
-    ? (filters as Record<string, unknown>).documentDomain
-    : undefined;
-}
-
-const FINANCE_DOCUMENTS_REFUSAL = 'The assistant cannot work with bills, receipts or statements.';
-
-/**
- * Input-level rules that metadata cannot express. The documents module
- * serves academic and finance documents alike; finance types (bills,
- * receipts, statements) are money tasks and stay out of scope, like billing.
- * Finance documents can be asked for by type or by domain, so both are
- * checked. The domain is an allowlist: only `academic` (or no domain, which
- * the API treats as academic) passes, so `finance`, `all` and any domain
- * added later are refused until someone decides otherwise.
- */
-export function assistantToolInputDecision(
-  meta: McpProcedureMeta,
-  input: unknown,
-): AssistantToolDecision {
-  if (meta.module === 'documents') {
-    const domain = documentDomainInInput(input);
-    if (domain !== undefined && domain !== 'academic') {
-      return { allowed: false, reason: FINANCE_DOCUMENTS_REFUSAL };
-    }
-    for (const value of documentTypesInInput(input)) {
-      const parsed = documentTypeSchema.safeParse(value);
-      if (parsed.success && isFinanceDocumentType(parsed.data)) {
-        return { allowed: false, reason: FINANCE_DOCUMENTS_REFUSAL };
-      }
-    }
   }
   return { allowed: true, requiresApproval: assistantToolRequiresApproval(meta) };
 }

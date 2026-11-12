@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import { approvalValueDisplay, EMPTY_VALUE, humanizeKey } from './approval-values';
+import { approvalRecordFields, approvalValueDisplay, EMPTY_VALUE, humanizeKey, isMoneyMapPath } from './approval-values';
 
-const text = (value: unknown) => approvalValueDisplay(value, 'en-US');
+const text = (value: unknown) => approvalValueDisplay(value, { locale: 'en-US' });
 
 describe('approvalValueDisplay', () => {
   it('shows a dash for a missing or empty value', () => {
@@ -116,6 +116,97 @@ describe('approvalValueDisplay', () => {
     for (const value of values) {
       for (const shown of flatten(text(value))) expect(shown).not.toMatch(/[{}[\]"]/);
     }
+  });
+});
+
+describe('money amounts', () => {
+  it('shows a minor-unit amount as money in its sibling currency', () => {
+    expect(approvalRecordFields({ amountMinor: '125000', currency: 'INR' })).toEqual([
+      { key: 'amountMinor', label: 'Amount', value: { kind: 'text', text: '₹1,250.00' } },
+      { key: 'currency', label: 'Currency', value: { kind: 'text', text: 'INR' } },
+    ]);
+    // The currency's own decimals decide where the point goes.
+    expect(approvalRecordFields({ amountMinor: '1250', currency: 'JPY' })[0]?.value).toEqual({ kind: 'text', text: '¥1,250' });
+    expect(approvalRecordFields({ amountMinor: '1250', currency: 'KWD' })[0]?.value).toEqual({ kind: 'text', text: 'د.ك1.250' });
+  });
+
+  it('uses the explicit currency for amounts that name none, at any depth', () => {
+    const lines = { lines: [{ title: 'Tuition', amountMinor: '125000' }] };
+    expect(approvalValueDisplay(lines, { currency: 'INR' })).toEqual({
+      kind: 'fields',
+      fields: [
+        {
+          key: 'lines',
+          label: 'Lines',
+          value: {
+            kind: 'fields',
+            fields: [
+              { key: '0', label: '1', value: { kind: 'fields', fields: [
+                { key: 'title', label: 'Title', value: { kind: 'text', text: 'Tuition' } },
+                { key: 'amountMinor', label: 'Amount', value: { kind: 'text', text: '₹1,250.00' } },
+              ] } },
+            ],
+          },
+        },
+      ],
+    });
+  });
+
+  it('never guesses a currency: without one the amount is labelled as minor units', () => {
+    expect(approvalRecordFields({ amountMinor: '125000' })).toEqual([
+      { key: 'amountMinor', label: 'Amount', value: { kind: 'text', text: '125000 (minor units)' } },
+    ]);
+    // A currency the platform does not support is not formatted, and the explicit
+    // currency does not override the one the record names.
+    expect(approvalRecordFields({ amountMinor: '500', currency: 'XYZ' }, { currency: 'INR' })[0]?.value).toEqual({
+      kind: 'text',
+      text: '500 (minor units)',
+    });
+    expect(approvalRecordFields({ amountMinor: '500', currency: 'USD' }, { currency: 'INR' })[0]?.value).toEqual({
+      kind: 'text',
+      text: '$5.00',
+    });
+  });
+
+  it('leaves a *Minor field that is not an integer amount as an ordinary value', () => {
+    expect(approvalRecordFields({ amountMinor: 'twelve', currency: 'INR' })[0]).toEqual({
+      key: 'amountMinor',
+      label: 'Amount Minor',
+      value: { kind: 'text', text: 'twelve' },
+    });
+  });
+});
+
+describe('money maps', () => {
+  const run = { runValues: { session: { tuition: '125000' }, classes: { 'grade-1': { transport: '50000' } } } };
+  const amounts = (display: ReturnType<typeof approvalValueDisplay>): string[] =>
+    display.kind === 'text' ? [display.text] : display.fields.flatMap((field) => amounts(field.value));
+
+  it('matches declared paths, with * for any one key', () => {
+    const maps = [['runValues', 'session'], ['runValues', 'classes', '*']] as const;
+    expect(isMoneyMapPath(['runValues', 'session'], maps)).toBe(true);
+    expect(isMoneyMapPath(['runValues', 'classes', 'grade-1'], maps)).toBe(true);
+    expect(isMoneyMapPath(['runValues', 'classes'], maps)).toBe(false);
+    expect(isMoneyMapPath(['values'], maps)).toBe(false);
+  });
+
+  it('shows every value of a declared fee-slug map as money in the given currency', () => {
+    const display = approvalValueDisplay(run, {
+      currency: 'INR',
+      moneyMaps: [['runValues', 'session'], ['runValues', 'classes', '*']],
+    });
+    expect(amounts(display)).toEqual(['₹1,250.00', '₹500.00']);
+  });
+
+  it('labels declared map values as minor units without a currency, and leaves undeclared maps alone', () => {
+    expect(amounts(approvalValueDisplay(run, { moneyMaps: [['runValues', 'session']] }))).toEqual([
+      '125000 (minor units)',
+      '50000',
+    ]);
+    // Fee values in configuration are JSON numbers.
+    expect(approvalRecordFields({ tuition: 125000 }, { currency: 'INR', moneyMaps: [['values']] }, ['values'])).toEqual([
+      { key: 'tuition', label: 'Tuition', value: { kind: 'text', text: '₹1,250.00' } },
+    ]);
   });
 });
 

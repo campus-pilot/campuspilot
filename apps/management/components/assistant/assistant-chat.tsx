@@ -40,6 +40,7 @@ import { useRef, type ReactNode } from 'react';
 import { assistantAttachmentThumbUrl } from '@/lib/assistant-attachments';
 import { orpc } from '@/lib/orpc';
 
+import { useApprovalMoney } from './assistant-approval-currency';
 import { AssistantApprovalWithSummary } from './assistant-approval-request';
 import { AssistantDraftCard, useDraftVerdicts } from './assistant-question-paper';
 import { missingAttachmentIdsOf, refusalMessage, type AssistantConversationFailure } from './assistant-stream';
@@ -336,6 +337,7 @@ function useTrayRequests(schoolId: string, conversationId: string | null, queued
     );
   };
   const first = pending[0];
+  const money = useApprovalMoney(schoolId, first);
   const queue = [
     ...queued.map((item) => ({
       id: item.id,
@@ -371,6 +373,8 @@ function useTrayRequests(schoolId: string, conversationId: string | null, queued
           waiting={pending.length}
           pendingDecision={decided.decision}
           error={decided.error}
+          currency={money.currency}
+          moneyMaps={money.moneyMaps}
           onDecide={(decision) => approvals.decide(first, decision)}
         />
       ) : null}

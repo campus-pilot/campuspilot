@@ -3,10 +3,7 @@ import { os } from "@orpc/server";
 import type { Context } from "./context";
 import { rpcError } from "./errors";
 import type { ProcedureMeta } from "./mcp-metadata";
-import {
-  assistantToolDecision,
-  assistantToolInputDecision,
-} from "./assistant/tool-policy";
+import { assistantToolDecision } from "./assistant/tool-policy";
 import {
   MCP_READ_SCOPE,
   MCP_WRITE_SCOPE,
@@ -40,10 +37,12 @@ function assertOAuthScope(
 
 /**
  * The assistant service is an ordinary MCP client, so the API itself enforces
- * what the assistant may do: the tool policy (no billing, no hidden or
- * platform procedures), input rules metadata cannot express (no finance
- * documents) and the conversation's school. The service cannot widen any of
- * this; it can only add its own rules, such as asking for approval.
+ * what the assistant may do: the tool policy from metadata (only allowlisted
+ * school modules, billing included; no hidden, platform or account
+ * procedures) and the conversation's school. Rules that depend on a call's
+ * input, such as the school check below, live here, next to the input; the
+ * tool policy itself decides from metadata only. The service cannot widen any
+ * of this; it can only add its own rules, such as asking for approval.
  */
 function assertAssistantToolPolicy(
   context: Context,
@@ -53,8 +52,6 @@ function assertAssistantToolPolicy(
   if (context.principal.authMethod !== "assistant") return;
   const decision = assistantToolDecision(meta.mcp);
   if (!decision.allowed) throw rpcError.forbidden(decision.reason);
-  const inputDecision = assistantToolInputDecision(meta.mcp!, input);
-  if (!inputDecision.allowed) throw rpcError.forbidden(inputDecision.reason);
   const schoolId =
     typeof input === "object" && input !== null
       ? (input as Record<string, unknown>).schoolId

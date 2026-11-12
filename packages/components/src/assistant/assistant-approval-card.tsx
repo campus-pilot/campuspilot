@@ -9,7 +9,7 @@ import { useRef, useSyncExternalStore } from 'react';
 
 import { APPROVE_BUTTON_ATTRIBUTE, approvalFocus, decisionKeys, type AssistantApprovalDecision } from './approval-keys';
 import type { ApprovalSummary } from './approval-summaries';
-import { approvalValueDisplay, humanizeKey, type ApprovalValueDisplay } from './approval-values';
+import { approvalRecordFields, type ApprovalPath, type ApprovalValueDisplay } from './approval-values';
 
 export { ASSISTANT_SURFACE_PROPS, type AssistantApprovalDecision } from './approval-keys';
 
@@ -28,18 +28,21 @@ const isReference = (key: string) => /Ids?$/.test(key);
 type ChangeField = Extract<ApprovalValueDisplay, { kind: 'fields' }>['fields'][number];
 
 /**
- * What the change will set, as labelled values in the reader's words (never raw JSON).
- * A key the tool's summary has a note for shows that note instead of its value.
+ * What the change will set, as labelled values in the reader's words (never
+ * raw JSON). A key the tool's summary has a note for shows that note instead of
+ * its value. `currency` and `moneyMaps` say how to read its money (see
+ * `ApprovalDisplayOptions`).
  */
-function changeFields(input: unknown, notes: Readonly<Record<string, string>> = {}): ChangeField[] {
-  if (typeof input !== 'object' || input === null) return [];
-  return Object.entries(input as Record<string, unknown>)
-    .filter(([key]) => !HIDDEN_INPUT_KEYS.has(key))
-    .map(([key, value]) => ({
-      key,
-      label: humanizeKey(key),
-      value: key in notes ? ({ kind: 'text', text: notes[key]! } satisfies ApprovalValueDisplay) : approvalValueDisplay(value),
-    }));
+function changeFields(
+  input: unknown,
+  notes: Readonly<Record<string, string>> = {},
+  currency?: string,
+  moneyMaps?: readonly ApprovalPath[],
+): ChangeField[] {
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) return [];
+  return approvalRecordFields(input as Record<string, unknown>, { currency, moneyMaps })
+    .filter((field) => !HIDDEN_INPUT_KEYS.has(field.key))
+    .map((field) => (field.key in notes ? { ...field, value: { kind: 'text', text: notes[field.key]! } satisfies ApprovalValueDisplay } : field));
 }
 
 /**
@@ -171,6 +174,8 @@ export function AssistantApprovalRequest({
   pendingDecision,
   error,
   summary,
+  currency,
+  moneyMaps,
   onDecide,
 }: {
   call: AssistantToolCallItemDto;
@@ -185,9 +190,20 @@ export function AssistantApprovalRequest({
   error?: string | null;
   /** The tool's own sentence for this change (`approvalSummaryOf`), when it has one: replaces the list of ids and values. */
   summary?: ApprovalSummary | null;
+  /**
+   * The currency of money amounts in the input that do not name their own,
+   * when the app knows it for this tool. Without it those amounts show as
+   * minor units; the card never guesses a currency.
+   */
+  currency?: string;
+  /**
+   * Paths of fee-slug maps in the input whose values are minor-unit amounts,
+   * declared by the app per tool (see `ApprovalDisplayOptions.moneyMaps`).
+   */
+  moneyMaps?: readonly ApprovalPath[];
   onDecide: (decision: AssistantApprovalDecision) => void;
 }) {
-  const fields = changeFields(call.body.input, summary?.notes);
+  const fields = changeFields(call.body.input, summary?.notes, currency, moneyMaps);
   const busy = Boolean(pendingDecision);
   const enter = useEnterApproves();
   return (

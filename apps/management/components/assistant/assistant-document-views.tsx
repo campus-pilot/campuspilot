@@ -1,10 +1,6 @@
 'use client';
 
-import {
-  documentTypeSchema,
-  isFinanceDocumentType,
-  type DocumentType,
-} from '@campuspilot/api/routers/school/document/document.dto';
+import { documentTypeSchema, type DocumentType } from '@campuspilot/api/routers/school/document/document.dto';
 import type { AssistantDocumentsView } from '@campuspilot/assistant-contract/views';
 import { AssistantRecordList, type AssistantRecord } from '@campuspilot/components/assistant';
 import { Button } from '@campuspilot/ui/components/button';
@@ -21,13 +17,16 @@ function documentTypeLabel(type: DocumentType) {
 }
 
 /**
- * The document type the assistant named, when the chat may offer it. Bills,
- * receipts and statements are money documents, which the assistant does not
- * handle, so a view naming one shows it as unavailable.
+ * The document type the assistant named, when the chat can offer it: any
+ * type the API knows, academic and finance (bills, receipts, statements)
+ * alike. Offering a row grants nothing: the download link is asked for with
+ * the user's own session through `school.getDocumentDownload`, which checks
+ * that user's permission for the type. A type the API does not know is shown
+ * as unavailable.
  */
 function offeredDocumentType(value: string): DocumentType | null {
   const parsed = documentTypeSchema.safeParse(value);
-  return parsed.success && !isFinanceDocumentType(parsed.data) ? parsed.data : null;
+  return parsed.success ? parsed.data : null;
 }
 
 /**

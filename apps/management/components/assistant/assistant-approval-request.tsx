@@ -30,6 +30,8 @@ export function AssistantApprovalWithSummary({
   waiting,
   pendingDecision,
   error,
+  currency,
+  moneyMaps,
   onDecide,
 }: {
   schoolId: string;
@@ -38,6 +40,10 @@ export function AssistantApprovalWithSummary({
   waiting: number;
   pendingDecision?: AssistantApprovalDecision;
   error?: string | null;
+  /** Passed through to the card: how to read money amounts that do not name their own currency. */
+  currency?: string;
+  /** Passed through to the card: paths of fee-slug maps whose values are minor-unit amounts. */
+  moneyMaps?: readonly (readonly string[])[];
   onDecide: (decision: AssistantApprovalDecision) => void;
 }) {
   const { toolName, input } = call.body;
@@ -58,6 +64,8 @@ export function AssistantApprovalWithSummary({
       pendingDecision={pendingDecision}
       error={error}
       summary={approvalSummaryOf(toolName, input, facts)}
+      currency={currency}
+      moneyMaps={moneyMaps}
       onDecide={onDecide}
     />
   );

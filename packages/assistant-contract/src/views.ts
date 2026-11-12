@@ -172,7 +172,7 @@ export const SHOW_VIEW_TOOL_DESCRIPTION = [
   'Show information to the user as a view inside the chat, rendered with the app’s own components.',
   'Use it whenever an answer contains records, lists, numbers or comparisons, instead of writing tables or long lists in text:',
   'records for specific admissions, students, classes, exams or staff (pass their ids); exam_result for one student’s result in an exam;',
-  'documents for generated documents such as report cards, each shown with a Download button (this is the only way to give the user a document: never write a download link);',
+  'documents for generated documents such as report cards, bills or receipts, each shown with a Download button (this is the only way to give the user a document: never write a download link);',
   'question_paper for a saved version of a question paper, with Preview and Download (after saveQuestionPaperVersion, or to show an older version);',
   'table for rows of data; stats for a few headline numbers; details for one item’s facts; bars to compare amounts; notice for one important caution.',
   'Only use data you got from tools. After showing a view, add at most one or two sentences of explanation; do not repeat what the view shows.',
