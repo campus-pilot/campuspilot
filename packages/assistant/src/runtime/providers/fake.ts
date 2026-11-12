@@ -15,8 +15,8 @@ import type {
   ModelToolResult,
   ModelToolUse,
   ModelUsage,
-  StructuredRequest,
-  StructuredResult,
+  TextRequest,
+  TextResult,
   TranscriptEntry,
 } from './types';
 
@@ -111,31 +111,31 @@ export type FakeModelCall = {
 };
 
 /**
- * One scripted `generateStructured`: a result, an `Error` to throw (a
+ * One scripted `generateText`: a result, an `Error` to throw (a
  * `FakeModelError` to choose its failure kind) or a function of the request
  * and the 0-based call index.
  */
-export type FakeStructuredStep =
-  | StructuredResult
+export type FakeTextStep =
+  | TextResult
   | Error
-  | ((input: StructuredRequest, call: number) => StructuredResult | Promise<StructuredResult>);
+  | ((input: TextRequest, call: number) => TextResult | Promise<TextResult>);
 
-/** A finished structured answer, as the fake's script holds it. */
-export function fakeStructuredResult({
-  text = '{}',
+/** A finished text answer, as the fake's script holds it. */
+export function fakeTextResult({
+  text = '<p>paper</p>',
   model = FAKE_REPORTED_MODEL,
   usage = FAKE_USAGE,
   refusal = false,
   truncated = false,
-}: Partial<StructuredResult> = {}): StructuredResult {
+}: Partial<TextResult> = {}): TextResult {
   return { text, model, usage, refusal, truncated };
 }
 
 export type FakeModelProvider = ModelProvider & {
-  /** Every `generateStructured` request so far, in order, including calls that threw. */
-  readonly structuredCalls: readonly { input: StructuredRequest; model: string }[];
-  /** Appends structured steps to their own script. */
-  enqueueStructured: (...steps: FakeStructuredStep[]) => void;
+  /** Every `generateText` request so far, in order, including calls that threw. */
+  readonly textCalls: readonly { input: TextRequest; model: string }[];
+  /** Appends text steps to their own script. */
+  enqueueText: (...steps: FakeTextStep[]) => void;
   /** Every `step` call so far, in order, including calls that threw. */
   readonly calls: readonly FakeModelCall[];
   /** Appends steps to the script. */
@@ -214,8 +214,8 @@ export function createFakeProvider({
 } = {}): FakeModelProvider {
   const queue = [...script];
   const calls: FakeModelCall[] = [];
-  const structuredQueue: FakeStructuredStep[] = [];
-  const structuredCalls: { input: StructuredRequest; model: string }[] = [];
+  const textQueue: FakeTextStep[] = [];
+  const textCalls: { input: TextRequest; model: string }[] = [];
 
   return {
     id,
@@ -223,15 +223,15 @@ export function createFakeProvider({
     imageMimeTypes,
     context: fakeContext,
     calls,
-    structuredCalls,
-    enqueueStructured: (...steps) => void structuredQueue.push(...steps),
+    textCalls,
+    enqueueText: (...steps) => void textQueue.push(...steps),
 
-    async generateStructured(input) {
-      const call = structuredCalls.length;
-      structuredCalls.push({ input, model });
-      const next = structuredQueue.shift();
+    async generateText(input) {
+      const call = textCalls.length;
+      textCalls.push({ input, model });
+      const next = textQueue.shift();
       if (next === undefined) {
-        throw new Error(`The fake model provider's structured script is exhausted (call ${call + 1}).`);
+        throw new Error(`The fake model provider's text script is exhausted (call ${call + 1}).`);
       }
       if (next instanceof Error) throw next;
       return typeof next === 'function' ? next(input, call) : next;

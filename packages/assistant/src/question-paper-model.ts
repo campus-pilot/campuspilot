@@ -18,10 +18,9 @@ export function questionPaperModelOf(provider: ModelProvider, settings: Question
     prices: settings.prices,
     imageMimeTypes: provider.imageMimeTypes,
     generate: async (input) => {
-      const result = await provider.generateStructured({
+      const result = await provider.generateText({
         system: input.system,
         parts: input.parts,
-        jsonSchema: input.jsonSchema,
         maxOutputTokens: input.maxOutputTokens,
       });
       return {

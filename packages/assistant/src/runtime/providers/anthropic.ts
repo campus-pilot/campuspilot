@@ -15,9 +15,9 @@ import type {
   ModelToolResult,
   ModelToolUse,
   ModelUsage,
-  StructuredPart,
-  StructuredRequest,
-  StructuredResult,
+  TextPart,
+  TextRequest,
+  TextResult,
 } from './types';
 import { ANTHROPIC_IMAGE_MIME_TYPES } from './image-types';
 import { withBilledUsage } from './types';
@@ -231,7 +231,7 @@ export async function streamAssistantResponse({
 
 export { ANTHROPIC_IMAGE_MIME_TYPES };
 
-function anthropicContentOf(part: StructuredPart): Anthropic.Beta.Messages.BetaContentBlockParam {
+function anthropicContentOf(part: TextPart): Anthropic.Beta.Messages.BetaContentBlockParam {
   if (part.type === 'text') return { type: 'text', text: part.text };
   const mediaType = ANTHROPIC_IMAGE_MIME_TYPES.find((supported) => supported === part.mimeType);
   // Callers check `imageMimeTypes` first (and tell the user); this only keeps a
@@ -241,28 +241,28 @@ function anthropicContentOf(part: StructuredPart): Anthropic.Beta.Messages.BetaC
 }
 
 /**
- * The exact Claude API request of a one-shot structured request (pinned by a
- * test, like {@link buildAnthropicRequest}). `output_config.format` is the
- * GA structured-output field (SDK 1.7 typings: `BetaJSONOutputFormat`); the
- * request is streamed because a large `max_tokens` requires it. Prompt caching
- * is off on purpose: the pages differ for every job, so nothing repeats.
+ * The exact Claude API request of a one-shot text request (pinned by a test,
+ * like {@link buildAnthropicRequest}). No structured-output mode: the answer is
+ * plain text. The request is streamed because a large `max_tokens` requires it.
+ * Prompt caching is off on purpose: the pages differ for every job, so nothing
+ * repeats.
  */
-export function buildAnthropicStructuredRequest(
+export function buildAnthropicTextRequest(
   model: string,
-  input: StructuredRequest,
+  input: TextRequest,
 ): Parameters<Anthropic['beta']['messages']['stream']>[0] {
   return {
     model,
     max_tokens: input.maxOutputTokens,
     system: input.system,
     messages: [{ role: 'user', content: input.parts.map(anthropicContentOf) }],
-    output_config: { effort: 'medium', format: { type: 'json_schema', schema: input.jsonSchema } },
+    output_config: { effort: 'medium' },
   };
 }
 
-/** Runs a one-shot structured request; failures carry the usage the stream had reported. */
-export async function generateAnthropicStructured(client: Anthropic, model: string, input: StructuredRequest): Promise<StructuredResult> {
-  const stream = client.beta.messages.stream(buildAnthropicStructuredRequest(model, input), { signal: input.signal });
+/** Runs a one-shot text request; failures carry the usage the stream had reported. */
+export async function generateAnthropicText(client: Anthropic, model: string, input: TextRequest): Promise<TextResult> {
+  const stream = client.beta.messages.stream(buildAnthropicTextRequest(model, input), { signal: input.signal });
   let reported: ModelUsage | null = null;
   let answeringModel: string | null = null;
   stream.on('streamEvent', (event) => {
@@ -391,7 +391,7 @@ export function createAnthropicProvider({ apiKey, model }: { apiKey: string; mod
     // The API refuses an image over 5 MB; only an undecodable original (no 600 KB JPEG copy) can come near it.
     maxImageBytes: 5 * 1024 * 1024,
     context: anthropicContext,
-    generateStructured: (input) => generateAnthropicStructured(client, model, input),
+    generateText: (input) => generateAnthropicText(client, model, input),
     async step({ prompt, tools, transcript, onText, isStopRequested }: ModelStepInput): Promise<ModelStepResult> {
       const result = await streamAssistantResponse({
         client,

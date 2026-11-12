@@ -12,7 +12,6 @@ import {
   type Part,
 } from '@google/genai';
 
-import { toGeminiResponseSchema } from './gemini-schema';
 import type { AssistantUserMessageBody } from '@campuspilot/db/schema/assistant';
 import { buildUserTranscriptContent, isAttachmentMarker, type AttachmentMarker } from '../../transcript';
 import { attachmentLabel, attachmentNote } from '../context';
@@ -28,9 +27,9 @@ import type {
   ModelToolResult,
   ModelToolUse,
   ModelUsage,
-  StructuredPart,
-  StructuredRequest,
-  StructuredResult,
+  TextPart,
+  TextRequest,
+  TextResult,
 } from './types';
 import { GEMINI_IMAGE_MIME_TYPES } from './image-types';
 import { withBilledUsage } from './types';
@@ -186,7 +185,7 @@ export function geminiUserContent(body: AssistantUserMessageBody): unknown[] {
   return buildUserTranscriptContent(body).map((block) => (isAttachmentMarker(block) ? block : { text: (block as { text: string }).text }));
 }
 
-function geminiPartOf(part: StructuredPart): Part {
+function geminiPartOf(part: TextPart): Part {
   if (part.type === 'text') return { text: part.text };
   if (!GEMINI_IMAGE_MIME_TYPES.some((supported) => supported === part.mimeType)) {
     throw new Error(`Gemini cannot read ${part.mimeType} images.`);
@@ -195,15 +194,14 @@ function geminiPartOf(part: StructuredPart): Part {
 }
 
 /**
- * The Gemini request of a one-shot structured request (pinned by a test).
+ * The Gemini request of a one-shot text request (pinned by a test): plain
+ * text out, no JSON mode and no response schema.
  * High media resolution is requested because handwriting is read from
  * photographs. Thinking and caching stay at the model's defaults.
  */
-export function buildGeminiStructuredRequest(model: string, input: StructuredRequest) {
+export function buildGeminiTextRequest(model: string, input: TextRequest) {
   const config: GenerateContentConfig = {
     systemInstruction: input.system,
-    responseMimeType: 'application/json',
-    responseJsonSchema: toGeminiResponseSchema(input.jsonSchema),
     maxOutputTokens: input.maxOutputTokens,
     mediaResolution: MediaResolution.MEDIA_RESOLUTION_HIGH,
     ...(input.signal ? { abortSignal: input.signal } : {}),
@@ -216,19 +214,19 @@ export function buildGeminiStructuredRequest(model: string, input: StructuredReq
 }
 
 /**
- * Runs a one-shot structured request. It streams (like `step`) rather than
+ * Runs a one-shot text request. It streams (like `step`) rather than
  * waiting for one response: a long answer then survives idle-connection
  * limits, and a stream that breaks after its first usage report still says
  * what it was billed for.
  */
-export async function generateGeminiStructured(client: GoogleGenAI, model: string, input: StructuredRequest): Promise<StructuredResult> {
+export async function generateGeminiText(client: GoogleGenAI, model: string, input: TextRequest): Promise<TextResult> {
   const parts: Part[] = [];
   let usage: GenerateContentResponseUsageMetadata | undefined;
   let finishReason: FinishReason | undefined;
   let blocked = false;
   let modelVersion = model;
   try {
-    const stream = await client.models.generateContentStream(buildGeminiStructuredRequest(model, input));
+    const stream = await client.models.generateContentStream(buildGeminiTextRequest(model, input));
     for await (const chunk of stream) {
       const candidate = chunk.candidates?.[0];
       if (candidate?.content?.parts) parts.push(...candidate.content.parts);
@@ -371,7 +369,7 @@ export function createGeminiProvider({ apiKey, model }: { apiKey: string; model:
     id: 'gemini',
     model,
     imageMimeTypes: GEMINI_IMAGE_MIME_TYPES,
-    generateStructured: (input) => generateGeminiStructured(client, model, input),
+    generateText: (input) => generateGeminiText(client, model, input),
     step,
     context: geminiContext,
     userContent: geminiUserContent,
@@ -381,5 +379,3 @@ export function createGeminiProvider({ apiKey, model }: { apiKey: string; model:
     failureKind: geminiFailureKind,
   };
 }
-
-export { toGeminiResponseSchema };

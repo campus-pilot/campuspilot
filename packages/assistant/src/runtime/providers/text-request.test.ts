@@ -2,28 +2,27 @@ import Anthropic from '@anthropic-ai/sdk';
 import { FinishReason, type GoogleGenAI } from '@google/genai';
 import { describe, expect, it } from 'vitest';
 
-import { ANTHROPIC_IMAGE_MIME_TYPES, buildAnthropicStructuredRequest, generateAnthropicStructured } from './anthropic';
-import { createFakeProvider, fakeStructuredResult, FakeModelError } from './fake';
+import { ANTHROPIC_IMAGE_MIME_TYPES, buildAnthropicTextRequest, generateAnthropicText } from './anthropic';
+import { createFakeProvider, fakeTextResult, FakeModelError } from './fake';
 import {
-  buildGeminiStructuredRequest,
+  buildGeminiTextRequest,
   GEMINI_IMAGE_MIME_TYPES,
-  generateGeminiStructured,
+  generateGeminiText,
 } from './gemini';
-import { billedUsageOf, type StructuredRequest } from './types';
+import { billedUsageOf, type TextRequest } from './types';
 
-const request: StructuredRequest = {
+const request: TextRequest = {
   system: 'Transcribe.',
   parts: [
     { type: 'text', text: 'Page 1 of 2' },
     { type: 'image', mimeType: 'image/jpeg', data: new Uint8Array([1, 2, 3]) },
   ],
-  jsonSchema: { type: 'object', properties: { schemaVersion: { type: 'number', const: 1 } } },
   maxOutputTokens: 32_000,
 };
 
-describe('anthropic structured request', () => {
-  it('sends the pages as base64 images with the schema as the output format', () => {
-    expect(buildAnthropicStructuredRequest('claude-test', request)).toEqual({
+describe('anthropic text request', () => {
+  it('sends the pages as base64 images and asks for plain text, with no output format', () => {
+    expect(buildAnthropicTextRequest('claude-test', request)).toEqual({
       model: 'claude-test',
       max_tokens: 32_000,
       system: 'Transcribe.',
@@ -36,14 +35,14 @@ describe('anthropic structured request', () => {
           ],
         },
       ],
-      output_config: { effort: 'medium', format: { type: 'json_schema', schema: request.jsonSchema } },
+      output_config: { effort: 'medium' },
     });
   });
 
   it('cannot read HEIC and refuses to send it as something else', () => {
     expect(ANTHROPIC_IMAGE_MIME_TYPES).not.toContain('image/heic');
     expect(() =>
-      buildAnthropicStructuredRequest('claude-test', { ...request, parts: [{ type: 'image', mimeType: 'image/heic', data: new Uint8Array() }] }),
+      buildAnthropicTextRequest('claude-test', { ...request, parts: [{ type: 'image', mimeType: 'image/heic', data: new Uint8Array() }] }),
     ).toThrow(/cannot read image\/heic/);
   });
 
@@ -65,7 +64,7 @@ describe('anthropic structured request', () => {
       stop_reason: stopReason,
       usage: { input_tokens: 10, output_tokens: 20, cache_read_input_tokens: 3, cache_creation_input_tokens: null },
     });
-    const done = await generateAnthropicStructured(clientWith(async () => message('end_turn')), 'claude-test', request);
+    const done = await generateAnthropicText(clientWith(async () => message('end_turn')), 'claude-test', request);
     expect(done).toEqual({
       text: '{"a":1}',
       model: 'claude-test-20261101',
@@ -73,8 +72,8 @@ describe('anthropic structured request', () => {
       refusal: false,
       truncated: false,
     });
-    expect((await generateAnthropicStructured(clientWith(async () => message('max_tokens')), 'm', request)).truncated).toBe(true);
-    expect((await generateAnthropicStructured(clientWith(async () => message('refusal')), 'm', request)).refusal).toBe(true);
+    expect((await generateAnthropicText(clientWith(async () => message('max_tokens')), 'm', request)).truncated).toBe(true);
+    expect((await generateAnthropicText(clientWith(async () => message('refusal')), 'm', request)).refusal).toBe(true);
   });
 
   it('attaches the usage a broken stream had reported to its error', async () => {
@@ -83,7 +82,7 @@ describe('anthropic structured request', () => {
       { type: 'message_delta', delta: {}, usage: { output_tokens: 40 } },
     ];
     const error = new Error('stream broke');
-    const failure = await generateAnthropicStructured(clientWith(() => Promise.reject(error), events), 'm', request).catch((e: unknown) => e);
+    const failure = await generateAnthropicText(clientWith(() => Promise.reject(error), events), 'm', request).catch((e: unknown) => e);
     expect(failure).toBe(error);
     expect(billedUsageOf(error)).toEqual({
       usage: { inputTokens: 900, outputTokens: 40, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 },
@@ -93,17 +92,17 @@ describe('anthropic structured request', () => {
   });
 });
 
-describe('gemini structured request', () => {
-  it('sends inline images, JSON mode, the schema and high media resolution', () => {
-    const built = buildGeminiStructuredRequest('gemini-test', request);
+describe('gemini text request', () => {
+  it('sends inline images and high media resolution, with no JSON mode or schema', () => {
+    const built = buildGeminiTextRequest('gemini-test', request);
     expect(built.model).toBe('gemini-test');
     expect(built.contents).toEqual([
       { role: 'user', parts: [{ text: 'Page 1 of 2' }, { inlineData: { mimeType: 'image/jpeg', data: 'AQID' } }] },
     ]);
+    expect(built.config).not.toHaveProperty('responseMimeType');
+    expect(built.config).not.toHaveProperty('responseJsonSchema');
     expect(built.config).toEqual({
       systemInstruction: 'Transcribe.',
-      responseMimeType: 'application/json',
-      responseJsonSchema: { type: 'object', properties: { schemaVersion: { type: 'number', enum: [1] } } },
       maxOutputTokens: 32_000,
       mediaResolution: 'MEDIA_RESOLUTION_HIGH',
     });
@@ -112,7 +111,7 @@ describe('gemini structured request', () => {
   it('reads HEIC and HEIF, which the Claude API cannot', () => {
     expect(GEMINI_IMAGE_MIME_TYPES).toEqual(expect.arrayContaining(['image/heic', 'image/heif']));
     expect(() =>
-      buildGeminiStructuredRequest('m', { ...request, parts: [{ type: 'image', mimeType: 'image/gif', data: new Uint8Array() }] }),
+      buildGeminiTextRequest('m', { ...request, parts: [{ type: 'image', mimeType: 'image/gif', data: new Uint8Array() }] }),
     ).toThrow(/cannot read image\/gif/);
   });
 
@@ -134,7 +133,7 @@ describe('gemini structured request', () => {
       { candidates: [{ content: { parts: [{ text: 'hidden', thought: true }, { text: '{"a":' }] } }], modelVersion: 'gemini-test-001' },
       { candidates: [{ content: { parts: [{ text: '1}' }] }, finishReason }], usageMetadata },
     ];
-    const done = await generateGeminiStructured(clientWith(chunk(FinishReason.STOP)), 'gemini-test', request);
+    const done = await generateGeminiText(clientWith(chunk(FinishReason.STOP)), 'gemini-test', request);
     expect(done).toEqual({
       text: '{"a":1}',
       model: 'gemini-test-001',
@@ -142,14 +141,14 @@ describe('gemini structured request', () => {
       refusal: false,
       truncated: false,
     });
-    expect((await generateGeminiStructured(clientWith(chunk(FinishReason.MAX_TOKENS)), 'm', request)).truncated).toBe(true);
-    expect((await generateGeminiStructured(clientWith(chunk(FinishReason.IMAGE_SAFETY)), 'm', request)).refusal).toBe(true);
-    expect((await generateGeminiStructured(clientWith([{ promptFeedback: { blockReason: 'SAFETY' } }]), 'm', request)).refusal).toBe(true);
+    expect((await generateGeminiText(clientWith(chunk(FinishReason.MAX_TOKENS)), 'm', request)).truncated).toBe(true);
+    expect((await generateGeminiText(clientWith(chunk(FinishReason.IMAGE_SAFETY)), 'm', request)).refusal).toBe(true);
+    expect((await generateGeminiText(clientWith([{ promptFeedback: { blockReason: 'SAFETY' } }]), 'm', request)).refusal).toBe(true);
   });
 
   it('attaches reported usage to a stream that broke', async () => {
     const error = new Error('stream broke');
-    const failure = await generateGeminiStructured(
+    const failure = await generateGeminiText(
       clientWith([{ candidates: [{ content: { parts: [{ text: '{' }] } }], usageMetadata: { promptTokenCount: 50, candidatesTokenCount: 2 } }], error),
       'm',
       request,
@@ -160,13 +159,13 @@ describe('gemini structured request', () => {
 });
 
 describe('the fake provider', () => {
-  it('answers structured requests from its own script and records them', async () => {
+  it('answers text requests from its own script and records them', async () => {
     const fake = createFakeProvider({ model: 'fake-m' });
-    fake.enqueueStructured(fakeStructuredResult({ text: '{"ok":true}' }), new FakeModelError('busy', 'later'));
-    expect((await fake.generateStructured(request)).text).toBe('{"ok":true}');
-    const failure = await fake.generateStructured(request).catch((e: unknown) => e);
+    fake.enqueueText(fakeTextResult({ text: '{"ok":true}' }), new FakeModelError('busy', 'later'));
+    expect((await fake.generateText(request)).text).toBe('{"ok":true}');
+    const failure = await fake.generateText(request).catch((e: unknown) => e);
     expect(fake.failureKind(failure)).toBe('busy');
-    expect(fake.structuredCalls.map((call) => call.model)).toEqual(['fake-m', 'fake-m']);
-    await expect(fake.generateStructured(request)).rejects.toThrow(/exhausted/);
+    expect(fake.textCalls.map((call) => call.model)).toEqual(['fake-m', 'fake-m']);
+    await expect(fake.generateText(request)).rejects.toThrow(/exhausted/);
   });
 });

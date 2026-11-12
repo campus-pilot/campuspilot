@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { questionPaperModelOf } from './question-paper-model';
-import { createFakeProvider, fakeStructuredResult, FakeModelError, FAKE_PRICES, FAKE_REPORTED_MODEL, FAKE_USAGE } from './runtime/providers/fake';
+import { createFakeProvider, fakeTextResult, FakeModelError, FAKE_PRICES, FAKE_REPORTED_MODEL, FAKE_USAGE } from './runtime/providers/fake';
 import { withBilledUsage } from './runtime/providers/types';
 
 describe('questionPaperModelOf', () => {
@@ -14,11 +14,11 @@ describe('questionPaperModelOf', () => {
 
   it('forwards one request and renames the answered model', async () => {
     const fake = createFakeProvider();
-    fake.enqueueStructured(fakeStructuredResult({ text: '{"ok":1}', truncated: true }));
+    fake.enqueueText(fakeTextResult({ text: '<p>ok</p>', truncated: true }));
     const model = questionPaperModelOf(fake, settings);
-    const result = await model.generate({ system: 's', parts: [{ type: 'text', text: 'hi' }], jsonSchema: { type: 'object' }, maxOutputTokens: 5 });
-    expect(result).toEqual({ text: '{"ok":1}', usage: FAKE_USAGE, answeredModel: FAKE_REPORTED_MODEL, refusal: false, truncated: true });
-    expect(fake.structuredCalls[0]!.input).toMatchObject({ system: 's', maxOutputTokens: 5 });
+    const result = await model.generate({ system: 's', parts: [{ type: 'text', text: 'hi' }], maxOutputTokens: 5 });
+    expect(result).toEqual({ text: '<p>ok</p>', usage: FAKE_USAGE, answeredModel: FAKE_REPORTED_MODEL, refusal: false, truncated: true });
+    expect(fake.textCalls[0]!.input).toMatchObject({ system: 's', maxOutputTokens: 5 });
   });
 
   it('classifies failures and reports billed usage through the provider', () => {
