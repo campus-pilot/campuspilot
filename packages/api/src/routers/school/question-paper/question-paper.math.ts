@@ -34,6 +34,13 @@ export const MATH_WALL_BUDGET_MS = 2_000;
 export type MathRenderer = {
   /** HTML for one formula, or throws a KaTeX `ParseError` for invalid TeX. */
   render: (tex: string, display: boolean) => string;
+  /**
+   * The HTML bytes of every `render` call so far, a repeated formula counted
+   * each time it is printed. Lets a draft check refuse a paper whose formulas
+   * alone could not fit in the printed body (a 500-character nested `\sqrt`
+   * is about 70 KB of KaTeX HTML).
+   */
+  renderedBytes: () => number;
 };
 
 /**
@@ -45,17 +52,23 @@ export type MathRenderer = {
 export function createMathRenderer(budgetMs: number = MATH_WALL_BUDGET_MS): MathRenderer {
   const started = performance.now();
   const memo = new Map<string, string>();
+  let bytes = 0;
   return {
+    renderedBytes: () => bytes,
     render(tex, display) {
       const key = `${display ? 'd' : 'i'}:${tex}`;
       const hit = memo.get(key);
-      if (hit !== undefined) return hit;
+      if (hit !== undefined) {
+        bytes += hit.length;
+        return hit;
+      }
       if (performance.now() - started > budgetMs) {
         throw rpcError.badRequest('This paper is too complex to render. Split it into smaller sections.');
       }
       // A fresh macros object every call: KaTeX writes definitions into it.
       const html = katex.renderToString(tex, { ...KATEX_OPTIONS, displayMode: display, macros: {} });
       memo.set(key, html);
+      bytes += html.length;
       return html;
     },
   };

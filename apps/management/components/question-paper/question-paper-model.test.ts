@@ -8,6 +8,7 @@ import {
   resolveSection,
   resolveVersionNo,
   runInOrder,
+  uploadsInFlight,
 } from './question-paper-model';
 
 const scope = { schoolId: 'sch 1', sessionId: 'ses_1', examSlug: 'half-yearly', classId: 'cls_1', subjectSlug: 'science', modeSlug: 'theory' };
@@ -62,4 +63,10 @@ test('uploads run one after another in the order given, even after a failure', a
     log.push(`end ${item}`);
   });
   assert.deepEqual(log, ['start a', 'end a', 'start b', 'end b', 'start c', 'end c']);
+});
+
+test('photos on their way count as in flight, a failed one does not', () => {
+  assert.equal(uploadsInFlight([]), 0);
+  assert.equal(uploadsInFlight([{ status: 'converting' }, { status: 'uploading' }, { status: 'error' }]), 2);
+  assert.equal(uploadsInFlight([{ status: 'error' }]), 0);
 });

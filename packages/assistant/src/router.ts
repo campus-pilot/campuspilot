@@ -1,4 +1,6 @@
 import { issueAssistantRunToken } from '@campuspilot/api/assistant/token';
+import { resolvePaperScope } from '@campuspilot/api/routers/school/question-paper/question-paper.scope';
+import type { AssistantMessageSeed } from '@campuspilot/assistant-contract/attachments';
 import { assistantContract } from '@campuspilot/assistant-contract/contract';
 import { ASSISTANT_LIST_PAGE_SIZE, type AssistantStreamEvent } from '@campuspilot/assistant-contract/dto';
 import { implement, ORPCError } from '@orpc/server';
@@ -30,6 +32,25 @@ import { userMessageItemKey } from './transcript';
  * (dispatch.ts), so no request waits for the worker.
  */
 export type AssistantRequestContext = { headers: Headers };
+
+/**
+ * Refuses a "Continue in chat" seed whose paper key does not resolve in the
+ * school (session, exam, class, subject and mode are all checked by the same
+ * function the question paper procedures use). Permission is not decided
+ * here: the tools the model then calls check it. A seed never reaches the
+ * model without this check, and its parts are limited to the slug charset by
+ * the contract.
+ */
+async function assertSeedNamesAPaper(schoolId: string, seed: NonNullable<AssistantMessageSeed>) {
+  try {
+    await resolvePaperScope(db, { schoolId, sessionId: seed.sessionId, examSlug: seed.examSlug, classId: seed.classId, subjectSlug: seed.subjectSlug, modeSlug: seed.modeSlug });
+  } catch (error) {
+    if (error instanceof ORPCError && (error.code === 'NOT_FOUND' || error.code === 'BAD_REQUEST')) {
+      throw new ORPCError('BAD_REQUEST', { message: 'The question paper this chat was started from was not found. Start a new chat from the Question paper screen.' });
+    }
+    throw error;
+  }
+}
 
 const os = implement(assistantContract).$context<AssistantRequestContext>();
 
@@ -270,6 +291,8 @@ export const assistantRouter = os.router({
     }
 
     await assertUseAccess(context, input.schoolId);
+    // The seed is written into the model's context: it must name a paper that exists in this school (not free text).
+    if (input.seed) await assertSeedNamesAPaper(input.schoolId, input.seed);
     const status = providerAvailability();
     if (!status.configured) {
       throw new ORPCError('PRECONDITION_FAILED', {

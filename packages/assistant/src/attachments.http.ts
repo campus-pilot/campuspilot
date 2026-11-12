@@ -13,7 +13,7 @@ import { env } from '@campuspilot/env/server';
 import { and, eq } from 'drizzle-orm';
 
 import { assertCanSee, assertCanUse, loadAssistantAccess } from './access';
-import { createAttachment } from './attachments';
+import { createAttachment, deleteUnsentAttachment } from './attachments';
 import { db } from './db';
 import { resolveAssistantSession, type AssistantSession } from './session';
 
@@ -109,6 +109,36 @@ export async function handleAssistantAttachmentRead(
       status: 302,
       headers: { Location: url, 'Cache-Control': `private, max-age=${QUESTION_PAPER_IMAGE_CACHE_SECONDS}` },
     });
+  } catch (error) {
+    reportError?.(error);
+    return rpcErrorResponse(error);
+  }
+}
+
+/**
+ * Removes one image the caller attached but has not sent (the composer's
+ * remove button; the 40 unsent images a user may hold count until then).
+ * Origin, browser session and the right to see the assistant are checked like
+ * a read, not like an upload: taking an image back must still work for a
+ * school over its monthly limit. Only the owner's own unsent image goes; one
+ * already sent is a CONFLICT, and one that is not there answers
+ * `{ deleted: false }`.
+ */
+export async function handleAssistantAttachmentDelete(
+  request: Request,
+  input: { schoolId: string; attachmentId: string },
+  reportError?: HttpErrorReporter,
+): Promise<Response> {
+  try {
+    assertAllowedOrigin(request);
+    const session = await requireSession(request.headers);
+    assertCanSee(await loadAssistantAccess(session, input.schoolId));
+    const result = await deleteUnsentAttachment(db, {
+      schoolId: input.schoolId,
+      userId: session.user.id,
+      attachmentId: input.attachmentId,
+    });
+    return Response.json(result, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
     reportError?.(error);
     return rpcErrorResponse(error);

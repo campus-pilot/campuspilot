@@ -19,7 +19,7 @@ import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 
 import { loadAssistantAccess, type AssistantAccessDecision } from './access';
 import { db } from './db';
-import { sweepUnsentAttachments } from './attachments';
+import { createAttachment, deleteUnsentAttachment, sweepUnsentAttachments } from './attachments';
 import { configureDispatcher } from './dispatch';
 import { generateId } from './ids';
 import { assistantRouter } from './router';
@@ -53,8 +53,31 @@ vi.mock('@campuspilot/api/assistant/token', () => ({
   }),
 }));
 /** Object storage is not part of this test project; attachment rows are enough for the router. */
-const storage = vi.hoisted(() => ({ deleted: [] as string[] }));
+const storage = vi.hoisted(() => ({ deleted: [] as string[], failing: false }));
+/** The paper a seed names exists only when its session id is `ss` (the real lookup is tested with the question paper procedures). */
+vi.mock('@campuspilot/api/routers/school/question-paper/question-paper.scope', () => ({
+  resolvePaperScope: vi.fn(async (_db: unknown, key: { sessionId: string }) => {
+    if (key.sessionId !== 'ss') {
+      const { ORPCError } = await import('@orpc/server');
+      throw new ORPCError('NOT_FOUND', { message: 'School session was not found.' });
+    }
+    return {};
+  }),
+}));
+vi.mock('@campuspilot/api/files/image-derivative', () => ({
+  makeImageDerivatives: vi.fn(async () => ({
+    status: 'ready',
+    width: 1,
+    height: 1,
+    model: { bytes: Buffer.from('m'), contentType: 'image/jpeg' },
+    thumb: { bytes: Buffer.from('t'), contentType: 'image/jpeg' },
+  })),
+}));
 vi.mock('@campuspilot/api/routers/school/question-paper/question-paper.storage', () => ({
+  deleteObjects: vi.fn(async (keys: Array<string | null>) => {
+    if (storage.failing) throw new Error('storage down');
+    storage.deleted.push(...keys.filter((key): key is string => Boolean(key)));
+  }),
   deleteObjectsBestEffort: vi.fn(async (keys: Array<string | null>) => {
     storage.deleted.push(...keys.filter((key): key is string => Boolean(key)));
   }),
@@ -698,6 +721,14 @@ describe('images attached to a message', () => {
     expect(sent.item.body.seed).toEqual(seed);
   });
 
+  it('refuses a seed that names no paper of the school, before anything is saved', async () => {
+    const owner = await newOwner();
+    const before = await list(owner);
+    const seed = { kind: 'question_paper', sessionId: 'other', examSlug: 'half-yearly', classId: 'cl', subjectSlug: 'science', modeSlug: 'theory' };
+    await expect(startConversation(owner, { text: 'x', seed })).rejects.toMatchObject({ code: 'BAD_REQUEST', message: expect.stringContaining('was not found') });
+    expect((await list(owner)).pagination.totalItems).toBe(before.pagination.totalItems);
+  });
+
   it('sweeps images never sent after a day, and keeps sent and recent ones', async () => {
     const owner = await newOwner();
     const old = await upload(owner, 'old.jpg', { createdAt: new Date(Date.now() - 25 * 3_600_000) });
@@ -724,5 +755,73 @@ describe('images attached to a message', () => {
 
     expect(await rowOf(id)).toBeUndefined();
     expect(storage.deleted.some((key) => key.includes(id))).toBe(true);
+  });
+
+  it('removes an unsent image of its owner with its objects, and nothing that is sent or someone else’s', async () => {
+    const owner = await newOwner();
+    const stranger = await newOwner();
+    const wrong = await upload(owner, 'wrong.jpg');
+    storage.deleted.length = 0;
+    await expect(deleteUnsentAttachment(db, { ...owner, attachmentId: wrong })).resolves.toEqual({ deleted: true });
+    expect(await rowOf(wrong)).toBeUndefined();
+    expect(storage.deleted).toHaveLength(3);
+    // Removing it again, or an image that never existed, is harmless.
+    await expect(deleteUnsentAttachment(db, { ...owner, attachmentId: wrong })).resolves.toEqual({ deleted: false });
+
+    const theirs = await upload(stranger, 'theirs.jpg');
+    await expect(deleteUnsentAttachment(db, { ...owner, attachmentId: theirs })).resolves.toEqual({ deleted: false });
+    expect(await rowOf(theirs)).toBeDefined();
+    // Its own owner can remove it.
+    await expect(deleteUnsentAttachment(db, { schoolId: stranger.schoolId, userId: stranger.userId, attachmentId: theirs })).resolves.toEqual({ deleted: true });
+
+    const sentId = await upload(owner, 'sent.jpg');
+    await startConversation(owner, { text: 'x', attachmentIds: [sentId] });
+    await expect(deleteUnsentAttachment(db, { ...owner, attachmentId: sentId })).rejects.toMatchObject({ code: 'CONFLICT' });
+    expect(await rowOf(sentId)).toBeDefined();
+  });
+
+  it('keeps the row when its objects cannot be deleted, so a later sweep can retry', async () => {
+    const owner = await newOwner();
+    const stuck = await upload(owner, 'stuck.jpg', { createdAt: new Date(Date.now() - 25 * 3_600_000) });
+    storage.failing = true;
+    try {
+      await expect(deleteUnsentAttachment(db, { ...owner, attachmentId: stuck })).rejects.toBeDefined();
+      await sweepUnsentAttachments(db);
+      expect(await rowOf(stuck)).toBeDefined();
+    } finally {
+      storage.failing = false;
+    }
+    await sweepUnsentAttachments(db);
+    expect(await rowOf(stuck)).toBeUndefined();
+  });
+
+  it('retries the objects of a deleted conversation whose cleanup failed', async () => {
+    const owner = await newOwner();
+    const id = await upload(owner, 'bye.jpg');
+    const sent = await startConversation(owner, { text: 'x', attachmentIds: [id] });
+    await setRunStatus({ conversationId: sent.conversation.id, runId: sent.run.id }, 'completed');
+    storage.failing = true;
+    try {
+      await remove({ schoolId: owner.schoolId, conversationId: sent.conversation.id }, owner.userId);
+      expect(await rowOf(id)).toBeDefined();
+    } finally {
+      storage.failing = false;
+    }
+    await sweepUnsentAttachments(db);
+    expect(await rowOf(id)).toBeUndefined();
+  });
+
+  it('frees images left behind by a reload when the user hits the cap, and keeps recent ones', async () => {
+    const owner = await newOwner();
+    const file = { bytes: Buffer.from('jpeg'), contentType: 'image/jpeg', extension: 'jpg', name: 'p.jpg' };
+    const hourAgo = new Date(Date.now() - 2 * 3_600_000);
+    const left = await Promise.all(Array.from({ length: 40 }, (_, index) => upload(owner, `left${index}.jpg`, { createdAt: hourAgo })));
+    await expect(createAttachment(db, { ...owner, file })).resolves.toMatchObject({ fileName: 'p.jpg' });
+    expect(await rowOf(left[0]!)).toBeUndefined();
+
+    // Fresh images belong to an open composer: they are never reclaimed.
+    const busy = await newOwner();
+    await Promise.all(Array.from({ length: 40 }, (_, index) => upload(busy, `open${index}.jpg`)));
+    await expect(createAttachment(db, { ...busy, file })).rejects.toMatchObject({ code: 'BAD_REQUEST', message: expect.stringContaining('waiting to be sent') });
   });
 });

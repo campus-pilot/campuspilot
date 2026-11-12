@@ -1,6 +1,7 @@
 import { db } from '@campuspilot/db';
 import { artifactTable } from '@campuspilot/db/schema/artifact';
-import { examQuestionPaperVersionTable } from '@campuspilot/db/schema/exam-question-paper';
+import { examPlanTable } from '@campuspilot/db/schema/exam';
+import { examQuestionPaperJobTable, examQuestionPaperTable, examQuestionPaperVersionTable } from '@campuspilot/db/schema/exam-question-paper';
 import { QUESTION_PAPER_EXAMPLES } from '@campuspilot/question-paper/examples';
 import { and, eq } from 'drizzle-orm';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -9,7 +10,9 @@ import { expectFeatureDisabled, expectPermissionDenied } from '../../../../test/
 import { createSchoolStaffSession, createTestClient, createTestSchool, setTestSchoolFeature } from '../../../../test/fixtures';
 import { createQuestionPaperWorld, switchAssistantRoles, type QuestionPaperWorld } from '../../../../test/question-paper';
 import { DOCUMENT_CONTEXT_HELP, DOCUMENT_MARKETPLACE } from '../document/document.catalog';
+import { resolvePaperScope } from './question-paper.scope';
 import { QUESTION_PAPER_SLOT_MESSAGE } from './question-paper.slot';
+import { renderStoredVersionHtml } from './question-paper.version.service';
 
 const ENGLISH_SCIENCE = QUESTION_PAPER_EXAMPLES[1];
 const CUSTOM = '<header style="direction:{{questionPaper.direction}}"><h1>CUSTOM HEADER {{exam.name}}</h1></header>{{{questionPaper.bodyHtml}}}<footer style="position:fixed;bottom:0;left:0;right:0">CUSTOM FOOTER</footer>';
@@ -112,6 +115,31 @@ describe('question paper in the document system', () => {
       expect(invalid.errors.length).toBeGreaterThan(0);
     });
 
+    it('keeps the maximum marks a version was saved with when the plan changes later (preview and restored PDF)', async () => {
+      const own = await createQuestionPaperWorld();
+      const manager = own.people.manager.client.school;
+      const ownScope = { schoolId: own.schoolId, documentType: 'question_paper' as const };
+      const current = await manager.getActiveDocumentTemplate(ownScope);
+      await manager.saveDocumentTemplate({ ...ownScope, name: 'Marks paper', content: '<h1>OUT OF {{questionPaper.maxMarks}}</h1>{{{questionPaper.bodyHtml}}}', pageSize: 'full', expectedRevisionId: current!.artifact.id });
+      const k = own.key();
+      const v1 = await manager.saveQuestionPaperVersion({ ...k, expectedVersionNo: 0, content: ENGLISH_SCIENCE as never });
+      expect(v1.planMaxMarks).toBe(20);
+      await db
+        .update(examPlanTable)
+        .set({ modeConfig: { theory: { percentage: 100, maxMarks: 100 } }, totalMarks: 100 })
+        .where(and(eq(examPlanTable.sessionId, own.sessionId), eq(examPlanTable.classId, own.classId), eq(examPlanTable.subjectSlug, 'science')));
+      expect((await manager.getQuestionPaperPreview({ ...k, versionNo: 1 })).html).toContain('OUT OF 20');
+      // A draft is judged against the plan as it is now.
+      expect((await manager.previewQuestionPaperDraft({ ...k, content: ENGLISH_SCIENCE as never })).html).toContain('OUT OF 100');
+
+      const [row] = await db.select().from(examQuestionPaperVersionTable).where(eq(examQuestionPaperVersionTable.paperId, v1.paperId));
+      await db.delete(artifactTable).where(eq(artifactTable.id, row!.pdfArtifactId!));
+      const { url } = await manager.getQuestionPaperDownload({ ...k, versionNo: 1 });
+      expect((await fetch(url)).status).toBe(200);
+      const { html } = await renderStoredVersionHtml(db, await resolvePaperScope(db, k), (await db.select().from(examQuestionPaperVersionTable).where(eq(examQuestionPaperVersionTable.id, row!.id)))[0]!);
+      expect(html).toContain('OUT OF 20');
+    });
+
     it('restores a deleted PDF from the content and the pinned template when it is downloaded', async () => {
       const manager = world.people.manager.client.school;
       const k = world.key({ subjectSlug: 'math', modeSlug: 'practical' });
@@ -188,6 +216,23 @@ describe('question paper in the document system', () => {
       expect(practical.warningCount).toBeGreaterThanOrEqual(1);
       // Nothing was uploaded or saved for it yet.
       expect(class8.subjects[1]!.modes[0]!.paper).toBeNull();
+    });
+
+    it('shows a failed AI job only until a version is saved after it', async () => {
+      const own = await createQuestionPaperWorld();
+      const manager = own.people.manager.client.school;
+      const input = { schoolId: own.schoolId, sessionId: own.sessionId, examSlug: 'term-1', classId: own.classId };
+      const k = own.key();
+      const saved = async () => (await manager.listQuestionPapers(input)).classes[0]!.subjects.find((subject) => subject.subjectSlug === 'science')!.modes[0]!.paper!;
+      // A paper row with a failed job and no version yet.
+      const [paper] = await db.insert(examQuestionPaperTable).values({ ...k, createdBy: own.people.manager.userId }).returning();
+      await db.insert(examQuestionPaperJobTable).values({
+        paperId: paper!.id, schoolId: own.schoolId, requestedBy: own.people.manager.userId, pageIds: [], pageRevision: 0,
+        status: 'failed', errorCode: 'model_error', errorMessage: 'The AI service failed. Try again.', completedAt: new Date(Date.now() - 60_000),
+      });
+      expect((await saved()).lastJobFailure).toMatchObject({ errorCode: 'model_error' });
+      await manager.saveQuestionPaperVersion({ ...k, expectedVersionNo: 0, content: ENGLISH_SCIENCE as never });
+      expect((await saved()).lastJobFailure).toBeNull();
     });
   });
 });

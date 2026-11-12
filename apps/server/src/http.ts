@@ -6,6 +6,7 @@ import {
   createOAuthContext,
 } from '@campuspilot/api/context';
 import {
+  handleAssistantAttachmentDelete,
   handleAssistantAttachmentRead,
   handleAssistantAttachmentUpload,
 } from '@campuspilot/assistant/attachments.http';
@@ -257,15 +258,18 @@ app.delete('/api/blob/schools/:schoolId/admissions/:admissionId/documents/:fileI
 });
 
 /**
- * Question paper page photos. Each client IP may upload 30 pages a minute (a
- * 20 page paper plus retries); the photo itself is capped at 15 MiB by the
- * handler. Reads are not limited here: they are permissioned redirects.
+ * Question paper page photos. Each client IP may upload 120 pages a minute: a
+ * school usually shares one public IP, so several teachers uploading 20 page
+ * papers at once must not starve each other. The limit is not what protects
+ * the server from heavy photos: the handler caps a photo at 15 MiB and 40
+ * megapixels and the decoder runs two photos at a time per process. Reads are
+ * not limited here: they are permissioned redirects.
  */
 const QUESTION_PAPER_PAGES_PATH =
   '/api/blob/schools/:schoolId/sessions/:sessionId/exams/:examSlug/classes/:classId/question-papers/:subjectSlug/:modeSlug/pages';
 const questionPaperUploadRateLimit = createRateLimit({
   id: 'question-paper-upload',
-  limit: 30,
+  limit: 120,
   windowMs: 60_000,
 });
 
@@ -348,6 +352,16 @@ app.post(ASSISTANT_ATTACHMENTS_PATH, assistantAttachmentUploadRateLimit, (contex
   const schoolId = context.req.param('schoolId');
   return handleAssistantAttachmentUpload(context.req.raw, schoolId, (error) =>
     reportUploadError(context.var.logger, 'assistant.attachment.upload.error', { schoolId }, error),
+  );
+});
+
+app.delete(`${ASSISTANT_ATTACHMENTS_PATH}/:attachmentId`, (context) => {
+  const input = {
+    schoolId: context.req.param('schoolId'),
+    attachmentId: context.req.param('attachmentId'),
+  };
+  return handleAssistantAttachmentDelete(context.req.raw, input, (error) =>
+    reportUploadError(context.var.logger, 'assistant.attachment.delete.error', input, error),
   );
 });
 

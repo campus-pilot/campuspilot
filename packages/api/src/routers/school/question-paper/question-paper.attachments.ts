@@ -62,6 +62,13 @@ async function usableAttachments(
   return new Map(rows.map((row) => [row.id, row]));
 }
 
+/**
+ * The object a figure is made from: the attachment's 1800 px model copy when
+ * it has one (already upright and flattened, so a preview does not decode a
+ * 40 megapixel original again), else the original.
+ */
+const figureSourceKey = (row: UsableRow) => row.modelS3Key ?? row.s3Key;
+
 /** Why an `asat_` figure id cannot be used, or null when it can. */
 export async function attachmentFigureProblems(
   db: DatabaseExecutor,
@@ -94,7 +101,7 @@ export async function loadAttachmentFigureAssets(
   const rows = await usableAttachments(db, { schoolId: input.schoolId, chatUserId: input.chatUserId!, ids: input.ids });
   const assets = new Map<string, { dataUri: string }>();
   for (const id of input.ids) {
-    const figure = await normalizeFigureImage(await getObjectBytes(rows.get(id)!.s3Key));
+    const figure = await normalizeFigureImage(await getObjectBytes(figureSourceKey(rows.get(id)!)));
     assets.set(id, { dataUri: `data:${figure.contentType};base64,${figure.bytes.toString('base64')}` });
   }
   return assets;
@@ -132,7 +139,7 @@ export async function convertAttachmentFigures(
     const figure = await addQuestionPaperFigure(db, {
       scope: input.scope,
       userId: input.userId,
-      bytes: await getObjectBytes(row.s3Key),
+      bytes: await getObjectBytes(figureSourceKey(row)),
       sourceAttachmentId: id,
     });
     figureIdOf.set(id, figure.id);

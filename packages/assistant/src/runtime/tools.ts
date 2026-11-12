@@ -234,7 +234,7 @@ export async function callTool(
     ok: true,
     text,
     modelContent: forModel.truncated
-      ? `${forModel.text}\n[Result truncated; request a narrower page or filter.]`
+      ? `${forModel.text}\n[Result truncated: showing the first ${(tool.outputChars ?? MODEL_OUTPUT_LIMIT).toLocaleString('en-US')} of ${text.length.toLocaleString('en-US')} characters; request a narrower page or filter.]`
       : forModel.text,
     storedOutput: stored.text,
     outputTruncated: stored.truncated,

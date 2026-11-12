@@ -18,7 +18,7 @@ import { toast } from '@campuspilot/ui/lib/toast';
 import { ConfirmationDialog } from '@campuspilot/components/confirmation-dialog';
 import { cellStatus } from '@campuspilot/components/question-paper/question-paper-model';
 import { RequirePermissions } from '@/components/require-permissions';
-import { LoadingExam, Notice, ReadError } from '@/components/exam/exam-common';
+import { DirtyGuard, LoadingExam, Notice, ReadError } from '@/components/exam/exam-common';
 import { questionPaperHref } from '@/components/exam/exam-model';
 import { orpc } from '@/lib/orpc';
 import {
@@ -29,13 +29,16 @@ import {
   resolveSection,
   resolveVersionNo,
   SECTION_LABELS,
+  uploadsInFlight,
   type QuestionPaperScope,
   type QuestionPaperSection,
 } from './question-paper-model';
+import { QuestionPaperAssistantGate } from './question-paper-assistant-gate';
 import { QuestionPaperPagesSection } from './question-paper-pages-section';
 import { QuestionPaperResultSection } from './question-paper-result-section';
 import { QuestionPaperTemplateAlert } from './question-paper-template-alert';
 import { QuestionPaperVersionsSection } from './question-paper-versions-section';
+import { usePageUploads, type PageUploads } from './use-page-uploads';
 import {
   useCanManageQuestionPaper,
   useDownloadQuestionPaper,
@@ -57,7 +60,9 @@ export function QuestionPaperWorkspace({ scope }: { scope: QuestionPaperScope })
       fallback={<Notice>Question papers of this class are unavailable for your account.</Notice>}
       pending={<LoadingExam />}
     >
-      <WorkspaceData scope={scope} />
+      <QuestionPaperAssistantGate schoolId={scope.schoolId}>
+        <WorkspaceData scope={scope} />
+      </QuestionPaperAssistantGate>
     </RequirePermissions>
   );
 }
@@ -77,6 +82,15 @@ function WorkspaceData({ scope }: { scope: QuestionPaperScope }) {
   );
 }
 
+/** The last AI failure, until a version is saved after it (the paper was then fixed another way, for example in chat). */
+function currentJobFailure(detail: QuestionPaperDetail) {
+  const last = detail.lastFinishedJob;
+  const newest = detail.versions[0];
+  if (last?.status !== 'failed' || !last.errorCode) return null;
+  if (newest && newest.createdAt >= last.completedAt) return null;
+  return { errorCode: last.errorCode, message: last.errorMessage ?? 'AI generation failed.' };
+}
+
 function PaperHeading({ detail }: { detail: QuestionPaperDetail }) {
   const { paper } = detail;
   const status = cellStatus({
@@ -86,7 +100,7 @@ function PaperHeading({ detail }: { detail: QuestionPaperDetail }) {
     planMaxMarks: paper.planMaxMarks,
     warningCount: detail.versions[0]?.warningCount ?? 0,
     activeJob: inFlightJob(detail.activeJob),
-    lastJobFailure: null,
+    lastJobFailure: currentJobFailure(detail),
   });
   return (
     <div className="flex min-w-0 flex-col gap-1">
@@ -176,8 +190,22 @@ function SectionTabs({ section, onSelect }: { section: QuestionPaperSection; onS
   );
 }
 
+/** Leaving the paper (a link, back, reload) while photos are still on their way asks first. */
+function UploadsGuard({ uploads }: { uploads: PageUploads }) {
+  return (
+    <uploads.form.Subscribe selector={(state) => uploadsInFlight(state.values.items) > 0}>
+      {(uploading) => (
+        <DirtyGuard dirty={uploading} description="Photos are still uploading. The ones not stored yet will be lost." />
+      )}
+    </uploads.form.Subscribe>
+  );
+}
+
 function PaperLayout({ scope, detail, canManage }: { scope: QuestionPaperScope; detail: QuestionPaperDetail; canManage: boolean }) {
   const router = useRouter();
+  const refresh = useRefreshQuestionPaper(scope);
+  // The upload queue is owned here, above the sections: switching section keeps uploads, their order and their slot count.
+  const uploads = usePageUploads({ pageKey: scope, refresh });
   const pathname = usePathname();
   const search = useSearchParams();
   const hasVersion = detail.paper.latestVersionNo > 0;
@@ -189,7 +217,7 @@ function PaperLayout({ scope, detail, canManage }: { scope: QuestionPaperScope; 
     router.replace(`${pathname}?${params.toString()}`, { scroll: false });
   };
   let body: ReactNode;
-  if (section === 'pages') body = <QuestionPaperPagesSection scope={scope} detail={detail} canManage={canManage} />;
+  if (section === 'pages') body = <QuestionPaperPagesSection scope={scope} detail={detail} canManage={canManage} uploads={uploads} />;
   else if (section === 'result')
     body = (
       <QuestionPaperResultSection
@@ -209,7 +237,8 @@ function PaperLayout({ scope, detail, canManage }: { scope: QuestionPaperScope; 
       />
     );
   return (
-    <div className="flex min-w-0 flex-col gap-4">
+    <div ref={uploads.rootRef} className="flex min-w-0 flex-col gap-4">
+      <UploadsGuard uploads={uploads} />
       <div className="flex flex-wrap items-start justify-between gap-3">
         <PaperHeading detail={detail} />
         <PaperMenu scope={scope} detail={detail} canManage={canManage} />

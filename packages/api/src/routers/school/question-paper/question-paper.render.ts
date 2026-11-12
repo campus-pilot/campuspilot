@@ -16,7 +16,7 @@ import {
   renderDocument,
 } from '../document/document.render';
 import { readDocumentTemplate } from '../document/document.storage';
-import { getSelectedDocumentTemplate } from '../document/document.selected-template';
+import { getSelectedDocumentTemplate, selectedDocumentTemplateTypes } from '../document/document.selected-template';
 import { isAttachmentFigureId, loadAttachmentFigureAssets } from './question-paper.attachments';
 import type { QuestionPaperContext } from './question-paper.context';
 import { createMathRenderer, type MathRenderer } from './question-paper.math';
@@ -178,6 +178,15 @@ export async function selectedQuestionPaperTemplate(db: DatabaseExecutor, school
     if (error instanceof ORPCError && error.status === 404) return null;
     throw error;
   }
+}
+
+/**
+ * Whether the school has a selected question paper template, without reading
+ * the template from storage (the detail screen polls this while a job runs
+ * and only needs the fact).
+ */
+export async function hasSelectedQuestionPaperTemplate(db: DatabaseExecutor, schoolId: string): Promise<boolean> {
+  return (await selectedDocumentTemplateTypes(db, schoolId, ['question_paper'])).has('question_paper');
 }
 
 let exampleBody: RenderedBody | undefined;

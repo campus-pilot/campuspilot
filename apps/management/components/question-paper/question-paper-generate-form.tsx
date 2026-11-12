@@ -29,6 +29,7 @@ export function QuestionPaperGenerateForm({
   pageCount,
   templateConfigured,
   blockedReason,
+  uploading,
 }: {
   scope: QuestionPaperScope;
   expectedPageRevision: number;
@@ -36,6 +37,8 @@ export function QuestionPaperGenerateForm({
   templateConfigured: boolean;
   /** Why changing the paper is closed (exam ended, no permission, job running), or null. */
   blockedReason: string | null;
+  /** Photos are still being prepared or uploaded (the queue lives above this form, so it survives leaving the Pages section). */
+  uploading: boolean;
 }) {
   const refresh = useRefreshQuestionPaper(scope);
   const start = useMutation(orpc.school.startQuestionPaperGeneration.mutationOptions());
@@ -54,7 +57,7 @@ export function QuestionPaperGenerateForm({
       await refresh();
     },
   });
-  const reason = generateBlockedReason({ pageCount, templateConfigured, blockedReason });
+  const reason = generateBlockedReason({ pageCount, templateConfigured, blockedReason, uploading });
   const failure = start.error && !isConflict(start.error) ? requestErrorMessage(start.error, 'The generation could not be started.') : null;
   return (
     <form

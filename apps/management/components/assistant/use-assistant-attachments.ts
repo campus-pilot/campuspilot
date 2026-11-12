@@ -2,7 +2,7 @@
 
 import type { AssistantAttachmentRef } from '@campuspilot/assistant-contract/attachments';
 
-import { assistantAttachmentThumbUrl, uploadAssistantAttachment } from '@/lib/assistant-attachments';
+import { assistantAttachmentThumbUrl, deleteAssistantAttachment, uploadAssistantAttachment } from '@/lib/assistant-attachments';
 import { prepareUploadFile } from '@/components/question-paper/prepare-upload-file';
 
 /**
@@ -19,5 +19,6 @@ export function useAssistantAttachmentUpload(schoolId: string) {
       const ref = await uploadAssistantAttachment(schoolId, prepared.file);
       return { ref, previewUrl: ref.previewable ? assistantAttachmentThumbUrl(schoolId, ref.id) : null };
     },
+    remove: (ref: AssistantAttachmentRef) => deleteAssistantAttachment(schoolId, ref.id),
   };
 }

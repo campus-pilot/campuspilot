@@ -265,7 +265,13 @@ the implementation and APIs in more detail.
   a conflict reloads and toasts "Someone changed the pages; reloaded."
 - Uploads are strictly sequential in the order chosen (the server numbers pages
   when stored). HEIC is redrawn to JPEG on a canvas where the browser can,
-  otherwise the original is uploaded. The upload queue is TanStack Form state.
+  otherwise the original is uploaded. The upload queue is TanStack Form state owned by
+  the workspace layout (`usePageUploads` in `PaperLayout`), above the sections, so
+  switching section keeps it; leaving the paper while photos upload asks first
+  (`DirtyGuard`). Generate with AI is closed while photos upload. A failed photo does
+  not stop the chain, so its message says it is not in the paper and must be added again.
+- The Question paper screens are wrapped in `QuestionPaperAssistantGate`
+  (`useAssistantGate`): a typed address with the assistant closed shows a notice.
 - Generation status comes from polling `getQuestionPaperDetail` (`refetchInterval`
   callback, 3 s while a job is active). Failed jobs show the stored safe
   `errorMessage`, never developer detail.

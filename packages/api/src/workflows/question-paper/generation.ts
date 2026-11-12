@@ -8,13 +8,13 @@ import { and, eq, inArray, sql } from 'drizzle-orm';
 
 import { resolveAssistantAccess } from '../../assistant/access';
 import type { PaperKey } from '../../routers/school/question-paper/question-paper.dto';
-import { selectedQuestionPaperTemplate } from '../../routers/school/question-paper/question-paper.render';
-import { assertPaperWritable, resolvePaperScope, type PaperScope } from '../../routers/school/question-paper/question-paper.scope';
+import { hasSelectedQuestionPaperTemplate } from '../../routers/school/question-paper/question-paper.render';
+import { assertPaperWritable, isPaperLockedError, resolvePaperScope, type PaperScope } from '../../routers/school/question-paper/question-paper.scope';
 import { unreadablePageMessage } from '../../routers/school/question-paper/question-paper.service';
 import { getObjectBytes } from '../../routers/school/question-paper/question-paper.storage';
 import { checkQuestionPaperDraft, saveQuestionPaperVersion } from '../../routers/school/question-paper/question-paper.version.service';
 import { QUESTION_PAPER_JOB_FAILURES, type QuestionPaperJobErrorCode } from './constants';
-import { questionPaperRequestKey, recordQuestionPaperRequest } from './cost';
+import { nextQuestionPaperRequestKey, recordQuestionPaperRequest } from './cost';
 import type { QuestionPaperJobInput } from './input';
 import { log } from './log';
 import { getQuestionPaperModel, type QuestionPaperModel, type StructuredPart, type StructuredResult } from './model';
@@ -300,7 +300,7 @@ async function planInputs(deps: GenerationDeps, begun: BegunJob, model: Question
     if (error instanceof ORPCError) throw new QuestionPaperJobFailure('paper_locked', undefined, `${error.status}: ${error.message}`);
     throw error;
   }
-  if (!(await selectedQuestionPaperTemplate(db, begun.schoolId))) throw new QuestionPaperJobFailure('template_missing');
+  if (!(await hasSelectedQuestionPaperTemplate(db, begun.schoolId))) throw new QuestionPaperJobFailure('template_missing');
 
   const rows = await db
     .select()
@@ -334,8 +334,13 @@ async function planInputs(deps: GenerationDeps, begun: BegunJob, model: Question
 const isMissingObject = (error: unknown) => error instanceof Error && (error.name === 'NoSuchKey' || error.name === 'NotFound');
 
 /**
- * Makes one model request and saves its cost (two journaled steps: the call
- * and then the cost row, so a crash between them still bills exactly once).
+ * Makes one model request (one journaled step). The cost row of every call
+ * the provider billed is saved inside that same step, right after the call
+ * returns, so a result that was paid for is never journaled without its cost.
+ * Only a crash of the worker between the provider's answer and that insert
+ * can lose a cost row, and a re-run of the step (which calls the provider
+ * again and is billed again) saves its own row under the next free key
+ * (`nextQuestionPaperRequestKey`), so a repeated call is counted, not dropped.
  * `parts` is null for the transcription request, whose parts are built from
  * the pages inside the step; the images are never journaled.
  */
@@ -349,21 +354,8 @@ async function runModelRequest(options: {
   n: number;
   parts: StructuredPart[] | null;
 }): Promise<ModelAnswer> {
-  const { deps, run, model, input, begun, n } = options;
-  const answer = await run(`model:${n}`, () => callModel(options), { maxRetryAttempts: 3 });
-  await run(`cost:${n}`, async () => {
-    await recordQuestionPaperRequest(deps.db, {
-      jobId: input.jobId,
-      schoolId: begun.schoolId,
-      userId: begun.requestedBy,
-      requestKey: questionPaperRequestKey(input.jobId, input.attempt, n),
-      model,
-      answeredModel: answer.answeredModel,
-      usage: answer.usage,
-      usageComplete: true,
-    });
-  });
-  return answer;
+  const { run, n } = options;
+  return run(`model:${n}`, () => callModel(options), { maxRetryAttempts: 3 });
 }
 
 async function callModel({
@@ -395,14 +387,14 @@ async function callModel({
     );
 
   for (let attempt = 1; ; attempt += 1) {
+    let result: StructuredResult;
     try {
-      const result = await model.generate({
+      result = await model.generate({
         system: QUESTION_PAPER_JOB_SYSTEM_PROMPT,
         parts: requestParts,
         jsonSchema: questionPaperProviderJsonSchema(),
         maxOutputTokens: deps.maxOutputTokens,
       });
-      return { text: result.text, usage: result.usage, answeredModel: result.answeredModel, refusal: result.refusal, truncated: result.truncated };
     } catch (error) {
       // A request that failed after the provider reported usage is billed:
       // save it under its own attempt key before retrying or failing.
@@ -412,7 +404,7 @@ async function callModel({
           jobId: input.jobId,
           schoolId: begun.schoolId,
           userId: begun.requestedBy,
-          requestKey: questionPaperRequestKey(input.jobId, input.attempt, n, attempt),
+          requestKey: await nextQuestionPaperRequestKey(deps.db, { jobId: input.jobId, attempt: input.attempt, n, finalAnswer: false }),
           model,
           answeredModel: billed.model ?? model.model,
           usage: billed.usage,
@@ -429,6 +421,18 @@ async function callModel({
       }
       throw modelFailure(kind, error);
     }
+    // Outside the try: a failure to save the cost must never be mistaken for a model failure and repeat a billed call.
+    await recordQuestionPaperRequest(deps.db, {
+      jobId: input.jobId,
+      schoolId: begun.schoolId,
+      userId: begun.requestedBy,
+      requestKey: await nextQuestionPaperRequestKey(deps.db, { jobId: input.jobId, attempt: input.attempt, n, finalAnswer: true }),
+      model,
+      answeredModel: result.answeredModel,
+      usage: result.usage,
+      usageComplete: true,
+    });
+    return { text: result.text, usage: result.usage, answeredModel: result.answeredModel, refusal: result.refusal, truncated: result.truncated };
   }
 }
 
@@ -458,7 +462,10 @@ async function savePaper(deps: GenerationDeps, input: QuestionPaperJobInput, beg
     return { versionNo: saved.versionNo };
   } catch (error) {
     if (error instanceof ORPCError && error.code === 'BAD_REQUEST') {
-      throw new QuestionPaperJobFailure(error.message.startsWith('The question paper is not valid') ? 'invalid_output' : 'paper_locked', undefined, error.message);
+      // Three different BAD_REQUESTs reach here: the paper was locked meanwhile (session or exam ended), the document
+      // failed the shared check, or the render refused it (body, figures or formulas too large or too complex).
+      const code = isPaperLockedError(error) ? 'paper_locked' : error.message.startsWith('The question paper is not valid') ? 'invalid_output' : 'paper_unprintable';
+      throw new QuestionPaperJobFailure(code, undefined, error.message);
     }
     if (error instanceof ORPCError && error.code === 'PRECONDITION_FAILED') throw new QuestionPaperJobFailure('template_missing', undefined, error.message);
     throw error;

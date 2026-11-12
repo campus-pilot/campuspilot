@@ -159,8 +159,9 @@ export const schoolQuestionPaperRouter = {
     .handler(async ({ context, input }) => {
       try {
         const scope = await resolvePaperScope(context.db, input);
-        // Attachments of the chat user are valid figures only inside the in-app assistant.
-        const chatUserId = context.principal.authMethod === 'assistant' ? userId(context) : undefined;
+        // Attachments of the chat user are valid figures inside the in-app assistant and when that same person's browser
+        // session re-checks a draft card (the same rule as previewQuestionPaperDraft); never for API keys or OAuth clients.
+        const chatUserId = context.principal.authMethod === 'assistant' || context.principal.authMethod === 'session' ? userId(context) : undefined;
         const checked = await checkQuestionPaperDraft(context.db, scope, input.content, { chatUserId });
         if (!checked.ok) {
           return { valid: false, errors: checked.errors, warnings: [], total: null, planMaxMarks: scope.planMaxMarks, draftId: null, placeholderFigures: 0, characters: JSON.stringify(input.content).length };

@@ -120,16 +120,22 @@ describe('AssistantComposer images', () => {
   });
   const jpeg = (name: string) => new File(['12345'], name, { type: 'image/jpeg' });
 
-  function renderComposer(props: Partial<React.ComponentProps<typeof AssistantComposer>> & { upload?: (file: File) => Promise<ReturnType<typeof stored>> }) {
-    const { upload = async (f: File) => stored(f.name), ...rest } = props;
+  function renderComposer(
+    props: Partial<React.ComponentProps<typeof AssistantComposer>> & {
+      upload?: (file: File) => Promise<ReturnType<typeof stored>>;
+      remove?: (ref: { id: string }) => Promise<void>;
+    },
+  ) {
+    const { upload = async (f: File) => stored(f.name), remove: removeStored = async () => {}, ...rest } = props;
     const onNotice = vi.fn();
     const onSend = vi.fn(async () => {});
+    const remove = vi.fn(removeStored);
     render(
       <TooltipProvider>
-        <AssistantComposer onSend={onSend} attachments={{ upload, onNotice }} {...rest} />
+        <AssistantComposer onSend={onSend} attachments={{ upload, remove, onNotice }} {...rest} />
       </TooltipProvider>,
     );
-    return { onSend, onNotice, input: screen.getByLabelText('Attach images', { selector: 'input' }) as HTMLInputElement };
+    return { onSend, onNotice, remove, input: screen.getByLabelText('Attach images', { selector: 'input' }) as HTMLInputElement };
   }
 
   it('has no paperclip unless attachments are switched on', () => {
@@ -194,5 +200,34 @@ describe('AssistantComposer images', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
     await screen.findByText('Offline');
     expect(screen.getByRole('list', { name: 'Attached images' })).toBeTruthy();
+  });
+
+  it('deletes a stored image from the server when the user removes it, and tells once if that fails', async () => {
+    const { input, remove, onNotice } = renderComposer({ remove: async () => Promise.reject(new Error('offline')) });
+    fireEvent.change(input, { target: { files: [jpeg('wrong.jpg')] } });
+    await waitFor(() => expect(screen.queryByRole('status', { name: /Uploading/ })).toBeNull());
+    fireEvent.click(screen.getByRole('button', { name: 'Remove wrong.jpg' }));
+    expect(screen.queryByRole('list', { name: 'Attached images' })).toBeNull();
+    await waitFor(() => expect(remove).toHaveBeenCalledWith(expect.objectContaining({ id: 'asat_wrong.jpg' })));
+    await waitFor(() => expect(onNotice).toHaveBeenCalledWith(expect.stringContaining('could not be removed from the server')));
+  });
+
+  it('deletes an upload that finishes after its tile was removed, so it never counts against the cap', async () => {
+    let finish!: (value: ReturnType<typeof stored>) => void;
+    const { input, remove } = renderComposer({ upload: () => new Promise((resolve) => (finish = resolve)) });
+    fireEvent.change(input, { target: { files: [jpeg('late.jpg')] } });
+    await screen.findByRole('status', { name: 'Uploading late.jpg' });
+    fireEvent.click(screen.getByRole('button', { name: 'Remove late.jpg' }));
+    expect(remove).not.toHaveBeenCalled();
+    finish(stored('late.jpg'));
+    await waitFor(() => expect(remove).toHaveBeenCalledWith(expect.objectContaining({ id: 'asat_late.jpg' })));
+  });
+
+  it('does not call the server for an image that failed to upload (nothing is stored)', async () => {
+    const { input, remove } = renderComposer({ upload: async () => Promise.reject(new Error('Not an image')) });
+    fireEvent.change(input, { target: { files: [jpeg('bad.jpg')] } });
+    await screen.findByRole('img', { name: 'Not an image' });
+    fireEvent.click(screen.getByRole('button', { name: 'Remove bad.jpg' }));
+    expect(remove).not.toHaveBeenCalled();
   });
 });

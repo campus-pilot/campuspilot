@@ -204,6 +204,7 @@ describe('renderQuestionPaperBodyHtml: math', () => {
 
   it('prints the TeX and reports it when a formula cannot be typeset at print time', () => {
     const failing: MathRenderer = {
+      renderedBytes: () => 0,
       render() {
         throw new Error('KaTeX parse error: Undefined control sequence: \\bad');
       },
@@ -230,6 +231,14 @@ describe('KaTeX validation and configuration', () => {
     const issues = validatePaperMath(content);
     expect(issues.map((issue) => issue.path)).toEqual(['sections[0].questions[0].text[3]', 'sections[0].questions[0].text[4]']);
     expect(issues[0]!.message).toMatch(/^Invalid TeX: Undefined control sequence/);
+  });
+
+  it('totals the HTML bytes of every printed formula, a repeated one each time', () => {
+    const math = createMathRenderer();
+    expect(math.renderedBytes()).toBe(0);
+    const once = math.render('\\frac{a}{b}', false).length;
+    math.render('\\frac{a}{b}', false);
+    expect(math.renderedBytes()).toBe(once * 2);
   });
 
   it('does not trust the TeX: no links, no raw HTML, no macro definitions that run away', () => {

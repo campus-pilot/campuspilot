@@ -63,7 +63,8 @@ export function createConfiguredApp() {
       }
       return allowedOrigins.has(origin) ? origin : null;
     },
-    allowMethods: ['GET', 'POST', 'OPTIONS'],
+    // DELETE: the composer removes an unsent chat image (and admission documents are deleted) from the management origin.
+    allowMethods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
     allowHeaders: ['Content-Type', 'Authorization', 'X-API-Key', 'x-api-key'],
     credentials: true,
   });

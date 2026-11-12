@@ -29,8 +29,15 @@ import type { AttachmentFile, ModelProvider, TranscriptEntry } from './providers
 export const CONTEXT_FULL_HUMAN_MESSAGES = 2;
 /** Tool results of at least this many characters (about 2,000 tokens) are stubbed once old. */
 export const CONTEXT_TOOL_RESULT_MIN_CHARS = 8_000;
-/** Image bytes one request may carry; providers cap requests at 20-32 MB. */
-export const CONTEXT_IMAGE_BUDGET_BYTES = 18 * 1024 * 1024;
+/**
+ * Image bytes, as sent (base64, 4/3 of the file), one request may carry.
+ * Providers cap the whole request: Gemini's inline limit is 20 MB, Anthropic's
+ * 32 MB. 16 MiB leaves the rest for the system prompt, tools and history.
+ */
+export const CONTEXT_IMAGE_BUDGET_BYTES = 16 * 1024 * 1024;
+
+/** The size an image takes in a request: providers receive it base64 encoded. */
+export const encodedImageBytes = (bytes: number) => Math.ceil((bytes * 4) / 3);
 
 export type ModelContextOptions = {
   fullHumanMessages?: number;
@@ -92,7 +99,7 @@ const markersOf = (entry: TranscriptEntry): AttachmentMarker[] => entry.content.
  */
 export async function buildModelContext(
   entries: readonly TranscriptEntry[],
-  provider: Pick<ModelProvider, 'context' | 'imageMimeTypes'>,
+  provider: Pick<ModelProvider, 'context' | 'imageMimeTypes' | 'maxImageBytes'>,
   deps: ModelContextDeps,
   options: ModelContextOptions = {},
 ): Promise<TranscriptEntry[]> {
@@ -106,11 +113,17 @@ export async function buildModelContext(
   for (let index = entries.length - 1; index >= boundary; index -= 1) {
     for (const marker of markersOf(entries[index]!).reverse()) {
       const loaded = await deps.loadAttachment(marker.attachmentId, provider.imageMimeTypes);
-      if (loaded.kind === 'image' && loaded.bytes.byteLength > remaining) {
+      if (loaded.kind === 'image' && provider.maxImageBytes !== undefined && loaded.bytes.byteLength > provider.maxImageBytes) {
+        // One image over the provider's own cap would fail every request of the run: say so instead.
+        files.set(marker.attachmentId, { kind: 'unreadable' });
+        continue;
+      }
+      const cost = loaded.kind === 'image' ? encodedImageBytes(loaded.bytes.byteLength) : 0;
+      if (cost > remaining) {
         files.set(marker.attachmentId, { kind: 'omitted' });
         continue;
       }
-      if (loaded.kind === 'image') remaining -= loaded.bytes.byteLength;
+      remaining -= cost;
       files.set(marker.attachmentId, loaded);
     }
   }

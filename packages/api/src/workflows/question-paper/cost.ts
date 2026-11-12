@@ -6,14 +6,39 @@ import { eq, sql } from 'drizzle-orm';
 import type { ModelUsage, QuestionPaperModel } from './model';
 
 /**
- * The idempotency key of a model request of one attempt of a job. `n` is the
- * request's place in the job (1 the transcription, 2 the repair); a billed
- * attempt that failed and was retried adds `:attempt:{k}`. A step replayed by
- * Restate computes the same key and so saves nothing a second time.
+ * The base key of the model requests of one attempt of a job. `n` is the
+ * request's place in the job (1 the transcription, 2 the repair). The first
+ * answered call is saved under the base key; every other billed call of the
+ * same request (a failed attempt the provider billed, or a call repeated
+ * because Restate re-ran the step after it was billed) adds `:attempt:{k}`.
  */
-export function questionPaperRequestKey(jobId: string, attempt: number, n: number, failedAttempt?: number): string {
+export function questionPaperRequestKey(jobId: string, attempt: number, n: number, extraCall?: number): string {
   const base = `qp:${jobId}.${attempt}:model:${n}`;
-  return failedAttempt === undefined ? base : `${base}:attempt:${failedAttempt}`;
+  return extraCall === undefined ? base : `${base}:attempt:${extraCall}`;
+}
+
+/**
+ * The key for the next billed call of a request, derived from the rows
+ * already saved for the job (never from an in-memory counter, which restarts
+ * when Restate re-runs the model step). Each provider call that reports usage
+ * is billed, so each gets its own key: a final answer takes the base key when
+ * it is free; every other billed call takes the next `:attempt:{k}`. A replay
+ * of the whole step therefore adds a row instead of being dropped as a
+ * duplicate. Calls of one request are sequential, so the count is exact.
+ */
+export async function nextQuestionPaperRequestKey(
+  db: DatabaseExecutor,
+  input: { jobId: string; attempt: number; n: number; finalAnswer: boolean },
+): Promise<string> {
+  const base = questionPaperRequestKey(input.jobId, input.attempt, input.n);
+  const rows = await db
+    .select({ key: assistantModelRequestTable.requestKey })
+    .from(assistantModelRequestTable)
+    .where(eq(assistantModelRequestTable.questionPaperJobId, input.jobId));
+  const keys = rows.map((row) => row.key);
+  if (input.finalAnswer && !keys.includes(base)) return base;
+  const extra = keys.filter((key) => key.startsWith(`${base}:attempt:`)).length;
+  return questionPaperRequestKey(input.jobId, input.attempt, input.n, extra + 1);
 }
 
 /**

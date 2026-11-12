@@ -23,11 +23,8 @@ import { and, desc, eq, isNull } from 'drizzle-orm';
 import { rpcError } from '../../../errors';
 import { convertDocumentPdf } from '../document/document.render';
 import { documentDownloadUrl, persistDocumentObject } from '../document/document.storage';
-import { lifecycleWhere } from '../exam/exam.scope';
-import { examLifecycleTable } from '@campuspilot/db/schema/exam';
 import { attachmentFigureIds, attachmentFigureProblems, convertAttachmentFigures, isAttachmentFigureId } from './question-paper.attachments';
 import { buildQuestionPaperContext } from './question-paper.context';
-import type { PaperKey } from './question-paper.dto';
 import { createMathRenderer, validatePaperMath } from './question-paper.math';
 import {
   findPaper,
@@ -37,12 +34,13 @@ import {
   type VersionRow,
 } from './question-paper.records';
 import {
+  QUESTION_PAPER_BODY_MAX_BYTES,
   readPinnedQuestionPaperTemplate,
   renderQuestionPaperBody,
   renderQuestionPaperDocument,
   selectedQuestionPaperTemplate,
 } from './question-paper.render';
-import { assertPaperWritable, type PaperScope } from './question-paper.scope';
+import { assertPaperWritable, assertPaperWritableLocked, type PaperScope } from './question-paper.scope';
 
 /** The most validation errors one refusal message lists. */
 const MAX_LISTED_ERRORS = 10;
@@ -130,8 +128,16 @@ export async function checkQuestionPaperDraft(
   const normalized = normalizeQuestionPaper(raw);
   if (!normalized.ok) return { ok: false, errors: normalized.errors };
   const content = normalized.value;
+  const math = createMathRenderer();
+  const mathErrors = validatePaperMath(content, math);
+  // KaTeX HTML is large (tens of KB for one nested formula): count it here so
+  // a draft that validates can also be printed, the same limit the body
+  // render enforces on the whole body.
+  if (mathErrors.length === 0 && math.renderedBytes() > QUESTION_PAPER_BODY_MAX_BYTES) {
+    mathErrors.push({ path: '', message: 'The formulas of this paper are too large to print. Shorten or remove some formulas.' });
+  }
   const errors = [
-    ...validatePaperMath(content, createMathRenderer()),
+    ...mathErrors,
     ...(await figureIssues(db, { schoolId: scope.key.schoolId, paper: await findPaper(db, scope.key), chatUserId: options.chatUserId }, content)),
   ];
   if (errors.length > 0) return { ok: false, errors };
@@ -245,14 +251,6 @@ const savedResult = (version: VersionRow, planMaxMarks: number): SavedVersion =>
   replayed: true,
 });
 
-/** A completed exam's papers are read-only; re-checked under the paper lock, where it cannot race a completion. */
-async function assertExamNotEnded(db: DatabaseExecutor, key: PaperKey) {
-  const [lifecycle] = await db.select({ status: examLifecycleTable.status }).from(examLifecycleTable).where(lifecycleWhere(key)).limit(1);
-  if (lifecycle?.status === 'completed') {
-    throw rpcError.badRequest('This examination has ended, so its question papers can no longer be changed.');
-  }
-}
-
 /**
  * Saves a new immutable version of a paper: the one function behind the agent
  * tool and the AI job, so both validate, render, print and number exactly the
@@ -294,6 +292,13 @@ export async function saveQuestionPaperVersion(
   let checked = await checkQuestionPaperDraft(db, scope, input.content, { chatUserId });
   if (!checked.ok) throw invalidPaperError(checked.errors);
   if (attachmentFigureIds(checked.content).length > 0) {
+    // Refuse a stale expectedVersionNo before anything is copied: a refused save must not leave figure rows behind.
+    if (input.expectedVersionNo !== null) {
+      const latest = (await findPaper(db, scope.key))?.latestVersionNo ?? 0;
+      if (input.expectedVersionNo !== latest) {
+        throw rpcError.conflict(`The paper changed: its latest version is ${latest}, not ${input.expectedVersionNo}. Read it again with getQuestionPaper.`);
+      }
+    }
     // Copy the attachments into the paper and store the version with its own
     // figure ids; the document is checked again as it will be stored.
     checked = await checkQuestionPaperDraft(db, scope, await convertAttachmentFigures(db, { scope, userId: input.userId, content: checked.content }));
@@ -371,8 +376,9 @@ async function renderAndStore(
     },
     pdf,
     async (tx, artifact) => {
+      // Session share lock first, then the paper lock: a completion of the exam cannot slip in between.
+      await assertPaperWritableLocked(tx, scope.key);
       const locked = await lockOrCreatePaper(tx, scope.key, input.userId);
-      await assertExamNotEnded(tx, scope.key);
       if (locked.latestVersionNo !== input.assumedLatest) {
         if (input.expectedVersionNo !== null) {
           throw rpcError.conflict(`The paper changed: its latest version is ${locked.latestVersionNo}, not ${input.expectedVersionNo}. Read it again with getQuestionPaper.`);
@@ -440,9 +446,11 @@ export async function renderStoredVersionHtml(
 ): Promise<{ html: string; templateName: string }> {
   const template = await readPinnedQuestionPaperTemplate(db, scope.key.schoolId, version.templateRevisionId);
   const body = await renderQuestionPaperBody(db, { schoolId: scope.key.schoolId, paperId: version.paperId, content: version.content });
+  // The maximum marks are the saved fact (`plan_max_marks`), not the plan as it is today: an edited plan must not change
+  // an old version's preview or a restored PDF. Class, subject, mode and exam names still come from the live scope.
   const context = await buildQuestionPaperContext(
     db,
-    scope,
+    { ...scope, planMaxMarks: version.planMaxMarks ?? scope.planMaxMarks },
     { content: version.content, versionNo: version.versionNo, totalMarks: version.totalMarks },
     generatedAt,
   );

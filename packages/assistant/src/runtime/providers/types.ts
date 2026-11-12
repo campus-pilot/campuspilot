@@ -180,6 +180,8 @@ export interface ModelProvider {
   readonly id: ModelProviderId;
   /** Media types this provider can read as image input (D46: never silently dropped). */
   readonly imageMimeTypes: readonly string[];
+  /** The largest single image the provider accepts, in bytes before base64; absent when only the request total is limited. */
+  readonly maxImageBytes?: number;
   /**
    * The model this provider is configured to call now. A conversation stays
    * on its provider, not on a model: changing the configured model moves

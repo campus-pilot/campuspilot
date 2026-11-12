@@ -31,7 +31,7 @@ import { Spinner } from '@campuspilot/ui/components/spinner';
 import { TooltipProvider } from '@campuspilot/ui/components/tooltip';
 import { toast } from '@campuspilot/ui/lib/toast';
 import { cn } from '@campuspilot/ui/lib/utils';
-import { useQuery } from '@tanstack/react-query';
+import { skipToken, useQuery } from '@tanstack/react-query';
 import { ClipboardList, RotateCcw, ShieldCheck, UserPlus, UserRoundX } from 'lucide-react';
 import { useRef, type ReactNode } from 'react';
 
@@ -118,12 +118,33 @@ export type AssistantChatProps = {
   onSeedRemoved?: () => void;
 };
 
-/** The chip over the message box: which paper this conversation is about. */
-function SeedChip({ schoolId, seed, onRemove }: { schoolId: string; seed: QuestionPaperSeed; onRemove: () => void }) {
-  const detail = useQuery({ ...orpc.school.getQuestionPaperDetail.queryOptions({ input: { ...seed, schoolId } }), retry: false });
-  const paper = detail.data?.paper;
-  const label = paper ? `${paper.subjectName} (${paper.modeName}), ${paper.className}, ${paper.examName}` : 'Question paper';
+/**
+ * The chip over the message box: which paper this conversation is about.
+ * While the paper loads it says only "Question paper"; when it cannot be read
+ * (a wrong link, no access) it says so and the seed is not sent
+ * (`useSeedPaper`), so the chip never vouches for a paper that was not found.
+ */
+function SeedChip({ paper, failed, onRemove }: { paper: { subjectName: string; modeName: string; className: string; examName: string } | undefined; failed: boolean; onRemove: () => void }) {
+  const label = failed
+    ? 'This question paper could not be opened'
+    : paper
+      ? `${paper.subjectName} (${paper.modeName}), ${paper.className}, ${paper.examName}`
+      : 'Question paper';
   return <AssistantContextChip label={label} onRemove={onRemove} />;
+}
+
+/**
+ * Reads the paper a seeded conversation is about. A paper that cannot be read
+ * (not found, or the person may not see it) makes the seed unusable: the
+ * conversation then starts plain, without the seed text in the model's context.
+ */
+function useSeedPaper(schoolId: string, seed: QuestionPaperSeed | null) {
+  const detail = useQuery({
+    ...orpc.school.getQuestionPaperDetail.queryOptions({ input: seed ? { ...seed, schoolId } : skipToken }),
+    retry: false,
+  });
+  const failed = seed !== null && detail.isError;
+  return { paper: detail.data?.paper, failed, usableSeed: failed ? null : seed };
 }
 
 function ReplyRow({
@@ -447,6 +468,7 @@ export function AssistantChat({
   const imageUpload = useAssistantAttachmentUpload(schoolId);
   // The seed only means something for a conversation that has not started.
   const activeSeed = conversationId ? null : seed;
+  const seedPaper = useSeedPaper(schoolId, activeSeed);
   const status = useAssistantStatus(schoolId);
   const { send, resend, isPending: sending } = useSendAssistantMessage(schoolId, surface);
   const stop = useStopAssistantRun();
@@ -486,7 +508,7 @@ export function AssistantChat({
   const requests =
     activeSeed && onSeedRemoved ? (
       <>
-        <SeedChip schoolId={schoolId} seed={activeSeed} onRemove={onSeedRemoved} />
+        <SeedChip paper={seedPaper.paper} failed={seedPaper.failed} onRemove={onSeedRemoved} />
         {tray}
       </>
     ) : (
@@ -500,7 +522,7 @@ export function AssistantChat({
   ) {
     const result = await send(text, conversationId, {
       attachmentIds: attachments.map((attachment) => attachment.id),
-      seed: activeSeed,
+      seed: seedPaper.usableSeed,
     }).catch((error: unknown) => {
       throw new Error(refusalMessage(error) ?? 'The message could not be sent. Check your connection and try again.');
     });
@@ -561,6 +583,8 @@ export function AssistantChat({
           {notLive ? <ConnectionNotice offline={connection.offline} /> : null}
           <div className={welcome ? 'flex flex-col gap-3' : ASSISTANT_LANE_CLASS}>
             <AssistantComposer
+              // Removing the seed's chip remounts the box, so the prefilled sentence goes with it unless the user edited it (then their draft stays).
+              key={activeSeed ? 'seeded' : 'plain'}
               autoFocus={autoFocus}
               disabledReason={disabledReason}
               placeholder={running ? 'Queue a follow-up…' : undefined}
@@ -568,7 +592,7 @@ export function AssistantChat({
               sending={sending}
               lastSentText={lastSentText}
               initialText={initialText}
-              attachments={{ upload: imageUpload.upload, onNotice: (message) => toast.error(message) }}
+              attachments={{ upload: imageUpload.upload, remove: imageUpload.remove, onNotice: (message) => toast.error(message) }}
               onDraftChange={saveDraft}
               requests={requests}
               leading={<ComposerToolbar schoolId={schoolId} conversationId={conversationId} />}

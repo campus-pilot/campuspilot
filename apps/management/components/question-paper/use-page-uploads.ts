@@ -7,7 +7,7 @@ import { planUploads, QUESTION_PAPER_MAX_PAGES } from '@campuspilot/components/q
 import type { UploadQueueItem } from '@campuspilot/components/question-paper/upload-queue';
 import { uploadQuestionPaperPage, type QuestionPaperPageKey } from '@/lib/question-paper-pages';
 import { prepareUploadFile } from './prepare-upload-file';
-import { requestErrorMessage, runInOrder } from './question-paper-model';
+import { requestErrorMessage, runInOrder, uploadsInFlight } from './question-paper-model';
 
 const queueSchema = z.object({
   items: z.array(z.object({ id: z.string(), name: z.string(), status: z.enum(['converting', 'uploading', 'error']) }).loose()),
@@ -29,8 +29,13 @@ const PREVIEWABLE = new Set(['image/jpeg', 'image/png', 'image/webp']);
  * A failure stays in the queue with the server's reason until dismissed, and
  * the rest carry on. Closing the tab loses only photos still in flight.
  *
- * `rootRef` revokes the local preview URLs when the section leaves the page.
+ * The hook is called by the paper's layout, above the Pages / Result /
+ * Versions sections, so switching section keeps the queue, its progress and its
+ * slot count (leaving the paper altogether asks first, `DirtyGuard`).
+ * `rootRef` revokes the local preview URLs when the paper leaves the page.
  */
+export type PageUploads = ReturnType<typeof usePageUploads>;
+
 export function usePageUploads({ pageKey, refresh }: { pageKey: QuestionPaperPageKey; refresh: () => Promise<void> }) {
   const form = useForm({
     defaultValues: { items: [] as UploadQueueItem[], rejections: [] as { name: string; reason: string }[] },
@@ -73,12 +78,13 @@ export function usePageUploads({ pageKey, refresh }: { pageKey: QuestionPaperPag
       await refresh();
       remove(entry.id);
     } catch (error) {
-      patch(entry.id, { status: 'error', error: requestErrorMessage(error, 'The upload failed. Try again.') });
+      // The chain carries on, so photos chosen after this one are stored before it is added again: say where it ended up.
+      patch(entry.id, { status: 'error', error: `${requestErrorMessage(error, 'The upload failed.')} This photo is not in the paper. Add it again; photos chosen after it were still added, so drag it into place.` });
     }
   }
 
   /** Photos still on their way count as taken slots, so two quick picks cannot pass 20 together. */
-  const inFlight = () => form.getFieldValue('items').filter((item) => item.status !== 'error').length;
+  const inFlight = () => uploadsInFlight(form.getFieldValue('items'));
 
   function addFiles(files: File[], savedPages: number) {
     const remaining = QUESTION_PAPER_MAX_PAGES - savedPages - inFlight();

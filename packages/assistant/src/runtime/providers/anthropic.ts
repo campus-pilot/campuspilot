@@ -388,6 +388,8 @@ export function createAnthropicProvider({ apiKey, model }: { apiKey: string; mod
     id: 'anthropic',
     model,
     imageMimeTypes: ANTHROPIC_IMAGE_MIME_TYPES,
+    // The API refuses an image over 5 MB; only an undecodable original (no 600 KB JPEG copy) can come near it.
+    maxImageBytes: 5 * 1024 * 1024,
     context: anthropicContext,
     generateStructured: (input) => generateAnthropicStructured(client, model, input),
     async step({ prompt, tools, transcript, onText, isStopRequested }: ModelStepInput): Promise<ModelStepResult> {

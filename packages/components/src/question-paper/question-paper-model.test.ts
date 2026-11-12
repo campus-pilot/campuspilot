@@ -127,6 +127,12 @@ describe('blocked reasons', () => {
     expect(generateBlockedReason({ pageCount: 2, templateConfigured: false, blockedReason: null })).toMatch(/template/);
     expect(generateBlockedReason({ pageCount: 2, templateConfigured: true, blockedReason: null })).toBeNull();
   });
+  it('closes generating while photos upload, after the permission reason and before the page count', () => {
+    expect(generateBlockedReason({ pageCount: 3, templateConfigured: true, blockedReason: null, uploading: true })).toBe('Wait for the photos to finish uploading.');
+    expect(generateBlockedReason({ pageCount: 3, templateConfigured: true, blockedReason: 'Closed.', uploading: true })).toBe('Closed.');
+    expect(generateBlockedReason({ pageCount: 0, templateConfigured: true, blockedReason: null, uploading: true })).toMatch(/finish uploading/);
+    expect(generateBlockedReason({ pageCount: 3, templateConfigured: true, blockedReason: null, uploading: false })).toBeNull();
+  });
 });
 
 describe('formatting', () => {

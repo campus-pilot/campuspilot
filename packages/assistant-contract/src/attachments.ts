@@ -14,6 +14,12 @@ export const ASSISTANT_ATTACHMENT_MAX_BYTES = 15 * 1024 * 1024;
 export const ASSISTANT_UNSENT_ATTACHMENTS_PER_USER = 40;
 /** Hours an attachment that was never sent is kept before the sweep deletes it. */
 export const ASSISTANT_UNSENT_ATTACHMENT_TTL_HOURS = 24;
+/**
+ * An upload that finds the user at the unsent cap first deletes that user's
+ * unsent attachments older than this (images left behind by a reload or a
+ * closed tab), then counts again. Younger ones are an open composer's and stay.
+ */
+export const ASSISTANT_UNSENT_ATTACHMENT_RECLAIM_HOURS = 1;
 /** The multipart field of the upload route (one file per request). */
 export const ASSISTANT_ATTACHMENT_FIELD_NAME = 'file';
 /** Media types the picker offers; the server decides with the file's bytes. */
@@ -38,13 +44,25 @@ export type AssistantAttachmentRef = z.infer<typeof assistantAttachmentRefSchema
  * ("Continue in chat" on a question paper, D31). Natural keys only: no
  * personal data, and permission is decided by the tools when they are used.
  */
+/**
+ * A natural key part of the seed: letters, digits, hyphen and underscore only.
+ * The seed is written into the model's context, so no free text (spaces,
+ * newlines, angle brackets) may pass; the send procedure also checks the key
+ * names a real paper of the school.
+ */
+const seedKeyPart = z
+  .string()
+  .trim()
+  .min(1)
+  .max(120)
+  .regex(/^[A-Za-z0-9_-]+$/, 'Only letters, digits, hyphens and underscores are allowed.');
 export const questionPaperSeedSchema = z.object({
   kind: z.literal('question_paper'),
-  sessionId: z.string().trim().min(1).max(120),
-  examSlug: z.string().trim().min(1).max(120),
-  classId: z.string().trim().min(1).max(120),
-  subjectSlug: z.string().trim().min(1).max(120),
-  modeSlug: z.string().trim().min(1).max(120),
+  sessionId: seedKeyPart,
+  examSlug: seedKeyPart,
+  classId: seedKeyPart,
+  subjectSlug: seedKeyPart,
+  modeSlug: seedKeyPart,
 });
 export const assistantMessageSeedSchema = z.discriminatedUnion('kind', [questionPaperSeedSchema]);
 export type AssistantMessageSeed = z.infer<typeof assistantMessageSeedSchema>;
@@ -77,5 +95,8 @@ export const QUESTION_PAPER_SEED_DRAFT = 'I want to update this question paper: 
 /** The one `/blob` style path of an attachment, relative to the API origin. */
 export const assistantAttachmentUploadPath = (schoolId: string) =>
   `/api/blob/schools/${encodeURIComponent(schoolId)}/assistant/attachments`;
+/** `DELETE` here removes one image the user attached but has not sent yet. */
+export const assistantAttachmentDeletePath = (schoolId: string, attachmentId: string) =>
+  `${assistantAttachmentUploadPath(schoolId)}/${encodeURIComponent(attachmentId)}`;
 export const assistantAttachmentReadPath = (schoolId: string, attachmentId: string, variant: 'thumb' | 'original') =>
   `${assistantAttachmentUploadPath(schoolId)}/${encodeURIComponent(attachmentId)}/${variant}`;

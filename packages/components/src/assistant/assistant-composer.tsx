@@ -160,10 +160,14 @@ export type AssistantComposerProps = {
    * file for the next message and resolves with the stored attachment and the
    * address of its thumbnail (the caller converts HEIC where the browser can,
    * and posts it). `onNotice` hears why picked files were refused. A message
-   * is sent only when no image is still uploading or failed.
+   * is sent only when no image is still uploading or failed. `remove` deletes
+   * a stored image from the server when the user takes it out of the box (an
+   * unsent image counts against the user's cap until it is deleted); it is
+   * also called for an upload that finished after its tile was removed.
    */
   attachments?: {
     upload: (file: File) => Promise<{ ref: AssistantAttachmentRef; previewUrl: string | null }>;
+    remove: (ref: AssistantAttachmentRef) => Promise<void>;
     onNotice: (message: string) => void;
   };
   /** Left side of the toolbar, e.g. the trust cue. */
@@ -251,14 +255,26 @@ export function AssistantComposer({
     const removed = form.getFieldValue('attachments').find((item) => item.localId === localId);
     if (removed?.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(removed.previewUrl);
     form.setFieldValue('attachments', (items) => items.filter((item) => item.localId !== localId));
+    if (removed?.ref) void discardStored(removed.ref);
   };
+
+  /** Deletes a stored image nobody will send; a failure is reported once, the server sweeps it later. */
+  async function discardStored(ref: AssistantAttachmentRef) {
+    try {
+      await attachments?.remove(ref);
+    } catch {
+      attachments?.onNotice(`${ref.fileName} could not be removed from the server. It is deleted automatically after a day.`);
+    }
+  }
 
   /** Uploads one picked file and settles its tile; a failure keeps the tile with the reason. */
   async function uploadOne(upload: NonNullable<typeof attachments>['upload'], file: File, localId: string) {
     try {
       const stored = await upload(file);
-      const local = form.getFieldValue('attachments').find((item) => item.localId === localId)?.previewUrl;
-      if (local?.startsWith('blob:')) URL.revokeObjectURL(local);
+      const tile = form.getFieldValue('attachments').find((item) => item.localId === localId);
+      // The user removed the tile while it was uploading: the stored copy has no tile and would count against the cap.
+      if (!tile) return void (await discardStored(stored.ref));
+      if (tile.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(tile.previewUrl);
       updateAttachment(localId, { status: 'ready', ref: stored.ref, previewUrl: stored.previewUrl, error: null });
     } catch (error) {
       updateAttachment(localId, { status: 'failed', error: error instanceof Error ? error.message : 'The image could not be uploaded.' });

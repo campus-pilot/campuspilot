@@ -12,6 +12,7 @@ import {
   examQuestionPaperVersionTable,
 } from '@campuspilot/db/schema/exam-question-paper';
 import { examPlanTable } from '@campuspilot/db/schema/exam';
+import { env as assistantEnv } from '@campuspilot/env/assistant';
 import { env } from '@campuspilot/env/server';
 import { QUESTION_PAPER_EXAMPLES } from '@campuspilot/question-paper/examples';
 import { getS3Client } from '@campuspilot/s3/client';
@@ -24,7 +25,14 @@ import { createHandlerContext, setTestSchoolFeature } from '../../../../test/fix
 import { createQuestionPaperWorld, type QuestionPaperWorld } from '../../../../test/question-paper';
 import { configureQuestionPaperModel, type QuestionPaperModel } from '../../../workflows/question-paper/model';
 import { handleQuestionPaperPageRead, handleQuestionPaperPageUpload } from './question-paper.http';
-import { addQuestionPaperFigure, startQuestionPaperGeneration } from './question-paper.service';
+import {
+  addQuestionPaperFigure,
+  addQuestionPaperPage,
+  deleteQuestionPaper,
+  deleteQuestionPaperPage,
+  reorderQuestionPaperPages,
+  startQuestionPaperGeneration,
+} from './question-paper.service';
 import { resolvePaperScope } from './question-paper.scope';
 import { QUESTION_PAPER_MAX_PAGE_BYTES } from './question-paper.dto';
 
@@ -282,6 +290,36 @@ describe('question paper pages', () => {
     });
   });
 
+  describe('completion racing a write', () => {
+    it('refuses every write whose scope was resolved before the exam completed (the check is repeated under the session lock)', async () => {
+      const k = { classId: world.otherClassId, subjectSlug: 'math', modeSlug: 'practical' };
+      const small = await jpeg(8, 8);
+      configureQuestionPaperModel(fakeModel(GEMINI_LIKE));
+      await upload('manager', small, 'image/jpeg', 'one.jpg', k);
+      const { paper, pages } = await world.people.manager.client.school.getQuestionPaperDetail(key(k));
+      // The scope a request resolved just before the principal completed the exam.
+      const staleScope = await resolvePaperScope(db, key(k));
+      expect(staleScope.examCompleted).toBe(false);
+      await world.setLifecycle('completed');
+      try {
+        const file = { bytes: Buffer.from(small), contentType: 'image/jpeg', extension: 'jpg', name: 'late.jpg' };
+        const user = world.people.manager.userId;
+        const ended = { code: 'BAD_REQUEST', message: expect.stringContaining('has ended') };
+        await expect(addQuestionPaperPage(db, { scope: staleScope, userId: user, file })).rejects.toMatchObject(ended);
+        await expect(reorderQuestionPaperPages(db, { scope: staleScope, pageIds: pages.map((page) => page.id), expectedPageRevision: paper.pageRevision })).rejects.toMatchObject(ended);
+        await expect(deleteQuestionPaperPage(db, { scope: staleScope, pageId: pages[0]!.id, expectedPageRevision: paper.pageRevision })).rejects.toMatchObject(ended);
+        await expect(startQuestionPaperGeneration(db, { scope: staleScope, userId: user, expectedPageRevision: paper.pageRevision, dispatch: () => {} })).rejects.toMatchObject(ended);
+        await expect(addQuestionPaperFigure(db, { scope: staleScope, userId: user, bytes: Buffer.from(small) })).rejects.toMatchObject(ended);
+        await expect(deleteQuestionPaper(db, { scope: staleScope })).rejects.toMatchObject(ended);
+      } finally {
+        await world.setLifecycle('ready');
+      }
+      const after = await world.people.manager.client.school.getQuestionPaperDetail(key(k));
+      expect(after.pages).toHaveLength(1);
+      expect(after.activeJob).toBeNull();
+    });
+  });
+
   describe('startQuestionPaperGeneration', () => {
     const start = (who: keyof QuestionPaperWorld['people'], overrides = {}, expectedPageRevision?: number) =>
       world.people[who].client.school.startQuestionPaperGeneration({ ...key(overrides), expectedPageRevision: expectedPageRevision ?? 0 });
@@ -415,6 +453,39 @@ describe('question paper pages', () => {
       await expect(manager.client.school.getQuestionPaper(limited.key())).resolves.toBeDefined();
       expect((await handleQuestionPaperPageUpload(uploadRequest(await jpeg(8, 8), 'image/jpeg', 'b.jpg'), manager.context, limited.key())).status).toBe(200);
       await expect(manager.client.school.saveQuestionPaperVersion({ ...limited.key(), expectedVersionNo: 0, content: ENGLISH_SCIENCE as never })).resolves.toMatchObject({ versionNo: 1 });
+    });
+
+    it('caps the generations one school may have at once, so the cached spend check cannot be overshot by every paper of an exam', async () => {
+      const crowded = await createQuestionPaperWorld();
+      const manager = crowded.people.manager;
+      configureQuestionPaperModel(fakeModel(GEMINI_LIKE));
+      const cap = assistantEnv.QUESTION_PAPER_MAX_RUNNING_JOBS_PER_SCHOOL;
+      const targets = [
+        { classId: crowded.classId, subjectSlug: 'science', modeSlug: 'theory' },
+        { classId: crowded.classId, subjectSlug: 'math', modeSlug: 'theory' },
+        { classId: crowded.classId, subjectSlug: 'math', modeSlug: 'practical' },
+        { classId: crowded.otherClassId, subjectSlug: 'science', modeSlug: 'theory' },
+        { classId: crowded.otherClassId, subjectSlug: 'math', modeSlug: 'theory' },
+      ].slice(0, cap + 2);
+      const startFor = async (target: (typeof targets)[number]) => {
+        await handleQuestionPaperPageUpload(uploadRequest(await jpeg(8, 8), 'image/jpeg', 'a.jpg'), manager.context, crowded.key(target));
+        const { paper } = await manager.client.school.getQuestionPaperDetail(crowded.key(target));
+        return reason(manager.client.school.startQuestionPaperGeneration({ ...crowded.key(target), expectedPageRevision: paper.pageRevision }));
+      };
+      // Hand-over would reach for Restate; the job rows are what count.
+      for (const target of targets.slice(0, cap)) expect(await startFor(target)).toBeNull();
+      const refused = await startFor(targets[cap]!);
+      expect(refused).toMatchObject({ code: 'CONFLICT', message: expect.stringContaining(`already has ${cap} AI generation`) });
+      // Another school is not affected by this school's jobs.
+      const other = await createQuestionPaperWorld();
+      await handleQuestionPaperPageUpload(uploadRequest(await jpeg(8, 8), 'image/jpeg', 'a.jpg'), other.people.manager.context, other.key());
+      const { paper } = await other.people.manager.client.school.getQuestionPaperDetail(other.key());
+      expect(await reason(other.people.manager.client.school.startQuestionPaperGeneration({ ...other.key(), expectedPageRevision: paper.pageRevision }))).toBeNull();
+      // Finishing one frees a place.
+      const [done] = await db.select().from(examQuestionPaperJobTable).where(eq(examQuestionPaperJobTable.schoolId, crowded.schoolId));
+      await db.update(examQuestionPaperJobTable).set({ status: 'failed', errorCode: 'model_error', errorMessage: 'x', completedAt: new Date() }).where(eq(examQuestionPaperJobTable.id, done!.id));
+      const { paper: again } = await manager.client.school.getQuestionPaperDetail(crowded.key(targets[cap]!));
+      expect(await reason(manager.client.school.startQuestionPaperGeneration({ ...crowded.key(targets[cap]!), expectedPageRevision: again.pageRevision }))).toBeNull();
     });
 
     it('refuses to start once the exam ended or the school lost the feature', async () => {

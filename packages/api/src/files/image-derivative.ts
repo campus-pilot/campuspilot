@@ -21,8 +21,15 @@ const MODEL_ATTEMPTS = [
   { edge: 1300, quality: 62 },
   { edge: 1300, quality: 55 },
 ] as const;
-/** Refuses decompression bombs: a small file can declare billions of pixels. */
-const MAX_INPUT_PIXELS = 100_000_000;
+/**
+ * Refuses decompression bombs: a small file can declare billions of pixels.
+ * 40 megapixels still covers a 600 dpi A4 scan (35 MP) and 48 MP phone
+ * photos downscaled by the phone; the header is read first and anything over
+ * this is refused before a single pixel is decoded.
+ */
+export const MAX_INPUT_PIXELS = 40_000_000;
+/** Page photos decoded at the same time in this process; more wait their turn (a decode is hundreds of MB). */
+const MAX_CONCURRENT_DECODES = 2;
 
 /** The longest edge and encoding of an uploaded figure (design B6). */
 const FIGURE_EDGE_PX = 1400;
@@ -52,10 +59,32 @@ export type ImageDerivatives =
 const open = (bytes: Uint8Array) =>
   sharp(bytes, { limitInputPixels: MAX_INPUT_PIXELS, failOn: 'error' });
 
+let activeDecodes = 0;
+const waitingForDecode: Array<() => void> = [];
+
+/** Runs a decode when fewer than {@link MAX_CONCURRENT_DECODES} are running; the rest queue in arrival order. */
+async function withDecodeSlot<T>(task: () => Promise<T>): Promise<T> {
+  while (activeDecodes >= MAX_CONCURRENT_DECODES) {
+    await new Promise<void>((resolve) => waitingForDecode.push(resolve));
+  }
+  activeDecodes += 1;
+  try {
+    return await task();
+  } finally {
+    activeDecodes -= 1;
+    waitingForDecode.shift()?.();
+  }
+}
+
+/** The refusal for an image that declares more than {@link MAX_INPUT_PIXELS} pixels. */
+const tooManyPixels = () =>
+  rpcError.payloadTooLarge(`The photo has more than ${MAX_INPUT_PIXELS / 1_000_000} megapixels. Use a smaller photo.`);
+
 /** The displayed size of an image from its header; null when the header cannot be read. */
 async function headerSize(bytes: Uint8Array): Promise<{ width: number; height: number } | null> {
   try {
-    const metadata = await open(bytes).metadata();
+    // Header only (no pixels are decoded), so the pixel cap is applied by the caller, with its own message.
+    const metadata = await sharp(bytes, { limitInputPixels: false, failOn: 'error' }).metadata();
     const size = metadata.autoOrient ?? metadata;
     return size.width && size.height ? { width: size.width, height: size.height } : null;
   } catch {
@@ -63,12 +92,28 @@ async function headerSize(bytes: Uint8Array): Promise<{ width: number; height: n
   }
 }
 
-async function encodeModelDerivative(bytes: Uint8Array) {
+/** Pixels of a decoded base image: raw, 3 channels, already upright, flattened onto white and at most 1800 px. */
+type RawBase = { data: Buffer; width: number; height: number; channels: 1 | 2 | 3 | 4 };
+
+/** The one full decode of an upload; every derivative is made from its (at most 1800 px) result. */
+async function decodeBase(bytes: Uint8Array): Promise<RawBase> {
+  const { data, info } = await open(bytes)
+    .rotate()
+    .flatten({ background: '#ffffff' })
+    .toColourspace('srgb')
+    .resize({ width: MODEL_EDGE_PX, height: MODEL_EDGE_PX, fit: 'inside', withoutEnlargement: true })
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  return { data, width: info.width, height: info.height, channels: info.channels };
+}
+
+const fromBase = (base: RawBase) =>
+  sharp(base.data, { raw: { width: base.width, height: base.height, channels: base.channels } });
+
+async function encodeModelDerivative(base: RawBase) {
   let encoded: Buffer | undefined;
   for (const { edge, quality } of MODEL_ATTEMPTS) {
-    encoded = await open(bytes)
-      .rotate()
-      .flatten({ background: '#ffffff' })
+    encoded = await fromBase(base)
       .resize({ width: edge, height: edge, fit: 'inside', withoutEnlargement: true })
       .jpeg({ quality, mozjpeg: true })
       .toBuffer();
@@ -81,6 +126,11 @@ async function encodeModelDerivative(bytes: Uint8Array) {
  * Decodes an uploaded page photo into the two JPEG derivatives the product
  * needs: a thumbnail for the page grid and a bounded copy for the AI model.
  *
+ * The header is read first and an image over {@link MAX_INPUT_PIXELS} is
+ * refused before any decode. The image is then decoded once, at most
+ * {@link MAX_CONCURRENT_DECODES} uploads at a time in this process, and both
+ * derivatives (and the size-reducing retries) are made from that one result.
+ *
  * Decoding, not reading the header, decides whether an image is supported:
  * the header of a HEIC file can be read by the prebuilt sharp but its pixels
  * cannot be decoded. A JPEG, PNG or WebP that cannot be decoded is the
@@ -92,31 +142,32 @@ export async function makeImageDerivatives(
   contentType: string,
 ): Promise<ImageDerivatives> {
   const isHeif = contentType === 'image/heic' || contentType === 'image/heif';
-  try {
-    const [model, thumb, size] = await Promise.all([
-      encodeModelDerivative(bytes),
-      open(bytes)
-        .rotate()
-        .flatten({ background: '#ffffff' })
-        .resize({ width: THUMB_EDGE_PX, height: THUMB_EDGE_PX, fit: 'inside', withoutEnlargement: true })
-        .jpeg({ quality: 70 })
-        .toBuffer(),
-      headerSize(bytes),
-    ]);
-    if (!size) throw new Error('The image has no readable size.');
-    return {
-      status: 'ready',
-      ...size,
-      model: { bytes: model, contentType: 'image/jpeg' },
-      thumb: { bytes: thumb, contentType: 'image/jpeg' },
-    };
-  } catch (cause) {
-    if (!isHeif) {
-      throw rpcError.unsupportedMediaType('The uploaded file could not be read as an image.');
+  const size = await headerSize(bytes);
+  if (size && size.width * size.height > MAX_INPUT_PIXELS) throw tooManyPixels();
+  return withDecodeSlot(async () => {
+    try {
+      if (!size) throw new Error('The image has no readable size.');
+      const base = await decodeBase(bytes);
+      const [model, thumb] = await Promise.all([
+        encodeModelDerivative(base),
+        fromBase(base)
+          .resize({ width: THUMB_EDGE_PX, height: THUMB_EDGE_PX, fit: 'inside', withoutEnlargement: true })
+          .jpeg({ quality: 70 })
+          .toBuffer(),
+      ]);
+      return {
+        status: 'ready' as const,
+        ...size,
+        model: { bytes: model, contentType: 'image/jpeg' as const },
+        thumb: { bytes: thumb, contentType: 'image/jpeg' as const },
+      };
+    } catch (cause) {
+      if (!isHeif) {
+        throw rpcError.unsupportedMediaType('The uploaded file could not be read as an image.');
+      }
+      return { status: 'unsupported' as const, width: size?.width ?? null, height: size?.height ?? null };
     }
-    const size = await headerSize(bytes);
-    return { status: 'unsupported', width: size?.width ?? null, height: size?.height ?? null };
-  }
+  });
 }
 
 export type NormalizedFigure = {
@@ -135,6 +186,12 @@ export type NormalizedFigure = {
  * figure. Undecodable input is a 415.
  */
 export async function normalizeFigureImage(bytes: Uint8Array): Promise<NormalizedFigure> {
+  const size = await headerSize(bytes);
+  if (size && size.width * size.height > MAX_INPUT_PIXELS) throw tooManyPixels();
+  return withDecodeSlot(() => normalizeFigureUnlimited(bytes));
+}
+
+async function normalizeFigureUnlimited(bytes: Uint8Array): Promise<NormalizedFigure> {
   try {
     const metadata = await open(bytes).metadata();
     const resize = { width: FIGURE_EDGE_PX, height: FIGURE_EDGE_PX, fit: 'inside', withoutEnlargement: true } as const;

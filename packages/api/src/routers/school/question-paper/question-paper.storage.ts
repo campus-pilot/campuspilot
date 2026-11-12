@@ -65,6 +65,25 @@ export async function deleteObjectsBestEffort(keys: ReadonlyArray<string | null 
   }
 }
 
+/**
+ * Deletes objects and reports failure: every key is tried, and an error naming
+ * the ones that could not be deleted is thrown at the end. For callers that
+ * keep the database row as the handle to retry with (delete the objects first,
+ * the row only once they are gone), unlike {@link deleteObjectsBestEffort}.
+ */
+export async function deleteObjects(keys: ReadonlyArray<string | null | undefined>) {
+  const failed: string[] = [];
+  for (const key of new Set(keys.filter((value): value is string => Boolean(value)))) {
+    try {
+      await getS3Client().send(new DeleteObjectCommand({ Bucket: env.S3_BUCKET, Key: key }));
+    } catch (error) {
+      log.warn({ err: error instanceof Error ? { name: error.name, message: error.message } : String(error), key }, 'question-paper.storage.delete.failed');
+      failed.push(key);
+    }
+  }
+  if (failed.length > 0) throw new Error(`Could not delete ${failed.length} stored object(s): ${failed.join(', ')}`);
+}
+
 /** A short-lived URL for a page image; `inline` for `<img>`, `attachment` for "download the original". */
 export function pageImageUrl(key: string, options: { contentType: string; fileName: string; disposition: 'inline' | 'attachment' }) {
   const safeName = options.fileName.replace(/[^a-zA-Z0-9 ._-]/g, '_').slice(0, 120) || 'page';

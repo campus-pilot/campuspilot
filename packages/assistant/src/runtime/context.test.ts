@@ -4,6 +4,7 @@ import type { AttachmentMarker } from '../transcript';
 import {
   attachmentNote,
   buildModelContext,
+  CONTEXT_IMAGE_BUDGET_BYTES,
   CONTEXT_TOOL_RESULT_MIN_CHARS,
   fullContextBoundary,
   toolResultStub,
@@ -210,6 +211,22 @@ describe.each([claude, gemini, fake])('context building ($name)', (format) => {
     expect(text[1]).toContain('Attachment 2 of 2');
     expect(text[1]).toContain(esc(attachmentNote(marker('new1', 1, 2), 'omitted')));
     expect(text[0]).toContain(esc(attachmentNote(marker('old1'), 'omitted')));
+  });
+
+  it('counts an image as the base64 it is sent as, so the request stays under the provider limit', async () => {
+    // Two 60-byte files are 80 bytes each once encoded: a budget of 100 holds one, not two (it would hold both raw).
+    const entries = [format.human('look', [marker('p1', 1, 2), marker('p2', 2, 2)])];
+    const out = await buildModelContext(entries, provider, loader({ p1: image(60), p2: image(60) }), { imageBudgetBytes: 100 });
+    const text = JSON.stringify(out[0]!.content);
+    expect(text).toContain(esc(attachmentNote(marker('p1', 1, 2), 'omitted')));
+    expect(text).not.toContain(esc(attachmentNote(marker('p2', 2, 2), 'omitted')));
+    expect(CONTEXT_IMAGE_BUDGET_BYTES).toBeLessThanOrEqual(Math.floor(20_000_000 * 0.9));
+  });
+
+  it('never sends one image over the provider\'s own cap, and says so', async () => {
+    const entries = [format.human('look', [marker('big')])];
+    const out = await buildModelContext(entries, { ...provider, maxImageBytes: 50 }, loader({ big: image(60) }));
+    expect(JSON.stringify(out[0]!.content)).toContain(esc(attachmentNote(marker('big'), 'unreadable')));
   });
 
   it('says why an image cannot be shown instead of dropping it', async () => {

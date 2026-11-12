@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  assistantAttachmentDeletePath,
   assistantAttachmentReadPath,
   assistantAttachmentRefSchema,
   assistantAttachmentUploadPath,
@@ -39,4 +40,22 @@ export async function uploadAssistantAttachment(schoolId: string, file: File): P
     throw new Error(failure?.message ?? `The upload failed (${response.status}).`);
   }
   return assistantAttachmentRefSchema.parse(await response.json());
+}
+
+/**
+ * Deletes an image that was uploaded for a message but not sent (the user
+ * removed it from the composer), so it stops counting against the cap of
+ * unsent images. Removing one that is already gone is not an error.
+ */
+export async function deleteAssistantAttachment(schoolId: string, attachmentId: string): Promise<void> {
+  let response: Response;
+  try {
+    response = await fetch(apiUrl(assistantAttachmentDeletePath(schoolId, attachmentId)), { method: 'DELETE', credentials: 'include' });
+  } catch {
+    throw new Error('Unable to reach the server. Check your connection and try again.');
+  }
+  if (!response.ok) {
+    const failure = (await response.json().catch(() => null)) as { message?: string } | null;
+    throw new Error(failure?.message ?? `The image could not be removed (${response.status}).`);
+  }
 }

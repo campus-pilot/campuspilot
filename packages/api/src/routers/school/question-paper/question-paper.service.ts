@@ -12,6 +12,7 @@ import {
   examQuestionPaperVersionTable,
 } from '@campuspilot/db/schema/exam-question-paper';
 import { classTable } from '@campuspilot/db/schema/class';
+import { env as assistantEnv } from '@campuspilot/env/assistant';
 import { QUESTION_PAPER_LIMITS } from '@campuspilot/question-paper/limits';
 import type { QuestionPaperWarning } from '@campuspilot/question-paper/marks';
 import { ORPCError } from '@orpc/server';
@@ -44,8 +45,8 @@ import {
   versionsOf,
   type PaperRow,
 } from './question-paper.records';
-import { selectedQuestionPaperTemplate } from './question-paper.render';
-import { assertPaperWritable, type PaperScope } from './question-paper.scope';
+import { hasSelectedQuestionPaperTemplate } from './question-paper.render';
+import { assertPaperWritable, assertPaperWritableLocked, type PaperScope } from './question-paper.scope';
 import { deleteObjectsBestEffort, putObject, questionPaperKeys } from './question-paper.storage';
 import { getVersion } from './question-paper.version.service';
 
@@ -108,7 +109,7 @@ export async function getQuestionPaperDetail(
   const [finished, versions, template] = await Promise.all([
     view.paper ? lastFinishedJobOf(db, view.paper.id) : undefined,
     view.paper ? versionsOf(db, view.paper.id).then((rows) => toVersionSummaries(db, rows, view.paper!.latestVersionNo)) : [],
-    selectedQuestionPaperTemplate(db, scope.key.schoolId),
+    hasSelectedQuestionPaperTemplate(db, scope.key.schoolId),
   ]);
   return {
     paper: view.facts,
@@ -119,7 +120,7 @@ export async function getQuestionPaperDetail(
         ? { ...toJob(finished), errorCode: finished.errorCode, errorMessage: finished.errorMessage, completedAt: finished.completedAt }
         : null,
     versions,
-    templateConfigured: template !== null,
+    templateConfigured: template,
   };
 }
 
@@ -195,6 +196,7 @@ export async function listQuestionPapers(
             totalMarks: examQuestionPaperVersionTable.totalMarks,
             planMaxMarks: examQuestionPaperVersionTable.planMaxMarks,
             warnings: examQuestionPaperVersionTable.warnings,
+            createdAt: examQuestionPaperVersionTable.createdAt,
           })
           .from(examQuestionPaperVersionTable)
           .innerJoin(
@@ -215,6 +217,7 @@ export async function listQuestionPapers(
             status: examQuestionPaperJobTable.status,
             errorCode: examQuestionPaperJobTable.errorCode,
             errorMessage: examQuestionPaperJobTable.errorMessage,
+            completedAt: examQuestionPaperJobTable.completedAt,
           })
           .from(examQuestionPaperJobTable)
           .where(inArray(examQuestionPaperJobTable.paperId, paperIds))
@@ -259,8 +262,9 @@ export async function listQuestionPapers(
                         planMaxMarks: latest?.planMaxMarks ?? null,
                         warningCount: (latest?.warnings as QuestionPaperWarning[] | undefined)?.length ?? 0,
                         activeJob: active ? { id: active.id, status: active.status as 'queued' | 'running' } : null,
+                        // A failure is news only until a version is saved after it (the teacher fixed the paper in chat).
                         lastJobFailure:
-                          last?.status === 'failed' && last.errorCode
+                          last?.status === 'failed' && last.errorCode && !(latest && last.completedAt && latest.createdAt >= last.completedAt)
                             ? { errorCode: last.errorCode, message: last.errorMessage ?? 'AI generation failed.' }
                             : null,
                       }
@@ -303,6 +307,7 @@ export async function addQuestionPaperPage(
   const written: string[] = [];
   try {
     return await db.transaction(async (tx) => {
+      await assertPaperWritableLocked(tx, scope.key);
       const paper = await lockOrCreatePaper(tx, scope.key, input.userId);
       const existing = await pagesOf(tx, paper.id);
       if (existing.length >= QUESTION_PAPER_MAX_PAGES) {
@@ -370,6 +375,7 @@ export async function reorderQuestionPaperPages(
 ) {
   assertPaperWritable(input.scope);
   return db.transaction(async (tx) => {
+    await assertPaperWritableLocked(tx, input.scope.key);
     const paper = await lockPaper(tx, input.scope.key);
     assertPageRevision(paper, input.expectedPageRevision);
     await assertNoActiveJob(tx, paper.id, 'Pages cannot be reordered');
@@ -400,6 +406,7 @@ export async function deleteQuestionPaperPage(
 ) {
   assertPaperWritable(input.scope);
   const { pageRevision, keys } = await db.transaction(async (tx) => {
+    await assertPaperWritableLocked(tx, input.scope.key);
     const paper = await lockPaper(tx, input.scope.key);
     assertPageRevision(paper, input.expectedPageRevision);
     await assertNoActiveJob(tx, paper.id, 'A page cannot be deleted');
@@ -456,6 +463,7 @@ async function deletePaperRows(tx: DatabaseTransaction, papers: PaperRow[]): Pro
 export async function deleteQuestionPaper(db: Database, input: { scope: PaperScope }) {
   assertPaperWritable(input.scope);
   const keys = await db.transaction(async (tx) => {
+    await assertPaperWritableLocked(tx, input.scope.key);
     const paper = await lockPaper(tx, input.scope.key);
     await assertNoActiveJob(tx, paper.id, 'The paper cannot be deleted');
     return deletePaperRows(tx, [paper]);
@@ -507,6 +515,7 @@ export async function addQuestionPaperFigure(
   let key: string | null = null;
   try {
     return await db.transaction(async (tx) => {
+      await assertPaperWritableLocked(tx, input.scope.key);
       const paper = await lockOrCreatePaper(tx, input.scope.key, input.userId);
       const [figures] = await tx
         .select({ count: sql<number>`count(*)::int` })
@@ -550,6 +559,30 @@ export function unreadablePageMessage(pages: Array<{ position: number; originalN
 }
 
 /**
+ * Refuses a new job while the school already has
+ * `QUESTION_PAPER_MAX_RUNNING_JOBS_PER_SCHOOL` queued or running ones. The
+ * monthly AI limit is checked against a cached spend sum, so the number of
+ * jobs that can pass that check on the same stale value has to be bounded
+ * here. A transaction-scoped advisory lock on the school makes the count and
+ * the insert that follows exact across papers (a paper's own row lock does
+ * not serialize two different papers). Taken after the paper lock; nothing
+ * takes them in the other order.
+ */
+async function assertSchoolJobCapacity(tx: DatabaseTransaction, schoolId: string): Promise<void> {
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`question-paper-jobs:${schoolId}`}, 0))`);
+  const [row] = await tx
+    .select({ count: sql<number>`count(*)::int` })
+    .from(examQuestionPaperJobTable)
+    .where(and(eq(examQuestionPaperJobTable.schoolId, schoolId), inArray(examQuestionPaperJobTable.status, ['queued', 'running'])));
+  const cap = assistantEnv.QUESTION_PAPER_MAX_RUNNING_JOBS_PER_SCHOOL;
+  if ((row?.count ?? 0) >= cap) {
+    throw rpcError.conflict(
+      `Your school already has ${cap} AI generation${cap === 1 ? '' : 's'} running. Wait for one to finish, then generate this paper.`,
+    );
+  }
+}
+
+/**
  * Queues an AI generation for a paper (the manual UI's path; chat agents
  * author papers themselves). Checked, in order and before any cost: a model
  * is configured, the school chose a template, the paper has pages and the
@@ -573,8 +606,9 @@ export async function startQuestionPaperGeneration(
   assertPaperWritable(scope);
   const model = getQuestionPaperModel();
   if (!model) throw providerUnavailableError();
-  if (!(await selectedQuestionPaperTemplate(db, scope.key.schoolId))) throw templateMissingError();
+  if (!(await hasSelectedQuestionPaperTemplate(db, scope.key.schoolId))) throw templateMissingError();
   const jobId = await db.transaction(async (tx) => {
+    await assertPaperWritableLocked(tx, scope.key);
     const paper = await lockPaper(tx, scope.key).catch((error: unknown) => {
       throw error instanceof ORPCError && error.status === 404 ? rpcError.badRequest('Upload at least one page before generating.') : error;
     });
@@ -584,6 +618,7 @@ export async function startQuestionPaperGeneration(
     const unreadable = unreadablePageMessage(pages, model.imageMimeTypes);
     if (unreadable) throw rpcError.badRequest(unreadable);
     if (await activeJobOf(tx, paper.id)) throw rpcError.conflict('A generation is already running for this paper.');
+    await assertSchoolJobCapacity(tx, scope.key.schoolId);
     const [job] = await tx
       .insert(examQuestionPaperJobTable)
       .values({

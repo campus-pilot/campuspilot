@@ -45,10 +45,11 @@ describe('anthropic adapter (must match the Claude-only build)', () => {
     // Pins the prompt text so it only changes on purpose. The Claude-only and
     // Gemini-only builds carry the same instructions; change them together.
     // Last changed for question papers (decision D36): one "call
-    // learn_question_paper_generation first" bullet, and the decline rule now
-    // says "question papers written from scratch".
+    // school_learn_question_paper_generation first" bullet (the exact model-facing
+    // name, found by tool search), attached images count as data, and the
+    // decline rule now says "question papers written from scratch".
     const system = JSON.stringify(buildAnthropicSystem(buildAssistantPrompt(facts)));
-    expect(createHash('sha256').update(system).digest('hex').slice(0, 16)).toMatchInlineSnapshot(`"3daf1e125a78ad2a"`);
+    expect(createHash('sha256').update(system).digest('hex').slice(0, 16)).toMatchInlineSnapshot(`"c832d9fdab234006"`);
   });
 
   it('defers advanced tools behind tool search and labels writes', () => {

@@ -135,11 +135,24 @@ describe('question paper procedures', () => {
         { path: 'sections[0].questions[0].blocks[0].imageId', message: 'This figure image does not belong to this paper.' },
       ]);
       withFigure.sections[0].questions[0].blocks = [{ type: 'figure', imageId: 'asat_aaaaaaaaaaaaaaaaaaaaa', alt: 'x' }];
-      expect((await teacher.school.validateQuestionPaperDraft({ ...key(), content: withFigure })).errors[0]!.message).toMatch(/chat attachments/);
+      expect((await teacher.school.validateQuestionPaperDraft({ ...key(), content: withFigure })).errors[0]!.message).toMatch(/not an image the user attached/);
 
       const warned = await teacher.school.validateQuestionPaperDraft({ ...key(), content: clone(HINDI_MATH) });
       expect(warned).toMatchObject({ valid: true, total: 15 });
       expect(warned.warnings.map((warning) => warning.code)).toContain('total_differs_from_plan');
+    });
+
+    it('refuses a paper whose formulas alone cannot be printed, in validation and in save (they agree with the render)', async () => {
+      // One nested \\sqrt of 491 characters is about 72 KB of KaTeX HTML; 300 of them exceed the 20 MB body limit.
+      const tex = '\\sqrt{'.repeat(70) + 'x' + '}'.repeat(70);
+      const heavy = clone(ENGLISH_SCIENCE) as Record<string, any>;
+      // A rich text holds at most 4,000 characters, so eight formulas per question: 38 questions, 304 formulas.
+      const first = heavy.sections[0].questions[0];
+      heavy.sections = [{ ...heavy.sections[0], attemptAny: undefined, questions: Array.from({ length: 38 }, (_, index) => ({ ...clone(first), number: String(index + 1), text: Array.from({ length: 8 }, () => ({ t: 'math', tex })) })) }];
+      const checked = await teacher.school.validateQuestionPaperDraft({ ...key(), content: heavy });
+      expect(checked.valid).toBe(false);
+      expect(checked.errors[0]!.message).toMatch(/formulas of this paper are too large to print/);
+      expect(await errorOf(teacher.school.saveQuestionPaperVersion({ ...key(), expectedVersionNo: 0, content: heavy }))).toMatchObject({ code: 'BAD_REQUEST', message: expect.stringContaining('The question paper is not valid') });
     });
 
     it('answers a paper that is too large with an error instead of parsing it', async () => {

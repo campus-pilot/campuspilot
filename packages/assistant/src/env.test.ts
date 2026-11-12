@@ -45,7 +45,7 @@ describe('the assistant environment', () => {
     it('needs nothing and uses its defaults', () => {
       const parsed = assistantEnvSchema.parse({});
       expect(parsed.QUESTION_PAPER_MAX_OUTPUT_TOKENS).toBe(32_000);
-      expect(parsed.QUESTION_PAPER_JOB_TIMEOUT_MINUTES).toBe(20);
+      expect(parsed.QUESTION_PAPER_JOB_TIMEOUT_MINUTES).toBe(40);
     });
 
     it('requires all four prices with a model, and refuses prices without one', () => {

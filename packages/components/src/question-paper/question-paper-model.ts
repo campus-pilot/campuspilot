@@ -178,8 +178,11 @@ export function generateBlockedReason(input: {
   pageCount: number;
   templateConfigured: boolean;
   blockedReason: string | null;
+  /** Photos still being prepared or uploaded: a job started now would read only the ones already stored. */
+  uploading?: boolean;
 }): string | null {
   if (input.blockedReason) return input.blockedReason;
+  if (input.uploading) return 'Wait for the photos to finish uploading.';
   if (input.pageCount < 1) return 'Upload at least one photo first.';
   if (!input.templateConfigured) return 'Choose a question paper template before generating papers.';
   return null;

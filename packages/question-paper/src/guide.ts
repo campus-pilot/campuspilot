@@ -50,7 +50,7 @@ The heading and footer (school name, logo, exam name, class, subject, mode, time
 - When the user attached the image, use {type:"figure", imageId, alt} with the id from the attachment list. Never invent an id. External clients without uploads use placeholders only.
 
 ## Editing an existing paper
-Call getQuestionPaper, change only what the user asked, keep everything else identical, validate, show the draft, wait for the user.
+Call getQuestionPaper, change only what the user asked, keep everything else identical, validate, show the draft, wait for the user. If the result ends with a "Result truncated" note you only saw part of the paper: never submit a revised paper built from it. Tell the user the paper is too long to edit in chat.
 
 ## Limits
 ${Object.entries(L)

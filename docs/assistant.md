@@ -226,8 +226,11 @@ they must be unset and the provider's own prices apply, so a model never
 inherits another model's prices. An explicit `QUESTION_PAPER_PROVIDER` needs
 that provider's key and a model (its own or `QUESTION_PAPER_MODEL`), or
 startup is refused. `QUESTION_PAPER_MAX_OUTPUT_TOKENS` (default 32000) bounds
-one request; `QUESTION_PAPER_JOB_TIMEOUT_MINUTES` (default 20) is how long a
-running job may take before the API's sweep fails it (read by the API server).
+one request; `QUESTION_PAPER_JOB_TIMEOUT_MINUTES` (default 40) is how long a
+running job may take before the API's sweep fails it (read by the API server);
+`QUESTION_PAPER_MAX_RUNNING_JOBS_PER_SCHOOL` (default 3) caps the jobs (queued plus
+running) one school may have at once, which bounds how far the cached spend check can be
+overshot.
 The worker needs the same `QUESTION_PAPER_*` values as the API server.
 
 ### Image attachments, question paper tools and context pruning
@@ -246,7 +249,11 @@ Chat can carry images, mainly photographs of a handwritten question paper
   them in the same transaction as the message; a message that names an image that is
   foreign, already sent or missing is refused whole. Reads redirect to a 5 minute
   presigned URL and only the owner may read. A user may hold 40 unsent attachments
-  per school; an unsent one is deleted after 24 hours (the outbox sweep), the others
+  per school; removing one from the composer deletes it (`DELETE` on the attachment,
+  owner and unsent only), an upload at the cap frees that user's unsent images older
+  than an hour, an unsent one is deleted after 24 hours (the outbox sweep, which also
+  retries attachments of deleted conversations whose objects could not be deleted;
+  objects go before rows), the others
   with their conversation (`deleteConversation`, a soft delete, deletes them
   explicitly) and with the school (demo purge). A file the active provider cannot
   read (HEIC on Anthropic) refuses the send with a message asking for a JPEG; an image is
@@ -274,8 +281,8 @@ Chat can carry images, mainly photographs of a handwritten question paper
   are never changed). The window is the last two human messages. Outside it a tool
   result of 8,000 characters or more is replaced by a stub naming the tool and its size
   ("Call the tool again if you need it") and an attachment by a note asking the user to
-  attach it again. Inside it, images are materialised newest first within an 18 MB
-  budget, with a note for any that are missing, unreadable or omitted. Entry count,
+  attach it again. Inside it, images are materialised newest first within a 16 MiB
+  budget counted as base64, with a note for any that are missing, unreadable or omitted. Entry count,
   order, tool call ids and thought signatures are never touched, and the function is
   pure and idempotent. Each provider supplies a `ContextAdapter` (`anthropicContext`,
   `geminiContext`, `fakeContext`) for its own message format. One threshold applies to

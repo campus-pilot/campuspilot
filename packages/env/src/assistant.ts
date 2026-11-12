@@ -185,7 +185,15 @@ const assistantEnvShape = {
      * How long a running generation job may take before the API's sweep fails
      * it as `not_finished`. Also read by the API server, which runs the sweep.
      */
-    QUESTION_PAPER_JOB_TIMEOUT_MINUTES: z.coerce.number().int().min(1).max(240).default(20),
+    QUESTION_PAPER_JOB_TIMEOUT_MINUTES: z.coerce.number().int().min(1).max(240).default(40),
+    /**
+     * Most generation jobs (queued plus running) one school may have at once.
+     * The monthly limit is checked against a spend sum cached for ten minutes,
+     * so without this cap a school just under its limit could start a job for
+     * every paper of an exam and overshoot it by all of them. Starting a job
+     * over the cap is refused with a message asking the user to wait.
+     */
+    QUESTION_PAPER_MAX_RUNNING_JOBS_PER_SCHOOL: z.coerce.number().int().min(1).max(50).default(3),
 };
 
 /**

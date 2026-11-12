@@ -116,7 +116,11 @@ chat: attach photos -> draft(s) -> user: "save" -> approval -> version n
   name). Upload, reorder (`expectedPageRevision`) and delete page run under the paper's
   row lock; storage is written first and removed again if the row cannot be inserted.
   Derivatives are made at upload (EXIF rotation applied, 1800 px, at most about
-  600 KB for the model copy, a 360 px thumbnail). A HEIC the server's `sharp`
+  600 KB for the model copy, a 360 px thumbnail). The header is read first and an
+  image over 40 megapixels is refused before any decode (413); the image is then
+  decoded once, at most two at a time per process, and both derivatives come from
+  that one decode (`files/image-derivative.ts`). The upload route allows 120 a minute
+  per IP (a school shares one address). A HEIC the server's `sharp`
   cannot decode is kept as `unsupported`: it still previews in browsers that can,
   and a model that cannot read it makes generation fail with a clear message
   instead of dropping the page (D46). The browser converts HEIC to JPEG itself where
@@ -129,7 +133,15 @@ chat: attach photos -> draft(s) -> user: "save" -> approval -> version n
   `latest_version_no`. The printed version number must equal the stored one: an
   agent save with a stale `expectedVersionNo` is CONFLICT; a job save renders again
   (up to 3 times) when another version landed in between. A job's save is
-  idempotent per job id.
+  idempotent per job id. Every write transaction (page add, reorder, delete,
+  figure, delete paper, start, save) first takes the school session row `FOR SHARE`
+  and re-reads the exam lifecycle (`assertPaperWritableLocked`); completing an exam
+  takes that row `FOR UPDATE`, so a write cannot commit to a completed exam. A paper
+  locked this way is the BAD_REQUEST with `data.reason = 'paper_locked'`; a paper
+  that is too large or complex to print fails a job as `paper_unprintable`, and
+  `checkQuestionPaperDraft` also totals the KaTeX HTML so validate, save and the job
+  agree. A stored version previews and re-prints with its saved `plan_max_marks`
+  (class, subject, mode and exam names still come from the live plan).
 - **Delete.** `deleteQuestionPaper` (refused while a job is in flight) and
   `deleteExamPlan` delete the rows (pages, jobs, versions, figures cascade), the
   PDF artifacts and, after the commit, every stored object (best effort, logged).
@@ -221,12 +233,19 @@ idempotent hand-over to Restate (`QuestionPaperControl.startGeneration`, signed 
 never blocks the request. The API's 30 s sweep re-sends what Restate did not accept and
 fails jobs that cannot progress (`dispatch_failed` after 10 minutes unaccepted,
 `not_started` after 5 minutes accepted, `not_finished` after
-`QUESTION_PAPER_JOB_TIMEOUT_MINUTES`, default 20).
+`QUESTION_PAPER_JOB_TIMEOUT_MINUTES`, default 40, above the worst case of two long
+requests). Starting a job is also refused when the school already has
+`QUESTION_PAPER_MAX_RUNNING_JOBS_PER_SCHOOL` (default 3) queued or running, because the
+monthly-limit check reads a spend sum cached for ten minutes and would otherwise be
+overshot by every job a user starts at once; the check runs under a per-school advisory
+lock.
 
 The workflow (`workflows/question-paper`, ingress-private, steps shared with the
 integration tests in `generation.ts`): begin, re-check access and the paper
 (limit, feature, role, exam not ended), gather inputs (every page has a readable
-source, 18 MB of images), one structured model request, record its cost, validate,
+source, 18 MB of images), one structured model request (its cost row is saved inside
+that same step; a repeated billed call takes the next `:attempt:{k}` key derived from
+the saved rows, never dropped), validate,
 at most one text-only repair request, save through `saveQuestionPaperVersion` with
 source `ai_job`, mark succeeded. Provider failures retry (busy or unknown up to 3
 requests); a refusal or a truncated answer fails without repair. Every step checks
@@ -252,8 +271,13 @@ drop or paste; JPEG, PNG, WebP, HEIC family; 15 MB each). Files are uploaded fir
 (`POST /api/blob/schools/:schoolId/assistant/attachments`, browser session only, origin
 checked, 60 per minute per IP) and become `assistant_attachment` rows with the same
 derivatives as pages; a message then carries ids, never bytes. At most 40 unsent
-attachments per user per school; unsent ones are deleted after 24 hours, the rest
-with their conversation and with the school. A model that cannot read a file type (HEIC
+attachments per user per school. Taking an image out of the composer deletes it
+(`DELETE .../attachments/:attachmentId`, owner and unsent only; an upload that
+finishes after its tile was removed is deleted too); an upload that finds the user at the
+cap first frees that user's unsent images older than an hour (left by a reload);
+unsent ones are deleted after 24 hours, the rest with their conversation and with the
+school. Objects are deleted before their row, so a failed storage delete leaves the row
+for the sweep to retry (the sweep also collects attachments of deleted conversations). A model that cannot read a file type (HEIC
 on Anthropic) makes the send fail with a message asking the user to convert it (D46);
 images are never silently dropped.
 
@@ -286,13 +310,16 @@ only): page photos, generation, polling, previews and downloads.
 - **Continue in chat** (the quiet link under a result) opens
   `/school/:id/assistant?seed=question_paper&sessionId=&examSlug=&classId=&subjectSlug=&modeSlug=`:
   a new conversation seeded with the paper's natural key (no personal data) and a
-  prefilled box. Nothing is sent until the user sends. A malformed link silently becomes
-  a plain new conversation.
+  prefilled box. Nothing is sent until the user sends. A malformed link (parts are limited
+  to letters, digits, `-` and `_`) silently becomes a plain new conversation; the send
+  refuses a seed that does not resolve to a paper of the school
+  (`resolvePaperScope`) before it reaches the model, and the chip says so when the
+  paper cannot be opened.
 - **Context pruning** (`runtime/context.ts`, applied to what the model sees only, never
   to the stored transcript): only the last two human messages are sent in full. In older
   turns a tool result of 8,000 characters or more is replaced by a short stub naming the
   tool and the size, and an older attachment by a note asking the user to attach it
-  again; fresh images are sent newest first within an 18 MB budget. The learn payload
+  again; fresh images are sent newest first within a 16 MiB budget counted as base64 (4/3 of the file, under Gemini's 20 MB request limit); an image over the provider's own cap (5 MB on Claude) is reported as unreadable. The learn payload
   counts as a long result, so after two more messages the agent calls the tool again.
 
 ## Where the code is

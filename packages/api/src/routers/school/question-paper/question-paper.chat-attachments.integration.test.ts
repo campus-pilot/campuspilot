@@ -54,6 +54,8 @@ describe('chat attachments as figures', () => {
     const bytes = await sharp({ create: { width: 120, height: 80, channels: 3, background: '#336699' } }).jpeg().toBuffer();
     const key = `schools/${world.schoolId}/assistant/attachments/${id}/original.jpg`;
     await putObject(key, bytes, 'image/jpeg');
+    // The 1800 px model copy a decoded attachment has; figures and previews are made from it.
+    if (!options.heic) await putObject(`${key}.model`, bytes, 'image/jpeg');
     let binding: Partial<typeof assistantAttachmentTable.$inferInsert> = {};
     if (options.sent !== false) {
       position += 1;
@@ -103,8 +105,22 @@ describe('chat attachments as figures', () => {
     const id = await attachment();
     const k = world.key({ classId: world.otherClassId });
     expect(await agent().school.validateQuestionPaperDraft({ ...k, content: withFigure(id) })).toMatchObject({ valid: true, errors: [] });
-    // A person using the API directly (or an external client) has no chat, so no attachments.
-    const outside = await world.people.manager.client.school.validateQuestionPaperDraft({ ...k, content: withFigure(id) });
+    // The person's own browser session (the draft card's re-check) sees their attachments, like the preview does.
+    expect(await world.people.manager.client.school.validateQuestionPaperDraft({ ...k, content: withFigure(id) })).toMatchObject({ valid: true, errors: [] });
+    // Someone else's session does not: it is not their attachment.
+    const other = await world.people.coordinator.client.school.validateQuestionPaperDraft({ ...k, content: withFigure(id) });
+    expect(other.valid).toBe(false);
+    expect(other.errors[0]!.message).toMatch(/not an image the user attached/);
+    // An API key or an external OAuth client has no chat at all, so no attachments.
+    const external = createRouterClient(appRouter, {
+      context: async (): Promise<Context> => ({
+        db,
+        headers: new Headers(),
+        session: world.people.manager.session,
+        principal: { authMethod: 'apiKey' },
+      }),
+    }) as unknown as TestClient;
+    const outside = await external.school.validateQuestionPaperDraft({ ...k, content: withFigure(id) });
     expect(outside.valid).toBe(false);
     expect(outside.errors[0]!.message).toMatch(/inside the in-app assistant/);
   });

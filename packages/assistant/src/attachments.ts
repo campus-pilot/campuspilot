@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { rpcError } from '@campuspilot/api/errors';
 import { makeImageDerivatives } from '@campuspilot/api/files/image-derivative';
 import {
+  deleteObjects,
   deleteObjectsBestEffort,
   getObjectBytes,
   putObject,
@@ -10,11 +11,12 @@ import {
 import {
   ASSISTANT_ATTACHMENTS_PER_MESSAGE,
   ASSISTANT_UNSENT_ATTACHMENTS_PER_USER,
+  ASSISTANT_UNSENT_ATTACHMENT_RECLAIM_HOURS,
   ASSISTANT_UNSENT_ATTACHMENT_TTL_HOURS,
   type AssistantAttachmentRef,
 } from '@campuspilot/assistant-contract/attachments';
-import { assistantAttachmentTable } from '@campuspilot/db/schema/assistant';
-import { and, asc, eq, inArray, isNull, lt, sql } from 'drizzle-orm';
+import { assistantAttachmentTable, assistantConversationTable } from '@campuspilot/db/schema/assistant';
+import { and, asc, eq, exists, inArray, isNotNull, isNull, lt, or, sql } from 'drizzle-orm';
 
 import type { AssistantDatabase, AssistantExecutor } from './db';
 import { db as defaultDb } from './db';
@@ -71,6 +73,78 @@ export function toAttachmentRef(row: AttachmentRow): AssistantAttachmentRef {
 }
 
 /**
+ * Deletes the stored objects of locked attachment rows and then the rows whose
+ * objects are gone. Objects first: the row is the only record of their keys,
+ * so a row whose objects could not be deleted stays for a later sweep to
+ * retry (and is logged), instead of leaving photographs of exam papers behind
+ * with nothing pointing at them. Returns the ids removed.
+ */
+async function removeAttachmentRows(tx: AssistantExecutor, rows: readonly AttachmentRow[]): Promise<string[]> {
+  const removed: string[] = [];
+  for (const row of rows) {
+    try {
+      await deleteObjects(attachmentObjectKeys(row));
+      removed.push(row.id);
+    } catch (err) {
+      log.warn({ err, attachmentId: row.id, keys: attachmentObjectKeys(row) }, 'assistant.attachment.objects.delete.failed');
+    }
+  }
+  if (removed.length > 0) await tx.delete(assistantAttachmentTable).where(inArray(assistantAttachmentTable.id, removed));
+  return removed;
+}
+
+/** Deletes a user's unsent attachments older than the reclaim age (rows locked first; one being sent right now is skipped). */
+async function reclaimStaleUnsent(tx: AssistantExecutor, input: { schoolId: string; userId: string }, now: Date = new Date()) {
+  const cutoff = new Date(now.getTime() - ASSISTANT_UNSENT_ATTACHMENT_RECLAIM_HOURS * 3_600_000);
+  const stale = await tx
+    .select()
+    .from(assistantAttachmentTable)
+    .where(
+      and(
+        eq(assistantAttachmentTable.schoolId, input.schoolId),
+        eq(assistantAttachmentTable.userId, input.userId),
+        isNull(assistantAttachmentTable.itemId),
+        lt(assistantAttachmentTable.createdAt, cutoff),
+      ),
+    )
+    .for('update', { skipLocked: true });
+  return removeAttachmentRows(tx, stale);
+}
+
+/**
+ * Removes one image the user attached but did not send (the composer's remove
+ * button). Only the owner's own unsent attachment of this school is removed:
+ * one already carried by a message is refused (CONFLICT), because the
+ * conversation still shows and may still read it. An attachment that is not
+ * there (already removed, swept, or someone else's) is `deleted: false`, so
+ * removing twice is harmless. The row is locked first, which makes the
+ * removal take turns with a send that names the same image.
+ */
+export async function deleteUnsentAttachment(
+  database: AssistantDatabase,
+  input: { schoolId: string; userId: string; attachmentId: string },
+): Promise<{ deleted: boolean }> {
+  return database.transaction(async (tx) => {
+    const [row] = await tx
+      .select()
+      .from(assistantAttachmentTable)
+      .where(
+        and(
+          eq(assistantAttachmentTable.id, input.attachmentId),
+          eq(assistantAttachmentTable.schoolId, input.schoolId),
+          eq(assistantAttachmentTable.userId, input.userId),
+        ),
+      )
+      .for('update');
+    if (!row) return { deleted: false };
+    if (row.itemId !== null) throw rpcError.conflict('This image was already sent with a message and cannot be removed.');
+    const removed = await removeAttachmentRows(tx, [row]);
+    if (removed.length === 0) throw rpcError.internal();
+    return { deleted: true };
+  });
+}
+
+/**
  * Stores one uploaded image as an unsent attachment: derivatives first (a
  * JPEG/PNG/WebP that cannot be decoded is a 415), then the objects, then the
  * row. The cap of unsent attachments per user and school is counted under an
@@ -91,17 +165,26 @@ export async function createAttachment(
   try {
     return await database.transaction(async (tx) => {
       await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`assistant-attachments:${schoolId}:${userId}`}, 0))`);
-      const [unsent] = await tx
-        .select({ count: sql<number>`count(*)::int` })
-        .from(assistantAttachmentTable)
-        .where(
-          and(
-            eq(assistantAttachmentTable.schoolId, schoolId),
-            eq(assistantAttachmentTable.userId, userId),
-            isNull(assistantAttachmentTable.itemId),
-          ),
-        );
-      if (unsent!.count >= ASSISTANT_UNSENT_ATTACHMENTS_PER_USER) {
+      const countUnsent = async () => {
+        const [unsent] = await tx
+          .select({ count: sql<number>`count(*)::int` })
+          .from(assistantAttachmentTable)
+          .where(
+            and(
+              eq(assistantAttachmentTable.schoolId, schoolId),
+              eq(assistantAttachmentTable.userId, userId),
+              isNull(assistantAttachmentTable.itemId),
+            ),
+          );
+        return unsent!.count;
+      };
+      let unsentCount = await countUnsent();
+      if (unsentCount >= ASSISTANT_UNSENT_ATTACHMENTS_PER_USER) {
+        // Images left behind by a reload or a closed tab are not in any open composer: free them rather than lock the user out.
+        await reclaimStaleUnsent(tx, { schoolId, userId });
+        unsentCount = await countUnsent();
+      }
+      if (unsentCount >= ASSISTANT_UNSENT_ATTACHMENTS_PER_USER) {
         throw rpcError.badRequest(
           `You have ${ASSISTANT_UNSENT_ATTACHMENTS_PER_USER} images waiting to be sent. Send or remove some first.`,
         );
@@ -279,34 +362,57 @@ export async function loadAttachmentFile(
 const SWEEP_LIMIT = 50;
 
 /**
- * Deletes attachments that were uploaded but never sent, once they are older
- * than {@link ASSISTANT_UNSENT_ATTACHMENT_TTL_HOURS}: the rows, then their
- * objects (best effort; the demo purge sweeps the school prefix). A row that
- * got sent meanwhile is not deleted: the delete re-checks it is still unsent.
+ * Deletes attachments nothing can use any more, {@link SWEEP_LIMIT} per call:
+ * ones uploaded but never sent once they are older than
+ * {@link ASSISTANT_UNSENT_ATTACHMENT_TTL_HOURS}, and ones of a conversation
+ * the user deleted whose cleanup at delete time failed. The rows are locked
+ * (one being sent right now is skipped) and re-checked by the same condition,
+ * then their objects are deleted before the rows ({@link removeAttachmentRows}).
  */
 export async function sweepUnsentAttachments(database: AssistantDatabase = defaultDb, now: Date = new Date()) {
   const cutoff = new Date(now.getTime() - ASSISTANT_UNSENT_ATTACHMENT_TTL_HOURS * 3_600_000);
-  const stale = await database
-    .select({ id: assistantAttachmentTable.id })
-    .from(assistantAttachmentTable)
-    .where(and(isNull(assistantAttachmentTable.itemId), lt(assistantAttachmentTable.createdAt, cutoff)))
-    .orderBy(asc(assistantAttachmentTable.createdAt))
-    .limit(SWEEP_LIMIT);
-  if (stale.length === 0) return { deleted: 0 };
-  const deleted = await database
-    .delete(assistantAttachmentTable)
-    .where(and(inArray(assistantAttachmentTable.id, stale.map((row) => row.id)), isNull(assistantAttachmentTable.itemId)))
-    .returning();
-  await deleteObjectsBestEffort(deleted.flatMap(attachmentObjectKeys));
-  return { deleted: deleted.length };
+  return database.transaction(async (tx) => {
+    const stale = await tx
+      .select()
+      .from(assistantAttachmentTable)
+      .where(
+        or(
+          and(isNull(assistantAttachmentTable.itemId), lt(assistantAttachmentTable.createdAt, cutoff)),
+          and(
+            isNotNull(assistantAttachmentTable.conversationId),
+            exists(
+              tx
+                .select({ one: sql`1` })
+                .from(assistantConversationTable)
+                .where(
+                  and(
+                    eq(assistantConversationTable.id, assistantAttachmentTable.conversationId),
+                    isNotNull(assistantConversationTable.deletedAt),
+                  ),
+                ),
+            ),
+          ),
+        ),
+      )
+      .orderBy(asc(assistantAttachmentTable.createdAt))
+      .limit(SWEEP_LIMIT)
+      .for('update', { skipLocked: true });
+    return { deleted: (await removeAttachmentRows(tx, stale)).length };
+  });
 }
 
-/** Deletes the attachments of a conversation the user deleted: the rows, then their objects (best effort). */
+/**
+ * Deletes the attachments of a conversation the user deleted: objects, then
+ * rows. A failure leaves the rows, which the sweep retries (it also collects
+ * attachments of soft-deleted conversations).
+ */
 export async function deleteConversationAttachments(database: AssistantDatabase, conversationId: string) {
-  const deleted = await database
-    .delete(assistantAttachmentTable)
-    .where(eq(assistantAttachmentTable.conversationId, conversationId))
-    .returning();
-  await deleteObjectsBestEffort(deleted.flatMap(attachmentObjectKeys));
-  return { deleted: deleted.length };
+  return database.transaction(async (tx) => {
+    const rows = await tx
+      .select()
+      .from(assistantAttachmentTable)
+      .where(eq(assistantAttachmentTable.conversationId, conversationId))
+      .for('update', { skipLocked: true });
+    return { deleted: (await removeAttachmentRows(tx, rows)).length };
+  });
 }

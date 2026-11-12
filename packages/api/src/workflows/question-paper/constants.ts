@@ -42,6 +42,7 @@ export const QUESTION_PAPER_JOB_FAILURES = {
   output_too_long: 'This paper is too long to read in one go.',
   template_missing: 'Choose a question paper template first.',
   paper_locked: 'This paper can no longer be changed.',
+  paper_unprintable: 'The paper was read but it is too large or too complex to print. Use fewer pages or simpler formulas.',
   pdf_failed: 'The paper was read but the PDF could not be created. Try again.',
   internal_error: 'AI generation failed unexpectedly. Try again.',
   not_started: 'AI generation did not start. Try again.',

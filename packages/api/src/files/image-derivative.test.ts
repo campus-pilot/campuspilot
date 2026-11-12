@@ -1,10 +1,11 @@
 import { randomBytes } from 'node:crypto';
+import { crc32 } from 'node:zlib';
 import { readFileSync } from 'node:fs';
 import { ORPCError } from '@orpc/server';
 import sharp from 'sharp';
 import { describe, expect, it } from 'vitest';
 
-import { makeImageDerivatives, normalizeFigureImage } from './image-derivative';
+import { MAX_INPUT_PIXELS, makeImageDerivatives, normalizeFigureImage } from './image-derivative';
 
 /**
  * A real HEVC still in a HEIC container (64x48, brand `heic`): the stream was
@@ -119,5 +120,35 @@ describe('normalizeFigureImage', () => {
   it('refuses bytes that are not an image with 415', async () => {
     const error = await normalizeFigureImage(randomBytes(100)).catch((e: unknown) => e);
     expect((error as ORPCError<string, unknown>).status).toBe(415);
+  });
+});
+
+describe('decompression bombs', () => {
+  /** A real small PNG whose header (and its CRC) declares a huge size; its pixels are never decoded. */
+  async function pngDeclaring(width: number, height: number) {
+    const png = Buffer.from(await sharp({ create: { width: 20, height: 20, channels: 3, background: '#fff' } }).png().toBuffer());
+    png.writeUInt32BE(width, 16);
+    png.writeUInt32BE(height, 20);
+    png.writeUInt32BE(crc32(png.subarray(12, 29)), 29);
+    return png;
+  }
+
+  it('refuses an image over the pixel cap from its header, for pages and figures, before decoding', async () => {
+    const side = Math.ceil(Math.sqrt(MAX_INPUT_PIXELS)) + 1;
+    const bomb = await pngDeclaring(side, side);
+    const page = await makeImageDerivatives(bomb, 'image/png').catch((e: unknown) => e);
+    expect((page as ORPCError<string, unknown>).status).toBe(413);
+    const figure = await normalizeFigureImage(bomb).catch((e: unknown) => e);
+    expect((figure as ORPCError<string, unknown>).status).toBe(413);
+  });
+
+  it('keeps the cap above a 600 dpi A4 scan', () => {
+    expect(MAX_INPUT_PIXELS).toBeGreaterThanOrEqual(4960 * 7016);
+  });
+
+  it('serves many uploads at once: the decode queue releases every waiter', async () => {
+    const jpeg = await sharp({ create: { width: 500, height: 400, channels: 3, background: '#ccc' } }).jpeg().toBuffer();
+    const results = await Promise.all(Array.from({ length: 6 }, () => makeImageDerivatives(jpeg, 'image/jpeg')));
+    expect(results.every((result) => result.status === 'ready')).toBe(true);
   });
 });

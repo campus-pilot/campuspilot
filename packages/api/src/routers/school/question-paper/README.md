@@ -99,7 +99,8 @@ returns; the hand-over to the worker (`sendQuestionPaperStart`, signed with
 30 s sweep in `apps/server` (`sweepQuestionPaperOutbox`) re-sends what Restate did not
 accept, and fails jobs that can no longer progress (`dispatch_failed` after 10
 minutes unaccepted, `not_started` after 5 minutes accepted, `not_finished` after
-`QUESTION_PAPER_JOB_TIMEOUT_MINUTES` running, an env setting, default 20).
+`QUESTION_PAPER_JOB_TIMEOUT_MINUTES` running, an env setting, default 40). Starting a job is refused while the school has
+`QUESTION_PAPER_MAX_RUNNING_JOBS_PER_SCHOOL` (default 3) queued or running jobs.
 
 The worker side lives in `workflows/question-paper/`: `control-service.ts`
 (`QuestionPaperControl.startGeneration`, signed), `workflow.ts` (the Restate workflow),

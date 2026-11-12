@@ -10,6 +10,7 @@ import {
   examQuestionPaperVersionTable,
 } from '@campuspilot/db/schema/exam-question-paper';
 import { QUESTION_PAPER_EXAMPLES } from '@campuspilot/question-paper/examples';
+import { ORPCError } from '@orpc/server';
 import { and, asc, eq } from 'drizzle-orm';
 import sharp from 'sharp';
 import { describe, expect, it } from 'vitest';
@@ -387,5 +388,66 @@ describe('question paper generation job', () => {
     await expect(db.insert(assistantModelRequestTable).values({ ...base, source: 'question_paper', requestKey: 'check:1' })).rejects.toThrow();
     await expect(db.insert(assistantModelRequestTable).values({ ...base, source: 'chat', questionPaperJobId: 'qpj_x', requestKey: 'check:2' })).rejects.toThrow();
     await expect(db.insert(assistantModelRequestTable).values({ ...base, source: 'chat', requestKey: 'check:3' })).rejects.toThrow();
+  });
+
+  it('counts a billed call again when Restate re-runs the model step, and keeps the cost in the same step as the call', async () => {
+    const world = await createQuestionPaperWorld();
+    const { job } = await queueJob(world);
+    const { model, requests } = scriptedModel([answer(ENGLISH_SCIENCE), answer(ENGLISH_SCIENCE, { usage: { ...USAGE, inputTokens: 700 } })]);
+    // Restate lost the journal entry of model:1 after the call (and its cost row) were done: the step runs again.
+    let reran = false;
+    const crashAfterCall: StepRunner = async (name, action) => {
+      const value = await action();
+      if (name === 'model:1' && !reran) {
+        reran = true;
+        return action();
+      }
+      return value;
+    };
+    expect(await runQuestionPaperGeneration({ jobId: job.id, attempt: 1 }, crashAfterCall, depsFor(model))).toMatchObject({ status: 'succeeded' });
+    expect(requests).toHaveLength(2);
+    // Both calls were billed: the second is a row of its own, not a dropped duplicate of the first key.
+    const rows = await requestsOf(job.id);
+    expect(rows.map((row) => [row.requestKey, row.inputTokens])).toEqual([[`qp:${job.id}.1:model:1`, 1000], [`qp:${job.id}.1:model:1:attempt:1`, 700]]);
+    expect((await jobOf(job.id)).modelRequestCount).toBe(2);
+  });
+
+  it('does not repeat a billed model call when only saving its cost fails', async () => {
+    const world = await createQuestionPaperWorld();
+    const { job } = await queueJob(world);
+    const { model, requests } = scriptedModel([answer(ENGLISH_SCIENCE), answer(ENGLISH_SCIENCE)]);
+    const brokenDb = new Proxy(db, {
+      get(target, property, receiver) {
+        if (property === 'insert') throw new Error('database blip');
+        return Reflect.get(target, property, receiver);
+      },
+    });
+    // The direct runner has no Restate retries: the unexpected error ends the job, and the model was asked once (never retried as a "model failure").
+    expect(await runQuestionPaperGeneration({ jobId: job.id, attempt: 1 }, direct, depsFor(model, { db: brokenDb as typeof db }))).toEqual({ status: 'failed', code: 'internal_error' });
+    expect(requests).toHaveLength(1);
+  });
+
+  it('tells a paper that is too large or too complex to print from a paper that was locked', async () => {
+    const world = await createQuestionPaperWorld();
+    const unprintable = await queueJob(world);
+    const { model } = scriptedModel([answer(ENGLISH_SCIENCE)]);
+    const tooLarge = async () => {
+      throw new ORPCError('BAD_REQUEST', { message: 'This paper is too large to print. Remove some figures or split it.' });
+    };
+    expect(await runQuestionPaperGeneration({ jobId: unprintable.job.id, attempt: 1 }, direct, depsFor(model, { save: tooLarge as never }))).toEqual({ status: 'failed', code: 'paper_unprintable' });
+    expect(await jobOf(unprintable.job.id)).toMatchObject({ errorCode: 'paper_unprintable', errorMessage: QUESTION_PAPER_JOB_FAILURES.paper_unprintable });
+    expect(await requestsOf(unprintable.job.id)).toHaveLength(1);
+
+    // The exam ended while the model worked: the real save refuses with the locked reason.
+    const locked = await queueJob(world, { subjectSlug: 'math', modeSlug: 'practical' });
+    const second = scriptedModel([async () => {
+      await world.setLifecycle('completed');
+      return answer(HINDI_MATH);
+    }]);
+    try {
+      expect(await runQuestionPaperGeneration({ jobId: locked.job.id, attempt: 1 }, direct, depsFor(second.model))).toEqual({ status: 'failed', code: 'paper_locked' });
+    } finally {
+      await world.setLifecycle('ready');
+    }
   });
 });

@@ -1,6 +1,7 @@
-import type { DatabaseExecutor } from '@campuspilot/db';
+import type { DatabaseExecutor, DatabaseTransaction } from '@campuspilot/db';
 import { classTable } from '@campuspilot/db/schema/class';
 import { examLifecycleTable, examPlanTable } from '@campuspilot/db/schema/exam';
+import { ORPCError } from '@orpc/server';
 import { and, eq } from 'drizzle-orm';
 
 import { rpcError } from '../../../errors';
@@ -84,10 +85,45 @@ export async function resolvePaperScope(db: DatabaseExecutor, key: PaperKey): Pr
   };
 }
 
-/** Writes need the active session and an exam that has not ended; the exam's own lifecycle is the fact, not the plan status. */
+/** `data.reason` of the BAD_REQUEST that says a paper can no longer be changed (not a validation or print failure). */
+export const PAPER_LOCKED_REASON = 'paper_locked';
+
+const paperLockedError = (message: string) => new ORPCError('BAD_REQUEST', { message, data: { reason: PAPER_LOCKED_REASON } });
+
+/** Whether an error is the refusal of {@link assertPaperWritable} or {@link assertPaperWritableLocked}. */
+export const isPaperLockedError = (error: unknown): boolean =>
+  error instanceof ORPCError && error.code === 'BAD_REQUEST' && (error.data as { reason?: unknown } | undefined)?.reason === PAPER_LOCKED_REASON;
+
+/**
+ * Writes need the active session and an exam that has not ended; the exam's own lifecycle is the fact, not the plan status.
+ * This reads the scope resolved before the transaction, so it is a fast early refusal only; every write transaction
+ * repeats the check with {@link assertPaperWritableLocked}.
+ */
 export function assertPaperWritable(scope: PaperScope): void {
-  if (!scope.sessionIsActive) throw rpcError.badRequest('Only the active academic session can be modified.');
+  if (!scope.sessionIsActive) throw paperLockedError('Only the active academic session can be modified.');
   if (scope.examCompleted) {
-    throw rpcError.badRequest('This examination has ended, so its question papers can no longer be changed.');
+    throw paperLockedError('This examination has ended, so its question papers can no longer be changed.');
+  }
+}
+
+/**
+ * The authoritative writable check, for the first statements of a write
+ * transaction (before the paper row is locked, which is also the order
+ * `deleteExamPlan` uses). It takes the school session row `FOR SHARE`, the
+ * same lock the exam services take, and `transitionExam` (which completes an
+ * exam) takes it `FOR UPDATE`: a completion therefore either commits before
+ * this read, and the write is refused, or waits until this transaction ends.
+ * The session's `isActive` is checked by the lock read itself.
+ */
+export async function assertPaperWritableLocked(tx: DatabaseTransaction, key: PaperKey): Promise<void> {
+  try {
+    await getExamSession(tx, key, 'share');
+  } catch (error) {
+    if (error instanceof ORPCError && error.code === 'BAD_REQUEST') throw paperLockedError(error.message);
+    throw error;
+  }
+  const [lifecycle] = await tx.select({ status: examLifecycleTable.status }).from(examLifecycleTable).where(lifecycleWhere(key)).limit(1);
+  if (lifecycle?.status === 'completed') {
+    throw paperLockedError('This examination has ended, so its question papers can no longer be changed.');
   }
 }

@@ -110,3 +110,7 @@ export async function runInOrder<T>(items: readonly T[], worker: (item: T) => Pr
 export function inFlightJob(job: { status: 'queued' | 'running' | 'succeeded' | 'failed' } | null | undefined) {
   return job && (job.status === 'queued' || job.status === 'running') ? { status: job.status } : null;
 }
+
+/** How many photos are still being prepared or uploaded; a failed one waits for the user and does not count. */
+export const uploadsInFlight = (items: readonly { status: 'converting' | 'uploading' | 'error' }[]) =>
+  items.filter((item) => item.status !== 'error').length;

@@ -13,11 +13,11 @@ import { Button } from '@campuspilot/ui/components/button';
 import { orpc } from '@/lib/orpc';
 import { questionPaperThumbUrl } from '@/lib/question-paper-pages';
 import { QuestionPaperGenerateForm } from './question-paper-generate-form';
-import { applyPageOrder, inFlightJob, isConflict, requestErrorMessage, type QuestionPaperScope } from './question-paper-model';
+import { applyPageOrder, inFlightJob, isConflict, requestErrorMessage, uploadsInFlight, type QuestionPaperScope } from './question-paper-model';
 import { useRefreshQuestionPaper, type QuestionPaperDetail } from './use-question-paper-detail';
-import { usePageUploads } from './use-page-uploads';
+import type { PageUploads } from './use-page-uploads';
 
-type SectionProps = { scope: QuestionPaperScope; detail: QuestionPaperDetail; canManage: boolean };
+type SectionProps = { scope: QuestionPaperScope; detail: QuestionPaperDetail; canManage: boolean; uploads: PageUploads };
 
 /**
  * Reordering is optimistic: the grid shows the new order at once and the
@@ -69,8 +69,9 @@ function Rejections({ rejections, onDismiss }: { rejections: readonly { name: st
   return (
     <div role="alert" className="flex items-start justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-3">
       <ul className="flex flex-col gap-1 text-sm text-destructive">
-        {rejections.map((rejection) => (
-          <li key={rejection.name}>
+        {rejections.map((rejection, index) => (
+          // The name alone repeats: every camera capture is called question-paper-photo.jpg.
+          <li key={`${index}:${rejection.name}`}>
             {rejection.name}: {rejection.reason}
           </li>
         ))}
@@ -105,19 +106,17 @@ function PagesHeader({ count }: { count: number }) {
  * Uploading, reordering, deleting and generating are closed while the exam has
  * ended, a generation runs, or the user may only view; the reason is written.
  */
-export function QuestionPaperPagesSection({ scope, detail, canManage }: SectionProps) {
+export function QuestionPaperPagesSection({ scope, detail, canManage, uploads }: SectionProps) {
   const { paper, pages } = detail;
-  const refresh = useRefreshQuestionPaper(scope);
   const reorder = usePageReorder(scope);
   const deletePage = useDeletePage(scope);
-  const uploads = usePageUploads({ pageKey: scope, refresh });
   const [deleting, setDeleting] = useState<string | null>(null);
   const blockedReason = editBlockedReason({ readOnly: paper.readOnly, canManage, jobActive: inFlightJob(detail.activeJob) !== null });
   const deletingPage = pages.find((page) => page.id === deleting);
   return (
-    <div ref={uploads.rootRef} className="flex flex-col gap-4">
+    <div className="flex flex-col gap-4">
       <JobPanel detail={detail} />
-      <uploads.form.Subscribe selector={(state) => state.values.items.filter((item) => item.status !== 'error').length}>
+      <uploads.form.Subscribe selector={(state) => uploadsInFlight(state.values.items)}>
         {(inFlight) => (
           <QuestionPaperUploadZone
             remaining={QUESTION_PAPER_MAX_PAGES - paper.pageCount - inFlight}
@@ -153,14 +152,19 @@ export function QuestionPaperPagesSection({ scope, detail, canManage }: SectionP
           is refused, convert those pages to JPEG and add them again.
         </p>
       ) : null}
-      <QuestionPaperGenerateForm
-        key={paper.pageRevision}
-        scope={scope}
-        expectedPageRevision={paper.pageRevision}
-        pageCount={paper.pageCount}
-        templateConfigured={detail.templateConfigured}
-        blockedReason={blockedReason}
-      />
+      <uploads.form.Subscribe selector={(state) => uploadsInFlight(state.values.items) > 0}>
+        {(uploading) => (
+          <QuestionPaperGenerateForm
+            key={paper.pageRevision}
+            scope={scope}
+            expectedPageRevision={paper.pageRevision}
+            pageCount={paper.pageCount}
+            templateConfigured={detail.templateConfigured}
+            blockedReason={blockedReason}
+            uploading={uploading}
+          />
+        )}
+      </uploads.form.Subscribe>
       <ConfirmationDialog
         open={deletingPage !== undefined}
         title={deletingPage ? `Delete page ${deletingPage.position}?` : 'Delete page?'}

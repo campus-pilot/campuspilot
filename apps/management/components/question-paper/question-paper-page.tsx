@@ -8,6 +8,7 @@ import { RequirePermissions } from '@/components/require-permissions';
 import { LoadingExam, Notice, ReadError } from '@/components/exam/exam-common';
 import { questionPaperWorkspaceHref, schoolPermission, type ExamScope } from '@/components/exam/exam-model';
 import { orpc } from '@/lib/orpc';
+import { QuestionPaperAssistantGate } from './question-paper-assistant-gate';
 import { QuestionPaperTemplateAlertForSchool } from './question-paper-template-alert';
 
 const LIST_POLL_MS = 5000;
@@ -24,7 +25,9 @@ export function QuestionPaperPage({ scope }: { scope: ExamScope }) {
       fallback={<Notice>Question papers are unavailable for your account.</Notice>}
       pending={<LoadingExam />}
     >
-      <PaperList scope={scope} />
+      <QuestionPaperAssistantGate schoolId={scope.schoolId}>
+        <PaperList scope={scope} />
+      </QuestionPaperAssistantGate>
     </RequirePermissions>
   );
 }
