@@ -8,7 +8,6 @@
       "subjectSlug": "science",
       "modeSlugs": ["theory", "written"],
       "classFrom": "seniormost",
-      "classLabelFormat": "Class {number}",
       "uploadedDaysAgo": 4,
       "savedDaysAgo": 4,
       "pages": [
@@ -23,7 +22,6 @@
       "subjectSlug": "mathematics",
       "modeSlugs": ["theory", "written"],
       "classFrom": "seniormost",
-      "classLabelFormat": "कक्षा {number}",
       "uploadedDaysAgo": 2,
       "savedDaysAgo": 2,
       "pages": [

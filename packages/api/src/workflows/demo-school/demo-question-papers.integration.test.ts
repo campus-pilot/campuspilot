@@ -56,9 +56,9 @@ describe('demo question papers (steps only, one class)', () => {
   const seedAll = () => Promise.all(ctx.plan.questionPapers.map((paper) => seedQuestionPaper(ctx, { sessionId, classIdsBySlug: { 'class-7': classId }, paper })));
 
   it('plans both papers into the upcoming exam, in a class that teaches the subject', () => {
-    expect(ctx.plan.questionPapers.map(({ key, examSlug, classSlug, subjectSlug, modeSlug, classLabel }) => ({ key, examSlug, classSlug, subjectSlug, modeSlug, classLabel }))).toEqual([
-      { key: 'science-english', examSlug: 'annual-examination', classSlug: 'class-7', subjectSlug: 'science', modeSlug: 'written', classLabel: 'Class 7' },
-      { key: 'mathematics-hindi', examSlug: 'annual-examination', classSlug: 'class-7', subjectSlug: 'mathematics', modeSlug: 'written', classLabel: 'कक्षा 7' },
+    expect(ctx.plan.questionPapers.map(({ key, examSlug, classSlug, subjectSlug, modeSlug }) => ({ key, examSlug, classSlug, subjectSlug, modeSlug }))).toEqual([
+      { key: 'science-english', examSlug: 'annual-examination', classSlug: 'class-7', subjectSlug: 'science', modeSlug: 'written' },
+      { key: 'mathematics-hindi', examSlug: 'annual-examination', classSlug: 'class-7', subjectSlug: 'mathematics', modeSlug: 'written' },
     ]);
   });
 

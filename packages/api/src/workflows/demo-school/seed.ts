@@ -222,8 +222,6 @@ const questionPaperSeedSchema = z
     /** The first of these that is a mode of the subject in the placed class. */
     modeSlugs: z.array(slugSchema).min(1),
     classFrom: z.enum(['seniormost', 'juniormost']),
-    /** How the paper prints its class: `{number}` is the first number in the class label. */
-    classLabelFormat: z.string().min(1).max(60).includes('{number}'),
     uploadedDaysAgo: z.number().int().min(1).max(120),
     savedDaysAgo: z.number().int().min(1).max(120),
     pages: z

@@ -199,14 +199,14 @@ describe('demo passwords', () => {
   it('places each question paper in the senior-most class that teaches its subject, in an exam that is not completed', () => {
     const asOf = new Date('2026-12-20T06:30:00Z');
     const plan = (classSlugs: string[], at = asOf) => buildDemoPlan({ input: { ...input, classSlugs }, seed: 's', asOf: at, school }).questionPapers;
-    const place = (papers: ReturnType<typeof plan>) => papers.map((paper) => [paper.key, paper.examSlug, paper.classSlug, paper.modeSlug, paper.classLabel]);
+    const place = (papers: ReturnType<typeof plan>) => papers.map((paper) => [paper.key, paper.examSlug, paper.classSlug, paper.modeSlug]);
     // Preschool has neither subject, so a nursery-only demo has no paper; Class 1 has maths only (modes written/oral).
     expect(plan(['nursery'])).toEqual([]);
-    expect(place(plan(['nursery', 'class-1']))).toEqual([['mathematics-hindi', 'annual-examination', 'class-1', 'written', 'कक्षा 1']]);
+    expect(place(plan(['nursery', 'class-1']))).toEqual([['mathematics-hindi', 'annual-examination', 'class-1', 'written']]);
     // The annual exam is still `ready` in December; the paper goes to the senior-most class with the subject, with its own mode.
     expect(place(plan(['class-1', 'class-7', 'class-9']))).toEqual([
-      ['science-english', 'annual-examination', 'class-9', 'theory', 'Class 9'],
-      ['mathematics-hindi', 'annual-examination', 'class-9', 'theory', 'कक्षा 9'],
+      ['science-english', 'annual-examination', 'class-9', 'theory'],
+      ['mathematics-hindi', 'annual-examination', 'class-9', 'theory'],
     ]);
     // Once the annual exam is under way ("active") that one is used; once every exam is completed there is nowhere to put a paper.
     expect(plan(['class-7'], new Date('2027-03-10T06:30:00Z')).map((paper) => paper.examSlug)).toEqual(['annual-examination', 'annual-examination']);

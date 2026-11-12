@@ -150,8 +150,6 @@ export type DemoQuestionPaper = {
   classSlug: string;
   subjectSlug: string;
   modeSlug: string;
-  /** The class as the paper prints it, or null to keep what the example says. */
-  classLabel: string | null;
   /** The pages of the photographed handwritten paper, in order. */
   pages: DemoSeed['questionPapers']['papers'][number]['pages'];
   /** When the pages were uploaded (ISO instant, before `asOf`). */
@@ -387,7 +385,6 @@ function buildQuestionPapers(classes: DemoClass[], exams: DemoExam[], asOfLocal:
       const subject = demoClass.config.subjects[paper.subjectSlug];
       const modeSlug = paper.modeSlugs.find((slug) => subject && Object.hasOwn(subject.examModes, slug));
       if (!exam || !modeSlug) continue;
-      const number = /\d+/.exec(demoClass.seed.label)?.[0];
       return [
         {
           key: paper.key,
@@ -396,7 +393,6 @@ function buildQuestionPapers(classes: DemoClass[], exams: DemoExam[], asOfLocal:
           classSlug: demoClass.seed.slug,
           subjectSlug: paper.subjectSlug,
           modeSlug,
-          classLabel: number ? paper.classLabelFormat.replace('{number}', number) : null,
           pages: paper.pages,
           uploadedAt: at(paper.uploadedDaysAgo, localHours.uploaded),
           savedAt: at(paper.savedDaysAgo, localHours.saved),
