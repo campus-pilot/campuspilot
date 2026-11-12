@@ -1,40 +1,39 @@
 /**
- * Every numeric bound of the structured question paper, in one place so the
- * Zod schema, the cross checks, the renderer caps, the learn guide and the
- * tests all read the same numbers.
+ * Every numeric bound of the HTML question paper, in one place so the
+ * sanitiser, the validation, the renderer caps, the learn guide and the tests
+ * all read the same numbers.
  *
- * These are product limits, not provider limits: the provider-facing JSON
- * Schema drops numeric and length keywords (providers ignore or reject them),
- * so the Zod schema is the only authority and re-validates everything.
+ * These are product limits. The fragment is untrusted text (a model's output,
+ * steered by photographs and prompts), so each limit also bounds the work the
+ * server does on it.
  */
 export const QUESTION_PAPER_LIMITS = {
-  sections: 20,
-  questionsPerSection: 100,
-  questionsPerPaper: 300,
-  /** `question.parts` and `part.parts`. */
-  partsPerLevel: 20,
-  alternatives: 3,
-  options: 8,
-  blocksPerNode: 10,
-  /** Runs (strings, text, math, br) in one rich text array. */
-  runsPerText: 60,
-  runChars: 2_000,
-  /** Sum of the text and math characters of one whole rich text. */
-  richChars: 4_000,
-  /** LaTeX characters of one math run. */
+  /** UTF-16 characters of the stored fragment. A longer answer is refused, never cut. */
+  fragmentChars: 200_000,
+  /**
+   * The most characters the sanitiser will even parse. Between this and
+   * `fragmentChars` the fragment is parsed so the finding can say how large it
+   * is; beyond it the input is refused unread.
+   */
+  parseChars: 1_000_000,
+  /** Elements of the fragment after sanitising (every tag counts, svg shapes too). */
+  elements: 8_000,
+  /** Inline `<svg>` drawings. */
+  svgs: 40,
+  /** Elements inside inline `<svg>` drawings, in total. */
+  svgElements: 4_000,
+  /** Characters of CSS in all `<style>` elements together (style attributes are bounded by `fragmentChars`). */
+  styleChars: 30_000,
+  /** LaTeX characters of one `data-math` expression. */
   texChars: 500,
-  mathNodesPerPaper: 600,
-  tablesPerPaper: 12,
-  tableRows: 20,
-  tableCols: 10,
+  /** `data-math` expressions per paper. */
+  mathNodes: 600,
   /** Uploaded figures plus placeholders. */
-  figuresPerPaper: 30,
-  generalInstructions: 20,
-  sectionInstructions: 10,
-  /** Marks are 0..maxMarksPerNode in multiples of 0.25. */
-  maxMarksPerNode: 1_000,
-  /** Serialized JSON of the whole document. */
-  jsonChars: 200_000,
+  figures: 30,
+  /** Characters of a `data-placeholder` description. */
+  placeholderChars: 500,
+  /** Characters of an `alt` text. */
+  altChars: 300,
 } as const;
 
 export type QuestionPaperLimits = typeof QUESTION_PAPER_LIMITS;
