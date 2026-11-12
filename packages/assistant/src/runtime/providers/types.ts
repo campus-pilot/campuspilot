@@ -125,7 +125,10 @@ export type TextResult = {
   usage: ModelUsage;
   /** The provider declined to answer (safety or policy); `text` may be empty. */
   refusal: boolean;
-  /** The answer stopped on the output-token limit, so `text` is cut off. */
+  /**
+   * The answer did not end with the provider's positive completion signal (Gemini `STOP`, Anthropic `end_turn` or
+   * `stop_sequence`): it stopped on the output-token limit, or for any other or unreported reason, so `text` may be cut off.
+   */
   truncated: boolean;
 };
 

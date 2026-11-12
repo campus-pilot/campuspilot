@@ -4,6 +4,8 @@ import { DOCUMENT_SANITIZER_OPTIONS, EMBEDDABLE_IMAGE } from "./document.sanitiz
 import { env } from "@campuspilot/env/server";
 import { rpcError } from "../../../errors";
 import { ORPCError } from "@orpc/server";
+import { QUESTION_PAPER_LIMITS } from "@campuspilot/question-paper/limits";
+import { PDFDocument } from "pdf-lib";
 import type {
   DocumentTemplatePageSize,
   DocumentType,
@@ -993,24 +995,45 @@ export function combineDocuments(
   const html = `<div class="batch">${sheets}</div><style>@page{size:${landscape ? "A4 landscape" : "A4"};margin:0}html,body{margin:0!important;padding:0!important}.print-sheet{box-sizing:border-box;width:${width};height:${height};overflow:hidden;break-after:page}.print-sheet:last-child{break-after:auto}.sheet-item{width:100%;height:100%;min-width:0;min-height:0;overflow:hidden;break-inside:avoid}${layout}</style>`;
   return safeHtml(html);
 }
+/** How long the converter may work on one question paper (the other documents get 120 seconds). */
+const QUESTION_PAPER_CONVERSION_TIMEOUT_MS = 60_000;
+
+/**
+ * Question papers are untrusted markup in the end (a model wrote them): the
+ * converter prints at most {@link QUESTION_PAPER_LIMITS.pdfPages} pages and
+ * stops after {@link QUESTION_PAPER_CONVERSION_TIMEOUT_MS}. The page range
+ * asks for ONE page more than the cap, so a paper over the cap is detected
+ * (and refused with a clear message) instead of being silently cut.
+ */
+async function assertQuestionPaperPageCount(bytes: Buffer) {
+  const pages = (await PDFDocument.load(bytes, { updateMetadata: false })).getPageCount();
+  if (pages > QUESTION_PAPER_LIMITS.pdfPages) {
+    throw rpcError.badRequest(
+      `This paper would print on more than ${QUESTION_PAPER_LIMITS.pdfPages} pages, which is the limit. Shorten it or reduce font sizes, spacing and heights.`,
+    );
+  }
+}
+
 export async function convertDocumentPdf(
   html: string,
   type: DocumentType,
   signal?: AbortSignal,
 ) {
+  const questionPaper = type === "question_paper";
   const form = new FormData();
   form.append("files", new Blob([html], { type: "text/html" }), "index.html");
   form.append("paperWidth", type === "timetable" ? "11.7" : "8.27");
   form.append("paperHeight", type === "timetable" ? "8.27" : "11.7");
   form.append("preferCssPageSize", "true");
   form.append("printBackground", "true");
+  if (questionPaper) form.append("nativePageRanges", `1-${QUESTION_PAPER_LIMITS.pdfPages + 1}`);
   const response = await fetch(
     `${env.GOTENBERG_URL.replace(/\/$/, "")}/forms/chromium/convert/html`,
     {
       method: "POST",
       body: form,
       signal: AbortSignal.any([
-        AbortSignal.timeout(120_000),
+        AbortSignal.timeout(questionPaper ? QUESTION_PAPER_CONVERSION_TIMEOUT_MS : 120_000),
         ...(signal ? [signal] : []),
       ]),
     },
@@ -1020,5 +1043,6 @@ export async function convertDocumentPdf(
   const bytes = Buffer.from(await response.arrayBuffer());
   if (bytes.length > 30_000_000 || bytes.subarray(0, 5).toString() !== "%PDF-")
     throw new Error("PDF converter returned an invalid or oversized document.");
+  if (questionPaper) await assertQuestionPaperPageCount(bytes);
   return bytes;
 }

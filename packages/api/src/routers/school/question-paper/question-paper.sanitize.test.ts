@@ -59,14 +59,20 @@ describe('question_paper_body sanitiser: what a good paper keeps', () => {
     expect(result.stripped.join()).not.toContain('<html>');
   });
 
-  it('keeps a safe inline svg with its own style block', () => {
+  it('keeps a safe inline svg, styled by a top-level style block and by attributes', () => {
     const result = clean(
-      '<svg viewBox="0 0 10 10" width="100" height="100" role="img" aria-label="d"><style>.a{fill:red;stroke-width:2}</style><g transform="translate(1,2)"><path class="a" d="M0 0 L5 5 Z"/><text x="1" y="2" font-size="3" text-anchor="middle">A</text></g></svg>',
+      '<style>.a{fill:red;stroke-width:2}</style><svg viewBox="0 0 10 10" width="100" height="100" role="img" aria-label="d"><g transform="translate(1,2)"><path class="a" d="M0 0 L5 5 Z"/><text x="1" y="2" font-size="3" text-anchor="middle">A</text></g></svg>',
     );
     expect(result.stripped).toEqual([]);
     expect(result.html).toContain('viewbox="0 0 10 10"');
     expect(result.html).toContain('<path class="a" d="M0 0 L5 5 Z"></path>');
     expect(result.html).toContain('.qp-body .a{fill:red;stroke-width:2}');
+  });
+
+  it('removes a style element inside an svg, with a notice that says where the CSS goes', () => {
+    const result = clean('<svg viewBox="0 0 10 10"><style>.a{fill:red}</style><rect class="a" width="1" height="1"/></svg>');
+    expect(result.html).toBe('<svg viewbox="0 0 10 10"><rect class="a" width="1" height="1"></rect></svg>');
+    expect(result.stripped.join()).toContain('<style> inside an <svg> was removed');
   });
 });
 
@@ -155,7 +161,8 @@ describe('question_paper_body sanitiser: hostile input', () => {
     const result = clean('<p style="position:fixed;bottom:0;color:red">a</p><p style="position:absolute;color:red">b</p><p style="height:99999mm;width:100%;margin:0 0 0 -50000px">c</p><p style="position:relative;top:2mm">d</p>');
     expect(result.html).not.toMatch(/fixed|absolute|99999|50000/);
     expect(result.html).toContain('style="color:red"');
-    expect(result.html).toContain('style="position:relative;top:2mm"');
+    // `top` is not a property at all (nothing can be offset), `position:relative` alone is inert.
+    expect(result.html).toContain('<p style="position:relative">d</p>');
   });
 
   it('does not let markup hide inside a style block', () => {

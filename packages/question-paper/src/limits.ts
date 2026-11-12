@@ -39,6 +39,11 @@ export const QUESTION_PAPER_LIMITS = {
   placeholderChars: 500,
   /** Characters of an `alt` text. */
   altChars: 300,
+  /**
+   * Pages of the printed PDF. A longer paper is refused when it is printed (never cut): the sanitiser caps every
+   * size, but many small allowed sizes can still add up, so the converter is held to this as well.
+   */
+  pdfPages: 40,
 } as const;
 
 export type QuestionPaperLimits = typeof QUESTION_PAPER_LIMITS;

@@ -16,20 +16,38 @@
  * - No `animation*`, `transition*`, `will-change`, `transform`, `filter` or
  *   `offset*` property: a paper is printed, nothing moves. Dropped properties
  *   of the motion family are reported with their own wording.
- * - `position` is `static` or `relative` only and there is no `z-index`, so a
- *   rule cannot paint over the school's fixed footer band.
- * - Lengths are capped near an A4 page, so a rule cannot create an unbounded
- *   number of pages.
- * - Every selector is prefixed with the body wrapper class, so a rule matches
- *   only inside the paper and can never restyle the school's heading or footer;
- *   selectors are rebuilt from validated parts, not passed through. A selector
- *   that already starts with the wrapper class and a descendant combinator keeps
- *   its single prefix, which makes cleaning idempotent (stored fragments are
- *   cleaned again at render time).
+ * - `position` is `static` or `relative` only, there is no `z-index` and there
+ *   are no `top`/`right`/`bottom`/`left` offsets or negative margins, so
+ *   nothing can be moved over the school's heading or footer band.
+ * - Every number is checked, not only lengths with a unit: no `calc()`,
+ *   `min()`, `max()`, `clamp()`, `var()` or `env()` (they compute sizes the
+ *   caps cannot see), no exponent notation, a cap per unit near an A4 page,
+ *   and a cap per property for unitless numbers (`line-height`, `columns`,
+ *   `flex`, grid `repeat()` counts...). A rule therefore cannot ask for an
+ *   unbounded number of pages. The converter's page cap is the second line
+ *   of defence (many small allowed rules can still add up).
+ * - Every selector is rebuilt from validated parts and prefixed with the body
+ *   wrapper class and a DESCENDANT combinator, so a rule matches only inside
+ *   the paper and can never restyle the school's heading or footer (a sibling
+ *   combinator after the wrapper, `.qp-body ~ *`, is not accepted). A selector
+ *   that an earlier pass already prefixed has that ONE prefix removed before it
+ *   is parsed and is then prefixed again, which makes cleaning idempotent
+ *   (stored fragments are cleaned again at render time). A selector may not name
+ *   a class reserved by the page (see {@link RESERVED_CLASS}).
  */
 
 /** The class of the wrapper element the fragment is placed in. Also written by the renderer. */
 export const QUESTION_PAPER_BODY_CLASS = 'qp-body';
+
+/**
+ * Class names the renderer, KaTeX and the built-in templates define styles
+ * for (`qp-*` renderer classes, `qpc-*` and `qpk-*` template classes, `katex*`,
+ * `question-paper*` the page frame). A fragment cannot use them in `class`
+ * attributes or selectors: borrowing `qpc-foot` would, for example, give a model
+ * the template's fixed footer. The built-in designs' classes all start with one
+ * of these prefixes (`question-paper.css.test.ts` checks the catalogue).
+ */
+export const RESERVED_CLASS = /^(?:qp|katex|question-paper)/i;
 
 /** Collects what was dropped, as short readable lines with counts. */
 export class StripReport {
@@ -37,6 +55,11 @@ export class StripReport {
 
   add(message: string) {
     this.counts.set(message, (this.counts.get(message) ?? 0) + 1);
+  }
+
+  /** Adds the messages of `other` that this report does not have yet (counts of the first pass are the ones kept). */
+  mergeNew(other: StripReport) {
+    for (const message of other.counts.keys()) if (!this.counts.has(message)) this.counts.set(message, other.counts.get(message)!);
   }
 
   lines(): string[] {
@@ -49,7 +72,7 @@ const MOTION_PROPERTY = /^(animation|transition|will-change|offset|scroll-timeli
 /** Presentation and layout properties, by name. Anything else is dropped. */
 const PROPERTIES = new Set(
   [
-    'display', 'position', 'top', 'right', 'bottom', 'left', 'float', 'clear', 'overflow', 'overflow-x', 'overflow-y',
+    'display', 'position', 'float', 'clear', 'overflow', 'overflow-x', 'overflow-y',
     'flex', 'flex-direction', 'flex-wrap', 'flex-flow', 'flex-grow', 'flex-shrink', 'flex-basis',
     'align-items', 'align-content', 'align-self', 'justify-content', 'justify-items', 'justify-self', 'place-items', 'place-content',
     'gap', 'row-gap', 'column-gap', 'grid-template-columns', 'grid-template-rows', 'grid-template-areas', 'grid-area', 'grid-column', 'grid-row', 'grid-auto-flow', 'grid-auto-columns', 'grid-auto-rows',
@@ -89,20 +112,74 @@ const KEYWORDS: Record<string, RegExp> = {
 const FONT_FAMILY = /^(noto (sans|serif)( [a-z ]{1,30})?|dejavu (sans|serif)( mono)?|liberation (sans|serif|mono)|serif|sans-serif|monospace|arial|helvetica|times new roman|times|courier new|courier|georgia|verdana|system-ui)$/i;
 
 /** Largest magnitude of a length, by unit, near an A4 page. Larger values would only make runaway layouts. */
-const UNIT_CAP: Record<string, number> = { mm: 400, cm: 40, q: 1600, in: 16, pt: 1100, pc: 90, px: 1500, em: 100, rem: 100, ex: 100, ch: 100, vh: 100, vw: 100, vmin: 100, vmax: 100, '%': 400 };
+export const UNIT_CAP: Record<string, number> = { mm: 400, cm: 40, q: 1600, in: 16, pt: 1100, pc: 90, px: 1500, em: 100, rem: 100, ex: 100, ch: 100, vh: 100, vw: 100, vmin: 100, vmax: 100, '%': 400, fr: 12 };
 
-const VALUE_CHARS = /^[A-Za-z0-9 #.,%()+\-*/'"!_]*$/;
-const FORBIDDEN_IN_VALUE = /url\s*\(|image-set|image\s*\(|src\s*\(|element\s*\(|var\s*\(|attr\s*\(|env\s*\(|expression|javascript|@import|-moz-binding|behavior/i;
+/** Text-size properties: the generic caps would let one `font-size` multiply a paper into hundreds of pages. */
+const FONT_SIZE_CAP: Record<string, number> = { mm: 17, cm: 1.7, q: 68, in: 0.67, pt: 48, pc: 4, px: 64, em: 4, rem: 4, ex: 8, ch: 8, vh: 5, vw: 5, vmin: 5, vmax: 5, '%': 400, fr: 0 };
+
+/** Largest unitless number by property (everything else: {@link DEFAULT_UNITLESS_CAP}). */
+const UNITLESS_CAP: Record<string, number> = {
+  'line-height': 5,
+  flex: 20, 'flex-grow': 20, 'flex-shrink': 20, 'flex-basis': 0,
+  columns: 6, 'column-count': 6,
+  'tab-size': 16,
+  orphans: 10, widows: 10,
+  opacity: 1, 'fill-opacity': 1, 'stroke-opacity': 1,
+  'aspect-ratio': 20,
+  'font-weight': 1000,
+  'stroke-width': 100, 'stroke-dasharray': 1000, 'stroke-dashoffset': 1000,
+  'grid-template-columns': 12, 'grid-template-rows': 12, 'grid-auto-columns': 12, 'grid-auto-rows': 12,
+  'grid-area': 12, 'grid-column': 12, 'grid-row': 12,
+};
+const DEFAULT_UNITLESS_CAP = 1000;
+
+/** Properties that may shift content backwards a little (a hanging indent); every other negative number is refused. */
+const NEGATIVE_OK = new Set(['text-indent', 'letter-spacing', 'word-spacing', 'vertical-align', 'outline-offset', 'text-underline-offset', 'stroke-dashoffset']);
+const NEGATIVE_UNIT_CAP: Record<string, number> = { mm: 10, cm: 1, q: 40, in: 0.4, pt: 30, pc: 2.5, px: 40, em: 3, rem: 3, ex: 3, ch: 3, '%': 20 };
+
+/** Functions a value may call. `calc`, `min`, `max`, `clamp`, `var`, `env`, `attr`, `url`... compute or fetch what the caps cannot see. */
+const ALLOWED_FUNCTIONS = new Set(['rgb', 'rgba', 'hsl', 'hsla', 'repeat', 'minmax']);
+const GRID_FUNCTION_PROPERTIES = new Set(['grid-template-columns', 'grid-template-rows', 'grid-auto-columns', 'grid-auto-rows']);
+/** Most whitespace-separated tokens in a grid track list. */
+const MAX_GRID_TOKENS = 40;
+
+const VALUE_CHARS = /^[A-Za-z0-9 #.,%()\-/'"!_]*$/;
+const FORBIDDEN_IN_VALUE = /url\s*\(|image-set|image\s*\(|src\s*\(|element\s*\(|expression|javascript|@import|-moz-binding|behavior/i;
 const MAX_VALUE_CHARS = 300;
+
+/** Strings, hex colours, identifiers and numbers (with optional exponent and unit) of a value, in order. */
+const VALUE_TOKEN = /"[^"]*"|'[^']*'|#[0-9a-fA-F]+|([+-]?(?:\d+\.?\d*|\.\d+))([eE][+-]?\d+)?([a-zA-Z%]*)|[a-zA-Z_-][a-zA-Z0-9_-]*/g;
 
 /** Why a value is not acceptable for a property, or null when it is. */
 function valueProblem(property: string, rawValue: string): string | null {
   const value = rawValue.replace(/\s*!\s*important\s*$/i, '').trim();
   if (value === '' || value.length > MAX_VALUE_CHARS) return 'its value is empty or too long';
   if (!VALUE_CHARS.test(value) || FORBIDDEN_IN_VALUE.test(value)) return 'its value is not allowed';
-  for (const match of value.matchAll(/(-?\d*\.?\d+)(mm|cm|q|in|pt|pc|px|rem|em|ex|ch|vh|vw|vmin|vmax|%)(?![a-z])/gi)) {
-    const cap = UNIT_CAP[match[2]!.toLowerCase()];
-    if (cap !== undefined && Math.abs(Number(match[1])) > cap) return 'a length in it is far larger than a page';
+  for (const call of value.matchAll(/([a-zA-Z_-][a-zA-Z0-9_-]*)\s*\(/g)) {
+    const name = call[1]!.toLowerCase();
+    if (!ALLOWED_FUNCTIONS.has(name) || ((name === 'repeat' || name === 'minmax') && !GRID_FUNCTION_PROPERTIES.has(property))) {
+      return `the function ${name}() is not allowed (write the size as a plain number with a unit)`;
+    }
+  }
+  if (GRID_FUNCTION_PROPERTIES.has(property) && value.split(/[\s,()]+/).filter(Boolean).length > MAX_GRID_TOKENS) return 'it lists too many grid tracks';
+  const unitless = UNITLESS_CAP[property] ?? DEFAULT_UNITLESS_CAP;
+  const unitCaps = property === 'font-size' ? FONT_SIZE_CAP : UNIT_CAP;
+  for (const token of value.matchAll(VALUE_TOKEN)) {
+    if (token[1] === undefined) continue;
+    if (token[2] !== undefined) return 'scientific notation (1e3) is not allowed';
+    const amount = Number(token[1]);
+    const unit = token[3]!.toLowerCase();
+    if (unit === '') {
+      if (Math.abs(amount) > unitless) return 'a number in it is far larger than a page needs';
+    } else {
+      const cap = unitCaps[unit];
+      if (cap === undefined) return `the unit "${unit}" is not allowed`;
+      if (Math.abs(amount) > cap) return 'a length in it is far larger than a page';
+    }
+    if (amount < 0) {
+      const floor = NEGATIVE_OK.has(property) ? NEGATIVE_UNIT_CAP[unit] ?? (unit === '' ? 0 : -1) : -1;
+      if (floor < 0 || Math.abs(amount) > floor) return 'a negative size could move content over the page header or footer';
+    }
   }
   const keyword = KEYWORDS[property];
   if (keyword && !keyword.test(value)) return 'its value is not allowed';
@@ -196,7 +273,7 @@ const COMPOUND = new RegExp(
       `:${PSEUDO}`,
       `:${NTH}`,
       ':lang\\([a-zA-Z]{2,3}(?:-[a-zA-Z]{2,8})?\\)',
-      '\\[(?:lang|dir|class|colspan|rowspan|scope|type|start)(?:[~|^$*]?=(?:"[a-zA-Z0-9_ -]{0,40}"|\'[a-zA-Z0-9_ -]{0,40}\'|[a-zA-Z0-9_-]{1,40}))?\\]',
+      '\\[(?:lang|dir|colspan|rowspan|scope|type|start)(?:[~|^$*]?=(?:"[a-zA-Z0-9_ -]{0,40}"|\'[a-zA-Z0-9_ -]{0,40}\'|[a-zA-Z0-9_-]{1,40}))?\\]',
     ].join('|') +
     ')',
 );
@@ -210,8 +287,10 @@ const COMBINATOR = /^\s*([>+~])\s*|^\s+/;
 function scopeSelector(selector: string, knownElement: (name: string) => boolean): string | null {
   let rest = selector.trim();
   if (rest === '' || rest.length > 200) return null;
-  // The wrapper itself is not a target: only what is inside it.
-  if (new RegExp(`^\\.${QUESTION_PAPER_BODY_CLASS}(?:[^\\s>+~]|$)`).test(rest)) return null;
+  // A selector an earlier pass prefixed: remove that ONE descendant prefix and parse the rest as written. A wrapper
+  // followed by anything else (`.qp-body ~ *`, `.qp-body + p`, `.qp-body > p`, `.qp-body.x`, a bare `.qp-body`) is not
+  // a prefix; it falls through, fails the parse (a combinator cannot start a selector) or names a reserved class.
+  rest = rest.replace(new RegExp(`^\\.${QUESTION_PAPER_BODY_CLASS}\\s+`), '');
   let rebuilt = '';
   let expectCompound = true;
   while (rest.length > 0) {
@@ -220,6 +299,7 @@ function scopeSelector(selector: string, knownElement: (name: string) => boolean
       if (!part) return null;
       const text = part[0];
       if (/^[a-zA-Z]/.test(text) && !knownElement(text.toLowerCase())) return null;
+      if (text.startsWith('.') && RESERVED_CLASS.test(text.slice(1))) return null;
       rebuilt += text;
       rest = rest.slice(text.length);
       // A compound selector continues with more simple selectors until a combinator.
@@ -237,8 +317,7 @@ function scopeSelector(selector: string, knownElement: (name: string) => boolean
     }
   }
   if (expectCompound) return null;
-  // Idempotence: a selector that is already scoped (the output of an earlier pass, or written that way) keeps its one prefix.
-  return rebuilt.startsWith(`.${QUESTION_PAPER_BODY_CLASS} `) || rebuilt.startsWith(`.${QUESTION_PAPER_BODY_CLASS} >`) ? rebuilt : `.${QUESTION_PAPER_BODY_CLASS} ${rebuilt}`;
+  return `.${QUESTION_PAPER_BODY_CLASS} ${rebuilt}`;
 }
 
 /**

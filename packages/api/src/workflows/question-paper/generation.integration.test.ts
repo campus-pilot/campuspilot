@@ -228,6 +228,21 @@ describe('question paper generation job', () => {
     expect(await requestsOf(refusedJob.id)).toHaveLength(1);
   });
 
+  it('does not save a refusal or chatter as a paper (M3): no markup fails as model_rejected, stray text is repaired once', async () => {
+    const world = await createQuestionPaperWorld();
+    const { job } = await queueJob(world);
+    const chatter = scriptedModel([answer("I'm sorry, but I cannot help with that request.")]);
+    expect(await runQuestionPaperGeneration({ jobId: job.id, attempt: 1 }, direct, depsFor(chatter.model))).toEqual({ status: 'failed', code: 'model_rejected' });
+    expect(chatter.requests).toHaveLength(1);
+    expect(await db.select().from(examQuestionPaperVersionTable).where(eq(examQuestionPaperVersionTable.sourceJobId, job.id))).toHaveLength(0);
+
+    const { job: preambleJob } = await queueJob(world);
+    const preamble = scriptedModel([answer('Here is the HTML you asked for:\n<p>Q1</p>'), answer('<p>Q1</p>')]);
+    expect(await runQuestionPaperGeneration({ jobId: preambleJob.id, attempt: 1 }, direct, depsFor(preamble.model))).toMatchObject({ status: 'succeeded' });
+    expect(preamble.requests).toHaveLength(2);
+    expect(JSON.stringify(preamble.requests[1]!.parts)).toContain('must start with an element');
+  });
+
   it('refuses a page the model cannot read before any request or cost, naming the page (D46)', async () => {
     const world = await createQuestionPaperWorld();
     const { job } = await queueJob(world, { subjectSlug: 'math', modeSlug: 'practical' }, [

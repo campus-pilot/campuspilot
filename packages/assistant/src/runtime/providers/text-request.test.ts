@@ -72,7 +72,11 @@ describe('anthropic text request', () => {
       refusal: false,
       truncated: false,
     });
-    expect((await generateAnthropicText(clientWith(async () => message('max_tokens')), 'm', request)).truncated).toBe(true);
+    expect((await generateAnthropicText(clientWith(async () => message('stop_sequence')), 'm', request)).truncated).toBe(false);
+    // Only a positive completion signal counts as complete: everything else (or nothing) is treated as cut off.
+    for (const reason of ['max_tokens', 'model_context_window_exceeded', 'pause_turn', 'tool_use', undefined as unknown as string]) {
+      expect((await generateAnthropicText(clientWith(async () => message(reason)), 'm', request)).truncated, String(reason)).toBe(true);
+    }
     expect((await generateAnthropicText(clientWith(async () => message('refusal')), 'm', request)).refusal).toBe(true);
   });
 
@@ -141,7 +145,12 @@ describe('gemini text request', () => {
       refusal: false,
       truncated: false,
     });
-    expect((await generateGeminiText(clientWith(chunk(FinishReason.MAX_TOKENS)), 'm', request)).truncated).toBe(true);
+    for (const reason of [FinishReason.MAX_TOKENS, FinishReason.OTHER, FinishReason.LANGUAGE, FinishReason.FINISH_REASON_UNSPECIFIED]) {
+      expect((await generateGeminiText(clientWith(chunk(reason)), 'm', request)).truncated, reason).toBe(true);
+    }
+    // A stream that ended without any finish reason may have been cut off.
+    const unfinished = [{ candidates: [{ content: { parts: [{ text: '{"a":1}' }] } }], usageMetadata, modelVersion: 'gemini-test-001' }];
+    expect((await generateGeminiText(clientWith(unfinished), 'm', request)).truncated).toBe(true);
     expect((await generateGeminiText(clientWith(chunk(FinishReason.IMAGE_SAFETY)), 'm', request)).refusal).toBe(true);
     expect((await generateGeminiText(clientWith([{ promptFeedback: { blockReason: 'SAFETY' } }]), 'm', request)).refusal).toBe(true);
   });

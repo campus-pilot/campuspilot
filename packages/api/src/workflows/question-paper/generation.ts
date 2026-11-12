@@ -3,7 +3,7 @@ import { ORPCError } from '@orpc/server';
 import { db as defaultDb, type Database } from '@campuspilot/db';
 import { examQuestionPaperJobTable, examQuestionPaperPageTable, examQuestionPaperTable, examQuestionPaperVersionTable } from '@campuspilot/db/schema/exam-question-paper';
 import { env } from '@campuspilot/env/assistant';
-import { extractQuestionPaperFragment } from '@campuspilot/question-paper/fragment';
+import { extractQuestionPaperFragment, hasPaperContent, questionPaperFragmentShapeProblem } from '@campuspilot/question-paper/fragment';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 
 import { resolveAssistantAccess } from '../../assistant/access';
@@ -109,7 +109,10 @@ type Plan = { scope: PaperScope; pages: PlannedPage[] };
 type ModelAnswer = Pick<TextResult, 'text' | 'usage' | 'answeredModel' | 'refusal' | 'truncated'>;
 
 /** The outcome of checking an answer: the fragment to save, or the problems to repair. */
-type Validation = { ok: true; html: string } | { ok: false; html: string; problems: string[] };
+type Validation =
+  | { ok: true; html: string }
+  /** `rejected`: the answer is a refusal or chatter, not a paper to repair (the job fails as `model_rejected`). */
+  | { ok: false; html: string; problems: string[]; rejected?: true };
 
 /** How a refusal by the assistant gate maps to a job failure. */
 function accessFailure(code: string): QuestionPaperJobErrorCode {
@@ -190,6 +193,9 @@ export async function runQuestionPaperGeneration(
     if (first.truncated) throw new QuestionPaperJobFailure('output_too_long', undefined, 'The answer stopped on the output limit.');
 
     let validation = await run('validate:1', () => validateAnswer(deps, plan, first.text));
+    if (!validation.ok && validation.rejected) {
+      throw new QuestionPaperJobFailure('model_rejected', undefined, `The model answered without an HTML fragment: ${validation.html.slice(0, 200)}`);
+    }
     if (!validation.ok) {
       // One repair, text only; a second failure ends the job (no loop).
       await run('access:2', () => assertAccess(deps, begun));
@@ -197,6 +203,9 @@ export async function runQuestionPaperGeneration(
       if (repair.refusal) throw new QuestionPaperJobFailure('model_rejected', undefined, 'The model declined the repair request.');
       if (repair.truncated) throw new QuestionPaperJobFailure('output_too_long', undefined, 'The repaired answer stopped on the output limit.');
       validation = await run('validate:2', () => validateAnswer(deps, plan, repair.text));
+      if (!validation.ok && validation.rejected) {
+        throw new QuestionPaperJobFailure('model_rejected', undefined, `The model answered the repair request without an HTML fragment: ${validation.html.slice(0, 200)}`);
+      }
       if (!validation.ok) {
         throw new QuestionPaperJobFailure('invalid_output', undefined, validation.problems.slice(0, 10).join('; '));
       }
@@ -456,8 +465,16 @@ async function callModel({
 async function validateAnswer(deps: GenerationDeps, plan: Plan, text: string): Promise<Validation> {
   const html = extractQuestionPaperFragment(text);
   if (html === '') return { ok: false, html, problems: ['The answer is empty. Return the HTML fragment of the paper.'] };
+  // The shape comes first: a refusal or a sentence of chatter would otherwise be cleaned to text and printed as the paper.
+  const shape = questionPaperFragmentShapeProblem(html);
+  if (shape?.kind === 'no_markup') return { ok: false, html, problems: [shape.message], rejected: true };
+  if (shape) return { ok: false, html, problems: [shape.message] };
   const checked = await checkQuestionPaperDraft(deps.db, plan.scope, html, { unresolvedFigures: 'placeholder' });
-  return checked.ok ? { ok: true, html } : { ok: false, html, problems: checked.problems.slice(0, MAX_PROBLEMS) };
+  if (!checked.ok) return { ok: false, html, problems: checked.problems.slice(0, MAX_PROBLEMS) };
+  if (!hasPaperContent(checked.html)) {
+    return { ok: false, html, problems: ['After cleaning, the answer holds no paper: it needs block elements (p, div, h1-h6, ul, ol, table, figure) with readable text.'] };
+  }
+  return { ok: true, html };
 }
 
 /** Saves the version through the one function chat uses; idempotent per job id. */

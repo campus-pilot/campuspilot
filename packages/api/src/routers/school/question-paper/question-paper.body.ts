@@ -28,7 +28,26 @@ import { sanitizeQuestionPaperBody } from './question-paper.sanitize';
  * Do not insert anything else after step 1 without repeating that review.
  */
 
-export const QUESTION_PAPER_BODY_MAX_BYTES = 20_000_000;
+/** The size the final document (template output plus body) may reach; the document system's limit. */
+export const QUESTION_PAPER_DOCUMENT_MAX_BYTES = 25_000_000;
+/**
+ * The template alone is rendered under this budget (the same as notices),
+ * with the slot placeholder as the body: the body's size can therefore never
+ * be multiplied by the template, which prints a constant string.
+ */
+export const QUESTION_PAPER_TEMPLATE_RENDER_MAX_CHARS = 2_000_000;
+/** How many times one paper may show the school logo (letterhead, footer, watermark). */
+export const QUESTION_PAPER_MAX_LOGO_USES = 3;
+/** What the template can add around the body: its whole budget at 3 UTF-8 bytes a character, plus the logo at most 1 MB a use. */
+const TEMPLATE_RESERVE_BYTES = QUESTION_PAPER_TEMPLATE_RENDER_MAX_CHARS * 3 + QUESTION_PAPER_MAX_LOGO_USES * 1_000_000;
+/**
+ * The body (fragment, KaTeX markup, figures, stylesheet) may be this large:
+ * whatever is left of the document limit after the template's worst case, so a
+ * body that passes this check can always be placed in the template and printed
+ * (the final check in `renderQuestionPaperDocument` is only a backstop).
+ */
+export const QUESTION_PAPER_BODY_MAX_BYTES = QUESTION_PAPER_DOCUMENT_MAX_BYTES - TEMPLATE_RESERVE_BYTES;
+/** The figures, as data URIs, are part of the body: they leave room for the fragment (80,000 characters) and the KaTeX markup. */
 export const QUESTION_PAPER_FIGURES_MAX_BYTES = 12_000_000;
 
 /** A figure image ready to print: a data URI built from the paper's stored figure or the user's chat attachment. */
@@ -163,14 +182,19 @@ function placeFigures(html: string, figures: FigureAssets, state: FigureState): 
  * Renders a stored fragment to the HTML fragment that fills the template's
  * body slot (see the trust boundary above). Pure: the same fragment, figures and
  * KaTeX version always give the same bytes. A figure id missing from `figures`
- * prints as a note and a warning, and a formula that fails prints as its raw
- * LaTeX and a warning: a stored version always renders.
+ * prints as a note and a warning (see `loadFigureAssets`, which leaves out ids
+ * that are not this paper's), and a formula that fails prints as its raw LaTeX
+ * and a warning: a stored version renders, except one the sanitiser now refuses
+ * (BAD_REQUEST) or one over the body size limit.
  */
 export function renderQuestionPaperBodyHtml(
   fragment: string,
   input: { figures: FigureAssets; math: MathRenderer },
 ): RenderedBody {
   const sanitized = sanitizeQuestionPaperBody(fragment);
+  // Stored versions were cleaned when they were saved, so this only trips if the cleaning rules changed under a stored
+  // fragment: refuse to print rather than print something that was not verified.
+  if (sanitized.refused) throw rpcError.badRequest(`This paper cannot be printed: ${sanitized.problems[0] ?? 'it could not be cleaned safely.'}`);
   const state: FigureState = { figureCount: 0, warnings: [] };
   const withFigures = placeFigures(sanitized.html, input.figures, state);
   const math = renderMathSpans(withFigures, input.math);

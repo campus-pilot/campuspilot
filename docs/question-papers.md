@@ -213,8 +213,21 @@ The fragment is **untrusted**: photographs and prompts can steer a model, so eve
 writes is treated as hostile. `question-paper.sanitize.ts` (with `question-paper.css.ts`) is the
 `question_paper_body` profile on the same sanitize-html base as every document
 (`document.sanitize.ts`). It runs when a fragment is validated or saved (the stored form is the
-sanitised one) and again at every render (defence in depth; cleaning is idempotent, so the second
-pass reports nothing).
+sanitised one) and again at every render. Cleaning reaches a **fixed point**: it repeats until its
+output stops changing (at most 4 rounds; a fragment that does not settle is refused and nothing is
+stored), so the stored value is exactly what the render's second cleaning produces. The result must
+then pass the **output grammar** (`question-paper.output.ts`, an exact check that fails closed, run
+at save and at every render): lowercase allowlisted tags only, plain double-quoted allowlisted
+attributes (no `on*`), no comment/CDATA/doctype, balanced tags, `style=""` attributes and `<style>`
+text equal to their cleaned form with no out-of-flow `position`. The one element whose content the
+browser does not read as markup is `<style>`, so it is written exactly `<style>`, never inside an
+`<svg>` (a `<style>` there is removed with a notice: its text is parsed as markup and entities are
+decoded, which is how sanitize-html's own handling was bypassed), and its text may hold no `<`, `&`
+or backslash. Each style element is replaced by an unguessable marker before sanitize-html writes any
+text, and its escaped text is cleaned as CSS and written back. A parse5 tree-based sanitiser was
+considered and not adopted (it needs a new dependency): the grammar check makes the tree the browser
+builds irrelevant to safety, because no allowlisted element changes how the tokenizer reads what
+follows it except `<style>`. `stats` count the cleaned output only.
 
 - **Forbidden, removed with their content:** `script iframe object embed foreignObject form
   controls link meta base`, SVG `use` and `image`, any event handler attribute, `id`, `xmlns`,
@@ -228,12 +241,20 @@ pass reports nothing).
   guide forbids it first and the sanitiser enforces it. Do not allow any of these to make a design
   look better.
 - **CSS.** A property allowlist (layout, spacing, borders, colours, font properties, direction,
-  white space); `position` only `static` or `relative`, no `z-index`; lengths capped near an A4
-  page; fonts only from the installed Noto families and the generic ones; values with `url`,
-  `\`, `<`, `>`, braces or `@` are dropped. **Every selector is prefixed with the body wrapper
-  class** (`qp-body`), so a rule matches only inside the paper and cannot restyle the school's
-  heading or footer; selectors are rebuilt from validated parts, not passed through. Class names
-  starting `qp-`, `katex` or `question-paper` are reserved and removed.
+  white space); `position` only `static` or `relative`, no `z-index`, no `top/right/bottom/left`, no
+  negative margins (a small negative `text-indent` is allowed); fonts only from the installed Noto
+  families and the generic ones; values with `url`, `\`, `<`, `>`, braces or `@` are dropped. **Every
+  number is checked**, not only lengths: no `calc() min() max() clamp() var() env()`, no exponent
+  notation, a cap per unit near an A4 page (`font-size` capped far lower), a cap per property for
+  unitless numbers (`line-height` 5, `columns` 6, `flex` 20, grid `repeat()` 12 and at most 40
+  tracks, ...); SVG geometry, sizes and `stroke-dasharray` are bounded the same way. The converter's
+  page cap is the second line of defence (see Budgets). **Every selector is rebuilt from validated
+  parts and prefixed with the body wrapper class and a descendant combinator** (`.qp-body .x`), so a
+  rule matches only inside the paper and cannot restyle the school's heading or footer; an authored
+  `.qp-body ~ *` or `.qp-body + p` is not a prefix and is dropped. An already prefixed selector has
+  that one prefix removed before it is parsed and added again (idempotence). Class names starting
+  `qp`, `katex` or `question-paper` are reserved (the built-in designs' `qpc-*`/`qpk-*` classes
+  start with `qp`): they are removed from `class` attributes and refused in selectors.
 - **Caps** (limits above) are reported as `problems`: they block, and nothing is silently cut.
 - **Two kinds of finding.** `stripped` is what was removed or changed ("The event handler
   "onclick" was removed (2 times)"); it never blocks, the paper saves without it. `problems` is
@@ -298,8 +319,13 @@ trust boundary.**
   review (`question-paper.slot.ts` and `question-paper.body.ts` carry the same warning).
 
 Budgets: the template alone renders under the notice budget (2,000,000 characters) and may show
-the logo at most 3 times; the body is at most 20 MB, the figures 12 MB, the whole document stays
-within 25 MB.
+the logo at most 3 times; the whole document stays within 25 MB. The body budget is DERIVED from
+that (`question-paper.body.ts`): 25 MB minus the template's worst case (2,000,000 characters at 3
+bytes plus 3 logo uses at 1 MB), 16 MB, and the figures (inside the body) are at most 12 MB, so a
+body that passes its own cap always fits in the document. The PDF is capped at
+`QUESTION_PAPER_LIMITS.pdfPages` (40) pages: Gotenberg is asked for pages `1-41` (so the work is
+bounded) and a result with a 41st page is refused with a clear BAD_REQUEST (`paper_unprintable` in
+the job), never cut; question paper conversions time out after 60 seconds (other documents 120).
 
 A saved version **pins its template revision**: previews and re-downloads use that revision,
 never the school's later choice.
@@ -345,7 +371,11 @@ images), at most one **text-only repair request** (the previous fragment and the
 pages), save through `saveQuestionPaperVersion` with source `ai_job` (the sanitiser's
 `stripped` lines become the version's notices), mark succeeded. Provider failures retry (busy or
 unknown up to 3 requests); a refusal fails without repair and an answer that stopped on the output
-limit fails as `output_too_long`. Every step checks
+limit fails as `output_too_long`. The provider must give a POSITIVE completion signal (Gemini
+`STOP`, Claude `end_turn`/`stop_sequence`): any other or missing finish reason counts as cut off. An answer
+with no HTML element in it (an apology) fails as `model_rejected` without repair; text before the first
+or after the last element, or an answer that cleans to no block element and readable text, is a repair
+problem. Every step checks
 the job is still `running` for its attempt, so a swept job spends and saves nothing
 more; the save transaction itself reads the job row `FOR SHARE` (after the paper lock) and
 refuses with `SourceJobEndedError` unless it is `running`, so a job swept at its deadline

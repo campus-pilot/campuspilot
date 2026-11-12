@@ -5,6 +5,11 @@ import { describe, expect, it } from 'vitest';
 import {
   figureIdsToPlaceholders,
   fragmentFigureIds,
+  QUESTION_PAPER_BODY_MAX_BYTES,
+  QUESTION_PAPER_DOCUMENT_MAX_BYTES,
+  QUESTION_PAPER_FIGURES_MAX_BYTES,
+  QUESTION_PAPER_MAX_LOGO_USES,
+  QUESTION_PAPER_TEMPLATE_RENDER_MAX_CHARS,
   renderQuestionPaperBodyHtml,
   type FigureAssets,
 } from './question-paper.body';
@@ -210,5 +215,29 @@ describe('the built-in examples', () => {
 
   it('count the placeholder of the science example as a figure', () => {
     expect(render(EXAMPLE_ENGLISH_SCIENCE_HTML).figureCount).toBe(1);
+  });
+});
+
+describe('the size budgets compose (m3)', () => {
+  it('leaves room for the template and the logo around a body of the largest allowed size', () => {
+    const templateWorstCase = QUESTION_PAPER_TEMPLATE_RENDER_MAX_CHARS * 3 + QUESTION_PAPER_MAX_LOGO_USES * 1_000_000;
+    expect(QUESTION_PAPER_BODY_MAX_BYTES + templateWorstCase).toBeLessThanOrEqual(QUESTION_PAPER_DOCUMENT_MAX_BYTES);
+  });
+
+  it('holds the figures, the whole fragment and room for formulas inside the body budget', () => {
+    expect(QUESTION_PAPER_FIGURES_MAX_BYTES + L.fragmentChars * 3).toBeLessThan(QUESTION_PAPER_BODY_MAX_BYTES);
+  });
+
+  it('refuses to print a fragment the sanitiser refuses, instead of printing it unverified', () => {
+    expect(() => render(`<p>${'a'.repeat(L.parseChars + 1)}</p>`)).toThrow(/cannot be printed/);
+  });
+});
+
+describe('a stored version always renders (m6)', () => {
+  it('prints a note and a warning for a figure id that has no image', () => {
+    const result = render(`<figure><img data-figure-id="${QPF}" alt="a graph"></figure>`);
+    expect(result.html).toContain('Figure unavailable');
+    expect(result.warnings.join()).toContain(QPF);
+    expect(result.figureCount).toBe(0);
   });
 });

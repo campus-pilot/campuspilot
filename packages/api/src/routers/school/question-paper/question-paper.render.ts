@@ -20,7 +20,10 @@ import type { QuestionPaperContext } from './question-paper.context';
 import { createMathRenderer, type MathRenderer } from './question-paper.math';
 import {
   fragmentFigureIds,
+  QUESTION_PAPER_DOCUMENT_MAX_BYTES,
   QUESTION_PAPER_FIGURES_MAX_BYTES,
+  QUESTION_PAPER_MAX_LOGO_USES,
+  QUESTION_PAPER_TEMPLATE_RENDER_MAX_CHARS,
   renderQuestionPaperBodyHtml,
   type FigureAssets,
   type RenderedBody,
@@ -29,25 +32,21 @@ import { substituteQuestionPaperBody } from './question-paper.slot';
 import { getObjectBytes } from './question-paper.storage';
 
 export type { RenderedBody } from './question-paper.body';
-export { QUESTION_PAPER_BODY_MAX_BYTES, QUESTION_PAPER_FIGURES_MAX_BYTES } from './question-paper.body';
-
-/**
- * The template alone is rendered under this budget (the same as notices),
- * with the slot placeholder as the body: the body's size can therefore never
- * be multiplied by the template, which prints a constant string.
- */
-export const QUESTION_PAPER_TEMPLATE_RENDER_MAX_CHARS = 2_000_000;
-/** How many times one paper may show the school logo (letterhead, footer, watermark). */
-export const QUESTION_PAPER_MAX_LOGO_USES = 3;
-/** The size the final document (template output plus body) may reach; the document system's limit. */
-const FINAL_DOCUMENT_MAX_BYTES = 25_000_000;
+export {
+  QUESTION_PAPER_BODY_MAX_BYTES,
+  QUESTION_PAPER_DOCUMENT_MAX_BYTES,
+  QUESTION_PAPER_FIGURES_MAX_BYTES,
+  QUESTION_PAPER_MAX_LOGO_USES,
+  QUESTION_PAPER_TEMPLATE_RENDER_MAX_CHARS,
+} from './question-paper.body';
 
 /**
  * Loads the data URIs of the figures a paper uses (`figureIds`, as the
- * sanitiser found them in the fragment). A figure id must belong to this paper
- * of this school: another paper's or school's figure, or an unknown id, is a
- * BAD_REQUEST, so a paper can never print someone else's image by naming its
- * id. `paperId` is null for a draft of a paper that has no row yet, which can
+ * sanitiser found them in the fragment). Only a figure that belongs to this paper
+ * of this school is loaded; another paper's or school's figure, or an unknown
+ * id, is simply absent from the result (the body then prints a note and a
+ * warning), so a paper can never print someone else's image by naming its id.
+ * `paperId` is null for a draft of a paper that has no row yet, which can
  * then hold no figure.
  */
 export async function loadFigureAssets(
@@ -58,7 +57,7 @@ export async function loadFigureAssets(
   if (allIds.length === 0) return new Map();
   // Chat attachments are only in drafts (a saved version holds its own figures).
   const attachmentIds = allIds.filter(isAttachmentFigureId);
-  const ids = allIds.filter((id) => !isAttachmentFigureId(id));
+  const storedIds = allIds.filter((id) => !isAttachmentFigureId(id));
   const rows =
     input.paperId === null
       ? []
@@ -69,14 +68,14 @@ export async function loadFigureAssets(
             and(
               eq(examQuestionPaperFigureTable.schoolId, input.schoolId),
               eq(examQuestionPaperFigureTable.paperId, input.paperId),
-              inArray(examQuestionPaperFigureTable.id, ids),
+              inArray(examQuestionPaperFigureTable.id, storedIds),
             ),
           );
   const known = new Map(rows.map((row) => [row.id, row]));
-  const missing = ids.filter((id) => !known.has(id));
-  if (missing.length > 0) {
-    throw rpcError.badRequest(`The paper uses figure images that do not belong to it: ${missing.join(', ')}.`);
-  }
+  // A stored figure id with no row (it belongs to another paper or school, or is gone) is not loaded: the body prints
+  // "Figure unavailable" and a warning, so a stored version always renders and never shows another paper's image.
+  // Authoring (`checkQuestionPaperDraft`) refuses such an id before anything is saved.
+  const ids = storedIds.filter((id) => known.has(id));
   const assets = new Map<string, { dataUri: string }>(
     await loadAttachmentFigureAssets(db, { schoolId: input.schoolId, chatUserId: input.chatUserId, ids: attachmentIds }),
   );
@@ -142,7 +141,7 @@ export function renderQuestionPaperDocument(input: {
   body: RenderedBody;
 }): string {
   const html = substituteQuestionPaperBody(renderTemplate(input.template.content, input.context), input.body.html);
-  if (Buffer.byteLength(html, 'utf8') > FINAL_DOCUMENT_MAX_BYTES) {
+  if (Buffer.byteLength(html, 'utf8') > QUESTION_PAPER_DOCUMENT_MAX_BYTES) {
     throw rpcError.badRequest('This document exceeds the 25 MB rendering limit. Use fewer or smaller figures.');
   }
   return html;

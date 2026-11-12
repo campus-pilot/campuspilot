@@ -290,7 +290,9 @@ export async function generateAnthropicText(client: Anthropic, model: string, in
         cacheCreationInputTokens: message.usage.cache_creation_input_tokens ?? 0,
       },
       refusal: message.stop_reason === 'refusal',
-      truncated: message.stop_reason === 'max_tokens',
+      // A POSITIVE completion signal is required (`end_turn`, or a stop sequence we asked for): `max_tokens`,
+      // `model_context_window_exceeded`, `pause_turn` or a missing reason all mean the answer may be incomplete.
+      truncated: message.stop_reason !== 'end_turn' && message.stop_reason !== 'stop_sequence',
     };
   } catch (error) {
     if (reported && typeof error === 'object' && error !== null) {

@@ -30,3 +30,43 @@ export function extractQuestionPaperFragment(text: string): string {
   if (best === null && OPENING_FENCE.test(fragment)) fragment = fragment.replace(OPENING_FENCE, '');
   return fragment.replace(DOCTYPE, '').trim();
 }
+
+/** Why an extracted answer is not an HTML fragment at all. */
+export type QuestionPaperFragmentShapeProblem = {
+  /** `no_markup`: no element anywhere (a refusal or chatter); `stray_text`: text before the first or after the last element. */
+  kind: 'no_markup' | 'stray_text';
+  message: string;
+};
+
+/**
+ * Checks the SHAPE of an extracted answer before anything is cleaned: a fragment
+ * has an element in it, starts with one and ends with one. A model's refusal
+ * ("I'm sorry, I cannot...") or preamble ("Here is the HTML:") would otherwise
+ * be kept as text and printed as the paper. Returns null for a fragment.
+ */
+export function questionPaperFragmentShapeProblem(fragment: string): QuestionPaperFragmentShapeProblem | null {
+  const text = fragment.trim();
+  if (!/<[a-zA-Z]/.test(text)) {
+    return { kind: 'no_markup', message: 'The answer is not an HTML fragment: it has no HTML elements.' };
+  }
+  if (!text.startsWith('<') || !text.endsWith('>')) {
+    return {
+      kind: 'stray_text',
+      message: 'Return only the HTML fragment: it must start with an element and end with one, with no sentence before or after it.',
+    };
+  }
+  return null;
+}
+
+const BLOCK_ELEMENT = /<(?:p|div|h[1-6]|ul|ol|table|figure)[\s>]/;
+
+/**
+ * Whether CLEANED markup holds a paper: at least one block element and some
+ * visible text (or a formula). Text and elements that only a `<style>` or a
+ * drawing carried do not count.
+ */
+export function hasPaperContent(cleanedHtml: string): boolean {
+  if (!BLOCK_ELEMENT.test(cleanedHtml)) return false;
+  if (/data-math="/.test(cleanedHtml)) return true;
+  return cleanedHtml.replace(/<style>[\s\S]*?<\/style>/g, '').replace(/<[^>]*>/g, '').trim() !== '';
+}

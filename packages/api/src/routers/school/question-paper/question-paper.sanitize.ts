@@ -1,8 +1,10 @@
 import { QUESTION_PAPER_LIMITS as L } from '@campuspilot/question-paper/limits';
+import { randomBytes } from 'node:crypto';
 import sanitizeHtml from 'sanitize-html';
 
 import { BASE_SANITIZER_OPTIONS } from '../document/document.sanitize';
-import { cleanDeclarations, cleanStyleSheet, StripReport } from './question-paper.css';
+import { cleanDeclarations, cleanStyleSheet, RESERVED_CLASS, StripReport, UNIT_CAP } from './question-paper.css';
+import { scanQuestionPaperOutput, type ScannedElement } from './question-paper.output';
 
 /**
  * The `question_paper_body` sanitiser profile (html-design.md): the HTML
@@ -30,10 +32,22 @@ import { cleanDeclarations, cleanStyleSheet, StripReport } from './question-pape
  *   ({@link QUESTION_PAPER_LIMITS}); over a cap is reported as a `problem`
  *   (a blocking finding), never silently truncated.
  *
- * Cleaning is idempotent: cleaning its own output changes nothing and reports
- * nothing, because the renderer cleans the stored fragment again (defence in
- * depth). `stripped` lists what was removed or changed, for the user;
- * `problems` lists what makes the paper unusable and must be fixed.
+ * Cleaning reaches a FIXED POINT: {@link sanitizeQuestionPaperBody} repeats the
+ * cleaning until the output stops changing (a small bounded number of rounds;
+ * if it does not settle the paper is refused and nothing is stored), so the
+ * stored fragment is exactly what the renderer's second cleaning produces, and
+ * the result is then checked by the exact grammar of `question-paper.output.ts`
+ * (tag and attribute allowlists, no `on*`, one controlled kind of `<style>`),
+ * which fails closed. `stripped` lists what was removed or changed, for the
+ * user; `problems` lists what makes the paper unusable and must be fixed.
+ *
+ * `<style>` is the one element whose text sanitize-html would emit verbatim
+ * (and in an `<svg>` its parser decodes entities and CDATA first, so the text
+ * can hold markup). So a style element is never left to it: each one becomes an
+ * unguessable marker element before the text is emitted (escaped, like any
+ * text), the marker's text is cleaned as CSS and written back as a plain
+ * `<style>`; a `<style>` inside an `<svg>` is removed (put the CSS in a
+ * `<style>` before the drawing, or in style attributes).
  */
 
 export const QUESTION_PAPER_HTML_TAGS = [
@@ -41,6 +55,9 @@ export const QUESTION_PAPER_HTML_TAGS = [
   'table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td', 'caption', 'colgroup', 'col',
   'br', 'hr', 'b', 'i', 'u', 'sup', 'sub', 'strong', 'em', 'figure', 'figcaption', 'img', 'style',
 ] as const;
+
+/** Stands for a style element that was inside an `<svg>`; removed with its content. */
+const DROPPED_STYLE = 'qpdroppedstyle';
 
 /** The inline SVG subset. All inert shapes and text; nothing that references, loads or moves. */
 export const QUESTION_PAPER_SVG_TAGS = [
@@ -57,6 +74,7 @@ const MOTION_TAGS = new Set(['animate', 'animatemotion', 'animatetransform', 'se
 /** Elements removed with everything inside them. */
 const DROP_WITH_CONTENT = new Set([
   ...MOTION_TAGS,
+  DROPPED_STYLE,
   'script', 'iframe', 'frame', 'frameset', 'object', 'embed', 'applet', 'foreignobject', 'noscript', 'template',
   'textarea', 'select', 'option', 'optgroup', 'datalist', 'input', 'button', 'form', 'link', 'meta', 'base',
   'audio', 'video', 'source', 'track', 'canvas', 'math', 'use', 'image', 'title', 'head', 'xmp', 'noembed', 'noframes', 'plaintext',
@@ -65,11 +83,12 @@ const DROP_WITH_CONTENT = new Set([
 /** Wrappers a model adds out of habit; unwrapped without a finding. */
 const UNWRAP_SILENTLY = new Set(['html', 'body']);
 
+/** The most cleaning rounds before a fragment that keeps changing is refused. */
+const MAX_ROUNDS = 4;
+
 const FIGURE_ID = /^(?:asat|qpf)_[0-9a-z]{21}$/;
 const LANG = /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,3}$/;
 const CLASS_TOKEN = /^[A-Za-z_][A-Za-z0-9_-]{0,40}$/;
-/** Class names the renderer and the page frame use: a fragment cannot borrow them. */
-const RESERVED_CLASS = /^(?:qp-|katex|question-paper)/;
 const COLOUR = /^(?:none|currentcolor|transparent|#[0-9a-f]{3,8}|[a-z]{3,20}|rgba?\([0-9., %]{3,40}\))$/i;
 const NUMBER_LIST = /^[0-9eE+\-., %a-z]{0,2000}$/;
 const FORBIDDEN_ATTRIBUTE_VALUE = /url\s*\(|javascript|data:|expression|@import|[<>\\]/i;
@@ -82,41 +101,77 @@ const integer = (min: number, max: number): Cleaner => (value) => {
   return number >= min && number <= max ? String(number) : null;
 };
 const oneOf = (...words: string[]): Cleaner => (value) => (words.includes(value.trim().toLowerCase()) ? value.trim().toLowerCase() : null);
+const NUMBER_TOKEN = /([+-]?(?:\d+\.?\d*|\.\d+))([eE][+-]?\d+)?([a-zA-Z%]*)/g;
+/**
+ * A list of SVG numbers (optionally with units) whose every number is at most
+ * `max` in magnitude and, when not zero, at least `minNonZero`; no exponent
+ * notation. An unbounded `stroke-dasharray` or coordinate would only make the
+ * converter work for minutes, and a drawing is a few hundred units wide.
+ */
+const numbers = (max: number, minNonZero = 0): Cleaner => (value) => {
+  const text = value.trim();
+  if (!NUMBER_LIST.test(text) || FORBIDDEN_ATTRIBUTE_VALUE.test(text)) return null;
+  for (const token of text.matchAll(NUMBER_TOKEN)) {
+    if (token[2] !== undefined) return null;
+    const unit = token[3]!.toLowerCase();
+    if (unit !== '' && UNIT_CAP[unit] === undefined) return null;
+    const amount = Math.abs(Number(token[1]));
+    if (amount > max || (amount > 0 && amount < minNonZero)) return null;
+  }
+  return text;
+};
+/** The size of the drawing itself (`width`/`height` of the `<svg>`): one length, capped like a CSS length. */
+const size: Cleaner = (value) => {
+  const text = value.trim();
+  const match = /^(\d+\.?\d*|\.\d+)([a-zA-Z%]*)$/.exec(text);
+  if (!match) return null;
+  const unit = match[2]!.toLowerCase();
+  const cap = unit === '' ? UNIT_CAP['px']! : UNIT_CAP[unit];
+  return cap !== undefined && Number(match[1]) <= cap ? text : null;
+};
+/** Path data and point lists: numbers and commands only, no exponent, bounded. */
+const geometry = (regex: RegExp): Cleaner => (value) => {
+  const text = value.trim();
+  if (!regex.test(text) || /[eE][+-]?[\d.]/.test(text)) return null;
+  for (const token of text.matchAll(/\d+\.?\d*|\.\d+/g)) if (Number(token[0]) > 100_000) return null;
+  return text;
+};
 const pattern = (regex: RegExp): Cleaner => (value) => (regex.test(value.trim()) && !FORBIDDEN_ATTRIBUTE_VALUE.test(value) ? value.trim() : null);
 
 /** SVG presentation and geometry attributes, by name. */
 const SVG_ATTRIBUTES: Record<string, Cleaner> = {
-  viewbox: pattern(/^[0-9eE+\-., ]{1,100}$/),
-  width: pattern(NUMBER_LIST),
-  height: pattern(NUMBER_LIST),
+  viewbox: geometry(/^[0-9eE+\-., ]{1,100}$/),
+  width: size,
+  height: size,
   preserveaspectratio: pattern(/^[A-Za-z ]{1,40}$/),
   role: oneOf('img', 'presentation', 'none'),
   'aria-label': (value) => (value.length <= L.altChars && !/[\u0000-\u001f]/.test(value) ? value : null),
   'aria-hidden': oneOf('true', 'false'),
-  x: pattern(NUMBER_LIST), y: pattern(NUMBER_LIST), dx: pattern(NUMBER_LIST), dy: pattern(NUMBER_LIST),
-  x1: pattern(NUMBER_LIST), y1: pattern(NUMBER_LIST), x2: pattern(NUMBER_LIST), y2: pattern(NUMBER_LIST),
-  cx: pattern(NUMBER_LIST), cy: pattern(NUMBER_LIST), r: pattern(NUMBER_LIST), rx: pattern(NUMBER_LIST), ry: pattern(NUMBER_LIST),
-  rotate: pattern(NUMBER_LIST),
-  d: pattern(/^[MmLlHhVvCcSsQqTtAaZz0-9eE+\-., \n\t\r]{0,20000}$/),
-  points: pattern(/^[0-9eE+\-., \n\t\r]{0,20000}$/),
-  transform: pattern(/^(?:\s*(?:translate|rotate|scale|skewX|skewY|matrix)\s*\([0-9eE+\-.,\s]{0,200}\)\s*,?){0,12}$/),
+  x: numbers(100_000), y: numbers(100_000), dx: numbers(100_000), dy: numbers(100_000),
+  x1: numbers(100_000), y1: numbers(100_000), x2: numbers(100_000), y2: numbers(100_000),
+  cx: numbers(100_000), cy: numbers(100_000), r: numbers(100_000), rx: numbers(100_000), ry: numbers(100_000),
+  rotate: numbers(3_600),
+  d: geometry(/^[MmLlHhVvCcSsQqTtAaZz0-9+\-., \n\t\r]{0,20000}$/),
+  points: geometry(/^[0-9+\-., \n\t\r]{0,20000}$/),
+  transform: geometry(/^(?:\s*(?:translate|rotate|scale|skewX|skewY|matrix)\s*\([0-9+\-.,\s]{0,200}\)\s*,?){0,12}$/),
   fill: pattern(COLOUR),
   stroke: pattern(COLOUR),
-  'stroke-width': pattern(NUMBER_LIST),
-  'stroke-dasharray': pattern(NUMBER_LIST),
-  'stroke-dashoffset': pattern(NUMBER_LIST),
-  'stroke-opacity': pattern(NUMBER_LIST),
-  'fill-opacity': pattern(NUMBER_LIST),
-  opacity: pattern(NUMBER_LIST),
+  'stroke-width': numbers(1_000),
+  // A dash shorter than half a unit along a long line is millions of dashes for the converter to draw.
+  'stroke-dasharray': numbers(10_000, 0.5),
+  'stroke-dashoffset': numbers(10_000),
+  'stroke-opacity': numbers(1),
+  'fill-opacity': numbers(1),
+  opacity: numbers(1),
   'stroke-linecap': oneOf('butt', 'round', 'square'),
   'stroke-linejoin': oneOf('miter', 'round', 'bevel'),
   'fill-rule': oneOf('nonzero', 'evenodd'),
   'text-anchor': oneOf('start', 'middle', 'end'),
   'dominant-baseline': oneOf('auto', 'middle', 'central', 'hanging', 'alphabetic', 'text-bottom', 'text-top', 'ideographic', 'mathematical'),
-  'font-size': pattern(NUMBER_LIST),
+  'font-size': numbers(500),
   'font-weight': pattern(/^(?:normal|bold|[1-9]00)$/),
   'font-style': oneOf('normal', 'italic', 'oblique'),
-  'letter-spacing': pattern(NUMBER_LIST),
+  'letter-spacing': numbers(100),
   'font-family': (value) => {
     const css = cleanDeclarations(`font-family:${value}`, new StripReport());
     return css === '' ? null : css.slice('font-family:'.length);
@@ -145,6 +200,11 @@ export type SanitizedQuestionPaperBody = {
   stripped: string[];
   /** What makes the paper unusable (a cap exceeded). Blocking. */
   problems: string[];
+  /**
+   * True when `html` is empty because the fragment could not be cleaned safely (too large to parse, did not settle,
+   * failed the output grammar). Distinct from a fragment that cleaned to nothing: the renderer must not print it.
+   */
+  refused: boolean;
   stats: {
     /** Characters of the input. */
     inputChars: number;
@@ -176,23 +236,23 @@ const emptyStats = (inputChars: number): SanitizedQuestionPaperBody['stats'] => 
 
 const number = (value: number) => value.toLocaleString('en-IN');
 
-/**
- * Cleans a model's HTML fragment with the `question_paper_body` profile. Pure
- * and synchronous; the input is never executed, fetched or evaluated.
- */
-export function sanitizeQuestionPaperBody(raw: string): SanitizedQuestionPaperBody {
-  const stats = emptyStats(raw.length);
-  if (raw.length > L.parseChars) {
-    return {
-      html: '',
-      stripped: [],
-      problems: [`The paper is ${number(raw.length)} characters; the limit is ${number(L.fragmentChars)}. Make it shorter.`],
-      stats,
-    };
-  }
+/** Attribute names the profile can produce (the output verifier's allowlist). */
+const ALLOWED_ATTRIBUTE_NAMES: ReadonlySet<string> = new Set([
+  'class', 'lang', 'dir', 'style', 'data-math', 'data-display', 'data-figure-id', 'data-placeholder', 'alt',
+  ...Object.keys(SVG_ATTRIBUTES),
+  ...Object.values(HTML_ATTRIBUTES).flatMap((byName) => Object.keys(byName)),
+]);
+const OUTPUT_GRAMMAR = { tags: ALLOWED_TAGS, attributes: ALLOWED_ATTRIBUTE_NAMES };
 
+type Pass = { html: string; report: StripReport };
+
+/** One cleaning round: sanitize-html with the profile's policy, then the style elements cleaned as CSS. */
+function cleanOnce(raw: string): Pass {
   const report = new StripReport();
-  const figureIds = new Set<string>();
+  // Unguessable per call: a fragment cannot write this element to have its text treated as CSS.
+  const marker = `qs${randomBytes(12).toString('hex')}`;
+  let svgDepth = 0;
+  const open: string[] = [];
 
   const cleanAttributes = (tag: string, attributes: Record<string, string>): Record<string, string> => {
     const clean: Record<string, string> = {};
@@ -221,9 +281,10 @@ export function sanitizeQuestionPaperBody(raw: string): SanitizedQuestionPaperBo
       } else if (lower === 'data-display' && tag === 'span') cleaned = /^(?:true|)$/i.test(value.trim()) ? 'true' : null;
       else if (lower === 'data-figure-id' && (tag === 'img' || tag === 'figure')) {
         cleaned = FIGURE_ID.test(value.trim()) ? value.trim() : null;
-        if (cleaned === null) report.add('A figure id that is not an asat_ or qpf_ id was removed');
-        else figureIds.add(cleaned);
-        if (cleaned === null) continue;
+        if (cleaned === null) {
+          report.add('A figure id that is not an asat_ or qpf_ id was removed');
+          continue;
+        }
       } else if (lower === 'data-placeholder' && tag === 'figure') {
         cleaned = value.replace(/\s+/g, ' ').trim().slice(0, L.placeholderChars);
         if (cleaned === '') cleaned = null;
@@ -250,22 +311,41 @@ export function sanitizeQuestionPaperBody(raw: string): SanitizedQuestionPaperBo
     // The tags removed with their content are listed as allowed on purpose: sanitize-html only runs `exclusiveFilter`
     // (the one hook that removes a whole subtree) for tags it allows, and a disallowed tag would lose only its own
     // markup and leave the children behind (a <div> inside <foreignObject>). `exclusiveFilter` below removes them.
-    allowedTags: [...ALLOWED_TAGS, ...DROP_WITH_CONTENT],
+    // `style` itself is NOT allowed: sanitize-html writes the text of an allowed style element out verbatim (see the
+    // header); the marker element stands in for it.
+    allowedTags: [...[...ALLOWED_TAGS].filter((tag) => tag !== 'style'), ...DROP_WITH_CONTENT, marker],
     allowedAttributes: false,
     parseStyleAttributes: false,
     disallowedTagsMode: 'discard',
     // A bound on nesting: deeper elements are dropped (their text is kept).
     nestingLimit: 40,
-    nonTextTags: ['script', 'style', 'textarea', 'option', 'xmp', 'noscript', 'template', 'noembed', 'noframes', 'plaintext', 'title', 'head', 'select', 'datalist'],
+    // `style` is deliberately absent (it is not allowed, so its text is escaped like any text); the marker is present so
+    // that a marker nested too deep loses its CSS instead of printing it.
+    nonTextTags: [marker, 'script', 'textarea', 'option', 'xmp', 'noscript', 'template', 'noembed', 'noframes', 'plaintext', 'title', 'head', 'select', 'datalist'],
+    // The parser's own view of whether an element is inside an <svg> (where a style element is not allowed).
+    onOpenTag: (name) => {
+      open.push(name);
+      if (name === 'svg') svgDepth += 1;
+    },
+    onCloseTag: () => {
+      if (open.pop() === 'svg') svgDepth -= 1;
+    },
     transformTags: {
       '*': (tagName, attribs) => {
         const tag = tagName.toLowerCase();
+        if (tag === 'style') {
+          if (svgDepth > 0) {
+            report.add('A <style> inside an <svg> was removed (put the CSS in a <style> before the drawing, or use style attributes)');
+            return { tagName: DROPPED_STYLE, attribs: {} };
+          }
+          return { tagName: marker, attribs: {} };
+        }
         if (MOTION_TAGS.has(tag)) {
           report.add(`Animation or motion "<${tag}>" was removed (a paper is printed, nothing moves)`);
           return { tagName: tag, attribs: {} };
         }
         if (DROP_WITH_CONTENT.has(tag)) {
-          report.add(`<${tag}> was removed with its content`);
+          if (tag !== DROPPED_STYLE) report.add(`<${tag}> was removed with its content`);
           return { tagName: tag, attribs: {} };
         }
         if (!ALLOWED_TAGS.has(tag)) {
@@ -273,19 +353,7 @@ export function sanitizeQuestionPaperBody(raw: string): SanitizedQuestionPaperBo
           if (!UNWRAP_SILENTLY.has(tag)) report.add(`<${tag}> is not allowed; its tag was removed and its text kept`);
           return { tagName: tag, attribs: {} };
         }
-        // `style` is allowed as an element, not as a carrier of attributes.
-        const clean = tag === 'style' ? {} : cleanAttributes(tag, attribs);
-        if (tag !== 'style') {
-          stats.elements += 1;
-          if (tag === 'svg') stats.svgs += 1;
-          if (SVG_PARTS.has(tag)) stats.svgElements += 1;
-          if (clean['data-math'] !== undefined) {
-            stats.mathNodes += 1;
-            stats.longestMath = Math.max(stats.longestMath, clean['data-math'].length);
-          }
-          if (tag === 'figure' && clean['data-placeholder'] !== undefined) stats.placeholders += 1;
-        }
-        return { tagName: tag, attribs: clean };
+        return { tagName: tag, attribs: cleanAttributes(tag, attribs) };
       },
     },
     exclusiveFilter: (frame) => {
@@ -299,11 +367,116 @@ export function sanitizeQuestionPaperBody(raw: string): SanitizedQuestionPaperBo
     },
   });
 
-  const cleaned = cleanStyleElements(html, report, stats);
-  stats.figureIds = [...figureIds];
+  return { html: writeStyleElements(html, marker, report), report };
+}
 
+const STYLE_OPEN = '<style>';
+const STYLE_CLOSE = '</style>';
+
+/**
+ * Replaces each marker element of sanitize-html's output with a plain
+ * `<style>` holding its text cleaned as CSS. The marker's text was escaped by
+ * sanitize-html like any text, so it is exactly `[^<]*`; a marker that holds
+ * anything else (a malformed region) is dropped, and the CSS cleaner refuses
+ * text with `<` or `&` in it on top of that.
+ */
+function writeStyleElements(html: string, marker: string, report: StripReport): string {
+  const open = `<${marker}>`;
+  const close = `</${marker}>`;
+  let output = '';
+  let index = 0;
+  let styleChars = 0;
+  for (;;) {
+    const start = html.indexOf(open, index);
+    if (start < 0) break;
+    const textStart = start + open.length;
+    const end = html.indexOf(close, textStart);
+    output += html.slice(index, start);
+    if (end < 0) {
+      // Cannot happen with balanced output; whatever follows is kept as text and the verifier has the last word.
+      index = textStart;
+      continue;
+    }
+    const escaped = html.slice(textStart, end);
+    index = end + close.length;
+    if (escaped.includes('<')) {
+      report.add('A <style> block containing markup was removed');
+      continue;
+    }
+    const text = escaped.replace(/&(lt|gt|amp|quot);/g, (_, name: string) => ({ lt: '<', gt: '>', amp: '&', quot: '"' })[name]!);
+    styleChars += text.length;
+    // Over twice the limit the rest is not even parsed; the caller reports the total as a problem.
+    const css = styleChars > L.styleChars * 2 ? '' : cleanStyleSheet(text, report, (name) => ALLOWED_TAGS.has(name));
+    // A style element with nothing left is dropped rather than kept empty.
+    if (css !== '') output += `${STYLE_OPEN}${css}${STYLE_CLOSE}`;
+  }
+  return output + html.slice(index);
+}
+
+/** Stats and the data they come from, counted on the elements that are in the OUTPUT (never on what was dropped). */
+function statsOf(elements: readonly ScannedElement[], styleTexts: readonly string[], inputChars: number): SanitizedQuestionPaperBody['stats'] {
+  const stats = emptyStats(inputChars);
+  const figureIds = new Set<string>();
+  for (const { name, attributes } of elements) {
+    stats.elements += 1;
+    if (name === 'svg') stats.svgs += 1;
+    if (SVG_PARTS.has(name)) stats.svgElements += 1;
+    const math = attributes['data-math'];
+    if (math !== undefined) {
+      stats.mathNodes += 1;
+      stats.longestMath = Math.max(stats.longestMath, math.length);
+    }
+    if (name === 'figure' && attributes['data-placeholder'] !== undefined) stats.placeholders += 1;
+    const figureId = attributes['data-figure-id'];
+    if (figureId !== undefined) figureIds.add(figureId);
+  }
+  stats.styleChars = styleTexts.reduce((sum, text) => sum + text.length, 0);
+  stats.figureIds = [...figureIds];
+  return stats;
+}
+
+/**
+ * Cleans a model's HTML fragment with the `question_paper_body` profile. Pure
+ * and synchronous; the input is never executed, fetched or evaluated.
+ *
+ * The cleaning is repeated until its output stops changing (at most
+ * {@link MAX_ROUNDS} rounds), so cleaning the result again never changes it;
+ * a fragment that does not settle, or whose result leaves the output grammar,
+ * is refused with a problem and an empty `html`: nothing unverified leaves
+ * this function. The stats count the final output only.
+ */
+export function sanitizeQuestionPaperBody(raw: string): SanitizedQuestionPaperBody {
+  if (raw.length > L.parseChars) {
+    return {
+      html: '',
+      stripped: [],
+      problems: [`The paper is ${number(raw.length)} characters; the limit is ${number(L.fragmentChars)}. Make it shorter.`],
+      refused: true,
+      stats: emptyStats(raw.length),
+    };
+  }
+
+  const first = cleanOnce(raw);
+  let html = first.html;
+  let settled = false;
+  for (let round = 1; round <= MAX_ROUNDS; round += 1) {
+    const next = cleanOnce(html);
+    first.report.mergeNew(next.report);
+    if (next.html === html) {
+      settled = true;
+      break;
+    }
+    html = next.html;
+  }
+
+  const refused = (problem: string): SanitizedQuestionPaperBody => ({ html: '', stripped: first.report.lines(), problems: [problem], refused: true, stats: emptyStats(raw.length) });
+  if (!settled) return refused('The paper could not be cleaned safely (its markup keeps changing when cleaned). Simplify the markup.');
+  const scanned = scanQuestionPaperOutput(html, OUTPUT_GRAMMAR);
+  if (!scanned.ok) return refused(`The paper could not be cleaned safely (${scanned.reason}). Simplify the markup.`);
+
+  const stats = statsOf(scanned.elements, scanned.styleTexts, raw.length);
   const problems: string[] = [];
-  if (cleaned.length > L.fragmentChars) problems.push(`The paper is ${number(cleaned.length)} characters after cleaning; the limit is ${number(L.fragmentChars)}. Make it shorter.`);
+  if (html.length > L.fragmentChars) problems.push(`The paper is ${number(html.length)} characters after cleaning; the limit is ${number(L.fragmentChars)}. Make it shorter.`);
   if (stats.elements > L.elements) problems.push(`The paper has ${number(stats.elements)} elements; the limit is ${number(L.elements)}. Simplify the markup.`);
   if (stats.svgs > L.svgs) problems.push(`The paper has ${stats.svgs} SVG drawings; the limit is ${L.svgs}.`);
   if (stats.svgElements > L.svgElements) problems.push(`The SVG drawings have ${number(stats.svgElements)} shapes in all; the limit is ${number(L.svgElements)}.`);
@@ -312,37 +485,5 @@ export function sanitizeQuestionPaperBody(raw: string): SanitizedQuestionPaperBo
   if (stats.longestMath > L.texChars) problems.push(`A formula is ${stats.longestMath} characters; the limit is ${L.texChars}. Split it.`);
   if (stats.figureIds.length + stats.placeholders > L.figures) problems.push(`The paper has ${stats.figureIds.length + stats.placeholders} figures and placeholders; the limit is ${L.figures}.`);
 
-  return { html: cleaned, stripped: report.lines(), problems, stats };
-}
-
-const STYLE_OPEN = '<style>';
-const STYLE_CLOSE = '</style>';
-
-/**
- * Replaces the text of every `<style>` element of already-sanitised markup with
- * its cleaned CSS. sanitize-html passes a style element's text through
- * verbatim (it is raw text), so this is where it is checked. In the sanitiser's
- * output a literal `<style>` can only be a real element (text and attribute
- * values have their `<` escaped), and its text ends at the first `</style>`, in
- * HTML and inside an `<svg>` alike. Text containing `<` is dropped whole by
- * {@link cleanStyleSheet}, so no markup can be hidden in it.
- */
-function cleanStyleElements(html: string, report: StripReport, stats: SanitizedQuestionPaperBody['stats']): string {
-  let output = '';
-  let index = 0;
-  const lowered = html.toLowerCase();
-  for (;;) {
-    const open = lowered.indexOf(STYLE_OPEN, index);
-    if (open < 0) break;
-    const textStart = open + STYLE_OPEN.length;
-    const close = lowered.indexOf(STYLE_CLOSE, textStart);
-    const textEnd = close < 0 ? html.length : close;
-    const text = html.slice(textStart, textEnd);
-    stats.styleChars += text.length;
-    const css = stats.styleChars > L.styleChars * 2 ? '' : cleanStyleSheet(text, report, (name) => ALLOWED_TAGS.has(name));
-    // A style element with nothing left is dropped rather than kept empty.
-    output += html.slice(index, open) + (css === '' ? '' : `${STYLE_OPEN}${css}${STYLE_CLOSE}`);
-    index = close < 0 ? html.length : close + STYLE_CLOSE.length;
-  }
-  return output + html.slice(index);
+  return { html, stripped: first.report.lines(), problems, refused: false, stats };
 }

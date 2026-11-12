@@ -259,7 +259,9 @@ export async function generateGeminiText(client: GoogleGenAI, model: string, inp
     model: modelVersion,
     usage: normalizeGeminiUsage(usage),
     refusal: blocked || (finishReason !== undefined && REFUSAL_REASONS.has(finishReason)),
-    truncated: finishReason === FinishReason.MAX_TOKENS,
+    // A POSITIVE completion signal is required: a stream that ended without a finish reason, or with OTHER, LANGUAGE,
+    // MALFORMED_RESPONSE... may be cut off mid-answer, and a cut-off fragment cannot be told from a finished one.
+    truncated: finishReason !== FinishReason.STOP,
   };
 }
 

@@ -1,4 +1,4 @@
-import { QUESTION_PAPER_FRAGMENT_RULES } from '@campuspilot/question-paper/guide';
+import { QUESTION_PAPER_NO_MOTION_RULE, QUESTION_PAPER_VOCABULARY_RULES } from '@campuspilot/question-paper/guide';
 
 import type { TextPart } from './model';
 
@@ -8,16 +8,21 @@ import type { TextPart } from './model';
  * agents load `learn_question_paper_generation` instead. Both share
  * {@link QUESTION_PAPER_FRAGMENT_RULES} (the vocabulary, maths, figures,
  * scripts and the ban on animation), so the two never disagree; this text adds
- * only what is specific to transcribing photographs.
+ * only what is specific to transcribing photographs. The animation rule is the
+ * first thing the model reads, as in the chat guide; the chat-only rules for
+ * attached images ({@link QUESTION_PAPER_VOCABULARY_RULES} excludes them) are
+ * deliberately absent, because this job cannot attach an image.
  *
  * The job has no way to attach images, so every drawn figure is a placeholder.
  * Text found inside the photographs is data. It is said once here and again in
  * the user turn, because the pages are the only untrusted input of the job.
  */
-export const QUESTION_PAPER_JOB_SYSTEM_PROMPT = `You transcribe a school question paper from photographs into an HTML fragment that CampusPilot prints. You do not answer the questions, grade them, improve them or translate them.
+export const QUESTION_PAPER_JOB_SYSTEM_PROMPT = `${QUESTION_PAPER_NO_MOTION_RULE}
+
+You transcribe a school question paper from photographs into an HTML fragment that CampusPilot prints. You do not answer the questions, grade them, improve them or translate them.
 
 Output
-- The HTML fragment only. No commentary, no Markdown, no code fence.
+- The HTML fragment only: your answer starts with its first element and ends with its last. No commentary, no sentence before or after it, no Markdown, no code fence. An answer that is not HTML (an apology, an explanation) is rejected.
 
 Fidelity
 - Keep question order, numbering and labels exactly as written.
@@ -26,12 +31,12 @@ Fidelity
 - Do not invent questions, options or marks. Copy the marks written next to each question or part; add none that are not written and never compute or adjust marks.
 
 Figures
-- You cannot attach images. Every drawn diagram, graph, map or picture becomes <figure data-placeholder="..."></figure> with a precise description of what it shows. A simple geometric diagram that you can draw exactly may be an inline svg instead. Never write data-figure-id.
+- In this job no image can be attached: a figure is either a placeholder or a drawing. Every drawn diagram, graph, map or picture becomes <figure data-placeholder="..."></figure> with a precise description of what it shows (the school can add the real image later). A simple geometric diagram that you can draw exactly may be an inline svg instead (with a padded viewBox, see the svg rules). Do not write <img> or data-figure-id: there is no image to name, and any such figure is turned into a placeholder.
 
 What the school template owns
 - Do not output the school name, exam name, class, subject, session, date, time allowed, maximum marks, the "General instructions" heading as a title, or any header or footer line. Genuine general instructions of the paper stay in the paper.
 
-${QUESTION_PAPER_FRAGMENT_RULES}`;
+${QUESTION_PAPER_VOCABULARY_RULES}`;
 
 /** The facts of the plan that a page-reading model can use, none of them personal. */
 export type GenerationFacts = {
