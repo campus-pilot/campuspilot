@@ -1,3 +1,4 @@
+import { ASSISTANT_ATTACHMENTS_MISSING_REASON } from '@campuspilot/assistant-contract/attachments';
 import { ORPCError } from '@orpc/client';
 
 /**
@@ -25,6 +26,14 @@ export function retryUnlessRefused(failureCount: number, error: unknown): boolea
  */
 export function refusalMessage(error: unknown): string | null {
   return isClientError(error) && error instanceof Error && error.message ? error.message : null;
+}
+
+/** The stored images a refused send named that the server no longer holds, or null for any other refusal. */
+export function missingAttachmentIdsOf(error: unknown): string[] | null {
+  if (!(error instanceof ORPCError) || error.status >= 500) return null;
+  const data = error.data as { reason?: unknown; attachmentIds?: unknown } | undefined;
+  if (data?.reason !== ASSISTANT_ATTACHMENTS_MISSING_REASON || !Array.isArray(data.attachmentIds)) return null;
+  return data.attachmentIds.filter((id): id is string => typeof id === 'string');
 }
 
 /** Why a conversation cannot be shown, in the terms the chat explains it. */

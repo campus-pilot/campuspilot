@@ -423,7 +423,8 @@ function WorkspaceLayout({
               if (item && await confirmNavigation()) router.push(item.href);
             }}
           >
-            <TabsList variant="line" className="h-auto max-w-full justify-start overflow-x-auto">
+            {/* overflow-x-auto clips what hangs below the box: the active underline sits 1px under the triggers, so the list pads 1px to hold it. */}
+            <TabsList variant="line" className="h-auto max-w-full justify-start overflow-x-auto pb-px">
               {items.map((item) => (
                 <RequirePermissions
                   key={item.id}

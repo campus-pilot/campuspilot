@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { QuestionPaperDraftCard, QuestionPaperVersionCard } from './chat-cards';
 import {
   draftFactsOf,
+  draftSaveSpent,
   parseDraftCallInput,
   parseStoredDraftResult,
   saveDraftMessage,
@@ -110,5 +111,25 @@ describe('QuestionPaperVersionCard', () => {
     expect(screen.getByText('1 warning, see the preview.')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Download PDF' }));
     expect(onDownload).toHaveBeenCalled();
+  });
+});
+
+describe('draftSaveSpent', () => {
+  const ask = { kind: 'message', text: saveDraftMessage('d1') } as const;
+  it('is open before any request and for another draft', () => {
+    expect(draftSaveSpent([], 'd1')).toBe(false);
+    expect(draftSaveSpent([ask], 'd2')).toBe(false);
+  });
+  it('is spent from the request while the save is pending, approved or done', () => {
+    expect(draftSaveSpent([ask], 'd1')).toBe(true);
+    for (const status of ['awaiting_approval', 'running', 'succeeded'] as const) {
+      expect(draftSaveSpent([ask, { kind: 'save-call', status }], 'd1')).toBe(true);
+    }
+  });
+  it('opens again when the save was declined, cancelled or failed, and a new request spends it', () => {
+    for (const status of ['declined', 'cancelled', 'failed'] as const) {
+      expect(draftSaveSpent([ask, { kind: 'save-call', status }], 'd1')).toBe(false);
+    }
+    expect(draftSaveSpent([ask, { kind: 'save-call', status: 'declined' }, ask], 'd1')).toBe(true);
   });
 });

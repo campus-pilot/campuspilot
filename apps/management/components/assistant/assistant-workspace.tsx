@@ -235,7 +235,10 @@ export function AssistantWorkspace({
         />
         <div className="min-h-0 min-w-0 flex-1">
           <AssistantChat
-            key={conversationId ?? (seed ? `new:${seed.classId}:${seed.subjectSlug}:${seed.modeSlug}` : 'new')}
+            // Keyed by the conversation only. The seed is deliberately not part of the key: removing its chip
+            // clears the address's seed, and a key that followed it would remount the chat and lose the images
+            // already attached (stored on the server, never sent).
+            key={conversationId ?? 'new'}
             schoolId={schoolId}
             seed={conversationId ? null : seed}
             onSeedRemoved={() => router.replace(conversationHref(schoolId))}

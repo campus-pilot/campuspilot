@@ -144,7 +144,7 @@ chat: attach photos -> draft(s) -> user: "save" -> approval -> version n
   session, plan, paper). Completing an exam takes the session row `FOR UPDATE` and
   deleting a plan takes the plan row `FOR UPDATE`, so a write cannot commit to a
   completed exam or re-create a paper for a plan that was just deleted (NOT_FOUND). A paper
-  locked this way is the BAD_REQUEST with `data.reason = 'paper_locked'`; a paper
+  locked this way is the BAD_REQUEST with `data.reason = 'paper_locked'`; a plan without the paper's mode is `plan_mode_removed`; a paper
   that is too large or complex to print fails a job as `paper_unprintable`, and
   `checkQuestionPaperDraft` also totals the KaTeX HTML and the stored figures (base64,
   12 MB cap) so validate, save and the job agree. A stored version previews and re-prints with its saved `plan_max_marks`
@@ -259,7 +259,11 @@ at most one text-only repair request, save through `saveQuestionPaperVersion` wi
 source `ai_job`, mark succeeded. Provider failures retry (busy or unknown up to 3
 requests); a refusal or a truncated answer fails without repair. Every step checks
 the job is still `running` for its attempt, so a swept job spends and saves nothing
-more. A failed job has an `error_code` from `QUESTION_PAPER_JOB_FAILURES` and a safe
+more; the save transaction itself reads the job row `FOR SHARE` (after the paper lock) and
+refuses with `SourceJobEndedError` unless it is `running`, so a job swept at its deadline
+while the version renders cannot commit a version afterwards (the job stops quietly). A
+plan that loses the paper's mode meanwhile fails the job as `plan_mode_removed`
+(`data.reason`), not `paper_unprintable`. A failed job has an `error_code` from `QUESTION_PAPER_JOB_FAILURES` and a safe
 `error_message` the page shows; the page polls `getQuestionPaperDetail`. A marks
 mismatch stays a warning. The job's own system prompt (`prompt.ts`) never enters chat.
 

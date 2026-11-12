@@ -10,10 +10,10 @@ import { and, eq, inArray, sql } from 'drizzle-orm';
 import { resolveAssistantAccess } from '../../assistant/access';
 import type { PaperKey } from '../../routers/school/question-paper/question-paper.dto';
 import { hasSelectedQuestionPaperTemplate } from '../../routers/school/question-paper/question-paper.render';
-import { assertPaperWritable, isPaperLockedError, resolvePaperScope, type PaperScope } from '../../routers/school/question-paper/question-paper.scope';
+import { assertPaperWritable, isPaperLockedError, isPlanModeRemovedError, resolvePaperScope, type PaperScope } from '../../routers/school/question-paper/question-paper.scope';
 import { unreadablePageMessage } from '../../routers/school/question-paper/question-paper.service';
 import { getObjectBytes } from '../../routers/school/question-paper/question-paper.storage';
-import { checkQuestionPaperDraft, saveQuestionPaperVersion } from '../../routers/school/question-paper/question-paper.version.service';
+import { checkQuestionPaperDraft, saveQuestionPaperVersion, SourceJobEndedError } from '../../routers/school/question-paper/question-paper.version.service';
 import { QUESTION_PAPER_JOB_FAILURES, type QuestionPaperJobErrorCode } from './constants';
 import { nextQuestionPaperRequestKey, recordQuestionPaperRequest } from './cost';
 import type { QuestionPaperJobInput } from './input';
@@ -466,10 +466,12 @@ async function savePaper(deps: GenerationDeps, input: QuestionPaperJobInput, beg
     });
     return { versionNo: saved.versionNo };
   } catch (error) {
+    // The sweep ended this job while the version was rendering: nothing was committed, stop quietly.
+    if (error instanceof SourceJobEndedError) throw new JobStopped();
     if (error instanceof ORPCError && error.code === 'BAD_REQUEST') {
-      // Three different BAD_REQUESTs reach here: the paper was locked meanwhile (session or exam ended), the document
-      // failed the shared check, or the render refused it (body, figures or formulas too large or too complex).
-      const code = isPaperLockedError(error) ? 'paper_locked' : error.message.startsWith('The question paper is not valid') ? 'invalid_output' : 'paper_unprintable';
+      // Four different BAD_REQUESTs reach here: the paper was locked meanwhile (session or exam ended), the plan lost the
+      // paper's mode meanwhile, the document failed the shared check, or the render refused it (too large or too complex).
+      const code = isPaperLockedError(error) ? 'paper_locked' : isPlanModeRemovedError(error) ? 'plan_mode_removed' : error.message.startsWith('The question paper is not valid') ? 'invalid_output' : 'paper_unprintable';
       throw new QuestionPaperJobFailure(code, undefined, error.message);
     }
     if (error instanceof ORPCError && error.code === 'PRECONDITION_FAILED') throw new QuestionPaperJobFailure('template_missing', undefined, error.message);

@@ -9,6 +9,7 @@ import {
   examQuestionPaperTable,
   examQuestionPaperVersionTable,
 } from '@campuspilot/db/schema/exam-question-paper';
+import { examPlanTable } from '@campuspilot/db/schema/exam';
 import { QUESTION_PAPER_EXAMPLES } from '@campuspilot/question-paper/examples';
 import { ORPCError } from '@orpc/server';
 import { and, asc, eq } from 'drizzle-orm';
@@ -460,5 +461,33 @@ describe('question paper generation job', () => {
     } finally {
       await world.setLifecycle('ready');
     }
+  });
+
+  it('says the plan lost the mode, not that the paper could not be printed', async () => {
+    const world = await createQuestionPaperWorld();
+    const { job } = await queueJob(world, { subjectSlug: 'math', modeSlug: 'practical' });
+    const { model } = scriptedModel([async () => {
+      await db
+        .update(examPlanTable)
+        .set({ modeConfig: { theory: { percentage: 100, maxMarks: 20 } } })
+        .where(and(eq(examPlanTable.schoolId, world.schoolId), eq(examPlanTable.subjectSlug, 'math')));
+      return answer(HINDI_MATH);
+    }]);
+    expect(await runQuestionPaperGeneration({ jobId: job.id, attempt: 1 }, direct, depsFor(model))).toEqual({ status: 'failed', code: 'plan_mode_removed' });
+    expect(await jobOf(job.id)).toMatchObject({ errorCode: 'plan_mode_removed', errorMessage: QUESTION_PAPER_JOB_FAILURES.plan_mode_removed });
+  });
+
+  it('cannot commit a version once the sweep ended the job, even mid-save', async () => {
+    const world = await createQuestionPaperWorld();
+    const { job, paper } = await queueJob(world);
+    const { model } = scriptedModel([answer(ENGLISH_SCIENCE)]);
+    // The deadline sweep lands after the live check and before the save commits.
+    const sweptDuringSave: GenerationDeps['save'] = async (database, input) => {
+      await database.update(examQuestionPaperJobTable).set({ status: 'failed', errorCode: 'not_finished', completedAt: new Date() }).where(eq(examQuestionPaperJobTable.id, job.id));
+      return defaultGenerationDeps().save(database, input);
+    };
+    expect(await runQuestionPaperGeneration({ jobId: job.id, attempt: 1 }, direct, depsFor(model, { save: sweptDuringSave }))).toEqual({ status: 'skipped' });
+    expect(await db.select().from(examQuestionPaperVersionTable).where(eq(examQuestionPaperVersionTable.paperId, paper.id))).toHaveLength(0);
+    expect(await jobOf(job.id)).toMatchObject({ status: 'failed', errorCode: 'not_finished' });
   });
 });

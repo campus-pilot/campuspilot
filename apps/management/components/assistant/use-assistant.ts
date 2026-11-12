@@ -47,7 +47,7 @@ import {
   type AssistantConversationState,
 } from './assistant-conversation-state';
 import { draftKey, readDraft, sessionDraftStorage, writeDraft } from './assistant-draft';
-import { conversationFailure, isClientError, reconnectingStream, refusalMessage, retryUnlessRefused } from './assistant-stream';
+import { conversationFailure, isClientError, missingAttachmentIdsOf, reconnectingStream, refusalMessage, retryUnlessRefused } from './assistant-stream';
 
 /**
  * Longest silence accepted from a live stream. The server sends a heartbeat
@@ -498,17 +498,30 @@ export function useSendAssistantMessage(schoolId: string, surface: AssistantSurf
     text: string,
     conversationId: string | null,
     extras: { attachmentIds?: string[]; seed?: QuestionPaperSeed | null } = {},
-  ) =>
-    mutation.mutateAsync({
-      schoolId,
-      ...(conversationId ? { conversationId } : {}),
-      clientRequestId: crypto.randomUUID(),
-      text,
-      surface,
-      pageContext: currentPageContext(),
-      ...(extras.attachmentIds?.length ? { attachmentIds: extras.attachmentIds } : {}),
-      ...(extras.seed && !conversationId ? { seed: extras.seed } : {}),
-    });
+  ) => {
+    const clientRequestId = crypto.randomUUID();
+    return mutation
+      .mutateAsync({
+        schoolId,
+        ...(conversationId ? { conversationId } : {}),
+        clientRequestId,
+        text,
+        surface,
+        pageContext: currentPageContext(),
+        ...(extras.attachmentIds?.length ? { attachmentIds: extras.attachmentIds } : {}),
+        ...(extras.seed && !conversationId ? { seed: extras.seed } : {}),
+      })
+      .catch((error: unknown) => {
+        // The composer marks the missing images and keeps the words, so no failed copy of the message stays whose Retry would fail the same way.
+        if (missingAttachmentIdsOf(error)) {
+          const cache = queryClient.getMutationCache();
+          for (const failed of cache.findAll({ mutationKey: sendKey(schoolId) })) {
+            if ((failed.state.variables as SendVariables | undefined)?.clientRequestId === clientRequestId) cache.remove(failed);
+          }
+        }
+        throw error;
+      });
+  };
   /**
    * Re-sends a failed message with its original request id. Resolves with
    * the send's result, or null when it failed again (the message then shows

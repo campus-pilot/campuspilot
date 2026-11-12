@@ -6,9 +6,11 @@ import { createRef } from 'react';
 
 import { AssistantAttachmentStrip, AssistantSentAttachments } from './assistant-attachment-strip';
 import {
+  AttachmentsMissingError,
   attachmentSendBlock,
   hasMessageContent,
   imagesOnlyLabel,
+  markMissingAttachments,
   planAttachmentPicks,
   readyAttachments,
   rejectionSummary,
@@ -57,6 +59,16 @@ describe('planAttachmentPicks', () => {
     expect(rejectionSummary([])).toBeNull();
     expect(rejectionSummary([{ name: 'a.pdf', reason: 'No.' }])).toBe('a.pdf: No.');
     expect(rejectionSummary([{ name: 'a.pdf', reason: 'No.' }, { name: 'b.pdf', reason: 'No.' }])).toBe('2 images were not added. a.pdf: No.');
+  });
+});
+
+describe('markMissingAttachments', () => {
+  it('fails only the named stored images and drops their references', () => {
+    const ref = (id: string) => ({ id, fileName: id, contentType: 'image/jpeg', byteSize: 1, width: 1, height: 1, previewable: true });
+    const items = [item('a', 'ready', { ref: ref('1') }), item('b', 'ready', { ref: ref('2') })];
+    const marked = markMissingAttachments(items, ['2']);
+    expect(marked[0]!.status).toBe('ready');
+    expect(marked[1]).toMatchObject({ status: 'failed', ref: null });
   });
 });
 
@@ -201,6 +213,22 @@ describe('AssistantComposer images', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
     await screen.findByText('Offline');
     expect(screen.getByRole('list', { name: 'Attached images' })).toBeTruthy();
+  });
+
+  it('marks the images the server no longer holds as failed, so the same send is not repeated', async () => {
+    const onSend = vi.fn(async () => {
+      throw new AttachmentsMissingError('An attached image is no longer available.', ['asat_gone.jpg']);
+    });
+    const { input, remove } = renderComposer({ onSend });
+    fireEvent.change(input, { target: { files: [jpeg('gone.jpg'), jpeg('fine.jpg')] } });
+    await waitFor(() => expect(screen.queryByRole('status', { name: /Uploading/ })).toBeNull());
+    fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+    await screen.findByText('An attached image is no longer available.');
+    expect(screen.getAllByRole('img', { name: /removed from the server/ })).toHaveLength(1);
+    // Sending is blocked until the lost tile is removed, and removing it does not call the server for it.
+    expect(attachmentSendBlock([{ ...item('x', 'failed') }])).not.toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Remove gone.jpg' }));
+    expect(remove).not.toHaveBeenCalled();
   });
 
   it('deletes a stored image from the server when the user removes it, and tells once if that fails', async () => {

@@ -74,17 +74,20 @@ test('photos on their way count as in flight, a failed one does not', () => {
 });
 
 const at = (minute: number) => new Date(Date.UTC(2026, 0, 1, 10, minute));
-const job = (status: 'succeeded' | 'failed') => ({ status, errorCode: status === 'failed' ? 'model_busy' : null, errorMessage: 'Try later.', createdAt: at(0), completedAt: at(5) });
+const job = (status: 'succeeded' | 'failed') => ({ id: 'job1', status, errorCode: status === 'failed' ? 'model_busy' : null, errorMessage: 'Try later.', createdAt: at(0), completedAt: at(5) });
 
 test('a failure is news only until a newer version exists', () => {
   assert.deepEqual(currentJobFailure({ lastFinishedJob: job('failed'), versions: [] }), { errorCode: 'model_busy', message: 'Try later.' });
-  assert.equal(currentJobFailure({ lastFinishedJob: job('failed'), versions: [{ versionNo: 1, createdAt: at(9) }] }), null);
+  assert.equal(currentJobFailure({ lastFinishedJob: job('failed'), versions: [{ versionNo: 1, createdAt: at(9), sourceJobId: null }] }), null);
   assert.equal(currentJobFailure({ lastFinishedJob: job('succeeded'), versions: [] }), null);
 });
 
 test('the version a succeeded job produced is announced while it is the newest', () => {
-  assert.equal(generatedVersionReady({ lastFinishedJob: job('succeeded'), versions: [{ versionNo: 3, createdAt: at(4) }] }), 3);
-  assert.equal(generatedVersionReady({ lastFinishedJob: job('succeeded'), versions: [{ versionNo: 2, createdAt: at(-30) }] }), null);
-  assert.equal(generatedVersionReady({ lastFinishedJob: job('failed'), versions: [{ versionNo: 3, createdAt: at(4) }] }), null);
+  const own = { versionNo: 3, createdAt: at(4), sourceJobId: 'job1' };
+  assert.equal(generatedVersionReady({ lastFinishedJob: job('succeeded'), versions: [own] }), 3);
+  // A version saved in chat afterwards, or by another job, is not this job's news.
+  assert.equal(generatedVersionReady({ lastFinishedJob: job('succeeded'), versions: [{ versionNo: 4, createdAt: at(99), sourceJobId: null }, own] }), null);
+  assert.equal(generatedVersionReady({ lastFinishedJob: job('succeeded'), versions: [{ ...own, sourceJobId: 'job0' }] }), null);
+  assert.equal(generatedVersionReady({ lastFinishedJob: job('failed'), versions: [own] }), null);
   assert.equal(generatedVersionReady({ lastFinishedJob: null, versions: [] }), null);
 });

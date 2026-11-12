@@ -97,12 +97,25 @@ function JobPanel({ scope, detail }: { scope: QuestionPaperScope; detail: Questi
   if (failure) return <GenerationStatus job={{ status: 'failed', message: failure.message }} />;
   const ready = generatedVersionReady(detail);
   if (ready === null) return null;
+  // Keyed by the version: a later generation shows its own notice again after this one was dismissed.
+  return <VersionReadyNotice key={ready} scope={scope} versionNo={ready} />;
+}
+
+/** "Version N is ready" with a View link; dismissing hides it until the next generation (not stored). */
+function VersionReadyNotice({ scope, versionNo }: { scope: QuestionPaperScope; versionNo: number }) {
+  const [dismissed, setDismissed] = useState(false);
+  if (dismissed) return null;
   return (
     <div role="status" className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/40 p-3 text-sm">
-      <span>Version {ready} is ready.</span>
-      <Button asChild size="sm" variant="outline">
-        <Link href={questionPaperWorkspaceHref(scope, { section: 'result', version: ready })}>View</Link>
-      </Button>
+      <span>Version {versionNo} is ready.</span>
+      <div className="flex items-center gap-2">
+        <Button asChild size="sm" variant="outline">
+          <Link href={questionPaperWorkspaceHref(scope, { section: 'result', version: versionNo })}>View</Link>
+        </Button>
+        <Button type="button" size="sm" variant="ghost" onClick={() => setDismissed(true)}>
+          Dismiss
+        </Button>
+      </div>
     </div>
   );
 }

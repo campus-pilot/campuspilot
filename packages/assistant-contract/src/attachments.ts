@@ -117,3 +117,6 @@ export const assistantAttachmentDeletePath = (schoolId: string, attachmentId: st
   `${assistantAttachmentUploadPath(schoolId)}/${encodeURIComponent(attachmentId)}`;
 export const assistantAttachmentReadPath = (schoolId: string, attachmentId: string, variant: 'thumb' | 'original') =>
   `${assistantAttachmentUploadPath(schoolId)}/${encodeURIComponent(attachmentId)}/${variant}`;
+
+/** `data.reason` of the refusal for a message that names images the server no longer holds (evicted or removed); `data.attachmentIds` lists them. */
+export const ASSISTANT_ATTACHMENTS_MISSING_REASON = 'attachments_missing';

@@ -576,6 +576,10 @@ export const assistantModelRequestTable = pgTable(
     index("assistant_model_request_created_idx").on(table.createdAt),
     index("assistant_model_request_run_idx").on(table.runId),
     index("assistant_model_request_school_source_created_idx").on(table.schoolId, table.source, table.createdAt),
+    /** The question paper job reads its own requests (next request key, cost row count) on every model call. */
+    index("assistant_model_request_question_paper_job_idx")
+      .on(table.questionPaperJobId)
+      .where(sql`${table.questionPaperJobId} is not null`),
     check(
       "assistant_model_request_source_owner_check",
       sql`(${table.source} = 'chat' and ${table.runId} is not null and ${table.questionPaperJobId} is null)

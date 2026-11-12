@@ -88,3 +88,28 @@ export const hasMessageContent = (text: string, items: readonly ComposerAttachme
 
 /** Text a queued or optimistic message shows when the user sent only images. */
 export const imagesOnlyLabel = (count: number) => (count === 1 ? '1 image' : `${count} images`);
+
+/** A send refused because these stored images are gone from the server; the composer marks their tiles. */
+export class AttachmentsMissingError extends Error {
+  constructor(
+    message: string,
+    readonly attachmentIds: readonly string[],
+  ) {
+    super(message);
+    this.name = 'AttachmentsMissingError';
+  }
+}
+
+/**
+ * The tiles after a send found some stored images gone: those become failed
+ * tiles with no server reference (so they are never sent again or deleted),
+ * telling the user to remove and re-add them; the others stay ready.
+ */
+export function markMissingAttachments(items: readonly ComposerAttachment[], missingIds: readonly string[]): ComposerAttachment[] {
+  const missing = new Set(missingIds);
+  return items.map((item) =>
+    item.ref && missing.has(item.ref.id)
+      ? { ...item, status: 'failed', ref: null, error: 'This image was removed from the server. Remove it and attach it again.' }
+      : item,
+  );
+}

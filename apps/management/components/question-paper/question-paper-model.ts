@@ -116,8 +116,8 @@ export const uploadsInFlight = (items: readonly { status: 'converting' | 'upload
   items.filter((item) => item.status !== 'error').length;
 
 type JobFacts = {
-  lastFinishedJob: { status: 'queued' | 'running' | 'succeeded' | 'failed'; errorCode: string | null; errorMessage: string | null; createdAt: Date; completedAt: Date } | null;
-  versions: ReadonlyArray<{ versionNo: number; createdAt: Date }>;
+  lastFinishedJob: { id: string; status: 'queued' | 'running' | 'succeeded' | 'failed'; errorCode: string | null; errorMessage: string | null; createdAt: Date; completedAt: Date } | null;
+  versions: ReadonlyArray<{ versionNo: number; createdAt: Date; sourceJobId: string | null }>;
 };
 
 /**
@@ -135,12 +135,13 @@ export function currentJobFailure(detail: JobFacts) {
 
 /**
  * The version the last generation produced, while it is still the newest:
- * the job succeeded and a version exists that was saved after the job was
- * queued. Null otherwise (also after a later version, which is not news of the job).
+ * the job succeeded and the newest version is that job's own output
+ * (`sourceJobId`). A version saved in chat afterwards, or by a later job, is
+ * not news of this job, so this is null then.
  */
 export function generatedVersionReady(detail: JobFacts): number | null {
   const last = detail.lastFinishedJob;
   const newest = detail.versions[0];
   if (last?.status !== 'succeeded' || !newest) return null;
-  return newest.createdAt >= last.createdAt ? newest.versionNo : null;
+  return newest.sourceJobId === last.id ? newest.versionNo : null;
 }

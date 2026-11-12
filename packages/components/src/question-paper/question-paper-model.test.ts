@@ -9,6 +9,7 @@ import {
   isAcceptedImage,
   isHeifFile,
   movePageId,
+  pageDragAnnouncements,
   planUploads,
   QUESTION_PAPER_MAX_PAGE_BYTES,
 } from './question-paper-model';
@@ -145,5 +146,20 @@ describe('formatting', () => {
     expect(formatPageSize(512)).toBe('512 B');
     expect(formatPageSize(2048)).toBe('2 KB');
     expect(formatPageSize(2.4 * 1024 * 1024)).toBe('2.4 MB');
+  });
+});
+
+describe('pageDragAnnouncements', () => {
+  const say = pageDragAnnouncements([
+    { id: 'qp_aaa', position: 1, originalName: 'front.jpg' },
+    { id: 'qp_bbb', position: 2, originalName: 'back.jpg' },
+  ]);
+  it('speaks page numbers and file names, never ids', () => {
+    expect(say.onDragStart({ active: { id: 'qp_bbb' } })).toBe('Picked up page 2, back.jpg.');
+    expect(say.onDragOver({ active: { id: 'qp_bbb' }, over: { id: 'qp_aaa' } })).toBe('page 2, back.jpg is over position 1.');
+    expect(say.onDragEnd({ active: { id: 'qp_bbb' }, over: { id: 'qp_aaa' } })).toBe('Dropped page 2, back.jpg at position 1.');
+    expect(say.onDragEnd({ active: { id: 'qp_bbb' }, over: null })).toContain('unchanged');
+    expect(say.onDragCancel({ active: { id: 'qp_bbb' } })).toContain('cancelled');
+    expect(say.onDragStart({ active: { id: 'qp_zzz' } })).not.toContain('qp_');
   });
 });

@@ -1,0 +1,1 @@
+CREATE INDEX "assistant_model_request_question_paper_job_idx" ON "assistant_model_request" USING btree ("question_paper_job_id") WHERE "assistant_model_request"."question_paper_job_id" is not null;

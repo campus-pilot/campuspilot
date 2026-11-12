@@ -122,6 +122,8 @@ const userRefSchema = z.object({ id: z.string(), name: z.string().nullable() });
 export const versionSummarySchema = z.object({
   versionNo: z.number().int(),
   source: z.enum(['ai_job', 'agent']),
+  /** The generation job that produced this version; null for a version saved in chat. */
+  sourceJobId: z.string().nullable(),
   createdAt: z.date(),
   createdBy: userRefSchema,
   totalMarks: z.number().nullable(),

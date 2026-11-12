@@ -13,7 +13,7 @@ import { rectSortingStrategy, SortableContext, sortableKeyboardCoordinates, useS
 import { CSS } from '@dnd-kit/utilities';
 import { Button } from '@campuspilot/ui/components/button';
 import { FileImage, GripVertical, Trash2 } from 'lucide-react';
-import { formatPageSize, movePageId } from './question-paper-model';
+import { formatPageSize, movePageId, PAGE_DRAG_INSTRUCTIONS, pageDragAnnouncements } from './question-paper-model';
 
 export type PageThumbnailView = {
   id: string;
@@ -126,7 +126,12 @@ export function PageThumbnailGrid({
     if (next) onReorder(next);
   }
   return (
-    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+    <DndContext
+      sensors={sensors}
+      collisionDetection={closestCenter}
+      onDragEnd={handleDragEnd}
+      accessibility={{ announcements: pageDragAnnouncements(pages), screenReaderInstructions: { draggable: PAGE_DRAG_INSTRUCTIONS } }}
+    >
       <SortableContext items={ids} strategy={rectSortingStrategy} disabled={disabled}>
         <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5" aria-label="Uploaded pages">
           {pages.map((page) => (

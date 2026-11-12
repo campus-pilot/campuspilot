@@ -26,6 +26,7 @@ import { getQuestionPaperModel } from '../../../workflows/question-paper/model';
 import { handOff, dispatchQuestionPaperJob } from '../../../workflows/question-paper/outbox';
 import {
   QUESTION_PAPER_MAX_PAGES,
+  type PaperKey,
   type detailOutputSchema,
   type getQuestionPaperOutputSchema,
   type listQuestionPapersOutputSchema,
@@ -288,6 +289,34 @@ export function sanitizeFileName(name: string): string {
 }
 
 /**
+ * A cheap read-only look, before any decode or storage write, at the refusals
+ * the locked transaction will give anyway (a full paper, a running
+ * generation), so a refused upload costs no storage calls. It takes no lock and
+ * is never the authority: the transaction re-checks everything, and an upload
+ * that passes here may still be refused there.
+ */
+async function precheckPageUpload(db: Database, key: PaperKey) {
+  const paper = await findPaper(db, key);
+  if (!paper) return;
+  const [pages, active] = await Promise.all([pagesOf(db, paper.id), activeJobOf(db, paper.id)]);
+  if (pages.length >= QUESTION_PAPER_MAX_PAGES) throw rpcError.badRequest(`A paper can have at most ${QUESTION_PAPER_MAX_PAGES} pages.`);
+  if (active) await assertNoActiveJob(db, paper.id, 'Pages cannot be added');
+}
+
+/** The same unlocked look for a figure: a paper that already holds its figures refuses before anything is written. */
+async function precheckFigureUpload(db: Database, key: PaperKey) {
+  const paper = await findPaper(db, key);
+  if (!paper) return;
+  const [figures] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(examQuestionPaperFigureTable)
+    .where(eq(examQuestionPaperFigureTable.paperId, paper.id));
+  if (figures!.count >= QUESTION_PAPER_LIMITS.figuresPerPaper) {
+    throw rpcError.badRequest(`A paper can have at most ${QUESTION_PAPER_LIMITS.figuresPerPaper} figure images.`);
+  }
+}
+
+/**
  * Stores one uploaded photo as the paper's next page (the upload route, after
  * it has checked permission, access and the file). The objects are written
  * first, with no lock held (a slow storage write must not hold the school's
@@ -306,6 +335,7 @@ export async function addQuestionPaperPage(
 ) {
   const { scope, file } = input;
   assertPaperWritable(scope);
+  await precheckPageUpload(db, scope.key);
   const derivatives = await makeImageDerivatives(file.bytes, file.contentType);
   const pageId = generateId('examQuestionPaperPage');
   const { schoolId } = scope.key;
@@ -510,6 +540,7 @@ export async function addQuestionPaperFigure(
   input: { scope: PaperScope; userId: string; bytes: Buffer; sourceAttachmentId?: string },
 ) {
   assertPaperWritable(input.scope);
+  await precheckFigureUpload(db, input.scope.key);
   const figure = await normalizeFigureImage(input.bytes);
   const figureId = generateId('examQuestionPaperFigure');
   const key = questionPaperKeys.figure(input.scope.key.schoolId, figureId, figure.extension);

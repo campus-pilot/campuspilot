@@ -4,6 +4,7 @@ import { assistantConversationTable, assistantItemTable } from '@campuspilot/db/
 import { generateId } from '@campuspilot/db/id';
 import {
   examQuestionPaperFigureTable,
+  examQuestionPaperJobTable,
   examQuestionPaperTable,
   examQuestionPaperVersionTable,
 } from '@campuspilot/db/schema/exam-question-paper';
@@ -240,6 +241,9 @@ export type SavedVersion = {
 /** Another version landed between a job's render and its commit: render again with the new number. */
 class VersionRaceError extends Error {}
 
+/** The generation job that is saving this version ended (swept at its deadline, deleted) before the save committed. */
+export class SourceJobEndedError extends Error {}
+
 const artifactName = (scope: PaperScope, versionNo: number) =>
   `Question paper: ${scope.subjectName} (${scope.modeName}) - ${scope.className} - v${versionNo}`;
 
@@ -390,6 +394,17 @@ async function renderAndStore(
       // Session share lock first, then the paper lock: a completion of the exam cannot slip in between.
       await assertPaperWritableLocked(tx, scope.key);
       const locked = await lockOrCreatePaper(tx, scope.key, input.userId);
+      if (source.kind === 'ai_job') {
+        // A job swept at its deadline (or deleted with its paper) must not commit a version afterwards. The row is
+        // read FOR SHARE after the paper lock (the order every job-row writer here also keeps: the sweep and the
+        // job's own transitions take the job row alone), so a sweep either lands first, refusing this save, or waits.
+        const [job] = await tx
+          .select({ status: examQuestionPaperJobTable.status })
+          .from(examQuestionPaperJobTable)
+          .where(eq(examQuestionPaperJobTable.id, source.jobId))
+          .for('share');
+        if (job?.status !== 'running') throw new SourceJobEndedError();
+      }
       if (locked.latestVersionNo !== input.assumedLatest) {
         if (input.expectedVersionNo !== null) {
           throw rpcError.conflict(`The paper changed: its latest version is ${locked.latestVersionNo}, not ${input.expectedVersionNo}. Read it again with getQuestionPaper.`);

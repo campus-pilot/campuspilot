@@ -695,7 +695,7 @@ describe('images attached to a message', () => {
     const before = await list(owner);
 
     await expect(startConversation(owner, { text: 'x', attachmentIds: [mine, theirs] })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
-    await expect(startConversation(owner, { text: 'x', attachmentIds: [mine, 'asat_missing000000000000'] })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    await expect(startConversation(owner, { text: 'x', attachmentIds: [mine, 'asat_missing000000000000'] })).rejects.toMatchObject({ code: 'BAD_REQUEST', data: { reason: 'attachments_missing', attachmentIds: ['asat_missing000000000000'] } });
     expect((await list(owner)).pagination.totalItems).toBe(before.pagination.totalItems);
     expect(await rowOf(mine)).toMatchObject({ itemId: null, conversationId: null });
 

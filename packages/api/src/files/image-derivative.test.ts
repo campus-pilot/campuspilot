@@ -5,7 +5,7 @@ import { ORPCError } from '@orpc/server';
 import sharp from 'sharp';
 import { describe, expect, it } from 'vitest';
 
-import { MAX_INPUT_PIXELS, makeImageDerivatives, normalizeFigureImage } from './image-derivative';
+import { MAX_CONCURRENT_DECODES, MAX_INPUT_PIXELS, MAX_WAITING_DECODES, makeImageDerivatives, normalizeFigureImage, withDecodeSlot } from './image-derivative';
 
 /**
  * A real HEVC still in a HEIC container (64x48, brand `heic`): the stream was
@@ -152,12 +152,41 @@ describe('decompression bombs', () => {
     expect(results.every((result) => result.status === 'ready')).toBe(true);
   });
 
-  it('refuses uploads beyond the bounded decode queue with 429 instead of holding every file in memory', async () => {
+  it('refuses a task beyond the bounded decode queue with 429, then runs every queued one', async () => {
+    // No images and no timing: tasks the test holds open fill the slots and the queue exactly.
+    const gates: Array<() => void> = [];
+    const ran: number[] = [];
+    const held = (id: number) =>
+      withDecodeSlot(
+        () =>
+          new Promise<number>((resolve) => {
+            ran.push(id);
+            gates.push(() => resolve(id));
+          }),
+      );
+    const running = Array.from({ length: MAX_CONCURRENT_DECODES }, (_, i) => held(i));
+    const queued = Array.from({ length: MAX_WAITING_DECODES }, (_, i) => held(100 + i));
+    // Let the queued tasks reach their wait.
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(ran).toEqual([0, 1]);
+    const refused = await withDecodeSlot(async () => 'never').catch((e: unknown) => e);
+    expect((refused as ORPCError<string, unknown>).status).toBe(429);
+    // Releasing the running tasks drains the queue in arrival order.
+    while (ran.length < MAX_CONCURRENT_DECODES + MAX_WAITING_DECODES || gates.length > 0) {
+      gates.shift()?.();
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    expect(await Promise.all([...running, ...queued])).toEqual([0, 1, ...Array.from({ length: MAX_WAITING_DECODES }, (_, i) => 100 + i)]);
+    expect(ran).toEqual([0, 1, ...Array.from({ length: MAX_WAITING_DECODES }, (_, i) => 100 + i)]);
+    // The queue is empty again: the next task is served at once.
+    expect(await withDecodeSlot(async () => 'ok')).toBe('ok');
+  });
+
+  it('still serves a real upload burst of 40 photos without losing any (each is either served or refused with 429)', async () => {
     const photo = await sharp({ create: { width: 3000, height: 3000, channels: 3, background: '#ccc' } }).jpeg().toBuffer();
     const outcomes = await Promise.all(Array.from({ length: 40 }, () => makeImageDerivatives(photo, 'image/jpeg').then(() => 'ok', (e: unknown) => (e as ORPCError<string, unknown>).status)));
-    expect(outcomes).toContain(429);
+    expect(outcomes.every((outcome) => outcome === 'ok' || outcome === 429)).toBe(true);
     expect(outcomes).toContain('ok');
-    // The queue drains: the next upload is served.
     expect((await makeImageDerivatives(photo, 'image/jpeg')).status).toBe('ready');
   });
 });

@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 
+import { ORPCError } from '@orpc/server';
 import { rpcError } from '@campuspilot/api/errors';
 import { makeImageDerivatives } from '@campuspilot/api/files/image-derivative';
 import {
@@ -9,6 +10,7 @@ import {
   putObject,
 } from '@campuspilot/api/routers/school/question-paper/question-paper.storage';
 import {
+  ASSISTANT_ATTACHMENTS_MISSING_REASON,
   ASSISTANT_ATTACHMENTS_PER_MESSAGE,
   ASSISTANT_UNSENT_ATTACHMENTS_PER_USER,
   ASSISTANT_UNSENT_ATTACHMENT_RECLAIM_HOURS,
@@ -93,6 +95,19 @@ async function removeAttachmentRows(tx: AssistantExecutor, rows: readonly Attach
   return removed;
 }
 
+/**
+ * Deletes the rows of locked attachments and returns their object keys for the
+ * caller to delete after its transaction commits. Used by upload, which must
+ * not hold a connection and the user's advisory lock across storage calls;
+ * a failed object delete then leaves unreferenced objects (logged with their
+ * keys), which the demo purge sweeps by prefix.
+ */
+async function dropAttachmentRows(tx: AssistantExecutor, rows: readonly AttachmentRow[]): Promise<string[]> {
+  if (rows.length === 0) return [];
+  await tx.delete(assistantAttachmentTable).where(inArray(assistantAttachmentTable.id, rows.map((row) => row.id)));
+  return rows.flatMap((row) => attachmentObjectKeys(row)).filter((key): key is string => Boolean(key));
+}
+
 /** Deletes a user's unsent attachments older than the reclaim age (rows locked first; one being sent right now is skipped). */
 async function reclaimStaleUnsent(tx: AssistantExecutor, input: { schoolId: string; userId: string }, now: Date = new Date()) {
   const cutoff = new Date(now.getTime() - ASSISTANT_UNSENT_ATTACHMENT_RECLAIM_HOURS * 3_600_000);
@@ -108,7 +123,7 @@ async function reclaimStaleUnsent(tx: AssistantExecutor, input: { schoolId: stri
       ),
     )
     .for('update', { skipLocked: true });
-  return removeAttachmentRows(tx, stale);
+  return dropAttachmentRows(tx, stale);
 }
 
 /**
@@ -134,7 +149,7 @@ async function evictOldestUnsent(tx: AssistantExecutor, input: { schoolId: strin
     .limit(ASSISTANT_UNSENT_ATTACHMENTS_PER_USER * 2)
     .offset(ASSISTANT_ATTACHMENTS_PER_MESSAGE)
     .for('update', { skipLocked: true });
-  return removeAttachmentRows(tx, surplus);
+  return dropAttachmentRows(tx, surplus);
 }
 
 /**
@@ -187,9 +202,22 @@ export async function createAttachment(
   const { schoolId, userId, file } = input;
   const derivatives = await makeImageDerivatives(file.bytes, file.contentType);
   const id = generateId('assistantAttachment');
-  const written: string[] = [];
+  // Storage first, then a short transaction (the page upload's order): no connection or advisory lock is held across
+  // storage calls. Keys derive from the id, so nothing can collide; every failure removes what was written.
+  const originalKey = attachmentKeys.original(schoolId, id, file.extension);
+  const thumbKey = derivatives.status === 'ready' ? attachmentKeys.thumb(schoolId, id) : null;
+  const modelKey = derivatives.status === 'ready' ? attachmentKeys.model(schoolId, id) : null;
+  const written: string[] = [originalKey];
+  let freed: string[] = [];
   try {
-    return await database.transaction(async (tx) => {
+    await putObject(originalKey, file.bytes, file.contentType);
+    if (derivatives.status === 'ready' && thumbKey && modelKey) {
+      written.push(thumbKey, modelKey);
+      await putObject(thumbKey, derivatives.thumb.bytes, derivatives.thumb.contentType);
+      await putObject(modelKey, derivatives.model.bytes, derivatives.model.contentType);
+    }
+    const ref = await database.transaction(async (tx) => {
+      freed = [];
       await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`assistant-attachments:${schoolId}:${userId}`}, 0))`);
       const countUnsent = async () => {
         const [unsent] = await tx
@@ -207,10 +235,10 @@ export async function createAttachment(
       let unsentCount = await countUnsent();
       if (unsentCount >= ASSISTANT_UNSENT_ATTACHMENTS_PER_USER) {
         // Images left behind by a reload, a closed tab or a composer that unmounted are not in any open composer: free them rather than lock the user out.
-        await reclaimStaleUnsent(tx, { schoolId, userId });
+        freed.push(...(await reclaimStaleUnsent(tx, { schoolId, userId })));
         unsentCount = await countUnsent();
         if (unsentCount >= ASSISTANT_UNSENT_ATTACHMENTS_PER_USER) {
-          await evictOldestUnsent(tx, { schoolId, userId });
+          freed.push(...(await evictOldestUnsent(tx, { schoolId, userId })));
           unsentCount = await countUnsent();
         }
       }
@@ -218,18 +246,6 @@ export async function createAttachment(
         throw rpcError.badRequest(
           `You have ${ASSISTANT_UNSENT_ATTACHMENTS_PER_USER} images waiting to be sent. Send or remove some first.`,
         );
-      }
-      const originalKey = attachmentKeys.original(schoolId, id, file.extension);
-      written.push(originalKey);
-      await putObject(originalKey, file.bytes, file.contentType);
-      let thumbKey: string | null = null;
-      let modelKey: string | null = null;
-      if (derivatives.status === 'ready') {
-        thumbKey = attachmentKeys.thumb(schoolId, id);
-        modelKey = attachmentKeys.model(schoolId, id);
-        written.push(thumbKey, modelKey);
-        await putObject(thumbKey, derivatives.thumb.bytes, derivatives.thumb.contentType);
-        await putObject(modelKey, derivatives.model.bytes, derivatives.model.contentType);
       }
       const [row] = await tx
         .insert(assistantAttachmentTable)
@@ -253,6 +269,9 @@ export async function createAttachment(
         .returning();
       return toAttachmentRef(row!);
     });
+    // The evicted rows are gone for good; their objects follow (best effort, logged with the keys).
+    await deleteObjectsBestEffort(freed);
+    return ref;
   } catch (error) {
     await deleteObjectsBestEffort(written);
     throw error;
@@ -288,8 +307,13 @@ export async function lockUnsentAttachments(
     .for('update');
   const byId = new Map(rows.map((row) => [row.id, row]));
   const ordered = input.ids.map((id) => byId.get(id));
-  if (ordered.some((row) => !row)) {
-    throw rpcError.badRequest('One of the attached images is no longer available. Attach it again.');
+  const missing = input.ids.filter((id) => !byId.has(id));
+  if (missing.length > 0) {
+    // The ids ride along so the composer can mark exactly those tiles; without them every resend would fail the same way.
+    throw new ORPCError('BAD_REQUEST', {
+      message: missing.length === 1 ? 'An attached image is no longer available. Remove it and attach it again.' : `${missing.length} attached images are no longer available. Remove them and attach them again.`,
+      data: { reason: ASSISTANT_ATTACHMENTS_MISSING_REASON, attachmentIds: missing },
+    });
   }
   return ordered as AttachmentRow[];
 }

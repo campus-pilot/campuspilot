@@ -16,8 +16,10 @@ import { z } from 'zod';
 
 import { AssistantAttachmentStrip } from './assistant-attachment-strip';
 import {
+  AttachmentsMissingError,
   attachmentSendBlock,
   hasMessageContent,
+  markMissingAttachments,
   planAttachmentPicks,
   readyAttachments,
   rejectionSummary,
@@ -244,7 +246,12 @@ export function AssistantComposer({
       } catch (error) {
         if (!formApi.getFieldValue('text')) formApi.setFieldValue('text', text);
         // The images stay with the draft, as the words do, unless new ones were added meanwhile.
-        if (formApi.getFieldValue('attachments').length === 0) formApi.setFieldValue('attachments', sentAttachments);
+        if (formApi.getFieldValue('attachments').length === 0) {
+          formApi.setFieldValue(
+            'attachments',
+            error instanceof AttachmentsMissingError ? markMissingAttachments(sentAttachments, error.attachmentIds) : sentAttachments,
+          );
+        }
         formApi.setErrorMap({
           onSubmit: { form: error instanceof Error ? error.message : 'The message could not be sent.', fields: {} },
         });

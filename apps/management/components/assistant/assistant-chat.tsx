@@ -22,12 +22,13 @@ import {
   AssistantTimeline,
   AssistantUserMessage,
   AssistantWelcome,
+  AttachmentsMissingError,
   imagesOnlyLabel,
   AssistantWorkBar,
   type AssistantApprovalDecision,
   type AssistantSuggestion,
 } from '@campuspilot/components/assistant';
-import { saveDraftMessage } from '@campuspilot/components/question-paper/chat-cards-model';
+import { draftSaveSpent, saveEventsOf } from '@campuspilot/components/question-paper/chat-cards-model';
 import { Button } from '@campuspilot/ui/components/button';
 import { Spinner } from '@campuspilot/ui/components/spinner';
 import { TooltipProvider } from '@campuspilot/ui/components/tooltip';
@@ -41,7 +42,7 @@ import { assistantAttachmentThumbUrl } from '@/lib/assistant-attachments';
 import { orpc } from '@/lib/orpc';
 
 import { AssistantDraftCard } from './assistant-question-paper';
-import { refusalMessage, type AssistantConversationFailure } from './assistant-stream';
+import { missingAttachmentIdsOf, refusalMessage, type AssistantConversationFailure } from './assistant-stream';
 import { AssistantViewBlock } from './assistant-view';
 import { useAssistantAttachmentUpload } from './use-assistant-attachments';
 import {
@@ -287,7 +288,7 @@ function ConversationTimeline({
           // "Draft n": the card's place among this conversation's drafts.
           ordinal={rows.filter((candidate) => candidate.kind === 'card').findIndex((candidate) => candidate.id === row.id) + 1}
           onSendMessage={onSendMessage}
-          saveRequested={(draftId) => rows.some((candidate) => candidate.kind === 'user' && candidate.item.body.text === saveDraftMessage(draftId))}
+          saveRequested={(draftId) => draftSaveSpent(saveEventsOf(rows), draftId)}
         />
       )}
     />
@@ -534,6 +535,9 @@ export function AssistantChat({
       attachmentIds: attachments.map((attachment) => attachment.id),
       seed: seedPaper.usableSeed,
     }).catch((error: unknown) => {
+      const missing = missingAttachmentIdsOf(error);
+      // The composer marks these tiles, so the failed copy of the message is dropped: its Retry would name the same missing images.
+      if (missing) throw new AttachmentsMissingError(refusalMessage(error) ?? 'An attached image is no longer available.', missing);
       throw new Error(refusalMessage(error) ?? 'The message could not be sent. Check your connection and try again.');
     });
     started(result.conversation.id, box.text());

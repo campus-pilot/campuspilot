@@ -118,7 +118,7 @@ export async function assertNoActiveJob(db: DatabaseExecutor, paperId: string, w
 
 type SummaryRow = Pick<
   VersionRow,
-  'versionNo' | 'source' | 'createdAt' | 'createdBy' | 'totalMarks' | 'planMaxMarks' | 'warnings' | 'pdfArtifactId'
+  'versionNo' | 'source' | 'createdAt' | 'createdBy' | 'totalMarks' | 'planMaxMarks' | 'warnings' | 'pdfArtifactId' | 'sourceJobId'
 >;
 
 /** Names of the users who created versions (none for a deleted account). */
@@ -137,6 +137,7 @@ export async function toVersionSummaries(
   return rows.map((row) => ({
     versionNo: row.versionNo,
     source: row.source,
+    sourceJobId: row.sourceJobId,
     createdAt: row.createdAt,
     createdBy: { id: row.createdBy, name: names.get(row.createdBy) ?? null },
     totalMarks: row.totalMarks,

@@ -242,12 +242,17 @@ Chat can carry images, mainly photographs of a handwritten question paper
   paste; JPEG, PNG, WebP and the HEIC family, 15 MB each). Each file is uploaded
   first, alone, to `POST /api/blob/schools/:schoolId/assistant/attachments`
   (`packages/assistant/src/attachments.http.ts`, mounted in `apps/server`): browser
-  session only, origin checked, `assertCanUse`, 60 per minute per IP. It becomes an
+  session only, origin checked, `assertCanUse`, 60 per minute per IP. The three objects are written
+  first and a short transaction (per user and school advisory lock) then counts the cap, frees
+  stale or surplus rows (their objects are deleted after the commit, best effort, logged by key)
+  and inserts the row; no connection or lock is held across storage calls. It becomes an
   `assistant_attachment` row (the original, a 1800 px model copy and a thumbnail in
   S3 under `schools/{schoolId}/`; `unsupported` when the server cannot decode it, as
   for HEIC) and an id. `sendMessage` takes `attachmentIds` (text may then be empty) and binds
   them in the same transaction as the message; a message that names an image that is
-  foreign, already sent or missing is refused whole. Reads redirect to a 5 minute
+  foreign, already sent or missing is refused whole; for missing ones the BAD_REQUEST carries
+  `data = { reason: 'attachments_missing', attachmentIds }` and the composer marks exactly
+  those tiles as failed (the failed copy of the message is dropped, so Retry cannot loop). Reads redirect to a 5 minute
   presigned URL and only the owner may read. A user may hold 40 unsent attachments
   per school; removing one from the composer deletes it (`DELETE` on the attachment,
   owner and unsent only), an upload at the cap frees that user's unsent images older

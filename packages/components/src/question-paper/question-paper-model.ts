@@ -207,3 +207,30 @@ export function formatPageSize(bytes: number) {
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
   return `${Number((bytes / (1024 * 1024)).toFixed(1))} MB`;
 }
+
+/**
+ * Screen reader announcements for dragging a page, in terms of page numbers and
+ * file names (dnd-kit would otherwise read out the opaque page ids).
+ */
+export function pageDragAnnouncements(pages: ReadonlyArray<{ id: string; position: number; originalName: string }>) {
+  const name = (id: string | number) => {
+    const page = pages.find((candidate) => candidate.id === String(id));
+    return page ? `page ${page.position}, ${page.originalName}` : 'a page';
+  };
+  const target = (id: string | number) => {
+    const page = pages.find((candidate) => candidate.id === String(id));
+    return page ? `position ${page.position}` : 'its place';
+  };
+  return {
+    onDragStart: ({ active }: { active: { id: string | number } }) => `Picked up ${name(active.id)}.`,
+    onDragOver: ({ active, over }: { active: { id: string | number }; over: { id: string | number } | null }) =>
+      over ? `${name(active.id)} is over ${target(over.id)}.` : `${name(active.id)} is not over a position.`,
+    onDragEnd: ({ active, over }: { active: { id: string | number }; over: { id: string | number } | null }) =>
+      over ? `Dropped ${name(active.id)} at ${target(over.id)}.` : `Dropped ${name(active.id)}. The order is unchanged.`,
+    onDragCancel: ({ active }: { active: { id: string | number } }) => `Moving ${name(active.id)} was cancelled. The order is unchanged.`,
+  };
+}
+
+/** Instructions read when the drag handle takes focus. */
+export const PAGE_DRAG_INSTRUCTIONS =
+  'Press space to pick up this page, use the arrow keys to move it, and press space again to drop it. Press escape to cancel.';

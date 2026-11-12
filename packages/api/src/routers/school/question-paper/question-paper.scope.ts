@@ -90,6 +90,13 @@ export const PAPER_LOCKED_REASON = 'paper_locked';
 
 const paperLockedError = (message: string) => new ORPCError('BAD_REQUEST', { message, data: { reason: PAPER_LOCKED_REASON } });
 
+/** `data.reason` of the BAD_REQUEST that says the exam plan no longer has the paper's mode (removed while a write or a generation was under way). */
+export const PLAN_MODE_REMOVED_REASON = 'plan_mode_removed';
+
+/** Whether an error is the refusal for a plan that no longer has the paper's mode. */
+export const isPlanModeRemovedError = (error: unknown): boolean =>
+  error instanceof ORPCError && error.code === 'BAD_REQUEST' && (error.data as { reason?: unknown } | undefined)?.reason === PLAN_MODE_REMOVED_REASON;
+
 /** Whether an error is the refusal of {@link assertPaperWritable} or {@link assertPaperWritableLocked}. */
 export const isPaperLockedError = (error: unknown): boolean =>
   error instanceof ORPCError && error.code === 'BAD_REQUEST' && (error.data as { reason?: unknown } | undefined)?.reason === PAPER_LOCKED_REASON;
@@ -144,7 +151,10 @@ export async function assertPaperWritableLocked(tx: DatabaseTransaction, key: Pa
     .for('share');
   if (!plan) throw rpcError.notFound('Exam plan for this subject');
   if (!Object.hasOwn(plan.modeConfig, key.modeSlug)) {
-    throw rpcError.badRequest(`The exam plan for this subject has no "${key.modeSlug}" mode.`);
+    throw new ORPCError('BAD_REQUEST', {
+      message: `The exam plan for this subject has no "${key.modeSlug}" mode.`,
+      data: { reason: PLAN_MODE_REMOVED_REASON },
+    });
   }
   const [lifecycle] = await tx.select({ status: examLifecycleTable.status }).from(examLifecycleTable).where(lifecycleWhere(key)).limit(1);
   if (lifecycle?.status === 'completed') {

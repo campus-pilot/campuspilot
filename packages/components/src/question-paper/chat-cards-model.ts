@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import type { AssistantTimelineRow } from '../assistant/timeline-model';
+
 /**
  * Pure reading of a `validateQuestionPaperDraft` tool call for its chat card
  * (design G5). The call item stores the tool's input whole and its output cut
@@ -95,3 +97,45 @@ export function draftCardSummary(facts: DraftCardFacts): { placeholderNote: stri
 
 /** The message the card's "Save as new version" sends (an explicit user command, decision D32). */
 export const saveDraftMessage = (draftId: string) => `Save draft ${draftId} as a new version.`;
+
+/** What the conversation holds, in order, that matters to whether a draft's Save is still pending. */
+export type DraftSaveEvent =
+  | { kind: 'message'; text: string }
+  | { kind: 'save-call'; status: 'awaiting_approval' | 'running' | 'succeeded' | 'failed' | 'declined' | 'cancelled' };
+
+/**
+ * Whether the user's request to save this draft is still in flight or done,
+ * so the card's button stays spent. It is spent from the user's save message
+ * until a save call that followed it was declined, cancelled or failed: then
+ * the request is over without a version and the button works again. Several
+ * save calls after one message: the last one decides.
+ */
+export function draftSaveSpent(events: readonly DraftSaveEvent[], draftId: string): boolean {
+  const sentence = saveDraftMessage(draftId);
+  let lastMessage = -1;
+  events.forEach((event, index) => {
+    if (event.kind === 'message' && event.text === sentence) lastMessage = index;
+  });
+  if (lastMessage < 0) return false;
+  const calls = events.slice(lastMessage + 1).filter((event) => event.kind === 'save-call');
+  const last = calls.at(-1);
+  if (!last) return true;
+  return !(last.status === 'failed' || last.status === 'declined' || last.status === 'cancelled');
+}
+
+/** The conversation's save-relevant events in order: user messages and `saveQuestionPaperVersion` calls, including those folded under a work bar. */
+export function saveEventsOf(rows: readonly AssistantTimelineRow[]): DraftSaveEvent[] {
+  const events: DraftSaveEvent[] = [];
+  const visit = (row: AssistantTimelineRow) => {
+    if (row.kind === 'user') events.push({ kind: 'message', text: row.item.body.text });
+    else if (row.kind === 'approval' && row.call.body.toolName.endsWith('saveQuestionPaperVersion')) {
+      events.push({ kind: 'save-call', status: row.call.status });
+    } else if (row.kind === 'activity') {
+      for (const call of row.calls) {
+        if (call.body.toolName.endsWith('saveQuestionPaperVersion')) events.push({ kind: 'save-call', status: call.status });
+      }
+    } else if (row.kind === 'work') row.folded.forEach(visit);
+  };
+  rows.forEach(visit);
+  return events;
+}
