@@ -12,6 +12,7 @@ export const STEP_LABELS: Record<DemoSchoolJobDto['steps'][number], string> = {
   finance: 'Finance',
   templates: 'Templates',
   notices: 'Notices',
+  'question-papers': 'Question papers',
   credentials: 'Credentials',
 };
 
@@ -25,6 +26,7 @@ const STEP_ACTIVITY: Record<DemoSchoolJobDto['steps'][number], string> = {
   finance: 'Billing and collecting fees…',
   templates: 'Choosing document templates…',
   notices: 'Writing notices…',
+  'question-papers': 'Preparing question papers…',
   credentials: 'Generating staff logins…',
 };
 

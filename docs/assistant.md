@@ -12,7 +12,7 @@ permissions.
 | Piece | Where | Owns |
 | --- | --- | --- |
 | Assistant package | `packages/assistant` | Agent loop and model providers (`src/runtime`), store, live events, the `/model/*` router (`router.ts`, `http.ts`), the outbox (`dispatch.ts`), the signed worker service (`control.ts`, `worker.ts`) |
-| Tables | `packages/db/src/schema/assistant.ts` (main migrations, `assistant_` prefix) | Conversations, runs, items, approvals, transcript, `assistant_model_request` (saved costs), `school_assistant_access_role` |
+| Tables | `packages/db/src/schema/assistant.ts` (main migrations, `assistant_` prefix) | Conversations, runs, items, approvals, transcript, `assistant_model_request` (saved costs, also the question paper job's), `assistant_attachment` (chat images), `school_assistant_access_role` |
 | Contract | `packages/assistant-contract` | DTOs, the oRPC contract of `/model/*`, shared protocol constants, exact USD sums (`money.ts`) |
 | Chat UI pieces | `packages/components/src/assistant` | Presentational timeline, approval card, composer (props and callbacks only) |
 | Usage UI pieces | `packages/components/src/assistant-usage` | Date range form, spend chart and table (props only) |
@@ -230,6 +230,58 @@ one request; `QUESTION_PAPER_JOB_TIMEOUT_MINUTES` (default 20) is how long a
 running job may take before the API's sweep fails it (read by the API server).
 The worker needs the same `QUESTION_PAPER_*` values as the API server.
 
+### Image attachments, question paper tools and context pruning
+
+Chat can carry images, mainly photographs of a handwritten question paper
+(feature guide: [Question papers](question-papers.md#chat-attachments-tools-drafts-pruning)).
+
+- **Attachments.** The composer takes up to 20 images per message (paperclip, drop,
+  paste; JPEG, PNG, WebP and the HEIC family, 15 MB each). Each file is uploaded
+  first, alone, to `POST /api/blob/schools/:schoolId/assistant/attachments`
+  (`packages/assistant/src/attachments.http.ts`, mounted in `apps/server`): browser
+  session only, origin checked, `assertCanUse`, 60 per minute per IP. It becomes an
+  `assistant_attachment` row (the original, a 1800 px model copy and a thumbnail in
+  S3 under `schools/{schoolId}/`; `unsupported` when the server cannot decode it, as
+  for HEIC) and an id. `sendMessage` takes `attachmentIds` (text may then be empty) and binds
+  them in the same transaction as the message; a message that names an image that is
+  foreign, already sent or missing is refused whole. Reads redirect to a 5 minute
+  presigned URL and only the owner may read. A user may hold 40 unsent attachments
+  per school; an unsent one is deleted after 24 hours (the outbox sweep), the others
+  with their conversation (`deleteConversation`, a soft delete, deletes them
+  explicitly) and with the school (demo purge). A file the active provider cannot
+  read (HEIC on Anthropic) refuses the send with a message asking for a JPEG; an image is
+  never dropped silently.
+- **Transcript.** A stored user turn holds provider-neutral markers, never bytes; the
+  provider adapters turn a marker into an image part when they build a request.
+  `AssistantUserMessageBody` carries `attachments` and an optional `seed` (the
+  question paper "Continue in chat" context, accepted only on a new conversation).
+- **Tools.** The question paper tools are ordinary advanced MCP tools of module
+  `exams` (`listQuestionPapers`, `getQuestionPaper`, `listQuestionPaperVersions`,
+  `learn_question_paper_generation`, `validateQuestionPaperDraft` and
+  `saveQuestionPaperVersion`, the only write and so the usual approval card). The prompt
+  has one bullet that sends the model to the learn tool first (Anthropic reaches it
+  through tool search, Gemini has every tool declared). `ASSISTANT_TOOL_META.outputChars`
+  lets a tool raise the 24,000 character cap on its result, carried end to end
+  (`_meta['campuspilot/output-chars']`).
+- **Cards and views.** A successful `validateQuestionPaperDraft` call becomes a
+  `card` timeline row (`ASSISTANT_CARD_TOOLS`, keyed by the stored MCP name
+  `school.validateQuestionPaperDraft`) that the app renders as a draft card (errors, or
+  Preview and *Save as new version*, which sends the plain message "Save draft {id} as
+  a new version."). The `question_paper` view shows a saved version with Preview and
+  Download (see Views below). Drafts exist only in the conversation.
+- **Context pruning** (`runtime/context.ts`, `buildModelContext`, applied after the
+  transcript is read and before the provider adapter; the stored transcript and the UI
+  are never changed). The window is the last two human messages. Outside it a tool
+  result of 8,000 characters or more is replaced by a stub naming the tool and its size
+  ("Call the tool again if you need it") and an attachment by a note asking the user to
+  attach it again. Inside it, images are materialised newest first within an 18 MB
+  budget, with a note for any that are missing, unreadable or omitted. Entry count,
+  order, tool call ids and thought signatures are never touched, and the function is
+  pure and idempotent. Each provider supplies a `ContextAdapter` (`anthropicContext`,
+  `geminiContext`, `fakeContext`) for its own message format. One threshold applies to
+  every tool, so the learn payload (about 17 KB) is pruned too and the agent calls it
+  again when it needs it.
+
 ### Cost: saved, never recomputed
 
 After each answered model request, one transaction (the step's own) inserts an
@@ -413,6 +465,9 @@ and stores it as a `view` item, and the app renders it with its own components:
   download link on click, with the user's session; the model never writes a
   link (they are long and short-lived, and models copy them unreliably). Bills,
   receipts and statements are shown as unavailable.
+- `question_paper`: a saved version of a question paper by its natural key and
+  `versionNo`, with Preview and Download. The app reads the paper with the user's
+  session behind the class read permission (`assistant-question-paper.tsx`).
 - `table`, `stats`, `details`, `bars`, `notice`: composed from design-system
   pieces in `packages/components/src/assistant/views` (dashboard tiles and bar
   lists, row-hairline tables, the app's badge tones).

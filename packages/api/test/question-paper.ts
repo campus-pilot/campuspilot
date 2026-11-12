@@ -40,8 +40,9 @@ export async function switchAssistantRoles(schoolId: string, roles: Role[]) {
  * - staff of each role, a teacher of `classId` and a teacher of `otherClassId`;
  * - optionally the `question-paper-classic` template selected.
  */
-export async function createQuestionPaperWorld(options: { template?: boolean } = {}) {
+export async function createQuestionPaperWorld(options: { template?: boolean; school?: { id: string; isDemo: boolean } } = {}) {
   const school = await createTestSchool({
+    ...options.school,
     name: 'Question Paper School',
     registrationNo: 'QP-2026',
     features: [{ feature: 'assistant', config: { monthlyLimitUsd: 100, eligibleRoles: ALL_ROLES } }],

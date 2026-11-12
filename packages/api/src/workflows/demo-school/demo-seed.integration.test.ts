@@ -7,6 +7,7 @@ import { demoSchoolJobTable } from '@campuspilot/db/schema/demo-school-job';
 import { examLifecycleTable, examStudentRemarkTable, examTimetableTable } from '@campuspilot/db/schema/exam';
 import { examResultPublicationTable } from '@campuspilot/db/schema/exam-result-publication';
 import { financeBillRunTable, financeBillTable, financePaymentTable } from '@campuspilot/db/schema/finance';
+import { examQuestionPaperTable } from '@campuspilot/db/schema/exam-question-paper';
 import { noticeTable } from '@campuspilot/db/schema/notice';
 import { notificationDeliveryTable, notificationEventTable, notificationTable } from '@campuspilot/db/schema/notification';
 import { schoolMemberTable } from '@campuspilot/db/schema/school-member';
@@ -88,7 +89,7 @@ describe('demo school seed steps (2 classes, without Restate)', () => {
       'monthly:2026-04', 'monthly:2026-05', 'monthly:2026-06', 'monthly:2026-07', 'monthly:2026-08',
       'monthly:2026-09', 'monthly:2026-10', 'monthly:2026-11', 'monthly:2026-12',
     ]);
-    expect(result.counts).toMatchObject({ staff: 5, classes: 2, students: plannedStudents, templates: 8 });
+    expect(result.counts).toMatchObject({ staff: 5, classes: 2, students: plannedStudents, templates: 9 });
     expect(result.counts.bills).toBeGreaterThan(plannedStudents * 8);
     expect(BigInt(result.amounts.collectedMinor)).toBeGreaterThan(0n);
 
@@ -159,6 +160,12 @@ describe('demo school seed steps (2 classes, without Restate)', () => {
 
     const downloaded = await client.systemAdmin.getDemoCredentialsDownload({ schoolId: job.schoolId });
     expect(downloaded.fileName).toBe(`${job.school.slug}-credentials.csv`);
+
+    // Class 1 teaches mathematics but not science: the Hindi paper is seeded (the English science one has no class),
+    // although the demo keeps the assistant feature off.
+    expect(plan.questionPapers.map((paper) => paper.key)).toEqual(['mathematics-hindi']);
+    const seededPapers = await db.select().from(examQuestionPaperTable).where(eq(examQuestionPaperTable.schoolId, job.schoolId));
+    expect(seededPapers.map((paper) => [paper.examSlug, paper.subjectSlug, paper.modeSlug, paper.latestVersionNo, paper.pageRevision])).toEqual([['annual-examination', 'mathematics', 'written', 1, 2]]);
 
     // Seed steps call the real posting and release procedures, so every bill,
     // payment and billing run emitted its notification event, and every
@@ -264,8 +271,10 @@ describe('demo school seed steps (2 classes, without Restate)', () => {
   it('changes nothing when every step runs again', async () => {
     const before = await snapshotCounts(job.schoolId);
     const noticesBefore = await noticeRows(job.schoolId);
+    const papersBefore = await db.select().from(examQuestionPaperTable).where(eq(examQuestionPaperTable.schoolId, job.schoolId));
     await runDemoSeedSteps({ job, attempt: 1, run, step });
     expect(await snapshotCounts(job.schoolId)).toEqual(before);
+    expect(await db.select().from(examQuestionPaperTable).where(eq(examQuestionPaperTable.schoolId, job.schoolId))).toEqual(papersBefore);
     // No second copy, no second publication (no new events above), same back-dated times.
     expect(await noticeRows(job.schoolId)).toEqual(noticesBefore);
     const memberCount = await db.select({ value: count() }).from(schoolMemberTable).where(eq(schoolMemberTable.schoolId, job.schoolId));

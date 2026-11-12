@@ -169,7 +169,13 @@ function previewTemplateHtml(
   if (documentType === "question_paper") return renderSampleQuestionPaperDocument(content);
   return combineDocuments([renderDocument(content, sampleDocumentContext(documentType))], documentType, pageSize);
 }
-async function saveTemplate(
+/**
+ * Validates and stores a template revision and selects it. Exported for the
+ * demo seed, which selects the Question paper template for a demo school
+ * whose `assistant` feature is off (the procedures refuse that), after
+ * checking the permission itself.
+ */
+export async function saveTemplate(
   db: Database,
   userId: string,
   input: z.infer<typeof dto.saveTemplateSchema>,

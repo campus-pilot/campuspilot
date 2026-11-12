@@ -604,9 +604,9 @@ conversion. What differs is recorded here because it is easy to get wrong.
 ## Question papers
 
 `question_paper` is the template of the heading and footer of AI-assisted question
-papers (feature design: `.sks/handlebar-based-question-paper-generation/design.md`;
-the canonical feature guide `docs/question-papers.md` is written with the last
-phase). The questions themselves are a structured JSON document
+papers. The canonical feature guide is [Question papers](question-papers.md)
+(product model, data model, the structured JSON, permissions, the generation job and
+chat); this section owns only what the document system does for the type. The questions themselves are a structured JSON document
 (`@campuspilot/question-paper`) turned into an HTML body by a fixed renderer, never
 by the template. What this document system owns for the type:
 
@@ -682,6 +682,15 @@ by the template. What this document system owns for the type:
   (`question-paper.math.ts`: HTML output only, `trust: false`, no macros, 2 s wall
   budget; the stylesheet with `data:font/woff2` fonts is built once per process from
   the pinned `katex` package and added only to papers that contain math).
+- **Demo schools.** The demo seed selects the `question-paper-classic` design for a
+  demo school (`seedTemplates`) although the demo has the `assistant` feature off:
+  the procedures refuse the type without the feature, so the seed saves the
+  catalogue design with the same `saveTemplate` function after the same
+  `MANAGE_DOCUMENT_TEMPLATES` check. The seeded papers' PDFs are printed with it.
+- **Extending.** A new design needs the slot exactly once and must follow the layout
+  rules above; changing the slot, the CSP exception or the sanitising order needs the
+  review the slot file asks for. Other changes to papers: see "Extending" in
+  [Question papers](question-papers.md#extending).
 
 ## Notification attachments (WhatsApp)
 

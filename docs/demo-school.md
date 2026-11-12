@@ -128,6 +128,45 @@ it together with the publication time (`DemoNotice.issuedOn`). The step is idemp
 within the session, so a replay neither writes a second copy nor publishes (and
 notifies) twice. All content is invented. See [School notices](notices.md).
 
+### Question papers
+
+The `question-papers` step runs after `templates` (a version is printed with the
+school's Question paper template) and `exams` (a paper belongs to an exam with a plan),
+before `credentials`. It writes the papers of `seed/question-papers.json`: an English
+science paper and a Hindi mathematics paper, each with two page photos and version 1
+(feature guide: [Question papers](question-papers.md)).
+
+- **Placement** (`buildQuestionPapers` in `plan.ts`). The admin chooses the demo's
+  classes, so a paper names what it needs: a subject, the modes it may use
+  (`theory`, `written`), the end of the chosen classes to take it from (`classFrom`) and
+  the exam states it accepts (`ready`, then `active`; a completed exam is read-only).
+  It goes in the first class that teaches the subject. A demo without such a class, or
+  with every exam completed, simply has no such paper (a nursery-only demo has none;
+  Class 1 gets only the mathematics paper, as primary classes have no science).
+  `classLabelFormat` prints the real class on the paper (`Class 7`, `कक्षा 7`).
+- **Content.** Version 1 is one of the two worked examples of `@campuspilot/question-paper`
+  (`example` names which: its own field, not inferred from the language). The pages are
+  procedural PNGs (`renderPaperPage` in `images.ts`: ruled paper, pen scribbles
+  and, on one page, a diagram box, built with `Canvas.ruledPaper` and
+  `scribbleLine`), like the avatars: no committed binaries, no text, no real
+  handwriting, reproducible from the seed.
+- **Service functions, not procedures** (`seedQuestionPaper`). The question paper
+  procedures need the `assistant` feature and an eligible role, and a demo keeps the
+  feature off, so the step calls `addQuestionPaperPage` and `saveQuestionPaperVersion`
+  as the demo's principal (after `resolvePaperScope`); no model is called. For the same
+  reason `seedTemplates` saves the `question-paper-classic` design directly
+  (`saveTemplate`, after the `MANAGE_DOCUMENT_TEMPLATES` check). The Question paper tab
+  is invisible until an admin enables the feature; then the papers and PDFs are there.
+  Printing needs Gotenberg reachable from the worker.
+- **Idempotency.** The service functions take no request key, so the step is idempotent
+  on the paper's own state: stored pages are kept and only missing ones added, and a
+  paper that already has a version is not saved again (`expectedVersionNo: 0` makes a
+  second writer lose). Every object written is fenced by `assertUploadsKept`.
+- **Dates** come from `asOf` like the notices: the pages were uploaded
+  `uploadedDaysAgo` and the version saved `savedDaysAgo` days before it, and
+  `backdateDemoQuestionPaper` (demo schools only) sets the paper, page, version and PDF
+  artifact times, repeated on a replay.
+
 ### Credentials
 
 Demo staff accounts are created, made members and marked
@@ -173,7 +212,8 @@ and the admin follows it through `watchDemoSchoolPurge`:
 3. `deleting-data`: one transaction locks the purge row and the school,
    records the manifest (`object_keys`, `demo_user_ids`), runs
    `purge_demo_school(schoolId)` (every row the school owns, including the
-   in-app assistant's conversations, runs, saved costs and role list, and its
+   in-app assistant's conversations, runs, saved costs, chat images and role list, its
+   question papers with their pages, jobs, versions and figures, and its
    demo-only users) and sets `data_deleted_at`; a replay after commit does nothing.
    Finance trigger functions allow those `DELETE`s only for a demo school
    (`is_demo`, immutable after insert since 0027) that has a
@@ -315,6 +355,9 @@ ingress.
 - New platform feature: decide it in `DEMO_SCHOOL_FEATURE_DEFAULTS` (the build
   fails until you do); a seed step that calls a feature-gated procedure relies
   on the flag written at creation.
+- A question paper table or object is covered like any other: rows by
+  `purge_demo_school` (0059, 0062), objects because they live under
+  `schools/{schoolId}/` (`demo-purge-question-papers.integration.test.ts`).
 - New school-owned S3 object: make sure purge collects its key or it lives under
   `schools/{schoolId}/`. Cached notice PDFs
   (`schools/{schoolId}/notices/{noticeId}.pdf`) have no database row, so

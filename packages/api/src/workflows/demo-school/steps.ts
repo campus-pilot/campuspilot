@@ -11,6 +11,11 @@ import {
 } from '@campuspilot/db/schema/finance';
 import type { DemoSchoolJobResult } from '@campuspilot/db/schema/demo-school-job';
 import { examLifecycleTable } from '@campuspilot/db/schema/exam';
+import {
+  examQuestionPaperPageTable,
+  examQuestionPaperTable,
+  examQuestionPaperVersionTable,
+} from '@campuspilot/db/schema/exam-question-paper';
 import { noticeTable } from '@campuspilot/db/schema/notice';
 import type { FinanceSchemaConfig } from '@campuspilot/db/schema/jsonb/finance-config';
 import { schoolTable } from '@campuspilot/db/schema/school';
@@ -24,19 +29,27 @@ import { and, count, eq, inArray, isNotNull, sql, sum } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 
 import { SCHOOL_ACTIONS } from '@campuspilot/opa/policies/school';
+import { EXAMPLE_ENGLISH_SCIENCE_PAPER, EXAMPLE_HINDI_MATH_PAPER } from '@campuspilot/question-paper/examples';
 
 import type { Context } from '../../context';
 import { assertPermission } from '../../permissions/authorization';
 import { appRouter } from '../../routers';
 import { ADMISSION_PHOTO_FIELD_NAME } from '../../routers/school/admission/admission.constants';
 import { handleAdmissionPhotoUpload } from '../../routers/school/admission/admission.http';
+import { DOCUMENT_MARKETPLACE } from '../../routers/school/document/document.catalog';
 import type { DocumentType } from '../../routers/school/document/document.dto';
+import { saveTemplate } from '../../routers/school/document/document.router';
+import { findPaper, pagesOf } from '../../routers/school/question-paper/question-paper.records';
+import { selectedQuestionPaperTemplate } from '../../routers/school/question-paper/question-paper.render';
+import { resolvePaperScope } from '../../routers/school/question-paper/question-paper.scope';
+import { addQuestionPaperPage } from '../../routers/school/question-paper/question-paper.service';
+import { saveQuestionPaperVersion } from '../../routers/school/question-paper/question-paper.version.service';
 import { SCHOOL_LOGO_FIELD_NAME } from '../../routers/system-admin/school/school.constants';
 import { handleSchoolLogoUpload } from '../../routers/system-admin/school/school.http';
 import { demoCredentialsS3Key } from './constants';
 import { localTimeInstant } from './dates';
 import { generateDemoPassword } from './identity';
-import { renderAvatar, renderMonogramLogo } from './images';
+import { renderAvatar, renderMonogramLogo, renderPaperPage } from './images';
 import { assertUploadsKept, createDemoSchoolJobContext } from './job-context';
 import {
   billedMonthIndexes,
@@ -45,6 +58,7 @@ import {
   type DemoClass,
   type DemoExam,
   type DemoNotice,
+  type DemoQuestionPaper,
   type DemoPlan,
   type DemoStaffMember,
   type DemoStudent,
@@ -723,24 +737,53 @@ export async function seedUnregistrations(ctx: SeedContext): Promise<{ unregiste
 // ---------------------------------------------------------------------------
 // §6.8 Templates
 
-const DOCUMENT_TYPES: DocumentType[] = ['report_card', 'id_card', 'admit_card', 'timetable', 'bill', 'receipt', 'statement', 'notice'];
+const DOCUMENT_TYPES: DocumentType[] = ['report_card', 'id_card', 'admit_card', 'timetable', 'bill', 'receipt', 'statement', 'notice', 'question_paper'];
 
-/** Selects each type's `<type>-default` marketplace design unless one is active. */
+/** The marketplace design a demo school starts with, per type: `<type>-default` unless the catalogue names it otherwise. */
+const DEMO_TEMPLATE_SLUGS: Partial<Record<DocumentType, string>> = { question_paper: 'question-paper-classic' };
+
+/**
+ * Selects each type's marketplace design unless one is active (see
+ * {@link DEMO_TEMPLATE_SLUGS}).
+ *
+ * The Question paper template is the exception to "through the procedure":
+ * its procedures require the school's `assistant` feature, which a demo keeps
+ * off (see `DEMO_SCHOOL_FEATURE_DEFAULTS`), so the seed saves the catalogue
+ * design with the same function the procedure uses, after the same
+ * `MANAGE_DOCUMENT_TEMPLATES` check. The template then exists the moment an
+ * admin enables the feature, and the seeded papers can print.
+ */
 export async function seedTemplates(ctx: SeedContext): Promise<{ templates: number }> {
   for (const documentType of DOCUMENT_TYPES) {
-    const active = await ctx.rpc.school.getActiveDocumentTemplate({ schoolId: ctx.schoolId, documentType });
-    if (!active) {
-      const selected = await ctx.rpc.school.selectMarketplaceTemplate({
-        schoolId: ctx.schoolId,
-        documentType,
-        slug: `${documentType}-default`,
-        expectedRevisionId: null,
-      });
-      const [artifact] = await db.select({ s3Key: artifactTable.s3Key }).from(artifactTable).where(eq(artifactTable.id, selected.artifact.id)).limit(1);
-      await assertUploadsKept(ctx.jobId, ctx.schoolId, [artifact?.s3Key ?? '']);
-    }
+    const slug = DEMO_TEMPLATE_SLUGS[documentType] ?? `${documentType}-default`;
+    const artifactId = documentType === 'question_paper' ? await seedQuestionPaperTemplate(ctx, slug) : await seedProcedureTemplate(ctx, documentType, slug);
+    if (!artifactId) continue;
+    const [artifact] = await db.select({ s3Key: artifactTable.s3Key }).from(artifactTable).where(eq(artifactTable.id, artifactId)).limit(1);
+    await assertUploadsKept(ctx.jobId, ctx.schoolId, [artifact?.s3Key ?? '']);
   }
   return { templates: DOCUMENT_TYPES.length };
+}
+
+/** Selects the catalogue design through the procedure; returns the new artifact, or null when one was already active. */
+async function seedProcedureTemplate(ctx: SeedContext, documentType: DocumentType, slug: string): Promise<string | null> {
+  const active = await ctx.rpc.school.getActiveDocumentTemplate({ schoolId: ctx.schoolId, documentType });
+  if (active) return null;
+  const selected = await ctx.rpc.school.selectMarketplaceTemplate({ schoolId: ctx.schoolId, documentType, slug, expectedRevisionId: null });
+  return selected.artifact.id;
+}
+
+async function seedQuestionPaperTemplate(ctx: SeedContext, slug: string): Promise<string | null> {
+  await assertPermission(ctx.context, { action: SCHOOL_ACTIONS.MANAGE_DOCUMENT_TEMPLATES, resource: { kind: 'school', schoolId: ctx.schoolId } });
+  if (await selectedQuestionPaperTemplate(db, ctx.schoolId)) return null;
+  const design = DOCUMENT_MARKETPLACE.find((item) => item.slug === slug && item.documentType === 'question_paper');
+  if (!design) throw new DemoSeedError(`The catalogue has no ${slug} design.`);
+  const saved = await saveTemplate(
+    db,
+    ctx.context.session!.user.id,
+    { schoolId: ctx.schoolId, documentType: 'question_paper', name: design.name, content: design.content, pageSize: design.pageSize, expectedRevisionId: null },
+    design.slug,
+  );
+  return saved.artifact.id;
 }
 
 // ---------------------------------------------------------------------------
@@ -832,6 +875,109 @@ async function backdateDemoNotice(scope: { schoolId: string; noticeId: string },
       .set({ createdAt, publishedAt, issuedOn: notice.issuedOn, updatedAt: publishedAt })
       .where(and(mine, eq(noticeTable.status, 'published')));
   }
+}
+
+// ---------------------------------------------------------------------------
+// Question papers
+
+/** The built-in worked examples that are version 1 of the demo's papers (a paper names one in `question-papers.json`). */
+const QUESTION_PAPER_EXAMPLES: Record<DemoQuestionPaper['example'], typeof EXAMPLE_ENGLISH_SCIENCE_PAPER> = {
+  'english-science': EXAMPLE_ENGLISH_SCIENCE_PAPER,
+  'hindi-maths': EXAMPLE_HINDI_MATH_PAPER,
+};
+
+/**
+ * Writes one planned question paper: its photographed pages, then version 1
+ * with its PDF. It calls the question paper SERVICE functions, not the
+ * procedures: those require the school's `assistant` feature and an assistant
+ * role, which a demo keeps off (the Question paper tab stays hidden until an
+ * admin enables the feature; then the papers are there). No model is called:
+ * the pages are procedural pictures (`renderPaperPage`) and the version is a
+ * built-in example, saved as a chat-agent version so it needs no AI job.
+ *
+ * Idempotent on the paper's own state under its lock rather than on a
+ * request key (the service functions take none): pages already stored are
+ * kept and only the missing ones are added, and a paper that already has a
+ * version is not saved again. Every object written is fenced by
+ * {@link assertUploadsKept}, so a purge requested meanwhile leaves none. Dates
+ * are then set from the plan ({@link backdateDemoQuestionPaper}), which a
+ * replay repeats so a crash between the calls heals.
+ */
+export async function seedQuestionPaper(
+  ctx: SeedContext,
+  input: { sessionId: string; classIdsBySlug: Record<string, string>; paper: DemoQuestionPaper },
+): Promise<{ paperId: string; pages: number; versionNo: number }> {
+  const { paper } = input;
+  const classId = input.classIdsBySlug[paper.classSlug];
+  if (!classId) throw new DemoSeedError(`The demo class ${paper.classSlug} of the question paper "${paper.key}" does not exist.`);
+  const key = { schoolId: ctx.schoolId, sessionId: input.sessionId, examSlug: paper.examSlug, classId, subjectSlug: paper.subjectSlug, modeSlug: paper.modeSlug };
+  const userId = ctx.context.session!.user.id;
+  const scope = await resolvePaperScope(db, key);
+  const existing = await findPaper(db, key);
+  const stored = existing ? (await pagesOf(db, existing.id)).length : 0;
+  for (const [index, page] of paper.pages.entries()) {
+    if (index < stored) continue;
+    const bytes = renderPaperPage(createRandom(ctx.seed, 'question-paper', paper.key, index), page);
+    const added = await addQuestionPaperPage(db, { scope, userId, file: { bytes, contentType: 'image/png', extension: 'png', name: page.fileName } });
+    const [row] = await db
+      .select({ original: examQuestionPaperPageTable.originalS3Key, thumb: examQuestionPaperPageTable.thumbS3Key, model: examQuestionPaperPageTable.modelS3Key })
+      .from(examQuestionPaperPageTable)
+      .where(eq(examQuestionPaperPageTable.id, added.page.id))
+      .limit(1);
+    await assertUploadsKept(ctx.jobId, ctx.schoolId, [row?.original ?? '', row?.thumb ?? '', row?.model ?? '']);
+  }
+  let row = (await findPaper(db, key))!;
+  if (row.latestVersionNo < 1) {
+    const example = QUESTION_PAPER_EXAMPLES[paper.example];
+    // `expectedVersionNo: 0` makes a second writer lose instead of adding a second version 1.
+    const saved = await saveQuestionPaperVersion(db, {
+      scope,
+      userId,
+      expectedVersionNo: 0,
+      content: paper.classLabel ? { ...example, meta: { ...example.meta, classLabel: paper.classLabel } } : example,
+      source: { kind: 'agent', conversationId: null },
+    });
+    const [version] = await db
+      .select({ pdfArtifactId: examQuestionPaperVersionTable.pdfArtifactId })
+      .from(examQuestionPaperVersionTable)
+      .where(and(eq(examQuestionPaperVersionTable.paperId, saved.paperId), eq(examQuestionPaperVersionTable.versionNo, saved.versionNo)))
+      .limit(1);
+    const [artifact] = version?.pdfArtifactId ? await db.select({ s3Key: artifactTable.s3Key }).from(artifactTable).where(eq(artifactTable.id, version.pdfArtifactId)).limit(1) : [];
+    await assertUploadsKept(ctx.jobId, ctx.schoolId, [artifact?.s3Key ?? '']);
+    row = (await findPaper(db, key))!;
+  }
+  await backdateDemoQuestionPaper({ schoolId: ctx.schoolId, paperId: row.id }, paper);
+  return { paperId: row.id, pages: paper.pages.length, versionNo: row.latestVersionNo };
+}
+
+/**
+ * Demo-only: sets when a seeded paper's pages were uploaded and its version
+ * was saved. The services always record "now"; only this seed step may change
+ * that, and only for a demo school (`school.is_demo`), so it can never rewrite
+ * a real school's history. Pages are spaced a minute apart in their order.
+ */
+async function backdateDemoQuestionPaper(scope: { schoolId: string; paperId: string }, paper: Pick<DemoQuestionPaper, 'uploadedAt' | 'savedAt'>) {
+  const [school] = await db.select({ isDemo: schoolTable.isDemo }).from(schoolTable).where(eq(schoolTable.id, scope.schoolId)).limit(1);
+  if (!school?.isDemo) throw new DemoSeedError('Only a demo school’s question papers can be back-dated.');
+  const uploadedAt = new Date(paper.uploadedAt);
+  const savedAt = new Date(paper.savedAt);
+  await db.transaction(async (tx) => {
+    await tx.update(examQuestionPaperTable).set({ createdAt: uploadedAt, updatedAt: savedAt }).where(and(eq(examQuestionPaperTable.id, scope.paperId), eq(examQuestionPaperTable.schoolId, scope.schoolId)));
+    const pages = await pagesOf(tx, scope.paperId);
+    for (const [index, page] of pages.entries()) {
+      await tx.update(examQuestionPaperPageTable).set({ createdAt: new Date(uploadedAt.getTime() + index * 60_000) }).where(eq(examQuestionPaperPageTable.id, page.id));
+    }
+    const versions = await tx
+      .select({ id: examQuestionPaperVersionTable.id, pdfArtifactId: examQuestionPaperVersionTable.pdfArtifactId })
+      .from(examQuestionPaperVersionTable)
+      .where(eq(examQuestionPaperVersionTable.paperId, scope.paperId));
+    for (const version of versions) {
+      await tx.update(examQuestionPaperVersionTable).set({ createdAt: savedAt }).where(eq(examQuestionPaperVersionTable.id, version.id));
+      if (version.pdfArtifactId) {
+        await tx.update(artifactTable).set({ createdAt: savedAt }).where(and(eq(artifactTable.id, version.pdfArtifactId), eq(artifactTable.schoolId, scope.schoolId)));
+      }
+    }
+  });
 }
 
 // ---------------------------------------------------------------------------

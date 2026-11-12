@@ -16,6 +16,7 @@ import classesJson from './seed/classes.json';
 import financeJson from './seed/finance.json';
 import noticesJson from './seed/notices.json';
 import peopleJson from './seed/people.json';
+import questionPapersJson from './seed/question-papers.json';
 import sessionJson from './seed/session.json';
 import staffJson from './seed/staff.json';
 
@@ -202,6 +203,61 @@ const noticesSeedSchema = z
     }
   });
 
+/**
+ * Demo question papers (invented; the content is the built-in worked
+ * examples of `@campuspilot/question-paper`, never a real school's paper).
+ * The demo's classes are chosen by the admin, so a paper names what it needs
+ * (a subject, the modes it may use, which end of the chosen classes) and the
+ * plan places it in the first class that has the subject; a demo without such
+ * a class simply has no such paper. Dates are days before the demo's `asOf`.
+ */
+const questionPaperSeedSchema = z
+  .object({
+    key: slugSchema,
+    /** Which built-in example is version 1: a fact of its own, not inferred from the language. */
+    example: z.enum(['hindi-maths', 'english-science']),
+    /** The exam states the paper may be attached to, in order of preference (a completed exam is read-only). */
+    examStates: z.array(z.enum(['ready', 'active'])).min(1),
+    subjectSlug: slugSchema,
+    /** The first of these that is a mode of the subject in the placed class. */
+    modeSlugs: z.array(slugSchema).min(1),
+    classFrom: z.enum(['seniormost', 'juniormost']),
+    /** How the paper prints its class: `{number}` is the first number in the class label. */
+    classLabelFormat: z.string().min(1).max(60).includes('{number}'),
+    uploadedDaysAgo: z.number().int().min(1).max(120),
+    savedDaysAgo: z.number().int().min(1).max(120),
+    pages: z
+      .array(
+        z.object({
+          fileName: z.string().min(1).max(100),
+          lines: z.number().int().min(4).max(24),
+          figureBox: z.boolean(),
+        }),
+      )
+      .min(1)
+      .max(4),
+  })
+  .superRefine((paper, context) => {
+    if (paper.savedDaysAgo > paper.uploadedDaysAgo) {
+      context.addIssue({ code: 'custom', path: ['savedDaysAgo'], message: 'A version is saved on or after the day the pages were uploaded.' });
+    }
+  });
+
+const questionPapersSeedSchema = z
+  .object({
+    /** Local wall-clock hours of the back-dated upload and save times. */
+    localHours: z.object({ uploaded: z.number().int().min(0).max(23), saved: z.number().int().min(0).max(23) }),
+    papers: z.array(questionPaperSeedSchema).min(1),
+  })
+  .superRefine((value, context) => {
+    if (value.localHours.saved <= value.localHours.uploaded) {
+      context.addIssue({ code: 'custom', path: ['localHours'], message: 'A version saved on the day of the upload is saved after it.' });
+    }
+    if (new Set(value.papers.map((paper) => paper.key)).size !== value.papers.length) {
+      context.addIssue({ code: 'custom', path: ['papers'], message: 'Question paper keys must be unique' });
+    }
+  });
+
 const nameListSchema = z.array(z.string().min(1)).min(10);
 const peopleSeedSchema = z.object({
   childFirstNames: z.object({ female: nameListSchema, male: nameListSchema }),
@@ -247,6 +303,7 @@ export const demoSeed = {
     .parse(financeJson),
   people: peopleSeedSchema.parse(peopleJson),
   notices: noticesSeedSchema.parse(noticesJson),
+  questionPapers: questionPapersSeedSchema.parse(questionPapersJson),
   staff: staffSeedSchema.parse(staffJson),
 };
 

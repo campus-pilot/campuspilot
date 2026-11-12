@@ -181,7 +181,8 @@ procedures omit them on the server when off.
 Teachers upload photos of a handwritten paper per class, subject and assessment mode
 of an exam, and a structured question paper is generated from them (by the AI job or
 by a chat agent). The code lives in the sibling folder
-`../question-paper/` (see its README); two facts matter here:
+`../question-paper/` (see its README and the canonical guide
+`docs/question-papers.md`); the facts that matter here:
 
 - A paper is keyed by `(session, exam, class, subject, mode)`, the natural key of an
   exam plan, and has **no foreign key to `exam_plan`** because plans are deleted and
@@ -192,3 +193,9 @@ by a chat agent). The code lives in the sibling folder
 - Papers are read-only once the exam is `completed` and editable before that,
   including after the exam started; this is the exam's own lifecycle row, never the
   plan status.
+- The Question paper tab of the management app is gated by the `assistant` feature, not
+  by an exam permission: the class permissions `class.exam.question_paper.read` and
+  `.manage` decide what a user may do, and the assistant gate decides whether the
+  feature exists for them.
+- A demo school's seed writes papers for an exam that is `ready` (or `active`) with
+  the service functions (`docs/demo-school.md`, "Question papers").

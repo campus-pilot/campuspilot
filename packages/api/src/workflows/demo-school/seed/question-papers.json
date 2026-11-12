@@ -1,0 +1,35 @@
+{
+  "localHours": { "uploaded": 10, "saved": 15 },
+  "papers": [
+    {
+      "key": "science-english",
+      "example": "english-science",
+      "examStates": ["ready", "active"],
+      "subjectSlug": "science",
+      "modeSlugs": ["theory", "written"],
+      "classFrom": "seniormost",
+      "classLabelFormat": "Class {number}",
+      "uploadedDaysAgo": 4,
+      "savedDaysAgo": 4,
+      "pages": [
+        { "fileName": "science-paper-page-1.png", "lines": 22, "figureBox": false },
+        { "fileName": "science-paper-page-2.png", "lines": 20, "figureBox": true }
+      ]
+    },
+    {
+      "key": "mathematics-hindi",
+      "example": "hindi-maths",
+      "examStates": ["ready", "active"],
+      "subjectSlug": "mathematics",
+      "modeSlugs": ["theory", "written"],
+      "classFrom": "seniormost",
+      "classLabelFormat": "कक्षा {number}",
+      "uploadedDaysAgo": 2,
+      "savedDaysAgo": 2,
+      "pages": [
+        { "fileName": "mathematics-paper-page-1.png", "lines": 22, "figureBox": false },
+        { "fileName": "mathematics-paper-page-2.png", "lines": 18, "figureBox": false }
+      ]
+    }
+  ]
+}

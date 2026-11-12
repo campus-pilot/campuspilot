@@ -34,6 +34,7 @@ import {
   seedExamSetup,
   seedFinanceConfiguration,
   seedNotice,
+  seedQuestionPaper,
   seedSchoolLogo,
   seedSession,
   seedStaffMember,
@@ -178,6 +179,15 @@ export async function runDemoSeedSteps(options: {
     const classIdsBySlug = Object.fromEntries([...placements].map(([slug, placement]) => [slug, placement.classId]));
     for (const notice of plan.notices) {
       await step(`notice:${notice.key}`, async () => seedNotice(await seed(), { sessionId, classIdsBySlug, notice }));
+    }
+  });
+
+  // After templates: a version is printed with the school's Question paper
+  // template. After exams: a paper belongs to an exam with a plan.
+  await phase('question-papers', async () => {
+    const classIdsBySlug = Object.fromEntries([...placements].map(([slug, placement]) => [slug, placement.classId]));
+    for (const paper of plan.questionPapers) {
+      await step(`question-paper:${paper.key}`, async () => seedQuestionPaper(await seed(), { sessionId, classIdsBySlug, paper }));
     }
   });
 

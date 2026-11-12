@@ -61,12 +61,13 @@ describe("Question paper authorization with real OPA", () => {
     for (const action of actions) {
       for (const role of ["principal", "manager", "exam_coordinator"] as const) {
         expect(
-          await allowed(action, { role: `school.${role}`, scope: school }),
+          await allowed(action, { role: `school.${role}`, scope: school, meta: null }),
         ).toBe(true);
         expect(
           await allowed(action, {
             role: `school.${role}`,
             scope: { kind: "school", schoolId: "school-2" },
+            meta: null,
           }),
         ).toBe(false);
       }
@@ -76,7 +77,7 @@ describe("Question paper authorization with real OPA", () => {
   it("denies accountants and platform admins", async () => {
     for (const action of actions) {
       expect(
-        await allowed(action, { role: "school.accountant", scope: school }),
+        await allowed(action, { role: "school.accountant", scope: school, meta: null }),
       ).toBe(false);
       expect(
         await allowed(action, {

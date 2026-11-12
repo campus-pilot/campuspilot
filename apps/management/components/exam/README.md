@@ -78,3 +78,17 @@ pnpm --filter @campuspilot/api test
 pnpm dlx tsx@4.23.13 --tsconfig apps/management/tsconfig.exam-tests.json --test apps/management/components/exam/exam-validation.test.ts apps/management/components/exam/exam-student-workspace-model.test.ts
 pnpm check-types
 ```
+
+## Question paper tab
+
+The tab and its screens live in `components/question-paper` (this app) and
+`packages/components/src/question-paper` (presentational pieces). It is shown only when
+the examination has a plan and the user may use the AI assistant (`useAssistantGate`),
+carries the shared `AiBadge`, and is the exam's default tab only while the exam has not
+started (`defaultExamSection`, lifecycle `ready`); Results otherwise. Teachers upload
+photos per class, subject and mode, reorder them, *Generate with AI* (a durable worker
+job polled through `getQuestionPaperDetail`) and preview or download versions. Embedding
+images is chat's job: the quiet *Continue in chat* link opens the assistant seeded with
+the paper. A completed exam makes everything read-only. Product model, permissions and
+the chat flow: [Question papers](../../../../docs/question-papers.md); layout and mobile
+conventions: [UI patterns](../../docs/ui-patterns.md#question-paper-tab).

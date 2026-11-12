@@ -1,9 +1,9 @@
 # Question papers (backend)
 
-Feature design: `.sks/handlebar-based-question-paper-generation/design.md`
-(sections C to E); the canonical feature guide `docs/question-papers.md` is written
-with the last phase. Template and rendering rules: `docs/document-system.md`,
-"Question papers".
+The canonical feature guide is `docs/question-papers.md` (product model, data model,
+JSON schema, renderer contract, the job, chat, extension checklist, verification).
+This README is the file map and the backend rules. Template and rendering rules:
+`docs/document-system.md`, "Question papers".
 
 A **paper** is one fact per `(session, exam, class, subject, mode)` of an exam. It has
 uploaded **pages** (photos), at most one in-flight generation **job**, immutable
@@ -24,6 +24,7 @@ each) and **figures** (uploaded images printed inside a version).
 | `question-paper.body.ts` / `.math.ts` / `.render.ts` | JSON to HTML body, KaTeX, the document around it |
 | `question-paper.storage.ts` | object keys, uploads, best-effort deletes, presigned URLs |
 | `question-paper.slot.ts` / `.context.ts` | the body slot and the template context |
+| `question-paper.attachments.ts` | chat attachments used as figures (`asat_` ids), copied into the paper when saving |
 | `../../../workflows/question-paper/` | the API side of the generation job (outbox, hand-over, model hook) |
 
 ## Who may do what
@@ -77,7 +78,7 @@ never offered to MCP clients or the assistant (page photos, the AI job, previews
 downloads).
 
 `getQuestionPaper`, `validateQuestionPaperDraft` and `learn_question_paper_generation`
-declare `outputChars` in their MCP metadata (80,000 / 80,000 / 100,000) so the
+declare `outputChars` in their MCP metadata (80,000 / 80,000 / 40,000) so the
 assistant does not cut a paper or the guide at the default 24,000 characters.
 
 A chat draft is not a database row: it is the input of a `validateQuestionPaperDraft`
@@ -113,3 +114,12 @@ instructions, never shown to chat), `cost.ts` (`assistant_model_request` rows wi
 `deleteQuestionPaper` and `deleteExamPlan` (via `deleteQuestionPapersOfPlan`) delete the
 rows (pages, jobs, versions and figures cascade), the PDF artifacts of the versions and,
 after the commit, every stored object. Template revisions are shared and stay.
+
+## Demo seed
+
+`workflows/demo-school/steps.ts` (`seedQuestionPaper`) calls `resolvePaperScope`,
+`addQuestionPaperPage` and `saveQuestionPaperVersion` directly as the demo's principal,
+because a demo school keeps the `assistant` feature off and the procedures refuse
+without it. If you change those functions' signatures or what they check, the seed and
+its test (`demo-question-papers.integration.test.ts`) must follow. See
+`docs/demo-school.md`.

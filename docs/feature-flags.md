@@ -70,9 +70,12 @@ has them.)
   `DEMO_SCHOOL_FEATURE_DEFAULTS` (`workflows/demo-school/constants.ts`, an
   exhaustive record) in the school's own transaction. `cadet` and `notices`
   are on; `assistant` is off (every assistant request is paid model usage, so
-  an administrator enables it for a demo deliberately).
+  an administrator enables it for a demo deliberately). The demo seed still
+  writes question papers and the `question_paper` template, through service
+  functions, so they appear when the feature is enabled
+  ([Demo schools](demo-school.md#question-papers)).
 - `purge_demo_school` deletes the rows (migration `0049_demo-purge-feature-flags.sql`),
-  and the assistant's rows and role list (`0056_demo-purge-assistant.sql`).
+  and the assistant's rows and role list (`0056_demo-purge-assistant.sql`), question papers (`0059_demo-purge-question-papers.sql`) and chat images (`0062_demo-purge-assistant-attachments.sql`).
 - `assistant` was not backfilled: it is off for every school until enabled.
 
 ## Reading and writing (API)
@@ -251,9 +254,12 @@ switched on, the IST month spend under the limit); see
 | `systemAdmin.updateSchoolFeatureFlag` | Enabling needs the settings (`monthlyLimitUsd`, `eligibleRoles`); BAD_REQUEST without them. |
 | `school.getAssistantAccess`, `school.updateAssistantRoles`, `school.getAssistantUsage` | Disabled-feature error after the permission check. |
 | Management UI | The navbar panel button, sidebar link and ⌘K entry (`AssistantAccess`), the assistant pages (`FeaturePage`), Settings › AI assistant and Settings › Usage disappear. |
+| Question papers (every `exam_question_paper` procedure and upload route, the chat image upload and the question paper MCP tools) | `assistant` also gates question papers; there is no separate flag (decision D26). After the OPA class permission, `requireQuestionPaperAssistantAccess` refuses with the disabled-feature error or the assistant's own refusal (`role_not_enabled`, `not_member`, `limit_reached` for generation only). The `question_paper` document template (settings, marketplace preview and selection) needs the feature too (`requireDocumentTypePermission`). A running generation job stops with `feature_disabled`. |
+| Management UI (question papers) | The Question paper tab of an examination, its marketplace card and Settings › Templates › Question paper disappear; the exam lands on Results. |
 
 Conversations, runs, saved costs and the school's role list are kept while the
-feature is off and come back when it is enabled. The admin usage pages
+feature is off and come back when it is enabled; so are question papers, their versions
+and PDFs, and chat images (see [Question papers](question-papers.md#permissions-gate-and-who-sees-it)). The admin usage pages
 (`systemAdmin.getSchoolAssistantUsage`, `getPlatformAssistantUsage`) keep
 showing past spend.
 
