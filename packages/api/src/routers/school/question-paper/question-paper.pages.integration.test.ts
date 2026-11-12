@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 
-import { HeadObjectCommand } from '@aws-sdk/client-s3';
+import { HeadObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import { db } from '@campuspilot/db';
 import { artifactTable } from '@campuspilot/db/schema/artifact';
 import { assistantConversationTable, assistantModelRequestTable, assistantRunTable } from '@campuspilot/db/schema/assistant';
@@ -54,6 +54,11 @@ async function exists(key: string) {
   } catch {
     return false;
   }
+}
+
+async function storedKeys(prefix: string) {
+  const result = await getS3Client().send(new ListObjectsV2Command({ Bucket: env.S3_BUCKET, Prefix: prefix }));
+  return (result.Contents ?? []).map((object) => object.Key!);
 }
 
 const fakeModel = (imageMimeTypes: string[]): QuestionPaperModel => ({
@@ -111,7 +116,7 @@ describe('question paper pages', () => {
       expect(rows.map((row) => row.position)).toEqual([1, 2, 3]);
       const [original] = rows;
       for (const objectKey of [original!.originalS3Key, original!.thumbS3Key!, original!.modelS3Key!]) expect(await exists(objectKey), objectKey).toBe(true);
-      expect(original!.originalS3Key).toMatch(new RegExp(`^schools/${world.schoolId}/exam-question-papers/qpp_[a-z0-9]{21}/pages/${original!.id}/original\\.jpg$`));
+      expect(original!.originalS3Key).toMatch(new RegExp(`^schools/${world.schoolId}/exam-question-papers/pages/${original!.id}/original\\.jpg$`));
       expect(original).toMatchObject({ modelContentType: 'image/jpeg', uploadedBy: world.people.manager.userId });
       expect(original!.modelByteSize!).toBeGreaterThan(0);
 
@@ -241,7 +246,7 @@ describe('question paper pages', () => {
         expect(refused.status).toBe(400);
         expect(await refused.json()).toMatchObject({ message: expect.stringContaining('has ended') });
         const detail = await world.people.teacher.client.school.getQuestionPaperDetail(key(k));
-        expect(detail.paper.readOnly).toBe(true);
+        expect(detail.paper).toMatchObject({ examCompleted: true, sessionActive: true });
         const page = await firstPage(k);
         expect((await read('teacher', page!.id, 'thumb', k)).status).toBe(302);
         await expect(world.people.teacher.client.school.reorderQuestionPaperPages({ ...key(k), pageIds: detail.pages.map((p) => p.id), expectedPageRevision: detail.paper.pageRevision })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
@@ -317,6 +322,33 @@ describe('question paper pages', () => {
       const after = await world.people.manager.client.school.getQuestionPaperDetail(key(k));
       expect(after.pages).toHaveLength(1);
       expect(after.activeJob).toBeNull();
+    });
+  });
+
+  describe('plan deletion racing a write', () => {
+    it('refuses every write whose scope was resolved before the plan was deleted, creates no paper and leaves no object behind', async () => {
+      const k = { classId: world.otherClassId, subjectSlug: 'science' };
+      const small = await jpeg(8, 8);
+      const staleScope = await resolvePaperScope(db, key(k));
+      const [plan] = await db
+        .select()
+        .from(examPlanTable)
+        .where(and(eq(examPlanTable.classId, k.classId), eq(examPlanTable.subjectSlug, k.subjectSlug)));
+      const papersBefore = await db.select({ id: examQuestionPaperTable.id }).from(examQuestionPaperTable).where(and(eq(examQuestionPaperTable.classId, k.classId), eq(examQuestionPaperTable.subjectSlug, k.subjectSlug)));
+      const objectsBefore = await storedKeys(`schools/${world.schoolId}/exam-question-papers/`);
+      await db.delete(examPlanTable).where(eq(examPlanTable.id, plan!.id));
+      try {
+        const user = world.people.manager.userId;
+        const gone = { code: 'NOT_FOUND' };
+        const file = { bytes: Buffer.from(small), contentType: 'image/jpeg', extension: 'jpg', name: 'late.jpg' };
+        await expect(addQuestionPaperPage(db, { scope: staleScope, userId: user, file })).rejects.toMatchObject(gone);
+        await expect(addQuestionPaperFigure(db, { scope: staleScope, userId: user, bytes: Buffer.from(small) })).rejects.toMatchObject(gone);
+      } finally {
+        await db.insert(examPlanTable).values(plan!);
+      }
+      const papersAfter = await db.select({ id: examQuestionPaperTable.id }).from(examQuestionPaperTable).where(and(eq(examQuestionPaperTable.classId, k.classId), eq(examQuestionPaperTable.subjectSlug, k.subjectSlug)));
+      expect(papersAfter).toHaveLength(papersBefore.length);
+      expect(await storedKeys(`schools/${world.schoolId}/exam-question-papers/`)).toEqual(objectsBefore);
     });
   });
 
@@ -509,6 +541,26 @@ describe('question paper pages', () => {
   });
 
   describe('figures and deletion', () => {
+    it('refuses to validate a draft whose figures cannot be printed together (the printer counts them as base64)', async () => {
+      const k = { classId: world.otherClassId, subjectSlug: 'math', modeSlug: 'practical' };
+      const manager = world.people.manager.client.school;
+      const scope = await resolvePaperScope(db, key(k));
+      const png = await sharp({ create: { width: 200, height: 100, channels: 3, background: '#4488cc' } }).png().toBuffer();
+      const figure = await addQuestionPaperFigure(db, { scope, userId: world.people.manager.userId, bytes: png });
+      try {
+        const content = JSON.parse(JSON.stringify(ENGLISH_SCIENCE)) as Record<string, any>;
+        content.sections[0].questions[0].blocks = [{ type: 'figure', imageId: figure.id, alt: 'A figure', widthPct: 50 }];
+        expect((await manager.validateQuestionPaperDraft({ ...key(k), content })).valid).toBe(true);
+        // 9.1 MB raw is under the 12 MB cap, 12.1 MB as base64 is over it.
+        await db.update(examQuestionPaperFigureTable).set({ byteSize: 9_100_000 }).where(eq(examQuestionPaperFigureTable.id, figure.id));
+        const checked = await manager.validateQuestionPaperDraft({ ...key(k), content });
+        expect(checked.valid).toBe(false);
+        expect(checked.errors[0]).toMatchObject({ message: expect.stringContaining('figure images of this paper are too large to print together') });
+      } finally {
+        await deleteQuestionPaper(db, { scope });
+      }
+    });
+
     it('prints an uploaded figure of the paper, refuses another paper\'s, and deletes everything with the paper', async () => {
       const k = { classId: world.otherClassId, subjectSlug: 'math', modeSlug: 'theory' };
       const manager = world.people.manager.client.school;

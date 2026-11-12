@@ -11,7 +11,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@campuspilot/ui/compone
 import { cn } from '@campuspilot/ui/lib/utils';
 import { useForm } from '@tanstack/react-form';
 import { ListPlus, Paperclip, X } from 'lucide-react';
-import { useRef, type ClipboardEvent, type DragEvent, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react';
+import { useImperativeHandle, useRef, type ClipboardEvent, type DragEvent, type KeyboardEvent, type PointerEvent, type ReactNode, type Ref } from 'react';
 import { z } from 'zod';
 
 import { AssistantAttachmentStrip } from './assistant-attachment-strip';
@@ -118,7 +118,15 @@ function SendButton({
   );
 }
 
+/** What a parent may do to the box without remounting it (a remount would drop the images attached in it). */
+export type AssistantComposerControls = {
+  /** Empties the text field when it holds exactly `text` (an untouched prefilled sentence); anything the user edited stays. */
+  clearTextIf: (text: string) => void;
+};
+
 export type AssistantComposerProps = {
+  /** Receives {@link AssistantComposerControls}. */
+  controlsRef?: Ref<AssistantComposerControls>;
   /**
    * Sends a message. The box clears at once (the message shows optimistically
    * elsewhere); a rejection shows the error and puts the text back, unless
@@ -192,6 +200,7 @@ function errorText(errors: unknown[]): string | null {
  * requests (approval, queue) are sections at its top, divided by one rule.
  */
 export function AssistantComposer({
+  controlsRef,
   onSend,
   sending = false,
   onStop,
@@ -246,6 +255,15 @@ export function AssistantComposer({
     },
   });
   const disabled = Boolean(disabledReason);
+  useImperativeHandle(
+    controlsRef,
+    () => ({
+      clearTextIf: (text) => {
+        if (form.getFieldValue('text') === text) form.setFieldValue('text', '');
+      },
+    }),
+    [form],
+  );
 
   /** Replaces one image in the box by id; an image the user removed meanwhile stays removed. */
   const updateAttachment = (localId: string, change: Partial<ComposerAttachment>) =>

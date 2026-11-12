@@ -108,12 +108,18 @@ export function assertPaperWritable(scope: PaperScope): void {
 
 /**
  * The authoritative writable check, for the first statements of a write
- * transaction (before the paper row is locked, which is also the order
- * `deleteExamPlan` uses). It takes the school session row `FOR SHARE`, the
- * same lock the exam services take, and `transitionExam` (which completes an
- * exam) takes it `FOR UPDATE`: a completion therefore either commits before
- * this read, and the write is refused, or waits until this transaction ends.
- * The session's `isActive` is checked by the lock read itself.
+ * transaction (before the paper row is locked). Lock order, the same as
+ * `deleteExamPlan` (session, then plan, then paper): it takes the school
+ * session row `FOR SHARE`, the lock the exam services take, and
+ * `transitionExam` (which completes an exam) takes it `FOR UPDATE`, so a
+ * completion either commits before this read and the write is refused, or
+ * waits until this transaction ends. It then takes the exam plan row of the
+ * paper's class and subject `FOR SHARE` (`deleteExamPlan` takes it
+ * `FOR UPDATE`): a plan deleted after the scope was resolved refuses the write
+ * with NOT_FOUND instead of letting it re-create a paper for a plan that is
+ * gone, and a deletion that arrives later waits for this transaction. The
+ * session's `isActive` is checked by the lock read itself. Hold the locks for
+ * database statements only; do object storage I/O outside the transaction.
  */
 export async function assertPaperWritableLocked(tx: DatabaseTransaction, key: PaperKey): Promise<void> {
   try {
@@ -121,6 +127,24 @@ export async function assertPaperWritableLocked(tx: DatabaseTransaction, key: Pa
   } catch (error) {
     if (error instanceof ORPCError && error.code === 'BAD_REQUEST') throw paperLockedError(error.message);
     throw error;
+  }
+  const [plan] = await tx
+    .select({ modeConfig: examPlanTable.modeConfig })
+    .from(examPlanTable)
+    .where(
+      and(
+        eq(examPlanTable.schoolId, key.schoolId),
+        eq(examPlanTable.sessionId, key.sessionId),
+        eq(examPlanTable.examSlug, key.examSlug),
+        eq(examPlanTable.classId, key.classId),
+        eq(examPlanTable.subjectSlug, key.subjectSlug),
+      ),
+    )
+    .limit(1)
+    .for('share');
+  if (!plan) throw rpcError.notFound('Exam plan for this subject');
+  if (!Object.hasOwn(plan.modeConfig, key.modeSlug)) {
+    throw rpcError.badRequest(`The exam plan for this subject has no "${key.modeSlug}" mode.`);
   }
   const [lifecycle] = await tx.select({ status: examLifecycleTable.status }).from(examLifecycleTable).where(lifecycleWhere(key)).limit(1);
   if (lifecycle?.status === 'completed') {

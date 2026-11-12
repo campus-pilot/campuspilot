@@ -7,7 +7,7 @@ import {
   ExamClassBreadcrumbValue,
   ExamStudentBreadcrumbValue,
 } from '@/components/exam/exam-breadcrumb-value';
-import { examHref, examClassHref, questionPaperHref } from '@/components/exam/exam-model';
+import { examHref, examClassHref, examResultsHref, questionPaperHref } from '@/components/exam/exam-model';
 import { QuestionPaperBreadcrumbValue } from '@/components/question-paper/question-paper-breadcrumb-value';
 import { ExamNavbarActions } from '@/components/exam/exam-navbar-actions';
 
@@ -46,7 +46,9 @@ export const examDetailsPage = defineManagementPage<
     {
       id: 'exam-name',
       label: <ExamBreadcrumbValue scope={scope} />,
-      href: examHref(scope, scope.examSlug),
+      // Results, not the exam root: the root is a landing that redirects to Question paper when it is the default,
+      // which would change section under someone clicking back from a class or student result.
+      href: examResultsHref(scope),
     },
     ...(scope.classId
       ? [

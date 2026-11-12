@@ -1,3 +1,4 @@
+import { encodedImageBytes, MODEL_REQUEST_IMAGE_BUDGET_BYTES } from '@campuspilot/assistant-contract/attachments';
 import { ORPCError } from '@orpc/server';
 import { db as defaultDb, type Database } from '@campuspilot/db';
 import { examQuestionPaperJobTable, examQuestionPaperPageTable, examQuestionPaperTable, examQuestionPaperVersionTable } from '@campuspilot/db/schema/exam-question-paper';
@@ -38,8 +39,12 @@ import { buildGenerationParts, buildRepairParts, QUESTION_PAPER_JOB_SYSTEM_PROMP
 const MODEL_ATTEMPTS = 3;
 /** Waits before the second and third attempt. */
 const DEFAULT_RETRY_DELAYS_MS = [5_000, 20_000] as const;
-/** Total bytes of page images in one request; over it the job fails before any cost (design F5). */
-export const QUESTION_PAPER_MAX_REQUEST_IMAGE_BYTES = 18 * 1024 * 1024;
+/**
+ * Total size of the page images in one request, counted as the providers
+ * receive them (base64, 4/3 of the file, the same budget and helper as the
+ * chat context); over it the job fails before any cost (design F5).
+ */
+export const QUESTION_PAPER_MAX_REQUEST_IMAGE_BYTES = MODEL_REQUEST_IMAGE_BUDGET_BYTES;
 /** Most findings kept from a validation (they are journaled and sent to the repair call). */
 const MAX_ISSUES = 50;
 
@@ -313,9 +318,9 @@ async function planInputs(deps: GenerationDeps, begun: BegunJob, model: Question
 
   const unreadable = unreadablePageMessage(present, model.imageMimeTypes);
   if (unreadable) throw new QuestionPaperJobFailure('unsupported_page_format', unreadable);
-  const totalBytes = present.reduce((sum, page) => sum + (page.modelByteSize ?? page.byteSize), 0);
+  const totalBytes = present.reduce((sum, page) => sum + encodedImageBytes(page.modelByteSize ?? page.byteSize), 0);
   if (totalBytes > QUESTION_PAPER_MAX_REQUEST_IMAGE_BYTES) {
-    throw new QuestionPaperJobFailure('images_too_large', undefined, `${totalBytes} bytes of page images.`);
+    throw new QuestionPaperJobFailure('images_too_large', undefined, `${totalBytes} encoded bytes of page images.`);
   }
   return {
     scope,

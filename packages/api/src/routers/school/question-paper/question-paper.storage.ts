@@ -10,21 +10,23 @@ import { getS3Client } from '@campuspilot/s3/client';
 import { log } from '../../../workflows/question-paper/log';
 
 /**
- * Object keys of a paper. Everything lives under `schools/{schoolId}/`, the
- * prefix the demo purge sweeps, and under the paper's own folder so deleting
- * a paper is one known set of keys.
+ * Object keys of a paper's photos and figures. Everything lives under
+ * `schools/{schoolId}/`, the prefix the demo purge sweeps. The keys are derived
+ * from the page or figure id alone, never from the paper row, so a request can
+ * write its objects before it opens the (short) database transaction that
+ * locks the paper: storage I/O never runs while the school's session row is
+ * locked. Objects written before this scheme keep their stored
+ * `.../{paperId}/...` keys; every delete goes by the key stored on the row.
  */
 export const questionPaperKeys = {
-  paperFolder: (schoolId: string, paperId: string) =>
-    `schools/${schoolId}/exam-question-papers/${paperId}`,
-  original: (schoolId: string, paperId: string, pageId: string, extension: string) =>
-    `schools/${schoolId}/exam-question-papers/${paperId}/pages/${pageId}/original.${extension}`,
-  thumb: (schoolId: string, paperId: string, pageId: string) =>
-    `schools/${schoolId}/exam-question-papers/${paperId}/pages/${pageId}/thumb.jpg`,
-  model: (schoolId: string, paperId: string, pageId: string) =>
-    `schools/${schoolId}/exam-question-papers/${paperId}/pages/${pageId}/model.jpg`,
-  figure: (schoolId: string, paperId: string, figureId: string, extension: string) =>
-    `schools/${schoolId}/exam-question-papers/${paperId}/figures/${figureId}.${extension}`,
+  original: (schoolId: string, pageId: string, extension: string) =>
+    `schools/${schoolId}/exam-question-papers/pages/${pageId}/original.${extension}`,
+  thumb: (schoolId: string, pageId: string) =>
+    `schools/${schoolId}/exam-question-papers/pages/${pageId}/thumb.jpg`,
+  model: (schoolId: string, pageId: string) =>
+    `schools/${schoolId}/exam-question-papers/pages/${pageId}/model.jpg`,
+  figure: (schoolId: string, figureId: string, extension: string) =>
+    `schools/${schoolId}/exam-question-papers/figures/${figureId}.${extension}`,
 } as const;
 
 const DOWNLOAD_TTL_SECONDS = 5 * 60;

@@ -60,7 +60,8 @@ const emptyPaperFacts = (scope: PaperScope, paper: PaperRow | undefined) => ({
   pageCount: 0,
   pageRevision: paper?.pageRevision ?? 0,
   latestVersionNo: paper?.latestVersionNo ?? 0,
-  readOnly: scope.examCompleted || !scope.sessionIsActive,
+  examCompleted: scope.examCompleted,
+  sessionActive: scope.sessionIsActive,
 });
 
 const toJob = (job: { id: string; status: 'queued' | 'running' | 'succeeded' | 'failed'; createdAt: Date }) => ({
@@ -288,9 +289,12 @@ export function sanitizeFileName(name: string): string {
 
 /**
  * Stores one uploaded photo as the paper's next page (the upload route, after
- * it has checked permission, access and the file). The paper row is locked,
- * so the page cap and the page order are exact; the objects are written
- * inside the transaction and removed again if the row cannot be inserted.
+ * it has checked permission, access and the file). The objects are written
+ * first, with no lock held (a slow storage write must not hold the school's
+ * session row, which every exam service queues behind); a short transaction
+ * then re-checks the exam and plan under their locks, locks the paper so the
+ * page cap and the page order are exact, and inserts the row. The objects are
+ * removed again if any of that fails, so a refused upload leaves nothing.
  */
 export async function addQuestionPaperPage(
   db: Database,
@@ -304,8 +308,17 @@ export async function addQuestionPaperPage(
   assertPaperWritable(scope);
   const derivatives = await makeImageDerivatives(file.bytes, file.contentType);
   const pageId = generateId('examQuestionPaperPage');
-  const written: string[] = [];
+  const { schoolId } = scope.key;
+  const originalKey = questionPaperKeys.original(schoolId, pageId, file.extension);
+  const thumbKey = derivatives.status === 'ready' ? questionPaperKeys.thumb(schoolId, pageId) : null;
+  const modelKey = derivatives.status === 'ready' ? questionPaperKeys.model(schoolId, pageId) : null;
+  const written = [originalKey, thumbKey, modelKey].filter((key): key is string => key !== null);
   try {
+    await putObject(originalKey, file.bytes, file.contentType);
+    if (derivatives.status === 'ready') {
+      await putObject(thumbKey!, derivatives.thumb.bytes, derivatives.thumb.contentType);
+      await putObject(modelKey!, derivatives.model.bytes, derivatives.model.contentType);
+    }
     return await db.transaction(async (tx) => {
       await assertPaperWritableLocked(tx, scope.key);
       const paper = await lockOrCreatePaper(tx, scope.key, input.userId);
@@ -314,19 +327,6 @@ export async function addQuestionPaperPage(
         throw rpcError.badRequest(`A paper can have at most ${QUESTION_PAPER_MAX_PAGES} pages.`);
       }
       await assertNoActiveJob(tx, paper.id, 'Pages cannot be added');
-      const { schoolId } = scope.key;
-      const originalKey = questionPaperKeys.original(schoolId, paper.id, pageId, file.extension);
-      written.push(originalKey);
-      await putObject(originalKey, file.bytes, file.contentType);
-      let thumbKey: string | null = null;
-      let modelKey: string | null = null;
-      if (derivatives.status === 'ready') {
-        thumbKey = questionPaperKeys.thumb(schoolId, paper.id, pageId);
-        modelKey = questionPaperKeys.model(schoolId, paper.id, pageId);
-        written.push(thumbKey, modelKey);
-        await putObject(thumbKey, derivatives.thumb.bytes, derivatives.thumb.contentType);
-        await putObject(modelKey, derivatives.model.bytes, derivatives.model.contentType);
-      }
       const [page] = await tx
         .insert(examQuestionPaperPageTable)
         .values({
@@ -512,8 +512,10 @@ export async function addQuestionPaperFigure(
   assertPaperWritable(input.scope);
   const figure = await normalizeFigureImage(input.bytes);
   const figureId = generateId('examQuestionPaperFigure');
-  let key: string | null = null;
+  const key = questionPaperKeys.figure(input.scope.key.schoolId, figureId, figure.extension);
   try {
+    // Written before the transaction so no lock is held across storage I/O; removed again if the row is refused.
+    await putObject(key, figure.bytes, figure.contentType);
     return await db.transaction(async (tx) => {
       await assertPaperWritableLocked(tx, input.scope.key);
       const paper = await lockOrCreatePaper(tx, input.scope.key, input.userId);
@@ -524,8 +526,6 @@ export async function addQuestionPaperFigure(
       if (figures!.count >= QUESTION_PAPER_LIMITS.figuresPerPaper) {
         throw rpcError.badRequest(`A paper can have at most ${QUESTION_PAPER_LIMITS.figuresPerPaper} figure images.`);
       }
-      key = questionPaperKeys.figure(input.scope.key.schoolId, paper.id, figureId, figure.extension);
-      await putObject(key, figure.bytes, figure.contentType);
       const [row] = await tx
         .insert(examQuestionPaperFigureTable)
         .values({

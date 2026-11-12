@@ -1,3 +1,5 @@
+import { encodedImageBytes, MODEL_REQUEST_IMAGE_BUDGET_BYTES } from '@campuspilot/assistant-contract/attachments';
+
 import { isAttachmentMarker, type AttachmentMarker } from '../transcript';
 import type { AttachmentFile, ModelProvider, TranscriptEntry } from './providers/types';
 
@@ -29,15 +31,8 @@ import type { AttachmentFile, ModelProvider, TranscriptEntry } from './providers
 export const CONTEXT_FULL_HUMAN_MESSAGES = 2;
 /** Tool results of at least this many characters (about 2,000 tokens) are stubbed once old. */
 export const CONTEXT_TOOL_RESULT_MIN_CHARS = 8_000;
-/**
- * Image bytes, as sent (base64, 4/3 of the file), one request may carry.
- * Providers cap the whole request: Gemini's inline limit is 20 MB, Anthropic's
- * 32 MB. 16 MiB leaves the rest for the system prompt, tools and history.
- */
-export const CONTEXT_IMAGE_BUDGET_BYTES = 16 * 1024 * 1024;
-
-/** The size an image takes in a request: providers receive it base64 encoded. */
-export const encodedImageBytes = (bytes: number) => Math.ceil((bytes * 4) / 3);
+/** Image bytes, as sent (base64), one chat request may carry; shared with the question paper job. */
+export const CONTEXT_IMAGE_BUDGET_BYTES = MODEL_REQUEST_IMAGE_BUDGET_BYTES;
 
 export type ModelContextOptions = {
   fullHumanMessages?: number;

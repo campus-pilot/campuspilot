@@ -7,6 +7,7 @@ import {
   examQuestionPaperTable,
   examQuestionPaperVersionTable,
 } from '@campuspilot/db/schema/exam-question-paper';
+import { encodedImageBytes } from '@campuspilot/assistant-contract/attachments';
 import { QUESTION_PAPER_LIMITS } from '@campuspilot/question-paper/limits';
 import { computePaperMarks, paperWarnings, type QuestionPaperWarning } from '@campuspilot/question-paper/marks';
 import {
@@ -21,6 +22,7 @@ import { formatPath, walkPaper } from '@campuspilot/question-paper/walk';
 import { and, desc, eq, isNull } from 'drizzle-orm';
 
 import { rpcError } from '../../../errors';
+import { FIGURE_MAX_BYTES } from '../../../files/image-derivative';
 import { convertDocumentPdf } from '../document/document.render';
 import { documentDownloadUrl, persistDocumentObject } from '../document/document.storage';
 import { attachmentFigureIds, attachmentFigureProblems, convertAttachmentFigures, isAttachmentFigureId } from './question-paper.attachments';
@@ -35,6 +37,7 @@ import {
 } from './question-paper.records';
 import {
   QUESTION_PAPER_BODY_MAX_BYTES,
+  QUESTION_PAPER_FIGURES_MAX_BYTES,
   readPinnedQuestionPaperTemplate,
   renderQuestionPaperBody,
   renderQuestionPaperDocument,
@@ -82,28 +85,36 @@ async function figureIssues(
     },
   });
   if (refs.length === 0) return [];
-  const stored = paper
-    ? new Set(
-        (
-          await db
-            .select({ id: examQuestionPaperFigureTable.id })
-            .from(examQuestionPaperFigureTable)
-            .where(and(eq(examQuestionPaperFigureTable.paperId, paper.id), eq(examQuestionPaperFigureTable.schoolId, paper.schoolId)))
-        ).map((row) => row.id),
-      )
-    : new Set<string>();
+  const storedRows = paper
+    ? await db
+        .select({ id: examQuestionPaperFigureTable.id, contentType: examQuestionPaperFigureTable.contentType, byteSize: examQuestionPaperFigureTable.byteSize })
+        .from(examQuestionPaperFigureTable)
+        .where(and(eq(examQuestionPaperFigureTable.paperId, paper.id), eq(examQuestionPaperFigureTable.schoolId, paper.schoolId)))
+    : [];
+  const stored = new Set(storedRows.map((row) => row.id));
   const problems = await attachmentFigureProblems(db, {
     schoolId: input.schoolId,
     chatUserId: input.chatUserId,
     ids: attachmentFigureIds(content),
   });
-  return refs.flatMap(({ path, imageId }): QuestionPaperIssue[] => {
+  const issues = refs.flatMap(({ path, imageId }): QuestionPaperIssue[] => {
     if (isAttachmentFigureId(imageId)) {
       const problem = problems.get(imageId);
       return problem ? [{ path, message: problem }] : [];
     }
     return stored.has(imageId) ? [] : [{ path, message: 'This figure image does not belong to this paper.' }];
   });
+  if (issues.length > 0) return issues;
+  // The printer embeds every figure as a base64 data URI under one cap (`loadFigureAssets`): total it here,
+  // so a draft that validates can also be printed. A chat image becomes a figure of at most about FIGURE_MAX_BYTES.
+  const sizeOf = new Map(storedRows.map((row) => [row.id, `data:${row.contentType};base64,`.length + encodedImageBytes(row.byteSize)]));
+  const embedded = [...new Set(refs.map((ref) => ref.imageId))].reduce(
+    (sum, imageId) => sum + (sizeOf.get(imageId) ?? encodedImageBytes(FIGURE_MAX_BYTES)),
+    0,
+  );
+  return embedded > QUESTION_PAPER_FIGURES_MAX_BYTES
+    ? [{ path: '', message: 'The figure images of this paper are too large to print together. Use fewer or smaller images.' }]
+    : [];
 }
 
 /**

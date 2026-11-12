@@ -151,4 +151,13 @@ describe('decompression bombs', () => {
     const results = await Promise.all(Array.from({ length: 6 }, () => makeImageDerivatives(jpeg, 'image/jpeg')));
     expect(results.every((result) => result.status === 'ready')).toBe(true);
   });
+
+  it('refuses uploads beyond the bounded decode queue with 429 instead of holding every file in memory', async () => {
+    const photo = await sharp({ create: { width: 3000, height: 3000, channels: 3, background: '#ccc' } }).jpeg().toBuffer();
+    const outcomes = await Promise.all(Array.from({ length: 40 }, () => makeImageDerivatives(photo, 'image/jpeg').then(() => 'ok', (e: unknown) => (e as ORPCError<string, unknown>).status)));
+    expect(outcomes).toContain(429);
+    expect(outcomes).toContain('ok');
+    // The queue drains: the next upload is served.
+    expect((await makeImageDerivatives(photo, 'image/jpeg')).status).toBe('ready');
+  });
 });

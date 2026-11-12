@@ -72,6 +72,15 @@ describe('QuestionPaperDraftCard', () => {
     expect((screen.getByRole('button', { name: 'Save as new version' }) as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it('spends the Save button once the user already asked to save the draft', () => {
+    const onSave = vi.fn();
+    render(<QuestionPaperDraftCard ordinal={1} {...draftFactsOf(valid)} preview={null} onSave={onSave} saveRequested />);
+    const button = screen.getByRole('button', { name: 'Save requested' }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    fireEvent.click(button);
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
   it('lists the problems of an invalid draft and offers neither preview nor save', () => {
     render(<QuestionPaperDraftCard ordinal={1} {...draftFactsOf(invalid)} preview={<button type="button">Preview</button>} />);
     expect(screen.getByText('sections[0].questions[1].marks: Marks are required.')).toBeTruthy();

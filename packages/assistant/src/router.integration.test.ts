@@ -819,9 +819,10 @@ describe('images attached to a message', () => {
     await expect(createAttachment(db, { ...owner, file })).resolves.toMatchObject({ fileName: 'p.jpg' });
     expect(await rowOf(left[0]!)).toBeUndefined();
 
-    // Fresh images belong to an open composer: they are never reclaimed.
+    // Fresh images are kept as long as they could be in an open composer: only those beyond the newest 20 go.
     const busy = await newOwner();
-    await Promise.all(Array.from({ length: 40 }, (_, index) => upload(busy, `open${index}.jpg`)));
-    await expect(createAttachment(db, { ...busy, file })).rejects.toMatchObject({ code: 'BAD_REQUEST', message: expect.stringContaining('waiting to be sent') });
+    const open = await Promise.all(Array.from({ length: 40 }, (_, index) => upload(busy, `open${index}.jpg`, { createdAt: new Date(Date.now() - (40 - index) * 1_000) })));
+    await expect(createAttachment(db, { ...busy, file })).resolves.toMatchObject({ fileName: 'p.jpg' });
+    expect(await Promise.all(open.map(async (id) => (await rowOf(id)) !== undefined))).toEqual([...Array.from({ length: 20 }, () => false), ...Array.from({ length: 20 }, () => true)]);
   });
 });

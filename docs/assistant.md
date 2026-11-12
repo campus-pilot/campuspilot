@@ -229,8 +229,8 @@ startup is refused. `QUESTION_PAPER_MAX_OUTPUT_TOKENS` (default 32000) bounds
 one request; `QUESTION_PAPER_JOB_TIMEOUT_MINUTES` (default 40) is how long a
 running job may take before the API's sweep fails it (read by the API server);
 `QUESTION_PAPER_MAX_RUNNING_JOBS_PER_SCHOOL` (default 3) caps the jobs (queued plus
-running) one school may have at once, which bounds how far the cached spend check can be
-overshot.
+running) one school may have at once, which bounds how many run at the same time (not how far
+the cached spend check can be overshot by jobs started one after another).
 The worker needs the same `QUESTION_PAPER_*` values as the API server.
 
 ### Image attachments, question paper tools and context pruning
@@ -251,7 +251,8 @@ Chat can carry images, mainly photographs of a handwritten question paper
   presigned URL and only the owner may read. A user may hold 40 unsent attachments
   per school; removing one from the composer deletes it (`DELETE` on the attachment,
   owner and unsent only), an upload at the cap frees that user's unsent images older
-  than an hour, an unsent one is deleted after 24 hours (the outbox sweep, which also
+  than an hour and then, if still at the cap, the oldest beyond the newest 20 (a composer
+  holds at most 20; the rest were left by a composer that unmounted), an unsent one is deleted after 24 hours (the outbox sweep, which also
   retries attachments of deleted conversations whose objects could not be deleted;
   objects go before rows), the others
   with their conversation (`deleteConversation`, a soft delete, deletes them

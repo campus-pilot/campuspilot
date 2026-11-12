@@ -41,10 +41,12 @@ export type QuestionPaperDraftCardProps = DraftCardFacts & {
   preview: ReactNode;
   /** Sends "Save draft … as a new version."; absent while the chat cannot send. */
   onSave?: () => void;
+  /** The user already asked to save this draft (a later message in the conversation says so): the button is spent, so a second click cannot queue a duplicate version. */
+  saveRequested?: boolean;
 };
 
 /** A draft question paper: its marks and warnings, a Preview and a quiet Save as new version. */
-export function QuestionPaperDraftCard({ ordinal, preview, onSave, ...facts }: QuestionPaperDraftCardProps) {
+export function QuestionPaperDraftCard({ ordinal, preview, onSave, saveRequested = false, ...facts }: QuestionPaperDraftCardProps) {
   const summary = draftCardSummary(facts);
   return (
     <AssistantViewFrame title={`Draft ${ordinal}`}>
@@ -60,8 +62,8 @@ export function QuestionPaperDraftCard({ ordinal, preview, onSave, ...facts }: Q
         {facts.valid ? (
           <CardActions>
             {preview}
-            <Button type="button" variant="ghost" size="sm" onClick={onSave} disabled={!onSave}>
-              <FilePlus2 data-icon="inline-start" aria-hidden /> Save as new version
+            <Button type="button" variant="ghost" size="sm" onClick={onSave} disabled={!onSave || saveRequested}>
+              <FilePlus2 data-icon="inline-start" aria-hidden /> {saveRequested ? 'Save requested' : 'Save as new version'}
             </Button>
           </CardActions>
         ) : null}

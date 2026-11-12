@@ -143,8 +143,10 @@ const paperFactsSchema = z.object({
   pageCount: z.number().int(),
   pageRevision: z.number().int(),
   latestVersionNo: z.number().int(),
-  /** Whether the exam has ended: its papers are then read-only. */
-  readOnly: z.boolean(),
+  /** Whether the exam has ended (its lifecycle is `completed`): its papers are then read-only. */
+  examCompleted: z.boolean(),
+  /** Whether the exam's academic session is the school's active one: papers of any other session are read-only. */
+  sessionActive: z.boolean(),
 });
 
 export const listQuestionPapersOutputSchema = z.object({

@@ -31,7 +31,7 @@ import { substituteQuestionPaperBody } from './question-paper.slot';
 import { getObjectBytes } from './question-paper.storage';
 
 export type { RenderedBody } from './question-paper.body';
-export { QUESTION_PAPER_BODY_MAX_BYTES } from './question-paper.body';
+export { QUESTION_PAPER_BODY_MAX_BYTES, QUESTION_PAPER_FIGURES_MAX_BYTES } from './question-paper.body';
 
 /**
  * The template alone is rendered under this budget (the same as notices),

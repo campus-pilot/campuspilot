@@ -16,7 +16,7 @@ import {
   type AssistantAttachmentRef,
 } from '@campuspilot/assistant-contract/attachments';
 import { assistantAttachmentTable, assistantConversationTable } from '@campuspilot/db/schema/assistant';
-import { and, asc, eq, exists, inArray, isNotNull, isNull, lt, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, exists, inArray, isNotNull, isNull, lt, or, sql } from 'drizzle-orm';
 
 import type { AssistantDatabase, AssistantExecutor } from './db';
 import { db as defaultDb } from './db';
@@ -112,6 +112,32 @@ async function reclaimStaleUnsent(tx: AssistantExecutor, input: { schoolId: stri
 }
 
 /**
+ * Deletes a user's unsent attachments beyond the newest
+ * {@link ASSISTANT_ATTACHMENTS_PER_MESSAGE} (rows locked first; one being sent
+ * right now is skipped). A composer holds at most that many images, so any
+ * older unsent image belongs to a composer that was closed, switched away from
+ * or reloaded: the user cannot see or remove it, and it must not lock them out.
+ * The newest ones, which an open composer may still show, are kept.
+ */
+async function evictOldestUnsent(tx: AssistantExecutor, input: { schoolId: string; userId: string }) {
+  const surplus = await tx
+    .select()
+    .from(assistantAttachmentTable)
+    .where(
+      and(
+        eq(assistantAttachmentTable.schoolId, input.schoolId),
+        eq(assistantAttachmentTable.userId, input.userId),
+        isNull(assistantAttachmentTable.itemId),
+      ),
+    )
+    .orderBy(desc(assistantAttachmentTable.createdAt), desc(assistantAttachmentTable.id))
+    .limit(ASSISTANT_UNSENT_ATTACHMENTS_PER_USER * 2)
+    .offset(ASSISTANT_ATTACHMENTS_PER_MESSAGE)
+    .for('update', { skipLocked: true });
+  return removeAttachmentRows(tx, surplus);
+}
+
+/**
  * Removes one image the user attached but did not send (the composer's remove
  * button). Only the owner's own unsent attachment of this school is removed:
  * one already carried by a message is refused (CONFLICT), because the
@@ -180,9 +206,13 @@ export async function createAttachment(
       };
       let unsentCount = await countUnsent();
       if (unsentCount >= ASSISTANT_UNSENT_ATTACHMENTS_PER_USER) {
-        // Images left behind by a reload or a closed tab are not in any open composer: free them rather than lock the user out.
+        // Images left behind by a reload, a closed tab or a composer that unmounted are not in any open composer: free them rather than lock the user out.
         await reclaimStaleUnsent(tx, { schoolId, userId });
         unsentCount = await countUnsent();
+        if (unsentCount >= ASSISTANT_UNSENT_ATTACHMENTS_PER_USER) {
+          await evictOldestUnsent(tx, { schoolId, userId });
+          unsentCount = await countUnsent();
+        }
       }
       if (unsentCount >= ASSISTANT_UNSENT_ATTACHMENTS_PER_USER) {
         throw rpcError.badRequest(

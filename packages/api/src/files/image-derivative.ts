@@ -30,10 +30,17 @@ const MODEL_ATTEMPTS = [
 export const MAX_INPUT_PIXELS = 40_000_000;
 /** Page photos decoded at the same time in this process; more wait their turn (a decode is hundreds of MB). */
 const MAX_CONCURRENT_DECODES = 2;
+/**
+ * Uploads that may wait for a decode slot. Each waiting upload holds its file
+ * in memory (up to 15 MB), so the queue is bounded; one more is refused with
+ * 429 and the client retries.
+ */
+const MAX_WAITING_DECODES = 8;
 
 /** The longest edge and encoding of an uploaded figure (design B6). */
 const FIGURE_EDGE_PX = 1400;
-const FIGURE_MAX_BYTES = 400 * 1024;
+/** Target size of a normalised figure (the last, smallest encoding is kept whatever its size). */
+export const FIGURE_MAX_BYTES = 400 * 1024;
 
 export type ImageDerivatives =
   | {
@@ -62,9 +69,16 @@ const open = (bytes: Uint8Array) =>
 let activeDecodes = 0;
 const waitingForDecode: Array<() => void> = [];
 
-/** Runs a decode when fewer than {@link MAX_CONCURRENT_DECODES} are running; the rest queue in arrival order. */
+/**
+ * Runs a decode when fewer than {@link MAX_CONCURRENT_DECODES} are running;
+ * the rest queue in arrival order, at most {@link MAX_WAITING_DECODES} of
+ * them (the next one is refused with 429).
+ */
 async function withDecodeSlot<T>(task: () => Promise<T>): Promise<T> {
   while (activeDecodes >= MAX_CONCURRENT_DECODES) {
+    if (waitingForDecode.length >= MAX_WAITING_DECODES) {
+      throw rpcError.tooManyRequests('The server is busy processing photos. Try again in a few seconds.');
+    }
     await new Promise<void>((resolve) => waitingForDecode.push(resolve));
   }
   activeDecodes += 1;

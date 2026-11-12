@@ -114,3 +114,33 @@ export function inFlightJob(job: { status: 'queued' | 'running' | 'succeeded' | 
 /** How many photos are still being prepared or uploaded; a failed one waits for the user and does not count. */
 export const uploadsInFlight = (items: readonly { status: 'converting' | 'uploading' | 'error' }[]) =>
   items.filter((item) => item.status !== 'error').length;
+
+type JobFacts = {
+  lastFinishedJob: { status: 'queued' | 'running' | 'succeeded' | 'failed'; errorCode: string | null; errorMessage: string | null; createdAt: Date; completedAt: Date } | null;
+  versions: ReadonlyArray<{ versionNo: number; createdAt: Date }>;
+};
+
+/**
+ * The last AI failure, until a version is saved after it (the paper was then
+ * fixed another way, for example in chat). The heading badge and the job panel
+ * both read this, so a failure that is no longer news shows nowhere.
+ */
+export function currentJobFailure(detail: JobFacts) {
+  const last = detail.lastFinishedJob;
+  const newest = detail.versions[0];
+  if (last?.status !== 'failed' || !last.errorCode) return null;
+  if (newest && newest.createdAt >= last.completedAt) return null;
+  return { errorCode: last.errorCode, message: last.errorMessage ?? 'AI generation failed.' };
+}
+
+/**
+ * The version the last generation produced, while it is still the newest:
+ * the job succeeded and a version exists that was saved after the job was
+ * queued. Null otherwise (also after a later version, which is not news of the job).
+ */
+export function generatedVersionReady(detail: JobFacts): number | null {
+  const last = detail.lastFinishedJob;
+  const newest = detail.versions[0];
+  if (last?.status !== 'succeeded' || !newest) return null;
+  return newest.createdAt >= last.createdAt ? newest.versionNo : null;
+}

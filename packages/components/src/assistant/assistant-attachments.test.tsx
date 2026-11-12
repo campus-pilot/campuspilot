@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { TooltipProvider } from '@campuspilot/ui/components/tooltip';
+import { createRef } from 'react';
 
 import { AssistantAttachmentStrip, AssistantSentAttachments } from './assistant-attachment-strip';
 import {
@@ -13,7 +14,7 @@ import {
   rejectionSummary,
   type ComposerAttachment,
 } from './assistant-attachments-model';
-import { AssistantComposer } from './assistant-composer';
+import { AssistantComposer, type AssistantComposerControls } from './assistant-composer';
 
 afterEach(cleanup);
 
@@ -229,5 +230,21 @@ describe('AssistantComposer images', () => {
     await screen.findByRole('img', { name: 'Not an image' });
     fireEvent.click(screen.getByRole('button', { name: 'Remove bad.jpg' }));
     expect(remove).not.toHaveBeenCalled();
+  });
+
+  it('clears an untouched prefilled sentence through its controls without dropping the attached images', async () => {
+    const controls = createRef<AssistantComposerControls>();
+    const { input } = renderComposer({ controlsRef: controls, initialText: 'Update this paper: ' });
+    fireEvent.change(input, { target: { files: [jpeg('keep.jpg')] } });
+    await waitFor(() => expect(screen.queryByRole('status', { name: /Uploading/ })).toBeNull());
+    const message = screen.getByLabelText('Message') as HTMLTextAreaElement;
+    expect(message.value).toBe('Update this paper: ');
+    act(() => controls.current!.clearTextIf('Update this paper: '));
+    expect(message.value).toBe('');
+    expect(screen.getByRole('button', { name: 'Remove keep.jpg' })).toBeTruthy();
+    // A sentence the user edited stays.
+    fireEvent.change(message, { target: { value: 'Update this paper: add a question' } });
+    act(() => controls.current!.clearTextIf('Update this paper: '));
+    expect(message.value).toBe('Update this paper: add a question');
   });
 });

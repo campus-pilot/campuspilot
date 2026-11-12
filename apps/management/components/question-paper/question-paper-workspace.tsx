@@ -16,12 +16,13 @@ import {
 import { Tabs, TabsList, TabsTrigger } from '@campuspilot/ui/components/tabs';
 import { toast } from '@campuspilot/ui/lib/toast';
 import { ConfirmationDialog } from '@campuspilot/components/confirmation-dialog';
-import { cellStatus } from '@campuspilot/components/question-paper/question-paper-model';
+import { cellStatus, isPaperLocked, paperLockReason } from '@campuspilot/components/question-paper/question-paper-model';
 import { RequirePermissions } from '@/components/require-permissions';
 import { DirtyGuard, LoadingExam, Notice, ReadError } from '@/components/exam/exam-common';
 import { questionPaperHref } from '@/components/exam/exam-model';
 import { orpc } from '@/lib/orpc';
 import {
+  currentJobFailure,
   inFlightJob,
   QUESTION_PAPER_SECTIONS,
   questionPaperPermission,
@@ -82,15 +83,6 @@ function WorkspaceData({ scope }: { scope: QuestionPaperScope }) {
   );
 }
 
-/** The last AI failure, until a version is saved after it (the paper was then fixed another way, for example in chat). */
-function currentJobFailure(detail: QuestionPaperDetail) {
-  const last = detail.lastFinishedJob;
-  const newest = detail.versions[0];
-  if (last?.status !== 'failed' || !last.errorCode) return null;
-  if (newest && newest.createdAt >= last.completedAt) return null;
-  return { errorCode: last.errorCode, message: last.errorMessage ?? 'AI generation failed.' };
-}
-
 function PaperHeading({ detail }: { detail: QuestionPaperDetail }) {
   const { paper } = detail;
   const status = cellStatus({
@@ -133,7 +125,7 @@ function PaperMenu({ scope, detail, canManage }: { scope: QuestionPaperScope; de
     }),
   );
   const { paper } = detail;
-  const canDelete = canManage && !paper.readOnly && inFlightJob(detail.activeJob) === null && paper.paperId !== null;
+  const canDelete = canManage && !isPaperLocked(paper) && inFlightJob(detail.activeJob) === null && paper.paperId !== null;
   return (
     <>
       <DropdownMenu>
@@ -243,8 +235,8 @@ function PaperLayout({ scope, detail, canManage }: { scope: QuestionPaperScope; 
         <PaperHeading detail={detail} />
         <PaperMenu scope={scope} detail={detail} canManage={canManage} />
       </div>
-      {detail.paper.readOnly ? (
-        <Notice>This examination has ended. You can preview and download its papers but not change them.</Notice>
+      {paperLockReason(detail.paper) ? (
+        <Notice>{paperLockReason(detail.paper)} You can still preview and download its papers.</Notice>
       ) : null}
       <SectionTabs section={section} onSelect={(next) => go({ section: next, version: next === 'pages' ? undefined : (versionNo ?? undefined) })} />
       <div className="min-w-0">{body}</div>

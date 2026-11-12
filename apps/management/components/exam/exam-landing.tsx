@@ -1,10 +1,12 @@
 'use client';
 import { useQuery } from '@tanstack/react-query';
 import { redirect } from 'next/navigation';
+import { SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
+import { RequirePermissions } from '@/components/require-permissions';
 import { useAssistantGate } from '@/components/assistant/assistant-access';
 import { orpc } from '@/lib/orpc';
 import { LoadingExam, ReadError } from './exam-common';
-import { defaultExamSection, examResultsHref, questionPaperHref, type ExamScope } from './exam-model';
+import { defaultExamSection, examResultsHref, questionPaperHref, schoolPermission, type ExamScope } from './exam-model';
 
 /**
  * The examination root: redirects to the default section and renders nothing
@@ -16,6 +18,15 @@ import { defaultExamSection, examResultsHref, questionPaperHref, type ExamScope 
  * open. A failed overview read offers a retry instead of guessing a section.
  */
 export function ExamLanding({ scope }: { scope: ExamScope }) {
+  // The same gate as the Results page the root used to be: without it the overview read would end in a raw read error.
+  return (
+    <RequirePermissions permissions={schoolPermission(scope.schoolId, SCHOOL_ACTIONS.READ_EXAM_PLANS)}>
+      <ExamLandingRedirect scope={scope} />
+    </RequirePermissions>
+  );
+}
+
+function ExamLandingRedirect({ scope }: { scope: ExamScope }) {
   const overview = useQuery(orpc.school.getExamOverview.queryOptions({ input: scope }));
   const assistant = useAssistantGate(scope.schoolId);
   if (!overview.data) {

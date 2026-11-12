@@ -229,6 +229,17 @@ describe('question paper generation job', () => {
     expect(gemini.requests[0]!.parts.filter((part: StructuredPart) => part.type === 'image').map((part: StructuredPart) => (part as { mimeType: string }).mimeType)).toEqual(['image/jpeg', 'image/heic']);
   });
 
+  it('counts the page images as the provider receives them (base64), so raw bytes under the budget can still be too large', async () => {
+    const world = await createQuestionPaperWorld();
+    const { job, pages } = await queueJob(world, { subjectSlug: 'math', modeSlug: 'practical' });
+    // Two pages of 6.5 MB: 13 MB raw is under the 16 MiB budget, 17.3 MB base64 is over it.
+    await db.update(examQuestionPaperPageTable).set({ modelByteSize: 6_500_000 }).where(eq(examQuestionPaperPageTable.paperId, pages[0]!.paperId));
+    const model = scriptedModel([answer(HINDI_MATH)]);
+    expect(await runQuestionPaperGeneration({ jobId: job.id, attempt: 1 }, direct, depsFor(model.model))).toEqual({ status: 'failed', code: 'images_too_large' });
+    expect(model.requests).toHaveLength(0);
+    expect(await requestsOf(job.id)).toHaveLength(0);
+  });
+
   it('retries a busy or unknown failure up to three requests, saves the billed ones, and does not retry a rejection', async () => {
     const world = await createQuestionPaperWorld();
     const { job } = await queueJob(world);

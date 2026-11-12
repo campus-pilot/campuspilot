@@ -161,13 +161,26 @@ export function movePageId(ids: readonly string[], activeId: string, overId: str
   return next;
 }
 
+/** The facts that make a paper read-only; each is its own field of the paper (they differ in what the user can do about them). */
+export type PaperLockFacts = { examCompleted: boolean; sessionActive: boolean };
+
+/** Whether the paper cannot be changed, whatever the user's permissions. */
+export const isPaperLocked = (facts: PaperLockFacts) => facts.examCompleted || !facts.sessionActive;
+
+/** Why a paper is read-only, in a sentence, or null when it is not. An ended exam is named first. */
+export function paperLockReason(facts: PaperLockFacts): string | null {
+  if (facts.examCompleted) return 'This examination has ended, so its question papers can no longer be changed.';
+  if (!facts.sessionActive) return 'This examination belongs to an academic session that is not the active one, so its question papers can no longer be changed.';
+  return null;
+}
+
 /** Whether a mutation of pages, generation or deletion is currently possible, and if not, why. */
-export function editBlockedReason(input: {
-  readOnly: boolean;
+export function editBlockedReason(input: PaperLockFacts & {
   canManage: boolean;
   jobActive: boolean;
 }): string | null {
-  if (input.readOnly) return 'This examination has ended, so its question papers can no longer be changed.';
+  const locked = paperLockReason(input);
+  if (locked) return locked;
   if (!input.canManage) return 'You can view this paper but not change it.';
   if (input.jobActive) return 'The paper is being generated. You can change it once that finishes.';
   return null;

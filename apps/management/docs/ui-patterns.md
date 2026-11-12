@@ -251,7 +251,9 @@ the implementation and APIs in more detail.
   that renders nothing and redirects with a render-time `redirect()` (no effect,
   Back does not loop). `defaultExamSection` picks Question paper only for plan
   count > 0, lifecycle status `ready` (never inferred from plans) and gate
-  `allowed`; otherwise Results. Existing links to the root keep working. The
+  `allowed`; otherwise Results. Existing links to the root keep working. The landing
+  is wrapped in the same `READ_EXAM_PLANS` gate as Results, and the exam-name
+  breadcrumb on class and student pages links to `/results`, never the landing. The
   lifecycle navbar action shows on the root and on `/results`.
 - `/question-paper` is one table per accessible class (row per subject and mode,
   sticky subject column, status badge, Open/View). `/question-paper/<class>/<subject>/<mode>`

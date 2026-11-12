@@ -101,7 +101,8 @@ question_paper`, class, session and exam filled) under
 `schools/{schoolId}/documents/`. `pdf_artifact_id` is `ON DELETE SET NULL`: if the
 artifact is ever deleted, the next download prints the version again from its stored
 JSON and pinned template and stores the new PDF. Every object lives under
-`schools/{schoolId}/` (`exam-question-papers/{paperId}/pages|figures/...`), which is
+`schools/{schoolId}/` (`exam-question-papers/pages|figures/{pageId|figureId}...`; objects written before
+this scheme keep their `{paperId}` keys, deletes use the key stored on the row), which is
 what the demo purge sweeps.
 
 ## Lifecycle
@@ -114,11 +115,14 @@ chat: attach photos -> draft(s) -> user: "save" -> approval -> version n
 - **Pages.** `POST` multipart through the API server (field `page`, 15 MB per file, 20
   per paper, JPEG, PNG, WebP and the HEIC family; the bytes decide, not the file
   name). Upload, reorder (`expectedPageRevision`) and delete page run under the paper's
-  row lock; storage is written first and removed again if the row cannot be inserted.
+  row lock. Objects are written to storage first, with no lock held, and removed again
+  if the short transaction that follows (exam and plan re-checked under their locks,
+  paper locked, row inserted) is refused.
   Derivatives are made at upload (EXIF rotation applied, 1800 px, at most about
   600 KB for the model copy, a 360 px thumbnail). The header is read first and an
   image over 40 megapixels is refused before any decode (413); the image is then
-  decoded once, at most two at a time per process, and both derivatives come from
+  decoded once, at most two at a time per process (at most eight more uploads wait; the
+  next is refused with 429), and both derivatives come from
   that one decode (`files/image-derivative.ts`). The upload route allows 120 a minute
   per IP (a school shares one address). A HEIC the server's `sharp`
   cannot decode is kept as `unsupported`: it still previews in browsers that can,
@@ -135,12 +139,15 @@ chat: attach photos -> draft(s) -> user: "save" -> approval -> version n
   (up to 3 times) when another version landed in between. A job's save is
   idempotent per job id. Every write transaction (page add, reorder, delete,
   figure, delete paper, start, save) first takes the school session row `FOR SHARE`
-  and re-reads the exam lifecycle (`assertPaperWritableLocked`); completing an exam
-  takes that row `FOR UPDATE`, so a write cannot commit to a completed exam. A paper
+  and the plan row of the paper's class and subject `FOR SHARE`, then re-reads the exam
+  lifecycle (`assertPaperWritableLocked`; the order is the one `deleteExamPlan` uses:
+  session, plan, paper). Completing an exam takes the session row `FOR UPDATE` and
+  deleting a plan takes the plan row `FOR UPDATE`, so a write cannot commit to a
+  completed exam or re-create a paper for a plan that was just deleted (NOT_FOUND). A paper
   locked this way is the BAD_REQUEST with `data.reason = 'paper_locked'`; a paper
   that is too large or complex to print fails a job as `paper_unprintable`, and
-  `checkQuestionPaperDraft` also totals the KaTeX HTML so validate, save and the job
-  agree. A stored version previews and re-prints with its saved `plan_max_marks`
+  `checkQuestionPaperDraft` also totals the KaTeX HTML and the stored figures (base64,
+  12 MB cap) so validate, save and the job agree. A stored version previews and re-prints with its saved `plan_max_marks`
   (class, subject, mode and exam names still come from the live plan).
 - **Delete.** `deleteQuestionPaper` (refused while a job is in flight) and
   `deleteExamPlan` delete the rows (pages, jobs, versions, figures cascade), the
@@ -237,13 +244,15 @@ fails jobs that cannot progress (`dispatch_failed` after 10 minutes unaccepted,
 requests). Starting a job is also refused when the school already has
 `QUESTION_PAPER_MAX_RUNNING_JOBS_PER_SCHOOL` (default 3) queued or running, because the
 monthly-limit check reads a spend sum cached for ten minutes and would otherwise be
-overshot by every job a user starts at once; the check runs under a per-school advisory
-lock.
+passed by every job a user starts at once; the check runs under a per-school advisory
+lock. The cap bounds how many jobs run at the same time, not how far the cached limit
+can be overshot: jobs started one after another inside the cache window all see the same
+cached spend.
 
 The workflow (`workflows/question-paper`, ingress-private, steps shared with the
 integration tests in `generation.ts`): begin, re-check access and the paper
 (limit, feature, role, exam not ended), gather inputs (every page has a readable
-source, 18 MB of images), one structured model request (its cost row is saved inside
+source, at most 16 MiB of images counted as base64, the same budget as the chat), one structured model request (its cost row is saved inside
 that same step; a repeated billed call takes the next `:attempt:{k}` key derived from
 the saved rows, never dropped), validate,
 at most one text-only repair request, save through `saveQuestionPaperVersion` with
@@ -311,7 +320,7 @@ only): page photos, generation, polling, previews and downloads.
   `/school/:id/assistant?seed=question_paper&sessionId=&examSlug=&classId=&subjectSlug=&modeSlug=`:
   a new conversation seeded with the paper's natural key (no personal data) and a
   prefilled box. Nothing is sent until the user sends. A malformed link (parts are limited
-  to letters, digits, `-` and `_`) silently becomes a plain new conversation; the send
+  to Unicode letters, digits, `.`, `~`, `-` and `_`; no spaces, quotes or brackets) silently becomes a plain new conversation; the send
   refuses a seed that does not resolve to a paper of the school
   (`resolvePaperScope`) before it reaches the model, and the chip says so when the
   paper cannot be opened.

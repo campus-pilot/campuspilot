@@ -11,6 +11,7 @@ import {
   ASSISTANT_SURFACE_PROPS,
   AssistantApprovalRequest,
   AssistantComposer,
+  type AssistantComposerControls,
   AssistantContextChip,
   AssistantConversationUnavailable,
   AssistantConversationUsage,
@@ -26,6 +27,7 @@ import {
   type AssistantApprovalDecision,
   type AssistantSuggestion,
 } from '@campuspilot/components/assistant';
+import { saveDraftMessage } from '@campuspilot/components/question-paper/chat-cards-model';
 import { Button } from '@campuspilot/ui/components/button';
 import { Spinner } from '@campuspilot/ui/components/spinner';
 import { TooltipProvider } from '@campuspilot/ui/components/tooltip';
@@ -285,6 +287,7 @@ function ConversationTimeline({
           // "Draft n": the card's place among this conversation's drafts.
           ordinal={rows.filter((candidate) => candidate.kind === 'card').findIndex((candidate) => candidate.id === row.id) + 1}
           onSendMessage={onSendMessage}
+          saveRequested={(draftId) => rows.some((candidate) => candidate.kind === 'user' && candidate.item.body.text === saveDraftMessage(draftId))}
         />
       )}
     />
@@ -505,10 +508,17 @@ export function AssistantChat({
     });
   // While a run works, a new message waits in the tray; otherwise it starts a turn.
   const tray = useTrayRequests(schoolId, conversationId, running ? optimistic : [], retry);
+  // Removing the seed's chip takes the prefilled sentence out of the box unless the user edited it (then their draft stays).
+  // The box stays mounted: remounting it would drop the images attached in it, which are already stored on the server.
+  const composer = useRef<AssistantComposerControls>(null);
+  const removeSeed = () => {
+    composer.current?.clearTextIf(QUESTION_PAPER_SEED_DRAFT);
+    onSeedRemoved?.();
+  };
   const requests =
     activeSeed && onSeedRemoved ? (
       <>
-        <SeedChip paper={seedPaper.paper} failed={seedPaper.failed} onRemove={onSeedRemoved} />
+        <SeedChip paper={seedPaper.paper} failed={seedPaper.failed} onRemove={removeSeed} />
         {tray}
       </>
     ) : (
@@ -583,8 +593,7 @@ export function AssistantChat({
           {notLive ? <ConnectionNotice offline={connection.offline} /> : null}
           <div className={welcome ? 'flex flex-col gap-3' : ASSISTANT_LANE_CLASS}>
             <AssistantComposer
-              // Removing the seed's chip remounts the box, so the prefilled sentence goes with it unless the user edited it (then their draft stays).
-              key={activeSeed ? 'seeded' : 'plain'}
+              controlsRef={composer}
               autoFocus={autoFocus}
               disabledReason={disabledReason}
               placeholder={running ? 'Queue a follow-up…' : undefined}

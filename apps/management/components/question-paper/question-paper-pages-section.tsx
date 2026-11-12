@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { ConfirmationDialog } from '@campuspilot/components/confirmation-dialog';
@@ -11,9 +12,10 @@ import { QuestionPaperUploadZone } from '@campuspilot/components/question-paper/
 import { UploadQueue } from '@campuspilot/components/question-paper/upload-queue';
 import { Button } from '@campuspilot/ui/components/button';
 import { orpc } from '@/lib/orpc';
+import { questionPaperWorkspaceHref } from '@/components/exam/exam-model';
 import { questionPaperThumbUrl } from '@/lib/question-paper-pages';
 import { QuestionPaperGenerateForm } from './question-paper-generate-form';
-import { applyPageOrder, inFlightJob, isConflict, requestErrorMessage, uploadsInFlight, type QuestionPaperScope } from './question-paper-model';
+import { applyPageOrder, currentJobFailure, generatedVersionReady, inFlightJob, isConflict, requestErrorMessage, uploadsInFlight, type QuestionPaperScope } from './question-paper-model';
 import { useRefreshQuestionPaper, type QuestionPaperDetail } from './use-question-paper-detail';
 import type { PageUploads } from './use-page-uploads';
 
@@ -83,13 +85,26 @@ function Rejections({ rejections, onDismiss }: { rejections: readonly { name: st
   );
 }
 
-/** What the background job says, derived from the polled detail: running, or the last failure. */
-function JobPanel({ detail, onRetry }: { detail: QuestionPaperDetail; onRetry?: () => void }) {
+/**
+ * What the background job says, derived from the polled detail: running, the
+ * failure that is still news (not one a newer version has fixed), or the
+ * version the job just produced with a link to it.
+ */
+function JobPanel({ scope, detail }: { scope: QuestionPaperScope; detail: QuestionPaperDetail }) {
   const running = inFlightJob(detail.activeJob);
   if (running) return <GenerationStatus job={running} />;
-  const last = detail.lastFinishedJob;
-  if (last?.status === 'failed') return <GenerationStatus job={{ status: 'failed', message: last.errorMessage }} onRetry={onRetry} />;
-  return null;
+  const failure = currentJobFailure(detail);
+  if (failure) return <GenerationStatus job={{ status: 'failed', message: failure.message }} />;
+  const ready = generatedVersionReady(detail);
+  if (ready === null) return null;
+  return (
+    <div role="status" className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/40 p-3 text-sm">
+      <span>Version {ready} is ready.</span>
+      <Button asChild size="sm" variant="outline">
+        <Link href={questionPaperWorkspaceHref(scope, { section: 'result', version: ready })}>View</Link>
+      </Button>
+    </div>
+  );
 }
 
 function PagesHeader({ count }: { count: number }) {
@@ -111,11 +126,11 @@ export function QuestionPaperPagesSection({ scope, detail, canManage, uploads }:
   const reorder = usePageReorder(scope);
   const deletePage = useDeletePage(scope);
   const [deleting, setDeleting] = useState<string | null>(null);
-  const blockedReason = editBlockedReason({ readOnly: paper.readOnly, canManage, jobActive: inFlightJob(detail.activeJob) !== null });
+  const blockedReason = editBlockedReason({ examCompleted: paper.examCompleted, sessionActive: paper.sessionActive, canManage, jobActive: inFlightJob(detail.activeJob) !== null });
   const deletingPage = pages.find((page) => page.id === deleting);
   return (
     <div className="flex flex-col gap-4">
-      <JobPanel detail={detail} />
+      <JobPanel scope={scope} detail={detail} />
       <uploads.form.Subscribe selector={(state) => uploadsInFlight(state.values.items)}>
         {(inFlight) => (
           <QuestionPaperUploadZone
@@ -138,13 +153,22 @@ export function QuestionPaperPagesSection({ scope, detail, canManage, uploads }:
           No photos yet. Add the pages of the question paper above.
         </p>
       ) : (
-        <PageThumbnailGrid
-          pages={pages}
-          thumbUrl={(pageId) => questionPaperThumbUrl(scope, pageId)}
-          disabled={blockedReason !== null || reorder.isPending || deletePage.isPending}
-          onReorder={(pageIds) => reorder.mutate({ ...scope, pageIds, expectedPageRevision: paper.pageRevision })}
-          onDelete={setDeleting}
-        />
+        // Every stored upload bumps the page revision a reorder or delete is checked against, so while photos are
+        // on their way the grid is closed (and says so) instead of failing with a "someone else changed the pages".
+        <uploads.form.Subscribe selector={(state) => uploadsInFlight(state.values.items) > 0}>
+          {(uploading) => (
+            <div className="flex flex-col gap-2">
+              {uploading ? <p className="text-xs text-muted-foreground">Photos are still uploading. You can reorder or delete pages once they finish.</p> : null}
+              <PageThumbnailGrid
+                pages={pages}
+                thumbUrl={(pageId) => questionPaperThumbUrl(scope, pageId)}
+                disabled={blockedReason !== null || uploading || reorder.isPending || deletePage.isPending}
+                onReorder={(pageIds) => reorder.mutate({ ...scope, pageIds, expectedPageRevision: paper.pageRevision })}
+                onDelete={setDeleting}
+              />
+            </div>
+          )}
+        </uploads.form.Subscribe>
       )}
       {pages.some((page) => page.derivativeStatus === 'unsupported') ? (
         <p className="text-xs text-muted-foreground">

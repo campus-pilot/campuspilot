@@ -17,9 +17,21 @@ export const ASSISTANT_UNSENT_ATTACHMENT_TTL_HOURS = 24;
 /**
  * An upload that finds the user at the unsent cap first deletes that user's
  * unsent attachments older than this (images left behind by a reload or a
- * closed tab), then counts again. Younger ones are an open composer's and stay.
+ * closed tab), then counts again; if the user is still at the cap it deletes
+ * the oldest unsent images beyond the newest {@link ASSISTANT_ATTACHMENTS_PER_MESSAGE}
+ * (a composer holds at most that many, so the rest were left by a composer that
+ * unmounted and are invisible to the user).
  */
 export const ASSISTANT_UNSENT_ATTACHMENT_RECLAIM_HOURS = 1;
+/**
+ * Image bytes, as sent (base64, 4/3 of the file), one model request may carry:
+ * the chat context and the question paper generation job share it. Providers
+ * cap the whole request: Gemini's inline limit is 20 MB, Anthropic's 32 MB.
+ * 16 MiB leaves the rest for the system prompt, tools and history.
+ */
+export const MODEL_REQUEST_IMAGE_BUDGET_BYTES = 16 * 1024 * 1024;
+/** The size an image takes in a request: providers receive it base64 encoded. */
+export const encodedImageBytes = (bytes: number) => Math.ceil((bytes * 4) / 3);
 /** The multipart field of the upload route (one file per request). */
 export const ASSISTANT_ATTACHMENT_FIELD_NAME = 'file';
 /** Media types the picker offers; the server decides with the file's bytes. */
@@ -45,17 +57,22 @@ export type AssistantAttachmentRef = z.infer<typeof assistantAttachmentRefSchema
  * personal data, and permission is decided by the tools when they are used.
  */
 /**
- * A natural key part of the seed: letters, digits, hyphen and underscore only.
- * The seed is written into the model's context, so no free text (spaces,
- * newlines, angle brackets) may pass; the send procedure also checks the key
- * names a real paper of the school.
+ * A natural key part of the seed: Unicode letters, marks and digits plus
+ * underscore, hyphen, dot and tilde, with no whitespace, control character,
+ * angle bracket or quote. This is wider than ids on purpose: exam, subject and
+ * mode slugs are free text in the school configuration (`maths.2`, a Hindi
+ * name), and a link that silently loses its seed is worse than a wider
+ * allowlist. The seed is written into the model's context, so what keeps free
+ * text out of it is the send procedure, which resolves the key against the
+ * school's own exam, class and plan rows (`resolvePaperScope`) before storing
+ * anything; this pattern is only the first, cheap screen.
  */
 const seedKeyPart = z
   .string()
   .trim()
   .min(1)
   .max(120)
-  .regex(/^[A-Za-z0-9_-]+$/, 'Only letters, digits, hyphens and underscores are allowed.');
+  .regex(/^[\p{L}\p{M}\p{N}_.~-]+$/u, 'Only letters, digits, dots, hyphens, tildes and underscores are allowed.');
 export const questionPaperSeedSchema = z.object({
   kind: z.literal('question_paper'),
   sessionId: seedKeyPart,

@@ -3,6 +3,8 @@ import { test } from 'node:test';
 import {
   applyPageOrder,
   continueInChatHref,
+  currentJobFailure,
+  generatedVersionReady,
   detailPollInterval,
   isConflict,
   resolveSection,
@@ -69,4 +71,20 @@ test('photos on their way count as in flight, a failed one does not', () => {
   assert.equal(uploadsInFlight([]), 0);
   assert.equal(uploadsInFlight([{ status: 'converting' }, { status: 'uploading' }, { status: 'error' }]), 2);
   assert.equal(uploadsInFlight([{ status: 'error' }]), 0);
+});
+
+const at = (minute: number) => new Date(Date.UTC(2026, 0, 1, 10, minute));
+const job = (status: 'succeeded' | 'failed') => ({ status, errorCode: status === 'failed' ? 'model_busy' : null, errorMessage: 'Try later.', createdAt: at(0), completedAt: at(5) });
+
+test('a failure is news only until a newer version exists', () => {
+  assert.deepEqual(currentJobFailure({ lastFinishedJob: job('failed'), versions: [] }), { errorCode: 'model_busy', message: 'Try later.' });
+  assert.equal(currentJobFailure({ lastFinishedJob: job('failed'), versions: [{ versionNo: 1, createdAt: at(9) }] }), null);
+  assert.equal(currentJobFailure({ lastFinishedJob: job('succeeded'), versions: [] }), null);
+});
+
+test('the version a succeeded job produced is announced while it is the newest', () => {
+  assert.equal(generatedVersionReady({ lastFinishedJob: job('succeeded'), versions: [{ versionNo: 3, createdAt: at(4) }] }), 3);
+  assert.equal(generatedVersionReady({ lastFinishedJob: job('succeeded'), versions: [{ versionNo: 2, createdAt: at(-30) }] }), null);
+  assert.equal(generatedVersionReady({ lastFinishedJob: job('failed'), versions: [{ versionNo: 3, createdAt: at(4) }] }), null);
+  assert.equal(generatedVersionReady({ lastFinishedJob: null, versions: [] }), null);
 });

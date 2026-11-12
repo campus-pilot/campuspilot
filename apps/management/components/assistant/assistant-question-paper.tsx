@@ -56,12 +56,23 @@ type DraftInput = NonNullable<ReturnType<typeof parseDraftCallInput>>;
 
 /**
  * The draft rendered with the school's currently selected template. Cached by
- * the draft's id (a hash of its content), so reopening or comparing drafts
- * does not render again; the server reads the stored input, never the model.
+ * the paper key and the draft's id (a hash of its content only): the heading
+ * names the class, subject and exam, so identical content for another paper
+ * is a different render. The server reads the stored input, never the model.
  */
 function DraftPreviewBody({ schoolId, input, draftId }: { schoolId: string; input: DraftInput; draftId: string }) {
   const preview = useQuery({
-    queryKey: ['assistant', 'question-paper-draft-preview', schoolId, draftId],
+    queryKey: [
+      'assistant',
+      'question-paper-draft-preview',
+      schoolId,
+      input.sessionId,
+      input.examSlug,
+      input.classId,
+      input.subjectSlug,
+      input.modeSlug,
+      draftId,
+    ],
     queryFn: () => client.school.previewQuestionPaperDraft({ ...input, content: input.content as Record<string, unknown> }),
     staleTime: Number.POSITIVE_INFINITY,
     retry: retryUnlessRefused,
@@ -100,10 +111,13 @@ export function AssistantDraftCard({
   call,
   ordinal,
   onSendMessage,
+  saveRequested,
 }: {
   schoolId: string;
   call: AssistantToolCallItemDto;
   ordinal: number;
+  /** Whether the conversation already holds the user's message that saves this draft (by draft id). */
+  saveRequested: (draftId: string) => boolean;
   /** Sends a chat message; absent while the chat cannot send. */
   onSendMessage?: (text: string) => void;
 }) {
@@ -128,6 +142,7 @@ export function AssistantDraftCard({
           </PreviewDialog>
         ) : null
       }
+      saveRequested={facts.valid && saveRequested(facts.draftId)}
       onSave={facts.valid && onSendMessage ? () => onSendMessage(saveDraftMessage(facts.draftId)) : undefined}
     />
   );

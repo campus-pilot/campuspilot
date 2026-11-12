@@ -116,10 +116,12 @@ describe('page ordering', () => {
 
 describe('blocked reasons', () => {
   it('names why editing is closed, completed exam first', () => {
-    expect(editBlockedReason({ readOnly: true, canManage: false, jobActive: true })).toMatch(/has ended/);
-    expect(editBlockedReason({ readOnly: false, canManage: false, jobActive: true })).toMatch(/not change/);
-    expect(editBlockedReason({ readOnly: false, canManage: true, jobActive: true })).toMatch(/being generated/);
-    expect(editBlockedReason({ readOnly: false, canManage: true, jobActive: false })).toBeNull();
+    expect(editBlockedReason({ examCompleted: true, sessionActive: true, canManage: false, jobActive: true })).toMatch(/has ended/);
+    expect(editBlockedReason({ examCompleted: false, sessionActive: false, canManage: true, jobActive: false })).toMatch(/not the active one/);
+    expect(editBlockedReason({ examCompleted: true, sessionActive: false, canManage: true, jobActive: false })).toMatch(/has ended/);
+    expect(editBlockedReason({ examCompleted: false, sessionActive: true, canManage: false, jobActive: true })).toMatch(/not change/);
+    expect(editBlockedReason({ examCompleted: false, sessionActive: true, canManage: true, jobActive: true })).toMatch(/being generated/);
+    expect(editBlockedReason({ examCompleted: false, sessionActive: true, canManage: true, jobActive: false })).toBeNull();
   });
   it('names why generating is closed', () => {
     expect(generateBlockedReason({ pageCount: 0, templateConfigured: false, blockedReason: 'Closed.' })).toBe('Closed.');
