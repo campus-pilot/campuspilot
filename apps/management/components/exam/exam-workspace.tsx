@@ -423,8 +423,10 @@ function WorkspaceLayout({
               if (item && await confirmNavigation()) router.push(item.href);
             }}
           >
-            {/* overflow-x-auto clips what hangs below the box: the active underline sits 1px under the triggers, so the list pads 1px to hold it. */}
-            <TabsList variant="line" className="h-auto max-w-full justify-start overflow-x-auto pb-px">
+            {/* overflow-x-auto clips what hangs below the box: the active underline sits 1px under the triggers, so the list pads 1px to hold it.
+                The list's own height must be auto under the same `group-data-horizontal/tabs` variant as the shared h-8 it replaces (a plain h-auto loses to it);
+                at h-8 the 36px triggers overflow the list and the browser shows a scrollbar. */}
+            <TabsList variant="line" className="max-w-full justify-start overflow-x-auto pb-px group-data-horizontal/tabs:h-auto">
               {items.map((item) => (
                 <RequirePermissions
                   key={item.id}

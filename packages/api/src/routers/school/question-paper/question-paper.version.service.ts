@@ -330,6 +330,16 @@ export class SourceJobEndedError extends Error {}
 const artifactName = (scope: PaperScope, versionNo: number) =>
   `Question paper: ${scope.subjectName} (${scope.modeName}) - ${scope.className} - v${versionNo}`;
 
+/**
+ * The name a downloaded version's PDF is saved under, without `.pdf`:
+ * subject, class, mode and version joined by underscores
+ * (`Hindi_Class 1_Written_v2`). Kept apart from the artifact's name, which
+ * Documents history shows, and derived from the paper at download time, so
+ * PDFs stored before this format download under it too.
+ */
+const downloadFileName = (scope: PaperScope, versionNo: number) =>
+  `${scope.subjectName}_${scope.className}_${scope.modeName}_v${versionNo}`;
+
 async function savedByJob(db: DatabaseExecutor, jobId: string): Promise<VersionRow | undefined> {
   const [version] = await db
     .select()
@@ -591,7 +601,8 @@ export async function downloadVersionPdf(
         .where(and(eq(artifactTable.id, version.pdfArtifactId), eq(artifactTable.schoolId, scope.key.schoolId)))
         .limit(1);
       if (artifact?.status === 'ready') {
-        return { url: await documentDownloadUrl(artifact.s3Key, artifact.name), fileName: `${artifact.name}.pdf` };
+        const fileName = downloadFileName(scope, version.versionNo);
+        return { url: await documentDownloadUrl(artifact.s3Key, fileName), fileName: `${fileName}.pdf` };
       }
     }
     const restored = await restoreVersionPdf(db, { ...input, version }).catch((error: unknown) => {
@@ -646,5 +657,6 @@ async function restoreVersionPdf(
       if (updated.length === 0) throw new PdfAlreadyStoredError();
     },
   );
-  return { url: await documentDownloadUrl(s3Key, name), fileName: `${name}.pdf` };
+  const fileName = downloadFileName(scope, version.versionNo);
+  return { url: await documentDownloadUrl(s3Key, fileName), fileName: `${fileName}.pdf` };
 }
