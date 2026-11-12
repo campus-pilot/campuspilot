@@ -22,6 +22,7 @@ import {
   DocumentSelect,
   allDocumentKinds,
   noticeDocumentKind,
+  questionPaperDocumentKind,
 } from '@campuspilot/components/documents/document-controls';
 import { client, orpc } from '@/lib/orpc';
 import { useSchoolFeature } from '../require-feature';
@@ -84,7 +85,13 @@ export function DocumentTemplateMarketplace({
   // The Notice template exists only for schools with the notices feature
   // (the server refuses it otherwise), so its card is offered only then.
   const notices = useSchoolFeature(schoolId, 'notices');
-  const kinds = notices.enabled ? [...allDocumentKinds, noticeDocumentKind] : allDocumentKinds;
+  // The question paper template belongs to the `assistant` feature in the same way.
+  const assistant = useSchoolFeature(schoolId, 'assistant');
+  const kinds = [
+    ...allDocumentKinds,
+    ...(notices.enabled ? [noticeDocumentKind] : []),
+    ...(assistant.enabled ? [questionPaperDocumentKind] : []),
+  ];
   const form = useForm({
     defaultValues: { documentType: initialType },
     validators: {
@@ -172,7 +179,7 @@ function MarketplaceTypeSection({ scope }: { scope: DocumentTemplateScope }) {
 }
 
 function TemplateThumbnail({ item }: { item: MarketplaceItem }) {
-  const kind = [...allDocumentKinds, noticeDocumentKind].find(({ value }) => value === item.documentType)!;
+  const kind = [...allDocumentKinds, noticeDocumentKind, questionPaperDocumentKind].find(({ value }) => value === item.documentType)!;
   const palette = item.slug.endsWith('classic')
     ? 'border-blue-900/50 text-blue-900'
     : item.slug.endsWith('minimal')

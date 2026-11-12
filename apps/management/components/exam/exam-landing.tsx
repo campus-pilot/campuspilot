@@ -1,0 +1,31 @@
+'use client';
+import { useQuery } from '@tanstack/react-query';
+import { redirect } from 'next/navigation';
+import { useAssistantGate } from '@/components/assistant/assistant-access';
+import { orpc } from '@/lib/orpc';
+import { LoadingExam, ReadError } from './exam-common';
+import { defaultExamSection, examResultsHref, questionPaperHref, type ExamScope } from './exam-model';
+
+/**
+ * The examination root: redirects to the default section and renders nothing
+ * else. `redirect()` during render replaces the history entry, so Back does
+ * not return to the root and loop (and no effect is involved).
+ *
+ * It waits while the overview or the assistant answer is loading, because
+ * Question paper is the default only when the assistant gate is known to be
+ * open. A failed overview read offers a retry instead of guessing a section.
+ */
+export function ExamLanding({ scope }: { scope: ExamScope }) {
+  const overview = useQuery(orpc.school.getExamOverview.queryOptions({ input: scope }));
+  const assistant = useAssistantGate(scope.schoolId);
+  if (!overview.data) {
+    return overview.isPending ? <LoadingExam /> : <ReadError error={overview.error} retry={overview.refetch} />;
+  }
+  const section = defaultExamSection({
+    planCount: overview.data.planCount,
+    status: overview.data.status,
+    assistant,
+  });
+  if (section === 'pending') return <LoadingExam />;
+  redirect(section === 'question-paper' ? questionPaperHref(scope) : examResultsHref(scope));
+}

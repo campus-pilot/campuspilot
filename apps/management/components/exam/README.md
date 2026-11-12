@@ -10,8 +10,8 @@ dialog with classes, student counts, subjects and modes. Each class row expands
 its subject/mode breakdown in a sub-table; there is no separate accordion. Automatic generation
 creates draft snapshots and a Not started examination; no per-subject approval step
 exists. Starting is a separate school-admin action. Classes and rosters use the app's shared DataTable and full workspace width.
-The detail workspace uses admission/classroom secondary navigation: Results,
-Timetable and Settings. Working days and lifecycle controls live in Settings;
+The detail workspace uses admission/classroom secondary navigation: Results (`/results`; the exam root is a redirecting landing),
+Question paper (AI assistant users, see `components/question-paper`), Timetable and Settings. Working days and lifecycle controls live in Settings;
 once a plan exists, the in-page overflow contains contextual admit-card and Create
 Results actions, with Create Results disabled until the examination is completed. Student names are
 non-interactive before the examination starts. The navbar shows the lifecycle

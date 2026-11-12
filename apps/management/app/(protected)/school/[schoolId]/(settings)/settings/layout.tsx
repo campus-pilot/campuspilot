@@ -14,6 +14,7 @@ import {
   ClipboardCheck,
   CreditCard,
   FileBadge,
+  FileQuestionMark,
   Files,
   GraduationCap,
   ReceiptText,
@@ -55,6 +56,7 @@ import { billTemplatePage } from './templates/bill/_route';
 import { examinationTemplatePage } from './templates/examination/_route';
 import { idCardTemplatePage } from './templates/id-card/_route';
 import { noticeTemplatePage } from './templates/notice/_route';
+import { questionPaperTemplatePage } from './templates/question-paper/_route';
 import { receiptTemplatePage } from './templates/receipt/_route';
 import { timetableTemplatePage } from './templates/timetable/_route';
 import { statementTemplatePage } from './templates/statement/_route';
@@ -76,6 +78,7 @@ const pages: ManagementPageDescriptor<SettingsRouteParams>[] = [
   receiptTemplatePage,
   statementTemplatePage,
   noticeTemplatePage,
+  questionPaperTemplatePage,
 ];
 
 function navigationFor(
@@ -238,6 +241,19 @@ function navigationFor(
           label: 'Notice',
           href: schoolHref(schoolId, '/settings/templates/notice'),
           icon: BookOpenCheck,
+        },
+        {
+          type: 'item',
+          id: 'question-paper-template',
+          // The template belongs to the AI assistant feature; the item needs it and the template permission.
+          wrap: (children) => (
+            <RequireFeature schoolId={schoolId} feature="assistant">
+              {withTemplatePermission(children)}
+            </RequireFeature>
+          ),
+          label: 'Question paper',
+          href: schoolHref(schoolId, '/settings/templates/question-paper'),
+          icon: FileQuestionMark,
         },
       ],
     },

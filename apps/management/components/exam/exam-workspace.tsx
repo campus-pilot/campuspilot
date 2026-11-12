@@ -25,6 +25,8 @@ import { Tabs, TabsList, TabsTrigger } from '@campuspilot/ui/components/tabs';
 import { ExamNavigationLayout } from '@campuspilot/components/exam/exam-navigation-layout';
 import type { ExamContextDto } from '@campuspilot/api/routers/school/exam/exam.dto';
 import { CLASS_ACTIONS, SCHOOL_ACTIONS, type PermissionCheck } from '@campuspilot/api/routers/authorization/authorization.dto';
+import { AiBadge } from '@campuspilot/components/question-paper/ai-badge';
+import { useAssistantGate } from '@/components/assistant/assistant-access';
 import { useSchoolFeature } from '@/components/require-feature';
 import { RequirePermissions } from '@/components/require-permissions';
 import {
@@ -36,6 +38,8 @@ import { ExamSession, LoadingExam, Notice, ReadError } from './exam-common';
 import {
   canCreateExamReportCards,
   examHref,
+  examResultsHref,
+  examSectionOf,
   examStatusLabel,
   schoolPermission,
   type ExamScope,
@@ -157,7 +161,7 @@ function WorkspaceActions(
             context={context}
             active={props.active}
           />
-        ) : pathname === `${base}/settings` ? null : (
+        ) : pathname === `${base}/settings` || examSectionOf(pathname, base) === 'question-paper' ? null : (
           <ExamDocumentsMenu
             scope={props.scope}
             classId={classId}
@@ -341,14 +345,29 @@ function WorkspaceLayout({
   const path = usePathname();
   const router = useRouter();
   const base = examHref(scope, scope.examSlug);
-  const section = path.endsWith('/settings') ? 'settings' : path.endsWith('/timetable') ? 'timetable' : 'results';
+  const section = examSectionOf(path, base);
+  // The tab exists only when the assistant gate is known to be open (D42);
+  // while it loads or is closed, the tab is simply absent.
+  const assistant = useAssistantGate(scope.schoolId);
   const items = [
     {
       id: 'results',
       label: 'Results',
-      href: base,
+      href: examResultsHref(scope),
       action: SCHOOL_ACTIONS.READ_EXAM_PLANS,
+      ai: false,
     },
+    ...(overview.planCount > 0 && assistant === 'allowed'
+      ? [
+          {
+            id: 'question-paper',
+            label: 'Question paper',
+            href: `${base}/question-paper`,
+            action: SCHOOL_ACTIONS.READ_EXAM_PLANS,
+            ai: true,
+          },
+        ]
+      : []),
     ...(overview.planCount > 0
       ? [
           {
@@ -356,10 +375,12 @@ function WorkspaceLayout({
             label: 'Timetable',
             href: `${base}/timetable`,
             action: SCHOOL_ACTIONS.READ_EXAM_TIMETABLE,
+            ai: false,
           },
           {
             id: 'settings', label: 'More',
             href: `${base}/settings`, action: SCHOOL_ACTIONS.READ_EXAM_PLANS,
+            ai: false,
           },
         ]
       : []),
@@ -402,13 +423,16 @@ function WorkspaceLayout({
               if (item && await confirmNavigation()) router.push(item.href);
             }}
           >
-            <TabsList variant="line" className="h-auto">
+            <TabsList variant="line" className="h-auto max-w-full justify-start overflow-x-auto">
               {items.map((item) => (
                 <RequirePermissions
                   key={item.id}
                   permissions={schoolPermission(scope.schoolId, item.action)}
                 >
-                  <TabsTrigger value={item.id} className="h-9 flex-none px-3 text-sm">{item.label}</TabsTrigger>
+                  <TabsTrigger value={item.id} className="h-9 flex-none gap-1.5 px-3 text-sm">
+                    {item.label}
+                    {item.ai ? <AiBadge /> : null}
+                  </TabsTrigger>
                 </RequirePermissions>
               ))}
             </TabsList>

@@ -196,3 +196,55 @@ export function examActionDescription(action: ExamDialogAction, released: boolea
       return 'Students will no longer see this examination’s results in the Cadet Portal. Saved results and remarks are not changed.';
   }
 }
+
+/** The Results section lives at `<exam>/results`; the exam root is a landing that redirects (K4). */
+export const examResultsHref = (scope: ExamScope) => `${examHref(scope, scope.examSlug)}/results`;
+/** The Question paper section of an examination. */
+export const questionPaperHref = (scope: ExamScope) => `${examHref(scope, scope.examSlug)}/question-paper`;
+/** One paper (a class, subject and assessment mode). */
+export const questionPaperWorkspaceHref = (
+  scope: ExamScope & { classId: string; subjectSlug: string; modeSlug: string },
+  query?: { section?: 'pages' | 'result' | 'versions'; version?: number },
+) => {
+  const params = new URLSearchParams();
+  if (query?.section) params.set('section', query.section);
+  if (query?.version) params.set('version', String(query.version));
+  const search = params.toString();
+  const suffix = search ? `?${search}` : '';
+  return `${questionPaperHref(scope)}/${encodeURIComponent(scope.classId)}/${encodeURIComponent(scope.subjectSlug)}/${encodeURIComponent(scope.modeSlug)}${suffix}`;
+};
+
+export type ExamSectionGate = 'allowed' | 'denied' | 'pending';
+export type ExamSection = 'question-paper' | 'results';
+
+/**
+ * Where the examination root sends the user (decisions D3 and D42).
+ *
+ * Question paper is the default only while the examination has a generated
+ * plan and has not started, and only for a user who may use the assistant.
+ * "Not started" is the lifecycle state `ready`; it is never inferred from the
+ * plans. Everything else lands on Results, which also holds plan creation.
+ * `pending` while the assistant answer is unknown, so the landing neither
+ * flashes Results nor guesses.
+ */
+export function defaultExamSection(input: {
+  planCount: number;
+  status: 'ready' | 'active' | 'completed' | null;
+  assistant: ExamSectionGate;
+}): ExamSection | 'pending' {
+  if (input.planCount <= 0 || input.status !== 'ready') return 'results';
+  if (input.assistant === 'pending') return 'pending';
+  return input.assistant === 'allowed' ? 'question-paper' : 'results';
+}
+
+/**
+ * Which workspace tab a pathname belongs to. Class and student pages (and the
+ * landing) belong to Results; the Question paper tab covers every page below it.
+ */
+export function examSectionOf(pathname: string, base: string): 'results' | 'question-paper' | 'timetable' | 'settings' {
+  const path = pathname.replace(/\/$/, '');
+  if (path === `${base}/settings`) return 'settings';
+  if (path === `${base}/timetable`) return 'timetable';
+  if (path === `${base}/question-paper` || path.startsWith(`${base}/question-paper/`)) return 'question-paper';
+  return 'results';
+}

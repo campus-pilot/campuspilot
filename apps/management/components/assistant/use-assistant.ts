@@ -399,10 +399,11 @@ export function useAssistantAnnouncement(schoolId: string, conversationId: strin
   return useConversationQuery(schoolId, conversationId, selectAnnouncement).data ?? '';
 }
 
-export function useAssistantStatus(schoolId: string) {
+export function useAssistantStatus(schoolId: string, enabled = true) {
   return useQuery({
     ...assistantOrpc.getStatus.queryOptions({ input: { schoolId } }),
     staleTime: 60_000,
+    enabled,
   });
 }
 
