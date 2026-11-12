@@ -1,8 +1,12 @@
 import type { AssistantUserMessageBody } from '@campuspilot/db/schema/assistant';
+import { type AttachmentMarker } from '../../transcript';
+import { attachmentLabel, attachmentNote } from '../context';
 import type { AssistantPrompt } from '../prompt';
 import type { ModelPrices } from './config';
 import type { ProviderRegistry } from './registry';
 import type {
+  AttachmentFile,
+  ContextAdapter,
   ModelFailureKind,
   ModelProvider,
   ModelProviderId,
@@ -31,7 +35,41 @@ import type {
 export type FakeTextBlock = { type: 'text'; text: string };
 export type FakeToolUseBlock = { type: 'tool_use'; id: string; name: string; input: unknown };
 export type FakeToolResultBlock = { type: 'tool_result' } & ModelToolResult;
-export type FakeBlock = FakeTextBlock | FakeToolUseBlock | FakeToolResultBlock;
+/** An image as the fake's context shows it: the type and size, not the bytes. */
+export type FakeImageBlock = { type: 'image'; mimeType: string; byteLength: number };
+export type FakeAttachmentMarkerBlock = AttachmentMarker;
+export type FakeBlock = FakeTextBlock | FakeToolUseBlock | FakeToolResultBlock | FakeImageBlock | FakeAttachmentMarkerBlock;
+
+/** The fake's pruning and attachment rules (see {@link ContextAdapter}); same shape as the real adapters, in its own format. */
+export const fakeContext: ContextAdapter = {
+  isHumanTurn: (entry) => entry.role === 'user' && !(entry.content as FakeBlock[]).some((block) => block.type === 'tool_result'),
+  toolNamesByUseId(entries) {
+    const names = new Map<string, string>();
+    for (const entry of entries) {
+      for (const block of entry.content as FakeBlock[]) if (block.type === 'tool_use') names.set(block.id, block.name);
+    }
+    return names;
+  },
+  stubToolResults(entry, toolNames, stub, minChars) {
+    if (!(entry.content as FakeBlock[]).some((block) => block.type === 'tool_result')) return entry;
+    return {
+      ...entry,
+      content: (entry.content as FakeBlock[]).map((block) =>
+        block.type === 'tool_result' && block.content.length >= minChars
+          ? { ...block, content: stub({ toolName: toolNames.get(block.toolUseId) ?? block.toolName, chars: block.content.length }) }
+          : block,
+      ),
+    };
+  },
+  materializeAttachment(marker: AttachmentMarker, file: AttachmentFile) {
+    if (file.kind !== 'image') return [{ type: 'text', text: attachmentNote(marker, file.kind) }];
+    return [
+      { type: 'text', text: attachmentLabel(marker) },
+      { type: 'image', mimeType: file.mimeType, byteLength: file.bytes.byteLength },
+    ];
+  },
+  stubAttachment: (marker) => [{ type: 'text', text: attachmentNote(marker, 'old') }],
+};
 
 /** A response that was not stopped, as the fake's script holds it. */
 export type FakeReply = Extract<ModelStepResult, { stopped: false }>;
@@ -183,6 +221,7 @@ export function createFakeProvider({
     id,
     model,
     imageMimeTypes,
+    context: fakeContext,
     calls,
     structuredCalls,
     enqueueStructured: (...steps) => void structuredQueue.push(...steps),
@@ -215,7 +254,17 @@ export function createFakeProvider({
       return typeof next === 'function' ? next(input, call) : next;
     },
 
-    userContent: (body: AssistantUserMessageBody): FakeBlock[] => [{ type: 'text', text: body.text }],
+    userContent: (body: AssistantUserMessageBody): FakeBlock[] => [
+      ...(body.attachments ?? []).map((attachment, index, all): FakeBlock => ({
+        type: 'campuspilot_attachment',
+        attachmentId: attachment.id,
+        fileName: attachment.fileName,
+        contentType: attachment.contentType,
+        ordinal: index + 1,
+        total: all.length,
+      })),
+      ...(body.text.length > 0 ? [{ type: 'text' as const, text: body.text }] : []),
+    ],
     assistantTextContent: (text: string): FakeBlock[] => [{ type: 'text', text }],
     toolResultsContent: (results: readonly ModelToolResult[]): FakeBlock[] =>
       results.map((result) => ({ type: 'tool_result', ...result })),

@@ -1,3 +1,4 @@
+import type { AssistantAttachmentRef } from '@campuspilot/assistant-contract/attachments';
 import type {
   AssistantRunDiagnosticsDto,
   AssistantRunDto,
@@ -24,6 +25,7 @@ import {
 } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 
+import { AssistantSentAttachments, type SentAttachment } from './assistant-attachment-strip';
 import { AssistantCopyButton } from './assistant-copy-button';
 import { AssistantRunDiagnostics } from './assistant-diagnostics';
 import { AssistantMarkdown } from './assistant-markdown';
@@ -125,23 +127,29 @@ export function AssistantUserMessage({
   at,
   delivery = 'sent',
   onRetry,
+  attachments = [],
 }: {
   text: string;
   at: Date;
   delivery?: AssistantMessageDelivery;
   onRetry?: () => void;
+  /** The images sent with the message, shown above its bubble. */
+  attachments?: readonly SentAttachment[];
 }) {
   return (
     <div className="group/message flex flex-col items-end gap-1">
       <h3 className="sr-only">You</h3>
-      <div
-        className={cn(
-          'min-w-0 max-w-[min(80%,32.5rem)] rounded-2xl assistant-bubble px-3.5 py-2.5 text-sm/relaxed text-foreground',
-          delivery === 'failed' && 'opacity-70',
-        )}
-      >
-        <CollapsibleMessageText text={text} />
-      </div>
+      <AssistantSentAttachments attachments={attachments} />
+      {text ? (
+        <div
+          className={cn(
+            'min-w-0 max-w-[min(80%,32.5rem)] rounded-2xl assistant-bubble px-3.5 py-2.5 text-sm/relaxed text-foreground',
+            delivery === 'failed' && 'opacity-70',
+          )}
+        >
+          <CollapsibleMessageText text={text} />
+        </div>
+      ) : null}
       {delivery === 'sent' ? (
         <div className={cn('flex h-6 items-center gap-0.5 pe-1', REVEAL_ON_HOVER)}>
           <MessageTime at={at} />
@@ -154,8 +162,20 @@ export function AssistantUserMessage({
   );
 }
 
-export function AssistantUserMessageRow({ item }: { item: AssistantUserMessageItemDto }) {
-  return <AssistantUserMessage text={item.body.text} at={item.createdAt} />;
+export function AssistantUserMessageRow({
+  item,
+  attachmentPreviewUrl,
+}: {
+  item: AssistantUserMessageItemDto;
+  /** The thumbnail address of a sent image; null draws a generic tile. */
+  attachmentPreviewUrl?: (attachment: AssistantAttachmentRef) => string | null;
+}) {
+  const attachments = (item.body.attachments ?? []).map((attachment) => ({
+    id: attachment.id,
+    fileName: attachment.fileName,
+    previewUrl: attachment.previewable ? (attachmentPreviewUrl?.(attachment) ?? null) : null,
+  }));
+  return <AssistantUserMessage text={item.body.text} at={item.createdAt} attachments={attachments} />;
 }
 
 /**

@@ -17,6 +17,7 @@ import {
 } from '../document/document.render';
 import { readDocumentTemplate } from '../document/document.storage';
 import { getSelectedDocumentTemplate } from '../document/document.selected-template';
+import { isAttachmentFigureId, loadAttachmentFigureAssets } from './question-paper.attachments';
 import type { QuestionPaperContext } from './question-paper.context';
 import { createMathRenderer, type MathRenderer } from './question-paper.math';
 import {
@@ -52,10 +53,13 @@ const FINAL_DOCUMENT_MAX_BYTES = 25_000_000;
  */
 export async function loadFigureAssets(
   db: DatabaseExecutor,
-  input: { schoolId: string; paperId: string | null; content: QuestionPaper },
+  input: { schoolId: string; paperId: string | null; content: QuestionPaper; chatUserId?: string },
 ): Promise<FigureAssets> {
-  const ids = paperFigureIds(input.content);
-  if (ids.length === 0) return new Map();
+  const allIds = paperFigureIds(input.content);
+  if (allIds.length === 0) return new Map();
+  // Chat attachments are only in drafts (a saved version holds its own figures).
+  const attachmentIds = allIds.filter(isAttachmentFigureId);
+  const ids = allIds.filter((id) => !isAttachmentFigureId(id));
   const rows =
     input.paperId === null
       ? []
@@ -74,8 +78,10 @@ export async function loadFigureAssets(
   if (missing.length > 0) {
     throw rpcError.badRequest(`The paper uses figure images that do not belong to it: ${missing.join(', ')}.`);
   }
-  const assets = new Map<string, { dataUri: string }>();
-  let total = 0;
+  const assets = new Map<string, { dataUri: string }>(
+    await loadAttachmentFigureAssets(db, { schoolId: input.schoolId, chatUserId: input.chatUserId, ids: attachmentIds }),
+  );
+  let total = [...assets.values()].reduce((sum, asset) => sum + asset.dataUri.length, 0);
   for (const id of ids) {
     const row = known.get(id)!;
     const bytes = await getObjectBytes(row.s3Key);
@@ -92,7 +98,7 @@ export async function loadFigureAssets(
 /** Renders the body fragment of a paper, loading its figures. See {@link renderQuestionPaperBodyHtml}. */
 export async function renderQuestionPaperBody(
   db: DatabaseExecutor,
-  input: { schoolId: string; paperId: string | null; content: QuestionPaper; math?: MathRenderer },
+  input: { schoolId: string; paperId: string | null; content: QuestionPaper; math?: MathRenderer; chatUserId?: string },
 ): Promise<RenderedBody> {
   const figures = await loadFigureAssets(db, input);
   return renderQuestionPaperBodyHtml(input.content, { figures, math: input.math ?? createMathRenderer() });

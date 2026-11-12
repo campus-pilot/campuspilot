@@ -13,6 +13,7 @@ import {
   assistantRunHandoverKey,
   type AssistantControlHandler,
 } from './control-constants';
+import { sweepUnsentAttachments } from './attachments';
 import type { AssistantControlService } from './control';
 import { db as defaultDb, type AssistantDatabase } from './db';
 import { log } from './log';
@@ -300,7 +301,9 @@ export async function sweepAssistantOutbox(db: AssistantDatabase = defaultDb) {
   const approvals = await approvalsToHandOver(db);
   let approvalsSent = 0;
   for (const approvalId of approvals) if (await handOverApprovalResolution(approvalId, db)) approvalsSent += 1;
+  const attachments = await sweepUnsentAttachments(db);
   return {
+    attachmentsDeleted: attachments.deleted,
     runs: runs.toSend.length,
     runsSent,
     runsExpired: runs.expired,

@@ -1,0 +1,147 @@
+import type { Database, DatabaseExecutor } from '@campuspilot/db';
+import { assistantAttachmentTable } from '@campuspilot/db/schema/assistant';
+import { examQuestionPaperFigureTable } from '@campuspilot/db/schema/exam-question-paper';
+import type { QuestionPaper } from '@campuspilot/question-paper/schema';
+import { walkPaper } from '@campuspilot/question-paper/walk';
+import { and, eq, inArray, isNotNull } from 'drizzle-orm';
+
+import { rpcError } from '../../../errors';
+import { normalizeFigureImage } from '../../../files/image-derivative';
+import { findPaper } from './question-paper.records';
+import type { PaperScope } from './question-paper.scope';
+import { addQuestionPaperFigure } from './question-paper.service';
+import { getObjectBytes } from './question-paper.storage';
+
+/**
+ * Chat attachments as figures (design B6/E7). In a chat the agent can put an
+ * image the user attached (`asat_` id) into a figure block. Until a version is
+ * saved the id stays as written: a draft is previewed straight from the
+ * attachment. Saving copies each attachment into the paper's own figure rows
+ * (`qpf_`, normalised, counted against the 30 figure cap) and rewrites the ids,
+ * so a stored version never depends on a chat attachment, which is deleted with
+ * its conversation.
+ *
+ * Who may use an attachment is its owner: the chat user. Only the in-app
+ * assistant (and the draft preview of the person who owns the chat) pass a
+ * `chatUserId`; an external client never has one, so `asat_` ids are refused
+ * there.
+ */
+
+export const isAttachmentFigureId = (imageId: string) => imageId.startsWith('asat_');
+
+/** The `asat_` ids a document uses, once each. */
+export function attachmentFigureIds(content: QuestionPaper): string[] {
+  const ids = new Set<string>();
+  walkPaper(content, {
+    block(block) {
+      if (block.type === 'figure' && isAttachmentFigureId(block.imageId)) ids.add(block.imageId);
+    },
+  });
+  return [...ids];
+}
+
+type UsableRow = typeof assistantAttachmentTable.$inferSelect;
+
+/** The user's sent attachments among `ids` in this school, by id. */
+async function usableAttachments(
+  db: DatabaseExecutor,
+  input: { schoolId: string; chatUserId: string; ids: readonly string[] },
+): Promise<Map<string, UsableRow>> {
+  if (input.ids.length === 0) return new Map();
+  const rows = await db
+    .select()
+    .from(assistantAttachmentTable)
+    .where(
+      and(
+        inArray(assistantAttachmentTable.id, [...input.ids]),
+        eq(assistantAttachmentTable.schoolId, input.schoolId),
+        eq(assistantAttachmentTable.userId, input.chatUserId),
+        isNotNull(assistantAttachmentTable.itemId),
+      ),
+    );
+  return new Map(rows.map((row) => [row.id, row]));
+}
+
+/** Why an `asat_` figure id cannot be used, or null when it can. */
+export async function attachmentFigureProblems(
+  db: DatabaseExecutor,
+  input: { schoolId: string; chatUserId: string | undefined; ids: readonly string[] },
+): Promise<Map<string, string>> {
+  const problems = new Map<string, string>();
+  if (input.ids.length === 0) return problems;
+  if (!input.chatUserId) {
+    for (const id of input.ids) problems.set(id, 'Figure images from chat attachments can only be used inside the in-app assistant chat. Use a figure_placeholder.');
+    return problems;
+  }
+  const usable = await usableAttachments(db, { schoolId: input.schoolId, chatUserId: input.chatUserId, ids: input.ids });
+  for (const id of input.ids) {
+    const row = usable.get(id);
+    if (!row) problems.set(id, 'This is not an image the user attached in a chat message.');
+    else if (row.derivativeStatus !== 'ready') {
+      problems.set(id, `${row.originalName} is in a format that cannot be printed (for example HEIC). Ask the user to attach a JPEG or PNG.`);
+    }
+  }
+  return problems;
+}
+
+/** Print-ready data URIs of attachments, for previewing a draft. */
+export async function loadAttachmentFigureAssets(
+  db: DatabaseExecutor,
+  input: { schoolId: string; chatUserId: string | undefined; ids: readonly string[] },
+): Promise<Map<string, { dataUri: string }>> {
+  const problems = await attachmentFigureProblems(db, input);
+  if (problems.size > 0) throw rpcError.badRequest([...problems.values()][0]!);
+  const rows = await usableAttachments(db, { schoolId: input.schoolId, chatUserId: input.chatUserId!, ids: input.ids });
+  const assets = new Map<string, { dataUri: string }>();
+  for (const id of input.ids) {
+    const figure = await normalizeFigureImage(await getObjectBytes(rows.get(id)!.s3Key));
+    assets.set(id, { dataUri: `data:${figure.contentType};base64,${figure.bytes.toString('base64')}` });
+  }
+  return assets;
+}
+
+/**
+ * Copies every attachment the document uses into the paper as a figure (once
+ * per attachment: a retried save reuses the figure it made) and returns the
+ * document with the figure ids. The paper row is created if it does not exist
+ * yet (a first version saved from chat).
+ */
+export async function convertAttachmentFigures(
+  db: Database,
+  input: { scope: PaperScope; userId: string; content: QuestionPaper },
+): Promise<QuestionPaper> {
+  const ids = attachmentFigureIds(input.content);
+  if (ids.length === 0) return input.content;
+  const usable = await usableAttachments(db, { schoolId: input.scope.key.schoolId, chatUserId: input.userId, ids });
+  const figureIdOf = new Map<string, string>();
+  for (const id of ids) {
+    const row = usable.get(id);
+    if (!row) throw rpcError.badRequest('A figure uses an image that is not one of the chat attachments of this user.');
+    const paper = await findPaper(db, input.scope.key);
+    const [existing] = paper
+      ? await db
+          .select({ id: examQuestionPaperFigureTable.id })
+          .from(examQuestionPaperFigureTable)
+          .where(and(eq(examQuestionPaperFigureTable.paperId, paper.id), eq(examQuestionPaperFigureTable.sourceAttachmentId, id)))
+          .limit(1)
+      : [];
+    if (existing) {
+      figureIdOf.set(id, existing.id);
+      continue;
+    }
+    const figure = await addQuestionPaperFigure(db, {
+      scope: input.scope,
+      userId: input.userId,
+      bytes: await getObjectBytes(row.s3Key),
+      sourceAttachmentId: id,
+    });
+    figureIdOf.set(id, figure.id);
+  }
+  const copy = structuredClone(input.content);
+  walkPaper(copy, {
+    block(block) {
+      if (block.type === 'figure') block.imageId = figureIdOf.get(block.imageId) ?? block.imageId;
+    },
+  });
+  return copy;
+}

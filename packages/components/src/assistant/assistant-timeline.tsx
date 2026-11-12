@@ -1,3 +1,4 @@
+import type { AssistantAttachmentRef } from '@campuspilot/assistant-contract/attachments';
 import type { AssistantViewItemDto } from '@campuspilot/assistant-contract/dto';
 import {
   MessageScroller,
@@ -42,6 +43,7 @@ function rowSpacing(row: AssistantTimelineRow, previous: AssistantTimelineRow | 
     case 'live':
       return 'pb-1.5';
     case 'view':
+    case 'card':
       return 'pt-1 pb-4';
     case 'reply':
       return row.meta ? 'pb-4' : 'pb-2';
@@ -64,6 +66,10 @@ export type AssistantTimelineProps = {
   renderReply: (itemId: string, meta: boolean) => ReactNode;
   /** Renders a view with the app's components (records fetch their own data). */
   renderView: (item: AssistantViewItemDto) => ReactNode;
+  /** Renders a tool call that is a card of its own (a question paper draft). */
+  renderCard: (row: Extract<AssistantTimelineRow, { kind: 'card' }>) => ReactNode;
+  /** The thumbnail address of an image the user sent; null draws a generic tile. */
+  attachmentPreviewUrl?: (attachment: AssistantAttachmentRef) => string | null;
   /**
    * Asks a failed or stopped turn's question again. Offered on the latest
    * turn only, and only while this is set, so the caller withholds it while
@@ -78,7 +84,7 @@ export type AssistantTimelineProps = {
   gutterClassName?: string;
 };
 
-type RowRenderers = Pick<AssistantTimelineProps, 'renderReply' | 'renderView' | 'onRetry' | 'stoppingRunId'>;
+type RowRenderers = Pick<AssistantTimelineProps, 'renderReply' | 'renderView' | 'renderCard' | 'attachmentPreviewUrl' | 'onRetry' | 'stoppingRunId'>;
 
 /** The "Try again" action of a notice, when its turn may be asked again and the caller allows it now. */
 function retryOf(text: string | null, onRetry: AssistantTimelineProps['onRetry']) {
@@ -88,7 +94,7 @@ function retryOf(text: string | null, onRetry: AssistantTimelineProps['onRetry']
 function TimelineRow({ row, ...renderers }: RowRenderers & { row: AssistantTimelineRow }) {
   switch (row.kind) {
     case 'user':
-      return <AssistantUserMessageRow item={row.item} />;
+      return <AssistantUserMessageRow item={row.item} attachmentPreviewUrl={renderers.attachmentPreviewUrl} />;
     case 'reply':
       return renderers.renderReply(row.itemId, row.meta);
     case 'activity':
@@ -97,6 +103,8 @@ function TimelineRow({ row, ...renderers }: RowRenderers & { row: AssistantTimel
       return <AssistantApprovalCard call={row.call} />;
     case 'view':
       return renderers.renderView(row.item);
+    case 'card':
+      return renderers.renderCard(row);
     case 'live':
       return <AssistantLiveStatus label={row.label} />;
     case 'notice':

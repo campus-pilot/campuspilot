@@ -1,4 +1,8 @@
-import { assistantConversationTable, assistantModelRequestTable } from '@campuspilot/db/schema/assistant';
+import {
+  assistantConversationTable,
+  assistantModelRequestTable,
+  type AssistantUserMessageBody,
+} from '@campuspilot/db/schema/assistant';
 import { createLogger } from '@campuspilot/logger';
 import { asc, eq } from 'drizzle-orm';
 import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
@@ -30,6 +34,7 @@ import {
   MAX_MODEL_STEPS,
   MODEL_STEP_RETRY,
   RECOVERED_OUTPUT_CUT_NOTE,
+  type AssistantConversationDeps,
   type RunAccessCheck,
 } from './conversation';
 import {
@@ -116,7 +121,13 @@ async function arrange({
   conversationModel = 'conversation-start-model',
   configured = true,
   checkAccess = async () => ({ allowed: true as const }),
+  body,
+  loadAttachment,
 }: {
+  /** More fields of the user message's body (attachments, a seed). */
+  body?: Partial<AssistantUserMessageBody>;
+  /** The worker's attachment loader (missing by default, as in a deployment with none). */
+  loadAttachment?: AssistantConversationDeps['loadAttachment'];
   script?: FakeModelStep[];
   whenExhausted?: FakeModelStep;
   providerModel?: string;
@@ -127,10 +138,10 @@ async function arrange({
   checkAccess?: RunAccessCheck;
 } = {}) {
   const provider = createFakeProvider({ model: providerModel, script, whenExhausted });
-  const turn = await seedTurn({ text: QUESTION, provider: provider.id, conversationModel });
+  const turn = await seedTurn({ text: QUESTION, provider: provider.id, conversationModel, body });
   const events = await watchEvents(turn.conversationId);
   onTestFinished(() => events.close());
-  const processRun = createRunProcessor({ providers: fakeProviderRegistry(configured ? provider : null), log, checkAccess });
+  const processRun = createRunProcessor({ providers: fakeProviderRegistry(configured ? provider : null), log, checkAccess, loadAttachment });
   /** Invokes the handler, as Restate does; pass a context with a journal to replay. */
   const invoke = (ctx: FakeRunContext = createFakeRunContext()) => ({ ctx, done: processRun(ctx, turn.input) });
   return { provider, turn, events, invoke };
@@ -153,6 +164,53 @@ const changes = <T>(values: T[]) => values.filter((value, index) => index === 0 
 
 const writeCall = { id: 'tu_write', name: updateStudent.modelName, input: { studentId: 'stu_1', name: 'Asha R.' } };
 const readCall = { id: 'tu_read', name: listStudents.modelName, input: { page: 1 } };
+
+describe('a message with images', () => {
+  const attachment = (id: string, fileName: string) => ({ id, fileName, contentType: 'image/jpeg', byteSize: 3, width: 1, height: 1, previewable: true });
+
+  it('stores markers only, and shows the model the images in order with their labels', async () => {
+    const loaded: string[] = [];
+    const { provider, turn, invoke } = await arrange({
+      script: [fakeReply({ text: 'I can see two pages.' })],
+      body: { attachments: [attachment('asat_1', 'page1.jpg'), attachment('asat_2', 'page2.jpg')] },
+      loadAttachment: async (id) => {
+        loaded.push(id);
+        return { kind: 'image', bytes: new Uint8Array([1, 2, 3]), mimeType: 'image/jpeg' };
+      },
+    });
+
+    await invoke().done;
+
+    const { transcript, run } = await readTurn(turn);
+    expect(run.status).toBe('completed');
+    // The stored transcript is small and provider-neutral: markers, never bytes.
+    expect(transcript[0]!.content).toEqual([
+      { type: 'campuspilot_attachment', attachmentId: 'asat_1', fileName: 'page1.jpg', contentType: 'image/jpeg', ordinal: 1, total: 2 },
+      { type: 'campuspilot_attachment', attachmentId: 'asat_2', fileName: 'page2.jpg', contentType: 'image/jpeg', ordinal: 2, total: 2 },
+      { type: 'text', text: QUESTION },
+    ]);
+    // The model got labelled images in the order attached, then the words.
+    expect(provider.calls[0]!.transcript[0]!.content).toEqual([
+      { type: 'text', text: 'Attachment 1 of 2: page1.jpg' },
+      { type: 'image', mimeType: 'image/jpeg', byteLength: 3 },
+      { type: 'text', text: 'Attachment 2 of 2: page2.jpg' },
+      { type: 'image', mimeType: 'image/jpeg', byteLength: 3 },
+      { type: 'text', text: QUESTION },
+    ]);
+    expect(loaded.sort()).toEqual(['asat_1', 'asat_2']);
+  });
+
+  it('tells the model when an image is gone instead of failing the turn', async () => {
+    const { provider, turn, invoke } = await arrange({
+      script: [fakeReply({ text: 'That page is missing.' })],
+      body: { attachments: [attachment('asat_9', 'lost.jpg')] },
+      loadAttachment: async () => ({ kind: 'missing' }),
+    });
+    await invoke().done;
+    expect((await readTurn(turn)).run.status).toBe('completed');
+    expect(JSON.stringify(provider.calls[0]!.transcript[0]!.content)).toContain('is no longer available');
+  });
+});
 
 describe('a text-only reply', () => {
   it('completes, and records the model the provider reported rather than the conversation’s', async () => {

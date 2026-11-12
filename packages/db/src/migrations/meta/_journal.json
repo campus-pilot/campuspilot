@@ -428,6 +428,20 @@
       "when": 1794447772239,
       "tag": "0060_question-paper-model-requests",
       "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1794449607779,
+      "tag": "0061_assistant-attachments",
+      "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1794449615518,
+      "tag": "0062_demo-purge-assistant-attachments",
+      "breakpoints": true
     }
   ]
 }

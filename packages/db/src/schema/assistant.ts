@@ -1,3 +1,7 @@
+import type {
+  AssistantAttachmentRef,
+  AssistantMessageSeed,
+} from "@campuspilot/assistant-contract/attachments";
 import type { AssistantView } from "@campuspilot/assistant-contract/views";
 import { sql } from "drizzle-orm";
 import {
@@ -110,6 +114,16 @@ export const assistantTranscriptRoleEnum = pgEnum("assistant_transcript_role", [
   "assistant",
 ]);
 
+/**
+ * Whether the server made a thumbnail and a model copy of an attachment.
+ * Its own enum (not the question paper page one) because that module imports
+ * this one; the values mean the same.
+ */
+export const assistantAttachmentDerivativeStatusEnum = pgEnum(
+  "assistant_attachment_derivative_status",
+  ["ready", "unsupported"],
+);
+
 /** Where the user was when they wrote a message; a hint for the model only. */
 export type AssistantPageContext = {
   path: string;
@@ -119,6 +133,10 @@ export type AssistantPageContext = {
 export type AssistantUserMessageBody = {
   text: string;
   pageContext?: AssistantPageContext;
+  /** Images sent with the message, in order; references only, never bytes. */
+  attachments?: AssistantAttachmentRef[];
+  /** The screen a new conversation was started from. */
+  seed?: AssistantMessageSeed;
 };
 
 export type AssistantAssistantMessageBody = {
@@ -329,6 +347,80 @@ export const assistantItemTable = pgTable(
     unique("assistant_item_conversation_key_unique").on(table.conversationId, table.itemKey),
     index("assistant_item_conversation_sequence_idx").on(table.conversationId, table.sequence),
     index("assistant_item_run_idx").on(table.runId),
+  ],
+);
+
+/**
+ * An image attached to a chat message (decisions D30, D38). It is uploaded
+ * before the message exists (`item_id` null, "unsent") and bound to the user
+ * message in the transaction that saves the message. Bytes live in object
+ * storage under `schools/{schoolId}/assistant/attachments/{id}/`; transcripts
+ * hold a provider-neutral marker with the id, never the bytes, so a long chat
+ * stays small and old images can be dropped from the model's context.
+ *
+ * Unsent attachments older than a day are deleted by the API's outbox sweep
+ * with their objects. Deleting a conversation, or its school, deletes the rows
+ * (cascade); the sweep of the school prefix removes the objects.
+ */
+export const assistantAttachmentTable = pgTable(
+  "assistant_attachment",
+  {
+    id: text("id")
+      .primaryKey()
+      .$default(() => generateId("assistantAttachment")),
+    schoolId: text("school_id")
+      .notNull()
+      .references(() => schoolTable.id, { onDelete: "cascade" }),
+    /** A plain value without a foreign key, like every assistant row. */
+    userId: text("user_id").notNull(),
+    /** Null until the message is sent. */
+    conversationId: text("conversation_id").references(
+      () => assistantConversationTable.id,
+      { onDelete: "cascade" },
+    ),
+    /** The user message that carries it; null until sent. */
+    itemId: text("item_id").references(() => assistantItemTable.id, {
+      onDelete: "cascade",
+    }),
+    /** Order within the message, 1-based; null until sent. */
+    position: integer("position"),
+    /** The client's file name, display only, sanitised. */
+    originalName: text("original_name").notNull(),
+    contentType: text("content_type").notNull(),
+    byteSize: integer("byte_size").notNull(),
+    sha256: text("sha256").notNull(),
+    /** Null when the image could not be decoded. */
+    width: integer("width"),
+    height: integer("height"),
+    s3Key: text("s3_key").notNull().unique(),
+    /** `unsupported` when the server could not decode it (HEIC): only the original exists. */
+    derivativeStatus: assistantAttachmentDerivativeStatusEnum(
+      "derivative_status",
+    ).notNull(),
+    thumbS3Key: text("thumb_s3_key"),
+    modelS3Key: text("model_s3_key"),
+    modelContentType: text("model_content_type"),
+    modelByteSize: integer("model_byte_size"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    /** Set when bound to a message. */
+    attachedAt: timestamp("attached_at", { withTimezone: true }),
+  },
+  (table) => [
+    check(
+      "assistant_attachment_binding_check",
+      sql`(${table.itemId} is null) = (${table.conversationId} is null) and (${table.itemId} is null) = (${table.attachedAt} is null) and (${table.itemId} is null) = (${table.position} is null)`,
+    ),
+    check(
+      "assistant_attachment_derivative_check",
+      sql`(${table.derivativeStatus} = 'ready') = (${table.thumbS3Key} is not null and ${table.modelS3Key} is not null)`,
+    ),
+    index("assistant_attachment_unsent_idx")
+      .on(table.schoolId, table.userId, table.createdAt)
+      .where(sql`${table.itemId} is null`),
+    index("assistant_attachment_item_idx").on(table.itemId),
+    index("assistant_attachment_conversation_idx").on(table.conversationId),
   ],
 );
 

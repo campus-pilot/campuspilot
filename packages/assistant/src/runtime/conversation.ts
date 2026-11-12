@@ -23,6 +23,7 @@ import {
   type AssistantConversationHandlers,
   type ProcessRunInput,
 } from './contract';
+import { buildModelContext, type ModelContextDeps } from './context';
 import { buildAssistantPrompt, type AssistantConversationFacts } from './prompt';
 import type { ProviderRegistry } from './providers/registry';
 import { billedUsageOf, type ModelProvider, type ModelToolResult, type TranscriptEntry } from './providers/types';
@@ -105,6 +106,12 @@ export type AssistantConversationDeps = {
   providers: ProviderRegistry;
   log: Logger;
   checkAccess: RunAccessCheck;
+  /**
+   * Loads an attached image for a model request (see `context.ts`). Injected
+   * by `apps/worker` so the turn loop reads no school table and no object
+   * storage itself; a test without attachments may omit it.
+   */
+  loadAttachment?: ModelContextDeps['loadAttachment'];
 };
 
 type RunFailure = { code: string; message: string; detail?: string };
@@ -418,7 +425,13 @@ export function createRunProcessor(deps: AssistantConversationDeps) {
     }
 
     const catalog = await loadToolCatalog(await requireToken(run.runId));
-    const transcript = await store.loadTranscript(db, run.conversationId);
+    // The stored transcript holds markers and whole old results; the model gets
+    // the shortened view (see `buildModelContext`). Nothing stored changes.
+    const transcript = await buildModelContext(
+      (await store.loadTranscript(db, run.conversationId)) as TranscriptEntry[],
+      provider,
+      { loadAttachment: deps.loadAttachment ?? (async () => ({ kind: 'missing' })) },
+    );
     const itemKey = assistantMessageItemKey(run.runId, step);
 
     let itemPromise: ReturnType<typeof store.insertItem> | null = null;
@@ -453,7 +466,7 @@ export function createRunProcessor(deps: AssistantConversationDeps) {
       result = await provider.step({
         prompt: buildAssistantPrompt(run.facts),
         tools: catalog.ordered,
-        transcript: transcript as TranscriptEntry[],
+        transcript,
         onText,
         isStopRequested: () => isAssistantRunStopSignalled(run.runId),
       });

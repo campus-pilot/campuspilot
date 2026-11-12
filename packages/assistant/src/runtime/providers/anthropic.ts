@@ -1,10 +1,13 @@
 import Anthropic from '@anthropic-ai/sdk';
 
 import type { AssistantUserMessageBody } from '@campuspilot/db/schema/assistant';
-import { buildUserTranscriptContent } from '../../transcript';
+import { buildUserTranscriptContent, type AttachmentMarker } from '../../transcript';
+import { attachmentLabel, attachmentNote } from '../context';
 import type { AssistantPrompt } from '../prompt';
 import { modelToolDescription, type AssistantTool } from '../tools';
 import type {
+  AttachmentFile,
+  ContextAdapter,
   ModelFailureKind,
   ModelProvider,
   ModelStepInput,
@@ -16,6 +19,7 @@ import type {
   StructuredRequest,
   StructuredResult,
 } from './types';
+import { ANTHROPIC_IMAGE_MIME_TYPES } from './image-types';
 import { withBilledUsage } from './types';
 
 /**
@@ -225,8 +229,7 @@ export async function streamAssistantResponse({
   }
 }
 
-/** Image media types the Claude API reads. It does not read HEIC/HEIF (decision D46). */
-export const ANTHROPIC_IMAGE_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'] as const;
+export { ANTHROPIC_IMAGE_MIME_TYPES };
 
 function anthropicContentOf(part: StructuredPart): Anthropic.Beta.Messages.BetaContentBlockParam {
   if (part.type === 'text') return { type: 'text', text: part.text };
@@ -316,6 +319,60 @@ export function anthropicFailureKind(error: unknown): ModelFailureKind {
   return 'unknown';
 }
 
+type AnthropicBlock = { type?: string; id?: string; name?: string; input?: unknown; tool_use_id?: string; content?: unknown };
+
+const isToolResultBlock = (block: unknown): block is AnthropicBlock & { type: 'tool_result' } =>
+  (block as AnthropicBlock | null)?.type === 'tool_result';
+
+/** Text of a tool result block's content (ours is always a string; blocks are joined). */
+const toolResultText = (content: unknown): string =>
+  typeof content === 'string'
+    ? content
+    : Array.isArray(content)
+      ? content.map((block) => (typeof (block as { text?: unknown }).text === 'string' ? (block as { text: string }).text : '')).join('')
+      : '';
+
+/**
+ * Pruning and attachment rules of Claude's transcript (design G3). A human
+ * turn is a user entry without `tool_result` blocks. Only the `content` of a
+ * `tool_result` changes when it is stubbed: `tool_use_id` and `is_error`
+ * stay, so every `tool_use` keeps its result.
+ */
+export const anthropicContext: ContextAdapter = {
+  isHumanTurn: (entry) => entry.role === 'user' && !entry.content.some(isToolResultBlock),
+  toolNamesByUseId(entries) {
+    const names = new Map<string, string>();
+    for (const entry of entries) {
+      for (const block of entry.content as AnthropicBlock[]) {
+        if (block?.type === 'tool_use' && block.id && block.name) names.set(block.id, block.name);
+      }
+    }
+    return names;
+  },
+  stubToolResults(entry, toolNames, stub, minChars) {
+    if (!entry.content.some(isToolResultBlock)) return entry;
+    return {
+      ...entry,
+      content: entry.content.map((block) => {
+        if (!isToolResultBlock(block)) return block;
+        const chars = toolResultText(block.content).length;
+        if (chars < minChars) return block;
+        return { ...block, content: stub({ toolName: toolNames.get(block.tool_use_id ?? '') ?? 'a tool', chars }) };
+      }),
+    };
+  },
+  materializeAttachment(marker: AttachmentMarker, file: AttachmentFile) {
+    if (file.kind !== 'image') return [{ type: 'text', text: attachmentNote(marker, file.kind) }];
+    const mediaType = ANTHROPIC_IMAGE_MIME_TYPES.find((supported) => supported === file.mimeType);
+    if (!mediaType) return [{ type: 'text', text: attachmentNote(marker, 'unreadable') }];
+    return [
+      { type: 'text', text: attachmentLabel(marker) },
+      { type: 'image', source: { type: 'base64', media_type: mediaType, data: Buffer.from(file.bytes).toString('base64') } },
+    ];
+  },
+  stubAttachment: (marker) => [{ type: 'text', text: attachmentNote(marker, 'old') }],
+};
+
 function toolUsesOf(content: readonly unknown[]): ModelToolUse[] {
   return content.flatMap((block) => {
     const candidate = block as { type?: string; id?: string; name?: string; input?: unknown };
@@ -331,6 +388,7 @@ export function createAnthropicProvider({ apiKey, model }: { apiKey: string; mod
     id: 'anthropic',
     model,
     imageMimeTypes: ANTHROPIC_IMAGE_MIME_TYPES,
+    context: anthropicContext,
     generateStructured: (input) => generateAnthropicStructured(client, model, input),
     async step({ prompt, tools, transcript, onText, isStopRequested }: ModelStepInput): Promise<ModelStepResult> {
       const result = await streamAssistantResponse({

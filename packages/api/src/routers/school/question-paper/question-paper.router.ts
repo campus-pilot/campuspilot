@@ -159,7 +159,9 @@ export const schoolQuestionPaperRouter = {
     .handler(async ({ context, input }) => {
       try {
         const scope = await resolvePaperScope(context.db, input);
-        const checked = await checkQuestionPaperDraft(context.db, scope, input.content);
+        // Attachments of the chat user are valid figures only inside the in-app assistant.
+        const chatUserId = context.principal.authMethod === 'assistant' ? userId(context) : undefined;
+        const checked = await checkQuestionPaperDraft(context.db, scope, input.content, { chatUserId });
         if (!checked.ok) {
           return { valid: false, errors: checked.errors, warnings: [], total: null, planMaxMarks: scope.planMaxMarks, draftId: null, placeholderFigures: 0, characters: JSON.stringify(input.content).length };
         }
@@ -330,12 +332,14 @@ export const schoolQuestionPaperRouter = {
     .handler(async ({ context, input }) => {
       try {
         const scope = await resolvePaperScope(context.db, input);
-        const checked = await checkQuestionPaperDraft(context.db, scope, input.content);
+        // A person previewing a draft from their own chat may see their attachments as figures.
+        const chatUserId = userId(context);
+        const checked = await checkQuestionPaperDraft(context.db, scope, input.content, { chatUserId });
         if (!checked.ok) return { html: '', errors: checked.errors, warnings: [], templateName: null };
         const template = await selectedQuestionPaperTemplate(context.db, input.schoolId);
         if (!template) throw templateMissingError();
         const paper = await findPaper(context.db, scope.key);
-        const body = await renderQuestionPaperBody(context.db, { schoolId: input.schoolId, paperId: paper?.id ?? null, content: checked.content });
+        const body = await renderQuestionPaperBody(context.db, { schoolId: input.schoolId, paperId: paper?.id ?? null, content: checked.content, chatUserId });
         const rendered = await buildQuestionPaperContext(context.db, scope, { content: checked.content, versionNo: null, totalMarks: checked.total });
         return {
           html: renderQuestionPaperDocument({ template, context: rendered, body }),

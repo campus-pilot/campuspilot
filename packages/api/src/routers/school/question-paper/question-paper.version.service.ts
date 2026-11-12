@@ -25,6 +25,7 @@ import { convertDocumentPdf } from '../document/document.render';
 import { documentDownloadUrl, persistDocumentObject } from '../document/document.storage';
 import { lifecycleWhere } from '../exam/exam.scope';
 import { examLifecycleTable } from '@campuspilot/db/schema/exam';
+import { attachmentFigureIds, attachmentFigureProblems, convertAttachmentFigures, isAttachmentFigureId } from './question-paper.attachments';
 import { buildQuestionPaperContext } from './question-paper.context';
 import type { PaperKey } from './question-paper.dto';
 import { createMathRenderer, validatePaperMath } from './question-paper.math';
@@ -65,11 +66,17 @@ export type DraftCheck =
   | { ok: false; errors: QuestionPaperIssue[] };
 
 /**
- * A figure `imageId` must name a stored figure of this paper. Chat
- * attachments (`asat_` ids) become figures when a version is saved from chat;
- * that conversion arrives with the chat attachments and is refused until then.
+ * A figure `imageId` must name a stored figure of this paper, or a chat
+ * attachment of `chatUserId` (`asat_` id; see `question-paper.attachments.ts`):
+ * an attachment is checked here and copied into a figure only when a version
+ * is saved.
  */
-async function figureIssues(db: DatabaseExecutor, paper: PaperRow | undefined, content: QuestionPaper): Promise<QuestionPaperIssue[]> {
+async function figureIssues(
+  db: DatabaseExecutor,
+  input: { schoolId: string; paper: PaperRow | undefined; chatUserId: string | undefined },
+  content: QuestionPaper,
+): Promise<QuestionPaperIssue[]> {
+  const { paper } = input;
   const refs: Array<{ path: string; imageId: string }> = [];
   walkPaper(content, {
     block(block, path) {
@@ -87,9 +94,15 @@ async function figureIssues(db: DatabaseExecutor, paper: PaperRow | undefined, c
         ).map((row) => row.id),
       )
     : new Set<string>();
+  const problems = await attachmentFigureProblems(db, {
+    schoolId: input.schoolId,
+    chatUserId: input.chatUserId,
+    ids: attachmentFigureIds(content),
+  });
   return refs.flatMap(({ path, imageId }): QuestionPaperIssue[] => {
-    if (imageId.startsWith('asat_')) {
-      return [{ path, message: 'Figure images from chat attachments cannot be used yet. Use a figure_placeholder.' }];
+    if (isAttachmentFigureId(imageId)) {
+      const problem = problems.get(imageId);
+      return problem ? [{ path, message: problem }] : [];
     }
     return stored.has(imageId) ? [] : [{ path, message: 'This figure image does not belong to this paper.' }];
   });
@@ -103,7 +116,13 @@ async function figureIssues(db: DatabaseExecutor, paper: PaperRow | undefined, c
  * and the AI job, so a draft that validated saves and a save cannot be
  * weaker than a validation.
  */
-export async function checkQuestionPaperDraft(db: DatabaseExecutor, scope: PaperScope, raw: unknown): Promise<DraftCheck> {
+export async function checkQuestionPaperDraft(
+  db: DatabaseExecutor,
+  scope: PaperScope,
+  raw: unknown,
+  /** The chat user whose attachments the document may use as figures; omitted outside the in-app assistant. */
+  options: { chatUserId?: string } = {},
+): Promise<DraftCheck> {
   const characters = JSON.stringify(raw)?.length ?? 0;
   if (characters > QUESTION_PAPER_LIMITS.jsonChars) {
     return { ok: false, errors: [{ path: '', message: `The paper is ${characters.toLocaleString('en-IN')} characters of JSON; the limit is ${QUESTION_PAPER_LIMITS.jsonChars.toLocaleString('en-IN')}.` }] };
@@ -113,7 +132,7 @@ export async function checkQuestionPaperDraft(db: DatabaseExecutor, scope: Paper
   const content = normalized.value;
   const errors = [
     ...validatePaperMath(content, createMathRenderer()),
-    ...(await figureIssues(db, await findPaper(db, scope.key), content)),
+    ...(await figureIssues(db, { schoolId: scope.key.schoolId, paper: await findPaper(db, scope.key), chatUserId: options.chatUserId }, content)),
   ];
   if (errors.length > 0) return { ok: false, errors };
   let placeholderFigures = 0;
@@ -270,8 +289,16 @@ export async function saveQuestionPaperVersion(
     if (done) return savedResult(done, scope.planMaxMarks);
   }
   assertPaperWritable(scope);
-  const checked = await checkQuestionPaperDraft(db, scope, input.content);
+  // Chat attachments may be figures only when an agent saves from a chat.
+  const chatUserId = source.kind === 'agent' && source.conversationId ? input.userId : undefined;
+  let checked = await checkQuestionPaperDraft(db, scope, input.content, { chatUserId });
   if (!checked.ok) throw invalidPaperError(checked.errors);
+  if (attachmentFigureIds(checked.content).length > 0) {
+    // Copy the attachments into the paper and store the version with its own
+    // figure ids; the document is checked again as it will be stored.
+    checked = await checkQuestionPaperDraft(db, scope, await convertAttachmentFigures(db, { scope, userId: input.userId, content: checked.content }));
+    if (!checked.ok) throw invalidPaperError(checked.errors);
+  }
   const template = await selectedQuestionPaperTemplate(db, scope.key.schoolId);
   if (!template) throw templateMissingError();
 

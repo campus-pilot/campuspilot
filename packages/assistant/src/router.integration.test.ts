@@ -6,6 +6,7 @@ import { schoolMonthSpendUsd } from '@campuspilot/api/assistant/spend';
 import { getRedisClient } from '@campuspilot/redis/client';
 import {
   assistantApprovalTable,
+  assistantAttachmentTable,
   assistantConversationTable,
   assistantItemTable,
   assistantModelRequestTable,
@@ -18,6 +19,7 @@ import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 
 import { loadAssistantAccess, type AssistantAccessDecision } from './access';
 import { db } from './db';
+import { sweepUnsentAttachments } from './attachments';
 import { configureDispatcher } from './dispatch';
 import { generateId } from './ids';
 import { assistantRouter } from './router';
@@ -49,6 +51,17 @@ vi.mock('@campuspilot/api/assistant/token', () => ({
     await during?.();
     return { token: 'delegated-token-for-tests', expiresAt: new Date(Date.now() + 60_000) };
   }),
+}));
+/** Object storage is not part of this test project; attachment rows are enough for the router. */
+const storage = vi.hoisted(() => ({ deleted: [] as string[] }));
+vi.mock('@campuspilot/api/routers/school/question-paper/question-paper.storage', () => ({
+  deleteObjectsBestEffort: vi.fn(async (keys: Array<string | null>) => {
+    storage.deleted.push(...keys.filter((key): key is string => Boolean(key)));
+  }),
+  getObjectBytes: vi.fn(),
+  putObject: vi.fn(),
+  pageImageUrl: vi.fn(),
+  QUESTION_PAPER_IMAGE_CACHE_SECONDS: 240,
 }));
 vi.mock('./access', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./access')>()),
@@ -588,5 +601,128 @@ describe('access', () => {
       available: true,
       unavailableReason: null,
     });
+  });
+});
+
+describe('images attached to a message', () => {
+  /** An uploaded, unsent attachment of a user (its row; the router never reads the object). */
+  async function upload(owner: { schoolId: string; userId: string }, name: string, overrides: Partial<typeof assistantAttachmentTable.$inferInsert> = {}) {
+    const attachmentId = `asat_${randomUUID().replaceAll('-', '').slice(0, 21)}`;
+    await db.insert(assistantAttachmentTable).values({
+      id: attachmentId,
+      schoolId: owner.schoolId,
+      userId: owner.userId,
+      originalName: name,
+      contentType: 'image/jpeg',
+      byteSize: 100,
+      sha256: 'x',
+      width: 10,
+      height: 10,
+      s3Key: `schools/${owner.schoolId}/assistant/attachments/${attachmentId}/original.jpg`,
+      derivativeStatus: 'ready',
+      thumbS3Key: `schools/${owner.schoolId}/assistant/attachments/${attachmentId}/thumb.jpg`,
+      modelS3Key: `schools/${owner.schoolId}/assistant/attachments/${attachmentId}/model.jpg`,
+      modelContentType: 'image/jpeg',
+      ...overrides,
+    });
+    return attachmentId;
+  }
+  const rowOf = async (id: string) => (await db.select().from(assistantAttachmentTable).where(eq(assistantAttachmentTable.id, id)))[0];
+
+  const startConversation = (owner: { schoolId: string; userId: string }, extra: Record<string, unknown>) => {
+    configureDispatcher({ startRun: vi.fn(), resolveApproval: vi.fn() });
+    onTestFinished(() => configureDispatcher(null));
+    return call(
+      assistantRouter.sendMessage,
+      { schoolId: owner.schoolId, clientRequestId: randomUUID(), surface: 'page', text: '', ...extra },
+      as(owner.userId),
+    );
+  };
+
+  async function newOwner() {
+    const turn = await seedTurn();
+    return { schoolId: turn.schoolId, userId: turn.userId };
+  }
+
+  it('binds the images to the message in the order sent, in the transaction that saves it', async () => {
+    const owner = await newOwner();
+    const [a, b, c] = [await upload(owner, 'page1.jpg'), await upload(owner, 'page2.jpg'), await upload(owner, 'page3.jpg')];
+
+    const sent = await startConversation(owner, { text: 'Read these', attachmentIds: [c, a, b] });
+
+    expect(sent.item.body.attachments?.map((attachment) => [attachment.id, attachment.fileName, attachment.previewable])).toEqual([
+      [c, 'page3.jpg', true],
+      [a, 'page1.jpg', true],
+      [b, 'page2.jpg', true],
+    ]);
+    for (const [index, id] of [c, a, b].entries()) {
+      expect(await rowOf(id)).toMatchObject({ conversationId: sent.conversation.id, itemId: sent.item.id, position: index + 1 });
+      expect((await rowOf(id))?.attachedAt).toBeInstanceOf(Date);
+    }
+    // Images only is a message too, titled after what it carries.
+    const imagesOnly = await startConversation(owner, { attachmentIds: [await upload(owner, 'solo.jpg')] });
+    expect(imagesOnly.conversation.title).toBe('Attached image');
+  });
+
+  it('refuses the whole message when one image is not the sender’s, is already sent or is gone, and saves nothing', async () => {
+    const owner = await newOwner();
+    const stranger = await newOwner();
+    const mine = await upload(owner, 'mine.jpg');
+    const theirs = await upload(stranger, 'theirs.jpg');
+    const before = await list(owner);
+
+    await expect(startConversation(owner, { text: 'x', attachmentIds: [mine, theirs] })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    await expect(startConversation(owner, { text: 'x', attachmentIds: [mine, 'asat_missing000000000000'] })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    expect((await list(owner)).pagination.totalItems).toBe(before.pagination.totalItems);
+    expect(await rowOf(mine)).toMatchObject({ itemId: null, conversationId: null });
+
+    await startConversation(owner, { text: 'first', attachmentIds: [mine] });
+    await expect(startConversation(owner, { text: 'again', attachmentIds: [mine] })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+  });
+
+  it('returns the original message when the same request is sent again, without binding anything twice', async () => {
+    const owner = await newOwner();
+    const id = await upload(owner, 'once.jpg');
+    const clientRequestId = randomUUID();
+    const first = await startConversation(owner, { text: 'x', attachmentIds: [id], clientRequestId });
+    const again = await startConversation(owner, { text: 'x', attachmentIds: [id], clientRequestId });
+    expect(again.item.id).toBe(first.item.id);
+    expect(again.item.body.attachments).toHaveLength(1);
+    expect(await rowOf(id)).toMatchObject({ itemId: first.item.id, position: 1 });
+  });
+
+  it('keeps the screen a conversation started from on its first message', async () => {
+    const owner = await newOwner();
+    const seed = { kind: 'question_paper', sessionId: 'ss', examSlug: 'half-yearly', classId: 'cl', subjectSlug: 'science', modeSlug: 'theory' };
+    const sent = await startConversation(owner, { text: 'I want to update this question paper: add one', seed });
+    expect(sent.item.body.seed).toEqual(seed);
+  });
+
+  it('sweeps images never sent after a day, and keeps sent and recent ones', async () => {
+    const owner = await newOwner();
+    const old = await upload(owner, 'old.jpg', { createdAt: new Date(Date.now() - 25 * 3_600_000) });
+    const recent = await upload(owner, 'recent.jpg');
+    const sent = await startConversation(owner, { text: 'x', attachmentIds: [await upload(owner, 'sent.jpg', { createdAt: new Date(Date.now() - 48 * 3_600_000) })] });
+    storage.deleted.length = 0;
+
+    await sweepUnsentAttachments(db);
+
+    expect(await rowOf(old)).toBeUndefined();
+    expect(storage.deleted).toEqual(expect.arrayContaining([expect.stringContaining(old)]));
+    expect(await rowOf(recent)).toBeDefined();
+    expect(await rowOf(sent.item.body.attachments![0]!.id)).toBeDefined();
+  });
+
+  it('deletes a conversation’s images with it', async () => {
+    const owner = await newOwner();
+    const id = await upload(owner, 'bye.jpg');
+    const sent = await startConversation(owner, { text: 'x', attachmentIds: [id] });
+    await setRunStatus({ conversationId: sent.conversation.id, runId: sent.run.id }, 'completed');
+    storage.deleted.length = 0;
+
+    await remove({ schoolId: owner.schoolId, conversationId: sent.conversation.id }, owner.userId);
+
+    expect(await rowOf(id)).toBeUndefined();
+    expect(storage.deleted.some((key) => key.includes(id))).toBe(true);
   });
 });

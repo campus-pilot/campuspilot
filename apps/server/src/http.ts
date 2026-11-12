@@ -5,6 +5,10 @@ import {
   createContextFromHeaders,
   createOAuthContext,
 } from '@campuspilot/api/context';
+import {
+  handleAssistantAttachmentRead,
+  handleAssistantAttachmentUpload,
+} from '@campuspilot/assistant/attachments.http';
 import { createAssistantRequestHandler } from '@campuspilot/assistant/http';
 import { verifyAssistantToken } from '@campuspilot/auth/assistant-token';
 import {
@@ -325,6 +329,38 @@ app.get('/api/blob/users/me/profile-image', async (context) => {
  * response). The turn itself runs in `apps/worker`.
  */
 const handleAssistantRequest = createAssistantRequestHandler();
+
+/**
+ * Images attached to chat messages (`packages/assistant/src/attachments.http.ts`).
+ * Each client IP may upload 60 images a minute (a 20 image message plus
+ * retries); the file itself is capped at 15 MiB by the handler. The session,
+ * the assistant access and the origin are decided by the handler, not here.
+ * Reads are permissioned redirects for the uploader only.
+ */
+const ASSISTANT_ATTACHMENTS_PATH = '/api/blob/schools/:schoolId/assistant/attachments';
+const assistantAttachmentUploadRateLimit = createRateLimit({
+  id: 'assistant-attachment-upload',
+  limit: 60,
+  windowMs: 60_000,
+});
+
+app.post(ASSISTANT_ATTACHMENTS_PATH, assistantAttachmentUploadRateLimit, (context) => {
+  const schoolId = context.req.param('schoolId');
+  return handleAssistantAttachmentUpload(context.req.raw, schoolId, (error) =>
+    reportUploadError(context.var.logger, 'assistant.attachment.upload.error', { schoolId }, error),
+  );
+});
+
+app.get(`${ASSISTANT_ATTACHMENTS_PATH}/:attachmentId/:variant`, (context) => {
+  const input = {
+    schoolId: context.req.param('schoolId'),
+    attachmentId: context.req.param('attachmentId'),
+    variant: context.req.param('variant'),
+  };
+  return handleAssistantAttachmentRead(context.req.raw.headers, input, (error) =>
+    reportUploadError(context.var.logger, 'assistant.attachment.read.error', input, error),
+  );
+});
 app.all('/model/rpc/*', async (context) => {
   const response = await handleAssistantRequest(context.req.raw);
   if (!response) return context.notFound();

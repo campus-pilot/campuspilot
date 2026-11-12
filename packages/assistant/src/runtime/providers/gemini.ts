@@ -13,10 +13,13 @@ import {
 } from '@google/genai';
 
 import type { AssistantUserMessageBody } from '@campuspilot/db/schema/assistant';
-import { buildUserTranscriptContent } from '../../transcript';
+import { buildUserTranscriptContent, isAttachmentMarker, type AttachmentMarker } from '../../transcript';
+import { attachmentLabel, attachmentNote } from '../context';
 import type { AssistantPrompt } from '../prompt';
 import { modelToolDescription, type AssistantTool } from '../tools';
 import type {
+  AttachmentFile,
+  ContextAdapter,
   ModelFailureKind,
   ModelProvider,
   ModelStepInput,
@@ -28,6 +31,7 @@ import type {
   StructuredRequest,
   StructuredResult,
 } from './types';
+import { GEMINI_IMAGE_MIME_TYPES } from './image-types';
 import { withBilledUsage } from './types';
 
 /**
@@ -53,8 +57,7 @@ const REFUSAL_REASONS: ReadonlySet<FinishReason> = new Set([
   FinishReason.IMAGE_PROHIBITED_CONTENT,
 ]);
 
-/** Image media types Gemini reads, HEIC and HEIF included (the Claude API reads neither). */
-export const GEMINI_IMAGE_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'] as const;
+export { GEMINI_IMAGE_MIME_TYPES };
 
 /** A malformed call is the model's mistake; the step is retried rather than failed. */
 class MalformedFunctionCallError extends Error {}
@@ -131,6 +134,55 @@ export function geminiToolResultParts(results: readonly ModelToolResult[]): Part
       response: result.isError ? { error: result.content } : { output: result.content },
     },
   }));
+}
+
+/**
+ * Pruning and attachment rules of Gemini's transcript (design G3). A human
+ * turn is a user entry without `functionResponse` parts. Only the text of a
+ * response's `output`/`error` changes when it is stubbed: `id` and `name`
+ * stay, so every `functionCall` keeps its response; call parts and thought
+ * signatures are never touched.
+ */
+export const geminiContext: ContextAdapter = {
+  isHumanTurn: (entry) => entry.role === 'user' && !(entry.content as Part[]).some((part) => part.functionResponse),
+  toolNamesByUseId(entries) {
+    const names = new Map<string, string>();
+    for (const entry of entries) {
+      for (const part of entry.content as Part[]) {
+        if (part.functionCall?.id && part.functionCall.name) names.set(part.functionCall.id, part.functionCall.name);
+      }
+    }
+    return names;
+  },
+  stubToolResults(entry, toolNames, stub, minChars) {
+    if (!(entry.content as Part[]).some((part) => part.functionResponse)) return entry;
+    return {
+      ...entry,
+      content: (entry.content as Part[]).map((part) => {
+        const response = part.functionResponse;
+        if (!response) return part;
+        const body = (response.response ?? {}) as { output?: unknown; error?: unknown };
+        const key = typeof body.error === 'string' ? 'error' : 'output';
+        const text = typeof body[key] === 'string' ? (body[key] as string) : JSON.stringify(body[key] ?? '');
+        if (text.length < minChars) return part;
+        const toolName = response.name ?? toolNames.get(response.id ?? '') ?? 'a tool';
+        return { ...part, functionResponse: { ...response, response: { [key]: stub({ toolName, chars: text.length }) } } };
+      }),
+    };
+  },
+  materializeAttachment(marker: AttachmentMarker, file: AttachmentFile) {
+    if (file.kind !== 'image') return [{ text: attachmentNote(marker, file.kind) }];
+    if (!GEMINI_IMAGE_MIME_TYPES.some((supported) => supported === file.mimeType)) {
+      return [{ text: attachmentNote(marker, 'unreadable') }];
+    }
+    return [{ text: attachmentLabel(marker) }, { inlineData: { mimeType: file.mimeType, data: Buffer.from(file.bytes).toString('base64') } }];
+  },
+  stubAttachment: (marker) => [{ text: attachmentNote(marker, 'old') }],
+};
+
+/** A user message as Gemini parts: text blocks become `{ text }`, attachment markers stay markers (replaced per request). */
+export function geminiUserContent(body: AssistantUserMessageBody): unknown[] {
+  return buildUserTranscriptContent(body).map((block) => (isAttachmentMarker(block) ? block : { text: (block as { text: string }).text }));
 }
 
 /**
@@ -346,8 +398,8 @@ export function createGeminiProvider({ apiKey, model }: { apiKey: string; model:
     imageMimeTypes: GEMINI_IMAGE_MIME_TYPES,
     generateStructured: (input) => generateGeminiStructured(client, model, input),
     step,
-    userContent: (body: AssistantUserMessageBody) =>
-      buildUserTranscriptContent(body).map((block) => ({ text: (block as { text: string }).text })),
+    context: geminiContext,
+    userContent: geminiUserContent,
     assistantTextContent: (text) => [{ text }],
     toolResultsContent: geminiToolResultParts,
     toolUsesOf,

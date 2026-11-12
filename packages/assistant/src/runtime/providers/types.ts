@@ -1,4 +1,5 @@
 import type { AssistantUserMessageBody } from '@campuspilot/db/schema/assistant';
+import type { AttachmentMarker } from '../../transcript';
 import type { AssistantPrompt } from '../prompt';
 import type { AssistantTool } from '../tools';
 
@@ -133,6 +134,48 @@ export type StructuredResult = {
   truncated: boolean;
 };
 
+/**
+ * The bytes of an attached image as a model request will carry them, or why
+ * they cannot be carried (the note then replaces the image; an image is never
+ * silently dropped, decision D46).
+ */
+export type AttachmentFile =
+  | { kind: 'image'; bytes: Uint8Array; mimeType: string }
+  | { kind: 'unreadable' }
+  | { kind: 'missing' }
+  /** Left out so the request stays within the image budget. */
+  | { kind: 'omitted' };
+
+/** A tool result found in a stored entry, for pruning. */
+export type ToolResultStubInput = { toolName: string; chars: number };
+
+/**
+ * How `buildModelContext` (runtime/context.ts) reads and rewrites this
+ * provider's stored transcript. Everything format-specific lives here, so the
+ * pruning algorithm itself is one function for every provider.
+ */
+export interface ContextAdapter {
+  /** A user entry that carries the person's words or images, not just tool results. */
+  isHumanTurn(entry: TranscriptEntry): boolean;
+  /** Model-facing tool name by tool call id, for every call in the transcript. */
+  toolNamesByUseId(entries: readonly TranscriptEntry[]): Map<string, string>;
+  /**
+   * The entry with every tool result of at least `minChars` characters
+   * replaced by `stub`'s text. Only a result's content changes: the entry,
+   * its ids and the calls they answer stay exactly as they were.
+   */
+  stubToolResults(
+    entry: TranscriptEntry,
+    toolNames: ReadonlyMap<string, string>,
+    stub: (result: ToolResultStubInput) => string,
+    minChars: number,
+  ): TranscriptEntry;
+  /** The parts that show an attachment to the model: a label, then the image or a note. */
+  materializeAttachment(marker: AttachmentMarker, file: AttachmentFile): unknown[];
+  /** The part that tells the model an older attachment is no longer shown. */
+  stubAttachment(marker: AttachmentMarker): unknown[];
+}
+
 export interface ModelProvider {
   readonly id: ModelProviderId;
   /** Media types this provider can read as image input (D46: never silently dropped). */
@@ -152,6 +195,8 @@ export interface ModelProvider {
    * request creates its own provider with it (see `question-paper-model.ts`).
    */
   generateStructured(input: StructuredRequest): Promise<StructuredResult>;
+  /** Reads and rewrites this provider's transcript for each request (pruning, attachments). */
+  readonly context: ContextAdapter;
   /** A user message as transcript content. */
   userContent(body: AssistantUserMessageBody): unknown[];
   /** Partial text kept after a stop, as assistant transcript content. */

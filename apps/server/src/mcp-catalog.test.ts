@@ -667,6 +667,49 @@ describe('assistant service view', () => {
     expect(tools.map((tool) => tool.name)).toEqual(expect.arrayContaining(['school.saveQuestionPaperVersion', 'school.listQuestionPapers']));
   });
 
+  /** The question paper tools by name: what each is for, and how the in-app assistant and external clients reach it. */
+  const QUESTION_PAPER_TOOLS = {
+    reads: ['school.listQuestionPapers', 'school.getQuestionPaper', 'school.listQuestionPaperVersions', 'school.learn_question_paper_generation', 'school.validateQuestionPaperDraft'],
+    writes: ['school.saveQuestionPaperVersion'],
+    // The UI's own procedures: a person does these, never the assistant.
+    humanOnly: ['school.startQuestionPaperGeneration', 'school.getQuestionPaperDetail', 'school.getQuestionPaperPreview', 'school.previewQuestionPaperDraft', 'school.getQuestionPaperDownload'],
+  };
+
+  it('gives the in-app assistant the question paper tools, with the save behind an approval and the human-only ones withheld', async () => {
+    const byName = new Map(exposedTools().map((tool) => [tool.name, tool]));
+    for (const name of [...QUESTION_PAPER_TOOLS.reads, ...QUESTION_PAPER_TOOLS.writes]) {
+      const tool = byName.get(name);
+      expect(tool, name).toBeDefined();
+      expect(tool!.mcp.module).toBe('exams');
+      expect(assistantToolDecision(tool!.mcp), name).toMatchObject({ allowed: true });
+    }
+    for (const name of QUESTION_PAPER_TOOLS.writes) expect(assistantToolDecision(byName.get(name)!.mcp)).toEqual({ allowed: true, requiresApproval: true });
+    for (const name of QUESTION_PAPER_TOOLS.reads) expect(assistantToolDecision(byName.get(name)!.mcp)).toEqual({ allowed: true, requiresApproval: false });
+    for (const name of QUESTION_PAPER_TOOLS.humanOnly) expect(byName.has(name), name).toBe(false);
+
+    const client = await connect('assistant');
+    const { tools } = await client.listTools();
+    const listed = new Map(tools.map((tool) => [tool.name, tool]));
+    // The in-app assistant has no meta tools: the learn tool is simply one of its (deferred) tools.
+    const learn = listed.get('school.learn_question_paper_generation');
+    expect(learn?._meta?.[ASSISTANT_TOOL_META.exposure]).toBe('advanced');
+    for (const name of [...QUESTION_PAPER_TOOLS.reads, ...QUESTION_PAPER_TOOLS.writes]) expect(listed.has(name), name).toBe(true);
+    for (const name of QUESTION_PAPER_TOOLS.humanOnly) expect(listed.has(name), name).toBe(false);
+  });
+
+  it('gives external clients the learn tool through the advanced tools', async () => {
+    expect(catalog.advanced.map(({ name }) => name)).toEqual(expect.arrayContaining([...QUESTION_PAPER_TOOLS.reads, ...QUESTION_PAPER_TOOLS.writes]));
+    expect(catalog.core.map(({ name }) => name)).not.toContain('school.learn_question_paper_generation');
+    const client = await connect();
+    const listed = textJson(await client.callTool({ name: META_TOOL_NAMES.list, arguments: {} })) as Array<{ name: string }>;
+    expect(listed.map(({ name }) => name)).toContain('school.learn_question_paper_generation');
+    const described = textJson(
+      await client.callTool({ name: META_TOOL_NAMES.describe, arguments: { names: ['school.learn_question_paper_generation'] } }),
+    ) as Array<{ name: string; inputSchema: JsonSchema }>;
+    expect(described.map(({ name }) => name)).toEqual(['school.learn_question_paper_generation']);
+    expect(described[0]!.inputSchema.type).toBe('object');
+  });
+
   it('refuses an invalid outputChars declaration while the catalog is built', async () => {
     const { os } = await import('@orpc/server');
     const broken = os

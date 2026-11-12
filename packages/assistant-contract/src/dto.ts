@@ -1,5 +1,10 @@
 import { z } from 'zod';
 
+import {
+  ASSISTANT_ATTACHMENTS_PER_MESSAGE,
+  assistantAttachmentRefSchema,
+  assistantMessageSeedSchema,
+} from './attachments';
 import { assistantViewSchema } from './views';
 
 
@@ -50,6 +55,10 @@ export const assistantUserMessageItemSchema = z.object({
   body: z.object({
     text: z.string(),
     pageContext: assistantPageContextSchema.optional(),
+    /** The images sent with the message, in order (no bytes: see `attachments.ts`). */
+    attachments: z.array(assistantAttachmentRefSchema).optional(),
+    /** The screen the conversation was started from, on its first message. */
+    seed: assistantMessageSeedSchema.optional(),
   }),
 });
 
@@ -300,9 +309,24 @@ export const sendAssistantMessageInputSchema = z.object({
   conversationId: z.string().min(1).optional(),
   /** Client-generated id; resending the same id returns the original run. */
   clientRequestId: z.string().uuid(),
-  text: z.string().trim().min(1).max(ASSISTANT_MESSAGE_MAX_LENGTH),
+  /** May be empty when images are attached; a message needs text or an image. */
+  text: z.string().trim().max(ASSISTANT_MESSAGE_MAX_LENGTH),
   surface: assistantSurfaceSchema,
   pageContext: assistantPageContextSchema.optional(),
+  /** Ids of uploaded, unsent attachments of this user in this school, in the order shown. */
+  attachmentIds: z.array(z.string().min(1)).max(ASSISTANT_ATTACHMENTS_PER_MESSAGE).default([]),
+  /** Where a new conversation starts from; only valid without `conversationId`. */
+  seed: assistantMessageSeedSchema.optional(),
+}).superRefine((value, ctx) => {
+  if (value.text.length === 0 && value.attachmentIds.length === 0) {
+    ctx.addIssue({ code: 'custom', path: ['text'], message: 'Write a message or attach an image.' });
+  }
+  if (new Set(value.attachmentIds).size !== value.attachmentIds.length) {
+    ctx.addIssue({ code: 'custom', path: ['attachmentIds'], message: 'Each attachment can be sent once.' });
+  }
+  if (value.seed && value.conversationId) {
+    ctx.addIssue({ code: 'custom', path: ['seed'], message: 'A seed is only valid when starting a conversation.' });
+  }
 });
 export const sendAssistantMessageOutputSchema = z.object({
   conversation: assistantConversationSchema,

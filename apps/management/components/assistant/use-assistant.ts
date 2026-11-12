@@ -1,5 +1,6 @@
 'use client';
 
+import type { QuestionPaperSeed } from '@campuspilot/assistant-contract/attachments';
 import {
   assistantConversationAttention,
   type AssistantConversationListItemDto,
@@ -488,7 +489,16 @@ export function useSendAssistantMessage(schoolId: string, surface: AssistantSurf
     retryDelay: equalJitterDelay,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: assistantOrpc.listConversations.key() }),
   });
-  const send = (text: string, conversationId: string | null) =>
+  /**
+   * Sends a message. `attachmentIds` are images already uploaded for it (in
+   * the order shown); `seed` names the screen a new conversation starts from
+   * and is valid only without a `conversationId`.
+   */
+  const send = (
+    text: string,
+    conversationId: string | null,
+    extras: { attachmentIds?: string[]; seed?: QuestionPaperSeed | null } = {},
+  ) =>
     mutation.mutateAsync({
       schoolId,
       ...(conversationId ? { conversationId } : {}),
@@ -496,6 +506,8 @@ export function useSendAssistantMessage(schoolId: string, surface: AssistantSurf
       text,
       surface,
       pageContext: currentPageContext(),
+      ...(extras.attachmentIds?.length ? { attachmentIds: extras.attachmentIds } : {}),
+      ...(extras.seed && !conversationId ? { seed: extras.seed } : {}),
     });
   /**
    * Re-sends a failed message with its original request id. Resolves with
@@ -541,6 +553,8 @@ export function useSurfaceLife() {
 export type OptimisticMessage = {
   clientRequestId: string;
   text: string;
+  /** Ids of the images sent with it, shown as thumbnails while it is on its way. */
+  attachmentIds: string[];
   submittedAt: Date;
   delivery: 'sending' | 'failed';
   mutation: Mutation<unknown, unknown, SendVariables>;
@@ -572,6 +586,7 @@ export function useOptimisticMessages(
       {
         clientRequestId: variables.clientRequestId,
         text: variables.text,
+        attachmentIds: variables.attachmentIds ?? [],
         submittedAt: new Date(submittedAt),
         delivery: status === 'error' ? 'failed' : 'sending',
         mutation,
