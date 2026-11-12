@@ -191,13 +191,35 @@ describe('a message with images', () => {
     ]);
     // The model got labelled images in the order attached, then the words.
     expect(provider.calls[0]!.transcript[0]!.content).toEqual([
-      { type: 'text', text: 'Attachment 1 of 2: page1.jpg' },
+      { type: 'text', text: '[Attachment asat_1: page1.jpg, image/jpeg (1 of 2). Use this id as figure.imageId to put the image in a question paper.]' },
       { type: 'image', mimeType: 'image/jpeg', byteLength: 3 },
-      { type: 'text', text: 'Attachment 2 of 2: page2.jpg' },
+      { type: 'text', text: '[Attachment asat_2: page2.jpg, image/jpeg (2 of 2). Use this id as figure.imageId to put the image in a question paper.]' },
       { type: 'image', mimeType: 'image/jpeg', byteLength: 3 },
       { type: 'text', text: QUESTION },
     ]);
     expect(loaded.sort()).toEqual(['asat_1', 'asat_2']);
+  });
+
+  it('lets a scripted model read the attachment id and write it into a figure node', async () => {
+    const id = 'asat_abcdefghijklmnopqrstu';
+    const { provider, invoke } = await arrange({
+      script: [
+        // Like a real model: find the id in the attachment line it was shown, then use it in the tool input.
+        (input) => {
+          const shown = JSON.stringify(input.transcript[0]!.content);
+          const found = /\[Attachment (asat_[a-z0-9]{21}):/.exec(shown)?.[1];
+          return fakeReply({
+            toolUses: [{ id: 'tu_fig', name: listStudents.modelName, input: { figure: { type: 'figure', imageId: found, alt: 'Triangle' } } }],
+          });
+        },
+        fakeReply({ text: 'Done.' }),
+      ],
+      body: { attachments: [attachment(id, 'triangle.png')] },
+      loadAttachment: async () => ({ kind: 'image', bytes: new Uint8Array([1]), mimeType: 'image/jpeg' }),
+    });
+    callToolMock.mockResolvedValue(toolSuccess('ok'));
+    await invoke().done;
+    expect(JSON.stringify(provider.calls[1]!.transcript)).toContain(`"imageId":"${id}"`);
   });
 
   it('tells the model when an image is gone instead of failing the turn', async () => {
@@ -208,7 +230,7 @@ describe('a message with images', () => {
     });
     await invoke().done;
     expect((await readTurn(turn)).run.status).toBe('completed');
-    expect(JSON.stringify(provider.calls[0]!.transcript[0]!.content)).toContain('is no longer available');
+    expect(JSON.stringify(provider.calls[0]!.transcript[0]!.content)).toContain('asat_9: lost.jpg');
   });
 });
 

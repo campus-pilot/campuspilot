@@ -110,7 +110,12 @@ const marks = z
   .nullable();
 
 /** Stored content only ever holds `qpf_`; the `asat_` form is accepted on input and rewritten when saving. */
-const imageId = z.string().regex(/^(qpf|asat)_[a-z0-9]{21}$/);
+const imageId = z
+  .string()
+  .regex(/^(qpf|asat)_[a-z0-9]{21}$/, {
+    message:
+      'imageId must be an asat_ id copied from an "[Attachment asat_...]" line of this chat, or a qpf_ id of a figure already saved in this paper (asat_ or qpf_ followed by 21 lowercase letters or digits). Never invent one; use a figure_placeholder when no such id exists.',
+  });
 const figurePlaceholder = z
   .object({
     type: z.literal("figure_placeholder"),

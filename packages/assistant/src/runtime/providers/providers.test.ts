@@ -47,9 +47,11 @@ describe('anthropic adapter (must match the Claude-only build)', () => {
     // Last changed for question papers (decision D36): one "call
     // school_learn_question_paper_generation first" bullet (the exact model-facing
     // name, found by tool search), attached images count as data, and the
-    // decline rule now says "question papers written from scratch".
+    // decline rule now says "question papers written from scratch". Then: the
+    // question-paper bullet says each attached image is announced by a line
+    // with its asat_ id, to be used for figures.
     const system = JSON.stringify(buildAnthropicSystem(buildAssistantPrompt(facts)));
-    expect(createHash('sha256').update(system).digest('hex').slice(0, 16)).toMatchInlineSnapshot(`"c832d9fdab234006"`);
+    expect(createHash('sha256').update(system).digest('hex').slice(0, 16)).toMatchInlineSnapshot(`"66092bfe292678b2"`);
   });
 
   it('defers advanced tools behind tool search and labels writes', () => {

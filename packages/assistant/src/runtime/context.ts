@@ -12,8 +12,8 @@ import type { AttachmentFile, ModelProvider, TranscriptEntry } from './providers
  *   an image byte budget, with a short note for anything that cannot be shown.
  * - Entries before the last two human messages are shortened: tool results
  *   that are long become a one-line stub, and every attachment becomes a note
- *   telling the model to ask the user to attach it again (it cannot look at it
- *   any more). Cheap chats are the point; so is keeping the cache prefix
+ *   that keeps its id but says the image is no longer visible (the model may
+ *   still embed it by id; it asks the user to attach it again only to look). Cheap chats are the point; so is keeping the cache prefix
  *   stable: the cut moves only when a new human message arrives.
  *
  * Properties the tests pin: the number and order of entries never change; no
@@ -49,26 +49,40 @@ export type ModelContextDeps = {
 export const toolResultStub = ({ toolName, chars }: { toolName: string; chars: number }) =>
   `[Earlier result of ${toolName} omitted to keep the chat short (${chars.toLocaleString('en-US')} characters). Call the tool again if you need it.]`;
 
-const label = (marker: AttachmentMarker) =>
-  `Attachment ${marker.ordinal} of ${marker.total}: ${marker.fileName}`;
+/**
+ * Server-generated and sanitised facts only: the id (`asat_...`), the sanitised
+ * file name (brackets and line breaks removed so it cannot close or split the
+ * line) and the content type. No user free text ever reaches this line.
+ */
+const describe = (marker: AttachmentMarker) =>
+  `${marker.attachmentId}: ${marker.fileName.replace(/[[\]\r\n]/g, '_')}, ${marker.contentType}`;
 
-/** The text that stands in for an attachment that is not shown as an image. */
+/** Tells the model what an attachment id is for, once per note. */
+const FIGURE_HINT = 'Use this id as figure.imageId to put the image in a question paper.';
+
+/**
+ * The text that stands in for an attachment that is not shown as an image.
+ * Every note keeps the attachment's id: an id stays valid for figures while the
+ * attachment exists server-side for this user, even when its pixels are not
+ * shown any more.
+ */
 export function attachmentNote(marker: AttachmentMarker, kind: Exclude<AttachmentFile['kind'], 'image'> | 'old'): string {
-  const name = `"${marker.fileName}"`;
+  const head = `[Attachment ${describe(marker)}`;
   switch (kind) {
     case 'old':
-      return `[Attachment ${name} (${marker.contentType}) was shown earlier and can no longer be read. Ask the user to attach it again if you need to look at it.]`;
+      return `${head} - the image content is no longer visible to you (it was shown earlier). ${FIGURE_HINT} Ask the user to attach it again only if you need to look at it.]`;
     case 'unreadable':
-      return `[Attachment ${name} (${marker.contentType}) is in a format this assistant cannot read. Ask the user to convert it to JPEG and attach it again.]`;
+      return `${head} - in a format this assistant cannot read. Ask the user to convert it to JPEG and attach it again.]`;
     case 'omitted':
-      return `[Attachment ${name} was left out because the images in this chat are too large to show at once. Ask the user to attach it again if you need to look at it.]`;
+      return `${head} - left out because the images in this chat are too large to show at once. ${FIGURE_HINT} Ask the user to attach it again if you need to look at it.]`;
     case 'missing':
-      return `[Attachment ${name} is no longer available. Ask the user to attach it again if you need to look at it.]`;
+      return `${head} - no longer available. Ask the user to attach it again if you need to look at it.]`;
   }
 }
 
-/** The label that precedes an image so the model can tell pages apart. */
-export const attachmentLabel = label;
+/** The line that precedes an image: its id for figure nodes, name and type, and its place among the message's images. */
+export const attachmentLabel = (marker: AttachmentMarker) =>
+  `[Attachment ${describe(marker)} (${marker.ordinal} of ${marker.total}). ${FIGURE_HINT}]`;
 
 /** Index of the first entry of the oldest human message that is still shown in full (0 when there are fewer). */
 export function fullContextBoundary(

@@ -331,9 +331,20 @@ only): page photos, generation, polling, previews and downloads.
 - **Context pruning** (`runtime/context.ts`, applied to what the model sees only, never
   to the stored transcript): only the last two human messages are sent in full. In older
   turns a tool result of 8,000 characters or more is replaced by a short stub naming the
-  tool and the size, and an older attachment by a note asking the user to attach it
-  again; fresh images are sent newest first within a 16 MiB budget counted as base64 (4/3 of the file, under Gemini's 20 MB request limit); an image over the provider's own cap (5 MB on Claude) is reported as unreadable. The learn payload
+  tool and the size, and an older attachment by a note that keeps its `asat_` id and says
+  the image is no longer visible (see "Attachment ids" below); fresh images are sent newest first within a 16 MiB budget counted as base64 (4/3 of the file, under Gemini's 20 MB request limit); an image over the provider's own cap (5 MB on Claude) is reported as unreadable. The learn payload
   counts as a long result, so after two more messages the agent calls the tool again.
+
+- **Attachment ids.** The model must be told each attachment's id or it cannot write a
+  `figure` node. Every image part is preceded by a server-built line
+  `[Attachment asat_...: <sanitised file name>, image/png (1 of 2). Use this id as figure.imageId ...]`
+  (`attachmentLabel` in `runtime/context.ts`, used by the Anthropic, Gemini and fake
+  adapters alike): only the generated id, the sanitised name (brackets and line breaks removed)
+  and the content type, never user free text. Notes for attachments that are not shown
+  (older than the window, over the image budget, unreadable, missing) keep the id too: an
+  `asat_` id stays valid for figures while the attachment exists for the same user, whether or
+  not its pixels are still visible. `figure.imageId` errors name the allowed forms
+  (`asat_` from an attachment line, or a `qpf_` already saved in the paper).
 
 ## Where the code is
 

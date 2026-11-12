@@ -292,7 +292,10 @@ Chat can carry images, mainly photographs of a handwritten question paper
   read (HEIC on Anthropic) refuses the send with a message asking for a JPEG; an image is
   never dropped silently.
 - **Transcript.** A stored user turn holds provider-neutral markers, never bytes; the
-  provider adapters turn a marker into an image part when they build a request.
+  provider adapters turn a marker into an image part when they build a request, always
+  preceded by a line carrying the attachment's `asat_` id, sanitised file name and type so
+  the model can use the id as `figure.imageId` (old/unshown attachments keep the id in their
+  note; see [Question papers](question-papers.md#chat-attachments-tools-drafts-pruning)).
   `AssistantUserMessageBody` carries `attachments` and an optional `seed` (the
   question paper "Continue in chat" context, accepted only on a new conversation).
 - **Tools.** The question paper tools are ordinary advanced MCP tools of module
