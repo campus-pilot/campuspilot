@@ -1,6 +1,5 @@
 import type { DatabaseExecutor } from "@campuspilot/db";
 import { schoolTable } from "@campuspilot/db/schema/school";
-import type { QuestionPaper } from "@campuspilot/question-paper/schema";
 import { eq } from "drizzle-orm";
 
 import { rpcError } from "../../../errors";
@@ -40,13 +39,24 @@ export type QuestionPaperContext = {
     modeSlug: string;
     /** The plan's max marks for this mode, snapshotted at render. */
     maxMarks: number | null;
-    /** Marks computed from the paper's questions. */
-    totalMarks: number | null;
-    /** The "time allowed" hint read from the paper. */
-    timeAllowed: string | null;
-    language: string;
-    script: string;
-    direction: "ltr" | "rtl";
+    /**
+     * Always null. The paper is free HTML and nothing reads facts out of it
+     * (marks, time allowed, language): these keys stay so that template
+     * revisions written against the structured paper keep rendering, their
+     * `{{#if}}` blocks simply print nothing.
+     */
+    totalMarks: null;
+    /** Always null, see `totalMarks`. */
+    timeAllowed: null;
+    /** Always null, see `totalMarks`. The paper's text carries its own `lang`. */
+    language: null;
+    /** Always null, see `totalMarks`. */
+    script: null;
+    /**
+     * The direction of the page frame around the paper, always `ltr`. The paper
+     * itself sets `dir` on the elements that need it; nothing here is read from it.
+     */
+    direction: "ltr";
     /** Null for previews, drafts and the sample. */
     versionNo: number | null;
     /** Always the slot placeholder. Use `{{{questionPaper.bodyHtml}}}` exactly once. */
@@ -56,15 +66,14 @@ export type QuestionPaperContext = {
 
 /**
  * The template context of one paper: the school block every document shares,
- * the exam, class, subject and mode names of the plan, and the facts of the
- * paper itself. `content` is null for the sample and for a paper without a
- * document yet; the plan's `maxMarks` is read from the scope, never from the
- * document. `generatedAt` is the instant of this render.
+ * the exam, class, subject and mode names of the plan, and the version number.
+ * The plan's `maxMarks` is read from the scope, never from the paper.
+ * `generatedAt` is the instant of this render.
  */
 export async function buildQuestionPaperContext(
   db: DatabaseExecutor,
   scope: PaperScope,
-  paper: { content: QuestionPaper | null; versionNo: number | null; totalMarks: number | null },
+  paper: { versionNo: number | null },
   generatedAt: Date = new Date(),
 ): Promise<QuestionPaperContext> {
   const [school] = await db
@@ -73,7 +82,6 @@ export async function buildQuestionPaperContext(
     .where(eq(schoolTable.id, scope.key.schoolId))
     .limit(1);
   if (!school) throw rpcError.notFound("School");
-  const meta = paper.content?.meta;
   return {
     school: await buildSchoolDocumentContext(school),
     session: { startYear: scope.sessionStartYear, endYear: scope.sessionEndYear },
@@ -86,11 +94,11 @@ export async function buildQuestionPaperContext(
       modeName: scope.modeName,
       modeSlug: scope.key.modeSlug,
       maxMarks: scope.planMaxMarks,
-      totalMarks: paper.totalMarks,
-      timeAllowed: meta?.timeAllowed ?? null,
-      language: meta?.language ?? "en",
-      script: meta?.script ?? "latin",
-      direction: meta?.direction ?? "ltr",
+      totalMarks: null,
+      timeAllowed: null,
+      language: null,
+      script: null,
+      direction: "ltr",
       versionNo: paper.versionNo,
       bodyHtml: QUESTION_PAPER_SLOT,
     },

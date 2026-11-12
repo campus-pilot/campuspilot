@@ -4,26 +4,31 @@ import { rpcError } from "../../../errors";
  * The body slot of the question paper document type.
  *
  * SECURITY, PLEASE READ BEFORE CHANGING (design.md A1/K1, acknowledged by the
- * product owner). Every other document is sanitised in full after rendering.
- * A question paper cannot be: its body carries KaTeX output, whose radicals
- * and arrows are inline `<svg>` that the document sanitiser strips, and whose
- * fonts need a `data:` font that the document CSP blocks. So the question
- * paper type, and only that type, has these two deliberate differences:
+ * product owner; narrowed by html-design.md). Every other document is sanitised
+ * in full after rendering. A question paper cannot be: its body carries KaTeX
+ * output, whose radicals and arrows are inline `<svg>` that the document
+ * sanitiser strips, and whose fonts need a `data:` font that the document CSP
+ * blocks. So the question paper type, and only that type, has these two
+ * deliberate differences:
  *
- * 1. The body is NOT sanitised. It is built by our own renderer
- *    (`question-paper.render.ts`) from a validated JSON document: every
- *    string is HTML-escaped, the element and class vocabulary is fixed, no
- *    JSON value is ever markup, a URL, an attribute name, a class or CSS.
- *    That makes it trusted by construction. The school's template never sees
- *    it: the template is rendered with the constant {@link QUESTION_PAPER_SLOT}
+ * 1. The body is not sanitised AGAIN after it is placed in the template. The
+ *    body is built by our own renderer (`question-paper.body.ts`) from the
+ *    stored fragment, which is a model's output and therefore untrusted: the
+ *    renderer sanitises it with the `question_paper_body` profile first (the
+ *    fragment is cleaned at save time and again at render time), and only
+ *    afterwards inserts the two things that come from our code, KaTeX output
+ *    produced from a formula's plain LaTeX string and the data URIs of figures
+ *    loaded from this paper's own stored images. The school's template never
+ *    sees the body: it is rendered with the constant {@link QUESTION_PAPER_SLOT}
  *    as `questionPaper.bodyHtml`, sanitised like any other document, and only
  *    then is the slot replaced by the body, exactly once
  *    ({@link substituteQuestionPaperBody}). Nothing a template author writes
  *    can therefore reach, repeat, enlarge or alter the body.
  * 2. The Content-Security-Policy of this type gains `font-src data:`
- *    (`document.render.ts`, `documentContentSecurityPolicy`). Nothing else is
- *    widened: still no network, no script, no frames, images from data URIs
- *    only. A `data:` font cannot load anything from outside the document.
+ *    (`document.render.ts`, `documentContentSecurityPolicy`) for the inlined
+ *    KaTeX fonts. Nothing else is widened: still no network, no script, no
+ *    frames, images from data URIs only. A `data:` font cannot load anything from
+ *    outside the document.
  *
  * Do not extend this technique to another type, and do not add a second
  * trusted insertion point, without repeating that review.

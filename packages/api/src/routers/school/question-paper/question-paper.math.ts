@@ -2,22 +2,23 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 
-import { walkPaper, formatPath, type Path } from '@campuspilot/question-paper/walk';
-import type { QuestionPaperShape } from '@campuspilot/question-paper/schema';
-import { ORPCError } from '@orpc/server';
+import { QUESTION_PAPER_LIMITS as L } from '@campuspilot/question-paper/limits';
 import katex from 'katex';
-
-import { rpcError } from '../../../errors';
 
 /**
  * Server-side KaTeX for question papers (design C3, C7).
  *
- * KaTeX runs inside a request on text an agent or a model wrote, so it is
- * configured as tightly as it allows: no trust (no links, no `\href`, no
- * raw HTML), no macros, a bounded size and macro expansion, and HTML output
- * only (the MathML twin KaTeX adds by default would double every formula's
- * text in the sanitiser-free body). The number of formulas and their length
- * are bounded by the document schema; this file adds a wall-clock budget.
+ * KaTeX runs inside a request on LaTeX text a model wrote (the `data-math`
+ * attribute of an empty span; the model never writes the typeset markup), so it
+ * is configured as tightly as it allows: no trust (no links, no `\href`, no raw
+ * HTML), no macros, a bounded size and macro expansion, and HTML output only (the
+ * MathML twin KaTeX adds by default would double every formula's text). The number
+ * of formulas and their length are capped here and by the sanitiser; this file
+ * adds a wall-clock budget.
+ *
+ * This is the first of the two things inserted AFTER sanitising (the other is
+ * the figure data URIs): KaTeX output is trusted because our code produced it
+ * from a plain string. Nothing the model wrote besides that string reaches it.
  */
 const KATEX_OPTIONS = {
   output: 'html',
@@ -28,17 +29,24 @@ const KATEX_OPTIONS = {
   maxExpand: 1000,
 } as const;
 
-/** How long one validation or render may spend in KaTeX before it is refused. */
+/** How long one validation or render may spend in KaTeX before the remaining formulas are refused. */
 export const MATH_WALL_BUDGET_MS = 2_000;
 
+/** The wall-clock budget of a {@link MathRenderer} ran out. */
+export class MathBudgetError extends Error {
+  constructor() {
+    super('This paper has too many or too complex formulas to typeset.');
+  }
+}
+
 export type MathRenderer = {
-  /** HTML for one formula, or throws a KaTeX `ParseError` for invalid TeX. */
+  /** HTML for one formula, or throws a KaTeX `ParseError` for invalid TeX or a {@link MathBudgetError}. */
   render: (tex: string, display: boolean) => string;
   /**
    * The HTML bytes of every `render` call so far, a repeated formula counted
-   * each time it is printed. Lets a draft check refuse a paper whose formulas
-   * alone could not fit in the printed body (a 500-character nested `\sqrt`
-   * is about 70 KB of KaTeX HTML).
+   * each time it is printed. Lets a check refuse a paper whose formulas alone
+   * could not fit in the printed body (a 500-character nested `\sqrt` is about
+   * 70 KB of KaTeX HTML).
    */
   renderedBytes: () => number;
 };
@@ -46,8 +54,7 @@ export type MathRenderer = {
 /**
  * A renderer with a wall-clock budget and a memo, so validating a paper and
  * then rendering it does not typeset any formula twice. The budget is shared
- * by every formula rendered through one instance and exhausting it is a
- * BAD_REQUEST, never a hang.
+ * by every formula rendered through one instance.
  */
 export function createMathRenderer(budgetMs: number = MATH_WALL_BUDGET_MS): MathRenderer {
   const started = performance.now();
@@ -62,9 +69,7 @@ export function createMathRenderer(budgetMs: number = MATH_WALL_BUDGET_MS): Math
         bytes += hit.length;
         return hit;
       }
-      if (performance.now() - started > budgetMs) {
-        throw rpcError.badRequest('This paper is too complex to render. Split it into smaller sections.');
-      }
+      if (performance.now() - started > budgetMs) throw new MathBudgetError();
       // A fresh macros object every call: KaTeX writes definitions into it.
       const html = katex.renderToString(tex, { ...KATEX_OPTIONS, displayMode: display, macros: {} });
       memo.set(key, html);
@@ -80,29 +85,97 @@ export function texErrorMessage(error: unknown): string {
   return message.replace(/^KaTeX parse error:\s*/, '');
 }
 
-export type MathIssue = { path: string; message: string };
+const ESCAPES: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+/** Escapes the five characters that matter in element content and quoted attribute values. */
+export function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (character) => ESCAPES[character]!);
+}
+/** Reverses the escaping sanitize-html applies to an attribute value. */
+function unescapeAttribute(value: string): string {
+  return value.replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+}
+
+export type MathSpan = { start: number; end: number; tex: string; display: boolean };
+
+const OPEN_SPAN = /<span\b([^>]*)>/g;
+const SPAN_TAG = /<span\b[^>]*>|<\/span>/g;
+const ATTRIBUTE = /([a-z][a-z-]*)="([^"]*)"/g;
 
 /**
- * Every formula of a paper that KaTeX rejects, with the path of the run so a
- * model can fix exactly that formula. A budget overrun throws instead.
+ * The formula spans of sanitised markup, outermost first, in document order.
+ * It reads the sanitiser's output, where every attribute value is quoted and a
+ * `>` inside one is escaped, so a tag ends at the first `>`. A span is
+ * replaced whole, so anything a model put inside it is dropped with it.
  */
-export function validatePaperMath(paper: QuestionPaperShape, math: MathRenderer = createMathRenderer()): MathIssue[] {
-  const issues: MathIssue[] = [];
-  walkPaper(paper, {
-    richText(value, path: Path) {
-      if (typeof value === 'string') return;
-      value.forEach((run, index) => {
-        if (typeof run === 'string' || run.t !== 'math') return;
-        try {
-          math.render(run.tex, run.display === true);
-        } catch (error) {
-          if (error instanceof ORPCError) throw error;
-          issues.push({ path: formatPath([...path, index]), message: `Invalid TeX: ${texErrorMessage(error)}` });
-        }
-      });
-    },
+export function findMathSpans(sanitizedHtml: string): MathSpan[] {
+  const spans: MathSpan[] = [];
+  let from = 0;
+  for (;;) {
+    OPEN_SPAN.lastIndex = from;
+    const open = OPEN_SPAN.exec(sanitizedHtml);
+    if (!open) return spans;
+    const attributes = new Map<string, string>();
+    for (const match of open[1]!.matchAll(ATTRIBUTE)) attributes.set(match[1]!, unescapeAttribute(match[2]!));
+    const afterOpen = open.index + open[0].length;
+    const tex = attributes.get('data-math');
+    if (tex === undefined) {
+      from = afterOpen;
+      continue;
+    }
+    let depth = 1;
+    let end = sanitizedHtml.length;
+    SPAN_TAG.lastIndex = afterOpen;
+    for (let tag = SPAN_TAG.exec(sanitizedHtml); tag; tag = SPAN_TAG.exec(sanitizedHtml)) {
+      depth += tag[0] === '</span>' ? -1 : 1;
+      if (depth === 0) {
+        end = tag.index + tag[0].length;
+        break;
+      }
+    }
+    spans.push({ start: open.index, end, tex, display: attributes.has('data-display') });
+    from = end;
+  }
+}
+
+export type MathFailure = { index: number; tex: string; message: string };
+
+export type MathRendered = {
+  html: string;
+  /** Formulas found (typeset or not). */
+  count: number;
+  failures: MathFailure[];
+};
+
+/**
+ * Replaces every formula span of sanitised markup with typeset KaTeX HTML. It
+ * never throws: a formula KaTeX rejects, one over the length cap, one beyond the
+ * count cap and every formula after the time budget ran out is printed as its
+ * raw LaTeX in a marked `code` element (red in print) and listed in `failures`,
+ * so the rest of the paper still prints. Callers decide what a failure means (a
+ * draft check refuses the paper, a render prints and warns).
+ */
+export function renderMathSpans(sanitizedHtml: string, math: MathRenderer = createMathRenderer()): MathRendered {
+  const spans = findMathSpans(sanitizedHtml);
+  const failures: MathFailure[] = [];
+  let output = '';
+  let at = 0;
+  spans.forEach((span, index) => {
+    output += sanitizedHtml.slice(at, span.start);
+    at = span.end;
+    const fail = (message: string) => {
+      failures.push({ index: index + 1, tex: span.tex, message });
+      output += `<code class="qp-math-error">${escapeHtml(span.tex.slice(0, L.texChars))}</code>`;
+    };
+    if (index >= L.mathNodes) return fail(`More than ${L.mathNodes} formulas.`);
+    if (span.tex.length > L.texChars) return fail(`The formula is longer than ${L.texChars} characters.`);
+    try {
+      const typeset = math.render(span.tex, span.display);
+      output += span.display ? `<span class="qp-math-display">${typeset}</span>` : `<span class="qp-math">${typeset}</span>`;
+    } catch (error) {
+      fail(error instanceof MathBudgetError ? error.message : `Invalid TeX: ${texErrorMessage(error)}`);
+    }
   });
-  return issues;
+  return { html: output + sanitizedHtml.slice(at), count: spans.length, failures };
 }
 
 /**

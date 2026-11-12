@@ -1,5 +1,6 @@
 import Handlebars from "handlebars";
 import sanitizeHtml from "sanitize-html";
+import { DOCUMENT_SANITIZER_OPTIONS, EMBEDDABLE_IMAGE } from "./document.sanitize";
 import { env } from "@campuspilot/env/server";
 import { rpcError } from "../../../errors";
 import { ORPCError } from "@orpc/server";
@@ -772,8 +773,6 @@ function renderMetered(
     activeMeter = null;
   }
 }
-/** The only image sources a document may carry (no SVG, no network). */
-const EMBEDDABLE_IMAGE = /^data:image\/(png|jpeg|webp);base64,[a-z0-9+/=]+$/i;
 const policy =
   "default-src 'none'; img-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'";
 /**
@@ -788,31 +787,6 @@ const policy =
 export function documentContentSecurityPolicy(type?: DocumentType) {
   return type === "question_paper" ? `${policy}; font-src data:` : policy;
 }
-const options: sanitizeHtml.IOptions = {
-  allowedTags: [
-    ...sanitizeHtml.defaults.allowedTags,
-    "html",
-    "head",
-    "body",
-    "style",
-    "img",
-    "main",
-    "header",
-    "footer",
-  ],
-  allowedAttributes: {
-    "*": ["class", "style", "id"],
-    img: ["src", "alt", "width", "height"],
-    td: ["colspan", "rowspan"],
-    th: ["colspan", "rowspan", "scope"],
-  },
-  allowedSchemes: ["data"],
-  allowedSchemesByTag: { img: ["data"] },
-  allowProtocolRelative: false,
-  allowVulnerableTags: true,
-  exclusiveFilter: (frame) =>
-    frame.tag === "img" && !EMBEDDABLE_IMAGE.test(frame.attribs.src ?? ""),
-};
 /** The CSP is inserted before all user markup. Sanitization removes active
  * elements and attributes; data-only images keep previews and Chromium offline.
  * Handlebars' own-property lookup protections remain enabled.
@@ -823,8 +797,8 @@ function safeHtml(raw: string, type?: DocumentType) {
       "This document exceeds the 25 MB rendering limit. Select fewer students or use smaller photos.",
     );
   const clean = sanitizeHtml(raw, {
-    ...options,
-    allowedTags: (options.allowedTags as string[]).filter(
+    ...DOCUMENT_SANITIZER_OPTIONS,
+    allowedTags: (DOCUMENT_SANITIZER_OPTIONS.allowedTags as string[]).filter(
       (tag) => !["html", "head", "body"].includes(tag),
     ),
   });
