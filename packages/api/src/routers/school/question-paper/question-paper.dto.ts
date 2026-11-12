@@ -32,7 +32,7 @@ export const QUESTION_PAPER_VALIDATE_LISTED = 40;
 export const QUESTION_PAPER_VALIDATE_LINE_CHARS = 400;
 /**
  * The same for `learn_question_paper_generation`: the guide, the limits and one
- * full example are about 12 KB. It is a one-off call per paper (and pruned from
+ * full example are about 10 KB. It is a one-off call per paper (and pruned from
  * the context afterwards), so it gets room for the whole payload rather than a
  * guide without its example.
  */

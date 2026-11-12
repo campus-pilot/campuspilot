@@ -2,7 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 
 import type { AssistantUserMessageBody } from '@campuspilot/db/schema/assistant';
 import { buildUserTranscriptContent, type AttachmentMarker } from '../../transcript';
-import { attachmentLabel, attachmentNote } from '../context';
+import { attachmentLabel, attachmentNote, stubLongInputFields } from '../context';
 import type { AssistantPrompt } from '../prompt';
 import { modelToolDescription, type AssistantTool } from '../tools';
 import type {
@@ -359,6 +359,16 @@ export const anthropicContext: ContextAdapter = {
         if (chars < minChars) return block;
         return { ...block, content: stub({ toolName: toolNames.get(block.tool_use_id ?? '') ?? 'a tool', chars }) };
       }),
+    };
+  },
+  stubToolInputs(entry, stub, minChars) {
+    const calls = entry.content as Array<{ type?: string; name?: string; input?: unknown }>;
+    if (!calls.some((block) => block.type === 'tool_use')) return entry;
+    return {
+      ...entry,
+      content: calls.map((block) =>
+        block.type === 'tool_use' ? { ...block, input: stubLongInputFields(block.name ?? 'a tool', block.input, stub, minChars) } : block,
+      ),
     };
   },
   materializeAttachment(marker: AttachmentMarker, file: AttachmentFile) {

@@ -273,7 +273,7 @@ Chat can carry images, mainly photographs of a handwritten question paper
 - **Transcript.** A stored user turn holds provider-neutral markers, never bytes; the
   provider adapters turn a marker into an image part when they build a request, always
   preceded by a line carrying the attachment's `asat_` id, sanitised file name and type so
-  the model can use the id as `figure.imageId` (old/unshown attachments keep the id in their
+  the model can use the id as `data-figure-id` on an `<img>` (old/unshown attachments keep the id in their
   note; see [Question papers](question-papers.md#chat-attachments-tools-drafts-pruning)).
   `AssistantUserMessageBody` carries `attachments` and an optional `seed` (the
   question paper "Continue in chat" context, accepted only on a new conversation).
@@ -296,13 +296,16 @@ Chat can carry images, mainly photographs of a handwritten question paper
   transcript is read and before the provider adapter; the stored transcript and the UI
   are never changed). The window is the last two human messages. Outside it a tool
   result of 8,000 characters or more is replaced by a stub naming the tool and its size
-  ("Call the tool again if you need it") and an attachment by a note asking the user to
-  attach it again. Inside it, images are materialised newest first within a 16 MiB
+  ("Call the tool again if you need it"), a top-level text field of 4,000 characters or more in
+  the input of an older tool call (the paper `html` of a draft or save call) by a stub naming
+  the field, the tool and the size (`stubToolInputs` of the adapter), and an attachment by a note
+  that keeps its id and says the image is no longer visible. The stored transcript keeps the
+  full text: a draft id is resolved from it when the user saves. Inside it, images are materialised newest first within a 16 MiB
   budget counted as base64, with a note for any that are missing, unreadable or omitted. Entry count,
   order, tool call ids and thought signatures are never touched, and the function is
   pure and idempotent. Each provider supplies a `ContextAdapter` (`anthropicContext`,
-  `geminiContext`, `fakeContext`) for its own message format. One threshold applies to
-  every tool, so the learn payload (about 17 KB) is pruned too and the agent calls it
+  `geminiContext`, `fakeContext`) for its own message format. One threshold per kind (results,
+  inputs) applies to every tool, so the learn payload (about 10 KB) is pruned too and the agent calls it
   again when it needs it.
 
 ### Cost: saved, never recomputed

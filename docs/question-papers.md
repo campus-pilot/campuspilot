@@ -401,10 +401,12 @@ only): page photos, generation, polling, previews and downloads.
   escaped in the JSON text, plus pages and the version list), so a long paper is not cut. If a
   result is nevertheless cut the tool appends its "Result truncated" line and the guide tells the
   agent never to submit a paper edited from a cut one. Validate declares 40,000 (it is lean by
-  construction); learn 40,000 (guide, limits and example are about 15 KB). The numbers live in
+  construction); learn 40,000 (guide, limits and example are about 10 KB). The numbers live in
   `question-paper.dto.ts` and are derived from `QUESTION_PAPER_LIMITS`, so raising the fragment
   limit raises the cap; `question-paper.dto.test.ts` pins the relation. Context pruning later
-  replaces a long result by a stub, so a long paper costs its tokens once.
+  replaces a long result, and the long text a model wrote into an older tool call, by a stub
+  (see "Context pruning"), so a long paper does not stay in the context once it is two
+  human messages old.
 - **Drafts** are not database rows. A draft is the input of a `validateQuestionPaperDraft`
   call in the conversation; the chat shows it as a card (ready or not, the problems in plain
   sentences, what the sanitiser removed behind a collapsed list, Preview, Save as new
@@ -430,12 +432,21 @@ only): page photos, generation, polling, previews and downloads.
   to the stored transcript): only the last two human messages are sent in full. In older
   turns a tool result of 8,000 characters or more is replaced by a short stub naming the
   tool and the size, and an older attachment by a note that keeps its `asat_` id and says
-  the image is no longer visible (see "Attachment ids" below); fresh images are sent newest first within a 16 MiB budget counted as base64 (4/3 of the file, under Gemini's 20 MB request limit); an image over the provider's own cap (5 MB on Claude) is reported as unreadable. The learn payload
+  the image is no longer visible (see "Attachment ids" below). The same applies to the
+  *inputs* of older tool calls: a top-level text field of 4,000 characters or more (the `html` the model
+  wrote into `validateQuestionPaperDraft` or `saveQuestionPaperVersion`) becomes a stub that names
+  the field, the tool and the size and points at what still works. The call, its id, its name and
+  its short fields are untouched, so every call keeps its result; the stored transcript keeps the
+  full text, which is what a `draftId` is resolved from when the user saves, and the stub says
+  that the call's result still names the draft id. To revise an old paper the agent calls
+  `getQuestionPaper` (saved) or writes the whole paper again; it can re-validate to get a fresh
+  draft id (a validate result over 8,000 characters is itself stubbed once old, so then only a
+  re-validation gives the id again). Fresh images are sent newest first within a 16 MiB budget counted as base64 (4/3 of the file, under Gemini's 20 MB request limit); an image over the provider's own cap (5 MB on Claude) is reported as unreadable. The learn payload
   counts as a long result, so after two more messages the agent calls the tool again.
 
 - **Attachment ids.** The model must be told each attachment's id or it cannot write a
   `data-figure-id`. Every image part is preceded by a server-built line
-  `[Attachment asat_...: <sanitised file name>, image/png (1 of 2). Use this id as data-figure-id ...]`
+  `[Attachment asat_...: <sanitised file name>, image/png (1 of 2). Use this id as data-figure-id on an <img> to put the image in a question paper.]`
   (`attachmentLabel` in `runtime/context.ts`, used by the Anthropic, Gemini and fake
   adapters alike): only the generated id, the sanitised name (brackets and line breaks removed)
   and the content type, never user free text. Notes for attachments that are not shown

@@ -144,6 +144,9 @@ export type AttachmentFile =
 /** A tool result found in a stored entry, for pruning. */
 export type ToolResultStubInput = { toolName: string; chars: number };
 
+/** One long text field of a tool call's input, for pruning. */
+export type ToolInputStubInput = { toolName: string; field: string; chars: number };
+
 /**
  * How `buildModelContext` (runtime/context.ts) reads and rewrites this
  * provider's stored transcript. Everything format-specific lives here, so the
@@ -163,6 +166,18 @@ export interface ContextAdapter {
     entry: TranscriptEntry,
     toolNames: ReadonlyMap<string, string>,
     stub: (result: ToolResultStubInput) => string,
+    minChars: number,
+  ): TranscriptEntry;
+  /**
+   * The entry with every long top-level text field of its tool call inputs
+   * (at least `minChars` characters) replaced by `stub`'s text. The call, its
+   * id, its name and every other field stay exactly as they were, so each call
+   * keeps its result. Use `stubLongInputFields` (runtime/context.ts) for the
+   * input itself.
+   */
+  stubToolInputs(
+    entry: TranscriptEntry,
+    stub: (input: ToolInputStubInput) => string,
     minChars: number,
   ): TranscriptEntry;
   /** The parts that show an attachment to the model: a label, then the image or a note. */

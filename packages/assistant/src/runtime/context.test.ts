@@ -2,14 +2,20 @@ import { describe, expect, it } from 'vitest';
 
 import type { AttachmentMarker } from '../transcript';
 import {
+  attachmentLabel,
   attachmentNote,
   buildModelContext,
   CONTEXT_IMAGE_BUDGET_BYTES,
+  CONTEXT_TOOL_INPUT_MIN_CHARS,
   CONTEXT_TOOL_RESULT_MIN_CHARS,
   fullContextBoundary,
+  stubLongInputFields,
+  toolInputStub,
   toolResultStub,
   type ModelContextDeps,
 } from './context';
+import { QUESTION_PAPER_GUIDE } from '@campuspilot/question-paper/guide';
+
 import { anthropicContext } from './providers/anthropic';
 import { fakeContext } from './providers/fake';
 import { geminiContext } from './providers/gemini';
@@ -240,6 +246,91 @@ describe.each([claude, gemini, fake])('context building ($name)', (format) => {
   });
 });
 
+/** A tool call whose input is `input`, and where each format keeps that input. */
+const inputFormats = [
+  {
+    format: claude,
+    call: (id: string, name: string, input: unknown): TranscriptEntry => ({ role: 'assistant', content: [{ type: 'tool_use', id, name, input }] }),
+    inputOf: (entry: TranscriptEntry) => (entry.content[0] as { input: unknown }).input,
+  },
+  {
+    format: gemini,
+    call: (id: string, name: string, input: unknown): TranscriptEntry => ({
+      role: 'assistant',
+      content: [{ functionCall: { id, name, args: input }, thoughtSignature: `sig-${id}` }],
+    }),
+    inputOf: (entry: TranscriptEntry) => (entry.content[0] as { functionCall: { args: unknown } }).functionCall.args,
+  },
+  {
+    format: fake,
+    call: (id: string, name: string, input: unknown): TranscriptEntry => ({ role: 'assistant', content: [{ type: 'tool_use', id, name, input }] }),
+    inputOf: (entry: TranscriptEntry) => (entry.content[0] as { input: unknown }).input,
+  },
+];
+
+describe.each(inputFormats)('long tool call inputs in old entries ($format.name)', ({ format, call, inputOf }) => {
+  const provider = { context: format.context, imageMimeTypes: format.imageMimeTypes };
+  const HTML = '<p>q</p>'.repeat(CONTEXT_TOOL_INPUT_MIN_CHARS);
+  const scope = { examSlug: 'annual', classId: 'c1' };
+
+  /** An old draft call, its result, a newer revision, then two human messages. */
+  const entries = (): TranscriptEntry[] => [
+    format.human('make a paper'),
+    call('v1', 'school_validateQuestionPaperDraft', { html: HTML }),
+    format.result('v1', 'school_validateQuestionPaperDraft', '{"valid":true,"draftId":"abc123abc123"}'),
+    format.human('shorter please'),
+    call('v2', 'school_validateQuestionPaperDraft', { html: `${HTML}x` }),
+    format.result('v2', 'school_validateQuestionPaperDraft', '{"valid":true,"draftId":"def456def456"}'),
+    format.human('save it'),
+    call('s1', 'school_saveQuestionPaperVersion', { ...scope, draftId: 'def456def456' }),
+  ];
+
+  it('stubs the long text of calls before the boundary, keeping ids, names, short fields and the result', async () => {
+    const original = entries();
+    const out = await buildModelContext(original, provider, loader({}));
+    expect(out).toHaveLength(original.length);
+    expect(inputOf(out[1]!)).toEqual({ html: toolInputStub({ toolName: 'school_validateQuestionPaperDraft', field: 'html', chars: HTML.length }) });
+    expect(format.callIds(out)).toEqual(format.callIds(original));
+    expect(format.resultIds(out)).toEqual(format.resultIds(original));
+    // The draft id the stub points at is still in the call's result.
+    expect(format.resultText(out[2]!)).toContain('abc123abc123');
+    // Calls in the full window and calls with only short fields stay whole.
+    expect(out[4]).toEqual(original[4]);
+    expect(out[7]).toEqual(original[7]);
+  });
+
+  it('never changes the stored transcript, is deterministic and idempotent', async () => {
+    const original = entries();
+    const before = JSON.stringify(original);
+    const first = await buildModelContext(original, provider, loader({}));
+    expect(JSON.stringify(original)).toBe(before);
+    expect(JSON.stringify(await buildModelContext(original, provider, loader({})))).toBe(JSON.stringify(first));
+    expect(JSON.stringify(await buildModelContext(first, provider, loader({})))).toBe(JSON.stringify(first));
+  });
+
+  it('keeps a call as it is below the threshold and honours the option', async () => {
+    const short = [format.human('a'), call('c', 'school_t', { html: 'x'.repeat(100) }), format.result('c', 'school_t', 'ok'), format.human('b'), format.human('c')];
+    expect((await buildModelContext(short, provider, loader({})))[1]).toEqual(short[1]);
+    const lowered = await buildModelContext(short, provider, loader({}), { toolInputMinChars: 50 });
+    expect(inputOf(lowered[1]!)).toEqual({ html: toolInputStub({ toolName: 'school_t', field: 'html', chars: 100 }) });
+  });
+
+  it('a stub is shorter than the threshold, so it is never stubbed again', () => {
+    expect(toolInputStub({ toolName: 'school_validateQuestionPaperDraft', field: 'html', chars: 80_000 }).length).toBeLessThan(CONTEXT_TOOL_INPUT_MIN_CHARS);
+  });
+});
+
+describe('stubLongInputFields', () => {
+  const stub = () => 'S';
+  it('returns the same object when nothing is long and leaves non-flat values alone', () => {
+    const input = { a: 'short', nested: { text: 'x'.repeat(10) }, list: ['y'.repeat(10)], n: 5 };
+    expect(stubLongInputFields('t', input, stub, 5)).toEqual({ a: 'S', nested: input.nested, list: input.list, n: 5 });
+    expect(stubLongInputFields('t', input, stub, 50)).toBe(input);
+    expect(stubLongInputFields('t', 'text', stub, 1)).toBe('text');
+    expect(stubLongInputFields('t', null, stub, 1)).toBeNull();
+  });
+});
+
 describe('attachment ids in the model context', () => {
   const real = (name = 'triangle.png'): AttachmentMarker => ({
     type: 'campuspilot_attachment',
@@ -257,8 +348,14 @@ describe('attachment ids in the model context', () => {
     expect(JSON.stringify(geminiContext.materializeAttachment(real(), file)[0])).toContain(line);
     expect(JSON.stringify(fakeContext.materializeAttachment(real(), file)[0])).toContain(line);
     for (const context of [anthropicContext, geminiContext, fakeContext]) {
-      expect(JSON.stringify(context.materializeAttachment(real(), file)[0])).toContain('figure.imageId');
+      expect(JSON.stringify(context.materializeAttachment(real(), file)[0])).toContain('data-figure-id');
     }
+  });
+
+  it('uses the same figure token the question paper guide teaches, so the two cannot drift apart', () => {
+    expect(QUESTION_PAPER_GUIDE).toContain('data-figure-id');
+    expect(attachmentLabel(real())).toContain('data-figure-id');
+    expect(attachmentLabel(real())).not.toContain('imageId');
   });
 
   it('cannot be closed or split by a hostile file name', () => {
@@ -272,7 +369,7 @@ describe('attachment ids in the model context', () => {
       const text = JSON.stringify(context.stubAttachment(real()));
       expect(text).toContain('asat_abcdefghijklmnopqrstu');
       expect(text).toContain('no longer visible');
-      expect(text).toContain('figure.imageId');
+      expect(text).toContain('data-figure-id');
     }
   });
 });

@@ -14,7 +14,7 @@ import {
 
 import type { AssistantUserMessageBody } from '@campuspilot/db/schema/assistant';
 import { buildUserTranscriptContent, isAttachmentMarker, type AttachmentMarker } from '../../transcript';
-import { attachmentLabel, attachmentNote } from '../context';
+import { attachmentLabel, attachmentNote, stubLongInputFields } from '../context';
 import type { AssistantPrompt } from '../prompt';
 import { modelToolDescription, type AssistantTool } from '../tools';
 import type {
@@ -167,6 +167,19 @@ export const geminiContext: ContextAdapter = {
         if (text.length < minChars) return part;
         const toolName = response.name ?? toolNames.get(response.id ?? '') ?? 'a tool';
         return { ...part, functionResponse: { ...response, response: { [key]: stub({ toolName, chars: text.length }) } } };
+      }),
+    };
+  },
+  stubToolInputs(entry, stub, minChars) {
+    if (!(entry.content as Part[]).some((part) => part.functionCall)) return entry;
+    return {
+      ...entry,
+      content: (entry.content as Part[]).map((part) => {
+        const call = part.functionCall;
+        if (!call) return part;
+        // Only `args` changes: id, name and the part's thought signature stay.
+        const args = stubLongInputFields(call.name ?? 'a tool', call.args, stub, minChars) as typeof call.args;
+        return args === call.args ? part : { ...part, functionCall: { ...call, args } };
       }),
     };
   },

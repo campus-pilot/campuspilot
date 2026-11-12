@@ -1,6 +1,6 @@
 import type { AssistantUserMessageBody } from '@campuspilot/db/schema/assistant';
 import { type AttachmentMarker } from '../../transcript';
-import { attachmentLabel, attachmentNote } from '../context';
+import { attachmentLabel, attachmentNote, stubLongInputFields } from '../context';
 import type { AssistantPrompt } from '../prompt';
 import type { ModelPrices } from './config';
 import type { ProviderRegistry } from './registry';
@@ -58,6 +58,15 @@ export const fakeContext: ContextAdapter = {
         block.type === 'tool_result' && block.content.length >= minChars
           ? { ...block, content: stub({ toolName: toolNames.get(block.toolUseId) ?? block.toolName, chars: block.content.length }) }
           : block,
+      ),
+    };
+  },
+  stubToolInputs(entry, stub, minChars) {
+    if (!(entry.content as FakeBlock[]).some((block) => block.type === 'tool_use')) return entry;
+    return {
+      ...entry,
+      content: (entry.content as FakeBlock[]).map((block) =>
+        block.type === 'tool_use' ? { ...block, input: stubLongInputFields(block.name, block.input, stub, minChars) } : block,
       ),
     };
   },

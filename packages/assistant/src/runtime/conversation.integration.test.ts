@@ -191,9 +191,9 @@ describe('a message with images', () => {
     ]);
     // The model got labelled images in the order attached, then the words.
     expect(provider.calls[0]!.transcript[0]!.content).toEqual([
-      { type: 'text', text: '[Attachment asat_1: page1.jpg, image/jpeg (1 of 2). Use this id as figure.imageId to put the image in a question paper.]' },
+      { type: 'text', text: '[Attachment asat_1: page1.jpg, image/jpeg (1 of 2). Use this id as data-figure-id on an <img> to put the image in a question paper.]' },
       { type: 'image', mimeType: 'image/jpeg', byteLength: 3 },
-      { type: 'text', text: '[Attachment asat_2: page2.jpg, image/jpeg (2 of 2). Use this id as figure.imageId to put the image in a question paper.]' },
+      { type: 'text', text: '[Attachment asat_2: page2.jpg, image/jpeg (2 of 2). Use this id as data-figure-id on an <img> to put the image in a question paper.]' },
       { type: 'image', mimeType: 'image/jpeg', byteLength: 3 },
       { type: 'text', text: QUESTION },
     ]);
@@ -209,7 +209,7 @@ describe('a message with images', () => {
           const shown = JSON.stringify(input.transcript[0]!.content);
           const found = /\[Attachment (asat_[a-z0-9]{21}):/.exec(shown)?.[1];
           return fakeReply({
-            toolUses: [{ id: 'tu_fig', name: listStudents.modelName, input: { figure: { type: 'figure', imageId: found, alt: 'Triangle' } } }],
+            toolUses: [{ id: 'tu_fig', name: listStudents.modelName, input: { html: `<figure><img data-figure-id="${found}" alt="Triangle"></figure>` } }],
           });
         },
         fakeReply({ text: 'Done.' }),
@@ -219,7 +219,7 @@ describe('a message with images', () => {
     });
     callToolMock.mockResolvedValue(toolSuccess('ok'));
     await invoke().done;
-    expect(JSON.stringify(provider.calls[1]!.transcript)).toContain(`"imageId":"${id}"`);
+    expect(JSON.stringify(provider.calls[1]!.transcript)).toContain(`data-figure-id=\\"${id}\\"`);
   });
 
   it('tells the model when an image is gone instead of failing the turn', async () => {
