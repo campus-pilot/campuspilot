@@ -106,10 +106,7 @@ export function AssistantPanel({ schoolId }: { schoolId: string }) {
               compact
               autoFocus
               gutterClassName="px-4"
-              onConversationStarted={(id) => {
-                chat.started(id);
-                setConversationId(id);
-              }}
+              onConversationStarted={(id) => chat.started(id, () => setConversationId(id))}
               onNewConversation={() => setConversationId(null)}
             />
           </div>

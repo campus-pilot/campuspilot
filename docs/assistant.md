@@ -601,7 +601,10 @@ Adapted from T3 Code's data layer:
   `/assistant/<id>`; the page is rendered by the assistant route's
   `layout.tsx` (its pages render nothing), so that change keeps the history,
   the chat and the focus instead of building a new page. Any other change of
-  conversation remounts the chat.
+  conversation remounts the chat, and so does a move that never arrives: a
+  link to `/assistant` (or Back) taken while the address change is pending
+  replaces that navigation, so the chat starts over as a new conversation,
+  matching the address and the history.
 - **Drafts**: the unsent text of each conversation is kept in the browser's
   `sessionStorage` (`assistant-draft.ts`), so switching conversation or
   reloading does not lose it. It is kept per school and conversation (new

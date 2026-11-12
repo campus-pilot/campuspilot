@@ -1,6 +1,6 @@
 'use client';
 
-import { parseQuestionPaperSeedParams, type QuestionPaperSeed } from '@campuspilot/assistant-contract/attachments';
+import type { QuestionPaperSeed } from '@campuspilot/assistant-contract/attachments';
 import type { AssistantConversationListItemDto } from '@campuspilot/assistant-contract/dto';
 import { Button } from '@campuspilot/ui/components/button';
 import { Skeleton } from '@campuspilot/ui/components/skeleton';
@@ -17,6 +17,7 @@ import { ModulePlaceholder } from '@/components/module-placeholder';
 import { AssistantAccess } from './assistant-access';
 import { AssistantChat } from './assistant-chat';
 import { useChatKey } from './assistant-chat-key';
+import { seedFromQuery } from './assistant-seed-query';
 import { ConversationRow, DeleteConversationDialog, useDeleteConversation } from './assistant-history-row';
 import { useAssistantConversations, useAssistantOpenConversation } from './use-assistant';
 
@@ -249,10 +250,7 @@ export function AssistantWorkspace({
             surface="page"
             autoFocus
             gutterClassName="px-4 sm:px-8 lg:px-12"
-            onConversationStarted={(id) => {
-              chat.started(id);
-              router.replace(conversationHref(schoolId, id));
-            }}
+            onConversationStarted={(id) => chat.started(id, () => router.replace(conversationHref(schoolId, id)))}
             onNewConversation={() => router.push(conversationHref(schoolId))}
           />
         </div>
@@ -278,6 +276,6 @@ export function AssistantWorkspace({
 export function AssistantWorkspaceFromAddress({ schoolId }: { schoolId: string }) {
   const { conversationId } = useParams<{ conversationId?: string }>();
   const query = useSearchParams();
-  const seed = conversationId ? null : parseQuestionPaperSeedParams(Object.fromEntries(query));
+  const seed = conversationId ? null : seedFromQuery(query);
   return <AssistantWorkspace schoolId={schoolId} conversationId={conversationId ?? null} seed={seed} />;
 }
