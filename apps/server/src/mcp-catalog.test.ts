@@ -658,8 +658,8 @@ describe('assistant service view', () => {
         .map((tool) => [tool.name, tool._meta![ASSISTANT_TOOL_META.outputChars]]),
     );
     expect(declared).toEqual({
-      'school.getQuestionPaper': 80_000,
-      'school.validateQuestionPaperDraft': 80_000,
+      'school.getQuestionPaper': 200_000,
+      'school.validateQuestionPaperDraft': 40_000,
       'school.learn_question_paper_generation': 40_000,
     });
     // Procedures the assistant may not use are not listed at all.

@@ -178,7 +178,7 @@ them). There is no JSON schema, no provider structured-output mode and no model 
 meaning: the server never reads the number of questions, the marks or the language back out of
 it. `packages/question-paper` holds what is shared by the API, the worker and the browser:
 
-- `limits.ts`, the one place for every number: 200,000 characters of fragment (a longer answer
+- `limits.ts`, the one place for every number: 80,000 characters of fragment (a longer answer
   is refused, never cut), 1,000,000 characters parsed at most, 8,000 elements, 40 SVGs and 4,000
   SVG elements, 30,000 characters of `<style>`, 600 formulas of at most 500 characters, 30
   figures plus placeholders, 500 characters per placeholder description.

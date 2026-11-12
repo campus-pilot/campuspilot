@@ -92,7 +92,7 @@ describe('question paper procedures', () => {
       expect(learn.guide).toContain('Writing a question paper');
       expect(learn.guide.indexOf('NO ANIMATION')).toBeGreaterThan(-1);
       expect(learn.example).toContain('data-math');
-      expect(learn.limits).toMatchObject({ fragmentChars: 200_000 });
+      expect(learn.limits).toMatchObject({ fragmentChars: 80_000 });
       expect(learn).not.toHaveProperty('jsonSchema');
       // The whole payload must fit what the assistant may read of it (design G6).
       expect(JSON.stringify(learn).length).toBeLessThan(QUESTION_PAPER_LEARN_OUTPUT_CHARS);

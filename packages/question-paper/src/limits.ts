@@ -8,8 +8,13 @@
  * server does on it.
  */
 export const QUESTION_PAPER_LIMITS = {
-  /** UTF-16 characters of the stored fragment. A longer answer is refused, never cut. */
-  fragmentChars: 200_000,
+  /**
+   * UTF-16 characters of the stored fragment. A longer answer is refused, never cut.
+   * 80,000 is deliberate: `getQuestionPaper` returns the fragment as JSON text (up to twice its
+   * length) plus 40,000 for the rest, and the MCP layer allows at most 200,000 characters per
+   * tool result, so every paper that can be saved can also be read back whole.
+   */
+  fragmentChars: 80_000,
   /**
    * The most characters the sanitiser will even parse. Between this and
    * `fragmentChars` the fragment is parsed so the finding can say how large it
