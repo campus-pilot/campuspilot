@@ -189,14 +189,16 @@ million tokens, `<P>_PRICE_INPUT_USD_PER_MTOK`, `_OUTPUT_`, `_CACHE_READ_`,
 `_CACHE_WRITE_`. A provider is configured only when all six are set; setting
 some of them refuses to start. There is no price list in code.
 
-### One-shot structured requests (question papers)
+### One-shot text requests (question papers)
 
-Besides the agent loop, a provider can make one **structured request**
-(`ModelProvider.generateStructured`): one user turn of text and image parts, a
-JSON Schema, no tools and no transcript, answered with the JSON text, the
-answering model, normalised usage and two flags, `refusal` and `truncated`
-(stopped on the output limit). Question paper generation (the "Generate with
-AI" job, `docs/question-papers.md`) is its only caller. It reaches it through
+Besides the agent loop, a provider can make one **plain text request**
+(`ModelProvider.generateText`): one user turn of text and image parts, a system
+prompt, no tools, no transcript and no structured-output mode, answered with the
+text, the answering model, normalised usage and two flags, `refusal` and
+`truncated` (stopped on the output limit). Question paper generation (the
+"Generate with AI" job, `docs/question-papers.md`) is its only caller; the answer
+is an HTML fragment, which the caller finds in the text (it strips a Markdown
+code fence), sanitises and validates. It reaches the provider through
 `createQuestionPaperModel()` (`packages/assistant/src/question-paper-model.ts`,
 outside `src/runtime`), which the API process and the worker call at boot and
 pass to `configureQuestionPaperModel`; the API package cannot import this one,
@@ -207,42 +209,19 @@ untouched, so `boundary.test.ts` still holds.
 | | Anthropic | Gemini |
 | --- | --- | --- |
 | Images read | JPEG, PNG, WebP, GIF (**not HEIC**) | JPEG, PNG, WebP, HEIC, HEIF |
-| Request | `beta.messages.stream`, `output_config.format = {type:'json_schema', schema}`, effort `medium`, no caching (pages differ per job) | `models.generateContentStream`, `responseMimeType: application/json`, `responseJsonSchema`, `mediaResolution: HIGH` (streamed so a long answer survives idle limits and a broken stream still reports usage) |
-| Schema | `$defs`/`$ref` supported (the SDK's own transform keeps them); see the complexity risk below | Expanded, `const` rewritten and fitted to the complexity limits by `toGeminiResponseSchema` (`gemini-schema.ts`), see below |
+| Request | `beta.messages.stream`, effort `medium`, no caching (pages differ per job) | `models.generateContentStream`, `mediaResolution: HIGH` (streamed so a long answer survives idle limits and a broken stream still reports usage) |
 | Truncated | `stop_reason = max_tokens` | `finishReason = MAX_TOKENS` |
 | Refused | `stop_reason = refusal` | prompt block, or a safety/image-safety finish reason |
 
-The model-facing JSON Schema of a paper is about 7 KB with `$defs`/`$ref`
-(78 KB expanded; rich text is shown as one flat run object). A page the active provider cannot read (HEIC on
-Anthropic) fails the job before any request, naming the page (decision D46);
-pages are never dropped silently.
-
-**Gemini structured output limits (found with the real API).** The first real
-call failed with `400 INVALID_ARGUMENT "Request contains an invalid argument."`
-and no other detail. Bisected with `responseJsonSchema` on `gemini-3.8-flash`:
-images, thinking, output tokens and the model id were fine; the schema was
-refused for complexity, measured **after `$ref`s are expanded** (so `$defs` does
-not help). Observed: nesting depth 30 passes and 32 fails; the question paper
-schema passed with 170 declared properties at depth 19 and failed with 178 at
-depth 22 (and with 220, 365, 884); a flat object passes with 150 properties and
-fails with 170. The rule is not documented, so `gemini-schema.ts` stays well
-inside what passed: it expands references, rewrites `const`, and relaxes the
-deepest optional subtrees (captions, then blocks, options and sub-parts; at the current budget even a question's own `blocks` become an open array that the prompt describes)
-to open `{}` schemas until depth <= 20 and <= 150 properties. The prompt and
-the validator still govern the answer; `gemini-schema.test.ts` pins the real
-schema within the limits. A future 400 of this kind means lowering
-`GEMINI_SCHEMA_LIMITS`. The rich text hint carries `t v tex display b i u sup
-sub` only: per-run `lang`/`script`/`dir` are not offered to the job (the paper
-level `meta` states them), because they cost most of the budget.
-
-**Anthropic risk (not verified, no key).** Anthropic's structured outputs
-document complexity limits on a strict schema (a bounded number of optional
-parameters and of union-typed parameters across the schema, no recursion).
-The paper schema has far more optional properties than the documented figures
-(about 130 expanded), so a first real Anthropic run may be refused with a
-`400`; the fix is the same technique (an Anthropic-specific fit in
-`anthropic.ts`). The job now records the provider's real message in
-`error_detail` (`error-detail.ts`) so the limit and request id are visible.
+There is no response schema, so no provider-specific schema fitting: an earlier
+design asked the providers for a JSON document and had to fit its schema to
+Gemini's undocumented complexity limits; that is gone. What the model may write
+is governed by the prompt (the shared fragment rules) and enforced by the
+`question_paper_body` sanitiser and the validator after the answer. A page the
+active provider cannot read (HEIC on Anthropic) fails the job before any request,
+naming the page (decision D46); pages are never dropped silently. The job
+records the provider's real error message in `error_detail` (`error-detail.ts`)
+so a refused request is diagnosable.
 
 **Settings.** Question paper generation uses `QUESTION_PAPER_PROVIDER`
 (default `ASSISTANT_PROVIDER`) and `QUESTION_PAPER_MODEL` (default the
@@ -308,9 +287,10 @@ Chat can carry images, mainly photographs of a handwritten question paper
   (`_meta['campuspilot/output-chars']`).
 - **Cards and views.** A successful `validateQuestionPaperDraft` call becomes a
   `card` timeline row (`ASSISTANT_CARD_TOOLS`, keyed by the stored MCP name
-  `school.validateQuestionPaperDraft`) that the app renders as a draft card (errors, or
+  `school.validateQuestionPaperDraft`) that the app renders as a draft card (the problems
+  in plain sentences, or: a collapsed "what was removed" list, a placeholder-figure note,
   Preview and *Save as new version*, which sends the plain message "Save draft {id} as
-  a new version."). The `question_paper` view shows a saved version with Preview and
+  a new version."). No marks are shown anywhere. The `question_paper` view shows a saved version with Preview and
   Download (see Views below). Drafts exist only in the conversation.
 - **Context pruning** (`runtime/context.ts`, `buildModelContext`, applied after the
   transcript is read and before the provider adapter; the stored transcript and the UI

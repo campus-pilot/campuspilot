@@ -1,15 +1,15 @@
 # Question papers
 
 AI-assisted question papers: a teacher photographs a handwritten paper (or
-dictates it to the assistant in chat), and CampusPilot turns it into a
-structured document that prints on the school's own letterhead. This is the
-canonical guide. Template and rendering rules shared with the other document
+dictates it to the assistant in chat), and CampusPilot turns it into an HTML
+fragment that prints on the school's own letterhead. This is the canonical
+guide. Template and rendering rules shared with the other document
 types are in [Document system](document-system.md#question-papers); the chat
 side of the assistant is in [In-app assistant](assistant.md).
 
 Read this before changing the `exam_question_paper_*` tables, the
-`question-paper` router or its MCP tools, the structured paper schema
-(`packages/question-paper`), the renderer, the generation job
+`question-paper` router or its MCP tools, the fragment vocabulary and limits
+(`packages/question-paper`), the `question_paper_body` sanitiser, the renderer, the generation job
 (`packages/api/src/workflows/question-paper`), chat image attachments, the
 `question_paper` document type, the Question paper tab in the management app or
 the demo seed's question papers.
@@ -26,7 +26,7 @@ the demo seed's question papers.
   version). Pages are *source material*: the printed paper paginates on its own and
   the number of uploaded pages means nothing for the generated one. Never map or
   validate them one to one.
-- A **version** is the structured JSON document (below) plus a stored PDF. It never
+- A **version** is the HTML fragment (below) plus a stored PDF. It never
   changes. Every change (a regeneration, a chat edit) is a new version; any version
   can be previewed and downloaded. There is no approved or final state, no hand
   editing of a generated paper in the UI and no answer key.
@@ -36,18 +36,22 @@ the demo seed's question papers.
   1. **Manual**: the Question paper tab of an examination (upload, reorder,
      *Generate with AI*, preview, download). Generation is a durable worker job.
   2. **Chat**: the in-app assistant or an external MCP client reads attached photos
-     or an existing paper, writes the JSON itself, validates it, shows drafts and saves
+     or an existing paper, writes the HTML itself, validates it, shows drafts and saves
      a new version only when the user says so. No model call is made by the server
      for this path: the agent is the author, the server validates and stores.
-  Both end in the same function, `saveQuestionPaperVersion`, so validation, the marks
-  check, rendering and printing are identical.
+  Both end in the same function, `saveQuestionPaperVersion`, so validation (the
+  sanitiser, limits, formulas, figures), rendering and printing are identical.
+- **Nothing computes or checks marks.** The paper prints the marks its author wrote;
+  there is no total, no comparison with the exam plan and no marks warning. The plan's
+  maximum marks reach the printed paper only through the school's template header
+  (`questionPaper.maxMarks`), a snapshot kept on the version (`plan_max_marks`).
 - Images **inside** a paper come only from uploaded images. Image links are not
   supported. A diagram the AI cannot reproduce becomes a **figure placeholder**
-  (with a description); the user attaches the real image in chat and a new
-  version prints it. The manual screen never embeds images: that is chat's job.
+  (`<figure data-placeholder="...">`, a labelled dashed box); the user attaches the real
+  image in chat and a new version prints it. A simple geometric diagram may be an inline SVG. The manual screen never embeds images: that is chat's job.
 - Languages and scripts: Hindi and other Indian languages, Urdu (right to left)
-  and mathematics (LaTeX through KaTeX) are first class. `language`, `script` and
-  `direction` are separate fields and never inferred from one another.
+  and mathematics (LaTeX through KaTeX) are first class. The fragment states its language and
+  direction itself, per element (`lang`, `dir`); the server reads neither back out of it.
 
 ## Permissions, gate and who sees it
 
@@ -91,16 +95,24 @@ affected papers itself.
 | `exam_question_paper` | The paper: unique key, `latest_version_no` (token of saving a version, never `max(version_no)`), `page_revision` (token of page changes) |
 | `exam_question_paper_page` | One photo: position, original and two derivatives (`model` JPEG the AI reads, `thumb`), `derivative_status` (`ready` or `unsupported` when the server cannot decode it, for example HEIC), size, sha256 |
 | `exam_question_paper_job` | One generation: `queued`, `running`, `succeeded`, `failed`; ordered `page_ids` and the `page_revision` it ran on; provider, model, request count; `error_code` and the safe `error_message` (and developer-only `error_detail`); hand-over facts (`handed_over_at`, attempts, last error). A partial unique index allows one queued or running job per paper |
-| `exam_question_paper_version` | Immutable: `version_no`, the JSON `content`, its sha256, `source` (`agent` or `ai_job`) with the job id, page ids or conversation id, `total_marks`, `plan_max_marks`, `warnings`, the pinned `template_revision_id` and the `pdf_artifact_id` |
+| `exam_question_paper_version` | Immutable: `version_no`, the sanitised fragment `content_html` (text), its sha256, `source` (`agent` or `ai_job`) with the job id, page ids or conversation id, `plan_max_marks` (the header snapshot), `warnings` (sanitiser notices, below), the pinned `template_revision_id` and the `pdf_artifact_id` |
 | `exam_question_paper_figure` | An uploaded image a version prints (JPEG, or PNG up to 400 KB when it has transparency), owned by the paper, deduplicated by `source_attachment_id` |
 | `assistant_attachment` | A chat image (below) |
 | `assistant_model_request` | The job's cost rows: `source = 'question_paper'`, `question_paper_job_id`, no chat run |
+
+**Migration 0064** (`question-paper-html-fragment`) moved versions from the structured JSON to
+the fragment: `content jsonb` became `content_html text`, and `schema_version` and `total_marks`
+were dropped. `plan_max_marks` stays (it is the plan's maximum at save time, not a computed
+total). `warnings` stays but now holds only sanitiser notices `{ code, message }` (code
+`sanitised`); the migration resets old entries. The JSON model never shipped, so existing
+rows (development data) keep their PDF and get a one-line placeholder fragment; generating
+the paper again adds a proper version.
 
 The PDF of a version is an `artifact` row (`kind: pdf`, `document_type:
 question_paper`, class, session and exam filled) under
 `schools/{schoolId}/documents/`. `pdf_artifact_id` is `ON DELETE SET NULL`: if the
 artifact is ever deleted, the next download prints the version again from its stored
-JSON and pinned template and stores the new PDF. Every object lives under
+fragment and pinned template and stores the new PDF. Every object lives under
 `schools/{schoolId}/` (`exam-question-papers/pages|figures/{pageId|figureId}...`; objects written before
 this scheme keep their `{paperId}` keys, deletes use the key stored on the row), which is
 what the demo purge sweeps.
@@ -130,8 +142,9 @@ chat: attach photos -> draft(s) -> user: "save" -> approval -> version n
   instead of dropping the page (D46). The browser converts HEIC to JPEG itself where
   it can (Safari).
 - **Generation** (manual only). See "The generation job".
-- **Save.** `saveQuestionPaperVersion` validates the document (`checkQuestionPaperDraft`),
-  copies chat-attachment figures into the paper, picks the school's currently
+- **Save.** `saveQuestionPaperVersion` validates the fragment (`checkQuestionPaperDraft`:
+  sanitise, caps, non-empty, every formula typeset, every figure id usable and the figures'
+  printed size), stores the **sanitised** fragment, copies chat-attachment figures into the paper, picks the school's currently
   selected template, renders the HTML, prints the PDF with Gotenberg, uploads it,
   and in one transaction inserts the artifact, the version and bumps
   `latest_version_no`. The printed version number must equal the stored one: an
@@ -157,77 +170,143 @@ chat: attach photos -> draft(s) -> user: "save" -> approval -> version n
   under a `FOR UPDATE` lock of the paper row. While a job is in flight, page changes
   and deleting the paper are CONFLICT.
 
-## The structured JSON
+## The HTML fragment
 
-`packages/question-paper` is the one definition (Zod, `.strict()` everywhere, so a
-typo is an error with a path). Schema version 1.
+The model's output, and what a version stores, is an HTML **fragment**: the body of the paper
+only (no `<html>`, `<head>`, doctype or code fence; the extractor and the sanitiser tolerate
+them). There is no JSON schema, no provider structured-output mode and no model of the paper's
+meaning: the server never reads the number of questions, the marks or the language back out of
+it. `packages/question-paper` holds what is shared by the API, the worker and the browser:
 
-- `meta`: `language`, `script`, `direction` (stated independently), and **hints** read
-  from the paper (`timeAllowed`, `maxMarks`, `classLabel`, `subjectLabel`,
-  `examLabel`). Hints reach the template (`questionPaper.timeAllowed`) or are compared
-  with the computed total; they are never authoritative.
-- `generalInstructions`, then `sections[]` (heading, instructions, blocks such as a
-  reading passage, `attemptAny`, `questions[]`). A question has `number` (printed
-  verbatim), `type` (semantic tag), `text`, `marks` (multiples of 0.25 or null),
-  `blocks`, `options` (MCQ), `parts` > `parts` (three levels at most, explicit, never
-  recursive: the providers' structured output rejects recursion) and `alternatives`
-  ("OR").
-- Rich text is a string or an array of runs (`text` with bold, italic, underline,
-  sup, sub and per-run language, `math` as LaTeX, `br`). Blocks are `paragraph`,
-  `table`, `figure` (`imageId` plus alt text) and `figure_placeholder`.
-- **No pages, page breaks, columns or fonts**: layout belongs to the renderer and the
-  template. Totals are computed (`marks.ts`), never stored in the document: an OR
-  question counts its largest branch, `attemptAny` counts the k largest questions.
-- Limits live in one file, `limits.ts` (20 sections, 300 questions, 600 math nodes,
-  30 figures, 200,000 JSON characters, ...). They are product limits; the provider
-  JSON Schema drops numeric keywords, so the Zod schema re-validates everything.
-- `normalize.ts` makes a document canonical (NFC, defaults, key order); the content
-  sha256 and the 12-hex **draft id** come from the canonical JSON.
-- `provider-schema.ts` derives the JSON Schema offered to providers (local `$defs`,
-  about 7 KB, no `$ref` siblings, no cycles). `examples.ts` holds two complete worked
-  papers (Hindi mathematics with LaTeX, English science with a placeholder figure, an
-  OR choice and a table); they are the guide's examples, the preview body of template
-  designs and the demo's version 1, and a test keeps them valid.
-- **Warnings** (`marks.ts`) never block a save: the total differs from the mode's
-  maximum marks (`total_differs_from_plan`) or from the paper's own header, a question
-  has no marks or its parts do not add up, the alternatives of an OR carry unequal
-  marks, a question number repeats, an MCQ has no options, or a figure placeholder is
-  still unresolved. Errors (schema, cross checks, a formula
-  KaTeX rejects, a figure that is not the paper's) do block.
+- `limits.ts`, the one place for every number: 200,000 characters of fragment (a longer answer
+  is refused, never cut), 1,000,000 characters parsed at most, 8,000 elements, 40 SVGs and 4,000
+  SVG elements, 30,000 characters of `<style>`, 600 formulas of at most 500 characters, 30
+  figures plus placeholders, 500 characters per placeholder description.
+- `guide.ts`: the rules a model is told (`QUESTION_PAPER_FRAGMENT_RULES`, shared by the chat
+  guide and the job's own prompt so the two never disagree) and `buildLearnPayload`. The
+  **NO ANIMATION** rule is the first and loudest rule (below).
+- `examples.ts`: two complete worked papers (Hindi mathematics with LaTeX and a matrix, English
+  science with an inline SVG, a table and a figure placeholder). They are the guide's example,
+  the preview body of template designs and the demo's version 1; tests keep them free of any
+  sanitiser notice and of motion.
+- `fragment.ts` (`extractQuestionPaperFragment`: the longest fenced block, else the text) and
+  `hash.ts` (`canonicalQuestionPaperHtml`: NFC, `\n` line ends, trimmed). The stored `content_sha256` is
+  that of the sanitised fragment; the 12-hex **draft id** is that of the fragment as the model wrote it
+  (*before* sanitising), so the id of a draft is stable whatever the sanitiser does.
+
+**Vocabulary.** Text and layout: `div span p h1-h6 ul ol li table thead tbody tfoot tr th td
+caption colgroup col br hr b i u strong em sup sub figure figcaption`, with `class`, `lang`,
+`dir`, `style`, `colspan`, `rowspan` and `start`. `<style>` elements and `style=""` with a CSS
+allowlist. Inline `<svg>` limited to `svg g path circle ellipse line polyline polygon rect text
+tspan` (not `title` or `desc`: the sanitiser drops them).
+
+- **Formulas** are an empty `<span data-math="LATEX">` (`data-display="true"` for a centred
+  equation). The model supplies only the LaTeX string; the server typesets it.
+- **Figures.** `<figure data-placeholder="description"></figure>` prints a labelled dashed box.
+  An uploaded image is `<img data-figure-id="asat_...|qpf_...">` (no `src`, ever) inside a
+  `<figure>`; the renderer swaps in the stored image.
+- **Marks, numbering and labels** are plain text the author wrote.
+
+## The sanitiser: `question_paper_body`
+
+The fragment is **untrusted**: photographs and prompts can steer a model, so everything it
+writes is treated as hostile. `question-paper.sanitize.ts` (with `question-paper.css.ts`) is the
+`question_paper_body` profile on the same sanitize-html base as every document
+(`document.sanitize.ts`). It runs when a fragment is validated or saved (the stored form is the
+sanitised one) and again at every render (defence in depth; cleaning is idempotent, so the second
+pass reports nothing).
+
+- **Forbidden, removed with their content:** `script iframe object embed foreignObject form
+  controls link meta base`, SVG `use` and `image`, any event handler attribute, `id`, `xmlns`,
+  any `href`/`src`, any URL, `url(...)`, `@import`, `@font-face`, and **all animation and
+  motion**.
+- **NO ANIMATION.** A paper is printed, nothing moves. SVG `animate`, `animateTransform`,
+  `animateMotion`, `set` (and `mpath`, `discard`) are removed with their content and reported in
+  their own words; the CSS properties `animation*`, `transition*`, `will-change`, `offset*`,
+  `scroll-timeline`, `view-timeline`, `motion*`, `transform` and `filter` and `@keyframes` are
+  dropped. A model asked for "an engaging diagram" reaches for SMIL or CSS animation, so the
+  guide forbids it first and the sanitiser enforces it. Do not allow any of these to make a design
+  look better.
+- **CSS.** A property allowlist (layout, spacing, borders, colours, font properties, direction,
+  white space); `position` only `static` or `relative`, no `z-index`; lengths capped near an A4
+  page; fonts only from the installed Noto families and the generic ones; values with `url`,
+  `\`, `<`, `>`, braces or `@` are dropped. **Every selector is prefixed with the body wrapper
+  class** (`qp-body`), so a rule matches only inside the paper and cannot restyle the school's
+  heading or footer; selectors are rebuilt from validated parts, not passed through. Class names
+  starting `qp-`, `katex` or `question-paper` are reserved and removed.
+- **Caps** (limits above) are reported as `problems`: they block, and nothing is silently cut.
+- **Two kinds of finding.** `stripped` is what was removed or changed ("The event handler
+  "onclick" was removed (2 times)"); it never blocks, the paper saves without it. `problems` is
+  what makes the paper unusable (a cap, an empty paper, a formula KaTeX rejects, an unusable
+  figure id, figures too large to print). The version stores `stripped` as its **notices**
+  (`warnings: [{ code: 'sanitised', message }]`); there are no other kinds of notice.
+
+## What the UI shows
+
+Draft and version cards, the version list and the Question paper tab show no marks computed from the paper (the tab heading still names the exam plan's maximum marks, a plan fact). A draft card
+says whether the draft is ready or can not be saved yet, lists the problems in plain sentences
+(never a path into the HTML), keeps the sanitiser's `stripped` list behind a collapsed "N things
+were removed", says how many figures are still placeholders, and offers Preview and Save as new
+version. A saved version shows its notice count; its preview lists the notices (collapsed) and
+a placeholder note with the Continue in chat link. `previewOutputSchema.placeholderFigures` is
+the count (counted from the sanitised fragment; it is not a notice).
 
 ## The renderer contract
 
-The body is built by our code, not by the template and not by the model:
+The body is built by our code from the stored fragment, in this order
+(`question-paper.body.ts`, a pure function plus the figure assets the caller loaded):
 
-- `question-paper.body.ts` is a pure function from the validated JSON to an HTML
-  fragment with a fixed element and class vocabulary; every string is escaped and no
-  JSON value is ever markup, a URL, an attribute name, a class or CSS. Math goes
-  through KaTeX (`question-paper.math.ts`: HTML output only, `trust: false`, no macros,
-  2 s wall budget). The KaTeX stylesheet with fonts inlined as data URIs is built once
-  per process and added only to papers that contain math.
-- The school's template (`question_paper` document type, full A4 only, no default
-  design: generation is blocked until the school selects one) places
-  `{{{questionPaper.bodyHtml}}}` **exactly once, in element content**. The template is
-  rendered with the constant slot placeholder as that value and sanitised like any other
-  document; only then is the placeholder replaced by the body
-  (`substituteQuestionPaperBody`, `indexOf` and slicing, never `String.replace`).
-  Nothing an author writes can reach, repeat or alter the body.
-- **Deliberate security differences (K1, acknowledged by the product owner).** The
-  body is *not* sanitised after the template, because the document sanitiser strips the
-  inline SVG KaTeX draws roots and arrows with; it is trusted because our renderer
-  builds it from validated JSON. The CSP of this type, and only this type, adds
-  `font-src data:` so the inlined KaTeX fonts load; still no network, no script, no
-  frames, images from data URIs only. Do not extend either difference to another type,
-  add a second trusted insertion point, or weaken the policy for a design without
-  repeating that review (`question-paper.slot.ts` carries the same warning).
-- Budgets: the template alone renders under the notice budget (2,000,000 characters)
-  and may show the logo at most 3 times; the whole document stays within 25 MB; figures
-  are loaded from storage as data URIs with a total cap.
-- A saved version **pins its template revision**: previews and re-downloads use that
-  revision, never the school's later choice.
-- Heading, footer and the template context (`QuestionPaperContext`: school, session,
-  exam, class, subject, mode names, max marks, total, time allowed, version number)
-  are in [Document system](document-system.md#question-papers).
+1. The stored fragment is **sanitised again** with `question_paper_body`. Everything after
+   this step works on the sanitiser's output, never on the stored text.
+2. `<figure data-placeholder>` becomes the dashed labelled box; `<img data-figure-id>` gets
+   the stored image as a data URI (the caller loaded only images this paper owns, or the chat
+   user's own attachments; a missing one prints "Figure unavailable" and a warning).
+3. `<span data-math>` is typeset by KaTeX (`question-paper.math.ts`: HTML output only,
+   `trust: false`, no macros, 2 s wall budget). The model supplies only the LaTeX string. A
+   formula KaTeX rejects at print time is printed as raw LaTeX in red and reported.
+4. The default stylesheet (constants only: Noto fonts chosen by `lang`, spacing, table borders;
+   the KaTeX stylesheet with fonts inlined as data URIs, built once per process and added only to
+   papers with maths), then the model's scoped `<style>` rules, then the `qp-body` wrapper.
+
+The school's template (`question_paper` document type, full A4 only, no default design:
+generation is blocked until the school selects one) places `{{{questionPaper.bodyHtml}}}`
+**exactly once, in element content**. The template is rendered with the constant slot
+placeholder as that value and sanitised like any other document; only then is the placeholder
+replaced by the body (`substituteQuestionPaperBody`, `indexOf` and slicing, never
+`String.replace`). Nothing an author writes can reach, repeat or alter the body.
+
+**Deliberate security differences (K1, acknowledged by the product owner), restated for the HTML
+trust boundary.**
+
+- The body is *not* sanitised after the template, because the document sanitiser strips the
+  inline SVG KaTeX draws roots and arrows with. What makes that acceptable has changed from the
+  JSON design: the body is no longer "built from validated JSON". The fragment is a model's
+  output and **is untrusted**; it is sanitised twice with the stricter `question_paper_body`
+  profile *before* anything is inserted. Only two things are inserted afterwards, and both come
+  from our code: KaTeX output made from the formula's plain LaTeX string, and the data URIs of
+  figures loaded from this paper's own stored images. The model can influence neither beyond a
+  LaTeX string and a figure id. Inline SVG that the model draws is allowed through the profile
+  (a safe element and attribute subset, no animation), so the SVG exception is no longer needed
+  to explain the fragment itself.
+- The CSP of this type, and only this type, adds `font-src data:` so the inlined KaTeX fonts
+  load; still no network, no script, no frames, images from data URIs only.
+- Do not extend either difference to another type, add a second trusted insertion point (anything
+  inserted after step 1), or weaken the profile or the policy for a design without repeating that
+  review (`question-paper.slot.ts` and `question-paper.body.ts` carry the same warning).
+
+Budgets: the template alone renders under the notice budget (2,000,000 characters) and may show
+the logo at most 3 times; the body is at most 20 MB, the figures 12 MB, the whole document stays
+within 25 MB.
+
+A saved version **pins its template revision**: previews and re-downloads use that revision,
+never the school's later choice.
+
+The template context (`QuestionPaperContext`, [Document system](document-system.md#question-papers))
+has school, session, exam, class, subject and mode names, the plan's `maxMarks` and the version
+number. `totalMarks`, `timeAllowed`, `language` and `script` are **always null** and `direction`
+is always `ltr`: the paper is free HTML and nothing reads facts out of it. The keys stay only so
+template revisions written against the structured paper keep rendering (their `{{#if}}` blocks
+print nothing).
 
 ## The generation job (manual UI only)
 
@@ -252,20 +331,27 @@ cached spend.
 The workflow (`workflows/question-paper`, ingress-private, steps shared with the
 integration tests in `generation.ts`): begin, re-check access and the paper
 (limit, feature, role, exam not ended), gather inputs (every page has a readable
-source, at most 16 MiB of images counted as base64, the same budget as the chat), one structured model request (its cost row is saved inside
-that same step; a repeated billed call takes the next `:attempt:{k}` key derived from
-the saved rows, never dropped), validate,
-at most one text-only repair request, save through `saveQuestionPaperVersion` with
-source `ai_job`, mark succeeded. Provider failures retry (busy or unknown up to 3
-requests); a refusal or a truncated answer fails without repair. Every step checks
+source, at most 16 MiB of images counted as base64, the same budget as the chat), **one plain
+text model request** (system prompt with the shared fragment rules; the pages in order as
+"Page i of n" and the image; its cost row is saved inside that same step; a repeated billed call
+takes the next `:attempt:{k}` key derived from the saved rows, never dropped), then check the
+answer: extract the fragment (`extractQuestionPaperFragment`: strip code fences and a doctype),
+sanitise and validate it (`checkQuestionPaperDraft`: non-empty, within the caps, formulas typeset;
+a `data-figure-id` that cannot be resolved becomes a placeholder, because the job can attach no
+images), at most one **text-only repair request** (the previous fragment and the problems, no
+pages), save through `saveQuestionPaperVersion` with source `ai_job` (the sanitiser's
+`stripped` lines become the version's notices), mark succeeded. Provider failures retry (busy or
+unknown up to 3 requests); a refusal fails without repair and an answer that stopped on the output
+limit fails as `output_too_long`. Every step checks
 the job is still `running` for its attempt, so a swept job spends and saves nothing
 more; the save transaction itself reads the job row `FOR SHARE` (after the paper lock) and
 refuses with `SourceJobEndedError` unless it is `running`, so a job swept at its deadline
 while the version renders cannot commit a version afterwards (the job stops quietly). A
 plan that loses the paper's mode meanwhile fails the job as `plan_mode_removed`
-(`data.reason`), not `paper_unprintable`. A failed job has an `error_code` from `QUESTION_PAPER_JOB_FAILURES` and a safe
-`error_message` the page shows; the page polls `getQuestionPaperDetail`. A marks
-mismatch stays a warning. The job's own system prompt (`prompt.ts`) never enters chat.
+(`data.reason`), not `paper_unprintable`. A failed job has an `error_code` from `QUESTION_PAPER_JOB_FAILURES` (for the
+model path: `model_busy`, `model_error`, `model_rejected`, `provider_unavailable`, `invalid_output`,
+`output_too_long`) and a safe `error_message` the page shows; the page polls `getQuestionPaperDetail`.
+The job's own system prompt (`prompt.ts`) never enters chat.
 
 Model settings are separate `QUESTION_PAPER_*` env values (`QUESTION_PAPER_PROVIDER` and
 `QUESTION_PAPER_MODEL`, four `QUESTION_PAPER_PRICE_*`, `QUESTION_PAPER_MAX_OUTPUT_TOKENS`,
@@ -301,22 +387,34 @@ the advanced-tool meta tools and by the in-app assistant): `listQuestionPapers`,
 assistant asks the user to approve). The other eight procedures are *hidden* (human
 only): page photos, generation, polling, previews and downloads.
 
-- `learn_question_paper_generation` returns the guide, the provider JSON Schema, the
-  limits and both examples on demand, so that no assistant or MCP client carries them
-  by default (D36). The assistant's prompt has a single bullet that names it.
-- `validateQuestionPaperDraft` checks a document exactly as a save would (and warns on
-  marks) and returns a `draftId`. `getQuestionPaper` and the validate tool declare
-  `outputChars` 80,000 and the learn tool 40,000, so a paper or the guide is not cut at
-  the assistant's default 24,000.
+- `learn_question_paper_generation` returns the guide (vocabulary, formulas as `data-math`,
+  figures, scripts through `lang`, the NO ANIMATION rule), the limits and one worked example
+  (an HTML fragment) on demand, so that no assistant or MCP client carries them by default
+  (D36). The assistant's prompt has a single bullet that names it.
+- `validateQuestionPaperDraft({ html })` checks a fragment exactly as a save would and returns
+  `{ valid, problems[], stripped[], draftId, placeholderFigures, characters }`. It **never echoes
+  the fragment** (the model has it; `draftId` names it) and lists at most 40 lines of each kind,
+  each at most 400 characters, with "and N more" as the last line (`leanLines`).
+- **Output caps** (`outputChars`, the tool metadata the assistant honours instead of its default
+  24,000): `getQuestionPaper` returns the whole fragment as `html` and declares
+  `fragmentChars * 2 + 40,000` (the longest allowed fragment with every quote and line end
+  escaped in the JSON text, plus pages and the version list), so a long paper is not cut. If a
+  result is nevertheless cut the tool appends its "Result truncated" line and the guide tells the
+  agent never to submit a paper edited from a cut one. Validate declares 40,000 (it is lean by
+  construction); learn 40,000 (guide, limits and example are about 15 KB). The numbers live in
+  `question-paper.dto.ts` and are derived from `QUESTION_PAPER_LIMITS`, so raising the fragment
+  limit raises the cap; `question-paper.dto.test.ts` pins the relation. Context pruning later
+  replaces a long result by a stub, so a long paper costs its tokens once.
 - **Drafts** are not database rows. A draft is the input of a `validateQuestionPaperDraft`
-  call in the conversation; the chat shows it as a card (valid or not, Preview, Save as
-  new version). Saving by `draftId` is accepted only from the in-app assistant, which
+  call in the conversation; the chat shows it as a card (ready or not, the problems in plain
+  sentences, what the sanitiser removed behind a collapsed list, Preview, Save as new
+  version). Saving by `draftId` is accepted only from the in-app assistant, which
   finds the newest such call of *this conversation, school and user* whose canonical
-  content hashes to the id; other clients pass `content`. The agent proposes, the user
+  html hashes to the id; other clients pass `html`. The agent proposes, the user
   decides: nothing is saved until they ask, and saving creates a new version after the
   usual approval card. Several drafts and older versions can be previewed in chat; the
   `question_paper` view (`show_view`) shows a saved version with Preview and Download.
-- A chat attachment can be a **figure**: the agent puts its `asat_` id in a figure block;
+- A chat attachment can be a **figure**: the agent puts its `asat_` id in `<img data-figure-id>`;
   validation and previews accept it only for the in-app assistant's own user, only when
   the attachment was sent, belongs to that user and school and decodes; saving copies
   it once into the paper (`qpf_` ids are what is stored).
@@ -336,27 +434,28 @@ only): page photos, generation, polling, previews and downloads.
   counts as a long result, so after two more messages the agent calls the tool again.
 
 - **Attachment ids.** The model must be told each attachment's id or it cannot write a
-  `figure` node. Every image part is preceded by a server-built line
-  `[Attachment asat_...: <sanitised file name>, image/png (1 of 2). Use this id as figure.imageId ...]`
+  `data-figure-id`. Every image part is preceded by a server-built line
+  `[Attachment asat_...: <sanitised file name>, image/png (1 of 2). Use this id as data-figure-id ...]`
   (`attachmentLabel` in `runtime/context.ts`, used by the Anthropic, Gemini and fake
   adapters alike): only the generated id, the sanitised name (brackets and line breaks removed)
   and the content type, never user free text. Notes for attachments that are not shown
   (older than the window, over the image budget, unreadable, missing) keep the id too: an
   `asat_` id stays valid for figures while the attachment exists for the same user, whether or
-  not its pixels are still visible. `figure.imageId` errors name the allowed forms
-  (`asat_` from an attachment line, or a `qpf_` already saved in the paper).
+  not its pixels are still visible. An unusable figure id is a validation problem that names the allowed forms
+  (`asat_` from an attachment line, or a `qpf_` already saved in the paper); a chat attachment
+  is accepted only inside the in-app assistant, anywhere else the agent writes a placeholder.
 
 ## Where the code is
 
 | Area | Where |
 | --- | --- |
-| JSON schema, limits, marks, guide, examples | `packages/question-paper` |
+| Fragment limits, guide, examples, fence extraction, hashing | `packages/question-paper` |
 | Tables, enums, ids | `packages/db/src/schema/exam-question-paper.ts`, `assistant.ts` |
-| Router, services, renderer, README | `packages/api/src/routers/school/question-paper` |
+| Router, services, sanitiser (`question-paper.sanitize.ts`, `.css.ts`), renderer, README | `packages/api/src/routers/school/question-paper` |
 | Generation job | `packages/api/src/workflows/question-paper`, served by `apps/worker` |
 | HTTP upload and read routes | `apps/server/src/http.ts` (page photos), `packages/assistant/src/attachments.http.ts` (chat images) |
 | Template, marketplace designs, slot | `packages/api/src/routers/school/document` (`document.catalog.marketplace.ts`, `question-paper.slot.ts`) |
-| Model call (providers) | `packages/assistant/src/question-paper-model.ts`, `providers/*` |
+| Model call (providers, plain text) | `packages/assistant/src/question-paper-model.ts`, `providers/*` (`generateText`) |
 | Chat contract, cards | `packages/assistant-contract`, `packages/components/src/question-paper/chat-cards.tsx` |
 | Management UI | `apps/management/components/question-paper`, `packages/components/src/question-paper`, routes under `exam/[examSlug]/question-paper` |
 | Demo seed | `packages/api/src/workflows/demo-school` (`seed/question-papers.json`, `seedQuestionPaper`) |
@@ -365,50 +464,63 @@ only): page photos, generation, polling, previews and downloads.
 
 A demo school gets two papers (see [Demo schools](demo-school.md#question-papers)): an
 English science paper and a Hindi mathematics paper, each with two synthetic page
-images and version 1 printed with a seeded `question_paper` template. The assistant
+images and version 1 (the two worked examples: Hindi, maths, an inline SVG, a figure placeholder)
+printed with a seeded `question_paper` template. The assistant
 stays off in a demo, so the tab is invisible until an admin enables it; the seed
 therefore calls the service functions, not the procedures.
 
 ## Extending
 
-- **A field in the JSON**: change `schema.ts` and `limits.ts`, bump nothing unless the
-  stored shape changes incompatibly (then bump `QUESTION_PAPER_SCHEMA_VERSION` and keep
-  reading the old one), update `normalize`, `walk`/`marks`, the provider schema (its
-  tests walk the references), the renderer (`question-paper.body.ts` and its tests),
-  the guide and both examples. Old versions keep their stored JSON and must keep
-  rendering.
-- **A block or run type**: also the renderer's fixed vocabulary and CSS. Never let
-  a JSON value become markup, a URL, a class or CSS.
+- **An allowed element, attribute or CSS property**: change the allowlist in
+  `question-paper.sanitize.ts` / `question-paper.css.ts`, with a test that a hostile variant of it
+  is still stripped; update `QUESTION_PAPER_FRAGMENT_RULES` (the guide and the job prompt share
+  it) and the vocabulary above. Never allow a URL, a reference to another element, an event
+  handler or anything that moves; the NO ANIMATION rule is not negotiable. A new kind of thing the
+  renderer inserts after the sanitising step (like KaTeX output or a figure) needs the trust review
+  in "The renderer contract".
+- **A limit**: change `packages/question-paper/src/limits.ts` only. The sanitiser, the guide, the
+  learn payload and the assistant output caps read it (`QUESTION_PAPER_PAPER_OUTPUT_CHARS` follows
+  `fragmentChars`).
+- **A new attribute that carries data for the renderer** (like `data-math`): the model supplies
+  plain data, the renderer builds the markup; the sanitiser keeps only validated values.
 - **A marketplace design**: add it to `document.catalog.marketplace.ts` with the slot
   exactly once (the catalog test asserts it) and a footer that follows the layout
   rules in [Document system](document-system.md#question-papers).
 - **A job failure**: add its code and safe text to `QUESTION_PAPER_JOB_FAILURES`; the
   UI shows the stored message.
 - **A chat tool**: add the procedure with `tool(...)` metadata in the router, keep
-  hidden what a human must do, set `outputChars` when its answer can be long, update
-  the MCP catalog counts test, and the learn guide if agents need to know about it.
+  hidden what a human must do, set `outputChars` when its answer can be long (derive it from the
+  limits, keep results lean), update the MCP catalog counts test, and the learn guide if agents
+  need to know about it.
 - **A new place that reads or writes papers**: go through the services (they hold the
   lock and the lifecycle rules), check the OPA action and the assistant gate in that
   order, and keep S3 keys under `schools/{schoolId}/`.
+- **A stored-format change** (the fragment's meaning, not just a rule): there is no schema
+  version. Old versions keep their stored fragment and are sanitised again at every render, so a
+  stricter profile also tightens old versions; a looser one must still be safe for them. Plan the
+  migration.
 - **A new school-owned table or object**: cover it in the demo seed if a school user
   would see it, and in `purge_demo_school`.
 
 ## Verification
 
-- `packages/question-paper`: `pnpm --filter @campuspilot/question-paper test` (schema,
-  normalisation, marks, provider schema, sha256).
+- `packages/question-paper`: `pnpm --filter @campuspilot/question-paper test` (limits, guide,
+  fragment extraction, hashing, sha256).
 - API (needs the test database, S3 and Gotenberg): `pnpm --filter @campuspilot/api exec
   vitest run --project school-scoped src/routers/school/question-paper
-  src/workflows/question-paper src/workflows/demo-school src/files` covers router and
-  permissions, pages, the document system, chat attachments, the generation workflow with
-  a scripted model, the sweep, the demo seed and the demo purge.
+  src/workflows/question-paper src/workflows/demo-school src/files` covers the sanitiser
+  (including a hostile fragment with script, `onerror`, `animate`, `@keyframes`, `url()` and
+  `foreignObject`), the renderer, router and permissions, pages, the document system, chat
+  attachments, the generation workflow with a scripted model, the sweep, the demo seed and the
+  demo purge. The pages integration test replaces the workflow engine's sender with a failing
+  fake, so it passes with or without a Restate running next to the database.
 - Providers and chat: `pnpm --filter @campuspilot/assistant exec vitest run --project unit`
-  and `--project integration` (structured requests, attachments, context pruning).
+  and `--project integration` (text requests, attachments, context pruning).
 - `apps/server`: `src/mcp-catalog.test.ts`, `src/mcp.test.ts` (tool counts, approval,
   hidden procedures, output limits).
-- UI: `pnpm --filter @campuspilot/components test`; `apps/management/docs/ui-patterns.md`
-  lists the browser checks (mobile 320 and 390 px, uploads, reorder, generation,
-  chat cards).
-- Not testable without keys: a real provider call. The first one is a smoke test
-  with a real key (does Anthropic's tool search find the learn tool from its name; does
-  each provider accept the schema; handwriting quality; 20 images within request limits).
+- UI: `pnpm --filter @campuspilot/components test`; `apps/management` runs its tests with
+  `pnpm test` (node:test through tsx); `apps/management/docs/ui-patterns.md` lists the browser
+  checks (mobile 320 and 390 px, uploads, reorder, generation, chat cards).
+- Not testable without keys: a real provider call. Check each provider once with a real key:
+  handwriting quality, Hindi, that an answer comes back as plain HTML rather than prose, 20
+  images within request limits, and that Anthropic's tool search finds the learn tool from its name.

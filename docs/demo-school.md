@@ -143,9 +143,10 @@ science paper and a Hindi mathematics paper, each with two page photos and versi
   It goes in the first class that teaches the subject. A demo without such a class, or
   with every exam completed, simply has no such paper (a nursery-only demo has none;
   Class 1 gets only the mathematics paper, as primary classes have no science).
-  `classLabelFormat` prints the real class on the paper (`Class 7`, `कक्षा 7`).
 - **Content.** Version 1 is one of the two worked examples of `@campuspilot/question-paper`
-  (`example` names which: its own field, not inferred from the language). The pages are
+  (HTML fragments: Hindi text and maths, an inline SVG, a figure placeholder, a table;
+  `example` names which: its own field, not inferred from the language). The paper does not
+  print its class: the school's template header does. The pages are
   procedural PNGs (`renderPaperPage` in `images.ts`: ruled paper, pen scribbles
   and, on one page, a diagram box, built with `Canvas.ruledPaper` and
   `scribbleLine`), like the avatars: no committed binaries, no text, no real

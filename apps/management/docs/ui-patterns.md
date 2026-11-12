@@ -277,6 +277,11 @@ the implementation and APIs in more detail.
 - Generation status comes from polling `getQuestionPaperDetail` (`refetchInterval`
   callback, 3 s while a job is active). Failed jobs show the stored safe
   `errorMessage`, never developer detail.
+- No marks are computed or shown for a paper (the heading names the exam plan's maximum
+  only). A version shows its sanitiser notices as a collapsed "N things were removed" list
+  (`RemovedList`) and, when figures are still placeholders, a note with the Continue in chat
+  link (`PlaceholderNote`, from the preview's `placeholderFigures`). Chat draft cards use the
+  same two pieces and plain-sentence problems, never paths.
 - Missing school template: `AppShellAlert` slug `school/:schoolId/question-paper-template-missing`,
   action "Choose template" (needs `MANAGE_DOCUMENT_TEMPLATES`) closes the alert list and
   opens the marketplace on the question paper type.
