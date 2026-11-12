@@ -152,11 +152,18 @@ describe('question paper procedures', () => {
       expect(checked.valid).toBe(true);
     });
 
-    it('answers a paper that is too large with a problem instead of parsing it', async () => {
-      const huge = `<p>${'x'.repeat(210_000)}</p>`;
-      const result = await teacher.school.validateQuestionPaperDraft({ ...key(), html: huge });
+    it('answers a paper between the product limit and the parse limit with a problem', async () => {
+      // 100,000 characters: over fragmentChars (80,000), under parseChars (120,000), so it is parsed and the size is reported.
+      const large = `<p>${'x'.repeat(100_000)}</p>`;
+      const result = await teacher.school.validateQuestionPaperDraft({ ...key(), html: large });
       expect(result.valid).toBe(false);
       expect(result.problems[0]).toMatch(/characters after cleaning; the limit is 80,000/);
+    });
+
+    it('refuses a paper over the parse limit at the transport, before anything is parsed', async () => {
+      const huge = `<p>${'x'.repeat(120_001)}</p>`;
+      const error = await errorOf(teacher.school.validateQuestionPaperDraft({ ...key(), html: huge }));
+      expect(error).toMatchObject({ code: 'BAD_REQUEST' });
     });
 
     it('refuses a key that names no plan or mode', async () => {
