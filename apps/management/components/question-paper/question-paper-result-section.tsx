@@ -9,7 +9,7 @@ import { toast } from '@campuspilot/ui/lib/toast';
 import { DocumentPreview } from '@campuspilot/components/documents/document-controls';
 import { OptionSelect } from '@campuspilot/components/option-select';
 import { ContinueInChatLink } from '@campuspilot/components/question-paper/continue-in-chat-link';
-import { hasFigurePlaceholders, MarksSummary } from '@campuspilot/components/question-paper/marks-summary';
+import { PlaceholderNote, RemovedList } from '@campuspilot/components/question-paper/paper-notices';
 import { versionSourceLabel } from '@campuspilot/components/question-paper/question-paper-model';
 import { orpc } from '@/lib/orpc';
 import { ReadError } from '@/components/exam/exam-common';
@@ -23,19 +23,18 @@ type ResultProps = {
   onSelectVersion: (versionNo: number) => void;
 };
 
-function PlaceholderNotice({ href, onNavigate }: { href: string; onNavigate: () => void }) {
+function PlaceholderNotice({ count, href, onNavigate }: { count: number; href: string; onNavigate: () => void }) {
   return (
-    <div className="flex flex-col gap-1 rounded-lg border bg-muted/40 p-3 text-sm">
-      <p>Some figures are placeholders and need an uploaded image. Add them in chat.</p>
+    <div className="flex flex-col gap-1 rounded-lg border bg-muted/40 p-3">
+      <PlaceholderNote count={count} />
       <ContinueInChatLink href={href} onNavigate={onNavigate} />
     </div>
   );
 }
 
-function RenderedVersion({ scope, detail, versionNo }: { scope: QuestionPaperScope; detail: QuestionPaperDetail; versionNo: number }) {
+function RenderedVersion({ scope, versionNo }: { scope: QuestionPaperScope; versionNo: number }) {
   const router = useRouter();
   const preview = useQuery(orpc.school.getQuestionPaperPreview.queryOptions({ input: { ...scope, versionNo } }));
-  const version = detail.versions.find((candidate) => candidate.versionNo === versionNo);
   const chatHref = continueInChatHref(scope);
   // Resolve from held data before the error flag, so a failed refetch never blanks a paper on screen.
   if (preview.data === undefined) {
@@ -43,13 +42,9 @@ function RenderedVersion({ scope, detail, versionNo }: { scope: QuestionPaperSco
   }
   return (
     <div className="flex flex-col gap-4">
-      <MarksSummary
-        totalMarks={null}
-        planMaxMarks={version?.planMaxMarks ?? detail.paper.planMaxMarks}
-        warnings={preview.data.warnings}
-      />
-      {hasFigurePlaceholders(preview.data.warnings) ? (
-        <PlaceholderNotice href={chatHref} onNavigate={() => router.push(chatHref)} />
+      <RemovedList lines={preview.data.warnings.map((notice) => notice.message)} />
+      {preview.data.placeholderFigures > 0 ? (
+        <PlaceholderNotice count={preview.data.placeholderFigures} href={chatHref} onNavigate={() => router.push(chatHref)} />
       ) : null}
       <DocumentPreview html={preview.data.html} label="Question paper preview" fitPageWidth />
       <ContinueInChatLink href={chatHref} onNavigate={() => router.push(chatHref)} />
@@ -58,7 +53,7 @@ function RenderedVersion({ scope, detail, versionNo }: { scope: QuestionPaperSco
 }
 
 /**
- * One version of the paper as printed: marks against the plan, the sandboxed
+ * One version of the paper as printed: what was removed from its HTML, the sandboxed
  * preview (the same frame as document previews), PDF download and the quiet
  * way into the assistant. The version is the one in the URL, else the latest.
  */
@@ -101,7 +96,7 @@ export function QuestionPaperResultSection({ scope, detail, versionNo, onSelectV
           <Download aria-hidden /> {download.isPending ? 'Preparing…' : 'Download PDF'}
         </Button>
       </div>
-      <RenderedVersion key={versionNo} scope={scope} detail={detail} versionNo={versionNo} />
+      <RenderedVersion key={versionNo} scope={scope} versionNo={versionNo} />
     </div>
   );
 }

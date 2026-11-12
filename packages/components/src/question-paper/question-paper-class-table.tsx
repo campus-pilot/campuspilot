@@ -31,7 +31,7 @@ const STATUS_BADGE: Record<CellStatusKind, 'outline' | 'secondary' | 'default' |
   warning: 'outline',
 };
 
-/** One status badge with its optional second line (marks, or the safe failure message). */
+/** One status badge with its optional second line (the safe failure message). */
 export function QuestionPaperCellStatus({ status }: { status: CellStatus }) {
   return (
     <div className="flex min-w-0 flex-col items-start gap-1">

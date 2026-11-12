@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AiBadge } from './ai-badge';
 import { ContinueInChatLink } from './continue-in-chat-link';
 import { GenerationStatus } from './generation-status';
-import { hasFigurePlaceholders, MarksSummary } from './marks-summary';
+import { PlaceholderNote, RemovedList } from './paper-notices';
 import { PageThumbnailGrid, type PageThumbnailView } from './page-thumbnail-grid';
 import { QuestionPaperClassTable, type QuestionPaperClassView } from './question-paper-class-table';
 import { UploadQueue } from './upload-queue';
@@ -64,7 +64,7 @@ describe('QuestionPaperClassTable', () => {
             modeSlug: 'practical',
             modeName: 'Practical',
             maxMarks: 20,
-            paper: { pageCount: 2, latestVersionNo: 1, totalMarks: 20, planMaxMarks: 20, warningCount: 0, activeJob: null, lastJobFailure: null },
+            paper: { pageCount: 2, latestVersionNo: 1, warningCount: 0, activeJob: null, lastJobFailure: null },
           },
         ],
       },
@@ -102,30 +102,28 @@ describe('GenerationStatus', () => {
   });
 });
 
-describe('MarksSummary', () => {
-  it('shows the total against the plan and every warning', () => {
-    render(
-      <MarksSummary
-        totalMarks={18}
-        planMaxMarks={20}
-        warnings={[{ code: 'total_differs_from_plan', message: 'The paper adds up to 18, the plan says 20.' }]}
-      />,
-    );
-    expect(screen.getByText(/Total marks:/).parentElement!.textContent).toContain('18');
-    expect(screen.getByText(/of 20 in the plan/)).toBeTruthy();
-    expect(screen.getByText('The paper adds up to 18, the plan says 20.')).toBeTruthy();
+describe('paper notices', () => {
+  it('lists what was removed only once opened, and nothing when nothing was', () => {
+    const { container, rerender } = render(<RemovedList lines={['A style was removed', 'An attribute was removed']} />);
+    expect(screen.queryByText('A style was removed')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /2 things were removed/ }));
+    expect(screen.getByText('A style was removed')).toBeTruthy();
+    rerender(<RemovedList lines={[]} />);
+    expect(container.textContent).toBe('');
   });
 
-  it('finds unresolved figure placeholders by warning code', () => {
-    expect(hasFigurePlaceholders([{ code: 'figure_placeholder_unresolved', message: '' }])).toBe(true);
-    expect(hasFigurePlaceholders([{ code: 'total_differs_from_plan', message: '' }])).toBe(false);
+  it('says how many figures are still placeholders, and says nothing for none', () => {
+    const { container, rerender } = render(<PlaceholderNote count={1} />);
+    expect(container.textContent).toMatch(/1 figure is still a placeholder/);
+    rerender(<PlaceholderNote count={0} />);
+    expect(container.textContent).toBe('');
   });
 });
 
 describe('VersionList', () => {
   const versions = [
-    { versionNo: 2, source: 'agent' as const, createdAt: new Date('2026-11-02T10:00:00Z'), createdByName: 'Asha', totalMarks: 20, warningCount: 1, isLatest: true },
-    { versionNo: 1, source: 'ai_job' as const, createdAt: new Date('2026-11-01T10:00:00Z'), createdByName: null, totalMarks: null, warningCount: 0, isLatest: false },
+    { versionNo: 2, source: 'agent' as const, createdAt: new Date('2026-11-02T10:00:00Z'), createdByName: 'Asha', warningCount: 1, isLatest: true },
+    { versionNo: 1, source: 'ai_job' as const, createdAt: new Date('2026-11-01T10:00:00Z'), createdByName: null, warningCount: 0, isLatest: false },
   ];
 
   it('labels who wrote each version and previews or downloads the chosen one', () => {

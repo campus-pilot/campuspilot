@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest';
 import {
   cellStatus,
   editBlockedReason,
-  formatMarks,
   formatPageSize,
   generateBlockedReason,
   isAcceptedImage,
@@ -18,8 +17,6 @@ const file = (name: string, type: string, size = 1000) => ({ name, type, size })
 const paper = (over: Partial<NonNullable<Parameters<typeof cellStatus>[0]>> = {}) => ({
   pageCount: 0,
   latestVersionNo: 0,
-  totalMarks: null,
-  planMaxMarks: 20,
   warningCount: 0,
   activeJob: null,
   lastJobFailure: null,
@@ -84,21 +81,8 @@ describe('cellStatus', () => {
       label: 'Generation failed',
       detail: 'The model refused.',
     });
-    expect(cellStatus(paper({ latestVersionNo: 2, totalMarks: 20 }))).toEqual({
-      kind: 'ready',
-      label: 'Version 2',
-      detail: '20 of 20 marks',
-    });
-    expect(cellStatus(paper({ latestVersionNo: 1, totalMarks: 18.5, warningCount: 1 }))).toEqual({
-      kind: 'warning',
-      label: 'Version 1 · 1 warning',
-      detail: '18.5 of 20 marks',
-    });
-  });
-
-  it('does not invent marks when the paper has none or the plan has no maximum', () => {
-    expect(cellStatus(paper({ latestVersionNo: 1 })).detail).toBeUndefined();
-    expect(cellStatus(paper({ latestVersionNo: 1, totalMarks: 10, planMaxMarks: null })).detail).toBe('10 marks');
+    expect(cellStatus(paper({ latestVersionNo: 2 }))).toEqual({ kind: 'ready', label: 'Version 2' });
+    expect(cellStatus(paper({ latestVersionNo: 1, warningCount: 1 }))).toEqual({ kind: 'warning', label: 'Version 1 · 1 notice' });
   });
 });
 
@@ -139,10 +123,7 @@ describe('blocked reasons', () => {
 });
 
 describe('formatting', () => {
-  it('formats marks and sizes', () => {
-    expect(formatMarks(15)).toBe('15');
-    expect(formatMarks(7.5)).toBe('7.5');
-    expect(formatMarks(0.1 + 0.2)).toBe('0.3');
+  it('formats sizes', () => {
     expect(formatPageSize(512)).toBe('512 B');
     expect(formatPageSize(2048)).toBe('2 KB');
     expect(formatPageSize(2.4 * 1024 * 1024)).toBe('2.4 MB');

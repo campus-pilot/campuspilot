@@ -3,8 +3,9 @@ import { Download, FilePlus2 } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 import { AssistantViewFrame } from '../assistant/views/view-frame';
-import { MarksSummary, type MarksWarningView } from './marks-summary';
-import { draftCardSummary, type DraftCardFacts } from './chat-cards-model';
+import { PlaceholderNote, RemovedList } from './paper-notices';
+import { removedSummary } from './paper-notices-model';
+import type { DraftCardFacts } from './chat-cards-model';
 
 /**
  * Question paper cards inside a chat (decision D32): a draft the assistant
@@ -14,19 +15,23 @@ import { draftCardSummary, type DraftCardFacts } from './chat-cards-model';
  * it; "Save as new version" sends that request as a chat message.
  */
 
-const MAX_LISTED_ERRORS = 3;
+const MAX_LISTED_PROBLEMS = 3;
 
-function ErrorList({ errors }: { errors: readonly { path: string; message: string }[] }) {
-  const listed = errors.slice(0, MAX_LISTED_ERRORS);
+/** Why a draft cannot be saved yet, in the assistant's own sentences. The assistant reads the same list and fixes them. */
+function ProblemList({ problems }: { problems: readonly string[] }) {
+  const listed = problems.slice(0, MAX_LISTED_PROBLEMS);
   return (
-    <ul aria-label="Problems" className="flex flex-col gap-1 text-sm text-destructive">
-      {listed.map((error, index) => (
-        <li key={`${error.path}-${index}`}>{error.path ? `${error.path}: ${error.message}` : error.message}</li>
-      ))}
-      {errors.length > listed.length ? (
-        <li className="text-muted-foreground">and {errors.length - listed.length} more. The assistant will fix them.</li>
-      ) : null}
-    </ul>
+    <div className="flex flex-col gap-1 text-sm">
+      <p className="font-medium text-destructive">This draft can’t be saved yet.</p>
+      <ul aria-label="Problems" className="flex flex-col gap-1 text-destructive">
+        {listed.map((problem, index) => (
+          <li key={`${index}-${problem}`}>{problem}</li>
+        ))}
+        {problems.length > listed.length ? (
+          <li className="text-muted-foreground">and {problems.length - listed.length} more. The assistant will fix them.</li>
+        ) : null}
+      </ul>
+    </div>
   );
 }
 
@@ -45,19 +50,19 @@ export type QuestionPaperDraftCardProps = DraftCardFacts & {
   saveRequested?: boolean;
 };
 
-/** A draft question paper: its marks and warnings, a Preview and a quiet Save as new version. */
+/** A draft question paper: valid or not, what was removed from its HTML, placeholder figures, a Preview and a quiet Save as new version. */
 export function QuestionPaperDraftCard({ ordinal, preview, onSave, saveRequested = false, ...facts }: QuestionPaperDraftCardProps) {
-  const summary = draftCardSummary(facts);
   return (
     <AssistantViewFrame title={`Draft ${ordinal}`}>
       <div className="flex flex-col gap-3 rounded-xl assistant-well p-3">
         {facts.valid ? (
           <>
-            <MarksSummary totalMarks={facts.total} planMaxMarks={facts.planMaxMarks} warnings={facts.warnings satisfies readonly MarksWarningView[]} />
-            {summary.placeholderNote ? <p className="text-sm text-muted-foreground">{summary.placeholderNote}</p> : null}
+            <p className="text-sm">Ready to preview and save.</p>
+            <PlaceholderNote count={facts.placeholderFigures} />
+            <RemovedList lines={facts.removed} />
           </>
         ) : (
-          <ErrorList errors={facts.errors} />
+          <ProblemList problems={facts.problems} />
         )}
         {facts.valid ? (
           <CardActions>
@@ -77,10 +82,8 @@ export type QuestionPaperVersionCardProps = {
   /** "Science (Theory), Class 8", once known. */
   subtitle?: string;
   versionNo: number;
-  totalMarks: number | null;
-  planMaxMarks: number | null;
-  /** How many warnings the version carries; their text is in the preview. */
-  warningCount: number;
+  /** How many items the sanitiser removed when the version was saved; their text is in the preview. */
+  removedCount: number;
   isLatest: boolean;
   downloading: boolean;
   /** The Preview control (a trigger with its dialog). */
@@ -88,14 +91,12 @@ export type QuestionPaperVersionCardProps = {
   onDownload: () => void;
 };
 
-/** A saved version in the chat, with Preview and Download. Older versions can be previewed too. */
+/** A saved version in the chat, with Preview and Download. Older versions can be previewed too. Its marks are not shown: the paper is HTML and nothing adds them up. */
 export function QuestionPaperVersionCard({
   title,
   subtitle,
   versionNo,
-  totalMarks,
-  planMaxMarks,
-  warningCount,
+  removedCount,
   isLatest,
   downloading,
   preview,
@@ -109,12 +110,7 @@ export function QuestionPaperVersionCard({
           Version {versionNo}
           {isLatest ? ' (latest)' : ''}
         </p>
-        <MarksSummary totalMarks={totalMarks} planMaxMarks={planMaxMarks} warnings={[]} />
-        {warningCount > 0 ? (
-          <p className="text-sm text-muted-foreground">
-            {warningCount} {warningCount === 1 ? 'warning' : 'warnings'}, see the preview.
-          </p>
-        ) : null}
+        {removedCount > 0 ? <p className="text-sm text-muted-foreground">{removedSummary(removedCount)} when it was saved, see the preview.</p> : null}
         <CardActions>
           {preview}
           <Button type="button" variant="outline" size="sm" onClick={onDownload} disabled={downloading}>

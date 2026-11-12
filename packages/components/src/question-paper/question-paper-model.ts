@@ -76,9 +76,6 @@ export function planUploads<F extends UploadFileInfo>(files: readonly F[], remai
 export type PaperCellInput = {
   pageCount: number;
   latestVersionNo: number;
-  /** No longer produced by the API (nothing adds up a paper's marks); the UI phase removes it. */
-  totalMarks?: number | null;
-  planMaxMarks: number | null;
   warningCount: number;
   activeJob: { status: 'queued' | 'running' } | null;
   lastJobFailure: { message: string } | null;
@@ -88,7 +85,7 @@ export type CellStatusKind = 'empty' | 'pages' | 'generating' | 'failed' | 'read
 export type CellStatus = {
   kind: CellStatusKind;
   label: string;
-  /** A second line (marks, the safe failure message), if there is one. */
+  /** A second line (the safe failure message), if there is one. */
   detail?: string;
 };
 
@@ -96,14 +93,9 @@ function plural(count: number, one: string, many = `${one}s`) {
   return `${count} ${count === 1 ? one : many}`;
 }
 
-/** Marks as people write them: `15`, `7.5`, never `15.000`. */
-export function formatMarks(value: number) {
-  return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(2)));
-}
-
 /**
  * The status of one subject and mode, in order of what needs attention:
- * a running job, then a failed one, then the saved paper (with warnings),
+ * a running job, then a failed one, then the saved paper (with notices about what was removed),
  * then uploaded pages, then nothing.
  */
 export function cellStatus(paper: PaperCellInput): CellStatus {
@@ -115,15 +107,9 @@ export function cellStatus(paper: PaperCellInput): CellStatus {
     return { kind: 'failed', label: 'Generation failed', detail: paper.lastJobFailure.message };
   }
   if (paper.latestVersionNo > 0) {
-    const marks =
-      paper.totalMarks == null
-        ? undefined
-        : paper.planMaxMarks === null
-          ? `${formatMarks(paper.totalMarks)} marks`
-          : `${formatMarks(paper.totalMarks)} of ${paper.planMaxMarks} marks`;
     return paper.warningCount > 0
-      ? { kind: 'warning', label: `Version ${paper.latestVersionNo} · ${plural(paper.warningCount, 'warning')}`, detail: marks }
-      : { kind: 'ready', label: `Version ${paper.latestVersionNo}`, detail: marks };
+      ? { kind: 'warning', label: `Version ${paper.latestVersionNo} · ${plural(paper.warningCount, 'notice')}` }
+      : { kind: 'ready', label: `Version ${paper.latestVersionNo}` };
   }
   if (paper.pageCount > 0) return { kind: 'pages', label: plural(paper.pageCount, 'page') };
   return { kind: 'empty', label: 'No paper yet' };

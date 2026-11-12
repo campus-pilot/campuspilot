@@ -12,6 +12,7 @@ import {
   saveDraftMessage,
   type DraftResult,
 } from '@campuspilot/components/question-paper/chat-cards-model';
+import { PlaceholderNote, RemovedList } from '@campuspilot/components/question-paper/paper-notices';
 import { QuestionPaperDraftCard, QuestionPaperVersionCard } from '@campuspilot/components/question-paper/chat-cards';
 import { Button } from '@campuspilot/ui/components/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@campuspilot/ui/components/dialog';
@@ -157,13 +158,8 @@ function VersionPreviewBody({ view, schoolId }: { view: AssistantQuestionPaperVi
   if (preview.isError) return <PreviewMessage>{requestErrorMessage(preview.error, 'This version could not be previewed.')}</PreviewMessage>;
   return (
     <div className="flex min-w-0 flex-col gap-3">
-      {preview.data.warnings.length > 0 ? (
-        <ul aria-label="Warnings" className="flex flex-col gap-1 text-sm text-muted-foreground">
-          {preview.data.warnings.map((warning, index) => (
-            <li key={`${warning.code}-${index}`}>{warning.message}</li>
-          ))}
-        </ul>
-      ) : null}
+      <RemovedList lines={preview.data.warnings.map((notice) => notice.message)} />
+      <PlaceholderNote count={preview.data.placeholderFigures} />
       <DocumentPreview html={preview.data.html} label="Question paper preview" fitPageWidth />
     </div>
   );
@@ -196,9 +192,7 @@ function VersionCard({ schoolId, view }: { schoolId: string; view: AssistantQues
       title={view.title}
       subtitle={`${paper.subjectName} (${paper.modeName}), ${paper.className}, ${paper.examName}`}
       versionNo={version.versionNo}
-      totalMarks={null}
-      planMaxMarks={version.planMaxMarks ?? paper.planMaxMarks}
-      warningCount={version.warningCount}
+      removedCount={version.warningCount}
       isLatest={version.isLatest}
       downloading={download.isPending}
       onDownload={() =>
@@ -218,7 +212,7 @@ function VersionCard({ schoolId, view }: { schoolId: string; view: AssistantQues
 
 /**
  * A saved question paper version in the chat (the assistant's
- * `question_paper` view): marks, Preview and Download PDF, read with the
+ * `question_paper` view): Preview and Download PDF, read with the
  * user's session behind the paper's class permission. Older versions work
  * the same, so the user can compare them inside the chat.
  */

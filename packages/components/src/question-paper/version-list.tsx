@@ -1,14 +1,13 @@
 import { Button } from '@campuspilot/ui/components/button';
 import { Download, Eye } from 'lucide-react';
-import { formatMarks, versionSourceLabel } from './question-paper-model';
+import { versionSourceLabel } from './question-paper-model';
 
 export type VersionView = {
   versionNo: number;
   source: 'ai_job' | 'agent';
   createdAt: Date;
   createdByName: string | null;
-  /** No longer produced by the API; the UI phase removes it. */
-  totalMarks?: number | null;
+  /** How many items the sanitiser removed when the version was saved (the API's `warningCount`). */
   warningCount: number;
   isLatest: boolean;
 };
@@ -32,8 +31,7 @@ function VersionRow({
     versionSourceLabel(version.source),
     DATE_FORMAT.format(version.createdAt),
     version.createdByName,
-    version.totalMarks == null ? null : `${formatMarks(version.totalMarks)} marks`,
-    version.warningCount > 0 ? `${version.warningCount} warning${version.warningCount === 1 ? '' : 's'}` : null,
+    version.warningCount > 0 ? `${version.warningCount} ${version.warningCount === 1 ? 'notice' : 'notices'}` : null,
   ].filter(Boolean);
   return (
     <li

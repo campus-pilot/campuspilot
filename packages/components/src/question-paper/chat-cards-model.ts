@@ -19,35 +19,23 @@ export const draftResultSchema = z.object({
 });
 export type DraftResult = z.infer<typeof draftResultSchema>;
 
-/** Everything the draft card shows. */
-export type DraftCardFacts =
-  | { valid: false; errors: readonly { path: string; message: string }[] }
-  | {
-      valid: true;
-      draftId: string;
-      total: number | null;
-      planMaxMarks: number | null;
-      warnings: readonly { code: string; path: string; message: string }[];
-      placeholderFigures: number;
-    };
-
 /**
- * The card still shows the shapes of the structured paper (a path per error,
- * marks and warnings) until the UI phase redesigns it: problems become errors
- * without a path, the sanitiser's `stripped` lines become warnings, and there
- * are no marks.
+ * Everything the draft card shows. `problems` are the sentences the API wrote
+ * for a teacher ("Formula 1 (...) is not valid maths", a limit that was
+ * exceeded); the card never shows schema paths because there are none.
+ * `removed` is what the sanitiser took out of the HTML (a style or attribute
+ * that is not allowed): it does not block saving, so the card keeps it behind
+ * a collapsed "what was removed" list.
  */
+export type DraftCardFacts =
+  | { valid: false; problems: readonly string[] }
+  | { valid: true; draftId: string; removed: readonly string[]; placeholderFigures: number };
+
+/** A draft is valid for the card only with a draft id (what Save refers to). */
 export function draftFactsOf(result: DraftResult): DraftCardFacts {
   return result.valid && result.draftId
-    ? {
-        valid: true,
-        draftId: result.draftId,
-        total: null,
-        planMaxMarks: null,
-        warnings: result.stripped.map((message) => ({ code: 'sanitised', path: '', message })),
-        placeholderFigures: result.placeholderFigures,
-      }
-    : { valid: false, errors: result.problems.length > 0 ? result.problems.map((message) => ({ path: '', message })) : [{ path: '', message: 'This draft is not valid.' }] };
+    ? { valid: true, draftId: result.draftId, removed: result.stripped, placeholderFigures: result.placeholderFigures }
+    : { valid: false, problems: result.problems.length > 0 ? result.problems : ['This draft is not valid.'] };
 }
 
 /**
@@ -85,15 +73,6 @@ export type DraftCallInput = z.infer<typeof paperInputSchema>;
 export function parseDraftCallInput(input: unknown): DraftCallInput | null {
   const parsed = paperInputSchema.safeParse(input);
   return parsed.success ? parsed.data : null;
-}
-
-/** The sentence a draft with placeholder figures carries, or null. */
-export function draftCardSummary(facts: DraftCardFacts): { placeholderNote: string | null } {
-  if (!facts.valid || facts.placeholderFigures === 0) return { placeholderNote: null };
-  const count = facts.placeholderFigures;
-  return {
-    placeholderNote: `${count} ${count === 1 ? 'figure is' : 'figures are'} still a placeholder. Attach the image in chat to put it in.`,
-  };
 }
 
 /** The message the card's "Save as new version" sends (an explicit user command, decision D32). */

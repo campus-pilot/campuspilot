@@ -44,7 +44,7 @@ describe('reading a draft check from its tool call', () => {
   it('is a valid draft only with a draft id, and says something for an invalid one with no errors', () => {
     expect(draftFactsOf(valid)).toMatchObject({ valid: true, draftId: 'abc123def456' });
     expect(draftFactsOf({ ...valid, draftId: null })).toMatchObject({ valid: false });
-    expect(draftFactsOf({ ...invalid, problems: [] })).toMatchObject({ valid: false, errors: [{ message: 'This draft is not valid.' }] });
+    expect(draftFactsOf({ ...invalid, problems: [] })).toMatchObject({ valid: false, problems: ['This draft is not valid.'] });
   });
 
   it('asks to save a draft by its id', () => {
@@ -53,11 +53,14 @@ describe('reading a draft check from its tool call', () => {
 });
 
 describe('QuestionPaperDraftCard', () => {
-  it('shows the sanitiser notices and placeholder figures, with Preview and a quiet Save', () => {
+  it('keeps what the sanitiser removed behind a collapsed list, shows placeholder figures, with Preview and a quiet Save and no marks', () => {
     const onSave = vi.fn();
     render(<QuestionPaperDraftCard ordinal={2} {...draftFactsOf(valid)} preview={<button type="button">Preview</button>} onSave={onSave} />);
     expect(screen.getByRole('heading', { name: 'Draft 2' })).toBeTruthy();
+    expect(screen.queryByText(/event handler "onclick" was removed/)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /1 thing was removed/ }));
     expect(screen.getByText(/event handler "onclick" was removed/)).toBeTruthy();
+    expect(screen.queryByText(/marks/i)).toBeNull();
     expect(screen.getByText(/2 figures are still a placeholder/)).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Preview' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Save as new version' }));
@@ -80,6 +83,7 @@ describe('QuestionPaperDraftCard', () => {
 
   it('lists the problems of an invalid draft and offers neither preview nor save', () => {
     render(<QuestionPaperDraftCard ordinal={1} {...draftFactsOf(invalid)} preview={<button type="button">Preview</button>} />);
+    expect(screen.getByText('This draft can’t be saved yet.')).toBeTruthy();
     expect(screen.getByText(/Formula 1 .*Invalid TeX/)).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Preview' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Save as new version' })).toBeNull();
@@ -87,15 +91,13 @@ describe('QuestionPaperDraftCard', () => {
 });
 
 describe('QuestionPaperVersionCard', () => {
-  it('names the version, marks and warnings, previews and downloads', () => {
+  it('names the version and what was removed, previews and downloads, and shows no marks', () => {
     const onDownload = vi.fn();
     render(
       <QuestionPaperVersionCard
         subtitle="Science (Theory), Class 8"
         versionNo={3}
-        totalMarks={20}
-        planMaxMarks={20}
-        warningCount={1}
+        removedCount={1}
         isLatest={false}
         downloading={false}
         preview={<button type="button">Preview</button>}
@@ -104,7 +106,8 @@ describe('QuestionPaperVersionCard', () => {
     );
     expect(screen.getByRole('heading', { name: 'Question paper, version 3' })).toBeTruthy();
     expect(screen.getByText('Science (Theory), Class 8 · Version 3')).toBeTruthy();
-    expect(screen.getByText('1 warning, see the preview.')).toBeTruthy();
+    expect(screen.getByText('1 thing was removed when it was saved, see the preview.')).toBeTruthy();
+    expect(screen.queryByText(/marks/i)).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Download PDF' }));
     expect(onDownload).toHaveBeenCalled();
   });
