@@ -19,8 +19,7 @@ import type { Context } from '../../../context';
 import { appRouter } from '../../index';
 import { putObject } from './question-paper.storage';
 
-const ENGLISH_SCIENCE = QUESTION_PAPER_EXAMPLES[1];
-const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+const ENGLISH_SCIENCE = QUESTION_PAPER_EXAMPLES['english-science'];
 const errorOf = (promise: Promise<unknown>) => promise.then(() => null, (error: unknown) => error as { code: string; message: string });
 
 /**
@@ -95,22 +94,19 @@ describe('chat attachments as figures', () => {
       }),
     }) as unknown as TestClient;
 
-  const withFigure = (imageId: string) => {
-    const content = clone(ENGLISH_SCIENCE) as Record<string, any>;
-    content.sections[0].questions[0].blocks = [{ type: 'figure', imageId, alt: 'The diagram' }];
-    return content;
-  };
+  const withFigure = (imageId: string) =>
+    ENGLISH_SCIENCE.replace('<h2 class="sec">Section A', `<figure><img data-figure-id="${imageId}" alt="The diagram"></figure><h2 class="sec">Section A`);
 
   it('accepts an attachment the user sent as a figure of a draft, in the assistant only', async () => {
     const id = await attachment();
     const k = world.key({ classId: world.otherClassId });
-    expect(await agent().school.validateQuestionPaperDraft({ ...k, content: withFigure(id) })).toMatchObject({ valid: true, errors: [] });
+    expect(await agent().school.validateQuestionPaperDraft({ ...k, html: withFigure(id) })).toMatchObject({ valid: true, problems: [] });
     // The person's own browser session (the draft card's re-check) sees their attachments, like the preview does.
-    expect(await world.people.manager.client.school.validateQuestionPaperDraft({ ...k, content: withFigure(id) })).toMatchObject({ valid: true, errors: [] });
+    expect(await world.people.manager.client.school.validateQuestionPaperDraft({ ...k, html: withFigure(id) })).toMatchObject({ valid: true, problems: [] });
     // Someone else's session does not: it is not their attachment.
-    const other = await world.people.coordinator.client.school.validateQuestionPaperDraft({ ...k, content: withFigure(id) });
+    const other = await world.people.coordinator.client.school.validateQuestionPaperDraft({ ...k, html: withFigure(id) });
     expect(other.valid).toBe(false);
-    expect(other.errors[0]!.message).toMatch(/not an image the user attached/);
+    expect(other.problems[0]).toMatch(/not an image the user attached/);
     // An API key or an external OAuth client has no chat at all, so no attachments.
     const external = createRouterClient(appRouter, {
       context: async (): Promise<Context> => ({
@@ -120,9 +116,9 @@ describe('chat attachments as figures', () => {
         principal: { authMethod: 'apiKey' },
       }),
     }) as unknown as TestClient;
-    const outside = await external.school.validateQuestionPaperDraft({ ...k, content: withFigure(id) });
+    const outside = await external.school.validateQuestionPaperDraft({ ...k, html: withFigure(id) });
     expect(outside.valid).toBe(false);
-    expect(outside.errors[0]!.message).toMatch(/inside the in-app assistant/);
+    expect(outside.problems[0]).toMatch(/inside the in-app assistant/);
   });
 
   it('refuses an attachment of another user, an unsent one and one the server could not decode', async () => {
@@ -130,16 +126,16 @@ describe('chat attachments as figures', () => {
     const theirs = await attachment({ userId: world.people.teacher.userId });
     const unsent = await attachment({ sent: false });
     const heic = await attachment({ heic: true });
-    expect((await agent().school.validateQuestionPaperDraft({ ...k, content: withFigure(theirs) })).errors[0]!.message).toMatch(/not an image the user attached/);
-    expect((await agent().school.validateQuestionPaperDraft({ ...k, content: withFigure(unsent) })).errors[0]!.message).toMatch(/not an image the user attached/);
-    expect((await agent().school.validateQuestionPaperDraft({ ...k, content: withFigure(heic) })).errors[0]!.message).toMatch(/cannot be printed/);
-    expect((await agent().school.validateQuestionPaperDraft({ ...k, content: withFigure('asat_nonexistent00000000') })).valid).toBe(false);
+    expect((await agent().school.validateQuestionPaperDraft({ ...k, html: withFigure(theirs) })).problems[0]).toMatch(/not an image the user attached/);
+    expect((await agent().school.validateQuestionPaperDraft({ ...k, html: withFigure(unsent) })).problems[0]).toMatch(/not an image the user attached/);
+    expect((await agent().school.validateQuestionPaperDraft({ ...k, html: withFigure(heic) })).problems[0]).toMatch(/cannot be printed/);
+    expect((await agent().school.validateQuestionPaperDraft({ ...k, html: withFigure('asat_000000000000000000000') })).valid).toBe(false);
   });
 
   it('copies the attachment into the paper on save, stores the version with the figure id, and reuses it on the next save', async () => {
     const id = await attachment();
     const k = world.key({ classId: world.otherClassId, subjectSlug: 'math' });
-    const first = await agent().school.saveQuestionPaperVersion({ ...k, expectedVersionNo: 0, content: withFigure(id) });
+    const first = await agent().school.saveQuestionPaperVersion({ ...k, expectedVersionNo: 0, html: withFigure(id) });
     expect(first.versionNo).toBe(1);
 
     const figures = await db.select().from(examQuestionPaperFigureTable).where(eq(examQuestionPaperFigureTable.paperId, first.paperId));
@@ -148,12 +144,12 @@ describe('chat attachments as figures', () => {
     expect(figures[0]!.id.startsWith('qpf_')).toBe(true);
 
     const [version] = await db.select().from(examQuestionPaperVersionTable).where(eq(examQuestionPaperVersionTable.paperId, first.paperId));
-    const stored = JSON.stringify(version!.content);
+    const stored = version!.contentHtml;
     expect(stored).toContain(figures[0]!.id);
     expect(stored).not.toContain('asat_');
 
     // The same attachment in the next version is the same figure, not a second copy.
-    const second = await agent().school.saveQuestionPaperVersion({ ...k, expectedVersionNo: 1, content: withFigure(id) });
+    const second = await agent().school.saveQuestionPaperVersion({ ...k, expectedVersionNo: 1, html: withFigure(id) });
     expect(second.versionNo).toBe(2);
     expect(await db.select().from(examQuestionPaperFigureTable).where(eq(examQuestionPaperFigureTable.paperId, first.paperId))).toHaveLength(1);
 
@@ -165,21 +161,21 @@ describe('chat attachments as figures', () => {
   it('refuses to save an attachment outside the assistant, and one that is not the saver\'s', async () => {
     const id = await attachment();
     const k = world.key({ classId: world.otherClassId, subjectSlug: 'science' });
-    const outside = await errorOf(world.people.manager.client.school.saveQuestionPaperVersion({ ...k, expectedVersionNo: 0, content: withFigure(id) }));
+    const outside = await errorOf(world.people.manager.client.school.saveQuestionPaperVersion({ ...k, expectedVersionNo: 0, html: withFigure(id) }));
     expect(outside).toMatchObject({ code: 'BAD_REQUEST', message: expect.stringContaining('in-app assistant') });
     const theirs = await attachment({ userId: world.people.teacher.userId });
-    const crossed = await errorOf(agent().school.saveQuestionPaperVersion({ ...k, expectedVersionNo: 0, content: withFigure(theirs) }));
+    const crossed = await errorOf(agent().school.saveQuestionPaperVersion({ ...k, expectedVersionNo: 0, html: withFigure(theirs) }));
     expect(crossed).toMatchObject({ code: 'BAD_REQUEST' });
   });
 
   it('previews a draft with the owner\'s attachment inline, and not for anyone else', async () => {
     const id = await attachment();
     const k = world.key({ classId: world.otherClassId, subjectSlug: 'math', modeSlug: 'practical' });
-    const preview = await world.people.manager.client.school.previewQuestionPaperDraft({ ...k, content: withFigure(id) });
-    expect(preview.errors).toEqual([]);
+    const preview = await world.people.manager.client.school.previewQuestionPaperDraft({ ...k, html: withFigure(id) });
+    expect(preview.problems).toEqual([]);
     expect(preview.html).toContain('data:image/jpeg;base64,');
-    const other = await world.people.principal.client.school.previewQuestionPaperDraft({ ...k, content: withFigure(id) });
+    const other = await world.people.principal.client.school.previewQuestionPaperDraft({ ...k, html: withFigure(id) });
     expect(other.html).toBe('');
-    expect(other.errors[0]!.message).toMatch(/not an image the user attached/);
+    expect(other.problems[0]).toMatch(/not an image the user attached/);
   });
 });

@@ -29,7 +29,7 @@ import { and, count, eq, inArray, isNotNull, sql, sum } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 
 import { SCHOOL_ACTIONS } from '@campuspilot/opa/policies/school';
-import { EXAMPLE_ENGLISH_SCIENCE_PAPER, EXAMPLE_HINDI_MATH_PAPER } from '@campuspilot/question-paper/examples';
+import { QUESTION_PAPER_EXAMPLES } from '@campuspilot/question-paper/examples';
 
 import type { Context } from '../../context';
 import { assertPermission } from '../../permissions/authorization';
@@ -880,11 +880,8 @@ async function backdateDemoNotice(scope: { schoolId: string; noticeId: string },
 // ---------------------------------------------------------------------------
 // Question papers
 
-/** The built-in worked examples that are version 1 of the demo's papers (a paper names one in `question-papers.json`). */
-const QUESTION_PAPER_EXAMPLES: Record<DemoQuestionPaper['example'], typeof EXAMPLE_ENGLISH_SCIENCE_PAPER> = {
-  'english-science': EXAMPLE_ENGLISH_SCIENCE_PAPER,
-  'hindi-maths': EXAMPLE_HINDI_MATH_PAPER,
-};
+// The built-in worked examples (`@campuspilot/question-paper/examples`) are version 1 of the demo's papers: a
+// paper names one in `question-papers.json` as `example`.
 
 /**
  * Writes one planned question paper: its photographed pages, then version 1
@@ -928,13 +925,13 @@ export async function seedQuestionPaper(
   }
   let row = (await findPaper(db, key))!;
   if (row.latestVersionNo < 1) {
-    const example = QUESTION_PAPER_EXAMPLES[paper.example];
+    const html: string = QUESTION_PAPER_EXAMPLES[paper.example satisfies keyof typeof QUESTION_PAPER_EXAMPLES];
     // `expectedVersionNo: 0` makes a second writer lose instead of adding a second version 1.
     const saved = await saveQuestionPaperVersion(db, {
       scope,
       userId,
       expectedVersionNo: 0,
-      content: paper.classLabel ? { ...example, meta: { ...example.meta, classLabel: paper.classLabel } } : example,
+      html,
       source: { kind: 'agent', conversationId: null },
     });
     const [version] = await db

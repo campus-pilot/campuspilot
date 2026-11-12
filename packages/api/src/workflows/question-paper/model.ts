@@ -11,12 +11,12 @@
  * `undefined`, and starting a generation is refused with a clear message.
  *
  * The part, result and usage types below are structurally the assistant
- * package's `StructuredPart` / `StructuredResult` / `ModelUsage`; its
+ * package's `TextPart` / `TextResult` / `ModelUsage`; its
  * `createQuestionPaperModel()` (`packages/assistant/src/question-paper-model.ts`)
  * adapts a configured provider to this interface.
  */
 
-export type StructuredPart =
+export type TextPart =
   | { type: 'text'; text: string }
   | { type: 'image'; mimeType: string; data: Uint8Array };
 
@@ -27,8 +27,8 @@ export type ModelUsage = {
   cacheCreationInputTokens: number;
 };
 
-export type StructuredResult = {
-  /** The model's JSON text, unparsed. */
+export type TextResult = {
+  /** The model's plain text answer, as returned (the HTML fragment, possibly inside a code fence). */
   text: string;
   usage: ModelUsage;
   /** The model that actually answered. */
@@ -53,10 +53,9 @@ export interface QuestionPaperModel {
   readonly imageMimeTypes: readonly string[];
   generate(input: {
     system: string;
-    parts: StructuredPart[];
-    jsonSchema: Record<string, unknown>;
+    parts: TextPart[];
     maxOutputTokens: number;
-  }): Promise<StructuredResult>;
+  }): Promise<TextResult>;
   failureKind(error: unknown): 'rejected' | 'unavailable' | 'busy' | 'unknown';
   billedUsageOf(error: unknown): { usage: ModelUsage; complete: boolean; model: string | null } | null;
 }

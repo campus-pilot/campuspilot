@@ -78,7 +78,7 @@ const userId = (context: { session: { user: { id: string } } | null }) => {
  */
 export const schoolQuestionPaperRouter = {
   listQuestionPapers: protectedProcedure
-    .route(route('List question papers', "For one exam, every class you may read with its subjects and assessment modes (from the exam plans) and, for each, whether a paper exists: its page count, latest version number and marks, warnings and any running or failed AI generation. Use this to find the ids that the other question paper tools take."))
+    .route(route('List question papers', "For one exam, every class you may read with its subjects and assessment modes (from the exam plans) and, for each, whether a paper exists: its page count, latest version number, notices and any running or failed AI generation. Use this to find the ids that the other question paper tools take."))
     .meta(tool('read'))
     .input(dto.listQuestionPapersInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_EXAM_PLANS))
@@ -108,7 +108,7 @@ export const schoolQuestionPaperRouter = {
     }),
 
   getQuestionPaper: protectedProcedure
-    .route(route('Get a question paper', "Read one paper: the uploaded pages, its latest version number (latestVersionNo, the expectedVersionNo to pass to saveQuestionPaperVersion; 0 when there is none) and the structured JSON of its latest or a named version with the marks total and warnings. Call learn_question_paper_generation before editing the JSON."))
+    .route(route('Get a question paper', "Read one paper: the uploaded pages, its latest version number (latestVersionNo, the expectedVersionNo to pass to saveQuestionPaperVersion; 0 when there is none) and the HTML fragment (html) of its latest or a named version with any notices about what the sanitiser removed. Call learn_question_paper_generation before editing the html."))
     .meta(tool('read', { outputChars: QUESTION_PAPER_PAPER_OUTPUT_CHARS }))
     .input(dto.getQuestionPaperInputSchema)
     .use(readClass)
@@ -123,7 +123,7 @@ export const schoolQuestionPaperRouter = {
     }),
 
   listQuestionPaperVersions: protectedProcedure
-    .route(route('List question paper versions', 'List the saved versions of one paper, newest first (at most 100): number, who and what wrote it (the AI job or a chat agent), marks, warning count and whether a PDF is stored.'))
+    .route(route('List question paper versions', 'List the saved versions of one paper, newest first (at most 100): number, who and what wrote it (the AI job or a chat agent), notice count and whether a PDF is stored.'))
     .meta(tool('read'))
     .input(dto.paperKeySchema)
     .use(readClass)
@@ -138,19 +138,18 @@ export const schoolQuestionPaperRouter = {
     }),
 
   learn_question_paper_generation: protectedProcedure
-    .route(route('Learn question paper generation', 'Call this first whenever you are going to write, check, edit or save a question paper. Returns the rules, the JSON Schema, the limits and two complete examples of the structured question paper that validateQuestionPaperDraft and saveQuestionPaperVersion accept. It reads no school data.'))
+    .route(route('Learn question paper generation', 'Call this first whenever you are going to write, check, edit or save a question paper. Returns the rules for the HTML fragment a question paper is written in (vocabulary, formulas as data-math, figures, scripts, and the ban on animation), the limits and one complete example that validateQuestionPaperDraft and saveQuestionPaperVersion accept. It reads no school data.'))
     .meta(tool('read', { outputChars: QUESTION_PAPER_LEARN_OUTPUT_CHARS }))
     .input(dto.learnInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.READ_EXAMS))
     .use(requireQuestionPaperAssistantAccess())
     .output(dto.learnOutputSchema)
     .handler(async () => {
-      const payload = buildLearnPayload();
-      return { ...payload, examples: [...payload.examples] };
+      return buildLearnPayload();
     }),
 
   validateQuestionPaperDraft: protectedProcedure
-    .route(route('Validate a question paper draft', 'Call learn_question_paper_generation first. Check a draft question paper (JSON) without saving anything: every schema, formula and figure error with its path, the marks total, and warnings such as a total that differs from the exam plan. When valid it returns a draftId; the app then shows the user a preview of the draft.'))
+    .route(route('Validate a question paper draft', 'Call learn_question_paper_generation first. Check a draft question paper (an HTML fragment) without saving anything. Returns valid, the problems you must fix (a limit exceeded, a formula KaTeX rejects, an unusable figure id, an empty paper), stripped (what the sanitiser removed from your html, for example a style it does not accept) and a draftId. When valid the app shows the user a preview of the draft.'))
     .meta(tool('read', { outputChars: QUESTION_PAPER_PAPER_OUTPUT_CHARS }))
     .input(dto.validateDraftInputSchema)
     .use(readClass)
@@ -162,16 +161,14 @@ export const schoolQuestionPaperRouter = {
         // Attachments of the chat user are valid figures inside the in-app assistant and when that same person's browser
         // session re-checks a draft card (the same rule as previewQuestionPaperDraft); never for API keys or OAuth clients.
         const chatUserId = context.principal.authMethod === 'assistant' || context.principal.authMethod === 'session' ? userId(context) : undefined;
-        const checked = await checkQuestionPaperDraft(context.db, scope, input.content, { chatUserId });
+        const checked = await checkQuestionPaperDraft(context.db, scope, input.html, { chatUserId });
         if (!checked.ok) {
-          return { valid: false, errors: checked.errors, warnings: [], total: null, planMaxMarks: scope.planMaxMarks, draftId: null, placeholderFigures: 0, characters: JSON.stringify(input.content).length };
+          return { valid: false, problems: checked.problems, stripped: checked.stripped, draftId: null, placeholderFigures: 0, characters: input.html.length };
         }
         return {
           valid: true,
-          errors: [],
-          warnings: checked.warnings,
-          total: checked.total,
-          planMaxMarks: scope.planMaxMarks,
+          problems: [],
+          stripped: checked.stripped,
           draftId: checked.draftId,
           placeholderFigures: checked.placeholderFigures,
           characters: checked.characters,
@@ -182,7 +179,7 @@ export const schoolQuestionPaperRouter = {
     }),
 
   saveQuestionPaperVersion: protectedProcedure
-    .route(route('Save a question paper version', "Call learn_question_paper_generation first. Save a question paper as a NEW version (an existing version is never edited); the user is asked to approve this. Send the JSON as content, or the draftId of a draft you validated earlier in this chat. expectedVersionNo must be latestVersionNo from getQuestionPaper (0 for a first version); if the paper changed meanwhile the call fails with CONFLICT. Only save when the user asked you to. Figures you cannot provide stay figure_placeholder blocks. The PDF is printed with the school's question paper template."))
+    .route(route('Save a question paper version', "Call learn_question_paper_generation first. Save a question paper as a NEW version (an existing version is never edited); the user is asked to approve this. Send the HTML as html, or the draftId of a draft you validated earlier in this chat. expectedVersionNo must be latestVersionNo from getQuestionPaper (0 for a first version); if the paper changed meanwhile the call fails with CONFLICT. Only save when the user asked you to. Figures you cannot provide stay <figure data-placeholder> placeholders. The PDF is printed with the school's question paper template."))
     .meta(tool('write'))
     .input(dto.saveVersionInputSchema)
     .use(manageClass)
@@ -193,19 +190,19 @@ export const schoolQuestionPaperRouter = {
         const user = userId(context);
         const scope = await resolvePaperScope(context.db, input);
         const chat = context.principal.authMethod === 'assistant' ? context.principal.assistantRun : null;
-        let content: unknown = input.content;
-        if (input.draftId !== undefined && input.content !== undefined) {
-          throw rpcError.badRequest('Send exactly one of content or draftId, not both.');
+        let html = input.html;
+        if (input.draftId !== undefined && input.html !== undefined) {
+          throw rpcError.badRequest('Send exactly one of html or draftId, not both.');
         }
         if (input.draftId !== undefined) {
-          if (!chat) throw rpcError.badRequest('A draftId can only be used from the in-app assistant. Send the full content instead.');
-          content = await findChatDraftContent(context.db, { conversationId: chat.conversationId, schoolId: input.schoolId, userId: user, draftId: input.draftId });
+          if (!chat) throw rpcError.badRequest('A draftId can only be used from the in-app assistant. Send the full html instead.');
+          html = await findChatDraftContent(context.db, { conversationId: chat.conversationId, schoolId: input.schoolId, userId: user, draftId: input.draftId });
         }
         const saved = await saveQuestionPaperVersion(context.db, {
           scope,
           userId: user,
           expectedVersionNo: input.expectedVersionNo,
-          content,
+          html: html!,
           source: { kind: 'agent', conversationId: chat?.conversationId ?? null },
           signal,
         });
@@ -217,7 +214,7 @@ export const schoolQuestionPaperRouter = {
     }),
 
   startQuestionPaperGeneration: protectedProcedure
-    .route(route('Generate a question paper with AI', "Start the AI reading the uploaded page photos and writing the structured paper. It runs in the background and saves a new version when it finishes; poll getQuestionPaperDetail. expectedPageRevision must be the pageRevision you last saw. Refused when there are no pages, a page is in a format the model cannot read, a generation is already running, the school has no question paper template, or the school's AI limit is reached."))
+    .route(route('Generate a question paper with AI', "Start the AI reading the uploaded page photos and writing the HTML paper. It runs in the background and saves a new version when it finishes; poll getQuestionPaperDetail. expectedPageRevision must be the pageRevision you last saw. Refused when there are no pages, a page is in a format the model cannot read, a generation is already running, the school has no question paper template, or the school's AI limit is reached."))
     .meta(humanOnly('write'))
     .input(dto.startGenerationInputSchema)
     .use(manageClass)
@@ -324,7 +321,7 @@ export const schoolQuestionPaperRouter = {
     }),
 
   previewQuestionPaperDraft: protectedProcedure
-    .route(route('Preview a question paper draft', "Render unsaved question paper JSON with the school's currently selected template. Returns the validation errors instead when the draft is not valid. Saves nothing."))
+    .route(route('Preview a question paper draft', "Render an unsaved question paper (an HTML fragment) with the school's currently selected template. Returns the problems instead when the draft is not valid. Saves nothing."))
     .meta(humanOnly('read'))
     .input(dto.previewDraftInputSchema)
     .use(readClass)
@@ -335,17 +332,17 @@ export const schoolQuestionPaperRouter = {
         const scope = await resolvePaperScope(context.db, input);
         // A person previewing a draft from their own chat may see their attachments as figures.
         const chatUserId = userId(context);
-        const checked = await checkQuestionPaperDraft(context.db, scope, input.content, { chatUserId });
-        if (!checked.ok) return { html: '', errors: checked.errors, warnings: [], templateName: null };
+        const checked = await checkQuestionPaperDraft(context.db, scope, input.html, { chatUserId });
+        if (!checked.ok) return { html: '', problems: checked.problems, warnings: [], templateName: null };
         const template = await selectedQuestionPaperTemplate(context.db, input.schoolId);
         if (!template) throw templateMissingError();
         const paper = await findPaper(context.db, scope.key);
-        const body = await renderQuestionPaperBody(context.db, { schoolId: input.schoolId, paperId: paper?.id ?? null, content: checked.content, chatUserId });
-        const rendered = await buildQuestionPaperContext(context.db, scope, { content: checked.content, versionNo: null, totalMarks: checked.total });
+        const body = await renderQuestionPaperBody(context.db, { schoolId: input.schoolId, paperId: paper?.id ?? null, html: checked.html, chatUserId });
+        const rendered = await buildQuestionPaperContext(context.db, scope, { versionNo: null });
         return {
           html: renderQuestionPaperDocument({ template, context: rendered, body }),
-          errors: [],
-          warnings: checked.warnings,
+          problems: [],
+          warnings: checked.notices,
           templateName: template.name,
         };
       } catch (error) {

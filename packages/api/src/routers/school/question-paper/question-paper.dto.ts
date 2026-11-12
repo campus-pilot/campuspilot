@@ -1,3 +1,4 @@
+import { QUESTION_PAPER_LIMITS } from '@campuspilot/question-paper/limits';
 import { z } from 'zod';
 
 /** The most pages (uploaded photos) one paper may hold (R3). */
@@ -13,11 +14,10 @@ export const QUESTION_PAPER_MAX_PAGE_BYTES = 15 * 1024 * 1024;
  */
 export const QUESTION_PAPER_PAPER_OUTPUT_CHARS = 80_000;
 /**
- * The same for `learn_question_paper_generation`: the guide, the model-facing
- * JSON Schema (about 7 KB with `$defs`), the limits and two full examples are
- * about 17 KB. It is a one-off call per paper (and pruned from the context
- * afterwards), so it gets room for the whole payload rather than a schema
- * without its examples.
+ * The same for `learn_question_paper_generation`: the guide, the limits and one
+ * full example are about 12 KB. It is a one-off call per paper (and pruned from
+ * the context afterwards), so it gets room for the whole payload rather than a
+ * guide without its example.
  */
 export const QUESTION_PAPER_LEARN_OUTPUT_CHARS = 40_000;
 
@@ -54,12 +54,18 @@ export const getQuestionPaperInputSchema = paperKeySchema.extend({
 
 export const learnInputSchema = z.object({ schoolId: id });
 
-/** The paper as JSON. Validated by `@campuspilot/question-paper`, not by this transport schema. */
-const paperContentInput = z
-  .record(z.string(), z.unknown())
-  .describe('The question paper as a JSON object (schemaVersion 1) exactly as described by learn_question_paper_generation.');
+/**
+ * The paper as an HTML fragment. Cleaned and checked by the sanitiser and the draft
+ * check, not by this transport schema; the length bound is only the largest
+ * text the sanitiser will look at (the product limit is lower and reported as a problem).
+ */
+const paperHtmlInput = z
+  .string()
+  .min(1)
+  .max(QUESTION_PAPER_LIMITS.parseChars)
+  .describe('The question paper as an HTML fragment (no <html>, <head> or <body>) exactly as described by learn_question_paper_generation.');
 
-export const validateDraftInputSchema = paperKeySchema.extend({ content: paperContentInput });
+export const validateDraftInputSchema = paperKeySchema.extend({ html: paperHtmlInput });
 
 export const saveVersionInputSchema = paperKeySchema
   .extend({
@@ -68,17 +74,17 @@ export const saveVersionInputSchema = paperKeySchema
       .int()
       .min(0)
       .describe('latestVersionNo from getQuestionPaper (0 when the paper has no version). A different current value is refused with CONFLICT.'),
-    content: paperContentInput.optional(),
+    html: paperHtmlInput.optional(),
     draftId: z
       .string()
       .length(12)
       .optional()
-      .describe('The draftId returned by validateQuestionPaperDraft earlier in this chat; instead of content. Only the in-app assistant can use it.'),
+      .describe('The draftId returned by validateQuestionPaperDraft earlier in this chat; instead of html. Only the in-app assistant can use it.'),
   })
   // "Exactly one" cannot be stated in JSON Schema, which MCP clients read, so the
   // schema asks for at least one and the handler refuses both.
-  .refine((value) => value.content !== undefined || value.draftId !== undefined, {
-    message: 'Send content or draftId.',
+  .refine((value) => value.html !== undefined || value.draftId !== undefined, {
+    message: 'Send html or draftId.',
   });
 
 export const startGenerationInputSchema = paperKeySchema.extend({
@@ -92,11 +98,11 @@ export const deletePageInputSchema = paperKeySchema.extend({
   pageId: id,
   expectedPageRevision: z.number().int().min(0),
 });
-export const previewDraftInputSchema = paperKeySchema.extend({ content: paperContentInput });
+export const previewDraftInputSchema = paperKeySchema.extend({ html: paperHtmlInput });
 
+/** What the sanitiser removed or changed when a version was saved. A notice, not an error. */
 export const questionPaperWarningSchema = z.object({
   code: z.string(),
-  path: z.string(),
   message: z.string(),
 });
 
@@ -126,7 +132,7 @@ export const versionSummarySchema = z.object({
   sourceJobId: z.string().nullable(),
   createdAt: z.date(),
   createdBy: userRefSchema,
-  totalMarks: z.number().nullable(),
+  /** The mode's maximum marks in the exam plan when the version was saved. */
   planMaxMarks: z.number().int().nullable(),
   warningCount: z.number().int(),
   hasPdf: z.boolean(),
@@ -171,7 +177,6 @@ export const listQuestionPapersOutputSchema = z.object({
                   paperId: z.string(),
                   pageCount: z.number().int(),
                   latestVersionNo: z.number().int(),
-                  totalMarks: z.number().nullable(),
                   planMaxMarks: z.number().int().nullable(),
                   warningCount: z.number().int(),
                   activeJob: z.object({ id: z.string(), status: z.enum(['queued', 'running']) }).nullable(),
@@ -193,7 +198,8 @@ export const getQuestionPaperOutputSchema = z.object({
   version: versionSummarySchema
     .extend({
       warnings: z.array(questionPaperWarningSchema),
-      content: z.record(z.string(), z.unknown()),
+      /** The sanitised HTML fragment of the version. */
+      html: z.string(),
     })
     .nullable(),
 });
@@ -212,27 +218,26 @@ export const detailOutputSchema = z.object({
 
 export const learnOutputSchema = z.object({
   guide: z.string(),
-  jsonSchema: z.record(z.string(), z.unknown()),
   limits: z.record(z.string(), z.unknown()),
-  examples: z.array(z.record(z.string(), z.unknown())),
-  schemaVersion: z.number().int(),
+  /** One complete worked example: an HTML fragment. */
+  example: z.string(),
 });
 
 export const validateDraftOutputSchema = z.object({
   valid: z.boolean(),
-  errors: z.array(z.object({ path: z.string(), message: z.string() })),
-  warnings: z.array(questionPaperWarningSchema),
-  total: z.number().nullable(),
-  planMaxMarks: z.number().int(),
+  /** What must be fixed before the paper can be saved (empty when valid). */
+  problems: z.array(z.string()),
+  /** What the sanitiser removed or changed in the html. Not blocking. */
+  stripped: z.array(z.string()),
   draftId: z.string().nullable(),
   placeholderFigures: z.number().int(),
+  /** Characters of the cleaned fragment. */
   characters: z.number().int(),
 });
 
 export const saveVersionOutputSchema = z.object({
   versionNo: z.number().int(),
   paperId: z.string(),
-  totalMarks: z.number().nullable(),
   planMaxMarks: z.number().int(),
   warnings: z.array(questionPaperWarningSchema),
   hasPdf: z.boolean(),
@@ -249,6 +254,6 @@ export const previewOutputSchema = z.object({
   templateName: z.string().nullable(),
 });
 export const previewDraftOutputSchema = previewOutputSchema.extend({
-  errors: z.array(z.object({ path: z.string(), message: z.string() })),
+  problems: z.array(z.string()),
 });
 export const downloadOutputSchema = z.object({ url: z.url(), fileName: z.string(), expiresIn: z.number().int() });

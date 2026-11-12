@@ -54,7 +54,7 @@ describe('demo purge of question papers and chat images', () => {
       const userId = world.people.manager.userId;
       const page = await addQuestionPaperPage(db, { scope, userId, file: { bytes: await png('#eee'), contentType: 'image/png', extension: 'png', name: 'page.png' } });
       await addQuestionPaperFigure(db, { scope, userId, bytes: await png('#ccd') });
-      await saveQuestionPaperVersion(db, { scope, userId, expectedVersionNo: 0, content: QUESTION_PAPER_EXAMPLES[1], source: { kind: 'agent', conversationId: null } });
+      await saveQuestionPaperVersion(db, { scope, userId, expectedVersionNo: 0, html: QUESTION_PAPER_EXAMPLES['english-science'], source: { kind: 'agent', conversationId: null } });
       const paper = (await db.select().from(examQuestionPaperTable).where(eq(examQuestionPaperTable.schoolId, world.schoolId)))[0]!;
       // A finished job and the cost row it wrote (no chat run: the cost is owned by the job).
       const [job] = await db

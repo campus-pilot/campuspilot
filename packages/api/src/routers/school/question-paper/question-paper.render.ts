@@ -1,9 +1,7 @@
 import type { DatabaseExecutor } from '@campuspilot/db';
 import { artifactTable } from '@campuspilot/db/schema/artifact';
 import { examQuestionPaperFigureTable } from '@campuspilot/db/schema/exam-question-paper';
-import { normalizeQuestionPaper } from '@campuspilot/question-paper/normalize';
 import { QUESTION_PAPER_EXAMPLES } from '@campuspilot/question-paper/examples';
-import type { QuestionPaper } from '@campuspilot/question-paper/schema';
 import { ORPCError } from '@orpc/server';
 import { and, eq, inArray } from 'drizzle-orm';
 import { randomBytes } from 'node:crypto';
@@ -21,7 +19,7 @@ import { isAttachmentFigureId, loadAttachmentFigureAssets } from './question-pap
 import type { QuestionPaperContext } from './question-paper.context';
 import { createMathRenderer, type MathRenderer } from './question-paper.math';
 import {
-  paperFigureIds,
+  fragmentFigureIds,
   QUESTION_PAPER_FIGURES_MAX_BYTES,
   renderQuestionPaperBodyHtml,
   type FigureAssets,
@@ -45,17 +43,18 @@ export const QUESTION_PAPER_MAX_LOGO_USES = 3;
 const FINAL_DOCUMENT_MAX_BYTES = 25_000_000;
 
 /**
- * Loads the data URIs of the figures a paper uses. A figure id must belong to
- * this paper of this school: another paper's or school's figure, or an
- * unknown id, is a BAD_REQUEST, so a paper can never print someone else's
- * image by naming its id. `paperId` is null for a draft of a paper that has
- * no row yet, which can then hold no figure.
+ * Loads the data URIs of the figures a paper uses (`figureIds`, as the
+ * sanitiser found them in the fragment). A figure id must belong to this paper
+ * of this school: another paper's or school's figure, or an unknown id, is a
+ * BAD_REQUEST, so a paper can never print someone else's image by naming its
+ * id. `paperId` is null for a draft of a paper that has no row yet, which can
+ * then hold no figure.
  */
 export async function loadFigureAssets(
   db: DatabaseExecutor,
-  input: { schoolId: string; paperId: string | null; content: QuestionPaper; chatUserId?: string },
+  input: { schoolId: string; paperId: string | null; figureIds: readonly string[]; chatUserId?: string },
 ): Promise<FigureAssets> {
-  const allIds = paperFigureIds(input.content);
+  const allIds = [...input.figureIds];
   if (allIds.length === 0) return new Map();
   // Chat attachments are only in drafts (a saved version holds its own figures).
   const attachmentIds = allIds.filter(isAttachmentFigureId);
@@ -98,10 +97,10 @@ export async function loadFigureAssets(
 /** Renders the body fragment of a paper, loading its figures. See {@link renderQuestionPaperBodyHtml}. */
 export async function renderQuestionPaperBody(
   db: DatabaseExecutor,
-  input: { schoolId: string; paperId: string | null; content: QuestionPaper; math?: MathRenderer; chatUserId?: string },
+  input: { schoolId: string; paperId: string | null; html: string; math?: MathRenderer; chatUserId?: string },
 ): Promise<RenderedBody> {
-  const figures = await loadFigureAssets(db, input);
-  return renderQuestionPaperBodyHtml(input.content, { figures, math: input.math ?? createMathRenderer() });
+  const figures = await loadFigureAssets(db, { ...input, figureIds: fragmentFigureIds(input.html) });
+  return renderQuestionPaperBodyHtml(input.html, { figures, math: input.math ?? createMathRenderer() });
 }
 
 /**
@@ -132,8 +131,9 @@ function renderTemplate(template: string, context: QuestionPaperContext): string
 
 /**
  * The full document HTML of a paper: the school's template rendered and
- * sanitised like any other document, with the trusted body substituted into
- * its single slot afterwards. The template must place the slot exactly once
+ * sanitised like any other document, with the body (sanitised fragment plus
+ * KaTeX and figures, see `question-paper.body.ts`) substituted into its single
+ * slot afterwards. The template must place the slot exactly once
  * (BAD_REQUEST otherwise). The total must fit the document system's 25 MB.
  */
 export function renderQuestionPaperDocument(input: {
@@ -191,15 +191,13 @@ export async function hasSelectedQuestionPaperTemplate(db: DatabaseExecutor, sch
 
 let exampleBody: RenderedBody | undefined;
 /**
- * The rendered English science example (design C5), used as the sample body
+ * The rendered English science example, used as the sample body
  * of template previews so an author sees a realistic page. It holds no
  * uploaded figure, so it needs no database.
  */
 export function exampleQuestionPaperBody(): RenderedBody {
   if (exampleBody) return exampleBody;
-  const normalized = normalizeQuestionPaper(QUESTION_PAPER_EXAMPLES[1]);
-  if (!normalized.ok) throw new Error('The built-in question paper example is invalid.');
-  exampleBody = renderQuestionPaperBodyHtml(normalized.value, { figures: new Map(), math: createMathRenderer(10_000) });
+  exampleBody = renderQuestionPaperBodyHtml(QUESTION_PAPER_EXAMPLES['english-science'], { figures: new Map(), math: createMathRenderer(10_000) });
   return exampleBody;
 }
 

@@ -1,3 +1,4 @@
+import { QUESTION_PAPER_EXAMPLES } from '@campuspilot/question-paper/examples';
 import { HeadObjectCommand } from '@aws-sdk/client-s3';
 import { db } from '@campuspilot/db';
 import { artifactTable } from '@campuspilot/db/schema/artifact';
@@ -14,6 +15,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 
 import { createAdminSession, createTestClient, type UserSession } from '../../../test/fixtures';
 import { selectedQuestionPaperTemplate } from '../../routers/school/question-paper/question-paper.render';
+import { sanitizeQuestionPaperBody } from '../../routers/school/question-paper/question-paper.sanitize';
 import { DemoJobGuardError } from './job-context';
 import { loadDemoJob, startDemoJob, type DemoJobSnapshot } from './job-store';
 import { createSeedContext, seedClass, seedExamSetup, seedQuestionPaper, seedSession, seedStaffMember, seedTemplates, type SeedContext } from './steps';
@@ -86,7 +88,7 @@ describe('demo question papers (steps only, one class)', () => {
       const [version] = await db.select().from(examQuestionPaperVersionTable).where(eq(examQuestionPaperVersionTable.paperId, row.id));
       expect(version).toMatchObject({ versionNo: 1, source: 'agent', sourceConversationId: null, createdBy: admin.user.id });
       expect(version!.createdAt.toISOString()).toBe(planned.savedAt);
-      expect(version!.content.meta.classLabel).toBe(planned.classLabel);
+      expect(version!.contentHtml).toBe(sanitizeQuestionPaperBody(QUESTION_PAPER_EXAMPLES[planned.example]).html);
       const [pdf] = await db.select().from(artifactTable).where(eq(artifactTable.id, version!.pdfArtifactId!));
       expect(pdf).toMatchObject({ documentType: 'question_paper', kind: 'pdf', contentType: 'application/pdf', sessionId, examSlug: 'annual-examination', classId });
       expect(pdf!.createdAt.toISOString()).toBe(planned.savedAt);

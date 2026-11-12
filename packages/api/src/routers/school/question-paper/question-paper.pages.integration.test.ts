@@ -37,7 +37,7 @@ import { resolvePaperScope } from './question-paper.scope';
 import { QUESTION_PAPER_MAX_PAGE_BYTES } from './question-paper.dto';
 
 const HEVC_STILL = readFileSync(new URL('../../../files/__fixtures__/hevc-still.heic', import.meta.url));
-const ENGLISH_SCIENCE = QUESTION_PAPER_EXAMPLES[1];
+const ENGLISH_SCIENCE = QUESTION_PAPER_EXAMPLES['english-science'];
 
 const jpeg = (width = 400, height = 300, background = '#ddd') => sharp({ create: { width, height, channels: 3, background } }).jpeg().toBuffer();
 
@@ -252,7 +252,7 @@ describe('question paper pages', () => {
         await expect(world.people.teacher.client.school.reorderQuestionPaperPages({ ...key(k), pageIds: detail.pages.map((p) => p.id), expectedPageRevision: detail.paper.pageRevision })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
         await expect(world.people.teacher.client.school.deleteQuestionPaperPage({ ...key(k), pageId: page!.id, expectedPageRevision: detail.paper.pageRevision })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
         await expect(world.people.teacher.client.school.deleteQuestionPaper(key(k))).rejects.toMatchObject({ code: 'BAD_REQUEST' });
-        await expect(world.people.teacher.client.school.saveQuestionPaperVersion({ ...key(k), expectedVersionNo: 0, content: ENGLISH_SCIENCE as never })).rejects.toMatchObject({ code: 'BAD_REQUEST', message: expect.stringContaining('has ended') });
+        await expect(world.people.teacher.client.school.saveQuestionPaperVersion({ ...key(k), expectedVersionNo: 0, html: ENGLISH_SCIENCE })).rejects.toMatchObject({ code: 'BAD_REQUEST', message: expect.stringContaining('has ended') });
       } finally {
         await world.setLifecycle('ready');
       }
@@ -484,7 +484,7 @@ describe('question paper pages', () => {
       // Reading, editing and saving what exists does not spend model money, so it stays open.
       await expect(manager.client.school.getQuestionPaper(limited.key())).resolves.toBeDefined();
       expect((await handleQuestionPaperPageUpload(uploadRequest(await jpeg(8, 8), 'image/jpeg', 'b.jpg'), manager.context, limited.key())).status).toBe(200);
-      await expect(manager.client.school.saveQuestionPaperVersion({ ...limited.key(), expectedVersionNo: 0, content: ENGLISH_SCIENCE as never })).resolves.toMatchObject({ versionNo: 1 });
+      await expect(manager.client.school.saveQuestionPaperVersion({ ...limited.key(), expectedVersionNo: 0, html: ENGLISH_SCIENCE })).resolves.toMatchObject({ versionNo: 1 });
     });
 
     it('caps the generations one school may have at once, so the cached spend check cannot be overshot by every paper of an exam', async () => {
@@ -548,14 +548,13 @@ describe('question paper pages', () => {
       const png = await sharp({ create: { width: 200, height: 100, channels: 3, background: '#4488cc' } }).png().toBuffer();
       const figure = await addQuestionPaperFigure(db, { scope, userId: world.people.manager.userId, bytes: png });
       try {
-        const content = JSON.parse(JSON.stringify(ENGLISH_SCIENCE)) as Record<string, any>;
-        content.sections[0].questions[0].blocks = [{ type: 'figure', imageId: figure.id, alt: 'A figure', widthPct: 50 }];
-        expect((await manager.validateQuestionPaperDraft({ ...key(k), content })).valid).toBe(true);
+        const html = ENGLISH_SCIENCE.replace('<h2 class="sec">Section A', `<figure><img data-figure-id="${figure.id}" alt="A figure" style="width:50%"></figure><h2 class="sec">Section A`);
+        expect((await manager.validateQuestionPaperDraft({ ...key(k), html })).valid).toBe(true);
         // 9.1 MB raw is under the 12 MB cap, 12.1 MB as base64 is over it.
         await db.update(examQuestionPaperFigureTable).set({ byteSize: 9_100_000 }).where(eq(examQuestionPaperFigureTable.id, figure.id));
-        const checked = await manager.validateQuestionPaperDraft({ ...key(k), content });
+        const checked = await manager.validateQuestionPaperDraft({ ...key(k), html });
         expect(checked.valid).toBe(false);
-        expect(checked.errors[0]).toMatchObject({ message: expect.stringContaining('figure images of this paper are too large to print together') });
+        expect(checked.problems[0]).toContain('figure images of this paper are too large to print together');
       } finally {
         await deleteQuestionPaper(db, { scope });
       }
@@ -571,17 +570,15 @@ describe('question paper pages', () => {
       expect(figure.s3Key).toMatch(/\/figures\/qpf_[a-z0-9]{21}\.jpg$/);
       expect(await exists(figure.s3Key)).toBe(true);
 
-      const content = JSON.parse(JSON.stringify(ENGLISH_SCIENCE)) as Record<string, any>;
-      content.sections[0].questions[0].blocks = [{ type: 'figure', imageId: figure.id, alt: 'A blue rectangle', widthPct: 50 }];
-      const saved = await manager.saveQuestionPaperVersion({ ...key(k), expectedVersionNo: 0, content });
+      const html = ENGLISH_SCIENCE.replace('<h2 class="sec">Section A', `<figure><img data-figure-id="${figure.id}" alt="A blue rectangle" style="width:50%"></figure><h2 class="sec">Section A`);
+      const saved = await manager.saveQuestionPaperVersion({ ...key(k), expectedVersionNo: 0, html });
       const preview = await manager.getQuestionPaperPreview({ ...key(k), versionNo: saved.versionNo });
-      expect(preview.html).toContain('<figure class="qp-figure" style="width:50%"><img src="data:image/jpeg;base64,');
-      expect(preview.html).toContain('alt="A blue rectangle"');
+      expect(preview.html).toMatch(/<figure><img src="data:image\/jpeg;base64,[A-Za-z0-9+/=]+" alt="A blue rectangle" style="width:50%"><\/figure>/);
 
       // The same id under another paper's key is not that paper's figure.
-      const elsewhere = await manager.validateQuestionPaperDraft({ ...key({ classId: world.otherClassId, subjectSlug: 'science' }), content });
+      const elsewhere = await manager.validateQuestionPaperDraft({ ...key({ classId: world.otherClassId, subjectSlug: 'science' }), html });
       expect(elsewhere.valid).toBe(false);
-      expect(elsewhere.errors[0]).toMatchObject({ message: 'This figure image does not belong to this paper.' });
+      expect(elsewhere.problems[0]).toContain('This figure image does not belong to this paper.');
 
       const paperRows = await db.select().from(examQuestionPaperTable).where(eq(examQuestionPaperTable.id, saved.paperId));
       const versions = await db.select().from(examQuestionPaperVersionTable).where(eq(examQuestionPaperVersionTable.paperId, saved.paperId));
@@ -607,7 +604,7 @@ describe('question paper pages', () => {
       const manager = world.people.manager.client.school;
       const before = (await pageRows(k)).map((row) => row.exam_question_paper_page);
       expect(before.length).toBeGreaterThan(0);
-      const saved = await manager.saveQuestionPaperVersion({ ...key(k), expectedVersionNo: 0, content: ENGLISH_SCIENCE as never });
+      const saved = await manager.saveQuestionPaperVersion({ ...key(k), expectedVersionNo: 0, html: ENGLISH_SCIENCE });
       const [version] = await db.select().from(examQuestionPaperVersionTable).where(eq(examQuestionPaperVersionTable.paperId, saved.paperId));
       const keptBefore = (await pageRows(keep)).length;
 

@@ -14,7 +14,7 @@ import { resolvePaperScope } from './question-paper.scope';
 import { QUESTION_PAPER_SLOT_MESSAGE } from './question-paper.slot';
 import { renderStoredVersionHtml } from './question-paper.version.service';
 
-const ENGLISH_SCIENCE = QUESTION_PAPER_EXAMPLES[1];
+const ENGLISH_SCIENCE = QUESTION_PAPER_EXAMPLES['english-science'];
 const CUSTOM = '<header style="direction:{{questionPaper.direction}}"><h1>CUSTOM HEADER {{exam.name}}</h1></header>{{{questionPaper.bodyHtml}}}<footer style="position:fixed;bottom:0;left:0;right:0">CUSTOM FOOTER</footer>';
 
 /** The `question_paper` document type through the document system's template and history procedures. */
@@ -92,12 +92,12 @@ describe('question paper in the document system', () => {
     it('prints a version with the template selected when it was saved and pins that revision', async () => {
       const manager = world.people.manager.client.school;
       const k = world.key({ subjectSlug: 'math', modeSlug: 'practical' });
-      const v1 = await manager.saveQuestionPaperVersion({ ...k, expectedVersionNo: 0, content: ENGLISH_SCIENCE as never });
+      const v1 = await manager.saveQuestionPaperVersion({ ...k, expectedVersionNo: 0, html: ENGLISH_SCIENCE });
       const classicRevision = (await db.select().from(examQuestionPaperVersionTable).where(eq(examQuestionPaperVersionTable.paperId, v1.paperId)))[0]!.templateRevisionId;
 
       const current = await manager.getActiveDocumentTemplate(scope());
       const custom = await manager.saveDocumentTemplate({ ...scope(), name: 'Custom paper', content: CUSTOM, pageSize: 'full', expectedRevisionId: current!.artifact.id });
-      const v2 = await manager.saveQuestionPaperVersion({ ...k, expectedVersionNo: 1, content: ENGLISH_SCIENCE as never });
+      const v2 = await manager.saveQuestionPaperVersion({ ...k, expectedVersionNo: 1, html: ENGLISH_SCIENCE });
       const versions = await db.select().from(examQuestionPaperVersionTable).where(eq(examQuestionPaperVersionTable.paperId, v2.paperId));
       expect(versions.sort((a, b) => a.versionNo - b.versionNo).map((version) => version.templateRevisionId)).toEqual([classicRevision, custom.artifact.id]);
 
@@ -107,12 +107,12 @@ describe('question paper in the document system', () => {
       expect(old.templateName).not.toBe('Custom paper');
 
       // A draft previews with the template selected now.
-      const draft = await manager.previewQuestionPaperDraft({ ...k, content: ENGLISH_SCIENCE as never });
-      expect(draft).toMatchObject({ errors: [], templateName: 'Custom paper' });
+      const draft = await manager.previewQuestionPaperDraft({ ...k, html: ENGLISH_SCIENCE });
+      expect(draft).toMatchObject({ problems: [], templateName: 'Custom paper' });
       expect(draft.html).toContain('CUSTOM FOOTER');
-      const invalid = await manager.previewQuestionPaperDraft({ ...k, content: { schemaVersion: 1 } });
+      const invalid = await manager.previewQuestionPaperDraft({ ...k, html: '<p></p>' });
       expect(invalid.html).toBe('');
-      expect(invalid.errors.length).toBeGreaterThan(0);
+      expect(invalid.problems.length).toBeGreaterThan(0);
     });
 
     it('keeps the maximum marks a version was saved with when the plan changes later (preview and restored PDF)', async () => {
@@ -122,7 +122,7 @@ describe('question paper in the document system', () => {
       const current = await manager.getActiveDocumentTemplate(ownScope);
       await manager.saveDocumentTemplate({ ...ownScope, name: 'Marks paper', content: '<h1>OUT OF {{questionPaper.maxMarks}}</h1>{{{questionPaper.bodyHtml}}}', pageSize: 'full', expectedRevisionId: current!.artifact.id });
       const k = own.key();
-      const v1 = await manager.saveQuestionPaperVersion({ ...k, expectedVersionNo: 0, content: ENGLISH_SCIENCE as never });
+      const v1 = await manager.saveQuestionPaperVersion({ ...k, expectedVersionNo: 0, html: ENGLISH_SCIENCE });
       expect(v1.planMaxMarks).toBe(20);
       await db
         .update(examPlanTable)
@@ -130,7 +130,7 @@ describe('question paper in the document system', () => {
         .where(and(eq(examPlanTable.sessionId, own.sessionId), eq(examPlanTable.classId, own.classId), eq(examPlanTable.subjectSlug, 'science')));
       expect((await manager.getQuestionPaperPreview({ ...k, versionNo: 1 })).html).toContain('OUT OF 20');
       // A draft is judged against the plan as it is now.
-      expect((await manager.previewQuestionPaperDraft({ ...k, content: ENGLISH_SCIENCE as never })).html).toContain('OUT OF 100');
+      expect((await manager.previewQuestionPaperDraft({ ...k, html: ENGLISH_SCIENCE })).html).toContain('OUT OF 100');
 
       const [row] = await db.select().from(examQuestionPaperVersionTable).where(eq(examQuestionPaperVersionTable.paperId, v1.paperId));
       await db.delete(artifactTable).where(eq(artifactTable.id, row!.pdfArtifactId!));
@@ -140,7 +140,7 @@ describe('question paper in the document system', () => {
       expect(html).toContain('OUT OF 20');
     });
 
-    it('restores a deleted PDF from the content and the pinned template when it is downloaded', async () => {
+    it('restores a deleted PDF from the fragment and the pinned template when it is downloaded', async () => {
       const manager = world.people.manager.client.school;
       const k = world.key({ subjectSlug: 'math', modeSlug: 'practical' });
       const [version] = await db
@@ -212,8 +212,8 @@ describe('question paper in the document system', () => {
         ['science', 'Science', [['theory', 'Theory', 20]]],
       ]);
       const practical = class8.subjects[0]!.modes[0]!.paper!;
-      expect(practical).toMatchObject({ latestVersionNo: 2, totalMarks: 20, planMaxMarks: 4, activeJob: null, lastJobFailure: null });
-      expect(practical.warningCount).toBeGreaterThanOrEqual(1);
+      expect(practical).toMatchObject({ latestVersionNo: 2, planMaxMarks: 4, activeJob: null, lastJobFailure: null });
+      expect(practical.warningCount).toBe(0);
       // Nothing was uploaded or saved for it yet.
       expect(class8.subjects[1]!.modes[0]!.paper).toBeNull();
     });
@@ -231,7 +231,7 @@ describe('question paper in the document system', () => {
         status: 'failed', errorCode: 'model_error', errorMessage: 'The AI service failed. Try again.', completedAt: new Date(Date.now() - 60_000),
       });
       expect((await saved()).lastJobFailure).toMatchObject({ errorCode: 'model_error' });
-      await manager.saveQuestionPaperVersion({ ...k, expectedVersionNo: 0, content: ENGLISH_SCIENCE as never });
+      await manager.saveQuestionPaperVersion({ ...k, expectedVersionNo: 0, html: ENGLISH_SCIENCE });
       expect((await saved()).lastJobFailure).toBeNull();
     });
   });

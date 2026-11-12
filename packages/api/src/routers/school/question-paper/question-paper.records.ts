@@ -118,7 +118,7 @@ export async function assertNoActiveJob(db: DatabaseExecutor, paperId: string, w
 
 type SummaryRow = Pick<
   VersionRow,
-  'versionNo' | 'source' | 'createdAt' | 'createdBy' | 'totalMarks' | 'planMaxMarks' | 'warnings' | 'pdfArtifactId' | 'sourceJobId'
+  'versionNo' | 'source' | 'createdAt' | 'createdBy' | 'planMaxMarks' | 'warnings' | 'pdfArtifactId' | 'sourceJobId'
 >;
 
 /** Names of the users who created versions (none for a deleted account). */
@@ -140,7 +140,6 @@ export async function toVersionSummaries(
     sourceJobId: row.sourceJobId,
     createdAt: row.createdAt,
     createdBy: { id: row.createdBy, name: names.get(row.createdBy) ?? null },
-    totalMarks: row.totalMarks,
     planMaxMarks: row.planMaxMarks,
     warningCount: row.warnings.length,
     hasPdf: row.pdfArtifactId !== null,

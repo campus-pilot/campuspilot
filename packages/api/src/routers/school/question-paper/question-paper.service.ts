@@ -14,7 +14,6 @@ import {
 import { classTable } from '@campuspilot/db/schema/class';
 import { env as assistantEnv } from '@campuspilot/env/assistant';
 import { QUESTION_PAPER_LIMITS } from '@campuspilot/question-paper/limits';
-import type { QuestionPaperWarning } from '@campuspilot/question-paper/marks';
 import { ORPCError } from '@orpc/server';
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import type { z } from 'zod';
@@ -90,7 +89,7 @@ export async function getQuestionPaper(
   if (view.paper && (versionNo !== undefined || view.paper.latestVersionNo > 0)) {
     const row = await getVersion(db, view.paper.id, versionNo ?? view.paper.latestVersionNo);
     const [summary] = await toVersionSummaries(db, [row], view.paper.latestVersionNo);
-    version = { ...summary!, warnings: row.warnings, content: row.content as Record<string, unknown> };
+    version = { ...summary!, warnings: row.warnings, html: row.contentHtml };
   } else if (versionNo !== undefined) {
     throw rpcError.notFound('Question paper version');
   }
@@ -195,7 +194,6 @@ export async function listQuestionPapers(
           .select({
             paperId: examQuestionPaperVersionTable.paperId,
             versionNo: examQuestionPaperVersionTable.versionNo,
-            totalMarks: examQuestionPaperVersionTable.totalMarks,
             planMaxMarks: examQuestionPaperVersionTable.planMaxMarks,
             warnings: examQuestionPaperVersionTable.warnings,
             createdAt: examQuestionPaperVersionTable.createdAt,
@@ -260,9 +258,8 @@ export async function listQuestionPapers(
                         paperId: paper.id,
                         pageCount: pageCountOf.get(paper.id) ?? 0,
                         latestVersionNo: paper.latestVersionNo,
-                        totalMarks: latest?.totalMarks ?? null,
                         planMaxMarks: latest?.planMaxMarks ?? null,
-                        warningCount: (latest?.warnings as QuestionPaperWarning[] | undefined)?.length ?? 0,
+                        warningCount: latest?.warnings.length ?? 0,
                         activeJob: active ? { id: active.id, status: active.status as 'queued' | 'running' } : null,
                         // A failure is news only until a version is saved after it (the teacher fixed the paper in chat).
                         lastJobFailure:
@@ -311,8 +308,8 @@ async function precheckFigureUpload(db: Database, key: PaperKey) {
     .select({ count: sql<number>`count(*)::int` })
     .from(examQuestionPaperFigureTable)
     .where(eq(examQuestionPaperFigureTable.paperId, paper.id));
-  if (figures!.count >= QUESTION_PAPER_LIMITS.figuresPerPaper) {
-    throw rpcError.badRequest(`A paper can have at most ${QUESTION_PAPER_LIMITS.figuresPerPaper} figure images.`);
+  if (figures!.count >= QUESTION_PAPER_LIMITS.figures) {
+    throw rpcError.badRequest(`A paper can have at most ${QUESTION_PAPER_LIMITS.figures} figure images.`);
   }
 }
 
@@ -532,7 +529,7 @@ export async function deleteQuestionPapersOfPlan(
 
 /**
  * Stores an uploaded figure image on a paper (design B6): normalised, owned
- * by the paper, at most {@link QUESTION_PAPER_LIMITS.figuresPerPaper} per
+ * by the paper, at most {@link QUESTION_PAPER_LIMITS.figures} per
  * paper. Used when a chat attachment becomes a figure of a saved version.
  */
 export async function addQuestionPaperFigure(
@@ -554,8 +551,8 @@ export async function addQuestionPaperFigure(
         .select({ count: sql<number>`count(*)::int` })
         .from(examQuestionPaperFigureTable)
         .where(eq(examQuestionPaperFigureTable.paperId, paper.id));
-      if (figures!.count >= QUESTION_PAPER_LIMITS.figuresPerPaper) {
-        throw rpcError.badRequest(`A paper can have at most ${QUESTION_PAPER_LIMITS.figuresPerPaper} figure images.`);
+      if (figures!.count >= QUESTION_PAPER_LIMITS.figures) {
+        throw rpcError.badRequest(`A paper can have at most ${QUESTION_PAPER_LIMITS.figures} figure images.`);
       }
       const [row] = await tx
         .insert(examQuestionPaperFigureTable)

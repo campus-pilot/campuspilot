@@ -9,17 +9,12 @@ import {
   examQuestionPaperVersionTable,
 } from '@campuspilot/db/schema/exam-question-paper';
 import { encodedImageBytes } from '@campuspilot/assistant-contract/attachments';
-import { QUESTION_PAPER_LIMITS } from '@campuspilot/question-paper/limits';
-import { computePaperMarks, paperWarnings, type QuestionPaperWarning } from '@campuspilot/question-paper/marks';
 import {
-  canonicalQuestionPaperJson,
-  normalizeQuestionPaper,
+  canonicalQuestionPaperHtml,
   questionPaperContentSha256,
   questionPaperDraftId,
-  type QuestionPaperIssue,
-} from '@campuspilot/question-paper/normalize';
-import type { QuestionPaper } from '@campuspilot/question-paper/schema';
-import { formatPath, walkPaper } from '@campuspilot/question-paper/walk';
+  type QuestionPaperNotice,
+} from '@campuspilot/question-paper/hash';
 import { and, desc, eq, isNull } from 'drizzle-orm';
 
 import { rpcError } from '../../../errors';
@@ -28,7 +23,7 @@ import { convertDocumentPdf } from '../document/document.render';
 import { documentDownloadUrl, persistDocumentObject } from '../document/document.storage';
 import { attachmentFigureIds, attachmentFigureProblems, convertAttachmentFigures, isAttachmentFigureId } from './question-paper.attachments';
 import { buildQuestionPaperContext } from './question-paper.context';
-import { createMathRenderer, validatePaperMath } from './question-paper.math';
+import { createMathRenderer, renderMathSpans } from './question-paper.math';
 import {
   findPaper,
   lockOrCreatePaper,
@@ -36,6 +31,7 @@ import {
   type PaperRow,
   type VersionRow,
 } from './question-paper.records';
+import { figureIdsToPlaceholders } from './question-paper.body';
 import {
   QUESTION_PAPER_BODY_MAX_BYTES,
   QUESTION_PAPER_FIGURES_MAX_BYTES,
@@ -44,6 +40,7 @@ import {
   renderQuestionPaperDocument,
   selectedQuestionPaperTemplate,
 } from './question-paper.render';
+import { sanitizeQuestionPaperBody, type SanitizedQuestionPaperBody } from './question-paper.sanitize';
 import { assertPaperWritable, assertPaperWritableLocked, type PaperScope } from './question-paper.scope';
 
 /** The most validation errors one refusal message lists. */
@@ -52,128 +49,170 @@ const MAX_LISTED_ERRORS = 10;
 const MAX_JOB_SAVE_ATTEMPTS = 3;
 
 /**
- * The checked form of a document an agent or the AI job wrote. `ok: false`
- * lists every finding with a path so a model can fix it in one round.
+ * The checked form of a fragment an agent or the AI job wrote. `ok: false`
+ * lists every problem so a model can fix them in one round; `stripped` (what
+ * the sanitiser removed or changed) is reported either way.
  */
 export type DraftCheck =
   | {
       ok: true;
-      content: QuestionPaper;
-      warnings: QuestionPaperWarning[];
-      total: number;
+      /** The cleaned fragment: what is stored, and what rendering cleans again. */
+      html: string;
+      /** `stripped` as stored with the version. */
+      notices: QuestionPaperNotice[];
+      stripped: string[];
+      /** The id of the fragment as it was written (before cleaning). */
       draftId: string;
       placeholderFigures: number;
       characters: number;
     }
-  | { ok: false; errors: QuestionPaperIssue[] };
+  | { ok: false; problems: string[]; stripped: string[] };
+
+/** How the check treats a figure id that cannot be used. */
+export type UnresolvedFigures =
+  /** A problem the writer must fix (an agent in chat, which can attach or drop the figure). */
+  | 'problem'
+  /** The figure becomes a placeholder and the user is told (the AI job, which has no way to attach images). */
+  | 'placeholder';
 
 /**
- * A figure `imageId` must name a stored figure of this paper, or a chat
- * attachment of `chatUserId` (`asat_` id; see `question-paper.attachments.ts`):
- * an attachment is checked here and copied into a figure only when a version
- * is saved.
+ * Why each figure id cannot be used, by id; a missing key means it can. An id
+ * must name a stored figure of this paper, or a chat attachment of
+ * `chatUserId` (`asat_` id; see `question-paper.attachments.ts`): an
+ * attachment is checked here and copied into a figure only when a version is
+ * saved.
  */
-async function figureIssues(
+async function figureProblems(
   db: DatabaseExecutor,
   input: { schoolId: string; paper: PaperRow | undefined; chatUserId: string | undefined },
-  content: QuestionPaper,
-): Promise<QuestionPaperIssue[]> {
-  const { paper } = input;
-  const refs: Array<{ path: string; imageId: string }> = [];
-  walkPaper(content, {
-    block(block, path) {
-      if (block.type === 'figure') refs.push({ path: `${formatPath(path)}.imageId`, imageId: block.imageId });
-    },
+  ids: readonly string[],
+): Promise<Map<string, string>> {
+  const problems = new Map<string, string>();
+  if (ids.length === 0) return problems;
+  const stored = new Set(
+    input.paper
+      ? (
+          await db
+            .select({ id: examQuestionPaperFigureTable.id })
+            .from(examQuestionPaperFigureTable)
+            .where(and(eq(examQuestionPaperFigureTable.paperId, input.paper.id), eq(examQuestionPaperFigureTable.schoolId, input.paper.schoolId)))
+        ).map((row) => row.id)
+      : [],
+  );
+  const attachmentProblems = await attachmentFigureProblems(db, {
+    schoolId: input.schoolId,
+    chatUserId: input.chatUserId,
+    ids: ids.filter(isAttachmentFigureId),
   });
-  if (refs.length === 0) return [];
-  const storedRows = paper
+  for (const id of ids) {
+    if (isAttachmentFigureId(id)) {
+      const problem = attachmentProblems.get(id);
+      if (problem) problems.set(id, problem);
+    } else if (!stored.has(id)) {
+      problems.set(id, 'This figure image does not belong to this paper. Use the asat_ id of an attachment of this chat, a qpf_ id from getQuestionPaper, or <figure data-placeholder="..."></figure>.');
+    }
+  }
+  return problems;
+}
+
+/**
+ * The printer embeds every figure as a base64 data URI under one cap
+ * (`loadFigureAssets`): total it here, so a draft that validates can also be
+ * printed. A chat image becomes a figure of at most about FIGURE_MAX_BYTES.
+ */
+async function figureSizeProblem(db: DatabaseExecutor, paper: PaperRow | undefined, ids: readonly string[]): Promise<string | null> {
+  if (ids.length === 0) return null;
+  const rows = paper
     ? await db
         .select({ id: examQuestionPaperFigureTable.id, contentType: examQuestionPaperFigureTable.contentType, byteSize: examQuestionPaperFigureTable.byteSize })
         .from(examQuestionPaperFigureTable)
         .where(and(eq(examQuestionPaperFigureTable.paperId, paper.id), eq(examQuestionPaperFigureTable.schoolId, paper.schoolId)))
     : [];
-  const stored = new Set(storedRows.map((row) => row.id));
-  const problems = await attachmentFigureProblems(db, {
-    schoolId: input.schoolId,
-    chatUserId: input.chatUserId,
-    ids: attachmentFigureIds(content),
-  });
-  const issues = refs.flatMap(({ path, imageId }): QuestionPaperIssue[] => {
-    if (isAttachmentFigureId(imageId)) {
-      const problem = problems.get(imageId);
-      return problem ? [{ path, message: problem }] : [];
-    }
-    return stored.has(imageId) ? [] : [{ path, message: 'This figure image does not belong to this paper.' }];
-  });
-  if (issues.length > 0) return issues;
-  // The printer embeds every figure as a base64 data URI under one cap (`loadFigureAssets`): total it here,
-  // so a draft that validates can also be printed. A chat image becomes a figure of at most about FIGURE_MAX_BYTES.
-  const sizeOf = new Map(storedRows.map((row) => [row.id, `data:${row.contentType};base64,`.length + encodedImageBytes(row.byteSize)]));
-  const embedded = [...new Set(refs.map((ref) => ref.imageId))].reduce(
-    (sum, imageId) => sum + (sizeOf.get(imageId) ?? encodedImageBytes(FIGURE_MAX_BYTES)),
-    0,
-  );
-  return embedded > QUESTION_PAPER_FIGURES_MAX_BYTES
-    ? [{ path: '', message: 'The figure images of this paper are too large to print together. Use fewer or smaller images.' }]
-    : [];
+  const sizeOf = new Map(rows.map((row) => [row.id, `data:${row.contentType};base64,`.length + encodedImageBytes(row.byteSize)]));
+  const embedded = ids.reduce((sum, id) => sum + (sizeOf.get(id) ?? encodedImageBytes(FIGURE_MAX_BYTES)), 0);
+  return embedded > QUESTION_PAPER_FIGURES_MAX_BYTES ? 'The figure images of this paper are too large to print together. Use fewer or smaller images.' : null;
 }
 
+/** Whether a cleaned fragment prints anything: text, a drawing, a formula or a figure. */
+function hasContent({ html, stats }: SanitizedQuestionPaperBody): boolean {
+  if (stats.mathNodes > 0 || stats.figureIds.length > 0 || stats.placeholders > 0 || stats.svgs > 0) return true;
+  return html.replace(/<style>[\s\S]*?<\/style>/g, '').replace(/<[^>]*>/g, '').trim() !== '';
+}
+
+const noticesOf = (stripped: readonly string[]): QuestionPaperNotice[] => stripped.map((message) => ({ code: 'sanitised', message }));
+
 /**
- * Validates untrusted JSON as a question paper of this plan, persisting
- * nothing: size, the document schema and its cross checks, every formula
- * with KaTeX, every figure id, then the marks warnings against the plan's
- * maximum. The same function guards `validateQuestionPaperDraft`, the save
- * and the AI job, so a draft that validated saves and a save cannot be
- * weaker than a validation.
+ * Validates untrusted HTML as a question paper of this plan, persisting
+ * nothing: the sanitiser (and the caps it enforces), that the paper prints
+ * something, every formula with KaTeX, every figure id and the printed size.
+ * The same function guards `validateQuestionPaperDraft`, the save and the AI
+ * job, so a draft that validated saves and a save cannot be weaker than a
+ * validation.
+ *
+ * What the sanitiser removes is NOT a problem: it is reported as `stripped`
+ * and the paper saves without it (an AI job's output must not fail because it
+ * wrote a style we do not accept). Only caps, an empty paper, a formula KaTeX
+ * rejects and unusable figures block.
  */
 export async function checkQuestionPaperDraft(
   db: DatabaseExecutor,
   scope: PaperScope,
-  raw: unknown,
-  /** The chat user whose attachments the document may use as figures; omitted outside the in-app assistant. */
-  options: { chatUserId?: string } = {},
+  raw: string,
+  options: {
+    /** The chat user whose attachments the fragment may use as figures; omitted outside the in-app assistant. */
+    chatUserId?: string;
+    unresolvedFigures?: UnresolvedFigures;
+  } = {},
 ): Promise<DraftCheck> {
-  const characters = JSON.stringify(raw)?.length ?? 0;
-  if (characters > QUESTION_PAPER_LIMITS.jsonChars) {
-    return { ok: false, errors: [{ path: '', message: `The paper is ${characters.toLocaleString('en-IN')} characters of JSON; the limit is ${QUESTION_PAPER_LIMITS.jsonChars.toLocaleString('en-IN')}.` }] };
+  const canonical = canonicalQuestionPaperHtml(raw);
+  let sanitized = sanitizeQuestionPaperBody(canonical);
+  const stripped = [...sanitized.stripped];
+  if (sanitized.problems.length > 0) return { ok: false, problems: sanitized.problems, stripped };
+
+  const problems: string[] = [];
+  if (!hasContent(sanitized)) problems.push('The paper is empty. Write the questions as HTML.');
+
+  const paper = await findPaper(db, scope.key);
+  const unusable = await figureProblems(db, { schoolId: scope.key.schoolId, paper, chatUserId: options.chatUserId }, sanitized.stats.figureIds);
+  if (unusable.size > 0) {
+    if (options.unresolvedFigures === 'placeholder') {
+      sanitized = sanitizeQuestionPaperBody(figureIdsToPlaceholders(sanitized.html, new Set(unusable.keys())));
+      stripped.push(`${unusable.size} figure ${unusable.size === 1 ? 'image' : 'images'} could not be attached and became ${unusable.size === 1 ? 'a placeholder' : 'placeholders'}`);
+    } else {
+      for (const [id, problem] of unusable) problems.push(`Figure ${id}: ${problem}`);
+    }
+  } else {
+    const size = await figureSizeProblem(db, paper, sanitized.stats.figureIds);
+    if (size) problems.push(size);
   }
-  const normalized = normalizeQuestionPaper(raw);
-  if (!normalized.ok) return { ok: false, errors: normalized.errors };
-  const content = normalized.value;
+
   const math = createMathRenderer();
-  const mathErrors = validatePaperMath(content, math);
-  // KaTeX HTML is large (tens of KB for one nested formula): count it here so
-  // a draft that validates can also be printed, the same limit the body
-  // render enforces on the whole body.
-  if (mathErrors.length === 0 && math.renderedBytes() > QUESTION_PAPER_BODY_MAX_BYTES) {
-    mathErrors.push({ path: '', message: 'The formulas of this paper are too large to print. Shorten or remove some formulas.' });
+  const typeset = renderMathSpans(sanitized.html, math);
+  for (const failure of typeset.failures) {
+    problems.push(`Formula ${failure.index} (${failure.tex.slice(0, 60)}): ${failure.message}`);
   }
-  const errors = [
-    ...mathErrors,
-    ...(await figureIssues(db, { schoolId: scope.key.schoolId, paper: await findPaper(db, scope.key), chatUserId: options.chatUserId }, content)),
-  ];
-  if (errors.length > 0) return { ok: false, errors };
-  let placeholderFigures = 0;
-  walkPaper(content, {
-    block(block) {
-      if (block.type === 'figure_placeholder') placeholderFigures += 1;
-    },
-  });
+  // KaTeX HTML is large (tens of KB for one nested formula): count it here so a draft that validates can also be
+  // printed, the same limit the body render enforces on the whole body.
+  if (typeset.failures.length === 0 && math.renderedBytes() > QUESTION_PAPER_BODY_MAX_BYTES) {
+    problems.push('The formulas of this paper are too large to print. Shorten or remove some formulas.');
+  }
+
+  if (problems.length > 0) return { ok: false, problems, stripped };
   return {
     ok: true,
-    content,
-    warnings: paperWarnings(content, { planMaxMarks: scope.planMaxMarks }),
-    total: computePaperMarks(content).total,
-    draftId: questionPaperDraftId(content),
-    placeholderFigures,
-    characters: canonicalQuestionPaperJson(content).length,
+    html: sanitized.html,
+    notices: noticesOf(stripped),
+    stripped,
+    draftId: questionPaperDraftId(canonical),
+    placeholderFigures: sanitized.stats.placeholders,
+    characters: sanitized.html.length,
   };
 }
 
-/** The refusal for a document that failed {@link checkQuestionPaperDraft}: BAD_REQUEST listing the first findings. */
-export function invalidPaperError(errors: QuestionPaperIssue[]) {
-  const listed = errors.slice(0, MAX_LISTED_ERRORS).map(({ path, message }) => (path ? `${path}: ${message}` : message));
-  const more = errors.length > MAX_LISTED_ERRORS ? ` (and ${errors.length - MAX_LISTED_ERRORS} more)` : '';
+/** The refusal for a fragment that failed {@link checkQuestionPaperDraft}: BAD_REQUEST listing the first problems. */
+export function invalidPaperError(problems: readonly string[]) {
+  const listed = problems.slice(0, MAX_LISTED_ERRORS);
+  const more = problems.length > MAX_LISTED_ERRORS ? ` (and ${problems.length - MAX_LISTED_ERRORS} more)` : '';
   return rpcError.badRequest(`The question paper is not valid${more}. ${listed.join('; ')}`);
 }
 
@@ -182,17 +221,17 @@ const DRAFT_TOOL_NAME = /(^|[._])validateQuestionPaperDraft$/;
 const DRAFT_SEARCH_DEPTH = 60;
 
 /**
- * Finds the paper JSON a chat agent validated earlier in this conversation
+ * Finds the HTML a chat agent validated earlier in this conversation
  * (design E7): the newest `validateQuestionPaperDraft` tool call whose input
- * hashes to `draftId`. A draft is not a database row; the chat transcript is
+ * `html` hashes to `draftId`. A draft is not a database row; the chat transcript is
  * its only home, which is why this reads the assistant's items, scoped to the
  * conversation, its school and its user. External clients have no
- * conversation and pass `content` instead.
+ * conversation and pass `html` instead.
  */
 export async function findChatDraftContent(
   db: DatabaseExecutor,
   input: { conversationId: string; schoolId: string; userId: string; draftId: string },
-): Promise<unknown> {
+): Promise<string> {
   const [conversation] = await db
     .select({ id: assistantConversationTable.id })
     .from(assistantConversationTable)
@@ -205,7 +244,7 @@ export async function findChatDraftContent(
       ),
     )
     .limit(1);
-  const notFound = rpcError.badRequest('No draft with that draftId was validated in this conversation. Send the full content instead.');
+  const notFound = rpcError.badRequest('No draft with that draftId was validated in this conversation. Send the full html instead.');
   if (!conversation) throw notFound;
   const items = await db
     .select({ body: assistantItemTable.body })
@@ -216,9 +255,8 @@ export async function findChatDraftContent(
   for (const { body } of items) {
     const call = body as { toolName?: unknown; input?: unknown };
     if (typeof call.toolName !== 'string' || !DRAFT_TOOL_NAME.test(call.toolName)) continue;
-    const content = (call.input as { content?: unknown } | null)?.content;
-    const normalized = normalizeQuestionPaper(content);
-    if (normalized.ok && questionPaperDraftId(normalized.value) === input.draftId) return content;
+    const html = (call.input as { html?: unknown } | null)?.html;
+    if (typeof html === 'string' && questionPaperDraftId(html) === input.draftId) return html;
   }
   throw notFound;
 }
@@ -230,9 +268,8 @@ export type SaveSource =
 export type SavedVersion = {
   versionNo: number;
   paperId: string;
-  totalMarks: number;
   planMaxMarks: number;
-  warnings: QuestionPaperWarning[];
+  warnings: QuestionPaperNotice[];
   hasPdf: true;
   /** True when this job had already saved its version and nothing was written. */
   replayed: boolean;
@@ -259,7 +296,6 @@ async function savedByJob(db: DatabaseExecutor, jobId: string): Promise<VersionR
 const savedResult = (version: VersionRow, planMaxMarks: number): SavedVersion => ({
   versionNo: version.versionNo,
   paperId: version.paperId,
-  totalMarks: version.totalMarks ?? 0,
   planMaxMarks: version.planMaxMarks ?? planMaxMarks,
   warnings: version.warnings,
   hasPdf: true,
@@ -291,7 +327,8 @@ export async function saveQuestionPaperVersion(
     scope: PaperScope;
     userId: string;
     expectedVersionNo: number | null;
-    content: unknown;
+    /** The fragment as written; it is cleaned and checked here. */
+    html: string;
     source: SaveSource;
     signal?: AbortSignal;
   },
@@ -302,11 +339,13 @@ export async function saveQuestionPaperVersion(
     if (done) return savedResult(done, scope.planMaxMarks);
   }
   assertPaperWritable(scope);
-  // Chat attachments may be figures only when an agent saves from a chat.
+  // Chat attachments may be figures only when an agent saves from a chat. The AI job has no way to attach an
+  // image, so a figure id it cannot resolve becomes a placeholder; an agent is told and fixes it.
   const chatUserId = source.kind === 'agent' && source.conversationId ? input.userId : undefined;
-  let checked = await checkQuestionPaperDraft(db, scope, input.content, { chatUserId });
-  if (!checked.ok) throw invalidPaperError(checked.errors);
-  if (attachmentFigureIds(checked.content).length > 0) {
+  const unresolvedFigures: UnresolvedFigures = source.kind === 'ai_job' ? 'placeholder' : 'problem';
+  let checked = await checkQuestionPaperDraft(db, scope, input.html, { chatUserId, unresolvedFigures });
+  if (!checked.ok) throw invalidPaperError(checked.problems);
+  if (attachmentFigureIds(checked.html).length > 0) {
     // Refuse a stale expectedVersionNo before anything is copied: a refused save must not leave figure rows behind.
     if (input.expectedVersionNo !== null) {
       const latest = (await findPaper(db, scope.key))?.latestVersionNo ?? 0;
@@ -314,10 +353,12 @@ export async function saveQuestionPaperVersion(
         throw rpcError.conflict(`The paper changed: its latest version is ${latest}, not ${input.expectedVersionNo}. Read it again with getQuestionPaper.`);
       }
     }
-    // Copy the attachments into the paper and store the version with its own
-    // figure ids; the document is checked again as it will be stored.
-    checked = await checkQuestionPaperDraft(db, scope, await convertAttachmentFigures(db, { scope, userId: input.userId, content: checked.content }));
-    if (!checked.ok) throw invalidPaperError(checked.errors);
+    // Copy the attachments into the paper and store the version with its own figure ids; the fragment is
+    // checked again as it will be stored. The notices of the first check are the ones the user is told about.
+    const { notices, stripped } = checked;
+    const converted = await checkQuestionPaperDraft(db, scope, await convertAttachmentFigures(db, { scope, userId: input.userId, html: checked.html }));
+    if (!converted.ok) throw invalidPaperError(converted.problems);
+    checked = { ...converted, notices, stripped };
   }
   const template = await selectedQuestionPaperTemplate(db, scope.key.schoolId);
   if (!template) throw templateMissingError();
@@ -363,9 +404,9 @@ async function renderAndStore(
   const body = await renderQuestionPaperBody(db, {
     schoolId: scope.key.schoolId,
     paperId: paper?.id ?? null,
-    content: checked.content,
+    html: checked.html,
   });
-  const context = await buildQuestionPaperContext(db, scope, { content: checked.content, versionNo, totalMarks: checked.total });
+  const context = await buildQuestionPaperContext(db, scope, { versionNo });
   const html = renderQuestionPaperDocument({ template: input.template, context, body });
   const pdf = await convertDocumentPdf(html, 'question_paper', input.signal);
 
@@ -417,16 +458,14 @@ async function renderAndStore(
         paperId: locked.id,
         schoolId: scope.key.schoolId,
         versionNo,
-        content: checked.content,
-        contentSha256: questionPaperContentSha256(checked.content),
-        schemaVersion: checked.content.schemaVersion,
+        contentHtml: checked.html,
+        contentSha256: questionPaperContentSha256(checked.html),
         source: source.kind,
         sourceJobId: source.kind === 'ai_job' ? source.jobId : null,
         sourcePageIds: source.kind === 'ai_job' ? source.pageIds : null,
         sourceConversationId: source.kind === 'agent' ? source.conversationId : null,
-        totalMarks: checked.total,
         planMaxMarks: scope.planMaxMarks,
-        warnings: checked.warnings,
+        warnings: checked.notices,
         templateRevisionId: input.template.revisionId,
         pdfArtifactId: artifact.id,
         createdBy: input.userId,
@@ -438,9 +477,8 @@ async function renderAndStore(
       return {
         versionNo,
         paperId: locked.id,
-        totalMarks: checked.total,
         planMaxMarks: scope.planMaxMarks,
-        warnings: checked.warnings,
+        warnings: checked.notices,
         hasPdf: true as const,
         replayed: false,
       };
@@ -471,13 +509,13 @@ export async function renderStoredVersionHtml(
   generatedAt: Date = new Date(),
 ): Promise<{ html: string; templateName: string }> {
   const template = await readPinnedQuestionPaperTemplate(db, scope.key.schoolId, version.templateRevisionId);
-  const body = await renderQuestionPaperBody(db, { schoolId: scope.key.schoolId, paperId: version.paperId, content: version.content });
+  const body = await renderQuestionPaperBody(db, { schoolId: scope.key.schoolId, paperId: version.paperId, html: version.contentHtml });
   // The maximum marks are the saved fact (`plan_max_marks`), not the plan as it is today: an edited plan must not change
   // an old version's preview or a restored PDF. Class, subject, mode and exam names still come from the live scope.
   const context = await buildQuestionPaperContext(
     db,
     { ...scope, planMaxMarks: version.planMaxMarks ?? scope.planMaxMarks },
-    { content: version.content, versionNo: version.versionNo, totalMarks: version.totalMarks },
+    { versionNo: version.versionNo },
     generatedAt,
   );
   return { html: renderQuestionPaperDocument({ template, context, body }), templateName: template.name };
@@ -489,7 +527,7 @@ class PdfAlreadyStoredError extends Error {}
 /**
  * A short-lived download URL for a version's PDF. The PDF stored when the
  * version was saved is served; if its artifact was deleted (the pointer is
- * then null) the version is printed again from its content and its pinned
+ * then null) the version is printed again from its fragment and its pinned
  * template, and the new artifact becomes its PDF. Two downloads racing to
  * restore the PDF keep the first and discard the second.
  */

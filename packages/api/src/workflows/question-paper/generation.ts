@@ -3,8 +3,7 @@ import { ORPCError } from '@orpc/server';
 import { db as defaultDb, type Database } from '@campuspilot/db';
 import { examQuestionPaperJobTable, examQuestionPaperPageTable, examQuestionPaperTable, examQuestionPaperVersionTable } from '@campuspilot/db/schema/exam-question-paper';
 import { env } from '@campuspilot/env/assistant';
-import type { QuestionPaperIssue } from '@campuspilot/question-paper/normalize';
-import { questionPaperProviderJsonSchema } from '@campuspilot/question-paper/provider-schema';
+import { extractQuestionPaperFragment } from '@campuspilot/question-paper/fragment';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 
 import { resolveAssistantAccess } from '../../assistant/access';
@@ -18,7 +17,7 @@ import { QUESTION_PAPER_JOB_FAILURES, type QuestionPaperJobErrorCode } from './c
 import { nextQuestionPaperRequestKey, recordQuestionPaperRequest } from './cost';
 import type { QuestionPaperJobInput } from './input';
 import { log } from './log';
-import { getQuestionPaperModel, type QuestionPaperModel, type StructuredPart, type StructuredResult } from './model';
+import { getQuestionPaperModel, type QuestionPaperModel, type TextPart, type TextResult } from './model';
 import { describeError } from './error-detail';
 import { buildGenerationParts, buildRepairParts, QUESTION_PAPER_JOB_SYSTEM_PROMPT } from './prompt';
 
@@ -26,7 +25,7 @@ import { buildGenerationParts, buildRepairParts, QUESTION_PAPER_JOB_SYSTEM_PROMP
  * The body of the generation job, shared by the Restate workflow
  * (`workflow.ts`) and the integration tests so both run exactly the same
  * sequence. Every unit of work goes through `step`, which Restate journals;
- * only small values (ids, counts, the model's JSON text) are returned from
+ * only small values (ids, counts, the model's text) are returned from
  * steps. Images are read inside the model step and never journaled.
  *
  * Sequence (design F6): begin, access, inputs, model call, cost, validate,
@@ -46,8 +45,8 @@ const DEFAULT_RETRY_DELAYS_MS = [5_000, 20_000] as const;
  * chat context); over it the job fails before any cost (design F5).
  */
 export const QUESTION_PAPER_MAX_REQUEST_IMAGE_BYTES = MODEL_REQUEST_IMAGE_BUDGET_BYTES;
-/** Most findings kept from a validation (they are journaled and sent to the repair call). */
-const MAX_ISSUES = 50;
+/** Most problems kept from a validation (they are journaled and sent to the repair call). */
+const MAX_PROBLEMS = 50;
 
 /** A job outcome that is a failure the user should read. */
 export class QuestionPaperJobFailure extends Error {
@@ -107,9 +106,10 @@ type PlannedPage = { id: string; position: number; name: string; key: string; mi
 type Plan = { scope: PaperScope; pages: PlannedPage[] };
 
 /** A model answer as journaled. */
-type ModelAnswer = Pick<StructuredResult, 'text' | 'usage' | 'answeredModel' | 'refusal' | 'truncated'>;
+type ModelAnswer = Pick<TextResult, 'text' | 'usage' | 'answeredModel' | 'refusal' | 'truncated'>;
 
-type Validation = { ok: true } | { ok: false; issues: QuestionPaperIssue[] };
+/** The outcome of checking an answer: the fragment to save, or the problems to repair. */
+type Validation = { ok: true; html: string } | { ok: false; html: string; problems: string[] };
 
 /** How a refusal by the assistant gate maps to a job failure. */
 function accessFailure(code: string): QuestionPaperJobErrorCode {
@@ -189,23 +189,21 @@ export async function runQuestionPaperGeneration(
     if (first.refusal) throw new QuestionPaperJobFailure('model_rejected', undefined, 'The model declined to answer.');
     if (first.truncated) throw new QuestionPaperJobFailure('output_too_long', undefined, 'The answer stopped on the output limit.');
 
-    let text = first.text;
-    let validation = await run('validate:1', () => validateAnswer(deps, plan, text));
+    let validation = await run('validate:1', () => validateAnswer(deps, plan, first.text));
     if (!validation.ok) {
       // One repair, text only; a second failure ends the job (no loop).
       await run('access:2', () => assertAccess(deps, begun));
-      const repair = await runModelRequest({ deps, run, model, input, begun, plan, n: 2, parts: buildRepairParts(text, validation.issues) });
+      const repair = await runModelRequest({ deps, run, model, input, begun, plan, n: 2, parts: buildRepairParts(validation.html, validation.problems) });
       if (repair.refusal) throw new QuestionPaperJobFailure('model_rejected', undefined, 'The model declined the repair request.');
       if (repair.truncated) throw new QuestionPaperJobFailure('output_too_long', undefined, 'The repaired answer stopped on the output limit.');
-      text = repair.text;
-      validation = await run('validate:2', () => validateAnswer(deps, plan, text));
+      validation = await run('validate:2', () => validateAnswer(deps, plan, repair.text));
       if (!validation.ok) {
-        throw new QuestionPaperJobFailure('invalid_output', undefined, validation.issues.slice(0, 10).map((issue) => `${issue.path || '(document)'}: ${issue.message}`).join('; '));
+        throw new QuestionPaperJobFailure('invalid_output', undefined, validation.problems.slice(0, 10).join('; '));
       }
     }
 
     phase = 'save';
-    const saved = await run('save', () => savePaper(deps, input, begun, plan, text), { maxRetryAttempts: 4 });
+    const saved = await run('save', () => savePaper(deps, input, begun, plan, validation.html), { maxRetryAttempts: 4 });
     await run('succeed', () => markSucceeded(deps, input));
     return { status: 'succeeded', versionNo: saved.versionNo };
   } catch (error) {
@@ -352,7 +350,7 @@ async function runModelRequest(options: {
   begun: BegunJob;
   plan: Plan;
   n: number;
-  parts: StructuredPart[] | null;
+  parts: TextPart[] | null;
 }): Promise<ModelAnswer> {
   const { run, n } = options;
   return run(`model:${n}`, () => callModel(options), { maxRetryAttempts: 3 });
@@ -387,12 +385,11 @@ async function callModel({
     );
 
   for (let attempt = 1; ; attempt += 1) {
-    let result: StructuredResult;
+    let result: TextResult;
     try {
       result = await model.generate({
         system: QUESTION_PAPER_JOB_SYSTEM_PROMPT,
         parts: requestParts,
-        jsonSchema: questionPaperProviderJsonSchema(),
         maxOutputTokens: deps.maxOutputTokens,
       });
     } catch (error) {
@@ -449,27 +446,29 @@ async function callModel({
   }
 }
 
-/** Parses and checks the model's answer with the same function the save uses. */
+/**
+ * Takes the fragment out of the model's text (a code fence and chatter around
+ * it are dropped) and checks it with the same function the save uses. A figure
+ * id the model invented becomes a placeholder: the job can attach no image. What
+ * the sanitiser removes is not a problem, so the answer that passes is the
+ * extracted fragment, which the save cleans again.
+ */
 async function validateAnswer(deps: GenerationDeps, plan: Plan, text: string): Promise<Validation> {
-  let raw: unknown;
-  try {
-    raw = JSON.parse(text);
-  } catch {
-    return { ok: false, issues: [{ path: '', message: 'The answer is not valid JSON.' }] };
-  }
-  const checked = await checkQuestionPaperDraft(deps.db, plan.scope, raw);
-  return checked.ok ? { ok: true } : { ok: false, issues: checked.errors.slice(0, MAX_ISSUES) };
+  const html = extractQuestionPaperFragment(text);
+  if (html === '') return { ok: false, html, problems: ['The answer is empty. Return the HTML fragment of the paper.'] };
+  const checked = await checkQuestionPaperDraft(deps.db, plan.scope, html, { unresolvedFigures: 'placeholder' });
+  return checked.ok ? { ok: true, html } : { ok: false, html, problems: checked.problems.slice(0, MAX_PROBLEMS) };
 }
 
 /** Saves the version through the one function chat uses; idempotent per job id. */
-async function savePaper(deps: GenerationDeps, input: QuestionPaperJobInput, begun: BegunJob, plan: Plan, text: string) {
+async function savePaper(deps: GenerationDeps, input: QuestionPaperJobInput, begun: BegunJob, plan: Plan, html: string) {
   if (!(await jobIsLive(deps.db, input))) throw new JobStopped();
   try {
     const saved = await deps.save(deps.db, {
       scope: plan.scope,
       userId: begun.requestedBy,
       expectedVersionNo: null,
-      content: JSON.parse(text),
+      html,
       source: { kind: 'ai_job', jobId: input.jobId, pageIds: begun.pageIds },
     });
     return { versionNo: saved.versionNo };
