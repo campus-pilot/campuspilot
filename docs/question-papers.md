@@ -245,8 +245,11 @@ pass reports nothing).
 
 Draft and version cards, the version list and the Question paper tab show no marks computed from the paper (the tab heading still names the exam plan's maximum marks, a plan fact). A draft card
 says whether the draft is ready or can not be saved yet, lists the problems in plain sentences
-(never a path into the HTML), keeps the sanitiser's `stripped` list behind a collapsed "N things
-were removed", says how many figures are still placeholders, and offers Preview and Save as new
+(`summarizeProblems` maps the API's model-facing lines, such as a formula's LaTeX and KaTeX message,
+to sentences like "Formula 2 could not be typeset"; an unknown line becomes a generic sentence;
+the raw lines are behind a collapsed "Details"), keeps the sanitiser's `stripped` list behind a
+collapsed "N notices about what was removed" (one notice per kind of change, the same count the
+version list and badge use), says how many figures are still placeholders, and offers Preview and Save as new
 version. A saved version shows its notice count; its preview lists the notices (collapsed) and
 a placeholder note with the Continue in chat link. `previewOutputSchema.placeholderFigures` is
 the count (counted from the sanitised fragment; it is not a notice).
@@ -410,7 +413,13 @@ only): page photos, generation, polling, previews and downloads.
 - **Drafts** are not database rows. A draft is the input of a `validateQuestionPaperDraft`
   call in the conversation; the chat shows it as a card (ready or not, the problems in plain
   sentences, what the sanitiser removed behind a collapsed list, Preview, Save as new
-  version). Saving by `draftId` is accepted only from the in-app assistant, which
+  version). A draft that a *later ready draft of the same paper* replaced shrinks to a quiet
+  collapsed "Replaced by Draft N" line (opening it shows the draft as it was); only drafts whose
+  stored check can be read count. "Save as new version" sends "Save draft {id} as a new version
+  of {Subject (Mode), Class, Exam}." (a draft id hashes the text alone, so the message names the
+  paper, and the button is spent only by a request for its own paper). The approval card for
+  `saveQuestionPaperVersion` reads "Save Draft 2 as version 4 of ..." with ids, slugs and the version
+  counter behind "Details" and the paper text never shown (`approval-summaries.ts`). Saving by `draftId` is accepted only from the in-app assistant, which
   finds the newest such call of *this conversation, school and user* whose canonical
   html hashes to the id; other clients pass `html`. The agent proposes, the user
   decides: nothing is saved until they ask, and saving creates a new version after the

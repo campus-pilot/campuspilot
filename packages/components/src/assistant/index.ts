@@ -1,3 +1,4 @@
+export * from './approval-summaries';
 export * from './assistant-approval-card';
 export * from './assistant-attachment-strip';
 export * from './assistant-attachments-model';

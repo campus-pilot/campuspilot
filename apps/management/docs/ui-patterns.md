@@ -278,10 +278,13 @@ the implementation and APIs in more detail.
   callback, 3 s while a job is active). Failed jobs show the stored safe
   `errorMessage`, never developer detail.
 - No marks are computed or shown for a paper (the heading names the exam plan's maximum
-  only). A version shows its sanitiser notices as a collapsed "N things were removed" list
+  only). A version shows its sanitiser notices as a collapsed "N notices about what was removed" list
   (`RemovedList`) and, when figures are still placeholders, a note with the Continue in chat
   link (`PlaceholderNote`, from the preview's `placeholderFigures`). Chat draft cards use the
-  same two pieces and plain-sentence problems, never paths.
+  same two pieces and plain-sentence problems (raw formula/KaTeX text only behind a collapsed
+  "Details"), never paths; a draft replaced by a later ready draft of the same paper collapses to
+  "Replaced by Draft N". Approval requests with a registry summary (`approval-summaries.ts`) show one
+  sentence and keep ids behind "Details".
 - Missing school template: `AppShellAlert` slug `school/:schoolId/question-paper-template-missing`,
   action "Choose template" (needs `MANAGE_DOCUMENT_TEMPLATES`) closes the alert list and
   opens the marketplace on the question paper type.

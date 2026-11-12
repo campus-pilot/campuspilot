@@ -106,7 +106,7 @@ describe('paper notices', () => {
   it('lists what was removed only once opened, and nothing when nothing was', () => {
     const { container, rerender } = render(<RemovedList lines={['A style was removed', 'An attribute was removed']} />);
     expect(screen.queryByText('A style was removed')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: /2 things were removed/ }));
+    fireEvent.click(screen.getByRole('button', { name: /2 notices about what was removed/ }));
     expect(screen.getByText('A style was removed')).toBeTruthy();
     rerender(<RemovedList lines={[]} />);
     expect(container.textContent).toBe('');

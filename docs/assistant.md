@@ -290,7 +290,8 @@ Chat can carry images, mainly photographs of a handwritten question paper
   `school.validateQuestionPaperDraft`) that the app renders as a draft card (the problems
   in plain sentences, or: a collapsed "what was removed" list, a placeholder-figure note,
   Preview and *Save as new version*, which sends the plain message "Save draft {id} as
-  a new version."). No marks are shown anywhere. The `question_paper` view shows a saved version with Preview and
+  a new version of {paper}."; a draft replaced by a later ready draft of the same paper shrinks to a
+  collapsed "Replaced by Draft N" line). No marks are shown anywhere. The `question_paper` view shows a saved version with Preview and
   Download (see Views below). Drafts exist only in the conversation.
 - **Context pruning** (`runtime/context.ts`, `buildModelContext`, applied after the
   transcript is read and before the provider adapter; the stored transcript and the UI
@@ -408,7 +409,13 @@ the worker logs a warning when it is on in production.
   only the conversation's own school, including the list of the user's
   schools, which holds just that school. The assistant cannot widen any of this.
 - **Approval policy, owned by the assistant** (`packages/assistant/src/runtime/tools.ts`,
-  `requiresApproval`): every write waits for the user. Reads run immediately.
+  `requiresApproval`): every write waits for the user. Reads run immediately. The approval
+  request lists the tool's input as labelled values; a tool whose input cannot be checked by a
+  person (ids, a draft hash, a whole paper) has an entry in the approval summary registry
+  (`packages/components/src/assistant/approval-summaries.ts`, keyed by the MCP tool name): one
+  sentence the app fills with names it resolves ("Save Draft 2 as version 4 of Mathematics (Oral),
+  Class 5, Annual Examination."), the ids behind a collapsed "Details" and long text replaced by its size.
+  Add an entry there rather than a second code path in the card.
 - **Permissions**: OPA decides every tool call as the user. Who may use the
   assistant at all is the role-based access above. An admin impersonating a
   user cannot use the assistant: its calls would be recorded as the user's own.

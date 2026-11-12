@@ -1,12 +1,14 @@
 import type { AssistantToolCallItemDto } from '@campuspilot/assistant-contract/dto';
 import { Button } from '@campuspilot/ui/components/button';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@campuspilot/ui/components/collapsible';
 import { Kbd } from '@campuspilot/ui/components/kbd';
 import { Spinner } from '@campuspilot/ui/components/spinner';
 import { cn } from '@campuspilot/ui/lib/utils';
-import { AlertCircle, Check, CircleSlash, CornerDownLeft, Shield, ShieldQuestionMark, SquarePen, X } from 'lucide-react';
+import { AlertCircle, Check, ChevronDown, CircleSlash, CornerDownLeft, Shield, ShieldQuestionMark, SquarePen, X } from 'lucide-react';
 import { useRef, useSyncExternalStore } from 'react';
 
 import { APPROVE_BUTTON_ATTRIBUTE, approvalFocus, decisionKeys, type AssistantApprovalDecision } from './approval-keys';
+import type { ApprovalSummary } from './approval-summaries';
 import { approvalValueDisplay, humanizeKey, type ApprovalValueDisplay } from './approval-values';
 
 export { ASSISTANT_SURFACE_PROPS, type AssistantApprovalDecision } from './approval-keys';
@@ -25,12 +27,19 @@ const isReference = (key: string) => /Ids?$/.test(key);
 
 type ChangeField = Extract<ApprovalValueDisplay, { kind: 'fields' }>['fields'][number];
 
-/** What the change will set, as labelled values in the reader's words (never raw JSON). */
-function changeFields(input: unknown): ChangeField[] {
+/**
+ * What the change will set, as labelled values in the reader's words (never raw JSON).
+ * A key the tool's summary has a note for shows that note instead of its value.
+ */
+function changeFields(input: unknown, notes: Readonly<Record<string, string>> = {}): ChangeField[] {
   if (typeof input !== 'object' || input === null) return [];
   return Object.entries(input as Record<string, unknown>)
     .filter(([key]) => !HIDDEN_INPUT_KEYS.has(key))
-    .map(([key, value]) => ({ key, label: humanizeKey(key), value: approvalValueDisplay(value) }));
+    .map(([key, value]) => ({
+      key,
+      label: humanizeKey(key),
+      value: key in notes ? ({ kind: 'text', text: notes[key]! } satisfies ApprovalValueDisplay) : approvalValueDisplay(value),
+    }));
 }
 
 /**
@@ -57,6 +66,33 @@ function ChangeFields({ fields, nested = false }: { fields: readonly ChangeField
         </div>
       ))}
     </dl>
+  );
+}
+
+/**
+ * The change as a tool's own sentence, with the values behind it in a
+ * collapsed "Details" disclosure. Fields the summary does not move to Details
+ * stay visible under the sentence.
+ */
+function SummarizedChange({ summary, fields }: { summary: ApprovalSummary; fields: readonly ChangeField[] }) {
+  const shown = fields.filter((field) => !summary.detailKeys.has(field.key) && !(field.key in summary.notes));
+  const details = fields.filter((field) => summary.detailKeys.has(field.key) || field.key in summary.notes);
+  return (
+    <div className="flex min-w-0 flex-col gap-2">
+      <p className="font-medium break-words text-foreground">{summary.sentence}</p>
+      {shown.length ? <ChangeFields fields={shown} /> : null}
+      {details.length ? (
+        <Collapsible className="flex min-w-0 flex-col gap-1">
+          <CollapsibleTrigger className="flex items-center gap-1 self-start text-muted-foreground">
+            Details
+            <ChevronDown className="size-3" aria-hidden />
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <ChangeFields fields={details} />
+          </CollapsibleContent>
+        </Collapsible>
+      ) : null}
+    </div>
   );
 }
 
@@ -131,6 +167,7 @@ export function AssistantApprovalRequest({
   waiting,
   pendingDecision,
   error,
+  summary,
   onDecide,
 }: {
   call: AssistantToolCallItemDto;
@@ -143,9 +180,11 @@ export function AssistantApprovalRequest({
   pendingDecision?: AssistantApprovalDecision;
   /** Why the last decision could not be sent; shown in place of the hint. */
   error?: string | null;
+  /** The tool's own sentence for this change (`approvalSummaryOf`), when it has one: replaces the list of ids and values. */
+  summary?: ApprovalSummary | null;
   onDecide: (decision: AssistantApprovalDecision) => void;
 }) {
-  const fields = changeFields(call.body.input);
+  const fields = changeFields(call.body.input, summary?.notes);
   const busy = Boolean(pendingDecision);
   const enter = useEnterApproves();
   return (
@@ -173,7 +212,7 @@ export function AssistantApprovalRequest({
       {fields.length ? (
         <div className="px-1.5">
           <div className="max-h-60 overflow-y-auto rounded-lg bg-muted/60 px-3 py-2.5 text-xs/relaxed dark:bg-muted/40">
-            <ChangeFields fields={fields} />
+            {summary ? <SummarizedChange summary={summary} fields={fields} /> : <ChangeFields fields={fields} />}
           </div>
         </div>
       ) : null}

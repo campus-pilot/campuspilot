@@ -89,6 +89,8 @@ describe('demo question papers (steps only, one class)', () => {
       expect(version).toMatchObject({ versionNo: 1, source: 'agent', sourceConversationId: null, createdBy: admin.user.id });
       expect(version!.createdAt.toISOString()).toBe(planned.savedAt);
       expect(version!.contentHtml).toBe(sanitizeQuestionPaperBody(QUESTION_PAPER_EXAMPLES[planned.example]).html);
+      // A new demo shows no "removed" notices on its seeded papers.
+      expect(version!.warnings).toEqual([]);
       const [pdf] = await db.select().from(artifactTable).where(eq(artifactTable.id, version!.pdfArtifactId!));
       expect(pdf).toMatchObject({ documentType: 'question_paper', kind: 'pdf', contentType: 'application/pdf', sessionId, examSlug: 'annual-examination', classId });
       expect(pdf!.createdAt.toISOString()).toBe(planned.savedAt);

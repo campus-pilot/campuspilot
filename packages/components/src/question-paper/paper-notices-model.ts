@@ -1,6 +1,11 @@
-/** The label of the collapsed list of removed items: "2 things were removed". */
+/**
+ * The label of the collapsed list of removed parts: "2 notices about what was removed".
+ * It counts notices (one line per kind of change, with its own "(3 times)" inside the line),
+ * which is also what the version list, the version card and the tab badge count, so every
+ * place says the same number for the same paper.
+ */
 export function removedSummary(count: number) {
-  return `${count} ${count === 1 ? 'thing was' : 'things were'} removed`;
+  return `${count} ${count === 1 ? 'notice' : 'notices'} about what was removed`;
 }
 
 /** The sentence for figures that are still a labelled box, or null when none are. */

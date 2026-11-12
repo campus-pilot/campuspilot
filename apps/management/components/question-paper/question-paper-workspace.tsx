@@ -88,7 +88,7 @@ function PaperHeading({ detail }: { detail: QuestionPaperDetail }) {
   const status = cellStatus({
     pageCount: paper.pageCount,
     latestVersionNo: paper.latestVersionNo,
-    warningCount: detail.versions[0]?.warningCount ?? 0,
+    warningCount: detail.versions.find((version) => version.isLatest)?.warningCount ?? 0,
     activeJob: inFlightJob(detail.activeJob),
     lastJobFailure: currentJobFailure(detail),
   });

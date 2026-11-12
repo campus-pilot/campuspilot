@@ -9,7 +9,6 @@ import type { AssistantSurface, AssistantToolCallItemDto, AssistantViewItemDto }
 import {
   ASSISTANT_LANE_CLASS,
   ASSISTANT_SURFACE_PROPS,
-  AssistantApprovalRequest,
   AssistantComposer,
   type AssistantComposerControls,
   AssistantContextChip,
@@ -28,7 +27,7 @@ import {
   type AssistantApprovalDecision,
   type AssistantSuggestion,
 } from '@campuspilot/components/assistant';
-import { draftSaveSpent, saveEventsOf } from '@campuspilot/components/question-paper/chat-cards-model';
+import { draftSaveSpent, saveEventsOf, supersededDrafts } from '@campuspilot/components/question-paper/chat-cards-model';
 import { Button } from '@campuspilot/ui/components/button';
 import { Spinner } from '@campuspilot/ui/components/spinner';
 import { TooltipProvider } from '@campuspilot/ui/components/tooltip';
@@ -41,6 +40,7 @@ import { useRef, type ReactNode } from 'react';
 import { assistantAttachmentThumbUrl } from '@/lib/assistant-attachments';
 import { orpc } from '@/lib/orpc';
 
+import { AssistantApprovalWithSummary } from './assistant-approval-request';
 import { AssistantDraftCard } from './assistant-question-paper';
 import { missingAttachmentIdsOf, refusalMessage, type AssistantConversationFailure } from './assistant-stream';
 import { AssistantViewBlock } from './assistant-view';
@@ -253,6 +253,8 @@ function ConversationTimeline({
   onNewConversation: () => void;
 }) {
   const rows = useAssistantTimeline(schoolId, conversationId);
+  // Draft cards a later ready draft of the same paper replaced shrink to one quiet line.
+  const superseded = supersededDrafts(rows ?? []);
   if (failure) {
     // A new conversation does not help someone who is signed out, so only the message shows then.
     return (
@@ -288,7 +290,8 @@ function ConversationTimeline({
           // "Draft n": the card's place among this conversation's drafts.
           ordinal={rows.filter((candidate) => candidate.kind === 'card').findIndex((candidate) => candidate.id === row.id) + 1}
           onSendMessage={onSendMessage}
-          saveRequested={(draftId) => draftSaveSpent(saveEventsOf(rows), draftId)}
+          supersededBy={superseded.get(row.call.id)}
+          saveRequested={(request) => draftSaveSpent(saveEventsOf(rows), request)}
         />
       )}
     />
@@ -358,9 +361,11 @@ function useTrayRequests(schoolId: string, conversationId: string | null, queued
   const decided = approvals.decisionOf(first?.body.approvalId);
   return (
     <>
-      {first ? (
-        <AssistantApprovalRequest
+      {first && conversationId ? (
+        <AssistantApprovalWithSummary
           key={first.id}
+          schoolId={schoolId}
+          conversationId={conversationId}
           call={first}
           waiting={pending.length}
           pendingDecision={decided.decision}
