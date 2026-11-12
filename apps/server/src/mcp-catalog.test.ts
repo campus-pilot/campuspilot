@@ -628,8 +628,16 @@ describe('assistant service view', () => {
     expect(names.sort()).toEqual(allowed.map((tool) => tool.name).sort());
     expect(names).not.toContain(META_TOOL_NAMES.list);
     expect(names.some((name) => name.startsWith('systemAdmin.'))).toBe(false);
-    expect(names).not.toContain('school.listPayments');
-    expect(names).not.toContain('school.getDashboard');
+    // Money tools are in scope; platform, account and unreviewed modules are not.
+    expect(names).toContain('school.listPayments');
+    expect(names).toContain('school.recordPayment');
+    expect(names).toContain('school.createManualBill');
+    expect(names).toContain('school.getDashboard');
+    expect(
+      allowed.filter((tool) =>
+        ['platform', 'system', 'account', 'notices', 'notifications'].includes(tool.mcp.module),
+      ),
+    ).toEqual([]);
     for (const tool of tools) {
       expect(tool._meta?.[ASSISTANT_TOOL_META.exposure]).toMatch(/^(core|advanced)$/);
       expect(typeof tool._meta?.[ASSISTANT_TOOL_META.module]).toBe('string');

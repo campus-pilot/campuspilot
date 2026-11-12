@@ -9,3 +9,4 @@ export * from './assistant-rows';
 export * from './assistant-timeline';
 export * from './timeline-model';
 export * from './views';
+export type { ApprovalDisplayOptions, ApprovalPath } from './approval-values';

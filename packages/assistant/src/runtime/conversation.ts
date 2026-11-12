@@ -23,7 +23,7 @@ import {
   type AssistantConversationHandlers,
   type ProcessRunInput,
 } from './contract';
-import { buildAssistantPrompt, type AssistantConversationFacts } from './prompt';
+import { buildAssistantPrompt, istInstant, type AssistantConversationFacts } from './prompt';
 import type { ProviderRegistry } from './providers/registry';
 import { billedUsageOf, type ModelProvider, type ModelToolResult, type TranscriptEntry } from './providers/types';
 import { showViewInputSchema } from '@campuspilot/assistant-contract/views';
@@ -36,13 +36,6 @@ import {
   type AssistantTool,
   type ToolOutcome,
 } from './tools';
-
-/**
- * Today's calendar date in India (Asia/Kolkata, `YYYY-MM-DD`), the schools'
- * time zone, for the prompt: a UTC date is yesterday's until 05:30 IST.
- * Read inside the run's first durable step, so a replay keeps it.
- */
-const istToday = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
 
 /** The usage saved for a stopped request that reported none. */
 const NO_USAGE = { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 };
@@ -324,6 +317,13 @@ export function createRunProcessor(deps: AssistantConversationDeps) {
       return null;
     }
 
+    /**
+     * The run's start, read once here, inside the run's first durable step:
+     * a Restate replay returns this step's journaled result, so the prompt's
+     * date and time never move. A retried step reuses a start already saved.
+     */
+    const startedAt = run.startedAt ?? new Date();
+    const now = istInstant(startedAt);
     await tx(async (t, emit) => {
       await store.appendTranscriptEntry(t, {
         conversationId: run.conversationId,
@@ -338,7 +338,7 @@ export function createRunProcessor(deps: AssistantConversationDeps) {
       // the model that actually answered.
       await store.updateRun(t, emit, run, {
         status: 'running',
-        startedAt: run.startedAt ?? new Date(),
+        startedAt,
         provider: provider.id,
         model: provider.model,
       });
@@ -355,7 +355,8 @@ export function createRunProcessor(deps: AssistantConversationDeps) {
         schoolName: await lookUpSchoolName(run.id, run.schoolId),
         userName: user.name,
         userEmail: user.email,
-        today: istToday(),
+        today: now.slice(0, 10),
+        now,
       },
     };
   }
