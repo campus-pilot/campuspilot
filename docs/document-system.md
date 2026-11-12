@@ -654,6 +654,34 @@ by the template. What this document system owns for the type:
 - **Generic history.** Question paper PDFs are not part of Document history: the
   class-level question paper permissions differ from the school-level history
   permissions, so versions and downloads live in the Question paper tab.
+  `listDocumentArtifacts` never returns a `question_paper` artifact and
+  `getDocumentDownload` / `deleteDocumentArtifact` answer NOT_FOUND for one (the
+  artifact rows are real: one PDF per saved version, `kind: pdf`,
+  `documentType: question_paper`, with the class, session and exam filled).
+- **Who may configure the template.** The usual academic template permissions
+  (`READ_/MANAGE_DOCUMENT_TEMPLATES`), plus the school's `assistant` feature
+  (`requireDocumentTypePermission`, checked after the permission so a caller
+  without access learns nothing). Only the *feature* is checked there, not the
+  caller's own assistant role: a principal whose role is not switched on for the
+  assistant can still choose the school's template. The papers themselves use the
+  full assistant gate (`requireQuestionPaperAssistantAccess`).
+- **Saving and previewing a template.** `saveTemplate` checks a `question_paper`
+  template with `assertValidSchoolQuestionPaperTemplate`: it renders the sample
+  context with the rendered English example paper in the slot, so the slot must be
+  placed exactly once, the render must fit `QUESTION_PAPER_TEMPLATE_RENDER_MAX_CHARS`
+  (2,000,000, the notice budget; the body never counts against it because the
+  template only ever prints the constant placeholder), the school logo may appear at
+  most 3 times (the notice technique: the template is given a random placeholder and
+  the real data URI is substituted after sanitising) and the whole document must stay
+  within 25 MB. Template previews and marketplace previews show the example paper.
+- **Rendering a paper.** `question-paper.render.ts` composes the document:
+  `renderTemplate` -> `substituteQuestionPaperBody`. A saved version pins the
+  template revision it was printed with (`template_revision_id`); previews and
+  re-downloads use that revision, never the school's current choice. The body is
+  `question-paper.body.ts` (pure, escaping, fixed vocabulary) plus KaTeX
+  (`question-paper.math.ts`: HTML output only, `trust: false`, no macros, 2 s wall
+  budget; the stylesheet with `data:font/woff2` fonts is built once per process from
+  the pinned `katex` package and added only to papers that contain math).
 
 ## Notification attachments (WhatsApp)
 

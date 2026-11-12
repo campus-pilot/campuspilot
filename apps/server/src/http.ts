@@ -21,6 +21,10 @@ import {
 } from '@campuspilot/api/routers/auth/auth.http';
 import { handleSchoolLogoUpload } from '@campuspilot/api/routers/system-admin/school/school.http';
 import { handleSchoolLogoBlob } from '@campuspilot/api/routers/school/logo/logo.blob';
+import {
+  handleQuestionPaperPageRead,
+  handleQuestionPaperPageUpload,
+} from '@campuspilot/api/routers/school/question-paper/question-paper.http';
 import { handleSchoolManifestBlob } from '@campuspilot/api/routers/school/manifest/manifest.blob';
 import { handleCadetManifestBlob } from '@campuspilot/api/routers/school/manifest/cadet-manifest.blob';
 import {
@@ -245,6 +249,48 @@ app.delete('/api/blob/schools/:schoolId/admissions/:admissionId/documents/:fileI
   const apiContext = await createContext({ context });
   return handleAdmissionDocumentDelete(apiContext, input, (error) =>
     reportUploadError(context.var.logger, 'admission.document.delete.error', input, error),
+  );
+});
+
+/**
+ * Question paper page photos. Each client IP may upload 30 pages a minute (a
+ * 20 page paper plus retries); the photo itself is capped at 15 MiB by the
+ * handler. Reads are not limited here: they are permissioned redirects.
+ */
+const QUESTION_PAPER_PAGES_PATH =
+  '/api/blob/schools/:schoolId/sessions/:sessionId/exams/:examSlug/classes/:classId/question-papers/:subjectSlug/:modeSlug/pages';
+const questionPaperUploadRateLimit = createRateLimit({
+  id: 'question-paper-upload',
+  limit: 30,
+  windowMs: 60_000,
+});
+
+/** The paper a question paper route names; the handlers validate every part. */
+const questionPaperKey = (context: { req: { param: (name: string) => string } }) => ({
+  schoolId: context.req.param('schoolId'),
+  sessionId: context.req.param('sessionId'),
+  examSlug: context.req.param('examSlug'),
+  classId: context.req.param('classId'),
+  subjectSlug: context.req.param('subjectSlug'),
+  modeSlug: context.req.param('modeSlug'),
+});
+
+app.post(QUESTION_PAPER_PAGES_PATH, questionPaperUploadRateLimit, async (context) => {
+  const key = questionPaperKey(context);
+  const apiContext = await createContext({ context });
+  return handleQuestionPaperPageUpload(context.req.raw, apiContext, key, (error) =>
+    reportUploadError(context.var.logger, 'question-paper.page.upload.error', key, error),
+  );
+});
+
+app.get(`${QUESTION_PAPER_PAGES_PATH}/:pageId/:variant`, async (context) => {
+  const key = questionPaperKey(context);
+  const apiContext = await createContext({ context });
+  return handleQuestionPaperPageRead(
+    apiContext,
+    key,
+    { pageId: context.req.param('pageId'), variant: context.req.param('variant') },
+    (error) => reportUploadError(context.var.logger, 'question-paper.page.read.error', key, error),
   );
 });
 

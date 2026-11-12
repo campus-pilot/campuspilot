@@ -119,6 +119,17 @@ const HIDDEN_TOOLS = [
   // platform decision (systemAdmin.getSchoolFeatureFlags stays advanced).
   'school.getFeatureFlags',
   'systemAdmin.updateSchoolFeatureFlag',
+  // Question paper actions that must stay a person's: the AI generation job
+  // (chat agents author papers themselves), page photo management, previews
+  // and downloads (the app and the paper's versions tools cover agents).
+  'school.startQuestionPaperGeneration',
+  'school.getQuestionPaperDetail',
+  'school.reorderQuestionPaperPages',
+  'school.deleteQuestionPaperPage',
+  'school.deleteQuestionPaper',
+  'school.getQuestionPaperPreview',
+  'school.previewQuestionPaperDraft',
+  'school.getQuestionPaperDownload',
 ];
 
 /**
@@ -225,8 +236,9 @@ describe('catalog metadata', () => {
     // single preview/send) and +2 delivery log tools (list, resend);
     // +1 systemAdmin.getSchoolFeatureFlags; +9 notice tools (list, get,
     // create, update, delete, preview, publish preview, publish, download);
-    // +3 exam timetable publication tools (publish preview, publish, withdraw).
-    expect(catalog.advanced).toHaveLength(110);
+    // +3 exam timetable publication tools (publish preview, publish, withdraw);
+    // +6 question paper tools (list, get, versions, learn, validate, save).
+    expect(catalog.advanced).toHaveLength(116);
   });
 });
 
@@ -635,5 +647,32 @@ describe('assistant service view', () => {
       expect(typeof tool._meta?.[ASSISTANT_TOOL_META.module]).toBe('string');
     }
     expect(allowed.some((tool) => tool.mcp.exposure === 'advanced')).toBe(true);
+  });
+
+  it('tells the assistant how much of a result it may read only for the tools that declare it', async () => {
+    const client = await connect('assistant');
+    const { tools } = await client.listTools();
+    const declared = Object.fromEntries(
+      tools
+        .filter((tool) => tool._meta?.[ASSISTANT_TOOL_META.outputChars] !== undefined)
+        .map((tool) => [tool.name, tool._meta![ASSISTANT_TOOL_META.outputChars]]),
+    );
+    expect(declared).toEqual({
+      'school.getQuestionPaper': 80_000,
+      'school.validateQuestionPaperDraft': 80_000,
+      'school.learn_question_paper_generation': 100_000,
+    });
+    // Procedures the assistant may not use are not listed at all.
+    expect(tools.map((tool) => tool.name)).not.toContain('school.startQuestionPaperGeneration');
+    expect(tools.map((tool) => tool.name)).toEqual(expect.arrayContaining(['school.saveQuestionPaperVersion', 'school.listQuestionPapers']));
+  });
+
+  it('refuses an invalid outputChars declaration while the catalog is built', async () => {
+    const { os } = await import('@orpc/server');
+    const broken = os
+      .meta({ mcp: { exposure: 'advanced', access: 'read', destructive: false, module: 'exams', outputChars: 0 } })
+      .route({ summary: 'x', description: 'y' })
+      .handler(() => 'ok');
+    await expect(buildMcpCatalog({ broken })).rejects.toThrow(/invalid outputChars/);
   });
 });

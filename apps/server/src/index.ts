@@ -8,6 +8,7 @@ import { runMigrations } from '@campuspilot/db/migrate';
 import { env } from '@campuspilot/env/server';
 import { sweepAssistantOutbox } from '@campuspilot/assistant/dispatch';
 import { sweepDemoSchoolOutbox } from '@campuspilot/api/routers/system-admin/demo-school/demo-school.outbox';
+import { sweepQuestionPaperOutbox } from '@campuspilot/api/workflows/question-paper/outbox';
 import { sweepDataMigrationOutbox } from '@campuspilot/api/data-migrations/data-migration.outbox';
 import { DATA_MIGRATIONS } from '@campuspilot/api/data-migrations/registry';
 import { sweepNotificationOutbox } from '@campuspilot/api/notifications/notification.outbox';
@@ -79,6 +80,15 @@ async function sweepAssistant() {
   if (Object.values(result).some((value) => value > 0)) log.info(result, 'assistant.outbox.ok');
 }
 
+/**
+ * One question paper generation sweep: hands queued jobs to the worker that
+ * Restate has not accepted and fails jobs that can no longer progress.
+ */
+async function sweepQuestionPapers() {
+  const result = await sweepQuestionPaperOutbox();
+  if (Object.values(result).some((value) => value > 0)) log.info(result, 'question-paper.outbox.ok');
+}
+
 /** Finishes result publications whose deliveries settled (publisher notified once). */
 async function sweepPublications() {
   const publications = await sweepResultPublications();
@@ -94,6 +104,7 @@ const OUTBOX_SWEEPS: ReadonlyArray<{ errorMessage: string; run: () => Promise<vo
   { errorMessage: 'demo-school.outbox.error', run: sweepDemoOutbox },
   { errorMessage: 'notification.outbox.error', run: sweepNotifications },
   { errorMessage: 'assistant.outbox.error', run: sweepAssistant },
+  { errorMessage: 'question-paper.outbox.error', run: sweepQuestionPapers },
   { errorMessage: 'notification.results.sweep.error', run: sweepPublications },
   // Reports failed WhatsApp deliveries to staff granted to receive them (D-30).
   { errorMessage: 'notification.failure-alerts.error', run: async () => { await sweepWhatsAppFailureAlerts(); } },

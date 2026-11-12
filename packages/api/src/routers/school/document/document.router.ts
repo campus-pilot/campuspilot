@@ -1,7 +1,11 @@
 import { assertValidSchoolNoticeTemplate } from "../notice/notice.render";
+import {
+  assertValidSchoolQuestionPaperTemplate,
+  renderSampleQuestionPaperDocument,
+} from "../question-paper/question-paper.render";
 import { z } from "zod";
 import { alias } from "drizzle-orm/pg-core";
-import { and, asc, count, desc, eq, ilike, inArray, notInArray, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, ilike, inArray, ne, notInArray, sql } from "drizzle-orm";
 import { generateId } from "@campuspilot/db/id";
 import type { Database } from "@campuspilot/db";
 import {
@@ -58,6 +62,12 @@ function requireDocumentTypePermission(
       // after the permission, so a caller without access learns nothing.
       if (input.documentType === "notice")
         await assertSchoolFeatureEnabled(context.db, input.schoolId, "notices");
+      // The question paper template belongs to the AI assistant's feature (D26).
+      // Only the feature is checked here, not the caller's own assistant role:
+      // a principal whose role is not switched on can still configure the
+      // school's template. Papers themselves use the full assistant gate.
+      if (input.documentType === "question_paper")
+        await assertSchoolFeatureEnabled(context.db, input.schoolId, "assistant");
       return next();
     },
   );
@@ -154,6 +164,9 @@ function previewTemplateHtml(
     const size = printSize ?? "full";
     return combineDocuments([renderDocument(content, { ...SAMPLE_NOTICE_CONTEXT, print: { size } })], "notice", size);
   }
+  // Rendered like a real paper (template budget, one body slot, logo limit),
+  // with the English example paper as the body so an author sees a real page.
+  if (documentType === "question_paper") return renderSampleQuestionPaperDocument(content);
   return combineDocuments([renderDocument(content, sampleDocumentContext(documentType))], documentType, pageSize);
 }
 async function saveTemplate(
@@ -165,6 +178,7 @@ async function saveTemplate(
   // A Notice template is checked the way notices render it (their output
   // budget and logo limit), so a design no notice could print is refused here.
   if (input.documentType === "notice") assertValidSchoolNoticeTemplate(input.content);
+  else if (input.documentType === "question_paper") assertValidSchoolQuestionPaperTemplate(input.content);
   else renderDocument(input.content, sampleDocumentContext(input.documentType));
   const id = generateId("artifact");
   return persistDocumentObject(
@@ -616,6 +630,10 @@ export const schoolDocumentRouter = {
         const where = and(
           eq(artifactTable.schoolId, input.schoolId),
           eq(artifactTable.kind, "pdf"),
+          // Question paper access is per class (D37) while this history is
+          // gated by school-wide actions, so papers are never listed here:
+          // their versions and downloads live in the Question paper tab.
+          ne(artifactTable.documentType, "question_paper"),
           f.documentType
             ? eq(artifactTable.documentType, f.documentType)
             : f.documentDomain === "finance"
@@ -716,6 +734,7 @@ export const schoolDocumentRouter = {
               eq(artifactTable.schoolId, input.schoolId),
               eq(artifactTable.kind, "pdf"),
               eq(artifactTable.documentType, input.documentType),
+              ne(artifactTable.documentType, "question_paper"),
             ),
           )
           .limit(1);
@@ -761,6 +780,7 @@ export const schoolDocumentRouter = {
           eq(artifactTable.schoolId, input.schoolId),
           eq(artifactTable.kind, "pdf"),
           eq(artifactTable.documentType, input.documentType),
+          ne(artifactTable.documentType, "question_paper"),
         );
         const [existing] = await context.db.select().from(artifactTable).where(where).limit(1);
         if (!existing) throw rpcError.notFound("Document artifact");

@@ -5,6 +5,7 @@ import { schoolExamPlanRouter } from "./exam-plan.router";
 import { schoolExamResultRouter } from "./exam-result.router";
 import { schoolExamTimetableRouter } from "./exam-timetable.router";
 import { schoolExamResultNotificationRouter } from "./exam-result-notification.router";
+import { schoolQuestionPaperRouter } from "../question-paper/question-paper.router";
 
 export const schoolExamRouter = {
   ...schoolExamStudentRouter,
@@ -14,4 +15,5 @@ export const schoolExamRouter = {
   ...schoolExamResultRouter,
   ...schoolExamTimetableRouter,
   ...schoolExamResultNotificationRouter,
+  ...schoolQuestionPaperRouter,
 };

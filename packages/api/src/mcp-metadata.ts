@@ -47,6 +47,14 @@ export type McpProcedureMeta = {
    */
   destructive: boolean;
   module: McpModule;
+  /**
+   * How many characters of this tool's result the in-app assistant gives the
+   * model, when the default (24,000) would cut off a result that is the point
+   * of the call, such as a whole question paper. The stored and displayed
+   * result stays truncated either way. An explicit fact, never inferred from
+   * the tool's name or output type.
+   */
+  outputChars?: number;
 };
 
 /** Metadata carried by every CampusPilot procedure. */

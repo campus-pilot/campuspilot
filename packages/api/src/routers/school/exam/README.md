@@ -175,3 +175,20 @@ completion) in the active session and frozen while released. School-level
 `getCadetPortalSettings` / `updateCadetPortalSettings` (school details
 permissions) control whether the Cadet Portal shows class averages; the cadet
 procedures omit them on the server when off.
+
+## Question papers
+
+Teachers upload photos of a handwritten paper per class, subject and assessment mode
+of an exam, and a structured question paper is generated from them (by the AI job or
+by a chat agent). The code lives in the sibling folder
+`../question-paper/` (see its README); two facts matter here:
+
+- A paper is keyed by `(session, exam, class, subject, mode)`, the natural key of an
+  exam plan, and has **no foreign key to `exam_plan`** because plans are deleted and
+  regenerated. `deleteExamPlan` therefore deletes that class and subject's papers (every
+  mode) in the same transaction, with their pages, figures, versions and PDF artifacts,
+  and removes the stored objects after the commit. A running AI generation for such a
+  paper goes with it.
+- Papers are read-only once the exam is `completed` and editable before that,
+  including after the exam started; this is the exam's own lifecycle row, never the
+  plan status.
