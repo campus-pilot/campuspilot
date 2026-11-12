@@ -5,7 +5,6 @@ import {
   index,
   integer,
   jsonb,
-  numeric,
   pgEnum,
   pgTable,
   text,
@@ -13,8 +12,7 @@ import {
   unique,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
-import type { QuestionPaperWarning } from "@campuspilot/question-paper/marks";
-import type { QuestionPaper } from "@campuspilot/question-paper/schema";
+import type { QuestionPaperNotice } from "@campuspilot/question-paper/hash";
 
 import { generateId } from "../id";
 import { artifactTable } from "./artifact";
@@ -283,10 +281,11 @@ export const examQuestionPaperJobTable = pgTable(
 );
 
 /**
- * One immutable saved version of the structured document (D19, D20, D32).
- * `total_marks`, `plan_max_marks`, `template_revision_id` and
- * `pdf_artifact_id` are stored facts, never recomputed from state that can
- * change later (the plan, the selected template, S3).
+ * One immutable saved version of the paper (D19, D20, D32): the HTML fragment a
+ * model wrote, as cleaned by the `question_paper_body` sanitiser when it was
+ * saved. `plan_max_marks`, `template_revision_id` and `pdf_artifact_id` are stored
+ * facts, never recomputed from state that can change later (the plan, the
+ * selected template, S3).
  */
 export const examQuestionPaperVersionTable = pgTable(
   "exam_question_paper_version",
@@ -301,12 +300,14 @@ export const examQuestionPaperVersionTable = pgTable(
       .notNull()
       .references(() => schoolTable.id),
     versionNo: integer("version_no").notNull(),
-    /** The structured document. Immutable. */
-    content: jsonb("content").$type<QuestionPaper>().notNull(),
-    /** SHA-256 of the canonical JSON: draft ids and duplicate detection. */
+    /**
+     * The sanitised HTML fragment (never a full document). Immutable. It is
+     * sanitised again whenever it is rendered; KaTeX and figures are added only
+     * then, so nothing rendered is stored here.
+     */
+    contentHtml: text("content_html").notNull(),
+    /** SHA-256 of the canonical fragment (NFC, LF, trimmed): duplicate detection. */
     contentSha256: text("content_sha256").notNull(),
-    /** Copy of `content.schemaVersion` so migrations can query it. */
-    schemaVersion: integer("schema_version").notNull(),
     source: questionPaperVersionSourceEnum("source").notNull(),
     /**
      * The job that produced this version. Unique, which makes the worker's
@@ -321,16 +322,19 @@ export const examQuestionPaperVersionTable = pgTable(
     sourcePageIds: jsonb("source_page_ids").$type<string[]>(),
     /** Chat provenance of an `agent` save. A plain value: conversations are soft-deleted. */
     sourceConversationId: text("source_conversation_id"),
-    /** Marks total computed from `content` at save time. */
-    totalMarks: numeric("total_marks", {
-      precision: 8,
-      scale: 2,
-      mode: "number",
-    }),
-    /** The mode's max marks from the plan at save time (snapshot). */
+    /**
+     * The mode's maximum marks in the exam plan at save time. A snapshot of the
+     * header fact the template prints ("Maximum marks"), so a restored PDF or an
+     * old preview never changes when the plan is edited. Not computed from the
+     * paper: nothing adds up a paper's marks any more.
+     */
     planMaxMarks: integer("plan_max_marks"),
+    /**
+     * What the sanitiser removed or changed when this version was saved, one
+     * entry per kind. Notices, not errors: the version saved without them.
+     */
     warnings: jsonb("warnings")
-      .$type<QuestionPaperWarning[]>()
+      .$type<QuestionPaperNotice[]>()
       .notNull()
       .default([]),
     /** The template revision rendered into the PDF. */
@@ -339,7 +343,7 @@ export const examQuestionPaperVersionTable = pgTable(
       .references(() => artifactTable.id),
     /**
      * The stored PDF (D17). Null only when the artifact was deleted; the
-     * download then re-renders from `content` and the pinned revision.
+     * download then re-renders from `content_html` and the pinned revision.
      */
     pdfArtifactId: text("pdf_artifact_id").references(() => artifactTable.id, {
       onDelete: "set null",
