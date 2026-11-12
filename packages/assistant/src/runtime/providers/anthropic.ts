@@ -12,6 +12,9 @@ import type {
   ModelToolResult,
   ModelToolUse,
   ModelUsage,
+  StructuredPart,
+  StructuredRequest,
+  StructuredResult,
 } from './types';
 import { withBilledUsage } from './types';
 
@@ -222,6 +225,78 @@ export async function streamAssistantResponse({
   }
 }
 
+/** Image media types the Claude API reads. It does not read HEIC/HEIF (decision D46). */
+export const ANTHROPIC_IMAGE_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'] as const;
+
+function anthropicContentOf(part: StructuredPart): Anthropic.Beta.Messages.BetaContentBlockParam {
+  if (part.type === 'text') return { type: 'text', text: part.text };
+  const mediaType = ANTHROPIC_IMAGE_MIME_TYPES.find((supported) => supported === part.mimeType);
+  // Callers check `imageMimeTypes` first (and tell the user); this only keeps a
+  // page from ever being sent as something it is not.
+  if (!mediaType) throw new Error(`The Claude API cannot read ${part.mimeType} images.`);
+  return { type: 'image', source: { type: 'base64', media_type: mediaType, data: Buffer.from(part.data).toString('base64') } };
+}
+
+/**
+ * The exact Claude API request of a one-shot structured request (pinned by a
+ * test, like {@link buildAnthropicRequest}). `output_config.format` is the
+ * GA structured-output field (SDK 1.7 typings: `BetaJSONOutputFormat`); the
+ * request is streamed because a large `max_tokens` requires it. Prompt caching
+ * is off on purpose: the pages differ for every job, so nothing repeats.
+ */
+export function buildAnthropicStructuredRequest(
+  model: string,
+  input: StructuredRequest,
+): Parameters<Anthropic['beta']['messages']['stream']>[0] {
+  return {
+    model,
+    max_tokens: input.maxOutputTokens,
+    system: input.system,
+    messages: [{ role: 'user', content: input.parts.map(anthropicContentOf) }],
+    output_config: { effort: 'medium', format: { type: 'json_schema', schema: input.jsonSchema } },
+  };
+}
+
+/** Runs a one-shot structured request; failures carry the usage the stream had reported. */
+export async function generateAnthropicStructured(client: Anthropic, model: string, input: StructuredRequest): Promise<StructuredResult> {
+  const stream = client.beta.messages.stream(buildAnthropicStructuredRequest(model, input), { signal: input.signal });
+  let reported: ModelUsage | null = null;
+  let answeringModel: string | null = null;
+  stream.on('streamEvent', (event) => {
+    if (event.type === 'message_start') {
+      answeringModel = event.message.model;
+      reported = {
+        inputTokens: event.message.usage.input_tokens,
+        outputTokens: event.message.usage.output_tokens,
+        cacheReadInputTokens: event.message.usage.cache_read_input_tokens ?? 0,
+        cacheCreationInputTokens: event.message.usage.cache_creation_input_tokens ?? 0,
+      };
+    } else if (event.type === 'message_delta' && reported) {
+      reported = { ...reported, outputTokens: event.usage.output_tokens };
+    }
+  });
+  try {
+    const message = await stream.finalMessage();
+    return {
+      text: responseText(message.content),
+      model: message.model,
+      usage: {
+        inputTokens: message.usage.input_tokens,
+        outputTokens: message.usage.output_tokens,
+        cacheReadInputTokens: message.usage.cache_read_input_tokens ?? 0,
+        cacheCreationInputTokens: message.usage.cache_creation_input_tokens ?? 0,
+      },
+      refusal: message.stop_reason === 'refusal',
+      truncated: message.stop_reason === 'max_tokens',
+    };
+  } catch (error) {
+    if (reported && typeof error === 'object' && error !== null) {
+      throw withBilledUsage(error, { usage: reported, complete: false, model: answeringModel });
+    }
+    throw error;
+  }
+}
+
 /** HTTP statuses the Claude API uses for rate limits and overload. */
 const ANTHROPIC_BUSY_STATUSES: ReadonlySet<number> = new Set([429, 503, 529]);
 
@@ -255,6 +330,8 @@ export function createAnthropicProvider({ apiKey, model }: { apiKey: string; mod
   return {
     id: 'anthropic',
     model,
+    imageMimeTypes: ANTHROPIC_IMAGE_MIME_TYPES,
+    generateStructured: (input) => generateAnthropicStructured(client, model, input),
     async step({ prompt, tools, transcript, onText, isStopRequested }: ModelStepInput): Promise<ModelStepResult> {
       const result = await streamAssistantResponse({
         client,

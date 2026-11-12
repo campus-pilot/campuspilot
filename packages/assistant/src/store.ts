@@ -409,6 +409,11 @@ export async function nextFailedAttemptKey(db: AssistantExecutor, stepKey: strin
  * `cost_usd` grows by exactly the stored amount, so the run always equals
  * the sum of its requests.
  *
+ * Only for chat (`source = 'chat'`, a run owns the request). A question paper
+ * generation job has no run: its requests are saved by
+ * `recordQuestionPaperRequest` in the API's `workflows/question-paper/cost.ts`
+ * (same cost expression, `source = 'question_paper'`).
+ *
  * Idempotent on `requestKey`: a durable step retried after it saved the
  * request adds nothing a second time (returns false). It takes the run's
  * row lock before the conversation's (in the `updateRun` that follows), the
@@ -434,6 +439,7 @@ export async function recordModelRequest(
   const [saved] = await tx
     .insert(assistantModelRequestTable)
     .values({
+      source: 'chat',
       runId: input.runId,
       schoolId: input.schoolId,
       userId: input.userId,

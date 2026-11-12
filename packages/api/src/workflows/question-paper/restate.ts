@@ -12,9 +12,9 @@ import type { QuestionPaperJobInput } from './input';
 
 /**
  * Declares, for typing only, the handlers of the worker's `QuestionPaperControl`
- * service. The implementation belongs to the worker (phase P2) and must keep
- * this name, handler and input; importing it here would import the whole
- * workflow into the API. The function is never called.
+ * service. The implementation is `control-service.ts` (served by `apps/worker`)
+ * and must keep this name, handler and input; importing it here would import
+ * the whole workflow into the API. The function is never called.
  */
 const declareControlService = () =>
   restate.service({

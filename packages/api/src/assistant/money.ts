@@ -12,7 +12,7 @@ export function usdToUnits(amount: string): bigint {
   const match = /^(\d+)(?:\.(\d+))?$/.exec(amount.trim());
   if (!match) throw new Error(`Not a USD amount: ${amount}`);
   const fraction = (match[2] ?? '').slice(0, USD_SCALE).padEnd(USD_SCALE, '0');
-  return BigInt(match[1]!) * 10n ** BigInt(USD_SCALE) + BigInt(fraction);
+  return BigInt(match[1]!) * BigInt(10) ** BigInt(USD_SCALE) + BigInt(fraction);
 }
 
 /**

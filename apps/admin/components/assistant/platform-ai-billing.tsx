@@ -1,6 +1,6 @@
 'use client';
 
-import { formatSpend, UsageFreshness, useUsageRangeForm, useUsageSelection } from '@campuspilot/components/assistant-usage';
+import { formatSpend, sourceRows, UsageFreshness, UsageSourcesTable, useUsageRangeForm, useUsageSelection } from '@campuspilot/components/assistant-usage';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@campuspilot/ui/components/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@campuspilot/ui/components/table';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -125,6 +125,9 @@ export function PlatformAiBilling() {
               />
             }
           />
+          <TableCard title="By feature" description="What the requests were for: the assistant chat and question paper generation.">
+            <UsageSourcesTable rows={sourceRows(usage.sources)} inrPerUsd={inrPerUsd} />
+          </TableCard>
           <TableCard title="Per provider and model" description="Tokens, requests and spend, with the prices that were saved.">
             <ModelTotalsTable models={usage.models} inrPerUsd={inrPerUsd} />
           </TableCard>

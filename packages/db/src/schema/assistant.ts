@@ -2,6 +2,7 @@ import type { AssistantView } from "@campuspilot/assistant-contract/views";
 import { sql } from "drizzle-orm";
 import {
   boolean,
+  check,
   index,
   integer,
   jsonb,
@@ -46,6 +47,17 @@ import { schoolTable } from "./school";
 export const assistantModelProviderEnum = pgEnum("assistant_model_provider", [
   "anthropic",
   "gemini",
+]);
+
+/**
+ * What a model request was made for. `chat` requests belong to an assistant
+ * run; `question_paper` requests belong to a question paper generation job
+ * (`exam_question_paper_job`), which has no run. Spend, limits and usage count
+ * both; the usage pages break the total down by this value.
+ */
+export const assistantModelRequestSourceEnum = pgEnum("assistant_model_request_source", [
+  "chat",
+  "question_paper",
 ]);
 
 /** Which management surface started a run, recorded to compare the variants. */
@@ -424,9 +436,19 @@ export const assistantModelRequestTable = pgTable(
      * gone too) or through `purge_demo_school`, which deletes them first.
      * Every spend and usage read uses this table, never runs.
      */
-    runId: text("run_id")
-      .notNull()
-      .references(() => assistantRunTable.id, { onDelete: "no action" }),
+    runId: text("run_id").references(() => assistantRunTable.id, { onDelete: "no action" }),
+    /**
+     * What the request was made for. Its own column, never inferred from which
+     * of `run_id` / `question_paper_job_id` is set (the CHECK ties them
+     * together). Every writer states it: there is no default.
+     */
+    source: assistantModelRequestSourceEnum("source").notNull(),
+    /**
+     * The question paper generation job that made the request (`qpj_...`), for
+     * `source = 'question_paper'`. A plain value without a foreign key: deleting
+     * a paper (and with it its jobs) must not drop or unlink what it cost.
+     */
+    questionPaperJobId: text("question_paper_job_id"),
     schoolId: text("school_id")
       .notNull()
       .references(() => schoolTable.id, { onDelete: "cascade" }),
@@ -461,6 +483,12 @@ export const assistantModelRequestTable = pgTable(
     index("assistant_model_request_school_created_idx").on(table.schoolId, table.createdAt),
     index("assistant_model_request_created_idx").on(table.createdAt),
     index("assistant_model_request_run_idx").on(table.runId),
+    index("assistant_model_request_school_source_created_idx").on(table.schoolId, table.source, table.createdAt),
+    check(
+      "assistant_model_request_source_owner_check",
+      sql`(${table.source} = 'chat' and ${table.runId} is not null and ${table.questionPaperJobId} is null)
+        or (${table.source} = 'question_paper' and ${table.runId} is null and ${table.questionPaperJobId} is not null)`,
+    ),
   ],
 );
 

@@ -660,7 +660,7 @@ describe('assistant service view', () => {
     expect(declared).toEqual({
       'school.getQuestionPaper': 80_000,
       'school.validateQuestionPaperDraft': 80_000,
-      'school.learn_question_paper_generation': 100_000,
+      'school.learn_question_paper_generation': 40_000,
     });
     // Procedures the assistant may not use are not listed at all.
     expect(tools.map((tool) => tool.name)).not.toContain('school.startQuestionPaperGeneration');

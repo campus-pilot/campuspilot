@@ -542,7 +542,7 @@ export async function addQuestionPaperFigure(
 }
 
 /** `Page 3 (IMG_0042.HEIC) is in a format the AI model cannot read...` for the first page the model cannot read (D46). */
-function unreadablePageMessage(pages: Array<{ position: number; originalName: string; derivativeStatus: string; contentType: string }>, mimeTypes: readonly string[]) {
+export function unreadablePageMessage(pages: Array<{ position: number; originalName: string; derivativeStatus: string; contentType: string }>, mimeTypes: readonly string[]) {
   const page = pages.find((candidate) => candidate.derivativeStatus === 'unsupported' && !mimeTypes.includes(candidate.contentType));
   return page
     ? `Page ${page.position} (${page.originalName}) is in a format the AI model cannot read. Convert it to JPEG and upload it again.`

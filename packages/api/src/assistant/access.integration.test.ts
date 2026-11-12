@@ -49,6 +49,7 @@ async function spend(schoolId: string, userId: string, costUsd: string, at?: Dat
     .values({ conversationId: conversation!.id, schoolId, userId, clientRequestId: randomUUID(), surface: 'panel', sequence: 1 })
     .returning();
   await db.insert(assistantModelRequestTable).values({
+    source: 'chat',
     runId: run!.id,
     schoolId,
     userId,

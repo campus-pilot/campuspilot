@@ -14,7 +14,7 @@ import { orpc } from '@/lib/orpc';
 import { useInrRate } from './inr-rate';
 import { ModelTotalsTable } from './model-totals-table';
 import { AssistantSettingsForm } from './school-ai-settings';
-import { UsageSpendCard, UsageStateCard, UsageToolbar } from './usage-section';
+import { SourceTotals, UsageSpendCard, UsageStateCard, UsageToolbar } from './usage-section';
 
 /** The `assistant` flag card: state, settings, and an invalid-settings warning. */
 function AssistantSettingsCard({ schoolId }: { schoolId: string }) {
@@ -104,6 +104,7 @@ function SchoolUsage({ schoolId }: { schoolId: string }) {
             />
           }
         >
+          <SourceTotals sources={usageQuery.data.sources} inrPerUsd={inrPerUsd} />
           <ModelTotalsTable models={usageQuery.data.models} inrPerUsd={inrPerUsd} />
           <TopUsersTable users={usageQuery.data.users} inrPerUsd={inrPerUsd} />
         </UsageSpendCard>

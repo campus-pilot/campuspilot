@@ -4,7 +4,9 @@ import {
   ApiError,
   FinishReason,
   GoogleGenAI,
+  MediaResolution,
   type Content,
+  type GenerateContentConfig,
   type FunctionDeclaration,
   type GenerateContentResponseUsageMetadata,
   type Part,
@@ -22,6 +24,9 @@ import type {
   ModelToolResult,
   ModelToolUse,
   ModelUsage,
+  StructuredPart,
+  StructuredRequest,
+  StructuredResult,
 } from './types';
 import { withBilledUsage } from './types';
 
@@ -44,7 +49,12 @@ const REFUSAL_REASONS: ReadonlySet<FinishReason> = new Set([
   FinishReason.PROHIBITED_CONTENT,
   FinishReason.SPII,
   FinishReason.RECITATION,
+  FinishReason.IMAGE_SAFETY,
+  FinishReason.IMAGE_PROHIBITED_CONTENT,
 ]);
+
+/** Image media types Gemini reads, HEIC and HEIF included (the Claude API reads neither). */
+export const GEMINI_IMAGE_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'] as const;
 
 /** A malformed call is the model's mistake; the step is retried rather than failed. */
 class MalformedFunctionCallError extends Error {}
@@ -121,6 +131,98 @@ export function geminiToolResultParts(results: readonly ModelToolResult[]): Part
       response: result.isError ? { error: result.content } : { output: result.content },
     },
   }));
+}
+
+/**
+ * Adapts a JSON Schema to what `responseJsonSchema` accepts (SDK 2.32 typings
+ * list the supported keywords: `$defs`/`$ref`, `type`, `enum` for strings and
+ * numbers, `items`, `anyOf`/`oneOf`, `properties`, `additionalProperties`,
+ * `required`; no `const`). `const` therefore becomes a one-value `enum`, and
+ * a boolean `const` (`true` flags) is left as a plain boolean, since boolean
+ * enums are not supported; the caller's own validation still enforces it.
+ */
+export function toGeminiResponseSchema(schema: unknown): unknown {
+  if (Array.isArray(schema)) return schema.map(toGeminiResponseSchema);
+  if (schema === null || typeof schema !== 'object') return schema;
+  const entries = Object.entries(schema as Record<string, unknown>);
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of entries) {
+    if (key === 'const') {
+      if (typeof value === 'string' || typeof value === 'number') result.enum = [value];
+    } else if (key === 'properties' && value !== null && typeof value === 'object') {
+      // A map of property names, not a schema: a property may be called "const".
+      result[key] = Object.fromEntries(Object.entries(value).map(([name, property]) => [name, toGeminiResponseSchema(property)]));
+    } else {
+      result[key] = toGeminiResponseSchema(value);
+    }
+  }
+  return result;
+}
+
+function geminiPartOf(part: StructuredPart): Part {
+  if (part.type === 'text') return { text: part.text };
+  if (!GEMINI_IMAGE_MIME_TYPES.some((supported) => supported === part.mimeType)) {
+    throw new Error(`Gemini cannot read ${part.mimeType} images.`);
+  }
+  return { inlineData: { mimeType: part.mimeType, data: Buffer.from(part.data).toString('base64') } };
+}
+
+/**
+ * The Gemini request of a one-shot structured request (pinned by a test).
+ * High media resolution is requested because handwriting is read from
+ * photographs. Thinking and caching stay at the model's defaults.
+ */
+export function buildGeminiStructuredRequest(model: string, input: StructuredRequest) {
+  const config: GenerateContentConfig = {
+    systemInstruction: input.system,
+    responseMimeType: 'application/json',
+    responseJsonSchema: toGeminiResponseSchema(input.jsonSchema),
+    maxOutputTokens: input.maxOutputTokens,
+    mediaResolution: MediaResolution.MEDIA_RESOLUTION_HIGH,
+    ...(input.signal ? { abortSignal: input.signal } : {}),
+  };
+  return {
+    model,
+    contents: [{ role: 'user', parts: input.parts.map(geminiPartOf) }] satisfies Content[],
+    config,
+  };
+}
+
+/**
+ * Runs a one-shot structured request. It streams (like `step`) rather than
+ * waiting for one response: a long answer then survives idle-connection
+ * limits, and a stream that breaks after its first usage report still says
+ * what it was billed for.
+ */
+export async function generateGeminiStructured(client: GoogleGenAI, model: string, input: StructuredRequest): Promise<StructuredResult> {
+  const parts: Part[] = [];
+  let usage: GenerateContentResponseUsageMetadata | undefined;
+  let finishReason: FinishReason | undefined;
+  let blocked = false;
+  let modelVersion = model;
+  try {
+    const stream = await client.models.generateContentStream(buildGeminiStructuredRequest(model, input));
+    for await (const chunk of stream) {
+      const candidate = chunk.candidates?.[0];
+      if (candidate?.content?.parts) parts.push(...candidate.content.parts);
+      finishReason = candidate?.finishReason ?? finishReason;
+      if (chunk.promptFeedback?.blockReason) blocked = true;
+      usage = chunk.usageMetadata ?? usage;
+      modelVersion = chunk.modelVersion ?? modelVersion;
+    }
+  } catch (error) {
+    if (usage && typeof error === 'object' && error !== null) {
+      throw withBilledUsage(error, { usage: normalizeGeminiUsage(usage), complete: false, model: modelVersion });
+    }
+    throw error;
+  }
+  return {
+    text: geminiVisibleText(parts),
+    model: modelVersion,
+    usage: normalizeGeminiUsage(usage),
+    refusal: blocked || (finishReason !== undefined && REFUSAL_REASONS.has(finishReason)),
+    truncated: finishReason === FinishReason.MAX_TOKENS,
+  };
 }
 
 function isAbort(error: unknown): boolean {
@@ -241,6 +343,8 @@ export function createGeminiProvider({ apiKey, model }: { apiKey: string; model:
   return {
     id: 'gemini',
     model,
+    imageMimeTypes: GEMINI_IMAGE_MIME_TYPES,
+    generateStructured: (input) => generateGeminiStructured(client, model, input),
     step,
     userContent: (body: AssistantUserMessageBody) =>
       buildUserTranscriptContent(body).map((block) => ({ text: (block as { text: string }).text })),

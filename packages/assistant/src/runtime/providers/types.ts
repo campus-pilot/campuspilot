@@ -97,8 +97,46 @@ export type ModelStepResult =
  */
 export type ModelFailureKind = 'rejected' | 'unavailable' | 'busy' | 'unknown';
 
+/** One part of a one-shot request's single user turn. */
+export type StructuredPart =
+  | { type: 'text'; text: string }
+  | { type: 'image'; mimeType: string; data: Uint8Array };
+
+/**
+ * A one-shot request for JSON that matches a schema, with images in the
+ * input (question paper generation). One request, no tools, no streaming to a
+ * UI, no transcript: the caller owns everything around it.
+ */
+export type StructuredRequest = {
+  system: string;
+  /** The user turn, in order. */
+  parts: readonly StructuredPart[];
+  /**
+   * The model-facing JSON Schema. `$defs` / `$ref` are used (non-recursive);
+   * adapters adapt it to what their API accepts, and the caller still
+   * validates the answer itself: the schema is advisory.
+   */
+  jsonSchema: Record<string, unknown>;
+  maxOutputTokens: number;
+  signal?: AbortSignal;
+};
+
+export type StructuredResult = {
+  /** The answer's text as returned (the JSON document, unparsed). */
+  text: string;
+  /** The model that actually answered. */
+  model: string;
+  usage: ModelUsage;
+  /** The provider declined to answer (safety or policy); `text` may be empty. */
+  refusal: boolean;
+  /** The answer stopped on the output-token limit, so `text` is cut off. */
+  truncated: boolean;
+};
+
 export interface ModelProvider {
   readonly id: ModelProviderId;
+  /** Media types this provider can read as image input (D46: never silently dropped). */
+  readonly imageMimeTypes: readonly string[];
   /**
    * The model this provider is configured to call now. A conversation stays
    * on its provider, not on a model: changing the configured model moves
@@ -106,6 +144,14 @@ export interface ModelProvider {
    */
   readonly model: string;
   step(input: ModelStepInput): Promise<ModelStepResult>;
+  /**
+   * One request for schema-shaped JSON (see {@link StructuredRequest}). Throws
+   * like `step`: an error whose billed usage, when the provider reported any,
+   * is attached with {@link withBilledUsage}, and which `failureKind` classifies.
+   * It runs on `model`: a caller that wants another model for this kind of
+   * request creates its own provider with it (see `question-paper-model.ts`).
+   */
+  generateStructured(input: StructuredRequest): Promise<StructuredResult>;
   /** A user message as transcript content. */
   userContent(body: AssistantUserMessageBody): unknown[];
   /** Partial text kept after a stop, as assistant transcript content. */

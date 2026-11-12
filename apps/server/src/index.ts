@@ -8,7 +8,9 @@ import { runMigrations } from '@campuspilot/db/migrate';
 import { env } from '@campuspilot/env/server';
 import { sweepAssistantOutbox } from '@campuspilot/assistant/dispatch';
 import { sweepDemoSchoolOutbox } from '@campuspilot/api/routers/system-admin/demo-school/demo-school.outbox';
+import { configureQuestionPaperModel } from '@campuspilot/api/workflows/question-paper/model';
 import { sweepQuestionPaperOutbox } from '@campuspilot/api/workflows/question-paper/outbox';
+import { createQuestionPaperModel } from '@campuspilot/assistant/question-paper-model';
 import { sweepDataMigrationOutbox } from '@campuspilot/api/data-migrations/data-migration.outbox';
 import { DATA_MIGRATIONS } from '@campuspilot/api/data-migrations/registry';
 import { sweepNotificationOutbox } from '@campuspilot/api/notifications/notification.outbox';
@@ -129,7 +131,20 @@ async function removeUnusedDynamicClients() {
   log.info({ deleted, cadetDeleted }, 'oauth.dcr-cleanup.ok');
 }
 
+/**
+ * Tells the API which model generates question papers (`QUESTION_PAPER_*`,
+ * else the assistant's). The API only needs it to refuse a generation up front
+ * and to check page formats; the worker runs the job with its own copy.
+ */
+function configureQuestionPaperGeneration() {
+  const model = createQuestionPaperModel();
+  configureQuestionPaperModel(model);
+  if (model) log.info({ provider: model.provider, model: model.model }, 'question-paper.model');
+  else log.warn('question-paper.not-configured');
+}
+
 async function main() {
+  configureQuestionPaperGeneration();
   // Every later phase and request expects the current schema.
   await phase('db.migrate', () => runMigrations());
   await phase('mcp.catalog', async () => {

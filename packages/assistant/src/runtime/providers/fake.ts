@@ -11,6 +11,8 @@ import type {
   ModelToolResult,
   ModelToolUse,
   ModelUsage,
+  StructuredRequest,
+  StructuredResult,
   TranscriptEntry,
 } from './types';
 
@@ -70,7 +72,32 @@ export type FakeModelCall = {
   transcript: TranscriptEntry[];
 };
 
+/**
+ * One scripted `generateStructured`: a result, an `Error` to throw (a
+ * `FakeModelError` to choose its failure kind) or a function of the request
+ * and the 0-based call index.
+ */
+export type FakeStructuredStep =
+  | StructuredResult
+  | Error
+  | ((input: StructuredRequest, call: number) => StructuredResult | Promise<StructuredResult>);
+
+/** A finished structured answer, as the fake's script holds it. */
+export function fakeStructuredResult({
+  text = '{}',
+  model = FAKE_REPORTED_MODEL,
+  usage = FAKE_USAGE,
+  refusal = false,
+  truncated = false,
+}: Partial<StructuredResult> = {}): StructuredResult {
+  return { text, model, usage, refusal, truncated };
+}
+
 export type FakeModelProvider = ModelProvider & {
+  /** Every `generateStructured` request so far, in order, including calls that threw. */
+  readonly structuredCalls: readonly { input: StructuredRequest; model: string }[];
+  /** Appends structured steps to their own script. */
+  enqueueStructured: (...steps: FakeStructuredStep[]) => void;
   /** Every `step` call so far, in order, including calls that threw. */
   readonly calls: readonly FakeModelCall[];
   /** Appends steps to the script. */
@@ -131,6 +158,7 @@ export function createFakeProvider({
   model = 'fake-configured-model',
   script = [],
   whenExhausted,
+  imageMimeTypes = ['image/jpeg', 'image/png', 'image/webp'],
 }: {
   /** A real provider id: conversations and runs store it in an enum column. */
   id?: ModelProviderId;
@@ -143,14 +171,32 @@ export function createFakeProvider({
    * makes more model requests than it scripted fails instead of hanging.
    */
   whenExhausted?: FakeModelStep;
+  /** Image types the fake "can read" (`ModelProvider.imageMimeTypes`). */
+  imageMimeTypes?: readonly string[];
 } = {}): FakeModelProvider {
   const queue = [...script];
   const calls: FakeModelCall[] = [];
+  const structuredQueue: FakeStructuredStep[] = [];
+  const structuredCalls: { input: StructuredRequest; model: string }[] = [];
 
   return {
     id,
     model,
+    imageMimeTypes,
     calls,
+    structuredCalls,
+    enqueueStructured: (...steps) => void structuredQueue.push(...steps),
+
+    async generateStructured(input) {
+      const call = structuredCalls.length;
+      structuredCalls.push({ input, model });
+      const next = structuredQueue.shift();
+      if (next === undefined) {
+        throw new Error(`The fake model provider's structured script is exhausted (call ${call + 1}).`);
+      }
+      if (next instanceof Error) throw next;
+      return typeof next === 'function' ? next(input, call) : next;
+    },
     enqueue: (...steps) => void queue.push(...steps),
     remaining: () => queue.length,
 

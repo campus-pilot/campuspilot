@@ -73,6 +73,72 @@ function requireCompleteProviders(value: Record<string, unknown>, context: z.Ref
   }
 }
 
+/**
+ * A question paper provider needs a way to be called: an explicit
+ * `QUESTION_PAPER_PROVIDER` must have its key, and a model from either
+ * `QUESTION_PAPER_MODEL` or its own `<P>_MODEL`.
+ */
+function requireUsableQuestionPaperProvider(value: Record<string, unknown>, context: z.RefinementCtx) {
+  const provider = value.QUESTION_PAPER_PROVIDER;
+  if (provider !== 'anthropic' && provider !== 'gemini') return;
+  const prefix = provider === 'anthropic' ? 'ANTHROPIC' : 'GEMINI';
+  if (value[`${prefix}_API_KEY`] === undefined) {
+    context.addIssue({
+      code: 'custom',
+      path: ['QUESTION_PAPER_PROVIDER'],
+      message: `QUESTION_PAPER_PROVIDER=${provider} needs ${prefix}_API_KEY.`,
+    });
+  }
+  if (value.QUESTION_PAPER_MODEL === undefined && value[`${prefix}_MODEL`] === undefined) {
+    context.addIssue({
+      code: 'custom',
+      path: ['QUESTION_PAPER_PROVIDER'],
+      message: `QUESTION_PAPER_PROVIDER=${provider} needs QUESTION_PAPER_MODEL or ${prefix}_MODEL.`,
+    });
+  }
+}
+
+/** The four question paper price settings, in the order errors name them. */
+const QUESTION_PAPER_PRICE_NAMES = [
+  'QUESTION_PAPER_PRICE_INPUT_USD_PER_MTOK',
+  'QUESTION_PAPER_PRICE_OUTPUT_USD_PER_MTOK',
+  'QUESTION_PAPER_PRICE_CACHE_READ_USD_PER_MTOK',
+  'QUESTION_PAPER_PRICE_CACHE_WRITE_USD_PER_MTOK',
+] as const;
+
+/**
+ * Prices belong to a model. A question paper model different from the
+ * provider's own therefore brings all four prices, and without that model the
+ * prices must not be set (the provider's own are used): a model never
+ * silently inherits another model's prices.
+ */
+function requireQuestionPaperPricesWithModel(value: Record<string, unknown>, context: z.RefinementCtx) {
+  const modelSet = value.QUESTION_PAPER_MODEL !== undefined;
+  for (const name of QUESTION_PAPER_PRICE_NAMES) {
+    const priceSet = value[name] !== undefined;
+    if (modelSet && !priceSet) {
+      context.addIssue({
+        code: 'custom',
+        path: [name],
+        message: `${name} is required because QUESTION_PAPER_MODEL is set: a model needs all four prices.`,
+      });
+    } else if (!modelSet && priceSet) {
+      context.addIssue({
+        code: 'custom',
+        path: [name],
+        message: `${name} is set without QUESTION_PAPER_MODEL. Prices belong to a model; unset it to use the provider's own prices.`,
+      });
+    }
+  }
+}
+
+/** Every cross-field rule of the assistant environment. */
+function refineAssistantEnv(value: Record<string, unknown>, context: z.RefinementCtx) {
+  requireCompleteProviders(value, context);
+  requireQuestionPaperPricesWithModel(value, context);
+  requireUsableQuestionPaperProvider(value, context);
+}
+
 /** The assistant settings' shape, without validation (see `assistantEnvSchema`). */
 const assistantEnvShape = {
     NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
@@ -98,22 +164,39 @@ const assistantEnvShape = {
      * and never meant for real users, who would see internals.
      */
     ASSISTANT_DIAGNOSTICS: z.stringbool().default(false),
+    /**
+     * Question paper generation (the manual "Generate with AI" job, run by
+     * `apps/worker`). It falls back to the assistant's provider and model, so
+     * a deployment that configures only the assistant can generate papers.
+     * `QUESTION_PAPER_PROVIDER` defaults to `ASSISTANT_PROVIDER`;
+     * `QUESTION_PAPER_MODEL` defaults to that provider's `<P>_MODEL`. When a
+     * model is set here, all four prices are required (and are used); when it
+     * is not, they must be unset and the provider's own prices apply.
+     */
+    QUESTION_PAPER_PROVIDER: z.enum(['anthropic', 'gemini']).optional(),
+    QUESTION_PAPER_MODEL: z.string().min(1).optional(),
+    QUESTION_PAPER_PRICE_INPUT_USD_PER_MTOK: usdPerMillionTokens,
+    QUESTION_PAPER_PRICE_OUTPUT_USD_PER_MTOK: usdPerMillionTokens,
+    QUESTION_PAPER_PRICE_CACHE_READ_USD_PER_MTOK: usdPerMillionTokens,
+    QUESTION_PAPER_PRICE_CACHE_WRITE_USD_PER_MTOK: usdPerMillionTokens,
+    /** Output token limit of one generation request; a paper that does not fit fails as too long. */
+    QUESTION_PAPER_MAX_OUTPUT_TOKENS: z.coerce.number().int().min(1_000).max(128_000).default(32_000),
+    /**
+     * How long a running generation job may take before the API's sweep fails
+     * it as `not_finished`. Also read by the API server, which runs the sweep.
+     */
+    QUESTION_PAPER_JOB_TIMEOUT_MINUTES: z.coerce.number().int().min(1).max(240).default(20),
 };
 
 /**
  * The full assistant environment schema, with the all-or-nothing rule per
  * provider. Exported so the rule is testable without a process environment.
  */
-export const assistantEnvSchema = z.object(assistantEnvShape).superRefine((value, context) => {
-  requireCompleteProviders(value, context);
-});
+export const assistantEnvSchema = z.object(assistantEnvShape).superRefine(refineAssistantEnv);
 
 export const env = createEnv({
   server: assistantEnvShape,
-  createFinalSchema: (shape) =>
-    z.object(shape).superRefine((value, context) => {
-      requireCompleteProviders(value, context);
-    }),
+  createFinalSchema: (shape) => z.object(shape).superRefine(refineAssistantEnv),
   runtimeEnv: process.env,
   skipValidation: !!process.env.SKIP_ENV_VALIDATION,
   emptyStringAsUndefined: true,

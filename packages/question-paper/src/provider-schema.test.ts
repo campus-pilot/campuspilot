@@ -6,8 +6,6 @@ import { questionPaperProviderJsonSchema } from "./provider-schema";
 import { questionPaper } from "./schema";
 
 const BOUND_KEYWORDS = [
-  "$ref",
-  "$defs",
   "multipleOf",
   "pattern",
   "minimum",
@@ -33,9 +31,44 @@ function keysOf(value: unknown, into = new Set<string>()): Set<string> {
 describe("questionPaperProviderJsonSchema", () => {
   const schema = questionPaperProviderJsonSchema();
 
-  it("has no recursion and none of the bound keywords providers reject", () => {
+  it("has none of the bound keywords providers reject", () => {
     const keys = keysOf(schema);
     for (const keyword of BOUND_KEYWORDS) expect(keys.has(keyword)).toBe(false);
+  });
+
+  it("shares sub-schemas through $defs, which keeps it small", () => {
+    expect(Object.keys(schema.$defs as object).length).toBeGreaterThan(5);
+    expect(JSON.stringify(schema).length).toBeLessThan(15_000);
+  });
+
+  it("has only local references, none beside sibling keywords, and no reference cycle", () => {
+    const defs = schema.$defs as Record<string, unknown>;
+    const referencesOf = (value: unknown, found: string[] = []): string[] => {
+      if (Array.isArray(value)) value.forEach((item) => referencesOf(item, found));
+      else if (value && typeof value === "object") {
+        const node = value as Record<string, unknown>;
+        if (typeof node.$ref === "string") {
+          found.push(node.$ref);
+          expect(Object.keys(node)).toEqual(["$ref"]);
+        }
+        Object.values(node).forEach((item) => referencesOf(item, found));
+      }
+      return found;
+    };
+    const graph = new Map(Object.entries(defs).map(([name, def]) => [`#/$defs/${name}`, referencesOf(def)]));
+    for (const reference of [...referencesOf(schema), ...[...graph.values()].flat()]) {
+      expect(graph.has(reference)).toBe(true);
+    }
+    const state = new Map<string, "visiting" | "done">();
+    const visit = (name: string) => {
+      state.set(name, "visiting");
+      for (const next of graph.get(name) ?? []) {
+        expect(state.get(next)).not.toBe("visiting");
+        if (!state.has(next)) visit(next);
+      }
+      state.set(name, "done");
+    };
+    for (const name of graph.keys()) if (!state.has(name)) visit(name);
   });
 
   it("keeps strictness and descriptions-free structure for the model", () => {

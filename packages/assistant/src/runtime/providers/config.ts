@@ -75,3 +75,40 @@ export function missingProviderReason(id: ModelProviderId): string {
   const prefix = ENV_PREFIX[id];
   return `The assistant is not configured: set ${prefix}_API_KEY, ${prefix}_MODEL and the four ${prefix}_PRICE_*_USD_PER_MTOK settings.`;
 }
+
+/**
+ * What question paper generation calls: a provider, its key, the model and the
+ * prices that model is billed at.
+ */
+export type QuestionPaperSettings = ProviderSettings;
+
+/**
+ * The settings of question paper generation from an environment, or null when
+ * it cannot be called. The provider is `QUESTION_PAPER_PROVIDER`, else
+ * `defaultProviderId` (the assistant's). With `QUESTION_PAPER_MODEL` set the
+ * model and its four `QUESTION_PAPER_PRICE_*` prices come from the question
+ * paper settings (the env schema requires all four with a model, and refuses
+ * them without one); otherwise the provider's own model and prices are used.
+ * Only the API key is always the provider's own: a model override never
+ * brings a different key. A model never inherits another model's prices.
+ */
+export function readQuestionPaperSettings(
+  source: Readonly<Record<string, string | undefined>>,
+  defaultProviderId: ModelProviderId,
+): QuestionPaperSettings | null {
+  const providerId = (source.QUESTION_PAPER_PROVIDER as ModelProviderId | undefined) ?? defaultProviderId;
+  const model = source.QUESTION_PAPER_MODEL;
+  if (!model) return readProviderSettings(source, providerId);
+  const apiKey = source[`${ENV_PREFIX[providerId]}_API_KEY`];
+  const inputUsdPerMtok = source.QUESTION_PAPER_PRICE_INPUT_USD_PER_MTOK;
+  const outputUsdPerMtok = source.QUESTION_PAPER_PRICE_OUTPUT_USD_PER_MTOK;
+  const cacheReadUsdPerMtok = source.QUESTION_PAPER_PRICE_CACHE_READ_USD_PER_MTOK;
+  const cacheWriteUsdPerMtok = source.QUESTION_PAPER_PRICE_CACHE_WRITE_USD_PER_MTOK;
+  if (!apiKey || !inputUsdPerMtok || !outputUsdPerMtok || !cacheReadUsdPerMtok || !cacheWriteUsdPerMtok) return null;
+  return { id: providerId, apiKey, model, prices: { inputUsdPerMtok, outputUsdPerMtok, cacheReadUsdPerMtok, cacheWriteUsdPerMtok } };
+}
+
+/** The question paper settings of this deployment, or null when generation is not configured. */
+export function questionPaperSettings(): QuestionPaperSettings | null {
+  return readQuestionPaperSettings(env as unknown as Readonly<Record<string, string | undefined>>, selectedProviderId());
+}

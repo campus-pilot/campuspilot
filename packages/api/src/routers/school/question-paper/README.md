@@ -98,7 +98,15 @@ returns; the hand-over to the worker (`sendQuestionPaperStart`, signed with
 30 s sweep in `apps/server` (`sweepQuestionPaperOutbox`) re-sends what Restate did not
 accept, and fails jobs that can no longer progress (`dispatch_failed` after 10
 minutes unaccepted, `not_started` after 5 minutes accepted, `not_finished` after
-`QUESTION_PAPER_JOB_TIMEOUT_MINUTES` running). The worker side is phase P2.
+`QUESTION_PAPER_JOB_TIMEOUT_MINUTES` running, an env setting, default 20).
+
+The worker side lives in `workflows/question-paper/`: `control-service.ts`
+(`QuestionPaperControl.startGeneration`, signed), `workflow.ts` (the Restate workflow),
+`generation.ts` (the steps, shared with the integration tests), `prompt.ts` (the job's own
+instructions, never shown to chat), `cost.ts` (`assistant_model_request` rows with
+`source = 'question_paper'`). A job ends `succeeded` (a version saved through
+`saveQuestionPaperVersion` with source `ai_job`) or `failed` with an `error_code` from
+`QUESTION_PAPER_JOB_FAILURES` and its safe `error_message`; the page polls the job row.
 
 ## Deleting
 

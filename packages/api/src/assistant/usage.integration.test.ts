@@ -54,6 +54,7 @@ async function request(options: {
     })
     .returning();
   await db.insert(assistantModelRequestTable).values({
+    source: 'chat',
     runId: run!.id,
     schoolId: options.schoolId,
     userId: options.userId,
@@ -124,6 +125,36 @@ describe('school.getAssistantUsage', () => {
     expect(usage.total).toMatchObject({ requests: 4, incompleteRequests: 1, inputTokens: 3 * 2_147_483_647 });
     expect(usage.days[0]).toMatchObject({ inputTokens: 6_442_450_941, incompleteRequests: 1 });
     expect(usage.models[0]).toMatchObject({ inputTokens: 6_442_450_941, incompleteRequests: 1 });
+  });
+
+  it('breaks the spend down by feature, listing every feature, and counts question paper requests in the total', async () => {
+    const school = await createTestSchool();
+    await enable(school.id);
+    const principal = await createSchoolStaffSession(school.id, [{ role: 'principal' }]);
+    const userId = principal.user.id;
+    const range = { from: '2031-09-01', to: '2031-09-01' };
+    const read = () => createTestClient(principal.session).school.getAssistantUsage({ schoolId: school.id, ...range, refresh: true });
+
+    await request({ schoolId: school.id, userId, at: '2031-09-01T06:00:00Z', costUsd: '0.5', inputTokens: 100 });
+    expect((await read()).sources).toEqual([
+      expect.objectContaining({ source: 'chat', requests: 1, costUsd: '0.5', inputTokens: 100 }),
+      expect.objectContaining({ source: 'question_paper', requests: 0, costUsd: '0', inputTokens: 0 }),
+    ]);
+
+    // A generation job has no run; its requests carry the job id and the source.
+    const prices = { inputUsdPerMtok: '2', outputUsdPerMtok: '10', cacheReadUsdPerMtok: '0.2', cacheWriteUsdPerMtok: '2.5' };
+    await db.insert(assistantModelRequestTable).values({
+      source: 'question_paper', questionPaperJobId: 'qpj_abcdefghijklmnopqrstu', schoolId: school.id, userId, requestKey: 'qp:usage-test:model:1',
+      provider: 'anthropic', requestedModel: 'claude-x', answeredModel: 'claude-x', usageComplete: true,
+      inputTokens: 2000, outputTokens: 1000, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, ...prices, costUsd: '0.014', createdAt: new Date('2031-09-01T07:00:00Z'),
+    });
+    const usage = await read();
+    expect(usage.total).toMatchObject({ requests: 2, costUsd: '0.514' });
+    expect(usage.sources).toEqual([
+      expect.objectContaining({ source: 'chat', requests: 1, costUsd: '0.5' }),
+      expect.objectContaining({ source: 'question_paper', requests: 1, costUsd: '0.014', inputTokens: 2000, outputTokens: 1000 }),
+    ]);
+    expect(usage.models.map((model) => model.model).sort()).toEqual(['claude-x', 'gemini-3.8-flash']);
   });
 
   it('is cached for an hour: a request saved after the first read is not seen until a refresh', async () => {

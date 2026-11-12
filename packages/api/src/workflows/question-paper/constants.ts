@@ -21,5 +21,31 @@ export function questionPaperWorkflowKey(jobId: string, attempt: number): string
   return `${jobId}.${attempt}`;
 }
 
-/** How long a running job may take before the outbox sweep fails it as `not_finished`. */
-export const QUESTION_PAPER_JOB_TIMEOUT_MINUTES = 30;
+/**
+ * Every `error_code` a failed generation job can carry, with the safe text the
+ * user reads (`error_message`). The sweep writes the last three; the workflow
+ * writes the rest. `unsupported_page_format` and `page_unreadable` name the
+ * page in their message, so their text here is only the default.
+ */
+export const QUESTION_PAPER_JOB_FAILURES = {
+  limit_reached: 'This school has reached its AI limit for this month.',
+  feature_disabled: 'The AI assistant is switched off for this school.',
+  role_not_enabled: 'You cannot use the AI assistant in this school.',
+  unsupported_page_format: 'A page is in a format the AI model cannot read. Convert it to JPEG and upload it again.',
+  images_too_large: 'The pages are too large to send together. Remove some pages or upload smaller photos.',
+  page_unreadable: 'A page could not be read. Upload it again.',
+  model_rejected: 'The AI could not process these pages. Try fewer or clearer photos.',
+  provider_unavailable: 'AI generation is not available right now.',
+  model_busy: 'The AI service is busy. Try again in a few minutes.',
+  model_error: 'The AI service failed. Try again.',
+  invalid_output: 'The AI returned a paper that could not be used. Try again.',
+  output_too_long: 'This paper is too long to read in one go.',
+  template_missing: 'Choose a question paper template first.',
+  paper_locked: 'This paper can no longer be changed.',
+  pdf_failed: 'The paper was read but the PDF could not be created. Try again.',
+  internal_error: 'AI generation failed unexpectedly. Try again.',
+  not_started: 'AI generation did not start. Try again.',
+  not_finished: 'AI generation took too long. Try again.',
+  dispatch_failed: 'AI generation could not be started. Try again.',
+} as const;
+export type QuestionPaperJobErrorCode = keyof typeof QUESTION_PAPER_JOB_FAILURES;

@@ -3,9 +3,11 @@
 import {
   formatSpend,
   groupUsage,
+  sourceRows,
   UsageChart,
   UsageFreshness,
   UsageRangeControls,
+  UsageSourcesTable,
   UsageTable,
   useUsageRangeForm,
   useUsageSelection,
@@ -55,10 +57,12 @@ export function AssistantUsageTab({ schoolId }: { schoolId: string }) {
           ) : null}
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          {periods && selection ? (
+          {periods && selection && query.data ? (
             <>
               <UsageChart periods={periods} inrPerUsd={null} label={`AI assistant spend per ${selection.grouping}`} />
               <UsageTable periods={periods} inrPerUsd={null} periodLabel={selection.grouping === 'day' ? 'Day' : 'Month'} />
+              <h3 className="text-sm font-medium">By feature</h3>
+              <UsageSourcesTable rows={sourceRows(query.data.sources)} inrPerUsd={null} />
             </>
           ) : query.isError ? (
             <p className="text-sm text-destructive">{query.error.message}</p>

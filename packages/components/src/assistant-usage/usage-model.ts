@@ -1,5 +1,5 @@
 import { formatUsdText, sumUsd } from '@campuspilot/assistant-contract/money';
-import { addTokenCounts, type TokenCount } from '@campuspilot/assistant-contract/usage';
+import { addTokenCounts, ASSISTANT_USAGE_SOURCE_LABELS, type AssistantUsageSource, type TokenCount } from '@campuspilot/assistant-contract/usage';
 
 /**
  * Pure helpers of the assistant usage views (admin AI pages, the school's
@@ -18,6 +18,12 @@ export type UsageDay = {
   cacheCreationInputTokens: TokenCount;
   costUsd: string;
 };
+
+/** One feature's spend over the range, as the usage procedures return it (`sources`). */
+export type UsageSource = Omit<UsageDay, 'date'> & { source: AssistantUsageSource };
+
+/** One row of the "By feature" table. */
+export type UsageSourceRow = { source: AssistantUsageSource; label: string; requests: number; tokens: TokenCount; costUsd: string };
 
 export type UsageGrouping = 'day' | 'month';
 
@@ -80,7 +86,7 @@ export function rangeForPreset(preset: UsageRangePreset, now: Date): { from: str
 const dayLabel = new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', timeZone: 'UTC' });
 const monthLabel = new Intl.DateTimeFormat('en-IN', { month: 'short', year: 'numeric', timeZone: 'UTC' });
 
-const tokensOf = (day: UsageDay) =>
+const tokensOf = (day: Omit<UsageDay, 'date'>) =>
   addTokenCounts(day.inputTokens, day.outputTokens, day.cacheReadInputTokens, day.cacheCreationInputTokens);
 
 /** Days as they are, or added up per calendar month (exact USD sums). */
@@ -105,6 +111,17 @@ export function groupUsage(days: readonly UsageDay[], grouping: UsageGrouping): 
     requests: monthDays.reduce((sum, day) => sum + day.requests, 0),
     tokens: addTokenCounts(...monthDays.map(tokensOf)),
     costUsd: sumUsd(monthDays.map((day) => day.costUsd)),
+  }));
+}
+
+/** The "By feature" rows, in the order the API lists the features (labels from the contract). */
+export function sourceRows(sources: readonly UsageSource[]): UsageSourceRow[] {
+  return sources.map((source) => ({
+    source: source.source,
+    label: ASSISTANT_USAGE_SOURCE_LABELS[source.source],
+    requests: source.requests,
+    tokens: tokensOf(source),
+    costUsd: source.costUsd,
   }));
 }
 

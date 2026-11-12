@@ -189,6 +189,47 @@ million tokens, `<P>_PRICE_INPUT_USD_PER_MTOK`, `_OUTPUT_`, `_CACHE_READ_`,
 `_CACHE_WRITE_`. A provider is configured only when all six are set; setting
 some of them refuses to start. There is no price list in code.
 
+### One-shot structured requests (question papers)
+
+Besides the agent loop, a provider can make one **structured request**
+(`ModelProvider.generateStructured`): one user turn of text and image parts, a
+JSON Schema, no tools and no transcript, answered with the JSON text, the
+answering model, normalised usage and two flags, `refusal` and `truncated`
+(stopped on the output limit). Question paper generation (the "Generate with
+AI" job, `docs/question-papers.md`) is its only caller. It reaches it through
+`createQuestionPaperModel()` (`packages/assistant/src/question-paper-model.ts`,
+outside `src/runtime`), which the API process and the worker call at boot and
+pass to `configureQuestionPaperModel`; the API package cannot import this one,
+so the job sees only the structural `QuestionPaperModel`
+(`packages/api/src/workflows/question-paper/model.ts`). The turn loop is
+untouched, so `boundary.test.ts` still holds.
+
+| | Anthropic | Gemini |
+| --- | --- | --- |
+| Images read | JPEG, PNG, WebP, GIF (**not HEIC**) | JPEG, PNG, WebP, HEIC, HEIF |
+| Request | `beta.messages.stream`, `output_config.format = {type:'json_schema', schema}`, effort `medium`, no caching (pages differ per job) | `models.generateContentStream`, `responseMimeType: application/json`, `responseJsonSchema`, `mediaResolution: HIGH` (streamed so a long answer survives idle limits and a broken stream still reports usage) |
+| Schema | `$defs`/`$ref` supported (the SDK's own transform keeps them) | `$defs`/`$ref` supported; no `const`, so the adapter turns it into a one-value `enum` (`toGeminiResponseSchema`) |
+| Truncated | `stop_reason = max_tokens` | `finishReason = MAX_TOKENS` |
+| Refused | `stop_reason = refusal` | prompt block, or a safety/image-safety finish reason |
+
+The model-facing JSON Schema of a paper is sent with `$defs`/`$ref` (about
+7 KB; inlined it is 77 KB). A page the active provider cannot read (HEIC on
+Anthropic) fails the job before any request, naming the page (decision D46);
+pages are never dropped silently.
+
+**Settings.** Question paper generation uses `QUESTION_PAPER_PROVIDER`
+(default `ASSISTANT_PROVIDER`) and `QUESTION_PAPER_MODEL` (default the
+provider's `<P>_MODEL`). The provider's API key is always its own. When
+`QUESTION_PAPER_MODEL` is set, all four `QUESTION_PAPER_PRICE_*_USD_PER_MTOK`
+are required and are the prices saved with its requests; when it is not set
+they must be unset and the provider's own prices apply, so a model never
+inherits another model's prices. An explicit `QUESTION_PAPER_PROVIDER` needs
+that provider's key and a model (its own or `QUESTION_PAPER_MODEL`), or
+startup is refused. `QUESTION_PAPER_MAX_OUTPUT_TOKENS` (default 32000) bounds
+one request; `QUESTION_PAPER_JOB_TIMEOUT_MINUTES` (default 20) is how long a
+running job may take before the API's sweep fails it (read by the API server).
+The worker needs the same `QUESTION_PAPER_*` values as the API server.
+
 ### Cost: saved, never recomputed
 
 After each answered model request, one transaction (the step's own) inserts an
@@ -215,8 +256,24 @@ bill.
 
 Saved costs stay linked to their run and conversation for good: users delete
 conversations softly (below), and `assistant_model_request.run_id` is
-`NOT NULL` with `ON DELETE NO ACTION`, so no run or conversation delete can
-drop or unlink a cost. Cost rows are removed only with their school
+`ON DELETE NO ACTION`, so no run or conversation delete can drop or unlink a
+cost.
+
+**Source.** `assistant_model_request.source` (`chat` | `question_paper`, no
+default: every writer states it) says what a request was for. A `chat` row
+has a `run_id` and no job; a `question_paper` row has no run and carries the
+generation job's id in `question_paper_job_id` (a plain value, deliberately no
+foreign key, so deleting a paper never drops or unlinks what it cost). A CHECK
+ties the three columns together. Question paper rows are written by
+`recordQuestionPaperRequest` (`packages/api/src/workflows/question-paper/cost.ts`)
+with the same cost expression, one row per model request (the transcription,
+the optional repair, and every failed attempt the provider billed), keyed
+`qp:<jobId>.<attempt>:model:<n>[:attempt:<k>]`. Because spend, the monthly
+limit and every usage read use this table only, question paper cost counts
+toward the school's AI limit and usage with no other change. The usage
+answers carry `sources` (every source listed, a quiet one with zeros); the
+usage tab and the admin AI pages show it as "By feature" (Assistant chat,
+Question paper). Cost rows are removed only with their school
 (`school_id` cascades on every assistant table; Postgres checks `NO ACTION` at
 the end of that one statement, when the cost rows are gone too) and by
 `purge_demo_school`, which deletes them first. Spend, limits and bills never

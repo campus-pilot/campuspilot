@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { formatInr, formatSpend, groupUsage, rangeForPreset, type UsageDay } from './usage-model';
+import { formatInr, formatSpend, groupUsage, rangeForPreset, sourceRows, type UsageDay } from './usage-model';
 
 const day = (date: string, costUsd: string, requests = 1): UsageDay => ({
   date,
@@ -44,5 +44,16 @@ describe('formatSpend', () => {
     expect(formatInr('12.5', '84.25')).toBe('₹1,053.13');
     expect(formatSpend('0.0005', '84')).toBe('$0.0005 (₹0.04)');
     expect(formatInr('100000', '84')).toBe('₹84,00,000.00');
+  });
+});
+
+describe('sourceRows', () => {
+  it('labels each feature and adds its token kinds', () => {
+    const { date: _date, ...chat } = day('2026-11-01', '0.5', 3);
+    const { date: _other, ...paper } = { ...day('2026-11-01', '0.25', 1), cacheReadInputTokens: 7 };
+    expect(sourceRows([{ source: 'chat', ...chat }, { source: 'question_paper', ...paper }])).toEqual([
+      { source: 'chat', label: 'Assistant chat', requests: 3, tokens: 15, costUsd: '0.5' },
+      { source: 'question_paper', label: 'Question paper', requests: 1, tokens: 22, costUsd: '0.25' },
+    ]);
   });
 });

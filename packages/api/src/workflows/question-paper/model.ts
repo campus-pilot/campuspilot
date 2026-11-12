@@ -10,14 +10,15 @@
  * deployment without a provider) has {@link getQuestionPaperModel} return
  * `undefined`, and starting a generation is refused with a clear message.
  *
- * The part, result and usage types below are the minimum the API side needs
- * to name. The worker side of the job (phase P2) owns their final shape; this
- * file is the contract it implements.
+ * The part, result and usage types below are structurally the assistant
+ * package's `StructuredPart` / `StructuredResult` / `ModelUsage`; its
+ * `createQuestionPaperModel()` (`packages/assistant/src/question-paper-model.ts`)
+ * adapts a configured provider to this interface.
  */
 
 export type StructuredPart =
-  | { kind: 'text'; text: string }
-  | { kind: 'image'; mimeType: string; bytes: Uint8Array };
+  | { type: 'text'; text: string }
+  | { type: 'image'; mimeType: string; data: Uint8Array };
 
 export type ModelUsage = {
   inputTokens: number;
@@ -27,13 +28,13 @@ export type ModelUsage = {
 };
 
 export type StructuredResult = {
-  /** The model's JSON text. */
+  /** The model's JSON text, unparsed. */
   text: string;
   usage: ModelUsage;
-  /** Whether the provider reported every usage figure. */
-  usageComplete: boolean;
   /** The model that actually answered. */
   answeredModel: string;
+  /** The model declined to answer. */
+  refusal: boolean;
   /** The answer hit the output limit and is cut off. */
   truncated: boolean;
 };

@@ -1,8 +1,9 @@
 import { db as defaultDb, type DatabaseExecutor } from '@campuspilot/db';
 import { examQuestionPaperJobTable } from '@campuspilot/db/schema/exam-question-paper';
+import { env } from '@campuspilot/env/assistant';
 import { and, asc, eq, inArray, isNotNull, isNull, lt, sql } from 'drizzle-orm';
 
-import { QUESTION_PAPER_JOB_TIMEOUT_MINUTES } from './constants';
+import { QUESTION_PAPER_JOB_FAILURES } from './constants';
 import { log } from './log';
 import { sendQuestionPaperStart } from './restate';
 
@@ -27,14 +28,8 @@ export const QUESTION_PAPER_HANDOVER_DEADLINE_MS = 10 * 60 * 1000;
 /** Accepted by Restate but never started by the worker after this long fails with `not_started`. */
 export const QUESTION_PAPER_START_DEADLINE_MS = 5 * 60 * 1000;
 
-/** Machine codes this file writes; the rest of B4's list is written by the workflow. */
+/** Codes this file writes; the workflow writes the rest of `QUESTION_PAPER_JOB_FAILURES`. */
 type SweepErrorCode = 'dispatch_failed' | 'not_started' | 'not_finished';
-
-const MESSAGES: Record<SweepErrorCode, string> = {
-  dispatch_failed: 'AI generation could not be started. Try again.',
-  not_started: 'AI generation did not start. Try again.',
-  not_finished: 'AI generation took too long. Try again.',
-};
 
 /** Safe one-line description of a hand-over failure (no URLs or secrets). */
 function describeHandoverError(error: unknown) {
@@ -96,7 +91,7 @@ async function failJobs(db: DatabaseExecutor, ids: string[], code: SweepErrorCod
   if (ids.length === 0) return 0;
   const rows = await db
     .update(examQuestionPaperJobTable)
-    .set({ status: 'failed', errorCode: code, errorMessage: MESSAGES[code], completedAt: new Date() })
+    .set({ status: 'failed', errorCode: code, errorMessage: QUESTION_PAPER_JOB_FAILURES[code], completedAt: new Date() })
     .where(and(inArray(examQuestionPaperJobTable.id, ids), inArray(examQuestionPaperJobTable.status, from)))
     .returning({ id: examQuestionPaperJobTable.id });
   if (rows.length > 0) log.warn({ jobIds: rows.map((row) => row.id), code }, 'question-paper.job.swept');
@@ -145,7 +140,7 @@ async function failStale(db: DatabaseExecutor) {
     .where(
       and(
         eq(examQuestionPaperJobTable.status, 'running'),
-        lt(examQuestionPaperJobTable.startedAt, new Date(Date.now() - QUESTION_PAPER_JOB_TIMEOUT_MINUTES * 60 * 1000)),
+        lt(examQuestionPaperJobTable.startedAt, new Date(Date.now() - env.QUESTION_PAPER_JOB_TIMEOUT_MINUTES * 60 * 1000)),
       ),
     )
     .orderBy(asc(examQuestionPaperJobTable.startedAt))

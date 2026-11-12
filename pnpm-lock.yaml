@@ -584,6 +584,12 @@ importers:
       dotenv:
         specifier: 'catalog:'
         version: 17.4.2
+      katex:
+        specifier: 0.16.11
+        version: 0.16.11
+      sharp:
+        specifier: ^0.34.5
+        version: 0.34.5
     devDependencies:
       '@campuspilot/config':
         specifier: workspace:*

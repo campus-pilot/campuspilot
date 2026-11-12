@@ -4,7 +4,7 @@ import { eq } from 'drizzle-orm';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createQuestionPaperWorld, type QuestionPaperWorld } from '../../../test/question-paper';
-import { QUESTION_PAPER_JOB_TIMEOUT_MINUTES } from './constants';
+import { env } from '@campuspilot/env/assistant';
 import {
   dispatchQuestionPaperJob,
   QUESTION_PAPER_HANDOVER_DEADLINE_MS,
@@ -97,8 +97,8 @@ describe('question paper outbox', () => {
   });
 
   it('fails a running job that exceeded the timeout, and leaves finished jobs alone', async () => {
-    const hung = await job({ status: 'running', handedOverAt: minutesAgo(200), startedAt: minutesAgo(QUESTION_PAPER_JOB_TIMEOUT_MINUTES + 1), handoverAttempts: 1 });
-    const working = await job({ status: 'running', handedOverAt: minutesAgo(20), startedAt: minutesAgo(QUESTION_PAPER_JOB_TIMEOUT_MINUTES - 5), handoverAttempts: 1 });
+    const hung = await job({ status: 'running', handedOverAt: minutesAgo(200), startedAt: minutesAgo(env.QUESTION_PAPER_JOB_TIMEOUT_MINUTES + 1), handoverAttempts: 1 });
+    const working = await job({ status: 'running', handedOverAt: minutesAgo(20), startedAt: minutesAgo(env.QUESTION_PAPER_JOB_TIMEOUT_MINUTES - 5), handoverAttempts: 1 });
     const done = await job({ status: 'succeeded', completedAt: minutesAgo(500), startedAt: minutesAgo(501), handedOverAt: minutesAgo(502) });
     const failedEarlier = await job({ status: 'failed', errorCode: 'model_busy', errorMessage: 'busy', completedAt: minutesAgo(500), startedAt: minutesAgo(501), handedOverAt: minutesAgo(502) });
     const counts = await sweepQuestionPaperOutbox(db);

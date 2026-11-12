@@ -399,7 +399,7 @@ describe('question paper pages', () => {
         .values({ conversationId: conversation!.id, schoolId: limited.schoolId, userId: limited.people.manager.userId, clientRequestId: crypto.randomUUID(), surface: 'panel', sequence: 1 })
         .returning();
       await db.insert(assistantModelRequestTable).values({
-        runId: run!.id, schoolId: limited.schoolId, userId: limited.people.manager.userId, requestKey: `${run!.id}:model:0`, provider: 'gemini', requestedModel: 'm', answeredModel: 'm',
+        source: 'chat', runId: run!.id, schoolId: limited.schoolId, userId: limited.people.manager.userId, requestKey: `${run!.id}:model:0`, provider: 'gemini', requestedModel: 'm', answeredModel: 'm',
         usageComplete: true, inputTokens: 1, outputTokens: 1, cacheReadInputTokens: 0, cacheCreationInputTokens: 0,
         inputUsdPerMtok: '1', outputUsdPerMtok: '1', cacheReadUsdPerMtok: '0', cacheWriteUsdPerMtok: '0', costUsd: '0.05',
       });

@@ -13,12 +13,13 @@ export const QUESTION_PAPER_MAX_PAGE_BYTES = 15 * 1024 * 1024;
  */
 export const QUESTION_PAPER_PAPER_OUTPUT_CHARS = 80_000;
 /**
- * The same for `learn_question_paper_generation`: the model-facing JSON Schema
- * alone is 77 KB, so the whole guide payload is about 86 KB. It is a one-off
- * call per paper (and pruned from the context afterwards), so it gets room
- * for the whole payload rather than a schema without its examples.
+ * The same for `learn_question_paper_generation`: the guide, the model-facing
+ * JSON Schema (about 7 KB with `$defs`), the limits and two full examples are
+ * about 17 KB. It is a one-off call per paper (and pruned from the context
+ * afterwards), so it gets room for the whole payload rather than a schema
+ * without its examples.
  */
-export const QUESTION_PAPER_LEARN_OUTPUT_CHARS = 100_000;
+export const QUESTION_PAPER_LEARN_OUTPUT_CHARS = 40_000;
 
 const id = z.string().trim().min(1).max(100);
 
