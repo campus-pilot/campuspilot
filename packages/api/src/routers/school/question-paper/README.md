@@ -1,13 +1,13 @@
 # Question papers (backend)
 
 The canonical feature guide is `docs/question-papers.md` (product model, data model,
-JSON schema, renderer contract, the job, chat, extension checklist, verification).
+the HTML fragment and its sanitiser, renderer contract, the job, chat, extension checklist, verification).
 This README is the file map and the backend rules. Template and rendering rules:
 `docs/document-system.md`, "Question papers".
 
 A **paper** is one fact per `(session, exam, class, subject, mode)` of an exam. It has
 uploaded **pages** (photos), at most one in-flight generation **job**, immutable
-**versions** (the structured JSON of `@campuspilot/question-paper`, with a stored PDF
+**versions** (the sanitised HTML fragment a model wrote, with a stored PDF
 each) and **figures** (uploaded images printed inside a version).
 
 ## Files
@@ -19,9 +19,11 @@ each) and **figures** (uploaded images printed inside a version).
 | `question-paper.access.ts` | the AI assistant gate |
 | `question-paper.scope.ts` | what a paper key means today (plan, names, lifecycle) |
 | `question-paper.service.ts` | lists, pages, deletion, figures, queueing a generation |
-| `question-paper.version.service.ts` | validation, saving a version, previews, downloads |
+| `question-paper.version.service.ts` | validation (`checkQuestionPaperDraft`), saving a version, previews, downloads |
+| `question-paper.sanitize.ts` / `.css.ts` | the `question_paper_body` sanitiser profile (allowlists, NO ANIMATION, scoped CSS, caps) |
+| `question-paper.lean.ts` | keeps the validate tool's result small |
 | `question-paper.records.ts` | row helpers, the paper row lock |
-| `question-paper.body.ts` / `.math.ts` / `.render.ts` | JSON to HTML body, KaTeX, the document around it |
+| `question-paper.body.ts` / `.math.ts` / `.render.ts` | stored fragment to HTML body (sanitise again, figures, KaTeX), the document around it |
 | `question-paper.storage.ts` | object keys, uploads, best-effort deletes, presigned URLs |
 | `question-paper.slot.ts` / `.context.ts` | the body slot and the template context |
 | `question-paper.attachments.ts` | chat attachments used as figures (`asat_` ids), copied into the paper when saving |
@@ -78,13 +80,17 @@ never offered to MCP clients or the assistant (page photos, the AI job, previews
 downloads).
 
 `getQuestionPaper`, `validateQuestionPaperDraft` and `learn_question_paper_generation`
-declare `outputChars` in their MCP metadata (80,000 / 80,000 / 40,000) so the
-assistant does not cut a paper or the guide at the default 24,000 characters.
+declare `outputChars` in their MCP metadata so the assistant does not cut a paper or the
+guide at the default 24,000 characters: `getQuestionPaper` returns the whole fragment (`html`)
+and declares `QUESTION_PAPER_PAPER_OUTPUT_CHARS` = twice the fragment limit plus 40,000 (JSON
+escaping); validate never echoes the fragment, lists at most 40 problems and 40 removed-item
+lines (`leanLines`) and declares 40,000; learn declares 40,000. All are derived in
+`question-paper.dto.ts` from `QUESTION_PAPER_LIMITS`.
 
-A chat draft is not a database row: it is the input of a `validateQuestionPaperDraft`
+A chat draft is not a database row: it is the input (`html`) of a `validateQuestionPaperDraft`
 tool call in the conversation. `saveQuestionPaperVersion({ draftId })` is accepted only
 from the in-app assistant and finds the newest such call of *this conversation* (same
-school, same user, not deleted) whose canonical content hashes to the id.
+school, same user, not deleted) whose canonical html hashes to the id.
 
 ## Generation (API side)
 

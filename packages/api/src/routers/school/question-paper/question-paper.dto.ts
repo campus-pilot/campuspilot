@@ -7,12 +7,29 @@ export const QUESTION_PAPER_MAX_PAGES = 20;
 export const QUESTION_PAPER_MAX_PAGE_BYTES = 15 * 1024 * 1024;
 
 /**
- * How many characters of a result the assistant gives the model for a tool
- * that returns a whole paper (`getQuestionPaper`, `validateQuestionPaperDraft`;
- * the default 24,000 would cut a long paper). The stored result stays cut at
- * 4,000 either way.
+ * How many characters of `getQuestionPaper` the assistant gives the model
+ * (the default 24,000 would cut a long paper). The result carries the whole
+ * fragment (`html`, at most `fragmentChars`) as JSON text, where `"`, `\\` and
+ * line ends take two characters: twice the fragment is the ceiling for ordinary
+ * markup, plus 40,000 for the rest of the result (20 pages, up to 100 version
+ * summaries, the job). A fragment of mostly control characters (six characters
+ * each as JSON) could still exceed it; the tool then appends its own
+ * "Result truncated" line, so the model is told and never reads a cut paper as
+ * a whole one. The stored result stays cut at 4,000 characters either way.
  */
-export const QUESTION_PAPER_PAPER_OUTPUT_CHARS = 80_000;
+export const QUESTION_PAPER_PAPER_OUTPUT_CHARS = QUESTION_PAPER_LIMITS.fragmentChars * 2 + 40_000;
+/**
+ * The same for `validateQuestionPaperDraft`. It never echoes the fragment (the
+ * model has it, and `draftId` names it), so its size does not depend on the
+ * paper: at most {@link QUESTION_PAPER_VALIDATE_LISTED} problems and as many
+ * removed-item lines of {@link QUESTION_PAPER_VALIDATE_LINE_CHARS} characters
+ * each, which is well inside this.
+ */
+export const QUESTION_PAPER_VALIDATE_OUTPUT_CHARS = 40_000;
+/** The most problems (and removed-item lines) the validate tool lists; the rest is summed in one last line. */
+export const QUESTION_PAPER_VALIDATE_LISTED = 40;
+/** The longest single problem or removed-item line the validate tool lists. */
+export const QUESTION_PAPER_VALIDATE_LINE_CHARS = 400;
 /**
  * The same for `learn_question_paper_generation`: the guide, the limits and one
  * full example are about 12 KB. It is a one-off call per paper (and pruned from
@@ -251,6 +268,8 @@ export const deletePaperOutputSchema = z.object({ deleted: z.literal(true) });
 export const previewOutputSchema = z.object({
   html: z.string(),
   warnings: z.array(questionPaperWarningSchema),
+  /** Figures still drawn as a labelled box because no image was attached; the UI says where to add them. */
+  placeholderFigures: z.number().int(),
   templateName: z.string().nullable(),
 });
 export const previewDraftOutputSchema = previewOutputSchema.extend({

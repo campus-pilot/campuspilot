@@ -108,7 +108,8 @@ describe('question paper in the document system', () => {
 
       // A draft previews with the template selected now.
       const draft = await manager.previewQuestionPaperDraft({ ...k, html: ENGLISH_SCIENCE });
-      expect(draft).toMatchObject({ problems: [], templateName: 'Custom paper' });
+      expect(draft).toMatchObject({ problems: [], templateName: 'Custom paper', placeholderFigures: 1 });
+      expect((await manager.getQuestionPaperPreview({ ...k, versionNo: 2 })).placeholderFigures).toBe(1);
       expect(draft.html).toContain('CUSTOM FOOTER');
       const invalid = await manager.previewQuestionPaperDraft({ ...k, html: '<p></p>' });
       expect(invalid.html).toBe('');

@@ -18,7 +18,7 @@ import { QUESTION_PAPER_EXAMPLES } from '@campuspilot/question-paper/examples';
 import { getS3Client } from '@campuspilot/s3/client';
 import { and, eq } from 'drizzle-orm';
 import sharp from 'sharp';
-import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { expectFeatureDisabled } from '../../../../test/feature-flags';
 import { createHandlerContext, setTestSchoolFeature } from '../../../../test/fixtures';
@@ -35,6 +35,18 @@ import {
 } from './question-paper.service';
 import { resolvePaperScope } from './question-paper.scope';
 import { QUESTION_PAPER_MAX_PAGE_BYTES } from './question-paper.dto';
+
+/**
+ * The workflow engine is replaced by a sender that fails the way an unsigned
+ * deployment does, so this file behaves the same with or without a Restate (and
+ * a worker) running next to the database: no job here is ever handed over, and
+ * the tests below assert on the job rows, not on a live engine.
+ */
+vi.mock('../../../workflows/question-paper/restate', () => ({
+  sendQuestionPaperStart: vi.fn(async () => {
+    throw new Error('WORKER_CONTROL_SECRET is not set, so worker control calls cannot be signed.');
+  }),
+}));
 
 const HEVC_STILL = readFileSync(new URL('../../../files/__fixtures__/hevc-still.heic', import.meta.url));
 const ENGLISH_SCIENCE = QUESTION_PAPER_EXAMPLES['english-science'];
@@ -425,7 +437,7 @@ describe('question paper pages', () => {
       expect((await upload('manager', small, 'image/jpeg', 'y.jpg', k)).status).toBe(200);
     });
 
-    it('goes through the router and leaves the hand-over to the outbox when the workflow engine cannot be signed for', async () => {
+    it('goes through the router and leaves the hand-over to the outbox when the workflow engine cannot be reached', async () => {
       configureQuestionPaperModel(fakeModel(GEMINI_LIKE));
       const k = { subjectSlug: 'math', modeSlug: 'theory' };
       await upload('manager', await jpeg(8, 8), 'image/jpeg', 'a.jpg', k);
@@ -453,7 +465,7 @@ describe('question paper pages', () => {
       configureQuestionPaperModel(fakeModel(ANTHROPIC_LIKE));
       const refused = await reason(start('manager', k, paper.pageRevision));
       expect(refused).toMatchObject({ code: 'BAD_REQUEST', message: expect.stringMatching(/^Page \d+ \(IMG_004\d\.HEIC\) is in a format the AI model cannot read\. Convert it to JPEG and upload it again\.$/) });
-      expect(await db.select().from(examQuestionPaperJobTable).where(eq(examQuestionPaperJobTable.paperId, (await db.select().from(examQuestionPaperTable).where(eq(examQuestionPaperTable.modeSlug, 'practical')))[0]!.id))).toHaveLength(0);
+      expect(await db.select().from(examQuestionPaperJobTable).where(eq(examQuestionPaperJobTable.paperId, paper.paperId!))).toHaveLength(0);
 
       configureQuestionPaperModel(fakeModel(GEMINI_LIKE));
       expect((await start('manager', k, paper.pageRevision)).status).toBe('queued');

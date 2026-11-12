@@ -8,12 +8,18 @@ import { checkPermissions } from '../../../permissions/authorization';
 import { requireClassPermission } from '../../../permissions/class';
 import { requireSchoolPermission } from '../../../permissions/school';
 import * as dto from './question-paper.dto';
-import { QUESTION_PAPER_LEARN_OUTPUT_CHARS, QUESTION_PAPER_PAPER_OUTPUT_CHARS } from './question-paper.dto';
+import {
+  QUESTION_PAPER_LEARN_OUTPUT_CHARS,
+  QUESTION_PAPER_PAPER_OUTPUT_CHARS,
+  QUESTION_PAPER_VALIDATE_OUTPUT_CHARS,
+} from './question-paper.dto';
+import { leanLines } from './question-paper.lean';
 import { buildQuestionPaperContext } from './question-paper.context';
 import { requireQuestionPaperAssistantAccess } from './question-paper.access';
 import { findPaper, templateMissingError } from './question-paper.records';
 import { renderQuestionPaperBody, renderQuestionPaperDocument, selectedQuestionPaperTemplate } from './question-paper.render';
 import { resolvePaperScope } from './question-paper.scope';
+import { sanitizeQuestionPaperBody } from './question-paper.sanitize';
 import {
   deleteQuestionPaper,
   deleteQuestionPaperPage,
@@ -150,7 +156,7 @@ export const schoolQuestionPaperRouter = {
 
   validateQuestionPaperDraft: protectedProcedure
     .route(route('Validate a question paper draft', 'Call learn_question_paper_generation first. Check a draft question paper (an HTML fragment) without saving anything. Returns valid, the problems you must fix (a limit exceeded, a formula KaTeX rejects, an unusable figure id, an empty paper), stripped (what the sanitiser removed from your html, for example a style it does not accept) and a draftId. When valid the app shows the user a preview of the draft.'))
-    .meta(tool('read', { outputChars: QUESTION_PAPER_PAPER_OUTPUT_CHARS }))
+    .meta(tool('read', { outputChars: QUESTION_PAPER_VALIDATE_OUTPUT_CHARS }))
     .input(dto.validateDraftInputSchema)
     .use(readClass)
     .use(requireQuestionPaperAssistantAccess())
@@ -163,12 +169,12 @@ export const schoolQuestionPaperRouter = {
         const chatUserId = context.principal.authMethod === 'assistant' || context.principal.authMethod === 'session' ? userId(context) : undefined;
         const checked = await checkQuestionPaperDraft(context.db, scope, input.html, { chatUserId });
         if (!checked.ok) {
-          return { valid: false, problems: checked.problems, stripped: checked.stripped, draftId: null, placeholderFigures: 0, characters: input.html.length };
+          return { valid: false, problems: leanLines(checked.problems), stripped: leanLines(checked.stripped), draftId: null, placeholderFigures: 0, characters: input.html.length };
         }
         return {
           valid: true,
           problems: [],
-          stripped: checked.stripped,
+          stripped: leanLines(checked.stripped),
           draftId: checked.draftId,
           placeholderFigures: checked.placeholderFigures,
           characters: checked.characters,
@@ -314,7 +320,7 @@ export const schoolQuestionPaperRouter = {
         if (!paper) throw rpcError.notFound('Question paper');
         const version = await getVersion(context.db, paper.id, input.versionNo);
         const { html, templateName } = await renderStoredVersionHtml(context.db, scope, version);
-        return { html, warnings: version.warnings, templateName };
+        return { html, warnings: version.warnings, placeholderFigures: sanitizeQuestionPaperBody(version.contentHtml).stats.placeholders, templateName };
       } catch (error) {
         throw toRpcError(error);
       }
@@ -333,7 +339,7 @@ export const schoolQuestionPaperRouter = {
         // A person previewing a draft from their own chat may see their attachments as figures.
         const chatUserId = userId(context);
         const checked = await checkQuestionPaperDraft(context.db, scope, input.html, { chatUserId });
-        if (!checked.ok) return { html: '', problems: checked.problems, warnings: [], templateName: null };
+        if (!checked.ok) return { html: '', problems: checked.problems, warnings: [], placeholderFigures: 0, templateName: null };
         const template = await selectedQuestionPaperTemplate(context.db, input.schoolId);
         if (!template) throw templateMissingError();
         const paper = await findPaper(context.db, scope.key);
@@ -343,6 +349,7 @@ export const schoolQuestionPaperRouter = {
           html: renderQuestionPaperDocument({ template, context: rendered, body }),
           problems: [],
           warnings: checked.notices,
+          placeholderFigures: checked.placeholderFigures,
           templateName: template.name,
         };
       } catch (error) {
