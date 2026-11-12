@@ -76,6 +76,26 @@ describe('question_paper_body sanitiser: what a good paper keeps', () => {
   });
 });
 
+describe('question_paper_body sanitiser: structure outside the elements (m4)', () => {
+  it('reports a pseudo-tag that is not HTML, and keeps unwrapping a real HTML element silently as before', () => {
+    expect(clean('<thinking>I should output</thinking><p>Q1</p>').structure).toEqual({ foreignTags: ['thinking'], looseText: false });
+    expect(clean('<analysis>x</analysis><scratchpad>y</scratchpad><p>Q1</p>').structure.foreignTags).toEqual(['analysis', 'scratchpad']);
+    expect(clean('<section><center><p>Q1</p></center></section>').structure).toEqual({ foreignTags: [], looseText: false });
+    expect(clean('<html><body><p>Q1</p></body></html>').structure).toEqual({ foreignTags: [], looseText: false });
+  });
+
+  it('reports text between top-level elements, not whitespace and not text inside elements', () => {
+    expect(clean('<p>Q1</p>I hope this helps<p>Q2</p>').structure.looseText).toBe(true);
+    expect(clean('<p>Q1</p>\n\n  <p>Q2 <b>bold</b> text</p>\n').structure.looseText).toBe(false);
+  });
+
+  it('does not change what is stored: the text is still kept and the notice still says so', () => {
+    const result = clean('<thinking>x</thinking><p>Q1</p>');
+    expect(result.html).toBe('x<p>Q1</p>');
+    expect(result.stripped.join()).toContain('<thinking> is not allowed');
+  });
+});
+
 describe('question_paper_body sanitiser: hostile input', () => {
   it('removes script with its content', () => {
     const result = clean('<p>a</p><script>alert(1)</script><p>b</p>');
@@ -191,6 +211,32 @@ describe('question_paper_body sanitiser: hostile input', () => {
   it('keeps nesting bounded', () => {
     const result = clean(`${'<div>'.repeat(200)}deep${'</div>'.repeat(200)}`);
     expect((result.html.match(/<div>/g) ?? []).length).toBeLessThanOrEqual(40);
+  });
+
+  it('parses at most parseChars, and the worst unclosed nesting at that size does not hold the event loop for long (M3)', () => {
+    for (const unit of ['<svg><g>', '<b><i>', '<div>', '<ul>']) {
+      const input = unit.repeat(Math.ceil(L.parseChars / unit.length)).slice(0, L.parseChars);
+      const started = performance.now();
+      const result = clean(input);
+      // Measured 40-150 ms on the development machine; the bound leaves room for a loaded CI host and still catches the
+      // former 1,000,000 characters, which took 5-18 s.
+      expect(performance.now() - started).toBeLessThan(1_500);
+      expect(result.refused).toBe(false);
+    }
+    expect(clean('<b>'.repeat(Math.ceil((L.parseChars + 1) / 3))).refused).toBe(true);
+  });
+
+  it('cleans a 200,000 character run of spaces in a style attribute at once (M2)', () => {
+    const started = performance.now();
+    clean(`<p style="color:red${' '.repeat(200_000)}!x">x</p>`);
+    expect(performance.now() - started).toBeLessThan(500);
+  });
+
+  it('checks the length of an attribute value before any pattern runs over it (M2)', () => {
+    const started = performance.now();
+    const result = clean(`<svg width="${'1'.repeat(50_000)}!"><g height="${'1'.repeat(50_000)}"></g></svg>`);
+    expect(performance.now() - started).toBeLessThan(500);
+    expect(result.html).toBe('<svg><g></g></svg>');
   });
 
   it('refuses a huge input without parsing it', () => {

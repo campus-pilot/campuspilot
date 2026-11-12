@@ -36,7 +36,7 @@ export type TextResult = {
   /** The model declined to answer. */
   refusal: boolean;
   /** The answer hit the output limit and is cut off. */
-  truncated: boolean;
+  unfinished: boolean;
 };
 
 export interface QuestionPaperModel {

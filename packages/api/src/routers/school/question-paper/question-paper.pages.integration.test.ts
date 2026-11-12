@@ -572,6 +572,28 @@ describe('question paper pages', () => {
       }
     });
 
+    it('refuses to validate formulas and figures that each fit but together are too large to print (m3)', async () => {
+      const k = { classId: world.otherClassId, subjectSlug: 'math', modeSlug: 'practical' };
+      const manager = world.people.manager.client.school;
+      const scope = await resolvePaperScope(db, key(k));
+      const png = await sharp({ create: { width: 200, height: 100, channels: 3, background: '#4488cc' } }).png().toBuffer();
+      const figure = await addQuestionPaperFigure(db, { scope, userId: world.people.manager.userId, bytes: png });
+      try {
+        // 60 display matrices of 160 columns: about 5.1 MB of KaTeX HTML, under the body budget alone.
+        const tex = `\\begin{pmatrix}${Array.from({ length: 160 }, () => '1').join('&amp;')}\\end{pmatrix}`;
+        const formulas = Array.from({ length: 60 }, () => `<span data-math="${tex}" data-display="true"></span>`).join('');
+        const html = `<p>Q1 <img data-figure-id="${figure.id}" alt="A figure"></p>${formulas}`;
+        expect((await manager.validateQuestionPaperDraft({ ...key(k), html })).valid).toBe(true);
+        // 8.9 MB raw is 11.9 MB as base64: under the 12 MB figure cap, over the shared body budget with the formulas.
+        await db.update(examQuestionPaperFigureTable).set({ byteSize: 8_900_000 }).where(eq(examQuestionPaperFigureTable.id, figure.id));
+        const checked = await manager.validateQuestionPaperDraft({ ...key(k), html });
+        expect(checked.valid).toBe(false);
+        expect(checked.problems.join()).toContain('formulas and figure images of this paper are too large to print together');
+      } finally {
+        await deleteQuestionPaper(db, { scope });
+      }
+    });
+
     it('prints an uploaded figure of the paper, refuses another paper\'s, and deletes everything with the paper', async () => {
       const k = { classId: world.otherClassId, subjectSlug: 'math', modeSlug: 'theory' };
       const manager = world.people.manager.client.school;

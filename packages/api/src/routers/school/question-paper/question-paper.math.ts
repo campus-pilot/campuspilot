@@ -97,9 +97,12 @@ function unescapeAttribute(value: string): string {
 
 export type MathSpan = { start: number; end: number; tex: string; display: boolean };
 
-const OPEN_SPAN = /<span\b([^>]*)>/g;
-const SPAN_TAG = /<span\b[^>]*>|<\/span>/g;
-const ATTRIBUTE = /([a-z][a-z-]*)="([^"]*)"/g;
+// A tag never contains `<` or `>` in sanitiser output (attribute values escape both), so `[^<>]*` reads the same tags as
+// `[^>]*` there. It matters on any other input: an unclosed `<span ` repeated would make every candidate scan to the end of the
+// text (quadratic), while here a scan stops at the next `<`. The lookbehind does the same for attribute names.
+const OPEN_SPAN = /<span\b([^<>]*)>/g;
+const SPAN_TAG = /<span\b[^<>]*>|<\/span>/g;
+const ATTRIBUTE = /(?<![a-z-])([a-z][a-z-]*)="([^"]*)"/g;
 
 /**
  * The formula spans of sanitised markup, outermost first, in document order.

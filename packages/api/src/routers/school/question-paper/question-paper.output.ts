@@ -29,8 +29,14 @@ import { cleanDeclarations, cleanStyleSheet, StripReport } from './question-pape
 /** Elements written without content, as `<br />`. */
 const VOID = new Set(['br', 'hr', 'img', 'col']);
 
-const TAG = /<(\/?)([a-z][a-z0-9]*)((?:\s+[a-z][a-z0-9:_-]*(?:="[^"<>]*")?)*)\s*(\/?)>/y;
-const ATTRIBUTE = /\s+([a-z][a-z0-9:_-]*)(?:="([^"]*)")?/y;
+/**
+ * Separators are the five ASCII whitespace characters of the HTML tokenizer (space, tab, line feed, form feed, carriage
+ * return) and nothing else. JS `\s` also matches U+000B, U+00A0, U+3000, U+FEFF and U+2028, which the tokenizer reads as
+ * part of a name, so a tag that looked like `<col dir="x">` to this check could be a differently named element to the browser.
+ */
+const WS = '[ \\t\\n\\f\\r]';
+const TAG = new RegExp(`<(/?)([a-z][a-z0-9]*)((?:${WS}+[a-z][a-z0-9:_-]*(?:="[^"<>]*")?)*)${WS}*(/?)>`, 'y');
+const ATTRIBUTE = new RegExp(`${WS}+([a-z][a-z0-9:_-]*)(?:="([^"]*)")?`, 'y');
 const OUT_OF_FLOW = /position\s*:\s*(?:fixed|absolute|sticky)/i;
 const STYLE_TEXT = /^[^<&\\\u0000]*$/;
 

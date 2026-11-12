@@ -146,13 +146,28 @@ const MAX_GRID_TOKENS = 40;
 const VALUE_CHARS = /^[A-Za-z0-9 #.,%()\-/'"!_]*$/;
 const FORBIDDEN_IN_VALUE = /url\s*\(|image-set|image\s*\(|src\s*\(|element\s*\(|expression|javascript|@import|-moz-binding|behavior/i;
 const MAX_VALUE_CHARS = 300;
+/**
+ * The most characters of one declaration list (a `style` attribute or the body of one rule). It is checked BEFORE
+ * anything else looks at the text, so no scan below ever runs over more than this, whatever the input.
+ */
+const MAX_DECLARATIONS_CHARS = 4_000;
+
+/** Removes a trailing `!important` (any spacing) from an already trimmed value. Linear: no backtracking pattern. */
+function withoutImportant(value: string): string {
+  const bang = value.lastIndexOf('!');
+  if (bang < 0 || value.slice(bang + 1).trim().toLowerCase() !== 'important') return value;
+  return value.slice(0, bang).trimEnd();
+}
 
 /** Strings, hex colours, identifiers and numbers (with optional exponent and unit) of a value, in order. */
 const VALUE_TOKEN = /"[^"]*"|'[^']*'|#[0-9a-fA-F]+|([+-]?(?:\d+\.?\d*|\.\d+))([eE][+-]?\d+)?([a-zA-Z%]*)|[a-zA-Z_-][a-zA-Z0-9_-]*/g;
 
 /** Why a value is not acceptable for a property, or null when it is. */
 function valueProblem(property: string, rawValue: string): string | null {
-  const value = rawValue.replace(/\s*!\s*important\s*$/i, '').trim();
+  // The length is capped before any other work: `!important` may add a few characters and spaces around it are trimmed.
+  const trimmed = rawValue.trim();
+  if (trimmed.length > MAX_VALUE_CHARS + 20) return 'its value is empty or too long';
+  const value = withoutImportant(trimmed);
   if (value === '' || value.length > MAX_VALUE_CHARS) return 'its value is empty or too long';
   if (!VALUE_CHARS.test(value) || FORBIDDEN_IN_VALUE.test(value)) return 'its value is not allowed';
   for (const call of value.matchAll(/([a-zA-Z_-][a-zA-Z0-9_-]*)\s*\(/g)) {
@@ -225,6 +240,10 @@ function splitTopLevel(text: string, separator: string): string[] | null {
  * reported by property name.
  */
 export function cleanDeclarations(text: string, report: StripReport): string {
+  if (text.length > MAX_DECLARATIONS_CHARS) {
+    report.add(`A style longer than ${MAX_DECLARATIONS_CHARS.toLocaleString('en-IN')} characters was removed`);
+    return '';
+  }
   if (text.includes('\\')) {
     report.add('A style containing a backslash escape was removed');
     return '';
@@ -257,7 +276,7 @@ export function cleanDeclarations(text: string, report: StripReport): string {
       report.add(`The CSS "${property}" was removed: ${problem}`);
       continue;
     }
-    kept.push(`${property}:${value.replace(/\s*!\s*important\s*$/i, '').trim()}`);
+    kept.push(`${property}:${withoutImportant(value)}`);
   }
   return kept.join(';');
 }
@@ -402,11 +421,22 @@ function matchingBrace(text: string, open: number): number {
   return -1;
 }
 
-/** Index after an at-rule: after its `;`, or after its balanced `{...}` block, whichever comes first. */
+/**
+ * Index after an at-rule: after its `;`, or after its balanced `{...}` block, whichever comes first. One forward scan
+ * that stops at the first `;` or `{` outside quotes, so a long run of at-rules is scanned once, not once per at-rule.
+ */
 function skipAtRule(text: string, start: number): number {
-  const semicolon = findOutsideQuotes(text, ';', start);
-  const open = findOutsideQuotes(text, '{', start);
-  if (open < 0 || (semicolon >= 0 && semicolon < open)) return semicolon < 0 ? text.length : semicolon + 1;
-  const close = matchingBrace(text, open);
-  return close < 0 ? text.length : close + 1;
+  let quote: string | null = null;
+  for (let index = start; index < text.length; index += 1) {
+    const char = text[index]!;
+    if (quote) {
+      if (char === quote) quote = null;
+    } else if (char === '"' || char === "'") quote = char;
+    else if (char === ';') return index + 1;
+    else if (char === '{') {
+      const close = matchingBrace(text, index);
+      return close < 0 ? text.length : close + 1;
+    }
+  }
+  return text.length;
 }

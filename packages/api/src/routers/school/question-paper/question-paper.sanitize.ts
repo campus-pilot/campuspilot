@@ -83,6 +83,24 @@ const DROP_WITH_CONTENT = new Set([
 /** Wrappers a model adds out of habit; unwrapped without a finding. */
 const UNWRAP_SILENTLY = new Set(['html', 'body']);
 
+/**
+ * Element names the HTML and SVG standards define, which the profile does not allow (`section`, `font`, `defs`...).
+ * Such a tag is unwrapped and its text kept, and that is right: the text is paper content. A name NOT in this set
+ * (`thinking`, `analysis`, `scratchpad`) is not markup at all but a pseudo-tag a model uses to wrap its own reasoning
+ * or answer, and its text is not necessarily the paper: {@link SanitizedQuestionPaperBody.structure} reports it so the
+ * caller that has no human to look (the AI job) can ask for a repair instead of printing it. A closed standard list,
+ * not a list of phrases or of known pseudo-tags.
+ */
+const STANDARD_ELEMENTS = new Set(
+  (
+    'a abbr acronym address area article aside audio bdi bdo big blockquote body button canvas center cite code data datalist dd del details dfn dialog dir dl dt ' +
+    'fieldset figcaption font footer form frame frameset head header hgroup html iframe input ins kbd label legend link main map mark marquee menu meta meter nav nobr ' +
+    'noscript object optgroup option output picture pre progress q rp rt ruby s samp script search section select slot small source span strike summary svg tbody ' +
+    'template textarea time title tt var video wbr ' +
+    'clippath defs desc filter foreignobject image lineargradient marker mask metadata mpath pattern radialgradient stop switch symbol use view'
+  ).split(' '),
+);
+
 /** The most cleaning rounds before a fragment that keeps changing is refused. */
 const MAX_ROUNDS = 4;
 
@@ -123,6 +141,8 @@ const numbers = (max: number, minNonZero = 0): Cleaner => (value) => {
 /** The size of the drawing itself (`width`/`height` of the `<svg>`): one length, capped like a CSS length. */
 const size: Cleaner = (value) => {
   const text = value.trim();
+  // Length first: the pattern below backtracks quadratically over a long run of digits.
+  if (text.length > 24) return null;
   const match = /^(\d+\.?\d*|\.\d+)([a-zA-Z%]*)$/.exec(text);
   if (!match) return null;
   const unit = match[2]!.toLowerCase();
@@ -189,6 +209,9 @@ const HTML_ATTRIBUTES: Record<string, Record<string, Cleaner>> = {
   img: { width: integer(1, 1500), height: integer(1, 1500) },
 };
 
+/** The most characters of any attribute value the cleaners will look at. */
+const MAX_ATTRIBUTE_CHARS = 25_000;
+
 const EVENT_HANDLER = /^on/i;
 /** Attributes that carry nothing a paper needs; dropped without a finding. */
 const SILENT_ATTRIBUTES = /^(?:xmlns|xmlns:.*|version|xml:space|xml:lang|baseprofile|focusable|tabindex)$/i;
@@ -205,6 +228,16 @@ export type SanitizedQuestionPaperBody = {
    * failed the output grammar). Distinct from a fragment that cleaned to nothing: the renderer must not print it.
    */
   refused: boolean;
+  /**
+   * What the first cleaning round found OUTSIDE the paper's structure. Neither is a problem for a person (the text is
+   * kept and `stripped` says so); an unattended caller can treat them as a reason to ask again.
+   */
+  structure: {
+    /** Tags that are not HTML or SVG elements at all (a model's `<thinking>` or `<analysis>`), whose tag was removed and text kept. */
+    foreignTags: string[];
+    /** True when non-blank text sits directly in the fragment, outside every element (a sentence between two paragraphs). */
+    looseText: boolean;
+  };
   stats: {
     /** Characters of the input. */
     inputChars: number;
@@ -221,6 +254,8 @@ export type SanitizedQuestionPaperBody = {
     placeholders: number;
   };
 };
+
+const NO_STRUCTURE: SanitizedQuestionPaperBody['structure'] = { foreignTags: [], looseText: false };
 
 const emptyStats = (inputChars: number): SanitizedQuestionPaperBody['stats'] => ({
   inputChars,
@@ -244,7 +279,7 @@ const ALLOWED_ATTRIBUTE_NAMES: ReadonlySet<string> = new Set([
 ]);
 const OUTPUT_GRAMMAR = { tags: ALLOWED_TAGS, attributes: ALLOWED_ATTRIBUTE_NAMES };
 
-type Pass = { html: string; report: StripReport };
+type Pass = { html: string; report: StripReport; foreignTags: Set<string>; looseText: boolean };
 
 /** One cleaning round: sanitize-html with the profile's policy, then the style elements cleaned as CSS. */
 function cleanOnce(raw: string): Pass {
@@ -253,6 +288,8 @@ function cleanOnce(raw: string): Pass {
   const marker = `qs${randomBytes(12).toString('hex')}`;
   let svgDepth = 0;
   const open: string[] = [];
+  const foreignTags = new Set<string>();
+  let looseText = false;
 
   const cleanAttributes = (tag: string, attributes: Record<string, string>): Record<string, string> => {
     const clean: Record<string, string> = {};
@@ -260,6 +297,11 @@ function cleanOnce(raw: string): Pass {
     for (const [name, value] of Object.entries(attributes)) {
       const lower = name.toLowerCase();
       if (SILENT_ATTRIBUTES.test(lower)) continue;
+      if (value.length > MAX_ATTRIBUTE_CHARS) {
+        // Before any pattern runs over it: the longest legitimate value is SVG path data (20,000 characters).
+        report.add(`The attribute "${lower}" on <${tag}> was longer than ${number(MAX_ATTRIBUTE_CHARS)} characters and was removed`);
+        continue;
+      }
       if (EVENT_HANDLER.test(lower)) {
         report.add(`The event handler "${lower}" was removed`);
         continue;
@@ -351,10 +393,16 @@ function cleanOnce(raw: string): Pass {
         if (!ALLOWED_TAGS.has(tag)) {
           // A model often wraps a fragment in <html><body>: unwrapping them is not worth a finding.
           if (!UNWRAP_SILENTLY.has(tag)) report.add(`<${tag}> is not allowed; its tag was removed and its text kept`);
+          if (!UNWRAP_SILENTLY.has(tag) && !STANDARD_ELEMENTS.has(tag)) foreignTags.add(tag);
           return { tagName: tag, attribs: {} };
         }
         return { tagName: tag, attribs: cleanAttributes(tag, attribs) };
       },
+    },
+    // `tag` is undefined for text directly in the fragment, outside every element.
+    textFilter: (text, tag) => {
+      if (tag === undefined && text.trim() !== '') looseText = true;
+      return text;
     },
     exclusiveFilter: (frame) => {
       const tag = frame.tag.toLowerCase();
@@ -367,7 +415,7 @@ function cleanOnce(raw: string): Pass {
     },
   });
 
-  return { html: writeStyleElements(html, marker, report), report };
+  return { html: writeStyleElements(html, marker, report), report, foreignTags, looseText };
 }
 
 const STYLE_OPEN = '<style>';
@@ -452,6 +500,7 @@ export function sanitizeQuestionPaperBody(raw: string): SanitizedQuestionPaperBo
       stripped: [],
       problems: [`The paper is ${number(raw.length)} characters; the limit is ${number(L.fragmentChars)}. Make it shorter.`],
       refused: true,
+      structure: NO_STRUCTURE,
       stats: emptyStats(raw.length),
     };
   }
@@ -469,7 +518,7 @@ export function sanitizeQuestionPaperBody(raw: string): SanitizedQuestionPaperBo
     html = next.html;
   }
 
-  const refused = (problem: string): SanitizedQuestionPaperBody => ({ html: '', stripped: first.report.lines(), problems: [problem], refused: true, stats: emptyStats(raw.length) });
+  const refused = (problem: string): SanitizedQuestionPaperBody => ({ html: '', stripped: first.report.lines(), problems: [problem], refused: true, structure: NO_STRUCTURE, stats: emptyStats(raw.length) });
   if (!settled) return refused('The paper could not be cleaned safely (its markup keeps changing when cleaned). Simplify the markup.');
   const scanned = scanQuestionPaperOutput(html, OUTPUT_GRAMMAR);
   if (!scanned.ok) return refused(`The paper could not be cleaned safely (${scanned.reason}). Simplify the markup.`);
@@ -485,5 +534,5 @@ export function sanitizeQuestionPaperBody(raw: string): SanitizedQuestionPaperBo
   if (stats.longestMath > L.texChars) problems.push(`A formula is ${stats.longestMath} characters; the limit is ${L.texChars}. Split it.`);
   if (stats.figureIds.length + stats.placeholders > L.figures) problems.push(`The paper has ${stats.figureIds.length + stats.placeholders} figures and placeholders; the limit is ${L.figures}.`);
 
-  return { html, stripped: first.report.lines(), problems, refused: false, stats };
+  return { html, stripped: first.report.lines(), problems, refused: false, structure: { foreignTags: [...first.foreignTags], looseText: first.looseText }, stats };
 }

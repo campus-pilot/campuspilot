@@ -129,7 +129,7 @@ export type TextResult = {
    * The answer did not end with the provider's positive completion signal (Gemini `STOP`, Anthropic `end_turn` or
    * `stop_sequence`): it stopped on the output-token limit, or for any other or unreported reason, so `text` may be cut off.
    */
-  truncated: boolean;
+  unfinished: boolean;
 };
 
 /**

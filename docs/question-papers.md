@@ -181,7 +181,7 @@ meaning: the server never reads the number of questions, the marks or the langua
 it. `packages/question-paper` holds what is shared by the API, the worker and the browser:
 
 - `limits.ts`, the one place for every number: 80,000 characters of fragment (a longer answer
-  is refused, never cut), 1,000,000 characters parsed at most, 8,000 elements, 40 SVGs and 4,000
+  is refused, never cut), 120,000 characters parsed at most (unclosed nesting costs the parser more than its length, so the cap is what keeps one call under about 150 ms), 8,000 elements, 40 SVGs and 4,000
   SVG elements, 30,000 characters of `<style>`, 600 formulas of at most 500 characters, 30
   figures plus placeholders, 500 characters per placeholder description.
 - `guide.ts`: the rules a model is told (`QUESTION_PAPER_FRAGMENT_RULES`, shared by the chat
@@ -221,7 +221,9 @@ stored), so the stored value is exactly what the render's second cleaning produc
 then pass the **output grammar** (`question-paper.output.ts`, an exact check that fails closed, run
 at save and at every render): lowercase allowlisted tags only, plain double-quoted allowlisted
 attributes (no `on*`), no comment/CDATA/doctype, balanced tags, `style=""` attributes and `<style>`
-text equal to their cleaned form with no out-of-flow `position`. The one element whose content the
+text equal to their cleaned form with no out-of-flow `position`; its tag separators are the five ASCII
+whitespace characters of the HTML tokenizer only (never JS `\s`, which also matches U+00A0, U+3000 and
+others the tokenizer reads as part of a name). The one element whose content the
 browser does not read as markup is `<style>`, so it is written exactly `<style>`, never inside an
 `<svg>` (a `<style>` there is removed with a notice: its text is parsed as markup and entities are
 decoded, which is how sanitize-html's own handling was bypassed), and its text may hold no `<`, `&`
@@ -324,10 +326,19 @@ Budgets: the template alone renders under the notice budget (2,000,000 character
 the logo at most 3 times; the whole document stays within 25 MB. The body budget is DERIVED from
 that (`question-paper.body.ts`): 25 MB minus the template's worst case (2,000,000 characters at 3
 bytes plus 3 logo uses at 1 MB), 16 MB, and the figures (inside the body) are at most 12 MB, so a
-body that passes its own cap always fits in the document. The PDF is capped at
+body that passes its own cap always fits in the document. The draft check and the print share ONE
+budget: `checkQuestionPaperDraft` compares `estimatedBodyBytes` (the very assembly and unit the render
+measures, plus the base64 bytes of every placed figure, a figure used twice counted twice) with the
+body cap, so formulas and figures that each fit but not together are refused at validate time, not
+at print time (the figures keep their own 12 MB cap on top). Work is bounded before it is done: a
+declaration list over 4,000 characters, a value over 300 and any attribute over 25,000 are refused
+before a pattern runs over them, and no pattern in these files backtracks over a long run (probed
+with 160,000 character runs of whitespace, `;`, `@a;`, `}` and digits; tests keep this). The PDF is capped at
 `QUESTION_PAPER_LIMITS.pdfPages` (40) pages: Gotenberg is asked for pages `1-41` (so the work is
 bounded) and a result with a 41st page is refused with a clear BAD_REQUEST (`paper_unprintable` in
-the job), never cut; question paper conversions time out after 60 seconds (other documents 120).
+the job), never cut. The page count is known only after Gotenberg lays the paper out, so validate and
+preview do not show it (they must not depend on the converter or wait on it) and the job does not
+repair it; the refusal at save is the check; question paper conversions time out after 60 seconds (other documents 120).
 
 A saved version **pins its template revision**: previews and re-downloads use that revision,
 never the school's later choice.
@@ -374,10 +385,16 @@ pages), save through `saveQuestionPaperVersion` with source `ai_job` (the saniti
 `stripped` lines become the version's notices), mark succeeded. Provider failures retry (busy or
 unknown up to 3 requests); a refusal fails without repair and an answer that stopped on the output
 limit fails as `output_too_long`. The provider must give a POSITIVE completion signal (Gemini
-`STOP`, Claude `end_turn`/`stop_sequence`): any other or missing finish reason counts as cut off. An answer
+`STOP`, Claude `end_turn`/`stop_sequence`): any other or missing finish reason sets `TextResult.unfinished` (named for what is known: the answer did not positively finish), which the job treats as cut off. An answer
 with no HTML element in it (an apology) fails as `model_rejected` without repair; text before the first
 or after the last element, or an answer that cleans to no block element and readable text, is a repair
-problem. Every step checks
+problem. A tag that is not an HTML or SVG element at all (`<thinking>`, `<analysis>`: the tag would be
+dropped and its text printed as part of the paper) and text between top-level elements are repair
+problems in the job too (`strictStructure` of `checkQuestionPaperDraft`; a person's draft only gets
+a notice), while a real HTML element the profile does not allow (`<section>`) is unwrapped as before.
+A refusal or a remark written INSIDE an allowed element (`<p>I cannot help with that.</p>`) cannot be
+told from a paper by code without a list of phrases, so it is not detected; the reviewing person is
+the check. Every step checks
 the job is still `running` for its attempt, so a swept job spends and saves nothing
 more; the save transaction itself reads the job row `FOR SHARE` (after the paper lock) and
 refuses with `SourceJobEndedError` unless it is `running`, so a job swept at its deadline

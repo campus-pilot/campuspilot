@@ -19,8 +19,11 @@ export const QUESTION_PAPER_LIMITS = {
    * The most characters the sanitiser will even parse. Between this and
    * `fragmentChars` the fragment is parsed so the finding can say how large it
    * is; beyond it the input is refused unread.
+   * It is one and a half times `fragmentChars` (comments and removed tags are the only legitimate excess) and no more because the
+   * parser's work grows faster than the input on unclosed nesting (`<svg><g>` repeated): measured worst cases are
+   * about 100-150 ms at 120,000 characters but 5-18 s at the former 1,000,000, and the work blocks the event loop.
    */
-  parseChars: 1_000_000,
+  parseChars: 120_000,
   /** Elements of the fragment after sanitising (every tag counts, svg shapes too). */
   elements: 8_000,
   /** Inline `<svg>` drawings. */

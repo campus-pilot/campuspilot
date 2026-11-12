@@ -106,7 +106,7 @@ type PlannedPage = { id: string; position: number; name: string; key: string; mi
 type Plan = { scope: PaperScope; pages: PlannedPage[] };
 
 /** A model answer as journaled. */
-type ModelAnswer = Pick<TextResult, 'text' | 'usage' | 'answeredModel' | 'refusal' | 'truncated'>;
+type ModelAnswer = Pick<TextResult, 'text' | 'usage' | 'answeredModel' | 'refusal' | 'unfinished'>;
 
 /** The outcome of checking an answer: the fragment to save, or the problems to repair. */
 type Validation =
@@ -190,7 +190,7 @@ export async function runQuestionPaperGeneration(
     phase = 'model';
     const first = await runModelRequest({ deps, run, model, input, begun, plan, n: 1, parts: null });
     if (first.refusal) throw new QuestionPaperJobFailure('model_rejected', undefined, 'The model declined to answer.');
-    if (first.truncated) throw new QuestionPaperJobFailure('output_too_long', undefined, 'The answer stopped on the output limit.');
+    if (first.unfinished) throw new QuestionPaperJobFailure('output_too_long', undefined, 'The answer stopped on the output limit.');
 
     let validation = await run('validate:1', () => validateAnswer(deps, plan, first.text));
     if (!validation.ok && validation.rejected) {
@@ -201,7 +201,7 @@ export async function runQuestionPaperGeneration(
       await run('access:2', () => assertAccess(deps, begun));
       const repair = await runModelRequest({ deps, run, model, input, begun, plan, n: 2, parts: buildRepairParts(validation.html, validation.problems) });
       if (repair.refusal) throw new QuestionPaperJobFailure('model_rejected', undefined, 'The model declined the repair request.');
-      if (repair.truncated) throw new QuestionPaperJobFailure('output_too_long', undefined, 'The repaired answer stopped on the output limit.');
+      if (repair.unfinished) throw new QuestionPaperJobFailure('output_too_long', undefined, 'The repaired answer stopped on the output limit.');
       validation = await run('validate:2', () => validateAnswer(deps, plan, repair.text));
       if (!validation.ok && validation.rejected) {
         throw new QuestionPaperJobFailure('model_rejected', undefined, `The model answered the repair request without an HTML fragment: ${validation.html.slice(0, 200)}`);
@@ -451,7 +451,7 @@ async function callModel({
       usage: result.usage,
       usageComplete: true,
     });
-    return { text: result.text, usage: result.usage, answeredModel: result.answeredModel, refusal: result.refusal, truncated: result.truncated };
+    return { text: result.text, usage: result.usage, answeredModel: result.answeredModel, refusal: result.refusal, unfinished: result.unfinished };
   }
 }
 
@@ -469,7 +469,7 @@ async function validateAnswer(deps: GenerationDeps, plan: Plan, text: string): P
   const shape = questionPaperFragmentShapeProblem(html);
   if (shape?.kind === 'no_markup') return { ok: false, html, problems: [shape.message], rejected: true };
   if (shape) return { ok: false, html, problems: [shape.message] };
-  const checked = await checkQuestionPaperDraft(deps.db, plan.scope, html, { unresolvedFigures: 'placeholder' });
+  const checked = await checkQuestionPaperDraft(deps.db, plan.scope, html, { unresolvedFigures: 'placeholder', strictStructure: true });
   if (!checked.ok) return { ok: false, html, problems: checked.problems.slice(0, MAX_PROBLEMS) };
   if (!hasPaperContent(checked.html)) {
     return { ok: false, html, problems: ['After cleaning, the answer holds no paper: it needs block elements (p, div, h1-h6, ul, ol, table, figure) with readable text.'] };

@@ -28,7 +28,7 @@ export function questionPaperModelOf(provider: ModelProvider, settings: Question
         usage: result.usage,
         answeredModel: result.model,
         refusal: result.refusal,
-        truncated: result.truncated,
+        unfinished: result.unfinished,
       };
     },
     failureKind: (error) => provider.failureKind(error),

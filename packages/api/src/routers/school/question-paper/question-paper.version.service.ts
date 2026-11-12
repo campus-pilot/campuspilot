@@ -31,7 +31,7 @@ import {
   type PaperRow,
   type VersionRow,
 } from './question-paper.records';
-import { figureIdsToPlaceholders } from './question-paper.body';
+import { estimatedBodyBytes, figureIdsToPlaceholders } from './question-paper.body';
 import {
   QUESTION_PAPER_BODY_MAX_BYTES,
   QUESTION_PAPER_FIGURES_MAX_BYTES,
@@ -116,12 +116,11 @@ async function figureProblems(
 }
 
 /**
- * The printer embeds every figure as a base64 data URI under one cap
- * (`loadFigureAssets`): total it here, so a draft that validates can also be
- * printed. A chat image becomes a figure of at most about FIGURE_MAX_BYTES.
+ * The base64 data URI bytes the printer embeds for each of these figures (`loadFigureAssets`), so a draft that validates
+ * can also be printed. A chat image becomes a figure of at most about FIGURE_MAX_BYTES.
  */
-async function figureSizeProblem(db: DatabaseExecutor, paper: PaperRow | undefined, ids: readonly string[]): Promise<string | null> {
-  if (ids.length === 0) return null;
+async function embeddedFigureSizes(db: DatabaseExecutor, paper: PaperRow | undefined, ids: readonly string[]): Promise<Map<string, number>> {
+  if (ids.length === 0) return new Map();
   const rows = paper
     ? await db
         .select({ id: examQuestionPaperFigureTable.id, contentType: examQuestionPaperFigureTable.contentType, byteSize: examQuestionPaperFigureTable.byteSize })
@@ -129,14 +128,13 @@ async function figureSizeProblem(db: DatabaseExecutor, paper: PaperRow | undefin
         .where(and(eq(examQuestionPaperFigureTable.paperId, paper.id), eq(examQuestionPaperFigureTable.schoolId, paper.schoolId)))
     : [];
   const sizeOf = new Map(rows.map((row) => [row.id, `data:${row.contentType};base64,`.length + encodedImageBytes(row.byteSize)]));
-  const embedded = ids.reduce((sum, id) => sum + (sizeOf.get(id) ?? encodedImageBytes(FIGURE_MAX_BYTES)), 0);
-  return embedded > QUESTION_PAPER_FIGURES_MAX_BYTES ? 'The figure images of this paper are too large to print together. Use fewer or smaller images.' : null;
+  return new Map(ids.map((id) => [id, sizeOf.get(id) ?? encodedImageBytes(FIGURE_MAX_BYTES)]));
 }
 
 /** Whether a cleaned fragment prints anything: text, a drawing, a formula or a figure. */
 function hasContent({ html, stats }: SanitizedQuestionPaperBody): boolean {
   if (stats.mathNodes > 0 || stats.figureIds.length > 0 || stats.placeholders > 0 || stats.svgs > 0) return true;
-  return html.replace(/<style>[\s\S]*?<\/style>/g, '').replace(/<[^>]*>/g, '').trim() !== '';
+  return html.replace(/<style>[^<]*<\/style>/g, '').replace(/<[^<>]*>/g, '').trim() !== '';
 }
 
 const noticesOf = (stripped: readonly string[]): QuestionPaperNotice[] => stripped.map((message) => ({ code: 'sanitised', message }));
@@ -162,6 +160,12 @@ export async function checkQuestionPaperDraft(
     /** The chat user whose attachments the fragment may use as figures; omitted outside the in-app assistant. */
     chatUserId?: string;
     unresolvedFigures?: UnresolvedFigures;
+    /**
+     * For a caller with nobody to look at what the sanitiser changed (the AI job): a pseudo-tag such as `<thinking>`
+     * or text between the top-level elements is a problem (to be repaired) instead of a notice, because its text would
+     * otherwise be printed as part of the paper. A person's draft keeps them as notices.
+     */
+    strictStructure?: boolean;
   } = {},
 ): Promise<DraftCheck> {
   const canonical = canonicalQuestionPaperHtml(raw);
@@ -170,6 +174,14 @@ export async function checkQuestionPaperDraft(
   if (sanitized.problems.length > 0) return { ok: false, problems: sanitized.problems, stripped };
 
   const problems: string[] = [];
+  if (options.strictStructure) {
+    const { foreignTags, looseText } = sanitized.structure;
+    if (foreignTags.length > 0) {
+      const listed = foreignTags.slice(0, 5).map((tag) => `<${tag}>`).join(', ');
+      problems.push(`${listed} ${foreignTags.length === 1 ? 'is' : 'are'} not HTML elements, so ${foreignTags.length === 1 ? 'its' : 'their'} text would be printed as part of the paper. Return only the paper's HTML, with no reasoning or answer wrappers.`);
+    }
+    if (looseText) problems.push('There is text outside every element (for example a sentence between two paragraphs). Put all text inside elements such as <p>.');
+  }
   if (!hasContent(sanitized)) problems.push('The paper is empty. Write the questions as HTML.');
 
   const paper = await findPaper(db, scope.key);
@@ -181,9 +193,22 @@ export async function checkQuestionPaperDraft(
     } else {
       for (const [id, problem] of unusable) problems.push(`Figure ${id}: ${problem}`);
     }
-  } else {
-    const size = await figureSizeProblem(db, paper, sanitized.stats.figureIds);
-    if (size) problems.push(size);
+  }
+
+  // The figures are embedded as one total under their own cap, and then figures + formulas + the stylesheet are held to
+  // the SAME body budget the print measures (`estimatedBodyBytes`), so what validates also prints.
+  // A figure used twice is embedded twice in the body but loaded once, so the two totals differ.
+  let figureBytes = 0;
+  let placedFigures = 0;
+  let distinctFigureBytes = 0;
+  if (unusable.size === 0 || options.unresolvedFigures === 'placeholder') {
+    const sizes = await embeddedFigureSizes(db, paper, sanitized.stats.figureIds);
+    distinctFigureBytes = [...sizes.values()].reduce((sum, size) => sum + size, 0);
+    for (const use of sanitized.html.matchAll(/ data-figure-id="([^"]*)"/g)) {
+      figureBytes += sizes.get(use[1]!) ?? 0;
+      placedFigures += 1;
+    }
+    if (distinctFigureBytes > QUESTION_PAPER_FIGURES_MAX_BYTES) problems.push('The figure images of this paper are too large to print together. Use fewer or smaller images.');
   }
 
   const math = createMathRenderer();
@@ -191,10 +216,17 @@ export async function checkQuestionPaperDraft(
   for (const failure of typeset.failures) {
     problems.push(`Formula ${failure.index} (${failure.tex.slice(0, 60)}): ${failure.message}`);
   }
-  // KaTeX HTML is large (tens of KB for one nested formula): count it here so a draft that validates can also be
-  // printed, the same limit the body render enforces on the whole body.
-  if (typeset.failures.length === 0 && math.renderedBytes() > QUESTION_PAPER_BODY_MAX_BYTES) {
-    problems.push('The formulas of this paper are too large to print. Shorten or remove some formulas.');
+  // KaTeX HTML is large (tens of KB for one nested formula, 85 KB for a wide matrix): count it with the figures.
+  if (
+    typeset.failures.length === 0 &&
+    distinctFigureBytes <= QUESTION_PAPER_FIGURES_MAX_BYTES &&
+    estimatedBodyBytes({ typesetHtml: typeset.html, hasMath: typeset.count > 0, figureBytes, figureCount: placedFigures }) > QUESTION_PAPER_BODY_MAX_BYTES
+  ) {
+    problems.push(
+      figureBytes === 0
+        ? 'The formulas of this paper are too large to print. Shorten or remove some formulas.'
+        : 'The formulas and figure images of this paper are too large to print together. Remove some figures or shorten some formulas.',
+    );
   }
 
   if (problems.length > 0) return { ok: false, problems, stripped };
@@ -261,6 +293,20 @@ export async function findChatDraftContent(
   throw notFound;
 }
 
+/**
+ * `getQuestionPaperDraft`: the cleaned fragment of a draft this chat validated
+ * (found by {@link findChatDraftContent}, so scoped to the conversation, school
+ * and user). Cleaned rather than as written so it never exceeds the fragment
+ * limit and is what a save would store; the draft id (hash of the text as written)
+ * is returned unchanged for the save. A draft whose cleaning now reports problems
+ * (limits changed since it was validated) is refused with them.
+ */
+export function cleanedChatDraft(raw: string): { draftId: string; html: string } {
+  const sanitized = sanitizeQuestionPaperBody(canonicalQuestionPaperHtml(raw));
+  if (sanitized.problems.length > 0) throw invalidPaperError(sanitized.problems);
+  return { draftId: questionPaperDraftId(raw), html: sanitized.html };
+}
+
 export type SaveSource =
   | { kind: 'agent'; conversationId: string | null }
   | { kind: 'ai_job'; jobId: string; pageIds: string[] };
@@ -291,20 +337,6 @@ async function savedByJob(db: DatabaseExecutor, jobId: string): Promise<VersionR
     .where(eq(examQuestionPaperVersionTable.sourceJobId, jobId))
     .limit(1);
   return version;
-}
-
-/**
- * `getQuestionPaperDraft`: the cleaned fragment of a draft this chat validated
- * (found by {@link findChatDraftContent}, so scoped to the conversation, school
- * and user). Cleaned rather than as written so it never exceeds the fragment
- * limit and is what a save would store; the draft id (hash of the text as written)
- * is returned unchanged for the save. A draft whose cleaning now reports problems
- * (limits changed since it was validated) is refused with them.
- */
-export function cleanedChatDraft(raw: string): { draftId: string; html: string } {
-  const sanitized = sanitizeQuestionPaperBody(canonicalQuestionPaperHtml(raw));
-  if (sanitized.problems.length > 0) throw invalidPaperError(sanitized.problems);
-  return { draftId: questionPaperDraftId(raw), html: sanitized.html };
 }
 
 const savedResult = (version: VersionRow, planMaxMarks: number): SavedVersion => ({

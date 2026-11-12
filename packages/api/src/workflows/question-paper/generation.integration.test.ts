@@ -41,7 +41,7 @@ const answer = (text: string, overrides: Partial<TextResult> = {}): TextResult =
   usage: USAGE,
   answeredModel: 'fake-answered-model',
   refusal: false,
-  truncated: false,
+  unfinished: false,
   ...overrides,
 });
 
@@ -216,7 +216,7 @@ describe('question paper generation job', () => {
   it('fails a truncated or refused answer without a repair, after billing it', async () => {
     const world = await createQuestionPaperWorld();
     const { job } = await queueJob(world);
-    const cut = scriptedModel([answer('<p>Q1 and then the answer stops', { truncated: true })]);
+    const cut = scriptedModel([answer('<p>Q1 and then the answer stops', { unfinished: true })]);
     expect(await runQuestionPaperGeneration({ jobId: job.id, attempt: 1 }, direct, depsFor(cut.model))).toEqual({ status: 'failed', code: 'output_too_long' });
     expect(cut.requests).toHaveLength(1);
     expect(await requestsOf(job.id)).toHaveLength(1);
@@ -241,6 +241,26 @@ describe('question paper generation job', () => {
     expect(await runQuestionPaperGeneration({ jobId: preambleJob.id, attempt: 1 }, direct, depsFor(preamble.model))).toMatchObject({ status: 'succeeded' });
     expect(preamble.requests).toHaveLength(2);
     expect(JSON.stringify(preamble.requests[1]!.parts)).toContain('must start with an element');
+  });
+
+  it('repairs a reasoning wrapper and loose text between elements instead of printing them (m4)', async () => {
+    const world = await createQuestionPaperWorld();
+    const { job } = await queueJob(world);
+    const wrapped = scriptedModel([answer('<thinking>I should output the paper</thinking><p>Q1</p>'), answer('<p>Q1</p>')]);
+    expect(await runQuestionPaperGeneration({ jobId: job.id, attempt: 1 }, direct, depsFor(wrapped.model))).toMatchObject({ status: 'succeeded' });
+    expect(wrapped.requests).toHaveLength(2);
+    expect(JSON.stringify(wrapped.requests[1]!.parts)).toContain('<thinking>');
+
+    const { job: looseJob } = await queueJob(world);
+    const loose = scriptedModel([answer('<p>Q1</p>I hope this helps<p>Q2</p>'), answer('<p>Q1</p><p>Q2</p>')]);
+    expect(await runQuestionPaperGeneration({ jobId: looseJob.id, attempt: 1 }, direct, depsFor(loose.model))).toMatchObject({ status: 'succeeded' });
+    expect(JSON.stringify(loose.requests[1]!.parts)).toContain('text outside every element');
+
+    // A standard element the profile does not allow (section) is paper content: unwrapped, no repair.
+    const { job: sectionJob } = await queueJob(world);
+    const section = scriptedModel([answer('<section><p>Q1</p></section>')]);
+    expect(await runQuestionPaperGeneration({ jobId: sectionJob.id, attempt: 1 }, direct, depsFor(section.model))).toMatchObject({ status: 'succeeded' });
+    expect(section.requests).toHaveLength(1);
   });
 
   it('refuses a page the model cannot read before any request or cost, naming the page (D46)', async () => {

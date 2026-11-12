@@ -135,9 +135,9 @@ export function fakeTextResult({
   model = FAKE_REPORTED_MODEL,
   usage = FAKE_USAGE,
   refusal = false,
-  truncated = false,
+  unfinished = false,
 }: Partial<TextResult> = {}): TextResult {
-  return { text, model, usage, refusal, truncated };
+  return { text, model, usage, refusal, unfinished };
 }
 
 export type FakeModelProvider = ModelProvider & {

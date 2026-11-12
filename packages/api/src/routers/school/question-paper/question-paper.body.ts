@@ -112,17 +112,47 @@ function bodyCss(): string {
   );
 }
 
+/** Why a body over {@link QUESTION_PAPER_BODY_MAX_BYTES} is refused (at print time and by the draft check alike). */
+export const BODY_TOO_LARGE_MESSAGE = 'This paper is too large to print. Remove some figures or formulas, or split it.';
+
+/**
+ * The printed body: the default stylesheet (with KaTeX's when the paper has a formula) and the wrapper around the
+ * typeset content. The ONE place this is assembled, used by the renderer and by {@link estimatedBodyBytes}.
+ */
+function composeBody(contentHtml: string, hasMath: boolean): string {
+  return `<style>${bodyCss()}${hasMath ? katexInlineCss() : ''}</style><div class="${QUESTION_PAPER_BODY_CLASS}">${contentHtml}</div>`;
+}
+
+/** Markup a figure adds on top of its data URI once placed (`<img src="" alt="">`, `<figure>`), counted per figure in the estimate. */
+const FIGURE_MARKUP_BYTES = 64;
+
+/**
+ * The size the printed body will have, before the figures are loaded: the exact
+ * size {@link renderQuestionPaperBodyHtml} measures (same assembly, same unit)
+ * for `typesetHtml` (the fragment after {@link renderMathSpans}, figures not yet
+ * placed), plus the base64 data URI bytes of the figures that will be placed.
+ * Compared to {@link QUESTION_PAPER_BODY_MAX_BYTES}, this is the ONE budget the
+ * draft check and the print share, so a draft that passes the check cannot be
+ * refused for size at print time (the estimate counts a figure's markup twice
+ * over: the unplaced `data-figure-id` tag is already in `typesetHtml`).
+ */
+export function estimatedBodyBytes(input: { typesetHtml: string; hasMath: boolean; figureBytes: number; figureCount: number }): number {
+  return Buffer.byteLength(composeBody(input.typesetHtml, input.hasMath), 'utf8') + input.figureBytes + input.figureCount * FIGURE_MARKUP_BYTES;
+}
+
 /** The attributes of one tag as sanitize-html wrote them (quoted, `>` escaped), by name. */
 function attributesOf(tag: string): Map<string, string> {
   const attributes = new Map<string, string>();
-  for (const match of tag.matchAll(/([a-z][a-z-]*)="([^"]*)"/g)) attributes.set(match[1]!, match[2]!);
+  // The lookbehind keeps a long run of letters from being rescanned from every position (see `findMathSpans`).
+  for (const match of tag.matchAll(/(?<![a-z-])([a-z][a-z-]*)="([^"]*)"/g)) attributes.set(match[1]!, match[2]!);
   return attributes;
 }
 
 type FigureState = { figureCount: number; warnings: string[] };
 
-const FIGURE_TAG = /<figure\b[^>]*>/g;
-const IMG_TAG = /<img\b[^>]*>/g;
+// `[^<>]*`, not `[^>]*`: the same tags in sanitiser output (no `<` or `>` inside a tag), but linear on any other text.
+const FIGURE_TAG = /<figure\b[^<>]*>/g;
+const IMG_TAG = /<img\b[^<>]*>/g;
 
 /**
  * Swaps figure ids for images and placeholder descriptions for the dashed box,
@@ -200,10 +230,10 @@ export function renderQuestionPaperBodyHtml(
   const math = renderMathSpans(withFigures, input.math);
   const hasMath = math.count > 0;
   const warnings = [...state.warnings, ...math.failures.map((failure) => `Formula ${failure.index} was printed as plain text: ${failure.message}`)];
-  const html = `<style>${bodyCss()}${hasMath ? katexInlineCss() : ''}</style><div class="${QUESTION_PAPER_BODY_CLASS}">${math.html}</div>`;
+  const html = composeBody(math.html, hasMath);
   const byteSize = Buffer.byteLength(html, 'utf8');
   if (byteSize > QUESTION_PAPER_BODY_MAX_BYTES) {
-    throw rpcError.badRequest('This paper is too large to print. Remove some figures or split it.');
+    throw rpcError.badRequest(BODY_TOO_LARGE_MESSAGE);
   }
   return { html, hasMath, figureCount: state.figureCount, byteSize, warnings };
 }

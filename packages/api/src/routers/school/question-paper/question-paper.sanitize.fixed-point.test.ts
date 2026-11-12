@@ -1,3 +1,4 @@
+import { QUESTION_PAPER_LIMITS as L } from '@campuspilot/question-paper/limits';
 import { EXAMPLE_ENGLISH_SCIENCE_HTML, EXAMPLE_HINDI_MATH_HTML } from '@campuspilot/question-paper/examples';
 import { describe, expect, it } from 'vitest';
 
@@ -83,10 +84,10 @@ describe('question_paper_body sanitiser: the review payloads (B1)', () => {
 
   it('refuses markup that cannot be proven clean instead of storing it', () => {
     // A fragment over the parse limit is refused unread and flagged: the renderer must not print it.
-    const huge = clean(`<p>${'a'.repeat(1_000_001)}</p>`);
+    const huge = clean(`<p>${'a'.repeat(L.parseChars + 1)}</p>`);
     expect(huge.refused).toBe(true);
     expect(huge.html).toBe('');
-    expect(() => render(`<p>${'a'.repeat(1_000_001)}</p>`)).toThrow(/cannot be printed/);
+    expect(() => render(`<p>${'a'.repeat(L.parseChars + 1)}</p>`)).toThrow(/cannot be printed/);
   });
 });
 
@@ -127,8 +128,18 @@ describe('the output grammar (fails closed)', () => {
     ['an unclean style attribute', '<p style="behavior:url(x)">x</p>'],
     ['a repeated attribute', '<p class="a" class="b">x</p>'],
     ['a self-closing non-void element', '<div />'],
+    ['a vertical tab between attributes', '<p\u000bclass="a">x</p>'],
+    ['a no-break space between attributes', '<p\u00a0class="a">x</p>'],
+    ['an ideographic space between attributes', '<p class="a"\u3000style="color:red">x</p>'],
+    ['a byte order mark between attributes', '<p\ufeffclass="a">x</p>'],
+    ['a line separator before the end of a tag', '<br\u2028/>'],
+    ['a vertical tab after the style tag name', '<style\u000b>p{color:red}</style>'],
   ])('rejects %s', (_name, html) => {
     expect(scan(html).ok).toBe(false);
+  });
+
+  it('accepts exactly the five ASCII whitespace characters of the HTML tokenizer between attributes', () => {
+    for (const separator of [' ', '\t', '\n', '\f', '\r']) expect(scan(`<p${separator}class="a"${separator}style="color:red">x</p>`).ok).toBe(true);
   });
 });
 

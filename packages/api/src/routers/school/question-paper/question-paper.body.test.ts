@@ -3,6 +3,7 @@ import { QUESTION_PAPER_LIMITS as L } from '@campuspilot/question-paper/limits';
 import { describe, expect, it } from 'vitest';
 
 import {
+  estimatedBodyBytes,
   figureIdsToPlaceholders,
   fragmentFigureIds,
   QUESTION_PAPER_BODY_MAX_BYTES,
@@ -13,6 +14,7 @@ import {
   renderQuestionPaperBodyHtml,
   type FigureAssets,
 } from './question-paper.body';
+import { sanitizeQuestionPaperBody } from './question-paper.sanitize';
 import { createMathRenderer, escapeHtml, findMathSpans, katexInlineCss, renderMathSpans, texErrorMessage, type MathRenderer } from './question-paper.math';
 
 const QPF = 'qpf_0123456789abcdefghijk';
@@ -111,6 +113,13 @@ describe('renderQuestionPaperBodyHtml: formulas', () => {
     const spans = findMathSpans(html);
     expect(spans.map((span) => [span.tex, span.display])).toEqual([['a&b"c', true], ['y', false]]);
     expect(html.slice(spans[0]!.start, spans[0]!.end)).toBe('<span data-math="a&amp;b&quot;c" data-display="true"><span>x</span></span>');
+  });
+
+  it('reads unclosed tags in linear time (the helpers take sanitiser output, but never trust that for speed)', () => {
+    const started = performance.now();
+    findMathSpans('<span '.repeat(30_000) + '<span ' + 'a'.repeat(100_000));
+    figureIdsToPlaceholders('<img '.repeat(30_000) + '<figure '.repeat(30_000), new Set(['x']));
+    expect(performance.now() - started).toBeLessThan(500);
   });
 
   it('tells a TeX error without its prefix', () => {
@@ -226,6 +235,25 @@ describe('the size budgets compose (m3)', () => {
 
   it('holds the figures, the whole fragment and room for formulas inside the body budget', () => {
     expect(QUESTION_PAPER_FIGURES_MAX_BYTES + L.fragmentChars * 3).toBeLessThan(QUESTION_PAPER_BODY_MAX_BYTES);
+  });
+
+  it('measures a draft with the exact size the print measures (one assembly, one unit)', () => {
+    const fragment = '<p>x</p><span data-math="\\frac{a}{b}"></span><span data-math="\\sum_{i=1}^{n} i" data-display="true"></span>';
+    const sanitized = sanitizeQuestionPaperBody(fragment);
+    const typeset = renderMathSpans(sanitized.html, createMathRenderer());
+    const printed = render(fragment);
+    expect(estimatedBodyBytes({ typesetHtml: typeset.html, hasMath: typeset.count > 0, figureBytes: 0, figureCount: 0 })).toBe(printed.byteSize);
+  });
+
+  it('refuses the reviewer repro: 60 wide pmatrix formulas that fit alone but not with the figures at their cap', () => {
+    // 160 columns is 85 KB of KaTeX HTML for 348 TeX characters; 60 of them are 5.1 MB, under the body budget alone.
+    const tex = `\\begin{pmatrix}${Array.from({ length: 160 }, () => '1').join('&')}\\end{pmatrix}`;
+    const fragment = Array.from({ length: 60 }, () => `<span data-math="${tex.replace(/&/g, '&amp;')}" data-display="true"></span>`).join('');
+    const typeset = renderMathSpans(sanitizeQuestionPaperBody(fragment).html, createMathRenderer(60_000));
+    expect(typeset.failures).toEqual([]);
+    const alone = { typesetHtml: typeset.html, hasMath: true, figureBytes: 0, figureCount: 0 };
+    expect(estimatedBodyBytes(alone)).toBeLessThan(QUESTION_PAPER_BODY_MAX_BYTES);
+    expect(estimatedBodyBytes({ ...alone, figureBytes: QUESTION_PAPER_FIGURES_MAX_BYTES, figureCount: 23 })).toBeGreaterThan(QUESTION_PAPER_BODY_MAX_BYTES);
   });
 
   it('refuses to print a fragment the sanitiser refuses, instead of printing it unverified', () => {

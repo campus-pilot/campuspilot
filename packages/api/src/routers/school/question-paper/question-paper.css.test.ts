@@ -133,3 +133,45 @@ describe('numbers are capped, not only lengths with a unit (M2)', () => {
     expect(declarations('text-indent:-11mm')).toBe('');
   });
 });
+
+describe('work is linear in the input (M2, m2): no pattern backtracks over a long run', () => {
+  const timed = (action: () => unknown) => {
+    const started = performance.now();
+    action();
+    return performance.now() - started;
+  };
+
+  it.each([
+    ['spaces before a bang', `color:red${' '.repeat(200_000)}!x`],
+    ['spaces after a bang', `color:red !${' '.repeat(200_000)}x`],
+    ['semicolons', ';'.repeat(200_000)],
+    ['comment openers', '/*'.repeat(100_000)],
+  ])('cleans a 200,000 character style attribute of %s in well under a second', (_name, text) => {
+    expect(timed(() => declarations(text))).toBeLessThan(500);
+    expect(declarations(text)).toBe('');
+  });
+
+  it('refuses a declaration list over the cap before reading it, and a value over the cap before parsing it', () => {
+    const report = new StripReport();
+    expect(cleanDeclarations(`color:red;${'margin:1mm;'.repeat(400)}`, report)).toBe('');
+    expect(report.lines().join()).toContain('longer than 4,000 characters');
+    expect(declarations(`color:red${' '.repeat(2_000)}!x`)).toBe('');
+  });
+
+  it('strips one trailing !important, with any spacing, and nothing else', () => {
+    expect(declarations('color:red !important')).toBe('color:red');
+    expect(declarations('color:red!IMPORTANT  ')).toBe('color:red');
+    expect(declarations('color:red ! important')).toBe('color:red');
+    expect(declarations('color:red !importantly')).toBe('color:red !importantly'); // not the keyword: left as written (an invalid declaration to the browser)
+  });
+
+  it.each([
+    ['at-rules ending in a semicolon', '@a;'.repeat(19_700)],
+    ['empty at-rule blocks', '@a{}'.repeat(14_700)],
+    ['closing braces', '}'.repeat(59_000)],
+    ['empty rules', 'a{}'.repeat(19_700)],
+    ['unclosed rules', 'a{'.repeat(29_000)],
+  ])('cleans a 59,000 character stylesheet of %s in well under a second', (_name, css) => {
+    expect(timed(() => sheet(css))).toBeLessThan(500);
+  });
+});

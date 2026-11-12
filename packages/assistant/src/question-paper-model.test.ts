@@ -14,10 +14,10 @@ describe('questionPaperModelOf', () => {
 
   it('forwards one request and renames the answered model', async () => {
     const fake = createFakeProvider();
-    fake.enqueueText(fakeTextResult({ text: '<p>ok</p>', truncated: true }));
+    fake.enqueueText(fakeTextResult({ text: '<p>ok</p>', unfinished: true }));
     const model = questionPaperModelOf(fake, settings);
     const result = await model.generate({ system: 's', parts: [{ type: 'text', text: 'hi' }], maxOutputTokens: 5 });
-    expect(result).toEqual({ text: '<p>ok</p>', usage: FAKE_USAGE, answeredModel: FAKE_REPORTED_MODEL, refusal: false, truncated: true });
+    expect(result).toEqual({ text: '<p>ok</p>', usage: FAKE_USAGE, answeredModel: FAKE_REPORTED_MODEL, refusal: false, unfinished: true });
     expect(fake.textCalls[0]!.input).toMatchObject({ system: 's', maxOutputTokens: 5 });
   });
 

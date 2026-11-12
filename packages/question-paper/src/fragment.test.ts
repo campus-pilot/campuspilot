@@ -67,4 +67,10 @@ describe('hasPaperContent', () => {
     expect(hasPaperContent('<span>inline only</span>')).toBe(false);
     expect(hasPaperContent('<p></p><div> </div>')).toBe(false);
   });
+
+  it('reads unclosed tags in linear time', () => {
+    const started = performance.now();
+    expect(hasPaperContent(`<p>${'<figure '.repeat(30_000)}`)).toBe(true);
+    expect(performance.now() - started).toBeLessThan(500);
+  });
 });

@@ -68,5 +68,6 @@ const BLOCK_ELEMENT = /<(?:p|div|h[1-6]|ul|ol|table|figure)[\s>]/;
 export function hasPaperContent(cleanedHtml: string): boolean {
   if (!BLOCK_ELEMENT.test(cleanedHtml)) return false;
   if (/data-math="/.test(cleanedHtml)) return true;
-  return cleanedHtml.replace(/<style>[\s\S]*?<\/style>/g, '').replace(/<[^>]*>/g, '').trim() !== '';
+  // Cleaned markup has no `<` or `>` inside a tag and none in style text, so these read it exactly and stay linear on any text.
+  return cleanedHtml.replace(/<style>[^<]*<\/style>/g, '').replace(/<[^<>]*>/g, '').trim() !== '';
 }
