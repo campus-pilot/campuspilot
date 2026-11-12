@@ -7,7 +7,8 @@ export type VersionView = {
   source: 'ai_job' | 'agent';
   createdAt: Date;
   createdByName: string | null;
-  totalMarks: number | null;
+  /** No longer produced by the API; the UI phase removes it. */
+  totalMarks?: number | null;
   warningCount: number;
   isLatest: boolean;
 };
@@ -31,7 +32,7 @@ function VersionRow({
     versionSourceLabel(version.source),
     DATE_FORMAT.format(version.createdAt),
     version.createdByName,
-    version.totalMarks === null ? null : `${formatMarks(version.totalMarks)} marks`,
+    version.totalMarks == null ? null : `${formatMarks(version.totalMarks)} marks`,
     version.warningCount > 0 ? `${version.warningCount} warning${version.warningCount === 1 ? '' : 's'}` : null,
   ].filter(Boolean);
   return (

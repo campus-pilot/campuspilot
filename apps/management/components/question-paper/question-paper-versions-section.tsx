@@ -25,7 +25,6 @@ export function QuestionPaperVersionsSection({
         source: version.source,
         createdAt: version.createdAt,
         createdByName: version.createdBy.name,
-        totalMarks: version.totalMarks,
         warningCount: version.warningCount,
         isLatest: version.isLatest,
       }))}

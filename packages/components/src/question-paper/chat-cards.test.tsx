@@ -16,14 +16,12 @@ afterEach(cleanup);
 
 const valid: DraftResult = {
   valid: true,
-  errors: [],
-  warnings: [{ code: 'total_differs_from_plan', path: '', message: 'The paper adds up to 15 marks but the plan says 20.' }],
-  total: 15,
-  planMaxMarks: 20,
+  problems: [],
+  stripped: ['The event handler "onclick" was removed'],
   draftId: 'abc123def456',
   placeholderFigures: 2,
 };
-const invalid: DraftResult = { valid: false, errors: [{ path: 'sections[0].questions[1].marks', message: 'Marks are required.' }], warnings: [], total: null, planMaxMarks: 20, draftId: null, placeholderFigures: 0 };
+const invalid: DraftResult = { valid: false, problems: ['Formula 1 (\\frac{1): Invalid TeX'], stripped: [], draftId: null, placeholderFigures: 0 };
 
 describe('reading a draft check from its tool call', () => {
   it('reads the stored output, raw or wrapped, and refuses a cut or foreign one', () => {
@@ -36,17 +34,17 @@ describe('reading a draft check from its tool call', () => {
   });
 
   it('reads the paper key and document back from the stored input', () => {
-    const input = { schoolId: 's', sessionId: 'ss', examSlug: 'e', classId: 'c', subjectSlug: 'su', modeSlug: 'm', content: { sections: [] } };
+    const input = { schoolId: 's', sessionId: 'ss', examSlug: 'e', classId: 'c', subjectSlug: 'su', modeSlug: 'm', html: '<p>Q1</p>' };
     expect(parseDraftCallInput(input)).toEqual(input);
-    expect(parseDraftCallInput({ ...input, content: undefined })).toBeNull();
+    expect(parseDraftCallInput({ ...input, html: undefined })).toBeNull();
     expect(parseDraftCallInput({ schoolId: 's' })).toBeNull();
     expect(parseDraftCallInput(null)).toBeNull();
   });
 
   it('is a valid draft only with a draft id, and says something for an invalid one with no errors', () => {
-    expect(draftFactsOf(valid)).toMatchObject({ valid: true, draftId: 'abc123def456', total: 15 });
+    expect(draftFactsOf(valid)).toMatchObject({ valid: true, draftId: 'abc123def456' });
     expect(draftFactsOf({ ...valid, draftId: null })).toMatchObject({ valid: false });
-    expect(draftFactsOf({ ...invalid, errors: [] })).toMatchObject({ valid: false, errors: [{ message: 'This draft is not valid.' }] });
+    expect(draftFactsOf({ ...invalid, problems: [] })).toMatchObject({ valid: false, errors: [{ message: 'This draft is not valid.' }] });
   });
 
   it('asks to save a draft by its id', () => {
@@ -55,13 +53,11 @@ describe('reading a draft check from its tool call', () => {
 });
 
 describe('QuestionPaperDraftCard', () => {
-  it('shows marks against the plan, warnings and placeholder figures, with Preview and a quiet Save', () => {
+  it('shows the sanitiser notices and placeholder figures, with Preview and a quiet Save', () => {
     const onSave = vi.fn();
     render(<QuestionPaperDraftCard ordinal={2} {...draftFactsOf(valid)} preview={<button type="button">Preview</button>} onSave={onSave} />);
     expect(screen.getByRole('heading', { name: 'Draft 2' })).toBeTruthy();
-    expect(screen.getByText(/Total marks/)).toBeTruthy();
-    expect(screen.getByText(/of 20 in the plan/)).toBeTruthy();
-    expect(screen.getByText(/adds up to 15 marks/)).toBeTruthy();
+    expect(screen.getByText(/event handler "onclick" was removed/)).toBeTruthy();
     expect(screen.getByText(/2 figures are still a placeholder/)).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Preview' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Save as new version' }));
@@ -84,7 +80,7 @@ describe('QuestionPaperDraftCard', () => {
 
   it('lists the problems of an invalid draft and offers neither preview nor save', () => {
     render(<QuestionPaperDraftCard ordinal={1} {...draftFactsOf(invalid)} preview={<button type="button">Preview</button>} />);
-    expect(screen.getByText('sections[0].questions[1].marks: Marks are required.')).toBeTruthy();
+    expect(screen.getByText(/Formula 1 .*Invalid TeX/)).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Preview' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Save as new version' })).toBeNull();
   });

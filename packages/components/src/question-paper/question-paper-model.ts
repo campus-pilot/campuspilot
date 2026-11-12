@@ -76,7 +76,8 @@ export function planUploads<F extends UploadFileInfo>(files: readonly F[], remai
 export type PaperCellInput = {
   pageCount: number;
   latestVersionNo: number;
-  totalMarks: number | null;
+  /** No longer produced by the API (nothing adds up a paper's marks); the UI phase removes it. */
+  totalMarks?: number | null;
   planMaxMarks: number | null;
   warningCount: number;
   activeJob: { status: 'queued' | 'running' } | null;
@@ -115,7 +116,7 @@ export function cellStatus(paper: PaperCellInput): CellStatus {
   }
   if (paper.latestVersionNo > 0) {
     const marks =
-      paper.totalMarks === null
+      paper.totalMarks == null
         ? undefined
         : paper.planMaxMarks === null
           ? `${formatMarks(paper.totalMarks)} marks`

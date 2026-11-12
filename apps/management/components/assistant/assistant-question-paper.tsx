@@ -73,13 +73,13 @@ function DraftPreviewBody({ schoolId, input, draftId }: { schoolId: string; inpu
       input.modeSlug,
       draftId,
     ],
-    queryFn: () => client.school.previewQuestionPaperDraft({ ...input, content: input.content as Record<string, unknown> }),
+    queryFn: () => client.school.previewQuestionPaperDraft(input),
     staleTime: Number.POSITIVE_INFINITY,
     retry: retryUnlessRefused,
   });
   if (preview.isPending) return <Skeleton className="h-96 w-full rounded-xl" />;
   if (preview.isError) return <PreviewMessage>{requestErrorMessage(preview.error, 'The draft could not be previewed.')}</PreviewMessage>;
-  if (preview.data.errors.length > 0) return <PreviewMessage>{preview.data.errors[0]!.message}</PreviewMessage>;
+  if (preview.data.problems.length > 0) return <PreviewMessage>{preview.data.problems[0]}</PreviewMessage>;
   return <DocumentPreview html={preview.data.html} label="Draft preview" fitPageWidth />;
 }
 
@@ -92,7 +92,7 @@ function useDraftResult(call: AssistantToolCallItemDto, input: DraftInput | null
   const stored = parseStoredDraftResult(call.body.output, call.body.outputTruncated);
   const recheck = useQuery({
     queryKey: ['assistant', 'question-paper-draft-check', call.id],
-    queryFn: () => client.school.validateQuestionPaperDraft({ ...input!, content: input!.content as Record<string, unknown> }),
+    queryFn: () => client.school.validateQuestionPaperDraft(input!),
     enabled: !stored && Boolean(input),
     staleTime: Number.POSITIVE_INFINITY,
     retry: retryUnlessRefused,
@@ -196,7 +196,7 @@ function VersionCard({ schoolId, view }: { schoolId: string; view: AssistantQues
       title={view.title}
       subtitle={`${paper.subjectName} (${paper.modeName}), ${paper.className}, ${paper.examName}`}
       versionNo={version.versionNo}
-      totalMarks={version.totalMarks}
+      totalMarks={null}
       planMaxMarks={version.planMaxMarks ?? paper.planMaxMarks}
       warningCount={version.warningCount}
       isLatest={version.isLatest}

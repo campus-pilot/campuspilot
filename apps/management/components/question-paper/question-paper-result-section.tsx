@@ -44,7 +44,7 @@ function RenderedVersion({ scope, detail, versionNo }: { scope: QuestionPaperSco
   return (
     <div className="flex flex-col gap-4">
       <MarksSummary
-        totalMarks={version?.totalMarks ?? null}
+        totalMarks={null}
         planMaxMarks={version?.planMaxMarks ?? detail.paper.planMaxMarks}
         warnings={preview.data.warnings}
       />

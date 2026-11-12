@@ -9,16 +9,11 @@ import type { AssistantTimelineRow } from '../assistant/timeline-model';
  * when it is cut or unreadable the caller validates the stored input again.
  */
 
-const issueSchema = z.object({ path: z.string(), message: z.string() });
-const warningSchema = z.object({ code: z.string(), path: z.string(), message: z.string() });
-
 /** The result of the validate tool, as the API's `validateDraftOutputSchema` returns it. */
 export const draftResultSchema = z.object({
   valid: z.boolean(),
-  errors: z.array(issueSchema),
-  warnings: z.array(warningSchema),
-  total: z.number().nullable(),
-  planMaxMarks: z.number().nullable(),
+  problems: z.array(z.string()),
+  stripped: z.array(z.string()),
   draftId: z.string().nullable(),
   placeholderFigures: z.number().int(),
 });
@@ -26,27 +21,33 @@ export type DraftResult = z.infer<typeof draftResultSchema>;
 
 /** Everything the draft card shows. */
 export type DraftCardFacts =
-  | { valid: false; errors: DraftResult['errors'] }
+  | { valid: false; errors: readonly { path: string; message: string }[] }
   | {
       valid: true;
       draftId: string;
       total: number | null;
       planMaxMarks: number | null;
-      warnings: DraftResult['warnings'];
+      warnings: readonly { code: string; path: string; message: string }[];
       placeholderFigures: number;
     };
 
+/**
+ * The card still shows the shapes of the structured paper (a path per error,
+ * marks and warnings) until the UI phase redesigns it: problems become errors
+ * without a path, the sanitiser's `stripped` lines become warnings, and there
+ * are no marks.
+ */
 export function draftFactsOf(result: DraftResult): DraftCardFacts {
   return result.valid && result.draftId
     ? {
         valid: true,
         draftId: result.draftId,
-        total: result.total,
-        planMaxMarks: result.planMaxMarks,
-        warnings: result.warnings,
+        total: null,
+        planMaxMarks: null,
+        warnings: result.stripped.map((message) => ({ code: 'sanitised', path: '', message })),
         placeholderFigures: result.placeholderFigures,
       }
-    : { valid: false, errors: result.errors.length > 0 ? result.errors : [{ path: '', message: 'This draft is not valid.' }] };
+    : { valid: false, errors: result.problems.length > 0 ? result.problems.map((message) => ({ path: '', message })) : [{ path: '', message: 'This draft is not valid.' }] };
 }
 
 /**
@@ -76,14 +77,14 @@ const paperInputSchema = z.object({
   classId: z.string(),
   subjectSlug: z.string(),
   modeSlug: z.string(),
-  content: z.unknown(),
+  html: z.string(),
 });
 export type DraftCallInput = z.infer<typeof paperInputSchema>;
 
 /** The paper key and document a validate call was made with, or null if the stored input is not that. */
 export function parseDraftCallInput(input: unknown): DraftCallInput | null {
   const parsed = paperInputSchema.safeParse(input);
-  return parsed.success && parsed.data.content !== undefined ? parsed.data : null;
+  return parsed.success ? parsed.data : null;
 }
 
 /** The sentence a draft with placeholder figures carries, or null. */
