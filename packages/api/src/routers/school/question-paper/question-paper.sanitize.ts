@@ -4,7 +4,8 @@ import sanitizeHtml from 'sanitize-html';
 
 import { BASE_SANITIZER_OPTIONS } from '../document/document.sanitize';
 import { cleanDeclarations, cleanStyleSheet, RESERVED_CLASS, StripReport, UNIT_CAP } from './question-paper.css';
-import { scanQuestionPaperOutput, type ScannedElement } from './question-paper.output';
+import { scanQuestionPaperOutput, type ScannedElement, type ScannedOutput } from './question-paper.output';
+import { checkQuestionPaperTree } from './question-paper.tree';
 
 /**
  * The `question_paper_body` sanitiser profile (html-design.md): the HTML
@@ -508,19 +509,35 @@ export function sanitizeQuestionPaperBody(raw: string): SanitizedQuestionPaperBo
   const first = cleanOnce(raw);
   let html = first.html;
   let settled = false;
+  let scanned: ScannedOutput = { ok: false, reason: 'not scanned' };
   for (let round = 1; round <= MAX_ROUNDS; round += 1) {
     const next = cleanOnce(html);
     first.report.mergeNew(next.report);
-    if (next.html === html) {
+    if (next.html !== html) {
+      html = next.html;
+      continue;
+    }
+    // Stable under cleaning. A string the grammar refuses cannot be saved; leave that to the refusal below.
+    scanned = scanQuestionPaperOutput(html, OUTPUT_GRAMMAR);
+    if (!scanned.ok) {
       settled = true;
       break;
     }
-    html = next.html;
+    // Stable and accepted: now the browser's tree builder must read it the way the grammar did (tree.ts). When it does
+    // not, take the browser's own reading as the new text and clean it again; it settles in one or two more rounds.
+    const tree = checkQuestionPaperTree(html, scanned.elements);
+    if (tree.faithful) {
+      settled = true;
+      break;
+    }
+    // Moving or adding an element (an implied <tbody>, a list item pulled out of a div) loses nothing and is not reported;
+    // an element the browser would not keep in that position (a stray <td>) is.
+    for (const name of tree.dropped) first.report.add(`A <${name}> that cannot stand where it was written was removed`);
+    html = tree.normalised;
   }
 
   const refused = (problem: string): SanitizedQuestionPaperBody => ({ html: '', stripped: first.report.lines(), problems: [problem], refused: true, structure: NO_STRUCTURE, stats: emptyStats(raw.length) });
   if (!settled) return refused('The paper could not be cleaned safely (its markup keeps changing when cleaned). Simplify the markup.');
-  const scanned = scanQuestionPaperOutput(html, OUTPUT_GRAMMAR);
   if (!scanned.ok) return refused(`The paper could not be cleaned safely (${scanned.reason}). Simplify the markup.`);
 
   const stats = statsOf(scanned.elements, scanned.styleTexts, raw.length);

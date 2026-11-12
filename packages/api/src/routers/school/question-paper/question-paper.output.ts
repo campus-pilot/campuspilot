@@ -44,6 +44,8 @@ export type ScannedElement = {
   name: string;
   /** Attribute values as the browser reads them (entities of `& < > "` decoded). */
   attributes: Readonly<Record<string, string>>;
+  /** Number of open elements around it (0 at the top level); `<style>` blocks are not elements here and do not count. */
+  depth: number;
 };
 
 export type ScannedOutput = { ok: true; elements: ScannedElement[]; styleTexts: string[] } | { ok: false; reason: string };
@@ -114,7 +116,7 @@ export function scanQuestionPaperOutput(html: string, allowed: { tags: ReadonlyS
     }
 
     if (selfClosing === '/' && !VOID.has(name)) return fail(`<${name} /> is not allowed`);
-    elements.push({ name, attributes });
+    elements.push({ name, attributes, depth: stack.length });
     if (!VOID.has(name)) {
       stack.push(name);
       if (name === 'svg') svgDepth += 1;
