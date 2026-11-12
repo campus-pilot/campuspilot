@@ -785,6 +785,9 @@ importers:
       '@campuspilot/config':
         specifier: workspace:*
         version: link:../config
+      '@campuspilot/question-paper':
+        specifier: workspace:*
+        version: link:../question-paper
       '@testcontainers/postgresql':
         specifier: 'catalog:'
         version: 12.1.0

@@ -19,6 +19,7 @@ import { nextQuestionPaperRequestKey, recordQuestionPaperRequest } from './cost'
 import type { QuestionPaperJobInput } from './input';
 import { log } from './log';
 import { getQuestionPaperModel, type QuestionPaperModel, type StructuredPart, type StructuredResult } from './model';
+import { describeError } from './error-detail';
 import { buildGenerationParts, buildRepairParts, QUESTION_PAPER_JOB_SYSTEM_PROMPT } from './prompt';
 
 /**
@@ -109,12 +110,6 @@ type Plan = { scope: PaperScope; pages: PlannedPage[] };
 type ModelAnswer = Pick<StructuredResult, 'text' | 'usage' | 'answeredModel' | 'refusal' | 'truncated'>;
 
 type Validation = { ok: true } | { ok: false; issues: QuestionPaperIssue[] };
-
-/** Safe, bounded description of an unexpected error for `error_detail` and logs (never request content). */
-function describeError(error: unknown): string {
-  if (error instanceof Error) return `${error.name}: ${error.message.split('\nparams:')[0]!.slice(0, 500)}`;
-  return String(error).slice(0, 500);
-}
 
 /** How a refusal by the assistant gate maps to a job failure. */
 function accessFailure(code: string): QuestionPaperJobErrorCode {
@@ -417,7 +412,20 @@ async function callModel({
         });
       }
       const kind = model.failureKind(error);
-      log.error({ jobId: input.jobId, n, attempt, kind, provider: model.provider, model: model.model, err: describeError(error) }, 'question-paper.model.error');
+      log.error(
+        {
+          jobId: input.jobId,
+          n,
+          attempt,
+          kind,
+          provider: model.provider,
+          model: model.model,
+          // The shape of the request, never its content: enough to tell a bad schema from a bad image.
+          request: { images: requestParts.filter((part) => part.type === 'image').length, textParts: requestParts.filter((part) => part.type === 'text').length, maxOutputTokens: deps.maxOutputTokens },
+          err: describeError(error),
+        },
+        'question-paper.model.error',
+      );
       // Only a busy or unknown failure can pass on its own; the same rejected
       // request, or a wrong key, fails the same way again.
       if ((kind === 'busy' || kind === 'unknown') && attempt < MODEL_ATTEMPTS) {

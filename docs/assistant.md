@@ -208,14 +208,41 @@ untouched, so `boundary.test.ts` still holds.
 | --- | --- | --- |
 | Images read | JPEG, PNG, WebP, GIF (**not HEIC**) | JPEG, PNG, WebP, HEIC, HEIF |
 | Request | `beta.messages.stream`, `output_config.format = {type:'json_schema', schema}`, effort `medium`, no caching (pages differ per job) | `models.generateContentStream`, `responseMimeType: application/json`, `responseJsonSchema`, `mediaResolution: HIGH` (streamed so a long answer survives idle limits and a broken stream still reports usage) |
-| Schema | `$defs`/`$ref` supported (the SDK's own transform keeps them) | `$defs`/`$ref` supported; no `const`, so the adapter turns it into a one-value `enum` (`toGeminiResponseSchema`) |
+| Schema | `$defs`/`$ref` supported (the SDK's own transform keeps them); see the complexity risk below | Expanded, `const` rewritten and fitted to the complexity limits by `toGeminiResponseSchema` (`gemini-schema.ts`), see below |
 | Truncated | `stop_reason = max_tokens` | `finishReason = MAX_TOKENS` |
 | Refused | `stop_reason = refusal` | prompt block, or a safety/image-safety finish reason |
 
-The model-facing JSON Schema of a paper is sent with `$defs`/`$ref` (about
-7 KB; inlined it is 77 KB). A page the active provider cannot read (HEIC on
+The model-facing JSON Schema of a paper is about 7 KB with `$defs`/`$ref`
+(78 KB expanded; rich text is shown as one flat run object). A page the active provider cannot read (HEIC on
 Anthropic) fails the job before any request, naming the page (decision D46);
 pages are never dropped silently.
+
+**Gemini structured output limits (found with the real API).** The first real
+call failed with `400 INVALID_ARGUMENT "Request contains an invalid argument."`
+and no other detail. Bisected with `responseJsonSchema` on `gemini-3.8-flash`:
+images, thinking, output tokens and the model id were fine; the schema was
+refused for complexity, measured **after `$ref`s are expanded** (so `$defs` does
+not help). Observed: nesting depth 30 passes and 32 fails; the question paper
+schema passed with 170 declared properties at depth 19 and failed with 178 at
+depth 22 (and with 220, 365, 884); a flat object passes with 150 properties and
+fails with 170. The rule is not documented, so `gemini-schema.ts` stays well
+inside what passed: it expands references, rewrites `const`, and relaxes the
+deepest optional subtrees (captions, then blocks, options and sub-parts; at the current budget even a question's own `blocks` become an open array that the prompt describes)
+to open `{}` schemas until depth <= 20 and <= 150 properties. The prompt and
+the validator still govern the answer; `gemini-schema.test.ts` pins the real
+schema within the limits. A future 400 of this kind means lowering
+`GEMINI_SCHEMA_LIMITS`. The rich text hint carries `t v tex display b i u sup
+sub` only: per-run `lang`/`script`/`dir` are not offered to the job (the paper
+level `meta` states them), because they cost most of the budget.
+
+**Anthropic risk (not verified, no key).** Anthropic's structured outputs
+document complexity limits on a strict schema (a bounded number of optional
+parameters and of union-typed parameters across the schema, no recursion).
+The paper schema has far more optional properties than the documented figures
+(about 130 expanded), so a first real Anthropic run may be refused with a
+`400`; the fix is the same technique (an Anthropic-specific fit in
+`anthropic.ts`). The job now records the provider's real message in
+`error_detail` (`error-detail.ts`) so the limit and request id are visible.
 
 **Settings.** Question paper generation uses `QUESTION_PAPER_PROVIDER`
 (default `ASSISTANT_PROVIDER`) and `QUESTION_PAPER_MODEL` (default the

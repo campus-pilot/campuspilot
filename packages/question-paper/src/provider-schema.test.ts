@@ -79,6 +79,21 @@ describe("questionPaperProviderJsonSchema", () => {
     );
   });
 
+  it("shows rich text as one flat run object, not a union of run shapes", () => {
+    // The first real Gemini call was refused (400 INVALID_ARGUMENT) because the
+    // expanded schema was too deep and too large; the union of run shapes with
+    // enumerated languages was most of it.
+    const text = Object.values(schema.$defs as Record<string, any>).find(
+      (def) => Array.isArray(def.anyOf) && def.anyOf[0]?.type === "string" && def.anyOf[1]?.type === "array",
+    );
+    const run = text.anyOf[1].items;
+    expect(Object.keys(run.properties)).toEqual(
+      expect.arrayContaining(["t", "v", "tex", "display", "b", "i", "u", "sup", "sub"]),
+    );
+    expect(run.required).toEqual(["t"]);
+    expect(keysOf(text).has("oneOf")).toBe(false);
+  });
+
   it("is memoised and plain JSON", () => {
     expect(questionPaperProviderJsonSchema()).toBe(schema);
     expect(JSON.parse(JSON.stringify(schema))).toEqual(schema);

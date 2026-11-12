@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { questionPaper } from "./schema";
+import { questionPaper, richText } from "./schema";
 
 /**
  * JSON Schema keywords that the providers' structured-output modes reject or
@@ -35,6 +35,42 @@ function strip(value: unknown): unknown {
   return value;
 }
 
+/**
+ * The model-facing rich text. The real one is a union of a string and an
+ * array of strings and three run shapes (text, math, break), each text run
+ * with enumerated language, script and direction. Expanded at every place a
+ * rich text occurs (a question, its parts, subparts, options, captions, table
+ * cells, alternatives) that made the schema far larger and deeper than
+ * Gemini accepts (see `docs/assistant.md`, "Structured output limits"), so the
+ * model sees one flat run object with optional fields instead. Zod stays the
+ * authority: a run that does not fit the real shape is reported by the
+ * validator, with its path, and repaired.
+ */
+const COMPACT_RICH_TEXT = {
+  anyOf: [
+    { type: "string" },
+    {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          t: { type: "string", enum: ["text", "math", "br"] },
+          v: { type: "string" },
+          tex: { type: "string" },
+          display: { type: "boolean" },
+          b: { type: "boolean" },
+          i: { type: "boolean" },
+          u: { type: "boolean" },
+          sup: { type: "boolean" },
+          sub: { type: "boolean" },
+        },
+        required: ["t"],
+        additionalProperties: false,
+      },
+    },
+  ],
+} as const;
+
 let cached: Record<string, unknown> | undefined;
 
 /**
@@ -59,6 +95,11 @@ export function questionPaperProviderJsonSchema(): Record<string, unknown> {
       target: "draft-2020-12",
       unrepresentable: "any",
       reused: "ref",
+      override: ({ zodSchema, jsonSchema }) => {
+        if (zodSchema !== richText) return;
+        for (const key of Object.keys(jsonSchema)) delete (jsonSchema as Record<string, unknown>)[key];
+        Object.assign(jsonSchema, structuredClone(COMPACT_RICH_TEXT));
+      },
     }),
   ) as Record<string, unknown>;
   return cached;

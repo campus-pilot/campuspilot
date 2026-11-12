@@ -20,7 +20,7 @@ Output
 
 Fidelity
 - Keep question order, numbering and labels exactly as written: "number" and every "label" are printed verbatim ("1", "Q.2", "(a)", "(क)").
-- Keep the paper's language and script. Set meta.language, meta.script and meta.direction (Urdu is "ur", "arabic", "rtl"). Never translate or transliterate. For mixed-language text use text runs with their own lang/script/dir.
+- Keep the paper's language and script. Set meta.language, meta.script and meta.direction (Urdu is "ur", "arabic", "rtl"). Never translate or transliterate. Mixed-language text stays in one run sequence in the order written (meta states the paper's main language and script; per-run overrides are not part of this output).
 - Where text is illegible write "[illegible]" in its place. Never guess.
 - Do not invent questions, options or marks.
 

@@ -8,7 +8,6 @@ import {
   buildGeminiStructuredRequest,
   GEMINI_IMAGE_MIME_TYPES,
   generateGeminiStructured,
-  toGeminiResponseSchema,
 } from './gemini';
 import { billedUsageOf, type StructuredRequest } from './types';
 
@@ -115,18 +114,6 @@ describe('gemini structured request', () => {
     expect(() =>
       buildGeminiStructuredRequest('m', { ...request, parts: [{ type: 'image', mimeType: 'image/gif', data: new Uint8Array() }] }),
     ).toThrow(/cannot read image\/gif/);
-  });
-
-  it('rewrites const for the response schema without touching a property called const', () => {
-    expect(
-      toGeminiResponseSchema({
-        $defs: { flag: { type: 'boolean', const: true }, kind: { type: 'string', const: 'text' } },
-        properties: { const: { type: 'string' } },
-      }),
-    ).toEqual({
-      $defs: { flag: { type: 'boolean' }, kind: { type: 'string', enum: ['text'] } },
-      properties: { const: { type: 'string' } },
-    });
   });
 
   function clientWith(chunks: unknown[], failAfter?: Error) {

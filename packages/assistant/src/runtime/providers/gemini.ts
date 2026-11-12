@@ -12,6 +12,7 @@ import {
   type Part,
 } from '@google/genai';
 
+import { toGeminiResponseSchema } from './gemini-schema';
 import type { AssistantUserMessageBody } from '@campuspilot/db/schema/assistant';
 import { buildUserTranscriptContent, isAttachmentMarker, type AttachmentMarker } from '../../transcript';
 import { attachmentLabel, attachmentNote } from '../context';
@@ -183,32 +184,6 @@ export const geminiContext: ContextAdapter = {
 /** A user message as Gemini parts: text blocks become `{ text }`, attachment markers stay markers (replaced per request). */
 export function geminiUserContent(body: AssistantUserMessageBody): unknown[] {
   return buildUserTranscriptContent(body).map((block) => (isAttachmentMarker(block) ? block : { text: (block as { text: string }).text }));
-}
-
-/**
- * Adapts a JSON Schema to what `responseJsonSchema` accepts (SDK 2.32 typings
- * list the supported keywords: `$defs`/`$ref`, `type`, `enum` for strings and
- * numbers, `items`, `anyOf`/`oneOf`, `properties`, `additionalProperties`,
- * `required`; no `const`). `const` therefore becomes a one-value `enum`, and
- * a boolean `const` (`true` flags) is left as a plain boolean, since boolean
- * enums are not supported; the caller's own validation still enforces it.
- */
-export function toGeminiResponseSchema(schema: unknown): unknown {
-  if (Array.isArray(schema)) return schema.map(toGeminiResponseSchema);
-  if (schema === null || typeof schema !== 'object') return schema;
-  const entries = Object.entries(schema as Record<string, unknown>);
-  const result: Record<string, unknown> = {};
-  for (const [key, value] of entries) {
-    if (key === 'const') {
-      if (typeof value === 'string' || typeof value === 'number') result.enum = [value];
-    } else if (key === 'properties' && value !== null && typeof value === 'object') {
-      // A map of property names, not a schema: a property may be called "const".
-      result[key] = Object.fromEntries(Object.entries(value).map(([name, property]) => [name, toGeminiResponseSchema(property)]));
-    } else {
-      result[key] = toGeminiResponseSchema(value);
-    }
-  }
-  return result;
 }
 
 function geminiPartOf(part: StructuredPart): Part {
@@ -406,3 +381,5 @@ export function createGeminiProvider({ apiKey, model }: { apiKey: string; model:
     failureKind: geminiFailureKind,
   };
 }
+
+export { toGeminiResponseSchema };
