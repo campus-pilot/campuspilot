@@ -37,8 +37,8 @@ describe('approval summaries', () => {
 
   it('describes pasted html by its size and notes it instead of its text', () => {
     const summary = approvalSummaryOf(TOOL, { ...input, draftId: undefined, html: '<p>x</p>'.repeat(1000) }, facts)!;
-    expect(summary.sentence).toContain('the paper text (8,000 characters)');
-    expect(summary.notes.html).toBe('Paper text, 8,000 characters (not shown)');
+    expect(summary.sentence).toContain('the pasted paper text (8,000 characters)');
+    expect(summary.notes.html).toBe('Pasted paper text, 8,000 characters (not shown)');
   });
 
   it('has no summary for other tools, and finds the paper and draft only for tools that have one', () => {
@@ -71,12 +71,14 @@ describe('AssistantApprovalRequest with a summary', () => {
     render(
       <AssistantApprovalRequest call={call(withHtml)} waiting={1} summary={approvalSummaryOf(TOOL, withHtml, facts)} onDecide={() => {}} />,
     );
-    expect(screen.getByText(/Save the paper text \(24 characters\) as version 4 of Mathematics/)).toBeTruthy();
+    expect(screen.getByText(/Save the pasted paper text \(24 characters\) as version 4 of Mathematics/)).toBeTruthy();
     expect(screen.queryByText('Class Id')).toBeNull();
     expect(screen.queryByText(/SECRET-PAPER-TEXT/)).toBeNull();
+    // The shared Button (focus ring, hover, hit area), not a bare collapsible trigger.
+    expect(screen.getByRole('button', { name: /Details/ }).className).toMatch(/focus-visible/);
     fireEvent.click(screen.getByRole('button', { name: /Details/ }));
     expect(screen.getByText('Class Id')).toBeTruthy();
-    expect(screen.getByText('Paper text, 24 characters (not shown)')).toBeTruthy();
+    expect(screen.getByText('Pasted paper text, 24 characters (not shown)')).toBeTruthy();
     expect(screen.queryByText(/SECRET-PAPER-TEXT/)).toBeNull();
   });
 

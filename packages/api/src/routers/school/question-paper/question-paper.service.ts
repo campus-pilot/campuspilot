@@ -101,6 +101,11 @@ export async function getQuestionPaper(
   };
 }
 
+/** The facts of one paper (the `paper` block of {@link getQuestionPaper}) without its pages and versions. */
+export async function getQuestionPaperFacts(db: DatabaseExecutor, scope: PaperScope) {
+  return (await loadPaperView(db, scope)).facts;
+}
+
 /** `getQuestionPaperDetail`: what the Question paper screen needs in one call, polled while a job runs. */
 export async function getQuestionPaperDetail(
   db: DatabaseExecutor,

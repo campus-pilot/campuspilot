@@ -98,7 +98,7 @@ ${QUESTION_PAPER_NO_MOTION_RULE}
 Never invent questions, options or marks. If something is unreadable write "[illegible]" and tell the user.
 
 ## Editing an existing paper
-Call getQuestionPaper, change only what the user asked, keep everything else identical, validate, show the draft, wait for the user. If the result ends with a "Result truncated" note you only saw part of the paper: never submit a revised paper built from it. Tell the user the paper is too long to edit in chat.
+Call getQuestionPaper (a saved paper) or, in the in-app chat, getQuestionPaperDraft with a draftId (a draft you validated earlier in this chat and that is not saved). Never edit from memory: your earlier html may have been replaced by a note in brackets to keep the chat short, and that note is not the paper (never send it as html). Change only what the user asked, keep everything else identical, validate, show the draft, wait for the user. If the result ends with a "Result truncated" note you only saw part of the paper: never submit a revised paper built from it. Tell the user the paper is too long to edit in chat.
 
 ${QUESTION_PAPER_VOCABULARY_RULES}
 ${QUESTION_PAPER_CHAT_FIGURE_RULES}`;

@@ -60,15 +60,34 @@ export type ModelContextDeps = {
 export const toolResultStub = ({ toolName, chars }: { toolName: string; chars: number }) =>
   `[Earlier result of ${toolName} omitted to keep the chat short (${chars.toLocaleString('en-US')} characters). Call the tool again if you need it.]`;
 
+const VALIDATE_DRAFT_TOOL = /(^|[._])validateQuestionPaperDraft$/;
+const SAVE_VERSION_TOOL = /(^|[._])saveQuestionPaperVersion$/;
+
 /**
  * The note that replaces a long text field of an old tool call input. The stored
  * transcript keeps the text (a draft id is the hash of it and saving resolves the id from
- * the stored call), so the stub points the model at what still works: the draft id in
- * that call's result, `getQuestionPaper` for a saved paper, or writing the paper again.
- * Only the field name and length are named, so the stub is stable and shorter than the threshold.
+ * the stored call), so the note names the way back that works for the tool that wrote it:
+ *
+ * - `validateQuestionPaperDraft`: an unsaved draft is read again with `getQuestionPaperDraft`
+ *   and the `draftId` in that call's result; a paper saved since is read with `getQuestionPaper`.
+ * - `saveQuestionPaperVersion` (pasted `html`): the paper is saved, so `getQuestionPaper`.
+ * - any other tool: no draft is involved, so no `draftId` is mentioned; the model writes it again.
+ *
+ * The note is deliberately plain bracketed prose that says it is not the content: a model that
+ * copies it into `html` sends text with no markup, which the draft check refuses as not being a
+ * paper, and nothing is saved. Only the tool name, field name and length are named, so the note
+ * is stable and far shorter than the threshold.
  */
-export const toolInputStub = ({ toolName, field, chars }: ToolInputStubInput) =>
-  `[Earlier \`${field}\` of ${toolName} omitted to keep the chat short (${chars.toLocaleString('en-US')} characters). The result of that call still names it (for a paper draft, its draftId). To change it, load the paper again with getQuestionPaper or write the whole paper again.]`;
+export const toolInputStub = ({ toolName, field, chars }: ToolInputStubInput) => {
+  const head = `[Omitted: the \`${field}\` of ${toolName} (${chars.toLocaleString('en-US')} characters) was removed from this chat to keep it short. This note is not the content; never send it as ${field}.`;
+  if (VALIDATE_DRAFT_TOOL.test(toolName)) {
+    return `${head} To read that draft again call getQuestionPaperDraft with the draftId in the result of that call; if the paper was saved since, call getQuestionPaper instead.]`;
+  }
+  if (SAVE_VERSION_TOOL.test(toolName)) {
+    return `${head} That paper was saved: call getQuestionPaper to read it.]`;
+  }
+  return `${head} Write it again if you still need it.]`;
+};
 
 /**
  * Replaces each top-level string field of a tool call input that has at least

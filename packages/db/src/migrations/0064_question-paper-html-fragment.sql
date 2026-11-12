@@ -7,10 +7,11 @@
 --
 -- The JSON model was never released, so no version can be converted. Any row
 -- that exists (a development database) keeps its PDF and gets a one-line
--- placeholder fragment; generating the paper again replaces it with a new
--- version.
+-- placeholder fragment and one `legacy` notice (so the version list, the card
+-- and the preview say the preview is not available and the PDF is the original);
+-- generating the paper again replaces it with a new version.
 ALTER TABLE "exam_question_paper_version" ADD COLUMN "content_html" text;--> statement-breakpoint
-UPDATE "exam_question_paper_version" SET "content_html" = '<p>This version was saved in an earlier format that can no longer be shown. Generate the paper again.</p>', "warnings" = '[]'::jsonb;--> statement-breakpoint
+UPDATE "exam_question_paper_version" SET "content_html" = '<p>This version was saved in an earlier format that can no longer be shown. Generate the paper again.</p>', "warnings" = '[{"code":"legacy","message":"Saved in an earlier format. The preview is not available; the PDF is the original."}]'::jsonb;--> statement-breakpoint
 ALTER TABLE "exam_question_paper_version" ALTER COLUMN "content_html" SET NOT NULL;--> statement-breakpoint
 ALTER TABLE "exam_question_paper_version" DROP COLUMN "content";--> statement-breakpoint
 ALTER TABLE "exam_question_paper_version" DROP COLUMN "schema_version";--> statement-breakpoint

@@ -19,6 +19,11 @@ export const QUESTION_PAPER_MAX_PAGE_BYTES = 15 * 1024 * 1024;
  */
 export const QUESTION_PAPER_PAPER_OUTPUT_CHARS = QUESTION_PAPER_LIMITS.fragmentChars * 2 + 40_000;
 /**
+ * `getQuestionPaperDraft` returns one cleaned fragment (at most `fragmentChars`) and a
+ * small paper facts block, so it gets the same room as `getQuestionPaper`.
+ */
+export const QUESTION_PAPER_DRAFT_OUTPUT_CHARS = QUESTION_PAPER_PAPER_OUTPUT_CHARS;
+/**
  * The same for `validateQuestionPaperDraft`. It never echoes the fragment (the
  * model has it, and `draftId` names it), so its size does not depend on the
  * paper: at most {@link QUESTION_PAPER_VALIDATE_LISTED} problems and as many
@@ -67,6 +72,15 @@ export const versionNoInputSchema = paperKeySchema.extend({
 
 export const getQuestionPaperInputSchema = paperKeySchema.extend({
   versionNo: z.number().int().min(1).optional().describe('A saved version; the latest when omitted.'),
+});
+
+/**
+ * `getQuestionPaperDraft`: a draft the in-app assistant validated earlier in this
+ * chat. The scope names the paper the draft is for; the draft itself is found by
+ * `draftId` in this conversation only.
+ */
+export const getQuestionPaperDraftInputSchema = paperKeySchema.extend({
+  draftId: z.string().length(12).describe('The draftId returned by validateQuestionPaperDraft earlier in this chat. Only the in-app assistant can use it.'),
 });
 
 export const learnInputSchema = z.object({ schoolId: id });
@@ -219,6 +233,16 @@ export const getQuestionPaperOutputSchema = z.object({
       html: z.string(),
     })
     .nullable(),
+});
+
+export const getQuestionPaperDraftOutputSchema = z.object({
+  /** The facts of the paper the draft belongs to, as in getQuestionPaper (its latestVersionNo is the expectedVersionNo for a save). */
+  paper: paperFactsSchema,
+  draftId: z.string(),
+  /** The draft as the sanitiser cleaned it: what saving it would store and the preview shows. At most the fragment limit. */
+  html: z.string(),
+  /** Characters of `html`. */
+  characters: z.number().int(),
 });
 
 export const listVersionsOutputSchema = z.object({ versions: z.array(versionSummarySchema) });

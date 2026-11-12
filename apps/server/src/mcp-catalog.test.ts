@@ -237,8 +237,8 @@ describe('catalog metadata', () => {
     // +1 systemAdmin.getSchoolFeatureFlags; +9 notice tools (list, get,
     // create, update, delete, preview, publish preview, publish, download);
     // +3 exam timetable publication tools (publish preview, publish, withdraw);
-    // +6 question paper tools (list, get, versions, learn, validate, save).
-    expect(catalog.advanced).toHaveLength(116);
+    // +7 question paper tools (list, get, versions, learn, validate, save, get draft).
+    expect(catalog.advanced).toHaveLength(117);
   });
 });
 
@@ -659,6 +659,7 @@ describe('assistant service view', () => {
     );
     expect(declared).toEqual({
       'school.getQuestionPaper': 200_000,
+      'school.getQuestionPaperDraft': 200_000,
       'school.validateQuestionPaperDraft': 40_000,
       'school.learn_question_paper_generation': 40_000,
     });
@@ -669,7 +670,7 @@ describe('assistant service view', () => {
 
   /** The question paper tools by name: what each is for, and how the in-app assistant and external clients reach it. */
   const QUESTION_PAPER_TOOLS = {
-    reads: ['school.listQuestionPapers', 'school.getQuestionPaper', 'school.listQuestionPaperVersions', 'school.learn_question_paper_generation', 'school.validateQuestionPaperDraft'],
+    reads: ['school.listQuestionPapers', 'school.getQuestionPaper', 'school.listQuestionPaperVersions', 'school.getQuestionPaperDraft', 'school.learn_question_paper_generation', 'school.validateQuestionPaperDraft'],
     writes: ['school.saveQuestionPaperVersion'],
     // The UI's own procedures: a person does these, never the assistant.
     humanOnly: ['school.startQuestionPaperGeneration', 'school.getQuestionPaperDetail', 'school.getQuestionPaperPreview', 'school.previewQuestionPaperDraft', 'school.getQuestionPaperDownload'],

@@ -83,9 +83,12 @@ function SummarizedChange({ summary, fields }: { summary: ApprovalSummary; field
       {shown.length ? <ChangeFields fields={shown} /> : null}
       {details.length ? (
         <Collapsible className="flex min-w-0 flex-col gap-1">
-          <CollapsibleTrigger className="flex items-center gap-1 self-start text-muted-foreground">
-            Details
-            <ChevronDown className="size-3" aria-hidden />
+          {/* The shared ghost button, as on the draft cards: it carries the focus ring, hover state and hit area a bare trigger lacks. */}
+          <CollapsibleTrigger asChild>
+            <Button type="button" variant="ghost" size="sm" className="self-start text-muted-foreground">
+              Details
+              <ChevronDown data-icon="inline-end" aria-hidden />
+            </Button>
           </CollapsibleTrigger>
           <CollapsibleContent>
             <ChangeFields fields={details} />

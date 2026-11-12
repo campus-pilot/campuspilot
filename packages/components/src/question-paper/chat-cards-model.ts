@@ -109,15 +109,32 @@ function paperScopeOf(input: DraftCallInput | null): string | null {
 const cardCallsOf = (rows: readonly AssistantTimelineRow[]) => rows.flatMap((row) => (row.kind === 'card' ? [row.call] : []));
 
 /**
- * For each draft card that a later draft of the same paper replaced, the
- * ordinal ("Draft 2") of the nearest later draft whose stored check said it is
- * ready. Keyed by the card's call id. A later draft with a cut or unreadable
- * stored result is not counted (its verdict is unknown without the re-check
- * the card makes), so a card is only called replaced on evidence.
+ * The draft cards whose stored result cannot be trusted (cut at 4,000 characters
+ * or unreadable) but whose input is a draft call: the ones that need the
+ * re-check for a verdict. Shared by the card (its own state) and
+ * {@link supersededDrafts} (whether a later draft is ready).
  */
-export function supersededDrafts(rows: readonly AssistantTimelineRow[]): Map<string, number> {
+export function draftCallsNeedingRecheck(rows: readonly AssistantTimelineRow[]): { id: string; input: DraftCallInput }[] {
+  return cardCallsOf(rows).flatMap((call) => {
+    if (parseStoredDraftResult(call.body.output, call.body.outputTruncated)) return [];
+    const input = parseDraftCallInput(call.body.input);
+    return input ? [{ id: call.id, input }] : [];
+  });
+}
+
+/**
+ * For each draft card that a later draft of the same paper replaced, the
+ * ordinal ("Draft 2") of the nearest later draft that is ready. Keyed by the
+ * card's call id. A draft's verdict is its stored result, or, when that was cut
+ * (a ready draft with a long list of removed items is cut at 4,000 characters)
+ * or unreadable, the re-check's `verdicts` for that call (the chat runs the
+ * re-check for those, see {@link draftCallsNeedingRecheck}). A later draft with
+ * neither (the re-check is running or failed) is not counted, so a card is only
+ * called replaced on evidence.
+ */
+export function supersededDrafts(rows: readonly AssistantTimelineRow[], verdicts: ReadonlyMap<string, DraftResult> = new Map()): Map<string, number> {
   const cards = cardCallsOf(rows).map((call) => {
-    const result = parseStoredDraftResult(call.body.output, call.body.outputTruncated);
+    const result = parseStoredDraftResult(call.body.output, call.body.outputTruncated) ?? verdicts.get(call.id);
     return {
       id: call.id,
       scope: paperScopeOf(parseDraftCallInput(call.body.input)),

@@ -293,6 +293,20 @@ async function savedByJob(db: DatabaseExecutor, jobId: string): Promise<VersionR
   return version;
 }
 
+/**
+ * `getQuestionPaperDraft`: the cleaned fragment of a draft this chat validated
+ * (found by {@link findChatDraftContent}, so scoped to the conversation, school
+ * and user). Cleaned rather than as written so it never exceeds the fragment
+ * limit and is what a save would store; the draft id (hash of the text as written)
+ * is returned unchanged for the save. A draft whose cleaning now reports problems
+ * (limits changed since it was validated) is refused with them.
+ */
+export function cleanedChatDraft(raw: string): { draftId: string; html: string } {
+  const sanitized = sanitizeQuestionPaperBody(canonicalQuestionPaperHtml(raw));
+  if (sanitized.problems.length > 0) throw invalidPaperError(sanitized.problems);
+  return { draftId: questionPaperDraftId(raw), html: sanitized.html };
+}
+
 const savedResult = (version: VersionRow, planMaxMarks: number): SavedVersion => ({
   versionNo: version.versionNo,
   paperId: version.paperId,

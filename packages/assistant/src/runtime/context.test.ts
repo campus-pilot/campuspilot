@@ -294,9 +294,20 @@ describe.each(inputFormats)('long tool call inputs in old entries ($format.name)
     expect(format.resultIds(out)).toEqual(format.resultIds(original));
     // The draft id the stub points at is still in the call's result.
     expect(format.resultText(out[2]!)).toContain('abc123abc123');
+    // ...and the stub names the tool that reads an unsaved draft back by that id.
+    expect(JSON.stringify(inputOf(out[1]!))).toContain('getQuestionPaperDraft');
     // Calls in the full window and calls with only short fields stay whole.
     expect(out[4]).toEqual(original[4]);
     expect(out[7]).toEqual(original[7]);
+  });
+
+  it('keeps provider metadata on the stubbed call (Gemini thoughtSignature)', async () => {
+    const out = await buildModelContext(entries(), provider, loader({}));
+    if (format.name === 'gemini') {
+      expect((out[1]!.content[0] as { thoughtSignature?: string }).thoughtSignature).toBe('sig-v1');
+      expect((out[1]!.content[0] as { functionCall: { id: string; name: string } }).functionCall).toMatchObject({ id: 'v1', name: 'school_validateQuestionPaperDraft' });
+    }
+    expect(format.callIds(out)).toEqual(format.callIds(entries()));
   });
 
   it('never changes the stored transcript, is deterministic and idempotent', async () => {
@@ -313,6 +324,22 @@ describe.each(inputFormats)('long tool call inputs in old entries ($format.name)
     expect((await buildModelContext(short, provider, loader({})))[1]).toEqual(short[1]);
     const lowered = await buildModelContext(short, provider, loader({}), { toolInputMinChars: 50 });
     expect(inputOf(lowered[1]!)).toEqual({ html: toolInputStub({ toolName: 'school_t', field: 'html', chars: 100 }) });
+  });
+
+  it('recovery path: the stub names the way back for the tool that wrote it, and draftId only for a draft', () => {
+    const stub = (toolName: string) => toolInputStub({ toolName, field: 'html', chars: 9_000 });
+    // An unsaved draft is read by draftId; a saved paper by getQuestionPaper.
+    expect(stub('school_validateQuestionPaperDraft')).toMatch(/getQuestionPaperDraft with the draftId/);
+    expect(stub('school_validateQuestionPaperDraft')).toMatch(/getQuestionPaper instead/);
+    expect(stub('school_saveQuestionPaperVersion')).toContain('getQuestionPaper to read it');
+    expect(stub('school_saveQuestionPaperVersion')).not.toContain('draftId');
+    // Any other tool: no draft is involved.
+    expect(stub('school_createNotice')).not.toMatch(/draftId|getQuestionPaper/);
+    // The note says it is not the content, so imitating it is obviously not a paper (no markup at all).
+    for (const name of ['school_validateQuestionPaperDraft', 'school_saveQuestionPaperVersion', 'school_createNotice']) {
+      expect(stub(name)).toContain('never send it as html');
+      expect(stub(name)).not.toMatch(/<[a-z]/i);
+    }
   });
 
   it('a stub is shorter than the threshold, so it is never stubbed again', () => {

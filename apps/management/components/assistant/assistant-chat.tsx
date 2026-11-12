@@ -41,7 +41,7 @@ import { assistantAttachmentThumbUrl } from '@/lib/assistant-attachments';
 import { orpc } from '@/lib/orpc';
 
 import { AssistantApprovalWithSummary } from './assistant-approval-request';
-import { AssistantDraftCard } from './assistant-question-paper';
+import { AssistantDraftCard, useDraftVerdicts } from './assistant-question-paper';
 import { missingAttachmentIdsOf, refusalMessage, type AssistantConversationFailure } from './assistant-stream';
 import { AssistantViewBlock } from './assistant-view';
 import { useAssistantAttachmentUpload } from './use-assistant-attachments';
@@ -254,7 +254,8 @@ function ConversationTimeline({
 }) {
   const rows = useAssistantTimeline(schoolId, conversationId);
   // Draft cards a later ready draft of the same paper replaced shrink to one quiet line.
-  const superseded = supersededDrafts(rows ?? []);
+  const verdicts = useDraftVerdicts(rows ?? []);
+  const superseded = supersededDrafts(rows ?? [], verdicts);
   if (failure) {
     // A new conversation does not help someone who is signed out, so only the message shows then.
     return (

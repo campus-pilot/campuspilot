@@ -103,10 +103,12 @@ affected papers itself.
 **Migration 0064** (`question-paper-html-fragment`) moved versions from the structured JSON to
 the fragment: `content jsonb` became `content_html text`, and `schema_version` and `total_marks`
 were dropped. `plan_max_marks` stays (it is the plan's maximum at save time, not a computed
-total). `warnings` stays but now holds only sanitiser notices `{ code, message }` (code
-`sanitised`); the migration resets old entries. The JSON model never shipped, so existing
-rows (development data) keep their PDF and get a one-line placeholder fragment; generating
-the paper again adds a proper version.
+total). `warnings` stays but now holds notices `{ code, message }` (code `sanitised`; the
+migration resets old entries). The JSON model never shipped, so existing rows (development
+data) keep their PDF and get a one-line placeholder fragment and one `legacy` notice ("Saved
+in an earlier format. The preview is not available; the PDF is the original."), which the
+version list, card and preview show like any notice; generating the paper again adds a proper
+version.
 
 The PDF of a version is an `artifact` row (`kind: pdf`, `document_type:
 question_paper`, class, session and exam filled) under
@@ -260,7 +262,7 @@ follows it except `<style>`. `stats` count the cleaned output only.
   "onclick" was removed (2 times)"); it never blocks, the paper saves without it. `problems` is
   what makes the paper unusable (a cap, an empty paper, a formula KaTeX rejects, an unusable
   figure id, figures too large to print). The version stores `stripped` as its **notices**
-  (`warnings: [{ code: 'sanitised', message }]`); there are no other kinds of notice.
+  (`warnings: [{ code: 'sanitised', message }]`); the only other kind is the `legacy` notice of rows migrated by 0064.
 
 ## What the UI shows
 
@@ -269,8 +271,8 @@ says whether the draft is ready or can not be saved yet, lists the problems in p
 (`summarizeProblems` maps the API's model-facing lines, such as a formula's LaTeX and KaTeX message,
 to sentences like "Formula 2 could not be typeset"; an unknown line becomes a generic sentence;
 the raw lines are behind a collapsed "Details"), keeps the sanitiser's `stripped` list behind a
-collapsed "N notices about what was removed" (one notice per kind of change, the same count the
-version list and badge use), says how many figures are still placeholders, and offers Preview and Save as new
+collapsed "N notices" list (one notice per kind of change, the same count the
+version list and badge use; the label is generic because a notice can also be the `legacy` one), says how many figures are still placeholders, and offers Preview and Save as new
 version. A saved version shows its notice count; its preview lists the notices (collapsed) and
 a placeholder note with the Continue in chat link. `previewOutputSchema.placeholderFigures` is
 the count (counted from the sanitised fragment; it is not a notice).
@@ -415,8 +417,8 @@ images are never silently dropped.
 
 **Tools** (advanced MCP tools, module `exams`; reachable by external MCP clients through
 the advanced-tool meta tools and by the in-app assistant): `listQuestionPapers`,
-`getQuestionPaper`, `listQuestionPaperVersions`, `learn_question_paper_generation`,
-`validateQuestionPaperDraft` and `saveQuestionPaperVersion` (a write, so the in-app
+`getQuestionPaper`, `listQuestionPaperVersions`, `getQuestionPaperDraft`,
+`learn_question_paper_generation`, `validateQuestionPaperDraft` and `saveQuestionPaperVersion` (a write, so the in-app
 assistant asks the user to approve). The other eight procedures are *hidden* (human
 only): page photos, generation, polling, previews and downloads.
 
@@ -428,6 +430,14 @@ only): page photos, generation, polling, previews and downloads.
   `{ valid, problems[], stripped[], draftId, placeholderFigures, characters }`. It **never echoes
   the fragment** (the model has it; `draftId` names it) and lists at most 40 lines of each kind,
   each at most 400 characters, with "and N more" as the last line (`leanLines`).
+- `getQuestionPaperDraft({ ...paper key, draftId })` is the way back to an **unsaved** draft
+  (read-only, in-app assistant only: a client without a chat is refused like a `draftId` on save).
+  It finds the draft exactly as save-by-`draftId` does (the newest `validateQuestionPaperDraft`
+  call of this conversation, school and user whose canonical html hashes to the id) and returns
+  `{ paper, draftId, html, characters }`: the paper's facts (including `latestVersionNo`, the
+  `expectedVersionNo` of a save) and the draft *cleaned*, so it is at most the fragment limit and
+  is what a save would store. A saved paper is read with `getQuestionPaper`. It declares the same
+  `outputChars` as `getQuestionPaper`.
 - **Output caps** (`outputChars`, the tool metadata the assistant honours instead of its default
   24,000): `getQuestionPaper` returns the whole fragment as `html` and declares
   `fragmentChars * 2 + 40,000` (the longest allowed fragment with every quote and line end
@@ -444,8 +454,9 @@ only): page photos, generation, polling, previews and downloads.
   call in the conversation; the chat shows it as a card (ready or not, the problems in plain
   sentences, what the sanitiser removed behind a collapsed list, Preview, Save as new
   version). A draft that a *later ready draft of the same paper* replaced shrinks to a quiet
-  collapsed "Replaced by Draft N" line (opening it shows the draft as it was); only drafts whose
-  stored check can be read count. "Save as new version" sends "Save draft {id} as a new version
+  collapsed "Replaced by Draft N" line (opening it shows the draft as it was; a Save requested for it stays
+  visible next to the line); a later draft counts when it is ready by its stored check or, when that
+  was cut at 4,000 characters, by the re-check the chat makes for it. "Save as new version" sends "Save draft {id} as a new version
   of {Subject (Mode), Class, Exam}." (a draft id hashes the text alone, so the message names the
   paper, and the button is spent only by a request for its own paper). The approval card for
   `saveQuestionPaperVersion` reads "Save Draft 2 as version 4 of ..." with ids, slugs and the version
@@ -476,11 +487,14 @@ only): page photos, generation, polling, previews and downloads.
   wrote into `validateQuestionPaperDraft` or `saveQuestionPaperVersion`) becomes a stub that names
   the field, the tool and the size and points at what still works. The call, its id, its name and
   its short fields are untouched, so every call keeps its result; the stored transcript keeps the
-  full text, which is what a `draftId` is resolved from when the user saves, and the stub says
-  that the call's result still names the draft id. To revise an old paper the agent calls
-  `getQuestionPaper` (saved) or writes the whole paper again; it can re-validate to get a fresh
-  draft id (a validate result over 8,000 characters is itself stubbed once old, so then only a
-  re-validation gives the id again). Fresh images are sent newest first within a 16 MiB budget counted as base64 (4/3 of the file, under Gemini's 20 MB request limit); an image over the provider's own cap (5 MB on Claude) is reported as unreadable. The learn payload
+  full text, which is what a `draftId` is resolved from when the user saves, and the stub names the way back
+  for the tool that wrote it: for a `validateQuestionPaperDraft` input, `getQuestionPaperDraft`
+  with the draft id in that call's result (an unsaved draft) or `getQuestionPaper` (saved since);
+  for a `saveQuestionPaperVersion` input, `getQuestionPaper`; for any other tool it only says to
+  write the text again and mentions no draft id. The stub also says it is not the content and
+  must never be sent as `html` (a model that copies it sends text without markup, which the draft
+  check refuses as an empty paper). A validate result over 8,000 characters is itself stubbed
+  once old, so the draft id is then found by calling the tool again or re-validating. Fresh images are sent newest first within a 16 MiB budget counted as base64 (4/3 of the file, under Gemini's 20 MB request limit); an image over the provider's own cap (5 MB on Claude) is reported as unreadable. The learn payload
   counts as a long result, so after two more messages the agent calls the tool again.
 
 - **Attachment ids.** The model must be told each attachment's id or it cannot write a

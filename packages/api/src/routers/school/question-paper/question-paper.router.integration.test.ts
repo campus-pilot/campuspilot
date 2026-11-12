@@ -306,6 +306,29 @@ describe('question paper procedures', () => {
       expect(row).toMatchObject({ source: 'agent', sourceConversationId: ids.conversation.id, sourceJobId: null, createdBy: world.people.manager.userId });
     });
 
+    it('reads an unsaved draft back by draftId (the way back after the chat stubbed its html), only in this conversation and only for the in-app assistant', async () => {
+      const k = key({ classId: world.otherClassId, subjectSlug: 'math' });
+      const ids = await conversationOf(world.people.manager.userId);
+      const { draftId } = await world.people.manager.client.school.validateQuestionPaperDraft({ ...k, html: ENGLISH_SCIENCE });
+      const agent = assistantClient('manager', ids);
+      expect(await errorOf(agent.school.getQuestionPaperDraft({ ...k, draftId: draftId! }))).toMatchObject({ code: 'BAD_REQUEST', message: expect.stringContaining('No draft') });
+
+      await recordToolCall(ids, 'school_validateQuestionPaperDraft', { ...k, html: ENGLISH_SCIENCE });
+      const draft = await agent.school.getQuestionPaperDraft({ ...k, draftId: draftId! });
+      expect(draft).toMatchObject({ draftId, paper: { subjectName: expect.any(String) } });
+      expect(draft.html).toContain('data-math');
+      expect(draft.characters).toBe(draft.html.length);
+      // Reading changes nothing, and the same draftId then saves.
+      expect((await world.people.manager.client.school.getQuestionPaper({ ...k })).paper.latestVersionNo).toBe(draft.paper.latestVersionNo);
+      expect(await agent.school.saveQuestionPaperVersion({ ...k, expectedVersionNo: draft.paper.latestVersionNo, draftId: draftId! })).toMatchObject({ versionNo: draft.paper.latestVersionNo + 1 });
+
+      // A browser session, an API key or any client without a chat is refused, as for a draftId on save.
+      expect(await errorOf(world.people.manager.client.school.getQuestionPaperDraft({ ...k, draftId: draftId! }))).toMatchObject({ code: 'BAD_REQUEST', message: expect.stringContaining('in-app assistant') });
+      // Another conversation of the same user does not see it.
+      const other = await conversationOf(world.people.manager.userId);
+      expect(await errorOf(assistantClient('manager', other).school.getQuestionPaperDraft({ ...k, draftId: draftId! }))).toMatchObject({ code: 'BAD_REQUEST', message: expect.stringContaining('No draft') });
+    });
+
     it('does not find a draft of another conversation, another user\'s conversation or a deleted one', async () => {
       const k = key({ classId: world.otherClassId, subjectSlug: 'math' });
       const draft = ENGLISH_SCIENCE;

@@ -9,6 +9,7 @@ import { requireClassPermission } from '../../../permissions/class';
 import { requireSchoolPermission } from '../../../permissions/school';
 import * as dto from './question-paper.dto';
 import {
+  QUESTION_PAPER_DRAFT_OUTPUT_CHARS,
   QUESTION_PAPER_LEARN_OUTPUT_CHARS,
   QUESTION_PAPER_PAPER_OUTPUT_CHARS,
   QUESTION_PAPER_VALIDATE_OUTPUT_CHARS,
@@ -25,6 +26,7 @@ import {
   deleteQuestionPaperPage,
   getQuestionPaper,
   getQuestionPaperDetail,
+  getQuestionPaperFacts,
   listQuestionPaperVersions,
   listQuestionPapers,
   reorderQuestionPaperPages,
@@ -32,6 +34,7 @@ import {
 } from './question-paper.service';
 import {
   checkQuestionPaperDraft,
+  cleanedChatDraft,
   downloadVersionPdf,
   findChatDraftContent,
   getVersion,
@@ -123,6 +126,28 @@ export const schoolQuestionPaperRouter = {
     .handler(async ({ context, input }) => {
       try {
         return await getQuestionPaper(context.db, await resolvePaperScope(context.db, input), input.versionNo);
+      } catch (error) {
+        throw toRpcError(error);
+      }
+    }),
+
+  getQuestionPaperDraft: protectedProcedure
+    .route(route('Get a question paper draft', "In-app assistant only. Read back the html of a draft you validated earlier in this chat and have not saved, by its draftId (from the result of validateQuestionPaperDraft), together with the facts of its paper (latestVersionNo is the expectedVersionNo for a save). Use it to edit a draft whose html is no longer in the chat; a saved paper is read with getQuestionPaper. It changes nothing."))
+    .meta(tool('read', { outputChars: QUESTION_PAPER_DRAFT_OUTPUT_CHARS }))
+    .input(dto.getQuestionPaperDraftInputSchema)
+    .use(readClass)
+    .use(requireQuestionPaperAssistantAccess())
+    .output(dto.getQuestionPaperDraftOutputSchema)
+    .handler(async ({ context, input }) => {
+      try {
+        const user = userId(context);
+        // Refused exactly like a draftId on save: a draft lives in one chat's transcript, which only that chat's assistant has.
+        const chat = context.principal.authMethod === 'assistant' ? context.principal.assistantRun : null;
+        if (!chat) throw rpcError.badRequest('A draft can only be read by the in-app assistant. You already have the html you wrote; use getQuestionPaper for a saved paper.');
+        const scope = await resolvePaperScope(context.db, input);
+        const raw = await findChatDraftContent(context.db, { conversationId: chat.conversationId, schoolId: input.schoolId, userId: user, draftId: input.draftId });
+        const draft = cleanedChatDraft(raw);
+        return { paper: await getQuestionPaperFacts(context.db, scope), draftId: draft.draftId, html: draft.html, characters: draft.html.length };
       } catch (error) {
         throw toRpcError(error);
       }

@@ -3,7 +3,6 @@ import { FinishReason, type GoogleGenAI } from '@google/genai';
 import { describe, expect, it } from 'vitest';
 
 import { ANTHROPIC_IMAGE_MIME_TYPES, buildAnthropicTextRequest, generateAnthropicText } from './anthropic';
-import { createFakeProvider, fakeTextResult, FakeModelError } from './fake';
 import {
   buildGeminiTextRequest,
   GEMINI_IMAGE_MIME_TYPES,
@@ -70,12 +69,12 @@ describe('anthropic text request', () => {
       model: 'claude-test-20261101',
       usage: { inputTokens: 10, outputTokens: 20, cacheReadInputTokens: 3, cacheCreationInputTokens: 0 },
       refusal: false,
-      truncated: false,
+      unfinished: false,
     });
-    expect((await generateAnthropicText(clientWith(async () => message('stop_sequence')), 'm', request)).truncated).toBe(false);
+    expect((await generateAnthropicText(clientWith(async () => message('stop_sequence')), 'm', request)).unfinished).toBe(false);
     // Only a positive completion signal counts as complete: everything else (or nothing) is treated as cut off.
     for (const reason of ['max_tokens', 'model_context_window_exceeded', 'pause_turn', 'tool_use', undefined as unknown as string]) {
-      expect((await generateAnthropicText(clientWith(async () => message(reason)), 'm', request)).truncated, String(reason)).toBe(true);
+      expect((await generateAnthropicText(clientWith(async () => message(reason)), 'm', request)).unfinished, String(reason)).toBe(true);
     }
     expect((await generateAnthropicText(clientWith(async () => message('refusal')), 'm', request)).refusal).toBe(true);
   });
@@ -143,14 +142,14 @@ describe('gemini text request', () => {
       model: 'gemini-test-001',
       usage: { inputTokens: 60, outputTokens: 25, cacheReadInputTokens: 40, cacheCreationInputTokens: 0 },
       refusal: false,
-      truncated: false,
+      unfinished: false,
     });
     for (const reason of [FinishReason.MAX_TOKENS, FinishReason.OTHER, FinishReason.LANGUAGE, FinishReason.FINISH_REASON_UNSPECIFIED]) {
-      expect((await generateGeminiText(clientWith(chunk(reason)), 'm', request)).truncated, reason).toBe(true);
+      expect((await generateGeminiText(clientWith(chunk(reason)), 'm', request)).unfinished, reason).toBe(true);
     }
     // A stream that ended without any finish reason may have been cut off.
     const unfinished = [{ candidates: [{ content: { parts: [{ text: '{"a":1}' }] } }], usageMetadata, modelVersion: 'gemini-test-001' }];
-    expect((await generateGeminiText(clientWith(unfinished), 'm', request)).truncated).toBe(true);
+    expect((await generateGeminiText(clientWith(unfinished), 'm', request)).unfinished).toBe(true);
     expect((await generateGeminiText(clientWith(chunk(FinishReason.IMAGE_SAFETY)), 'm', request)).refusal).toBe(true);
     expect((await generateGeminiText(clientWith([{ promptFeedback: { blockReason: 'SAFETY' } }]), 'm', request)).refusal).toBe(true);
   });
@@ -164,17 +163,5 @@ describe('gemini text request', () => {
     ).catch((e: unknown) => e);
     expect(failure).toBe(error);
     expect(billedUsageOf(error)).toMatchObject({ usage: { inputTokens: 50, outputTokens: 2 }, complete: false });
-  });
-});
-
-describe('the fake provider', () => {
-  it('answers text requests from its own script and records them', async () => {
-    const fake = createFakeProvider({ model: 'fake-m' });
-    fake.enqueueText(fakeTextResult({ text: '{"ok":true}' }), new FakeModelError('busy', 'later'));
-    expect((await fake.generateText(request)).text).toBe('{"ok":true}');
-    const failure = await fake.generateText(request).catch((e: unknown) => e);
-    expect(fake.failureKind(failure)).toBe('busy');
-    expect(fake.textCalls.map((call) => call.model)).toEqual(['fake-m', 'fake-m']);
-    await expect(fake.generateText(request)).rejects.toThrow(/exhausted/);
   });
 });

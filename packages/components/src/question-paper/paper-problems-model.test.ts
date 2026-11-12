@@ -38,6 +38,27 @@ describe('summarizeProblems', () => {
     ]);
   });
 
+  it('maps the pre-cleaning length, unsafe markup, figure total and fragment shape lines', () => {
+    const { sentences } = summarizeProblems([
+      'The paper is 130,000 characters; the limit is 80,000. Make it shorter.',
+      'The paper could not be cleaned safely (its markup keeps changing when cleaned). Simplify the markup.',
+      'The figure images of this paper are too large to print together. Use fewer or smaller images.',
+      'The formulas and figure images of this paper are too large to print together. Remove some figures or shorten some formulas.',
+      'The answer is not an HTML fragment: it has no HTML elements.',
+      'Return only the HTML fragment: it must start with an element and end with one, with no sentence before or after it.',
+    ]);
+    expect(sentences).toEqual([
+      'The paper is too long to save.',
+      'The paper’s markup is too tangled to save. It needs to be simpler.',
+      'The figure images are too large to print together.',
+      'The formulas and figure images are too large to print together.',
+      'The text is not written as a paper.',
+      'There is text outside the paper.',
+    ]);
+    // None of these fell through to the generic sentence.
+    expect(sentences).not.toContain(GENERIC_PROBLEM_SENTENCE);
+  });
+
   it('falls back to the generic sentence for a line it does not know, without showing the line', () => {
     const { sentences, details } = summarizeProblems(['A brand new kind of problem nobody mapped', 'Another unknown']);
     expect(sentences).toEqual([GENERIC_PROBLEM_SENTENCE]);

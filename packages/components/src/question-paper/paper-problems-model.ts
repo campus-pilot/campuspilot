@@ -19,9 +19,25 @@ export const GENERIC_PROBLEM_SENTENCE = 'Something in this draft could not be ac
 const KNOWN_PROBLEMS: readonly { test: RegExp; sentence: string }[] = [
   { test: /^The paper is empty/, sentence: 'The paper has no questions yet.' },
   {
-    test: /^The paper is [\d,]+ characters after cleaning/,
+    // Both forms: "... characters after cleaning; the limit is" and the pre-cleaning "... characters; the limit is".
+    test: /^The paper is [\d,]+ characters(?: after cleaning)?; the limit is/,
     sentence: 'The paper is too long to save.',
   },
+  {
+    test: /^The paper could not be cleaned safely/,
+    sentence: 'The paper’s markup is too tangled to save. It needs to be simpler.',
+  },
+  {
+    test: /^The formulas and figure images of this paper are too large to print together/,
+    sentence: 'The formulas and figure images are too large to print together.',
+  },
+  {
+    test: /^The figure images of this paper are too large to print together/,
+    sentence: 'The figure images are too large to print together.',
+  },
+  // Shapes of an answer that is not a paper at all (the AI job's check; a chat draft of plain text reports an empty paper instead).
+  { test: /^The answer is not an HTML fragment/, sentence: 'The text is not written as a paper.' },
+  { test: /^Return only the HTML fragment/, sentence: 'There is text outside the paper.' },
   {
     test: /^The paper has [\d,]+ elements/,
     sentence: 'The paper is too complicated to save.',

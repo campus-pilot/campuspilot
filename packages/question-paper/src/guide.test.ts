@@ -18,6 +18,11 @@ describe('the learn guide', () => {
     }
   });
 
+  it('names both ways to read a paper back for editing: a saved paper and an unsaved draft', () => {
+    expect(QUESTION_PAPER_GUIDE).toContain('getQuestionPaperDraft with a draftId');
+    expect(QUESTION_PAPER_GUIDE).toContain('never send it as html');
+  });
+
   it('returns the guide, the limits and one worked example', () => {
     const payload = buildLearnPayload();
     expect(payload.guide).toBe(QUESTION_PAPER_GUIDE);

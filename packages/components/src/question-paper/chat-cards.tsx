@@ -85,16 +85,24 @@ export type QuestionPaperDraftCardProps = DraftCardFacts & {
   supersededBy?: number;
 };
 
-/** The quiet line a replaced draft shrinks to; opening it shows the draft. */
-function SupersededDraft({ by, children }: { by: number; children: ReactNode }) {
+/**
+ * The quiet line a replaced draft shrinks to; opening it shows the draft. A Save
+ * that was requested for the replaced draft stays visible next to the line, since the
+ * request (and its approval card) is still live whether or not the section is open.
+ */
+function SupersededDraft({ by, ordinal, saveRequested, children }: { by: number; ordinal: number; saveRequested: boolean; children: ReactNode }) {
   return (
     <Collapsible className="flex min-w-0 flex-col gap-2">
-      <CollapsibleTrigger asChild>
-        <Button type="button" variant="ghost" size="sm" className="self-start text-muted-foreground">
-          Replaced by Draft {by}
-          <ChevronDown data-icon="inline-end" aria-hidden />
-        </Button>
-      </CollapsibleTrigger>
+      <div className="flex flex-wrap items-center gap-2">
+        <CollapsibleTrigger asChild>
+          <Button type="button" variant="ghost" size="sm" className="self-start text-muted-foreground">
+            <span className="sr-only">Draft {ordinal}: </span>
+            Replaced by Draft {by}
+            <ChevronDown data-icon="inline-end" aria-hidden />
+          </Button>
+        </CollapsibleTrigger>
+        {saveRequested ? <p className="text-sm text-muted-foreground">Save requested for this draft</p> : null}
+      </div>
       <CollapsibleContent>{children}</CollapsibleContent>
     </Collapsible>
   );
@@ -112,7 +120,13 @@ export function QuestionPaperDraftCard({
   const body = <DraftBody facts={facts} preview={preview} onSave={onSave} saveRequested={saveRequested} />;
   return (
     <AssistantViewFrame title={`Draft ${ordinal}`}>
-      {supersededBy ? <SupersededDraft by={supersededBy}>{body}</SupersededDraft> : body}
+      {supersededBy ? (
+        <SupersededDraft by={supersededBy} ordinal={ordinal} saveRequested={saveRequested}>
+          {body}
+        </SupersededDraft>
+      ) : (
+        body
+      )}
     </AssistantViewFrame>
   );
 }

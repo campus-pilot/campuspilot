@@ -3,13 +3,16 @@
 import { CLASS_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
 import type { AssistantToolCallItemDto } from '@campuspilot/assistant-contract/dto';
 import type { AssistantQuestionPaperView } from '@campuspilot/assistant-contract/views';
+import type { AssistantTimelineRow } from '@campuspilot/components/assistant/timeline-model';
 import { AssistantViewFrame } from '@campuspilot/components/assistant';
 import { DocumentPreview } from '@campuspilot/components/documents/document-controls';
 import {
+  draftCallsNeedingRecheck,
   draftFactsOf,
   parseDraftCallInput,
   parseStoredDraftResult,
   saveDraftMessage,
+  type DraftResult,
 } from '@campuspilot/components/question-paper/chat-cards-model';
 import { PlaceholderNote, RemovedList } from '@campuspilot/components/question-paper/paper-notices';
 import { QuestionPaperDraftCard, QuestionPaperVersionCard } from '@campuspilot/components/question-paper/chat-cards';
@@ -17,7 +20,7 @@ import { Button } from '@campuspilot/ui/components/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@campuspilot/ui/components/dialog';
 import { Skeleton } from '@campuspilot/ui/components/skeleton';
 import { toast } from '@campuspilot/ui/lib/toast';
-import { useQuery } from '@tanstack/react-query';
+import { useQueries, useQuery } from '@tanstack/react-query';
 import { Eye } from 'lucide-react';
 import type { ReactNode } from 'react';
 
@@ -98,17 +101,42 @@ const DRAFT_PREVIEW_STALE_MS = 60_000;
  * the page (`gcTime`), so reopening conversations does not validate again;
  * only a page reload does, and only for those long results.
  */
-function useDraftCheck(call: AssistantToolCallItemDto, input: DraftInput | null) {
-  const stored = parseStoredDraftResult(call.body.output, call.body.outputTruncated);
-  const recheck = useQuery({
-    queryKey: ['assistant', 'question-paper-draft-check', call.id],
+function draftRecheckOptions(callId: string, input: DraftInput | null, stored: DraftResult | null) {
+  return {
+    queryKey: ['assistant', 'question-paper-draft-check', callId],
     queryFn: () => client.school.validateQuestionPaperDraft(input!),
     enabled: !stored && Boolean(input),
     staleTime: Number.POSITIVE_INFINITY,
     gcTime: Number.POSITIVE_INFINITY,
     retry: retryUnlessRefused,
-  });
+  };
+}
+
+function useDraftCheck(call: AssistantToolCallItemDto, input: DraftInput | null) {
+  const stored = parseStoredDraftResult(call.body.output, call.body.outputTruncated);
+  const recheck = useQuery(draftRecheckOptions(call.id, input, stored));
   return { check: draftCheckOf({ input, stored, recheck }), retry: () => void recheck.refetch() };
+}
+
+/**
+ * The re-check verdicts of the conversation's drafts whose stored result was
+ * cut, by call id, for the chat to decide which draft replaced which. It uses
+ * the same query keys as each card's own re-check, so a card and the chat share
+ * one request per draft, and nothing is checked for a draft whose stored result is readable.
+ */
+export function useDraftVerdicts(rows: readonly AssistantTimelineRow[]): ReadonlyMap<string, DraftResult> {
+  const pending = draftCallsNeedingRecheck(rows);
+  return useQueries({
+    queries: pending.map(({ id, input }) => draftRecheckOptions(id, input, null)),
+    combine: (results) => {
+      const verdicts = new Map<string, DraftResult>();
+      pending.forEach(({ id }, index) => {
+        const data = results[index]?.data;
+        if (data) verdicts.set(id, data);
+      });
+      return verdicts;
+    },
+  });
 }
 
 /**

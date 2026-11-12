@@ -60,14 +60,14 @@ const saveQuestionPaperVersion: SummaryEntry = {
   summarize(input, facts) {
     const html = text(input.html);
     const what = html
-      ? `the paper text (${html.length.toLocaleString('en-US')} characters)`
+      ? `the pasted paper text (${html.length.toLocaleString('en-US')} characters)`
       : facts.draftOrdinal
         ? `Draft ${facts.draftOrdinal}`
         : 'the draft';
     // The next version number is the expected latest plus one (a changed paper is refused as a conflict, never overwritten).
     const expected = typeof input.expectedVersionNo === 'number' ? input.expectedVersionNo : null;
     const version = expected === null ? 'a new version' : `version ${expected + 1}`;
-    const notes: Record<string, string> = html ? { html: `Paper text, ${html.length.toLocaleString('en-US')} characters (not shown)` } : {};
+    const notes: Record<string, string> = html ? { html: `Pasted paper text, ${html.length.toLocaleString('en-US')} characters (not shown)` } : {};
     return {
       sentence: `Save ${what} as ${version} of ${facts.paperLabel ?? 'this paper'}.`,
       detailKeys: new Set(['sessionId', 'examSlug', 'classId', 'subjectSlug', 'modeSlug', 'draftId', 'expectedVersionNo']),

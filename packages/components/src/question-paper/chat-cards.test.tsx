@@ -6,6 +6,7 @@ import type { AssistantTimelineRow } from '../assistant/timeline-model';
 import { QuestionPaperDraftCard, QuestionPaperVersionCard } from './chat-cards';
 import {
   draftFactsOf,
+  draftCallsNeedingRecheck,
   draftOrdinalOf,
   draftSaveSpent,
   parseDraftCallInput,
@@ -71,7 +72,7 @@ describe('QuestionPaperDraftCard', () => {
     );
     expect(screen.getByRole('heading', { name: 'Draft 2' })).toBeTruthy();
     expect(screen.queryByText(/event handler "onclick" was removed/)).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: /1 notice about what was removed/ }));
+    fireEvent.click(screen.getByRole('button', { name: /1 notice/ }));
     expect(screen.getByText(/event handler "onclick" was removed/)).toBeTruthy();
     expect(screen.queryByText(/marks/i)).toBeNull();
     expect(screen.getByText(/2 figures are still a placeholder/)).toBeTruthy();
@@ -114,6 +115,15 @@ describe('QuestionPaperDraftCard', () => {
     expect(screen.queryByText('This draft can’t be saved yet.')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: /Replaced by Draft 2/ }));
     expect(screen.getByText('This draft can’t be saved yet.')).toBeTruthy();
+  });
+
+  it('keeps a requested Save visible outside the collapsed replaced draft, and names the draft for a screen reader', () => {
+    render(<QuestionPaperDraftCard ordinal={1} {...draftFactsOf(valid)} preview={null} supersededBy={2} saveRequested />);
+    expect(screen.getByText('Save requested for this draft')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Draft 1: Replaced by Draft 2' })).toBeTruthy();
+    cleanup();
+    render(<QuestionPaperDraftCard ordinal={1} {...draftFactsOf(valid)} preview={null} supersededBy={2} />);
+    expect(screen.queryByText('Save requested for this draft')).toBeNull();
   });
 });
 
@@ -158,6 +168,16 @@ describe('drafts of a conversation', () => {
     expect(supersededDrafts([call('a', '1', invalid), call('b', '2', invalid), cut]).size).toBe(0);
   });
 
+  it('counts a later ready draft whose stored result was cut when its re-check verdict says ready', () => {
+    const cut = call('x', '5', ready('xxxxxxxxxxxx'));
+    (cut as { call: { body: { outputTruncated: boolean } } }).call.body.outputTruncated = true;
+    const earlier = call('a', '1', invalid);
+    expect(draftCallsNeedingRecheck([earlier, cut]).map(({ id }) => id)).toEqual(['x']);
+    expect(supersededDrafts([earlier, cut], new Map([['x', ready('xxxxxxxxxxxx')]])).get('a')).toBe(2);
+    // A re-check that says the later draft is not valid does not replace the earlier one.
+    expect(supersededDrafts([earlier, cut], new Map([['x', invalid]])).size).toBe(0);
+  });
+
   it('finds the ordinal of the newest draft with an id', () => {
     expect(draftOrdinalOf(rows, 'bbbbbbbbbbbb')).toBe(2);
     expect(draftOrdinalOf(rows, 'nope')).toBeNull();
@@ -180,7 +200,7 @@ describe('QuestionPaperVersionCard', () => {
     );
     expect(screen.getByRole('heading', { name: 'Question paper, version 3' })).toBeTruthy();
     expect(screen.getByText('Science (Theory), Class 8 · Version 3')).toBeTruthy();
-    expect(screen.getByText('Saved with 1 notice about what was removed, see the preview.')).toBeTruthy();
+    expect(screen.getByText('Saved with 1 notice, see the preview.')).toBeTruthy();
     expect(screen.queryByText(/marks/i)).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Download PDF' }));
     expect(onDownload).toHaveBeenCalled();

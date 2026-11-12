@@ -279,6 +279,7 @@ Chat can carry images, mainly photographs of a handwritten question paper
   question paper "Continue in chat" context, accepted only on a new conversation).
 - **Tools.** The question paper tools are ordinary advanced MCP tools of module
   `exams` (`listQuestionPapers`, `getQuestionPaper`, `listQuestionPaperVersions`,
+  `getQuestionPaperDraft` (reads an unsaved draft back by `draftId`; in-app only),
   `learn_question_paper_generation`, `validateQuestionPaperDraft` and
   `saveQuestionPaperVersion`, the only write and so the usual approval card). The prompt
   has one bullet that sends the model to the learn tool first (Anthropic reaches it
@@ -299,7 +300,11 @@ Chat can carry images, mainly photographs of a handwritten question paper
   result of 8,000 characters or more is replaced by a stub naming the tool and its size
   ("Call the tool again if you need it"), a top-level text field of 4,000 characters or more in
   the input of an older tool call (the paper `html` of a draft or save call) by a stub naming
-  the field, the tool and the size (`stubToolInputs` of the adapter), and an attachment by a note
+  the field, the tool and the size (`stubToolInputs` of the adapter). The stub (`toolInputStub`)
+  names the way back per tool: `getQuestionPaperDraft` with the result's draft id (unsaved draft)
+  or `getQuestionPaper` (saved) for a validate input, `getQuestionPaper` for a save input, and no
+  draft id for any other tool; it says it is not the content, so copying it into `html` is
+  refused as an empty paper, and an attachment by a note
   that keeps its id and says the image is no longer visible. The stored transcript keeps the
   full text: a draft id is resolved from it when the user saves. Inside it, images are materialised newest first within a 16 MiB
   budget counted as base64, with a note for any that are missing, unreadable or omitted. Entry count,

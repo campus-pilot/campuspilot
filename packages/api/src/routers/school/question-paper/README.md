@@ -70,16 +70,16 @@ paper row.
 
 ## Tools for agents
 
-Six advanced MCP tools in module `exams` (reachable by external MCP clients through the
+Seven advanced MCP tools in module `exams` (reachable by external MCP clients through the
 advanced-tool meta tools, and by the in-app assistant): `listQuestionPapers`,
-`getQuestionPaper`, `listQuestionPaperVersions`, `learn_question_paper_generation`
+`getQuestionPaper`, `listQuestionPaperVersions`, `getQuestionPaperDraft` (in-app assistant only: reads back an unsaved draft by `draftId`), `learn_question_paper_generation`
 (the literal name, decision D36; model-facing `school_learn_question_paper_generation`),
 `validateQuestionPaperDraft` and `saveQuestionPaperVersion` (a write, so the assistant
 asks the user to approve it). Everything else is *hidden*: a human action that is
 never offered to MCP clients or the assistant (page photos, the AI job, previews and
 downloads).
 
-`getQuestionPaper`, `validateQuestionPaperDraft` and `learn_question_paper_generation`
+`getQuestionPaper`, `getQuestionPaperDraft`, `validateQuestionPaperDraft` and `learn_question_paper_generation`
 declare `outputChars` in their MCP metadata so the assistant does not cut a paper or the
 guide at the default 24,000 characters: `getQuestionPaper` returns the whole fragment (`html`)
 and declares `QUESTION_PAPER_PAPER_OUTPUT_CHARS` = twice the fragment limit plus 40,000 (JSON
@@ -91,6 +91,11 @@ A chat draft is not a database row: it is the input (`html`) of a `validateQuest
 tool call in the conversation. `saveQuestionPaperVersion({ draftId })` is accepted only
 from the in-app assistant and finds the newest such call of *this conversation* (same
 school, same user, not deleted) whose canonical html hashes to the id.
+`getQuestionPaperDraft({ ...scope, draftId })` uses the same lookup (so the same scoping and
+the same refusal outside the in-app assistant) and returns the draft *cleaned* (at most the
+fragment limit, what a save would store) with the paper's facts; it is the way back when the
+chat has replaced an old `validateQuestionPaperDraft` input with a note (a saved paper is
+read with `getQuestionPaper`).
 
 ## Generation (API side)
 

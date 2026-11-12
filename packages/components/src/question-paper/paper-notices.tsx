@@ -21,7 +21,7 @@ export function RemovedList({ lines }: { lines: readonly string[] }) {
         </Button>
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <ul aria-label="What was removed" className="flex list-disc flex-col gap-1 pl-8 text-sm text-muted-foreground">
+        <ul aria-label="Notices" className="flex list-disc flex-col gap-1 pl-8 text-sm text-muted-foreground">
           {lines.map((line, index) => (
             <li key={`${index}-${line}`}>{line}</li>
           ))}
