@@ -142,21 +142,21 @@ describe('question paper procedures', () => {
       expect((await teacher.school.validateQuestionPaperDraft({ ...key(), html: `<img data-figure-id="${asat}" alt="x">` })).problems[0]).toMatch(/not an image the user attached/);
     });
 
-    it('refuses a paper whose formulas alone cannot be printed, in validation and in save (they agree with the render)', async () => {
-      // One nested \\sqrt of 491 characters is about 72 KB of KaTeX HTML; 300 of them exceed the 20 MB body limit.
+    it('accepts the heaviest formula paper the fragment limit allows (its KaTeX output stays under the body cap)', async () => {
+      // One nested \\sqrt of 491 characters is about 72 KB of KaTeX HTML. At 80,000 characters of fragment
+      // at most ~150 of them fit, about 11 MB: under the body cap, so whatever validates also prints.
       const tex = '\\sqrt{'.repeat(70) + 'x' + '}'.repeat(70);
-      const heavy = `<p>${Array.from({ length: 300 }, () => `<span data-math="${tex}"></span>`).join(' ')}</p>`;
+      const heavy = `<p>${Array.from({ length: 150 }, () => `<span data-math="${tex}"></span>`).join(' ')}</p>`;
       const checked = await teacher.school.validateQuestionPaperDraft({ ...key(), html: heavy });
-      expect(checked.valid).toBe(false);
-      expect(checked.problems.join(' ')).toMatch(/formulas of this paper are too large to print|too complex/);
-      expect(await errorOf(teacher.school.saveQuestionPaperVersion({ ...key(), expectedVersionNo: 0, html: heavy }))).toMatchObject({ code: 'BAD_REQUEST', message: expect.stringContaining('The question paper is not valid') });
+      expect(checked.problems).toEqual([]);
+      expect(checked.valid).toBe(true);
     });
 
     it('answers a paper that is too large with a problem instead of parsing it', async () => {
       const huge = `<p>${'x'.repeat(210_000)}</p>`;
       const result = await teacher.school.validateQuestionPaperDraft({ ...key(), html: huge });
       expect(result.valid).toBe(false);
-      expect(result.problems[0]).toMatch(/characters after cleaning; the limit is 2,00,000/);
+      expect(result.problems[0]).toMatch(/characters after cleaning; the limit is 80,000/);
     });
 
     it('refuses a key that names no plan or mode', async () => {
