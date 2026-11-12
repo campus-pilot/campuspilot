@@ -228,10 +228,25 @@ browser does not read as markup is `<style>`, so it is written exactly `<style>`
 `<svg>` (a `<style>` there is removed with a notice: its text is parsed as markup and entities are
 decoded, which is how sanitize-html's own handling was bypassed), and its text may hold no `<`, `&`
 or backslash. Each style element is replaced by an unguessable marker before sanitize-html writes any
-text, and its escaped text is cleaned as CSS and written back. A parse5 tree-based sanitiser was
-considered and not adopted (it needs a new dependency): the grammar check makes the tree the browser
-builds irrelevant to safety, because no allowlisted element changes how the tokenizer reads what
-follows it except `<style>`. `stats` count the cleaned output only.
+text, and its escaped text is cleaned as CSS and written back.
+
+The grammar proves tokens and tag balance, not the tree a browser builds. A browser closes elements
+implicitly (a `<li>` start closes the open `<li>` and everything above it, including a `<div>`; a block
+start tag closes a `<p>`; a stray `<td>` is dropped; a table gets a `<tbody>`; `<svg><p>` breaks out of
+the drawing), so a later `</div>` could pop a different div than the grammar believed and end the
+`.qp-body` wrapper, or the template's container, early (review-html-2 M1: the rest of the paper and the
+footer then lose their styles). So, once the text is stable and accepted by the grammar,
+`question-paper.tree.ts` (`parse5`, pinned to 7.3.0 in `packages/api`) parses it as the browser would,
+INSIDE `<div class="qp-body">` followed by a sentinel element, and compares the tree it builds with the
+grammar's element list (names and nesting depth, nothing between the wrapper and the sentinel). When they
+differ the sanitiser takes the browser's serialisation as the new text and cleans it again, until the
+stored text is a fixed point of the real tree builder as well (the same 4-round cap applies; a fragment
+that does not settle is refused). The comparison is by structure, not by string, because parse5 writes
+`<br>` where the sanitiser writes `<br />`. Moving or adding elements loses nothing and is not reported
+(an implied `<tbody>`, the options of a sloppy `<li><div><li>` pulled out as sibling items); an element
+the browser would not keep where it was written (a stray `<td>`, a `<col>` outside a table) is removed
+with a notice, its text kept. The render runs the same function, so it cannot print a different tree than
+was stored. `stats` count the cleaned output only.
 
 - **Forbidden, removed with their content:** `script iframe object embed foreignObject form
   controls link meta base`, SVG `use` and `image`, any event handler attribute, `id`, `xmlns`,

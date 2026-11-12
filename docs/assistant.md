@@ -195,7 +195,7 @@ Besides the agent loop, a provider can make one **plain text request**
 (`ModelProvider.generateText`): one user turn of text and image parts, a system
 prompt, no tools, no transcript and no structured-output mode, answered with the
 text, the answering model, normalised usage and two flags, `refusal` and
-`truncated` (stopped on the output limit). Question paper generation (the
+`unfinished` (the provider did not report a normal finish: the output limit or any other finish reason, or none). Question paper generation (the
 "Generate with AI" job, `docs/question-papers.md`) is its only caller; the answer
 is an HTML fragment, which the caller finds in the text (it strips a Markdown
 code fence), sanitises and validates. It reaches the provider through

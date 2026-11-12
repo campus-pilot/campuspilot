@@ -7,7 +7,8 @@ import { cleanDeclarations, cleanStyleSheet, StripReport } from './question-pape
  * parser either: sanitize-html (htmlparser2) and the browser build different
  * trees from the same text, which is the whole class of bug this exists for.
  * Instead it checks that the string is written in a grammar so small that the
- * browser's tokenizer can only read it one way, whatever tree it builds:
+ * browser's tokenizer can only read it one way (the tree the browser builds from those tokens is checked separately, by
+ * `question-paper.tree.ts`, which the sanitiser runs after this grammar accepts a string):
  *
  * - text has no `<` or `>` (the sanitiser escapes them);
  * - every `<` starts a lowercase tag from the allowlist, with plain

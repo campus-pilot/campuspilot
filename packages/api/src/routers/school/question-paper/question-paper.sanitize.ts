@@ -39,7 +39,11 @@ import { checkQuestionPaperTree } from './question-paper.tree';
  * stored fragment is exactly what the renderer's second cleaning produces, and
  * the result is then checked by the exact grammar of `question-paper.output.ts`
  * (tag and attribute allowlists, no `on*`, one controlled kind of `<style>`),
- * which fails closed. `stripped` lists what was removed or changed, for the
+ * which fails closed. A stable, accepted string must finally be read by a real
+ * HTML tree builder (parse5, `question-paper.tree.ts`) inside the `.qp-body`
+ * wrapper as the grammar read it; otherwise the browser's own reading becomes
+ * the new text and the rounds go on (implied end tags would otherwise let a
+ * later `</div>` close the wrapper). `stripped` lists what was removed or changed, for the
  * user; `problems` lists what makes the paper unusable and must be fixed.
  *
  * `<style>` is the one element whose text sanitize-html would emit verbatim

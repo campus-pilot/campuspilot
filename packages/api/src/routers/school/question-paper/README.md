@@ -21,6 +21,7 @@ each) and **figures** (uploaded images printed inside a version).
 | `question-paper.service.ts` | lists, pages, deletion, figures, queueing a generation |
 | `question-paper.version.service.ts` | validation (`checkQuestionPaperDraft`), saving a version, previews, downloads |
 | `question-paper.sanitize.ts` / `.css.ts` | the `question_paper_body` sanitiser profile (allowlists, NO ANIMATION, scoped CSS, caps) |
+| `question-paper.output.ts` / `.tree.ts` | the exact output grammar (tokens, balance) and the parse5 tree check (the browser builds the grammar's tree inside `.qp-body`); both run at save and at every render |
 | `question-paper.lean.ts` | keeps the validate tool's result small |
 | `question-paper.records.ts` | row helpers, the paper row lock |
 | `question-paper.body.ts` / `.math.ts` / `.render.ts` | stored fragment to HTML body (sanitise again, figures, KaTeX), the document around it |
