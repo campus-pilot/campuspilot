@@ -200,7 +200,7 @@ describe('question paper procedures', () => {
 
     it('stores a downloadable A4 PDF whose pages follow the questions', async () => {
       const { url, fileName } = await teacher.school.getQuestionPaperDownload({ ...key(), versionNo: 1 });
-      expect(fileName).toBe('Question paper: Science (Theory) - Class 8 - v1.pdf');
+      expect(fileName).toBe('Science_Class 8_Theory_v1.pdf');
       const pdf = await pdfOf(url);
       expect(pdf.getPageCount()).toBeGreaterThanOrEqual(1);
       const { width, height } = pdf.getPage(0).getSize();

@@ -155,7 +155,7 @@ describe('question paper in the document system', () => {
       expect((await manager.listQuestionPaperVersions(k)).versions.find((v) => v.versionNo === 1)!.hasPdf).toBe(false);
 
       const { url, fileName } = await manager.getQuestionPaperDownload({ ...k, versionNo: 1 });
-      expect(fileName).toBe('Question paper: Mathematics (Practical) - Class 8 - v1.pdf');
+      expect(fileName).toBe('Mathematics_Class 8_Practical_v1.pdf');
       expect((await fetch(url)).status).toBe(200);
       const restored = (await db.select().from(examQuestionPaperVersionTable).where(eq(examQuestionPaperVersionTable.id, original.id)))[0]!;
       expect(restored.pdfArtifactId).not.toBeNull();
