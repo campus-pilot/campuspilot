@@ -7,10 +7,6 @@ import {
 } from './attachments';
 import { assistantViewSchema } from './views';
 
-
-/** Longest message a user may send; long pastes belong in documents. */
-export const ASSISTANT_MESSAGE_MAX_LENGTH = 8000;
-
 export const assistantSurfaceSchema = z.enum(['panel', 'page', 'palette']);
 export type AssistantSurface = z.infer<typeof assistantSurfaceSchema>;
 
@@ -310,7 +306,7 @@ export const sendAssistantMessageInputSchema = z.object({
   /** Client-generated id; resending the same id returns the original run. */
   clientRequestId: z.string().uuid(),
   /** May be empty when images are attached; a message needs text or an image. */
-  text: z.string().trim().max(ASSISTANT_MESSAGE_MAX_LENGTH),
+  text: z.string().trim(),
   surface: assistantSurfaceSchema,
   pageContext: assistantPageContextSchema.optional(),
   /** Ids of uploaded, unsent attachments of this user in this school, in the order shown. */

@@ -3,7 +3,6 @@ import {
   ASSISTANT_ATTACHMENTS_PER_MESSAGE,
   type AssistantAttachmentRef,
 } from '@campuspilot/assistant-contract/attachments';
-import { ASSISTANT_MESSAGE_MAX_LENGTH } from '@campuspilot/assistant-contract/dto';
 import { Button } from '@campuspilot/ui/components/button';
 import { InputGroup, InputGroupAddon, InputGroupTextarea } from '@campuspilot/ui/components/input-group';
 import { Spinner } from '@campuspilot/ui/components/spinner';
@@ -27,9 +26,7 @@ import {
 } from './assistant-attachments-model';
 
 const composerSchema = z.object({
-  text: z
-    .string()
-    .max(ASSISTANT_MESSAGE_MAX_LENGTH, `Keep messages under ${ASSISTANT_MESSAGE_MAX_LENGTH} characters.`),
+  text: z.string(),
   attachments: z.array(z.custom<ComposerAttachment>()).max(ASSISTANT_ATTACHMENTS_PER_MESSAGE, `A message can carry at most ${ASSISTANT_ATTACHMENTS_PER_MESSAGE} images.`),
 });
 
@@ -394,7 +391,6 @@ export function AssistantComposer({
               autoFocus={autoFocus}
               disabled={disabled}
               rows={2}
-              maxLength={ASSISTANT_MESSAGE_MAX_LENGTH}
               placeholder={disabledReason ?? placeholder}
               className="max-h-52 min-h-[calc(2lh+0.875rem)] px-4 pt-3.5 pb-0 text-base/relaxed placeholder:text-muted-foreground sm:text-sm/relaxed md:text-sm/relaxed"
               value={field.state.value}

@@ -49,9 +49,10 @@ describe('anthropic adapter (must match the Claude-only build)', () => {
     // name, found by tool search), attached images count as data, and the
     // decline rule now says "question papers written from scratch". Then: the
     // question-paper bullet says each attached image is announced by a line
-    // with its asat_ id, to be used for figures.
+    // with its asat_ id, to be used for figures. Then: question papers written
+    // from a description are no longer declined, and the bullet says so.
     const system = JSON.stringify(buildAnthropicSystem(buildAssistantPrompt(facts)));
-    expect(createHash('sha256').update(system).digest('hex').slice(0, 16)).toMatchInlineSnapshot(`"a39de7d69b62ed6f"`);
+    expect(createHash('sha256').update(system).digest('hex').slice(0, 16)).toMatchInlineSnapshot(`"3a481b20e6d2f44d"`);
   });
 
   it('defers advanced tools behind tool search and labels writes', () => {

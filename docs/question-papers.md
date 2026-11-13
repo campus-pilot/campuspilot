@@ -1,7 +1,7 @@
 # Question papers
 
 AI-assisted question papers: a teacher photographs a handwritten paper (or
-dictates it to the assistant in chat), and CampusPilot turns it into an HTML
+describes it to the assistant in chat, which writes the questions itself), and CampusPilot turns it into an HTML
 fragment that prints on the school's own letterhead. This is the canonical
 guide. Template and rendering rules shared with the other document
 types are in [Document system](document-system.md#question-papers); the chat
