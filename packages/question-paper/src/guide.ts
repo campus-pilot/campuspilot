@@ -89,13 +89,13 @@ export const QUESTION_PAPER_GUIDE = `# Writing a question paper
 ${QUESTION_PAPER_NO_MOTION_RULE}
 
 ## Workflow
-1. Read the attached images, or call getQuestionPaper for an existing paper (it returns the fragment's html).
+1. Read the attached images, or call getQuestionPaper for an existing paper (it returns the fragment's html). With neither, the user is asking you to create a paper from a description: write the questions yourself (step 2) from the class, subject, topics, question types and marks they gave.
 2. Write the paper as an HTML fragment following the rules below and the example returned with this guide.
 3. Call validateQuestionPaperDraft with the html until it reports valid. Fix every problem it lists. "stripped" lists what the sanitiser removed from your html (a style it does not accept, an attribute...): fix your html so nothing is stripped, or tell the user.
 4. The user sees your draft as a preview card. Wait for them. Never call saveQuestionPaperVersion until the user explicitly asks you to save.
 5. To save, pass the draftId from the validate result (in-app chat) or the full html (other clients), and expectedVersionNo from getQuestionPaper. Saving always creates a new version.
 
-Never invent questions, options or marks. If something is unreadable write "[illegible]" and tell the user.
+When you are transcribing photographs or an existing paper, never invent questions, options or marks; if something is unreadable write "[illegible]" and tell the user. When the user asked you to create a paper, writing original questions is the task: cover every topic and question type they named, give each question or section the marks that add up to the full marks they stated, and keep the difficulty suited to the class. If they left something open (the number of questions per type, the split of marks), choose sensibly rather than asking.
 
 ## Editing an existing paper
 Call getQuestionPaper (a saved paper) or, in the in-app chat, getQuestionPaperDraft with a draftId (a draft you validated earlier in this chat and that is not saved). Never edit from memory: your earlier html may have been replaced by a note in brackets to keep the chat short, and that note is not the paper (never send it as html). Change only what the user asked, keep everything else identical, validate, show the draft, wait for the user. If the result ends with a "Result truncated" note you only saw part of the paper: never submit a revised paper built from it. Tell the user the paper is too long to edit in chat.
