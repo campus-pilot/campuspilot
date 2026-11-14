@@ -919,9 +919,15 @@ describe("finance database foundation", () => {
     });
     await hasInserted;
     let finalized = false;
+    // Settles with the failure instead of rejecting: the update waits on the member's row lock and fails the
+    // moment it commits, which can land before a `rejects` assertion attached afterwards, and Node would then
+    // report the rejection as unhandled.
     const finalize = (async () => {
       try {
         await db.update(financeBillRunTable).set({ status: "posted", finalizedAt: new Date() }).where(eq(financeBillRunTable.id, run!.id));
+        return null;
+      } catch (error) {
+        return error;
       } finally {
         finalized = true;
       }
@@ -930,7 +936,7 @@ describe("finance database foundation", () => {
     expect(finalized).toBe(false);
     release();
     await member;
-    await expect(finalize).rejects.toThrow();
+    expect(await finalize).toBeInstanceOf(Error);
   });
 
   it("serializes concurrent settlement inserts against payment and bill reversals", async () => {
