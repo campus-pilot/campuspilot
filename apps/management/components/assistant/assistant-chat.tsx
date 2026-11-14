@@ -39,12 +39,13 @@ import { ClipboardList, RotateCcw, ShieldCheck, UserPlus, UserRoundX } from 'luc
 import { useRef, type ReactNode } from 'react';
 
 import { assistantAttachmentThumbUrl } from '@/lib/assistant-attachments';
-import { authClient } from '@/lib/auth-client';
 import { orpc } from '@/lib/orpc';
 
 import { useApprovalMoney } from './assistant-approval-currency';
 import { AssistantApprovalWithSummary } from './assistant-approval-request';
 import { AssistantDraftCard, useDraftVerdicts } from './assistant-question-paper';
+import { seedFailedOf } from './assistant-question-paper-model';
+import { mayStopTurn } from './assistant-conversation-state';
 import { missingAttachmentIdsOf, refusalMessage, type AssistantConversationFailure } from './assistant-stream';
 import { AssistantViewBlock } from './assistant-view';
 import { useAssistantAttachmentUpload } from './use-assistant-attachments';
@@ -66,6 +67,7 @@ import {
   useOptimisticMessages,
   useRespondToApproval,
   useSendAssistantMessage,
+  useSignedInUserId,
   useStopAssistantRun,
   useSurfaceLife,
   type OptimisticMessage,
@@ -178,7 +180,7 @@ function useSeedPaper(schoolId: string, seed: QuestionPaperSeed | null) {
     ...orpc.school.getQuestionPaperDetail.queryOptions({ input: seed ? { ...seed, schoolId } : skipToken }),
     retry: false,
   });
-  const failed = seed !== null && detail.isError;
+  const failed = seedFailedOf({ hasSeed: seed !== null, hasData: detail.data !== undefined, isError: detail.isError });
   return { paper: detail.data?.paper, failed, usableSeed: failed ? null : seed };
 }
 
@@ -203,15 +205,6 @@ function ReplyRow({
  * chat showing it) until the stream takes it out of the tray; a decision
  * that could not be sent re-enables it and says why, in the request.
  */
-/** The name over a message someone else sent in a shared conversation; null for the user's own and for messages that do not say. */
-function useAuthorOf() {
-  const userId = authClient.useSession().data?.user.id ?? null;
-  return (item: AssistantUserMessageItemDto) => {
-    const author = item.body.author;
-    return author && userId !== null && author.userId !== userId ? author.name : null;
-  };
-}
-
 function useApprovals(schoolId: string) {
   const respond = useRespondToApproval();
   const decisionOf = useApprovalDecisions();
@@ -219,6 +212,15 @@ function useApprovals(schoolId: string) {
     if (call.body.approvalId) respond({ schoolId, approvalId: call.body.approvalId, decision });
   };
   return { decide, decisionOf };
+}
+
+/** The name over a message someone else sent in a shared conversation; null for the user's own and for messages that do not say. */
+function useAuthorOf() {
+  const userId = useSignedInUserId();
+  return (item: AssistantUserMessageItemDto) => {
+    const author = item.body.author;
+    return author && userId !== null && author.userId !== userId ? author.name : null;
+  };
 }
 
 /**
@@ -362,7 +364,15 @@ function ComposerToolbar({ schoolId, conversationId }: { schoolId: string; conve
  * a decision, then messages queued behind the working run (confirmed ones
  * and ones still on their way).
  */
-function useTrayRequests(schoolId: string, conversationId: string | null, queuedOptimistic: OptimisticMessage[], onRetry: (message: OptimisticMessage) => void) {
+function useTrayRequests(
+  schoolId: string,
+  conversationId: string | null,
+  queuedOptimistic: OptimisticMessage[],
+  onRetry: (message: OptimisticMessage) => void,
+  /** The user may write in this conversation; someone who only reads it may remove no one's queued message. */
+  canWrite: boolean,
+) {
+  const userId = useSignedInUserId();
   const approvals = useApprovals(schoolId);
   const { mine: pending, waitingFor } = useAssistantPendingApprovals(schoolId, conversationId);
   const queued = useAssistantQueuedMessages(schoolId, conversationId);
@@ -384,7 +394,12 @@ function useTrayRequests(schoolId: string, conversationId: string | null, queued
     ...queued.map((item) => ({
       id: item.id,
       text: item.body.text || attachmentsOnlyLabel((item.body.attachments ?? []).map((attachment) => attachment.kind)),
-      ...(item.runId === removingRunId ? { status: 'Removing…' } : { removable: true }),
+      // Removing a queued message stops its run: the server allows it for one's own, or with the right to continue the chat.
+      ...(item.runId === removingRunId
+        ? { status: 'Removing…' }
+        : mayStopTurn({ canWrite, userId, ownerId: item.body.author?.userId })
+          ? { removable: true }
+          : {}),
     })),
     ...queuedOptimistic.map((message) => ({
       id: message.clientRequestId,
@@ -576,7 +591,9 @@ export function AssistantChat({
       if (result) started(result.conversation.id, boxText.current);
     });
   // While a run works, a new message waits in the tray; otherwise it starts a turn.
-  const tray = useTrayRequests(schoolId, conversationId, running ? optimistic : [], retry);
+  const canWrite = readOnlyReason === null;
+  const userId = useSignedInUserId();
+  const tray = useTrayRequests(schoolId, conversationId, running ? optimistic : [], retry, canWrite);
   // Removing the seed's chip takes the prefilled sentence out of the box unless the user edited it (then their draft stays).
   // The box stays mounted: remounting it would drop the files attached in it, which are already stored on the server.
   const composer = useRef<AssistantComposerControls>(null);
@@ -618,7 +635,7 @@ export function AssistantChat({
 
   const disabledReason = status.data && !status.data.available ? status.data.unavailableReason : null;
   // "Try again" asks a failed turn's question again. Not while a message is already on its way or sending is unavailable.
-  const canRetry = !sending && optimistic.length === 0 && !disabledReason;
+  const canRetry = canWrite && !sending && optimistic.length === 0 && !disabledReason;
   // From the click until the run has ended: the request on its way, then the stop the run has recorded.
   const stopping = stop.isPending || Boolean(running?.stopRequestedAt);
   const welcome = !conversationId && optimistic.length === 0;
@@ -665,13 +682,11 @@ export function AssistantChat({
           )}
           {notLive ? <ConnectionNotice offline={connection.offline} /> : null}
           <div className={welcome ? 'flex flex-col gap-3' : ASSISTANT_LANE_CLASS}>
-            {readOnlyReason ? (
-              <p className="rounded-2xl border border-dashed px-3 py-3 text-center text-sm text-muted-foreground">{readOnlyReason}</p>
-            ) : (
+            {/* Read-only keeps the composer, closed with the reason, so its tray (approvals, whose approval is awaited) stays. */}
             <AssistantComposer
               controlsRef={composer}
               autoFocus={autoFocus}
-              disabledReason={disabledReason}
+              disabledReason={readOnlyReason ?? disabledReason}
               placeholder={running ? 'Queue a follow-up…' : placeholder}
               onSend={sendText}
               sending={sending}
@@ -683,7 +698,8 @@ export function AssistantChat({
               leading={<ComposerToolbar schoolId={schoolId} conversationId={conversationId} />}
               stopping={stopping}
               onStop={
-                running
+                // Someone else's turn is stopped only with the right to continue the chat; one's own, always.
+                running && mayStopTurn({ canWrite, userId, ownerId: running.userId })
                   ? () =>
                       stop.mutate(
                         { schoolId, runId: running.id },
@@ -692,7 +708,6 @@ export function AssistantChat({
                   : undefined
               }
             />
-            )}
             {welcome && !readOnlyReason && (suggestions || !activeSeed) ? (
               <AssistantSuggestions suggestions={suggestions ?? SUGGESTIONS} onPick={sendDirectly} />
             ) : null}

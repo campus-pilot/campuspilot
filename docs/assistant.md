@@ -554,22 +554,32 @@ so a colleague who takes the paper over reads how it came to be and carries on.
   all or none, checked; migration 0068). A seed alone never shares anything:
   the assistant's page can start a private conversation about a paper.
 - **Who reaches it** (`mayReachConversation`, `conversation-access.ts`), always
-  after seeing the assistant in the school (`assertCanSee`):
-  - its starter, for everything, as with any of their conversations;
+  after seeing the assistant in the school (`assertCanSee`). The paper's class
+  permission decides for everyone, **its starter included**: a teacher moved off
+  the class no longer reads what colleagues write in it.
   - anyone who may **read** the class's question papers (the same OPA action as
     the paper's procedures): get, subscribe, see its images, approve or decline
-    their own turn's changes, stop their own turn;
+    their own turn's changes;
   - anyone who may **manage** them: also send into it, and stop someone else's
     turn (or remove their queued message);
-  - nobody else: NOT_FOUND, as for an id that does not exist.
-  Open streams recheck this every two minutes with the rest of the access.
-- **What stays personal.** Only the starter deletes it (it then disappears for
-  everyone). Only the person whose turn asked for a change may approve it: each
+  - nobody else: NOT_FOUND, as for an id that does not exist. A starter who lost
+    the class still has the row in their own history; opening it says it is not
+    available.
+  Anyone may always stop their own turn. Open streams recheck this every two
+  minutes with the rest of the access.
+- **What stays personal.** Only the starter deletes it, and only while they may
+  still continue it (it then disappears for everyone). Only the person whose turn asked for a change may approve it: each
   run is its sender's, with their delegated token (`assistant_run.user_id`,
   now on the run DTO), and the others see "Waiting for … to approve a change".
   Each user message records its sender (`body.author`, named as at sending),
   and the chat shows the name over messages that are not the user's own. It
   stays in its starter's own history; it is not added to anyone else's.
+- **When the paper is deleted** (its own delete, or its exam plan's), its
+  conversations stop being shared (`unsharePaperConversations`, matched by key,
+  also for a paper that never had a row): each stays a private conversation in
+  its starter's history, and the paper starts again from its first screen. A
+  paper is not deleted while one of its conversations has a turn that has not
+  finished (CONFLICT), so no colleague's approval is stranded.
 - **Its history.** `listPaperConversations` lists one paper's live shared
   conversations, newest first, with who started each (`startedByName`) and
   their attention; for people who may manage the paper. The paper's detail

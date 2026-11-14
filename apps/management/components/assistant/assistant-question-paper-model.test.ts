@@ -3,7 +3,7 @@ import { test } from 'node:test';
 
 import type { AssistantTimelineRow } from '@campuspilot/components/assistant/timeline-model';
 
-import { approvalFactsOf, draftCheckOf, paperLabelFromKey, paperLabelOf } from './assistant-question-paper-model';
+import { approvalFactsOf, draftCheckOf, paperLabelFromKey, paperLabelOf, seedFailedOf } from './assistant-question-paper-model';
 
 const input = {
   schoolId: 's',
@@ -59,4 +59,11 @@ test('approval facts: the paper label once the names arrived and the ordinal of 
   assert.deepEqual(approvalFactsOf({ toolName: tool, input: save, rows, paper: null }), { paperLabel: null, draftOrdinal: 1 });
   assert.deepEqual(approvalFactsOf({ toolName: tool, input: { ...save, draftId: 'zzzzzzzzzzzz' }, rows, paper: names }).draftOrdinal, null);
   assert.deepEqual(approvalFactsOf({ toolName: 'school.updateAdmission', input: save, rows, paper: names }).draftOrdinal, null);
+});
+
+test('a seed fails only when its paper was never read, not when a refetch fails over held data', () => {
+  assert.equal(seedFailedOf({ hasSeed: true, hasData: false, isError: true }), true);
+  assert.equal(seedFailedOf({ hasSeed: true, hasData: true, isError: true }), false);
+  assert.equal(seedFailedOf({ hasSeed: true, hasData: false, isError: false }), false);
+  assert.equal(seedFailedOf({ hasSeed: false, hasData: false, isError: true }), false);
 });

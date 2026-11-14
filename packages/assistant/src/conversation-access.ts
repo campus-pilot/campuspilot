@@ -19,24 +19,22 @@ const PAPER_ACTION = {
 } as const;
 
 /**
- * Whether the user may reach a live conversation of the school for `need`.
- * The rule, in order:
- * 1. A user's own conversation is theirs for everything (as before sharing
- *    existed), whatever its paper.
- * 2. A conversation shared with a question paper is reached through that
- *    paper's class permission, the same OPA check the paper's procedures
- *    make: reading the class's question papers to read it, managing them to
- *    continue it.
- * 3. Anything else is not reachable (the caller answers NOT_FOUND, so an id
- *    says nothing about whether it exists).
+ * Whether the user may reach a live conversation of the school for `need`:
+ * - A conversation shared with a question paper is reached through that
+ *   paper's class permission, the same OPA check the paper's procedures
+ *   make (reading the class's question papers to read it, managing them to
+ *   continue it), for everyone, its starter included: a starter who loses the
+ *   class no longer reads what colleagues write in it.
+ * - A private conversation is its starter's only.
+ * - Anything else is not reachable (the caller answers NOT_FOUND, so an id
+ *   says nothing about whether it exists).
  *
  * Seeing the assistant in the school at all (`assertCanSee`) is checked by
  * the caller first, for every need; continuing also needs use access.
  */
 export async function mayReachConversation(session: AssistantSession, row: ConversationRow, need: ConversationNeed): Promise<boolean> {
-  if (row.userId === session.user.id) return true;
   const paper = sharedPaperOf(row);
-  if (!paper) return false;
+  if (!paper) return row.userId === session.user.id;
   const [allowed] = await checkPermissions(session.context, [
     { action: PAPER_ACTION[need], resource: { kind: 'class', schoolId: row.schoolId, classId: paper.classId } },
   ]);

@@ -105,6 +105,14 @@ function paperScopeOf(input: DraftCallInput | null): string | null {
   return input ? JSON.stringify([input.sessionId, input.examSlug, input.classId, input.subjectSlug, input.modeSlug]) : null;
 }
 
+/** The paper a `saveQuestionPaperVersion` call saved, by the same key as {@link paperScopeOf}; null when its input does not name one. */
+function savedPaperScopeOf(input: unknown): string | null {
+  if (!input || typeof input !== 'object') return null;
+  const key = input as Record<string, unknown>;
+  const parts = [key.sessionId, key.examSlug, key.classId, key.subjectSlug, key.modeSlug];
+  return parts.every((part) => typeof part === 'string') ? JSON.stringify(parts) : null;
+}
+
 /** The draft cards of a conversation in order (cards are never folded under a work bar). */
 const cardCallsOf = (rows: readonly AssistantTimelineRow[]) => rows.flatMap((row) => (row.kind === 'card' ? [row.call] : []));
 
@@ -177,6 +185,8 @@ export type UnsavedDraft = {
   draftId: string;
   placeholderFigures: number;
   removed: readonly string[];
+  /** When the draft was written (its tool call, a server time): a version saved after it is newer than the draft. */
+  writtenAt: Date;
 };
 
 /**
@@ -206,10 +216,13 @@ export function unsavedDraftOf(
       const input = parseDraftCallInput(row.call.body.input);
       const result = parseStoredDraftResult(row.call.body.output, row.call.body.outputTruncated) ?? verdicts.get(row.call.id);
       if (!input || paperScopeOf(input) !== wanted || !result?.valid || !result.draftId) return;
-      found = { callId: row.call.id, ordinal, input, draftId: result.draftId, placeholderFigures: result.placeholderFigures, removed: result.stripped };
+      found = { callId: row.call.id, ordinal, input, draftId: result.draftId, placeholderFigures: result.placeholderFigures, removed: result.stripped, writtenAt: row.call.createdAt };
     } else if (row.kind === 'approval' || row.kind === 'activity') {
       const calls = row.kind === 'approval' ? [row.call] : row.calls;
-      if (calls.some((call) => call.body.toolName.endsWith('saveQuestionPaperVersion') && call.status === 'succeeded')) found = null;
+      // Only a save of this same paper settles its draft: the chat may have saved another paper meanwhile.
+      const saved = (call: (typeof calls)[number]) =>
+        call.body.toolName.endsWith('saveQuestionPaperVersion') && call.status === 'succeeded' && savedPaperScopeOf(call.body.input) === wanted;
+      if (calls.some(saved)) found = null;
     } else if (row.kind === 'work') row.folded.forEach(visit);
   };
   rows.forEach(visit);

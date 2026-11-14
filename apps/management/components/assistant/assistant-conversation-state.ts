@@ -204,3 +204,12 @@ export function eventChangedConversationList(event: AssistantStreamEvent): boole
     event.run.status === 'awaiting_approval'
   );
 }
+
+/**
+ * Whether the user may stop a turn (or remove a queued message, which stops
+ * its run): always their own; someone else's only with the right to write in
+ * the conversation (a conversation shared with a paper, which the server
+ * allows to whoever may continue it). `ownerId` null: not known, so not theirs.
+ */
+export const mayStopTurn = (facts: { canWrite: boolean; userId: string | null; ownerId: string | null | undefined }) =>
+  facts.canWrite || (facts.userId !== null && facts.ownerId === facts.userId);

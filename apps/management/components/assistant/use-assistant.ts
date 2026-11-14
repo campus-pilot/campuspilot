@@ -744,6 +744,6 @@ export function useAssistantDraft(schoolId: string, conversationId: string | nul
  * The signed-in user's id, or null until the session has loaded. Drafts are
  * kept per user, so none is read or written before it is known.
  */
-function useSignedInUserId(): string | null {
+export function useSignedInUserId(): string | null {
   return authClient.useSession().data?.user.id ?? null;
 }

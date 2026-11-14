@@ -72,3 +72,11 @@ export function approvalFactsOf({
   const draftId = approvalDraftId(toolName, input);
   return { paperLabel: paper ? paperLabelOf(paper) : null, draftOrdinal: draftId ? draftOrdinalOf(rows, draftId) : null };
 }
+
+/**
+ * Whether the paper a seed names could not be read: only when nothing was
+ * ever read and the request failed. A refetch that fails while the paper is
+ * held (a network blip on window focus) keeps the seed, so a conversation
+ * started on the paper's screen is still seeded and shared with it.
+ */
+export const seedFailedOf = (query: { hasSeed: boolean; hasData: boolean; isError: boolean }) => query.hasSeed && !query.hasData && query.isError;

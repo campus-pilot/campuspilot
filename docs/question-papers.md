@@ -452,13 +452,18 @@ one the URL names, else the paper's latest shared conversation).
     conversation (`latestConversationId` in the detail), whoever started it. `?chat=<id>`
     names another; `?chat=new` is a new one. The header's *New chat* starts a new one and
     *Chat history* lists the paper's conversations (who started each, when it last
-    changed); both are for people who may change the paper. A message someone else sent
+    changed); New chat is for people who may change the paper now, Chat history for
+    anyone who may manage the class's papers (also once the exam has ended). A message someone else sent
     shows their name, and a change waiting for someone else's approval says whose. On a
     phone the paper is the screen and the assistant is a full-screen sheet opened from a
     bar at the bottom.
-  - A viewer, and a paper whose exam has ended, read the paper's conversation without a
-    message box (one sentence says why) and see its unsaved draft without *Save*; with no
-    conversation they get the paper alone, as does a first paper still being generated.
+  - A viewer, and a paper whose exam has ended, read the paper's conversation with the
+    message box closed (its placeholder says why) and see its unsaved draft without *Save*.
+    The box's tray stays: whose approval a change waits for, and a user's own approval or
+    Stop. With no conversation they get the paper alone, as does a first paper still being
+    generated.
+  - The paper's side shows an unsaved draft only while it is newer than every saved version
+    (`draftIsNewest`), and only a save of this same paper settles it (`unsavedDraftOf`).
 - The URL is `?start=sources|earlier` (the first screen for a paper that already has
   versions, and the same with the earlier-paper dialog open, so Back closes the dialog),
   `?version=n` and `?chat=<conversation id>|new` (`questionPaperWorkspaceHref`). Only the

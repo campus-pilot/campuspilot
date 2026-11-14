@@ -20,7 +20,7 @@ import { DraftPreviewBody } from '@/components/assistant/assistant-question-pape
 import { useSendAssistantMessage } from '@/components/assistant/use-assistant';
 import { ReadError } from '@/components/exam/exam-common';
 import { orpc } from '@/lib/orpc';
-import { currentJobFailure, inFlightJob, requestErrorMessage, shownPaperOf, type QuestionPaperScope, type ShownPaper } from './question-paper-model';
+import { currentJobFailure, draftIsNewest, inFlightJob, requestErrorMessage, shownPaperOf, type QuestionPaperScope, type ShownPaper } from './question-paper-model';
 import { PAPER_ASSISTANT_SURFACE, paperSeedOf, usePaperDraft, type PaperDraft } from './use-paper-assistant';
 import { PaperChatHistoryDialog } from './paper-chat-history';
 import { useDownloadQuestionPaper, type QuestionPaperDetail } from './use-question-paper-detail';
@@ -93,14 +93,17 @@ function PaperAssistant({
   scope,
   chatId,
   readOnlyReason,
+  canSeeHistory,
   open,
   onOpenChange,
   onChat,
 }: {
   scope: QuestionPaperScope;
   chatId: string | null;
-  /** Why this user may read the paper's conversation but not write in it; null when they may write (and start or pick conversations). */
+  /** Why this user may read the paper's conversation but not write in it; null when they may write (and start new ones). */
   readOnlyReason: string | null;
+  /** The user may manage the class's papers: they see the paper's chat history (also when the paper can no longer change). */
+  canSeeHistory: boolean;
   /** Whether the sheet is open; only a phone has a sheet. */
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -125,7 +128,7 @@ function PaperAssistant({
         <header className="flex h-11 shrink-0 items-center gap-1 border-b px-3">
           <Sparkles className="size-4 shrink-0 text-muted-foreground" aria-hidden />
           <h3 className="ms-1 min-w-0 flex-1 truncate text-sm font-medium">Assistant</h3>
-          {canWrite ? <HeaderIconButton label="Chat history" icon={<History aria-hidden />} onClick={() => setHistoryOpen(true)} /> : null}
+          {canSeeHistory ? <HeaderIconButton label="Chat history" icon={<History aria-hidden />} onClick={() => setHistoryOpen(true)} /> : null}
           {canWrite && chatId ? <HeaderIconButton label="New chat" icon={<SquarePen aria-hidden />} onClick={startNew} /> : null}
           <Button type="button" variant="ghost" size="icon-sm" className="md:hidden" aria-label="Close assistant" onClick={() => onOpenChange(false)}>
             <X aria-hidden />
@@ -161,7 +164,7 @@ function PaperAssistant({
           </Button>
         </div>
       )}
-      {canWrite ? <PaperChatHistoryDialog scope={scope} open={historyOpen} onOpenChange={setHistoryOpen} currentId={chatId} onChoose={onChat} /> : null}
+      {canSeeHistory ? <PaperChatHistoryDialog scope={scope} open={historyOpen} onOpenChange={setHistoryOpen} currentId={chatId} onChoose={onChat} /> : null}
     </>
   );
 }
@@ -411,7 +414,8 @@ export function QuestionPaperStudio({
       ? 'This paper can no longer be changed, so nothing more can be asked here.'
       : 'You can read this conversation. Only people who can change this paper can write here.';
   const [assistantOpen, setAssistantOpen] = useState(false);
-  const draft = usePaperDraft(scope, showAssistant ? chatId : null, detail.paper);
+  const chatDraft = usePaperDraft(scope, showAssistant ? chatId : null, detail.paper);
+  const draft = chatDraft && draftIsNewest(chatDraft.writtenAt, detail.versions) ? chatDraft : null;
   const { send, isPending: saving } = useSendAssistantMessage(scope.schoolId, PAPER_ASSISTANT_SURFACE);
   const shown = shownPaperOf(versionParam, detail.versions.map((version) => version.versionNo), draft !== null);
   const saveDraft = () => {
@@ -444,7 +448,15 @@ export function QuestionPaperStudio({
       </header>
       <div className={cn('grid min-h-0 min-w-0 flex-1', showAssistant && 'md:grid-cols-[minmax(20rem,26rem)_minmax(0,1fr)]')}>
         {showAssistant ? (
-          <PaperAssistant scope={scope} chatId={chatId} readOnlyReason={readOnlyReason} open={assistantOpen} onOpenChange={setAssistantOpen} onChat={onChat} />
+          <PaperAssistant
+            scope={scope}
+            chatId={chatId}
+            readOnlyReason={readOnlyReason}
+            canSeeHistory={canManage}
+            open={assistantOpen}
+            onOpenChange={setAssistantOpen}
+            onChat={onChat}
+          />
         ) : null}
         <section aria-label="Paper" className="flex min-h-0 min-w-0 flex-col gap-3 md:overflow-hidden md:bg-muted/30 md:p-4">
           {notice}

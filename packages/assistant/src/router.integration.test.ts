@@ -1049,6 +1049,21 @@ describe('conversations shared with a question paper', () => {
     await expect(history(shared.schoolId, reader)).rejects.toMatchObject({ code: 'FORBIDDEN' });
   });
 
+  it('follows the paper permission for its starter too, who may still stop their own turn', async () => {
+    const shared = await sharedConversation();
+    const ids = { schoolId: shared.schoolId, conversationId: shared.conversationId };
+    // The starter is moved off the class.
+    grant(shared.ownerId);
+    await expect(get(shared.schoolId, shared.conversationId, shared.ownerId)).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await expect(send(shared.schoolId, shared.ownerId, { conversationId: shared.conversationId })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await expect(call(assistantRouter.stopRun, { schoolId: shared.schoolId, runId: shared.runId }, as(shared.ownerId))).resolves.toMatchObject({ id: shared.runId });
+    await setRunStatus({ conversationId: shared.conversationId, runId: shared.runId }, 'cancelled');
+    await expect(call(assistantRouter.deleteConversation, ids, as(shared.ownerId))).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    // Back on the class, it is theirs again.
+    grant(shared.ownerId, READ, MANAGE);
+    await expect(get(shared.schoolId, shared.conversationId, shared.ownerId)).resolves.toMatchObject({ conversation: { id: shared.conversationId } });
+  });
+
   it('lets the paper’s people stop a turn, but only its starter delete it', async () => {
     const shared = await sharedConversation();
     const [reader, colleague] = [user(), user()];

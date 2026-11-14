@@ -544,14 +544,14 @@ function StartFooter({
                 ) : null}
                 <div className="flex shrink-0 gap-2">
                   {onBack ? (
-                    <Button type="button" variant="outline" className="max-sm:h-11" onClick={onBack}>
+                    <Button type="button" variant="outline" onClick={onBack}>
                       Back
                     </Button>
                   ) : null}
                   {/* A closed button is grey, not a dimmed primary: the brand colour means "this will create the paper". */}
                   <Button
                     type="submit"
-                    className="disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100 max-sm:h-11 max-sm:flex-1"
+                    className="disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100 max-sm:flex-1"
                     disabled={reason !== null || plan.kind === 'blocked' || !canSubmit || isSubmitting}
                   >
                     {isSubmitting ? 'Creating…' : paper.latestVersionNo > 0 ? 'Create new version' : 'Create paper'}

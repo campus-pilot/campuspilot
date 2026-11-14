@@ -8,6 +8,8 @@ import {
   isConflict,
   chatIdOf,
   paperChatOf,
+  hasStudioOf,
+  draftIsNewest,
   resolveView,
   resolveVersionNo,
   shownPaperOf,
@@ -123,4 +125,21 @@ test('the paper conversation: the one the address names, none when it asks for a
   assert.equal(paperChatOf(null, null), null);
   // Something that is not an id falls back to the latest, never reaches a request.
   assert.equal(paperChatOf('../etc', latest), latest);
+});
+
+test('the first screen has a way back while the paper has any conversation, also after New chat on a paper with no version', () => {
+  const none = { hasVersion: false, generating: false, chatId: null, latestConversationId: null };
+  assert.equal(hasStudioOf(none), false);
+  assert.equal(hasStudioOf({ ...none, latestConversationId: 'asc_latest0000000000001' }), true);
+  assert.equal(hasStudioOf({ ...none, hasVersion: true }), true);
+  assert.equal(hasStudioOf({ ...none, generating: true }), true);
+});
+
+test('an unsaved draft is shown only while no version was saved after it', () => {
+  const draftAt = new Date('2026-11-14T10:00:00Z');
+  assert.equal(draftIsNewest(draftAt, []), true);
+  assert.equal(draftIsNewest(draftAt, [{ createdAt: new Date('2026-11-14T09:00:00Z') }]), true);
+  // The photo job (or another chat) saved a version after the draft was written.
+  assert.equal(draftIsNewest(draftAt, [{ createdAt: new Date('2026-11-14T11:00:00Z') }, { createdAt: new Date('2026-11-14T09:00:00Z') }]), false);
+  assert.equal(draftIsNewest(draftAt, [{ createdAt: draftAt }]), false);
 });

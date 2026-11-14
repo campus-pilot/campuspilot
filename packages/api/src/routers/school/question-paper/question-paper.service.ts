@@ -20,7 +20,7 @@ import type { z } from 'zod';
 
 import { rpcError } from '../../../errors';
 import { getExamSession } from '../exam/exam.service';
-import { latestPaperConversationId } from './question-paper.conversations';
+import { latestPaperConversationId, paperChatIsWorking, unsharePaperConversations } from './question-paper.conversations';
 import { makeImageDerivatives, normalizeFigureImage } from '../../../files/image-derivative';
 import { getQuestionPaperModel } from '../../../workflows/question-paper/model';
 import { handOff, dispatchQuestionPaperJob } from '../../../workflows/question-paper/outbox';
@@ -507,6 +507,10 @@ export async function deleteQuestionPaper(db: Database, input: { scope: PaperSco
     await assertPaperWritableLocked(tx, input.scope.key);
     const paper = await lockPaper(tx, input.scope.key);
     await assertNoActiveJob(tx, paper.id, 'The paper cannot be deleted');
+    if (await paperChatIsWorking(tx, input.scope.key)) {
+      throw new ORPCError('CONFLICT', { message: 'The assistant is still working on this paper. Stop it, or decide on its change, before deleting the paper.' });
+    }
+    await unsharePaperConversations(tx, input.scope.key);
     return deletePaperRows(tx, [paper]);
   });
   await deleteObjectsBestEffort(keys);
@@ -538,6 +542,8 @@ export async function deleteQuestionPapersOfPlan(
       ),
     )
     .for('update');
+  // Every mode's conversations, also of a paper that never got a row.
+  await unsharePaperConversations(tx, plan);
   return deletePaperRows(tx, papers);
 }
 

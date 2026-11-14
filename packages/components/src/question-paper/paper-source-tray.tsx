@@ -195,7 +195,7 @@ const WAY_TILE_VISIBILITY = {
 /** A way in as an outlined button (the empty tray, and the phone's row of controls). */
 function WayButton({ way, className }: { way: PaperSourceWay; className?: string }) {
   return (
-    <Button type="button" variant="outline" disabled={way.disabled} className={cn('max-sm:h-11', className, way.pointer ? WAY_BUTTON_POINTER[way.pointer] : undefined)} onClick={way.onClick}>
+    <Button type="button" variant="outline" disabled={way.disabled} className={cn(className, way.pointer ? WAY_BUTTON_POINTER[way.pointer] : undefined)} onClick={way.onClick}>
       <way.icon aria-hidden />
       {way.label}
     </Button>
@@ -341,7 +341,7 @@ export function PaperSourceTray({
                   <button
                     type="button"
                     onClick={onAdd}
-                    className="inline-flex h-11 flex-1 items-center justify-center gap-1.5 rounded-lg border border-dashed border-foreground/30 px-3 text-sm text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className="inline-flex h-7 flex-1 items-center justify-center gap-1 rounded-lg border border-dashed border-foreground/30 px-2 text-xs/relaxed text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     <Plus className="size-4" aria-hidden />
                     Add pages

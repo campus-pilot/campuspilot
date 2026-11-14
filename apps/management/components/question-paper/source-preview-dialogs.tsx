@@ -85,11 +85,11 @@ export function PagePreviewDialog({
             <span />
           )}
           <div className="flex gap-2 max-sm:w-full max-sm:justify-between">
-            <Button type="button" variant="outline" size="sm" className="max-sm:h-11 max-sm:px-4" disabled={index <= 0} onClick={() => go(-1)}>
+            <Button type="button" variant="outline" size="sm" disabled={index <= 0} onClick={() => go(-1)}>
               <ChevronLeft aria-hidden />
               Previous
             </Button>
-            <Button type="button" variant="outline" size="sm" className="max-sm:h-11 max-sm:px-4" disabled={index < 0 || index >= pages.length - 1} onClick={() => go(1)}>
+            <Button type="button" variant="outline" size="sm" disabled={index < 0 || index >= pages.length - 1} onClick={() => go(1)}>
               Next
               <ChevronRight aria-hidden />
             </Button>

@@ -72,6 +72,23 @@ export function paperChatOf(raw: string | null | undefined, latestConversationId
   return chatIdOf(raw) ?? latestConversationId;
 }
 
+/**
+ * Whether the paper has a studio to go back to from its first screen: a
+ * version, a generation at work, the conversation on screen, or any
+ * conversation shared with the paper (after New chat on a paper with no
+ * version the screen is the first one, and Back must still reach the chat).
+ */
+export const hasStudioOf = (facts: { hasVersion: boolean; generating: boolean; chatId: string | null; latestConversationId: string | null }) =>
+  facts.hasVersion || facts.generating || facts.chatId !== null || facts.latestConversationId !== null;
+
+/**
+ * Whether an unsaved draft is still the newest thing about the paper: it was
+ * written after every saved version (both are server times). A version made
+ * since, by the photo job or in another conversation, is newer, and the
+ * paper's side shows it instead (the draft stays in its chat).
+ */
+export const draftIsNewest = (writtenAt: Date, versions: readonly { createdAt: Date }[]) => versions.every((version) => writtenAt > version.createdAt);
+
 /** What the paper's side of the studio shows. */
 export type ShownPaper = { kind: 'draft' } | { kind: 'version'; versionNo: number } | { kind: 'nothing' };
 

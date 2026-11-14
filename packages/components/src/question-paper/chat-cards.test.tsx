@@ -185,8 +185,10 @@ describe('drafts of a conversation', () => {
     expect(unsavedDraftOf(rows, { ...paper, examSlug: 'other-exam' })).toMatchObject({ callId: 'c', ordinal: 3 });
     expect(unsavedDraftOf([call('a', '1', invalid)], paper)).toBeNull();
 
-    const save = (status: string) =>
-      ({ kind: 'approval', id: `s-${status}`, call: { id: `s-${status}`, status, body: { toolName: 'school.saveQuestionPaperVersion' } } }) as unknown as AssistantTimelineRow;
+    const save = (status: string, saved: Record<string, string> = paper) =>
+      ({ kind: 'approval', id: `s-${status}`, call: { id: `s-${status}`, status, body: { toolName: 'school.saveQuestionPaperVersion', input: { schoolId: 's', ...saved, expectedVersionNo: 0 } } } }) as unknown as AssistantTimelineRow;
+    // Saving another paper in the same chat leaves this paper's draft unsaved.
+    expect(unsavedDraftOf([...rows, save('succeeded', { ...paper, modeSlug: 'oral' })], paper)?.callId).toBe('d');
     // Saved: a version holds it now. A declined or failed save leaves it unsaved.
     expect(unsavedDraftOf([...rows, save('succeeded')], paper)).toBeNull();
     expect(unsavedDraftOf([...rows, save('declined')], paper)?.callId).toBe('d');

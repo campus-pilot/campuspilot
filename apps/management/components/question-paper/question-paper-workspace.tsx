@@ -25,6 +25,7 @@ import { questionPaperHref, questionPaperWorkspaceHref } from '@/components/exam
 import { orpc } from '@/lib/orpc';
 import {
   currentJobFailure,
+  hasStudioOf,
   NEW_CHAT_PARAM,
   paperChatOf,
   inFlightJob,
@@ -254,7 +255,7 @@ function PaperMenu({
       <ConfirmationDialog
         open={confirming}
         title="Delete this question paper?"
-        description="The uploaded photos, every version and every stored PDF of this paper are deleted. This cannot be undone."
+        description="The uploaded photos, every version and every stored PDF of this paper are deleted. This cannot be undone. Its conversations with the assistant stay with whoever started them, and are no longer shared."
         confirmLabel="Delete paper"
         pending={remove.isPending}
         onOpenChange={setConfirming}
@@ -285,8 +286,7 @@ function PaperLayout({ scope, detail, canManage }: { scope: QuestionPaperScope; 
   const hasVersion = detail.paper.latestVersionNo > 0;
   const generating = inFlightJob(detail.activeJob) !== null;
   const view = resolveView({ start: search.get('start'), hasVersion, generating, hasChat: chatId !== null });
-  /** The paper has a studio to go back to from its first screen: something is in it. */
-  const hasStudio = hasVersion || generating || chatId !== null;
+  const hasStudio = hasStudioOf({ hasVersion, generating, chatId, latestConversationId: detail.latestConversationId });
   /** What the screen shows lives in the address. Opening the first screen or its picker is a step the Back button undoes; the rest replaces. */
   const show = (query: Parameters<typeof questionPaperWorkspaceHref>[1], how: 'push' | 'replace' = 'replace') =>
     router[how](questionPaperWorkspaceHref(scope, query), { scroll: false });

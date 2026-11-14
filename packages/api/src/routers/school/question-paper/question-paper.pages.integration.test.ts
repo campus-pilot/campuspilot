@@ -689,6 +689,12 @@ describe('question paper pages', () => {
       const saved = await manager.saveQuestionPaperVersion({ ...key(k), expectedVersionNo: 0, html: ENGLISH_SCIENCE });
       const [version] = await db.select().from(examQuestionPaperVersionTable).where(eq(examQuestionPaperVersionTable.paperId, saved.paperId));
       const keptBefore = (await pageRows(keep)).length;
+      // A conversation shared with a mode of this plan that has no paper row yet, and one with the kept subject.
+      const sharedWith = (subjectSlug: string, modeSlug: string) => ({
+        schoolId: world.schoolId, userId: world.people.manager.userId, provider: 'gemini' as const, model: 'm',
+        paperSessionId: world.sessionId, paperExamSlug: 'term-1', paperClassId: world.classId, paperSubjectSlug: subjectSlug, paperModeSlug: modeSlug,
+      });
+      const [planChat, keptChat] = await db.insert(assistantConversationTable).values([sharedWith('math', 'oral'), sharedWith('science', 'theory')]).returning();
 
       const [plan] = await db
         .select()
@@ -705,6 +711,10 @@ describe('question paper pages', () => {
       expect(await db.select().from(artifactTable).where(eq(artifactTable.id, version!.pdfArtifactId!))).toHaveLength(0);
       expect(await db.select().from(examQuestionPaperJobTable).where(eq(examQuestionPaperJobTable.paperId, saved.paperId))).toHaveLength(0);
       await expect(manager.getQuestionPaper(key(k))).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      // The plan's conversations are no longer shared with any paper (also one whose paper never had a row); others stay.
+      const chats = await db.select().from(assistantConversationTable).where(and(eq(assistantConversationTable.schoolId, world.schoolId)));
+      expect(chats.find((chat) => chat.id === planChat!.id)).toMatchObject({ paperClassId: null, paperModeSlug: null });
+      expect(chats.find((chat) => chat.id === keptChat!.id)).toMatchObject({ paperSubjectSlug: 'science' });
     });
   });
 });

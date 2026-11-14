@@ -180,9 +180,11 @@ function valueProblem(property: string, rawValue: string): string | null {
   if (trimmed.length > MAX_VALUE_CHARS + 20) return 'its value is empty or too long';
   const value = withoutImportant(trimmed);
   if (value === '' || value.length > MAX_VALUE_CHARS) return 'its value is empty or too long';
-  // Quoted text (`content: "→ "`) may hold any character except what could end the style or reopen markup.
+  // Quoted text (`content: "→ "`) may hold any character except what could end the style or reopen markup, and no
+  // raw line break: a browser ends a CSS string at one, so what follows would be read as declarations this check
+  // took for text.
   const strings = [...value.matchAll(/"[^"]*"|'[^']*'/g)].map((match) => match[0]);
-  if (strings.some((text) => /[<>&{}@\\]/.test(text))) return 'its text is not allowed';
+  if (strings.some((text) => /[<>&{}@\\\n\r\f]/.test(text))) return 'its text is not allowed';
   const unquoted = property === 'content' || property === 'quotes' ? value.replace(/"[^"]*"|'[^']*'/g, '""') : value;
   if (!VALUE_CHARS.test(unquoted) || FORBIDDEN_IN_VALUE.test(unquoted)) return 'its value is not allowed';
   for (const call of unquoted.matchAll(/([a-zA-Z_-][a-zA-Z0-9_-]*)\s*\(/g)) {
@@ -213,6 +215,32 @@ function valueProblem(property: string, rawValue: string): string | null {
     if (!families.every((name) => FONT_FAMILY.test(name))) return 'the font is not installed';
   }
   return null;
+}
+
+/**
+ * The text without its CSS comments, each replaced by `replacement`. Quote-aware: a comment opener inside a quoted
+ * string is text (a `content` string that reads "slash star Choose one star slash" keeps it), and a quote inside a
+ * comment does not open a string. An unclosed comment runs to the end, as in a browser.
+ */
+export function withoutComments(text: string, replacement: string): string {
+  let out = '';
+  let quote: string | null = null;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index]!;
+    if (quote) {
+      if (char === quote) quote = null;
+      out += char;
+    } else if (char === '/' && text[index + 1] === '*') {
+      const end = text.indexOf('*/', index + 2);
+      out += replacement;
+      if (end < 0) break;
+      index = end + 1;
+    } else {
+      if (char === '"' || char === "'") quote = char;
+      out += char;
+    }
+  }
+  return out;
 }
 
 /**
@@ -257,7 +285,7 @@ export function cleanDeclarations(text: string, report: StripReport): string {
     report.add('A style containing a backslash escape was removed');
     return '';
   }
-  const declarations = splitTopLevel(text.replace(/\/\*[\s\S]*?(\*\/|$)/g, ''), ';');
+  const declarations = splitTopLevel(withoutComments(text, ''), ';');
   if (!declarations) {
     report.add('A style with unbalanced brackets or quotes was removed');
     return '';
@@ -411,7 +439,7 @@ export function cleanStyleSheet(css: string, report: StripReport, knownElement: 
     report.add('A <style> block containing "<" or "&" was removed');
     return '';
   }
-  const text = css.replace(/\/\*[\s\S]*?(\*\/|$)/g, ' ');
+  const text = withoutComments(css, ' ');
   const rules: string[] = [];
   let index = 0;
   while (index < text.length) {

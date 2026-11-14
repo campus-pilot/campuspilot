@@ -9,8 +9,7 @@ import {
   eventChangedConversationList,
   eventChangedSchoolData,
   hasSucceededWriteAfter,
-  withConnectionLost,
-} from './assistant-conversation-state';
+  withConnectionLost, mayStopTurn } from './assistant-conversation-state';
 
 const at = new Date('2026-11-05T00:00:00Z');
 const conversation = { id: 'c', schoolId: 's', userId: 'u', title: 't', sharedWithPaper: false, lastSequence: 3, createdAt: at, updatedAt: at };
@@ -132,4 +131,12 @@ test('the first snapshot marks where the conversation was opened; later ones kee
   });
   assert.equal(again.openedSequence, 3);
   assert.equal(again.sequence, 9);
+});
+
+test('a turn is stopped by its sender, or by whoever may write in the conversation', () => {
+  assert.equal(mayStopTurn({ canWrite: false, userId: 'me', ownerId: 'me' }), true);
+  assert.equal(mayStopTurn({ canWrite: false, userId: 'me', ownerId: 'ravi' }), false);
+  assert.equal(mayStopTurn({ canWrite: true, userId: 'me', ownerId: 'ravi' }), true);
+  // Before the session is known, or for a message that does not say whose it is, only the right to write counts.
+  assert.equal(mayStopTurn({ canWrite: false, userId: null, ownerId: undefined }), false);
 });

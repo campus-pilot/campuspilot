@@ -143,6 +143,19 @@ describe('numbers are capped, not only lengths with a unit (M2)', () => {
     expect(declarations('text-indent:-11mm')).toBe('text-indent:-11mm');
   });
 
+  it('refuses a line break inside quoted text, so nothing after it is read as a declaration', () => {
+    for (const breaker of ['\n', '\r', '\f']) {
+      const css = `p{content:"b${breaker};filter:blur(3px);transform:rotate(45deg);background-image:url(https://evil.example/x.png);x:"}`;
+      expect(sheet(css), JSON.stringify(breaker)).toBe('');
+      expect(declarations(`content:"b${breaker};filter:blur(3px)"`)).toBe('');
+    }
+  });
+
+  it('keeps comment-like text inside quotes and still removes real comments', () => {
+    expect(sheet('p::before{content:"/* Choose one */"}')).toBe('.qp-body p::before{content:"/* Choose one */"}');
+    expect(declarations('/* it\'s */color:red;content:"a /* b */"')).toBe('color:red;content:"a /* b */"');
+  });
+
   it('still refuses what loads or moves', () => {
     for (const declaration of ['background-image:url(https://example.com/a.png)', 'background:url(x)', 'transform:rotate(3deg)', 'filter:blur(2px)', 'animation:spin 1s', 'content:attr(class)']) {
       expect(declarations(declaration), declaration).toBe('');

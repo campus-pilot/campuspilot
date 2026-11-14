@@ -9,7 +9,7 @@ import {
 import { examQuestionPaperFigureTable, examQuestionPaperVersionTable } from '@campuspilot/db/schema/exam-question-paper';
 import { QUESTION_PAPER_EXAMPLES } from '@campuspilot/question-paper/examples';
 import { createRouterClient } from '@orpc/server';
-import { eq } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import sharp from 'sharp';
 import { beforeAll, describe, expect, it } from 'vitest';
 
@@ -262,6 +262,33 @@ describe('chat attachments as figures', () => {
     // The paper's screen opens the conversation shared with it that changed last.
     const detail = await world.people.coordinator.client.school.getQuestionPaperDetail(k);
     expect(detail.latestConversationId).toBe(shared!.id);
+  });
+
+  it('stops sharing the paper’s conversations when the paper is deleted, but not while one of them works', async () => {
+    const k = world.key({ classId: world.otherClassId, subjectSlug: 'science' });
+    await agent().school.saveQuestionPaperVersion({ ...k, expectedVersionNo: 0, html: ENGLISH_SCIENCE });
+    const [shared] = await db
+      .insert(assistantConversationTable)
+      .values({ schoolId: world.schoolId, userId: world.people.teacher.userId, provider: 'gemini', model: 'm', paperSessionId: k.sessionId, paperExamSlug: k.examSlug, paperClassId: k.classId, paperSubjectSlug: k.subjectSlug, paperModeSlug: k.modeSlug })
+      .returning();
+    const [working] = await db
+      .insert(assistantRunTable)
+      .values({ conversationId: shared!.id, schoolId: world.schoolId, userId: world.people.teacher.userId, clientRequestId: crypto.randomUUID(), surface: 'panel', sequence: 1, status: 'awaiting_approval' })
+      .returning();
+    expect((await world.people.manager.client.school.getQuestionPaperDetail(k)).latestConversationId).toBe(shared!.id);
+
+    // A colleague's change waits for approval: deleting would strand it.
+    expect(await errorOf(world.people.manager.client.school.deleteQuestionPaper(k))).toMatchObject({ code: 'CONFLICT' });
+
+    // Every turn on this paper's conversations ends (an earlier test left one queued on the same paper).
+    const onPaper = await db.select({ id: assistantConversationTable.id }).from(assistantConversationTable).where(eq(assistantConversationTable.paperClassId, k.classId));
+    await db.update(assistantRunTable).set({ status: 'completed' }).where(inArray(assistantRunTable.conversationId, onPaper.map((row) => row.id)));
+    expect(working).toBeDefined();
+    await world.people.manager.client.school.deleteQuestionPaper(k);
+    const [after] = await db.select().from(assistantConversationTable).where(eq(assistantConversationTable.id, shared!.id));
+    // Kept for its starter, shared with nothing: the paper starts again from its first screen.
+    expect(after).toMatchObject({ deletedAt: null, paperClassId: null, paperSessionId: null, paperModeSlug: null });
+    expect((await world.people.manager.client.school.getQuestionPaperDetail(k)).latestConversationId).toBeNull();
   });
 
   it('refuses a PDF the user sent as a figure, with a problem that says to read it and use a placeholder', async () => {

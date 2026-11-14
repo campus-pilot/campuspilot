@@ -24,7 +24,7 @@ import {
 import { readableMimeTypesOf } from './runtime/providers/image-types';
 import { resolveAssistantSession, type AssistantSession } from './session';
 import * as store from './store';
-import type { PaperKeyParts } from './store';
+import { sharedPaperOf, type PaperKeyParts } from './store';
 import { userMessageItemKey } from './transcript';
 
 /**
@@ -480,10 +480,10 @@ export const assistantRouter = os.router({
 
   /**
    * Stopping spends nothing, so it needs only read access to the assistant
-   * (it stays possible at the limit). A user stops their own turn in any
-   * conversation they may read; in a conversation shared with a paper, anyone
-   * who may continue it may also stop someone else's turn (or remove their
-   * queued message), as the person beside them at the paper could.
+   * (it stays possible at the limit). A user may always stop their own turn;
+   * in a conversation shared with a paper, anyone who may continue it may also
+   * stop someone else's turn (or remove their queued message), as the person
+   * beside them at the paper could.
    */
   stopRun: authed.stopRun.handler(async ({ context, input }) => {
     await assertReadAccess(context, input.schoolId);
@@ -491,9 +491,10 @@ export const assistantRouter = os.router({
     if (!run || run.schoolId !== input.schoolId) {
       throw new ORPCError('NOT_FOUND', { message: 'Assistant run was not found.' });
     }
+    // A user may always stop their own turn (it spends nothing, and it was theirs); someone else's needs the right to continue.
     const own = run.userId === context.session.user.id;
     const conversation = await store.findLiveConversation(db, { conversationId: run.conversationId, schoolId: input.schoolId });
-    if (!conversation || !(await mayReachConversation(context.session, conversation, own ? 'read' : 'continue'))) {
+    if (!conversation || (!own && !(await mayReachConversation(context.session, conversation, 'continue')))) {
       throw new ORPCError('NOT_FOUND', { message: 'Assistant run was not found.' });
     }
     try {
@@ -517,6 +518,11 @@ export const assistantRouter = os.router({
   deleteConversation: authed.deleteConversation.handler(async ({ context, input }) => {
     await assertReadAccess(context, input.schoolId);
     const owned = await ownedConversation(context, input.schoolId, input.conversationId);
+    // Deleting a conversation shared with a paper takes it from everyone working on that paper, so its starter must still
+    // be one of them (may continue it); otherwise it is answered like any conversation they cannot reach.
+    if (sharedPaperOf(owned) && !(await mayReachConversation(context.session, owned, 'continue'))) {
+      throw new ORPCError('NOT_FOUND', { message: 'Assistant conversation was not found.' });
+    }
     const outcome = await store.deleteConversation(db, owned.id, context.session.user.id);
     if (outcome === 'busy') {
       throw new ORPCError('CONFLICT', { message: 'Stop the assistant before deleting this conversation.' });
