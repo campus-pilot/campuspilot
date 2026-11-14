@@ -31,7 +31,7 @@ import type {
   TextRequest,
   TextResult,
 } from './types';
-import { GEMINI_IMAGE_MIME_TYPES } from './image-types';
+import { GEMINI_DOCUMENT_MIME_TYPES, GEMINI_IMAGE_MIME_TYPES } from './image-types';
 import { withBilledUsage } from './types';
 
 /**
@@ -57,7 +57,17 @@ const REFUSAL_REASONS: ReadonlySet<FinishReason> = new Set([
   FinishReason.IMAGE_PROHIBITED_CONTENT,
 ]);
 
-export { GEMINI_IMAGE_MIME_TYPES };
+export { GEMINI_DOCUMENT_MIME_TYPES, GEMINI_IMAGE_MIME_TYPES };
+
+/**
+ * A PDF as the Gemini API reads it natively: a part with `inlineData` of type
+ * `application/pdf` (`Part.inlineData` in @google/genai 2.32.0;
+ * https://ai.google.dev/gemini-api/docs/document-processing: up to 1,000 pages,
+ * 50 MB per inline PDF). The bytes are the uploaded file, unchanged.
+ */
+export function geminiDocumentPart(bytes: Uint8Array): Part {
+  return { inlineData: { mimeType: 'application/pdf', data: Buffer.from(bytes).toString('base64') } };
+}
 
 /** A malformed call is the model's mistake; the step is retried rather than failed. */
 class MalformedFunctionCallError extends Error {}
@@ -184,8 +194,14 @@ export const geminiContext: ContextAdapter = {
     };
   },
   materializeAttachment(marker: AttachmentMarker, file: AttachmentFile) {
+    if (file.kind === 'document') {
+      if (marker.kind !== 'document' || !GEMINI_DOCUMENT_MIME_TYPES.some((supported) => supported === file.mimeType)) {
+        return [{ text: attachmentNote(marker, 'unreadable') }];
+      }
+      return [{ text: attachmentLabel(marker) }, geminiDocumentPart(file.bytes)];
+    }
     if (file.kind !== 'image') return [{ text: attachmentNote(marker, file.kind) }];
-    if (!GEMINI_IMAGE_MIME_TYPES.some((supported) => supported === file.mimeType)) {
+    if (marker.kind !== 'image' || !GEMINI_IMAGE_MIME_TYPES.some((supported) => supported === file.mimeType)) {
       return [{ text: attachmentNote(marker, 'unreadable') }];
     }
     return [{ text: attachmentLabel(marker) }, { inlineData: { mimeType: file.mimeType, data: Buffer.from(file.bytes).toString('base64') } }];
@@ -384,6 +400,7 @@ export function createGeminiProvider({ apiKey, model }: { apiKey: string; model:
     id: 'gemini',
     model,
     imageMimeTypes: GEMINI_IMAGE_MIME_TYPES,
+    documentMimeTypes: GEMINI_DOCUMENT_MIME_TYPES,
     generateText: (input) => generateGeminiText(client, model, input),
     step,
     context: geminiContext,

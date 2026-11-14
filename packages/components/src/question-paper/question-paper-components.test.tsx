@@ -1,14 +1,13 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { Camera, FileText } from 'lucide-react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { AiBadge } from './ai-badge';
-import { ContinueInChatLink } from './continue-in-chat-link';
 import { GenerationStatus } from './generation-status';
 import { PlaceholderNote, RemovedList } from './paper-notices';
-import { PageThumbnailGrid, type PageThumbnailView } from './page-thumbnail-grid';
+import { PaperSourceItem, PaperSourceTray, type PageThumbnailView } from './paper-source-tray';
 import { QuestionPaperClassTable, type QuestionPaperClassView } from './question-paper-class-table';
-import { UploadQueue } from './upload-queue';
 import { VersionList } from './version-list';
 
 afterEach(cleanup);
@@ -25,27 +24,137 @@ describe('AiBadge', () => {
   });
 });
 
-describe('PageThumbnailGrid', () => {
-  it('shows each page with a thumbnail, or a tile when none could be made', () => {
-    render(<PageThumbnailGrid pages={pages} thumbUrl={(id) => `/thumb/${id}`} onReorder={() => {}} onDelete={() => {}} />);
-    expect((screen.getByAltText('Page 1: one.jpg') as HTMLImageElement).getAttribute('src')).toBe('/thumb/a');
-    expect(screen.queryByAltText('Page 2: two.heic')).toBeNull();
-    expect(screen.getByText('Preview not available')).toBeTruthy();
-    expect(screen.getByText('two.heic · 3 MB')).toBeTruthy();
+describe('PaperSourceTray', () => {
+  const tray = { thumbUrl: (id: string) => `/thumb/${id}`, emptyTitle: 'Add the paper', emptyHint: 'Photos of its pages, or a PDF', onAdd: () => {}, onOpen: () => {}, onReorder: () => {}, onDelete: () => {}, onDismissUpload: () => {} };
+
+  it('with nothing in it is the add tile beside what belongs here and the other ways in', () => {
+    const onAdd = vi.fn();
+    const onCamera = vi.fn();
+    render(<PaperSourceTray {...tray} pages={[]} uploads={[]} canAdd onAdd={onAdd} ways={[{ key: 'camera', icon: Camera, label: 'Take a photo', onClick: onCamera }]} />);
+    expect(screen.getByText('Photos of its pages, or a PDF')).toBeTruthy();
+    expect(screen.queryByRole('list')).toBeNull();
+    // The tile says what it does, and it is the one control assistive technology meets for it.
+    const add = screen.getByRole('button', { name: 'Add the paper: Photos of its pages, or a PDF' });
+    expect(add.textContent).toBe('Choose files');
+    fireEvent.click(add);
+    // The words beside it open the picker for a pointer too.
+    fireEvent.click(screen.getByText('Add the paper'));
+    expect(onAdd).toHaveBeenCalledTimes(2);
+    fireEvent.click(screen.getByRole('button', { name: 'Take a photo' }));
+    expect(onCamera).toHaveBeenCalledOnce();
   });
 
-  it('asks to delete the page of the clicked tile', () => {
+  it('keeps the other ways in with the add control once there are pages: a tile after it, and a button for a phone', () => {
+    const onCamera = vi.fn();
+    render(<PaperSourceTray {...tray} pages={pages} uploads={[]} canAdd ways={[{ key: 'camera', icon: Camera, label: 'Take a photo', onClick: onCamera }]} />);
+    const cameras = screen.getAllByRole('button', { name: 'Take a photo' });
+    expect(cameras).toHaveLength(2);
+    for (const camera of cameras) fireEvent.click(camera);
+    expect(onCamera).toHaveBeenCalledTimes(2);
+  });
+
+  it('never lets a way for one kind of pointer show as a tile on a phone', () => {
+    // A phone has a coarse pointer and a narrow screen. Its camera is a button under the pages; the tile is for wide
+    // screens only. The tile's classes must not include one that shows it at every width (this once drew two cameras).
+    render(<PaperSourceTray {...tray} pages={pages} uploads={[]} canAdd ways={[{ key: 'camera', icon: Camera, label: 'Take a photo', pointer: 'coarse', onClick: () => {} }]} />);
+    const [tileButton, phoneButton] = screen.getAllByRole('button', { name: 'Take a photo' });
+    const tile = tileButton!.closest('li')!;
+    expect(tile.className.split(' ')).toContain('hidden');
+    for (const name of tile.className.split(' ').filter((name) => name.includes('pointer:coarse'))) expect(name.startsWith('sm:')).toBe(true);
+    expect(phoneButton!.closest('li')!.className).toContain('sm:hidden');
+  });
+
+  it('shows each page as a numbered tile, with a thumbnail when one could be made, and ends in the add tile', () => {
+    const onAdd = vi.fn();
+    render(<PaperSourceTray {...tray} pages={pages} uploads={[]} canAdd onAdd={onAdd} />);
+    const tiles = within(screen.getByRole('list', { name: 'Pages of the paper' })).getAllByRole('listitem');
+    expect(tiles).toHaveLength(4);
+    expect(within(tiles[0]!).getByRole('button', { name: /^Page 1: one\.jpg/ }).querySelector('img')?.getAttribute('src')).toBe('/thumb/a');
+    expect(within(tiles[1]!).getByRole('button', { name: /^Page 2: two\.heic/ }).querySelector('img')).toBeNull();
+    // The words of the empty tray are gone: the dashed tile after the last page is where the next photo lands.
+    expect(screen.queryByText('Add the paper')).toBeNull();
+    // The add tile after the last page, and the compact button a phone shows instead: the same words, the same action.
+    const adds = screen.getAllByRole('button', { name: 'Add pages' });
+    expect(adds).toHaveLength(2);
+    expect(tiles[2]!.contains(adds[0]!)).toBe(true);
+    for (const add of adds) fireEvent.click(add);
+    expect(onAdd).toHaveBeenCalledTimes(2);
+  });
+
+  it('says how many pages there are and how to reorder them, and opens a pressed page', () => {
+    const onOpen = vi.fn();
+    render(<PaperSourceTray {...tray} pages={pages} uploads={[]} canAdd onOpen={onOpen} />);
+    // One caption for a mouse and one for touch; CSS shows the one that fits.
+    expect(screen.getByText(/^2 pages · Click a page to check it, drag to reorder$/)).toBeTruthy();
+    expect(screen.getByText(/^2 pages · Tap a page to check or remove it\. Hold and drag to reorder$/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /^Page 2: two\.heic/ }));
+    expect(onOpen).toHaveBeenCalledWith('b');
+    cleanup();
+    // One page has no order to change, and a closed tray does not offer it.
+    render(<PaperSourceTray {...tray} pages={pages.slice(0, 1)} uploads={[]} canAdd />);
+    expect(screen.getByText('1 page · Click a page to check it')).toBeTruthy();
+    cleanup();
+    render(<PaperSourceTray {...tray} pages={pages} uploads={[]} canAdd={false} disabled />);
+    expect(screen.getByText('2 pages · Click a page to check it')).toBeTruthy();
+  });
+
+  it('asks to remove the page of the clicked tile', () => {
     const onDelete = vi.fn();
-    render(<PageThumbnailGrid pages={pages} thumbUrl={() => ''} onReorder={() => {}} onDelete={onDelete} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Delete page 2' }));
+    render(<PaperSourceTray {...tray} pages={pages} uploads={[]} canAdd onDelete={onDelete} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Remove page 2' }));
     expect(onDelete).toHaveBeenCalledWith('b');
   });
 
-  it('disables moving and deleting while changes are closed', () => {
-    render(<PageThumbnailGrid pages={pages} thumbUrl={() => ''} disabled onReorder={() => {}} onDelete={() => {}} />);
-    for (const name of ['Move page 1', 'Delete page 1', 'Move page 2', 'Delete page 2']) {
+  it('closes removing while changes are closed and drops the add tile when nothing more fits', () => {
+    render(<PaperSourceTray {...tray} pages={pages} uploads={[]} canAdd={false} disabled />);
+    for (const name of ['Remove page 1', 'Remove page 2']) {
       expect((screen.getByRole('button', { name }) as HTMLButtonElement).disabled).toBe(true);
     }
+    expect(screen.queryByRole('button', { name: 'Add pages' })).toBeNull();
+  });
+
+  it('shows photos on their way in the same row, and keeps a failed one until dismissed', () => {
+    const onDismissUpload = vi.fn();
+    render(
+      <PaperSourceTray
+        {...tray}
+        pages={pages}
+        canAdd
+        onDismissUpload={onDismissUpload}
+        uploads={[
+          { id: '1', name: 'c.jpg', previewUrl: 'blob:c', status: 'uploading' },
+          { id: '2', name: 'd.heic', status: 'error', error: 'A paper holds at most 20 pages.' },
+        ]}
+      />,
+    );
+    expect(within(screen.getByRole('list')).getAllByRole('listitem')).toHaveLength(6);
+    expect(screen.getByRole('status', { name: 'Adding c.jpg' })).toBeTruthy();
+    expect(screen.getByRole('img', { name: 'd.heic was not added' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Dismiss c.jpg' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss d.heic' }));
+    expect(onDismissUpload).toHaveBeenCalledWith('2');
+  });
+});
+
+describe('PaperSourceItem', () => {
+  it('names the source with a line of detail and can be taken out', () => {
+    const onRemove = vi.fn();
+    render(<PaperSourceItem icon={FileText} title="old-paper.pdf" detail="PDF · 1.2 MB" removeLabel="Remove old-paper.pdf" onRemove={onRemove} />);
+    expect(screen.getByText('old-paper.pdf')).toBeTruthy();
+    expect(screen.getByText('PDF · 1.2 MB')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Remove old-paper.pdf' }));
+    expect(onRemove).toHaveBeenCalledOnce();
+  });
+
+  it('carries a quiet action beside the remove button', () => {
+    render(<PaperSourceItem icon={FileText} title="Half-Yearly · Theory" detail="2025-26 · Version 2" actions={<button type="button">Preview</button>} removeLabel="Remove" onRemove={() => {}} />);
+    expect(screen.getByRole('button', { name: 'Preview' })).toBeTruthy();
+  });
+
+  it('says why it failed in place of the detail', () => {
+    render(<PaperSourceItem icon={FileText} title="old-paper.pdf" detail="PDF · 1.2 MB" status="failed" error="The PDF is larger than 10 MB." removeLabel="Remove" onRemove={() => {}} />);
+    expect(screen.getByRole('alert').textContent).toBe('The PDF is larger than 10 MB.');
+    expect(screen.queryByText('PDF · 1.2 MB')).toBeNull();
   });
 });
 
@@ -138,47 +247,14 @@ describe('VersionList', () => {
     expect(onDownload).toHaveBeenCalledWith(2);
   });
 
+  it('labels a version copied from an earlier paper', () => {
+    const copied = [{ versionNo: 3, source: 'copy' as const, createdAt: new Date('2026-11-03T10:00:00Z'), createdByName: 'Asha', warningCount: 0, isLatest: true }];
+    render(<VersionList versions={copied} selectedVersionNo={3} downloadingVersionNo={null} onPreview={() => {}} onDownload={() => {}} />);
+    expect(screen.getByText(/Copied from an earlier paper/)).toBeTruthy();
+  });
+
   it('says so when there is no version', () => {
     render(<VersionList versions={[]} selectedVersionNo={null} downloadingVersionNo={null} onPreview={() => {}} onDownload={() => {}} />);
     expect(screen.getByText('No version has been saved yet.')).toBeTruthy();
-  });
-});
-
-describe('UploadQueue', () => {
-  it('shows progress and keeps a failure until dismissed', () => {
-    const onDismiss = vi.fn();
-    render(
-      <UploadQueue
-        onDismiss={onDismiss}
-        items={[
-          { id: '1', name: 'a.jpg', previewUrl: 'blob:a', status: 'uploading' },
-          { id: '2', name: 'b.heic', status: 'error', error: 'A paper holds at most 20 pages.' },
-        ]}
-      />,
-    );
-    expect(screen.getByText('Uploading…')).toBeTruthy();
-    expect(screen.getByRole('alert').textContent).toContain('at most 20 pages');
-    fireEvent.click(screen.getByRole('button', { name: 'Dismiss b.heic' }));
-    expect(onDismiss).toHaveBeenCalledWith('2');
-  });
-
-  it('renders nothing when empty', () => {
-    const { container } = render(<UploadQueue items={[]} onDismiss={() => {}} />);
-    expect(container.innerHTML).toBe('');
-  });
-});
-
-describe('ContinueInChatLink', () => {
-  it('navigates inside the app on a plain click and leaves modified clicks to the browser', () => {
-    const onNavigate = vi.fn();
-    // jsdom cannot navigate; this keeps the modified click from logging an error.
-    document.addEventListener('click', (event) => event.preventDefault());
-    render(<ContinueInChatLink href="/school/s/assistant?seed=question_paper" onNavigate={onNavigate} />);
-    const link = screen.getByRole('link', { name: 'Want to update something? Continue in chat' });
-    expect(link.getAttribute('href')).toBe('/school/s/assistant?seed=question_paper');
-    fireEvent.click(link);
-    expect(onNavigate).toHaveBeenCalledTimes(1);
-    fireEvent.click(link, { ctrlKey: true });
-    expect(onNavigate).toHaveBeenCalledTimes(1);
   });
 });

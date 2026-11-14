@@ -5,7 +5,7 @@ import {
   type AssistantAttachmentRef,
   type QuestionPaperSeed,
 } from '@campuspilot/assistant-contract/attachments';
-import type { AssistantSurface, AssistantToolCallItemDto, AssistantViewItemDto } from '@campuspilot/assistant-contract/dto';
+import type { AssistantSurface, AssistantToolCallItemDto, AssistantUserMessageItemDto, AssistantViewItemDto } from '@campuspilot/assistant-contract/dto';
 import {
   ASSISTANT_LANE_CLASS,
   ASSISTANT_SURFACE_PROPS,
@@ -22,7 +22,8 @@ import {
   AssistantUserMessage,
   AssistantWelcome,
   AttachmentsMissingError,
-  imagesOnlyLabel,
+  attachmentsOnlyLabel,
+  sentAttachmentsOf,
   AssistantWorkBar,
   type AssistantApprovalDecision,
   type AssistantSuggestion,
@@ -43,6 +44,8 @@ import { orpc } from '@/lib/orpc';
 import { useApprovalMoney } from './assistant-approval-currency';
 import { AssistantApprovalWithSummary } from './assistant-approval-request';
 import { AssistantDraftCard, useDraftVerdicts } from './assistant-question-paper';
+import { seedFailedOf } from './assistant-question-paper-model';
+import { mayStopTurn } from './assistant-conversation-state';
 import { missingAttachmentIdsOf, refusalMessage, type AssistantConversationFailure } from './assistant-stream';
 import { AssistantViewBlock } from './assistant-view';
 import { useAssistantAttachmentUpload } from './use-assistant-attachments';
@@ -64,6 +67,7 @@ import {
   useOptimisticMessages,
   useRespondToApproval,
   useSendAssistantMessage,
+  useSignedInUserId,
   useStopAssistantRun,
   useSurfaceLife,
   type OptimisticMessage,
@@ -120,6 +124,35 @@ export type AssistantChatProps = {
   seed?: QuestionPaperSeed | null;
   /** The user removed the seed's chip: start a plain conversation. */
   onSeedRemoved?: () => void;
+  /**
+   * The sentence the box starts with for a seeded conversation. A surface that
+   * is already about the paper (the paper's own screen) passes an empty string:
+   * there the box starts empty and the seed still travels with the first message.
+   */
+  seedText?: string;
+  /** The welcome's words, for a surface about one thing; the general welcome otherwise. */
+  welcome?: { title: string; text: string };
+  /** The message box's hint, for a surface about one thing. While a turn works the box says it queues a follow-up, whatever this is. */
+  placeholder?: string;
+  /**
+   * The suggestions under a new conversation's box, in place of the general
+   * ones. Given ones are shown with a seed too (they are about its paper);
+   * the general ones are not.
+   */
+  suggestions?: readonly AssistantSuggestion[];
+  /**
+   * Share the conversation this chat starts with the seed's question paper
+   * (`shareWithPaper`): everyone who may read the paper may read it, and
+   * everyone who may change it may continue it. Only the paper's own screen
+   * passes it.
+   */
+  shareWithPaper?: boolean;
+  /**
+   * Why this user can read the conversation but not write in it (someone who
+   * may only read the paper, or a paper that can no longer change). The
+   * message box is replaced by this sentence; null (the default) lets them write.
+   */
+  readOnlyReason?: string | null;
 };
 
 /**
@@ -147,7 +180,7 @@ function useSeedPaper(schoolId: string, seed: QuestionPaperSeed | null) {
     ...orpc.school.getQuestionPaperDetail.queryOptions({ input: seed ? { ...seed, schoolId } : skipToken }),
     retry: false,
   });
-  const failed = seed !== null && detail.isError;
+  const failed = seedFailedOf({ hasSeed: seed !== null, hasData: detail.data !== undefined, isError: detail.isError });
   return { paper: detail.data?.paper, failed, usableSeed: failed ? null : seed };
 }
 
@@ -181,6 +214,15 @@ function useApprovals(schoolId: string) {
   return { decide, decisionOf };
 }
 
+/** The name over a message someone else sent in a shared conversation; null for the user's own and for messages that do not say. */
+function useAuthorOf() {
+  const userId = useSignedInUserId();
+  return (item: AssistantUserMessageItemDto) => {
+    const author = item.body.author;
+    return author && userId !== null && author.userId !== userId ? author.name : null;
+  };
+}
+
 /**
  * A first message on its way while nothing runs yet: the bubble, then the
  * same work bar and "Thinking" line the server's rows will show, so the
@@ -205,7 +247,7 @@ function OptimisticTurn({
             at={message.submittedAt}
             delivery={message.delivery}
             onRetry={() => onRetry(message)}
-            attachments={message.attachmentIds.map((id) => ({ id, fileName: 'Attached image', previewUrl: assistantAttachmentThumbUrl(schoolId, id) }))}
+            attachments={sentAttachmentsOf(message.attachments, (attachment) => assistantAttachmentThumbUrl(schoolId, attachment.id))}
           />
         </div>
       ))}
@@ -263,8 +305,9 @@ function ConversationTimeline({
 }) {
   const loaded = useAssistantTimeline(schoolId, conversationId);
   const rows = loaded ?? (trailing ? [] : undefined);
+  const authorOf = useAuthorOf();
   // Draft cards a later ready draft of the same paper replaced shrink to one quiet line.
-  const verdicts = useDraftVerdicts(rows ?? []);
+  const verdicts = useDraftVerdicts(rows ?? [], conversationId);
   const superseded = supersededDrafts(rows ?? [], verdicts);
   if (failure) {
     // A new conversation does not help someone who is signed out, so only the message shows then.
@@ -297,6 +340,7 @@ function ConversationTimeline({
       }
       renderView={(item: AssistantViewItemDto) => <AssistantViewBlock schoolId={schoolId} view={item.body.view} />}
       attachmentPreviewUrl={(attachment: AssistantAttachmentRef) => assistantAttachmentThumbUrl(schoolId, attachment.id)}
+      authorOf={authorOf}
       renderCard={(row) => (
         <AssistantDraftCard
           schoolId={schoolId}
@@ -332,9 +376,17 @@ function ComposerToolbar({ schoolId, conversationId }: { schoolId: string; conve
  * a decision, then messages queued behind the working run (confirmed ones
  * and ones still on their way).
  */
-function useTrayRequests(schoolId: string, conversationId: string | null, queuedOptimistic: OptimisticMessage[], onRetry: (message: OptimisticMessage) => void) {
+function useTrayRequests(
+  schoolId: string,
+  conversationId: string | null,
+  queuedOptimistic: OptimisticMessage[],
+  onRetry: (message: OptimisticMessage) => void,
+  /** The user may write in this conversation; someone who only reads it may remove no one's queued message. */
+  canWrite: boolean,
+) {
+  const userId = useSignedInUserId();
   const approvals = useApprovals(schoolId);
-  const pending = useAssistantPendingApprovals(schoolId, conversationId);
+  const { mine: pending, waitingFor } = useAssistantPendingApprovals(schoolId, conversationId);
   const queued = useAssistantQueuedMessages(schoolId, conversationId);
   // Its own request state, apart from the composer's Stop: removing a queued message is not stopping the working run.
   const remove = useStopAssistantRun();
@@ -353,12 +405,17 @@ function useTrayRequests(schoolId: string, conversationId: string | null, queued
   const queue = [
     ...queued.map((item) => ({
       id: item.id,
-      text: item.body.text || imagesOnlyLabel(item.body.attachments?.length ?? 0),
-      ...(item.runId === removingRunId ? { status: 'Removing…' } : { removable: true }),
+      text: item.body.text || attachmentsOnlyLabel((item.body.attachments ?? []).map((attachment) => attachment.kind)),
+      // Removing a queued message stops its run: the server allows it for one's own, or with the right to continue the chat.
+      ...(item.runId === removingRunId
+        ? { status: 'Removing…' }
+        : mayStopTurn({ canWrite, userId, ownerId: item.body.author?.userId })
+          ? { removable: true }
+          : {}),
     })),
     ...queuedOptimistic.map((message) => ({
       id: message.clientRequestId,
-      text: message.text || imagesOnlyLabel(message.attachmentIds.length),
+      text: message.text || attachmentsOnlyLabel(message.attachments.map((attachment) => attachment.kind)),
       status:
         message.delivery === 'failed' ? (
           <span className="flex items-center gap-1 text-destructive">
@@ -372,10 +429,11 @@ function useTrayRequests(schoolId: string, conversationId: string | null, queued
         ),
     })),
   ];
-  if (!first && queue.length === 0) return null;
+  if (!first && queue.length === 0 && waitingFor.length === 0) return null;
   const decided = approvals.decisionOf(first?.body.approvalId);
   return (
     <>
+      {waitingFor.length > 0 ? <WaitingForApproval names={waitingFor} /> : null}
       {first && conversationId ? (
         <AssistantApprovalWithSummary
           key={first.id}
@@ -392,6 +450,15 @@ function useTrayRequests(schoolId: string, conversationId: string | null, queued
       ) : null}
       <AssistantQueuedMessages messages={queue} onRemove={removeQueued} />
     </>
+  );
+}
+
+/** Only the person whose turn asked for a change may approve it; the others in a shared conversation are told whom it waits for. */
+function WaitingForApproval({ names }: { names: readonly string[] }) {
+  return (
+    <p className="px-1 text-xs text-muted-foreground">
+      Waiting for {names.join(' and ')} to approve a change.
+    </p>
   );
 }
 
@@ -485,6 +552,12 @@ export function AssistantChat({
   gutterClassName = 'px-4 sm:px-6',
   seed = null,
   onSeedRemoved,
+  seedText = QUESTION_PAPER_SEED_DRAFT,
+  welcome: welcomeWords,
+  placeholder,
+  suggestions,
+  shareWithPaper = false,
+  readOnlyReason = null,
 }: AssistantChatProps) {
   const life = useSurfaceLife();
   // The conversation this chat's first message started, set the moment the send returns. The surface moves
@@ -493,7 +566,7 @@ export function AssistantChat({
   // The surfaces key their chat so that any other change of conversation remounts it (`useChatKey`).
   const [startedId, setStartedId] = useState<string | null>(null);
   const conversationId = openConversationId ?? startedId;
-  const imageUpload = useAssistantAttachmentUpload(schoolId);
+  const attachmentUpload = useAssistantAttachmentUpload(schoolId);
   // The seed only means something for a conversation that has not started.
   const activeSeed = conversationId ? null : seed;
   const seedPaper = useSeedPaper(schoolId, activeSeed);
@@ -509,7 +582,7 @@ export function AssistantChat({
   const draft = useAssistantDraft(schoolId, conversationId);
   // What the message box holds, as its draft reports say; for sends that do
   // not come from the box (a retry, a suggestion), whose text stays in it.
-  const initialText = draft.initialText || (activeSeed ? QUESTION_PAPER_SEED_DRAFT : '');
+  const initialText = draft.initialText || (activeSeed ? seedText : '');
   const boxText = useRef(initialText);
   const saveDraft = (text: string) => {
     boxText.current = text;
@@ -533,12 +606,14 @@ export function AssistantChat({
       if (result) started(result.conversation.id, boxText.current);
     });
   // While a run works, a new message waits in the tray; otherwise it starts a turn.
-  const tray = useTrayRequests(schoolId, conversationId, running ? optimistic : [], retry);
+  const canWrite = readOnlyReason === null;
+  const userId = useSignedInUserId();
+  const tray = useTrayRequests(schoolId, conversationId, running ? optimistic : [], retry, canWrite);
   // Removing the seed's chip takes the prefilled sentence out of the box unless the user edited it (then their draft stays).
-  // The box stays mounted: remounting it would drop the images attached in it, which are already stored on the server.
+  // The box stays mounted: remounting it would drop the files attached in it, which are already stored on the server.
   const composer = useRef<AssistantComposerControls>(null);
   const removeSeed = () => {
-    composer.current?.clearTextIf(QUESTION_PAPER_SEED_DRAFT);
+    composer.current?.clearTextIf(seedText);
     onSeedRemoved?.();
   };
   const requests =
@@ -557,12 +632,13 @@ export function AssistantChat({
     attachments: AssistantAttachmentRef[] = [],
   ) {
     const result = await send(text, conversationId, {
-      attachmentIds: attachments.map((attachment) => attachment.id),
+      attachments,
       seed: seedPaper.usableSeed,
+      shareWithPaper,
     }).catch((error: unknown) => {
       const missing = missingAttachmentIdsOf(error);
-      // The composer marks these tiles, so the failed copy of the message is dropped: its Retry would name the same missing images.
-      if (missing) throw new AttachmentsMissingError(refusalMessage(error) ?? 'An attached image is no longer available.', missing);
+      // The composer marks these tiles, so the failed copy of the message is dropped: its Retry would name the same missing files.
+      if (missing) throw new AttachmentsMissingError(refusalMessage(error) ?? 'An attached file is no longer available.', missing);
       throw new Error(refusalMessage(error) ?? 'The message could not be sent. Check your connection and try again.');
     });
     started(result.conversation.id, box.text());
@@ -574,7 +650,7 @@ export function AssistantChat({
 
   const disabledReason = status.data && !status.data.available ? status.data.unavailableReason : null;
   // "Try again" asks a failed turn's question again. Not while a message is already on its way or sending is unavailable.
-  const canRetry = !sending && optimistic.length === 0 && !disabledReason;
+  const canRetry = canWrite && !sending && optimistic.length === 0 && !disabledReason;
   // From the click until the run has ended: the request on its way, then the stop the run has recorded.
   const stopping = stop.isPending || Boolean(running?.stopRequestedAt);
   const welcome = !conversationId && optimistic.length === 0;
@@ -615,28 +691,30 @@ export function AssistantChat({
           }
         >
           {welcome ? (
-            <AssistantWelcome compact={compact} />
+            <AssistantWelcome compact={compact} {...welcomeWords} />
           ) : (
             <div className="pointer-events-none absolute inset-x-0 -top-6 h-6 bg-linear-to-t from-background to-transparent" aria-hidden />
           )}
           {notLive ? <ConnectionNotice offline={connection.offline} /> : null}
           <div className={welcome ? 'flex flex-col gap-3' : ASSISTANT_LANE_CLASS}>
+            {/* Read-only keeps the composer, closed with the reason, so its tray (approvals, whose approval is awaited) stays. */}
             <AssistantComposer
               controlsRef={composer}
               autoFocus={autoFocus}
-              disabledReason={disabledReason}
-              placeholder={running ? 'Queue a follow-up…' : undefined}
+              disabledReason={readOnlyReason ?? disabledReason}
+              placeholder={running ? 'Queue a follow-up…' : placeholder}
               onSend={sendText}
               sending={sending}
               lastSentText={lastSentText}
               initialText={initialText}
-              attachments={{ upload: imageUpload.upload, remove: imageUpload.remove, onNotice: (message) => toast.error(message) }}
+              attachments={{ upload: attachmentUpload.upload, remove: attachmentUpload.remove, onNotice: (message) => toast.error(message) }}
               onDraftChange={saveDraft}
               requests={requests}
               leading={<ComposerToolbar schoolId={schoolId} conversationId={conversationId} />}
               stopping={stopping}
               onStop={
-                running
+                // Someone else's turn is stopped only with the right to continue the chat; one's own, always.
+                running && mayStopTurn({ canWrite, userId, ownerId: running.userId })
                   ? () =>
                       stop.mutate(
                         { schoolId, runId: running.id },
@@ -645,8 +723,8 @@ export function AssistantChat({
                   : undefined
               }
             />
-            {welcome && !activeSeed ? (
-              <AssistantSuggestions suggestions={SUGGESTIONS} onPick={sendDirectly} />
+            {welcome && !readOnlyReason && (suggestions || !activeSeed) ? (
+              <AssistantSuggestions suggestions={suggestions ?? SUGGESTIONS} onPick={sendDirectly} />
             ) : null}
           </div>
         </div>

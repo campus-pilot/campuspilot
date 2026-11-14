@@ -41,6 +41,7 @@ import {
   examResultsHref,
   examSectionOf,
   examStatusLabel,
+  isQuestionPaperWorkspacePath,
   schoolPermission,
   type ExamScope,
 } from './exam-model';
@@ -388,6 +389,8 @@ function WorkspaceLayout({
   const selected =
     items.find((item) => item.id === section) ??
     items[0]!;
+  // One paper is a workspace of its own that fills the window (see `isQuestionPaperWorkspacePath`).
+  if (isQuestionPaperWorkspacePath(path, base)) return <>{children}</>;
   const heading = (
     <div className="flex min-w-0 flex-1 items-center gap-3">
       <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">

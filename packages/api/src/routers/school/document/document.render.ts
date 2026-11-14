@@ -940,7 +940,14 @@ const QUESTION_PAPER_FOOTER_BAND = "14mm";
  * the bottom of every page and the fixed footer sits in that band.
  *
  * On screen (the sandboxed preview, where `@page` does not apply) the same
- * margin is shown as padding around an A4-wide column.
+ * margin is shown as padding around an A4-wide column. There the paper is one
+ * long column, not pages, so a footer fixed to the viewport would float over
+ * whichever questions happen to be at the bottom of the frame. The frame
+ * (the page's content area, inside the padding) therefore gets a
+ * `transform`, which makes it the containing block of its fixed descendants:
+ * the footer sits once at the end of the paper, in the footer band and within
+ * the margins as in print, and scrolls with it. Print is untouched
+ * (`@media screen`).
  */
 function flowingQuestionPaperLayout(documents: string[]) {
   const papers = documents
@@ -949,7 +956,7 @@ function flowingQuestionPaperLayout(documents: string[]) {
         `<article class="question-paper-document"><table class="qp-frame"><tbody><tr><td>${doc}</td></tr></tbody><tfoot><tr><td><div class="qp-footer-band"></div></td></tr></tfoot></table></article>`,
     )
     .join("");
-  return `<div class="batch">${papers}</div><style>@page{size:A4;margin:${QUESTION_PAPER_PAGE_MARGIN}}html,body{margin:0!important;padding:0!important}.question-paper-document{box-sizing:border-box;width:100%;overflow-wrap:anywhere}.qp-frame{width:100%;border-collapse:collapse;border-spacing:0}.qp-frame>tbody>tr>td,.qp-frame>tfoot>tr>td{padding:0;border:0;vertical-align:top}.qp-footer-band{height:${QUESTION_PAPER_FOOTER_BAND}}@media screen{.question-paper-document{max-width:210mm;margin:0 auto;padding:${QUESTION_PAPER_PAGE_MARGIN}}}</style>`;
+  return `<div class="batch">${papers}</div><style>@page{size:A4;margin:${QUESTION_PAPER_PAGE_MARGIN}}html,body{margin:0!important;padding:0!important}.question-paper-document{box-sizing:border-box;width:100%;overflow-wrap:anywhere}.qp-frame{width:100%;border-collapse:collapse;border-spacing:0}.qp-frame>tbody>tr>td,.qp-frame>tfoot>tr>td{padding:0;border:0;vertical-align:top}.qp-footer-band{height:${QUESTION_PAPER_FOOTER_BAND}}@media screen{.question-paper-document{max-width:210mm;margin:0 auto;padding:${QUESTION_PAPER_PAGE_MARGIN}}.qp-frame{transform:translate(0)}}</style>`;
 }
 
 /** Templates own the design inside one slot; this wrapper exclusively owns

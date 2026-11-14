@@ -70,7 +70,13 @@ describe('demo purge of question papers and chat images', () => {
       const attachmentKey = `schools/${world.schoolId}/assistant/attachments/${crypto.randomUUID()}/original.png`;
       await putObject(attachmentKey, await png('#fdd'), 'image/png');
       await db.insert(assistantAttachmentTable).values({
-        schoolId: world.schoolId, userId, originalName: 'photo.png', contentType: 'image/png', byteSize: 10, sha256: 'a'.repeat(64), s3Key: attachmentKey, derivativeStatus: 'unsupported',
+        schoolId: world.schoolId, userId, kind: 'image', originalName: 'photo.png', contentType: 'image/png', byteSize: 10, sha256: 'a'.repeat(64), s3Key: attachmentKey, derivativeStatus: 'unsupported',
+      });
+      // An unsent chat PDF, stored as uploaded under the same prefix.
+      const documentKey = `schools/${world.schoolId}/assistant/attachments/${crypto.randomUUID()}/original.pdf`;
+      await putObject(documentKey, Buffer.from('%PDF-1.7\n%%EOF\n'), 'application/pdf');
+      await db.insert(assistantAttachmentTable).values({
+        schoolId: world.schoolId, userId, kind: 'document', originalName: 'paper.pdf', contentType: 'application/pdf', byteSize: 15, sha256: 'b'.repeat(64), s3Key: documentKey, derivativeStatus: null,
       });
       const [pageRow] = await db.select().from(examQuestionPaperPageTable).where(eq(examQuestionPaperPageTable.paperId, paper.id));
       const [figureRow] = await db.select().from(examQuestionPaperFigureTable).where(eq(examQuestionPaperFigureTable.paperId, paper.id));
@@ -78,7 +84,7 @@ describe('demo purge of question papers and chat images', () => {
       const [pdf] = await db.select().from(artifactTable).where(eq(artifactTable.id, versionRow!.pdfArtifactId!));
       return {
         schoolId: world.schoolId,
-        keys: [pageRow!.originalS3Key, pageRow!.thumbS3Key!, pageRow!.modelS3Key!, figureRow!.s3Key, pdf!.s3Key, attachmentKey],
+        keys: [pageRow!.originalS3Key, pageRow!.thumbS3Key!, pageRow!.modelS3Key!, figureRow!.s3Key, pdf!.s3Key, attachmentKey, documentKey],
       };
     };
     const demo = await make(true);
@@ -99,7 +105,7 @@ describe('demo purge of question papers and chat images', () => {
     // The other school keeps every row and object.
     for (const key of real.keys) expect(await exists(key), key).toBe(true);
     expect(await db.select().from(examQuestionPaperVersionTable).where(eq(examQuestionPaperVersionTable.schoolId, real.schoolId))).toHaveLength(1);
-    expect(await db.select().from(assistantAttachmentTable).where(eq(assistantAttachmentTable.schoolId, real.schoolId))).toHaveLength(1);
+    expect(await db.select().from(assistantAttachmentTable).where(eq(assistantAttachmentTable.schoolId, real.schoolId))).toHaveLength(2);
     expect(await db.select().from(assistantModelRequestTable).where(eq(assistantModelRequestTable.schoolId, real.schoolId))).toHaveLength(1);
   }, 120_000);
 });

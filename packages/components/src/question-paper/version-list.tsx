@@ -1,10 +1,10 @@
 import { Button } from '@campuspilot/ui/components/button';
 import { Download, Eye } from 'lucide-react';
-import { versionSourceLabel } from './question-paper-model';
+import { versionSourceLabel, type QuestionPaperVersionSource } from './question-paper-model';
 
 export type VersionView = {
   versionNo: number;
-  source: 'ai_job' | 'agent';
+  source: QuestionPaperVersionSource;
   createdAt: Date;
   createdByName: string | null;
   /** How many items the sanitiser removed when the version was saved (the API's `warningCount`). */

@@ -225,19 +225,36 @@ const FITTED_PAGE_CSS = `@supports (width: 1cqw) and (width: calc(1px * tan(atan
     transform: scale(${FIT_SCALE});
     transform-origin: top left;
   }
+  .document-fitted-frame-fill {
+    height: calc(100cqh / ${FIT_SCALE});
+  }
 }`;
 
-/** The sandboxed frame of {@link DocumentPreview} at A4 width, scaled to its container. The sandbox stays empty. */
-function FittedPageFrame({ html, label }: { html: string; label: string }) {
+/**
+ * The sandboxed frame of {@link DocumentPreview} at A4 width, scaled to its
+ * container. The sandbox stays empty. With `fill` the frame is as tall as its
+ * container instead of 640 px (the container is then a size container, so
+ * `100cqh` is its height and the scaled frame fills it exactly); a browser
+ * without the fitted layout keeps a full-height, full-width frame.
+ */
+function FittedPageFrame({ html, label, fill, actualSize }: { html: string; label: string; fill: boolean; actualSize: boolean }) {
+  if (actualSize) {
+    // The page at its real width, never scaled down: a narrow container pans sideways (this box) and the page scrolls inside its frame.
+    return (
+      <div className={`overflow-x-auto bg-white ${fill ? 'min-h-0 flex-1' : 'h-[640px]'}`}>
+        <iframe title={label} sandbox="" referrerPolicy="no-referrer" srcDoc={html} className="h-full w-[794px] min-w-full border-0 bg-white" />
+      </div>
+    );
+  }
   return (
-    <div className="h-[640px] overflow-hidden bg-white [container-type:inline-size]">
+    <div className={fill ? 'min-h-0 flex-1 overflow-hidden bg-white [container-type:size]' : 'h-[640px] overflow-hidden bg-white [container-type:inline-size]'}>
       <style>{FITTED_PAGE_CSS}</style>
       <iframe
         title={label}
         sandbox=""
         referrerPolicy="no-referrer"
         srcDoc={html}
-        className="document-fitted-frame h-[640px] w-full border-0 bg-white"
+        className={`document-fitted-frame w-full border-0 bg-white ${fill ? 'document-fitted-frame-fill h-full' : 'h-[640px]'}`}
       />
     </div>
   );
@@ -253,6 +270,8 @@ export function DocumentPreview({
   sample = false,
   placeholder = "Choose a template or preview a document to see the finished layout.",
   fitPageWidth = false,
+  fill = false,
+  actualSize = false,
 }: {
   html?: string;
   label?: string;
@@ -265,22 +284,37 @@ export function DocumentPreview({
    * re-wrapping it into a narrow column. Wide containers are unaffected.
    */
   fitPageWidth?: boolean;
+  /**
+   * The preview takes the height of its container (which must have one)
+   * instead of a fixed 640 px, and has no title bar: for a screen whose
+   * whole pane is the document, which the screen itself names. Only with
+   * `fitPageWidth`. The frame's accessible name is still `label`.
+   */
+  fill?: boolean;
+  /**
+   * With `fitPageWidth`: shows the page at its real A4 width instead of
+   * scaling it to the container, so a phone can read the text; the container
+   * then pans sideways. For a zoom control beside the preview.
+   */
+  actualSize?: boolean;
 }) {
   return (
-    <section className="flex min-w-0 flex-col overflow-hidden rounded-xl border bg-muted/30">
-      <header className="flex items-center justify-between gap-3 border-b bg-card px-5 py-3">
-        <span className="flex items-center gap-2 text-sm font-medium">
-          <ScanEye className="size-4" />
-          {label}
-        </span>
-        {sample && (
-          <span className="rounded-full border px-2 py-0.5 text-xs text-muted-foreground">
-            Sample data
+    <section className={`flex min-w-0 flex-col overflow-hidden rounded-xl border bg-muted/30 ${fill ? 'h-full min-h-0' : ''}`}>
+      {fill ? null : (
+        <header className="flex items-center justify-between gap-3 border-b bg-card px-5 py-3">
+          <span className="flex items-center gap-2 text-sm font-medium">
+            <ScanEye className="size-4" />
+            {label}
           </span>
-        )}
-      </header>
+          {sample && (
+            <span className="rounded-full border px-2 py-0.5 text-xs text-muted-foreground">
+              Sample data
+            </span>
+          )}
+        </header>
+      )}
       {html && fitPageWidth ? (
-        <FittedPageFrame html={html} label={label} />
+        <FittedPageFrame html={html} label={label} fill={fill} actualSize={actualSize} />
       ) : html ? (
         <iframe
           title={label}

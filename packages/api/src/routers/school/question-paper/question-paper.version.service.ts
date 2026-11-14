@@ -1,6 +1,6 @@
 import type { Database, DatabaseExecutor } from '@campuspilot/db';
 import { artifactTable } from '@campuspilot/db/schema/artifact';
-import { assistantConversationTable, assistantItemTable } from '@campuspilot/db/schema/assistant';
+import { assistantItemTable } from '@campuspilot/db/schema/assistant';
 import { generateId } from '@campuspilot/db/id';
 import {
   examQuestionPaperFigureTable,
@@ -21,8 +21,9 @@ import { rpcError } from '../../../errors';
 import { FIGURE_MAX_BYTES } from '../../../files/image-derivative';
 import { convertDocumentPdf } from '../document/document.render';
 import { documentDownloadUrl, persistDocumentObject } from '../document/document.storage';
-import { attachmentFigureIds, attachmentFigureProblems, convertAttachmentFigures, isAttachmentFigureId } from './question-paper.attachments';
+import { attachmentFigureIds, attachmentFigureProblems, chatFiguresOf, convertAttachmentFigures, isAttachmentFigureId, type ChatFigures } from './question-paper.attachments';
 import { buildQuestionPaperContext } from './question-paper.context';
+import { isPaperChat } from './question-paper.conversations';
 import { createMathRenderer, renderMathSpans } from './question-paper.math';
 import {
   findPaper,
@@ -32,6 +33,8 @@ import {
   type VersionRow,
 } from './question-paper.records';
 import { estimatedBodyBytes, figureIdsToPlaceholders } from './question-paper.body';
+import { assertCopySourceAllowed, copySourceFigures, copySourceNotFoundError, storedFigureIds } from './question-paper.copy';
+import type { PaperKey } from './question-paper.dto';
 import {
   QUESTION_PAPER_BODY_MAX_BYTES,
   QUESTION_PAPER_FIGURES_MAX_BYTES,
@@ -77,14 +80,14 @@ export type UnresolvedFigures =
 
 /**
  * Why each figure id cannot be used, by id; a missing key means it can. An id
- * must name a stored figure of this paper, or a chat attachment of
- * `chatUserId` (`asat_` id; see `question-paper.attachments.ts`): an
+ * must name a stored figure of this paper, or a chat attachment `chat` may
+ * use (`asat_` id; see `question-paper.attachments.ts`): an
  * attachment is checked here and copied into a figure only when a version is
  * saved.
  */
 async function figureProblems(
   db: DatabaseExecutor,
-  input: { schoolId: string; paper: PaperRow | undefined; chatUserId: string | undefined },
+  input: { schoolId: string; paper: PaperRow | undefined; chat: ChatFigures | undefined },
   ids: readonly string[],
 ): Promise<Map<string, string>> {
   const problems = new Map<string, string>();
@@ -101,7 +104,7 @@ async function figureProblems(
   );
   const attachmentProblems = await attachmentFigureProblems(db, {
     schoolId: input.schoolId,
-    chatUserId: input.chatUserId,
+    chat: input.chat,
     ids: ids.filter(isAttachmentFigureId),
   });
   for (const id of ids) {
@@ -157,8 +160,8 @@ export async function checkQuestionPaperDraft(
   scope: PaperScope,
   raw: string,
   options: {
-    /** The chat user whose attachments the fragment may use as figures; omitted outside the in-app assistant. */
-    chatUserId?: string;
+    /** The chat attachments the fragment may use as figures (`chatFiguresOf`); omitted outside the in-app assistant and the app. */
+    chat?: ChatFigures;
     unresolvedFigures?: UnresolvedFigures;
     /**
      * For a caller with nobody to look at what the sanitiser changed (the AI job): a pseudo-tag such as `<thinking>`
@@ -185,7 +188,7 @@ export async function checkQuestionPaperDraft(
   if (!hasContent(sanitized)) problems.push('The paper is empty. Write the questions as HTML.');
 
   const paper = await findPaper(db, scope.key);
-  const unusable = await figureProblems(db, { schoolId: scope.key.schoolId, paper, chatUserId: options.chatUserId }, sanitized.stats.figureIds);
+  const unusable = await figureProblems(db, { schoolId: scope.key.schoolId, paper, chat: options.chat }, sanitized.stats.figureIds);
   if (unusable.size > 0) {
     if (options.unresolvedFigures === 'placeholder') {
       sanitized = sanitizeQuestionPaperBody(figureIdsToPlaceholders(sanitized.html, new Set(unusable.keys())));
@@ -262,26 +265,15 @@ const DRAFT_SEARCH_DEPTH = 60;
  */
 export async function findChatDraftContent(
   db: DatabaseExecutor,
-  input: { conversationId: string; schoolId: string; userId: string; draftId: string },
+  input: { conversationId: string; key: PaperKey; userId: string; draftId: string },
 ): Promise<string> {
-  const [conversation] = await db
-    .select({ id: assistantConversationTable.id })
-    .from(assistantConversationTable)
-    .where(
-      and(
-        eq(assistantConversationTable.id, input.conversationId),
-        eq(assistantConversationTable.schoolId, input.schoolId),
-        eq(assistantConversationTable.userId, input.userId),
-        isNull(assistantConversationTable.deletedAt),
-      ),
-    )
-    .limit(1);
   const notFound = rpcError.badRequest('No draft with that draftId was validated in this conversation. Send the full html instead.');
-  if (!conversation) throw notFound;
+  // The user's own chat, or one shared with this paper (continued by a colleague): drafts are read from nothing else.
+  if (!(await isPaperChat(db, { conversationId: input.conversationId, userId: input.userId, key: input.key }))) throw notFound;
   const items = await db
     .select({ body: assistantItemTable.body })
     .from(assistantItemTable)
-    .where(and(eq(assistantItemTable.conversationId, conversation.id), eq(assistantItemTable.kind, 'tool_call')))
+    .where(and(eq(assistantItemTable.conversationId, input.conversationId), eq(assistantItemTable.kind, 'tool_call')))
     .orderBy(desc(assistantItemTable.position))
     .limit(DRAFT_SEARCH_DEPTH);
   for (const { body } of items) {
@@ -309,7 +301,9 @@ export function cleanedChatDraft(raw: string): { draftId: string; html: string }
 
 export type SaveSource =
   | { kind: 'agent'; conversationId: string | null }
-  | { kind: 'ai_job'; jobId: string; pageIds: string[] };
+  | { kind: 'ai_job'; jobId: string; pageIds: string[] }
+  /** A version of another paper (same school, class and subject) copied by a person; see `question-paper.copy.ts`. */
+  | { kind: 'copy'; sourcePaperId: string; sourceVersionId: string };
 
 export type SavedVersion = {
   versionNo: number;
@@ -360,10 +354,13 @@ const savedResult = (version: VersionRow, planMaxMarks: number): SavedVersion =>
 
 /**
  * Saves a new immutable version of a paper: the one function behind the agent
- * tool and the AI job, so both validate, render, print and number exactly the
- * same way.
+ * tool, the AI job and a copy of an earlier paper's version, so all of them
+ * validate, render, print and number exactly the same way.
  *
  * - The document is checked ({@link checkQuestionPaperDraft}); errors refuse.
+ *   Images it prints that the paper does not own yet are copied into the paper
+ *   first: chat attachments of an agent save, the source paper's figures of a
+ *   copy ({@link checkCopiedFragment}).
  * - Optimistic concurrency: with `expectedVersionNo`, a different current
  *   `latest_version_no` is CONFLICT. A job passes null (it saves whatever is
  *   next) and re-renders if another version lands between its render and its
@@ -395,26 +392,28 @@ export async function saveQuestionPaperVersion(
     if (done) return savedResult(done, scope.planMaxMarks);
   }
   assertPaperWritable(scope);
-  // Chat attachments may be figures only when an agent saves from a chat. The AI job has no way to attach an
-  // image, so a figure id it cannot resolve becomes a placeholder; an agent is told and fixes it.
-  const chatUserId = source.kind === 'agent' && source.conversationId ? input.userId : undefined;
-  const unresolvedFigures: UnresolvedFigures = source.kind === 'ai_job' ? 'placeholder' : 'problem';
-  let checked = await checkQuestionPaperDraft(db, scope, input.html, { chatUserId, unresolvedFigures });
-  if (!checked.ok) throw invalidPaperError(checked.problems);
-  if (attachmentFigureIds(checked.html).length > 0) {
-    // Refuse a stale expectedVersionNo before anything is copied: a refused save must not leave figure rows behind.
-    if (input.expectedVersionNo !== null) {
-      const latest = (await findPaper(db, scope.key))?.latestVersionNo ?? 0;
-      if (input.expectedVersionNo !== latest) {
-        throw rpcError.conflict(`The paper changed: its latest version is ${latest}, not ${input.expectedVersionNo}. Read it again with getQuestionPaper.`);
-      }
+  let checked: Extract<DraftCheck, { ok: true }>;
+  if (source.kind === 'copy') {
+    checked = await checkCopiedFragment(db, { scope, userId: input.userId, html: input.html, expectedVersionNo: input.expectedVersionNo, sourcePaperId: source.sourcePaperId });
+  } else {
+    // Chat attachments may be figures only when an agent saves from a chat. The AI job has no way to attach an
+    // image, so a figure id it cannot resolve becomes a placeholder; an agent is told and fixes it.
+    const chat =
+      source.kind === 'agent' && source.conversationId ? await chatFiguresOf(db, { userId: input.userId, conversationId: source.conversationId, key: scope.key }) : undefined;
+    const unresolvedFigures: UnresolvedFigures = source.kind === 'ai_job' ? 'placeholder' : 'problem';
+    const first = await checkQuestionPaperDraft(db, scope, input.html, { chat, unresolvedFigures });
+    if (!first.ok) throw invalidPaperError(first.problems);
+    checked = first;
+    if (attachmentFigureIds(checked.html).length > 0) {
+      // Refuse a stale expectedVersionNo before anything is copied: a refused save must not leave figure rows behind.
+      await assertExpectedVersion(db, scope, input.expectedVersionNo);
+      // Copy the attachments into the paper and store the version with its own figure ids; the fragment is
+      // checked again as it will be stored. The notices of the first check are the ones the user is told about.
+      const { notices, stripped } = checked;
+      const converted = await checkQuestionPaperDraft(db, scope, await convertAttachmentFigures(db, { scope, userId: input.userId, chat: chat!, html: checked.html }));
+      if (!converted.ok) throw invalidPaperError(converted.problems);
+      checked = { ...converted, notices, stripped };
     }
-    // Copy the attachments into the paper and store the version with its own figure ids; the fragment is
-    // checked again as it will be stored. The notices of the first check are the ones the user is told about.
-    const { notices, stripped } = checked;
-    const converted = await checkQuestionPaperDraft(db, scope, await convertAttachmentFigures(db, { scope, userId: input.userId, html: checked.html }));
-    if (!converted.ok) throw invalidPaperError(converted.problems);
-    checked = { ...converted, notices, stripped };
   }
   const template = await selectedQuestionPaperTemplate(db, scope.key.schoolId);
   if (!template) throw templateMissingError();
@@ -439,6 +438,96 @@ export async function saveQuestionPaperVersion(
       throw error;
     }
   }
+}
+
+/** CONFLICT unless the paper's `latest_version_no` is `expected` (no expectation: the AI job). An early look, not under the lock. */
+async function assertExpectedVersion(db: DatabaseExecutor, scope: PaperScope, expected: number | null): Promise<void> {
+  if (expected === null) return;
+  const latest = (await findPaper(db, scope.key))?.latestVersionNo ?? 0;
+  if (expected !== latest) {
+    throw rpcError.conflict(`The paper changed: its latest version is ${latest}, not ${expected}. Read it again with getQuestionPaper.`);
+  }
+}
+
+/**
+ * The draft check of a copied version's fragment, for {@link saveQuestionPaperVersion}. The stored fragment is
+ * cleaned and checked again (the profile may have become stricter since it was saved), first with its figures
+ * standing in as placeholders, so a fragment that would be refused anyway (a formula KaTeX now rejects, a cap)
+ * fails before a stale `expectedVersionNo` is looked at and before any figure is copied. Then the source's figures
+ * are copied into the target (`copySourceFigures`, which refuses one it cannot copy) and the fragment with the
+ * target's figure ids is checked exactly as an agent's save is: every id must be a figure of the target, and
+ * figures and formulas must fit the print budget together. The notices are what this cleaning removed.
+ */
+async function checkCopiedFragment(
+  db: Database,
+  input: { scope: PaperScope; userId: string; html: string; expectedVersionNo: number | null; sourcePaperId: string },
+): Promise<Extract<DraftCheck, { ok: true }>> {
+  const { scope } = input;
+  const cleaned = sanitizeQuestionPaperBody(canonicalQuestionPaperHtml(input.html));
+  if (cleaned.problems.length > 0) throw invalidPaperError(cleaned.problems);
+  const figureIds = storedFigureIds(cleaned.html);
+  const precheck = await checkQuestionPaperDraft(db, scope, figureIdsToPlaceholders(cleaned.html, new Set(figureIds)), { unresolvedFigures: 'problem' });
+  if (!precheck.ok) throw invalidPaperError(precheck.problems);
+  await assertExpectedVersion(db, scope, input.expectedVersionNo);
+  const html = await copySourceFigures(db, { scope, userId: input.userId, html: cleaned.html, sourcePaperId: input.sourcePaperId });
+  const checked = await checkQuestionPaperDraft(db, scope, html, { unresolvedFigures: 'problem' });
+  if (!checked.ok) throw invalidPaperError(checked.problems);
+  return { ...checked, notices: noticesOf(cleaned.stripped), stripped: cleaned.stripped };
+}
+
+/**
+ * Starts the target paper from a saved version of an earlier paper: a NEW
+ * version of the target whose fragment is the source version's stored fragment
+ * (`copyQuestionPaperVersion`). The source is only read and never changes.
+ *
+ * - The keys must name the same school, class and subject, and not the target
+ *   itself ({@link assertCopySourceAllowed}); the source paper and version must
+ *   exist in that school (NOT_FOUND `copy_source_not_found`).
+ * - Everything else is {@link saveQuestionPaperVersion} with source `copy`:
+ *   the target must be writable, `expectedVersionNo` is the target's token
+ *   (CONFLICT as for an agent save), the fragment is cleaned and checked again,
+ *   the source's figures are copied into the target, the school's currently
+ *   selected template prints the PDF, and `plan_max_marks` is the TARGET plan's
+ *   maximum (a header snapshot of the paper being saved, not the source's).
+ * - No model is called, so it needs no room under the school's AI limit.
+ *
+ * The caller has checked the class permissions (manage on the target, read on
+ * the source class) and the assistant gate.
+ */
+export async function copyQuestionPaperVersion(
+  db: Database,
+  input: {
+    scope: PaperScope;
+    userId: string;
+    expectedVersionNo: number;
+    source: PaperKey & { versionNo: number };
+    signal?: AbortSignal;
+  },
+): Promise<SavedVersion> {
+  const { versionNo, ...sourceKey } = input.source;
+  assertCopySourceAllowed(input.scope.key, sourceKey);
+  const sourcePaper = await findPaper(db, sourceKey);
+  if (!sourcePaper || sourcePaper.schoolId !== input.scope.key.schoolId) throw copySourceNotFoundError('Question paper');
+  const [version] = await db
+    .select({ id: examQuestionPaperVersionTable.id, contentHtml: examQuestionPaperVersionTable.contentHtml })
+    .from(examQuestionPaperVersionTable)
+    .where(
+      and(
+        eq(examQuestionPaperVersionTable.paperId, sourcePaper.id),
+        eq(examQuestionPaperVersionTable.schoolId, sourcePaper.schoolId),
+        eq(examQuestionPaperVersionTable.versionNo, versionNo),
+      ),
+    )
+    .limit(1);
+  if (!version) throw copySourceNotFoundError('Question paper version');
+  return saveQuestionPaperVersion(db, {
+    scope: input.scope,
+    userId: input.userId,
+    expectedVersionNo: input.expectedVersionNo,
+    html: version.contentHtml,
+    source: { kind: 'copy', sourcePaperId: sourcePaper.id, sourceVersionId: version.id },
+    signal: input.signal,
+  });
 }
 
 async function renderAndStore(
@@ -502,6 +591,16 @@ async function renderAndStore(
           .for('share');
         if (job?.status !== 'running') throw new SourceJobEndedError();
       }
+      if (source.kind === 'copy') {
+        // The source paper may have been deleted while the copy rendered. Held FOR KEY SHARE (what the foreign key
+        // check takes anyway), so a delete either committed first and the copy is refused cleanly here, or waits.
+        const [kept] = await tx
+          .select({ id: examQuestionPaperVersionTable.id })
+          .from(examQuestionPaperVersionTable)
+          .where(and(eq(examQuestionPaperVersionTable.id, source.sourceVersionId), eq(examQuestionPaperVersionTable.schoolId, scope.key.schoolId)))
+          .for('key share');
+        if (!kept) throw copySourceNotFoundError('Question paper version');
+      }
       if (locked.latestVersionNo !== input.assumedLatest) {
         if (input.expectedVersionNo !== null) {
           throw rpcError.conflict(`The paper changed: its latest version is ${locked.latestVersionNo}, not ${input.expectedVersionNo}. Read it again with getQuestionPaper.`);
@@ -520,6 +619,7 @@ async function renderAndStore(
         sourceJobId: source.kind === 'ai_job' ? source.jobId : null,
         sourcePageIds: source.kind === 'ai_job' ? source.pageIds : null,
         sourceConversationId: source.kind === 'agent' ? source.conversationId : null,
+        sourceVersionId: source.kind === 'copy' ? source.sourceVersionId : null,
         planMaxMarks: scope.planMaxMarks,
         warnings: checked.notices,
         templateRevisionId: input.template.revisionId,

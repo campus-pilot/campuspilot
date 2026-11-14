@@ -49,17 +49,26 @@ function captureFrame(video: HTMLVideoElement, fileName: string) {
  * or the surrounding dialog closing) without an effect. A permission prompt
  * answered after the component has gone is released straight away.
  */
-function useCameraCapture(onCapture: (file: File) => void, fileName: string) {
+function useCameraCapture(onCapture: (file: File) => void, fileName: string, autoStart: boolean) {
   const [stream, setStream] = useState<MediaStream>();
   const [isStarting, setIsStarting] = useState(false);
   const [error, setError] = useState<string>();
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const isDisposedRef = useRef(false);
+  const autoStartRef = useRef(autoStart);
+  const isAutoStartedRef = useRef(false);
+  const startRef = useRef<() => Promise<void>>(async () => {});
 
   /** Marks the component as gone so a late camera grant is not kept open. */
   const rootRef = useCallback((node: HTMLDivElement | null) => {
     if (!node) return;
     isDisposedRef.current = false;
+    // With `autoStart` the camera opens as the component appears (a dialog opened to take a photo). A ref callback
+    // is the mount event here; the request is made once per mount even when React attaches the node twice.
+    if (autoStartRef.current && !isAutoStartedRef.current) {
+      isAutoStartedRef.current = true;
+      void startRef.current();
+    }
     return () => {
       isDisposedRef.current = true;
     };
@@ -100,6 +109,8 @@ function useCameraCapture(onCapture: (file: File) => void, fileName: string) {
     }
   }
 
+  startRef.current = start;
+
   async function capture() {
     if (!videoRef.current) return;
     try {
@@ -122,12 +133,15 @@ export function CameraCapture({
   onCapture,
   disabled = false,
   fileName = 'camera-photo.jpg',
+  autoStart = false,
 }: {
   onCapture: (file: File) => void;
   disabled?: boolean;
   fileName?: string;
+  /** Opens the camera as soon as this appears, for a dialog whose only purpose is taking a photo. */
+  autoStart?: boolean;
 }) {
-  const camera = useCameraCapture(onCapture, fileName);
+  const camera = useCameraCapture(onCapture, fileName, autoStart);
   return (
     <div ref={camera.rootRef} className="flex flex-col gap-2">
       {camera.stream ? (

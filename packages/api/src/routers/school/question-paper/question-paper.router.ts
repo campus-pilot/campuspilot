@@ -3,8 +3,8 @@ import { SCHOOL_ACTIONS } from '@campuspilot/opa/policies/school';
 import { buildLearnPayload } from '@campuspilot/question-paper/guide';
 
 import { rpcError, toRpcError } from '../../../errors';
-import { protectedProcedure } from '../../../index';
-import { checkPermissions } from '../../../permissions/authorization';
+import { o, protectedProcedure } from '../../../index';
+import { assertPermission, checkPermissions } from '../../../permissions/authorization';
 import { requireClassPermission } from '../../../permissions/class';
 import { requireSchoolPermission } from '../../../permissions/school';
 import * as dto from './question-paper.dto';
@@ -17,6 +17,8 @@ import {
 import { leanLines } from './question-paper.lean';
 import { buildQuestionPaperContext } from './question-paper.context';
 import { requireQuestionPaperAssistantAccess } from './question-paper.access';
+import { chatFiguresOf } from './question-paper.attachments';
+import { listQuestionPaperCopySources } from './question-paper.copy';
 import { findPaper, templateMissingError } from './question-paper.records';
 import { renderQuestionPaperBody, renderQuestionPaperDocument, selectedQuestionPaperTemplate } from './question-paper.render';
 import { resolvePaperScope } from './question-paper.scope';
@@ -35,6 +37,7 @@ import {
 import {
   checkQuestionPaperDraft,
   cleanedChatDraft,
+  copyQuestionPaperVersion,
   downloadVersionPdf,
   findChatDraftContent,
   getVersion,
@@ -68,6 +71,26 @@ const humanOnly = (access: 'read' | 'write', destructive = false) =>
 
 const readClass = requireClassPermission(CLASS_ACTIONS.READ_EXAM_QUESTION_PAPERS);
 const manageClass = requireClassPermission(CLASS_ACTIONS.MANAGE_EXAM_QUESTION_PAPERS);
+
+/**
+ * `class.exam.question_paper.read` on the class of a copy's SOURCE paper
+ * (`input.source`), checked with OPA like every class permission and before the
+ * assistant gate, so a caller who may not read that class learns nothing about
+ * its papers (not even whether they exist).
+ */
+const readSourceClass = o.middleware<Record<never, never>, { source: { schoolId: string; classId: string } }>(
+  async ({ context, next, signal }, input) => {
+    await assertPermission(
+      context,
+      {
+        action: CLASS_ACTIONS.READ_EXAM_QUESTION_PAPERS,
+        resource: { kind: 'class', schoolId: input.source.schoolId, classId: input.source.classId },
+      },
+      signal,
+    );
+    return next();
+  },
+);
 
 const userId = (context: { session: { user: { id: string } } | null }) => {
   const id = context.session?.user.id;
@@ -145,7 +168,7 @@ export const schoolQuestionPaperRouter = {
         const chat = context.principal.authMethod === 'assistant' ? context.principal.assistantRun : null;
         if (!chat) throw rpcError.badRequest('A draft can only be read by the in-app assistant. You already have the html you wrote; use getQuestionPaper for a saved paper.');
         const scope = await resolvePaperScope(context.db, input);
-        const raw = await findChatDraftContent(context.db, { conversationId: chat.conversationId, schoolId: input.schoolId, userId: user, draftId: input.draftId });
+        const raw = await findChatDraftContent(context.db, { conversationId: chat.conversationId, key: scope.key, userId: user, draftId: input.draftId });
         const draft = cleanedChatDraft(raw);
         return { paper: await getQuestionPaperFacts(context.db, scope), draftId: draft.draftId, html: draft.html, characters: draft.html.length };
       } catch (error) {
@@ -189,10 +212,16 @@ export const schoolQuestionPaperRouter = {
     .handler(async ({ context, input }) => {
       try {
         const scope = await resolvePaperScope(context.db, input);
-        // Attachments of the chat user are valid figures inside the in-app assistant and when that same person's browser
-        // session re-checks a draft card (the same rule as previewQuestionPaperDraft); never for API keys or OAuth clients.
-        const chatUserId = context.principal.authMethod === 'assistant' || context.principal.authMethod === 'session' ? userId(context) : undefined;
-        const checked = await checkQuestionPaperDraft(context.db, scope, input.html, { chatUserId });
+        // Chat attachments are valid figures inside the in-app assistant (its run's chat) and when a person's browser
+        // re-checks a draft card (the chat it shows it from; the same rule as previewQuestionPaperDraft); never for API
+        // keys or OAuth clients.
+        const principal = context.principal;
+        const chatConversationId = principal.authMethod === 'assistant' ? principal.assistantRun.conversationId : input.conversationId;
+        const chat =
+          principal.authMethod === 'assistant' || principal.authMethod === 'session'
+            ? await chatFiguresOf(context.db, { userId: userId(context), conversationId: chatConversationId, key: scope.key })
+            : undefined;
+        const checked = await checkQuestionPaperDraft(context.db, scope, input.html, { chat });
         if (!checked.ok) {
           return { valid: false, problems: leanLines(checked.problems), stripped: leanLines(checked.stripped), draftId: null, placeholderFigures: 0, characters: input.html.length };
         }
@@ -227,7 +256,7 @@ export const schoolQuestionPaperRouter = {
         }
         if (input.draftId !== undefined) {
           if (!chat) throw rpcError.badRequest('A draftId can only be used from the in-app assistant. Send the full html instead.');
-          html = await findChatDraftContent(context.db, { conversationId: chat.conversationId, schoolId: input.schoolId, userId: user, draftId: input.draftId });
+          html = await findChatDraftContent(context.db, { conversationId: chat.conversationId, key: scope.key, userId: user, draftId: input.draftId });
         }
         const saved = await saveQuestionPaperVersion(context.db, {
           scope,
@@ -244,8 +273,50 @@ export const schoolQuestionPaperRouter = {
       }
     }),
 
+  listQuestionPaperCopySources: protectedProcedure
+    .route(route('List papers to start from', "The saved papers this paper can be started from: papers of the same class and subject in any exam, session and mode of the school, with their latest version, newest first. The paper itself and papers without a saved version are not listed. Needs permission to manage this paper, because the list only serves copyQuestionPaperVersion."))
+    .meta(humanOnly('read'))
+    .input(dto.paperKeySchema)
+    // Manage on the target (the list only serves a copy), then read on the source class, which is the same class.
+    .use(manageClass)
+    .use(readClass)
+    .use(requireQuestionPaperAssistantAccess())
+    .output(dto.listCopySourcesOutputSchema)
+    .handler(async ({ context, input }) => {
+      try {
+        return await listQuestionPaperCopySources(context.db, await resolvePaperScope(context.db, input));
+      } catch (error) {
+        throw toRpcError(error);
+      }
+    }),
+
+  copyQuestionPaperVersion: protectedProcedure
+    .route(route('Start a paper from an earlier paper', "Save a NEW version of this paper whose content is a saved version of an earlier paper of the same class and subject (source, from listQuestionPaperCopySources). The earlier paper is never changed; its figure images are copied into this paper. expectedVersionNo must be this paper's latestVersionNo (CONFLICT otherwise). The PDF is printed with the school's current question paper template and this paper's maximum marks. No AI is used."))
+    .meta(humanOnly('write'))
+    .input(dto.copyVersionInputSchema)
+    .use(manageClass)
+    .use(readSourceClass)
+    .use(requireQuestionPaperAssistantAccess())
+    .output(dto.copyVersionOutputSchema)
+    .handler(async ({ context, input, signal }) => {
+      try {
+        const { source, expectedVersionNo, ...target } = input;
+        const saved = await copyQuestionPaperVersion(context.db, {
+          scope: await resolvePaperScope(context.db, target),
+          userId: userId(context),
+          expectedVersionNo,
+          source,
+          signal,
+        });
+        const { replayed: _replayed, ...result } = saved;
+        return result;
+      } catch (error) {
+        throw toRpcError(error);
+      }
+    }),
+
   startQuestionPaperGeneration: protectedProcedure
-    .route(route('Generate a question paper with AI', "Start the AI reading the uploaded page photos and writing the HTML paper. It runs in the background and saves a new version when it finishes; poll getQuestionPaperDetail. expectedPageRevision must be the pageRevision you last saw. Refused when there are no pages, a page is in a format the model cannot read, a generation is already running, the school has no question paper template, or the school's AI limit is reached."))
+    .route(route('Generate a question paper with AI', "Start the AI reading the uploaded page photos and writing the HTML paper, changed as the optional instructions ask (for example: keep the questions but change the numbers). It runs in the background and saves a new version when it finishes; poll getQuestionPaperDetail. expectedPageRevision must be the pageRevision you last saw. Refused when there are no pages, a page is in a format the model cannot read, a generation is already running, the school has no question paper template, or the school's AI limit is reached."))
     .meta(humanOnly('write'))
     .input(dto.startGenerationInputSchema)
     .use(manageClass)
@@ -257,6 +328,7 @@ export const schoolQuestionPaperRouter = {
           scope: await resolvePaperScope(context.db, input),
           userId: userId(context),
           expectedPageRevision: input.expectedPageRevision,
+          instructions: input.instructions ?? null,
         });
       } catch (error) {
         throw toRpcError(error);
@@ -361,14 +433,14 @@ export const schoolQuestionPaperRouter = {
     .handler(async ({ context, input }) => {
       try {
         const scope = await resolvePaperScope(context.db, input);
-        // A person previewing a draft from their own chat may see their attachments as figures.
-        const chatUserId = userId(context);
-        const checked = await checkQuestionPaperDraft(context.db, scope, input.html, { chatUserId });
+        // A person previewing a draft sees as figures their own attachments and those of the paper's chat it is from.
+        const chat = await chatFiguresOf(context.db, { userId: userId(context), conversationId: input.conversationId, key: scope.key });
+        const checked = await checkQuestionPaperDraft(context.db, scope, input.html, { chat });
         if (!checked.ok) return { html: '', problems: checked.problems, warnings: [], placeholderFigures: 0, templateName: null };
         const template = await selectedQuestionPaperTemplate(context.db, input.schoolId);
         if (!template) throw templateMissingError();
         const paper = await findPaper(context.db, scope.key);
-        const body = await renderQuestionPaperBody(context.db, { schoolId: input.schoolId, paperId: paper?.id ?? null, html: checked.html, chatUserId });
+        const body = await renderQuestionPaperBody(context.db, { schoolId: input.schoolId, paperId: paper?.id ?? null, html: checked.html, chat });
         const rendered = await buildQuestionPaperContext(context.db, scope, { versionNo: null });
         return {
           html: renderQuestionPaperDocument({ template, context: rendered, body }),

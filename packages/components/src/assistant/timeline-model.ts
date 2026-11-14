@@ -264,11 +264,38 @@ export function queuedMessages(
   );
 }
 
-/** Changes waiting for the user's decision, oldest first. */
+/** Changes waiting for a decision, oldest first. */
 export function pendingApprovals(items: readonly AssistantItemDto[]): AssistantToolCallItemDto[] {
   return items.filter(
     (item): item is AssistantToolCallItemDto => item.kind === 'tool_call' && item.status === 'awaiting_approval',
   );
+}
+
+/**
+ * The changes waiting for a decision, split by who may decide: only the
+ * person whose turn asked for a change may approve it. `mine` are the user's
+ * own (the tray shows them to decide); `waitingFor` names the others whose
+ * decision is awaited, once each, by the name on their turn's message (a
+ * conversation shared with a paper has several people in it).
+ */
+export function approvalsByDecider(
+  items: readonly AssistantItemDto[],
+  runs: readonly AssistantRunDto[],
+  userId: string | null,
+): { mine: AssistantToolCallItemDto[]; waitingFor: string[] } {
+  const ownerOf = new Map(runs.map((run) => [run.id, run.userId]));
+  const nameOf = new Map(
+    items.flatMap((item) => (item.kind === 'user_message' && item.body.author ? [[item.runId, item.body.author.name] as const] : [])),
+  );
+  const mine: AssistantToolCallItemDto[] = [];
+  const waitingFor = new Set<string>();
+  for (const call of pendingApprovals(items)) {
+    const owner = ownerOf.get(call.runId);
+    // A run not known yet, or no signed-in user yet, is treated as the user's own: the server decides who may approve.
+    if (owner === undefined || userId === null || owner === userId) mine.push(call);
+    else waitingFor.add(nameOf.get(call.runId) ?? 'someone else');
+  }
+  return { mine, waitingFor: [...waitingFor] };
 }
 
 /**

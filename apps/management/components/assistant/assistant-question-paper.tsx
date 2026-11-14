@@ -67,7 +67,21 @@ type DraftInput = NonNullable<ReturnType<typeof parseDraftCallInput>>;
  * because the heading names the class, subject and exam. The server reads the
  * stored input, never the model.
  */
-function DraftPreviewBody({ schoolId, input, draftId }: { schoolId: string; input: DraftInput; draftId: string }) {
+export function DraftPreviewBody({
+  schoolId,
+  conversationId,
+  input,
+  draftId,
+  fill = false,
+}: {
+  schoolId: string;
+  /** The chat the draft is from: its attachments preview as figures (the server checks it is a chat of the paper the user may use). */
+  conversationId: string;
+  input: DraftInput;
+  draftId: string;
+  /** The preview takes its container's height (the paper's pane) instead of a fixed frame; see `DocumentPreview`. */
+  fill?: boolean;
+}) {
   const preview = useQuery({
     queryKey: [
       'assistant',
@@ -79,15 +93,16 @@ function DraftPreviewBody({ schoolId, input, draftId }: { schoolId: string; inpu
       input.subjectSlug,
       input.modeSlug,
       draftId,
+      conversationId,
     ],
-    queryFn: () => client.school.previewQuestionPaperDraft(input),
+    queryFn: () => client.school.previewQuestionPaperDraft({ ...input, conversationId }),
     staleTime: DRAFT_PREVIEW_STALE_MS,
     retry: retryUnlessRefused,
   });
-  if (preview.isPending) return <Skeleton className="h-96 w-full rounded-xl" />;
+  if (preview.isPending) return <Skeleton className={fill ? 'h-full w-full rounded-xl' : 'h-96 w-full rounded-xl'} />;
   if (preview.isError) return <PreviewMessage>{requestErrorMessage(preview.error, 'The draft could not be previewed.')}</PreviewMessage>;
   if (preview.data.problems.length > 0) return <PreviewMessage>{preview.data.problems[0]}</PreviewMessage>;
-  return <DocumentPreview html={preview.data.html} label="Draft preview" fitPageWidth />;
+  return <DocumentPreview html={preview.data.html} label="Draft preview" fitPageWidth fill={fill} />;
 }
 
 /** How long a draft preview is trusted before Preview renders it again (the school's template can change). */
@@ -101,10 +116,10 @@ const DRAFT_PREVIEW_STALE_MS = 60_000;
  * the page (`gcTime`), so reopening conversations does not validate again;
  * only a page reload does, and only for those long results.
  */
-function draftRecheckOptions(callId: string, input: DraftInput | null, stored: DraftResult | null) {
+function draftRecheckOptions(call: { id: string; conversationId: string }, input: DraftInput | null, stored: DraftResult | null) {
   return {
-    queryKey: ['assistant', 'question-paper-draft-check', callId],
-    queryFn: () => client.school.validateQuestionPaperDraft(input!),
+    queryKey: ['assistant', 'question-paper-draft-check', call.id],
+    queryFn: () => client.school.validateQuestionPaperDraft({ ...input!, conversationId: call.conversationId }),
     enabled: !stored && Boolean(input),
     staleTime: Number.POSITIVE_INFINITY,
     gcTime: Number.POSITIVE_INFINITY,
@@ -114,7 +129,7 @@ function draftRecheckOptions(callId: string, input: DraftInput | null, stored: D
 
 function useDraftCheck(call: AssistantToolCallItemDto, input: DraftInput | null) {
   const stored = parseStoredDraftResult(call.body.output, call.body.outputTruncated);
-  const recheck = useQuery(draftRecheckOptions(call.id, input, stored));
+  const recheck = useQuery(draftRecheckOptions(call, input, stored));
   return { check: draftCheckOf({ input, stored, recheck }), retry: () => void recheck.refetch() };
 }
 
@@ -124,10 +139,10 @@ function useDraftCheck(call: AssistantToolCallItemDto, input: DraftInput | null)
  * the same query keys as each card's own re-check, so a card and the chat share
  * one request per draft, and nothing is checked for a draft whose stored result is readable.
  */
-export function useDraftVerdicts(rows: readonly AssistantTimelineRow[]): ReadonlyMap<string, DraftResult> {
-  const pending = draftCallsNeedingRecheck(rows);
+export function useDraftVerdicts(rows: readonly AssistantTimelineRow[], conversationId: string | null): ReadonlyMap<string, DraftResult> {
+  const pending = conversationId ? draftCallsNeedingRecheck(rows) : [];
   return useQueries({
-    queries: pending.map(({ id, input }) => draftRecheckOptions(id, input, null)),
+    queries: pending.map(({ id, input }) => draftRecheckOptions({ id, conversationId: conversationId! }, input, null)),
     combine: (results) => {
       const verdicts = new Map<string, DraftResult>();
       pending.forEach(({ id }, index) => {
@@ -234,7 +249,7 @@ export function AssistantDraftCard({
       preview={
         facts.valid && input ? (
           <PreviewDialog title={`Draft ${ordinal}`} description="How this draft prints with your school’s template. Nothing is saved.">
-            <DraftPreviewBody schoolId={schoolId} input={input} draftId={facts.draftId} />
+            <DraftPreviewBody schoolId={schoolId} conversationId={call.conversationId} input={input} draftId={facts.draftId} />
           </PreviewDialog>
         ) : null
       }

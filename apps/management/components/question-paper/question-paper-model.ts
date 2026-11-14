@@ -4,14 +4,21 @@ import type { ExamScope } from '@/components/exam/exam-model';
 /** One paper: an exam, a class, a subject and an assessment mode of its plan. */
 export type QuestionPaperScope = ExamScope & { classId: string; subjectSlug: string; modeSlug: string };
 
-export const QUESTION_PAPER_SECTIONS = ['pages', 'result', 'versions'] as const;
-export type QuestionPaperSection = (typeof QUESTION_PAPER_SECTIONS)[number];
+/**
+ * How the first screen was asked for in the address (`?start=`): `sources`
+ * shows it for a paper that already has versions (to add photos or a file
+ * as a new version), `earlier` shows it with the earlier-paper picker open.
+ */
+export const QUESTION_PAPER_STARTS = ['sources', 'earlier'] as const;
+export type QuestionPaperStart = (typeof QUESTION_PAPER_STARTS)[number];
 
-export const SECTION_LABELS: Record<QuestionPaperSection, string> = {
-  pages: 'Pages',
-  result: 'Result',
-  versions: 'Versions',
-};
+/**
+ * What the paper's screen shows.
+ * - `start`: the first screen, where the paper is made (`picking`: its
+ *   earlier-paper picker is open).
+ * - `studio`: the paper beside its assistant.
+ */
+export type QuestionPaperView = { kind: 'start'; picking: boolean } | { kind: 'studio' };
 
 /** Class-scoped permission, exactly as the procedures check it. */
 export function questionPaperPermission(
@@ -25,12 +32,78 @@ export function questionPaperPermission(
 }
 
 /**
- * The section to show: the one in the URL when valid, otherwise Result when a
- * version exists (that is what the user came to see) and Pages when not.
+ * The view to show. The first screen named in the URL wins (the user asked
+ * for it, also for a paper that already has versions: adding photos, copying
+ * again). Otherwise the studio, when there is something in it: a saved
+ * version, a generation at work, or a conversation with the assistant.
+ * Otherwise the first screen: a paper with photos but nothing else returns
+ * to its photos, so a visit continues where the last one stopped (and a
+ * failed generation is read beside the photos it used).
+ *
+ * Each input is its own fact: none is inferred from another.
  */
-export function resolveSection(raw: string | null | undefined, hasVersion: boolean): QuestionPaperSection {
-  const requested = QUESTION_PAPER_SECTIONS.find((section) => section === raw);
-  return requested ?? (hasVersion ? 'result' : 'pages');
+export function resolveView(facts: {
+  start: string | null | undefined;
+  hasVersion: boolean;
+  generating: boolean;
+  hasChat: boolean;
+}): QuestionPaperView {
+  const start = QUESTION_PAPER_STARTS.find((candidate) => candidate === facts.start);
+  if (start) return { kind: 'start', picking: start === 'earlier' };
+  if (facts.hasVersion || facts.generating || facts.hasChat) return { kind: 'studio' };
+  return { kind: 'start', picking: false };
+}
+
+/** A conversation id as the address may carry it: the assistant's own ids only, so nothing else reaches a request. */
+export const chatIdOf = (raw: string | null | undefined): string | null => (raw && /^asc_[a-z0-9]{8,40}$/.test(raw) ? raw : null);
+
+/** `?chat=new`: the user started a new conversation, which begins with their first message. */
+export const NEW_CHAT_PARAM = 'new';
+
+/**
+ * The paper's conversation on screen. The address decides when it names one
+ * (`?chat=<id>`) or asks for a new one (`?chat=new`); otherwise it is the
+ * paper's latest conversation, so whoever opens the paper, and whoever comes
+ * back to it, continues where the paper's work stands. Null: no conversation
+ * yet (the first message starts one).
+ */
+export function paperChatOf(raw: string | null | undefined, latestConversationId: string | null): string | null {
+  if (raw === NEW_CHAT_PARAM) return null;
+  return chatIdOf(raw) ?? latestConversationId;
+}
+
+/**
+ * Whether the paper has a studio to go back to from its first screen: a
+ * version, a generation at work, the conversation on screen, or any
+ * conversation shared with the paper (after New chat on a paper with no
+ * version the screen is the first one, and Back must still reach the chat).
+ */
+export const hasStudioOf = (facts: { hasVersion: boolean; generating: boolean; chatId: string | null; latestConversationId: string | null }) =>
+  facts.hasVersion || facts.generating || facts.chatId !== null || facts.latestConversationId !== null;
+
+/**
+ * Whether an unsaved draft is still the newest thing about the paper: it was
+ * written after every saved version (both are server times). A version made
+ * since, by the photo job or in another conversation, is newer, and the
+ * paper's side shows it instead (the draft stays in its chat).
+ */
+export const draftIsNewest = (writtenAt: Date, versions: readonly { createdAt: Date }[]) => versions.every((version) => writtenAt > version.createdAt);
+
+/** What the paper's side of the studio shows. */
+export type ShownPaper = { kind: 'draft' } | { kind: 'version'; versionNo: number } | { kind: 'nothing' };
+
+/**
+ * What the paper's side shows: a version named in the address; else the
+ * assistant's unsaved draft when there is one (it is the newest thing); else
+ * the latest version. Nothing only while a first paper is still being made.
+ * A version the address names that does not exist falls back to the latest.
+ */
+export function shownPaperOf(versionParam: string | null | undefined, versionNos: readonly number[], hasDraft: boolean): ShownPaper {
+  const named = versionParam !== null && versionParam !== undefined;
+  if (hasDraft && !named) return { kind: 'draft' };
+  const versionNo = resolveVersionNo(versionParam, versionNos);
+  if (versionNo !== null) return { kind: 'version', versionNo };
+  return hasDraft ? { kind: 'draft' } : { kind: 'nothing' };
 }
 
 /** The version to show: the one in the URL when it exists, otherwise the latest; null when there is none. */
@@ -44,26 +117,6 @@ export function resolveVersionNo(raw: string | null | undefined, versionNos: rea
 export const GENERATION_POLL_MS = 3000;
 export function detailPollInterval(data: { activeJob: unknown } | undefined): number | false {
   return data?.activeJob ? GENERATION_POLL_MS : false;
-}
-
-/**
- * Where "Want to update something? Continue in chat" leads: the assistant page
- * with the paper's natural key in the query (ids and slugs only, nothing
- * personal). Contract with the chat: `?seed=question_paper&sessionId=&examSlug=
- * &classId=&subjectSlug=&modeSlug=`. The chat reads the seed, starts a new
- * conversation with a prefilled draft and a context chip, and sends nothing
- * until the user does (decision D31).
- */
-export function continueInChatHref(scope: QuestionPaperScope) {
-  const params = new URLSearchParams({
-    seed: 'question_paper',
-    sessionId: scope.sessionId,
-    examSlug: scope.examSlug,
-    classId: scope.classId,
-    subjectSlug: scope.subjectSlug,
-    modeSlug: scope.modeSlug,
-  });
-  return `/school/${encodeURIComponent(scope.schoolId)}/assistant?${params.toString()}`;
 }
 
 type PageOrder = { id: string; position: number };

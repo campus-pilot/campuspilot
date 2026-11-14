@@ -293,6 +293,9 @@ importers:
       '@campuspilot/env':
         specifier: workspace:*
         version: link:../../packages/env
+      '@campuspilot/s3':
+        specifier: workspace:*
+        version: link:../../packages/s3
       '@campuspilot/ui':
         specifier: workspace:*
         version: link:../../packages/ui

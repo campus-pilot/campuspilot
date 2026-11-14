@@ -1,0 +1,1 @@
+ALTER TABLE "exam_question_paper_job" ADD COLUMN "instructions" text;

@@ -10,7 +10,7 @@ side of the assistant is in [In-app assistant](assistant.md).
 Read this before changing the `exam_question_paper_*` tables, the
 `question-paper` router or its MCP tools, the fragment vocabulary and limits
 (`packages/question-paper`), the `question_paper_body` sanitiser, the renderer, the generation job
-(`packages/api/src/workflows/question-paper`), chat image attachments, the
+(`packages/api/src/workflows/question-paper`), chat attachments (images and PDFs), the
 `question_paper` document type, the Question paper tab in the management app or
 the demo seed's question papers.
 
@@ -27,19 +27,25 @@ the demo seed's question papers.
   the number of uploaded pages means nothing for the generated one. Never map or
   validate them one to one.
 - A **version** is the HTML fragment (below) plus a stored PDF. It never
-  changes. Every change (a regeneration, a chat edit) is a new version; any version
+  changes. Every change (a regeneration, a chat edit, a copy of an earlier paper) is a new version; any version
   can be previewed and downloaded. There is no approved or final state, no hand
   editing of a generated paper in the UI and no answer key.
 - The **heading and footer come from the school's `question_paper` template**
   (a full document type, see below), never from the AI. The AI only writes the body.
-- Two ways in, one set of rules:
-  1. **Manual**: the Question paper tab of an examination (upload, reorder,
-     *Generate with AI*, preview, download). Generation is a durable worker job.
+- Three ways in, one set of rules:
+  1. **Manual**: the Question paper tab of an examination (photos of the pages, an
+     optional note on what to change, *Create paper*, preview, download). Generation is a
+     durable worker job. A PDF or a description does not take this path: it starts the
+     paper's conversation (see "The paper's screen").
   2. **Chat**: the in-app assistant or an external MCP client reads attached photos
      or an existing paper, writes the HTML itself, validates it, shows drafts and saves
      a new version only when the user says so. No model call is made by the server
      for this path: the agent is the author, the server validates and stores.
-  Both end in the same function, `saveQuestionPaperVersion`, so validation (the
+  3. **Start from an earlier paper**: a person copies a saved version of another
+     paper of the same class and subject (last term's, last session's, another
+     mode's) into this paper as a new version, then edits it in chat or generates
+     again (`copyQuestionPaperVersion`, see "Starting from an earlier paper").
+  All of them end in the same function, `saveQuestionPaperVersion`, so validation (the
   sanitiser, limits, formulas, figures), rendering and printing are identical.
 - **Nothing computes or checks marks.** The paper prints the marks its author wrote;
   there is no total, no comparison with the exam plan and no marks warning. The plan's
@@ -59,7 +65,7 @@ Every procedure and upload route checks, in this order (the order matters: a cal
 without access must learn nothing about the school's features):
 
 1. **OPA class permission** `class.exam.question_paper.read` (list, view, preview,
-   download, versions) or `.manage` (upload, reorder, delete, generate, save).
+   download, versions) or `.manage` (upload, reorder, delete, generate, save, copy).
    Granted to teacher (only for the classes in the role's `meta.classIds`), principal,
    manager and exam coordinator (every class). `listQuestionPapers` and
    `learn_question_paper_generation` are school level (`READ_EXAM_PLANS` /
@@ -73,6 +79,11 @@ without access must learn nothing about the school's features):
    so a school at its limit keeps its papers. There is **no separate feature flag**:
    question papers are part of the `assistant` feature, and their cost counts under AI
    usage as "Question paper".
+   A copy (`listQuestionPaperCopySources`, `copyQuestionPaperVersion`) checks two
+   class permissions before the gate: `.manage` on the target paper's class (the
+   list too, since it only serves a copy) and `.read` on the source paper's class
+   (`readSourceClass`, from `input.source`), so a caller learns nothing about the
+   papers of a class they may not read.
 3. **The paper**: the key must name a real plan and mode (`resolvePaperScope`).
    Writes also need the active session and an exam whose lifecycle is not
    `completed` (read from `exam_lifecycle`, never inferred from the plan). Once an
@@ -94,10 +105,10 @@ affected papers itself.
 | --- | --- |
 | `exam_question_paper` | The paper: unique key, `latest_version_no` (token of saving a version, never `max(version_no)`), `page_revision` (token of page changes) |
 | `exam_question_paper_page` | One photo: position, original and two derivatives (`model` JPEG the AI reads, `thumb`), `derivative_status` (`ready` or `unsupported` when the server cannot decode it, for example HEIC), size, sha256 |
-| `exam_question_paper_job` | One generation: `queued`, `running`, `succeeded`, `failed`; ordered `page_ids` and the `page_revision` it ran on; provider, model, request count; `error_code` and the safe `error_message` (and developer-only `error_detail`); hand-over facts (`handed_over_at`, attempts, last error). A partial unique index allows one queued or running job per paper |
-| `exam_question_paper_version` | Immutable: `version_no`, the sanitised fragment `content_html` (text), its sha256, `source` (`agent` or `ai_job`) with the job id, page ids or conversation id, `plan_max_marks` (the header snapshot), `warnings` (sanitiser notices, below), the pinned `template_revision_id` and the `pdf_artifact_id` |
-| `exam_question_paper_figure` | An uploaded image a version prints (JPEG, or PNG up to 400 KB when it has transparency), owned by the paper, deduplicated by `source_attachment_id` |
-| `assistant_attachment` | A chat image (below) |
+| `exam_question_paper_job` | One generation: `queued`, `running`, `succeeded`, `failed`; ordered `page_ids` and the `page_revision` it ran on; the teacher's `instructions` (nullable text, migration 0067: null means none, written at creation and never changed); provider, model, request count; `error_code` and the safe `error_message` (and developer-only `error_detail`); hand-over facts (`handed_over_at`, attempts, last error). A partial unique index allows one queued or running job per paper |
+| `exam_question_paper_version` | Immutable: `version_no`, the sanitised fragment `content_html` (text), its sha256, `source` (`agent`, `ai_job` or `copy`) with the job id, page ids, conversation id or `source_version_id` (the copied version), `plan_max_marks` (the header snapshot), `warnings` (sanitiser notices, below), the pinned `template_revision_id` and the `pdf_artifact_id` |
+| `exam_question_paper_figure` | An uploaded image a version prints (JPEG, or PNG up to 400 KB when it has transparency), owned by the paper, deduplicated by `source_attachment_id` (a chat image) or `source_figure_id` (a figure of a copied version); at most one of the two is set |
+| `assistant_attachment` | A chat attachment, an image or a PDF by its `kind` (below) |
 | `assistant_model_request` | The job's cost rows: `source = 'question_paper'`, `question_paper_job_id`, no chat run |
 
 **Migration 0064** (`question-paper-html-fragment`) moved versions from the structured JSON to
@@ -109,6 +120,15 @@ data) keep their PDF and get a one-line placeholder fragment and one `legacy` no
 in an earlier format. The preview is not available; the PDF is the original."), which the
 version list, card and preview show like any notice; generating the paper again adds a proper
 version.
+
+**Migration 0065** (`question-paper-copy`) added the `copy` source, `source_version_id` on versions
+and `source_figure_id` on figures. `source_version_id` is a foreign key to the copied version
+`ON DELETE SET NULL`: the source paper can be deleted later (by `deleteQuestionPaper`,
+`deleteExamPlan` or the demo purge) and the copy must survive, so the reference may neither cascade
+nor block that delete; the copy never needs the source again (its fragment is stored and its figures
+were copied). After such a delete the version is still `source = 'copy'` with a null
+`source_version_id`; a check allows `source_version_id` only on a copy. `source_figure_id` is a plain
+value (no foreign key), like `source_attachment_id`.
 
 The PDF of a version is an `artifact` row (`kind: pdf`, `document_type:
 question_paper`, class, session and exam filled) under
@@ -143,7 +163,7 @@ chat: attach photos -> draft(s) -> user: "save" -> approval -> version n
   and a model that cannot read it makes generation fail with a clear message
   instead of dropping the page (D46). The browser converts HEIC to JPEG itself where
   it can (Safari).
-- **Generation** (manual only). See "The generation job".
+- **Generation** (manual only, optionally with the teacher's instructions on what to change). See "The generation job".
 - **Save.** `saveQuestionPaperVersion` validates the fragment (`checkQuestionPaperDraft`:
   sanitise, caps, non-empty, every formula typeset, every figure id usable and the figures'
   printed size), stores the **sanitised** fragment, copies chat-attachment figures into the paper, picks the school's currently
@@ -164,6 +184,7 @@ chat: attach photos -> draft(s) -> user: "save" -> approval -> version n
   `checkQuestionPaperDraft` also totals the KaTeX HTML and the stored figures (base64,
   12 MB cap) so validate, save and the job agree. A stored version previews and re-prints with its saved `plan_max_marks`
   (class, subject, mode and exam names still come from the live plan).
+- **Copy.** See "Starting from an earlier paper".
 - **Delete.** `deleteQuestionPaper` (refused while a job is in flight) and
   `deleteExamPlan` delete the rows (pages, jobs, versions, figures cascade), the
   PDF artifacts and, after the commit, every stored object (best effort, logged).
@@ -171,6 +192,53 @@ chat: attach photos -> draft(s) -> user: "save" -> approval -> version n
 - **Concurrency.** Everything that changes a paper's pages, jobs or versions runs
   under a `FOR UPDATE` lock of the paper row. While a job is in flight, page changes
   and deleting the paper are CONFLICT.
+
+## Starting from an earlier paper
+
+A teacher starting the paper of (session, exam, class, subject, mode) can begin from a paper the
+school already saved, for example last term's or last session's paper of the same class and subject.
+The earlier paper never changes. Code: `question-paper.copy.ts` (listing, key rules, figure copying)
+and `copyQuestionPaperVersion` in `question-paper.version.service.ts`.
+
+- **What may be copied.** A saved version of another paper of the **same school, class and
+  subject**, from any session, exam and mode. A class is a school-level row (`class` has no session
+  column; plans and papers name it by `class_id` in every session), so the same class in an earlier
+  session is the same `class_id`: an exact match, never a guess by name. The subject is the same
+  `subject_slug`. A class that was replaced by a new row (a different `class_id`) is not matched.
+- **`listQuestionPaperCopySources(paperKey)`** (read) lists those papers that have at least one
+  saved version, never the target itself, newest saved first (at most 100). Each entry: `key` (the
+  source's natural key), `sessionLabel` ("2025–26"), `sessionActive`, `examName` and `modeName` (as
+  configured today, the slug when no longer configured), `latestVersionNo`, `savedAt` and
+  `planMaxMarks` of that latest version (its snapshot).
+- **`copyQuestionPaperVersion({ ...targetKey, source: { ...sourceKey, versionNo }, expectedVersionNo })`**
+  (write) saves a NEW version of the target through `saveQuestionPaperVersion` with source `copy`:
+  the target must be writable (active session, exam not completed, `paper_locked` otherwise),
+  `expectedVersionNo` is the target's token (CONFLICT exactly as for an agent save), the stored
+  fragment is cleaned and checked again (a stricter profile applies to it; what it removes becomes
+  the new version's notices), the school's **currently selected** template prints it and
+  `plan_max_marks` is the **target** plan's maximum (a header snapshot of the paper being saved). No
+  model is called, so a school at its monthly AI limit can copy.
+- **Refusals** (`data.reason`): `copy_source_mismatch` (BAD_REQUEST: another school, class or
+  subject), `copy_source_is_target` (BAD_REQUEST), `copy_source_not_found` (NOT_FOUND: no such
+  source paper or version, or it was deleted before the copy committed), `copy_figure_unavailable`
+  (BAD_REQUEST, below), plus every refusal of a save (`paper_locked`, `plan_mode_removed`,
+  `QUESTION_PAPER_TEMPLATE_MISSING`, CONFLICT, an invalid fragment).
+- **Figures.** A source fragment prints figures owned by the source paper (`qpf_` ids), and the
+  renderer only loads figures the paper being printed owns. The copy therefore copies each one into
+  the target first (`copySourceFigures`): every id must be a figure row of the source paper; each
+  object is read and checked against the row's size and sha256, and the target's 30 figure cap is
+  checked for the whole set, **before anything is written**. The bytes are stored unchanged (they were
+  normalised when the source figure was made) as new target figures under
+  `schools/{schoolId}/exam-question-papers/figures/{figureId}`, with `source_figure_id`, and the ids in
+  the fragment are rewritten; a figure the target already copied from the same source figure is
+  reused. Any figure that cannot be copied refuses the copy with `copy_figure_unavailable` and no
+  version: a copy never prints "Figure unavailable". Placeholders stay placeholders. As with chat
+  attachments, figures copied for a version that is then refused (the target changed or locked in
+  between) stay on the target unused and go with it.
+- **Locks.** The save transaction is the usual one (session `FOR SHARE`, the target plan `FOR SHARE`,
+  the target paper `FOR UPDATE`); it then reads the source version `FOR KEY SHARE`, so a source
+  deleted while the copy rendered is refused (`copy_source_not_found`) rather than violating the
+  foreign key. Nothing locks the source paper.
 
 ## The HTML fragment
 
@@ -221,7 +289,7 @@ stored), so the stored value is exactly what the render's second cleaning produc
 then pass the **output grammar** (`question-paper.output.ts`, an exact check that fails closed, run
 at save and at every render): lowercase allowlisted tags only, plain double-quoted allowlisted
 attributes (no `on*`), no comment/CDATA/doctype, balanced tags, `style=""` attributes and `<style>`
-text equal to their cleaned form with no out-of-flow `position`; its tag separators are the five ASCII
+text equal to their cleaned form; its tag separators are the five ASCII
 whitespace characters of the HTML tokenizer only (never JS `\s`, which also matches U+00A0, U+3000 and
 others the tokenizer reads as part of a name). The one element whose content the
 browser does not read as markup is `<style>`, so it is written exactly `<style>`, never inside an
@@ -259,14 +327,28 @@ was stored. `stats` count the cleaned output only.
   dropped. A model asked for "an engaging diagram" reaches for SMIL or CSS animation, so the
   guide forbids it first and the sanitiser enforces it. Do not allow any of these to make a design
   look better.
-- **CSS.** A property allowlist (layout, spacing, borders, colours, font properties, direction,
-  white space); `position` only `static` or `relative`, no `z-index`, no `top/right/bottom/left`, no
-  negative margins (a small negative `text-indent` is allowed); fonts only from the installed Noto
-  families and the generic ones; values with `url`, `\`, `<`, `>`, braces or `@` are dropped. **Every
-  number is checked**, not only lengths: no `calc() min() max() clamp() var() env()`, no exponent
-  notation, a cap per unit near an A4 page (`font-size` capped far lower), a cap per property for
-  unitless numbers (`line-height` 5, `columns` 6, `flex` 20, grid `repeat()` 12 and at most 40
-  tracks, ...); SVG geometry, sizes and `stroke-dasharray` are bounded the same way. The converter's
+- **Layout is the author's** (product owner's decision, 2026-11-14). The teacher sees the paper
+  as it prints and approves every save, so a layout that covers the school's heading or footer is
+  seen and refused by a person; the sanitiser does not decide how a paper looks. Allowed:
+  `position` relative, absolute and sticky with `top/right/bottom/left/inset` and `z-index` (labels
+  laid over a figure). Not `fixed`: the preview shows a fixed box once, but print repeats it on
+  every page over the school's header, so the PDF would differ from what was approved. Negative
+  margins, `box-shadow`, `text-shadow`, linear/radial/conic gradients, `visibility`, `::before`,
+  `::after`, `::marker` with `content` (quoted text, `counter()`), `:hover`, `:not()`, `:is()` and
+  `:where()` (their argument is checked like any selector, one level deep), and text as large as a
+  page. Tags for code and quoted text (`pre code kbd samp blockquote small section label center
+  mark s del ins dl dt dd`) are allowed. What stays out is what loads, runs or moves: no URL of
+  any kind (so no background or `<img>` from a web address: the PDF converter has no network, and
+  the page's CSP allows only `data:` images), no `transform`, `filter` or animation.
+- **CSS.** A property allowlist (layout, positioning, spacing, borders, shadows, colours and
+  gradients, font properties, direction, white space); fonts only from the installed Noto families
+  and the generic ones; values with `url`, `\`, `<`, `>`, braces or `@` are dropped (quoted text in
+  `content` may hold any other character). **Every number is checked**, not only lengths: no
+  `calc() min() max() clamp() var() env()`, no exponent notation, a cap per unit near an A4 page
+  (the same for negative numbers), a cap per property for unitless numbers (`columns` 6, `flex` 20,
+  grid `repeat()` 12 and at most 40 tracks, ...); SVG geometry, sizes and `stroke-dasharray` are
+  bounded the same way. These caps keep a paper from asking for endless pages, not from looking
+  a certain way. The converter's
   page cap is the second line of defence (see Budgets). **Every selector is rebuilt from validated
   parts and prefixed with the body wrapper class and a descendant combinator** (`.qp-body .x`), so a
   rule matches only inside the paper and cannot restyle the school's heading or footer; an authored
@@ -281,6 +363,117 @@ was stored. `stats` count the cleaned output only.
   figure id, figures too large to print). The version stores `stripped` as its **notices**
   (`warnings: [{ code: 'sanitised', message }]`); the only other kind is the `legacy` notice of rows migrated by 0064.
 
+## The paper's screen
+
+One paper's screen in the management app (`components/question-paper`) is one of two views,
+decided by `resolveView` from facts that are each their own input (never inferred from one
+another): the first screen asked for in the URL, whether a version exists, whether a
+generation is in flight, and whether there is a conversation to show (`paperChatOf`: the
+one the URL names, else the paper's latest shared conversation).
+
+- **Start** (`QuestionPaperStart`): one card in a centred column, in the shape of the
+  assistant's message box beside which the paper is later changed. It holds what the paper
+  is made from, an optional note, and one button, *Create paper*. Nothing has to be typed
+  and nothing has to be chosen first: the card never opens on a list of options. The rules
+  are pure functions in `question-paper-start-model.ts` (`sortSourcePicks`, `createPlanOf`).
+  A paper is made from **one source**:
+  1. **Photos** (the default). The paper's stored pages are a row of page-shaped, numbered
+     tiles (`PaperSourceTray`), so what was added sits where it was added. Every way to add
+     stays with them: from `sm` up the row ends in two dashed tiles of the same shape, *Add
+     pages* and *Take a photo*; on a phone those are two buttons under the tiles. With no
+     photo yet, a dashed *Choose files* tile stands beside "Add the paper" and the buttons
+     *Take a photo* and *Copy an earlier paper*. A phone takes the photo with its own camera
+     (a capture input), a computer in a webcam dialog; which one shows is the way's
+     `pointer`, a fact kept apart from where the tray draws it, so the two never override
+     each other (a test guards it). Photos on their way appear in the row at once and a
+     failed one stays marked until dismissed. Pressing a tile opens the page large enough
+     to read (`PagePreviewDialog`, the uploaded photo itself, Previous / Next / Remove
+     page); a tile is dragged to reorder; removing asks first. On a phone the tiles carry
+     no remove mark (removing is in the page viewer) and one caption line says what a tap
+     and a hold do. Photos also arrive by drop on the card or paste into the note.
+     *Create paper* starts the durable job, with the note as its `instructions`, and opens
+     the studio, where the job is followed and the instructions are shown.
+  2. **One PDF**, picked or dropped like a photo. It is uploaded as a chat attachment
+     (`uploadAssistantAttachment`; the server decides from the bytes that it is a PDF, never
+     parses it and never serves it back) and shown as one row with its name and size; it
+     has no preview, by that rule. *Create paper* sends it as the first message of the
+     paper's conversation (`pdfPaperMessage`, with the note as the user's instructions):
+     the model reads the PDF itself. Photos and a PDF never mix, and only one PDF is taken;
+     the refusal says what to remove. A Word file is refused with "Save it as a PDF, then
+     add the PDF"; refusals show as one alert row that clears when something is added.
+  3. **An earlier paper**, chosen in a dialog (`EarlierPaperDialog`,
+     `listQuestionPaperCopySources`) and shown as one row named "exam · mode" with its
+     session, version, marks and date, and a *Preview* of it as it prints
+     (`EarlierPaperPreviewDialog`; on a phone the page can be switched from *Whole page* to
+     *Larger text*). It is offered only while the card holds no photo. A copy is the old
+     paper as it is, so when it was written for other marks than this paper the card says
+     so before the copy is made (`marksMismatchOf`). *Create paper* copies it
+     (`copyQuestionPaperVersion`); a note is then sent as the first message of the paper's
+     conversation, so the assistant drafts the change on the copy. Without a note the
+     studio opens on the new version.
+  4. **Only the note**: with nothing else in the card the note is a description, the first
+     message of the paper's conversation (`describedPaperMessage`).
+  Choosing a PDF or an earlier paper does not delete photos already on the paper; the card
+  says they are kept and not used. While one of them is chosen no other way in is shown:
+  the card shows the path taken, not the others. The note has a label that stays while the
+  user types ("Or describe the paper" on an empty card, "Instructions (optional)" with a
+  source) and is one line tall until it is used. *Create paper* is grey while it cannot
+  create and the brand colour only when a press will; why it is closed (photos still
+  uploading, no template, a completed exam) is written beside it, a failed creation stays
+  beside it too and nothing in the card is lost; when nothing is wrong there is no line. A
+  paper that already has versions reaches the same card from its menu or from the photos
+  button beside the PDF (a new version is added; the others are kept). Whenever the paper
+  has a studio to return to (a version, a generation or a conversation), a chevron left of
+  the paper's name and *Back* beside the button return to it.
+- **Studio** (`QuestionPaperStudio`): the paper as it prints beside the assistant that
+  changes it. Shown once there is a version, a generation at work or a conversation.
+  - **Layout.** One paper's screen is a workspace of its own: the exam's heading and tabs
+    are not drawn above it (`isQuestionPaperWorkspacePath`; breadcrumbs lead back). From md
+    up the studio fills the window under the app's header (`APP_SHELL_FILL_HEIGHT_MD_CLASS`,
+    which leaves room for the shell's alert rows): one header row (name, version, PDF,
+    menu), then the assistant on the left and the paper on the right, each scrolling inside
+    its pane, so nothing is cut off on arrival and the page never scrolls. The paper is the
+    sandboxed preview in its `fill` form (`DocumentPreview`), scaled to the pane.
+  - The **paper's side** shows the version the URL names; else the assistant's **unsaved
+    draft** when the conversation holds one (`unsavedDraftOf`: the newest ready draft of
+    this paper with no successful save after it); else the latest version. An unsaved
+    draft has one action, *Save as version n*, which sends the same sentence as the draft
+    card's Save in the chat (`saveDraftMessage`); the approval that follows is given in the
+    assistant like every other change. Nothing on this side is editable: versions are
+    immutable and the preview frame stays sandboxed.
+  - The header row also has an icon button beside *Download PDF*, named by its tooltip
+    *View uploaded photos or file* (*Add photos or a file* while the paper has no photo):
+    it opens the same card as the menu's *Add photos or a file*. It is shown when the paper
+    has photos, or the user may add some to a paper that can still change.
+  - The **assistant's side** is the paper's own conversation: the ordinary assistant
+    (`AssistantChat`) with the paper as its seed from the first message, its own welcome
+    words, placeholder and suggestions, and no prefilled sentence. It is recorded as the
+    `panel` surface. Every conversation started here (from the chat or the first screen) is
+    **shared with the paper** (`shareWithPaper`, see [Assistant](assistant.md#conversations-shared-with-a-question-paper)):
+    whoever opens the paper, and whoever comes back to it, lands in the paper's latest
+    conversation (`latestConversationId` in the detail), whoever started it. `?chat=<id>`
+    names another; `?chat=new` is a new one. The header's *New chat* starts a new one and
+    *Chat history* lists the paper's conversations (who started each, when it last
+    changed); New chat is for people who may change the paper now, Chat history for
+    anyone who may manage the class's papers (also once the exam has ended). A message someone else sent
+    shows their name, and a change waiting for someone else's approval says whose. On a
+    phone the paper is the screen and the assistant is a full-screen sheet opened from a
+    bar at the bottom.
+  - A viewer, and a paper whose exam has ended, read the paper's conversation with the
+    message box closed (its placeholder says why) and see its unsaved draft without *Save*.
+    The box's tray stays: whose approval a change waits for, and a user's own approval or
+    Stop. With no conversation they get the paper alone, as does a first paper still being
+    generated.
+  - The paper's side shows an unsaved draft only while it is newer than every saved version
+    (`draftIsNewest`), and only a save of this same paper settles it (`unsavedDraftOf`).
+- The URL is `?start=sources|earlier` (the first screen for a paper that already has
+  versions, and the same with the earlier-paper dialog open, so Back closes the dialog),
+  `?version=n` and `?chat=<conversation id>|new` (`questionPaperWorkspaceHref`). Only the
+  assistant's own ids and `new` are read from `chat` (`chatIdOf`, `paperChatOf`).
+- The paper's menu holds what is not the main task: All versions (a dialog with who saved
+  each, when and how, and its PDF), Download latest PDF, Add photos or a file, Copy an
+  earlier paper, Delete paper.
+
 ## What the UI shows
 
 Draft and version cards, the version list and the Question paper tab show no marks computed from the paper (the tab heading still names the exam plan's maximum marks, a plan fact). A draft card
@@ -291,7 +484,7 @@ the raw lines are behind a collapsed "Details"), keeps the sanitiser's `stripped
 collapsed "N notices" list (one notice per kind of change, the same count the
 version list and badge use; the label is generic because a notice can also be the `legacy` one), says how many figures are still placeholders, and offers Preview and Save as new
 version. A saved version shows its notice count; its preview lists the notices (collapsed) and
-a placeholder note with the Continue in chat link. `previewOutputSchema.placeholderFigures` is
+a placeholder note. `previewOutputSchema.placeholderFigures` is
 the count (counted from the sanitised fragment; it is not a notice).
 
 ## The renderer contract
@@ -385,12 +578,51 @@ lock. The cap bounds how many jobs run at the same time, not how far the cached 
 can be overshot: jobs started one after another inside the cache window all see the same
 cached spend.
 
+**The teacher's instructions.** `startQuestionPaperGeneration` takes an optional
+`instructions` string, a short note on what to change ("Keep the questions but change the
+numbers", "Make section B easier", "Type it in Hindi", "Leave out question 7"). The input
+schema (`generationInstructionsSchema`) turns CR and CRLF into `\n` and trims; an empty or
+whitespace-only value is none; the rest may be at most
+`QUESTION_PAPER_GENERATION_INSTRUCTIONS_MAX_CHARS` (2,000, UTF-16 code units, exported from
+`question-paper.dto.ts` for the UI); any other control character (C0 except tab and line
+feed, DEL, C1) is **refused, never stripped**, so what is stored and sent is exactly what the
+teacher wrote. Format characters such as the zero-width joiners Indian scripts need pass. The
+text is its own fact on the job row (`instructions`, null for none), written when the job is
+created and never changed; it changes no check, permission, limit or cost.
+`getQuestionPaperDetail` returns it on `activeJob` and `lastFinishedJob` (`instructions:
+string | null`) so the screen can show what was asked; `getQuestionPaper`, which agents read,
+keeps its job shape. A version a job saved keeps `source = 'ai_job'` and `source_job_id`; the
+instructions are read through that job (no copy on the version, which would be a second
+record of the same fact). They are the words of an authorised staff member but untrusted
+text for the model:
+
+- Without instructions the job sends exactly the transcription prompt and user turn
+  (`QUESTION_PAPER_JOB_SYSTEM_PROMPT`, `buildGenerationParts`).
+- With them the system prompt is `QUESTION_PAPER_JOB_INSTRUCTED_SYSTEM_PROMPT`: the
+  photographed pages are the source, the instructions say what to change, and the Fidelity
+  rules (order, numbering, language, marks, "[illegible]", nothing invented) hold for
+  everything they do not ask to change. Its output, figure, template and vocabulary sections
+  (animation rule first) are the same text as the transcription prompt's, and it says the
+  instructions change the paper's content only and never these rules; a part that asks for
+  something else (Markdown, a script, an animation, the school's heading) is ignored. Text in
+  the photographs stays data.
+- The instructions travel only in the user turn, after the pages, as their own text part:
+  a labelled line, the instructions as **one JSON string** (a delimiter that cannot be closed
+  from inside: quotes and line breaks are escaped) and a closing line.
+- The repair request does not send them again: the previous fragment already carries them
+  out and the repair changes only the listed problems, so sending them again would invite
+  applying them twice ("change the numbers" twice). It adds one sentence to keep the changes
+  they made, and uses the instructed system prompt.
+- The worker reads the instructions from the job row in the begin step (journaled with the
+  job's other facts), so every request, retry and attempt of the job sends the same text.
+  Deploy the worker with or before the API: an older worker ignores the column.
+
 The workflow (`workflows/question-paper`, ingress-private, steps shared with the
 integration tests in `generation.ts`): begin, re-check access and the paper
 (limit, feature, role, exam not ended), gather inputs (every page has a readable
 source, at most 16 MiB of images counted as base64, the same budget as the chat), **one plain
 text model request** (system prompt with the shared fragment rules; the pages in order as
-"Page i of n" and the image; its cost row is saved inside that same step; a repeated billed call
+"Page i of n" and the image, then the teacher's instructions when there are any; its cost row is saved inside that same step; a repeated billed call
 takes the next `:attempt:{k}` key derived from the saved rows, never dropped), then check the
 answer: extract the fragment (`extractQuestionPaperFragment`: strip code fences and a doctype),
 sanitise and validate it (`checkQuestionPaperDraft`: non-empty, within the caps, formulas typeset;
@@ -432,27 +664,38 @@ and count toward AI usage by feature ("By feature" in the usage views); see
 
 ## Chat: attachments, tools, drafts, pruning
 
-**Attachments.** The assistant composer accepts up to 20 images per message (paperclip,
-drop or paste; JPEG, PNG, WebP, HEIC family; 15 MB each). Files are uploaded first
-(`POST /api/blob/schools/:schoolId/assistant/attachments`, browser session only, origin
-checked, 60 per minute per IP) and become `assistant_attachment` rows with the same
-derivatives as pages; a message then carries ids, never bytes. At most 40 unsent
-attachments per user per school. Taking an image out of the composer deletes it
-(`DELETE .../attachments/:attachmentId`, owner and unsent only; an upload that
+**Attachments.** The assistant composer accepts up to 20 files per message, images and
+PDFs together (paperclip, drop or paste; JPEG, PNG, WebP, HEIC family up to 15 MB, PDF up
+to 10 MB; Word and other files are refused with a sentence that says to save them as PDF).
+What a file is comes from its bytes, never its name (`kind`: `image` or `document`; the
+canonical rules, limits and provider docs are in [In-app assistant](assistant.md#attachments-question-paper-tools-and-context-pruning)).
+Files are uploaded first (`POST /api/blob/schools/:schoolId/assistant/attachments`,
+browser session only, origin checked, 60 per minute per IP) and become
+`assistant_attachment` rows: an image with the same derivatives as pages, a PDF as one
+object stored exactly as uploaded (never parsed, rendered or served back to a browser;
+it shows as a tile with its name and size). A message then carries ids, never bytes. At
+most 40 unsent attachments per user per school. Taking a file out of the composer deletes
+it (`DELETE .../attachments/:attachmentId`, owner and unsent only; an upload that
 finishes after its tile was removed is deleted too); an upload that finds the user at the
-cap first frees that user's unsent images older than an hour (left by a reload);
+cap first frees that user's unsent files older than an hour (left by a reload);
 unsent ones are deleted after 24 hours, the rest with their conversation and with the
 school. Objects are deleted before their row, so a failed storage delete leaves the row
-for the sweep to retry (the sweep also collects attachments of deleted conversations). A model that cannot read a file type (HEIC
-on Anthropic) makes the send fail with a message asking the user to convert it (D46);
-images are never silently dropped.
+for the sweep to retry (the sweep also collects attachments of deleted conversations). A
+model that cannot read a file type (HEIC on Anthropic, a PDF on a provider without
+document support) makes the send fail with a message that says what to attach instead
+(D46); files are never silently dropped. A PDF reaches the model as the PDF itself (Gemini
+inline `application/pdf`, Claude a `document` block); a PDF the provider refuses (too
+many pages, a password) fails the turn with a sentence about the PDF.
 
 **Tools** (advanced MCP tools, module `exams`; reachable by external MCP clients through
 the advanced-tool meta tools and by the in-app assistant): `listQuestionPapers`,
 `getQuestionPaper`, `listQuestionPaperVersions`, `getQuestionPaperDraft`,
 `learn_question_paper_generation`, `validateQuestionPaperDraft` and `saveQuestionPaperVersion` (a write, so the in-app
-assistant asks the user to approve). The other eight procedures are *hidden* (human
-only): page photos, generation, polling, previews and downloads.
+assistant asks the user to approve). The other ten procedures are *hidden* (human
+only): page photos, generation, polling, previews, downloads and starting from an earlier paper
+(`listQuestionPaperCopySources`, `copyQuestionPaperVersion`: a button of the paper screen; an agent
+already reads any paper it may read with `getQuestionPaper` and saves its own edit, and could not
+use the source's `qpf_` figure ids, which a save refuses).
 
 - `learn_question_paper_generation` returns the guide (vocabulary, formulas as `data-math`,
   figures, scripts through `lang`, the NO ANIMATION rule), the limits and one worked example
@@ -500,9 +743,15 @@ only): page photos, generation, polling, previews and downloads.
   `question_paper` view (`show_view`) shows a saved version with Preview and Download.
 - A chat attachment can be a **figure**: the agent puts its `asat_` id in `<img data-figure-id>`;
   validation and previews accept it only for the in-app assistant's own user, only when
-  the attachment was sent, belongs to that user and school and decodes; saving copies
-  it once into the paper (`qpf_` ids are what is stored).
-- **Continue in chat** (the quiet link under a result) opens
+  the attachment was sent, belongs to that user and school, is an image and decodes; saving copies
+  it once into the paper (`qpf_` ids are what is stored). A **PDF is never a figure**: its id
+  as a `data-figure-id` is a problem line ("<name> is a PDF the user attached, not an image ...
+  Read it as source material; for a picture inside it write `<figure data-placeholder="...">`,
+  or ask the user to attach that picture as an image", `documentFigureProblem` in
+  `question-paper.attachments.ts`), a preview prints nothing, and a save refuses it.
+- **A seeded conversation.** The paper's own screen starts its conversation with the
+  paper as the seed (see "The paper's screen"). The assistant page also still accepts a
+  seed in its address, although nothing in the app links to it any more:
   `/school/:id/assistant?seed=question_paper&sessionId=&examSlug=&classId=&subjectSlug=&modeSlug=`:
   a new conversation seeded with the paper's natural key (no personal data) and a
   prefilled box. Nothing is sent until the user sends. A malformed link (parts are limited
@@ -514,7 +763,7 @@ only): page photos, generation, polling, previews and downloads.
   to the stored transcript): only the last two human messages are sent in full. In older
   turns a tool result of 8,000 characters or more is replaced by a short stub naming the
   tool and the size, and an older attachment by a note that keeps its `asat_` id and says
-  the image is no longer visible (see "Attachment ids" below). The same applies to the
+  the image or PDF is no longer visible (see "Attachment ids" below). The same applies to the
   *inputs* of older tool calls: a top-level text field of 4,000 characters or more (the `html` the model
   wrote into `validateQuestionPaperDraft` or `saveQuestionPaperVersion`) becomes a stub that names
   the field, the tool and the size and points at what still works. The call, its id, its name and
@@ -526,7 +775,7 @@ only): page photos, generation, polling, previews and downloads.
   write the text again and mentions no draft id. The stub also says it is not the content and
   must never be sent as `html` (a model that copies it sends text without markup, which the draft
   check refuses as an empty paper). A validate result over 8,000 characters is itself stubbed
-  once old, so the draft id is then found by calling the tool again or re-validating. Fresh images are sent newest first within a 16 MiB budget counted as base64 (4/3 of the file, under Gemini's 20 MB request limit); an image over the provider's own cap (5 MB on Claude) is reported as unreadable. The learn payload
+  once old, so the draft id is then found by calling the tool again or re-validating. Fresh images and PDFs are sent newest first within one 16 MiB budget counted as base64 (4/3 of the file; `MODEL_REQUEST_ATTACHMENT_BUDGET_BYTES`, well under both providers' request limits); an image over the provider's own cap (5 MB on Claude) is reported as unreadable. The learn payload
   counts as a long result, so after two more messages the agent calls the tool again.
 
 - **Attachment ids.** The model must be told each attachment's id or it cannot write a
@@ -534,7 +783,9 @@ only): page photos, generation, polling, previews and downloads.
   `[Attachment asat_...: <sanitised file name>, image/png (1 of 2). Use this id as data-figure-id on an <img> to put the image in a question paper.]`
   (`attachmentLabel` in `runtime/context.ts`, used by the Anthropic, Gemini and fake
   adapters alike): only the generated id, the sanitised name (brackets and line breaks removed)
-  and the content type, never user free text. Notes for attachments that are not shown
+  and the content type, never user free text. A PDF's line ends instead with "It is a PDF
+  document: read it as source material. It is not an image and cannot be used as
+  data-figure-id.", and the guide (`learn_question_paper_generation`) says the same. Notes for attachments that are not shown
   (older than the window, over the image budget, unreadable, missing) keep the id too: an
   `asat_` id stays valid for figures while the attachment exists for the same user, whether or
   not its pixels are still visible. An unusable figure id is a validation problem that names the allowed forms
@@ -548,12 +799,13 @@ only): page photos, generation, polling, previews and downloads.
 | Fragment limits, guide, examples, fence extraction, hashing | `packages/question-paper` |
 | Tables, enums, ids | `packages/db/src/schema/exam-question-paper.ts`, `assistant.ts` |
 | Router, services, sanitiser (`question-paper.sanitize.ts`, `.css.ts`), renderer, README | `packages/api/src/routers/school/question-paper` |
+| Starting from an earlier paper (listing, key rules, figure copying) | `question-paper.copy.ts`; `copyQuestionPaperVersion` in `question-paper.version.service.ts` |
 | Generation job | `packages/api/src/workflows/question-paper`, served by `apps/worker` |
-| HTTP upload and read routes | `apps/server/src/http.ts` (page photos), `packages/assistant/src/attachments.http.ts` (chat images) |
+| HTTP upload and read routes | `apps/server/src/http.ts` (page photos), `packages/assistant/src/attachments.http.ts` (chat images and PDFs; kind from bytes in `packages/api/src/files/attachment-upload.ts`) |
 | Template, marketplace designs, slot | `packages/api/src/routers/school/document` (`document.catalog.marketplace.ts`, `question-paper.slot.ts`) |
 | Model call (providers, plain text) | `packages/assistant/src/question-paper-model.ts`, `providers/*` (`generateText`) |
 | Chat contract, cards | `packages/assistant-contract`, `packages/components/src/question-paper/chat-cards.tsx` |
-| Management UI | `apps/management/components/question-paper`, `packages/components/src/question-paper`, routes under `exam/[examSlug]/question-paper` |
+| Management UI | `apps/management/components/question-paper` (`question-paper-workspace.tsx` decides the view, `question-paper-start.tsx` the first screen with its rules in `question-paper-start-model.ts`, `earlier-paper-dialog.tsx` the earlier-paper picker, `source-preview-dialogs.tsx` the page viewer and the earlier paper's preview, `question-paper-studio.tsx` the paper beside its assistant, `use-paper-assistant.ts` the paper's conversation), `packages/components/src/question-paper`, routes under `exam/[examSlug]/question-paper` |
 | Demo seed | `packages/api/src/workflows/demo-school` (`seed/question-papers.json`, `seedQuestionPaper`) |
 
 ## Demo schools
@@ -563,7 +815,9 @@ English science paper and a Hindi mathematics paper, each with two synthetic pag
 images and version 1 (the two worked examples: Hindi, maths, an inline SVG, a figure placeholder)
 printed with a seeded `question_paper` template. The assistant
 stays off in a demo, so the tab is invisible until an admin enables it; the seed
-therefore calls the service functions, not the procedures.
+therefore calls the service functions, not the procedures. The seed has no copied version: each
+seeded paper is a copy source for the same class and subject in any other exam (the list shows it
+once the tab is visible).
 
 ## Extending
 
@@ -607,7 +861,9 @@ therefore calls the service functions, not the procedures.
   src/workflows/question-paper src/workflows/demo-school src/files` covers the sanitiser
   (including a hostile fragment with script, `onerror`, `animate`, `@keyframes`, `url()` and
   `foreignObject`), the renderer, router and permissions, pages, the document system, chat
-  attachments, the generation workflow with a scripted model, the sweep, the demo seed and the
+  attachments, starting from an earlier paper (`question-paper.copy.integration.test.ts`: listing,
+  copied and re-owned figures, permission order, locks, conflicts, another school, the AI limit,
+  deletes), the generation workflow with a scripted model, the sweep, the demo seed and the
   demo purge. The pages integration test replaces the workflow engine's sender with a failing
   fake, so it passes with or without a Restate running next to the database.
 - Providers and chat: `pnpm --filter @campuspilot/assistant exec vitest run --project unit`

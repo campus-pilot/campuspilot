@@ -17,6 +17,7 @@
     "@campuspilot/auth": "workspace:*",
     "@campuspilot/components": "workspace:*",
     "@campuspilot/env": "workspace:*",
+    "@campuspilot/s3": "workspace:*",
     "@campuspilot/ui": "workspace:*",
     "@icons-pack/react-simple-icons": "^13.15.1",
     "@monaco-editor/react": "^4.7.0",

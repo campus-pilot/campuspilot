@@ -36,9 +36,17 @@ afterAll(async () => {
   await db.$client.end();
 });
 
-/** A fresh client address per test, so one test's IP failures never lock another. */
+let nextTestIp = 0;
+
+/**
+ * A client address no other call in this run has used, so one test's IP
+ * failures never lock another. Sequential rather than random: a random pick
+ * from a small range collides now and then and flakes the lock assertions.
+ */
 function testIp() {
-  return `203.0.113.${1 + Math.floor(Math.random() * 250)}`;
+  const offset = nextTestIp;
+  nextTestIp += 1;
+  return `198.18.${Math.floor(offset / 250)}.${1 + (offset % 250)}`;
 }
 
 async function createSchool() {

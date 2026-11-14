@@ -1,3 +1,4 @@
+import { ASSISTANT_DOCUMENT_REJECTED_MESSAGE } from '@campuspilot/assistant-contract/attachments';
 import { ASSISTANT_TERMINAL_RUN_STATUSES } from '@campuspilot/assistant-contract/dto';
 import type { Logger } from '@campuspilot/logger';
 import * as restate from '@restatedev/restate-sdk';
@@ -23,7 +24,7 @@ import {
   type AssistantConversationHandlers,
   type ProcessRunInput,
 } from './contract';
-import { buildModelContext, type ModelContextDeps } from './context';
+import { buildModelContextWithStats, type ModelContextDeps } from './context';
 import { buildAssistantPrompt, istInstant, type AssistantConversationFacts } from './prompt';
 import type { ProviderRegistry } from './providers/registry';
 import { billedUsageOf, type ModelProvider, type ModelToolResult, type TranscriptEntry } from './providers/types';
@@ -100,7 +101,7 @@ export type AssistantConversationDeps = {
   log: Logger;
   checkAccess: RunAccessCheck;
   /**
-   * Loads an attached image for a model request (see `context.ts`). Injected
+   * Loads an attached image or PDF for a model request (see `context.ts`). Injected
    * by `apps/worker` so the turn loop reads no school table and no object
    * storage itself; a test without attachments may omit it.
    */
@@ -428,7 +429,7 @@ export function createRunProcessor(deps: AssistantConversationDeps) {
     const catalog = await loadToolCatalog(await requireToken(run.runId));
     // The stored transcript holds markers and whole old results; the model gets
     // the shortened view (see `buildModelContext`). Nothing stored changes.
-    const transcript = await buildModelContext(
+    const { entries: transcript, documentsShown } = await buildModelContextWithStats(
       (await store.loadTranscript(db, run.conversationId)) as TranscriptEntry[],
       provider,
       { loadAttachment: deps.loadAttachment ?? (async () => ({ kind: 'missing' })) },
@@ -507,6 +508,12 @@ export function createRunProcessor(deps: AssistantConversationDeps) {
         'assistant.model.error',
       );
       const detail = errorText(error);
+      if (kind === 'rejected' && documentsShown > 0) {
+        // The request carried a PDF. The server never parses one, so a PDF over the
+        // provider's page limit, encrypted or damaged is found out here; the provider's
+        // own reason stays in `detail` (D46: said plainly, never dropped silently).
+        throw runFailure('document_rejected', ASSISTANT_DOCUMENT_REJECTED_MESSAGE, { detail });
+      }
       if (kind === 'rejected') {
         throw runFailure(
           'model_rejected',

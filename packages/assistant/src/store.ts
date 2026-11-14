@@ -30,7 +30,28 @@ import type { ModelPrices } from './runtime/providers/config';
 import { publishAssistantEvent } from './events';
 import { log } from './log';
 
-type ConversationRow = typeof assistantConversationTable.$inferSelect;
+export type ConversationRow = typeof assistantConversationTable.$inferSelect;
+
+/** A question paper by its natural key within a school (the seed's parts): what a conversation can be shared with. */
+export type PaperKeyParts = { sessionId: string; examSlug: string; classId: string; subjectSlug: string; modeSlug: string };
+
+/** The paper a conversation is shared with, or null for a private conversation. */
+export function sharedPaperOf(row: ConversationRow): PaperKeyParts | null {
+  const { paperSessionId, paperExamSlug, paperClassId, paperSubjectSlug, paperModeSlug } = row;
+  // The table's check keeps the five together; reading them together keeps a half key from ever counting.
+  if (paperSessionId === null || paperExamSlug === null || paperClassId === null || paperSubjectSlug === null || paperModeSlug === null) return null;
+  return { sessionId: paperSessionId, examSlug: paperExamSlug, classId: paperClassId, subjectSlug: paperSubjectSlug, modeSlug: paperModeSlug };
+}
+
+/** The columns that hold a paper key, for a where clause. */
+export const paperKeyWhere = (paper: PaperKeyParts) =>
+  and(
+    eq(assistantConversationTable.paperSessionId, paper.sessionId),
+    eq(assistantConversationTable.paperExamSlug, paper.examSlug),
+    eq(assistantConversationTable.paperClassId, paper.classId),
+    eq(assistantConversationTable.paperSubjectSlug, paper.subjectSlug),
+    eq(assistantConversationTable.paperModeSlug, paper.modeSlug),
+  );
 export type RunRow = typeof assistantRunTable.$inferSelect;
 type ItemRow = typeof assistantItemTable.$inferSelect;
 
@@ -40,7 +61,7 @@ export type EmitAssistantChange = (conversationId: string, change: AssistantChan
 
 /** A conversation as clients see it. */
 export function toConversationDto(row: ConversationRow): AssistantConversationDto {
-  return assistantConversationSchema.parse(row);
+  return assistantConversationSchema.parse({ ...row, sharedWithPaper: sharedPaperOf(row) !== null });
 }
 
 /**
@@ -50,7 +71,7 @@ export function toConversationDto(row: ConversationRow): AssistantConversationDt
  * drizzle writes bare column names inside `sql`, and a bare `id` in the
  * subquery would mean the run's id, not the conversation's.
  */
-const hasRunIn = (statuses: AssistantRunStatus[]) =>
+export const hasRunIn = (statuses: AssistantRunStatus[]) =>
   sql<boolean>`exists (select 1 from ${assistantRunTable} as run where run.conversation_id = ${assistantConversationTable}.id and run.status in (${sql.join(
     statuses.map((status) => sql`${status}`),
     sql`, `,
@@ -87,7 +108,7 @@ export async function listConversations(
   return {
     items: rows.map((row) =>
       assistantConversationListItemSchema.parse({
-        ...row.conversation,
+        ...toConversationDto(row.conversation),
         attention: row.awaitingApproval ? 'approval' : row.working ? 'working' : null,
       }),
     ),
@@ -255,10 +276,42 @@ export async function createConversation(
     title: string | null;
     provider: ConversationRow['provider'];
     model: string;
+    /** The question paper the conversation is shared with; none (the default) keeps it private to its user. */
+    paper?: PaperKeyParts | null;
   },
 ): Promise<ConversationRow> {
-  const [row] = await tx.insert(assistantConversationTable).values(input).returning();
+  const { paper, ...values } = input;
+  const [row] = await tx
+    .insert(assistantConversationTable)
+    .values({
+      ...values,
+      paperSessionId: paper?.sessionId ?? null,
+      paperExamSlug: paper?.examSlug ?? null,
+      paperClassId: paper?.classId ?? null,
+      paperSubjectSlug: paper?.subjectSlug ?? null,
+      paperModeSlug: paper?.modeSlug ?? null,
+    })
+    .returning();
   return row!;
+}
+
+/** A live conversation in that school, whoever owns it, or null (a deleted one is not found). Who may reach it is the caller's check. */
+export async function findLiveConversation(
+  db: AssistantExecutor,
+  input: { conversationId: string; schoolId: string },
+): Promise<ConversationRow | null> {
+  const [row] = await db
+    .select()
+    .from(assistantConversationTable)
+    .where(
+      and(
+        eq(assistantConversationTable.id, input.conversationId),
+        eq(assistantConversationTable.schoolId, input.schoolId),
+        isNull(assistantConversationTable.deletedAt),
+      ),
+    )
+    .limit(1);
+  return row ?? null;
 }
 
 /** A live conversation the user owns in that school, or null (a deleted one is not found). */

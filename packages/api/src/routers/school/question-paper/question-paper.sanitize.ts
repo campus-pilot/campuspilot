@@ -59,6 +59,8 @@ export const QUESTION_PAPER_HTML_TAGS = [
   'div', 'span', 'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li',
   'table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td', 'caption', 'colgroup', 'col',
   'br', 'hr', 'b', 'i', 'u', 'sup', 'sub', 'strong', 'em', 'figure', 'figcaption', 'img', 'style',
+  // Code and quoted text (computer science papers), sections, labels and editing marks: plain text containers.
+  'pre', 'code', 'kbd', 'samp', 'small', 'blockquote', 'section', 'label', 'center', 'mark', 's', 'del', 'ins', 'dl', 'dt', 'dd',
 ] as const;
 
 /** Stands for a style element that was inside an `<svg>`; removed with its content. */

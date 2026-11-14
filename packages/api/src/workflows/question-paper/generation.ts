@@ -1,4 +1,4 @@
-import { encodedImageBytes, MODEL_REQUEST_IMAGE_BUDGET_BYTES } from '@campuspilot/assistant-contract/attachments';
+import { encodedImageBytes, MODEL_REQUEST_ATTACHMENT_BUDGET_BYTES } from '@campuspilot/assistant-contract/attachments';
 import { ORPCError } from '@orpc/server';
 import { db as defaultDb, type Database } from '@campuspilot/db';
 import { examQuestionPaperJobTable, examQuestionPaperPageTable, examQuestionPaperTable, examQuestionPaperVersionTable } from '@campuspilot/db/schema/exam-question-paper';
@@ -19,7 +19,7 @@ import type { QuestionPaperJobInput } from './input';
 import { log } from './log';
 import { getQuestionPaperModel, type QuestionPaperModel, type TextPart, type TextResult } from './model';
 import { describeError } from './error-detail';
-import { buildGenerationParts, buildRepairParts, QUESTION_PAPER_JOB_SYSTEM_PROMPT } from './prompt';
+import { buildGenerationParts, buildRepairParts, questionPaperJobSystemPrompt } from './prompt';
 
 /**
  * The body of the generation job, shared by the Restate workflow
@@ -44,7 +44,7 @@ const DEFAULT_RETRY_DELAYS_MS = [5_000, 20_000] as const;
  * receive them (base64, 4/3 of the file, the same budget and helper as the
  * chat context); over it the job fails before any cost (design F5).
  */
-export const QUESTION_PAPER_MAX_REQUEST_IMAGE_BYTES = MODEL_REQUEST_IMAGE_BUDGET_BYTES;
+export const QUESTION_PAPER_MAX_REQUEST_IMAGE_BYTES = MODEL_REQUEST_ATTACHMENT_BUDGET_BYTES;
 /** Most problems kept from a validation (they are journaled and sent to the repair call). */
 const MAX_PROBLEMS = 50;
 
@@ -99,8 +99,16 @@ export function defaultGenerationDeps(): GenerationDeps {
   };
 }
 
-/** What the begin step returns: the job's facts, none of them large. */
-type BegunJob = { key: PaperKey; paperId: string; schoolId: string; requestedBy: string; pageIds: string[] };
+/**
+ * What the begin step returns: the job's facts, none of them large. The
+ * teacher's instructions (at most 2,000 characters) are journaled with them, so
+ * a replay sends exactly the text the first run read. A journal written before
+ * the field existed has no `instructions`; read it through {@link instructionsOf}.
+ */
+type BegunJob = { key: PaperKey; paperId: string; schoolId: string; requestedBy: string; pageIds: string[]; instructions?: string | null };
+
+/** The job's instructions, null for none (also for a begin step journaled before they existed: such a job had none). */
+const instructionsOf = (begun: BegunJob): string | null => begun.instructions ?? null;
 
 type PlannedPage = { id: string; position: number; name: string; key: string; mimeType: string };
 type Plan = { scope: PaperScope; pages: PlannedPage[] };
@@ -199,7 +207,16 @@ export async function runQuestionPaperGeneration(
     if (!validation.ok) {
       // One repair, text only; a second failure ends the job (no loop).
       await run('access:2', () => assertAccess(deps, begun));
-      const repair = await runModelRequest({ deps, run, model, input, begun, plan, n: 2, parts: buildRepairParts(validation.html, validation.problems) });
+      const repair = await runModelRequest({
+        deps,
+        run,
+        model,
+        input,
+        begun,
+        plan,
+        n: 2,
+        parts: buildRepairParts(validation.html, validation.problems, { instructed: instructionsOf(begun) !== null }),
+      });
       if (repair.refusal) throw new QuestionPaperJobFailure('model_rejected', undefined, 'The model declined the repair request.');
       if (repair.unfinished) throw new QuestionPaperJobFailure('output_too_long', undefined, 'The repaired answer stopped on the output limit.');
       validation = await run('validate:2', () => validateAnswer(deps, plan, repair.text));
@@ -278,6 +295,7 @@ async function beginJob(deps: GenerationDeps, input: QuestionPaperJobInput, mode
     schoolId: job.schoolId,
     requestedBy: job.requestedBy,
     pageIds: job.pageIds,
+    instructions: job.instructions,
   };
 }
 
@@ -349,7 +367,9 @@ const isMissingObject = (error: unknown) => error instanceof Error && (error.nam
  * again and is billed again) saves its own row under the next free key
  * (`nextQuestionPaperRequestKey`), so a repeated call is counted, not dropped.
  * `parts` is null for the transcription request, whose parts are built from
- * the pages inside the step; the images are never journaled.
+ * the pages (and the job's instructions) inside the step; the images are never
+ * journaled. Every request of a job with instructions uses the instructed
+ * system prompt, the repair too.
  */
 async function runModelRequest(options: {
   deps: GenerationDeps;
@@ -375,6 +395,8 @@ async function callModel({
   parts,
 }: Parameters<typeof runModelRequest>[0]): Promise<ModelAnswer> {
   if (!(await jobIsLive(deps.db, input))) throw new JobStopped();
+  // The same stored text for the first request, every retry and the repair's system prompt.
+  const instructions = instructionsOf(begun);
   const requestParts =
     parts ??
     buildGenerationParts(
@@ -391,13 +413,14 @@ async function callModel({
           }
         }),
       ),
+      instructions,
     );
 
   for (let attempt = 1; ; attempt += 1) {
     let result: TextResult;
     try {
       result = await model.generate({
-        system: QUESTION_PAPER_JOB_SYSTEM_PROMPT,
+        system: questionPaperJobSystemPrompt(instructions),
         parts: requestParts,
         maxOutputTokens: deps.maxOutputTokens,
       });

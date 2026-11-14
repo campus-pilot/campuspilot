@@ -15,17 +15,20 @@ describe('transcript', () => {
   });
 
   it('stores attachments as markers in order, before the text, and never as bytes', () => {
-    const attachment = (id: string, fileName: string) => ({ id, fileName, contentType: 'image/jpeg', byteSize: 10, width: 1, height: 1, previewable: true });
+    const attachment = (id: string, fileName: string) => ({ id, kind: 'image' as const, fileName, contentType: 'image/jpeg', byteSize: 10, width: 1, height: 1, previewable: true });
+    const pdf = { id: 'asat_3', kind: 'document' as const, fileName: 'paper.pdf', contentType: 'application/pdf', byteSize: 10, width: null, height: null, previewable: false };
     expect(
       buildUserTranscriptContent({
         text: 'Make a paper',
         pageContext: { path: '/school/s/assistant' },
-        attachments: [attachment('asat_1', 'page1.jpg'), attachment('asat_2', 'page2.jpg')],
+        attachments: [attachment('asat_1', 'page1.jpg'), attachment('asat_2', 'page2.jpg'), pdf],
       }),
     ).toEqual([
       { type: 'text', text: '<current_page>\nPath: /school/s/assistant\n</current_page>' },
-      { type: 'campuspilot_attachment', attachmentId: 'asat_1', fileName: 'page1.jpg', contentType: 'image/jpeg', ordinal: 1, total: 2 },
-      { type: 'campuspilot_attachment', attachmentId: 'asat_2', fileName: 'page2.jpg', contentType: 'image/jpeg', ordinal: 2, total: 2 },
+      { type: 'campuspilot_attachment', attachmentId: 'asat_1', kind: 'image', fileName: 'page1.jpg', contentType: 'image/jpeg', ordinal: 1, total: 3 },
+      { type: 'campuspilot_attachment', attachmentId: 'asat_2', kind: 'image', fileName: 'page2.jpg', contentType: 'image/jpeg', ordinal: 2, total: 3 },
+      // A PDF is a marker of its own kind, never its bytes.
+      { type: 'campuspilot_attachment', attachmentId: 'asat_3', kind: 'document', fileName: 'paper.pdf', contentType: 'application/pdf', ordinal: 3, total: 3 },
       { type: 'text', text: 'Make a paper' },
     ]);
     // Images only: no empty text block, which providers reject.

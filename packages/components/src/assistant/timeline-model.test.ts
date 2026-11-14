@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { splitMarkdownBlocks } from './assistant-markdown';
 import {
   activeRun,
+  approvalsByDecider,
   assistantAnnouncement,
   buildAssistantTimeline,
   pendingApprovals,
@@ -24,7 +25,7 @@ const reply = (id: string, position: number, text: string): AssistantItemDto => 
   ...base, id, position, kind: 'assistant_message', status: 'complete', body: { text },
 });
 const run = (id: string, status: AssistantRunDto['status'], startedAt: Date | null = null): AssistantRunDto => ({
-  id, conversationId: 'c', status, surface: 'page', stopRequestedAt: null, errorCode: null,
+  id, conversationId: 'c', userId: 'u', status, surface: 'page', stopRequestedAt: null, errorCode: null,
   errorMessage: status === 'failed' ? 'Boom' : null, sequence: 1, createdAt: at, startedAt,
   completedAt: startedAt && ['completed', 'failed', 'cancelled'].includes(status) ? new Date(startedAt.getTime() + 18_000) : null,
   diagnostics: null,
@@ -241,5 +242,31 @@ describe('assistantAnnouncement', () => {
     expect(assistantAnnouncement(items, [run('r1', 'completed', at), run('r2', 'queued')], 2)).toBe(
       'Assistant replied: All 18 are registered.',
     );
+  });
+});
+
+describe('approvalsByDecider', () => {
+  const asking = (id: string, runId: string): AssistantItemDto => ({ ...call(id, 2, {}, 'awaiting_approval'), runId });
+  const sentBy = (id: string, runId: string, author: { userId: string; name: string } | undefined): AssistantItemDto => {
+    const item = user(id, 1, runId);
+    return item.kind === 'user_message' ? { ...item, body: { ...item.body, ...(author ? { author } : {}) } } : item;
+  };
+  const items = [sentBy('m1', 'r1', { userId: 'me', name: 'Asha' }), asking('c1', 'r1'), sentBy('m2', 'r2', { userId: 'ravi', name: 'Ravi Kumar' }), asking('c2', 'r2')];
+  const runs = [{ ...run('r1', 'awaiting_approval'), userId: 'me' }, { ...run('r2', 'awaiting_approval'), userId: 'ravi' }];
+
+  it('keeps the user’s own changes to decide and names whose decision the others wait for', () => {
+    const split = approvalsByDecider(items, runs, 'me');
+    expect(split.mine.map((item) => item.id)).toEqual(['c1']);
+    expect(split.waitingFor).toEqual(['Ravi Kumar']);
+  });
+
+  it('treats a change as the user’s own until it is known whose turn asked for it', () => {
+    expect(approvalsByDecider(items, runs, null).mine.map((item) => item.id)).toEqual(['c1', 'c2']);
+    expect(approvalsByDecider(items, [], 'me').waitingFor).toEqual([]);
+  });
+
+  it('says “someone else” for a turn whose message does not name its sender', () => {
+    const unnamed = [sentBy('m2', 'r2', undefined), asking('c2', 'r2')];
+    expect(approvalsByDecider(unnamed, runs, 'me').waitingFor).toEqual(['someone else']);
   });
 });

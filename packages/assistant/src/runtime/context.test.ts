@@ -5,7 +5,8 @@ import {
   attachmentLabel,
   attachmentNote,
   buildModelContext,
-  CONTEXT_IMAGE_BUDGET_BYTES,
+  buildModelContextWithStats,
+  CONTEXT_ATTACHMENT_BUDGET_BYTES,
   CONTEXT_TOOL_INPUT_MIN_CHARS,
   CONTEXT_TOOL_RESULT_MIN_CHARS,
   fullContextBoundary,
@@ -16,9 +17,10 @@ import {
 } from './context';
 import { QUESTION_PAPER_GUIDE } from '@campuspilot/question-paper/guide';
 
-import { anthropicContext } from './providers/anthropic';
+import { anthropicContext, anthropicDocumentBlock } from './providers/anthropic';
 import { fakeContext } from './providers/fake';
-import { geminiContext } from './providers/gemini';
+import { geminiContext, geminiDocumentPart } from './providers/gemini';
+import { readableMimeTypesOf } from './providers/image-types';
 import type { AttachmentFile, ContextAdapter, TranscriptEntry } from './providers/types';
 
 /**
@@ -32,6 +34,7 @@ type Format = {
   name: string;
   context: ContextAdapter;
   imageMimeTypes: readonly string[];
+  documentMimeTypes: readonly string[];
   human(text: string, markers?: AttachmentMarker[]): TranscriptEntry;
   call(id: string, name: string): TranscriptEntry;
   result(id: string, name: string, content: string, isError?: boolean): TranscriptEntry;
@@ -45,6 +48,7 @@ type Format = {
 const marker = (id: string, ordinal = 1, total = 1): AttachmentMarker => ({
   type: 'campuspilot_attachment',
   attachmentId: id,
+  kind: 'image',
   fileName: `${id}.jpg`,
   contentType: 'image/jpeg',
   ordinal,
@@ -55,6 +59,7 @@ const claude: Format = {
   name: 'anthropic',
   context: anthropicContext,
   imageMimeTypes: ['image/jpeg', 'image/png', 'image/webp', 'image/gif'],
+  documentMimeTypes: ['application/pdf'],
   human: (text, markers = []) => ({ role: 'user', content: [...markers, { type: 'text', text }] }),
   call: (id, name) => ({ role: 'assistant', content: [{ type: 'tool_use', id, name, input: { big: 'x'.repeat(50) } }] }),
   result: (id, _name, content, isError = false) => ({
@@ -71,6 +76,7 @@ const gemini: Format = {
   name: 'gemini',
   context: geminiContext,
   imageMimeTypes: ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'],
+  documentMimeTypes: ['application/pdf'],
   human: (text, markers = []) => ({ role: 'user', content: [...markers, { text }] }),
   call: (id, name) => ({ role: 'assistant', content: [{ functionCall: { id, name, args: { big: 'x'.repeat(50) } }, thoughtSignature: `sig-${id}` }] }),
   result: (id, name, content, isError = false) => ({
@@ -89,6 +95,7 @@ const fake: Format = {
   name: 'fake',
   context: fakeContext,
   imageMimeTypes: ['image/jpeg', 'image/png', 'image/webp'],
+  documentMimeTypes: ['application/pdf'],
   human: (text, markers = []) => ({ role: 'user', content: [...markers, { type: 'text', text }] }),
   call: (id, name) => ({ role: 'assistant', content: [{ type: 'tool_use', id, name, input: {} }] }),
   result: (id, name, content, isError = false) => ({ role: 'user', content: [{ type: 'tool_result', toolUseId: id, toolName: name, content, isError }] }),
@@ -109,7 +116,7 @@ const loader = (files: Record<string, AttachmentFile>): ModelContextDeps => ({
 const image = (bytes: number, mimeType = 'image/jpeg'): AttachmentFile => ({ kind: 'image', bytes: new Uint8Array(bytes), mimeType });
 
 describe.each([claude, gemini, fake])('context building ($name)', (format) => {
-  const provider = { context: format.context, imageMimeTypes: format.imageMimeTypes };
+  const provider = { context: format.context, imageMimeTypes: format.imageMimeTypes, documentMimeTypes: format.documentMimeTypes };
 
   /** Three human turns, each followed by a tool loop with one long and one short result. */
   function transcript(): TranscriptEntry[] {
@@ -212,7 +219,7 @@ describe.each([claude, gemini, fake])('context building ($name)', (format) => {
 
   it('fits images in the budget newest first and says what it left out', async () => {
     const entries = [format.human('older', [marker('old1')]), format.human('newer', [marker('new1', 1, 2), marker('new2', 2, 2)])];
-    const out = await buildModelContext(entries, provider, loader({ old1: image(60), new1: image(60), new2: image(60) }), { imageBudgetBytes: 100 });
+    const out = await buildModelContext(entries, provider, loader({ old1: image(60), new1: image(60), new2: image(60) }), { attachmentBudgetBytes: 100 });
     const text = out.map((entry) => JSON.stringify(entry.content));
     // new2 is newest and fits; new1 would exceed 100 bytes; old1 is in the full window too (two messages) and is left out.
     expect(text[1]).toContain('[Attachment new2: new2.jpg, image/jpeg (2 of 2)');
@@ -223,11 +230,11 @@ describe.each([claude, gemini, fake])('context building ($name)', (format) => {
   it('counts an image as the base64 it is sent as, so the request stays under the provider limit', async () => {
     // Two 60-byte files are 80 bytes each once encoded: a budget of 100 holds one, not two (it would hold both raw).
     const entries = [format.human('look', [marker('p1', 1, 2), marker('p2', 2, 2)])];
-    const out = await buildModelContext(entries, provider, loader({ p1: image(60), p2: image(60) }), { imageBudgetBytes: 100 });
+    const out = await buildModelContext(entries, provider, loader({ p1: image(60), p2: image(60) }), { attachmentBudgetBytes: 100 });
     const text = JSON.stringify(out[0]!.content);
     expect(text).toContain(esc(attachmentNote(marker('p1', 1, 2), 'omitted')));
     expect(text).not.toContain(esc(attachmentNote(marker('p2', 2, 2), 'omitted')));
-    expect(CONTEXT_IMAGE_BUDGET_BYTES).toBeLessThanOrEqual(Math.floor(20_000_000 * 0.9));
+    expect(CONTEXT_ATTACHMENT_BUDGET_BYTES).toBeLessThanOrEqual(Math.floor(20_000_000 * 0.9));
   });
 
   it('never sends one image over the provider\'s own cap, and says so', async () => {
@@ -269,7 +276,7 @@ const inputFormats = [
 ];
 
 describe.each(inputFormats)('long tool call inputs in old entries ($format.name)', ({ format, call, inputOf }) => {
-  const provider = { context: format.context, imageMimeTypes: format.imageMimeTypes };
+  const provider = { context: format.context, imageMimeTypes: format.imageMimeTypes, documentMimeTypes: format.documentMimeTypes };
   const HTML = '<p>q</p>'.repeat(CONTEXT_TOOL_INPUT_MIN_CHARS);
   const scope = { examSlug: 'annual', classId: 'c1' };
 
@@ -362,6 +369,7 @@ describe('attachment ids in the model context', () => {
   const real = (name = 'triangle.png'): AttachmentMarker => ({
     type: 'campuspilot_attachment',
     attachmentId: 'asat_abcdefghijklmnopqrstu',
+    kind: 'image',
     fileName: name,
     contentType: 'image/png',
     ordinal: 1,
@@ -443,5 +451,119 @@ describe('provider image rules', () => {
       8000,
     );
     expect(stubbed.content[0]).toEqual({ type: 'tool_result', tool_use_id: 't', content: toolResultStub({ toolName: 'school_listClasses', chars: 9000 }) });
+  });
+});
+
+/** A PDF attachment's marker, as a message that carried one stores it. */
+const pdfMarker = (id: string, ordinal = 1, total = 1): AttachmentMarker => ({
+  type: 'campuspilot_attachment',
+  attachmentId: id,
+  kind: 'document',
+  fileName: `${id}.pdf`,
+  contentType: 'application/pdf',
+  ordinal,
+  total,
+});
+const pdf = (bytes: number): AttachmentFile => ({ kind: 'document', bytes: new Uint8Array(bytes), mimeType: 'application/pdf' });
+
+describe.each([claude, gemini, fake])('PDF attachments in the context ($name)', (format) => {
+  const provider = { context: format.context, imageMimeTypes: format.imageMimeTypes, documentMimeTypes: format.documentMimeTypes };
+  const text = (entry: TranscriptEntry) => JSON.stringify(entry.content);
+
+  it('sends a fresh PDF whole, after a label that says it is source material and not a figure', async () => {
+    const out = await buildModelContext([format.human('read this', [pdfMarker('d1')])], provider, loader({ d1: pdf(10) }));
+    expect(text(out[0]!)).toContain(esc(attachmentLabel(pdfMarker('d1'))));
+    expect(attachmentLabel(pdfMarker('d1'))).toContain('cannot be used as data-figure-id');
+    expect(attachmentLabel(pdfMarker('d1'))).not.toContain('Use this id as data-figure-id');
+    expect(text(out[0]!)).not.toContain('campuspilot_attachment');
+  });
+
+  it('replaces a PDF of an older message by a note that keeps its id, the way back being to attach it again', async () => {
+    const entries = [format.human('first', [pdfMarker('d1')]), format.human('second'), format.human('third')];
+    const out = await buildModelContext(entries, provider, loader({ d1: pdf(10) }));
+    const note = attachmentNote(pdfMarker('d1'), 'old');
+    expect(text(out[0]!)).toContain(esc(note));
+    expect(note).toContain('d1: d1.pdf, application/pdf');
+    expect(note).toContain('no longer visible');
+    expect(note).toContain('attach it again');
+    expect(note).toContain('cannot be used as data-figure-id');
+    // The stub is what the adapter writes for an old marker too.
+    expect(text({ role: 'user', content: format.context.stubAttachment(pdfMarker('d1')) })).toContain(esc(note));
+    // Idempotent: pruning the pruned view again changes nothing.
+    const again = await buildModelContext(out, provider, loader({ d1: pdf(10) }));
+    expect(JSON.stringify(again)).toBe(JSON.stringify(out));
+  });
+
+  it('counts a PDF as base64 in the same budget as images, newest first', async () => {
+    // A 60-byte PDF and a 60-byte image are 80 bytes each once encoded: a budget of 100 holds one of them.
+    const entries = [format.human('look', [marker('img', 1, 2), pdfMarker('doc', 2, 2)])];
+    const out = await buildModelContext(entries, provider, loader({ img: image(60), doc: pdf(60) }), { attachmentBudgetBytes: 100 });
+    expect(text(out[0]!)).toContain(esc(attachmentLabel(pdfMarker('doc', 2, 2))));
+    expect(text(out[0]!)).toContain(esc(attachmentNote(marker('img', 1, 2), 'omitted')));
+    // A PDF that does not fit is left out with a note, never dropped.
+    const tight = await buildModelContext([format.human('look', [pdfMarker('doc')])], provider, loader({ doc: pdf(90) }), { attachmentBudgetBytes: 100 });
+    expect(text(tight[0]!)).toContain(esc(attachmentNote(pdfMarker('doc'), 'omitted')));
+  });
+
+  it('shows a PDF the provider cannot read, or one that is gone, as a note', async () => {
+    const entries = [format.human('look', [pdfMarker('locked', 1, 2), pdfMarker('gone', 2, 2)])];
+    const out = await buildModelContext(entries, { ...provider, documentMimeTypes: [] }, {
+      // The loader is told what the provider reads, per kind; with no document types it answers unreadable.
+      loadAttachment: async (id, readable) => (id === 'gone' ? { kind: 'missing' } : readable.document.includes('application/pdf') ? pdf(5) : { kind: 'unreadable' }),
+    });
+    expect(text(out[0]!)).toContain(esc(attachmentNote(pdfMarker('locked', 1, 2), 'unreadable')));
+    expect(text(out[0]!)).toContain('photos of its pages');
+    expect(text(out[0]!)).toContain(esc(attachmentNote(pdfMarker('gone', 2, 2), 'missing')));
+  });
+
+  it('never sends a file as another kind than its marker names', async () => {
+    const out = await buildModelContext([format.human('look', [pdfMarker('d')])], provider, loader({ d: image(5) }));
+    expect(text(out[0]!)).toContain(esc(attachmentNote(pdfMarker('d'), 'unreadable')));
+  });
+
+  it('reports how many PDFs a request shows, so a refused request can be explained', async () => {
+    const shown = await buildModelContextWithStats([format.human('a', [pdfMarker('d'), marker('i', 2, 2)])], provider, loader({ d: pdf(5), i: image(5) }));
+    expect(shown.documentsShown).toBe(1);
+    const none = await buildModelContextWithStats([format.human('a', [marker('i')])], provider, loader({ i: image(5) }));
+    expect(none.documentsShown).toBe(0);
+  });
+});
+
+describe('provider document request shapes', () => {
+  it('sends Claude a document block with a base64 application/pdf source, after its label', () => {
+    expect(anthropicDocumentBlock(new Uint8Array([1, 2, 3]))).toEqual({
+      type: 'document',
+      source: { type: 'base64', media_type: 'application/pdf', data: 'AQID' },
+    });
+    expect(anthropicContext.materializeAttachment(pdfMarker('p', 1, 2), pdf(0))).toEqual([
+      { type: 'text', text: attachmentLabel(pdfMarker('p', 1, 2)) },
+      { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: '' } },
+    ]);
+  });
+
+  it('sends Gemini inline data of type application/pdf, after its label', () => {
+    expect(geminiDocumentPart(new Uint8Array([1, 2, 3]))).toEqual({ inlineData: { mimeType: 'application/pdf', data: 'AQID' } });
+    expect(geminiContext.materializeAttachment(pdfMarker('p'), { kind: 'document', bytes: new Uint8Array([1, 2, 3]), mimeType: 'application/pdf' })).toEqual([
+      { text: attachmentLabel(pdfMarker('p')) },
+      { inlineData: { mimeType: 'application/pdf', data: 'AQID' } },
+    ]);
+  });
+
+  it('records a PDF in the fake provider like an image: type and size', () => {
+    expect(fakeContext.materializeAttachment(pdfMarker('p'), pdf(7))).toEqual([
+      { type: 'text', text: attachmentLabel(pdfMarker('p')) },
+      { type: 'document', mimeType: 'application/pdf', byteLength: 7 },
+    ]);
+  });
+
+  it('keeps the image label byte for byte as it was before documents (cached prompts stay valid)', () => {
+    expect(attachmentLabel(marker('p', 2, 5))).toBe(
+      '[Attachment p: p.jpg, image/jpeg (2 of 5). Use this id as data-figure-id on an <img> to put the image in a question paper.]',
+    );
+  });
+
+  it('declares PDF reading explicitly per provider', () => {
+    expect(readableMimeTypesOf('anthropic')).toEqual({ image: ['image/jpeg', 'image/png', 'image/webp', 'image/gif'], document: ['application/pdf'] });
+    expect(readableMimeTypesOf('gemini').document).toEqual(['application/pdf']);
   });
 });

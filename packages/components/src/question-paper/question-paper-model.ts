@@ -115,9 +115,24 @@ export function cellStatus(paper: PaperCellInput): CellStatus {
   return { kind: 'empty', label: 'No paper yet' };
 }
 
-/** "AI from photos" or "Assistant chat": who wrote a version. */
-export function versionSourceLabel(source: 'ai_job' | 'agent') {
-  return source === 'ai_job' ? 'AI from photos' : 'Assistant chat';
+/** Who wrote a version (the API's `source`, the `question_paper_version_source` enum). */
+export type QuestionPaperVersionSource = 'ai_job' | 'agent' | 'copy';
+
+/** Who wrote a version, for people: "AI from photos", "Assistant chat" or "Copied from an earlier paper". */
+export function versionSourceLabel(source: QuestionPaperVersionSource): string {
+  switch (source) {
+    case 'ai_job':
+      return 'AI from photos';
+    case 'agent':
+      return 'Assistant chat';
+    case 'copy':
+      return 'Copied from an earlier paper';
+    default: {
+      // Exhaustive: a new source must get its own label here.
+      const unknown: never = source;
+      return unknown;
+    }
+  }
 }
 
 /** The first line of a generation panel: what the background job is doing. */
@@ -171,28 +186,6 @@ export function editBlockedReason(input: PaperLockFacts & {
   if (!input.canManage) return 'You can view this paper but not change it.';
   if (input.jobActive) return 'The paper is being generated. You can change it once that finishes.';
   return null;
-}
-
-/** Why Generate with AI is unavailable, or null when it is available. First reason wins. */
-export function generateBlockedReason(input: {
-  pageCount: number;
-  templateConfigured: boolean;
-  blockedReason: string | null;
-  /** Photos still being prepared or uploaded: a job started now would read only the ones already stored. */
-  uploading?: boolean;
-}): string | null {
-  if (input.blockedReason) return input.blockedReason;
-  if (input.uploading) return 'Wait for the photos to finish uploading.';
-  if (input.pageCount < 1) return 'Upload at least one photo first.';
-  if (!input.templateConfigured) return 'Choose a question paper template before generating papers.';
-  return null;
-}
-
-/** Human size of an original photo (`2.4 MB`). */
-export function formatPageSize(bytes: number) {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
-  return `${Number((bytes / (1024 * 1024)).toFixed(1))} MB`;
 }
 
 /**

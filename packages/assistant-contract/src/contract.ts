@@ -10,6 +10,8 @@ import {
   deleteAssistantConversationOutputSchema,
   listAssistantConversationsInputSchema,
   listAssistantConversationsOutputSchema,
+  listPaperConversationsInputSchema,
+  listPaperConversationsOutputSchema,
   respondToAssistantApprovalInputSchema,
   sendAssistantMessageInputSchema,
   sendAssistantMessageOutputSchema,
@@ -29,6 +31,14 @@ export const assistantContract = {
   listConversations: oc
     .input(listAssistantConversationsInputSchema)
     .output(listAssistantConversationsOutputSchema),
+  /**
+   * The conversations shared with one question paper, newest first, whoever
+   * started them: the paper's chat history. For people who may manage the
+   * class's question papers.
+   */
+  listPaperConversations: oc
+    .input(listPaperConversationsInputSchema)
+    .output(listPaperConversationsOutputSchema),
   getConversation: oc.input(assistantConversationInputSchema).output(assistantSnapshotSchema),
   /**
    * A snapshot, then sequenced upserts and ephemeral text frames until the

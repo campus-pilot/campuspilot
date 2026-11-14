@@ -9,7 +9,7 @@ import {
 import { examQuestionPaperFigureTable, examQuestionPaperVersionTable } from '@campuspilot/db/schema/exam-question-paper';
 import { QUESTION_PAPER_EXAMPLES } from '@campuspilot/question-paper/examples';
 import { createRouterClient } from '@orpc/server';
-import { eq } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import sharp from 'sharp';
 import { beforeAll, describe, expect, it } from 'vitest';
 
@@ -17,6 +17,7 @@ import { type TestClient } from '../../../../test/fixtures';
 import { createQuestionPaperWorld, type QuestionPaperWorld } from '../../../../test/question-paper';
 import type { Context } from '../../../context';
 import { appRouter } from '../../index';
+import { questionPaperDraftId } from '@campuspilot/question-paper/hash';
 import { putObject } from './question-paper.storage';
 
 const ENGLISH_SCIENCE = QUESTION_PAPER_EXAMPLES['english-science'];
@@ -46,8 +47,39 @@ describe('chat attachments as figures', () => {
     runId = run!.id;
   });
 
-  /** An attachment row with its object, sent (bound to a message) unless `sent` is false. */
-  async function attachment(options: { userId?: string; sent?: boolean; heic?: boolean } = {}) {
+  /** A PDF the manager sent in a chat message (its object is the PDF itself; nothing is derived from it). */
+  async function documentAttachment() {
+    const id = generateId('assistantAttachment');
+    const key = `schools/${world.schoolId}/assistant/attachments/${id}/original.pdf`;
+    const bytes = Buffer.from('%PDF-1.7\n1 0 obj\n<<>>\nendobj\n%%EOF\n');
+    await putObject(key, bytes, 'application/pdf');
+    position += 1;
+    const [item] = await db
+      .insert(assistantItemTable)
+      .values({ conversationId, runId, kind: 'user_message', status: 'complete', position, sequence: position, itemKey: `item-${crypto.randomUUID()}`, body: { text: 'source' } })
+      .returning();
+    await db.insert(assistantAttachmentTable).values({
+      id,
+      schoolId: world.schoolId,
+      userId: world.people.manager.userId,
+      kind: 'document',
+      originalName: 'old-paper.pdf',
+      contentType: 'application/pdf',
+      byteSize: bytes.byteLength,
+      sha256: 'x',
+      s3Key: key,
+      derivativeStatus: null,
+      conversationId,
+      itemId: item!.id,
+      position: 1,
+      attachedAt: new Date(),
+    });
+    return id;
+  }
+
+  /** An attachment row with its object, sent (bound to a message, in the manager's chat unless `chat` says) unless `sent` is false. */
+  async function attachment(options: { userId?: string; sent?: boolean; heic?: boolean; chat?: { conversationId: string; runId: string } } = {}) {
+    const chat = options.chat ?? { conversationId, runId };
     const id = generateId('assistantAttachment');
     const userId = options.userId ?? world.people.manager.userId;
     const bytes = await sharp({ create: { width: 120, height: 80, channels: 3, background: '#336699' } }).jpeg().toBuffer();
@@ -60,14 +92,15 @@ describe('chat attachments as figures', () => {
       position += 1;
       const [item] = await db
         .insert(assistantItemTable)
-        .values({ conversationId, runId, kind: 'user_message', status: 'complete', position, sequence: position, itemKey: `item-${crypto.randomUUID()}`, body: { text: 'figure' } })
+        .values({ ...chat, kind: 'user_message', status: 'complete', position, sequence: position, itemKey: `item-${crypto.randomUUID()}`, body: { text: 'figure' } })
         .returning();
-      binding = { conversationId, itemId: item!.id, position: 1, attachedAt: new Date() };
+      binding = { conversationId: chat.conversationId, itemId: item!.id, position: 1, attachedAt: new Date() };
     }
     await db.insert(assistantAttachmentTable).values({
       id,
       schoolId: world.schoolId,
       userId,
+      kind: 'image',
       originalName: 'diagram.jpg',
       contentType: options.heic ? 'image/heic' : 'image/jpeg',
       byteSize: bytes.byteLength,
@@ -166,6 +199,113 @@ describe('chat attachments as figures', () => {
     const theirs = await attachment({ userId: world.people.teacher.userId });
     const crossed = await errorOf(agent().school.saveQuestionPaperVersion({ ...k, expectedVersionNo: 0, html: withFigure(theirs) }));
     expect(crossed).toMatchObject({ code: 'BAD_REQUEST' });
+  });
+
+  it('lets whoever works on a paper use the photos sent in a conversation shared with it, and only there', async () => {
+    const k = world.key({ classId: world.otherClassId });
+    const teacher = world.people.teacher.userId;
+    const [shared] = await db
+      .insert(assistantConversationTable)
+      .values({
+        schoolId: world.schoolId,
+        userId: teacher,
+        provider: 'gemini',
+        model: 'm',
+        paperSessionId: k.sessionId,
+        paperExamSlug: k.examSlug,
+        paperClassId: k.classId,
+        paperSubjectSlug: k.subjectSlug,
+        paperModeSlug: k.modeSlug,
+      })
+      .returning();
+    const [sharedRun] = await db
+      .insert(assistantRunTable)
+      .values({ conversationId: shared!.id, schoolId: world.schoolId, userId: teacher, clientRequestId: crypto.randomUUID(), surface: 'panel', sequence: 1 })
+      .returning();
+    const photo = await attachment({ userId: teacher, chat: { conversationId: shared!.id, runId: sharedRun!.id } });
+
+    // The manager's turn in the shared conversation uses the teacher's photo...
+    const inShared = createRouterClient(appRouter, {
+      context: async (): Promise<Context> => ({
+        db,
+        headers: new Headers(),
+        session: world.people.manager.session,
+        principal: { authMethod: 'assistant', assistantRun: { conversationId: shared!.id, runId: sharedRun!.id, schoolId: world.schoolId } },
+      }),
+    }) as unknown as TestClient;
+    expect(await inShared.school.validateQuestionPaperDraft({ ...k, html: withFigure(photo) })).toMatchObject({ valid: true, problems: [] });
+    // ...and so does the draft card of a colleague who opens that conversation.
+    expect(await world.people.coordinator.client.school.validateQuestionPaperDraft({ ...k, html: withFigure(photo), conversationId: shared!.id })).toMatchObject({ valid: true });
+    // Not from the manager's own private chat, and not for a paper the conversation is not shared with.
+    expect((await agent().school.validateQuestionPaperDraft({ ...k, html: withFigure(photo) })).valid).toBe(false);
+    const otherPaper = world.key({ classId: world.otherClassId, subjectSlug: 'math' });
+    expect((await world.people.manager.client.school.validateQuestionPaperDraft({ ...otherPaper, html: withFigure(photo), conversationId: shared!.id })).valid).toBe(false);
+
+    // A draft the teacher's turn validated there is read back by the manager's turn by its id, and saved by it.
+    const html = ENGLISH_SCIENCE;
+    position += 1;
+    await db.insert(assistantItemTable).values({
+      conversationId: shared!.id,
+      runId: sharedRun!.id,
+      kind: 'tool_call',
+      status: 'succeeded',
+      position,
+      sequence: position,
+      itemKey: `item-${crypto.randomUUID()}`,
+      body: { toolUseId: 'tu_shared', toolName: 'school_validateQuestionPaperDraft', title: 'Validate', access: 'read', destructive: false, module: 'school', input: { ...k, html } },
+    });
+    const draftId = questionPaperDraftId(html);
+    expect(await inShared.school.getQuestionPaperDraft({ ...k, draftId })).toMatchObject({ draftId });
+    // The same id from the manager's private chat names nothing.
+    expect(await errorOf(agent().school.getQuestionPaperDraft({ ...k, draftId }))).toMatchObject({ code: 'BAD_REQUEST' });
+
+    // The paper's screen opens the conversation shared with it that changed last.
+    const detail = await world.people.coordinator.client.school.getQuestionPaperDetail(k);
+    expect(detail.latestConversationId).toBe(shared!.id);
+  });
+
+  it('stops sharing the paper’s conversations when the paper is deleted, but not while one of them works', async () => {
+    const k = world.key({ classId: world.otherClassId, subjectSlug: 'science' });
+    await agent().school.saveQuestionPaperVersion({ ...k, expectedVersionNo: 0, html: ENGLISH_SCIENCE });
+    const [shared] = await db
+      .insert(assistantConversationTable)
+      .values({ schoolId: world.schoolId, userId: world.people.teacher.userId, provider: 'gemini', model: 'm', paperSessionId: k.sessionId, paperExamSlug: k.examSlug, paperClassId: k.classId, paperSubjectSlug: k.subjectSlug, paperModeSlug: k.modeSlug })
+      .returning();
+    const [working] = await db
+      .insert(assistantRunTable)
+      .values({ conversationId: shared!.id, schoolId: world.schoolId, userId: world.people.teacher.userId, clientRequestId: crypto.randomUUID(), surface: 'panel', sequence: 1, status: 'awaiting_approval' })
+      .returning();
+    expect((await world.people.manager.client.school.getQuestionPaperDetail(k)).latestConversationId).toBe(shared!.id);
+
+    // A colleague's change waits for approval: deleting would strand it.
+    expect(await errorOf(world.people.manager.client.school.deleteQuestionPaper(k))).toMatchObject({ code: 'CONFLICT' });
+
+    // Every turn on this paper's conversations ends (an earlier test left one queued on the same paper).
+    const onPaper = await db.select({ id: assistantConversationTable.id }).from(assistantConversationTable).where(eq(assistantConversationTable.paperClassId, k.classId));
+    await db.update(assistantRunTable).set({ status: 'completed' }).where(inArray(assistantRunTable.conversationId, onPaper.map((row) => row.id)));
+    expect(working).toBeDefined();
+    await world.people.manager.client.school.deleteQuestionPaper(k);
+    const [after] = await db.select().from(assistantConversationTable).where(eq(assistantConversationTable.id, shared!.id));
+    // Kept for its starter, shared with nothing: the paper starts again from its first screen.
+    expect(after).toMatchObject({ deletedAt: null, paperClassId: null, paperSessionId: null, paperModeSlug: null });
+    expect((await world.people.manager.client.school.getQuestionPaperDetail(k)).latestConversationId).toBeNull();
+  });
+
+  it('refuses a PDF the user sent as a figure, with a problem that says to read it and use a placeholder', async () => {
+    const id = await documentAttachment();
+    const k = world.key({ classId: world.otherClassId, subjectSlug: 'science' });
+    const checked = await agent().school.validateQuestionPaperDraft({ ...k, html: withFigure(id) });
+    expect(checked.valid).toBe(false);
+    expect(checked.problems[0]).toContain('old-paper.pdf is a PDF the user attached, not an image');
+    expect(checked.problems[0]).toContain('data-placeholder');
+    // A save refuses it too, and nothing is copied into the paper.
+    const saved = await errorOf(agent().school.saveQuestionPaperVersion({ ...k, expectedVersionNo: 0, html: withFigure(id) }));
+    expect(saved).toMatchObject({ code: 'BAD_REQUEST' });
+    expect(await db.select().from(examQuestionPaperFigureTable).where(eq(examQuestionPaperFigureTable.sourceAttachmentId, id))).toHaveLength(0);
+    // Nor does a preview print it.
+    const preview = await world.people.manager.client.school.previewQuestionPaperDraft({ ...k, html: withFigure(id) });
+    expect(preview.html).toBe('');
+    expect(preview.problems[0]).toContain('is a PDF the user attached');
   });
 
   it('previews a draft with the owner\'s attachment inline, and not for anyone else', async () => {

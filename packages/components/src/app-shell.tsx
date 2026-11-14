@@ -9,6 +9,7 @@ import {
   useMemo,
   useState,
   type ComponentType,
+  type CSSProperties,
   type MouseEventHandler,
   type ReactNode,
   type SVGProps,
@@ -134,6 +135,24 @@ export type AppShellLinkProps = {
 };
 
 export type AppShellAlertType = 'normal' | 'warning' | 'destructive';
+
+/** One alert row's height. Fixed (a row is one truncated line), so the shell can say how much room its alerts take. */
+const APP_SHELL_ALERT_ROW_REM = 2.0625;
+const APP_SHELL_ALERT_ROW_CLASS = 'h-[2.0625rem]';
+
+/**
+ * The height of the content area under the shell's header and its alert rows,
+ * for a screen that fills the window instead of scrolling the page (the
+ * assistant beside a question paper). The shell's content area grows with its
+ * content, so "the rest of the window" has to be worked out from the viewport:
+ * the 3.5rem header, on md+ also the inset's 0.5rem margins, and the alert
+ * rows the shell is showing, which it publishes as `--app-shell-alerts` (one
+ * row on a phone, up to two from md, as it renders them).
+ */
+export const APP_SHELL_FILL_HEIGHT_CLASS =
+  'h-[calc(100dvh-3.5rem-var(--app-shell-alerts-sm,0px))] md:h-[calc(100dvh-4.5rem-var(--app-shell-alerts,0px))]';
+/** The same height from md up only, for a screen that fills the window on wide screens and scrolls as a page on a phone. */
+export const APP_SHELL_FILL_HEIGHT_MD_CLASS = 'md:h-[calc(100dvh-4.5rem-var(--app-shell-alerts,0px))]';
 
 export type AppShellAlertDefinition = {
   /** Stable domain key. A newer registration with the same slug takes precedence. */
@@ -366,7 +385,7 @@ function AppShellAlerts({
             <div
               key={alert.slug}
               role="alert"
-              className={`${appearance.container} ${index === 1 ? 'hidden md:flex' : 'flex'} min-w-0 items-center gap-2 border-b px-4 py-2 text-xs sm:px-6`}
+              className={`${appearance.container} ${index === 1 ? 'hidden md:flex' : 'flex'} ${APP_SHELL_ALERT_ROW_CLASS} min-w-0 items-center gap-2 border-b px-4 text-xs sm:px-6`}
             >
               <Icon className="size-4 shrink-0" aria-hidden />
               <span className="min-w-0 flex-1 truncate text-left">
@@ -721,7 +740,15 @@ export function AppShell({
             />
           </SidebarFooter>
         </Sidebar>
-        <SidebarInset className="min-w-0 rounded-none md:my-2 md:mr-2 md:rounded-2xl md:ring-1 md:ring-border">
+        <SidebarInset
+          className="min-w-0 rounded-none md:my-2 md:mr-2 md:rounded-2xl md:ring-1 md:ring-border"
+          style={
+            {
+              '--app-shell-alerts': `${Math.min(alerts.length, 2) * APP_SHELL_ALERT_ROW_REM}rem`,
+              '--app-shell-alerts-sm': `${Math.min(alerts.length, 1) * APP_SHELL_ALERT_ROW_REM}rem`,
+            } as CSSProperties
+          }
+        >
           <header className="flex h-14 items-center gap-2 border-b px-4 sm:px-6">
             <SidebarTrigger className="-ml-1 md:hidden" />
             <Breadcrumb>

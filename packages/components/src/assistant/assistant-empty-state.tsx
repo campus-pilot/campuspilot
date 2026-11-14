@@ -8,7 +8,16 @@ export type AssistantSuggestion = { id: string; label: string; prompt: string; i
  * The new-conversation headline: a raised disc, a title and one muted line
  * (T3 Code's empty state). The composer sits right under it.
  */
-export function AssistantWelcome({ compact = false }: { compact?: boolean }) {
+export function AssistantWelcome({
+  compact = false,
+  title = 'What can I help with?',
+  text = 'I work with your permissions, and ask before changing anything.',
+}: {
+  compact?: boolean;
+  /** The headline; a surface about one thing (a question paper) names that thing instead. */
+  title?: string;
+  text?: string;
+}) {
   return (
     <div className="flex flex-col items-center gap-3 px-2 text-center">
       <span className="flex size-9 shrink-0 items-center justify-center rounded-full assistant-raised text-muted-foreground">
@@ -21,10 +30,10 @@ export function AssistantWelcome({ compact = false }: { compact?: boolean }) {
             compact ? 'text-[15px]/[1.38]' : 'text-[22px]/[1.27] tracking-[-0.01em]',
           )}
         >
-          What can I help with?
+          {title}
         </h2>
         <p className="max-w-sm text-sm/[1.45] text-balance text-muted-foreground">
-          I work with your permissions, and ask before changing anything.
+          {text}
         </p>
       </div>
     </div>

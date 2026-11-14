@@ -197,18 +197,36 @@ export function examActionDescription(action: ExamDialogAction, released: boolea
   }
 }
 
+/**
+ * Whether a pathname is one paper's screen (`<exam>/question-paper/<class>/<subject>/<mode>`).
+ * That screen is a workspace of its own: the paper beside its assistant fills
+ * the window, so the exam's heading and tabs are not drawn above it and the
+ * breadcrumbs lead back.
+ */
+export function isQuestionPaperWorkspacePath(pathname: string, base: string): boolean {
+  const prefix = `${base}/question-paper/`;
+  const path = pathname.replace(/\/$/, '');
+  return path.startsWith(prefix) && path.slice(prefix.length).split('/').length === 3;
+}
+
 /** The Results section lives at `<exam>/results`; the exam root is a landing that redirects (K4). */
 export const examResultsHref = (scope: ExamScope) => `${examHref(scope, scope.examSlug)}/results`;
 /** The Question paper section of an examination. */
 export const questionPaperHref = (scope: ExamScope) => `${examHref(scope, scope.examSlug)}/question-paper`;
-/** One paper (a class, subject and assessment mode). */
+/**
+ * One paper (a class, subject and assessment mode). The query says what the
+ * screen shows, so a reload or a shared link lands in the same place: `start`
+ * is one of the ways to begin a paper, `version` a saved version and `chat` the
+ * paper's conversation with the assistant.
+ */
 export const questionPaperWorkspaceHref = (
   scope: ExamScope & { classId: string; subjectSlug: string; modeSlug: string },
-  query?: { section?: 'pages' | 'result' | 'versions'; version?: number },
+  query?: { start?: 'sources' | 'earlier'; version?: number; chat?: string },
 ) => {
   const params = new URLSearchParams();
-  if (query?.section) params.set('section', query.section);
+  if (query?.start) params.set('start', query.start);
   if (query?.version) params.set('version', String(query.version));
+  if (query?.chat) params.set('chat', query.chat);
   const search = params.toString();
   const suffix = search ? `?${search}` : '';
   return `${questionPaperHref(scope)}/${encodeURIComponent(scope.classId)}/${encodeURIComponent(scope.subjectSlug)}/${encodeURIComponent(scope.modeSlug)}${suffix}`;

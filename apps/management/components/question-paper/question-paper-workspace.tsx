@@ -1,9 +1,9 @@
 'use client';
 
-import { useState, type ReactNode } from 'react';
+import { useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
-import { Download, MoreVertical, Trash2 } from 'lucide-react';
-import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { Camera, ChevronLeft, Copy, Download, History, MoreVertical, Trash2 } from 'lucide-react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Badge } from '@campuspilot/ui/components/badge';
 import { Button } from '@campuspilot/ui/components/button';
 import {
@@ -11,34 +11,35 @@ import {
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@campuspilot/ui/components/dropdown-menu';
-import { Tabs, TabsList, TabsTrigger } from '@campuspilot/ui/components/tabs';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@campuspilot/ui/components/dialog';
 import { toast } from '@campuspilot/ui/lib/toast';
 import { ConfirmationDialog } from '@campuspilot/components/confirmation-dialog';
 import { cellStatus, isPaperLocked, paperLockReason } from '@campuspilot/components/question-paper/question-paper-model';
+import { VersionList } from '@campuspilot/components/question-paper/version-list';
 import { RequirePermissions } from '@/components/require-permissions';
 import { DirtyGuard, LoadingExam, Notice, ReadError } from '@/components/exam/exam-common';
-import { questionPaperHref } from '@/components/exam/exam-model';
+import { questionPaperHref, questionPaperWorkspaceHref } from '@/components/exam/exam-model';
 import { orpc } from '@/lib/orpc';
 import {
   currentJobFailure,
+  hasStudioOf,
+  NEW_CHAT_PARAM,
+  paperChatOf,
   inFlightJob,
-  QUESTION_PAPER_SECTIONS,
   questionPaperPermission,
   requestErrorMessage,
-  resolveSection,
-  resolveVersionNo,
-  SECTION_LABELS,
+  resolveView,
   uploadsInFlight,
   type QuestionPaperScope,
-  type QuestionPaperSection,
+  type QuestionPaperStart as QuestionPaperStartKind,
 } from './question-paper-model';
 import { QuestionPaperAssistantGate } from './question-paper-assistant-gate';
-import { QuestionPaperPagesSection } from './question-paper-pages-section';
-import { QuestionPaperResultSection } from './question-paper-result-section';
+import { QuestionPaperStart } from './question-paper-start';
+import { QuestionPaperStudio } from './question-paper-studio';
 import { QuestionPaperTemplateAlert } from './question-paper-template-alert';
-import { QuestionPaperVersionsSection } from './question-paper-versions-section';
 import { usePageUploads, type PageUploads } from './use-page-uploads';
 import {
   useCanManageQuestionPaper,
@@ -49,10 +50,13 @@ import {
 } from './use-question-paper-detail';
 
 /**
- * One paper: a class, subject and assessment mode of an exam. Sections Pages,
- * Result and Versions are line tabs (the section and the shown version live in
- * the URL, so a reload or a shared link lands in the same place). Breadcrumbs
- * give the way back; there is no feature-level back button.
+ * One paper: a class, subject and assessment mode of an exam. A paper with
+ * nothing yet asks how to begin (`QuestionPaperStart`); once it has a version,
+ * a generation at work or a conversation it is the studio, the paper beside
+ * its assistant (`QuestionPaperStudio`). What is shown lives in the URL (the
+ * way of starting, the version, the conversation), so a reload or a shared
+ * link lands in the same place. Breadcrumbs give the way back; there is no
+ * feature-level back button.
  */
 export function QuestionPaperWorkspace({ scope }: { scope: QuestionPaperScope }) {
   return (
@@ -83,7 +87,8 @@ function WorkspaceData({ scope }: { scope: QuestionPaperScope }) {
   );
 }
 
-function PaperHeading({ detail }: { detail: QuestionPaperDetail }) {
+/** The paper's name and plan. `showStatus` adds its state as a badge; the first screen leaves it out, where the card itself shows what the paper has. */
+function PaperHeading({ detail, showStatus }: { detail: QuestionPaperDetail; showStatus: boolean }) {
   const { paper } = detail;
   const status = cellStatus({
     pageCount: paper.pageCount,
@@ -101,15 +106,84 @@ function PaperHeading({ detail }: { detail: QuestionPaperDetail }) {
         <p className="text-sm text-muted-foreground">
           {paper.className} · {paper.examName} · {paper.planMaxMarks} marks
         </p>
-        <Badge variant="outline">{status.label}</Badge>
+        {showStatus ? <Badge variant="outline">{status.label}</Badge> : null}
       </div>
     </div>
   );
 }
 
-function PaperMenu({ scope, detail, canManage }: { scope: QuestionPaperScope; detail: QuestionPaperDetail; canManage: boolean }) {
+/** Every saved version in a dialog: who saved it, when and how, with its PDF. Opening one shows it in the studio. */
+function VersionsDialog({
+  scope,
+  detail,
+  open,
+  onOpenChange,
+  onShow,
+}: {
+  scope: QuestionPaperScope;
+  detail: QuestionPaperDetail;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onShow: (versionNo: number) => void;
+}) {
+  const download = useDownloadQuestionPaper();
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Versions</DialogTitle>
+          <DialogDescription>Every change is a new version. Earlier ones are kept and can be downloaded.</DialogDescription>
+        </DialogHeader>
+        <div className="max-h-[60dvh] overflow-y-auto">
+          <VersionList
+            versions={detail.versions.map((version) => ({
+              versionNo: version.versionNo,
+              source: version.source,
+              createdAt: version.createdAt,
+              createdByName: version.createdBy.name,
+              warningCount: version.warningCount,
+              isLatest: version.isLatest,
+            }))}
+            selectedVersionNo={null}
+            downloadingVersionNo={download.isPending ? (download.variables?.versionNo ?? null) : null}
+            onPreview={(versionNo) => {
+              onOpenChange(false);
+              onShow(versionNo);
+            }}
+            onDownload={(versionNo) =>
+              download.mutate(
+                { ...scope, versionNo },
+                { onError: (error) => toast.error(requestErrorMessage(error, 'The PDF could not be prepared.')) },
+              )
+            }
+          />
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
+ * The paper's actions that are not its main task: its versions, starting it
+ * again another way, its latest PDF and deleting it. Starting again is only
+ * offered to someone who may change a paper that can still be changed.
+ */
+function PaperMenu({
+  scope,
+  detail,
+  canManage,
+  onStart,
+  onShowVersion,
+}: {
+  scope: QuestionPaperScope;
+  detail: QuestionPaperDetail;
+  canManage: boolean;
+  onStart: (start: QuestionPaperStartKind) => void;
+  onShowVersion: (versionNo: number) => void;
+}) {
   const router = useRouter();
   const [confirming, setConfirming] = useState(false);
+  const [showingVersions, setShowingVersions] = useState(false);
   const refresh = useRefreshQuestionPaper(scope);
   const download = useDownloadQuestionPaper();
   const remove = useMutation(
@@ -123,7 +197,9 @@ function PaperMenu({ scope, detail, canManage }: { scope: QuestionPaperScope; de
     }),
   );
   const { paper } = detail;
-  const canDelete = canManage && !isPaperLocked(paper) && inFlightJob(detail.activeJob) === null && paper.paperId !== null;
+  const hasVersion = paper.latestVersionNo > 0;
+  const canChange = canManage && !isPaperLocked(paper);
+  const canDelete = canChange && inFlightJob(detail.activeJob) === null && paper.paperId !== null;
   return (
     <>
       <DropdownMenu>
@@ -134,8 +210,12 @@ function PaperMenu({ scope, detail, canManage }: { scope: QuestionPaperScope; de
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
           <DropdownMenuGroup>
+            <DropdownMenuItem disabled={!hasVersion} onSelect={() => setShowingVersions(true)}>
+              <History aria-hidden />
+              All versions
+            </DropdownMenuItem>
             <DropdownMenuItem
-              disabled={paper.latestVersionNo === 0}
+              disabled={!hasVersion}
               onSelect={() =>
                 download.mutate(
                   { ...scope, versionNo: paper.latestVersionNo },
@@ -146,6 +226,24 @@ function PaperMenu({ scope, detail, canManage }: { scope: QuestionPaperScope; de
               <Download aria-hidden />
               Download latest PDF
             </DropdownMenuItem>
+          </DropdownMenuGroup>
+          {hasVersion && canChange ? (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuGroup>
+                <DropdownMenuItem onSelect={() => onStart('sources')}>
+                  <Camera aria-hidden />
+                  Add photos or a file
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => onStart('earlier')}>
+                  <Copy aria-hidden />
+                  Copy an earlier paper
+                </DropdownMenuItem>
+              </DropdownMenuGroup>
+            </>
+          ) : null}
+          <DropdownMenuSeparator />
+          <DropdownMenuGroup>
             <DropdownMenuItem disabled={!canDelete} variant="destructive" onSelect={() => setConfirming(true)}>
               <Trash2 aria-hidden />
               Delete paper
@@ -153,30 +251,17 @@ function PaperMenu({ scope, detail, canManage }: { scope: QuestionPaperScope; de
           </DropdownMenuGroup>
         </DropdownMenuContent>
       </DropdownMenu>
+      <VersionsDialog scope={scope} detail={detail} open={showingVersions} onOpenChange={setShowingVersions} onShow={onShowVersion} />
       <ConfirmationDialog
         open={confirming}
         title="Delete this question paper?"
-        description="The uploaded photos, every version and every stored PDF of this paper are deleted. This cannot be undone."
+        description="The uploaded photos, every version and every stored PDF of this paper are deleted. This cannot be undone. Its conversations with the assistant stay with whoever started them, and are no longer shared."
         confirmLabel="Delete paper"
         pending={remove.isPending}
         onOpenChange={setConfirming}
         onConfirm={() => remove.mutate(scope)}
       />
     </>
-  );
-}
-
-function SectionTabs({ section, onSelect }: { section: QuestionPaperSection; onSelect: (section: QuestionPaperSection) => void }) {
-  return (
-    <Tabs value={section} onValueChange={(value) => onSelect(value as QuestionPaperSection)}>
-      <TabsList variant="line" className="h-auto">
-        {QUESTION_PAPER_SECTIONS.map((id) => (
-          <TabsTrigger key={id} value={id} className="h-9 flex-none px-3 text-sm">
-            {SECTION_LABELS[id]}
-          </TabsTrigger>
-        ))}
-      </TabsList>
-    </Tabs>
   );
 }
 
@@ -194,50 +279,72 @@ function UploadsGuard({ uploads }: { uploads: PageUploads }) {
 function PaperLayout({ scope, detail, canManage }: { scope: QuestionPaperScope; detail: QuestionPaperDetail; canManage: boolean }) {
   const router = useRouter();
   const refresh = useRefreshQuestionPaper(scope);
-  // The upload queue is owned here, above the sections: switching section keeps uploads, their order and their slot count.
+  // The upload queue is owned here, above the views: switching between them keeps uploads, their order and their slot count.
   const uploads = usePageUploads({ pageKey: scope, refresh });
-  const pathname = usePathname();
   const search = useSearchParams();
+  const chatId = paperChatOf(search.get('chat'), detail.latestConversationId);
   const hasVersion = detail.paper.latestVersionNo > 0;
-  const section = resolveSection(search.get('section'), hasVersion);
-  const versionNo = resolveVersionNo(search.get('version'), detail.versions.map((version) => version.versionNo));
-  const go = (next: { section: QuestionPaperSection; version?: number }) => {
-    const params = new URLSearchParams({ section: next.section });
-    if (next.version !== undefined) params.set('version', String(next.version));
-    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
-  };
-  let body: ReactNode;
-  if (section === 'pages') body = <QuestionPaperPagesSection scope={scope} detail={detail} canManage={canManage} uploads={uploads} />;
-  else if (section === 'result')
-    body = (
-      <QuestionPaperResultSection
-        scope={scope}
-        detail={detail}
-        versionNo={versionNo}
-        onSelectVersion={(version) => go({ section: 'result', version })}
-      />
-    );
-  else
-    body = (
-      <QuestionPaperVersionsSection
-        scope={scope}
-        detail={detail}
-        selectedVersionNo={versionNo}
-        onPreview={(version) => go({ section: 'result', version })}
-      />
-    );
+  const generating = inFlightJob(detail.activeJob) !== null;
+  const view = resolveView({ start: search.get('start'), hasVersion, generating, hasChat: chatId !== null });
+  const hasStudio = hasStudioOf({ hasVersion, generating, chatId, latestConversationId: detail.latestConversationId });
+  /** What the screen shows lives in the address. Opening the first screen or its picker is a step the Back button undoes; the rest replaces. */
+  const show = (query: Parameters<typeof questionPaperWorkspaceHref>[1], how: 'push' | 'replace' = 'replace') =>
+    router[how](questionPaperWorkspaceHref(scope, query), { scroll: false });
+  const openStudio = (query: { version?: number; chat?: string } = {}) => show({ chat: query.chat ?? chatId ?? undefined, version: query.version });
+  const start = (next: QuestionPaperStartKind) => show({ start: next, chat: chatId ?? undefined }, 'push');
+  /** Closing the picker returns to the first screen: named in the address only where the paper would otherwise show its studio. */
+  const closePicker = () => show({ start: hasStudio ? 'sources' : undefined, chat: chatId ?? undefined });
+  const back = hasStudio ? () => openStudio() : null;
+  const heading = <PaperHeading detail={detail} showStatus={view.kind === 'studio'} />;
+  const menu = <PaperMenu scope={scope} detail={detail} canManage={canManage} onStart={start} onShowVersion={(version) => openStudio({ version })} />;
+  const lockReason = paperLockReason(detail.paper);
+  const notice = lockReason ? <Notice>{lockReason} You can still preview and download its papers.</Notice> : null;
   return (
-    <div ref={uploads.rootRef} className="flex min-w-0 flex-col gap-4">
+    // The root only carries the uploads' ref across both views; each view lays itself out.
+    <div ref={uploads.rootRef} className="contents">
       <UploadsGuard uploads={uploads} />
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <PaperHeading detail={detail} />
-        <PaperMenu scope={scope} detail={detail} canManage={canManage} />
-      </div>
-      {paperLockReason(detail.paper) ? (
-        <Notice>{paperLockReason(detail.paper)} You can still preview and download its papers.</Notice>
-      ) : null}
-      <SectionTabs section={section} onSelect={(next) => go({ section: next, version: next === 'pages' ? undefined : (versionNo ?? undefined) })} />
-      <div className="min-w-0">{body}</div>
+      {view.kind === 'studio' ? (
+        <QuestionPaperStudio
+          scope={scope}
+          detail={detail}
+          canManage={canManage}
+          chatId={chatId}
+          versionParam={search.get('version')}
+          heading={heading}
+          menu={menu}
+          notice={notice}
+          onVersion={(version) => show({ chat: chatId ?? undefined, version: version ?? undefined })}
+          // A new conversation is named in the address, or the paper's latest one would take its place.
+          onChat={(chat) => show({ chat: chat ?? NEW_CHAT_PARAM, version: Number(search.get('version')) || undefined })}
+          onOpenPhotos={() => start('sources')}
+          // The photos are worth a button when there are some, or when this user may add them to a paper that can change.
+          onOpenSources={detail.paper.pageCount > 0 || (canManage && !isPaperLocked(detail.paper)) ? () => start('sources') : null}
+        />
+      ) : (
+        // One centred column: the paper's name, then the card it is made in. Nothing else competes with it.
+        <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-5 md:pt-6">
+          <div className="flex items-start gap-2">
+            {back ? (
+              <Button type="button" variant="ghost" size="icon" className="-ml-2 shrink-0" aria-label="Back to the paper" onClick={back}>
+                <ChevronLeft aria-hidden />
+              </Button>
+            ) : null}
+            <div className="min-w-0 flex-1">{heading}</div>
+            {menu}
+          </div>
+          {notice}
+          <QuestionPaperStart
+            scope={scope}
+            detail={detail}
+            canManage={canManage}
+            uploads={uploads}
+            earlierOpen={view.picking}
+            onEarlierOpenChange={(open) => (open ? start('earlier') : closePicker())}
+            onOpenStudio={openStudio}
+            onBack={back}
+          />
+        </div>
+      )}
     </div>
   );
 }

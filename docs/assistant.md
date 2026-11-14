@@ -12,7 +12,7 @@ permissions.
 | Piece | Where | Owns |
 | --- | --- | --- |
 | Assistant package | `packages/assistant` | Agent loop and model providers (`src/runtime`), store, live events, the `/model/*` router (`router.ts`, `http.ts`), the outbox (`dispatch.ts`), the signed worker service (`control.ts`, `worker.ts`) |
-| Tables | `packages/db/src/schema/assistant.ts` (main migrations, `assistant_` prefix) | Conversations, runs, items, approvals, transcript, `assistant_model_request` (saved costs, also the question paper job's), `assistant_attachment` (chat images), `school_assistant_access_role` |
+| Tables | `packages/db/src/schema/assistant.ts` (main migrations, `assistant_` prefix) | Conversations, runs, items, approvals, transcript, `assistant_model_request` (saved costs, also the question paper job's), `assistant_attachment` (chat images and PDFs), `school_assistant_access_role` |
 | Contract | `packages/assistant-contract` | DTOs, the oRPC contract of `/model/*`, shared protocol constants, exact USD sums (`money.ts`) |
 | Chat UI pieces | `packages/components/src/assistant` | Presentational timeline, approval card, composer (props and callbacks only) |
 | Usage UI pieces | `packages/components/src/assistant-usage` | Date range form, spend chart and table (props only) |
@@ -239,44 +239,97 @@ running) one school may have at once, which bounds how many run at the same time
 the cached spend check can be overshot by jobs started one after another).
 The worker needs the same `QUESTION_PAPER_*` values as the API server.
 
-### Image attachments, question paper tools and context pruning
+### Attachments, question paper tools and context pruning
 
-Chat can carry images, mainly photographs of a handwritten question paper
+Chat can carry images and PDFs: photographs of a handwritten question paper, an
+existing paper, a syllabus or notes as a PDF
 (feature guide: [Question papers](question-papers.md#chat-attachments-tools-drafts-pruning)).
 
-- **Attachments.** The composer takes up to 20 images per message (paperclip, drop,
-  paste; JPEG, PNG, WebP and the HEIC family, 15 MB each). Each file is uploaded
-  first, alone, to `POST /api/blob/schools/:schoolId/assistant/attachments`
+- **Kinds.** An attachment is an `image` (JPEG, PNG, WebP or the HEIC family) or a
+  `document` (a PDF). The kind is its own fact (`assistant_attachment.kind`, migration
+  0066; `AssistantAttachmentRef.kind`; the transcript marker's `kind`), decided once from
+  the uploaded **bytes** (`sniffAttachmentKind` in `packages/api/src/files/attachment-upload.ts`:
+  an image signature at offset 0 first, then `%PDF-` at offset 0 or within the first 1,024
+  bytes, as PDF readers accept) and never from the file name or the declared type. A
+  JPEG named `.pdf` is an image; HTML or a Word file named `.pdf` is refused. Database
+  checks hold one shape per kind: a document has no derivative status, thumbnail or model
+  copy and its type is `application/pdf`. Word and other files are refused with
+  `ASSISTANT_ATTACHMENT_REFUSED_TYPE_MESSAGE` ("... Save Word and other documents as PDF
+  and attach the PDF."), by the composer before uploading and by the server (415).
+- **Limits** (all in `packages/assistant-contract/src/attachments.ts`, read by the server,
+  the composer and the model context): 20 attachments per message, of either kind
+  together; an image at most 15 MiB, a PDF at most 10 MiB (13.3 MiB as base64, so one PDF
+  always fits the request budget with room for images); 40 unsent attachments per user
+  and school; unsent ones kept 24 hours; one request carries at most 16 MiB of attachment
+  bytes counted as base64, images and PDFs together. Pages of a PDF are not counted: the
+  server never parses one. The providers' own limits are far above ours (Gemini: 50 MB
+  per inline PDF, 100 MB of inline data per request, 1,000 pages,
+  <https://ai.google.dev/gemini-api/docs/file-input-methods>; Claude: 128 MB per request,
+  600 pages, 100 when the model's context window is under 1M tokens,
+  <https://platform.claude.com/docs/en/build-with-claude/pdf-support>; both read
+  2026-11-14). A PDF a provider refuses (too many pages, a password, damaged) fails the
+  turn with `ASSISTANT_DOCUMENT_REJECTED_MESSAGE` (run failure `document_rejected`),
+  which tells the user to start a new conversation with a shorter PDF or photos.
+- **Upload.** Each file is uploaded first, alone, to
+  `POST /api/blob/schools/:schoolId/assistant/attachments`
   (`packages/assistant/src/attachments.http.ts`, mounted in `apps/server`): browser
-  session only, origin checked, `assertCanUse`, 60 per minute per IP. The three objects are written
-  first and a short transaction (per user and school advisory lock) then counts the cap, frees
-  stale or surplus rows (their objects are deleted after the commit, best effort, logged by key)
-  and inserts the row; no connection or lock is held across storage calls. It becomes an
-  `assistant_attachment` row (the original, a 1800 px model copy and a thumbnail in
-  S3 under `schools/{schoolId}/`; `unsupported` when the server cannot decode it, as
-  for HEIC) and an id. `sendMessage` takes `attachmentIds` (text may then be empty) and binds
-  them in the same transaction as the message; a message that names an image that is
+  session only, origin checked, `assertCanUse`, 60 per minute per IP; the body is read
+  bounded to the larger cap, then the kind's own cap applies. An image becomes three
+  objects (the original, a 1800 px model copy and a thumbnail; `unsupported` when the
+  server cannot decode it, as for HEIC); a PDF is one object, stored exactly as uploaded
+  (`original.pdf`), never parsed, rendered or rewritten. All live under
+  `schools/{schoolId}/assistant/attachments/{id}/`. The objects are written first and a
+  short transaction (per user and school advisory lock) then counts the cap, frees stale
+  or surplus rows (their objects are deleted after the commit, best effort, logged by key)
+  and inserts the row; no connection or lock is held across storage calls.
+- **Browser.** The management app decides the kind from the file's first bytes too
+  (`assistantAttachmentKindOf` in `apps/management/lib/assistant-attachments.ts`, same
+  order as the server, reusing `hasPdfSignature` and `@campuspilot/s3/image`): only an
+  image goes through the HEIC to JPEG conversion (`prepareUploadFile`), a PDF goes up as
+  picked, anything else is refused before it uploads. The server's `ref.kind` is the
+  fact the composer then uses. A document is drawn as a tile with a file icon, its name
+  and its size, in the composer, on a sent message and on a message that is still on its
+  way or queued (those carry the references, `useSendAssistantMessage().send(text, id,
+  { attachments })`, so their kind is known before the server echoes the message).
+- **Sending.** `sendMessage` takes `attachmentIds` (text may then be empty) and binds
+  them in the same transaction as the message; a message that names a file that is
   foreign, already sent or missing is refused whole; for missing ones the BAD_REQUEST carries
   `data = { reason: 'attachments_missing', attachmentIds }` and the composer marks exactly
-  those tiles as failed (the failed copy of the message is dropped, so Retry cannot loop). Reads redirect to a 5 minute
-  presigned URL and only the owner may read. A user may hold 40 unsent attachments
-  per school; removing one from the composer deletes it (`DELETE` on the attachment,
-  owner and unsent only), an upload at the cap frees that user's unsent images older
-  than an hour and then, if still at the cap, the oldest beyond the newest 20 (a composer
-  holds at most 20; the rest were left by a composer that unmounted), an unsent one is deleted after 24 hours (the outbox sweep, which also
-  retries attachments of deleted conversations whose objects could not be deleted;
-  objects go before rows), the others
-  with their conversation (`deleteConversation`, a soft delete, deletes them
-  explicitly) and with the school (demo purge). A file the active provider cannot
-  read (HEIC on Anthropic) refuses the send with a message asking for a JPEG; an image is
-  never dropped silently.
-- **Transcript.** A stored user turn holds provider-neutral markers, never bytes; the
-  provider adapters turn a marker into an image part when they build a request, always
-  preceded by a line carrying the attachment's `asat_` id, sanitised file name and type so
-  the model can use the id as `data-figure-id` on an `<img>` (old/unshown attachments keep the id in their
-  note; see [Question papers](question-papers.md#chat-attachments-tools-drafts-pruning)).
+  those tiles as failed (the failed copy of the message is dropped, so Retry cannot loop).
+  A file the conversation's provider cannot read refuses the send before any cost (D46):
+  HEIC on Anthropic asks for a JPEG; a PDF on a provider that declares no document types
+  (`documentMimeTypes`, explicit per provider in `runtime/providers/image-types.ts`) asks
+  for photos of its pages. A file is never dropped silently. A conversation started by
+  files alone is titled "Attached image(s)", "Attached PDF(s)" or "Attached files".
+- **Reading back.** Only an image is ever served back: `thumb` and `original` redirect
+  the owner to a 5 minute presigned URL. A document answers 404 on both, so a PDF's bytes
+  go to the model and nowhere else (a PDF can carry script and a browser renders it
+  inline); there is no PDF preview or thumbnail.
+- **Removal.** Removing a file from the composer deletes it (`DELETE` on the attachment,
+  owner and unsent only); an upload at the cap frees that user's unsent files older than
+  an hour and then, if still at the cap, the oldest beyond the newest 20 (a composer holds
+  at most 20; the rest were left by a composer that unmounted); an unsent one is deleted
+  after 24 hours (the outbox sweep, which also retries attachments of deleted conversations
+  whose objects could not be deleted; objects go before rows); the others go with their
+  conversation (`deleteConversation`, a soft delete, deletes them explicitly) and with the
+  school (demo purge). Both kinds follow the same rules.
+- **Transcript.** A stored user turn holds provider-neutral markers (id, kind, name,
+  type), never bytes; the provider adapters turn a marker into the provider's part when
+  they build a request, always preceded by a line carrying the attachment's `asat_` id,
+  sanitised file name and type (`attachmentLabel`). For an image the line says the id can
+  be a `data-figure-id`; for a PDF it says the file is source material to read and can
+  never be a figure. An image goes to Gemini as `inlineData` and to Claude as an `image`
+  block. A PDF goes as the PDF itself, never rasterised or text-extracted by us: Gemini
+  `inlineData` with `mimeType: 'application/pdf'` (`geminiDocumentPart`), Claude a
+  `document` block with a base64 `application/pdf` source (`anthropicDocumentBlock`).
+  Old or unshown attachments keep the id in their note; see
+  [Question papers](question-papers.md#chat-attachments-tools-drafts-pruning).
   `AssistantUserMessageBody` carries `attachments` and an optional `seed` (the
-  question paper "Continue in chat" context, accepted only on a new conversation).
+  question paper context, accepted only on a new conversation).
+- **Never a figure.** A PDF's `asat_` id as a `data-figure-id` is a validation problem
+  that tells the model to read the PDF and write a placeholder (or ask for the picture as
+  an image); a save refuses it and never copies a PDF into a paper's figures
+  (`question-paper.attachments.ts`).
 - **Tools.** The question paper tools are ordinary advanced MCP tools of module
   `exams` (`listQuestionPapers`, `getQuestionPaper`, `listQuestionPaperVersions`,
   `getQuestionPaperDraft` (reads an unsaved draft back by `draftId`; in-app only),
@@ -305,8 +358,9 @@ Chat can carry images, mainly photographs of a handwritten question paper
   or `getQuestionPaper` (saved) for a validate input, `getQuestionPaper` for a save input, and no
   draft id for any other tool; it says it is not the content, so copying it into `html` is
   refused as an empty paper, and an attachment by a note
-  that keeps its id and says the image is no longer visible. The stored transcript keeps the
-  full text: a draft id is resolved from it when the user saves. Inside it, images are materialised newest first within a 16 MiB
+  that keeps its id and says the image or document is no longer visible (a document's note
+  also says it is not a figure). The stored transcript keeps the
+  full text: a draft id is resolved from it when the user saves. Inside it, images and PDFs are materialised newest first within one 16 MiB
   budget counted as base64, with a note for any that are missing, unreadable or omitted. Entry count,
   order, tool call ids and thought signatures are never touched, and the function is
   pure and idempotent. Each provider supplies a `ContextAdapter` (`anthropicContext`,
@@ -465,6 +519,12 @@ the worker logs a warning when it is on in production.
   through tool results; the prompt tells the model not to follow it, and the
   renderer (`assistant-markdown.tsx`) makes the leak impossible by showing an
   image as its description only. Links still open, on a click.
+- **A PDF is never shown in the browser or opened by the server.** A PDF can
+  carry script, and a browser renders one inline, so its bytes are never
+  served back (no preview, no thumbnail, `thumb`/`original` answer 404) and
+  never parsed, rendered or rewritten on the server: they go to the model
+  exactly as uploaded. What a PDF is comes from its bytes, never its name or
+  declared type; HTML named `.pdf` is refused.
 - **Cross-site requests are refused.** `/model/rpc/*` rejects a request whose
   `Origin` is not in `CORS_ORIGIN`. CORS alone only hides the response; the
   request would still run with the user's cookie.
@@ -480,6 +540,62 @@ the worker logs a warning when it is on in production.
   request still applies). The API enforces the tool policy for it; approval
   is enforced by the assistant's loop only.
 
+## Conversations shared with a question paper
+
+A conversation is private to the user who started it, with one exception: a
+conversation started on a question paper's screen is **shared with that paper**,
+so a colleague who takes the paper over reads how it came to be and carries on.
+
+- **What makes it shared.** `sendMessage` with `shareWithPaper: true` on a new
+  conversation, which needs a question paper `seed` (contract) and the right to
+  manage that paper's class (FORBIDDEN otherwise). It is its own fact, stored as
+  the paper's natural key on `assistant_conversation` (`paper_session_id`,
+  `paper_exam_slug`, `paper_class_id`, `paper_subject_slug`, `paper_mode_slug`;
+  all or none, checked; migration 0068). A seed alone never shares anything:
+  the assistant's page can start a private conversation about a paper.
+- **Who reaches it** (`mayReachConversation`, `conversation-access.ts`), always
+  after seeing the assistant in the school (`assertCanSee`). The paper's class
+  permission decides for everyone, **its starter included**: a teacher moved off
+  the class no longer reads what colleagues write in it.
+  - anyone who may **read** the class's question papers (the same OPA action as
+    the paper's procedures): get, subscribe, see its images, approve or decline
+    their own turn's changes;
+  - anyone who may **manage** them: also send into it, and stop someone else's
+    turn (or remove their queued message);
+  - nobody else: NOT_FOUND, as for an id that does not exist. A starter who lost
+    the class still has the row in their own history; opening it says it is not
+    available.
+  Anyone may always stop their own turn. Open streams recheck this every two
+  minutes with the rest of the access.
+- **What stays personal.** Only the starter deletes it, and only while they may
+  still continue it (it then disappears for everyone). Only the person whose turn asked for a change may approve it: each
+  run is its sender's, with their delegated token (`assistant_run.user_id`,
+  now on the run DTO), and the others see "Waiting for … to approve a change".
+  Each user message records its sender (`body.author`, named as at sending),
+  and the chat shows the name over messages that are not the user's own. It
+  stays in its starter's own history; it is not added to anyone else's.
+- **When the paper is deleted** (its own delete, or its exam plan's), its
+  conversations stop being shared (`unsharePaperConversations`, matched by key,
+  also for a paper that never had a row): each stays a private conversation in
+  its starter's history, and the paper starts again from its first screen. A
+  paper is not deleted while one of its conversations has a turn that has not
+  finished (CONFLICT), so no colleague's approval is stranded.
+- **Its history.** `listPaperConversations` lists one paper's live shared
+  conversations, newest first, with who started each (`startedByName`) and
+  their attention; for people who may manage the paper. The paper's detail
+  (`getQuestionPaperDetail`) carries `latestConversationId`, which the paper's
+  screen opens unless its URL names another (`?chat=<id>`, or `?chat=new`).
+- **The paper's tools in it.** A draft id is read from the user's own chat or a
+  chat shared with that exact paper (`isPaperChat`). Chat images may be figures
+  when the user sent them, or when they were sent in a conversation shared with
+  that exact paper (`chatFiguresOf`); the draft card passes its conversation
+  (`conversationId`) to `previewQuestionPaperDraft` and
+  `validateQuestionPaperDraft` for this, and the server checks it.
+- **Mind what is in it.** Everything said and read in a shared conversation is
+  visible to the paper's readers, including tool results that came from the
+  sender's own permissions. The welcome says so ("Everyone who can open this
+  paper sees this chat").
+
 ## Comparing the three surfaces
 
 All three share one chat component and the same conversations:
@@ -489,6 +605,14 @@ All three share one chat component and the same conversations:
 - **Palette**: type a question in ⌘K and choose *Ask the assistant*.
 
 Each run records the surface it started from (`assistant_run.surface`).
+
+The same chat component is also embedded where a screen is about one thing. A question
+paper's screen holds its own conversation beside the paper
+([Question papers](question-papers.md#the-papers-screen)): it passes the paper as the
+`seed` with an empty `seedText` (no prefilled sentence), its own `welcome` words,
+`placeholder` and `suggestions`, and records the `panel` surface. An embedding surface
+keys the chat so that the one that starts a conversation stays mounted as it moves into
+it, and any other change of conversation remounts it.
 
 ## Running locally
 

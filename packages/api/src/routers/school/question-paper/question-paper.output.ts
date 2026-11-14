@@ -20,8 +20,7 @@ import { cleanDeclarations, cleanStyleSheet, StripReport } from './question-pape
  *   its text must hold no `<`, `&`, backslash or NUL and equal its own cleaned
  *   form. Its text can therefore never close it early, reopen markup, or mean
  *   something else in another parsing context;
- * - tags are balanced, `style=""` attributes equal their cleaned form, and no
- *   style positions anything out of flow.
+ * - tags are balanced and `style=""` attributes equal their cleaned form.
  *
  * The renderer runs this on every render as well as the sanitiser on every
  * save, so the stored value and what is printed are checked by the same rules.
@@ -38,7 +37,6 @@ const VOID = new Set(['br', 'hr', 'img', 'col']);
 const WS = '[ \\t\\n\\f\\r]';
 const TAG = new RegExp(`<(/?)([a-z][a-z0-9]*)((?:${WS}+[a-z][a-z0-9:_-]*(?:="[^"<>]*")?)*)${WS}*(/?)>`, 'y');
 const ATTRIBUTE = new RegExp(`${WS}+([a-z][a-z0-9:_-]*)(?:="([^"]*)")?`, 'y');
-const OUT_OF_FLOW = /position\s*:\s*(?:fixed|absolute|sticky)/i;
 const STYLE_TEXT = /^[^<&\\\u0000]*$/;
 
 export type ScannedElement = {
@@ -98,7 +96,7 @@ export function scanQuestionPaperOutput(html: string, allowed: { tags: ReadonlyS
       if (attributeName in attributes) return fail(`the attribute "${attributeName}" is repeated`);
       const value = unescapeAttribute(attribute[2] ?? '');
       if (attributeName === 'style') {
-        if (OUT_OF_FLOW.test(value) || cleanDeclarations(value, new StripReport()) !== value) return fail('a style attribute that is not clean');
+        if (cleanDeclarations(value, new StripReport()) !== value) return fail('a style attribute that is not clean');
       }
       attributes[attributeName] = value;
     }
@@ -109,7 +107,7 @@ export function scanQuestionPaperOutput(html: string, allowed: { tags: ReadonlyS
       const close = html.indexOf('</style>', index);
       if (close < 0) return fail('an unclosed <style>');
       const css = html.slice(index, close);
-      if (!STYLE_TEXT.test(css) || OUT_OF_FLOW.test(css)) return fail('style text that is not plain CSS');
+      if (!STYLE_TEXT.test(css)) return fail('style text that is not plain CSS');
       if (cleanStyleSheet(css, new StripReport(), (element) => allowed.tags.has(element)) !== css) return fail('style text that is not clean');
       styleTexts.push(css);
       index = close + '</style>'.length;

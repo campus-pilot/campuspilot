@@ -23,6 +23,14 @@ describe('the learn guide', () => {
     expect(QUESTION_PAPER_GUIDE).toContain('never send it as html');
   });
 
+  it('says an attached PDF is source material to read, never a figure to print', () => {
+    expect(QUESTION_PAPER_GUIDE).toContain('An attached PDF');
+    expect(QUESTION_PAPER_GUIDE).toContain('SOURCE MATERIAL to read');
+    expect(QUESTION_PAPER_GUIDE).toContain('its id can never be a data-figure-id');
+    // The job prompt shares only the fragment rules; attachments exist in chat only.
+    expect(QUESTION_PAPER_FRAGMENT_RULES).not.toContain('attached PDF');
+  });
+
   it('returns the guide, the limits and one worked example', () => {
     const payload = buildLearnPayload();
     expect(payload.guide).toBe(QUESTION_PAPER_GUIDE);

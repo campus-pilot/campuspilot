@@ -37,8 +37,10 @@ export type FakeToolUseBlock = { type: 'tool_use'; id: string; name: string; inp
 export type FakeToolResultBlock = { type: 'tool_result' } & ModelToolResult;
 /** An image as the fake's context shows it: the type and size, not the bytes. */
 export type FakeImageBlock = { type: 'image'; mimeType: string; byteLength: number };
+/** A document (PDF) as the fake's context shows it, like an image: the type and size, so tests can assert it was sent whole. */
+export type FakeDocumentBlock = { type: 'document'; mimeType: string; byteLength: number };
 export type FakeAttachmentMarkerBlock = AttachmentMarker;
-export type FakeBlock = FakeTextBlock | FakeToolUseBlock | FakeToolResultBlock | FakeImageBlock | FakeAttachmentMarkerBlock;
+export type FakeBlock = FakeTextBlock | FakeToolUseBlock | FakeToolResultBlock | FakeImageBlock | FakeDocumentBlock | FakeAttachmentMarkerBlock;
 
 /** The fake's pruning and attachment rules (see {@link ContextAdapter}); same shape as the real adapters, in its own format. */
 export const fakeContext: ContextAdapter = {
@@ -71,7 +73,15 @@ export const fakeContext: ContextAdapter = {
     };
   },
   materializeAttachment(marker: AttachmentMarker, file: AttachmentFile) {
+    if (file.kind === 'document') {
+      if (marker.kind !== 'document') return [{ type: 'text', text: attachmentNote(marker, 'unreadable') }];
+      return [
+        { type: 'text', text: attachmentLabel(marker) },
+        { type: 'document', mimeType: file.mimeType, byteLength: file.bytes.byteLength },
+      ];
+    }
     if (file.kind !== 'image') return [{ type: 'text', text: attachmentNote(marker, file.kind) }];
+    if (marker.kind !== 'image') return [{ type: 'text', text: attachmentNote(marker, 'unreadable') }];
     return [
       { type: 'text', text: attachmentLabel(marker) },
       { type: 'image', mimeType: file.mimeType, byteLength: file.bytes.byteLength },
@@ -206,6 +216,7 @@ export function createFakeProvider({
   script = [],
   whenExhausted,
   imageMimeTypes = ['image/jpeg', 'image/png', 'image/webp'],
+  documentMimeTypes = ['application/pdf'],
 }: {
   /** A real provider id: conversations and runs store it in an enum column. */
   id?: ModelProviderId;
@@ -220,6 +231,8 @@ export function createFakeProvider({
   whenExhausted?: FakeModelStep;
   /** Image types the fake "can read" (`ModelProvider.imageMimeTypes`). */
   imageMimeTypes?: readonly string[];
+  /** Document types the fake "can read" (`ModelProvider.documentMimeTypes`); `[]` for a provider that reads none. */
+  documentMimeTypes?: readonly string[];
 } = {}): FakeModelProvider {
   const queue = [...script];
   const calls: FakeModelCall[] = [];
@@ -230,6 +243,7 @@ export function createFakeProvider({
     id,
     model,
     imageMimeTypes,
+    documentMimeTypes,
     context: fakeContext,
     calls,
     textCalls,
@@ -267,6 +281,7 @@ export function createFakeProvider({
       ...(body.attachments ?? []).map((attachment, index, all): FakeBlock => ({
         type: 'campuspilot_attachment',
         attachmentId: attachment.id,
+        kind: attachment.kind,
         fileName: attachment.fileName,
         contentType: attachment.contentType,
         ordinal: index + 1,

@@ -9,11 +9,10 @@ import {
   eventChangedConversationList,
   eventChangedSchoolData,
   hasSucceededWriteAfter,
-  withConnectionLost,
-} from './assistant-conversation-state';
+  withConnectionLost, mayStopTurn } from './assistant-conversation-state';
 
 const at = new Date('2026-11-05T00:00:00Z');
-const conversation = { id: 'c', schoolId: 's', title: 't', lastSequence: 3, createdAt: at, updatedAt: at };
+const conversation = { id: 'c', schoolId: 's', userId: 'u', title: 't', sharedWithPaper: false, lastSequence: 3, createdAt: at, updatedAt: at };
 const reply = (sequence: number, status: 'streaming' | 'complete', text = ''): AssistantItemDto => ({
   id: 'i2', conversationId: 'c', runId: 'r', position: 2, sequence, createdAt: at, updatedAt: at,
   kind: 'assistant_message', status, body: { text },
@@ -23,7 +22,7 @@ const user: AssistantItemDto = {
   kind: 'user_message', status: 'complete', body: { text: 'hi' },
 };
 const run = (sequence: number, status: AssistantRunDto['status']): AssistantRunDto => ({
-  id: 'r', conversationId: 'c', status, surface: 'panel', stopRequestedAt: null, errorCode: null,
+  id: 'r', conversationId: 'c', userId: 'u', status, surface: 'panel', stopRequestedAt: null, errorCode: null,
   errorMessage: null, sequence, createdAt: at, startedAt: null, completedAt: null, diagnostics: null,
 });
 
@@ -132,4 +131,12 @@ test('the first snapshot marks where the conversation was opened; later ones kee
   });
   assert.equal(again.openedSequence, 3);
   assert.equal(again.sequence, 9);
+});
+
+test('a turn is stopped by its sender, or by whoever may write in the conversation', () => {
+  assert.equal(mayStopTurn({ canWrite: false, userId: 'me', ownerId: 'me' }), true);
+  assert.equal(mayStopTurn({ canWrite: false, userId: 'me', ownerId: 'ravi' }), false);
+  assert.equal(mayStopTurn({ canWrite: true, userId: 'me', ownerId: 'ravi' }), true);
+  // Before the session is known, or for a message that does not say whose it is, only the right to write counts.
+  assert.equal(mayStopTurn({ canWrite: false, userId: null, ownerId: undefined }), false);
 });

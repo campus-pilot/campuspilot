@@ -1,3 +1,4 @@
+import { ASSISTANT_DOCUMENT_REJECTED_MESSAGE } from '@campuspilot/assistant-contract/attachments';
 import {
   assistantConversationTable,
   assistantModelRequestTable,
@@ -123,7 +124,10 @@ async function arrange({
   checkAccess = async () => ({ allowed: true as const }),
   body,
   loadAttachment,
+  documentMimeTypes,
 }: {
+  /** Document types the fake provider reads (PDF by default; `[]` for a provider that reads none). */
+  documentMimeTypes?: readonly string[];
   /** More fields of the user message's body (attachments, a seed). */
   body?: Partial<AssistantUserMessageBody>;
   /** The worker's attachment loader (missing by default, as in a deployment with none). */
@@ -137,7 +141,7 @@ async function arrange({
   /** The worker's access check before each model request (allows by default). */
   checkAccess?: RunAccessCheck;
 } = {}) {
-  const provider = createFakeProvider({ model: providerModel, script, whenExhausted });
+  const provider = createFakeProvider({ model: providerModel, script, whenExhausted, ...(documentMimeTypes ? { documentMimeTypes } : {}) });
   const turn = await seedTurn({ text: QUESTION, provider: provider.id, conversationModel, body });
   const events = await watchEvents(turn.conversationId);
   onTestFinished(() => events.close());
@@ -166,7 +170,7 @@ const writeCall = { id: 'tu_write', name: updateStudent.modelName, input: { stud
 const readCall = { id: 'tu_read', name: listStudents.modelName, input: { page: 1 } };
 
 describe('a message with images', () => {
-  const attachment = (id: string, fileName: string) => ({ id, fileName, contentType: 'image/jpeg', byteSize: 3, width: 1, height: 1, previewable: true });
+  const attachment = (id: string, fileName: string) => ({ id, kind: 'image' as const, fileName, contentType: 'image/jpeg', byteSize: 3, width: 1, height: 1, previewable: true });
 
   it('stores markers only, and shows the model the images in order with their labels', async () => {
     const loaded: string[] = [];
@@ -185,8 +189,8 @@ describe('a message with images', () => {
     expect(run.status).toBe('completed');
     // The stored transcript is small and provider-neutral: markers, never bytes.
     expect(transcript[0]!.content).toEqual([
-      { type: 'campuspilot_attachment', attachmentId: 'asat_1', fileName: 'page1.jpg', contentType: 'image/jpeg', ordinal: 1, total: 2 },
-      { type: 'campuspilot_attachment', attachmentId: 'asat_2', fileName: 'page2.jpg', contentType: 'image/jpeg', ordinal: 2, total: 2 },
+      { type: 'campuspilot_attachment', attachmentId: 'asat_1', kind: 'image', fileName: 'page1.jpg', contentType: 'image/jpeg', ordinal: 1, total: 2 },
+      { type: 'campuspilot_attachment', attachmentId: 'asat_2', kind: 'image', fileName: 'page2.jpg', contentType: 'image/jpeg', ordinal: 2, total: 2 },
       { type: 'text', text: QUESTION },
     ]);
     // The model got labelled images in the order attached, then the words.
@@ -231,6 +235,65 @@ describe('a message with images', () => {
     await invoke().done;
     expect((await readTurn(turn)).run.status).toBe('completed');
     expect(JSON.stringify(provider.calls[0]!.transcript[0]!.content)).toContain('asat_9: lost.jpg');
+  });
+});
+
+describe('a message with a PDF', () => {
+  const pdfRef = (id: string, fileName: string) => ({ id, kind: 'document' as const, fileName, contentType: 'application/pdf', byteSize: 9, width: null, height: null, previewable: false });
+  const pdfFile = { kind: 'document' as const, bytes: new Uint8Array(9), mimeType: 'application/pdf' };
+
+  it('stores a document marker and hands the model the PDF itself, labelled as source material', async () => {
+    const asked: Array<{ id: string; document: readonly string[] }> = [];
+    const { provider, turn, invoke } = await arrange({
+      script: [fakeReply({ text: 'The paper has 12 questions.' })],
+      body: { attachments: [pdfRef('asat_pdf', 'paper.pdf')] },
+      loadAttachment: async (id, readable) => {
+        asked.push({ id, document: readable.document });
+        return pdfFile;
+      },
+    });
+
+    await invoke().done;
+
+    const { transcript, run } = await readTurn(turn);
+    expect(run.status).toBe('completed');
+    expect(transcript[0]!.content[0]).toEqual({ type: 'campuspilot_attachment', attachmentId: 'asat_pdf', kind: 'document', fileName: 'paper.pdf', contentType: 'application/pdf', ordinal: 1, total: 1 });
+    expect(provider.calls[0]!.transcript[0]!.content).toEqual([
+      { type: 'text', text: '[Attachment asat_pdf: paper.pdf, application/pdf (1 of 1). It is a PDF document: read it as source material. It is not an image and cannot be used as data-figure-id.]' },
+      { type: 'document', mimeType: 'application/pdf', byteLength: 9 },
+      { type: 'text', text: QUESTION },
+    ]);
+    // The loader was told the provider reads PDFs.
+    expect(asked).toEqual([{ id: 'asat_pdf', document: ['application/pdf'] }]);
+  });
+
+  it('fails with a sentence about the PDF when the provider refuses a request that carried one', async () => {
+    const { turn, invoke } = await arrange({
+      script: [new FakeModelError('rejected', '400 invalid_request_error: A maximum of 100 PDF pages may be provided.')],
+      body: { attachments: [pdfRef('asat_pdf', 'long.pdf')] },
+      loadAttachment: async () => pdfFile,
+    });
+    await invoke().done;
+    const { run } = await readTurn(turn);
+    expect(run).toMatchObject({
+      status: 'failed',
+      errorCode: 'document_rejected',
+      errorMessage: ASSISTANT_DOCUMENT_REJECTED_MESSAGE,
+      errorDetail: '400 invalid_request_error: A maximum of 100 PDF pages may be provided.',
+    });
+  });
+
+  it('shows a PDF to a provider that reads no documents as a note, never sending it or dropping it silently', async () => {
+    const { provider, invoke } = await arrange({
+      documentMimeTypes: [],
+      script: [fakeReply({ text: 'I cannot read that file.' })],
+      body: { attachments: [pdfRef('asat_pdf', 'paper.pdf')] },
+      loadAttachment: async (_id, readable) => (readable.document.length === 0 ? { kind: 'unreadable' } : pdfFile),
+    });
+    await invoke().done;
+    const shown = JSON.stringify(provider.calls[0]!.transcript[0]!.content);
+    expect(shown).toContain('asat_pdf: paper.pdf, application/pdf - a document this assistant cannot read');
+    expect(shown).not.toContain('"type":"document"');
   });
 });
 

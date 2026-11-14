@@ -34,7 +34,7 @@ import {
   startQuestionPaperGeneration,
 } from './question-paper.service';
 import { resolvePaperScope } from './question-paper.scope';
-import { QUESTION_PAPER_MAX_PAGE_BYTES } from './question-paper.dto';
+import { QUESTION_PAPER_GENERATION_INSTRUCTIONS_MAX_CHARS, QUESTION_PAPER_MAX_PAGE_BYTES } from './question-paper.dto';
 
 /**
  * The workflow engine is replaced by a sender that fails the way an unsigned
@@ -409,10 +409,10 @@ describe('question paper pages', () => {
       expect(queued).toMatchObject({ status: 'queued' });
       expect(dispatched).toEqual([queued.jobId]);
       const [job] = await db.select().from(examQuestionPaperJobTable).where(eq(examQuestionPaperJobTable.id, queued.jobId));
-      expect(job).toMatchObject({ status: 'queued', requestedBy: world.people.teacher.userId, pageIds: detail.pages.map((page) => page.id), pageRevision: detail.paper.pageRevision, attempt: 1, handedOverAt: null });
+      expect(job).toMatchObject({ status: 'queued', requestedBy: world.people.teacher.userId, pageIds: detail.pages.map((page) => page.id), pageRevision: detail.paper.pageRevision, attempt: 1, handedOverAt: null, instructions: null });
 
       const active = await world.people.manager.client.school.getQuestionPaperDetail(key(k));
-      expect(active.activeJob).toMatchObject({ id: queued.jobId, status: 'queued' });
+      expect(active.activeJob).toMatchObject({ id: queued.jobId, status: 'queued', instructions: null });
       const again = await reason(start('manager', k, detail.paper.pageRevision));
       expect(again).toMatchObject({ code: 'CONFLICT', message: 'A generation is already running for this paper.' });
 
@@ -454,6 +454,54 @@ describe('question paper pages', () => {
       // A sweep running in another test file may also have tried (and failed) to hand it over.
       expect(job!.handoverAttempts).toBeGreaterThanOrEqual(1);
       expect(job).toMatchObject({ status: 'queued', handedOverAt: null, lastHandoverError: expect.stringContaining('WORKER_CONTROL_SECRET') });
+    });
+
+    it("stores the teacher's instructions on the job as sent (line breaks normalised, trimmed), shows them in the detail and refuses bad ones before any job", async () => {
+      configureQuestionPaperModel(fakeModel(GEMINI_LIKE));
+      // A school of its own, so no other test's job or page changes interfere.
+      const own = await createQuestionPaperWorld();
+      const manager = own.people.manager;
+      const client = manager.client.school;
+      const science = own.key({ subjectSlug: 'science', modeSlug: 'theory' });
+      const math = own.key({ subjectSlug: 'math', modeSlug: 'theory' });
+      for (const target of [science, math]) await handleQuestionPaperPageUpload(uploadRequest(await jpeg(8, 8), 'image/jpeg', 'a.jpg'), manager.context, target);
+      const revision = async (target: typeof science) => (await client.getQuestionPaperDetail(target)).paper.pageRevision;
+      const jobRows = (paperId: string) => db.select().from(examQuestionPaperJobTable).where(eq(examQuestionPaperJobTable.paperId, paperId));
+
+      // Refused at the input, before any job: too long after trimming, or a control character other than line feed and tab.
+      const tooLong = `  ${'x'.repeat(QUESTION_PAPER_GENERATION_INSTRUCTIONS_MAX_CHARS + 1)}  `;
+      expect(await reason(client.startQuestionPaperGeneration({ ...science, expectedPageRevision: await revision(science), instructions: tooLong }))).toMatchObject({ code: 'BAD_REQUEST' });
+      expect(await reason(client.startQuestionPaperGeneration({ ...science, expectedPageRevision: await revision(science), instructions: 'Leave out\u0000 question 7' }))).toMatchObject({ code: 'BAD_REQUEST' });
+      const sciencePaper = (await client.getQuestionPaperDetail(science)).paper.paperId!;
+      expect(await jobRows(sciencePaper)).toHaveLength(0);
+
+      // Accepted: stored once, exactly as normalised, and returned to the screen while it runs and after it ended.
+      const sent = '  Keep the questions but change the numbers.\r\nप्रश्न 7 छोड़ दें\tthen type it in Hindi.  ';
+      const stored = 'Keep the questions but change the numbers.\nप्रश्न 7 छोड़ दें\tthen type it in Hindi.';
+      const { jobId } = await client.startQuestionPaperGeneration({ ...science, expectedPageRevision: await revision(science), instructions: sent });
+      const [job, ...others] = await jobRows(sciencePaper);
+      expect(others).toEqual([]);
+      expect(job).toMatchObject({ id: jobId, status: 'queued', instructions: stored });
+      expect((await client.getQuestionPaperDetail(science)).activeJob).toEqual({ id: jobId, status: 'queued', createdAt: expect.anything(), instructions: stored });
+      // getQuestionPaper (an agent tool) keeps its job shape: the instructions are for the paper screen.
+      expect((await client.getQuestionPaper(science)).activeJob).toEqual({ id: jobId, status: 'queued', createdAt: expect.anything() });
+      await db.update(examQuestionPaperJobTable).set({ status: 'failed', errorCode: 'model_error', errorMessage: 'x', completedAt: new Date() }).where(eq(examQuestionPaperJobTable.id, jobId));
+      const ended = await client.getQuestionPaperDetail(science);
+      expect(ended.activeJob).toBeNull();
+      expect(ended.lastFinishedJob).toMatchObject({ id: jobId, status: 'failed', instructions: stored });
+
+      // Empty or whitespace-only instructions are none, exactly like leaving them out.
+      const blank = await client.startQuestionPaperGeneration({ ...science, expectedPageRevision: await revision(science), instructions: ' \n\t ' });
+      expect((await db.select().from(examQuestionPaperJobTable).where(eq(examQuestionPaperJobTable.id, blank.jobId)))[0]).toMatchObject({ instructions: null });
+      expect((await client.getQuestionPaperDetail(science)).activeJob).toMatchObject({ id: blank.jobId, instructions: null });
+      const plain = await client.startQuestionPaperGeneration({ ...math, expectedPageRevision: await revision(math) });
+      expect((await db.select().from(examQuestionPaperJobTable).where(eq(examQuestionPaperJobTable.id, plain.jobId)))[0]).toMatchObject({ instructions: null });
+
+      // The longest allowed instructions are accepted.
+      await db.update(examQuestionPaperJobTable).set({ status: 'failed', errorCode: 'model_error', errorMessage: 'x', completedAt: new Date() }).where(eq(examQuestionPaperJobTable.id, blank.jobId));
+      const longest = 'y'.repeat(QUESTION_PAPER_GENERATION_INSTRUCTIONS_MAX_CHARS);
+      const max = await client.startQuestionPaperGeneration({ ...science, expectedPageRevision: await revision(science), instructions: longest });
+      expect((await db.select().from(examQuestionPaperJobTable).where(eq(examQuestionPaperJobTable.id, max.jobId)))[0]!.instructions).toBe(longest);
     });
 
     it('refuses before any cost a page the configured model cannot read, and accepts it for a model that can', async () => {
@@ -641,6 +689,12 @@ describe('question paper pages', () => {
       const saved = await manager.saveQuestionPaperVersion({ ...key(k), expectedVersionNo: 0, html: ENGLISH_SCIENCE });
       const [version] = await db.select().from(examQuestionPaperVersionTable).where(eq(examQuestionPaperVersionTable.paperId, saved.paperId));
       const keptBefore = (await pageRows(keep)).length;
+      // A conversation shared with a mode of this plan that has no paper row yet, and one with the kept subject.
+      const sharedWith = (subjectSlug: string, modeSlug: string) => ({
+        schoolId: world.schoolId, userId: world.people.manager.userId, provider: 'gemini' as const, model: 'm',
+        paperSessionId: world.sessionId, paperExamSlug: 'term-1', paperClassId: world.classId, paperSubjectSlug: subjectSlug, paperModeSlug: modeSlug,
+      });
+      const [planChat, keptChat] = await db.insert(assistantConversationTable).values([sharedWith('math', 'oral'), sharedWith('science', 'theory')]).returning();
 
       const [plan] = await db
         .select()
@@ -657,6 +711,10 @@ describe('question paper pages', () => {
       expect(await db.select().from(artifactTable).where(eq(artifactTable.id, version!.pdfArtifactId!))).toHaveLength(0);
       expect(await db.select().from(examQuestionPaperJobTable).where(eq(examQuestionPaperJobTable.paperId, saved.paperId))).toHaveLength(0);
       await expect(manager.getQuestionPaper(key(k))).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      // The plan's conversations are no longer shared with any paper (also one whose paper never had a row); others stay.
+      const chats = await db.select().from(assistantConversationTable).where(and(eq(assistantConversationTable.schoolId, world.schoolId)));
+      expect(chats.find((chat) => chat.id === planChat!.id)).toMatchObject({ paperClassId: null, paperModeSlug: null });
+      expect(chats.find((chat) => chat.id === keptChat!.id)).toMatchObject({ paperSubjectSlug: 'science' });
     });
   });
 });

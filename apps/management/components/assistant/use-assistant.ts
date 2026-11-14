@@ -1,6 +1,6 @@
 'use client';
 
-import type { QuestionPaperSeed } from '@campuspilot/assistant-contract/attachments';
+import type { AssistantAttachmentRef, QuestionPaperSeed } from '@campuspilot/assistant-contract/attachments';
 import {
   assistantConversationAttention,
   type AssistantConversationListItemDto,
@@ -15,7 +15,7 @@ import {
   buildAssistantTimeline,
   lastUserText,
   sumAssistantUsage,
-  pendingApprovals,
+  approvalsByDecider,
   queuedMessages,
   type AssistantApprovalDecision,
 } from '@campuspilot/components/assistant';
@@ -290,7 +290,8 @@ function structural<T>(derive: (state: AssistantConversationState) => T) {
 const selectTimeline = structural((state) => buildAssistantTimeline(state.items, state.runs));
 const selectItemsById = structural((state) => new Map(state.items.map((item) => [item.id, item])));
 const selectActiveRun = structural((state) => activeRun(state.runs));
-const selectPendingApprovals = structural((state) => pendingApprovals(state.items));
+/** What deciding needs: the items and runs, unchanged while neither changes. */
+const selectApprovalState = structural((state) => ({ items: state.items, runs: state.runs }));
 const selectQueuedMessages = structural((state) => queuedMessages(state.items, state.runs));
 const selectConfirmedItemIds = structural((state): ReadonlySet<string> => new Set(state.items.map((item) => item.id)));
 const selectAnnouncement = structural((state) => assistantAnnouncement(state.items, state.runs, state.openedSequence));
@@ -365,9 +366,17 @@ export function useAssistantActiveRun(schoolId: string, conversationId: string |
   return useConversationQuery(schoolId, conversationId, selectActiveRun).data;
 }
 
-/** Changes waiting for the user's decision, for the composer tray. */
+const NO_APPROVALS = { mine: [], waitingFor: [] };
+
+/**
+ * Changes waiting for a decision, for the composer tray: the user's own to
+ * decide, and the names of the other people (in a conversation shared with a
+ * paper) whose decision is awaited.
+ */
 export function useAssistantPendingApprovals(schoolId: string, conversationId: string | null) {
-  return useConversationQuery(schoolId, conversationId, selectPendingApprovals).data ?? [];
+  const userId = useSignedInUserId();
+  const state = useConversationQuery(schoolId, conversationId, selectApprovalState).data;
+  return state ? approvalsByDecider(state.items, state.runs, userId) : NO_APPROVALS;
 }
 
 /** Messages queued behind the working run, for the composer tray. */
@@ -473,14 +482,30 @@ export function equalJitterDelay(attempt: number): number {
 
 const sendKey = (schoolId: string) => ['assistant', 'send', schoolId] as const;
 
-type SendVariables = Parameters<
+type SendInput = Parameters<
   NonNullable<ReturnType<typeof assistantOrpc['sendMessage']['mutationOptions']>['mutationFn']>
 >[0];
 
+/**
+ * What a send holds in the browser: the server's input, but with the stored
+ * attachment references (kind, name, size) in place of their ids, so a
+ * message on its way or queued draws each file by its kind (a PDF as a
+ * document tile, never as a broken thumbnail). Only the ids go to the server.
+ */
+type SendVariables = Omit<SendInput, 'attachmentIds'> & { attachments?: AssistantAttachmentRef[] };
+
+/** The send's server input: the references reduced to their ids, in the order shown. */
+const sendInputOf = ({ attachments, ...input }: SendVariables): SendInput => ({
+  ...input,
+  ...(attachments?.length ? { attachmentIds: attachments.map((attachment) => attachment.id) } : {}),
+});
+
 export function useSendAssistantMessage(schoolId: string, surface: AssistantSurface) {
   const queryClient = useQueryClient();
+  const sendOptions = assistantOrpc.sendMessage.mutationOptions();
   const mutation = useMutation({
-    ...assistantOrpc.sendMessage.mutationOptions(),
+    ...sendOptions,
+    mutationFn: (variables: SendVariables, context) => sendOptions.mutationFn!(sendInputOf(variables), context),
     mutationKey: sendKey(schoolId),
     // Only network and server failures are retried; a refusal is final.
     // Retrying is safe: the request id makes the server return the original
@@ -490,14 +515,16 @@ export function useSendAssistantMessage(schoolId: string, surface: AssistantSurf
     onSuccess: () => queryClient.invalidateQueries({ queryKey: assistantOrpc.listConversations.key() }),
   });
   /**
-   * Sends a message. `attachmentIds` are images already uploaded for it (in
-   * the order shown); `seed` names the screen a new conversation starts from
-   * and is valid only without a `conversationId`.
+   * Sends a message. `attachments` are images and PDFs already uploaded for
+   * it (in the order shown; only their ids go to the server); `seed` names the
+   * screen a new conversation starts from and is valid only without a
+   * `conversationId`; `shareWithPaper` shares that new conversation with the
+   * seed's question paper.
    */
   const send = (
     text: string,
     conversationId: string | null,
-    extras: { attachmentIds?: string[]; seed?: QuestionPaperSeed | null } = {},
+    extras: { attachments?: AssistantAttachmentRef[]; seed?: QuestionPaperSeed | null; shareWithPaper?: boolean } = {},
   ) => {
     const clientRequestId = crypto.randomUUID();
     return mutation
@@ -508,11 +535,11 @@ export function useSendAssistantMessage(schoolId: string, surface: AssistantSurf
         text,
         surface,
         pageContext: currentPageContext(),
-        ...(extras.attachmentIds?.length ? { attachmentIds: extras.attachmentIds } : {}),
-        ...(extras.seed && !conversationId ? { seed: extras.seed } : {}),
+        ...(extras.attachments?.length ? { attachments: extras.attachments } : {}),
+        ...(extras.seed && !conversationId ? { seed: extras.seed, shareWithPaper: extras.shareWithPaper ?? false } : {}),
       })
       .catch((error: unknown) => {
-        // The composer marks the missing images and keeps the words, so no failed copy of the message stays whose Retry would fail the same way.
+        // The composer marks the missing files and keeps the words, so no failed copy of the message stays whose Retry would fail the same way.
         if (missingAttachmentIdsOf(error)) {
           const cache = queryClient.getMutationCache();
           for (const failed of cache.findAll({ mutationKey: sendKey(schoolId) })) {
@@ -566,8 +593,8 @@ export function useSurfaceLife() {
 export type OptimisticMessage = {
   clientRequestId: string;
   text: string;
-  /** Ids of the images sent with it, shown as thumbnails while it is on its way. */
-  attachmentIds: string[];
+  /** The images and PDFs sent with it, shown by kind (a thumbnail or a document tile) while it is on its way. */
+  attachments: AssistantAttachmentRef[];
   submittedAt: Date;
   delivery: 'sending' | 'failed';
   mutation: Mutation<unknown, unknown, SendVariables>;
@@ -599,7 +626,7 @@ export function useOptimisticMessages(
       {
         clientRequestId: variables.clientRequestId,
         text: variables.text,
-        attachmentIds: variables.attachmentIds ?? [],
+        attachments: variables.attachments ?? [],
         submittedAt: new Date(submittedAt),
         delivery: status === 'error' ? 'failed' : 'sending',
         mutation,
@@ -719,6 +746,6 @@ export function useAssistantDraft(schoolId: string, conversationId: string | nul
  * The signed-in user's id, or null until the session has loaded. Drafts are
  * kept per user, so none is read or written before it is known.
  */
-function useSignedInUserId(): string | null {
+export function useSignedInUserId(): string | null {
   return authClient.useSession().data?.user.id ?? null;
 }

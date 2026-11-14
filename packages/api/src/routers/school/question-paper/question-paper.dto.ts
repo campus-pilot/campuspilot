@@ -5,6 +5,12 @@ import { z } from 'zod';
 export const QUESTION_PAPER_MAX_PAGES = 20;
 /** The largest accepted original photo, 15 MiB (D24). */
 export const QUESTION_PAPER_MAX_PAGE_BYTES = 15 * 1024 * 1024;
+/**
+ * The longest teacher's instructions a generation job accepts, in UTF-16 code
+ * units (what a textarea's `maxLength` and `String.length` count), after
+ * trimming. A short note ("Make section B easier"), not a second paper.
+ */
+export const QUESTION_PAPER_GENERATION_INSTRUCTIONS_MAX_CHARS = 2_000;
 
 /**
  * How many characters of `getQuestionPaper` the assistant gives the model
@@ -96,7 +102,10 @@ const paperHtmlInput = z
   .max(QUESTION_PAPER_LIMITS.parseChars)
   .describe('The question paper as an HTML fragment (no <html>, <head> or <body>) exactly as described by learn_question_paper_generation.');
 
-export const validateDraftInputSchema = paperKeySchema.extend({ html: paperHtmlInput });
+/** The chat a draft card is shown from, so its attachments preview as figures. Set by the app's screens only; the in-app assistant's own chat is known without it. */
+const draftChatInput = z.string().min(1).max(64).optional().describe('Leave out. Used by the app only.');
+
+export const validateDraftInputSchema = paperKeySchema.extend({ html: paperHtmlInput, conversationId: draftChatInput });
 
 export const saveVersionInputSchema = paperKeySchema
   .extend({
@@ -118,8 +127,59 @@ export const saveVersionInputSchema = paperKeySchema
     message: 'Send html or draftId.',
   });
 
+/**
+ * `copyQuestionPaperVersion`: the target paper's key, the version of an earlier
+ * paper to start from and the target's `expectedVersionNo`. The source names a
+ * paper of the same school, class and subject (any session, exam and mode),
+ * as `listQuestionPaperCopySources` lists them; anything else is refused.
+ */
+export const copyVersionInputSchema = paperKeySchema.extend({
+  expectedVersionNo: z
+    .number()
+    .int()
+    .min(0)
+    .describe('latestVersionNo of the target paper (0 when it has no version). A different current value is refused with CONFLICT.'),
+  source: paperKeySchema
+    .extend({ versionNo: z.number().int().min(1).describe('The version of the source paper to copy.') })
+    .describe('The earlier paper to copy from, as listQuestionPaperCopySources returns it.'),
+});
+
+/**
+ * Control characters a teacher's instructions may not hold: C0 (except tab and
+ * line feed), DEL and C1. Line breaks are normalised to `\n` before the check,
+ * so a pasted CRLF is not refused. Format characters (zero-width joiners, which
+ * Indian scripts need, and direction marks) are not control characters and pass.
+ */
+// eslint-disable-next-line no-control-regex
+const INSTRUCTIONS_CONTROL_CHARACTER = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F]/;
+
+/**
+ * The teacher's optional instructions for a generation ("Keep the questions but
+ * change the numbers"). Line breaks become `\n` and the text is trimmed; an
+ * empty or whitespace-only value is the same as none (`null`). At most
+ * {@link QUESTION_PAPER_GENERATION_INSTRUCTIONS_MAX_CHARS} characters after
+ * that. Any other control character is REFUSED rather than stripped: what the
+ * job stores and the model reads is then exactly what the teacher sent (no
+ * hidden text, nothing silently changed), and the caller learns why.
+ */
+export const generationInstructionsSchema = z
+  .string()
+  .transform((value) => value.replace(/\r\n?/g, '\n').trim())
+  .pipe(
+    z
+      .string()
+      .max(QUESTION_PAPER_GENERATION_INSTRUCTIONS_MAX_CHARS, `Instructions can be at most ${QUESTION_PAPER_GENERATION_INSTRUCTIONS_MAX_CHARS} characters.`)
+      .refine((value) => !INSTRUCTIONS_CONTROL_CHARACTER.test(value), 'Instructions cannot contain control characters.'),
+  )
+  .transform((value) => (value === '' ? null : value));
+
 export const startGenerationInputSchema = paperKeySchema.extend({
   expectedPageRevision: z.number().int().min(0),
+  instructions: generationInstructionsSchema
+    .optional()
+    .describe(
+      `What the teacher wants changed when the AI writes the paper from the photos, for example "Keep the questions but change the numbers". Optional; at most ${QUESTION_PAPER_GENERATION_INSTRUCTIONS_MAX_CHARS} characters; empty means none.`,
+    ),
 });
 export const reorderPagesInputSchema = paperKeySchema.extend({
   pageIds: z.array(id).min(1).max(QUESTION_PAPER_MAX_PAGES).describe('Every page id, in the new order.'),
@@ -129,7 +189,7 @@ export const deletePageInputSchema = paperKeySchema.extend({
   pageId: id,
   expectedPageRevision: z.number().int().min(0),
 });
-export const previewDraftInputSchema = paperKeySchema.extend({ html: paperHtmlInput });
+export const previewDraftInputSchema = paperKeySchema.extend({ html: paperHtmlInput, conversationId: draftChatInput });
 
 /** What the sanitiser removed or changed when a version was saved. A notice, not an error. */
 export const questionPaperWarningSchema = z.object({
@@ -154,11 +214,26 @@ const jobSchema = z.object({
   status: z.enum(['queued', 'running', 'succeeded', 'failed']),
   createdAt: z.date(),
 });
+/**
+ * A job as the paper screen sees it (`getQuestionPaperDetail`): with the
+ * teacher's instructions it was started with, so the screen can show what was
+ * asked. Not part of `getQuestionPaper`, which agents read.
+ */
+const detailJobSchema = jobSchema.extend({
+  /** The teacher's instructions, exactly as stored; null when the job was started without any. */
+  instructions: z.string().nullable(),
+});
 const userRefSchema = z.object({ id: z.string(), name: z.string().nullable() });
+
+/**
+ * Who wrote a version: the AI job from photos, a chat agent, or a copy of an
+ * earlier paper's version. Mirrors `question_paper_version_source`.
+ */
+export const versionSourceSchema = z.enum(['ai_job', 'agent', 'copy']);
 
 export const versionSummarySchema = z.object({
   versionNo: z.number().int(),
-  source: z.enum(['ai_job', 'agent']),
+  source: versionSourceSchema,
   /** The generation job that produced this version; null for a version saved in chat. */
   sourceJobId: z.string().nullable(),
   createdAt: z.date(),
@@ -250,11 +325,17 @@ export const listVersionsOutputSchema = z.object({ versions: z.array(versionSumm
 export const detailOutputSchema = z.object({
   paper: paperFactsSchema,
   pages: z.array(pageDtoSchema),
-  activeJob: jobSchema.nullable(),
-  lastFinishedJob: jobSchema.extend({ errorCode: z.string().nullable(), errorMessage: z.string().nullable(), completedAt: z.date() }).nullable(),
+  activeJob: detailJobSchema.nullable(),
+  lastFinishedJob: detailJobSchema.extend({ errorCode: z.string().nullable(), errorMessage: z.string().nullable(), completedAt: z.date() }).nullable(),
   versions: z.array(versionSummarySchema),
   /** Whether the school selected a question paper template (generation needs one). */
   templateConfigured: z.boolean(),
+  /**
+   * The paper's most recently active assistant conversation shared with it
+   * (whoever started it); null when it has none. The paper's screen opens it
+   * unless the address names another.
+   */
+  latestConversationId: z.string().nullable(),
 });
 
 export const learnOutputSchema = z.object({
@@ -282,6 +363,35 @@ export const saveVersionOutputSchema = z.object({
   planMaxMarks: z.number().int(),
   warnings: z.array(questionPaperWarningSchema),
   hasPdf: z.boolean(),
+});
+
+/** `copyQuestionPaperVersion`: the new version of the target paper, as a save returns it. */
+export const copyVersionOutputSchema = saveVersionOutputSchema;
+
+/**
+ * `listQuestionPaperCopySources`: saved papers of the same school, class and
+ * subject as the target (any session, exam and mode), newest saved first.
+ */
+export const listCopySourcesOutputSchema = z.object({
+  sources: z.array(
+    z.object({
+      /** The source paper's natural key, to pass as `source` (with a versionNo) to copyQuestionPaperVersion. */
+      key: paperKeySchema,
+      /** The academic session, as "2025–26". */
+      sessionLabel: z.string(),
+      /** Whether the source paper's session is the school's active one. */
+      sessionActive: z.boolean(),
+      /** The exam's name in its session's configuration (its slug when the exam was removed from it). */
+      examName: z.string(),
+      /** The mode's name in the class configuration (its slug when the class no longer names it). */
+      modeName: z.string(),
+      latestVersionNo: z.number().int(),
+      /** When the latest version was saved. */
+      savedAt: z.date(),
+      /** The plan's maximum marks snapshot of the latest version (`plan_max_marks`). */
+      planMaxMarks: z.number().int().nullable(),
+    }),
+  ),
 });
 
 export const startGenerationOutputSchema = z.object({ jobId: z.string(), status: z.literal('queued') });

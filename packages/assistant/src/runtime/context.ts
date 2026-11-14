@@ -1,6 +1,7 @@
-import { encodedImageBytes, MODEL_REQUEST_IMAGE_BUDGET_BYTES } from '@campuspilot/assistant-contract/attachments';
+import { encodedImageBytes, MODEL_REQUEST_ATTACHMENT_BUDGET_BYTES } from '@campuspilot/assistant-contract/attachments';
 
 import { isAttachmentMarker, type AttachmentMarker } from '../transcript';
+import type { ReadableMimeTypes } from './providers/image-types';
 import type { AttachmentFile, ModelProvider, ToolInputStubInput, TranscriptEntry } from './providers/types';
 
 /**
@@ -8,12 +9,14 @@ import type { AttachmentFile, ModelProvider, ToolInputStubInput, TranscriptEntry
  * (design G2/G3, decisions D41/D45). It is a view for the model only: the
  * stored transcript, the items and the UI are never changed.
  *
- * - Attachment markers become the provider's image parts, newest first within
- *   an image byte budget, with a short note for anything that cannot be shown.
+ * - Attachment markers become the provider's image or document parts, newest
+ *   first within one byte budget for both kinds, with a short note for
+ *   anything that cannot be shown.
  * - Entries before the last two human messages are shortened: tool results
  *   that are long become a one-line stub, and every attachment becomes a note
- *   that keeps its id but says the image is no longer visible (the model may
- *   still embed it by id; it asks the user to attach it again only to look).
+ *   that keeps its id but says its content is no longer visible (the model may
+ *   still embed an image by id; it asks the user to attach a file again only
+ *   to look at or read it).
  *   Long text fields of old tool CALL inputs (the whole paper a model wrote
  *   into `validateQuestionPaperDraft` or `saveQuestionPaperVersion`) become a
  *   one-line stub too: every revision of a long paper would otherwise stay in
@@ -41,19 +44,19 @@ export const CONTEXT_TOOL_RESULT_MIN_CHARS = 8_000;
  * the result threshold on purpose: an input is the model's own words, which it can always re-send.
  */
 export const CONTEXT_TOOL_INPUT_MIN_CHARS = 4_000;
-/** Image bytes, as sent (base64), one chat request may carry; shared with the question paper job. */
-export const CONTEXT_IMAGE_BUDGET_BYTES = MODEL_REQUEST_IMAGE_BUDGET_BYTES;
+/** Attachment bytes (images and PDFs), as sent (base64), one chat request may carry; shared with the question paper job. */
+export const CONTEXT_ATTACHMENT_BUDGET_BYTES = MODEL_REQUEST_ATTACHMENT_BUDGET_BYTES;
 
 export type ModelContextOptions = {
   fullHumanMessages?: number;
   toolResultMinChars?: number;
   toolInputMinChars?: number;
-  imageBudgetBytes?: number;
+  attachmentBudgetBytes?: number;
 };
 
 export type ModelContextDeps = {
-  /** The bytes of an attachment the provider can read, or why not. */
-  loadAttachment(attachmentId: string, readableMimeTypes: readonly string[]): Promise<AttachmentFile>;
+  /** The bytes of an attachment the provider can read (per kind), or why not. */
+  loadAttachment(attachmentId: string, readable: ReadableMimeTypes): Promise<AttachmentFile>;
 };
 
 /** The note that replaces a long tool result in an old entry. */
@@ -120,18 +123,19 @@ export function stubLongInputFields(
 const describe = (marker: AttachmentMarker) =>
   `${marker.attachmentId}: ${marker.fileName.replace(/[[\]\r\n]/g, '_')}, ${marker.contentType}`;
 
-/** Tells the model what an attachment id is for, once per note. */
+/** Tells the model what an image attachment id is for, once per note. */
 const FIGURE_HINT = 'Use this id as data-figure-id on an <img> to put the image in a question paper.';
-
 /**
- * The text that stands in for an attachment that is not shown as an image.
- * Every note keeps the attachment's id: an id stays valid for figures while the
- * attachment exists server-side for this user, even when its pixels are not
- * shown any more.
+ * Tells the model what a document is for, once per note: source material to
+ * read, never a figure (a save refuses a document id as `data-figure-id`).
  */
-export function attachmentNote(marker: AttachmentMarker, kind: Exclude<AttachmentFile['kind'], 'image'> | 'old'): string {
-  const head = `[Attachment ${describe(marker)}`;
-  switch (kind) {
+const DOCUMENT_HINT = 'It is a PDF document: read it as source material. It is not an image and cannot be used as data-figure-id.';
+
+/** Why an attachment is shown as a note instead of its content. */
+export type AttachmentNoteReason = Exclude<AttachmentFile['kind'], 'image' | 'document'> | 'old';
+
+function imageNote(head: string, reason: AttachmentNoteReason): string {
+  switch (reason) {
     case 'old':
       return `${head} - the image content is no longer visible to you (it was shown earlier). ${FIGURE_HINT} Ask the user to attach it again only if you need to look at it.]`;
     case 'unreadable':
@@ -143,9 +147,38 @@ export function attachmentNote(marker: AttachmentMarker, kind: Exclude<Attachmen
   }
 }
 
-/** The line that precedes an image: its id for figure nodes, name and type, and its place among the message's images. */
+function documentNote(head: string, reason: AttachmentNoteReason): string {
+  switch (reason) {
+    case 'old':
+      return `${head} - the document's content is no longer visible to you (it was shown earlier). ${DOCUMENT_HINT} Ask the user to attach it again only if you need to read it.]`;
+    case 'unreadable':
+      return `${head} - a document this assistant cannot read. Ask the user to attach photos of its pages instead.]`;
+    case 'omitted':
+      return `${head} - left out because the attachments in this chat are too large to show at once. ${DOCUMENT_HINT} Ask the user to attach it again if you need to read it.]`;
+    case 'missing':
+      return `${head} - no longer available. Ask the user to attach it again if you need to read it.]`;
+  }
+}
+
+/**
+ * The text that stands in for an attachment whose content is not shown. Every
+ * note keeps the attachment's id: an image id stays valid for figures while the
+ * attachment exists server-side for this user, even when its pixels are not
+ * shown any more; a document note says it is not a figure.
+ */
+export function attachmentNote(marker: AttachmentMarker, reason: AttachmentNoteReason): string {
+  const head = `[Attachment ${describe(marker)}`;
+  return marker.kind === 'document' ? documentNote(head, reason) : imageNote(head, reason);
+}
+
+/**
+ * The line that precedes an attachment's content: its id, name and type, its
+ * place among the message's attachments, and what the id is for (a figure for
+ * an image; nothing but reading for a document). The image line is unchanged
+ * from before documents existed, so a cached prompt prefix stays valid.
+ */
 export const attachmentLabel = (marker: AttachmentMarker) =>
-  `[Attachment ${describe(marker)} (${marker.ordinal} of ${marker.total}). ${FIGURE_HINT}]`;
+  `[Attachment ${describe(marker)} (${marker.ordinal} of ${marker.total}). ${marker.kind === 'document' ? DOCUMENT_HINT : FIGURE_HINT}]`;
 
 /** Index of the first entry of the oldest human message that is still shown in full (0 when there are fewer). */
 export function fullContextBoundary(
@@ -165,43 +198,69 @@ export function fullContextBoundary(
 
 const markersOf = (entry: TranscriptEntry): AttachmentMarker[] => entry.content.filter(isAttachmentMarker);
 
+/** The context for one request, and how many PDFs it shows the model (a refused request is then explained as a PDF problem). */
+export type ModelContext = { entries: TranscriptEntry[]; documentsShown: number };
+
 /**
- * Builds the context for one model request. Pure apart from `loadAttachment`;
- * entries are copied, never mutated.
+ * Builds the context for one model request (see {@link buildModelContextWithStats}).
  */
 export async function buildModelContext(
   entries: readonly TranscriptEntry[],
-  provider: Pick<ModelProvider, 'context' | 'imageMimeTypes' | 'maxImageBytes'>,
+  provider: Pick<ModelProvider, 'context' | 'imageMimeTypes' | 'documentMimeTypes' | 'maxImageBytes'>,
   deps: ModelContextDeps,
   options: ModelContextOptions = {},
 ): Promise<TranscriptEntry[]> {
+  return (await buildModelContextWithStats(entries, provider, deps, options)).entries;
+}
+
+/**
+ * Builds the context for one model request. Pure apart from `loadAttachment`;
+ * entries are copied, never mutated. Images and documents share one byte
+ * budget, newest first; a file whose loaded kind is not the kind its marker
+ * names (which cannot happen while rows keep their kind) is shown as
+ * unreadable rather than sent as something it is not.
+ */
+export async function buildModelContextWithStats(
+  entries: readonly TranscriptEntry[],
+  provider: Pick<ModelProvider, 'context' | 'imageMimeTypes' | 'documentMimeTypes' | 'maxImageBytes'>,
+  deps: ModelContextDeps,
+  options: ModelContextOptions = {},
+): Promise<ModelContext> {
   const minChars = options.toolResultMinChars ?? CONTEXT_TOOL_RESULT_MIN_CHARS;
   const inputMinChars = options.toolInputMinChars ?? CONTEXT_TOOL_INPUT_MIN_CHARS;
   const boundary = fullContextBoundary(entries, provider, options.fullHumanMessages);
   const toolNames = provider.context.toolNamesByUseId(entries);
+  const readable: ReadableMimeTypes = { image: provider.imageMimeTypes, document: provider.documentMimeTypes };
 
-  // Newest first, so when the image budget runs out it is the older pages that are left out.
-  let remaining = options.imageBudgetBytes ?? CONTEXT_IMAGE_BUDGET_BYTES;
+  // Newest first, so when the budget runs out it is the older pages and files that are left out.
+  let remaining = options.attachmentBudgetBytes ?? CONTEXT_ATTACHMENT_BUDGET_BYTES;
+  let documentsShown = 0;
   const files = new Map<string, AttachmentFile>();
   for (let index = entries.length - 1; index >= boundary; index -= 1) {
     for (const marker of markersOf(entries[index]!).reverse()) {
-      const loaded = await deps.loadAttachment(marker.attachmentId, provider.imageMimeTypes);
+      const loaded = await deps.loadAttachment(marker.attachmentId, readable);
+      const carried = loaded.kind === 'image' || loaded.kind === 'document';
+      if (carried && loaded.kind !== marker.kind) {
+        files.set(marker.attachmentId, { kind: 'unreadable' });
+        continue;
+      }
       if (loaded.kind === 'image' && provider.maxImageBytes !== undefined && loaded.bytes.byteLength > provider.maxImageBytes) {
         // One image over the provider's own cap would fail every request of the run: say so instead.
         files.set(marker.attachmentId, { kind: 'unreadable' });
         continue;
       }
-      const cost = loaded.kind === 'image' ? encodedImageBytes(loaded.bytes.byteLength) : 0;
+      const cost = carried ? encodedImageBytes(loaded.bytes.byteLength) : 0;
       if (cost > remaining) {
         files.set(marker.attachmentId, { kind: 'omitted' });
         continue;
       }
       remaining -= cost;
+      if (loaded.kind === 'document') documentsShown += 1;
       files.set(marker.attachmentId, loaded);
     }
   }
 
-  return entries.map((entry, index) => {
+  const built = entries.map((entry, index) => {
     const old = index < boundary;
     const shortened = old
       ? provider.context.stubToolInputs(provider.context.stubToolResults(entry, toolNames, toolResultStub, minChars), toolInputStub, inputMinChars)
@@ -215,4 +274,5 @@ export async function buildModelContext(
     });
     return { ...shortened, content };
   });
+  return { entries: built, documentsShown };
 }

@@ -1,0 +1,8 @@
+ALTER TABLE "assistant_conversation" ADD COLUMN "paper_session_id" text;--> statement-breakpoint
+ALTER TABLE "assistant_conversation" ADD COLUMN "paper_exam_slug" text;--> statement-breakpoint
+ALTER TABLE "assistant_conversation" ADD COLUMN "paper_class_id" text;--> statement-breakpoint
+ALTER TABLE "assistant_conversation" ADD COLUMN "paper_subject_slug" text;--> statement-breakpoint
+ALTER TABLE "assistant_conversation" ADD COLUMN "paper_mode_slug" text;--> statement-breakpoint
+CREATE INDEX "assistant_conversation_paper_updated_idx" ON "assistant_conversation" USING btree ("school_id","paper_class_id","paper_session_id","paper_exam_slug","paper_subject_slug","paper_mode_slug","updated_at") WHERE "assistant_conversation"."paper_class_id" is not null and "assistant_conversation"."deleted_at" is null;--> statement-breakpoint
+ALTER TABLE "assistant_conversation" ADD CONSTRAINT "assistant_conversation_paper_key_whole" CHECK (("assistant_conversation"."paper_session_id" is null and "assistant_conversation"."paper_exam_slug" is null and "assistant_conversation"."paper_class_id" is null and "assistant_conversation"."paper_subject_slug" is null and "assistant_conversation"."paper_mode_slug" is null)
+        or ("assistant_conversation"."paper_session_id" is not null and "assistant_conversation"."paper_exam_slug" is not null and "assistant_conversation"."paper_class_id" is not null and "assistant_conversation"."paper_subject_slug" is not null and "assistant_conversation"."paper_mode_slug" is not null));

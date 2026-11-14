@@ -1,12 +1,14 @@
 import { issueAssistantRunToken } from '@campuspilot/api/assistant/token';
 import { resolvePaperScope } from '@campuspilot/api/routers/school/question-paper/question-paper.scope';
-import type { AssistantMessageSeed } from '@campuspilot/assistant-contract/attachments';
+import type { AssistantAttachmentKind, AssistantMessageSeed } from '@campuspilot/assistant-contract/attachments';
 import { assistantContract } from '@campuspilot/assistant-contract/contract';
 import { ASSISTANT_LIST_PAGE_SIZE, type AssistantStreamEvent } from '@campuspilot/assistant-contract/dto';
 import { implement, ORPCError } from '@orpc/server';
 
 import { bindAttachments, deleteConversationAttachments, lockUnsentAttachments, toAttachmentRef, unreadableAttachmentMessage } from './attachments';
 import { assertCanSee, assertCanUse, assertMember, canSee, loadAssistantAccess } from './access';
+import { assertMayManagePaper, mayReachConversation, type ConversationNeed } from './conversation-access';
+import { listPaperConversations } from './paper-conversations';
 import { db } from './db';
 import { handOverApprovalResolution, handOverRun } from './dispatch';
 import { liveEvents, streamingTexts, subscribeAssistantEvents } from './events';
@@ -19,9 +21,10 @@ import {
   missingProviderReason,
   selectedProviderId,
 } from './runtime/providers/config';
-import { imageMimeTypesOf } from './runtime/providers/image-types';
+import { readableMimeTypesOf } from './runtime/providers/image-types';
 import { resolveAssistantSession, type AssistantSession } from './session';
 import * as store from './store';
+import { sharedPaperOf, type PaperKeyParts } from './store';
 import { userMessageItemKey } from './transcript';
 
 /**
@@ -51,6 +54,15 @@ async function assertSeedNamesAPaper(schoolId: string, seed: NonNullable<Assista
     throw error;
   }
 }
+
+/** The paper a question paper seed names, as the parts a shared conversation stores. */
+const paperKeyOfSeed = (seed: NonNullable<AssistantMessageSeed>): PaperKeyParts => ({
+  sessionId: seed.sessionId,
+  examSlug: seed.examSlug,
+  classId: seed.classId,
+  subjectSlug: seed.subjectSlug,
+  modeSlug: seed.modeSlug,
+});
 
 const os = implement(assistantContract).$context<AssistantRequestContext>();
 
@@ -115,16 +127,19 @@ const HEARTBEAT_MS = 15_000;
 const ACCESS_RECHECK_MS = 2 * 60_000;
 
 /**
- * Whether the user of an open stream is still signed in and still allowed
- * to use the assistant in the school. A stream stays open for hours, so the
- * check made when it opened says nothing about now. When the API cannot be
- * asked, the stream is kept: an outage must not close every conversation,
- * and the next check decides.
+ * Whether the user of an open stream is still signed in, still allowed to
+ * see the assistant in the school, and may still read the conversation (for
+ * one shared with a paper, the paper's read permission). A stream stays open
+ * for hours, so the check made when it opened says nothing about now. When
+ * the API cannot be asked, the stream is kept: an outage must not close every
+ * conversation, and the next check decides.
  */
-async function streamStillAllowed(context: Authed, headers: Headers, schoolId: string): Promise<boolean> {
+async function streamStillAllowed(context: Authed, headers: Headers, schoolId: string, conversationId: string): Promise<boolean> {
   try {
     const current = await resolveAssistantSession(headers);
-    return current?.user.id === context.session.user.id && canSee(await loadAssistantAccess(current, schoolId));
+    if (current?.user.id !== context.session.user.id || !canSee(await loadAssistantAccess(current, schoolId))) return false;
+    const row = await store.findLiveConversation(db, { conversationId, schoolId });
+    return row !== null && (await mayReachConversation(current, row, 'read'));
   } catch (err) {
     log.warn({ err, schoolId }, 'assistant.stream.access-recheck-failed');
     return true;
@@ -134,14 +149,36 @@ async function streamStillAllowed(context: Authed, headers: Headers, schoolId: s
 /** Longest conversation title derived from the first message. */
 const TITLE_MAX_LENGTH = 80;
 
-function titleFromMessage(text: string, attachmentCount = 0): string {
-  if (!text.trim()) return attachmentCount === 1 ? 'Attached image' : 'Attached images';
+/** A title for a message without words, named after what it carries. */
+function attachmentsTitle(kinds: readonly AssistantAttachmentKind[]): string {
+  const documents = kinds.filter((kind) => kind === 'document').length;
+  if (documents === 0) return kinds.length === 1 ? 'Attached image' : 'Attached images';
+  if (documents === kinds.length) return documents === 1 ? 'Attached PDF' : 'Attached PDFs';
+  return 'Attached files';
+}
+
+function titleFromMessage(text: string, attachmentKinds: readonly AssistantAttachmentKind[] = []): string {
+  if (!text.trim()) return attachmentsTitle(attachmentKinds);
   const firstLine = text.split('\n').find((line) => line.trim())?.trim() ?? text.trim();
   return firstLine.length > TITLE_MAX_LENGTH
     ? `${firstLine.slice(0, TITLE_MAX_LENGTH - 1)}…`
     : firstLine;
 }
 
+/**
+ * A live conversation the user may reach for `need` (`mayReachConversation`:
+ * their own, or one shared with a paper they may read or manage), else
+ * NOT_FOUND, the same answer as for an id that does not exist.
+ */
+async function reachableConversation(context: Authed, schoolId: string, conversationId: string, need: ConversationNeed) {
+  const row = await store.findLiveConversation(db, { conversationId, schoolId });
+  if (!row || !(await mayReachConversation(context.session, row, need))) {
+    throw new ORPCError('NOT_FOUND', { message: 'Assistant conversation was not found.' });
+  }
+  return row;
+}
+
+/** A live conversation the user started: deleting is for its owner only, also for one shared with a paper. */
 async function ownedConversation(context: Authed, schoolId: string, conversationId: string) {
   const owned = await store.findOwnedConversation(db, {
     conversationId,
@@ -197,9 +234,27 @@ export const assistantRouter = os.router({
     };
   }),
 
+  /**
+   * One paper's shared conversations, whoever started them (the paper's chat
+   * history). Seeing the assistant, then managing the paper's class: the
+   * history is for the people who change the paper.
+   */
+  listPaperConversations: authed.listPaperConversations.handler(async ({ context, input }) => {
+    await assertReadAccess(context, input.schoolId);
+    const { schoolId, page, ...paper } = input;
+    await assertMayManagePaper(context.session, schoolId, paper);
+    const pageSize = ASSISTANT_LIST_PAGE_SIZE;
+    const { items, totalItems } = await listPaperConversations(db, { schoolId, paper, page, pageSize });
+    const totalPages = Math.ceil(totalItems / pageSize);
+    return {
+      items,
+      pagination: { nextCursor: page < totalPages ? String(page + 1) : null, currentPage: page, totalPages, totalItems, pageSize },
+    };
+  }),
+
   getConversation: authed.getConversation.handler(async ({ context, input }) => {
     await assertReadAccess(context, input.schoolId);
-    const owned = await ownedConversation(context, input.schoolId, input.conversationId);
+    const owned = await reachableConversation(context, input.schoolId, input.conversationId, 'read');
     const snapshot = await store.loadSnapshot(db, owned.id);
     if (!snapshot) throw new ORPCError('NOT_FOUND');
     return snapshot;
@@ -221,7 +276,7 @@ export const assistantRouter = os.router({
   }) {
     const contextHeaders = context.headers;
     await assertReadAccess(context, input.schoolId);
-    const owned = await ownedConversation(context, input.schoolId, input.conversationId);
+    const owned = await reachableConversation(context, input.schoolId, input.conversationId, 'read');
 
     const subscription = await subscribeAssistantEvents(owned.id);
     const onAbort = () => void subscription.close();
@@ -247,7 +302,7 @@ export const assistantRouter = os.router({
           accessCheckedAt = Date.now();
           // Ending the stream makes the browser reconnect, and that request
           // gets the real refusal (signed out, or no longer permitted).
-          if (!(await streamStillAllowed(context, contextHeaders, input.schoolId))) return;
+          if (!(await streamStillAllowed(context, contextHeaders, input.schoolId, owned.id))) return;
         }
         yield event === 'heartbeat' ? ({ type: 'heartbeat' } satisfies AssistantStreamEvent) : event;
       }
@@ -272,15 +327,12 @@ export const assistantRouter = os.router({
         throw new ORPCError('CONFLICT', { message: 'This request id was already used in another school.' });
       }
       const [conversation, item] = await Promise.all([
-        store.findOwnedConversation(db, {
-          conversationId: replay.conversationId,
-          schoolId: input.schoolId,
-          userId,
-        }),
+        store.findLiveConversation(db, { conversationId: replay.conversationId, schoolId: input.schoolId }),
         store.findItemByKey(db, replay.conversationId, userMessageItemKey(replay.id)),
       ]);
       const itemDto = item ? store.toItemDto(item) : null;
-      if (!conversation || !itemDto || itemDto.kind !== 'user_message') {
+      // The replay is of this user's own send, into a conversation they may still read (their own, or a paper's).
+      if (!conversation || !(await mayReachConversation(context.session, conversation, 'read')) || !itemDto || itemDto.kind !== 'user_message') {
         throw new ORPCError('NOT_FOUND', { message: 'Assistant conversation was not found.' });
       }
       return {
@@ -293,6 +345,9 @@ export const assistantRouter = os.router({
     await assertUseAccess(context, input.schoolId);
     // The seed is written into the model's context: it must name a paper that exists in this school (not free text).
     if (input.seed) await assertSeedNamesAPaper(input.schoolId, input.seed);
+    // A conversation shared with a paper is started by someone who may change that paper (the contract requires its seed).
+    const sharedPaper = input.shareWithPaper && input.seed ? paperKeyOfSeed(input.seed) : null;
+    if (sharedPaper) await assertMayManagePaper(context.session, input.schoolId, sharedPaper);
     const status = providerAvailability();
     if (!status.configured) {
       throw new ORPCError('PRECONDITION_FAILED', {
@@ -302,7 +357,7 @@ export const assistantRouter = os.router({
     // A conversation stays on the provider it started with; new ones use the
     // currently selected provider.
     const provider = input.conversationId
-      ? configuredProviderSettings().get((await ownedConversation(context, input.schoolId, input.conversationId)).provider) ?? null
+      ? configuredProviderSettings().get((await reachableConversation(context, input.schoolId, input.conversationId, 'continue')).provider) ?? null
       : selectedProvider();
     if (!provider) {
       throw new ORPCError('PRECONDITION_FAILED', {
@@ -322,14 +377,20 @@ export const assistantRouter = os.router({
       if (input.conversationId && !(await store.lockLiveConversation(tx, conversationId))) {
         throw new ORPCError('NOT_FOUND', { message: 'Assistant conversation was not found.' });
       }
+      // Attachments are bound in this transaction: the message either carries every
+      // one of them or is not saved (decision D46 is checked here, before any cost).
+      const attachments = await lockUnsentAttachments(tx, { schoolId: input.schoolId, userId, ids: input.attachmentIds });
+      const unreadable = unreadableAttachmentMessage(attachments, readableMimeTypesOf(provider.id));
+      if (unreadable) throw new ORPCError('BAD_REQUEST', { message: unreadable });
       if (!input.conversationId) {
         await store.createConversation(tx, {
           id: conversationId,
           schoolId: input.schoolId,
           userId,
-          title: titleFromMessage(input.text, input.attachmentIds.length),
+          title: titleFromMessage(input.text, attachments.map((row) => row.kind)),
           provider: provider.id,
           model: provider.model,
+          paper: sharedPaper,
         });
       }
       const run = await store.insertRun(tx, emit, {
@@ -340,11 +401,6 @@ export const assistantRouter = os.router({
         clientRequestId: input.clientRequestId,
         surface: input.surface,
       });
-      // Images are bound in this transaction: the message either carries every
-      // one of them or is not saved (decision D46 is checked here, before any cost).
-      const attachments = await lockUnsentAttachments(tx, { schoolId: input.schoolId, userId, ids: input.attachmentIds });
-      const unreadable = unreadableAttachmentMessage(attachments, imageMimeTypesOf(provider.id));
-      if (unreadable) throw new ORPCError('BAD_REQUEST', { message: unreadable });
       const item = await store.insertItem(tx, emit, {
         conversationId,
         runId,
@@ -355,6 +411,7 @@ export const assistantRouter = os.router({
           ...(input.pageContext ? { pageContext: input.pageContext } : {}),
           ...(attachments.length > 0 ? { attachments: attachments.map(toAttachmentRef) } : {}),
           ...(input.seed ? { seed: input.seed } : {}),
+          author: { userId, name: context.session.user.name },
         },
         itemKey: userMessageItemKey(runId),
       });
@@ -381,8 +438,8 @@ export const assistantRouter = os.router({
     if (!approval || approval.schoolId !== input.schoolId || approval.userId !== context.session.user.id) {
       throw new ORPCError('NOT_FOUND', { message: 'Assistant approval was not found.' });
     }
-    // An approval of a deleted conversation is gone with it.
-    await ownedConversation(context, input.schoolId, approval.conversationId);
+    // An approval of a deleted conversation is gone with it, and so is one of a paper's conversation the user may no longer read.
+    await reachableConversation(context, input.schoolId, approval.conversationId, 'read');
     if (approval.status !== 'pending') {
       throw new ORPCError('CONFLICT', { message: 'This action was already decided.' });
     }
@@ -421,14 +478,25 @@ export const assistantRouter = os.router({
     return store.toRunDto(run);
   }),
 
-  /** Stopping spends nothing, so it needs only read access (it stays possible at the limit). */
+  /**
+   * Stopping spends nothing, so it needs only read access to the assistant
+   * (it stays possible at the limit). A user may always stop their own turn;
+   * in a conversation shared with a paper, anyone who may continue it may also
+   * stop someone else's turn (or remove their queued message), as the person
+   * beside them at the paper could.
+   */
   stopRun: authed.stopRun.handler(async ({ context, input }) => {
     await assertReadAccess(context, input.schoolId);
     const run = await store.findRun(db, input.runId);
-    if (!run || run.schoolId !== input.schoolId || run.userId !== context.session.user.id) {
+    if (!run || run.schoolId !== input.schoolId) {
       throw new ORPCError('NOT_FOUND', { message: 'Assistant run was not found.' });
     }
-    await ownedConversation(context, input.schoolId, run.conversationId);
+    // A user may always stop their own turn (it spends nothing, and it was theirs); someone else's needs the right to continue.
+    const own = run.userId === context.session.user.id;
+    const conversation = await store.findLiveConversation(db, { conversationId: run.conversationId, schoolId: input.schoolId });
+    if (!conversation || (!own && !(await mayReachConversation(context.session, conversation, 'continue')))) {
+      throw new ORPCError('NOT_FOUND', { message: 'Assistant run was not found.' });
+    }
     try {
       return await stopRun(run, (approvalId) => handOverApprovalResolution(approvalId));
     } catch (error) {
@@ -450,13 +518,18 @@ export const assistantRouter = os.router({
   deleteConversation: authed.deleteConversation.handler(async ({ context, input }) => {
     await assertReadAccess(context, input.schoolId);
     const owned = await ownedConversation(context, input.schoolId, input.conversationId);
+    // Deleting a conversation shared with a paper takes it from everyone working on that paper, so its starter must still
+    // be one of them (may continue it); otherwise it is answered like any conversation they cannot reach.
+    if (sharedPaperOf(owned) && !(await mayReachConversation(context.session, owned, 'continue'))) {
+      throw new ORPCError('NOT_FOUND', { message: 'Assistant conversation was not found.' });
+    }
     const outcome = await store.deleteConversation(db, owned.id, context.session.user.id);
     if (outcome === 'busy') {
       throw new ORPCError('CONFLICT', { message: 'Stop the assistant before deleting this conversation.' });
     }
     // Deleted by another request in between: it is gone either way.
     if (outcome === 'missing') throw new ORPCError('NOT_FOUND', { message: 'Assistant conversation was not found.' });
-    // The images the user attached go with the chat they deleted; nothing reads them any more.
+    // The files the user attached go with the chat they deleted; nothing reads them any more.
     await deleteConversationAttachments(db, owned.id).catch((err) =>
       log.warn({ err, conversationId: owned.id }, 'assistant.conversation.attachments.cleanup.failed'),
     );

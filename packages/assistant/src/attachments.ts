@@ -15,6 +15,7 @@ import {
   ASSISTANT_UNSENT_ATTACHMENTS_PER_USER,
   ASSISTANT_UNSENT_ATTACHMENT_RECLAIM_HOURS,
   ASSISTANT_UNSENT_ATTACHMENT_TTL_HOURS,
+  type AssistantAttachmentKind,
   type AssistantAttachmentRef,
 } from '@campuspilot/assistant-contract/attachments';
 import { assistantAttachmentTable, assistantConversationTable } from '@campuspilot/db/schema/assistant';
@@ -24,11 +25,13 @@ import type { AssistantDatabase, AssistantExecutor } from './db';
 import { db as defaultDb } from './db';
 import { generateId } from '@campuspilot/db/id';
 import { log } from './log';
+import type { ReadableMimeTypes } from './runtime/providers/image-types';
 import type { AttachmentFile } from './runtime/providers/types';
 
 /**
- * Chat image attachments: storing them, binding them to a message, loading
- * them for a model request and sweeping the ones never sent (design G1/G2).
+ * Chat attachments (images and PDFs): storing them, binding them to a
+ * message, loading them for a model request and sweeping the ones never sent
+ * (design G1/G2).
  * Lives outside `src/runtime` on purpose: the turn loop gets attachments
  * through an injected loader and imports no object storage or school table.
  *
@@ -54,23 +57,37 @@ export const attachmentObjectKeys = (row: Pick<AttachmentRow, 's3Key' | 'thumbS3
   row.modelS3Key,
 ];
 
-/** A file name for display: no path, control characters or markup-ish characters, bounded. */
-export function sanitizeAttachmentName(name: string): string {
+/** The longest display name kept. */
+export const ATTACHMENT_NAME_MAX_LENGTH = 120;
+
+/**
+ * A file name for display only: no path, no control or invisible formatting
+ * characters (C0/C1 controls, bidirectional overrides and isolates, zero-width
+ * characters, which could make a name read as something else), markup-ish
+ * characters replaced, bounded to {@link ATTACHMENT_NAME_MAX_LENGTH}. It is a
+ * label and nothing more: never part of a storage key, a header or a path.
+ */
+export function sanitizeAttachmentName(name: string, kind: AssistantAttachmentKind = 'image'): string {
   const base = name.split(/[\\/]/).pop() ?? '';
-  // eslint-disable-next-line no-control-regex
-  const cleaned = base.replace(/[\u0000-\u001f\u007f<>"|?*]/g, '_').trim().slice(0, 120);
-  return cleaned || 'image';
+  const cleaned = base
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/g, '')
+    .replace(/[<>"|?*]/g, '_')
+    .trim()
+    .slice(0, ATTACHMENT_NAME_MAX_LENGTH);
+  return cleaned || (kind === 'document' ? 'document.pdf' : 'image');
 }
 
 export function toAttachmentRef(row: AttachmentRow): AssistantAttachmentRef {
   return {
     id: row.id,
+    kind: row.kind,
     fileName: row.originalName,
     contentType: row.contentType,
     byteSize: row.byteSize,
     width: row.width,
     height: row.height,
-    previewable: row.derivativeStatus === 'ready',
+    previewable: row.kind === 'image' && row.derivativeStatus === 'ready',
   };
 }
 
@@ -178,7 +195,7 @@ export async function deleteUnsentAttachment(
       )
       .for('update');
     if (!row) return { deleted: false };
-    if (row.itemId !== null) throw rpcError.conflict('This image was already sent with a message and cannot be removed.');
+    if (row.itemId !== null) throw rpcError.conflict('This file was already sent with a message and cannot be removed.');
     const removed = await removeAttachmentRows(tx, [row]);
     if (removed.length === 0) throw rpcError.internal();
     return { deleted: true };
@@ -186,35 +203,41 @@ export async function deleteUnsentAttachment(
 }
 
 /**
- * Stores one uploaded image as an unsent attachment: derivatives first (a
- * JPEG/PNG/WebP that cannot be decoded is a 415), then the objects, then the
- * row. The cap of unsent attachments per user and school is counted under an
- * advisory lock for that pair, so parallel uploads cannot pass it together.
+ * Stores one uploaded file as an unsent attachment. An image gets its
+ * derivatives first (a JPEG/PNG/WebP that cannot be decoded is a 415); a
+ * document gets none: its bytes are stored exactly as uploaded and never
+ * parsed, rendered or rewritten. Then the objects, then the row. The cap of
+ * unsent attachments per user and school (both kinds together) is counted
+ * under an advisory lock for that pair, so parallel uploads cannot pass it
+ * together. `file.kind`, `contentType` and `extension` come from the bytes
+ * (`sniffAttachmentKind`, `@campuspilot/api/files/attachment-upload`); `name`
+ * is only a label.
  */
 export async function createAttachment(
   database: AssistantDatabase,
   input: {
     schoolId: string;
     userId: string;
-    file: { bytes: Buffer; contentType: string; extension: string; name: string };
+    file: { bytes: Buffer; kind: AssistantAttachmentKind; contentType: string; extension: string; name: string };
   },
 ): Promise<AssistantAttachmentRef> {
   const { schoolId, userId, file } = input;
-  const derivatives = await makeImageDerivatives(file.bytes, file.contentType);
+  const derivatives = file.kind === 'image' ? await makeImageDerivatives(file.bytes, file.contentType) : null;
   const id = generateId('assistantAttachment');
   // Storage first, then a short transaction (the page upload's order): no connection or advisory lock is held across
   // storage calls. Keys derive from the id, so nothing can collide; every failure removes what was written.
   const originalKey = attachmentKeys.original(schoolId, id, file.extension);
-  const thumbKey = derivatives.status === 'ready' ? attachmentKeys.thumb(schoolId, id) : null;
-  const modelKey = derivatives.status === 'ready' ? attachmentKeys.model(schoolId, id) : null;
+  const ready = derivatives?.status === 'ready' ? derivatives : null;
+  const thumbKey = ready ? attachmentKeys.thumb(schoolId, id) : null;
+  const modelKey = ready ? attachmentKeys.model(schoolId, id) : null;
   const written: string[] = [originalKey];
   let freed: string[] = [];
   try {
     await putObject(originalKey, file.bytes, file.contentType);
-    if (derivatives.status === 'ready' && thumbKey && modelKey) {
+    if (ready && thumbKey && modelKey) {
       written.push(thumbKey, modelKey);
-      await putObject(thumbKey, derivatives.thumb.bytes, derivatives.thumb.contentType);
-      await putObject(modelKey, derivatives.model.bytes, derivatives.model.contentType);
+      await putObject(thumbKey, ready.thumb.bytes, ready.thumb.contentType);
+      await putObject(modelKey, ready.model.bytes, ready.model.contentType);
     }
     const ref = await database.transaction(async (tx) => {
       freed = [];
@@ -244,7 +267,7 @@ export async function createAttachment(
       }
       if (unsentCount >= ASSISTANT_UNSENT_ATTACHMENTS_PER_USER) {
         throw rpcError.badRequest(
-          `You have ${ASSISTANT_UNSENT_ATTACHMENTS_PER_USER} images waiting to be sent. Send or remove some first.`,
+          `You have ${ASSISTANT_UNSENT_ATTACHMENTS_PER_USER} files waiting to be sent. Send or remove some first.`,
         );
       }
       const [row] = await tx
@@ -253,18 +276,20 @@ export async function createAttachment(
           id,
           schoolId,
           userId,
-          originalName: sanitizeAttachmentName(file.name),
+          kind: file.kind,
+          originalName: sanitizeAttachmentName(file.name, file.kind),
           contentType: file.contentType,
           byteSize: file.bytes.byteLength,
           sha256: createHash('sha256').update(file.bytes).digest('hex'),
-          width: derivatives.width,
-          height: derivatives.height,
+          width: derivatives?.width ?? null,
+          height: derivatives?.height ?? null,
           s3Key: originalKey,
-          derivativeStatus: derivatives.status === 'ready' ? 'ready' : 'unsupported',
+          // A document has no derivative status at all; an image is `ready` or `unsupported`.
+          derivativeStatus: derivatives ? (ready ? 'ready' : 'unsupported') : null,
           thumbS3Key: thumbKey,
           modelS3Key: modelKey,
-          modelContentType: derivatives.status === 'ready' ? derivatives.model.contentType : null,
-          modelByteSize: derivatives.status === 'ready' ? derivatives.model.bytes.byteLength : null,
+          modelContentType: ready ? ready.model.contentType : null,
+          modelByteSize: ready ? ready.model.bytes.byteLength : null,
         })
         .returning();
       return toAttachmentRef(row!);
@@ -291,7 +316,7 @@ export async function lockUnsentAttachments(
 ): Promise<AttachmentRow[]> {
   if (input.ids.length === 0) return [];
   if (input.ids.length > ASSISTANT_ATTACHMENTS_PER_MESSAGE) {
-    throw rpcError.badRequest(`A message can carry at most ${ASSISTANT_ATTACHMENTS_PER_MESSAGE} images.`);
+    throw rpcError.badRequest(`A message can carry at most ${ASSISTANT_ATTACHMENTS_PER_MESSAGE} attachments.`);
   }
   const rows = await tx
     .select()
@@ -311,7 +336,7 @@ export async function lockUnsentAttachments(
   if (missing.length > 0) {
     // The ids ride along so the composer can mark exactly those tiles; without them every resend would fail the same way.
     throw new ORPCError('BAD_REQUEST', {
-      message: missing.length === 1 ? 'An attached image is no longer available. Remove it and attach it again.' : `${missing.length} attached images are no longer available. Remove them and attach them again.`,
+      message: missing.length === 1 ? 'An attached file is no longer available. Remove it and attach it again.' : `${missing.length} attached files are no longer available. Remove them and attach them again.`,
       data: { reason: ASSISTANT_ATTACHMENTS_MISSING_REASON, attachmentIds: missing },
     });
   }
@@ -336,14 +361,22 @@ export async function bindAttachments(
  * The first attachment the provider cannot read, as the message to show
  * (decision D46: said before any cost, never dropped silently). An image the
  * server decoded is sent as a JPEG copy, which every provider reads; only an
- * undecodable original (HEIC) depends on the provider.
+ * undecodable original (HEIC) depends on the provider. A document is sent as
+ * it is, so it depends on the provider's document types.
  */
 export function unreadableAttachmentMessage(
-  rows: ReadonlyArray<Pick<AttachmentRow, 'originalName' | 'contentType' | 'derivativeStatus'>>,
-  readableMimeTypes: readonly string[],
+  rows: ReadonlyArray<Pick<AttachmentRow, 'kind' | 'originalName' | 'contentType' | 'derivativeStatus'>>,
+  readable: ReadableMimeTypes,
 ): string | null {
-  const row = rows.find((candidate) => candidate.derivativeStatus === 'unsupported' && !readableMimeTypes.includes(candidate.contentType));
-  return row ? `${row.originalName} can't be read by the assistant. Convert it to JPEG and attach it again.` : null;
+  for (const row of rows) {
+    if (row.kind === 'document' && !readable.document.includes(row.contentType)) {
+      return `${row.originalName} can't be read by the assistant. Attach photos of its pages instead.`;
+    }
+    if (row.kind === 'image' && row.derivativeStatus === 'unsupported' && !readable.image.includes(row.contentType)) {
+      return `${row.originalName} can't be read by the assistant. Convert it to JPEG and attach it again.`;
+    }
+  }
+  return null;
 }
 
 /** The newest bytes kept in memory: the tool loop sends the history again on every step. */
@@ -380,32 +413,38 @@ class ByteCache {
 
 const cache = new ByteCache(CACHE_MAX_BYTES);
 
+/** The object a model request reads for a row, or null when the provider cannot read it. */
+function modelSourceOf(row: AttachmentRow, readable: ReadableMimeTypes): { key: string; mimeType: string } | null {
+  if (row.kind === 'document') {
+    // The PDF itself, as uploaded: there is no copy of a document.
+    return readable.document.includes(row.contentType) ? { key: row.s3Key, mimeType: row.contentType } : null;
+  }
+  if (row.derivativeStatus === 'ready' && row.modelS3Key && row.modelContentType) return { key: row.modelS3Key, mimeType: row.modelContentType };
+  return readable.image.includes(row.contentType) ? { key: row.s3Key, mimeType: row.contentType } : null;
+}
+
 /**
  * The bytes of an attachment as a model request carries them (design G2):
- * the JPEG model copy when it exists, else the original when the provider
- * reads its type, else `unreadable`. A row or object that is gone is
+ * for an image the JPEG model copy when it exists, else the original when the
+ * provider reads its type; for a document the PDF as uploaded when the
+ * provider reads documents; else `unreadable`. A row or object that is gone is
  * `missing`; either way the model is told, never left to guess.
  */
 export async function loadAttachmentFile(
   attachmentId: string,
-  readableMimeTypes: readonly string[],
+  readable: ReadableMimeTypes,
   database: AssistantDatabase = defaultDb,
 ): Promise<AttachmentFile> {
   const [row] = await database.select().from(assistantAttachmentTable).where(eq(assistantAttachmentTable.id, attachmentId)).limit(1);
   if (!row) return { kind: 'missing' };
-  const source =
-    row.derivativeStatus === 'ready' && row.modelS3Key && row.modelContentType
-      ? { key: row.modelS3Key, mimeType: row.modelContentType }
-      : readableMimeTypes.includes(row.contentType)
-        ? { key: row.s3Key, mimeType: row.contentType }
-        : null;
+  const source = modelSourceOf(row, readable);
   if (!source) return { kind: 'unreadable' };
   const cached = cache.get(source.key);
-  if (cached) return { kind: 'image', ...cached };
+  if (cached) return { kind: row.kind, ...cached };
   try {
     const bytes = await getObjectBytes(source.key);
     cache.set(source.key, { bytes, mimeType: source.mimeType });
-    return { kind: 'image', bytes, mimeType: source.mimeType };
+    return { kind: row.kind, bytes, mimeType: source.mimeType };
   } catch (err) {
     log.warn({ err, attachmentId }, 'assistant.attachment.load.failed');
     return { kind: 'missing' };

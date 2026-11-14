@@ -13,6 +13,7 @@ import {
   parseStoredDraftResult,
   saveDraftMessage,
   supersededDrafts,
+  unsavedDraftOf,
   type DraftResult,
 } from './chat-cards-model';
 
@@ -176,6 +177,33 @@ describe('drafts of a conversation', () => {
     expect(supersededDrafts([earlier, cut], new Map([['x', ready('xxxxxxxxxxxx')]])).get('a')).toBe(2);
     // A re-check that says the later draft is not valid does not replace the earlier one.
     expect(supersededDrafts([earlier, cut], new Map([['x', invalid]])).size).toBe(0);
+  });
+
+  it('offers the newest ready draft of a paper as unsaved, until a save goes through after it', () => {
+    const paper = { sessionId: 'ss', examSlug: 'e1', classId: 'c', subjectSlug: 'su', modeSlug: 'm' };
+    expect(unsavedDraftOf(rows, paper)).toMatchObject({ callId: 'd', ordinal: 4, draftId: 'dddddddddddd', placeholderFigures: 2 });
+    expect(unsavedDraftOf(rows, { ...paper, examSlug: 'other-exam' })).toMatchObject({ callId: 'c', ordinal: 3 });
+    expect(unsavedDraftOf([call('a', '1', invalid)], paper)).toBeNull();
+
+    const save = (status: string, saved: Record<string, string> = paper) =>
+      ({ kind: 'approval', id: `s-${status}`, call: { id: `s-${status}`, status, body: { toolName: 'school.saveQuestionPaperVersion', input: { schoolId: 's', ...saved, expectedVersionNo: 0 } } } }) as unknown as AssistantTimelineRow;
+    // Saving another paper in the same chat leaves this paper's draft unsaved.
+    expect(unsavedDraftOf([...rows, save('succeeded', { ...paper, modeSlug: 'oral' })], paper)?.callId).toBe('d');
+    // Saved: a version holds it now. A declined or failed save leaves it unsaved.
+    expect(unsavedDraftOf([...rows, save('succeeded')], paper)).toBeNull();
+    expect(unsavedDraftOf([...rows, save('declined')], paper)?.callId).toBe('d');
+    // A draft written after the save is unsaved again; a folded save counts like a visible one.
+    expect(unsavedDraftOf([...rows, save('succeeded'), call('e', '5', ready('eeeeeeeeeeee'))], paper)).toMatchObject({ callId: 'e', ordinal: 5 });
+    const folded = { kind: 'work', id: 'w', folded: [save('succeeded')] } as unknown as AssistantTimelineRow;
+    expect(unsavedDraftOf([...rows, folded], paper)).toBeNull();
+  });
+
+  it('reads a cut draft result from its re-check verdict', () => {
+    const paper = { sessionId: 'ss', examSlug: 'e1', classId: 'c', subjectSlug: 'su', modeSlug: 'm' };
+    const cut = call('x', '5', ready('xxxxxxxxxxxx'));
+    (cut as { call: { body: { outputTruncated: boolean } } }).call.body.outputTruncated = true;
+    expect(unsavedDraftOf([cut], paper)).toBeNull();
+    expect(unsavedDraftOf([cut], paper, new Map([['x', ready('xxxxxxxxxxxx')]]))?.draftId).toBe('xxxxxxxxxxxx');
   });
 
   it('finds the ordinal of the newest draft with an id', () => {

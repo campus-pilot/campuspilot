@@ -240,7 +240,7 @@ export function AssistantWorkspace({
           <AssistantChat
             // Keyed by the conversation (useChatKey), so the chat that starts one stays mounted as the address
             // moves to it. The seed is deliberately not part of the key: removing its chip clears the address's
-            // seed, and a key that followed it would remount the chat and lose the images already attached
+            // seed, and a key that followed it would remount the chat and lose the files already attached
             // (stored on the server, never sent).
             key={chat.key}
             schoolId={schoolId}

@@ -1,6 +1,11 @@
 import {
   ASSISTANT_ATTACHMENT_MAX_BYTES,
   ASSISTANT_ATTACHMENTS_PER_MESSAGE,
+  ASSISTANT_DOCUMENT_MAX_BYTES,
+  ASSISTANT_IMAGE_MAX_BYTES,
+  assistantAttachmentRefSchema,
+  encodedImageBytes,
+  MODEL_REQUEST_ATTACHMENT_BUDGET_BYTES,
   assistantAttachmentReadPath,
   assistantAttachmentUploadPath,
   assistantMessageSeedSchema,
@@ -13,14 +18,16 @@ import { assistantViewSchema } from '@campuspilot/assistant-contract/views';
 import { describe, expect, it } from 'vitest';
 
 import { sanitizeAttachmentName, unreadableAttachmentMessage } from './attachments';
-import { imageMimeTypesOf } from './runtime/providers/image-types';
+import { readableMimeTypesOf } from './runtime/providers/image-types';
 
 const base = { schoolId: 's1', clientRequestId: '7b0d3b63-8f4b-4a9c-9f4a-2f4a0d6a7a11', surface: 'page' as const };
 const ids = (count: number) => Array.from({ length: count }, (_, index) => `asat_${index}`);
 
 describe('chat attachment limits', () => {
-  it('allows 20 images of 15 MB per message', () => {
+  it('allows 20 attachments per message: images of 15 MB, PDFs of 10 MB', () => {
     expect(ASSISTANT_ATTACHMENTS_PER_MESSAGE).toBe(20);
+    expect(ASSISTANT_IMAGE_MAX_BYTES).toBe(15 * 1024 * 1024);
+    expect(ASSISTANT_DOCUMENT_MAX_BYTES).toBe(10 * 1024 * 1024);
     expect(ASSISTANT_ATTACHMENT_MAX_BYTES).toBe(15 * 1024 * 1024);
     expect(sendAssistantMessageInputSchema.safeParse({ ...base, text: 'see', attachmentIds: ids(20) }).success).toBe(true);
     expect(sendAssistantMessageInputSchema.safeParse({ ...base, text: 'see', attachmentIds: ids(21) }).success).toBe(false);
@@ -67,25 +74,58 @@ describe('question paper in the chat contract', () => {
   });
 });
 
+describe('the request budget holds the largest PDF', () => {
+  it('fits one PDF at its cap, counted as base64, with room left for images', () => {
+    expect(encodedImageBytes(ASSISTANT_DOCUMENT_MAX_BYTES)).toBeLessThan(MODEL_REQUEST_ATTACHMENT_BUDGET_BYTES);
+    expect(MODEL_REQUEST_ATTACHMENT_BUDGET_BYTES - encodedImageBytes(ASSISTANT_DOCUMENT_MAX_BYTES)).toBeGreaterThan(2 * 1024 * 1024);
+  });
+
+  it('carries the kind on every attachment reference', () => {
+    const ref = { id: 'asat_1', fileName: 'a.pdf', contentType: 'application/pdf', byteSize: 1, width: null, height: null, previewable: false };
+    expect(assistantAttachmentRefSchema.safeParse(ref).success).toBe(false);
+    expect(assistantAttachmentRefSchema.safeParse({ ...ref, kind: 'document' }).success).toBe(true);
+    expect(assistantAttachmentRefSchema.safeParse({ ...ref, kind: 'word' }).success).toBe(false);
+  });
+});
+
 describe('D46: a type the provider cannot read is refused with a clear message', () => {
-  const heic = { originalName: 'IMG_0042.HEIC', contentType: 'image/heic', derivativeStatus: 'unsupported' as const };
+  const heic = { kind: 'image' as const, originalName: 'IMG_0042.HEIC', contentType: 'image/heic', derivativeStatus: 'unsupported' as const };
+  const pdf = { kind: 'document' as const, originalName: 'paper.pdf', contentType: 'application/pdf', derivativeStatus: null };
   it('refuses HEIC on Claude, never silently', () => {
-    expect(unreadableAttachmentMessage([heic], imageMimeTypesOf('anthropic'))).toBe(
+    expect(unreadableAttachmentMessage([heic], readableMimeTypesOf('anthropic'))).toBe(
       "IMG_0042.HEIC can't be read by the assistant. Convert it to JPEG and attach it again.",
     );
   });
   it('accepts HEIC on Gemini and any image the server decoded', () => {
-    expect(unreadableAttachmentMessage([heic], imageMimeTypesOf('gemini'))).toBeNull();
-    expect(unreadableAttachmentMessage([{ ...heic, derivativeStatus: 'ready' }], imageMimeTypesOf('anthropic'))).toBeNull();
+    expect(unreadableAttachmentMessage([heic], readableMimeTypesOf('gemini'))).toBeNull();
+    expect(unreadableAttachmentMessage([{ ...heic, derivativeStatus: 'ready' }], readableMimeTypesOf('anthropic'))).toBeNull();
+  });
+  it('accepts a PDF on both providers', () => {
+    expect(unreadableAttachmentMessage([pdf], readableMimeTypesOf('anthropic'))).toBeNull();
+    expect(unreadableAttachmentMessage([pdf], readableMimeTypesOf('gemini'))).toBeNull();
+  });
+  it('refuses a PDF on a provider that reads no documents, by name', () => {
+    expect(unreadableAttachmentMessage([heic, pdf].slice(1), { image: readableMimeTypesOf('anthropic').image, document: [] })).toBe(
+      "paper.pdf can't be read by the assistant. Attach photos of its pages instead.",
+    );
   });
 });
 
 describe('attachment file names', () => {
   it('drop paths and control characters and stay short', () => {
     expect(sanitizeAttachmentName('C:\\Users\\a\\page 1.jpg')).toBe('page 1.jpg');
-    expect(sanitizeAttachmentName('../../etc/pa\u0000ss<wd>.png')).toBe('pa_ss_wd_.png');
+    expect(sanitizeAttachmentName('../../etc/pa\u0000ss<wd>.png')).toBe('pass_wd_.png');
     expect(sanitizeAttachmentName('')).toBe('image');
+    expect(sanitizeAttachmentName('', 'document')).toBe('document.pdf');
     expect(sanitizeAttachmentName('x'.repeat(300))).toHaveLength(120);
+  });
+
+  it('removes line breaks, C1 controls and bidirectional or invisible characters that could disguise a name', () => {
+    expect(sanitizeAttachmentName('exam\r\npaper\u0085.pdf', 'document')).toBe('exampaper.pdf');
+    // "paper\u202Efdp.exe" would display as "paperexe.pdf".
+    expect(sanitizeAttachmentName('paper\u202Efdp.exe')).toBe('paperfdp.exe');
+    expect(sanitizeAttachmentName('a\u200Bb\u2066c\uFEFF.pdf')).toBe('abc.pdf');
+    expect(sanitizeAttachmentName('\u0000\u0001', 'document')).toBe('document.pdf');
   });
 });
 

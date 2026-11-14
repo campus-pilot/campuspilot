@@ -15,7 +15,7 @@ import {
 } from '../document/document.render';
 import { readDocumentTemplate } from '../document/document.storage';
 import { getSelectedDocumentTemplate, selectedDocumentTemplateTypes } from '../document/document.selected-template';
-import { isAttachmentFigureId, loadAttachmentFigureAssets } from './question-paper.attachments';
+import { isAttachmentFigureId, loadAttachmentFigureAssets, type ChatFigures } from './question-paper.attachments';
 import type { QuestionPaperContext } from './question-paper.context';
 import { createMathRenderer, type MathRenderer } from './question-paper.math';
 import {
@@ -51,7 +51,7 @@ export {
  */
 export async function loadFigureAssets(
   db: DatabaseExecutor,
-  input: { schoolId: string; paperId: string | null; figureIds: readonly string[]; chatUserId?: string },
+  input: { schoolId: string; paperId: string | null; figureIds: readonly string[]; chat?: ChatFigures },
 ): Promise<FigureAssets> {
   const allIds = [...input.figureIds];
   if (allIds.length === 0) return new Map();
@@ -77,7 +77,7 @@ export async function loadFigureAssets(
   // Authoring (`checkQuestionPaperDraft`) refuses such an id before anything is saved.
   const ids = storedIds.filter((id) => known.has(id));
   const assets = new Map<string, { dataUri: string }>(
-    await loadAttachmentFigureAssets(db, { schoolId: input.schoolId, chatUserId: input.chatUserId, ids: attachmentIds }),
+    await loadAttachmentFigureAssets(db, { schoolId: input.schoolId, chat: input.chat, ids: attachmentIds }),
   );
   let total = [...assets.values()].reduce((sum, asset) => sum + asset.dataUri.length, 0);
   for (const id of ids) {
@@ -96,7 +96,7 @@ export async function loadFigureAssets(
 /** Renders the body fragment of a paper, loading its figures. See {@link renderQuestionPaperBodyHtml}. */
 export async function renderQuestionPaperBody(
   db: DatabaseExecutor,
-  input: { schoolId: string; paperId: string | null; html: string; math?: MathRenderer; chatUserId?: string },
+  input: { schoolId: string; paperId: string | null; html: string; math?: MathRenderer; chat?: ChatFigures },
 ): Promise<RenderedBody> {
   const figures = await loadFigureAssets(db, { ...input, figureIds: fragmentFigureIds(input.html) });
   return renderQuestionPaperBodyHtml(input.html, { figures, math: input.math ?? createMathRenderer() });
