@@ -1,8 +1,10 @@
 import {
   ChartColumn,
   ClipboardCheck,
+  FilePenLine,
   FileText,
   GraduationCap,
+  Megaphone,
   IndianRupee,
   UserPlus,
   UsersRound,
@@ -307,6 +309,91 @@ export const featureExtras: Record<FeatureSlug, FeatureExtra> = {
       },
     ],
     ctaTitle: "See your school's day at a glance.",
+  },
+  "question-papers": {
+    name: "Question papers",
+    icon: FilePenLine,
+    artLabel: "A question paper on the school's letterhead, drafted by AI from photos of a handwritten paper, with ways to start and the PDF ready.",
+    stepNotes: [
+      "Photos of the handwritten paper, a description in chat, or an earlier paper.",
+      "The AI writes the questions; the school's template adds the heading and footer.",
+      "Ask for changes in chat; each change becomes a new version.",
+      "Every version keeps its own PDF to preview and download.",
+    ],
+    doneOnce:
+      "The school name, heading and footer are set once in your question paper template. Every paper prints with them, and the AI never writes them.",
+    next: [
+      { slug: "examinations", direction: "from", carries: "A paper belongs to one exam, class, subject and mode of the exam plan." },
+      { slug: "documents", direction: "from", carries: "It prints through the same template system as report cards and notices." },
+    ],
+    ai: {
+      ask: "Make a 40-mark Science paper for Class 8 from these photos.",
+      answer: "The assistant writes the paper, and a teacher only reaches papers for classes they are assigned to.",
+    },
+    faq: [
+      {
+        question: "Does the AI decide what is on the paper?",
+        answer: "The AI drafts the questions from your photos or description. A teacher reviews the paper, asks for changes in chat, and downloads it only when it is right. Nothing is final until a person saves it.",
+      },
+      {
+        question: "Can it handle Hindi, Urdu and maths?",
+        answer: "Yes. Hindi and other Indian languages, Urdu, which reads right to left, and mathematical expressions are all supported.",
+      },
+      {
+        question: "What about diagrams?",
+        answer: "Diagrams come from images you upload. Where the AI cannot reproduce one, it leaves a labelled placeholder, and you attach the real image in chat.",
+      },
+      {
+        question: "Who can see a school's papers?",
+        answer: "Access follows school roles. Teachers see and edit papers only for the classes assigned to them, while principals, managers and exam coordinators see every class.",
+      },
+      {
+        question: "Is the AI feature on for every school?",
+        answer: "It is enabled per school. Book a demo and we will show it with your own class and subject set-up.",
+      },
+    ],
+    ctaTitle: "See a question paper made from your own handwriting.",
+  },
+  notices: {
+    name: "Notices & notifications",
+    icon: Megaphone,
+    artLabel: "A school notice addressed to staff and Classes 6 to 8, delivered in the app, on WhatsApp and as a push notification.",
+    stepNotes: [
+      "A title and a body, written once as plain text or from a template.",
+      "Staff, every class, or only the classes you select.",
+      "A draft is reviewed and then published. Publishing is one way.",
+      "Each channel's delivery is logged, with resend for failures.",
+    ],
+    doneOnce:
+      "A notice is written once. The same notice reaches staff in the management app and students in their portal, and prints from the same record.",
+    next: [
+      { slug: "student-portal", direction: "into", carries: "Students read notices in their own portal." },
+      { slug: "documents", direction: "from", carries: "Notices print through the school's notice template." },
+      { slug: "examinations", direction: "from", carries: "Published results and timetables notify staff and students." },
+    ],
+    faq: [
+      {
+        question: "Where do notifications arrive?",
+        answer: "In the app, on WhatsApp and as a push notification on a student's device. Bills, receipts, payments and published results use the same delivery.",
+      },
+      {
+        question: "Can we send a notice to only some classes?",
+        answer: "Yes. A notice can be addressed to staff, to every class, or to selected classes, and the audience is recorded when it is published.",
+      },
+      {
+        question: "How do we know a message was delivered?",
+        answer: "A delivery log shows each channel's outcome. A failed delivery can be resent, and failure alerts reach the school.",
+      },
+      {
+        question: "Does WhatsApp reach everyone?",
+        answer: "WhatsApp messages go to the number saved for the family, and only where the school has turned WhatsApp on. Where a message cannot be delivered, the log says so.",
+      },
+      {
+        question: "Can a notice be printed?",
+        answer: "Yes. Every notice can be printed on full or half A4 from the school's notice template.",
+      },
+    ],
+    ctaTitle: "See notices reach staff and students.",
   },
   "student-portal": {
     name: "Student portal",

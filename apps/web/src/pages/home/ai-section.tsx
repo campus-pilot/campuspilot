@@ -20,13 +20,13 @@ const aiStages: readonly AiStage[] = [
     id: "today",
     tag: "Today",
     title: "Your assistants, your permissions",
-    text: "Connect the AI assistants your team already uses. They answer from live CampusPilot records as the person asking.",
+    text: "Connect the AI assistants your team already uses. They answer from live CampusPilot records as the person asking. Inside CampusPilot, AI already drafts question papers for teachers to review.",
   },
   {
     id: "coming",
     tag: "Coming · on the roadmap",
-    title: "Assistants inside CampusPilot",
-    text: "Agentic AI that prepares work, like the fee-reminder list or report cards for approval, for a person to review.",
+    title: "More AI inside CampusPilot",
+    text: "Agentic AI that prepares more work, like the fee-reminder list or report cards for approval, for a person to review.",
   },
 ];
 

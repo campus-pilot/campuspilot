@@ -20,7 +20,7 @@ export const homeFaqs: readonly FaqEntry[] = [
   {
     question: "Is there AI inside CampusPilot itself?",
     answer:
-      "It is on our roadmap, not available yet. We are working on agentic assistants inside the CampusPilot web app that prepare work — drafting the fee-reminder list, preparing report cards for approval — for a person to review before anything is sent.",
+      "Yes, in part. Question paper generation is live: a teacher photographs a handwritten paper or describes it in chat, and AI drafts a printed paper to review and refine. More is on our roadmap: assistants that prepare work such as the fee-reminder list or report cards for a person to review before anything is sent.",
   },
   {
     question: "Who is CampusPilot for?",
