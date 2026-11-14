@@ -101,13 +101,16 @@ describe('demo question papers (steps only, one class)', () => {
   }, 120_000);
 
   it('changes nothing when the step runs again', async () => {
+    // Read in a fixed order: without ORDER BY, Postgres may return rows a re-run rewrote in another order.
+    const pagesOf = () => db.select().from(examQuestionPaperPageTable).where(eq(examQuestionPaperPageTable.schoolId, job.schoolId)).orderBy(asc(examQuestionPaperPageTable.id));
+    const versionsOf = () => db.select().from(examQuestionPaperVersionTable).where(eq(examQuestionPaperVersionTable.schoolId, job.schoolId)).orderBy(asc(examQuestionPaperVersionTable.id));
     const before = await papers();
-    const pagesBefore = await db.select().from(examQuestionPaperPageTable).where(eq(examQuestionPaperPageTable.schoolId, job.schoolId));
-    const versionsBefore = await db.select().from(examQuestionPaperVersionTable).where(eq(examQuestionPaperVersionTable.schoolId, job.schoolId));
+    const pagesBefore = await pagesOf();
+    const versionsBefore = await versionsOf();
     await seedAll();
     expect(await papers()).toEqual(before);
-    expect(await db.select().from(examQuestionPaperPageTable).where(eq(examQuestionPaperPageTable.schoolId, job.schoolId))).toEqual(pagesBefore);
-    expect(await db.select().from(examQuestionPaperVersionTable).where(eq(examQuestionPaperVersionTable.schoolId, job.schoolId))).toEqual(versionsBefore);
+    expect(await pagesOf()).toEqual(pagesBefore);
+    expect(await versionsOf()).toEqual(versionsBefore);
   }, 120_000);
 
   it('adds only the missing pages after an interrupted run', async () => {
