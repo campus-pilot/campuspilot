@@ -17,7 +17,8 @@
  *   `offset*` property: a paper is printed, nothing moves. Dropped properties
  *   of the motion family are reported with their own wording.
  * - Layout is the author's (a decision of the product owner, 2026-11-14):
- *   any `position`, offsets, `z-index`, negative margins, shadows, gradients,
+ *   `position` relative, absolute and sticky (never fixed: it repeats on every
+ *   printed page, unlike the preview), offsets, `z-index`, negative margins, shadows, gradients,
  *   `::before`/`::after` with `content`, and large text are allowed. A label
  *   laid over a figure needs them, and the teacher sees the paper as it prints
  *   and approves every save, so a layout that covers the school's heading is
@@ -107,7 +108,9 @@ const PROPERTIES = new Set(
 
 const KEYWORDS: Record<string, RegExp> = {
   display: /^(block|inline|inline-block|flex|inline-flex|grid|inline-grid|table|inline-table|table-row|table-cell|table-row-group|table-header-group|table-footer-group|table-caption|list-item|none|contents)$/i,
-  position: /^(static|relative|absolute|fixed|sticky)$/i,
+  // Not `fixed`: the preview shows a fixed box once, but print repeats it on every page over the school's header,
+  // so the PDF would differ from what the teacher approved (product owner's decision, 2026-11-14).
+  position: /^(static|relative|absolute|sticky)$/i,
   visibility: /^(visible|hidden|collapse)$/i,
   float: /^(left|right|none|inline-start|inline-end)$/i,
   clear: /^(left|right|both|none)$/i,

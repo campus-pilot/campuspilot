@@ -329,8 +329,10 @@ was stored. `stats` count the cleaned output only.
   look better.
 - **Layout is the author's** (product owner's decision, 2026-11-14). The teacher sees the paper
   as it prints and approves every save, so a layout that covers the school's heading or footer is
-  seen and refused by a person; the sanitiser does not decide how a paper looks. Allowed: any
-  `position` with `top/right/bottom/left/inset` and `z-index` (labels laid over a figure), negative
+  seen and refused by a person; the sanitiser does not decide how a paper looks. Allowed:
+  `position` relative, absolute and sticky with `top/right/bottom/left/inset` and `z-index` (labels
+  laid over a figure). Not `fixed`: the preview shows a fixed box once, but print repeats it on
+  every page over the school's header, so the PDF would differ from what was approved. Negative
   margins, `box-shadow`, `text-shadow`, linear/radial/conic gradients, `visibility`, `::before`,
   `::after`, `::marker` with `content` (quoted text, `counter()`), `:hover`, `:not()`, `:is()` and
   `:where()` (their argument is checked like any selector, one level deep), and text as large as a

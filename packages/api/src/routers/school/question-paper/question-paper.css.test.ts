@@ -130,7 +130,7 @@ describe('numbers are capped, not only lengths with a unit (M2)', () => {
 
   it('leaves positioning, layering, shadows, gradients and large text to the author', () => {
     for (const declaration of [
-      'position:absolute;left:62%;top:18%', 'position:fixed;bottom:0', 'position:sticky;top:0', 'inset:0', 'z-index:-1', 'margin:0 0 0 -4mm',
+      'position:absolute;left:62%;top:18%', 'position:sticky;top:0', 'inset:0', 'z-index:-1', 'margin:0 0 0 -4mm',
       'box-shadow:0 1mm 2mm rgba(0,0,0,0.2)', 'text-shadow:0 0 1px #000', 'background:linear-gradient(90deg, #fff, #eee)',
       'background-image:radial-gradient(circle, #fff 0%, #ddd 100%)', 'visibility:hidden', 'font-size:96pt', 'line-height:8',
     ]) {
@@ -157,6 +157,8 @@ describe('numbers are capped, not only lengths with a unit (M2)', () => {
   });
 
   it('still refuses what loads or moves', () => {
+    // `fixed` repeats on every printed page but shows once in the preview, so it is refused.
+    expect(declarations('position:fixed;bottom:0;color:red')).toBe('bottom:0;color:red');
     for (const declaration of ['background-image:url(https://example.com/a.png)', 'background:url(x)', 'transform:rotate(3deg)', 'filter:blur(2px)', 'animation:spin 1s', 'content:attr(class)']) {
       expect(declarations(declaration), declaration).toBe('');
     }

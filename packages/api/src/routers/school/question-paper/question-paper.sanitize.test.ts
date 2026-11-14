@@ -182,7 +182,8 @@ describe('question_paper_body sanitiser: hostile input', () => {
 
   it('leaves positioning to the author, and still refuses lengths that would make endless pages', () => {
     const result = clean('<p style="position:fixed;bottom:0;color:red">a</p><p style="position:absolute;color:red">b</p><p style="height:99999mm;width:100%;margin:0 0 0 -50000px">c</p><p style="position:relative;top:2mm;z-index:2">d</p>');
-    expect(result.html).toContain('<p style="position:fixed;bottom:0;color:red">a</p>');
+    // Fixed is refused (it repeats on every printed page); its offsets alone are inert.
+    expect(result.html).toContain('<p style="bottom:0;color:red">a</p>');
     expect(result.html).toContain('<p style="position:absolute;color:red">b</p>');
     expect(result.html).toContain('<p style="position:relative;top:2mm;z-index:2">d</p>');
     expect(result.html).not.toMatch(/99999|50000/);
