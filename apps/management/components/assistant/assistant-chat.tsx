@@ -35,7 +35,7 @@ import { toast } from '@campuspilot/ui/lib/toast';
 import { cn } from '@campuspilot/ui/lib/utils';
 import { skipToken, useQuery } from '@tanstack/react-query';
 import { ClipboardList, RotateCcw, ShieldCheck, UserPlus, UserRoundX } from 'lucide-react';
-import { useRef, type ReactNode } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 
 import { assistantAttachmentThumbUrl } from '@/lib/assistant-attachments';
 import { orpc } from '@/lib/orpc';
@@ -235,6 +235,14 @@ type TurnActions = {
   stoppingRunId: string | null;
 };
 
+/**
+ * The conversation's timeline. With no conversation yet (`conversationId`
+ * null) or before its first snapshot, it shows the messages on their way
+ * (`trailing`) in the same timeline the rows will fill, so the first message
+ * stays on screen from the send to the server's copy: the timeline's
+ * scroller hides its content until it has scrolled into place, and one
+ * mounted anew when the rows arrive would blank the message for a frame.
+ */
 function ConversationTimeline({
   schoolId,
   conversationId,
@@ -247,13 +255,14 @@ function ConversationTimeline({
   stoppingRunId,
 }: TurnActions & {
   schoolId: string;
-  conversationId: string;
+  conversationId: string | null;
   trailing: ReactNode;
   gutterClassName?: string;
   failure: AssistantConversationFailure | null;
   onNewConversation: () => void;
 }) {
-  const rows = useAssistantTimeline(schoolId, conversationId);
+  const loaded = useAssistantTimeline(schoolId, conversationId);
+  const rows = loaded ?? (trailing ? [] : undefined);
   // Draft cards a later ready draft of the same paper replaced shrink to one quiet line.
   const verdicts = useDraftVerdicts(rows ?? []);
   const superseded = supersededDrafts(rows ?? [], verdicts);
@@ -282,7 +291,10 @@ function ConversationTimeline({
       stoppingRunId={stoppingRunId}
       trailing={trailing}
       gutterClassName={gutterClassName}
-      renderReply={(itemId, meta) => <ReplyRow schoolId={schoolId} conversationId={conversationId} itemId={itemId} meta={meta} />}
+      // Replies are rows, and there are none before the conversation exists.
+      renderReply={(itemId, meta) =>
+        conversationId ? <ReplyRow schoolId={schoolId} conversationId={conversationId} itemId={itemId} meta={meta} /> : null
+      }
       renderView={(item: AssistantViewItemDto) => <AssistantViewBlock schoolId={schoolId} view={item.body.view} />}
       attachmentPreviewUrl={(attachment: AssistantAttachmentRef) => assistantAttachmentThumbUrl(schoolId, attachment.id)}
       renderCard={(row) => (
@@ -432,25 +444,21 @@ function ChatBody({
   failure: AssistantConversationFailure | null;
   onNewConversation: () => void;
 }) {
+  // One timeline whether or not the conversation exists yet, so the first message's send and the
+  // conversation it starts share it (see ConversationTimeline).
   return (
     <div className="min-h-0 flex-1">
-      {conversationId ? (
-        <ConversationTimeline
-          schoolId={schoolId}
-          conversationId={conversationId}
-          trailing={trailing}
-          gutterClassName={gutterClassName}
-          failure={failure}
-          onNewConversation={onNewConversation}
-          onRetry={onRetry}
-          onSendMessage={onSendMessage}
-          stoppingRunId={stoppingRunId}
-        />
-      ) : (
-        <div className={cn('h-full overflow-y-auto pt-4', gutterClassName)}>
-          <div className={ASSISTANT_LANE_CLASS}>{trailing}</div>
-        </div>
-      )}
+      <ConversationTimeline
+        schoolId={schoolId}
+        conversationId={conversationId}
+        trailing={trailing}
+        gutterClassName={gutterClassName}
+        failure={failure}
+        onNewConversation={onNewConversation}
+        onRetry={onRetry}
+        onSendMessage={onSendMessage}
+        stoppingRunId={stoppingRunId}
+      />
     </div>
   );
 }
@@ -468,7 +476,7 @@ function ChatBody({
  */
 export function AssistantChat({
   schoolId,
-  conversationId,
+  conversationId: openConversationId,
   surface,
   onConversationStarted,
   onNewConversation,
@@ -479,6 +487,12 @@ export function AssistantChat({
   onSeedRemoved,
 }: AssistantChatProps) {
   const life = useSurfaceLife();
+  // The conversation this chat's first message started, set the moment the send returns. The surface moves
+  // to it too (`conversationId` follows), but a page does so through its address, a moment later; the chat
+  // does not wait, so its message never belongs to neither the new conversation nor this one in between.
+  // The surfaces key their chat so that any other change of conversation remounts it (`useChatKey`).
+  const [startedId, setStartedId] = useState<string | null>(null);
+  const conversationId = openConversationId ?? startedId;
   const imageUpload = useAssistantAttachmentUpload(schoolId);
   // The seed only means something for a conversation that has not started.
   const activeSeed = conversationId ? null : seed;
@@ -510,6 +524,7 @@ export function AssistantChat({
   function started(id: string, textInBox: string) {
     if (conversationId || !life.isAlive()) return;
     draft.start(id, textInBox);
+    setStartedId(id);
     onConversationStarted(id);
   }
 

@@ -18,6 +18,7 @@ import { schoolHref } from '@/components/school-route';
 
 import { AssistantAccess } from './assistant-access';
 import { AssistantChat } from './assistant-chat';
+import { useChatKey } from './assistant-chat-key';
 
 function PanelHeader({
   schoolId,
@@ -70,6 +71,7 @@ function PanelHeader({
 export function AssistantPanel({ schoolId }: { schoolId: string }) {
   const [open, setOpen] = useState(false);
   const [conversationId, setConversationId] = useState<string | null>(null);
+  const chat = useChatKey(conversationId);
 
   return (
     <AssistantAccess schoolId={schoolId}>
@@ -96,14 +98,15 @@ export function AssistantPanel({ schoolId }: { schoolId: string }) {
           />
           <div className="min-h-0 flex-1">
             <AssistantChat
-              key={conversationId ?? 'new'}
+              // The chat that starts a conversation stays mounted as it moves into it (useChatKey).
+              key={chat.key}
               schoolId={schoolId}
               conversationId={conversationId}
               surface="panel"
               compact
               autoFocus
               gutterClassName="px-4"
-              onConversationStarted={setConversationId}
+              onConversationStarted={(id) => chat.started(id, () => setConversationId(id))}
               onNewConversation={() => setConversationId(null)}
             />
           </div>

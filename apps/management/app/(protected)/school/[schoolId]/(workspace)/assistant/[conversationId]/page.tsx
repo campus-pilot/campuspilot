@@ -1,10 +1,4 @@
-import { AssistantWorkspace } from '@/components/assistant/assistant-workspace';
-
-export default async function AssistantConversationPage({
-  params,
-}: {
-  params: Promise<{ schoolId: string; conversationId: string }>;
-}) {
-  const { schoolId, conversationId } = await params;
-  return <AssistantWorkspace schoolId={schoolId} conversationId={conversationId} />;
+/** One conversation. The assistant's layout renders it from the address; see `../layout.tsx`. */
+export default function AssistantConversationPage() {
+  return null;
 }
