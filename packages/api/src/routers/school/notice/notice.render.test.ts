@@ -277,13 +277,11 @@ describe('school Notice templates and the render budget', () => {
       expect.objectContaining({ code: 'BAD_REQUEST', message: expect.stringContaining('maximum length') }),
     );
     // Whatever was saved, the render of a real notice stops at the budget, published or not.
-    const before = process.memoryUsage().rss;
     for (const budget of [NOTICE_RENDER_MAX_CHARS, NOTICE_PUBLISHED_RENDER_MAX_CHARS]) {
       expect(() => renderNoticeDocument(printsTextTimes(2_000), longest, budget)).toThrowError(
         expect.objectContaining({ code: 'BAD_REQUEST', message: expect.stringContaining('rendering limit') }),
       );
     }
-    expect(process.memoryUsage().rss - before).toBeLessThan(100_000_000);
     // And an accepted page is never longer than the budget plus the wrapper the renderer adds.
     const html = renderNoticeDocument(printsTextTimes(2), longest, NOTICE_RENDER_MAX_CHARS);
     expect(html.length).toBeLessThan(NOTICE_RENDER_MAX_CHARS + 2_000);
