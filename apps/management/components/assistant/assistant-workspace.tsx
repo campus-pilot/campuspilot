@@ -8,7 +8,7 @@ import { cn } from '@campuspilot/ui/lib/utils';
 import { Spinner } from '@campuspilot/ui/components/spinner';
 import { Sparkles, SquarePen } from 'lucide-react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 
 import { schoolHref } from '@/components/school-route';
 
@@ -16,6 +16,8 @@ import { FeaturePage } from '@/components/feature-unavailable';
 import { ModulePlaceholder } from '@/components/module-placeholder';
 import { AssistantAccess } from './assistant-access';
 import { AssistantChat } from './assistant-chat';
+import { useChatKey } from './assistant-chat-key';
+import { seedFromQuery } from './assistant-seed-query';
 import { ConversationRow, DeleteConversationDialog, useDeleteConversation } from './assistant-history-row';
 import { useAssistantConversations, useAssistantOpenConversation } from './use-assistant';
 
@@ -214,10 +216,11 @@ export function AssistantWorkspace({
 }: {
   schoolId: string;
   conversationId: string | null;
-  /** The screen the new conversation starts from (a question paper), read from the address by the page. */
+  /** The screen the new conversation starts from (a question paper), read from the address. */
   seed?: QuestionPaperSeed | null;
 }) {
   const router = useRouter();
+  const chat = useChatKey(conversationId);
   return (
     // The page exists while the school has the assistant, and only for a user
     // whose role may use it. At the school's limit it stays (the composer
@@ -235,10 +238,11 @@ export function AssistantWorkspace({
         />
         <div className="min-h-0 min-w-0 flex-1">
           <AssistantChat
-            // Keyed by the conversation only. The seed is deliberately not part of the key: removing its chip
-            // clears the address's seed, and a key that followed it would remount the chat and lose the files
-            // already attached (stored on the server, never sent).
-            key={conversationId ?? 'new'}
+            // Keyed by the conversation (useChatKey), so the chat that starts one stays mounted as the address
+            // moves to it. The seed is deliberately not part of the key: removing its chip clears the address's
+            // seed, and a key that followed it would remount the chat and lose the files already attached
+            // (stored on the server, never sent).
+            key={chat.key}
             schoolId={schoolId}
             seed={conversationId ? null : seed}
             onSeedRemoved={() => router.replace(conversationHref(schoolId))}
@@ -246,7 +250,7 @@ export function AssistantWorkspace({
             surface="page"
             autoFocus
             gutterClassName="px-4 sm:px-8 lg:px-12"
-            onConversationStarted={(id) => router.replace(conversationHref(schoolId, id))}
+            onConversationStarted={(id) => chat.started(id, () => router.replace(conversationHref(schoolId, id)))}
             onNewConversation={() => router.push(conversationHref(schoolId))}
           />
         </div>
@@ -254,4 +258,24 @@ export function AssistantWorkspace({
       </AssistantAccess>
     </FeaturePage>
   );
+}
+
+/**
+ * The full page as the address describes it: the open conversation from the
+ * path (`/assistant/<id>`), and, for a new conversation, the screen it starts
+ * from. "Continue in chat" on a question paper links here with the paper's
+ * natural key (`?seed=question_paper&sessionId=&examSlug=&classId=&subjectSlug=&modeSlug=`);
+ * anything malformed means no seed, a plain new conversation. Both are
+ * derived from the address on every render, not set by an effect.
+ *
+ * The assistant's layout renders this, not its pages: a layout stays mounted
+ * while the path below it changes, so the first message moving the address
+ * from `/assistant` to `/assistant/<id>` keeps the page (history, chat, focus)
+ * instead of building another one.
+ */
+export function AssistantWorkspaceFromAddress({ schoolId }: { schoolId: string }) {
+  const { conversationId } = useParams<{ conversationId?: string }>();
+  const query = useSearchParams();
+  const seed = conversationId ? null : seedFromQuery(query);
+  return <AssistantWorkspace schoolId={schoolId} conversationId={conversationId ?? null} seed={seed} />;
 }

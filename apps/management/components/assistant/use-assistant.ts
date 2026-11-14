@@ -344,7 +344,7 @@ export function useAssistantOpenConversation(schoolId: string, conversationId: s
   return useConversationQuery(schoolId, conversationId, selectConversation).data ?? null;
 }
 
-/** The conversation's rows; undefined until its first snapshot arrives, and while there is no conversation. */
+/** The conversation's rows; undefined until its first snapshot arrives, and while there is no conversation yet. */
 export function useAssistantTimeline(schoolId: string, conversationId: string | null) {
   return useConversationQuery(schoolId, conversationId, selectTimeline).data;
 }
@@ -725,8 +725,10 @@ export function useAssistantDraft(schoolId: string, conversationId: string | nul
      * The first message started conversation `id`: `boxText` (what the box
      * holds right now, empty included) becomes that conversation's draft and
      * the shared new-conversation draft is cleared. Called before the chat
-     * moves to the conversation, so its next mount reads the text back. Never
-     * the text that was sent: the box no longer holds it.
+     * moves to the conversation; the chat stays mounted as it does (see
+     * `useChatKey`), so later saves go to the conversation and the stored
+     * text is there for its next visit. Never the text that was sent: the
+     * box no longer holds it.
      */
     start: (id: string, boxText: string) => {
       const fresh = keyOf(id);
