@@ -25,6 +25,16 @@ export const aiFaqEntries: readonly FaqEntry[] = [
   {
     question: "Will AI send messages or make decisions on its own?",
     answer:
-      "CampusPilot is not built for unsupervised decisions. On our roadmap is AI inside CampusPilot that prepares work, such as a fee-reminder list or report cards, for a person to review. Nothing goes out until someone approves it.",
+      "CampusPilot is not built for unsupervised decisions. AI inside CampusPilot drafts question papers, and a teacher reviews and saves them. On our roadmap is more prepared work, such as a fee-reminder list or report cards, for a person to review. Nothing goes out until someone approves it.",
+  },
+  {
+    question: "How does AI question paper generation work?",
+    answer:
+      "A teacher uploads photos of a handwritten paper, or describes the paper in chat. AI drafts the questions, the teacher asks for changes in chat, and each change is saved as a new version with its own PDF. The school's own template provides the heading and footer, and teachers reach only the classes assigned to them.",
+  },
+  {
+    question: "Which AI does CampusPilot use for this?",
+    answer:
+      "Question paper drafting and the assistant inside CampusPilot use Google's Gemini models. The details of what is sent are in our privacy policy.",
   },
 ];

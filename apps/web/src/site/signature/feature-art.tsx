@@ -20,11 +20,14 @@ import {
   BookOpen,
   Bot,
   CalendarDays,
+  Camera,
   Check,
   Clock3,
   IdCard,
   Layers3,
   Lock,
+  MessageCircle,
+  Smartphone,
   Printer,
   ShieldCheck,
   Sparkles,
@@ -546,6 +549,90 @@ export function StudentPortalArt({ label }: ArtProps) {
   );
 }
 
+/* ───────────── Question papers ───────────── */
+
+const paperStarts = ["Photos of the paper", "Describe it in chat", "Start from an earlier paper"];
+
+const paperQuestions = [
+  ["1", "Name the process by which plants make food.", "2"],
+  ["2", "Differentiate between a solution and a suspension.", "3"],
+  ["3", "Label the parts of the figure.", "5"],
+] as const;
+
+function PaperSheet() {
+  return (
+    <div className="cp-wt-sheet cp-wt-sheet-front">
+      <p className="cp-wt-sheet-school">
+        <b>Riverview Public School</b>
+        <small>Science · Class 8 · Half-yearly</small>
+      </p>
+      <ul className="cp-wt-sheet-table">
+        {paperQuestions.map(([number, text, marks]) => (
+          <li key={number}><span>{number}. {text}</span><b>[{marks}]</b></li>
+        ))}
+      </ul>
+      <p className="cp-wt-sheet-foot"><span>Drafted by AI · version 2</span><BadgeCheck /></p>
+    </div>
+  );
+}
+
+/** A drafted paper on the school's letterhead, with the three ways to start one. */
+export function QuestionPapersArt({ label }: ArtProps) {
+  return (
+    <ArtFrame name="documents" label={label}>
+      <div className="cp-wt-doc-stack cp-wt-rise" style={stagger(1)}>
+        <PaperSheet />
+      </div>
+      <ul className="cp-wt-chips cp-wt-rise" style={stagger(2)}>
+        {paperStarts.map((start, index) => (
+          <li key={start} style={stagger(index)}><Camera />{start}</li>
+        ))}
+      </ul>
+    </ArtFrame>
+  );
+}
+
+/* ───────────── Notices ───────────── */
+
+const noticeChannels: readonly [string, LucideIcon][] = [
+  ["In the app", Check],
+  ["On WhatsApp", MessageCircle],
+  ["Push notification", Smartphone],
+];
+
+function NoticeSheet() {
+  return (
+    <div className="cp-wt-sheet cp-wt-sheet-front">
+      <p className="cp-wt-sheet-school">
+        <b>Riverview Public School</b>
+        <small>Notice · for Classes 6 to 8 and staff</small>
+      </p>
+      <ul className="cp-wt-sheet-table">
+        <li><span>Annual day rehearsal</span><b>Fri</b></li>
+        <li><span>Reporting time</span><b>8:30</b></li>
+        <li><span>Uniform</span><b>House</b></li>
+      </ul>
+      <p className="cp-wt-sheet-foot"><span>Published · delivery logged</span><BadgeCheck /></p>
+    </div>
+  );
+}
+
+/** One notice and the three ways it reaches people. */
+export function NoticesArt({ label }: ArtProps) {
+  return (
+    <ArtFrame name="documents" label={label}>
+      <div className="cp-wt-doc-stack cp-wt-rise" style={stagger(1)}>
+        <NoticeSheet />
+      </div>
+      <ul className="cp-wt-chips cp-wt-rise" style={stagger(2)}>
+        {noticeChannels.map(([channel, Icon], index) => (
+          <li key={channel} style={stagger(index)}><Icon />{channel}</li>
+        ))}
+      </ul>
+    </ArtFrame>
+  );
+}
+
 /* ───────────── Lookup ───────────── */
 
 /** Hero artwork per feature page. Billing reuses the fees scene. */
@@ -557,4 +644,6 @@ export const featureArt: Record<FeatureSlug, ComponentType<ArtProps>> = {
   documents: DocumentsArt,
   dashboards: DashboardsArt,
   "student-portal": StudentPortalArt,
+  "question-papers": QuestionPapersArt,
+  notices: NoticesArt,
 };

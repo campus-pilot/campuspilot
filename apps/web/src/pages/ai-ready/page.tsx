@@ -22,14 +22,14 @@ function AiReadyHero() {
           Your school records, <em>ready for AI.</em>
         </>
       }
-      description="Today, the AI assistants your team already uses can answer from your live CampusPilot records, with the same permissions as the person asking. Next, AI inside CampusPilot will prepare routine work for a person to approve."
+      description="Today, the AI assistants your team already uses can answer from your live CampusPilot records, with the same permissions as the person asking. Inside CampusPilot, AI already drafts question papers for teachers to refine. Next, more of the routine work will be prepared for a person to approve."
       actions={
         <ButtonRow>
           <ButtonLink href="/book-demo">Book a demo</ButtonLink>
           <ButtonLink href="#reach" tone="light">See who reaches what</ButtonLink>
         </ButtonRow>
       }
-      note="Today: answers within each person's access · On the roadmap: prepared work, approved by a person"
+      note="Today: answers within each person's access, and AI-drafted question papers · On the roadmap: more prepared work, approved by a person"
       visual={
         <AiArt label="Illustration: a class teacher's assistant answers which Science marks are pending in her class, declines a question about whole-school fee dues as outside her access, and below it a fee-reminder list prepared for review is marked as roadmap." />
       }

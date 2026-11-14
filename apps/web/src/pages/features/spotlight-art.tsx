@@ -9,7 +9,7 @@
  * where it sits below the copy, it does not play off-screen. Base styles are
  * the finished state.
  */
-import { BadgeCheck, CalendarDays, Check, FileText, IdCard, Lock, Receipt, ShieldCheck, Stamp, UserRound } from "lucide-react";
+import { BadgeCheck, Bell, CalendarDays, Camera, Check, FileText, IdCard, Lock, MessageCircle, MessagesSquare, Printer, Receipt, ShieldCheck, Smartphone, Stamp, UserRound } from "lucide-react";
 import type { ComponentType } from "react";
 
 import type { FeatureSlug } from "@/site/content/catalog";
@@ -224,6 +224,58 @@ function PortalSpot() {
   );
 }
 
+/* ------------------------------------------------------ question papers */
+
+const paperSteps = [
+  { label: "Photos", icon: Camera },
+  { label: "Chat edits", icon: MessagesSquare },
+  { label: "Version 3", icon: FileText },
+  { label: "PDF", icon: Printer },
+] as const;
+
+function QuestionPapersSpot() {
+  return (
+    <SpotFrame kind="papers" title="Science · Class 8 · every change a new version">
+      <ul className="pg-features-spot-papers">
+        {paperSteps.map(({ label, icon: Icon }, index) => (
+          <li key={label} style={staggerStyle(index)}>
+            <Icon />
+            <b>{label}</b>
+            <i />
+            <i />
+          </li>
+        ))}
+      </ul>
+    </SpotFrame>
+  );
+}
+
+/* --------------------------------------------------------------- notices */
+
+const noticeStops = [
+  { label: "In the app", icon: Bell },
+  { label: "WhatsApp", icon: MessageCircle },
+  { label: "Push", icon: Smartphone },
+  { label: "Print", icon: Printer },
+] as const;
+
+function NoticesSpot() {
+  return (
+    <SpotFrame kind="papers" title="One notice · Classes 6 to 8 and staff">
+      <ul className="pg-features-spot-papers">
+        {noticeStops.map(({ label, icon: Icon }, index) => (
+          <li key={label} style={staggerStyle(index)}>
+            <Icon />
+            <b>{label}</b>
+            <i />
+            <i />
+          </li>
+        ))}
+      </ul>
+    </SpotFrame>
+  );
+}
+
 /* --------------------------------------------------------------- lookup */
 
 type SpotlightVariant = {
@@ -240,4 +292,6 @@ export const spotlightArt: Record<FeatureSlug, SpotlightVariant> = {
   documents: { Art: DocumentsSpot, artFirst: false },
   dashboards: { Art: DashboardsSpot, artFirst: true },
   "student-portal": { Art: PortalSpot, artFirst: false },
+  "question-papers": { Art: QuestionPapersSpot, artFirst: true },
+  notices: { Art: NoticesSpot, artFirst: false },
 };

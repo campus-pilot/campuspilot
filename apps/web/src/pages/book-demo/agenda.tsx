@@ -47,9 +47,9 @@ const topics: readonly AgendaTopic[] = [
     minute: "24",
     icon: Sparkles,
     title: "What AI-ready means for your records",
-    text: "Today, the AI assistants your team already uses can work with CampusPilot records, with the same permissions as the person asking.",
+    text: "Today, the AI assistants your team already uses can work with CampusPilot records, with the same permissions as the person asking. AI inside CampusPilot also drafts question papers for teachers.",
     see: "“Which Class 3-B fees are still due?”",
-    roadmap: "On the roadmap: assistants inside CampusPilot that prepare work, like a fee-reminder list, for a person to review.",
+    roadmap: "On the roadmap: more AI inside CampusPilot that prepares work, like a fee-reminder list, for a person to review.",
   },
 ];
 
