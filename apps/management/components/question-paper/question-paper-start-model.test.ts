@@ -7,7 +7,6 @@ import {
   createPlanOf,
   describedPaperMessage,
   MIXED_SOURCE_REASON,
-  createHintOf,
   marksMismatchOf,
   noteWordsOf,
   pdfPaperMessage,
@@ -123,11 +122,6 @@ test('the note reads as optional once there is a source, and as the way in when 
   for (const input of [{ alternative: null, hasPhotos: true }, { alternative: withPdf, hasPhotos: false }, { alternative: withEarlier, hasPhotos: false }]) {
     assert.equal(noteWordsOf(input).label, 'Instructions (optional)');
   }
-});
-
-test('the line beside the button is silent on an empty card, then says the result is not final', () => {
-  assert.equal(createHintOf(createPlanOf(nothing)), null);
-  assert.equal(createHintOf(createPlanOf({ ...nothing, pageCount: 2 })), 'You can change anything afterwards.');
 });
 
 test('an earlier paper written for other marks is said, and changes the example', () => {

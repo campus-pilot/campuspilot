@@ -17,6 +17,7 @@ import {
 import { leanLines } from './question-paper.lean';
 import { buildQuestionPaperContext } from './question-paper.context';
 import { requireQuestionPaperAssistantAccess } from './question-paper.access';
+import { chatFiguresOf } from './question-paper.attachments';
 import { listQuestionPaperCopySources } from './question-paper.copy';
 import { findPaper, templateMissingError } from './question-paper.records';
 import { renderQuestionPaperBody, renderQuestionPaperDocument, selectedQuestionPaperTemplate } from './question-paper.render';
@@ -167,7 +168,7 @@ export const schoolQuestionPaperRouter = {
         const chat = context.principal.authMethod === 'assistant' ? context.principal.assistantRun : null;
         if (!chat) throw rpcError.badRequest('A draft can only be read by the in-app assistant. You already have the html you wrote; use getQuestionPaper for a saved paper.');
         const scope = await resolvePaperScope(context.db, input);
-        const raw = await findChatDraftContent(context.db, { conversationId: chat.conversationId, schoolId: input.schoolId, userId: user, draftId: input.draftId });
+        const raw = await findChatDraftContent(context.db, { conversationId: chat.conversationId, key: scope.key, userId: user, draftId: input.draftId });
         const draft = cleanedChatDraft(raw);
         return { paper: await getQuestionPaperFacts(context.db, scope), draftId: draft.draftId, html: draft.html, characters: draft.html.length };
       } catch (error) {
@@ -211,10 +212,16 @@ export const schoolQuestionPaperRouter = {
     .handler(async ({ context, input }) => {
       try {
         const scope = await resolvePaperScope(context.db, input);
-        // Attachments of the chat user are valid figures inside the in-app assistant and when that same person's browser
-        // session re-checks a draft card (the same rule as previewQuestionPaperDraft); never for API keys or OAuth clients.
-        const chatUserId = context.principal.authMethod === 'assistant' || context.principal.authMethod === 'session' ? userId(context) : undefined;
-        const checked = await checkQuestionPaperDraft(context.db, scope, input.html, { chatUserId });
+        // Chat attachments are valid figures inside the in-app assistant (its run's chat) and when a person's browser
+        // re-checks a draft card (the chat it shows it from; the same rule as previewQuestionPaperDraft); never for API
+        // keys or OAuth clients.
+        const principal = context.principal;
+        const chatConversationId = principal.authMethod === 'assistant' ? principal.assistantRun.conversationId : input.conversationId;
+        const chat =
+          principal.authMethod === 'assistant' || principal.authMethod === 'session'
+            ? await chatFiguresOf(context.db, { userId: userId(context), conversationId: chatConversationId, key: scope.key })
+            : undefined;
+        const checked = await checkQuestionPaperDraft(context.db, scope, input.html, { chat });
         if (!checked.ok) {
           return { valid: false, problems: leanLines(checked.problems), stripped: leanLines(checked.stripped), draftId: null, placeholderFigures: 0, characters: input.html.length };
         }
@@ -249,7 +256,7 @@ export const schoolQuestionPaperRouter = {
         }
         if (input.draftId !== undefined) {
           if (!chat) throw rpcError.badRequest('A draftId can only be used from the in-app assistant. Send the full html instead.');
-          html = await findChatDraftContent(context.db, { conversationId: chat.conversationId, schoolId: input.schoolId, userId: user, draftId: input.draftId });
+          html = await findChatDraftContent(context.db, { conversationId: chat.conversationId, key: scope.key, userId: user, draftId: input.draftId });
         }
         const saved = await saveQuestionPaperVersion(context.db, {
           scope,
@@ -426,14 +433,14 @@ export const schoolQuestionPaperRouter = {
     .handler(async ({ context, input }) => {
       try {
         const scope = await resolvePaperScope(context.db, input);
-        // A person previewing a draft from their own chat may see their attachments as figures.
-        const chatUserId = userId(context);
-        const checked = await checkQuestionPaperDraft(context.db, scope, input.html, { chatUserId });
+        // A person previewing a draft sees as figures their own attachments and those of the paper's chat it is from.
+        const chat = await chatFiguresOf(context.db, { userId: userId(context), conversationId: input.conversationId, key: scope.key });
+        const checked = await checkQuestionPaperDraft(context.db, scope, input.html, { chat });
         if (!checked.ok) return { html: '', problems: checked.problems, warnings: [], placeholderFigures: 0, templateName: null };
         const template = await selectedQuestionPaperTemplate(context.db, input.schoolId);
         if (!template) throw templateMissingError();
         const paper = await findPaper(context.db, scope.key);
-        const body = await renderQuestionPaperBody(context.db, { schoolId: input.schoolId, paperId: paper?.id ?? null, html: checked.html, chatUserId });
+        const body = await renderQuestionPaperBody(context.db, { schoolId: input.schoolId, paperId: paper?.id ?? null, html: checked.html, chat });
         const rendered = await buildQuestionPaperContext(context.db, scope, { versionNo: null });
         return {
           html: renderQuestionPaperDocument({ template, context: rendered, body }),

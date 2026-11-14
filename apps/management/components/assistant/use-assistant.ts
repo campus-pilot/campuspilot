@@ -15,7 +15,7 @@ import {
   buildAssistantTimeline,
   lastUserText,
   sumAssistantUsage,
-  pendingApprovals,
+  approvalsByDecider,
   queuedMessages,
   type AssistantApprovalDecision,
 } from '@campuspilot/components/assistant';
@@ -290,7 +290,8 @@ function structural<T>(derive: (state: AssistantConversationState) => T) {
 const selectTimeline = structural((state) => buildAssistantTimeline(state.items, state.runs));
 const selectItemsById = structural((state) => new Map(state.items.map((item) => [item.id, item])));
 const selectActiveRun = structural((state) => activeRun(state.runs));
-const selectPendingApprovals = structural((state) => pendingApprovals(state.items));
+/** What deciding needs: the items and runs, unchanged while neither changes. */
+const selectApprovalState = structural((state) => ({ items: state.items, runs: state.runs }));
 const selectQueuedMessages = structural((state) => queuedMessages(state.items, state.runs));
 const selectConfirmedItemIds = structural((state): ReadonlySet<string> => new Set(state.items.map((item) => item.id)));
 const selectAnnouncement = structural((state) => assistantAnnouncement(state.items, state.runs, state.openedSequence));
@@ -365,9 +366,17 @@ export function useAssistantActiveRun(schoolId: string, conversationId: string |
   return useConversationQuery(schoolId, conversationId, selectActiveRun).data;
 }
 
-/** Changes waiting for the user's decision, for the composer tray. */
+const NO_APPROVALS = { mine: [], waitingFor: [] };
+
+/**
+ * Changes waiting for a decision, for the composer tray: the user's own to
+ * decide, and the names of the other people (in a conversation shared with a
+ * paper) whose decision is awaited.
+ */
 export function useAssistantPendingApprovals(schoolId: string, conversationId: string | null) {
-  return useConversationQuery(schoolId, conversationId, selectPendingApprovals).data ?? [];
+  const userId = useSignedInUserId();
+  const state = useConversationQuery(schoolId, conversationId, selectApprovalState).data;
+  return state ? approvalsByDecider(state.items, state.runs, userId) : NO_APPROVALS;
 }
 
 /** Messages queued behind the working run, for the composer tray. */
@@ -509,12 +518,13 @@ export function useSendAssistantMessage(schoolId: string, surface: AssistantSurf
    * Sends a message. `attachments` are images and PDFs already uploaded for
    * it (in the order shown; only their ids go to the server); `seed` names the
    * screen a new conversation starts from and is valid only without a
-   * `conversationId`.
+   * `conversationId`; `shareWithPaper` shares that new conversation with the
+   * seed's question paper.
    */
   const send = (
     text: string,
     conversationId: string | null,
-    extras: { attachments?: AssistantAttachmentRef[]; seed?: QuestionPaperSeed | null } = {},
+    extras: { attachments?: AssistantAttachmentRef[]; seed?: QuestionPaperSeed | null; shareWithPaper?: boolean } = {},
   ) => {
     const clientRequestId = crypto.randomUUID();
     return mutation
@@ -526,7 +536,7 @@ export function useSendAssistantMessage(schoolId: string, surface: AssistantSurf
         surface,
         pageContext: currentPageContext(),
         ...(extras.attachments?.length ? { attachments: extras.attachments } : {}),
-        ...(extras.seed && !conversationId ? { seed: extras.seed } : {}),
+        ...(extras.seed && !conversationId ? { seed: extras.seed, shareWithPaper: extras.shareWithPaper ?? false } : {}),
       })
       .catch((error: unknown) => {
         // The composer marks the missing files and keeps the words, so no failed copy of the message stays whose Retry would fail the same way.

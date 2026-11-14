@@ -167,22 +167,38 @@ describe('question_paper_body sanitiser: hostile input', () => {
 
   it('keeps a hostile style block from escaping the wrapper', () => {
     const result = clean(
-      '<style>body{background:red}html,.a{color:red}:root{--x:1}.qp-body{display:none}* {color:red} .a, script{x:y} a[href^="javascript"]{color:red} .ok{color:green} div::before{content:"x"} .a:hover{color:red}</style><p>x</p>',
+      '<style>body{background:red}html,.a{color:red}:root{--x:1}.qp-body{display:none}* {color:red} .a, script{x:y} a[href^="javascript"]{color:red} .ok{color:green} div::before{content:"x"} .a:hover{color:red} :not(.qp-body){color:red} .b:is(html, p){color:red}</style><p>x</p>',
     );
-    // Only the bare `*`, the wrapper-itself and .ok rules survive, each prefixed with the wrapper class.
+    // What survives is prefixed with the wrapper class: it can only match inside the paper.
     const rules = result.html.replace(/^<style>/, '').replace(/<\/style>.*$/s, '').split('\n').filter(Boolean);
     for (const rule of rules) expect(rule.startsWith('.qp-body ')).toBe(true);
-    expect(result.html).not.toMatch(/\.qp-body\{|\.qp-body \.qp-body|body\{|html|:root|--x|script|href|::before|:hover/);
+    expect(result.html).not.toMatch(/\.qp-body\{|\.qp-body \.qp-body|body\{|html|:root|--x|script|href|:not|:is/);
     expect(result.html).toContain('.qp-body .ok{color:green}');
     expect(result.html).toContain('.qp-body *{color:red}');
+    // Pseudo-elements and states are the author's, inside the paper.
+    expect(result.html).toContain('.qp-body div::before{content:"x"}');
+    expect(result.html).toContain('.qp-body .a:hover{color:red}');
   });
 
-  it('refuses positions and lengths that could cover the page footer or make endless pages', () => {
-    const result = clean('<p style="position:fixed;bottom:0;color:red">a</p><p style="position:absolute;color:red">b</p><p style="height:99999mm;width:100%;margin:0 0 0 -50000px">c</p><p style="position:relative;top:2mm">d</p>');
-    expect(result.html).not.toMatch(/fixed|absolute|99999|50000/);
-    expect(result.html).toContain('style="color:red"');
-    // `top` is not a property at all (nothing can be offset), `position:relative` alone is inert.
-    expect(result.html).toContain('<p style="position:relative">d</p>');
+  it('leaves positioning to the author, and still refuses lengths that would make endless pages', () => {
+    const result = clean('<p style="position:fixed;bottom:0;color:red">a</p><p style="position:absolute;color:red">b</p><p style="height:99999mm;width:100%;margin:0 0 0 -50000px">c</p><p style="position:relative;top:2mm;z-index:2">d</p>');
+    expect(result.html).toContain('<p style="position:fixed;bottom:0;color:red">a</p>');
+    expect(result.html).toContain('<p style="position:absolute;color:red">b</p>');
+    expect(result.html).toContain('<p style="position:relative;top:2mm;z-index:2">d</p>');
+    expect(result.html).not.toMatch(/99999|50000/);
+  });
+
+  it('labels a figure with positioned text, shadows, gradients and code blocks', () => {
+    const result = clean(
+      '<figure style="position:relative"><span style="position:absolute;left:62%;top:-3mm;box-shadow:0 1px 2px rgba(0,0,0,0.3);background:linear-gradient(90deg, #fff, #eee)">A</span></figure>' +
+        '<pre><code>print("hi")</code></pre><blockquote>q</blockquote><section><label>Name</label></section>',
+    );
+    expect(result.html).toContain('position:absolute;left:62%;top:-3mm;box-shadow:0 1px 2px rgba(0,0,0,0.3);background:linear-gradient(90deg, #fff, #eee)');
+    expect(result.html).toContain('<pre><code>print("hi")</code></pre>');
+    expect(result.html).toContain('<blockquote>q</blockquote><section><label>Name</label></section>');
+    // Still out: anything that loads, and motion.
+    const loading = clean('<p style="background-image:url(https://example.com/a.png);transform:rotate(3deg);color:red">x</p>');
+    expect(loading.html).toBe('<p style="color:red">x</p>');
   });
 
   it('does not let markup hide inside a style block', () => {

@@ -1,11 +1,13 @@
 import type { Database, DatabaseExecutor } from '@campuspilot/db';
 import { assistantAttachmentTable } from '@campuspilot/db/schema/assistant';
 import { examQuestionPaperFigureTable } from '@campuspilot/db/schema/exam-question-paper';
-import { and, eq, inArray, isNotNull } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, or } from 'drizzle-orm';
 
 import { rpcError } from '../../../errors';
 import { normalizeFigureImage } from '../../../files/image-derivative';
 import { replaceFigureIds } from './question-paper.body';
+import { isSharedWithPaper } from './question-paper.conversations';
+import type { PaperKey } from './question-paper.dto';
 import { findPaper } from './question-paper.records';
 import { sanitizeQuestionPaperBody } from './question-paper.sanitize';
 import type { PaperScope } from './question-paper.scope';
@@ -26,10 +28,12 @@ import { getObjectBytes } from './question-paper.storage';
  * the model reads; its `asat_` id used as a figure is a problem the model is
  * told how to fix, and a save refuses it ({@link DOCUMENT_FIGURE_PROBLEM}).
  *
- * Who may use an attachment is its owner: the chat user. Only the in-app
- * assistant (and the draft preview of the person who owns the chat) pass a
- * `chatUserId`; an external client never has one, so `asat_` ids are refused
- * there.
+ * Who may use an attachment: the chat user, for their own sent attachments,
+ * and anyone working in a conversation shared with the paper, for the
+ * attachments sent in it (a colleague continuing the paper's chat uses the
+ * photos the first teacher attached). Only the in-app assistant and the draft
+ * preview of a person in the app pass a {@link ChatFigures}; an external
+ * client never has one, so `asat_` ids are refused there.
  */
 
 export const isAttachmentFigureId = (imageId: string) => imageId.startsWith('asat_');
@@ -41,12 +45,34 @@ export function attachmentFigureIds(html: string): string[] {
 
 type UsableRow = typeof assistantAttachmentTable.$inferSelect;
 
-/** The user's sent attachments among `ids` in this school, by id. */
+/**
+ * Whose chat attachments a fragment may use as figures: the chat user's own
+ * sent attachments, and those sent in `conversationId` by anyone. Made only by
+ * {@link chatFiguresOf}, which keeps `conversationId` only for a conversation
+ * shared with this paper: a private chat has only its owner's attachments, so
+ * nothing else of anyone's is ever usable through it.
+ */
+export type ChatFigures = { readonly userId: string; readonly conversationId: string | null };
+
+/**
+ * The chat figures of a user working on a paper, from the chat they work in
+ * (the assistant's run, or the conversation a draft card is shown from). A
+ * conversation that is not shared with this paper adds nothing beyond the
+ * user's own attachments.
+ */
+export async function chatFiguresOf(db: DatabaseExecutor, input: { userId: string; conversationId: string | null | undefined; key: PaperKey }): Promise<ChatFigures> {
+  const conversationId =
+    input.conversationId && (await isSharedWithPaper(db, { conversationId: input.conversationId, key: input.key })) ? input.conversationId : null;
+  return { userId: input.userId, conversationId };
+}
+
+/** The sent attachments among `ids` in this school that `chat` may use, by id. */
 async function usableAttachments(
   db: DatabaseExecutor,
-  input: { schoolId: string; chatUserId: string; ids: readonly string[] },
+  input: { schoolId: string; chat: ChatFigures; ids: readonly string[] },
 ): Promise<Map<string, UsableRow>> {
   if (input.ids.length === 0) return new Map();
+  const { userId, conversationId } = input.chat;
   const rows = await db
     .select()
     .from(assistantAttachmentTable)
@@ -54,7 +80,9 @@ async function usableAttachments(
       and(
         inArray(assistantAttachmentTable.id, [...input.ids]),
         eq(assistantAttachmentTable.schoolId, input.schoolId),
-        eq(assistantAttachmentTable.userId, input.chatUserId),
+        conversationId
+          ? or(eq(assistantAttachmentTable.userId, userId), eq(assistantAttachmentTable.conversationId, conversationId))
+          : eq(assistantAttachmentTable.userId, userId),
         isNotNull(assistantAttachmentTable.itemId),
       ),
     );
@@ -75,15 +103,15 @@ export const documentFigureProblem = (fileName: string) =>
 /** Why an `asat_` figure id cannot be used, or null when it can. */
 export async function attachmentFigureProblems(
   db: DatabaseExecutor,
-  input: { schoolId: string; chatUserId: string | undefined; ids: readonly string[] },
+  input: { schoolId: string; chat: ChatFigures | undefined; ids: readonly string[] },
 ): Promise<Map<string, string>> {
   const problems = new Map<string, string>();
   if (input.ids.length === 0) return problems;
-  if (!input.chatUserId) {
+  if (!input.chat) {
     for (const id of input.ids) problems.set(id, 'Figure images from chat attachments can only be used inside the in-app assistant chat. Use <figure data-placeholder="..."></figure>.');
     return problems;
   }
-  const usable = await usableAttachments(db, { schoolId: input.schoolId, chatUserId: input.chatUserId, ids: input.ids });
+  const usable = await usableAttachments(db, { schoolId: input.schoolId, chat: input.chat, ids: input.ids });
   for (const id of input.ids) {
     const row = usable.get(id);
     if (!row) problems.set(id, 'This is not an image the user attached in a chat message.');
@@ -98,11 +126,11 @@ export async function attachmentFigureProblems(
 /** Print-ready data URIs of attachments, for previewing a draft. */
 export async function loadAttachmentFigureAssets(
   db: DatabaseExecutor,
-  input: { schoolId: string; chatUserId: string | undefined; ids: readonly string[] },
+  input: { schoolId: string; chat: ChatFigures | undefined; ids: readonly string[] },
 ): Promise<Map<string, { dataUri: string }>> {
   const problems = await attachmentFigureProblems(db, input);
   if (problems.size > 0) throw rpcError.badRequest([...problems.values()][0]!);
-  const rows = await usableAttachments(db, { schoolId: input.schoolId, chatUserId: input.chatUserId!, ids: input.ids });
+  const rows = await usableAttachments(db, { schoolId: input.schoolId, chat: input.chat!, ids: input.ids });
   const assets = new Map<string, { dataUri: string }>();
   for (const id of input.ids) {
     const figure = await normalizeFigureImage(await getObjectBytes(figureSourceKey(rows.get(id)!)));
@@ -120,15 +148,15 @@ export async function loadAttachmentFigureAssets(
  */
 export async function convertAttachmentFigures(
   db: Database,
-  input: { scope: PaperScope; userId: string; html: string },
+  input: { scope: PaperScope; userId: string; chat: ChatFigures; html: string },
 ): Promise<string> {
   const ids = attachmentFigureIds(input.html);
   if (ids.length === 0) return input.html;
-  const usable = await usableAttachments(db, { schoolId: input.scope.key.schoolId, chatUserId: input.userId, ids });
+  const usable = await usableAttachments(db, { schoolId: input.scope.key.schoolId, chat: input.chat, ids });
   const figureIdOf = new Map<string, string>();
   for (const id of ids) {
     const row = usable.get(id);
-    if (!row) throw rpcError.badRequest('A figure uses an image that is not one of the chat attachments of this user.');
+    if (!row) throw rpcError.badRequest('A figure uses an image that was not attached in this chat.');
     // Validation refuses this first; a save never copies a PDF into the paper's figures.
     if (row.kind !== 'image') throw rpcError.badRequest(documentFigureProblem(row.originalName));
     const paper = await findPaper(db, input.scope.key);

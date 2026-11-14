@@ -129,6 +129,7 @@ export function AssistantUserMessage({
   delivery = 'sent',
   onRetry,
   attachments = [],
+  author = null,
 }: {
   text: string;
   at: Date;
@@ -136,10 +137,12 @@ export function AssistantUserMessage({
   onRetry?: () => void;
   /** The images and PDFs sent with the message, shown above its bubble. */
   attachments?: readonly SentAttachment[];
+  /** Who sent it, when it was someone else (a conversation shared with several people); null for the user's own message. */
+  author?: string | null;
 }) {
   return (
     <div className="group/message flex flex-col items-end gap-1">
-      <h3 className="sr-only">You</h3>
+      {author ? <h3 className="pe-1 text-xs text-muted-foreground">{author}</h3> : <h3 className="sr-only">You</h3>}
       <AssistantSentAttachments attachments={attachments} />
       {text ? (
         <div
@@ -166,14 +169,17 @@ export function AssistantUserMessage({
 export function AssistantUserMessageRow({
   item,
   attachmentPreviewUrl,
+  authorOf,
 }: {
   item: AssistantUserMessageItemDto;
   /** The thumbnail address of a sent image (never asked for a document); null draws a generic tile. */
   attachmentPreviewUrl?: (attachment: AssistantAttachmentRef) => string | null;
+  /** The name to show over a message someone else sent; null for the user's own. */
+  authorOf?: (item: AssistantUserMessageItemDto) => string | null;
 }) {
   // Only an image the server decoded has a thumbnail; a document is never asked for one.
   const attachments = sentAttachmentsOf(item.body.attachments ?? [], attachmentPreviewUrl);
-  return <AssistantUserMessage text={item.body.text} at={item.createdAt} attachments={attachments} />;
+  return <AssistantUserMessage text={item.body.text} at={item.createdAt} attachments={attachments} author={authorOf?.(item) ?? null} />;
 }
 
 /**

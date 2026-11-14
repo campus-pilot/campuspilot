@@ -540,6 +540,52 @@ the worker logs a warning when it is on in production.
   request still applies). The API enforces the tool policy for it; approval
   is enforced by the assistant's loop only.
 
+## Conversations shared with a question paper
+
+A conversation is private to the user who started it, with one exception: a
+conversation started on a question paper's screen is **shared with that paper**,
+so a colleague who takes the paper over reads how it came to be and carries on.
+
+- **What makes it shared.** `sendMessage` with `shareWithPaper: true` on a new
+  conversation, which needs a question paper `seed` (contract) and the right to
+  manage that paper's class (FORBIDDEN otherwise). It is its own fact, stored as
+  the paper's natural key on `assistant_conversation` (`paper_session_id`,
+  `paper_exam_slug`, `paper_class_id`, `paper_subject_slug`, `paper_mode_slug`;
+  all or none, checked; migration 0068). A seed alone never shares anything:
+  the assistant's page can start a private conversation about a paper.
+- **Who reaches it** (`mayReachConversation`, `conversation-access.ts`), always
+  after seeing the assistant in the school (`assertCanSee`):
+  - its starter, for everything, as with any of their conversations;
+  - anyone who may **read** the class's question papers (the same OPA action as
+    the paper's procedures): get, subscribe, see its images, approve or decline
+    their own turn's changes, stop their own turn;
+  - anyone who may **manage** them: also send into it, and stop someone else's
+    turn (or remove their queued message);
+  - nobody else: NOT_FOUND, as for an id that does not exist.
+  Open streams recheck this every two minutes with the rest of the access.
+- **What stays personal.** Only the starter deletes it (it then disappears for
+  everyone). Only the person whose turn asked for a change may approve it: each
+  run is its sender's, with their delegated token (`assistant_run.user_id`,
+  now on the run DTO), and the others see "Waiting for … to approve a change".
+  Each user message records its sender (`body.author`, named as at sending),
+  and the chat shows the name over messages that are not the user's own. It
+  stays in its starter's own history; it is not added to anyone else's.
+- **Its history.** `listPaperConversations` lists one paper's live shared
+  conversations, newest first, with who started each (`startedByName`) and
+  their attention; for people who may manage the paper. The paper's detail
+  (`getQuestionPaperDetail`) carries `latestConversationId`, which the paper's
+  screen opens unless its URL names another (`?chat=<id>`, or `?chat=new`).
+- **The paper's tools in it.** A draft id is read from the user's own chat or a
+  chat shared with that exact paper (`isPaperChat`). Chat images may be figures
+  when the user sent them, or when they were sent in a conversation shared with
+  that exact paper (`chatFiguresOf`); the draft card passes its conversation
+  (`conversationId`) to `previewQuestionPaperDraft` and
+  `validateQuestionPaperDraft` for this, and the server checks it.
+- **Mind what is in it.** Everything said and read in a shared conversation is
+  visible to the paper's readers, including tool results that came from the
+  sender's own permissions. The welcome says so ("Everyone who can open this
+  paper sees this chat").
+
 ## Comparing the three surfaces
 
 All three share one chat component and the same conversations:

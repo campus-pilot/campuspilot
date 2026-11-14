@@ -102,7 +102,10 @@ const paperHtmlInput = z
   .max(QUESTION_PAPER_LIMITS.parseChars)
   .describe('The question paper as an HTML fragment (no <html>, <head> or <body>) exactly as described by learn_question_paper_generation.');
 
-export const validateDraftInputSchema = paperKeySchema.extend({ html: paperHtmlInput });
+/** The chat a draft card is shown from, so its attachments preview as figures. Set by the app's screens only; the in-app assistant's own chat is known without it. */
+const draftChatInput = z.string().min(1).max(64).optional().describe('Leave out. Used by the app only.');
+
+export const validateDraftInputSchema = paperKeySchema.extend({ html: paperHtmlInput, conversationId: draftChatInput });
 
 export const saveVersionInputSchema = paperKeySchema
   .extend({
@@ -186,7 +189,7 @@ export const deletePageInputSchema = paperKeySchema.extend({
   pageId: id,
   expectedPageRevision: z.number().int().min(0),
 });
-export const previewDraftInputSchema = paperKeySchema.extend({ html: paperHtmlInput });
+export const previewDraftInputSchema = paperKeySchema.extend({ html: paperHtmlInput, conversationId: draftChatInput });
 
 /** What the sanitiser removed or changed when a version was saved. A notice, not an error. */
 export const questionPaperWarningSchema = z.object({
@@ -327,6 +330,12 @@ export const detailOutputSchema = z.object({
   versions: z.array(versionSummarySchema),
   /** Whether the school selected a question paper template (generation needs one). */
   templateConfigured: z.boolean(),
+  /**
+   * The paper's most recently active assistant conversation shared with it
+   * (whoever started it); null when it has none. The paper's screen opens it
+   * unless the address names another.
+   */
+  latestConversationId: z.string().nullable(),
 });
 
 export const learnOutputSchema = z.object({

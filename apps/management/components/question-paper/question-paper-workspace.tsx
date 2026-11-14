@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
-import { Camera, Copy, Download, History, MoreVertical, Trash2 } from 'lucide-react';
+import { Camera, ChevronLeft, Copy, Download, History, MoreVertical, Trash2 } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Badge } from '@campuspilot/ui/components/badge';
 import { Button } from '@campuspilot/ui/components/button';
@@ -24,8 +24,9 @@ import { DirtyGuard, LoadingExam, Notice, ReadError } from '@/components/exam/ex
 import { questionPaperHref, questionPaperWorkspaceHref } from '@/components/exam/exam-model';
 import { orpc } from '@/lib/orpc';
 import {
-  chatIdOf,
   currentJobFailure,
+  NEW_CHAT_PARAM,
+  paperChatOf,
   inFlightJob,
   questionPaperPermission,
   requestErrorMessage,
@@ -280,21 +281,20 @@ function PaperLayout({ scope, detail, canManage }: { scope: QuestionPaperScope; 
   // The upload queue is owned here, above the views: switching between them keeps uploads, their order and their slot count.
   const uploads = usePageUploads({ pageKey: scope, refresh });
   const search = useSearchParams();
-  const chatId = chatIdOf(search.get('chat'));
+  const chatId = paperChatOf(search.get('chat'), detail.latestConversationId);
   const hasVersion = detail.paper.latestVersionNo > 0;
-  const view = resolveView({
-    start: search.get('start'),
-    hasVersion,
-    generating: inFlightJob(detail.activeJob) !== null,
-    hasChat: chatId !== null,
-  });
+  const generating = inFlightJob(detail.activeJob) !== null;
+  const view = resolveView({ start: search.get('start'), hasVersion, generating, hasChat: chatId !== null });
+  /** The paper has a studio to go back to from its first screen: something is in it. */
+  const hasStudio = hasVersion || generating || chatId !== null;
   /** What the screen shows lives in the address. Opening the first screen or its picker is a step the Back button undoes; the rest replaces. */
   const show = (query: Parameters<typeof questionPaperWorkspaceHref>[1], how: 'push' | 'replace' = 'replace') =>
     router[how](questionPaperWorkspaceHref(scope, query), { scroll: false });
   const openStudio = (query: { version?: number; chat?: string } = {}) => show({ chat: query.chat ?? chatId ?? undefined, version: query.version });
   const start = (next: QuestionPaperStartKind) => show({ start: next, chat: chatId ?? undefined }, 'push');
   /** Closing the picker returns to the first screen: named in the address only where the paper would otherwise show its studio. */
-  const closePicker = () => show({ start: hasVersion || chatId !== null ? 'sources' : undefined, chat: chatId ?? undefined });
+  const closePicker = () => show({ start: hasStudio ? 'sources' : undefined, chat: chatId ?? undefined });
+  const back = hasStudio ? () => openStudio() : null;
   const heading = <PaperHeading detail={detail} showStatus={view.kind === 'studio'} />;
   const menu = <PaperMenu scope={scope} detail={detail} canManage={canManage} onStart={start} onShowVersion={(version) => openStudio({ version })} />;
   const lockReason = paperLockReason(detail.paper);
@@ -314,14 +314,22 @@ function PaperLayout({ scope, detail, canManage }: { scope: QuestionPaperScope; 
           menu={menu}
           notice={notice}
           onVersion={(version) => show({ chat: chatId ?? undefined, version: version ?? undefined })}
-          onChat={(chat) => show({ chat: chat ?? undefined, version: Number(search.get('version')) || undefined })}
+          // A new conversation is named in the address, or the paper's latest one would take its place.
+          onChat={(chat) => show({ chat: chat ?? NEW_CHAT_PARAM, version: Number(search.get('version')) || undefined })}
           onOpenPhotos={() => start('sources')}
+          // The photos are worth a button when there are some, or when this user may add them to a paper that can change.
+          onOpenSources={detail.paper.pageCount > 0 || (canManage && !isPaperLocked(detail.paper)) ? () => start('sources') : null}
         />
       ) : (
         // One centred column: the paper's name, then the card it is made in. Nothing else competes with it.
         <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-5 md:pt-6">
-          <div className="flex items-start justify-between gap-3">
-            {heading}
+          <div className="flex items-start gap-2">
+            {back ? (
+              <Button type="button" variant="ghost" size="icon" className="-ml-2 shrink-0" aria-label="Back to the paper" onClick={back}>
+                <ChevronLeft aria-hidden />
+              </Button>
+            ) : null}
+            <div className="min-w-0 flex-1">{heading}</div>
             {menu}
           </div>
           {notice}
@@ -333,6 +341,7 @@ function PaperLayout({ scope, detail, canManage }: { scope: QuestionPaperScope; 
             earlierOpen={view.picking}
             onEarlierOpenChange={(open) => (open ? start('earlier') : closePicker())}
             onOpenStudio={openStudio}
+            onBack={back}
           />
         </div>
       )}

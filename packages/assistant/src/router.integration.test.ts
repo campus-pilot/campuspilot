@@ -89,6 +89,22 @@ vi.mock('@campuspilot/api/routers/school/question-paper/question-paper.storage',
   pageImageUrl: vi.fn(),
   QUESTION_PAPER_IMAGE_CACHE_SECONDS: 240,
 }));
+/**
+ * The API's OPA check, replaced by a table of the class permissions each test
+ * user holds (the real check is tested with the API's permissions). Only the
+ * question paper permissions of a conversation shared with a paper ask it.
+ */
+const permissions = vi.hoisted(() => ({ byUser: new Map<string, Set<string>>() }));
+vi.mock('@campuspilot/api/permissions/authorization', async () => {
+  const { ORPCError } = await import('@orpc/server');
+  const holds = (context: { session?: { user: { id: string } } }, action: string) => permissions.byUser.get(context.session?.user.id ?? '')?.has(action) ?? false;
+  return {
+    checkPermissions: vi.fn(async (context: { session?: { user: { id: string } } }, requests: { action: string }[]) => requests.map((request) => holds(context, request.action))),
+    assertPermission: vi.fn(async (context: { session?: { user: { id: string } } }, request: { action: string }) => {
+      if (!holds(context, request.action)) throw new ORPCError('FORBIDDEN', { message: 'You do not have permission to perform this action.' });
+    }),
+  };
+});
 vi.mock('./access', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./access')>()),
   loadAssistantAccess: vi.fn(),
@@ -128,7 +144,8 @@ const cookieOf = (userId: string) => `session=${userId}`;
 function sessionOf(userId: string): AssistantSession {
   return {
     user: { id: userId, name: 'Asha Rao', email: 'asha.rao@school.test', impersonatedBy: null },
-    context: {} as AssistantSession['context'],
+    // Only who the user is: the permission check above reads nothing else.
+    context: { session: { user: { id: userId } } } as unknown as AssistantSession['context'],
   };
 }
 
@@ -138,6 +155,7 @@ beforeEach(() => {
     return userId ? sessionOf(userId) : null;
   });
   loadAccessMock.mockReset().mockResolvedValue(ALLOWED);
+  permissions.byUser.clear();
 });
 
 /** Calls a procedure as a signed-in user (or as nobody, without a cookie). */
@@ -950,5 +968,101 @@ describe('PDF attachments', () => {
     await expect(db.insert(assistantAttachmentTable).values({ ...base, kind: 'document', contentType: 'text/html', derivativeStatus: null })).rejects.toThrow();
     await expect(db.insert(assistantAttachmentTable).values({ ...base, kind: 'image', contentType: 'image/jpeg', derivativeStatus: null })).rejects.toThrow();
     await expect(db.insert(assistantAttachmentTable).values({ ...base, kind: 'document', contentType: 'application/pdf', derivativeStatus: null })).resolves.toBeDefined();
+  });
+});
+
+describe('conversations shared with a question paper', () => {
+  const READ = 'class.exam.question_paper.read';
+  const MANAGE = 'class.exam.question_paper.manage';
+  /** The paper the mocked scope lookup knows (its session id is `ss`). */
+  const PAPER = { sessionId: 'ss', examSlug: 'final', classId: 'cls_paper', subjectSlug: 'maths', modeSlug: 'theory' };
+  const grant = (userId: string, ...actions: string[]) => permissions.byUser.set(userId, new Set(actions));
+  const user = () => `usr_${randomUUID()}`;
+
+  /** A message sent as `userId`, starting a conversation (with `extra`) or continuing one. */
+  function send(schoolId: string, userId: string, extra: Record<string, unknown>) {
+    configureDispatcher({ startRun: vi.fn(), resolveApproval: vi.fn() });
+    onTestFinished(() => configureDispatcher(null));
+    return call(assistantRouter.sendMessage, { schoolId, clientRequestId: randomUUID(), surface: 'panel', text: 'Make it easier.', ...extra }, as(userId));
+  }
+  /** A conversation the first teacher starts on the paper's screen, shared with the paper. */
+  async function sharedConversation() {
+    const owner = await seedTurn();
+    grant(owner.userId, READ, MANAGE);
+    const started = await send(owner.schoolId, owner.userId, { seed: { kind: 'question_paper', ...PAPER }, shareWithPaper: true });
+    return { schoolId: owner.schoolId, ownerId: owner.userId, conversationId: started.conversation.id, runId: started.run.id, started };
+  }
+  const get = (schoolId: string, conversationId: string, userId: string) =>
+    call(assistantRouter.getConversation, { schoolId, conversationId }, as(userId));
+  const history = (schoolId: string, userId: string, paper = PAPER) =>
+    call(assistantRouter.listPaperConversations, { schoolId, ...paper, page: 1 }, as(userId));
+
+  it('is shared only when asked, by someone who may change the paper', async () => {
+    const shared = await sharedConversation();
+    expect(shared.started.conversation).toMatchObject({ sharedWithPaper: true, userId: shared.ownerId });
+    expect(shared.started.item.body.author).toEqual({ userId: shared.ownerId, name: 'Asha Rao' });
+
+    // A seed alone keeps the conversation private.
+    const privately = await send(shared.schoolId, shared.ownerId, { seed: { kind: 'question_paper', ...PAPER } });
+    expect(privately.conversation.sharedWithPaper).toBe(false);
+
+    // Someone who may only read the paper cannot start one shared with it.
+    const reader = user();
+    grant(reader, READ);
+    await expect(send(shared.schoolId, reader, { seed: { kind: 'question_paper', ...PAPER }, shareWithPaper: true })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+
+  it('is read by whoever may read the paper, and continued only by whoever may change it', async () => {
+    const shared = await sharedConversation();
+    const [reader, colleague, stranger] = [user(), user(), user()];
+    grant(reader, READ);
+    grant(colleague, READ, MANAGE);
+
+    await expect(get(shared.schoolId, shared.conversationId, reader)).resolves.toMatchObject({ conversation: { id: shared.conversationId } });
+    await expect(get(shared.schoolId, shared.conversationId, stranger)).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await expect(send(shared.schoolId, reader, { conversationId: shared.conversationId })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+
+    const continued = await send(shared.schoolId, colleague, { conversationId: shared.conversationId });
+    expect(continued.run).toMatchObject({ conversationId: shared.conversationId, userId: colleague });
+    expect(continued.item.body.author).toEqual({ userId: colleague, name: 'Asha Rao' });
+  });
+
+  it('never opens a private conversation to the paper’s people, whatever it is about', async () => {
+    const owner = await seedTurn({ body: { seed: { kind: 'question_paper', ...PAPER } } });
+    const colleague = user();
+    grant(colleague, READ, MANAGE);
+    await expect(get(owner.schoolId, owner.conversationId, colleague)).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    expect((await history(owner.schoolId, colleague)).items).toEqual([]);
+  });
+
+  it('is listed in the paper’s history for whoever may change the paper, and only that paper’s', async () => {
+    const shared = await sharedConversation();
+    const [reader, colleague] = [user(), user()];
+    grant(reader, READ);
+    grant(colleague, READ, MANAGE);
+
+    const listed = await history(shared.schoolId, colleague);
+    expect(listed.items.map((item) => [item.id, item.attention, item.sharedWithPaper])).toEqual([[shared.conversationId, 'working', true]]);
+    // The test users have no account row, so the starter has no name to show.
+    expect(listed.items[0]?.startedByName).toBeNull();
+    expect((await history(shared.schoolId, colleague, { ...PAPER, modeSlug: 'oral' })).items).toEqual([]);
+    await expect(history(shared.schoolId, reader)).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+
+  it('lets the paper’s people stop a turn, but only its starter delete it', async () => {
+    const shared = await sharedConversation();
+    const [reader, colleague] = [user(), user()];
+    grant(reader, READ);
+    grant(colleague, READ, MANAGE);
+    const ids = { schoolId: shared.schoolId, conversationId: shared.conversationId };
+
+    await expect(call(assistantRouter.stopRun, { schoolId: shared.schoolId, runId: shared.runId }, as(reader))).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await expect(call(assistantRouter.stopRun, { schoolId: shared.schoolId, runId: shared.runId }, as(colleague))).resolves.toMatchObject({ id: shared.runId });
+
+    await setRunStatus({ conversationId: shared.conversationId, runId: shared.runId }, 'cancelled');
+    await expect(call(assistantRouter.deleteConversation, ids, as(colleague))).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await expect(call(assistantRouter.deleteConversation, ids, as(shared.ownerId))).resolves.toEqual({ id: shared.conversationId });
+    // Deleted by its starter, it is gone for the paper's people too.
+    await expect(get(shared.schoolId, shared.conversationId, colleague)).rejects.toMatchObject({ code: 'NOT_FOUND' });
   });
 });

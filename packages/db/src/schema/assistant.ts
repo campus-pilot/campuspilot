@@ -149,6 +149,8 @@ export type AssistantUserMessageBody = {
   attachments?: AssistantAttachmentRef[];
   /** The screen a new conversation was started from. */
   seed?: AssistantMessageSeed;
+  /** Who sent it, named as at sending: a conversation shared with a paper has several people in it. */
+  author?: { userId: string; name: string };
 };
 
 export type AssistantAssistantMessageBody = {
@@ -240,12 +242,45 @@ export const assistantConversationTable = pgTable(
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
     /** Who deleted it (today always its owner); its own fact, null while live. No foreign key, like `user_id`. */
     deletedBy: text("deleted_by"),
+    /**
+     * The question paper this conversation is shared with, by the paper's
+     * natural key (session, exam, class, subject, mode; the school is
+     * `school_id`). Set only when the conversation was started on that
+     * paper's screen to be shared with it (`shareWithPaper`), never inferred
+     * from a seed. Everyone who may read the class's question papers may then
+     * read it, and everyone who may manage them may continue it; it stays in
+     * its starter's own history too. All five are set or none (checked).
+     * The paper may not have a row yet (a paper is made by its first photo or
+     * version), so this is the key, not a foreign key, like the seed.
+     */
+    paperSessionId: text("paper_session_id"),
+    paperExamSlug: text("paper_exam_slug"),
+    paperClassId: text("paper_class_id"),
+    paperSubjectSlug: text("paper_subject_slug"),
+    paperModeSlug: text("paper_mode_slug"),
   },
   (table) => [
     /** The history list: a user's live conversations in a school, newest first. */
     index("assistant_conversation_school_user_updated_idx")
       .on(table.schoolId, table.userId, table.updatedAt)
       .where(sql`${table.deletedAt} is null`),
+    /** A paper's live conversations, newest first: its latest one and its history. */
+    index("assistant_conversation_paper_updated_idx")
+      .on(
+        table.schoolId,
+        table.paperClassId,
+        table.paperSessionId,
+        table.paperExamSlug,
+        table.paperSubjectSlug,
+        table.paperModeSlug,
+        table.updatedAt,
+      )
+      .where(sql`${table.paperClassId} is not null and ${table.deletedAt} is null`),
+    check(
+      "assistant_conversation_paper_key_whole",
+      sql`(${table.paperSessionId} is null and ${table.paperExamSlug} is null and ${table.paperClassId} is null and ${table.paperSubjectSlug} is null and ${table.paperModeSlug} is null)
+        or (${table.paperSessionId} is not null and ${table.paperExamSlug} is not null and ${table.paperClassId} is not null and ${table.paperSubjectSlug} is not null and ${table.paperModeSlug} is not null)`,
+    ),
   ],
 );
 

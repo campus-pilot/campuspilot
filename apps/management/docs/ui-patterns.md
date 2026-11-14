@@ -69,7 +69,10 @@ navigable routes. Keep labels short enough to fit without horizontal scrolling a
 do not put icons in tabs. When a workspace has more than three primary sections,
 keep the three most-used sections as tabs and place secondary sections in an
 adjacent overflow menu, following the classroom workspace. Breadcrumbs provide
-parent navigation; do not add another feature-level back button.
+parent navigation; do not add another feature-level back button. One exception, asked
+for by the product owner: a question paper's photos card, opened from its studio, has a
+chevron by the paper's name and *Back* beside its button. That returns to the studio
+of the same page, not to a parent screen.
 
 Keep section navigation in the secondary sidebar, without duplicating it in the
 header's overflow menu. Examination sections are Results, Timetable and Settings.

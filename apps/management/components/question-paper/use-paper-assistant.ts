@@ -40,7 +40,8 @@ export function useStartPaperConversation(scope: QuestionPaperScope) {
   const { send, isPending } = useSendAssistantMessage(scope.schoolId, PAPER_ASSISTANT_SURFACE);
   const start = async (text: string, attachments: AssistantAttachmentRef[] = []): Promise<string> => {
     try {
-      const sent = await send(text, null, { seed: paperSeedOf(scope), attachments });
+      // Shared with the paper: whoever opens it next continues here (see docs/assistant.md).
+      const sent = await send(text, null, { seed: paperSeedOf(scope), attachments, shareWithPaper: true });
       return sent.conversation.id;
     } catch (error) {
       throw new Error(refusalMessage(error) ?? 'The assistant could not be reached. Check your connection and try again.');
@@ -65,7 +66,7 @@ export type PaperDraft = UnsavedDraft & {
  */
 export function usePaperDraft(scope: QuestionPaperScope, chatId: string | null, paper: PaperNames): PaperDraft | null {
   const rows = useAssistantTimeline(scope.schoolId, chatId) ?? [];
-  const verdicts = useDraftVerdicts(rows);
+  const verdicts = useDraftVerdicts(rows, chatId);
   const draft = unsavedDraftOf(rows, scope, verdicts);
   if (!draft) return null;
   const saveRequest = saveDraftMessage(draft.draftId, paperLabelOf(paper));

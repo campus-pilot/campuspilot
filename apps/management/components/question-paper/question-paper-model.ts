@@ -57,6 +57,21 @@ export function resolveView(facts: {
 /** A conversation id as the address may carry it: the assistant's own ids only, so nothing else reaches a request. */
 export const chatIdOf = (raw: string | null | undefined): string | null => (raw && /^asc_[a-z0-9]{8,40}$/.test(raw) ? raw : null);
 
+/** `?chat=new`: the user started a new conversation, which begins with their first message. */
+export const NEW_CHAT_PARAM = 'new';
+
+/**
+ * The paper's conversation on screen. The address decides when it names one
+ * (`?chat=<id>`) or asks for a new one (`?chat=new`); otherwise it is the
+ * paper's latest conversation, so whoever opens the paper, and whoever comes
+ * back to it, continues where the paper's work stands. Null: no conversation
+ * yet (the first message starts one).
+ */
+export function paperChatOf(raw: string | null | undefined, latestConversationId: string | null): string | null {
+  if (raw === NEW_CHAT_PARAM) return null;
+  return chatIdOf(raw) ?? latestConversationId;
+}
+
 /** What the paper's side of the studio shows. */
 export type ShownPaper = { kind: 'draft' } | { kind: 'version'; versionNo: number } | { kind: 'nothing' };
 

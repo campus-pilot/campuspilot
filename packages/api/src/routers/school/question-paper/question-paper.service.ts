@@ -20,6 +20,7 @@ import type { z } from 'zod';
 
 import { rpcError } from '../../../errors';
 import { getExamSession } from '../exam/exam.service';
+import { latestPaperConversationId } from './question-paper.conversations';
 import { makeImageDerivatives, normalizeFigureImage } from '../../../files/image-derivative';
 import { getQuestionPaperModel } from '../../../workflows/question-paper/model';
 import { handOff, dispatchQuestionPaperJob } from '../../../workflows/question-paper/outbox';
@@ -118,10 +119,11 @@ export async function getQuestionPaperDetail(
   scope: PaperScope,
 ): Promise<z.infer<typeof detailOutputSchema>> {
   const view = await loadPaperView(db, scope);
-  const [finished, versions, template] = await Promise.all([
+  const [finished, versions, template, latestConversationId] = await Promise.all([
     view.paper ? lastFinishedJobOf(db, view.paper.id) : undefined,
     view.paper ? versionsOf(db, view.paper.id).then((rows) => toVersionSummaries(db, rows, view.paper!.latestVersionNo)) : [],
     hasSelectedQuestionPaperTemplate(db, scope.key.schoolId),
+    latestPaperConversationId(db, scope.key),
   ]);
   return {
     paper: view.facts,
@@ -133,6 +135,7 @@ export async function getQuestionPaperDetail(
         : null,
     versions,
     templateConfigured: template,
+    latestConversationId,
   };
 }
 

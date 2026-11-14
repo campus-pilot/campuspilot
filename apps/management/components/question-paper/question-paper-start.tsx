@@ -21,7 +21,6 @@ import { questionPaperThumbUrl } from '@/lib/question-paper-pages';
 import { EarlierPaperDialog, earlierPaperDetail, earlierPaperTitle } from './earlier-paper-dialog';
 import { applyPageOrder, currentJobFailure, inFlightJob, isConflict, requestErrorMessage, uploadsInFlight, type QuestionPaperScope } from './question-paper-model';
 import {
-  createHintOf,
   createPlanOf,
   marksMismatchOf,
   noteWordsOf,
@@ -52,6 +51,8 @@ type StartProps = {
   onEarlierOpenChange: (open: boolean) => void;
   /** The paper has something to show now: open the studio on this version or conversation. */
   onOpenStudio: (query?: { version?: number; chat?: string }) => void;
+  /** Returns to the paper's studio, for a paper that has one (a version, a generation or a conversation); null for a paper made here first. */
+  onBack: (() => void) | null;
 };
 
 /**
@@ -508,11 +509,18 @@ function StartNote({
 }
 
 /**
- * The card's last row: the one button, with one line beside it. The line says
- * why the button is closed or why creating failed; when nothing is wrong it
- * says what is still needed, or that the result can be changed.
+ * The card's last row: the one button, with one line beside it, and Back
+ * beside the button when the paper has a studio to return to. The line says
+ * why the button is closed or why creating failed; when nothing is wrong
+ * there is no line.
  */
-function StartFooter({ detail, uploads, start, blockedReason }: Pick<StartProps, 'detail' | 'uploads'> & { start: PaperStart; blockedReason: string | null }) {
+function StartFooter({
+  detail,
+  uploads,
+  start,
+  blockedReason,
+  onBack,
+}: Pick<StartProps, 'detail' | 'uploads' | 'onBack'> & { start: PaperStart; blockedReason: string | null }) {
   const { paper } = detail;
   const templateReason = detail.templateConfigured ? null : 'Choose a question paper template before creating papers.';
   return (
@@ -523,7 +531,7 @@ function StartFooter({ detail, uploads, start, blockedReason }: Pick<StartProps,
             const plan = createPlanOf({ alternative, pageCount: paper.pageCount, uploading, note });
             const reason = blockedReason ?? (plan.kind === 'blocked' ? plan.reason : templateReason);
             const failure = start.run.error ? requestErrorMessage(start.run.error, 'The paper could not be created.') : null;
-            const line = reason ?? createHintOf(plan);
+            const line = reason;
             return (
               // The line comes first, for a reader and on the screen: left of the button from `sm` up, above it on a phone.
               <div className="flex flex-col gap-2 px-4 pb-4 sm:flex-row sm:items-center sm:justify-end sm:gap-3">
@@ -534,14 +542,21 @@ function StartFooter({ detail, uploads, start, blockedReason }: Pick<StartProps,
                 ) : line ? (
                   <p className="text-[0.8125rem] text-muted-foreground">{line}</p>
                 ) : null}
-                {/* A closed button is grey, not a dimmed primary: the brand colour means "this will create the paper". */}
-                <Button
-                  type="submit"
-                  className="shrink-0 disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100 max-sm:h-11 max-sm:w-full"
-                  disabled={reason !== null || plan.kind === 'blocked' || !canSubmit || isSubmitting}
-                >
-                  {isSubmitting ? 'Creating…' : paper.latestVersionNo > 0 ? 'Create new version' : 'Create paper'}
-                </Button>
+                <div className="flex shrink-0 gap-2">
+                  {onBack ? (
+                    <Button type="button" variant="outline" className="max-sm:h-11" onClick={onBack}>
+                      Back
+                    </Button>
+                  ) : null}
+                  {/* A closed button is grey, not a dimmed primary: the brand colour means "this will create the paper". */}
+                  <Button
+                    type="submit"
+                    className="disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100 max-sm:h-11 max-sm:flex-1"
+                    disabled={reason !== null || plan.kind === 'blocked' || !canSubmit || isSubmitting}
+                  >
+                    {isSubmitting ? 'Creating…' : paper.latestVersionNo > 0 ? 'Create new version' : 'Create paper'}
+                  </Button>
+                </div>
               </div>
             );
           }}
@@ -576,10 +591,10 @@ function UnusedPhotosNote({ start, pageCount }: { start: PaperStart; pageCount: 
  * on the card or pasted into the note.
  *
  * It is also how a paper that already has versions gets another start (more
- * photos, a copy): then it says that a new version is added and offers the
- * way back to the paper.
+ * photos, a copy): then it says that a new version is added, and Back beside
+ * the button (and the arrow by the paper's name) returns to the paper.
  */
-export function QuestionPaperStart({ scope, detail, canManage, uploads, earlierOpen, onEarlierOpenChange, onOpenStudio }: StartProps) {
+export function QuestionPaperStart({ scope, detail, canManage, uploads, earlierOpen, onEarlierOpenChange, onOpenStudio, onBack }: StartProps) {
   const { paper } = detail;
   const start = usePaperStart({ scope, detail, uploads, onOpenStudio });
   const picker = useRef<HTMLInputElement>(null);
@@ -602,14 +617,7 @@ export function QuestionPaperStart({ scope, detail, canManage, uploads, earlierO
   };
   return (
     <div className="flex flex-col gap-4">
-      {hasVersion ? (
-        <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
-          <p>This adds a new version. The versions you have are kept.</p>
-          <Button type="button" variant="outline" size="sm" onClick={() => onOpenStudio()}>
-            Show the paper
-          </Button>
-        </div>
-      ) : null}
+      {hasVersion ? <p className="text-sm text-muted-foreground">This adds a new version. The versions you have are kept.</p> : null}
       {failure ? <GenerationStatus job={{ status: 'failed', message: failure.message }} /> : null}
       <form
         aria-label="Create the question paper"
@@ -661,7 +669,7 @@ export function QuestionPaperStart({ scope, detail, canManage, uploads, earlierO
         </div>
         <StartProblems uploads={uploads} />
         <StartNote start={start} hasPhotos={paper.pageCount > 0} planMaxMarks={paper.planMaxMarks} disabled={closed} onPasteFiles={start.addFiles} />
-        <StartFooter detail={detail} uploads={uploads} start={start} blockedReason={blockedReason} />
+        <StartFooter detail={detail} uploads={uploads} start={start} blockedReason={blockedReason} onBack={onBack} />
       </form>
       {detail.pages.some((page) => page.derivativeStatus === 'unsupported') ? (
         <p className="text-xs text-muted-foreground">

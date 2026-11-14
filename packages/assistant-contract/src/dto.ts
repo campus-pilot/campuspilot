@@ -4,6 +4,7 @@ import {
   ASSISTANT_ATTACHMENTS_PER_MESSAGE,
   assistantAttachmentRefSchema,
   assistantMessageSeedSchema,
+  questionPaperSeedSchema,
 } from './attachments';
 import { assistantViewSchema } from './views';
 
@@ -55,6 +56,13 @@ export const assistantUserMessageItemSchema = z.object({
     attachments: z.array(assistantAttachmentRefSchema).optional(),
     /** The screen the conversation was started from, on its first message. */
     seed: assistantMessageSeedSchema.optional(),
+    /**
+     * Who sent the message, as they were named when they sent it. A
+     * conversation shared with a question paper is continued by several
+     * people, so each message says whose it is. Missing on messages saved
+     * before it was recorded.
+     */
+    author: z.object({ userId: z.string(), name: z.string() }).optional(),
   }),
 });
 
@@ -142,6 +150,8 @@ export type AssistantRunDiagnosticsDto = z.infer<typeof assistantRunDiagnosticsS
 export const assistantRunSchema = z.object({
   id: z.string(),
   conversationId: z.string(),
+  /** Whose turn this is: only they may approve its changes (a shared conversation shows the others whose approval it waits for). */
+  userId: z.string(),
   status: assistantRunStatusSchema,
   surface: assistantSurfaceSchema,
   stopRequestedAt: z.date().nullable(),
@@ -184,7 +194,11 @@ export function assistantConversationAttention(
 export const assistantConversationSchema = z.object({
   id: z.string(),
   schoolId: z.string(),
+  /** Who started the conversation (its owner: only they may delete it). */
+  userId: z.string(),
   title: z.string().nullable(),
+  /** The conversation is shared with a question paper: everyone who may read that paper may read it (`shareWithPaper`). */
+  sharedWithPaper: z.boolean(),
   lastSequence: z.number().int(),
   createdAt: z.date(),
   updatedAt: z.date(),
@@ -313,6 +327,14 @@ export const sendAssistantMessageInputSchema = z.object({
   attachmentIds: z.array(z.string().min(1)).max(ASSISTANT_ATTACHMENTS_PER_MESSAGE).default([]),
   /** Where a new conversation starts from; only valid without `conversationId`. */
   seed: assistantMessageSeedSchema.optional(),
+  /**
+   * Share the new conversation with the seed's question paper: everyone who
+   * may read the class's question papers may then read it, and everyone who
+   * may manage them may continue it. Needs a question paper seed and the
+   * right to manage that paper. Its own fact, never inferred from the seed:
+   * a seed alone keeps the conversation private.
+   */
+  shareWithPaper: z.boolean().default(false),
 }).superRefine((value, ctx) => {
   if (value.text.length === 0 && value.attachmentIds.length === 0) {
     ctx.addIssue({ code: 'custom', path: ['text'], message: 'Write a message or attach an image.' });
@@ -322,6 +344,9 @@ export const sendAssistantMessageInputSchema = z.object({
   }
   if (value.seed && value.conversationId) {
     ctx.addIssue({ code: 'custom', path: ['seed'], message: 'A seed is only valid when starting a conversation.' });
+  }
+  if (value.shareWithPaper && value.seed?.kind !== 'question_paper') {
+    ctx.addIssue({ code: 'custom', path: ['shareWithPaper'], message: 'Only a conversation started from a question paper can be shared with it.' });
   }
 });
 export const sendAssistantMessageOutputSchema = z.object({
@@ -344,4 +369,22 @@ export const deleteAssistantConversationOutputSchema = z.object({ id: z.string()
 export const stopAssistantRunInputSchema = z.object({
   ...schoolScopeShape,
   runId: z.string().min(1),
+});
+
+/** One question paper, by its natural key in the school (the seed's parts). */
+export const listPaperConversationsInputSchema = questionPaperSeedSchema.omit({ kind: true }).extend({
+  ...schoolScopeShape,
+  page: z.number().int().positive().default(1),
+});
+
+/** A conversation shared with a question paper, as a row of that paper's history. */
+export const assistantPaperConversationSchema = assistantConversationListItemSchema.extend({
+  /** The name of who started it; null when that account no longer exists. */
+  startedByName: z.string().nullable(),
+});
+export type AssistantPaperConversationDto = z.infer<typeof assistantPaperConversationSchema>;
+
+export const listPaperConversationsOutputSchema = z.object({
+  items: z.array(assistantPaperConversationSchema),
+  pagination: listAssistantConversationsOutputSchema.shape.pagination,
 });

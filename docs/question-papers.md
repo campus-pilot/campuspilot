@@ -289,7 +289,7 @@ stored), so the stored value is exactly what the render's second cleaning produc
 then pass the **output grammar** (`question-paper.output.ts`, an exact check that fails closed, run
 at save and at every render): lowercase allowlisted tags only, plain double-quoted allowlisted
 attributes (no `on*`), no comment/CDATA/doctype, balanced tags, `style=""` attributes and `<style>`
-text equal to their cleaned form with no out-of-flow `position`; its tag separators are the five ASCII
+text equal to their cleaned form; its tag separators are the five ASCII
 whitespace characters of the HTML tokenizer only (never JS `\s`, which also matches U+00A0, U+3000 and
 others the tokenizer reads as part of a name). The one element whose content the
 browser does not read as markup is `<style>`, so it is written exactly `<style>`, never inside an
@@ -327,14 +327,26 @@ was stored. `stats` count the cleaned output only.
   dropped. A model asked for "an engaging diagram" reaches for SMIL or CSS animation, so the
   guide forbids it first and the sanitiser enforces it. Do not allow any of these to make a design
   look better.
-- **CSS.** A property allowlist (layout, spacing, borders, colours, font properties, direction,
-  white space); `position` only `static` or `relative`, no `z-index`, no `top/right/bottom/left`, no
-  negative margins (a small negative `text-indent` is allowed); fonts only from the installed Noto
-  families and the generic ones; values with `url`, `\`, `<`, `>`, braces or `@` are dropped. **Every
-  number is checked**, not only lengths: no `calc() min() max() clamp() var() env()`, no exponent
-  notation, a cap per unit near an A4 page (`font-size` capped far lower), a cap per property for
-  unitless numbers (`line-height` 5, `columns` 6, `flex` 20, grid `repeat()` 12 and at most 40
-  tracks, ...); SVG geometry, sizes and `stroke-dasharray` are bounded the same way. The converter's
+- **Layout is the author's** (product owner's decision, 2026-11-14). The teacher sees the paper
+  as it prints and approves every save, so a layout that covers the school's heading or footer is
+  seen and refused by a person; the sanitiser does not decide how a paper looks. Allowed: any
+  `position` with `top/right/bottom/left/inset` and `z-index` (labels laid over a figure), negative
+  margins, `box-shadow`, `text-shadow`, linear/radial/conic gradients, `visibility`, `::before`,
+  `::after`, `::marker` with `content` (quoted text, `counter()`), `:hover`, `:not()`, `:is()` and
+  `:where()` (their argument is checked like any selector, one level deep), and text as large as a
+  page. Tags for code and quoted text (`pre code kbd samp blockquote small section label center
+  mark s del ins dl dt dd`) are allowed. What stays out is what loads, runs or moves: no URL of
+  any kind (so no background or `<img>` from a web address: the PDF converter has no network, and
+  the page's CSP allows only `data:` images), no `transform`, `filter` or animation.
+- **CSS.** A property allowlist (layout, positioning, spacing, borders, shadows, colours and
+  gradients, font properties, direction, white space); fonts only from the installed Noto families
+  and the generic ones; values with `url`, `\`, `<`, `>`, braces or `@` are dropped (quoted text in
+  `content` may hold any other character). **Every number is checked**, not only lengths: no
+  `calc() min() max() clamp() var() env()`, no exponent notation, a cap per unit near an A4 page
+  (the same for negative numbers), a cap per property for unitless numbers (`columns` 6, `flex` 20,
+  grid `repeat()` 12 and at most 40 tracks, ...); SVG geometry, sizes and `stroke-dasharray` are
+  bounded the same way. These caps keep a paper from asking for endless pages, not from looking
+  a certain way. The converter's
   page cap is the second line of defence (see Budgets). **Every selector is rebuilt from validated
   parts and prefixed with the body wrapper class and a descendant combinator** (`.qp-body .x`), so a
   rule matches only inside the paper and cannot restyle the school's heading or footer; an authored
@@ -354,7 +366,8 @@ was stored. `stats` count the cleaned output only.
 One paper's screen in the management app (`components/question-paper`) is one of two views,
 decided by `resolveView` from facts that are each their own input (never inferred from one
 another): the first screen asked for in the URL, whether a version exists, whether a
-generation is in flight, and whether the URL names a conversation.
+generation is in flight, and whether there is a conversation to show (`paperChatOf`: the
+one the URL names, else the paper's latest shared conversation).
 
 - **Start** (`QuestionPaperStart`): one card in a centred column, in the shape of the
   assistant's message box beside which the paper is later changed. It holds what the paper
@@ -405,9 +418,11 @@ generation is in flight, and whether the URL names a conversation.
   source) and is one line tall until it is used. *Create paper* is grey while it cannot
   create and the brand colour only when a press will; why it is closed (photos still
   uploading, no template, a completed exam) is written beside it, a failed creation stays
-  beside it too and nothing in the card is lost, and once there is something to create the
-  line says the result can be changed afterwards. A paper that already has versions
-  reaches the same card from its menu (a new version is added; the others are kept).
+  beside it too and nothing in the card is lost; when nothing is wrong there is no line. A
+  paper that already has versions reaches the same card from its menu or from the photos
+  button beside the PDF (a new version is added; the others are kept). Whenever the paper
+  has a studio to return to (a version, a generation or a conversation), a chevron left of
+  the paper's name and *Back* beside the button return to it.
 - **Studio** (`QuestionPaperStudio`): the paper as it prints beside the assistant that
   changes it. Shown once there is a version, a generation at work or a conversation.
   - **Layout.** One paper's screen is a workspace of its own: the exam's heading and tabs
@@ -424,18 +439,30 @@ generation is in flight, and whether the URL names a conversation.
     card's Save in the chat (`saveDraftMessage`); the approval that follows is given in the
     assistant like every other change. Nothing on this side is editable: versions are
     immutable and the preview frame stays sandboxed.
+  - The header row also has an icon button beside *Download PDF*, named by its tooltip
+    *View uploaded photos or file* (*Add photos or a file* while the paper has no photo):
+    it opens the same card as the menu's *Add photos or a file*. It is shown when the paper
+    has photos, or the user may add some to a paper that can still change.
   - The **assistant's side** is the paper's own conversation: the ordinary assistant
     (`AssistantChat`) with the paper as its seed from the first message, its own welcome
     words, placeholder and suggestions, and no prefilled sentence. It is recorded as the
-    `panel` surface. The conversation's id lives in the URL (`?chat=`), so a reload returns
-    to it; without one the next message starts a new conversation. On a phone the paper is
-    the screen and the assistant is a full-screen sheet opened from a bar at the bottom.
-  - A viewer, a paper whose exam has ended, and a first paper still being generated get the
-    paper alone.
+    `panel` surface. Every conversation started here (from the chat or the first screen) is
+    **shared with the paper** (`shareWithPaper`, see [Assistant](assistant.md#conversations-shared-with-a-question-paper)):
+    whoever opens the paper, and whoever comes back to it, lands in the paper's latest
+    conversation (`latestConversationId` in the detail), whoever started it. `?chat=<id>`
+    names another; `?chat=new` is a new one. The header's *New chat* starts a new one and
+    *Chat history* lists the paper's conversations (who started each, when it last
+    changed); both are for people who may change the paper. A message someone else sent
+    shows their name, and a change waiting for someone else's approval says whose. On a
+    phone the paper is the screen and the assistant is a full-screen sheet opened from a
+    bar at the bottom.
+  - A viewer, and a paper whose exam has ended, read the paper's conversation without a
+    message box (one sentence says why) and see its unsaved draft without *Save*; with no
+    conversation they get the paper alone, as does a first paper still being generated.
 - The URL is `?start=sources|earlier` (the first screen for a paper that already has
   versions, and the same with the earlier-paper dialog open, so Back closes the dialog),
-  `?version=n` and `?chat=<conversation id>` (`questionPaperWorkspaceHref`). Only the assistant's own ids are read from `chat`
-  (`chatIdOf`).
+  `?version=n` and `?chat=<conversation id>|new` (`questionPaperWorkspaceHref`). Only the
+  assistant's own ids and `new` are read from `chat` (`chatIdOf`, `paperChatOf`).
 - The paper's menu holds what is not the main task: All versions (a dialog with who saved
   each, when and how, and its PDF), Download latest PDF, Add photos or a file, Copy an
   earlier paper, Delete paper.

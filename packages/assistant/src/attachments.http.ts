@@ -11,8 +11,10 @@ import { and, eq } from 'drizzle-orm';
 
 import { assertCanSee, assertCanUse, loadAssistantAccess } from './access';
 import { createAttachment, deleteUnsentAttachment } from './attachments';
+import { mayReachConversation } from './conversation-access';
 import { db } from './db';
 import { resolveAssistantSession, type AssistantSession } from './session';
+import { findLiveConversation } from './store';
 
 type HttpErrorReporter = (error: unknown) => void;
 
@@ -65,10 +67,22 @@ export async function handleAssistantAttachmentUpload(
 }
 
 /**
- * Redirects the owner of an image attachment to a five-minute URL of it:
- * `thumb` (a JPEG thumbnail, used as `<img src>`) or `original`. Only the
- * user who uploaded it may read it, and only while they may see the assistant
- * in the school. An image the server could not decode has no thumbnail (404);
+ * Whether the user may see an attachment: their own upload, or one sent in
+ * a conversation they may read (one shared with a paper they may read). An
+ * unsent file is its uploader's only.
+ */
+async function maySeeAttachment(session: AssistantSession, row: typeof assistantAttachmentTable.$inferSelect): Promise<boolean> {
+  if (row.userId === session.user.id) return true;
+  if (!row.conversationId || !row.itemId) return false;
+  const conversation = await findLiveConversation(db, { conversationId: row.conversationId, schoolId: row.schoolId });
+  return conversation !== null && (await mayReachConversation(session, conversation, 'read'));
+}
+
+/**
+ * Redirects to a five-minute URL of an image attachment: `thumb` (a JPEG
+ * thumbnail, used as `<img src>`) or `original`. The user who uploaded it may
+ * read it, and so may whoever may read the conversation it was sent in
+ * (`maySeeAttachment`), only while they may see the assistant in the school. An image the server could not decode has no thumbnail (404);
  * the screen draws a tile instead.
  *
  * A document is never served, in either variant (404): a PDF can carry script
@@ -88,14 +102,10 @@ export async function handleAssistantAttachmentRead(
       .select()
       .from(assistantAttachmentTable)
       .where(
-        and(
-          eq(assistantAttachmentTable.id, input.attachmentId),
-          eq(assistantAttachmentTable.schoolId, input.schoolId),
-          eq(assistantAttachmentTable.userId, session.user.id),
-        ),
+        and(eq(assistantAttachmentTable.id, input.attachmentId), eq(assistantAttachmentTable.schoolId, input.schoolId)),
       )
       .limit(1);
-    if (!row || row.kind !== 'image') throw rpcError.notFound('Attachment');
+    if (!row || row.kind !== 'image' || !(await maySeeAttachment(session, row))) throw rpcError.notFound('Attachment');
     const thumb = input.variant === 'thumb';
     const key = thumb ? row.thumbS3Key : row.s3Key;
     if (!key) throw rpcError.notFound('Attachment image');

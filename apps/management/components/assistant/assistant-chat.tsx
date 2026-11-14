@@ -5,7 +5,7 @@ import {
   type AssistantAttachmentRef,
   type QuestionPaperSeed,
 } from '@campuspilot/assistant-contract/attachments';
-import type { AssistantSurface, AssistantToolCallItemDto, AssistantViewItemDto } from '@campuspilot/assistant-contract/dto';
+import type { AssistantSurface, AssistantToolCallItemDto, AssistantUserMessageItemDto, AssistantViewItemDto } from '@campuspilot/assistant-contract/dto';
 import {
   ASSISTANT_LANE_CLASS,
   ASSISTANT_SURFACE_PROPS,
@@ -39,6 +39,7 @@ import { ClipboardList, RotateCcw, ShieldCheck, UserPlus, UserRoundX } from 'luc
 import { useRef, type ReactNode } from 'react';
 
 import { assistantAttachmentThumbUrl } from '@/lib/assistant-attachments';
+import { authClient } from '@/lib/auth-client';
 import { orpc } from '@/lib/orpc';
 
 import { useApprovalMoney } from './assistant-approval-currency';
@@ -137,6 +138,19 @@ export type AssistantChatProps = {
    * the general ones are not.
    */
   suggestions?: readonly AssistantSuggestion[];
+  /**
+   * Share the conversation this chat starts with the seed's question paper
+   * (`shareWithPaper`): everyone who may read the paper may read it, and
+   * everyone who may change it may continue it. Only the paper's own screen
+   * passes it.
+   */
+  shareWithPaper?: boolean;
+  /**
+   * Why this user can read the conversation but not write in it (someone who
+   * may only read the paper, or a paper that can no longer change). The
+   * message box is replaced by this sentence; null (the default) lets them write.
+   */
+  readOnlyReason?: string | null;
 };
 
 /**
@@ -189,6 +203,15 @@ function ReplyRow({
  * chat showing it) until the stream takes it out of the tray; a decision
  * that could not be sent re-enables it and says why, in the request.
  */
+/** The name over a message someone else sent in a shared conversation; null for the user's own and for messages that do not say. */
+function useAuthorOf() {
+  const userId = authClient.useSession().data?.user.id ?? null;
+  return (item: AssistantUserMessageItemDto) => {
+    const author = item.body.author;
+    return author && userId !== null && author.userId !== userId ? author.name : null;
+  };
+}
+
 function useApprovals(schoolId: string) {
   const respond = useRespondToApproval();
   const decisionOf = useApprovalDecisions();
@@ -271,8 +294,9 @@ function ConversationTimeline({
   onNewConversation: () => void;
 }) {
   const rows = useAssistantTimeline(schoolId, conversationId);
+  const authorOf = useAuthorOf();
   // Draft cards a later ready draft of the same paper replaced shrink to one quiet line.
-  const verdicts = useDraftVerdicts(rows ?? []);
+  const verdicts = useDraftVerdicts(rows ?? [], conversationId);
   const superseded = supersededDrafts(rows ?? [], verdicts);
   if (failure) {
     // A new conversation does not help someone who is signed out, so only the message shows then.
@@ -302,6 +326,7 @@ function ConversationTimeline({
       renderReply={(itemId, meta) => <ReplyRow schoolId={schoolId} conversationId={conversationId} itemId={itemId} meta={meta} />}
       renderView={(item: AssistantViewItemDto) => <AssistantViewBlock schoolId={schoolId} view={item.body.view} />}
       attachmentPreviewUrl={(attachment: AssistantAttachmentRef) => assistantAttachmentThumbUrl(schoolId, attachment.id)}
+      authorOf={authorOf}
       renderCard={(row) => (
         <AssistantDraftCard
           schoolId={schoolId}
@@ -339,7 +364,7 @@ function ComposerToolbar({ schoolId, conversationId }: { schoolId: string; conve
  */
 function useTrayRequests(schoolId: string, conversationId: string | null, queuedOptimistic: OptimisticMessage[], onRetry: (message: OptimisticMessage) => void) {
   const approvals = useApprovals(schoolId);
-  const pending = useAssistantPendingApprovals(schoolId, conversationId);
+  const { mine: pending, waitingFor } = useAssistantPendingApprovals(schoolId, conversationId);
   const queued = useAssistantQueuedMessages(schoolId, conversationId);
   // Its own request state, apart from the composer's Stop: removing a queued message is not stopping the working run.
   const remove = useStopAssistantRun();
@@ -377,10 +402,11 @@ function useTrayRequests(schoolId: string, conversationId: string | null, queued
         ),
     })),
   ];
-  if (!first && queue.length === 0) return null;
+  if (!first && queue.length === 0 && waitingFor.length === 0) return null;
   const decided = approvals.decisionOf(first?.body.approvalId);
   return (
     <>
+      {waitingFor.length > 0 ? <WaitingForApproval names={waitingFor} /> : null}
       {first && conversationId ? (
         <AssistantApprovalWithSummary
           key={first.id}
@@ -397,6 +423,15 @@ function useTrayRequests(schoolId: string, conversationId: string | null, queued
       ) : null}
       <AssistantQueuedMessages messages={queue} onRemove={removeQueued} />
     </>
+  );
+}
+
+/** Only the person whose turn asked for a change may approve it; the others in a shared conversation are told whom it waits for. */
+function WaitingForApproval({ names }: { names: readonly string[] }) {
+  return (
+    <p className="px-1 text-xs text-muted-foreground">
+      Waiting for {names.join(' and ')} to approve a change.
+    </p>
   );
 }
 
@@ -498,6 +533,8 @@ export function AssistantChat({
   welcome: welcomeWords,
   placeholder,
   suggestions,
+  shareWithPaper = false,
+  readOnlyReason = null,
 }: AssistantChatProps) {
   const life = useSurfaceLife();
   const attachmentUpload = useAssistantAttachmentUpload(schoolId);
@@ -565,6 +602,7 @@ export function AssistantChat({
     const result = await send(text, conversationId, {
       attachments,
       seed: seedPaper.usableSeed,
+      shareWithPaper,
     }).catch((error: unknown) => {
       const missing = missingAttachmentIdsOf(error);
       // The composer marks these tiles, so the failed copy of the message is dropped: its Retry would name the same missing files.
@@ -627,6 +665,9 @@ export function AssistantChat({
           )}
           {notLive ? <ConnectionNotice offline={connection.offline} /> : null}
           <div className={welcome ? 'flex flex-col gap-3' : ASSISTANT_LANE_CLASS}>
+            {readOnlyReason ? (
+              <p className="rounded-2xl border border-dashed px-3 py-3 text-center text-sm text-muted-foreground">{readOnlyReason}</p>
+            ) : (
             <AssistantComposer
               controlsRef={composer}
               autoFocus={autoFocus}
@@ -651,7 +692,8 @@ export function AssistantChat({
                   : undefined
               }
             />
-            {welcome && (suggestions || !activeSeed) ? (
+            )}
+            {welcome && !readOnlyReason && (suggestions || !activeSeed) ? (
               <AssistantSuggestions suggestions={suggestions ?? SUGGESTIONS} onPick={sendDirectly} />
             ) : null}
           </div>

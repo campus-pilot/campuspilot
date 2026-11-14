@@ -162,10 +162,3 @@ export function noteWordsOf(input: { alternative: AlternativeSource; hasPhotos: 
   }
   return { label: 'Instructions (optional)', placeholder: input.marksDiffer ? 'For example: keep section A only' : 'For example: change the numbers' };
 }
-
-/**
- * The quiet line beside the button when nothing is wrong: that the result is
- * not final. An empty card says nothing here: the card itself already says
- * what it needs, and its button is visibly closed.
- */
-export const createHintOf = (plan: CreatePlan): string | null => (plan.kind === 'blocked' ? null : 'You can change anything afterwards.');

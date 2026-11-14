@@ -1,6 +1,6 @@
 import type { Database, DatabaseExecutor } from '@campuspilot/db';
 import { artifactTable } from '@campuspilot/db/schema/artifact';
-import { assistantConversationTable, assistantItemTable } from '@campuspilot/db/schema/assistant';
+import { assistantItemTable } from '@campuspilot/db/schema/assistant';
 import { generateId } from '@campuspilot/db/id';
 import {
   examQuestionPaperFigureTable,
@@ -21,8 +21,9 @@ import { rpcError } from '../../../errors';
 import { FIGURE_MAX_BYTES } from '../../../files/image-derivative';
 import { convertDocumentPdf } from '../document/document.render';
 import { documentDownloadUrl, persistDocumentObject } from '../document/document.storage';
-import { attachmentFigureIds, attachmentFigureProblems, convertAttachmentFigures, isAttachmentFigureId } from './question-paper.attachments';
+import { attachmentFigureIds, attachmentFigureProblems, chatFiguresOf, convertAttachmentFigures, isAttachmentFigureId, type ChatFigures } from './question-paper.attachments';
 import { buildQuestionPaperContext } from './question-paper.context';
+import { isPaperChat } from './question-paper.conversations';
 import { createMathRenderer, renderMathSpans } from './question-paper.math';
 import {
   findPaper,
@@ -79,14 +80,14 @@ export type UnresolvedFigures =
 
 /**
  * Why each figure id cannot be used, by id; a missing key means it can. An id
- * must name a stored figure of this paper, or a chat attachment of
- * `chatUserId` (`asat_` id; see `question-paper.attachments.ts`): an
+ * must name a stored figure of this paper, or a chat attachment `chat` may
+ * use (`asat_` id; see `question-paper.attachments.ts`): an
  * attachment is checked here and copied into a figure only when a version is
  * saved.
  */
 async function figureProblems(
   db: DatabaseExecutor,
-  input: { schoolId: string; paper: PaperRow | undefined; chatUserId: string | undefined },
+  input: { schoolId: string; paper: PaperRow | undefined; chat: ChatFigures | undefined },
   ids: readonly string[],
 ): Promise<Map<string, string>> {
   const problems = new Map<string, string>();
@@ -103,7 +104,7 @@ async function figureProblems(
   );
   const attachmentProblems = await attachmentFigureProblems(db, {
     schoolId: input.schoolId,
-    chatUserId: input.chatUserId,
+    chat: input.chat,
     ids: ids.filter(isAttachmentFigureId),
   });
   for (const id of ids) {
@@ -159,8 +160,8 @@ export async function checkQuestionPaperDraft(
   scope: PaperScope,
   raw: string,
   options: {
-    /** The chat user whose attachments the fragment may use as figures; omitted outside the in-app assistant. */
-    chatUserId?: string;
+    /** The chat attachments the fragment may use as figures (`chatFiguresOf`); omitted outside the in-app assistant and the app. */
+    chat?: ChatFigures;
     unresolvedFigures?: UnresolvedFigures;
     /**
      * For a caller with nobody to look at what the sanitiser changed (the AI job): a pseudo-tag such as `<thinking>`
@@ -187,7 +188,7 @@ export async function checkQuestionPaperDraft(
   if (!hasContent(sanitized)) problems.push('The paper is empty. Write the questions as HTML.');
 
   const paper = await findPaper(db, scope.key);
-  const unusable = await figureProblems(db, { schoolId: scope.key.schoolId, paper, chatUserId: options.chatUserId }, sanitized.stats.figureIds);
+  const unusable = await figureProblems(db, { schoolId: scope.key.schoolId, paper, chat: options.chat }, sanitized.stats.figureIds);
   if (unusable.size > 0) {
     if (options.unresolvedFigures === 'placeholder') {
       sanitized = sanitizeQuestionPaperBody(figureIdsToPlaceholders(sanitized.html, new Set(unusable.keys())));
@@ -264,26 +265,15 @@ const DRAFT_SEARCH_DEPTH = 60;
  */
 export async function findChatDraftContent(
   db: DatabaseExecutor,
-  input: { conversationId: string; schoolId: string; userId: string; draftId: string },
+  input: { conversationId: string; key: PaperKey; userId: string; draftId: string },
 ): Promise<string> {
-  const [conversation] = await db
-    .select({ id: assistantConversationTable.id })
-    .from(assistantConversationTable)
-    .where(
-      and(
-        eq(assistantConversationTable.id, input.conversationId),
-        eq(assistantConversationTable.schoolId, input.schoolId),
-        eq(assistantConversationTable.userId, input.userId),
-        isNull(assistantConversationTable.deletedAt),
-      ),
-    )
-    .limit(1);
   const notFound = rpcError.badRequest('No draft with that draftId was validated in this conversation. Send the full html instead.');
-  if (!conversation) throw notFound;
+  // The user's own chat, or one shared with this paper (continued by a colleague): drafts are read from nothing else.
+  if (!(await isPaperChat(db, { conversationId: input.conversationId, userId: input.userId, key: input.key }))) throw notFound;
   const items = await db
     .select({ body: assistantItemTable.body })
     .from(assistantItemTable)
-    .where(and(eq(assistantItemTable.conversationId, conversation.id), eq(assistantItemTable.kind, 'tool_call')))
+    .where(and(eq(assistantItemTable.conversationId, input.conversationId), eq(assistantItemTable.kind, 'tool_call')))
     .orderBy(desc(assistantItemTable.position))
     .limit(DRAFT_SEARCH_DEPTH);
   for (const { body } of items) {
@@ -408,9 +398,10 @@ export async function saveQuestionPaperVersion(
   } else {
     // Chat attachments may be figures only when an agent saves from a chat. The AI job has no way to attach an
     // image, so a figure id it cannot resolve becomes a placeholder; an agent is told and fixes it.
-    const chatUserId = source.kind === 'agent' && source.conversationId ? input.userId : undefined;
+    const chat =
+      source.kind === 'agent' && source.conversationId ? await chatFiguresOf(db, { userId: input.userId, conversationId: source.conversationId, key: scope.key }) : undefined;
     const unresolvedFigures: UnresolvedFigures = source.kind === 'ai_job' ? 'placeholder' : 'problem';
-    const first = await checkQuestionPaperDraft(db, scope, input.html, { chatUserId, unresolvedFigures });
+    const first = await checkQuestionPaperDraft(db, scope, input.html, { chat, unresolvedFigures });
     if (!first.ok) throw invalidPaperError(first.problems);
     checked = first;
     if (attachmentFigureIds(checked.html).length > 0) {
@@ -419,7 +410,7 @@ export async function saveQuestionPaperVersion(
       // Copy the attachments into the paper and store the version with its own figure ids; the fragment is
       // checked again as it will be stored. The notices of the first check are the ones the user is told about.
       const { notices, stripped } = checked;
-      const converted = await checkQuestionPaperDraft(db, scope, await convertAttachmentFigures(db, { scope, userId: input.userId, html: checked.html }));
+      const converted = await checkQuestionPaperDraft(db, scope, await convertAttachmentFigures(db, { scope, userId: input.userId, chat: chat!, html: checked.html }));
       if (!converted.ok) throw invalidPaperError(converted.problems);
       checked = { ...converted, notices, stripped };
     }

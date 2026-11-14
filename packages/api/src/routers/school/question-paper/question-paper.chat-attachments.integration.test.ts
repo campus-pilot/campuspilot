@@ -17,6 +17,7 @@ import { type TestClient } from '../../../../test/fixtures';
 import { createQuestionPaperWorld, type QuestionPaperWorld } from '../../../../test/question-paper';
 import type { Context } from '../../../context';
 import { appRouter } from '../../index';
+import { questionPaperDraftId } from '@campuspilot/question-paper/hash';
 import { putObject } from './question-paper.storage';
 
 const ENGLISH_SCIENCE = QUESTION_PAPER_EXAMPLES['english-science'];
@@ -76,8 +77,9 @@ describe('chat attachments as figures', () => {
     return id;
   }
 
-  /** An attachment row with its object, sent (bound to a message) unless `sent` is false. */
-  async function attachment(options: { userId?: string; sent?: boolean; heic?: boolean } = {}) {
+  /** An attachment row with its object, sent (bound to a message, in the manager's chat unless `chat` says) unless `sent` is false. */
+  async function attachment(options: { userId?: string; sent?: boolean; heic?: boolean; chat?: { conversationId: string; runId: string } } = {}) {
+    const chat = options.chat ?? { conversationId, runId };
     const id = generateId('assistantAttachment');
     const userId = options.userId ?? world.people.manager.userId;
     const bytes = await sharp({ create: { width: 120, height: 80, channels: 3, background: '#336699' } }).jpeg().toBuffer();
@@ -90,9 +92,9 @@ describe('chat attachments as figures', () => {
       position += 1;
       const [item] = await db
         .insert(assistantItemTable)
-        .values({ conversationId, runId, kind: 'user_message', status: 'complete', position, sequence: position, itemKey: `item-${crypto.randomUUID()}`, body: { text: 'figure' } })
+        .values({ ...chat, kind: 'user_message', status: 'complete', position, sequence: position, itemKey: `item-${crypto.randomUUID()}`, body: { text: 'figure' } })
         .returning();
-      binding = { conversationId, itemId: item!.id, position: 1, attachedAt: new Date() };
+      binding = { conversationId: chat.conversationId, itemId: item!.id, position: 1, attachedAt: new Date() };
     }
     await db.insert(assistantAttachmentTable).values({
       id,
@@ -197,6 +199,69 @@ describe('chat attachments as figures', () => {
     const theirs = await attachment({ userId: world.people.teacher.userId });
     const crossed = await errorOf(agent().school.saveQuestionPaperVersion({ ...k, expectedVersionNo: 0, html: withFigure(theirs) }));
     expect(crossed).toMatchObject({ code: 'BAD_REQUEST' });
+  });
+
+  it('lets whoever works on a paper use the photos sent in a conversation shared with it, and only there', async () => {
+    const k = world.key({ classId: world.otherClassId });
+    const teacher = world.people.teacher.userId;
+    const [shared] = await db
+      .insert(assistantConversationTable)
+      .values({
+        schoolId: world.schoolId,
+        userId: teacher,
+        provider: 'gemini',
+        model: 'm',
+        paperSessionId: k.sessionId,
+        paperExamSlug: k.examSlug,
+        paperClassId: k.classId,
+        paperSubjectSlug: k.subjectSlug,
+        paperModeSlug: k.modeSlug,
+      })
+      .returning();
+    const [sharedRun] = await db
+      .insert(assistantRunTable)
+      .values({ conversationId: shared!.id, schoolId: world.schoolId, userId: teacher, clientRequestId: crypto.randomUUID(), surface: 'panel', sequence: 1 })
+      .returning();
+    const photo = await attachment({ userId: teacher, chat: { conversationId: shared!.id, runId: sharedRun!.id } });
+
+    // The manager's turn in the shared conversation uses the teacher's photo...
+    const inShared = createRouterClient(appRouter, {
+      context: async (): Promise<Context> => ({
+        db,
+        headers: new Headers(),
+        session: world.people.manager.session,
+        principal: { authMethod: 'assistant', assistantRun: { conversationId: shared!.id, runId: sharedRun!.id, schoolId: world.schoolId } },
+      }),
+    }) as unknown as TestClient;
+    expect(await inShared.school.validateQuestionPaperDraft({ ...k, html: withFigure(photo) })).toMatchObject({ valid: true, problems: [] });
+    // ...and so does the draft card of a colleague who opens that conversation.
+    expect(await world.people.coordinator.client.school.validateQuestionPaperDraft({ ...k, html: withFigure(photo), conversationId: shared!.id })).toMatchObject({ valid: true });
+    // Not from the manager's own private chat, and not for a paper the conversation is not shared with.
+    expect((await agent().school.validateQuestionPaperDraft({ ...k, html: withFigure(photo) })).valid).toBe(false);
+    const otherPaper = world.key({ classId: world.otherClassId, subjectSlug: 'math' });
+    expect((await world.people.manager.client.school.validateQuestionPaperDraft({ ...otherPaper, html: withFigure(photo), conversationId: shared!.id })).valid).toBe(false);
+
+    // A draft the teacher's turn validated there is read back by the manager's turn by its id, and saved by it.
+    const html = ENGLISH_SCIENCE;
+    position += 1;
+    await db.insert(assistantItemTable).values({
+      conversationId: shared!.id,
+      runId: sharedRun!.id,
+      kind: 'tool_call',
+      status: 'succeeded',
+      position,
+      sequence: position,
+      itemKey: `item-${crypto.randomUUID()}`,
+      body: { toolUseId: 'tu_shared', toolName: 'school_validateQuestionPaperDraft', title: 'Validate', access: 'read', destructive: false, module: 'school', input: { ...k, html } },
+    });
+    const draftId = questionPaperDraftId(html);
+    expect(await inShared.school.getQuestionPaperDraft({ ...k, draftId })).toMatchObject({ draftId });
+    // The same id from the manager's private chat names nothing.
+    expect(await errorOf(agent().school.getQuestionPaperDraft({ ...k, draftId }))).toMatchObject({ code: 'BAD_REQUEST' });
+
+    // The paper's screen opens the conversation shared with it that changed last.
+    const detail = await world.people.coordinator.client.school.getQuestionPaperDetail(k);
+    expect(detail.latestConversationId).toBe(shared!.id);
   });
 
   it('refuses a PDF the user sent as a figure, with a problem that says to read it and use a placeholder', async () => {

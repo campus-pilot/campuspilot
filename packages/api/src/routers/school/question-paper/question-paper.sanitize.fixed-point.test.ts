@@ -22,11 +22,12 @@ const HOSTILE = '<meta http-equiv="refresh" content="0;url=http://evil.example">
 const S2 = `<svg><style ><![CDATA[</style>${HOSTILE}]]></style></svg>`;
 
 /**
- * What a rendered body must not contain: markup (tags and attributes, never escaped text, which is inert) that is
- * dangerous or out of flow, and style text that positions out of flow.
+ * What a rendered body must not contain: markup (tags and attributes, never escaped text, which is inert) that loads,
+ * runs or leaves the page. Positioning is the author's own (the teacher sees and approves the paper as it prints), so
+ * it is not on this list.
  */
-const DANGEROUS_TAG = /^<\/?(?:meta|form|input|iframe|script|link|base|object|embed)\b|\son[a-z]+\s*=|http-equiv|position\s*:\s*(?:fixed|absolute)/i;
-const dangerous = (html: string) => (html.match(/<[^>]*>/g) ?? []).filter((tag) => DANGEROUS_TAG.test(tag)).concat(html.match(/<style>[^<]*<\/style>/g)?.filter((style) => /position\s*:\s*(?:fixed|absolute)/i.test(style)) ?? []);
+const DANGEROUS_TAG = /^<\/?(?:meta|form|input|iframe|script|link|base|object|embed)\b|\son[a-z]+\s*=|http-equiv/i;
+const dangerous = (html: string) => (html.match(/<[^>]*>/g) ?? []).filter((tag) => DANGEROUS_TAG.test(tag));
 const withoutStyleElements = (html: string) => html.replace(/<style>[^<]*<\/style>/g, '');
 
 const PAYLOADS: Record<string, string> = {
@@ -124,7 +125,6 @@ describe('the output grammar (fails closed)', () => {
     ['an unclosed element', '<p>x'],
     ['an unquoted attribute value', '<p class=a>x</p>'],
     ['a single-quoted attribute value', "<p class='a'>x</p>"],
-    ['a fixed-position style attribute', '<p style="position:fixed">x</p>'],
     ['an unclean style attribute', '<p style="behavior:url(x)">x</p>'],
     ['a repeated attribute', '<p class="a" class="b">x</p>'],
     ['a self-closing non-void element', '<div />'],

@@ -39,11 +39,23 @@ describe('selector scoping (M1): a rule matches inside the paper only', () => {
     expect(sheet('.qp-body   p{color:red}')).toBe('.qp-body p{color:red}');
   });
 
-  it('cannot reach the page or pseudo states, and header/footer elements are not known elements of a paper', () => {
-    for (const selector of ['body', 'html', ':root', 'header', 'main', 'p:not(.x)', 'p:hover', 'p::before', '[href]']) {
+  it('cannot reach the page, and header/footer elements are not known elements of a paper', () => {
+    for (const selector of ['body', 'html', ':root', 'header', 'main', '[href]', 'p:not(.qpc-foot)', 'p:is(body p)', 'p:not(:not(.x))', 'p:has(.x)']) {
       expect(sheet(`${selector}{color:red}`), selector).toBe('');
     }
     expect(body('header{display:none}footer{display:none}')).toBe('<p>x</p>');
+  });
+
+  it('accepts pseudo-elements, states and logical pseudo-classes, scoped to the paper', () => {
+    expect(sheet('p::before{content:"Q. "}')).toBe('.qp-body p::before{content:"Q. "}');
+    expect(sheet('li:after{content:"→"}')).toBe('.qp-body li:after{content:"→"}');
+    expect(sheet('.a:hover{color:red}')).toBe('.qp-body .a:hover{color:red}');
+    expect(sheet('p:not(.x, .y) > span:is(div, li){color:red}')).toBe('.qp-body p:not(.x,.y) > span:is(div,li){color:red}');
+    expect(sheet('ul{counter-reset:q}li::before{content:counter(q) ". ";counter-increment:q}')).toBe(
+      '.qp-body ul{counter-reset:q}\n.qp-body li::before{content:counter(q) ". ";counter-increment:q}',
+    );
+    // Text in content cannot end the style or reopen markup.
+    expect(sheet('p::before{content:"<b>"}')).toBe('');
   });
 
   it('does not accept a reserved class in a selector', () => {
@@ -87,7 +99,6 @@ describe('numbers are capped, not only lengths with a unit (M2)', () => {
     ['uppercase exponent', 'height:1E5mm'],
     ['signed exponent', 'height:1e+5mm'],
     ['huge unitless line-height', 'line-height:99999999'],
-    ['line-height above 5', 'line-height:6'],
     ['huge grid repeat', 'grid-template-rows:repeat(99999,100px)'],
     ['grid repeat above 12', 'grid-template-columns:repeat(13,1fr)'],
     ['many grid tracks', `grid-template-columns:${'1fr '.repeat(41)}`],
@@ -97,14 +108,11 @@ describe('numbers are capped, not only lengths with a unit (M2)', () => {
     ['huge flex', 'flex:99999'],
     ['huge orphans', 'orphans:99999'],
     ['huge grid line', 'grid-row:1 / 99999'],
-    ['huge font size', 'font-size:100em'],
-    ['font size in points', 'font-size:200pt'],
     ['huge height', 'height:99999mm'],
+    ['huge font size', 'font-size:101em'],
+    ['huge negative offset', 'top:-99999mm'],
     ['unknown unit', 'height:5dvh'],
     ['negative margin', 'margin-top:-100000'],
-    ['small negative margin', 'margin:0 0 0 -1mm'],
-    ['negative top', 'top:-100vh'],
-    ['negative padding via shorthand', 'padding:-5mm'],
   ])('removes %s', (_name, declaration) => {
     expect(declarations(declaration)).toBe('');
   });
@@ -120,17 +128,25 @@ describe('numbers are capped, not only lengths with a unit (M2)', () => {
     }
   });
 
-  it('removes top/right/bottom/left offsets and keeps position:relative harmless (m1)', () => {
-    expect(declarations('top:2mm')).toBe('');
-    expect(declarations('left:0')).toBe('');
-    expect(declarations('position:relative;top:2mm;color:red')).toBe('position:relative;color:red');
-    expect(declarations('position:sticky')).toBe('');
+  it('leaves positioning, layering, shadows, gradients and large text to the author', () => {
+    for (const declaration of [
+      'position:absolute;left:62%;top:18%', 'position:fixed;bottom:0', 'position:sticky;top:0', 'inset:0', 'z-index:-1', 'margin:0 0 0 -4mm',
+      'box-shadow:0 1mm 2mm rgba(0,0,0,0.2)', 'text-shadow:0 0 1px #000', 'background:linear-gradient(90deg, #fff, #eee)',
+      'background-image:radial-gradient(circle, #fff 0%, #ddd 100%)', 'visibility:hidden', 'font-size:96pt', 'line-height:8',
+    ]) {
+      expect(declarations(declaration), declaration).toBe(declaration);
+    }
   });
 
-  it('negative text-indent and vertical-align are bounded to a hanging indent', () => {
-    expect(declarations('text-indent:-400mm')).toBe('');
-    expect(declarations('text-indent:-10mm')).toBe('text-indent:-10mm');
-    expect(declarations('text-indent:-11mm')).toBe('');
+  it('bounds a negative number like a positive one', () => {
+    expect(declarations('text-indent:-401mm')).toBe('');
+    expect(declarations('text-indent:-11mm')).toBe('text-indent:-11mm');
+  });
+
+  it('still refuses what loads or moves', () => {
+    for (const declaration of ['background-image:url(https://example.com/a.png)', 'background:url(x)', 'transform:rotate(3deg)', 'filter:blur(2px)', 'animation:spin 1s', 'content:attr(class)']) {
+      expect(declarations(declaration), declaration).toBe('');
+    }
   });
 });
 

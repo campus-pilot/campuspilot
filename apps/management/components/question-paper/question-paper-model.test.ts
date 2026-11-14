@@ -7,6 +7,7 @@ import {
   detailPollInterval,
   isConflict,
   chatIdOf,
+  paperChatOf,
   resolveView,
   resolveVersionNo,
   shownPaperOf,
@@ -112,4 +113,14 @@ test('the version a succeeded job produced is announced while it is the newest',
   assert.equal(generatedVersionReady({ lastFinishedJob: job('succeeded'), versions: [{ ...own, sourceJobId: 'job0' }] }), null);
   assert.equal(generatedVersionReady({ lastFinishedJob: job('failed'), versions: [own] }), null);
   assert.equal(generatedVersionReady({ lastFinishedJob: null, versions: [] }), null);
+});
+
+test('the paper conversation: the one the address names, none when it asks for a new one, else the latest', () => {
+  const latest = 'asc_latest0000000000001';
+  assert.equal(paperChatOf('asc_named00000000000001', latest), 'asc_named00000000000001');
+  assert.equal(paperChatOf('new', latest), null);
+  assert.equal(paperChatOf(null, latest), latest);
+  assert.equal(paperChatOf(null, null), null);
+  // Something that is not an id falls back to the latest, never reaches a request.
+  assert.equal(paperChatOf('../etc', latest), latest);
 });

@@ -16,9 +16,13 @@
  * - No `animation*`, `transition*`, `will-change`, `transform`, `filter` or
  *   `offset*` property: a paper is printed, nothing moves. Dropped properties
  *   of the motion family are reported with their own wording.
- * - `position` is `static` or `relative` only, there is no `z-index` and there
- *   are no `top`/`right`/`bottom`/`left` offsets or negative margins, so
- *   nothing can be moved over the school's heading or footer band.
+ * - Layout is the author's (a decision of the product owner, 2026-11-14):
+ *   any `position`, offsets, `z-index`, negative margins, shadows, gradients,
+ *   `::before`/`::after` with `content`, and large text are allowed. A label
+ *   laid over a figure needs them, and the teacher sees the paper as it prints
+ *   and approves every save, so a layout that covers the school's heading is
+ *   seen and refused by a person, not by this file. What stays out is what
+ *   loads, runs or moves, and what reaches outside the paper's own elements.
  * - Every number is checked, not only lengths with a unit: no `calc()`,
  *   `min()`, `max()`, `clamp()`, `var()` or `env()` (they compute sizes the
  *   caps cannot see), no exponent notation, a cap per unit near an A4 page,
@@ -73,6 +77,9 @@ const MOTION_PROPERTY = /^(animation|transition|will-change|offset|scroll-timeli
 const PROPERTIES = new Set(
   [
     'display', 'position', 'float', 'clear', 'overflow', 'overflow-x', 'overflow-y',
+    'top', 'right', 'bottom', 'left', 'inset', 'inset-inline', 'inset-inline-start', 'inset-inline-end', 'inset-block', 'inset-block-start', 'inset-block-end', 'z-index',
+    'visibility', 'box-shadow', 'text-shadow', 'content', 'counter-reset', 'counter-increment', 'quotes',
+    'background-image', 'background-size', 'background-position', 'background-repeat', 'background-origin', 'background-clip',
     'flex', 'flex-direction', 'flex-wrap', 'flex-flow', 'flex-grow', 'flex-shrink', 'flex-basis',
     'align-items', 'align-content', 'align-self', 'justify-content', 'justify-items', 'justify-self', 'place-items', 'place-content',
     'gap', 'row-gap', 'column-gap', 'grid-template-columns', 'grid-template-rows', 'grid-template-areas', 'grid-area', 'grid-column', 'grid-row', 'grid-auto-flow', 'grid-auto-columns', 'grid-auto-rows',
@@ -100,7 +107,8 @@ const PROPERTIES = new Set(
 
 const KEYWORDS: Record<string, RegExp> = {
   display: /^(block|inline|inline-block|flex|inline-flex|grid|inline-grid|table|inline-table|table-row|table-cell|table-row-group|table-header-group|table-footer-group|table-caption|list-item|none|contents)$/i,
-  position: /^(static|relative)$/i,
+  position: /^(static|relative|absolute|fixed|sticky)$/i,
+  visibility: /^(visible|hidden|collapse)$/i,
   float: /^(left|right|none|inline-start|inline-end)$/i,
   clear: /^(left|right|both|none)$/i,
   overflow: /^(visible|hidden)(\s+(visible|hidden))?$/i,
@@ -112,14 +120,14 @@ const KEYWORDS: Record<string, RegExp> = {
 const FONT_FAMILY = /^(noto (sans|serif)( [a-z ]{1,30})?|dejavu (sans|serif)( mono)?|liberation (sans|serif|mono)|serif|sans-serif|monospace|arial|helvetica|times new roman|times|courier new|courier|georgia|verdana|system-ui)$/i;
 
 /** Largest magnitude of a length, by unit, near an A4 page. Larger values would only make runaway layouts. */
-export const UNIT_CAP: Record<string, number> = { mm: 400, cm: 40, q: 1600, in: 16, pt: 1100, pc: 90, px: 1500, em: 100, rem: 100, ex: 100, ch: 100, vh: 100, vw: 100, vmin: 100, vmax: 100, '%': 400, fr: 12 };
-
-/** Text-size properties: the generic caps would let one `font-size` multiply a paper into hundreds of pages. */
-const FONT_SIZE_CAP: Record<string, number> = { mm: 17, cm: 1.7, q: 68, in: 0.67, pt: 48, pc: 4, px: 64, em: 4, rem: 4, ex: 8, ch: 8, vh: 5, vw: 5, vmin: 5, vmax: 5, '%': 400, fr: 0 };
+export const UNIT_CAP: Record<string, number> = {
+  mm: 400, cm: 40, q: 1600, in: 16, pt: 1100, pc: 90, px: 1500, em: 100, rem: 100, ex: 100, ch: 100, vh: 100, vw: 100, vmin: 100, vmax: 100, '%': 400, fr: 12,
+  // Angles, for gradients.
+  deg: 360, grad: 400, rad: 7, turn: 1,
+};
 
 /** Largest unitless number by property (everything else: {@link DEFAULT_UNITLESS_CAP}). */
 const UNITLESS_CAP: Record<string, number> = {
-  'line-height': 5,
   flex: 20, 'flex-grow': 20, 'flex-shrink': 20, 'flex-basis': 0,
   columns: 6, 'column-count': 6,
   'tab-size': 16,
@@ -133,12 +141,15 @@ const UNITLESS_CAP: Record<string, number> = {
 };
 const DEFAULT_UNITLESS_CAP = 1000;
 
-/** Properties that may shift content backwards a little (a hanging indent); every other negative number is refused. */
-const NEGATIVE_OK = new Set(['text-indent', 'letter-spacing', 'word-spacing', 'vertical-align', 'outline-offset', 'text-underline-offset', 'stroke-dashoffset']);
-const NEGATIVE_UNIT_CAP: Record<string, number> = { mm: 10, cm: 1, q: 40, in: 0.4, pt: 30, pc: 2.5, px: 40, em: 3, rem: 3, ex: 3, ch: 3, '%': 20 };
-
-/** Functions a value may call. `calc`, `min`, `max`, `clamp`, `var`, `env`, `attr`, `url`... compute or fetch what the caps cannot see. */
-const ALLOWED_FUNCTIONS = new Set(['rgb', 'rgba', 'hsl', 'hsla', 'repeat', 'minmax']);
+/**
+ * Functions a value may call: colours, gradients, counters and the grid's own. `calc`, `min`, `max`, `clamp`, `var`,
+ * `env`, `attr` and `url`... compute or fetch what the caps cannot see.
+ */
+const ALLOWED_FUNCTIONS = new Set([
+  'rgb', 'rgba', 'hsl', 'hsla', 'repeat', 'minmax',
+  'linear-gradient', 'radial-gradient', 'conic-gradient', 'repeating-linear-gradient', 'repeating-radial-gradient', 'repeating-conic-gradient',
+  'counter', 'counters',
+]);
 const GRID_FUNCTION_PROPERTIES = new Set(['grid-template-columns', 'grid-template-rows', 'grid-auto-columns', 'grid-auto-rows']);
 /** Most whitespace-separated tokens in a grid track list. */
 const MAX_GRID_TOKENS = 40;
@@ -169,8 +180,12 @@ function valueProblem(property: string, rawValue: string): string | null {
   if (trimmed.length > MAX_VALUE_CHARS + 20) return 'its value is empty or too long';
   const value = withoutImportant(trimmed);
   if (value === '' || value.length > MAX_VALUE_CHARS) return 'its value is empty or too long';
-  if (!VALUE_CHARS.test(value) || FORBIDDEN_IN_VALUE.test(value)) return 'its value is not allowed';
-  for (const call of value.matchAll(/([a-zA-Z_-][a-zA-Z0-9_-]*)\s*\(/g)) {
+  // Quoted text (`content: "→ "`) may hold any character except what could end the style or reopen markup.
+  const strings = [...value.matchAll(/"[^"]*"|'[^']*'/g)].map((match) => match[0]);
+  if (strings.some((text) => /[<>&{}@\\]/.test(text))) return 'its text is not allowed';
+  const unquoted = property === 'content' || property === 'quotes' ? value.replace(/"[^"]*"|'[^']*'/g, '""') : value;
+  if (!VALUE_CHARS.test(unquoted) || FORBIDDEN_IN_VALUE.test(unquoted)) return 'its value is not allowed';
+  for (const call of unquoted.matchAll(/([a-zA-Z_-][a-zA-Z0-9_-]*)\s*\(/g)) {
     const name = call[1]!.toLowerCase();
     if (!ALLOWED_FUNCTIONS.has(name) || ((name === 'repeat' || name === 'minmax') && !GRID_FUNCTION_PROPERTIES.has(property))) {
       return `the function ${name}() is not allowed (write the size as a plain number with a unit)`;
@@ -178,8 +193,7 @@ function valueProblem(property: string, rawValue: string): string | null {
   }
   if (GRID_FUNCTION_PROPERTIES.has(property) && value.split(/[\s,()]+/).filter(Boolean).length > MAX_GRID_TOKENS) return 'it lists too many grid tracks';
   const unitless = UNITLESS_CAP[property] ?? DEFAULT_UNITLESS_CAP;
-  const unitCaps = property === 'font-size' ? FONT_SIZE_CAP : UNIT_CAP;
-  for (const token of value.matchAll(VALUE_TOKEN)) {
+  for (const token of unquoted.matchAll(VALUE_TOKEN)) {
     if (token[1] === undefined) continue;
     if (token[2] !== undefined) return 'scientific notation (1e3) is not allowed';
     const amount = Number(token[1]);
@@ -187,13 +201,9 @@ function valueProblem(property: string, rawValue: string): string | null {
     if (unit === '') {
       if (Math.abs(amount) > unitless) return 'a number in it is far larger than a page needs';
     } else {
-      const cap = unitCaps[unit];
+      const cap = UNIT_CAP[unit];
       if (cap === undefined) return `the unit "${unit}" is not allowed`;
       if (Math.abs(amount) > cap) return 'a length in it is far larger than a page';
-    }
-    if (amount < 0) {
-      const floor = NEGATIVE_OK.has(property) ? NEGATIVE_UNIT_CAP[unit] ?? (unit === '' ? 0 : -1) : -1;
-      if (floor < 0 || Math.abs(amount) > floor) return 'a negative size could move content over the page header or footer';
     }
   }
   const keyword = KEYWORDS[property];
@@ -202,7 +212,6 @@ function valueProblem(property: string, rawValue: string): string | null {
     const families = value.split(',').map((name) => name.trim().replace(/^(["'])(.*)\1$/, '$2').trim());
     if (!families.every((name) => FONT_FAMILY.test(name))) return 'the font is not installed';
   }
-  if ((property === 'background' || property === 'background-color') && /gradient|none\s+\S/i.test(value)) return 'only a plain background colour is allowed';
   return null;
 }
 
@@ -281,7 +290,9 @@ export function cleanDeclarations(text: string, report: StripReport): string {
   return kept.join(';');
 }
 
-const PSEUDO = '(?:first-child|last-child|only-child|first-of-type|last-of-type|only-of-type|empty)';
+const PSEUDO = '(?:first-child|last-child|only-child|first-of-type|last-of-type|only-of-type|empty|hover|focus|focus-within|active)';
+/** Pseudo-elements (and their old one-colon spelling). They draw from the element's own `content`; nothing about them moves. */
+const PSEUDO_ELEMENT = '(?::?:(?:before|after)|::(?:marker|first-letter|first-line|selection))';
 const NTH = '(?:nth-child|nth-last-child|nth-of-type|nth-last-of-type)\\((?:odd|even|[0-9n+\\- ]{1,12})\\)';
 const COMPOUND = new RegExp(
   '^(?:' +
@@ -289,6 +300,7 @@ const COMPOUND = new RegExp(
       '\\*',
       '[a-zA-Z][a-zA-Z0-9]*',
       '\\.[a-zA-Z_][a-zA-Z0-9_-]*',
+      PSEUDO_ELEMENT,
       `:${PSEUDO}`,
       `:${NTH}`,
       ':lang\\([a-zA-Z]{2,3}(?:-[a-zA-Z]{2,8})?\\)',
@@ -298,22 +310,57 @@ const COMPOUND = new RegExp(
 );
 const COMBINATOR = /^\s*([>+~])\s*|^\s+/;
 
+/** A logical pseudo-class whose argument is itself a selector list (`:not(.a, p)`). */
+const LOGICAL = /^:(not|is|where)\(/i;
+
 /**
- * The selector rebuilt from its validated parts, prefixed with the body
- * wrapper class, or null when any part is not recognised. `knownElement`
- * decides which element names may appear.
+ * The argument of a logical pseudo-class at the start of `rest`, rebuilt from
+ * validated parts (one level deep, never prefixed: it qualifies an element
+ * that the outer selector already places inside the paper), with the length
+ * of the text it used; null when any part is not recognised.
  */
-function scopeSelector(selector: string, knownElement: (name: string) => boolean): string | null {
+function logicalPseudo(rest: string, knownElement: (name: string) => boolean, nested: boolean): { text: string; length: number } | null {
+  const head = LOGICAL.exec(rest);
+  if (!head || nested) return null;
+  let depth = 0;
+  let end = -1;
+  for (let index = head[0].length - 1; index < rest.length; index += 1) {
+    if (rest[index] === '(') depth += 1;
+    else if (rest[index] === ')' && --depth === 0) {
+      end = index;
+      break;
+    }
+  }
+  if (end < 0) return null;
+  const inner = rest.slice(head[0].length, end).split(',').map((part) => rebuildSelector(part, knownElement, true));
+  if (inner.some((part) => part === null)) return null;
+  return { text: `:${head[1]!.toLowerCase()}(${inner.join(',')})`, length: end + 1 };
+}
+
+/**
+ * The selector rebuilt from its validated parts, or null when any part is not
+ * recognised. `knownElement` decides which element names may appear;
+ * `nested` is true inside a logical pseudo-class, where another one is not
+ * accepted.
+ */
+function rebuildSelector(selector: string, knownElement: (name: string) => boolean, nested: boolean): string | null {
   let rest = selector.trim();
   if (rest === '' || rest.length > 200) return null;
-  // A selector an earlier pass prefixed: remove that ONE descendant prefix and parse the rest as written. A wrapper
-  // followed by anything else (`.qp-body ~ *`, `.qp-body + p`, `.qp-body > p`, `.qp-body.x`, a bare `.qp-body`) is not
-  // a prefix; it falls through, fails the parse (a combinator cannot start a selector) or names a reserved class.
-  rest = rest.replace(new RegExp(`^\\.${QUESTION_PAPER_BODY_CLASS}\\s+`), '');
   let rebuilt = '';
   let expectCompound = true;
   while (rest.length > 0) {
     if (expectCompound) {
+      const logical = logicalPseudo(rest, knownElement, nested);
+      if (logical) {
+        rebuilt += logical.text;
+        rest = rest.slice(logical.length);
+        if (rest.length > 0 && !/^[\s>+~]/.test(rest)) {
+          if (/^[a-zA-Z*]/.test(rest)) return null;
+          continue;
+        }
+        expectCompound = false;
+        continue;
+      }
       const part = COMPOUND.exec(rest);
       if (!part) return null;
       const text = part[0];
@@ -336,7 +383,20 @@ function scopeSelector(selector: string, knownElement: (name: string) => boolean
     }
   }
   if (expectCompound) return null;
-  return `.${QUESTION_PAPER_BODY_CLASS} ${rebuilt}`;
+  return rebuilt;
+}
+
+/**
+ * The selector rebuilt from its validated parts, prefixed with the body
+ * wrapper class, or null when any part is not recognised.
+ */
+function scopeSelector(selector: string, knownElement: (name: string) => boolean): string | null {
+  // A selector an earlier pass prefixed: remove that ONE descendant prefix and parse the rest as written. A wrapper
+  // followed by anything else (`.qp-body ~ *`, `.qp-body + p`, `.qp-body > p`, `.qp-body.x`, a bare `.qp-body`) is not
+  // a prefix; it falls through, fails the parse (a combinator cannot start a selector) or names a reserved class.
+  const rest = selector.trim().replace(new RegExp(`^\\.${QUESTION_PAPER_BODY_CLASS}\\s+`), '');
+  const rebuilt = rebuildSelector(rest, knownElement, false);
+  return rebuilt === null ? null : `.${QUESTION_PAPER_BODY_CLASS} ${rebuilt}`;
 }
 
 /**
@@ -380,7 +440,8 @@ export function cleanStyleSheet(css: string, report: StripReport, knownElement: 
       report.add('A malformed or nested CSS rule was removed');
       continue;
     }
-    const selectors = prelude.split(',').map((selector) => scopeSelector(selector, knownElement));
+    // Commas inside `:is(...)` / `:not(...)` belong to the argument, not the rule's list.
+    const selectors = (splitTopLevel(prelude, ',') ?? [prelude, '']).map((selector) => scopeSelector(selector, knownElement));
     if (selectors.some((selector) => selector === null)) {
       report.add(`The CSS selector "${prelude.trim().slice(0, 60)}" is not allowed and its rule was removed`);
       continue;
