@@ -42,6 +42,10 @@ export function Footer() {
       </div>
       <div className="cp-footer-base">
         <small>© 2026 CampusPilot</small>
+        <nav className="cp-footer-legal" aria-label="Legal">
+          <Link to="/privacy">Privacy policy</Link>
+          <Link to="/terms">Terms of use</Link>
+        </nav>
         <small>Made for schools in India</small>
       </div>
     </footer>

@@ -22,6 +22,8 @@ const PREVIEW_BY_HREF: Readonly<Record<string, PreviewKey | undefined>> = {
   "/features/documents": "documents",
   "/features/dashboards": "dashboards",
   "/features/student-portal": "student-portal",
+  "/features/question-papers": "question-papers",
+  "/features/notices": "notices",
   "/security": "security",
 };
 

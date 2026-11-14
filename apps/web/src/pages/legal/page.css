@@ -1,0 +1,115 @@
+/*
+ * Legal pages: `/privacy` and `/terms`. Prefix: `pg-legal-`.
+ */
+
+.cp-section.pg-legal {
+  padding-block: 64px 96px;
+}
+
+.pg-legal-layout {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 48px;
+  align-items: start;
+}
+
+.pg-legal-toc {
+  position: sticky;
+  top: calc(var(--cp-header-h) + 24px);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 13.5px;
+}
+
+.pg-legal-toc p {
+  margin: 0;
+  color: var(--cp-subtle);
+  font-size: 12px;
+  font-weight: 550;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.pg-legal-toc ol {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pg-legal-toc a {
+  color: var(--cp-muted);
+  text-decoration: none;
+}
+
+.pg-legal-toc a:hover {
+  color: var(--cp-ink);
+}
+
+.pg-legal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 40px;
+  max-width: 720px;
+}
+
+.pg-legal-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.pg-legal-section h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.pg-legal-section h2 span {
+  color: var(--cp-accent);
+}
+
+.pg-legal-section p,
+.pg-legal-section li {
+  margin: 0;
+  color: var(--cp-muted);
+  font-size: 15.5px;
+  line-height: 1.65;
+}
+
+.pg-legal-section ul {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding-left: 20px;
+}
+
+.pg-legal-other {
+  margin: 0;
+  color: var(--cp-muted);
+  font-size: 15px;
+}
+
+.pg-legal-other a {
+  color: var(--cp-accent);
+}
+
+@media (max-width: 960px) {
+  .cp-section.pg-legal {
+    padding-inline: 20px;
+  }
+
+  .pg-legal-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 32px;
+  }
+
+  .pg-legal-toc {
+    position: static;
+  }
+}

@@ -47,13 +47,13 @@ const aiStatuses: readonly AiStatus[] = [
     tag: "Available today",
     tone: "today",
     title: "Assistants your team already uses",
-    text: "They can look up and work with CampusPilot records, with the same permissions as the person asking.",
+    text: "They can look up and work with CampusPilot records, with the same permissions as the person asking. Inside CampusPilot, AI drafts question papers for teachers to review.",
   },
   {
     tag: "On the roadmap",
     tone: "coming",
-    title: "Help inside CampusPilot",
-    text: "AI that prepares work for a person to review, such as a fee-reminder list or report cards waiting for approval.",
+    title: "More help inside CampusPilot",
+    text: "AI that prepares more work for a person to review, such as a fee-reminder list or report cards waiting for approval.",
   },
 ];
 

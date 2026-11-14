@@ -132,20 +132,20 @@ function MenuGroupList({ group, onNavigate }: { group: NavGroup; onNavigate: () 
   );
 }
 
-/** Dark promo card in the Product menu that carries the AI-ready message. */
-function AiSpotlight({ onNavigate }: { onNavigate: () => void }) {
+/** Dark promo card in the Product menu that announces question paper generation. */
+function QuestionPaperSpotlight({ onNavigate }: { onNavigate: () => void }) {
   return (
-    <Link className="cp-spotlight" to="/ai-ready" onClick={onNavigate}>
+    <Link className="cp-spotlight" to="/features/question-papers" onClick={onNavigate}>
       <span className="cp-spotlight-badge">
-        <Sparkles aria-hidden="true" /> AI-ready
+        <Sparkles aria-hidden="true" /> New · With AI
       </span>
       <span className="cp-spotlight-orbit" aria-hidden="true">
         <i />
         <i />
         <i />
       </span>
-      <b>Answers from your live records</b>
-      <small>Assistants only see what that person may see.</small>
+      <b>Question paper generation</b>
+      <small>Turn a handwritten draft into a printed paper.</small>
     </Link>
   );
 }
@@ -156,7 +156,7 @@ function MenuPanel({ menu, onNavigate }: { menu: NavMenu; onNavigate: () => void
       {menu.groups.map((group) => (
         <MenuGroupList key={group.label} group={group} onNavigate={onNavigate} />
       ))}
-      {menu.spotlight ? <AiSpotlight onNavigate={onNavigate} /> : null}
+      {menu.spotlight ? <QuestionPaperSpotlight onNavigate={onNavigate} /> : null}
     </div>
   );
 }

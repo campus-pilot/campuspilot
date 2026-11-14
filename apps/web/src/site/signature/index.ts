@@ -18,6 +18,8 @@ export {
   DocumentsArt,
   ExamsArt,
   FeesArt,
+  NoticesArt,
+  QuestionPapersArt,
   StudentPortalArt,
   featureArt,
   type ArtProps,

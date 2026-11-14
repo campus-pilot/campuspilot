@@ -11,6 +11,7 @@ const todayItems: readonly TodayItem[] = [
   { title: "Answers from live records", text: "Answers come from what is in CampusPilot right now, not from a spreadsheet exported last week." },
   { title: "Same permissions as the person asking", text: "A class teacher's assistant sees her classes. An accountant's sees fees. Nobody's sees more than they do." },
   { title: "Access ends with the person", text: "Your records are not copied into a separate AI tool, so when someone's access ends, their assistant's ends too." },
+  { title: "Question papers drafted by AI", text: "Inside CampusPilot, a teacher uploads a handwritten paper or describes it in chat. AI drafts it, the teacher refines it, and it prints on the school's letterhead." },
 ];
 
 type NextItem = { title: string; text: string; reviewer: string };
@@ -45,7 +46,7 @@ function LaneHead({ id, icon: Icon, status, title, text }: { id: string; icon: L
 function TodayLane() {
   return (
     <article className="pg-ai-lane" data-lane="today" aria-labelledby="pg-ai-today-title">
-      <LaneHead id="pg-ai-today-title" icon={Check} status="Available today" title="Your assistants, inside your rules" text="The AI assistants your team already uses can work with CampusPilot records." />
+      <LaneHead id="pg-ai-today-title" icon={Check} status="Available today" title="Your assistants, inside your rules" text="Assistants your team already uses work with your records, and AI inside CampusPilot drafts question papers." />
       <ul className="pg-ai-today-list">
         {todayItems.map((item, index) => (
           <li key={item.title} style={stagger(index)}>
@@ -71,7 +72,7 @@ function NextCard({ item, index }: { item: NextItem; index: number }) {
 function NextLane() {
   return (
     <article className="pg-ai-lane" data-lane="next" aria-labelledby="pg-ai-next-title">
-      <LaneHead id="pg-ai-next-title" icon={CalendarClock} status="Coming · on the roadmap" title="AI that prepares work for review" text="Agentic AI inside the CampusPilot web app that gets the routine work ready, then waits for a person." />
+      <LaneHead id="pg-ai-next-title" icon={CalendarClock} status="Coming · on the roadmap" title="More AI that prepares work for review" text="More agentic AI inside the CampusPilot web app that gets routine work ready, then waits for a person." />
       <ul className="pg-ai-next-list">
         {nextItems.map((item, index) => <NextCard key={item.title} item={item} index={index} />)}
       </ul>
@@ -81,7 +82,7 @@ function NextLane() {
 }
 
 /**
- * Honest split between what ships today (solid lane) and what is on the
+ * Honest split between what ships today (solid lane, including AI question papers) and what is on the
  * roadmap (dashed lane, "Coming" status, every item a draft awaiting a named
  * reviewer). Lanes rise in once on view (`playOnView`).
  */

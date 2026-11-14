@@ -6,6 +6,7 @@ import {
   Calculator,
   ChartColumn,
   ClipboardCheck,
+  FilePenLine,
   FileText,
   GraduationCap,
   IndianRupee,
@@ -13,6 +14,7 @@ import {
   LayoutGrid,
   Library,
   Mail,
+  Megaphone,
   MessageSquareText,
   NotebookPen,
   School,
@@ -60,7 +62,7 @@ export type NavMenu = {
   groups: readonly NavGroup[];
   id: string;
   label: string;
-  /** Shows the dark "AI-ready" spotlight card beside the link groups. */
+  /** Shows the dark question-paper spotlight card beside the link groups. */
   spotlight: boolean;
 };
 
@@ -72,12 +74,14 @@ const productGroups: readonly NavGroup[] = [
       { href: "/features/academics", label: "Academics", description: "Sessions, classes and teachers", icon: GraduationCap, motion: "toss" },
       { href: "/features/billing", label: "Finance & fees", description: "Bills, receipts and ledgers", icon: IndianRupee, motion: "flip" },
       { href: "/features/examinations", label: "Examinations", description: "Marks, approvals, report cards", icon: ClipboardCheck, motion: "wiggle" },
+      { href: "/features/question-papers", label: "Question papers", description: "Handwritten draft to printed paper, with AI", icon: FilePenLine, motion: "write" },
     ],
   },
   {
     label: "Records & access",
     items: [
       { href: "/features/documents", label: "Documents", description: "Branded outputs from live records", icon: FileText, motion: "lift" },
+      { href: "/features/notices", label: "Notices & notifications", description: "In the app, on WhatsApp and by push", icon: Megaphone, motion: "bounce" },
       { href: "/features/dashboards", label: "Dashboards", description: "The session at a glance", icon: ChartColumn, motion: "bars" },
       { href: "/features/student-portal", label: "Student & family access", description: "Each student sees only their own", icon: UsersRound, motion: "rise" },
       { href: "/product", label: "Platform overview", description: "How it all connects", icon: LayoutGrid, motion: "grid" },
