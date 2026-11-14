@@ -19,7 +19,7 @@ import type {
   TextRequest,
   TextResult,
 } from './types';
-import { ANTHROPIC_IMAGE_MIME_TYPES } from './image-types';
+import { ANTHROPIC_DOCUMENT_MIME_TYPES, ANTHROPIC_IMAGE_MIME_TYPES } from './image-types';
 import { withBilledUsage } from './types';
 
 /**
@@ -229,7 +229,20 @@ export async function streamAssistantResponse({
   }
 }
 
-export { ANTHROPIC_IMAGE_MIME_TYPES };
+export { ANTHROPIC_DOCUMENT_MIME_TYPES, ANTHROPIC_IMAGE_MIME_TYPES };
+
+/**
+ * A PDF as the Claude API reads it natively: a `document` content block with a
+ * base64 `application/pdf` source (`BetaRequestDocumentBlock` with
+ * `BetaBase64PDFSource` in @anthropic-ai/sdk 1.7.0;
+ * https://platform.claude.com/docs/en/build-with-claude/pdf-support). The bytes
+ * are the uploaded file, unchanged: never rasterised or text-extracted here.
+ * The limits that apply (pages per request, request size) are the provider's;
+ * a request over them is refused and the turn fails with a sentence about the PDF.
+ */
+export function anthropicDocumentBlock(bytes: Uint8Array): Anthropic.Beta.Messages.BetaRequestDocumentBlock {
+  return { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: Buffer.from(bytes).toString('base64') } };
+}
 
 function anthropicContentOf(part: TextPart): Anthropic.Beta.Messages.BetaContentBlockParam {
   if (part.type === 'text') return { type: 'text', text: part.text };
@@ -374,7 +387,14 @@ export const anthropicContext: ContextAdapter = {
     };
   },
   materializeAttachment(marker: AttachmentMarker, file: AttachmentFile) {
+    if (file.kind === 'document') {
+      if (marker.kind !== 'document' || !ANTHROPIC_DOCUMENT_MIME_TYPES.some((supported) => supported === file.mimeType)) {
+        return [{ type: 'text', text: attachmentNote(marker, 'unreadable') }];
+      }
+      return [{ type: 'text', text: attachmentLabel(marker) }, anthropicDocumentBlock(file.bytes)];
+    }
     if (file.kind !== 'image') return [{ type: 'text', text: attachmentNote(marker, file.kind) }];
+    if (marker.kind !== 'image') return [{ type: 'text', text: attachmentNote(marker, 'unreadable') }];
     const mediaType = ANTHROPIC_IMAGE_MIME_TYPES.find((supported) => supported === file.mimeType);
     if (!mediaType) return [{ type: 'text', text: attachmentNote(marker, 'unreadable') }];
     return [
@@ -400,6 +420,7 @@ export function createAnthropicProvider({ apiKey, model }: { apiKey: string; mod
     id: 'anthropic',
     model,
     imageMimeTypes: ANTHROPIC_IMAGE_MIME_TYPES,
+    documentMimeTypes: ANTHROPIC_DOCUMENT_MIME_TYPES,
     // The API refuses an image over 5 MB; only an undecodable original (no 600 KB JPEG copy) can come near it.
     maxImageBytes: 5 * 1024 * 1024,
     context: anthropicContext,

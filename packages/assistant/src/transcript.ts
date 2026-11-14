@@ -1,3 +1,4 @@
+import type { AssistantAttachmentKind } from '@campuspilot/assistant-contract/attachments';
 import type { AssistantUserMessageBody } from '@campuspilot/db/schema/assistant';
 
 /**
@@ -21,13 +22,15 @@ export const interruptedTranscriptKey = (runId: string) => `${runId}:interrupted
 
 /**
  * Where an attachment sits in a stored user turn: a provider-neutral marker,
- * never the image. Transcripts stay small and provider-independent; each
- * model request turns the markers into the provider's image parts
- * (`runtime/context.ts`), or into a short text note once the image is old.
+ * never the file. Transcripts stay small and provider-independent; each
+ * model request turns the markers into the provider's image or document parts
+ * (`runtime/context.ts`), or into a short text note once the file is old.
  */
 export type AttachmentMarker = {
   type: 'campuspilot_attachment';
   attachmentId: string;
+  /** Image or document, copied from the attachment's reference (the notes and labels differ per kind). */
+  kind: AssistantAttachmentKind;
   fileName: string;
   contentType: string;
   /** 1-based position within its message. */
@@ -50,8 +53,8 @@ function seedText(seed: NonNullable<AssistantUserMessageBody['seed']>): string {
 /**
  * A user message as blocks, in order: the page the user was on (context, not
  * part of what they asked), the screen a seeded conversation started from,
- * one marker per attached image, then the text (omitted when the user sent
- * only images: providers reject empty text blocks).
+ * one marker per attached file, then the text (omitted when the user sent
+ * only files: providers reject empty text blocks).
  */
 export function buildUserTranscriptContent(body: AssistantUserMessageBody): unknown[] {
   const blocks: unknown[] = [];
@@ -69,6 +72,7 @@ export function buildUserTranscriptContent(body: AssistantUserMessageBody): unkn
     blocks.push({
       type: 'campuspilot_attachment',
       attachmentId: attachment.id,
+      kind: attachment.kind,
       fileName: attachment.fileName,
       contentType: attachment.contentType,
       ordinal: index + 1,

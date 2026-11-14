@@ -46,6 +46,36 @@ describe('chat attachments as figures', () => {
     runId = run!.id;
   });
 
+  /** A PDF the manager sent in a chat message (its object is the PDF itself; nothing is derived from it). */
+  async function documentAttachment() {
+    const id = generateId('assistantAttachment');
+    const key = `schools/${world.schoolId}/assistant/attachments/${id}/original.pdf`;
+    const bytes = Buffer.from('%PDF-1.7\n1 0 obj\n<<>>\nendobj\n%%EOF\n');
+    await putObject(key, bytes, 'application/pdf');
+    position += 1;
+    const [item] = await db
+      .insert(assistantItemTable)
+      .values({ conversationId, runId, kind: 'user_message', status: 'complete', position, sequence: position, itemKey: `item-${crypto.randomUUID()}`, body: { text: 'source' } })
+      .returning();
+    await db.insert(assistantAttachmentTable).values({
+      id,
+      schoolId: world.schoolId,
+      userId: world.people.manager.userId,
+      kind: 'document',
+      originalName: 'old-paper.pdf',
+      contentType: 'application/pdf',
+      byteSize: bytes.byteLength,
+      sha256: 'x',
+      s3Key: key,
+      derivativeStatus: null,
+      conversationId,
+      itemId: item!.id,
+      position: 1,
+      attachedAt: new Date(),
+    });
+    return id;
+  }
+
   /** An attachment row with its object, sent (bound to a message) unless `sent` is false. */
   async function attachment(options: { userId?: string; sent?: boolean; heic?: boolean } = {}) {
     const id = generateId('assistantAttachment');
@@ -68,6 +98,7 @@ describe('chat attachments as figures', () => {
       id,
       schoolId: world.schoolId,
       userId,
+      kind: 'image',
       originalName: 'diagram.jpg',
       contentType: options.heic ? 'image/heic' : 'image/jpeg',
       byteSize: bytes.byteLength,
@@ -166,6 +197,23 @@ describe('chat attachments as figures', () => {
     const theirs = await attachment({ userId: world.people.teacher.userId });
     const crossed = await errorOf(agent().school.saveQuestionPaperVersion({ ...k, expectedVersionNo: 0, html: withFigure(theirs) }));
     expect(crossed).toMatchObject({ code: 'BAD_REQUEST' });
+  });
+
+  it('refuses a PDF the user sent as a figure, with a problem that says to read it and use a placeholder', async () => {
+    const id = await documentAttachment();
+    const k = world.key({ classId: world.otherClassId, subjectSlug: 'science' });
+    const checked = await agent().school.validateQuestionPaperDraft({ ...k, html: withFigure(id) });
+    expect(checked.valid).toBe(false);
+    expect(checked.problems[0]).toContain('old-paper.pdf is a PDF the user attached, not an image');
+    expect(checked.problems[0]).toContain('data-placeholder');
+    // A save refuses it too, and nothing is copied into the paper.
+    const saved = await errorOf(agent().school.saveQuestionPaperVersion({ ...k, expectedVersionNo: 0, html: withFigure(id) }));
+    expect(saved).toMatchObject({ code: 'BAD_REQUEST' });
+    expect(await db.select().from(examQuestionPaperFigureTable).where(eq(examQuestionPaperFigureTable.sourceAttachmentId, id))).toHaveLength(0);
+    // Nor does a preview print it.
+    const preview = await world.people.manager.client.school.previewQuestionPaperDraft({ ...k, html: withFigure(id) });
+    expect(preview.html).toBe('');
+    expect(preview.problems[0]).toContain('is a PDF the user attached');
   });
 
   it('previews a draft with the owner\'s attachment inline, and not for anyone else', async () => {

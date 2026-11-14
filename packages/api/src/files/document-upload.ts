@@ -9,11 +9,16 @@ export type ParsedDocumentUpload = {
   fileName: string;
 };
 
-/** Parses exactly one bounded multipart file without trusting its media type. */
+/**
+ * Parses exactly one bounded multipart file without trusting its media type.
+ * `subject` names the file in the refusals ("admission document" unless a
+ * caller says otherwise, such as the assistant's "attachment").
+ */
 export function parseDocumentUpload(
   request: Request,
-  options: { fieldName: string; maxBytes: number },
+  options: { fieldName: string; maxBytes: number; subject?: string },
 ): Promise<ParsedDocumentUpload> {
+  const subject = options.subject ?? 'admission document';
   if (!request.body) {
     throw rpcError.badRequest('A multipart request body is required.');
   }
@@ -54,12 +59,12 @@ export function parseDocumentUpload(
         file.on('error', rejectFile);
         file.on('end', () => {
           if (exceededLimit) {
-            rejectFile(rpcError.payloadTooLarge(`Each admission document must be ${Math.floor(options.maxBytes / 1024 / 1024)} MB or smaller.`));
+            rejectFile(rpcError.payloadTooLarge(`Each ${subject} must be ${Math.floor(options.maxBytes / 1024 / 1024)} MB or smaller.`));
             return;
           }
           const bytes = Buffer.concat(chunks);
           if (bytes.byteLength === 0) {
-            rejectFile(rpcError.badRequest('The admission document cannot be empty.'));
+            rejectFile(rpcError.badRequest(`The ${subject} cannot be empty.`));
             return;
           }
           resolveFile({
@@ -72,12 +77,12 @@ export function parseDocumentUpload(
       fileResult.catch(() => {});
     });
 
-    parser.on('filesLimit', () => reject(rpcError.badRequest('Upload exactly one admission document.')));
+    parser.on('filesLimit', () => reject(rpcError.badRequest(`Upload exactly one ${subject}.`)));
     parser.on('fieldsLimit', () => reject(rpcError.badRequest('Additional form fields are not allowed.')));
     parser.on('error', reject);
     parser.on('finish', async () => {
       if (fileCount !== 1 || !fileResult) {
-        reject(rpcError.badRequest('Upload exactly one admission document.'));
+        reject(rpcError.badRequest(`Upload exactly one ${subject}.`));
         return;
       }
       try {

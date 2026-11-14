@@ -1,13 +1,10 @@
 import { rpcError, rpcErrorResponse } from '@campuspilot/api/errors';
-import { parseImageUpload, QUESTION_PAPER_IMAGE_FAMILY } from '@campuspilot/api/files/image-upload';
+import { parseAttachmentUpload } from '@campuspilot/api/files/attachment-upload';
 import {
   pageImageUrl,
   QUESTION_PAPER_IMAGE_CACHE_SECONDS,
 } from '@campuspilot/api/routers/school/question-paper/question-paper.storage';
-import {
-  ASSISTANT_ATTACHMENT_FIELD_NAME,
-  ASSISTANT_ATTACHMENT_MAX_BYTES,
-} from '@campuspilot/assistant-contract/attachments';
+import { ASSISTANT_ATTACHMENT_FIELD_NAME } from '@campuspilot/assistant-contract/attachments';
 import { assistantAttachmentTable } from '@campuspilot/db/schema/assistant';
 import { env } from '@campuspilot/env/server';
 import { and, eq } from 'drizzle-orm';
@@ -34,13 +31,16 @@ async function requireSession(headers: Headers): Promise<AssistantSession> {
 }
 
 /**
- * Stores one image for the next chat message (multipart field `file`, exactly
- * one file; the composer sends several requests). Checks run in this order and
- * the body is not read before the last one passes: the origin, a browser
- * session (an API key is refused, as for `/model/*`), then the same use
- * access as sending (feature, role, monthly limit). Then the file is read
- * bounded to 15 MiB, type-checked by bytes (JPEG, PNG, WebP, HEIC/HEIF),
- * decoded into a thumbnail and a model copy, and stored unsent.
+ * Stores one image or PDF for the next chat message (multipart field `file`,
+ * exactly one file; the composer sends several requests). Checks run in this
+ * order and the body is not read before the last one passes: the origin, a
+ * browser session (an API key is refused, as for `/model/*`), then the same
+ * use access as sending (feature, role, monthly limit). Then the file is read
+ * bounded to 15 MiB and its kind is decided by its bytes alone (JPEG, PNG,
+ * WebP, HEIC/HEIF, or `%PDF-`; never the name or declared type). An image is
+ * decoded into a thumbnail and a model copy and capped at 15 MiB; a PDF is
+ * capped at 10 MiB and stored as it is (never parsed or rendered). Anything
+ * else is a 415 that says to save documents as PDF.
  */
 export async function handleAssistantAttachmentUpload(
   request: Request,
@@ -51,16 +51,11 @@ export async function handleAssistantAttachmentUpload(
     assertAllowedOrigin(request);
     const session = await requireSession(request.headers);
     assertCanUse(await loadAssistantAccess(session, schoolId));
-    const upload = await parseImageUpload(request, {
-      fieldName: ASSISTANT_ATTACHMENT_FIELD_NAME,
-      maxBytes: ASSISTANT_ATTACHMENT_MAX_BYTES,
-      subject: 'image',
-      family: QUESTION_PAPER_IMAGE_FAMILY,
-    });
+    const upload = await parseAttachmentUpload(request, { fieldName: ASSISTANT_ATTACHMENT_FIELD_NAME });
     const attachment = await createAttachment(db, {
       schoolId,
       userId: session.user.id,
-      file: { bytes: upload.bytes, contentType: upload.contentType, extension: upload.extension, name: upload.fileName },
+      file: { bytes: upload.bytes, kind: upload.kind, contentType: upload.contentType, extension: upload.extension, name: upload.fileName },
     });
     return Response.json(attachment, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
@@ -70,11 +65,15 @@ export async function handleAssistantAttachmentUpload(
 }
 
 /**
- * Redirects the owner of an attachment to a five-minute URL of its image:
+ * Redirects the owner of an image attachment to a five-minute URL of it:
  * `thumb` (a JPEG thumbnail, used as `<img src>`) or `original`. Only the
  * user who uploaded it may read it, and only while they may see the assistant
  * in the school. An image the server could not decode has no thumbnail (404);
  * the screen draws a tile instead.
+ *
+ * A document is never served, in either variant (404): a PDF can carry script
+ * and a browser renders it inline, so its bytes go to the model and nowhere
+ * else. The screen shows a document as a tile with its name and size.
  */
 export async function handleAssistantAttachmentRead(
   headers: Headers,
@@ -96,7 +95,7 @@ export async function handleAssistantAttachmentRead(
         ),
       )
       .limit(1);
-    if (!row) throw rpcError.notFound('Attachment');
+    if (!row || row.kind !== 'image') throw rpcError.notFound('Attachment');
     const thumb = input.variant === 'thumb';
     const key = thumb ? row.thumbS3Key : row.s3Key;
     if (!key) throw rpcError.notFound('Attachment image');
@@ -116,11 +115,11 @@ export async function handleAssistantAttachmentRead(
 }
 
 /**
- * Removes one image the caller attached but has not sent (the composer's
- * remove button; the 40 unsent images a user may hold count until then).
+ * Removes one file the caller attached but has not sent (the composer's
+ * remove button; the 40 unsent files a user may hold count until then).
  * Origin, browser session and the right to see the assistant are checked like
  * a read, not like an upload: taking an image back must still work for a
- * school over its monthly limit. Only the owner's own unsent image goes; one
+ * school over its monthly limit. Only the owner's own unsent file goes; one
  * already sent is a CONFLICT, and one that is not there answers
  * `{ deleted: false }`.
  */

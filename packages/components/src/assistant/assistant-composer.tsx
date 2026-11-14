@@ -16,6 +16,7 @@ import { z } from 'zod';
 import { AssistantAttachmentStrip } from './assistant-attachment-strip';
 import {
   AttachmentsMissingError,
+  attachmentKindOfFile,
   attachmentSendBlock,
   hasMessageContent,
   markMissingAttachments,
@@ -27,10 +28,10 @@ import {
 
 const composerSchema = z.object({
   text: z.string(),
-  attachments: z.array(z.custom<ComposerAttachment>()).max(ASSISTANT_ATTACHMENTS_PER_MESSAGE, `A message can carry at most ${ASSISTANT_ATTACHMENTS_PER_MESSAGE} images.`),
+  attachments: z.array(z.custom<ComposerAttachment>()).max(ASSISTANT_ATTACHMENTS_PER_MESSAGE, `A message can carry at most ${ASSISTANT_ATTACHMENTS_PER_MESSAGE} attachments.`),
 });
 
-/** How many images upload at once; the rest wait their turn, in the order picked. */
+/** How many files upload at once; the rest wait their turn, in the order picked. */
 const UPLOAD_CONCURRENCY = 3;
 
 /** Buttons never take focus from the message box when clicked (T3 Code). */
@@ -117,7 +118,7 @@ function SendButton({
   );
 }
 
-/** What a parent may do to the box without remounting it (a remount would drop the images attached in it). */
+/** What a parent may do to the box without remounting it (a remount would drop the files attached in it). */
 export type AssistantComposerControls = {
   /** Empties the text field when it holds exactly `text` (an untouched prefilled sentence); anything the user edited stays. */
   clearTextIf: (text: string) => void;
@@ -163,14 +164,15 @@ export type AssistantComposerProps = {
   /** Up arrow in an empty box recalls this (the last message sent). */
   lastSentText?: string;
   /**
-   * Turns on image attachments (paperclip, drop, paste). `upload` stores one
-   * file for the next message and resolves with the stored attachment and the
-   * address of its thumbnail (the caller converts HEIC where the browser can,
-   * and posts it). `onNotice` hears why picked files were refused. A message
-   * is sent only when no image is still uploading or failed. `remove` deletes
-   * a stored image from the server when the user takes it out of the box (an
-   * unsent image counts against the user's cap until it is deleted); it is
-   * also called for an upload that finished after its tile was removed.
+   * Turns on attachments, images and PDFs (paperclip, drop, paste). `upload`
+   * stores one file for the next message and resolves with the stored
+   * attachment and the address of its thumbnail (null for a PDF; the caller
+   * converts HEIC where the browser can, and posts it). `onNotice` hears why
+   * picked files were refused. A message is sent only when no file is still
+   * uploading or failed. `remove` deletes a stored file from the server when
+   * the user takes it out of the box (an unsent file counts against the
+   * user's cap until it is deleted); it is also called for an upload that
+   * finished after its tile was removed.
    */
   attachments?: {
     upload: (file: File) => Promise<{ ref: AssistantAttachmentRef; previewUrl: string | null }>;
@@ -242,7 +244,7 @@ export function AssistantComposer({
         await onSend(text, { text: () => formApi.getFieldValue('text') }, readyAttachments(sentAttachments));
       } catch (error) {
         if (!formApi.getFieldValue('text')) formApi.setFieldValue('text', text);
-        // The images stay with the draft, as the words do, unless new ones were added meanwhile.
+        // The attachments stay with the draft, as the words do, unless new ones were added meanwhile.
         if (formApi.getFieldValue('attachments').length === 0) {
           formApi.setFieldValue(
             'attachments',
@@ -269,7 +271,7 @@ export function AssistantComposer({
     [form],
   );
 
-  /** Replaces one image in the box by id; an image the user removed meanwhile stays removed. */
+  /** Replaces one attachment in the box by id; one the user removed meanwhile stays removed. */
   const updateAttachment = (localId: string, change: Partial<ComposerAttachment>) =>
     form.setFieldValue('attachments', (items) => items.map((item) => (item.localId === localId ? { ...item, ...change } : item)));
 
@@ -280,7 +282,7 @@ export function AssistantComposer({
     if (removed?.ref) void discardStored(removed.ref);
   };
 
-  /** Deletes a stored image nobody will send; a failure is reported once, the server sweeps it later. */
+  /** Deletes a stored file nobody will send; a failure is reported once, the server sweeps it later. */
   async function discardStored(ref: AssistantAttachmentRef) {
     try {
       await attachments?.remove(ref);
@@ -297,9 +299,17 @@ export function AssistantComposer({
       // The user removed the tile while it was uploading: the stored copy has no tile and would count against the cap.
       if (!tile) return void (await discardStored(stored.ref));
       if (tile.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(tile.previewUrl);
-      updateAttachment(localId, { status: 'ready', ref: stored.ref, previewUrl: stored.previewUrl, error: null });
+      // The server decided the kind from the bytes; its answer replaces the guess from the file's type.
+      updateAttachment(localId, {
+        status: 'ready',
+        ref: stored.ref,
+        kind: stored.ref.kind,
+        byteSize: stored.ref.byteSize,
+        previewUrl: stored.ref.kind === 'image' ? stored.previewUrl : null,
+        error: null,
+      });
     } catch (error) {
-      updateAttachment(localId, { status: 'failed', error: error instanceof Error ? error.message : 'The image could not be uploaded.' });
+      updateAttachment(localId, { status: 'failed', error: error instanceof Error ? error.message : 'The file could not be uploaded.' });
     }
   }
 
@@ -309,13 +319,16 @@ export function AssistantComposer({
     const plan = planAttachmentPicks(picked, form.getFieldValue('attachments').length);
     const notice = rejectionSummary(plan.rejected);
     if (notice) attachments.onNotice(notice);
-    const queue = plan.accepted.map((file) => ({ file, localId: crypto.randomUUID() }));
+    const queue = plan.accepted.map(({ file, kind }) => ({ file, kind, localId: crypto.randomUUID() }));
     form.setFieldValue('attachments', (items) => [
       ...items,
-      ...queue.map(({ file, localId }): ComposerAttachment => ({
+      ...queue.map(({ file, localId, kind }): ComposerAttachment => ({
         localId,
+        kind,
         fileName: file.name,
-        previewUrl: URL.createObjectURL(file),
+        byteSize: file.size,
+        // Only an image gets a local preview; a PDF is never rendered in the page.
+        previewUrl: kind === 'image' ? URL.createObjectURL(file) : null,
         status: 'uploading',
         ref: null,
         error: null,
@@ -331,7 +344,8 @@ export function AssistantComposer({
   }
 
   const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
-    const files = [...event.clipboardData.files].filter((file) => file.type.startsWith('image/'));
+    // Pasted images and PDFs become attachments; anything else pastes as the browser would.
+    const files = [...event.clipboardData.files].filter((file) => attachmentKindOfFile(file) !== null);
     if (!attachments || files.length === 0) return;
     event.preventDefault();
     void addFiles(files);
@@ -410,7 +424,7 @@ export function AssistantComposer({
                 multiple
                 hidden
                 accept={ASSISTANT_ATTACHMENT_ACCEPT}
-                aria-label="Attach images"
+                aria-label="Attach files"
                 onChange={(event) => {
                   void addFiles([...(event.target.files ?? [])]);
                   // The same file can be picked again after it was removed.
@@ -423,7 +437,7 @@ export function AssistantComposer({
                     type="button"
                     variant="ghost"
                     size="icon-sm"
-                    aria-label="Attach images"
+                    aria-label="Attach files"
                     disabled={disabled}
                     className="shrink-0 rounded-full text-muted-foreground"
                     onPointerDown={keepComposerFocus}
@@ -432,7 +446,7 @@ export function AssistantComposer({
                     <Paperclip />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>Attach images (up to {ASSISTANT_ATTACHMENTS_PER_MESSAGE})</TooltipContent>
+                <TooltipContent>Attach images or PDFs (up to {ASSISTANT_ATTACHMENTS_PER_MESSAGE})</TooltipContent>
               </Tooltip>
             </>
           ) : null}

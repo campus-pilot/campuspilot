@@ -257,9 +257,31 @@ the implementation and APIs in more detail.
   lifecycle navbar action shows on the root and on `/results`.
 - `/question-paper` is one table per accessible class (row per subject and mode,
   sticky subject column, status badge, Open/View). `/question-paper/<class>/<subject>/<mode>`
-  is the paper workspace: line tabs Pages / Result / Versions (section and version
-  live in `?section=&version=`), heading, top-right overflow (Download latest PDF,
-  Delete paper with an app confirmation), breadcrumbs for navigation, no back button.
+  is the paper's screen. A paper with nothing yet is one card in a centred column
+  (`max-w-3xl`), in the shape of the assistant's message box: what the paper is made from
+  on top (photos as a row of page tiles that ends in a dashed add tile, `PaperSourceTray`;
+  or one PDF or one earlier paper as a single row, `PaperSourceItem`), an optional note
+  under it, and one primary button. The card opens on the most common way (photos) instead
+  of a list of options; the rarer ways are two quiet buttons in its last row, and once a
+  way is taken the others are not shown. Things being added appear where they will stay
+  (an uploading photo is already a tile in the row), never in a separate list. Every way
+  to add more stays beside what was added (dashed tiles of the same shape at the end of
+  the row from `sm` up, a row of buttons under it on a phone), and the card's last row
+  holds only the primary button, which is grey until a press will do something. Material
+  can be checked before it is used: a photo opens large, an earlier paper has a Preview. A
+  control that is for one kind of pointer (the phone's camera, the computer's webcam) says
+  so as its own field; do not fold that into the classes that place it. Use this pattern
+  where one thing is made from material plus an optional instruction. Once the paper has a version it is the studio, a screen that fills the
+  window instead of scrolling the page (like the assistant's page): the exam's heading and
+  tabs step aside, one header row carries the paper's name and actions, and the assistant
+  and the paper sit side by side, each scrolling inside its pane. Use
+  `APP_SHELL_FILL_HEIGHT_CLASS` (or its `MD` form) from `@campuspilot/components/app-shell`
+  for such a screen: it is the window less the shell's header and its alert rows, so the
+  screen still fits when a notice bar is showing. On a phone the studio is an ordinary
+  page: the paper alone with a bar at the bottom that opens the assistant full-screen. What is shown lives in
+  `?start=&version=&chat=`. Heading, top-right overflow (All versions, Download latest
+  PDF, the ways to add a new version, Delete paper with an app confirmation), breadcrumbs for
+  navigation, no back button.
 - Uploading, reordering, deleting and generating are closed when the exam is
   completed (D43), when a generation is queued/running, or when the user can only
   read; the reason is written beside the control. Preview, download and versions
@@ -268,9 +290,9 @@ the implementation and APIs in more detail.
 - Uploads are strictly sequential in the order chosen (the server numbers pages
   when stored). HEIC is redrawn to JPEG on a canvas where the browser can,
   otherwise the original is uploaded. The upload queue is TanStack Form state owned by
-  the workspace layout (`usePageUploads` in `PaperLayout`), above the sections, so
-  switching section keeps it; leaving the paper while photos upload asks first
-  (`DirtyGuard`). Generate with AI is closed while photos upload. A failed photo does
+  the workspace layout (`usePageUploads` in `PaperLayout`), above the views, so
+  switching view keeps it; leaving the paper while photos upload asks first
+  (`DirtyGuard`). Create paper is closed while photos upload. A failed photo does
   not stop the chain, so its message says it is not in the paper and must be added again.
 - The Question paper screens are wrapped in `QuestionPaperAssistantGate`
   (`useAssistantGate`): a typed address with the assistant closed shows a notice.

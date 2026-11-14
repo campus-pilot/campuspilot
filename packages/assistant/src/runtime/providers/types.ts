@@ -133,15 +133,17 @@ export type TextResult = {
 };
 
 /**
- * The bytes of an attached image as a model request will carry them, or why
- * they cannot be carried (the note then replaces the image; an image is never
- * silently dropped, decision D46).
+ * The bytes of an attached file as a model request will carry them, or why
+ * they cannot be carried (the note then replaces the file; nothing is ever
+ * silently dropped, decision D46). `image` and `document` follow the
+ * attachment's stored kind; a document's bytes are the uploaded PDF, as is.
  */
 export type AttachmentFile =
   | { kind: 'image'; bytes: Uint8Array; mimeType: string }
+  | { kind: 'document'; bytes: Uint8Array; mimeType: string }
   | { kind: 'unreadable' }
   | { kind: 'missing' }
-  /** Left out so the request stays within the image budget. */
+  /** Left out so the request stays within the attachment budget. */
   | { kind: 'omitted' };
 
 /** A tool result found in a stored entry, for pruning. */
@@ -183,7 +185,7 @@ export interface ContextAdapter {
     stub: (input: ToolInputStubInput) => string,
     minChars: number,
   ): TranscriptEntry;
-  /** The parts that show an attachment to the model: a label, then the image or a note. */
+  /** The parts that show an attachment to the model: a label, then the image or document, or a note. */
   materializeAttachment(marker: AttachmentMarker, file: AttachmentFile): unknown[];
   /** The part that tells the model an older attachment is no longer shown. */
   stubAttachment(marker: AttachmentMarker): unknown[];
@@ -193,6 +195,13 @@ export interface ModelProvider {
   readonly id: ModelProviderId;
   /** Media types this provider can read as image input (D46: never silently dropped). */
   readonly imageMimeTypes: readonly string[];
+  /**
+   * Media types this provider can read as document input, sent as the file
+   * itself (a PDF, never rasterised or text-extracted by us). Empty for a
+   * provider that reads no documents: a document is then refused at send
+   * (D46) and shown to the model as an unreadable note.
+   */
+  readonly documentMimeTypes: readonly string[];
   /** The largest single image the provider accepts, in bytes before base64; absent when only the request total is limited. */
   readonly maxImageBytes?: number;
   /**

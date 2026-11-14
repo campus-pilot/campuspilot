@@ -70,6 +70,12 @@ const toJob = (job: { id: string; status: 'queued' | 'running' | 'succeeded' | '
   createdAt: job.createdAt,
 });
 
+/** A job for the paper screen ({@link getQuestionPaperDetail}): with the teacher's instructions it was started with. */
+const toDetailJob = (job: { id: string; status: 'queued' | 'running' | 'succeeded' | 'failed'; createdAt: Date; instructions: string | null }) => ({
+  ...toJob(job),
+  instructions: job.instructions,
+});
+
 /** Everything the paper screen shows, for one paper that may not exist yet. */
 async function loadPaperView(db: DatabaseExecutor, scope: PaperScope) {
   const paper = await findPaper(db, scope.key);
@@ -120,10 +126,10 @@ export async function getQuestionPaperDetail(
   return {
     paper: view.facts,
     pages: view.pages.map(toPageDto),
-    activeJob: view.activeJob ? toJob(view.activeJob) : null,
+    activeJob: view.activeJob ? toDetailJob(view.activeJob) : null,
     lastFinishedJob:
       finished && finished.completedAt
-        ? { ...toJob(finished), errorCode: finished.errorCode, errorMessage: finished.errorMessage, completedAt: finished.completedAt }
+        ? { ...toDetailJob(finished), errorCode: finished.errorCode, errorMessage: finished.errorMessage, completedAt: finished.completedAt }
         : null,
     versions,
     templateConfigured: template,
@@ -544,6 +550,36 @@ export async function addQuestionPaperFigure(
   assertPaperWritable(input.scope);
   await precheckFigureUpload(db, input.scope.key);
   const figure = await normalizeFigureImage(input.bytes);
+  return storeQuestionPaperFigure(db, {
+    scope: input.scope,
+    userId: input.userId,
+    figure,
+    provenance: { sourceAttachmentId: input.sourceAttachmentId ?? null, sourceFigureId: null },
+  });
+}
+
+/** A print-ready figure image: what {@link normalizeFigureImage} makes, or a stored figure's own bytes and facts. */
+export type PreparedFigure = { bytes: Buffer; contentType: string; extension: string; width: number; height: number };
+
+/**
+ * Writes a prepared figure as a new figure of the paper: the object under
+ * `schools/{schoolId}/exam-question-papers/figures/`, then the row, in a short
+ * transaction that re-checks the exam and plan under their locks, locks (or
+ * creates) the paper and enforces the figure cap. The object is removed again
+ * if the row is refused. `provenance` names where the image came from, each
+ * fact in its own column (at most one is set).
+ */
+export async function storeQuestionPaperFigure(
+  db: Database,
+  input: {
+    scope: PaperScope;
+    userId: string;
+    figure: PreparedFigure;
+    provenance: { sourceAttachmentId: string | null; sourceFigureId: string | null };
+  },
+) {
+  assertPaperWritable(input.scope);
+  const { figure } = input;
   const figureId = generateId('examQuestionPaperFigure');
   const key = questionPaperKeys.figure(input.scope.key.schoolId, figureId, figure.extension);
   try {
@@ -571,7 +607,8 @@ export async function addQuestionPaperFigure(
           width: figure.width,
           height: figure.height,
           sha256: createHash('sha256').update(figure.bytes).digest('hex'),
-          sourceAttachmentId: input.sourceAttachmentId ?? null,
+          sourceAttachmentId: input.provenance.sourceAttachmentId,
+          sourceFigureId: input.provenance.sourceFigureId,
           createdBy: input.userId,
         })
         .returning();
@@ -624,6 +661,12 @@ async function assertSchoolJobCapacity(tx: DatabaseTransaction, schoolId: string
  * the job failed; pages are never silently dropped), and no generation is
  * already in flight. The job row is the outbox entry; the hand-over to the
  * worker happens after the commit and never blocks the request.
+ *
+ * `instructions` are the teacher's optional note on what to change (already
+ * normalised by `generationInstructionsSchema`: trimmed, null for none). They
+ * are stored on the job row as written and never changed; the worker reads
+ * them from there, so every attempt of the job uses the same text. They change
+ * no check, limit or cost rule above.
  */
 export async function startQuestionPaperGeneration(
   db: Database,
@@ -631,6 +674,8 @@ export async function startQuestionPaperGeneration(
     scope: PaperScope;
     userId: string;
     expectedPageRevision: number;
+    /** The teacher's instructions; null or omitted for none. */
+    instructions?: string | null;
     /** Hands a committed job to the worker; the default is the outbox hand-over. Tests replace it. */
     dispatch?: (jobId: string) => void;
   },
@@ -660,6 +705,7 @@ export async function startQuestionPaperGeneration(
         requestedBy: input.userId,
         pageIds: pages.map((page) => page.id),
         pageRevision: paper.pageRevision,
+        instructions: input.instructions ?? null,
       })
       .returning({ id: examQuestionPaperJobTable.id });
     return job!.id;

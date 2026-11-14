@@ -3,14 +3,13 @@ import { describe, expect, it } from 'vitest';
 import {
   cellStatus,
   editBlockedReason,
-  formatPageSize,
-  generateBlockedReason,
   isAcceptedImage,
   isHeifFile,
   movePageId,
   pageDragAnnouncements,
   planUploads,
   QUESTION_PAPER_MAX_PAGE_BYTES,
+  versionSourceLabel,
 } from './question-paper-model';
 
 const file = (name: string, type: string, size = 1000) => ({ name, type, size });
@@ -108,26 +107,6 @@ describe('blocked reasons', () => {
     expect(editBlockedReason({ examCompleted: false, sessionActive: true, canManage: true, jobActive: true })).toMatch(/being generated/);
     expect(editBlockedReason({ examCompleted: false, sessionActive: true, canManage: true, jobActive: false })).toBeNull();
   });
-  it('names why generating is closed', () => {
-    expect(generateBlockedReason({ pageCount: 0, templateConfigured: false, blockedReason: 'Closed.' })).toBe('Closed.');
-    expect(generateBlockedReason({ pageCount: 0, templateConfigured: false, blockedReason: null })).toMatch(/at least one photo/);
-    expect(generateBlockedReason({ pageCount: 2, templateConfigured: false, blockedReason: null })).toMatch(/template/);
-    expect(generateBlockedReason({ pageCount: 2, templateConfigured: true, blockedReason: null })).toBeNull();
-  });
-  it('closes generating while photos upload, after the permission reason and before the page count', () => {
-    expect(generateBlockedReason({ pageCount: 3, templateConfigured: true, blockedReason: null, uploading: true })).toBe('Wait for the photos to finish uploading.');
-    expect(generateBlockedReason({ pageCount: 3, templateConfigured: true, blockedReason: 'Closed.', uploading: true })).toBe('Closed.');
-    expect(generateBlockedReason({ pageCount: 0, templateConfigured: true, blockedReason: null, uploading: true })).toMatch(/finish uploading/);
-    expect(generateBlockedReason({ pageCount: 3, templateConfigured: true, blockedReason: null, uploading: false })).toBeNull();
-  });
-});
-
-describe('formatting', () => {
-  it('formats sizes', () => {
-    expect(formatPageSize(512)).toBe('512 B');
-    expect(formatPageSize(2048)).toBe('2 KB');
-    expect(formatPageSize(2.4 * 1024 * 1024)).toBe('2.4 MB');
-  });
 });
 
 describe('pageDragAnnouncements', () => {
@@ -142,5 +121,13 @@ describe('pageDragAnnouncements', () => {
     expect(say.onDragEnd({ active: { id: 'qp_bbb' }, over: null })).toContain('unchanged');
     expect(say.onDragCancel({ active: { id: 'qp_bbb' } })).toContain('cancelled');
     expect(say.onDragStart({ active: { id: 'qp_zzz' } })).not.toContain('qp_');
+  });
+});
+
+describe('versionSourceLabel', () => {
+  it('names who wrote a version, including a copy of an earlier paper', () => {
+    expect(versionSourceLabel('ai_job')).toBe('AI from photos');
+    expect(versionSourceLabel('agent')).toBe('Assistant chat');
+    expect(versionSourceLabel('copy')).toBe('Copied from an earlier paper');
   });
 });

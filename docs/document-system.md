@@ -642,6 +642,12 @@ by the template. What this document system owns for the type:
   stack, a fixed element can only be painted inside the page content area, and one
   placed outside it vanishes from page 1 and reappears at the top of the next pages.
   Templates must not set a fixed height, `overflow:hidden` or outer page padding.
+  **On screen** (the sandboxed preview, `@media screen`) the paper is one long column,
+  not pages, so a footer fixed to the viewport would float over whichever questions are
+  at the bottom of the frame. The wrapper table (`.qp-frame`, the page's content area)
+  therefore has a `transform` on screen only, which makes it the containing block of the
+  fixed footer: the footer shows once, at the end of the paper, inside the margins, and
+  scrolls with it. Print is unchanged.
 - **Direction.** The sanitiser keeps `class`, `style` and `id` only, so a template
   sets text direction with `style="direction:{{questionPaper.direction}}"`, not a
   `dir` attribute. `questionPaper.direction` is always `ltr` (the page frame); the body sets

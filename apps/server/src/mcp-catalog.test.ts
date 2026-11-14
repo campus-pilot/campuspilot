@@ -130,6 +130,10 @@ const HIDDEN_TOOLS = [
   'school.getQuestionPaperPreview',
   'school.previewQuestionPaperDraft',
   'school.getQuestionPaperDownload',
+  // Starting a paper from an earlier one is a button in the paper screen; an agent
+  // reads any paper with getQuestionPaper and saves its own edit instead.
+  'school.listQuestionPaperCopySources',
+  'school.copyQuestionPaperVersion',
 ];
 
 /**
@@ -681,7 +685,15 @@ describe('assistant service view', () => {
     reads: ['school.listQuestionPapers', 'school.getQuestionPaper', 'school.listQuestionPaperVersions', 'school.getQuestionPaperDraft', 'school.learn_question_paper_generation', 'school.validateQuestionPaperDraft'],
     writes: ['school.saveQuestionPaperVersion'],
     // The UI's own procedures: a person does these, never the assistant.
-    humanOnly: ['school.startQuestionPaperGeneration', 'school.getQuestionPaperDetail', 'school.getQuestionPaperPreview', 'school.previewQuestionPaperDraft', 'school.getQuestionPaperDownload'],
+    humanOnly: [
+      'school.startQuestionPaperGeneration',
+      'school.getQuestionPaperDetail',
+      'school.getQuestionPaperPreview',
+      'school.previewQuestionPaperDraft',
+      'school.getQuestionPaperDownload',
+      'school.listQuestionPaperCopySources',
+      'school.copyQuestionPaperVersion',
+    ],
   };
 
   it('gives the in-app assistant the question paper tools, with the save behind an approval and the human-only ones withheld', async () => {

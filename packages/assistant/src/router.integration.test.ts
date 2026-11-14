@@ -19,7 +19,10 @@ import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 
 import { loadAssistantAccess, type AssistantAccessDecision } from './access';
 import { db } from './db';
-import { createAttachment, deleteUnsentAttachment, sweepUnsentAttachments } from './attachments';
+import { createAttachment, deleteConversationAttachments, deleteUnsentAttachment, loadAttachmentFile, sweepUnsentAttachments } from './attachments';
+import { handleAssistantAttachmentRead, handleAssistantAttachmentUpload } from './attachments.http';
+import { getObjectBytes, pageImageUrl, putObject } from '@campuspilot/api/routers/school/question-paper/question-paper.storage';
+import { makeImageDerivatives } from '@campuspilot/api/files/image-derivative';
 import { configureDispatcher } from './dispatch';
 import { generateId } from './ids';
 import { assistantRouter } from './router';
@@ -635,6 +638,7 @@ describe('images attached to a message', () => {
       id: attachmentId,
       schoolId: owner.schoolId,
       userId: owner.userId,
+      kind: 'image',
       originalName: name,
       contentType: 'image/jpeg',
       byteSize: 100,
@@ -813,7 +817,7 @@ describe('images attached to a message', () => {
 
   it('frees images left behind by a reload when the user hits the cap, and keeps recent ones', async () => {
     const owner = await newOwner();
-    const file = { bytes: Buffer.from('jpeg'), contentType: 'image/jpeg', extension: 'jpg', name: 'p.jpg' };
+    const file = { bytes: Buffer.from('jpeg'), kind: 'image' as const, contentType: 'image/jpeg', extension: 'jpg', name: 'p.jpg' };
     const hourAgo = new Date(Date.now() - 2 * 3_600_000);
     const left = await Promise.all(Array.from({ length: 40 }, (_, index) => upload(owner, `left${index}.jpg`, { createdAt: hourAgo })));
     await expect(createAttachment(db, { ...owner, file })).resolves.toMatchObject({ fileName: 'p.jpg' });
@@ -824,5 +828,127 @@ describe('images attached to a message', () => {
     const open = await Promise.all(Array.from({ length: 40 }, (_, index) => upload(busy, `open${index}.jpg`, { createdAt: new Date(Date.now() - (40 - index) * 1_000) })));
     await expect(createAttachment(db, { ...busy, file })).resolves.toMatchObject({ fileName: 'p.jpg' });
     expect(await Promise.all(open.map(async (id) => (await rowOf(id)) !== undefined))).toEqual([...Array.from({ length: 20 }, () => false), ...Array.from({ length: 20 }, () => true)]);
+  });
+});
+
+describe('PDF attachments', () => {
+  const PDF = Buffer.from('%PDF-1.7\n1 0 obj\n<<>>\nendobj\n%%EOF\n', 'latin1');
+  const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
+
+  async function newOwner() {
+    const turn = await seedTurn();
+    return { schoolId: turn.schoolId, userId: turn.userId };
+  }
+  const rowOf = async (id: string) => (await db.select().from(assistantAttachmentTable).where(eq(assistantAttachmentTable.id, id)))[0];
+
+  /** Posts one file to the upload route as the composer does. */
+  async function post(owner: { schoolId: string; userId: string }, bytes: Buffer, name: string, type = 'application/octet-stream') {
+    const form = new FormData();
+    form.set('file', new Blob([new Uint8Array(bytes)], { type }), name);
+    const response = await handleAssistantAttachmentUpload(
+      new Request('http://api.invalid/upload', { method: 'POST', body: form, headers: { cookie: cookieOf(owner.userId), origin: 'http://management.invalid' } }),
+      owner.schoolId,
+    );
+    return { status: response.status, body: (await response.json()) as Record<string, unknown> };
+  }
+
+  const read = (owner: { schoolId: string; userId: string }, attachmentId: string, variant: string) =>
+    handleAssistantAttachmentRead(new Headers({ cookie: cookieOf(owner.userId) }), { schoolId: owner.schoolId, attachmentId, variant });
+
+  const send = (owner: { schoolId: string; userId: string }, extra: Record<string, unknown>) => {
+    configureDispatcher({ startRun: vi.fn(), resolveApproval: vi.fn() });
+    onTestFinished(() => configureDispatcher(null));
+    return call(assistantRouter.sendMessage, { schoolId: owner.schoolId, clientRequestId: randomUUID(), surface: 'page', text: '', ...extra }, as(owner.userId));
+  };
+
+  it('stores a PDF as it is, with no derivatives, keyed by its own id and decided by its bytes', async () => {
+    const owner = await newOwner();
+    vi.mocked(putObject).mockClear();
+    vi.mocked(makeImageDerivatives).mockClear();
+
+    const uploaded = await post(owner, PDF, 'Exam paper.png', 'image/png');
+
+    expect(uploaded.status).toBe(200);
+    expect(uploaded.body).toMatchObject({ kind: 'document', contentType: 'application/pdf', fileName: 'Exam paper.png', width: null, height: null, previewable: false, byteSize: PDF.byteLength });
+    const row = (await rowOf(uploaded.body.id as string))!;
+    expect(row).toMatchObject({ kind: 'document', derivativeStatus: null, thumbS3Key: null, modelS3Key: null, modelContentType: null });
+    expect(row.s3Key).toBe(`schools/${owner.schoolId}/assistant/attachments/${row.id}/original.pdf`);
+    // The bytes are stored exactly as uploaded; nothing was decoded or derived.
+    expect(vi.mocked(putObject).mock.calls).toEqual([[row.s3Key, PDF, 'application/pdf']]);
+    expect(makeImageDerivatives).not.toHaveBeenCalled();
+  });
+
+  it('takes an image named .pdf as an image, and refuses HTML named .pdf with the save-as-PDF sentence', async () => {
+    const owner = await newOwner();
+    const image = await post(owner, JPEG, 'scan.pdf', 'application/pdf');
+    expect(image.body).toMatchObject({ kind: 'image', contentType: 'image/jpeg' });
+    expect((await rowOf(image.body.id as string))!.s3Key.endsWith('/original.jpg')).toBe(true);
+
+    const html = await post(owner, Buffer.from('<html><script>alert(1)</script></html>'), 'paper.pdf', 'application/pdf');
+    expect(html.status).toBe(415);
+    expect(html.body.message).toMatch(/Save Word and other documents as PDF/);
+  });
+
+  it('never returns a document from the image routes, in either variant', async () => {
+    const owner = await newOwner();
+    vi.mocked(pageImageUrl).mockResolvedValue('https://storage.invalid/signed');
+    const doc = (await post(owner, PDF, 'paper.pdf')).body.id as string;
+    vi.mocked(pageImageUrl).mockClear();
+    for (const variant of ['thumb', 'original']) {
+      const response = await read(owner, doc, variant);
+      expect(response.status).toBe(404);
+      expect(response.headers.get('location')).toBeNull();
+    }
+    expect(pageImageUrl).not.toHaveBeenCalled();
+    // An image of the same user still redirects.
+    const image = (await post(owner, JPEG, 'p.jpg')).body.id as string;
+    expect((await read(owner, image, 'thumb')).status).toBe(302);
+  });
+
+  it('sends a PDF with a message, titles the chat after it and loads it for the model as the PDF itself', async () => {
+    const owner = await newOwner();
+    const doc = (await post(owner, PDF, 'paper.pdf')).body.id as string;
+    const sent = await send(owner, { attachmentIds: [doc] });
+    expect(sent.conversation.title).toBe('Attached PDF');
+    expect(sent.item.body.attachments).toEqual([expect.objectContaining({ id: doc, kind: 'document', previewable: false })]);
+
+    vi.mocked(getObjectBytes).mockResolvedValueOnce(Buffer.from(PDF));
+    expect(await loadAttachmentFile(doc, { image: ['image/jpeg'], document: ['application/pdf'] }, db)).toEqual({ kind: 'document', bytes: Buffer.from(PDF), mimeType: 'application/pdf' });
+    // A provider that reads no documents gets "unreadable", which the context turns into a note.
+    expect(await loadAttachmentFile(doc, { image: ['image/jpeg'], document: [] }, db)).toEqual({ kind: 'unreadable' });
+  });
+
+  it('counts PDFs toward the unsent cap and removes them with their object, unsent, swept or with their conversation', async () => {
+    const owner = await newOwner();
+    const unsent = (await post(owner, PDF, 'wrong.pdf')).body.id as string;
+    storage.deleted.length = 0;
+    await expect(deleteUnsentAttachment(db, { ...owner, attachmentId: unsent })).resolves.toEqual({ deleted: true });
+    expect(await rowOf(unsent)).toBeUndefined();
+    expect(storage.deleted).toEqual([`schools/${owner.schoolId}/assistant/attachments/${unsent}/original.pdf`]);
+
+    const stale = (await post(owner, PDF, 'old.pdf')).body.id as string;
+    await db.update(assistantAttachmentTable).set({ createdAt: new Date(Date.now() - 25 * 3_600_000) }).where(eq(assistantAttachmentTable.id, stale));
+    storage.deleted.length = 0;
+    await sweepUnsentAttachments(db);
+    expect(await rowOf(stale)).toBeUndefined();
+    expect(storage.deleted).toContain(`schools/${owner.schoolId}/assistant/attachments/${stale}/original.pdf`);
+
+    const kept = (await post(owner, PDF, 'kept.pdf')).body.id as string;
+    const sent = await send(owner, { text: 'read', attachmentIds: [kept] });
+    storage.deleted.length = 0;
+    await deleteConversationAttachments(db, sent.conversation.id);
+    expect(await rowOf(kept)).toBeUndefined();
+    expect(storage.deleted).toEqual([`schools/${owner.schoolId}/assistant/attachments/${kept}/original.pdf`]);
+  });
+
+  it('holds the database to one shape per kind', async () => {
+    const owner = await newOwner();
+    const id = `asat_${randomUUID().replaceAll('-', '').slice(0, 21)}`;
+    const base = { id, schoolId: owner.schoolId, userId: owner.userId, originalName: 'x.pdf', byteSize: 1, sha256: 'x', s3Key: `schools/${owner.schoolId}/assistant/attachments/${id}/original.pdf` };
+    // A document with a derivative status, a thumbnail or another type is refused; an image without a status too.
+    await expect(db.insert(assistantAttachmentTable).values({ ...base, kind: 'document', contentType: 'application/pdf', derivativeStatus: 'unsupported' })).rejects.toThrow();
+    await expect(db.insert(assistantAttachmentTable).values({ ...base, kind: 'document', contentType: 'text/html', derivativeStatus: null })).rejects.toThrow();
+    await expect(db.insert(assistantAttachmentTable).values({ ...base, kind: 'image', contentType: 'image/jpeg', derivativeStatus: null })).rejects.toThrow();
+    await expect(db.insert(assistantAttachmentTable).values({ ...base, kind: 'document', contentType: 'application/pdf', derivativeStatus: null })).resolves.toBeDefined();
   });
 });

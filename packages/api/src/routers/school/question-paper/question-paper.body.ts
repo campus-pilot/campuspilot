@@ -244,6 +244,23 @@ export function fragmentFigureIds(fragment: string): string[] {
 }
 
 /**
+ * Replaces figure ids by the ids in `replacement` (ids it does not name stay as
+ * they are), working on sanitiser output, where an id appears only as a quoted
+ * `data-figure-id` value. Only inside `<img>` and `<figure>` tags: a paragraph
+ * that merely quotes the attribute is text and stays as written. Used when a
+ * save copies images into the paper (chat attachments, the figures of a copied
+ * version) and stores the version with the paper's own figure ids.
+ */
+export function replaceFigureIds(sanitizedHtml: string, replacement: ReadonlyMap<string, string>): string {
+  return sanitizedHtml.replace(/<(?:img|figure)\b[^>]*>/g, (tag) =>
+    tag.replace(/\sdata-figure-id="([^"]*)"/, (whole, id: string) => {
+      const figureId = replacement.get(id);
+      return figureId ? ` data-figure-id="${figureId}"` : whole;
+    }),
+  );
+}
+
+/**
  * Turns the figure ids in `unresolved` into placeholders, working on sanitiser
  * output (so ids and attribute values are quoted and escaped). An image with an
  * unusable id becomes a placeholder figure described by its `alt` text; a

@@ -22,6 +22,7 @@ import { handleQuestionPaperPageUpload } from '../../routers/school/question-pap
 import { getObjectBytes } from '../../routers/school/question-paper/question-paper.storage';
 import { QUESTION_PAPER_JOB_FAILURES } from './constants';
 import { defaultGenerationDeps, runQuestionPaperGeneration, type GenerationDeps, type StepRunner } from './generation';
+import { QUESTION_PAPER_JOB_INSTRUCTED_SYSTEM_PROMPT, QUESTION_PAPER_JOB_SYSTEM_PROMPT, TEACHER_INSTRUCTIONS_END, TEACHER_INSTRUCTIONS_START } from './prompt';
 import type { ModelUsage, QuestionPaperModel, TextPart, TextResult } from './model';
 
 const { 'hindi-maths': HINDI_MATH, 'english-science': ENGLISH_SCIENCE } = QUESTION_PAPER_EXAMPLES;
@@ -78,7 +79,12 @@ function uploadRequest(bytes: Uint8Array, type: string, filename: string) {
 }
 
 /** Uploads pages to a paper and queues a job over them, as `startQuestionPaperGeneration` does. */
-async function queueJob(world: QuestionPaperWorld, overrides: Partial<{ classId: string; subjectSlug: string; modeSlug: string }> = {}, pages: Array<{ bytes: Uint8Array; type: string; name: string }> | null = null) {
+async function queueJob(
+  world: QuestionPaperWorld,
+  overrides: Partial<{ classId: string; subjectSlug: string; modeSlug: string }> = {},
+  pages: Array<{ bytes: Uint8Array; type: string; name: string }> | null = null,
+  instructions: string | null = null,
+) {
   const key = world.key(overrides);
   const manager = world.people.manager;
   for (const page of pages ?? [{ bytes: await jpeg(), type: 'image/jpeg', name: 'one.jpg' }, { bytes: await jpeg(300, 300), type: 'image/jpeg', name: 'two.jpg' }]) {
@@ -92,7 +98,7 @@ async function queueJob(world: QuestionPaperWorld, overrides: Partial<{ classId:
   const pageRows = await db.select().from(examQuestionPaperPageTable).where(eq(examQuestionPaperPageTable.paperId, paper!.id)).orderBy(asc(examQuestionPaperPageTable.position));
   const [job] = await db
     .insert(examQuestionPaperJobTable)
-    .values({ paperId: paper!.id, schoolId: world.schoolId, requestedBy: manager.userId, pageIds: pageRows.map((page) => page.id), pageRevision: paper!.pageRevision })
+    .values({ paperId: paper!.id, schoolId: world.schoolId, requestedBy: manager.userId, pageIds: pageRows.map((page) => page.id), pageRevision: paper!.pageRevision, instructions })
     .returning();
   return { job: job!, paper: paper!, pages: pageRows };
 }
@@ -143,6 +149,59 @@ describe('question paper generation job', () => {
       requestKey: `qp:${job.id}.1:model:1`, provider: 'gemini', requestedModel: 'fake-configured-model', answeredModel: 'fake-answered-model',
       usageComplete: true, inputTokens: 1000, outputTokens: 500, cacheReadInputTokens: 100, costUsd: '0.00702000',
     });
+  });
+
+  it('sends a job without instructions the plain transcription prompt', async () => {
+    const world = await createQuestionPaperWorld();
+    const { job } = await queueJob(world);
+    const { model, requests } = scriptedModel([answer(ENGLISH_SCIENCE)]);
+    expect(await runQuestionPaperGeneration({ jobId: job.id, attempt: 1 }, direct, depsFor(model))).toMatchObject({ status: 'succeeded' });
+    expect(requests[0]!.system).toBe(QUESTION_PAPER_JOB_SYSTEM_PROMPT);
+    expect(JSON.stringify(requests[0]!.parts)).not.toContain(TEACHER_INSTRUCTIONS_START);
+  });
+
+  it("sends the job's stored instructions with every request: the first, a retry of a busy one, the repair's prompt and a later attempt", async () => {
+    const world = await createQuestionPaperWorld();
+    const instructions = 'Keep the questions but change the numbers.\nLeave out question 7.';
+    const { job, paper } = await queueJob(world, {}, null, instructions);
+    const busy = new Error('503');
+    const broken = ENGLISH_SCIENCE.replace('data-math="\\mathrm{H_2O}"', 'data-math="\\frac{1"');
+    const { model, requests } = scriptedModel([busy, answer(broken), answer(ENGLISH_SCIENCE)], { kind: () => 'busy' });
+
+    expect(await runQuestionPaperGeneration({ jobId: job.id, attempt: 1 }, direct, depsFor(model))).toEqual({ status: 'succeeded', versionNo: 1 });
+    expect(requests).toHaveLength(3);
+    // The first request and its retry: the instructed prompt, the pages, then the instructions as one labelled JSON string.
+    for (const request of requests.slice(0, 2)) {
+      expect(request.system).toBe(QUESTION_PAPER_JOB_INSTRUCTED_SYSTEM_PROMPT);
+      const kinds = request.parts.map((part: TextPart) => (part.type === 'text' ? part.text.split('\n')[0] : `image:${part.mimeType}`));
+      expect(kinds.slice(1)).toEqual(['Page 1 of 2', 'image:image/jpeg', 'Page 2 of 2', 'image:image/jpeg', TEACHER_INSTRUCTIONS_START]);
+      expect((request.parts.at(-1) as { text: string }).text).toBe([TEACHER_INSTRUCTIONS_START, JSON.stringify(instructions), TEACHER_INSTRUCTIONS_END].join('\n'));
+    }
+    // The repair: the same instructed prompt, and a reminder to keep the changes, without the instructions themselves.
+    const repair = requests[2]!;
+    expect(repair.system).toBe(QUESTION_PAPER_JOB_INSTRUCTED_SYSTEM_PROMPT);
+    expect(repair.parts).toHaveLength(1);
+    const repairText = (repair.parts[0] as { text: string }).text;
+    expect(repairText).toContain("already carries out the teacher's instructions");
+    expect(repairText).not.toContain('change the numbers');
+
+    // The version points at its job, which keeps the instructions: the provenance needs no copy on the version.
+    const [version] = await db.select().from(examQuestionPaperVersionTable).where(eq(examQuestionPaperVersionTable.paperId, paper.id));
+    expect(version).toMatchObject({ source: 'ai_job', sourceJobId: job.id });
+    expect(await jobOf(job.id)).toMatchObject({ status: 'succeeded', instructions });
+
+    // Another attempt of the same job (a re-dispatch) reads the same stored text.
+    const { job: second } = await queueJob(world, { subjectSlug: 'math', modeSlug: 'theory' }, null, instructions);
+    const refused = scriptedModel([new Error('400')], { kind: () => 'rejected' });
+    expect(await runQuestionPaperGeneration({ jobId: second.id, attempt: 1 }, direct, depsFor(refused.model))).toEqual({ status: 'failed', code: 'model_rejected' });
+    await db
+      .update(examQuestionPaperJobTable)
+      .set({ status: 'queued', attempt: 2, errorCode: null, errorMessage: null, errorDetail: null, completedAt: null })
+      .where(eq(examQuestionPaperJobTable.id, second.id));
+    const retried = scriptedModel([answer(HINDI_MATH)]);
+    expect(await runQuestionPaperGeneration({ jobId: second.id, attempt: 2 }, direct, depsFor(retried.model))).toMatchObject({ status: 'succeeded' });
+    expect(retried.requests[0]!.system).toBe(QUESTION_PAPER_JOB_INSTRUCTED_SYSTEM_PROMPT);
+    expect((retried.requests[0]!.parts.at(-1) as { text: string }).text).toContain(JSON.stringify(instructions));
   });
 
   it('does nothing for a job that already ended or belongs to another attempt, and never saves or bills twice', async () => {

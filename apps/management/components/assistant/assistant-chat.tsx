@@ -22,7 +22,8 @@ import {
   AssistantUserMessage,
   AssistantWelcome,
   AttachmentsMissingError,
-  imagesOnlyLabel,
+  attachmentsOnlyLabel,
+  sentAttachmentsOf,
   AssistantWorkBar,
   type AssistantApprovalDecision,
   type AssistantSuggestion,
@@ -120,6 +121,22 @@ export type AssistantChatProps = {
   seed?: QuestionPaperSeed | null;
   /** The user removed the seed's chip: start a plain conversation. */
   onSeedRemoved?: () => void;
+  /**
+   * The sentence the box starts with for a seeded conversation. A surface that
+   * is already about the paper (the paper's own screen) passes an empty string:
+   * there the box starts empty and the seed still travels with the first message.
+   */
+  seedText?: string;
+  /** The welcome's words, for a surface about one thing; the general welcome otherwise. */
+  welcome?: { title: string; text: string };
+  /** The message box's hint, for a surface about one thing. While a turn works the box says it queues a follow-up, whatever this is. */
+  placeholder?: string;
+  /**
+   * The suggestions under a new conversation's box, in place of the general
+   * ones. Given ones are shown with a seed too (they are about its paper);
+   * the general ones are not.
+   */
+  suggestions?: readonly AssistantSuggestion[];
 };
 
 /**
@@ -205,7 +222,7 @@ function OptimisticTurn({
             at={message.submittedAt}
             delivery={message.delivery}
             onRetry={() => onRetry(message)}
-            attachments={message.attachmentIds.map((id) => ({ id, fileName: 'Attached image', previewUrl: assistantAttachmentThumbUrl(schoolId, id) }))}
+            attachments={sentAttachmentsOf(message.attachments, (attachment) => assistantAttachmentThumbUrl(schoolId, attachment.id))}
           />
         </div>
       ))}
@@ -341,12 +358,12 @@ function useTrayRequests(schoolId: string, conversationId: string | null, queued
   const queue = [
     ...queued.map((item) => ({
       id: item.id,
-      text: item.body.text || imagesOnlyLabel(item.body.attachments?.length ?? 0),
+      text: item.body.text || attachmentsOnlyLabel((item.body.attachments ?? []).map((attachment) => attachment.kind)),
       ...(item.runId === removingRunId ? { status: 'Removing…' } : { removable: true }),
     })),
     ...queuedOptimistic.map((message) => ({
       id: message.clientRequestId,
-      text: message.text || imagesOnlyLabel(message.attachmentIds.length),
+      text: message.text || attachmentsOnlyLabel(message.attachments.map((attachment) => attachment.kind)),
       status:
         message.delivery === 'failed' ? (
           <span className="flex items-center gap-1 text-destructive">
@@ -477,9 +494,13 @@ export function AssistantChat({
   gutterClassName = 'px-4 sm:px-6',
   seed = null,
   onSeedRemoved,
+  seedText = QUESTION_PAPER_SEED_DRAFT,
+  welcome: welcomeWords,
+  placeholder,
+  suggestions,
 }: AssistantChatProps) {
   const life = useSurfaceLife();
-  const imageUpload = useAssistantAttachmentUpload(schoolId);
+  const attachmentUpload = useAssistantAttachmentUpload(schoolId);
   // The seed only means something for a conversation that has not started.
   const activeSeed = conversationId ? null : seed;
   const seedPaper = useSeedPaper(schoolId, activeSeed);
@@ -495,7 +516,7 @@ export function AssistantChat({
   const draft = useAssistantDraft(schoolId, conversationId);
   // What the message box holds, as its draft reports say; for sends that do
   // not come from the box (a retry, a suggestion), whose text stays in it.
-  const initialText = draft.initialText || (activeSeed ? QUESTION_PAPER_SEED_DRAFT : '');
+  const initialText = draft.initialText || (activeSeed ? seedText : '');
   const boxText = useRef(initialText);
   const saveDraft = (text: string) => {
     boxText.current = text;
@@ -520,10 +541,10 @@ export function AssistantChat({
   // While a run works, a new message waits in the tray; otherwise it starts a turn.
   const tray = useTrayRequests(schoolId, conversationId, running ? optimistic : [], retry);
   // Removing the seed's chip takes the prefilled sentence out of the box unless the user edited it (then their draft stays).
-  // The box stays mounted: remounting it would drop the images attached in it, which are already stored on the server.
+  // The box stays mounted: remounting it would drop the files attached in it, which are already stored on the server.
   const composer = useRef<AssistantComposerControls>(null);
   const removeSeed = () => {
-    composer.current?.clearTextIf(QUESTION_PAPER_SEED_DRAFT);
+    composer.current?.clearTextIf(seedText);
     onSeedRemoved?.();
   };
   const requests =
@@ -542,12 +563,12 @@ export function AssistantChat({
     attachments: AssistantAttachmentRef[] = [],
   ) {
     const result = await send(text, conversationId, {
-      attachmentIds: attachments.map((attachment) => attachment.id),
+      attachments,
       seed: seedPaper.usableSeed,
     }).catch((error: unknown) => {
       const missing = missingAttachmentIdsOf(error);
-      // The composer marks these tiles, so the failed copy of the message is dropped: its Retry would name the same missing images.
-      if (missing) throw new AttachmentsMissingError(refusalMessage(error) ?? 'An attached image is no longer available.', missing);
+      // The composer marks these tiles, so the failed copy of the message is dropped: its Retry would name the same missing files.
+      if (missing) throw new AttachmentsMissingError(refusalMessage(error) ?? 'An attached file is no longer available.', missing);
       throw new Error(refusalMessage(error) ?? 'The message could not be sent. Check your connection and try again.');
     });
     started(result.conversation.id, box.text());
@@ -600,7 +621,7 @@ export function AssistantChat({
           }
         >
           {welcome ? (
-            <AssistantWelcome compact={compact} />
+            <AssistantWelcome compact={compact} {...welcomeWords} />
           ) : (
             <div className="pointer-events-none absolute inset-x-0 -top-6 h-6 bg-linear-to-t from-background to-transparent" aria-hidden />
           )}
@@ -610,12 +631,12 @@ export function AssistantChat({
               controlsRef={composer}
               autoFocus={autoFocus}
               disabledReason={disabledReason}
-              placeholder={running ? 'Queue a follow-up…' : undefined}
+              placeholder={running ? 'Queue a follow-up…' : placeholder}
               onSend={sendText}
               sending={sending}
               lastSentText={lastSentText}
               initialText={initialText}
-              attachments={{ upload: imageUpload.upload, remove: imageUpload.remove, onNotice: (message) => toast.error(message) }}
+              attachments={{ upload: attachmentUpload.upload, remove: attachmentUpload.remove, onNotice: (message) => toast.error(message) }}
               onDraftChange={saveDraft}
               requests={requests}
               leading={<ComposerToolbar schoolId={schoolId} conversationId={conversationId} />}
@@ -630,8 +651,8 @@ export function AssistantChat({
                   : undefined
               }
             />
-            {welcome && !activeSeed ? (
-              <AssistantSuggestions suggestions={SUGGESTIONS} onPick={sendDirectly} />
+            {welcome && (suggestions || !activeSeed) ? (
+              <AssistantSuggestions suggestions={suggestions ?? SUGGESTIONS} onPick={sendDirectly} />
             ) : null}
           </div>
         </div>

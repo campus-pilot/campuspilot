@@ -30,6 +30,16 @@ export function questionPaperThumbUrl(key: QuestionPaperPageKey, pageId: string)
   return pagesUrl(key, `/${encodeURIComponent(pageId)}/thumb`);
 }
 
+/**
+ * The photo of a page as it was uploaded, usable as `<img src>` for a view
+ * large enough to read. It can be several megabytes and, for a HEIC original,
+ * a type the browser cannot draw: callers load it only when the user asks to
+ * see the page and fall back to the thumbnail.
+ */
+export function questionPaperOriginalUrl(key: QuestionPaperPageKey, pageId: string) {
+  return pagesUrl(key, `/${encodeURIComponent(pageId)}/original`);
+}
+
 /** What the upload route answers on success (`{ page, pageRevision }`); only the revision is used. */
 export type QuestionPaperUploadResult = { pageRevision: number };
 

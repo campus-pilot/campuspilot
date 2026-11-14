@@ -4,7 +4,7 @@ import { useCallback, useRef } from 'react';
 import { useForm } from '@tanstack/react-form';
 import { z } from 'zod';
 import { planUploads, QUESTION_PAPER_MAX_PAGES } from '@campuspilot/components/question-paper/question-paper-model';
-import type { UploadQueueItem } from '@campuspilot/components/question-paper/upload-queue';
+import type { UploadQueueItem } from '@campuspilot/components/question-paper/paper-source-tray';
 import { uploadQuestionPaperPage, type QuestionPaperPageKey } from '@/lib/question-paper-pages';
 import { prepareUploadFile } from './prepare-upload-file';
 import { requestErrorMessage, runInOrder, uploadsInFlight } from './question-paper-model';
@@ -29,8 +29,8 @@ const PREVIEWABLE = new Set(['image/jpeg', 'image/png', 'image/webp']);
  * A failure stays in the queue with the server's reason until dismissed, and
  * the rest carry on. Closing the tab loses only photos still in flight.
  *
- * The hook is called by the paper's layout, above the Pages / Result /
- * Versions sections, so switching section keeps the queue, its progress and its
+ * The hook is called by the paper's layout, above its views (the first screen
+ * and the studio), so switching view keeps the queue, its progress and its
  * slot count (leaving the paper altogether asks first, `DirtyGuard`).
  * `rootRef` revokes the local preview URLs when the paper leaves the page.
  */
@@ -103,16 +103,16 @@ export function usePageUploads({ pageKey, refresh }: { pageKey: QuestionPaperPag
     chain.current = chain.current.then(() => runInOrder(entries, processEntry));
   }
 
-  /** Files dropped with a type the zone does not take: reported, never counted against the slots. */
-  function rejectFiles(files: File[]) {
-    form.setFieldValue('rejections', planUploads(files, 0).rejected);
+  /** Files turned away before they reached the queue (a type the paper does not take, a source that cannot be mixed in): reported beside the queue's own refusals. */
+  function reportRejections(rejections: readonly { name: string; reason: string }[]) {
+    if (rejections.length > 0) form.setFieldValue('rejections', (current) => [...current, ...rejections]);
   }
 
   return {
     form,
     rootRef,
     addFiles,
-    rejectFiles,
+    reportRejections,
     dismiss: remove,
     dismissRejections: () => form.setFieldValue('rejections', []),
   };

@@ -164,6 +164,58 @@ export function draftOrdinalOf(rows: readonly AssistantTimelineRow[], draftId: s
   return null;
 }
 
+/** A paper's natural key, as the draft calls carry it. */
+export type DraftPaperKey = Pick<DraftCallInput, 'sessionId' | 'examSlug' | 'classId' | 'subjectSlug' | 'modeSlug'>;
+
+/** A ready draft of a paper that no version holds yet. */
+export type UnsavedDraft = {
+  /** The draft's tool call (its stored input is what a preview renders). */
+  callId: string;
+  /** "Draft 2": its place among the conversation's draft cards. */
+  ordinal: number;
+  input: DraftCallInput;
+  draftId: string;
+  placeholderFigures: number;
+  removed: readonly string[];
+};
+
+/**
+ * The newest ready draft of `paper` in the conversation, unless a save of the
+ * paper went through after it: then a version holds it (or a later text) and
+ * there is nothing unsaved to show. A draft's verdict is read as in
+ * {@link supersededDrafts}: its stored result, else the re-check's `verdicts`;
+ * a draft with neither is not counted.
+ *
+ * "After" is the order of the conversation, in which a save call follows the
+ * draft it saves. A save call does not say which paper it wrote (its input is
+ * not read here), so a save of another paper in the same conversation also
+ * hides this paper's draft until a newer one is written; that is the cautious
+ * side: a saved draft is never offered again as unsaved.
+ */
+export function unsavedDraftOf(
+  rows: readonly AssistantTimelineRow[],
+  paper: DraftPaperKey,
+  verdicts: ReadonlyMap<string, DraftResult> = new Map(),
+): UnsavedDraft | null {
+  const wanted = paperScopeOf({ schoolId: '', html: '', ...paper });
+  let ordinal = 0;
+  let found: UnsavedDraft | null = null;
+  const visit = (row: AssistantTimelineRow) => {
+    if (row.kind === 'card') {
+      ordinal += 1;
+      const input = parseDraftCallInput(row.call.body.input);
+      const result = parseStoredDraftResult(row.call.body.output, row.call.body.outputTruncated) ?? verdicts.get(row.call.id);
+      if (!input || paperScopeOf(input) !== wanted || !result?.valid || !result.draftId) return;
+      found = { callId: row.call.id, ordinal, input, draftId: result.draftId, placeholderFigures: result.placeholderFigures, removed: result.stripped };
+    } else if (row.kind === 'approval' || row.kind === 'activity') {
+      const calls = row.kind === 'approval' ? [row.call] : row.calls;
+      if (calls.some((call) => call.body.toolName.endsWith('saveQuestionPaperVersion') && call.status === 'succeeded')) found = null;
+    } else if (row.kind === 'work') row.folded.forEach(visit);
+  };
+  rows.forEach(visit);
+  return found;
+}
+
 /** What the conversation holds, in order, that matters to whether a draft's Save is still pending. */
 export type DraftSaveEvent =
   | { kind: 'message'; text: string }

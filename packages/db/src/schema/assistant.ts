@@ -115,14 +115,26 @@ export const assistantTranscriptRoleEnum = pgEnum("assistant_transcript_role", [
 ]);
 
 /**
- * Whether the server made a thumbnail and a model copy of an attachment.
- * Its own enum (not the question paper page one) because that module imports
- * this one; the values mean the same.
+ * Whether the server made a thumbnail and a model copy of an image
+ * attachment. Its own enum (not the question paper page one) because that
+ * module imports this one; the values mean the same. A document has no
+ * derivative status at all (the column is null): nothing is ever made from a
+ * PDF.
  */
 export const assistantAttachmentDerivativeStatusEnum = pgEnum(
   "assistant_attachment_derivative_status",
   ["ready", "unsupported"],
 );
+
+/**
+ * What an attachment is (`ASSISTANT_ATTACHMENT_KINDS` in the contract):
+ * decided once from the uploaded bytes and stored, never re-derived from the
+ * content type.
+ */
+export const assistantAttachmentKindEnum = pgEnum("assistant_attachment_kind", [
+  "image",
+  "document",
+]);
 
 /** Where the user was when they wrote a message; a hint for the model only. */
 export type AssistantPageContext = {
@@ -133,7 +145,7 @@ export type AssistantPageContext = {
 export type AssistantUserMessageBody = {
   text: string;
   pageContext?: AssistantPageContext;
-  /** Images sent with the message, in order; references only, never bytes. */
+  /** Images and PDFs sent with the message, in order; references only, never bytes. */
   attachments?: AssistantAttachmentRef[];
   /** The screen a new conversation was started from. */
   seed?: AssistantMessageSeed;
@@ -351,12 +363,14 @@ export const assistantItemTable = pgTable(
 );
 
 /**
- * An image attached to a chat message (decisions D30, D38). It is uploaded
+ * An image or PDF attached to a chat message (decisions D30, D38). It is uploaded
  * before the message exists (`item_id` null, "unsent") and bound to the user
  * message in the transaction that saves the message. Bytes live in object
  * storage under `schools/{schoolId}/assistant/attachments/{id}/`; transcripts
  * hold a provider-neutral marker with the id, never the bytes, so a long chat
- * stays small and old images can be dropped from the model's context.
+ * stays small and old files can be dropped from the model's context. A
+ * document has only its original object (no thumbnail, no model copy, no
+ * dimensions); the checks below hold that per kind.
  *
  * Unsent attachments older than a day are deleted by the API's outbox sweep
  * with their objects. Deleting a conversation, or its school, deletes the rows
@@ -384,19 +398,27 @@ export const assistantAttachmentTable = pgTable(
     }),
     /** Order within the message, 1-based; null until sent. */
     position: integer("position"),
-    /** The client's file name, display only, sanitised. */
+    /** Image or document, decided from the uploaded bytes. */
+    kind: assistantAttachmentKindEnum("kind").notNull(),
+    /**
+     * The client's file name, display only: sanitised and length-limited,
+     * never part of a storage key, header or path.
+     */
     originalName: text("original_name").notNull(),
     contentType: text("content_type").notNull(),
     byteSize: integer("byte_size").notNull(),
     sha256: text("sha256").notNull(),
-    /** Null when the image could not be decoded. */
+    /** Null for a document, and when an image could not be decoded. */
     width: integer("width"),
     height: integer("height"),
     s3Key: text("s3_key").notNull().unique(),
-    /** `unsupported` when the server could not decode it (HEIC): only the original exists. */
+    /**
+     * Images only (null for a document): `unsupported` when the server could
+     * not decode it (HEIC), so only the original exists.
+     */
     derivativeStatus: assistantAttachmentDerivativeStatusEnum(
       "derivative_status",
-    ).notNull(),
+    ),
     thumbS3Key: text("thumb_s3_key"),
     modelS3Key: text("model_s3_key"),
     modelContentType: text("model_content_type"),
@@ -414,7 +436,12 @@ export const assistantAttachmentTable = pgTable(
     ),
     check(
       "assistant_attachment_derivative_check",
-      sql`(${table.derivativeStatus} = 'ready') = (${table.thumbS3Key} is not null and ${table.modelS3Key} is not null)`,
+      sql`coalesce(${table.derivativeStatus} = 'ready', false) = (${table.thumbS3Key} is not null and ${table.modelS3Key} is not null)`,
+    ),
+    // An image always has a derivative status; a document has none, and no dimensions or derived objects.
+    check(
+      "assistant_attachment_kind_check",
+      sql`(${table.kind} = 'image') = (${table.derivativeStatus} is not null) and (${table.kind} = 'image' or (${table.width} is null and ${table.height} is null and ${table.thumbS3Key} is null and ${table.modelS3Key} is null and ${table.modelContentType} is null and ${table.modelByteSize} is null and ${table.contentType} = 'application/pdf'))`,
     ),
     index("assistant_attachment_unsent_idx")
       .on(table.schoolId, table.userId, table.createdAt)

@@ -67,7 +67,18 @@ type DraftInput = NonNullable<ReturnType<typeof parseDraftCallInput>>;
  * because the heading names the class, subject and exam. The server reads the
  * stored input, never the model.
  */
-function DraftPreviewBody({ schoolId, input, draftId }: { schoolId: string; input: DraftInput; draftId: string }) {
+export function DraftPreviewBody({
+  schoolId,
+  input,
+  draftId,
+  fill = false,
+}: {
+  schoolId: string;
+  input: DraftInput;
+  draftId: string;
+  /** The preview takes its container's height (the paper's pane) instead of a fixed frame; see `DocumentPreview`. */
+  fill?: boolean;
+}) {
   const preview = useQuery({
     queryKey: [
       'assistant',
@@ -84,10 +95,10 @@ function DraftPreviewBody({ schoolId, input, draftId }: { schoolId: string; inpu
     staleTime: DRAFT_PREVIEW_STALE_MS,
     retry: retryUnlessRefused,
   });
-  if (preview.isPending) return <Skeleton className="h-96 w-full rounded-xl" />;
+  if (preview.isPending) return <Skeleton className={fill ? 'h-full w-full rounded-xl' : 'h-96 w-full rounded-xl'} />;
   if (preview.isError) return <PreviewMessage>{requestErrorMessage(preview.error, 'The draft could not be previewed.')}</PreviewMessage>;
   if (preview.data.problems.length > 0) return <PreviewMessage>{preview.data.problems[0]}</PreviewMessage>;
-  return <DocumentPreview html={preview.data.html} label="Draft preview" fitPageWidth />;
+  return <DocumentPreview html={preview.data.html} label="Draft preview" fitPageWidth fill={fill} />;
 }
 
 /** How long a draft preview is trusted before Preview renders it again (the school's template can change). */

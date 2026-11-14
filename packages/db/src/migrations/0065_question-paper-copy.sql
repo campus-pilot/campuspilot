@@ -1,0 +1,7 @@
+ALTER TYPE "public"."question_paper_version_source" ADD VALUE 'copy';--> statement-breakpoint
+ALTER TABLE "exam_question_paper_figure" ADD COLUMN "source_figure_id" text;--> statement-breakpoint
+ALTER TABLE "exam_question_paper_version" ADD COLUMN "source_version_id" text;--> statement-breakpoint
+ALTER TABLE "exam_question_paper_version" ADD CONSTRAINT "exam_question_paper_version_source_version_id_exam_question_paper_version_id_fk" FOREIGN KEY ("source_version_id") REFERENCES "public"."exam_question_paper_version"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "exam_question_paper_version_source_version_idx" ON "exam_question_paper_version" USING btree ("source_version_id");--> statement-breakpoint
+ALTER TABLE "exam_question_paper_figure" ADD CONSTRAINT "exam_question_paper_figure_source_check" CHECK (num_nonnulls("exam_question_paper_figure"."source_attachment_id", "exam_question_paper_figure"."source_figure_id") <= 1);--> statement-breakpoint
+ALTER TABLE "exam_question_paper_version" ADD CONSTRAINT "exam_question_paper_version_source_version_check" CHECK ("exam_question_paper_version"."source_version_id" is null or "exam_question_paper_version"."source"::text = 'copy');

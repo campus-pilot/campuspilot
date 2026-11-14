@@ -1,6 +1,6 @@
 import { issueAssistantRunToken } from '@campuspilot/api/assistant/token';
 import { resolvePaperScope } from '@campuspilot/api/routers/school/question-paper/question-paper.scope';
-import type { AssistantMessageSeed } from '@campuspilot/assistant-contract/attachments';
+import type { AssistantAttachmentKind, AssistantMessageSeed } from '@campuspilot/assistant-contract/attachments';
 import { assistantContract } from '@campuspilot/assistant-contract/contract';
 import { ASSISTANT_LIST_PAGE_SIZE, type AssistantStreamEvent } from '@campuspilot/assistant-contract/dto';
 import { implement, ORPCError } from '@orpc/server';
@@ -19,7 +19,7 @@ import {
   missingProviderReason,
   selectedProviderId,
 } from './runtime/providers/config';
-import { imageMimeTypesOf } from './runtime/providers/image-types';
+import { readableMimeTypesOf } from './runtime/providers/image-types';
 import { resolveAssistantSession, type AssistantSession } from './session';
 import * as store from './store';
 import { userMessageItemKey } from './transcript';
@@ -134,8 +134,16 @@ async function streamStillAllowed(context: Authed, headers: Headers, schoolId: s
 /** Longest conversation title derived from the first message. */
 const TITLE_MAX_LENGTH = 80;
 
-function titleFromMessage(text: string, attachmentCount = 0): string {
-  if (!text.trim()) return attachmentCount === 1 ? 'Attached image' : 'Attached images';
+/** A title for a message without words, named after what it carries. */
+function attachmentsTitle(kinds: readonly AssistantAttachmentKind[]): string {
+  const documents = kinds.filter((kind) => kind === 'document').length;
+  if (documents === 0) return kinds.length === 1 ? 'Attached image' : 'Attached images';
+  if (documents === kinds.length) return documents === 1 ? 'Attached PDF' : 'Attached PDFs';
+  return 'Attached files';
+}
+
+function titleFromMessage(text: string, attachmentKinds: readonly AssistantAttachmentKind[] = []): string {
+  if (!text.trim()) return attachmentsTitle(attachmentKinds);
   const firstLine = text.split('\n').find((line) => line.trim())?.trim() ?? text.trim();
   return firstLine.length > TITLE_MAX_LENGTH
     ? `${firstLine.slice(0, TITLE_MAX_LENGTH - 1)}…`
@@ -322,12 +330,17 @@ export const assistantRouter = os.router({
       if (input.conversationId && !(await store.lockLiveConversation(tx, conversationId))) {
         throw new ORPCError('NOT_FOUND', { message: 'Assistant conversation was not found.' });
       }
+      // Attachments are bound in this transaction: the message either carries every
+      // one of them or is not saved (decision D46 is checked here, before any cost).
+      const attachments = await lockUnsentAttachments(tx, { schoolId: input.schoolId, userId, ids: input.attachmentIds });
+      const unreadable = unreadableAttachmentMessage(attachments, readableMimeTypesOf(provider.id));
+      if (unreadable) throw new ORPCError('BAD_REQUEST', { message: unreadable });
       if (!input.conversationId) {
         await store.createConversation(tx, {
           id: conversationId,
           schoolId: input.schoolId,
           userId,
-          title: titleFromMessage(input.text, input.attachmentIds.length),
+          title: titleFromMessage(input.text, attachments.map((row) => row.kind)),
           provider: provider.id,
           model: provider.model,
         });
@@ -340,11 +353,6 @@ export const assistantRouter = os.router({
         clientRequestId: input.clientRequestId,
         surface: input.surface,
       });
-      // Images are bound in this transaction: the message either carries every
-      // one of them or is not saved (decision D46 is checked here, before any cost).
-      const attachments = await lockUnsentAttachments(tx, { schoolId: input.schoolId, userId, ids: input.attachmentIds });
-      const unreadable = unreadableAttachmentMessage(attachments, imageMimeTypesOf(provider.id));
-      if (unreadable) throw new ORPCError('BAD_REQUEST', { message: unreadable });
       const item = await store.insertItem(tx, emit, {
         conversationId,
         runId,
@@ -456,7 +464,7 @@ export const assistantRouter = os.router({
     }
     // Deleted by another request in between: it is gone either way.
     if (outcome === 'missing') throw new ORPCError('NOT_FOUND', { message: 'Assistant conversation was not found.' });
-    // The images the user attached go with the chat they deleted; nothing reads them any more.
+    // The files the user attached go with the chat they deleted; nothing reads them any more.
     await deleteConversationAttachments(db, owned.id).catch((err) =>
       log.warn({ err, conversationId: owned.id }, 'assistant.conversation.attachments.cleanup.failed'),
     );

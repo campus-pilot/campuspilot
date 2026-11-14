@@ -2,24 +2,43 @@ import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 import {
   applyPageOrder,
-  continueInChatHref,
   currentJobFailure,
   generatedVersionReady,
   detailPollInterval,
   isConflict,
-  resolveSection,
+  chatIdOf,
+  resolveView,
   resolveVersionNo,
+  shownPaperOf,
   runInOrder,
   uploadsInFlight,
 } from './question-paper-model';
 
 const scope = { schoolId: 'sch 1', sessionId: 'ses_1', examSlug: 'half-yearly', classId: 'cls_1', subjectSlug: 'science', modeSlug: 'theory' };
 
-test('the section follows the URL, else the result when a version exists', () => {
-  assert.equal(resolveSection('versions', false), 'versions');
-  assert.equal(resolveSection(undefined, true), 'result');
-  assert.equal(resolveSection(null, false), 'pages');
-  assert.equal(resolveSection('nonsense', true), 'result');
+const nothing = { start: null, hasVersion: false, generating: false, hasChat: false };
+
+test('a paper with nothing shows its first screen, and the address can ask for it', () => {
+  assert.deepEqual(resolveView(nothing), { kind: 'start', picking: false });
+  assert.deepEqual(resolveView({ ...nothing, start: 'earlier' }), { kind: 'start', picking: true });
+  // Also for a paper that already has versions: adding photos or copying again is asked for in the address.
+  assert.deepEqual(resolveView({ ...nothing, start: 'sources', hasVersion: true }), { kind: 'start', picking: false });
+  assert.deepEqual(resolveView({ ...nothing, start: 'earlier', hasVersion: true }), { kind: 'start', picking: true });
+  assert.deepEqual(resolveView({ ...nothing, start: 'nonsense' }), { kind: 'start', picking: false });
+  assert.deepEqual(resolveView({ ...nothing, start: 'nonsense', hasVersion: true }), { kind: 'studio' });
+});
+
+test('the studio shows once there is a version, a generation at work or a conversation', () => {
+  assert.deepEqual(resolveView({ ...nothing, hasVersion: true }), { kind: 'studio' });
+  assert.deepEqual(resolveView({ ...nothing, generating: true }), { kind: 'studio' });
+  assert.deepEqual(resolveView({ ...nothing, hasChat: true }), { kind: 'studio' });
+});
+
+test('only the assistant\'s own conversation ids are read from the address', () => {
+  assert.equal(chatIdOf('asc_1zha8rfad562u25ztsr16'), 'asc_1zha8rfad562u25ztsr16');
+  assert.equal(chatIdOf('../../etc'), null);
+  assert.equal(chatIdOf(''), null);
+  assert.equal(chatIdOf(null), null);
 });
 
 test('the version follows the URL when it exists, else the latest', () => {
@@ -36,11 +55,14 @@ test('the detail is polled only while a job is in flight', () => {
   assert.equal(detailPollInterval({ activeJob: { id: 'j' } }), 3000);
 });
 
-test('the chat link carries only ids and slugs, encoded', () => {
-  assert.equal(
-    continueInChatHref(scope),
-    '/school/sch%201/assistant?seed=question_paper&sessionId=ses_1&examSlug=half-yearly&classId=cls_1&subjectSlug=science&modeSlug=theory',
-  );
+test('the paper side shows a named version, else the unsaved draft, else the latest version', () => {
+  assert.deepEqual(shownPaperOf(null, [1, 2], true), { kind: 'draft' });
+  assert.deepEqual(shownPaperOf('1', [1, 2], true), { kind: 'version', versionNo: 1 });
+  assert.deepEqual(shownPaperOf(null, [1, 2], false), { kind: 'version', versionNo: 2 });
+  // A version that does not exist falls back to the latest; with no version at all, to the draft.
+  assert.deepEqual(shownPaperOf('9', [1, 2], true), { kind: 'version', versionNo: 2 });
+  assert.deepEqual(shownPaperOf('9', [], true), { kind: 'draft' });
+  assert.deepEqual(shownPaperOf(null, [], false), { kind: 'nothing' });
 });
 
 test('an optimistic reorder renumbers and never drops a page', () => {

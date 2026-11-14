@@ -53,11 +53,16 @@ export const questionPaperJobStatusEnum = pgEnum("question_paper_job_status", [
 
 /**
  * Who authored a saved version. Its own fact: not inferred from whether
- * `source_job_id` is set.
+ * `source_job_id` or `source_version_id` is set (`source_version_id` is
+ * cleared when the copied version is deleted, the source stays `copy`).
+ * - `ai_job`: the generation job wrote it from the uploaded pages.
+ * - `agent`: a chat agent (in-app assistant or MCP client) wrote it.
+ * - `copy`: a person started this paper from a version of an earlier paper
+ *   of the same class and subject (`copyQuestionPaperVersion`).
  */
 export const questionPaperVersionSourceEnum = pgEnum(
   "question_paper_version_source",
-  ["ai_job", "agent"],
+  ["ai_job", "agent", "copy"],
 );
 
 /** The largest accepted original image (D24). */
@@ -224,6 +229,16 @@ export const examQuestionPaperJobTable = pgTable(
     pageIds: jsonb("page_ids").$type<string[]>().notNull(),
     /** The `page_revision` the request was made against. */
     pageRevision: integer("page_revision").notNull(),
+    /**
+     * The teacher's instructions for this generation ("Keep the questions but
+     * change the numbers"), as `startQuestionPaperGeneration` accepted them
+     * (trimmed, at most 2,000 characters, no control characters besides line
+     * feed and tab). Its own fact: null means the job was started without any
+     * and only transcribes, never inferred from anything else. Written when
+     * the job is created and never changed, so every attempt and every replay
+     * of the job sends the model the same text.
+     */
+    instructions: text("instructions"),
     /** Retry counter, part of the provider idempotency keys. */
     attempt: integer("attempt").notNull().default(1),
     /** Set when the job starts. */
@@ -323,6 +338,20 @@ export const examQuestionPaperVersionTable = pgTable(
     /** Chat provenance of an `agent` save. A plain value: conversations are soft-deleted. */
     sourceConversationId: text("source_conversation_id"),
     /**
+     * The version a `copy` was made from (another paper of the same school,
+     * class and subject). `ON DELETE SET NULL`: the source paper can be deleted
+     * later (`deleteQuestionPaper`, `deleteExamPlan`, the demo purge) and the
+     * copy must survive it, so the reference may neither cascade nor block the
+     * delete. The copy never needs the source again: its fragment is stored
+     * here and its figures were copied into this paper. Null for every other
+     * source, and for a copy whose source version is gone (`source` stays
+     * `copy`).
+     */
+    sourceVersionId: text("source_version_id").references(
+      (): AnyPgColumn => examQuestionPaperVersionTable.id,
+      { onDelete: "set null" },
+    ),
+    /**
      * The mode's maximum marks in the exam plan at save time. A snapshot of the
      * header fact the template prints ("Maximum marks"), so a restored PDF or an
      * old preview never changes when the plan is edited. Not computed from the
@@ -368,7 +397,17 @@ export const examQuestionPaperVersionTable = pgTable(
       table.templateRevisionId,
     ),
     index("exam_question_paper_version_pdf_idx").on(table.pdfArtifactId),
+    index("exam_question_paper_version_source_version_idx").on(
+      table.sourceVersionId,
+    ),
     check("exam_question_paper_version_no_check", sql`${table.versionNo} >= 1`),
+    // Only a copy names a source version; a copy may have none once its source was deleted. Compared as text: an
+    // enum value added in a migration cannot be used (cast to the enum) in the transaction that adds it, and the
+    // migrator applies every pending migration in one transaction.
+    check(
+      "exam_question_paper_version_source_version_check",
+      sql`${table.sourceVersionId} is null or ${table.source}::text = 'copy'`,
+    ),
   ],
 );
 
@@ -398,6 +437,14 @@ export const examQuestionPaperFigureTable = pgTable(
     sha256: text("sha256").notNull(),
     /** The chat attachment it was copied from (plain value). */
     sourceAttachmentId: text("source_attachment_id"),
+    /**
+     * The figure of another paper it was copied from when a version was
+     * copied (`copyQuestionPaperVersion`). A plain value, not a foreign key:
+     * the source paper and its figures can be deleted and this copy keeps its
+     * own object. Deduplicates a repeated copy of the same source figure into
+     * this paper.
+     */
+    sourceFigureId: text("source_figure_id"),
     /** A user id with no FK. */
     createdBy: text("created_by").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true })
@@ -407,6 +454,10 @@ export const examQuestionPaperFigureTable = pgTable(
   (table) => [
     index("exam_question_paper_figure_paper_idx").on(table.paperId),
     index("exam_question_paper_figure_school_idx").on(table.schoolId),
+    check(
+      "exam_question_paper_figure_source_check",
+      sql`num_nonnulls(${table.sourceAttachmentId}, ${table.sourceFigureId}) <= 1`,
+    ),
     check(
       "exam_question_paper_figure_content_type_check",
       sql`${table.contentType} in ('image/jpeg', 'image/png')`,

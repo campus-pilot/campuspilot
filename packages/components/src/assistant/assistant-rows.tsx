@@ -25,7 +25,8 @@ import {
 } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 
-import { AssistantSentAttachments, type SentAttachment } from './assistant-attachment-strip';
+import { AssistantSentAttachments } from './assistant-attachment-strip';
+import { sentAttachmentsOf, type SentAttachment } from './assistant-attachments-model';
 import { AssistantCopyButton } from './assistant-copy-button';
 import { AssistantRunDiagnostics } from './assistant-diagnostics';
 import { AssistantMarkdown } from './assistant-markdown';
@@ -133,7 +134,7 @@ export function AssistantUserMessage({
   at: Date;
   delivery?: AssistantMessageDelivery;
   onRetry?: () => void;
-  /** The images sent with the message, shown above its bubble. */
+  /** The images and PDFs sent with the message, shown above its bubble. */
   attachments?: readonly SentAttachment[];
 }) {
   return (
@@ -167,14 +168,11 @@ export function AssistantUserMessageRow({
   attachmentPreviewUrl,
 }: {
   item: AssistantUserMessageItemDto;
-  /** The thumbnail address of a sent image; null draws a generic tile. */
+  /** The thumbnail address of a sent image (never asked for a document); null draws a generic tile. */
   attachmentPreviewUrl?: (attachment: AssistantAttachmentRef) => string | null;
 }) {
-  const attachments = (item.body.attachments ?? []).map((attachment) => ({
-    id: attachment.id,
-    fileName: attachment.fileName,
-    previewUrl: attachment.previewable ? (attachmentPreviewUrl?.(attachment) ?? null) : null,
-  }));
+  // Only an image the server decoded has a thumbnail; a document is never asked for one.
+  const attachments = sentAttachmentsOf(item.body.attachments ?? [], attachmentPreviewUrl);
   return <AssistantUserMessage text={item.body.text} at={item.createdAt} attachments={attachments} />;
 }
 

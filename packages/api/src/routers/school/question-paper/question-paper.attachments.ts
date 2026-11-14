@@ -5,6 +5,7 @@ import { and, eq, inArray, isNotNull } from 'drizzle-orm';
 
 import { rpcError } from '../../../errors';
 import { normalizeFigureImage } from '../../../files/image-derivative';
+import { replaceFigureIds } from './question-paper.body';
 import { findPaper } from './question-paper.records';
 import { sanitizeQuestionPaperBody } from './question-paper.sanitize';
 import type { PaperScope } from './question-paper.scope';
@@ -20,6 +21,10 @@ import { getObjectBytes } from './question-paper.storage';
  * (`qpf_`, normalised, counted against the 30 figure cap) and rewrites the ids,
  * so a stored version never depends on a chat attachment, which is deleted with
  * its conversation.
+ *
+ * Only an image can be a figure. A PDF the user attached is source material
+ * the model reads; its `asat_` id used as a figure is a problem the model is
+ * told how to fix, and a save refuses it ({@link DOCUMENT_FIGURE_PROBLEM}).
  *
  * Who may use an attachment is its owner: the chat user. Only the in-app
  * assistant (and the draft preview of the person who owns the chat) pass a
@@ -63,6 +68,10 @@ async function usableAttachments(
  */
 const figureSourceKey = (row: UsableRow) => row.modelS3Key ?? row.s3Key;
 
+/** The problem line for a PDF used as a figure: what is wrong and what to write instead. */
+export const documentFigureProblem = (fileName: string) =>
+  `${fileName} is a PDF the user attached, not an image: it cannot be printed as a figure. Read it as source material; for a picture inside it write <figure data-placeholder="..."></figure>, or ask the user to attach that picture as an image.`;
+
 /** Why an `asat_` figure id cannot be used, or null when it can. */
 export async function attachmentFigureProblems(
   db: DatabaseExecutor,
@@ -78,6 +87,7 @@ export async function attachmentFigureProblems(
   for (const id of input.ids) {
     const row = usable.get(id);
     if (!row) problems.set(id, 'This is not an image the user attached in a chat message.');
+    else if (row.kind === 'document') problems.set(id, documentFigureProblem(row.originalName));
     else if (row.derivativeStatus !== 'ready') {
       problems.set(id, `${row.originalName} is in a format that cannot be printed (for example HEIC). Ask the user to attach a JPEG or PNG.`);
     }
@@ -119,6 +129,8 @@ export async function convertAttachmentFigures(
   for (const id of ids) {
     const row = usable.get(id);
     if (!row) throw rpcError.badRequest('A figure uses an image that is not one of the chat attachments of this user.');
+    // Validation refuses this first; a save never copies a PDF into the paper's figures.
+    if (row.kind !== 'image') throw rpcError.badRequest(documentFigureProblem(row.originalName));
     const paper = await findPaper(db, input.scope.key);
     const [existing] = paper
       ? await db
@@ -139,11 +151,5 @@ export async function convertAttachmentFigures(
     });
     figureIdOf.set(id, figure.id);
   }
-  // Only inside <img> and <figure> tags: a paragraph that merely quotes the attribute is text and stays as written.
-  return input.html.replace(/<(?:img|figure)\b[^>]*>/g, (tag) =>
-    tag.replace(/\sdata-figure-id="([^"]*)"/, (whole, id: string) => {
-      const figureId = figureIdOf.get(id);
-      return figureId ? ` data-figure-id="${figureId}"` : whole;
-    }),
-  );
+  return replaceFigureIds(input.html, figureIdOf);
 }

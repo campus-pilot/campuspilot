@@ -1,6 +1,6 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { defaultExamSection, examSectionOf, questionPaperWorkspaceHref } from './exam-model';
+import { defaultExamSection, examSectionOf, isQuestionPaperWorkspacePath, questionPaperWorkspaceHref } from './exam-model';
 
 test('Question paper is the default only for a ready exam with a plan and an allowed assistant', () => {
   assert.equal(defaultExamSection({ planCount: 3, status: 'ready', assistant: 'allowed' }), 'question-paper');
@@ -35,14 +35,29 @@ test('pathnames map to workspace tabs', () => {
   assert.equal(examSectionOf(`${base}/classes/question-paper`, base), 'results');
 });
 
-test('paper links encode every segment and keep the section in the query', () => {
+test('only one paper\'s screen takes the window from the exam\'s heading and tabs', () => {
+  const base = '/school/s/sessions/x/exam/half-yearly';
+  assert.equal(isQuestionPaperWorkspacePath(`${base}/question-paper/c1/sci/theory`, base), true);
+  assert.equal(isQuestionPaperWorkspacePath(`${base}/question-paper/c1/sci/theory/`, base), true);
+  // The grid of papers, and every other section, keep the exam's heading and tabs.
+  assert.equal(isQuestionPaperWorkspacePath(`${base}/question-paper`, base), false);
+  assert.equal(isQuestionPaperWorkspacePath(`${base}/question-paper/c1/sci`, base), false);
+  assert.equal(isQuestionPaperWorkspacePath(`${base}/results`, base), false);
+  assert.equal(isQuestionPaperWorkspacePath(`${base}/classes/question-paper/a/b/c`, base), false);
+});
+
+test('paper links encode every segment and keep what the screen shows in the query', () => {
   const scope = { schoolId: 's', sessionId: 'x', examSlug: 'half yearly', classId: 'c/1', subjectSlug: 'sci', modeSlug: 'theory' };
   assert.equal(
     questionPaperWorkspaceHref(scope),
     '/school/s/sessions/x/exam/half%20yearly/question-paper/c%2F1/sci/theory',
   );
   assert.equal(
-    questionPaperWorkspaceHref(scope, { section: 'result', version: 2 }),
-    '/school/s/sessions/x/exam/half%20yearly/question-paper/c%2F1/sci/theory?section=result&version=2',
+    questionPaperWorkspaceHref(scope, { version: 2, chat: 'asc_1' }),
+    '/school/s/sessions/x/exam/half%20yearly/question-paper/c%2F1/sci/theory?version=2&chat=asc_1',
+  );
+  assert.equal(
+    questionPaperWorkspaceHref(scope, { start: 'sources' }),
+    '/school/s/sessions/x/exam/half%20yearly/question-paper/c%2F1/sci/theory?start=sources',
   );
 });

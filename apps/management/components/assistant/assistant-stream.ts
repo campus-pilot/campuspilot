@@ -28,7 +28,7 @@ export function refusalMessage(error: unknown): string | null {
   return isClientError(error) && error instanceof Error && error.message ? error.message : null;
 }
 
-/** The stored images a refused send named that the server no longer holds, or null for any other refusal. */
+/** The stored files (images or PDFs) a refused send named that the server no longer holds, or null for any other refusal. */
 export function missingAttachmentIdsOf(error: unknown): string[] | null {
   if (!(error instanceof ORPCError) || error.status >= 500) return null;
   const data = error.data as { reason?: unknown; attachmentIds?: unknown } | undefined;
