@@ -11,6 +11,8 @@ export * from './assistant-empty-state';
 export * from './assistant-markdown';
 export * from './assistant-rows';
 export * from './assistant-timeline';
+export * from './assistant-voice';
+export * from './assistant-voice-model';
 export * from './timeline-model';
 export * from './views';
 export type { ApprovalDisplayOptions, ApprovalPath } from './approval-values';

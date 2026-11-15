@@ -63,6 +63,15 @@ export const schoolFeatureCatalogue = {
         .array(roleEnum)
         .min(1)
         .refine((roles) => new Set(roles).size === roles.length, "Name each role once."),
+      /**
+       * Voice mode: talking to the assistant and hearing it answer. Its own
+       * switch inside the assistant feature, so a school can have the assistant
+       * without voice. It only narrows: voice also needs the assistant itself
+       * (this flag enabled, the user's role, the monthly limit) and a voice
+       * model configured on the platform. Rows saved before voice existed have
+       * no `voice` and read as off.
+       */
+      voice: z.object({ enabled: z.boolean() }).default({ enabled: false }),
     }),
   },
 } as const satisfies Record<

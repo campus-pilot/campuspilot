@@ -139,6 +139,7 @@ describe('school.getAssistantUsage', () => {
     expect((await read()).sources).toEqual([
       expect.objectContaining({ source: 'chat', requests: 1, costUsd: '0.5', inputTokens: 100 }),
       expect.objectContaining({ source: 'question_paper', requests: 0, costUsd: '0', inputTokens: 0 }),
+      expect.objectContaining({ source: 'voice', requests: 0, costUsd: '0', inputTokens: 0 }),
     ]);
 
     // A generation job has no run; its requests carry the job id and the source.
@@ -148,13 +149,21 @@ describe('school.getAssistantUsage', () => {
       provider: 'anthropic', requestedModel: 'claude-x', answeredModel: 'claude-x', usageComplete: true,
       inputTokens: 2000, outputTokens: 1000, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, ...prices, costUsd: '0.014', createdAt: new Date('2031-09-01T07:00:00Z'),
     });
+    // A voice session has neither a run nor a job; its requests carry the session id and the source.
+    await db.insert(assistantModelRequestTable).values({
+      source: 'voice', voiceSessionId: 'avs_abcdefghijklmnopqrstu', schoolId: school.id, userId, requestKey: 'voice:usage-test:1:audio',
+      provider: 'gemini', requestedModel: 'gemini-3.8-live', answeredModel: 'gemini-3.8-live', usageComplete: true,
+      inputTokens: 300, outputTokens: 90, cacheReadInputTokens: 0, cacheCreationInputTokens: 0,
+      inputUsdPerMtok: '3', outputUsdPerMtok: '12', cacheReadUsdPerMtok: '0', cacheWriteUsdPerMtok: '0', costUsd: '0.00198', createdAt: new Date('2031-09-01T08:00:00Z'),
+    });
     const usage = await read();
-    expect(usage.total).toMatchObject({ requests: 2, costUsd: '0.514' });
+    expect(usage.total).toMatchObject({ requests: 3, costUsd: '0.51598' });
     expect(usage.sources).toEqual([
       expect.objectContaining({ source: 'chat', requests: 1, costUsd: '0.5' }),
       expect.objectContaining({ source: 'question_paper', requests: 1, costUsd: '0.014', inputTokens: 2000, outputTokens: 1000 }),
+      expect.objectContaining({ source: 'voice', requests: 1, costUsd: '0.00198', inputTokens: 300, outputTokens: 90 }),
     ]);
-    expect(usage.models.map((model) => model.model).sort()).toEqual(['claude-x', 'gemini-3.8-flash']);
+    expect(usage.models.map((model) => model.model).sort()).toEqual(['claude-x', 'gemini-3.8-flash', 'gemini-3.8-live']);
   });
 
   it('is cached for an hour: a request saved after the first read is not seen until a refresh', async () => {

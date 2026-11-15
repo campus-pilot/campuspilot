@@ -5,9 +5,10 @@ const ENTITIES = {
   conversation: 'assistantConversation',
   item: 'assistantItem',
   run: 'assistantRun',
+  voiceSession: 'assistantVoiceSession',
 } as const satisfies Record<string, EntityName>;
 
-/** Prefixed random ids in the platform's `<prefix>_<21 base-36 chars>` shape (`asa_`, `asc_`, `asi_`, `asr_`). */
+/** Prefixed random ids in the platform's `<prefix>_<21 base-36 chars>` shape (`asa_`, `asc_`, `asi_`, `asr_`, `avs_`). */
 export function generateId(entity: keyof typeof ENTITIES): string {
   return generateDbId(ENTITIES[entity]);
 }

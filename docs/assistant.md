@@ -16,8 +16,9 @@ permissions.
 | Contract | `packages/assistant-contract` | DTOs, the oRPC contract of `/model/*`, shared protocol constants, exact USD sums (`money.ts`) |
 | Chat UI pieces | `packages/components/src/assistant` | Presentational timeline, approval card, composer (props and callbacks only) |
 | Usage UI pieces | `packages/components/src/assistant-usage` | Date range form, spend chart and table (props only) |
-| Management surfaces | `apps/management/components/assistant`, `components/assistant-settings` | Data hooks, the three surfaces (panel, page, palette), Settings › AI assistant and Settings › Usage |
+| Management surfaces | `apps/management/components/assistant`, `components/assistant-settings` | Data hooks, the surfaces (the voice overlay, the page, the palette), Settings › AI assistant and Settings › Usage |
 | Admin pages | `apps/admin/components/assistant` | School › AI (feature flag, limit, eligible roles, spend), AI billing (platform) |
+| Voice mode | `packages/assistant/src/voice`, `packages/assistant-contract/src/voice.ts`, `apps/management/components/assistant/voice`, `packages/components/src/assistant/assistant-voice*.tsx` | The voice endpoint and session on the API server, the voice model's adapter, the wire format, the browser's microphone and speakers, the avatar and the voice bar (see [Voice mode](#voice-mode)) |
 | API side | `packages/api/src/assistant/*` (`access.ts`, `token.ts`, `spend.ts`, `usage.ts`, `tool-policy.ts`), `packages/auth/src/assistant-token.ts`, `routers/school/assistant-access`, `routers/system-admin/assistant-usage`, `apps/server/src/mcp*.ts` | The access decision, delegated tokens, spend and usage reads, the `assistant` principal, the tool policy, the MCP assistant view |
 
 ### Where it runs
@@ -146,7 +147,7 @@ Procedures: `school.getAssistantAccess`, `school.updateAssistantRoles`,
 `systemAdmin.getPlatformAssistantUsage` (all hidden from MCP, so never offered
 to the assistant itself).
 
-UI: every management entry point (navbar panel button, sidebar link, ⌘K
+UI: every management entry point (the top bar's voice button, sidebar link, ⌘K
 entry) is wrapped in `AssistantAccess`: `RequireFeature('assistant')` and the
 user's `getStatus().allowed` (their role may use it, whatever the limit). The
 assistant pages use `FeaturePage` and the same `AssistantAccess` role gate.
@@ -596,6 +597,258 @@ so a colleague who takes the paper over reads how it came to be and carries on.
   sender's own permissions. The welcome says so ("Everyone who can open this
   paper sees this chat").
 
+## Voice mode
+
+Staff can talk to the assistant and hear it answer, on every surface the chat
+is on (the overlay, the page, the palette, a question paper's screen): all of them render the
+same `AssistantChat`, which is the one place voice is wired
+(`voice/use-chat-voice.ts`).
+
+**The voice model is a speaking front, not a second assistant.** It holds no
+school data and has one tool, `ask_assistant`. A spoken request is sent as an
+ordinary assistant message by the user's own browser, so it is a normal turn:
+the same access decision, permissions, approvals on screen, history, spend
+limit and text provider. Nothing about the turn loop changed for voice.
+
+```
+microphone -> browser ==WebSocket /model/voice==> API server ==Live API==> voice model
+                 |  (binary: PCM audio both ways; text: JSON messages)        |
+                 |                                                            | calls ask_assistant(request)
+                 |<----------------------- ask(request) ----------------------+
+                 |-- sendMessage (ordinary /model/rpc call) --> run starts in the worker, as always
+                 |-- turn(conversationId, runId) --> API server follows that run (events + snapshot)
+                 |                                    and gives the voice model its outcome
+speakers  <------+<=================== the assistant's voice ==================+
+```
+
+### Pieces
+
+| Piece | Where | Owns |
+| --- | --- | --- |
+| Wire format | `packages/assistant-contract/src/voice.ts` | The path, the audio formats (16 kHz in, 24 kHz out, 16-bit mono PCM), the JSON messages each way, why a session ended |
+| Endpoint | `packages/assistant/src/voice/server.ts` | The WebSocket upgrade at `/model/voice` on the API server (attached in `apps/server/src/index.ts`), who is admitted, one session per user per process |
+| Session | `voice/session.ts` | One session: relays audio, passes requests to the browser, follows their runs, saves usage, reconnects the voice model, enforces the time limits and the access recheck |
+| Run follower | `voice/turn-watch.ts` | Reads one run to its outcome from the conversation's own events and rows |
+| Voice provider | `voice/provider.ts`, `voice/gemini-live.ts` | The seam to the voice model and the Gemini Live adapter |
+| Instructions | `voice/prompt.ts` | What the voice model is told, and its one tool |
+| Cost | `voice/usage.ts` | The voice model's cost rows |
+| Browser | `apps/management/components/assistant/voice` | `voice-engine.ts` (microphone, playback, loudness), `voice-controller.ts` (the app's one session), `voice-state.ts` (what the screen shows, as pure rules), `public/assistant-voice-capture.js` (the capture worklet) |
+| Screen | `packages/components/src/assistant/assistant-voice.tsx`, `assistant-voice-model.ts` | The avatar, the header over the conversation, the voice bar in the message box's place, the start button |
+
+### Switching it on
+
+Voice needs all of these, each its own fact (`voice/access.ts`, `voiceRefusal`):
+
+1. **The platform has a voice model**: `GEMINI_LIVE_MODEL` and its four prices
+   (`GEMINI_LIVE_PRICE_TEXT_INPUT_`, `_AUDIO_INPUT_`, `_TEXT_OUTPUT_`,
+   `_AUDIO_OUTPUT_USD_PER_MTOK`), all five or none, plus `GEMINI_API_KEY`. Only
+   the API server reads them. Without them no school has voice.
+2. **The user may send in the school now**: the assistant's own access decision
+   (feature, role, monthly limit).
+3. **The school has voice on**: `voice.enabled` inside the `assistant` feature's
+   settings, edited on the admin app's School › AI page. Settings saved before
+   voice existed read as off.
+4. **Nobody is impersonating the user.**
+
+`getStatus` reports the result as `voice.available`; the voice button is shown
+only then. The same check admits the upgrade request and is repeated every
+minute of an open session, so a session ends when the limit is reached, the
+feature or the role is switched off, or the user signs out.
+
+`ASSISTANT_VOICE_MAX_SESSION_MINUTES` (20) and `ASSISTANT_VOICE_IDLE_SECONDS`
+(180) bound a session. A request that is running, or waiting for an approval,
+keeps a quiet session open: its outcome is still to be said.
+
+### The endpoint
+
+`/model/voice?schoolId=` is a WebSocket on the API origin, opened with the
+user's session cookie. The upgrade is decided before any socket exists: the
+origin must be one of `CORS_ORIGIN` (a WebSocket handshake is not subject to
+CORS and carries the cookie from any site), then the session, then voice access.
+Refusals are plain HTTP statuses (401, 403, 404).
+
+**Whatever sits in front of the API must pass WebSocket upgrades on
+`/model/voice` and must not buffer it.** This is the only WebSocket the API
+serves; an upgrade for any other path is closed.
+
+The browser's key never leaves the server, the voice model's instructions are
+never sent to the browser, and usage is counted by the server from the model's
+own reports, not by the browser.
+
+### A spoken request
+
+1. The voice model hears the user (its own voice activity detection and
+   transcription) and calls `ask_assistant` with the request in the user's
+   words. The server sends `ask` to the browser.
+2. The browser sends the request with the chat's own `send` (the same
+   `sendMessage` call as a typed message, with the chat's seed and sharing) and
+   answers `turn` with the conversation and run it started. A refusal (the
+   monthly limit, no access) is answered as `turn_failed` and said to the user.
+3. The server confirms the run is this user's own in a conversation they may
+   read, then follows it (`turn-watch.ts`): it subscribes to the conversation's
+   events and reads its snapshot, and reads again whenever the events are quiet
+   for ten seconds, because they are fire-and-forget.
+4. When a change waits for approval, the voice model is told once per change and
+   asks the user to tap Approve or Decline. **Speech never approves**: the voice
+   model has no way to, the approval is the same card in the same place, and
+   only the sender of the turn may decide it, as always.
+5. When the run ends, the voice model is given its outcome (the answer's text,
+   the views put on screen by kind and heading, the changes made and declined,
+   or why it failed) and says it in a sentence or two. The details are on the
+   screen: the conversation shows the run's steps, tables and drafts as its own
+   rows, exactly as for a typed message.
+
+The tool is declared non-blocking, so the voice model keeps listening while a
+request runs and the user can speak or interrupt. If it stops waiting for a call
+(the user moved on, or its connection was replaced), the outcome is told as a
+note from the app instead, because a result for a call it no longer knows is
+dropped.
+
+### Connection to the voice model
+
+A Live API connection lasts about ten minutes. The session keeps the latest
+resume handle, reconnects when the model warns (`goAway`) or the connection
+drops, and tells the browser (`reconnecting`, `reconnected`); after three failed
+attempts it ends as `unavailable`. Context window compression is on, so a long
+session slides its oldest turns out instead of ending at the model's limit.
+
+### Cost
+
+Each reply of the voice model reports its usage once. `recordVoiceUsage` saves
+it as `assistant_model_request` rows with `source = 'voice'` and the session's
+id (`voice_session_id`, migration 0069; a voice session has no row of its own).
+Text and audio tokens have different prices and a row holds one input and one
+output price, so a reply is saved as **up to two rows**, one per modality
+(`voice:<session>:<reply>:text` and `:audio`), each with the prices its tokens
+were billed at. The cost expression is the same as every other writer's.
+
+Voice rows count toward the school's monthly limit and appear on the usage
+pages under **Voice**. They are the voice model only; the turns spoken requests
+start are ordinary runs, counted under the chat as always. The "requests" count
+of voice is rows, so a reply with both modalities counts twice there.
+
+### In the browser
+
+- **One session for the whole app** (`voice-controller.ts`): there is one
+  microphone. Starting voice in one chat ends it in another, a Web Lock keeps
+  two tabs of one browser from talking at once, and the server keeps one session
+  per user per process.
+- **The chat that started it owns it.** It shows the voice header over the
+  conversation and the voice bar in the message box's place; the message box
+  stays mounted but hidden, so what was typed and attached survives. When that
+  chat leaves the screen, the session ends (the cleanup of its root element's
+  ref), and so it does when the page is left.
+- **Muted means nothing is sent**: the capture callback drops every chunk, the
+  track is disabled, and the server is told the stream paused.
+- **The avatar moves only with real sound**: every frame it reads the loudness
+  of the microphone and of the assistant's voice from two analysers and writes
+  them to CSS variables (`assistant.css`). What it shows is always also said in
+  words by the voice bar's label.
+- No `useEffect`: the session lives outside React (`useSyncExternalStore`), is
+  driven from event handlers, and the avatar's frame loop is a ref callback.
+
+### The overlay and opening pages
+
+The top bar's assistant button no longer opens a side panel (it was removed).
+It starts voice in **the overlay** (`voice/assistant-voice-overlay.tsx`): a
+voice bar docked at the bottom of the window, the conversation in a card above
+it once something was asked, and a glow around the window while it is on. The
+page underneath stays usable; the layer takes clicks only on its bar and card.
+Typing lives on the Assistant page, ⌘K and the question paper screen, whose
+chats keep their own voice button.
+
+- **Where it is mounted**: `app/(protected)/school/[schoolId]/layout.tsx`, above
+  every page and both shells (workspace and settings). Next.js keeps a layout
+  mounted during navigation below it, so a session survives every page change
+  inside the school. Leaving the school unmounts it and ends the session.
+- **What it renders**: `AssistantChat` in its `overlay` mode (surface `panel`),
+  so requests, steps, views and approvals are the chat's own. Each session
+  starts a new conversation, which stays in the history.
+- **How the button reaches it**: the overlay registers its start function
+  (`voice-launcher.ts`) through a ref; the button calls it inside the click.
+- **What the user sees**: a pill (`AssistantVoiceDock`) with the assistant, its
+  words, the user's words, the microphone and End. The conversation appears in
+  a panel above it, as tall as its content up to about half the window; the
+  user can hide it and bring it back from the pill, and a new request shows it
+  again. Its Full screen button makes the whole layer fill the window over the
+  blurred page the user is on; it never navigates (the full conversation is
+  still in the Assistant page's history). A change waiting for approval has its own card between the two, so it
+  stays in view either way.
+- **What is on the page**: each request from the overlay carries the text of
+  the page under it (`pageContext.pageText`, at most 12,000 characters;
+  `screen-text.ts`). It is read from the page as drawn, all of it at once
+  (above and below the window too, so nothing waits for a scroll), in reading
+  order, one line per visual row, with the part in the user's view framed by
+  marker lines. Too long a page is cut at whole lines, keeping the part in view
+  and then what follows it, with a note where text was left out. Only what the
+  page has drawn is there: a paginated table holds its shown page of rows. The model
+  gets it fenced inside the `<current_page>` block, which the prompt explains
+  and treats as data entered by people. Other surfaces send only the path and
+  title: a chat on its own page would only describe itself. It stays in the
+  transcript with its message and is not pruned, so a long overlay session
+  carries one snapshot per request.
+- **Questions about the screen** ("what can you see", "which exams are
+  here"): the voice model answers them itself with its `read_screen` tool. The
+  server asks the browser (`read_screen`), the overlay returns the window's
+  title and the text of `main` (`readPageUnderOverlay`, the same reader as
+  `pageContext.pageText`), and the voice model speaks the answer. No text
+  turn runs, so nothing is looked up, it is quick, and the only cost is the
+  screen's text as input to the voice model. The text is what the user already
+  sees; the voice model is told it is data and never instructions. The text
+  assistant still gets the screen with each request and is told to answer
+  screen questions from it, but a small model does not always obey, which is
+  why the voice model takes these itself.
+- **Opening pages**: the voice model has a second tool, `open_page`, with a
+  fixed list of sections (`VOICE_DESTINATIONS` in the contract: dashboard,
+  assistant, staff, admission, classroom, examinations, documents, billing,
+  notices, settings). The server passes it to the browser (`open`), the overlay
+  builds the address for the user's school and session
+  (`voice-destinations.ts`, the sidebar's own addresses) and routes there, and
+  answers `opened`. It is never a free address, it reads and changes nothing,
+  and the page still decides what the user may see.
+- **Opening what is on the screen**: a third tool, `open_on_screen`, takes a
+  name as written on the screen ("Second Term Examination", "Aanya Menon").
+  The overlay follows what on the screen matches it best
+  (`screen-links.ts`), anywhere but the overlay itself (the page, the
+  sidebar, the breadcrumbs): links to addresses inside the school, and table rows
+  that open their record (`data-opens-record`, set by the shared `DataTable`
+  whenever it has `onRowClick`), opened by clicking the row. Never buttons (a
+  button may change something), and only what is drawn inside the window, so
+  it is exactly a click the user could make. A table that opens rows another
+  way must set `data-opens-record` on them to be opened by name. Two equally good
+  matches open nothing; when nothing matches, the voice model gets the texts
+  of the links on screen to retry with or to tell the user. A link matches when
+  it holds most of the request's words, or when the request holds all of its
+  words and they are at least half of the request ("admit card templates" opens
+  "Admit card"; "view the results" never opens "View"). Moving the screen is
+  the voice model's job alone: the text assistant cannot do it, so the voice
+  model is told never to pass it a request to open or go somewhere.
+
+### How to tell it is working
+
+- **Logs**, one line per session: `assistant.voice.session.started` and
+  `assistant.voice.session.ended` with the reason, the seconds, the replies, the
+  requests and the reconnects. `assistant.voice.connection.dropped`,
+  `.reconnect.failed`, `.usage.save-failed` and `.turn.not-followed` name what
+  went wrong.
+- **Cost rows**: `select * from assistant_model_request where source = 'voice'`
+  shows every reply's tokens and cost per session.
+- **Tests**: the session against a scripted voice model (`session.test.ts`), the
+  endpoint over a real socket with Postgres and Redis
+  (`server.integration.test.ts`), the Live API message mapping
+  (`gemini-live.test.ts`, built from the model's real messages), the run
+  outcomes, the cost rows, and the screen's rules.
+
+### Extending it
+
+- **Another voice model**: implement `VoiceProvider` (`voice/provider.ts`), give
+  it its settings and prices, and pass it to `attachAssistantVoice`. Nothing
+  else knows which model speaks.
+- **Another tool for the voice model**: think twice. Every school fact and every
+  change must go through `ask_assistant`, so the rules live in one place.
+- **A new session message**: add it to both schemas in the contract; the session
+  and the browser's `voiceStateAfter` are exhaustive over them.
+
 ## Comparing the three surfaces
 
 All three share one chat component and the same conversations:
@@ -630,6 +883,11 @@ it, and any other change of conversation remounts it.
    manager, switch roles on in **Settings › AI assistant**.
 4. The management app needs nothing extra: the assistant is served by the API
    at `NEXT_PUBLIC_SERVER_URL` + `/model/rpc`.
+5. For voice mode, also set `GEMINI_LIVE_MODEL` and its four
+   `GEMINI_LIVE_PRICE_*_USD_PER_MTOK` settings in `apps/server/.env` (see
+   `.env.example`), and switch **Voice mode** on on the school's **AI** page in
+   the admin app. The browser asks for the microphone on the first use; it works
+   on `localhost` and on HTTPS origins only.
 
 The tables are part of the main migrations, applied by the API at boot.
 

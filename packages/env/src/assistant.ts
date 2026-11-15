@@ -132,9 +132,47 @@ function requireQuestionPaperPricesWithModel(value: Record<string, unknown>, con
   }
 }
 
+/**
+ * The settings that switch voice mode on for the platform: the live model and
+ * the four prices it is billed at (text and audio, in and out), in the order
+ * errors name them.
+ */
+export const ASSISTANT_VOICE_SETTING_NAMES = [
+  'GEMINI_LIVE_MODEL',
+  'GEMINI_LIVE_PRICE_TEXT_INPUT_USD_PER_MTOK',
+  'GEMINI_LIVE_PRICE_AUDIO_INPUT_USD_PER_MTOK',
+  'GEMINI_LIVE_PRICE_TEXT_OUTPUT_USD_PER_MTOK',
+  'GEMINI_LIVE_PRICE_AUDIO_OUTPUT_USD_PER_MTOK',
+] as const;
+
+/**
+ * Voice is configured only when its model and all four prices are set, like a
+ * provider: it can never run without the prices its cost is saved with. It
+ * uses the Gemini key, so that must be set too.
+ */
+function requireCompleteVoice(value: Record<string, unknown>, context: z.RefinementCtx) {
+  const missing = ASSISTANT_VOICE_SETTING_NAMES.filter((name) => value[name] === undefined);
+  if (missing.length === ASSISTANT_VOICE_SETTING_NAMES.length) return;
+  for (const name of missing) {
+    context.addIssue({
+      code: 'custom',
+      path: [name],
+      message: `${name} is required because other GEMINI_LIVE_* settings are set: voice needs its model and all four prices.`,
+    });
+  }
+  if (value.GEMINI_API_KEY === undefined) {
+    context.addIssue({
+      code: 'custom',
+      path: ['GEMINI_API_KEY'],
+      message: 'GEMINI_API_KEY is required because GEMINI_LIVE_* settings are set: voice calls Gemini with it.',
+    });
+  }
+}
+
 /** Every cross-field rule of the assistant environment. */
 function refineAssistantEnv(value: Record<string, unknown>, context: z.RefinementCtx) {
   requireCompleteProviders(value, context);
+  requireCompleteVoice(value, context);
   requireQuestionPaperPricesWithModel(value, context);
   requireUsableQuestionPaperProvider(value, context);
 }
@@ -164,6 +202,25 @@ const assistantEnvShape = {
      * and never meant for real users, who would see internals.
      */
     ASSISTANT_DIAGNOSTICS: z.stringbool().default(false),
+    /**
+     * Voice mode (talking to the assistant): the Gemini Live model the API
+     * server relays audio to, and its prices in USD per million tokens. Text
+     * and audio tokens are billed at different prices, in and out, so there
+     * are four. Set all five or none (`requireCompleteVoice`); without them no
+     * school has voice, whatever its feature flag says. Only the API server
+     * uses them: a voice session never reaches the worker.
+     */
+    GEMINI_LIVE_MODEL: z.string().min(1).optional(),
+    GEMINI_LIVE_PRICE_TEXT_INPUT_USD_PER_MTOK: usdPerMillionTokens,
+    GEMINI_LIVE_PRICE_AUDIO_INPUT_USD_PER_MTOK: usdPerMillionTokens,
+    GEMINI_LIVE_PRICE_TEXT_OUTPUT_USD_PER_MTOK: usdPerMillionTokens,
+    GEMINI_LIVE_PRICE_AUDIO_OUTPUT_USD_PER_MTOK: usdPerMillionTokens,
+    /** The prebuilt voice the assistant speaks with; the model's default when unset. */
+    GEMINI_LIVE_VOICE: z.string().min(1).optional(),
+    /** The longest one voice session may last. It then ends with a notice on screen; the user can start another. */
+    ASSISTANT_VOICE_MAX_SESSION_MINUTES: z.coerce.number().int().min(1).max(120).default(20),
+    /** How long a voice session may stay silent (nobody speaking, nothing running) before it ends on its own. */
+    ASSISTANT_VOICE_IDLE_SECONDS: z.coerce.number().int().min(30).max(900).default(180),
     /**
      * Question paper generation (the manual "Generate with AI" job, run by
      * `apps/worker`). It falls back to the assistant's provider and model, so

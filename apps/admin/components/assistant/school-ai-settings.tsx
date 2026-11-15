@@ -44,7 +44,7 @@ const limitIsValid = (value: string) =>
  * saved and the stored ones are kept (see `configToSave`).
  */
 const settingsSchema = z
-  .object({ enabled: z.boolean(), monthlyLimitUsd: z.string(), eligibleRoles: z.array(roleEnum) })
+  .object({ enabled: z.boolean(), monthlyLimitUsd: z.string(), eligibleRoles: z.array(roleEnum), voiceEnabled: z.boolean() })
   .superRefine((value, context) => {
     if (!value.enabled) return;
     if (!limitIsValid(value.monthlyLimitUsd)) {
@@ -69,7 +69,7 @@ type SettingsValues = z.infer<typeof settingsSchema>;
 function configToSave(value: SettingsValues, stored: AssistantConfig | null): AssistantConfig | null {
   const limit = value.monthlyLimitUsd.trim();
   if (limitIsValid(limit) && value.eligibleRoles.length > 0) {
-    return { monthlyLimitUsd: limit === '' ? null : Number(limit), eligibleRoles: value.eligibleRoles };
+    return { monthlyLimitUsd: limit === '' ? null : Number(limit), eligibleRoles: value.eligibleRoles, voice: { enabled: value.voiceEnabled } };
   }
   return stored;
 }
@@ -78,7 +78,8 @@ const errorText = (error: unknown) => (typeof error === 'string' ? error : (erro
 
 /**
  * The school's `assistant` feature flag: on or off, its monthly USD limit
- * (IST calendar month) and the roles the school may open the assistant to.
+ * (IST calendar month), the roles the school may open the assistant to, and
+ * whether the school has voice mode.
  * Saved as one flag update; switching it off asks first and keeps the
  * settings. Which eligible roles actually use it is the school's choice, in
  * its own settings.
@@ -90,6 +91,7 @@ function useAssistantSettingsForm(schoolId: string, stored: { enabled: boolean; 
       enabled: stored.enabled,
       monthlyLimitUsd: stored.config?.monthlyLimitUsd == null ? '' : String(stored.config.monthlyLimitUsd),
       eligibleRoles: stored.config?.eligibleRoles ?? [],
+      voiceEnabled: stored.config?.voice.enabled ?? false,
     } as SettingsValues,
     validators: { onSubmit: settingsSchema },
     onSubmit: async ({ value }) => {
@@ -184,6 +186,29 @@ function RolesField({ form }: { form: SettingsForm }) {
 }
 
 /**
+ * Voice mode, a switch inside the assistant feature: it only matters while the
+ * assistant is enabled, and its cost counts toward the same monthly limit.
+ */
+function VoiceField({ form }: { form: SettingsForm }) {
+  return (
+    <form.Field name="voiceEnabled">
+      {(field) => (
+        <Field>
+          <div className="flex items-center justify-between gap-4">
+            <FieldLabel htmlFor="assistant-voice">Voice mode</FieldLabel>
+            <Switch id="assistant-voice" checked={field.state.value} onCheckedChange={(checked) => field.handleChange(checked)} />
+          </div>
+          <FieldDescription>
+            Staff who may use the assistant can talk to it and hear it answer. Needs a voice model configured on the platform. Its cost counts
+            toward the monthly limit.
+          </FieldDescription>
+        </Field>
+      )}
+    </form.Field>
+  );
+}
+
+/**
  * Saving, by the button or by Enter in a field: switching a live assistant
  * off asks first (the confirmation dialog), anything else saves at once.
  * The dialog's open flag is UI state, not form state.
@@ -266,6 +291,7 @@ export function AssistantSettingsForm({
       <EnabledField form={form} />
       <LimitField form={form} />
       <RolesField form={form} />
+      <VoiceField form={form} />
       <SaveRow form={form} wasEnabled={stored.enabled} save={save} />
     </form>
   );

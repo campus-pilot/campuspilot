@@ -34,6 +34,37 @@ describe('the assistant environment', () => {
     expect(z.string().safeParse('ok').success).toBe(true);
   });
 
+  describe('voice settings', () => {
+    const VOICE = {
+      GEMINI_LIVE_MODEL: 'gemini-3.8-live',
+      GEMINI_LIVE_PRICE_TEXT_INPUT_USD_PER_MTOK: '0.75',
+      GEMINI_LIVE_PRICE_AUDIO_INPUT_USD_PER_MTOK: '3',
+      GEMINI_LIVE_PRICE_TEXT_OUTPUT_USD_PER_MTOK: '4.5',
+      GEMINI_LIVE_PRICE_AUDIO_OUTPUT_USD_PER_MTOK: '12',
+    };
+
+    it('accepts the live model with all four prices and the Gemini key, or none of them', () => {
+      expect(issuesOf({ ...GEMINI, ...VOICE })).toEqual([]);
+      expect(issuesOf(GEMINI)).toEqual([]);
+    });
+
+    it('refuses voice with a price missing: it can never run without the prices its cost is saved with', () => {
+      const { GEMINI_LIVE_PRICE_AUDIO_OUTPUT_USD_PER_MTOK: _audioOut, ...withoutOne } = VOICE;
+      expect(issuesOf({ ...GEMINI, ...withoutOne })).toEqual(['GEMINI_LIVE_PRICE_AUDIO_OUTPUT_USD_PER_MTOK']);
+      expect(issuesOf({ ...GEMINI, GEMINI_LIVE_MODEL: 'gemini-3.8-live' })).toHaveLength(4);
+    });
+
+    it('refuses voice without the Gemini key it calls with', () => {
+      expect(issuesOf(VOICE)).toEqual(['GEMINI_API_KEY']);
+    });
+
+    it('keeps the session limits within sane bounds', () => {
+      expect(issuesOf({ ASSISTANT_VOICE_MAX_SESSION_MINUTES: '0' })).toEqual(['ASSISTANT_VOICE_MAX_SESSION_MINUTES']);
+      expect(issuesOf({ ASSISTANT_VOICE_IDLE_SECONDS: '5' })).toEqual(['ASSISTANT_VOICE_IDLE_SECONDS']);
+      expect(assistantEnvSchema.parse({})).toMatchObject({ ASSISTANT_VOICE_MAX_SESSION_MINUTES: 20, ASSISTANT_VOICE_IDLE_SECONDS: 180 });
+    });
+  });
+
   describe('question paper settings', () => {
     const PRICES = {
       QUESTION_PAPER_PRICE_INPUT_USD_PER_MTOK: '1.5',

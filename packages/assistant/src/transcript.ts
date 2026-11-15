@@ -61,6 +61,15 @@ export function buildUserTranscriptContent(body: AssistantUserMessageBody): unkn
   if (body.pageContext) {
     const lines = [`Path: ${body.pageContext.path}`];
     if (body.pageContext.title) lines.push(`Title: ${body.pageContext.title}`);
+    // The screen's text is data, like a tool result; it is fenced so a line in it cannot pass for the end of the block.
+    if (body.pageContext.pageText) {
+      lines.push(
+        'The page’s text (all of it, above and below the user’s view too; top to bottom, cells of a row joined by " | "; the part on their screen now is framed by marker lines; it may be cut where it says so):',
+        '"""',
+        body.pageContext.pageText.replaceAll('"""', "'''").replaceAll('</current_page>', ''),
+        '"""',
+      );
+    }
     blocks.push({
       type: 'text',
       text: `<current_page>\n${lines.join('\n')}\n</current_page>`,

@@ -1,0 +1,6 @@
+ALTER TYPE "public"."assistant_model_request_source" ADD VALUE 'voice';--> statement-breakpoint
+ALTER TABLE "assistant_model_request" DROP CONSTRAINT "assistant_model_request_source_owner_check";--> statement-breakpoint
+ALTER TABLE "assistant_model_request" ADD COLUMN "voice_session_id" text;--> statement-breakpoint
+ALTER TABLE "assistant_model_request" ADD CONSTRAINT "assistant_model_request_source_owner_check" CHECK (("assistant_model_request"."source" = 'chat' and "assistant_model_request"."run_id" is not null and "assistant_model_request"."question_paper_job_id" is null and "assistant_model_request"."voice_session_id" is null)
+        or ("assistant_model_request"."source" = 'question_paper' and "assistant_model_request"."run_id" is null and "assistant_model_request"."question_paper_job_id" is not null and "assistant_model_request"."voice_session_id" is null)
+        or ("assistant_model_request"."source"::text = 'voice' and "assistant_model_request"."run_id" is null and "assistant_model_request"."question_paper_job_id" is null and "assistant_model_request"."voice_session_id" is not null));

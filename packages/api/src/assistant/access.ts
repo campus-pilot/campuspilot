@@ -51,6 +51,13 @@ export type AssistantAccessDecision = {
   limit: AssistantLimit;
   /** Whether the school's spend this IST month reached its limit (false without a limit). */
   limitReached: boolean;
+  /**
+   * Whether the school's assistant feature has voice switched on
+   * (`config.voice.enabled`). False when the decision stopped before reading
+   * the settings. It never grants use on its own: voice also needs `allowed`
+   * and a voice model on the platform (the assistant package decides that).
+   */
+  voiceEnabled: boolean;
   allowed: boolean;
   /** The first fact that refuses use, for the user; null when allowed. */
   refusal: AssistantAccessRefusal | null;
@@ -112,6 +119,7 @@ export async function resolveAssistantAccess(
     allowedRoles: [] as Role[],
     limit: { known: false } as AssistantLimit,
     limitReached: false,
+    voiceEnabled: false,
   };
   if (!featureEnabled) return refused(base, 'feature_disabled');
 
@@ -146,7 +154,12 @@ export async function resolveAssistantAccess(
   const allowedRoles = [...new Set(roleRows.map((row) => row.role))].filter(
     (role) => eligible.has(role) && switchedOn.has(role),
   );
-  const withRoles = { ...facts, allowedRoles, limit: { known: true, monthlyLimitUsd } as AssistantLimit };
+  const withRoles = {
+    ...facts,
+    allowedRoles,
+    limit: { known: true, monthlyLimitUsd } as AssistantLimit,
+    voiceEnabled: stored.config?.voice.enabled ?? false,
+  };
   if (allowedRoles.length === 0) return refused(withRoles, 'role_not_enabled');
 
   const limitReached =
