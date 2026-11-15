@@ -2,8 +2,8 @@ import type { VoiceClientMessage, VoiceEndReason, VoiceServerMessage } from '@ca
 
 import { voiceDestinationSchema } from '@campuspilot/assistant-contract/voice';
 
-import { APP_NOTE_PREFIX, ASK_ASSISTANT_TOOL, OPEN_ON_SCREEN_TOOL, OPEN_PAGE_TOOL, READ_SCREEN_TOOL, VOICE_TOOLS } from './prompt';
-import type { VoiceConnection, VoiceEvent, VoiceProvider, VoiceToolCall, VoiceUsage } from './provider';
+import { APP_NOTE_PREFIX, ASK_ASSISTANT_TOOL, OPEN_ON_SCREEN_TOOL, OPEN_PAGE_TOOL, READ_SCREEN_TOOL } from './prompt';
+import type { VoiceConnection, VoiceEvent, VoiceProvider, VoiceToolCall, VoiceToolDeclaration, VoiceUsage } from './provider';
 import type { TurnOutcome, TurnUpdate, TurnWatch } from './turn-watch';
 
 /**
@@ -24,6 +24,8 @@ export type VoiceSessionDeps = {
   sessionId: string;
   provider: VoiceProvider;
   instructions: string;
+  /** The tools this session's voice model is offered (`voiceTools` of its kind). */
+  tools: readonly VoiceToolDeclaration[];
   /** The longest the session may last, and how long it may stay quiet with nothing running. */
   limits: { maxSessionMs: number; idleMs: number };
   /** A text frame to the browser. */
@@ -51,11 +53,24 @@ const TICK_MS = 5_000;
 /** How often an open session confirms its user may still use voice. */
 const ACCESS_RECHECK_MS = 60_000;
 
+/**
+ * How long the voice model's connection is kept, after the session ended or
+ * while it must be replaced, for the reply in progress to finish: its usage
+ * arrives only when it ends, a few seconds after its last audio.
+ */
+const REPLY_GRACE_MS = 5_000;
+
+/** How often a reply's cost is written again after a failed write, and the first wait between tries. */
+const USAGE_WRITE_ATTEMPTS = 4;
+const USAGE_RETRY_MS = 500;
+
 /** How many times in a row a dropped connection to the voice model is restored before the session gives up. */
 const RECONNECT_ATTEMPTS = 3;
 
 const END_MESSAGES: Record<Exclude<VoiceEndReason, 'limit_reached' | 'access'>, string> = {
   ended: 'Voice ended.',
+  replaced: 'Voice continued in another window.',
+  restarting: 'The server is restarting. Start voice again in a moment.',
   idle: 'Voice ended because it was quiet for a while.',
   max_duration: 'This voice session reached its time limit. Start voice again to continue.',
   unavailable: 'Voice is not available right now. You can keep typing.',
@@ -109,12 +124,27 @@ export class VoiceSession {
   private readCount = 0;
   private replyCount = 0;
   private reconnectCount = 0;
+  /**
+   * Whether the voice model has produced something whose usage has not been
+   * reported yet (audio, words or a tool call since the last usage report).
+   */
+  private replyOpen = false;
+  /** Set while the connection must be replaced but a reply is still finishing; fires the replacement at the latest. */
+  private replaceAfterReply: ReturnType<typeof setTimeout> | null = null;
+  /** The connection of an ended session, kept only to receive its last reply's usage; and the timer that closes it. */
+  private draining: { connection: VoiceConnection; timer: ReturnType<typeof setTimeout> } | null = null;
+  /** News for the voice model that arrived while it had no connection (it was being replaced); sent once it is back. */
+  private readonly notesWhileAway: string[] = [];
   private userSpeaking = false;
   /**
-   * Whether the user has spoken since the last request was passed on. A
-   * request is passed on only then: what the voice model reads in a result
-   * (school data, which anyone may have written) must never become a request
-   * of the user's by itself.
+   * Whether the user has spoken since the last request was passed on and
+   * since text they did not say last reached the voice model: news of a
+   * request (its outcome, a change waiting for approval), the page's text or
+   * the names of its links. A request is passed on only then: what the voice
+   * model reads there (school data, which anyone may have written) must never
+   * become a request of the user's by itself, also not when the user said
+   * "okay" while the assistant was still working. It raises the bar and is not the protection: a change still
+   * waits for the user's tap, and a lookup shows its result only to the user.
    */
   private userSpokeSinceAsk = false;
   private heard = '';
@@ -141,12 +171,35 @@ export class VoiceSession {
     this.timer = setInterval(() => void this.tick(), TICK_MS);
   }
 
+  /**
+   * Runs one piece of the session's work so that nothing it throws leaves the
+   * session: a socket that broke between two frames, a write that failed. Every
+   * way into the session goes through here (the browser's frames, the voice
+   * model's events, the clock). An error ends this session alone; it must
+   * never reach the server's event loop, where it would take down every
+   * school's sessions and requests with it.
+   */
+  private contained(work: () => void): void {
+    try {
+      work();
+    } catch (err) {
+      this.deps.log.warn({ err, voiceSessionId: this.deps.sessionId }, 'assistant.voice.session.failed');
+      this.end('error');
+    }
+  }
+
   /** Microphone audio from the browser. Dropped while the voice model is being reconnected. */
   handleAudio(pcm: Uint8Array): void {
-    if (!this.ended) this.connection?.sendAudio(pcm);
+    this.contained(() => {
+      if (!this.ended) this.connection?.sendAudio(pcm);
+    });
   }
 
   handleMessage(message: VoiceClientMessage): void {
+    this.contained(() => this.onMessage(message));
+  }
+
+  private onMessage(message: VoiceClientMessage): void {
     if (this.ended) return;
     if (message.type === 'end') return this.end('ended');
     if (message.type === 'mic') {
@@ -172,6 +225,8 @@ export class VoiceSession {
         delivery: 'when_idle',
         final: true,
       });
+      // The voice model now holds text from the page, which anyone may have written: see `userSpokeSinceAsk`.
+      if (message.text) this.userSpokeSinceAsk = false;
       return;
     }
     if (message.type === 'opened') {
@@ -191,6 +246,8 @@ export class VoiceSession {
         delivery: 'when_idle',
         final: true,
       });
+      // The names of the page's links are page text too.
+      if (!message.opened && message.linksOnScreen?.length) this.userSpokeSinceAsk = false;
       return;
     }
     const ask = this.asks.get(message.askId);
@@ -214,9 +271,26 @@ export class VoiceSession {
     if (this.ended) return;
     this.ended = true;
     if (this.timer) clearInterval(this.timer);
-    this.connection?.close();
+    // Ending must always finish, whatever state each part is in: each step is tried on its own.
+    const attempt = (step: () => void) => {
+      try {
+        step();
+      } catch (err) {
+        this.deps.log.warn({ err, voiceSessionId: this.deps.sessionId }, 'assistant.voice.session.end-step-failed');
+      }
+    };
+    const connection = this.connection;
     this.connection = null;
-    for (const ask of this.asks.values()) void ask.watch?.stop();
+    if (this.replaceAfterReply) clearTimeout(this.replaceAfterReply);
+    this.replaceAfterReply = null;
+    if (connection && this.replyOpen) {
+      // The reply in progress is billed whether or not anyone hears its end: keep the connection just long enough to learn its cost.
+      const timer = setTimeout(() => this.stopDraining(), REPLY_GRACE_MS);
+      this.draining = { connection, timer };
+    } else {
+      attempt(() => connection?.close());
+    }
+    for (const ask of this.asks.values()) void ask.watch?.stop().catch(() => undefined);
     this.asks.clear();
     this.deps.log.info(
       {
@@ -231,31 +305,72 @@ export class VoiceSession {
     );
     if (options.notify !== false) {
       const message = options.message ?? (reason === 'limit_reached' || reason === 'access' ? 'Voice is no longer available.' : END_MESSAGES[reason]);
-      this.deps.send({ type: 'ended', reason, message });
+      attempt(() => this.deps.send({ type: 'ended', reason, message }));
     }
-    this.deps.closeSocket();
+    attempt(() => this.deps.closeSocket());
+  }
+
+  /** Closes the connection an ended session kept for its last reply's usage. */
+  private stopDraining(): void {
+    const draining = this.draining;
+    this.draining = null;
+    if (!draining) return;
+    clearTimeout(draining.timer);
+    try {
+      draining.connection.close();
+    } catch {
+      // A connection that cannot be closed is already gone.
+    }
+  }
+
+  /**
+   * Saves a reply's cost, trying again after a failed write: a database that
+   * is away for a moment must not lose what the school was charged. Nothing is
+   * thrown; a cost that could not be saved after every try is logged.
+   */
+  private saveUsage(usage: VoiceUsage, reply: number): void {
+    const attempt = (tries: number) => {
+      this.deps.recordUsage(usage, reply).catch((err: unknown) => {
+        if (tries + 1 >= USAGE_WRITE_ATTEMPTS) {
+          this.deps.log.warn({ err, voiceSessionId: this.deps.sessionId, reply, usage }, 'assistant.voice.usage.save-failed');
+          return;
+        }
+        setTimeout(() => attempt(tries + 1), USAGE_RETRY_MS * 2 ** tries);
+      });
+    };
+    attempt(0);
   }
 
   private async connect(): Promise<void> {
     const number = (this.connectionNumber += 1);
     const connection = await this.deps.provider.connect({
       instructions: this.deps.instructions,
-      tools: VOICE_TOOLS,
+      tools: this.deps.tools,
       resumeHandle: this.resumeHandle,
       onEvent: (event) => {
-        if (number === this.connectionNumber) this.onEvent(event);
+        if (number === this.connectionNumber) this.contained(() => this.onEvent(event));
       },
     });
     // The session ended, or another connection replaced this one, while it was opening.
-    if (this.ended || number !== this.connectionNumber) return connection.close();
+    if (this.ended || number !== this.connectionNumber) {
+      this.contained(() => connection.close());
+      return;
+    }
     this.connection = connection;
   }
 
   private onEvent(event: VoiceEvent): void {
-    if (this.ended) return;
+    if (this.ended) {
+      // Only the last reply's cost is still wanted; once it is known (or the connection closes) the session lets go.
+      if (!this.draining) return;
+      if (event.type === 'usage') this.saveUsage(event.usage, (this.replyCount += 1));
+      if (event.type === 'usage' || event.type === 'closed') this.stopDraining();
+      return;
+    }
     switch (event.type) {
       case 'audio':
         this.lastActivityAt = this.now();
+        this.replyOpen = true;
         return this.deps.sendAudio(event.pcm);
       case 'user_speaking':
         this.lastActivityAt = this.now();
@@ -278,31 +393,43 @@ export class VoiceSession {
           this.replyEnded = false;
         }
         this.said += event.text;
+        this.replyOpen = true;
         return this.deps.send({ type: 'said', text: this.said });
       case 'reply_done':
         this.replyEnded = true;
-        return this.deps.send({ type: 'reply_done' });
+        this.deps.send({ type: 'reply_done' });
+        this.replaceIfReplyIsOver();
+        return;
       case 'interrupted':
         this.replyEnded = true;
         return this.deps.send({ type: 'interrupted' });
       case 'tool_calls':
         this.lastActivityAt = this.now();
+        this.replyOpen = true;
         for (const call of event.calls) this.onToolCall(call);
         return;
       case 'tool_calls_cancelled':
         for (const ask of this.asks.values()) if (event.ids.includes(ask.callId)) ask.awaited = false;
+        // The voice model no longer waits for these: an answer from the browser would be for a call it has dropped.
+        for (const [openId, open] of this.opens) if (event.ids.includes(open.callId)) this.opens.delete(openId);
+        for (const [readId, callId] of this.reads) if (event.ids.includes(callId)) this.reads.delete(readId);
         return;
       case 'usage':
-        this.replyCount += 1;
-        void this.deps.recordUsage(event.usage, this.replyCount).catch((err: unknown) => {
-          this.deps.log.warn({ err, voiceSessionId: this.deps.sessionId }, 'assistant.voice.usage.save-failed');
-        });
+        this.replyOpen = false;
+        this.saveUsage(event.usage, (this.replyCount += 1));
+        this.replaceIfReplyIsOver();
         return;
       case 'resume_handle':
         this.resumeHandle = event.handle;
         return;
       case 'going_away':
-        return void this.reconnect();
+        // A warning, not the end: a reply in progress is let finish (its words, and its usage) before the connection is replaced.
+        if (this.replyOpen && !this.replaceAfterReply) {
+          this.replaceAfterReply = setTimeout(() => this.replaceNow(), REPLY_GRACE_MS);
+          return;
+        }
+        if (!this.replaceAfterReply) void this.reconnect();
+        return;
       case 'closed':
         if (!event.expected) {
           this.deps.log.warn({ voiceSessionId: this.deps.sessionId, detail: event.detail }, 'assistant.voice.connection.dropped');
@@ -372,21 +499,48 @@ export class VoiceSession {
   /** Follows the run the browser started for a request, and tells the voice model what happens to it. */
   private async follow(askId: string, ask: Ask, turn: { conversationId: string; runId: string }): Promise<void> {
     try {
-      const watch = await this.deps.watchTurn(turn, (update) => {
-        this.lastActivityAt = this.now();
-        if (update.type === 'approval') {
-          this.tell(askId, { status: 'needs_approval', change_waiting_for_the_users_tap: update.change }, false);
-        } else {
-          this.settle(askId, resultOf(update.outcome));
-        }
-      });
+      const watch = await this.deps.watchTurn(turn, (update) =>
+        this.contained(() => {
+          this.lastActivityAt = this.now();
+          if (update.type === 'approval') {
+            this.tell(askId, { status: 'needs_approval', change_waiting_for_the_users_tap: update.change }, false);
+          } else {
+            this.settle(askId, resultOf(update.outcome));
+          }
+        }),
+      );
       // The session ended, or the request was settled, while the watch was starting.
       if (this.ended || !this.asks.has(askId)) return void watch.stop();
       ask.watch = watch;
     } catch (err) {
       this.deps.log.warn({ err, voiceSessionId: this.deps.sessionId }, 'assistant.voice.turn.not-followed');
-      this.settle(askId, { status: 'failed', error: 'The request’s answer could not be read. It is on the screen if it finished.' });
+      this.contained(() => this.settle(askId, { status: 'failed', error: 'The request’s answer could not be read. It is on the screen if it finished.' }));
     }
+  }
+
+  /** Sends the news that waited for a connection, oldest first. */
+  private sendNotesWhileAway(): void {
+    for (const note of this.notesWhileAway.splice(0)) this.connection?.sendNote(note);
+  }
+
+  /**
+   * Replaces the connection that was waiting for a reply, once that reply's
+   * usage is in. It happens after the events that arrived together with the
+   * usage (the end of the reply comes in the same message), so none of them is
+   * taken for an old connection's.
+   */
+  private replaceIfReplyIsOver(): void {
+    if (!this.replaceAfterReply || this.replyOpen) return;
+    queueMicrotask(() =>
+      this.contained(() => {
+        if (this.replaceAfterReply) this.replaceNow();
+      }),
+    );
+  }
+
+  /** Replaces the connection now; the wait for a reply to finish, if any, is over. */
+  private replaceNow(): void {
+    void this.reconnect();
   }
 
   /** Tells the voice model the final outcome of a request and forgets it. */
@@ -401,16 +555,22 @@ export class VoiceSession {
 
   /**
    * Tells the voice model about a request: as the tool's result while it
-   * still waits for that call, otherwise as a note from the app.
+   * still waits for that call, otherwise as a note from the app (at once, or
+   * when the connection that is being replaced is back).
    */
   private tell(askId: string, output: Record<string, unknown>, final: boolean): void {
     const ask = this.asks.get(askId);
-    if (!ask || !this.connection) return;
-    if (ask.awaited) {
+    if (!ask) return;
+    // What the assistant found is school data, which anyone may have written: see `userSpokeSinceAsk`.
+    this.userSpokeSinceAsk = false;
+    if (this.connection && ask.awaited) {
       this.connection.sendToolResult({ id: ask.callId, name: ASK_ASSISTANT_TOOL, output, delivery: 'when_idle', final });
-    } else {
-      this.connection.sendNote(`${APP_NOTE_PREFIX} News about a request the user made earlier: ${JSON.stringify(output)}`);
+      return;
     }
+    const note = `${APP_NOTE_PREFIX} News about a request the user made earlier: ${JSON.stringify(output)}`;
+    // While the connection is being replaced there is nobody to tell: the news waits for the new one.
+    if (this.connection) this.connection.sendNote(note);
+    else this.notesWhileAway.push(note);
   }
 
   /**
@@ -419,13 +579,35 @@ export class VoiceSession {
    * then on: the new connection does not know the old one's calls.
    */
   private async reconnect(): Promise<void> {
+    // It runs on its own (nothing awaits it), so nothing may escape it: an unhandled rejection ends the process.
+    try {
+      await this.replaceConnection();
+    } catch (err) {
+      this.deps.log.warn({ err, voiceSessionId: this.deps.sessionId }, 'assistant.voice.reconnect.failed');
+      this.contained(() => this.end('error'));
+    }
+  }
+
+  private async replaceConnection(): Promise<void> {
     if (this.ended || this.reconnecting) return;
+    // Whatever was waiting to replace the connection is overtaken: it is being replaced now.
+    if (this.replaceAfterReply) clearTimeout(this.replaceAfterReply);
+    this.replaceAfterReply = null;
     this.reconnecting = true;
     this.reconnectCount += 1;
-    this.connection?.close();
+    const old = this.connection;
     this.connection = null;
     this.connectionNumber += 1;
+    try {
+      old?.close();
+    } catch {
+      // A connection that cannot be closed is already gone.
+    }
     for (const ask of this.asks.values()) ask.awaited = false;
+    // The new connection never made these calls: an answer from the browser would name a call it does not know.
+    this.opens.clear();
+    this.reads.clear();
+    this.replyOpen = false;
     this.deps.send({ type: 'reconnecting' });
     for (let attempt = 0; attempt < RECONNECT_ATTEMPTS && !this.ended; attempt += 1) {
       try {
@@ -433,6 +615,7 @@ export class VoiceSession {
         if (this.ended) return;
         this.reconnecting = false;
         this.deps.send({ type: 'reconnected' });
+        this.sendNotesWhileAway();
         return;
       } catch (err) {
         this.deps.log.warn({ err, voiceSessionId: this.deps.sessionId, attempt }, 'assistant.voice.reconnect.failed');
@@ -446,14 +629,14 @@ export class VoiceSession {
   private async tick(): Promise<void> {
     if (this.ended) return;
     const now = this.now();
-    if (now - this.startedAt >= this.deps.limits.maxSessionMs) return this.end('max_duration');
+    if (now - this.startedAt >= this.deps.limits.maxSessionMs) return this.contained(() => this.end('max_duration'));
     // A request that is running (or waiting for an approval) keeps the session open: its outcome is still to be said.
-    if (this.asks.size === 0 && now - this.lastActivityAt >= this.deps.limits.idleMs) return this.end('idle');
+    if (this.asks.size === 0 && now - this.lastActivityAt >= this.deps.limits.idleMs) return this.contained(() => this.end('idle'));
     if (now - this.accessCheckedAt < ACCESS_RECHECK_MS) return;
     this.accessCheckedAt = now;
     try {
       const refusal = await this.deps.refusal();
-      if (refusal) this.end(refusal.reason, { message: refusal.message });
+      if (refusal) this.contained(() => this.end(refusal.reason, { message: refusal.message }));
     } catch (err) {
       // An outage of the check must not end every session; the next check decides.
       this.deps.log.warn({ err, voiceSessionId: this.deps.sessionId }, 'assistant.voice.access-recheck-failed');

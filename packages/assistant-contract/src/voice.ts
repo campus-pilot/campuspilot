@@ -37,8 +37,31 @@ export const VOICE_OUTPUT_SAMPLE_RATE = 24_000;
 export const VOICE_MAX_INPUT_FRAME_BYTES = VOICE_INPUT_SAMPLE_RATE * 2;
 
 /**
+ * The largest text frame the server accepts from the browser, in bytes. The
+ * biggest valid one is `screen` with a full page text, whose limit is counted
+ * in characters: a character of Devanagari is three bytes in UTF-8, and JSON
+ * may escape a character into six. This leaves room for both.
+ */
+export const VOICE_MAX_TEXT_FRAME_BYTES = ASSISTANT_PAGE_TEXT_MAX * 6 + 4_096;
+
+/**
+ * What a session is attached to, said by the browser when it opens it (`kind`
+ * in the query):
+ * - `overlay`: the layer over the app. It can open pages and read the page
+ *   under it, so the voice model is given those tools.
+ * - `chat`: the voice button inside a chat's own message box (the Assistant
+ *   page, the palette, a question paper's screen). It lives and dies with that
+ *   chat, so it cannot leave the page or read it: the voice model is given
+ *   only "ask the assistant".
+ */
+export const voiceSessionKindSchema = z.enum(['overlay', 'chat']);
+export type VoiceSessionKind = z.infer<typeof voiceSessionKindSchema>;
+
+/**
  * Why a session ended, as the server reports it:
  * - `ended`: the user ended it.
+ * - `replaced`: the user started voice in another window, which took over.
+ * - `restarting`: the server is restarting; voice can be started again.
  * - `idle`: nobody spoke and nothing was running for the idle limit.
  * - `max_duration`: the session reached its longest allowed length.
  * - `limit_reached`: the school reached its monthly assistant limit.
@@ -47,7 +70,7 @@ export const VOICE_MAX_INPUT_FRAME_BYTES = VOICE_INPUT_SAMPLE_RATE * 2;
  * - `unavailable`: the voice model could not be reached or refused.
  * - `error`: anything else.
  */
-export const voiceEndReasonSchema = z.enum(['ended', 'idle', 'max_duration', 'limit_reached', 'access', 'unavailable', 'error']);
+export const voiceEndReasonSchema = z.enum(['ended', 'replaced', 'restarting', 'idle', 'max_duration', 'limit_reached', 'access', 'unavailable', 'error']);
 export type VoiceEndReason = z.infer<typeof voiceEndReasonSchema>;
 
 /**
@@ -130,9 +153,11 @@ export type VoiceServerMessage = z.infer<typeof voiceServerMessageSchema>;
 
 /**
  * HTTP statuses the upgrade request is refused with, before any socket
- * exists: 401 signed out, 403 not allowed or another origin, 404 no voice in
- * this school (not configured, or switched off). The browser cannot read
- * them from a failed WebSocket, so it asks `getStatus` first and treats a
- * failed open as "try again".
+ * exists: 400 a request that is not a voice session's, 401 signed out, 403
+ * another origin or not allowed (no access to the assistant, at the limit,
+ * voice switched off for the school, impersonating), 404 the platform has no
+ * voice model, 503 this server is carrying all the sessions it may. The
+ * browser cannot read them from a failed WebSocket, so it asks `getStatus`
+ * first and treats a failed open as "try again".
  */
-export const VOICE_UPGRADE_REFUSALS = { signedOut: 401, forbidden: 403, noVoice: 404 } as const;
+export const VOICE_UPGRADE_REFUSALS = { badRequest: 400, signedOut: 401, forbidden: 403, noVoice: 404, busy: 503 } as const;

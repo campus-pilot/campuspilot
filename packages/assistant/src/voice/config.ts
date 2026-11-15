@@ -24,6 +24,8 @@ export type VoiceSettings = {
   maxSessionMs: number;
   /** How long a session may stay silent, with nothing running, before it ends. */
   idleMs: number;
+  /** The most sessions this process carries at once; a new one beyond it is refused. */
+  maxSessions: number;
 };
 
 /**
@@ -53,6 +55,7 @@ export function readVoiceSettings(source: Readonly<Record<string, string | numbe
     prices: { textInputUsdPerMtok, audioInputUsdPerMtok, textOutputUsdPerMtok, audioOutputUsdPerMtok },
     maxSessionMs: Number(source.ASSISTANT_VOICE_MAX_SESSION_MINUTES ?? 20) * 60_000,
     idleMs: Number(source.ASSISTANT_VOICE_IDLE_SECONDS ?? 180) * 1_000,
+    maxSessions: Number(source.ASSISTANT_VOICE_MAX_SESSIONS ?? 500),
   };
 }
 

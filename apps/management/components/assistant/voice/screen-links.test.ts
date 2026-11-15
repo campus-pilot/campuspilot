@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { bestLink, linkTexts } from './screen-links';
+import { bestLink, drawnOnPage, linkTexts } from './screen-links';
 
 const exams = [
   { text: 'Periodic Test 1 Exam plan generated Completed Completed Nov 14, 2026', href: '/school/s/sessions/x/exam/periodic-test-1' },
@@ -72,5 +72,15 @@ describe('linkTexts', () => {
   it('lists each link’s text once, tidied and capped', () => {
     assert.deepEqual(linkTexts([{ text: ' Billing ', href: '/a' }, { text: 'Billing', href: '/b' }, { text: '', href: '/c' }, { text: 'Staff', href: '/d' }]), ['Billing', 'Staff']);
     assert.equal(linkTexts(Array.from({ length: 60 }, (_, index) => ({ text: `Link ${index}`, href: `/${index}` }))).length, 40);
+  });
+});
+
+describe('drawnOnPage', () => {
+  it('counts what is drawn anywhere on the page, also far below the window, and nothing hidden or empty', () => {
+    // A card three screens down: the assistant read it with the rest of the page, so it can be opened by name.
+    assert.equal(drawnOnPage({ width: 320, height: 96 }, true), true);
+    // A link inside a closed menu, and one with no box at all.
+    assert.equal(drawnOnPage({ width: 320, height: 96 }, false), false);
+    assert.equal(drawnOnPage({ width: 0, height: 0 }, true), false);
   });
 });

@@ -101,10 +101,21 @@ export function voiceStateAfter(state: VoiceState, message: VoiceServerMessage):
   }
 }
 
-/** What the user is told when a session ends on its own; null when they ended it themselves. */
+/**
+ * The reasons a session ends without anything having gone wrong: it was quiet,
+ * it reached its length, the user took it to another window, or the server is
+ * being updated. Said as information; every other reason is a problem.
+ */
+const ORDINARY_ENDS: ReadonlySet<VoiceEndReason> = new Set(['idle', 'max_duration', 'replaced', 'restarting']);
+
+/**
+ * What the user is told when a session ends on its own; null when they ended
+ * it themselves (`ended`). Decided by the reason alone: the message is the
+ * server's wording for the user and may change without changing what happened.
+ */
 export function noticeOfEnd(reason: VoiceEndReason, message: string): VoiceNotice | null {
-  if (reason === 'ended' && message === 'Voice ended.') return null;
-  return { tone: reason === 'ended' || reason === 'idle' || reason === 'max_duration' ? 'info' : 'problem', message };
+  if (reason === 'ended') return null;
+  return { tone: ORDINARY_ENDS.has(reason) ? 'info' : 'problem', message };
 }
 
 /** Why the microphone could not be opened, in the user's words. */

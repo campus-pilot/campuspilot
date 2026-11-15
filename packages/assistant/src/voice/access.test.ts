@@ -13,6 +13,7 @@ const SETTINGS: VoiceSettings = {
   prices: { textInputUsdPerMtok: '1', audioInputUsdPerMtok: '1', textOutputUsdPerMtok: '1', audioOutputUsdPerMtok: '1' },
   maxSessionMs: 60_000,
   idleMs: 60_000,
+  maxSessions: 5_000,
 };
 
 const ALLOWED: AssistantAccessDecision = {

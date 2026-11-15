@@ -5,7 +5,6 @@ import {
   type AssistantAttachmentRef,
   type QuestionPaperSeed,
 } from '@campuspilot/assistant-contract/attachments';
-import type { VoiceDestination } from '@campuspilot/assistant-contract/voice';
 import type { AssistantSurface, AssistantToolCallItemDto, AssistantUserMessageItemDto, AssistantViewItemDto } from '@campuspilot/assistant-contract/dto';
 import {
   ASSISTANT_LANE_CLASS,
@@ -56,8 +55,11 @@ import { missingAttachmentIdsOf, refusalMessage, type AssistantConversationFailu
 import { AssistantViewBlock } from './assistant-view';
 import { useAssistantAttachmentUpload } from './use-assistant-attachments';
 import { readPageUnderOverlay } from './screen-text';
-import { useChatVoice } from './voice/use-chat-voice';
+import { OVERLAY_VOICE_OWNER, useChatVoice } from './voice/use-chat-voice';
+import { useVoice } from './voice/use-voice';
+import type { VoiceHandlers } from './voice/voice-controller';
 import { registerVoiceLauncher } from './voice/voice-launcher';
+import { voiceIsOn } from './voice/voice-state';
 import {
   useApprovalDecisions,
   useAssistantActiveRun,
@@ -166,13 +168,11 @@ export type AssistantChatProps = {
    * The voice overlay's chat (`AssistantVoiceOverlay`): it has no message box
    * and shows nothing until voice is started from the top bar. Then it is the
    * voice bar with the assistant in it and, once something was asked, the
-   * conversation in a card above. Each session starts a new conversation.
-   * `open` moves the app to a section on request.
+   * conversation in a card above. Each session starts a new conversation, and
+   * the chat has that conversation only while the session is on. `open` moves
+   * the app to a section on request, `openLink` follows a link on the page.
    */
-  overlay?: {
-    open: (destination: VoiceDestination) => boolean;
-    openLink: (label: string) => { opened: true } | { opened: false; linksOnScreen: string[] };
-  };
+  overlay?: Required<Pick<VoiceHandlers, 'open' | 'openLink'>>;
 };
 
 /**
@@ -590,7 +590,11 @@ export function AssistantChat({
   const [overlayPanelOpen, setOverlayPanelOpen] = useState(true);
   /** Whether the overlay fills the window (its own Full screen button); it never navigates. */
   const [overlayExpanded, setOverlayExpanded] = useState(false);
-  const conversationId = openConversationId ?? startedId;
+  const voiceSession = useVoice();
+  // The overlay's chat is its session's conversation and nothing else: it has one only while that session is on. Once
+  // voice ends there is nothing of it on screen, so nothing may keep loading it or stay subscribed to it either.
+  const overlaySessionOn = voiceSession.ownerId === OVERLAY_VOICE_OWNER && voiceIsOn(voiceSession);
+  const conversationId = overlay ? (overlaySessionOn ? startedId : null) : (openConversationId ?? startedId);
   const attachmentUpload = useAssistantAttachmentUpload(schoolId);
   // The seed only means something for a conversation that has not started.
   const activeSeed = conversationId ? null : seed;
@@ -696,18 +700,19 @@ export function AssistantChat({
     },
     // The overlay's chat is not on a page of its own: it only follows its session's conversation.
     onConversationStarted: overlay ? setStartedId : (id) => started(id, boxText.current),
-    open: overlay?.open,
-    openLink: overlay?.openLink,
-    readScreen: overlay ? readPageUnderOverlay : undefined,
+    overlay: overlay ? { ...overlay, readScreen: readPageUnderOverlay } : undefined,
   });
-  /** Starts voice in the overlay, in a new conversation. */
+  /** Starts voice in the overlay, in a new conversation: the last session's is left behind, for the chat and for the session alike. */
   const startOverlayVoice = () => {
     setStartedId(null);
     setOverlayExpanded(false);
-    chatVoice.start();
+    chatVoice.start({ conversationId: null });
   };
-  // Registered through a ref, so the top bar's button always reaches this render's function, with no effect.
-  const launcherRef = (element: HTMLSpanElement | null) => (element ? registerVoiceLauncher(startOverlayVoice) : undefined);
+  // Through a ref, so the top bar's button always reaches this render's function and the session this render's handlers, with no effect.
+  const launcherRef = (element: HTMLSpanElement | null) => {
+    chatVoice.handlersRef(element);
+    return element ? registerVoiceLauncher(startOverlayVoice) : undefined;
+  };
   // Offered to someone who can send here now, where the school has voice (`getStatus`, never inferred from `available`).
   const voiceOffered = canWrite && !disabledReason && status.data?.voice.available === true;
   // The chat's root: it tells late answers the chat has left, and ends a voice session this chat owns when it leaves.
@@ -782,6 +787,7 @@ export function AssistantChat({
           welcome ? cn('justify-center overflow-y-auto py-8', gutterClassName) : 'relative',
         )}
       >
+        <span ref={chatVoice.handlersRef} hidden />
         {chatVoice.on && !welcome ? (
           // Over the conversation, which stays as it is: the steps, tables and drafts of a spoken request are its own rows.
           <div className={cn('border-b border-assistant-hairline py-2.5', gutterClassName)}>

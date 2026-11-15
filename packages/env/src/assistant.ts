@@ -219,6 +219,15 @@ const assistantEnvShape = {
     GEMINI_LIVE_VOICE: z.string().min(1).optional(),
     /** The longest one voice session may last. It then ends with a notice on screen; the user can start another. */
     ASSISTANT_VOICE_MAX_SESSION_MINUTES: z.coerce.number().int().min(1).max(120).default(20),
+    /**
+     * The most voice sessions one API process carries at once. A safety
+     * valve, not a quota: voice shares the process with every other request,
+     * so beyond it a new session is refused (503, "try again in a moment")
+     * and the ones that are open are unaffected. One process carried 2,000
+     * sessions all talking at once in the load test
+     * (`server.scale.integration.test.ts`); the default leaves wide headroom.
+     */
+    ASSISTANT_VOICE_MAX_SESSIONS: z.coerce.number().int().min(1).max(5_000).default(500),
     /** How long a voice session may stay silent (nobody speaking, nothing running) before it ends on its own. */
     ASSISTANT_VOICE_IDLE_SECONDS: z.coerce.number().int().min(30).max(900).default(180),
     /**

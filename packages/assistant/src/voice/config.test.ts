@@ -20,6 +20,7 @@ describe('readVoiceSettings', () => {
       prices: { textInputUsdPerMtok: '0.75', audioInputUsdPerMtok: '3.00', textOutputUsdPerMtok: '4.50', audioOutputUsdPerMtok: '12.00' },
       maxSessionMs: 20 * 60_000,
       idleMs: 180_000,
+      maxSessions: 500,
     });
     expect(readVoiceSettings({ ...VOICE, GEMINI_LIVE_VOICE: 'Kore', ASSISTANT_VOICE_MAX_SESSION_MINUTES: 5, ASSISTANT_VOICE_IDLE_SECONDS: 60 })).toMatchObject({
       voiceName: 'Kore',

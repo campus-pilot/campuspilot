@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import type { AttachmentMarker } from '../transcript';
+import { buildUserTranscriptContent, PAGE_TEXT_OMITTED, type AttachmentMarker } from '../transcript';
 import {
   attachmentLabel,
   attachmentNote,
@@ -187,6 +187,31 @@ describe.each([claude, gemini, fake])('context building ($name)', (format) => {
       expect(text(out[index]!)).toContain('[Attachment a');
       expect(text(out[index]!)).not.toContain('campuspilot_attachment');
     }
+  });
+
+  it('shows the text of the page only with the newest two messages: an older one keeps where the user was, not what was on it', async () => {
+    const pageBlock = (name: string) =>
+      (buildUserTranscriptContent({ text: 'x', pageContext: { path: `/school/s/${name}`, title: name, pageText: `Everything on the ${name} page` } })[0] as { text: string }).text;
+    /** A message sent from the overlay: the page block, then what the user asked. */
+    const fromPage = (name: string, question: string): TranscriptEntry => ({ role: 'user', content: [...format.human(pageBlock(name)).content, ...format.human(question).content] });
+    // The second message has no page block, and the user typed one by hand: what they typed is theirs and stays whole.
+    const typed: TranscriptEntry = { role: 'user', content: [...format.human('Why does it say this?').content, ...format.human(pageBlock('typed')).content] };
+    const entries = [fromPage('admissions', 'Who is here?'), typed, fromPage('fees', 'Who owes fees?'), fromPage('exams', 'Which exam is next?')];
+    const stored = JSON.stringify(entries);
+    const out = (await buildModelContext(entries, provider, loader({}))).filter((_entry, index) => index !== 1);
+    const text = (entry: TranscriptEntry) => JSON.stringify(entry.content);
+    expect(JSON.stringify((await buildModelContext(entries, provider, loader({})))[1])).toContain('Everything on the typed page');
+
+    expect(text(out[0]!)).not.toContain('Everything on the admissions page');
+    expect(text(out[0]!)).toContain(esc(PAGE_TEXT_OMITTED));
+    expect(text(out[0]!)).toContain('Path: /school/s/admissions');
+    expect(text(out[0]!)).toContain('Who is here?');
+    expect(text(out[1]!)).toContain('Everything on the fees page');
+    expect(text(out[2]!)).toContain('Everything on the exams page');
+    // Only the model's view changes, and shortening it again changes nothing.
+    expect(JSON.stringify(entries)).toBe(stored);
+    const again = await buildModelContext(entries, provider, loader({}));
+    expect(await buildModelContext(again, provider, loader({}))).toEqual(again);
   });
 
   it('shows the current message in full even when it is the only one', async () => {

@@ -9,8 +9,11 @@
  *   page, the sidebar, the breadcrumbs), except the overlay's own;
  * - table rows that open their record when clicked (`data-opens-record`, set
  *   by the shared data table), opened by the same click the user would make.
- * Only what is drawn inside the window now counts, so opening one is exactly
- * what the user could do by clicking it.
+ * Everything drawn on the page counts, also what the user would have to scroll
+ * to: the assistant is told the whole page's text (`screen-text.ts`), so it
+ * may name anything on it. Opening one is what the user could do by scrolling
+ * to it and clicking; what is hidden (a closed menu, a collapsed section) does
+ * not count.
  */
 
 /**
@@ -107,11 +110,16 @@ export function linkTexts(links: readonly ScreenLink[], max = 40): string[] {
   return texts;
 }
 
-/** Whether an element is drawn inside the window. */
-function inWindow(element: Element): boolean {
-  const rect = element.getBoundingClientRect();
-  return rect.width >= 2 && rect.height >= 2 && rect.bottom > 0 && rect.top < window.innerHeight && element.checkVisibility();
+/**
+ * Whether something of this size and visibility is drawn on the page. Where it
+ * is does not matter: a link far below the window is as much on the page as
+ * one in view.
+ */
+export function drawnOnPage(box: { width: number; height: number }, visible: boolean): boolean {
+  return visible && box.width >= 2 && box.height >= 2;
 }
+
+const isDrawn = (element: Element) => drawnOnPage(element.getBoundingClientRect(), element.checkVisibility());
 
 /** What a link or row says, on one line; an icon-only link by its accessible name. */
 const textOf = (element: HTMLElement) => (element.innerText || element.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim();
@@ -119,7 +127,7 @@ const textOf = (element: HTMLElement) => (element.innerText || element.getAttrib
 /**
  * What can be opened inside `root` now: links that stay inside the school
  * (`/school/{schoolId}/…` on this origin) and rows that open their record,
- * each drawn inside the window, with the way to open it.
+ * each drawn on the page, with the way to open it.
  */
 export function screenLinks(root: Element, schoolId: string, skip: string | null = null): { links: ScreenLink[]; follow: (link: ScreenLink, navigate: (href: string) => void) => void } {
   const prefix = `/school/${encodeURIComponent(schoolId)}`;
@@ -130,12 +138,12 @@ export function screenLinks(root: Element, schoolId: string, skip: string | null
     const url = new URL(anchor.href, window.location.href);
     if (url.origin !== window.location.origin || !(url.pathname === prefix || url.pathname.startsWith(`${prefix}/`))) continue;
     const text = textOf(anchor);
-    if (text && inWindow(anchor)) links.push({ text, href: `${url.pathname}${url.search}` });
+    if (text && isDrawn(anchor)) links.push({ text, href: `${url.pathname}${url.search}` });
   }
   root.querySelectorAll<HTMLElement>('[data-opens-record]').forEach((row, index) => {
     if (skip && row.closest(skip)) return;
     const text = textOf(row).replaceAll('\t', ' ');
-    if (!text || !inWindow(row)) return;
+    if (!text || !isDrawn(row)) return;
     const key = `row:${index}`;
     rows.set(key, row);
     links.push({ text, href: key });

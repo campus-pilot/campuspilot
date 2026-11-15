@@ -118,6 +118,15 @@ function liveConfig(settings: VoiceSettings, input: VoiceConnectInput) {
   };
 }
 
+/**
+ * How long a connection may take to be ready. The SDK's `live.connect` waits
+ * for the socket to open and for the model's setup to complete, and neither
+ * wait ever fails: a socket that closes first (a wrong model name, a key
+ * without access, a network that drops) would leave it waiting for ever, and
+ * the user on "Connecting". So the wait is given an end here.
+ */
+export const VOICE_CONNECT_TIMEOUT_MS = 15_000;
+
 export function createGeminiLiveProvider(settings: VoiceSettings): VoiceProvider {
   const client = new GoogleGenAI({ apiKey: settings.apiKey });
 
@@ -127,12 +136,33 @@ export function createGeminiLiveProvider(settings: VoiceSettings): VoiceProvider
     async connect(input: VoiceConnectInput): Promise<VoiceConnection> {
       let closedByUs = false;
       let open = true;
-      const session: Session = await client.live.connect({
+      /** Whether the connection became ready; before that a close is a failed connect, not a dropped session. */
+      let ready = false;
+      /** Whether the connect failed or timed out: whatever this connection still delivers is nobody's. */
+      let abandoned = false;
+      let failConnect: (error: Error) => void = () => undefined;
+      const failed = new Promise<never>((_resolve, reject) => {
+        failConnect = reject;
+      });
+      // A failure after the connect was already decided has nobody waiting for it.
+      failed.catch(() => undefined);
+      const timeout = setTimeout(() => failConnect(new Error(`The voice model was not ready within ${VOICE_CONNECT_TIMEOUT_MS / 1000} s.`)), VOICE_CONNECT_TIMEOUT_MS);
+      const connecting = client.live.connect({
         model: settings.model,
         config: liveConfig(settings, input),
         callbacks: {
           onmessage: (message) => {
-            for (const event of voiceEventsOf(message)) input.onEvent(event);
+            // A connection that was given up on has no session to tell.
+            if (abandoned) return;
+            // The SDK calls this from its socket: anything thrown here would reach the server's event loop.
+            let events: VoiceEvent[];
+            try {
+              events = voiceEventsOf(message);
+            } catch {
+              // A message that cannot be read leaves the session's state unknown: treat the connection as lost, so it is replaced.
+              events = [{ type: 'closed', expected: false, detail: 'unreadable message from the voice model' }];
+            }
+            for (const event of events) input.onEvent(event);
           },
           onerror: (event) => {
             // The close that follows reports it; an error alone does not end the connection.
@@ -140,10 +170,25 @@ export function createGeminiLiveProvider(settings: VoiceSettings): VoiceProvider
           },
           onclose: (event) => {
             open = false;
-            input.onEvent({ type: 'closed', expected: closedByUs, detail: `${event.code} ${event.reason}`.trim() });
+            const detail = `${event.code} ${event.reason}`.trim();
+            if (abandoned) return;
+            if (!ready) return failConnect(new Error(`The voice model closed the connection before it was ready: ${detail}`));
+            input.onEvent({ type: 'closed', expected: closedByUs, detail });
           },
         },
       });
+      let session: Session;
+      try {
+        session = await Promise.race([connecting, failed]);
+      } catch (err) {
+        abandoned = true;
+        // A connection that becomes ready after it was given up on has no owner: close it, so it is not left open and billed.
+        void connecting.then((late) => late.close()).catch(() => undefined);
+        throw err;
+      } finally {
+        clearTimeout(timeout);
+      }
+      ready = true;
 
       return {
         sendAudio(pcm) {

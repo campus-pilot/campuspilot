@@ -8,12 +8,13 @@ import { cn } from '@campuspilot/ui/lib/utils';
 import { useParams, useRouter } from 'next/navigation';
 
 import { useSchoolSessions, useStoredSchoolSessionId } from '@/components/session-selection';
+import { confirmNavigation } from '@/lib/navigation-guard';
 
 import { AssistantAccess } from '../assistant-access';
 import { AssistantChat } from '../assistant-chat';
 import { useAssistantStatus } from '../use-assistant';
 import { useVoice } from './use-voice';
-import { voice } from './voice-controller';
+import { voice, type VoiceNotOpened } from './voice-controller';
 import { bestLink, linkTexts, screenLinks } from './screen-links';
 import { voiceDestinationHref } from './voice-destinations';
 import { launchVoice } from './voice-launcher';
@@ -60,22 +61,34 @@ function OverlayLayer({ schoolId }: { schoolId: string }) {
   const sessionId = useSelectedSessionId(schoolId);
   const on = voiceIsOn(useVoice());
   /**
-   * Opens what matches `label` on the screen (`open_on_screen`): the page, the
+   * Whether the page may be left. The assistant moving the screen is the app
+   * navigating on its own, like switching school or session, so an editor with
+   * unsaved changes is asked first (its own dialog) and the user's answer is
+   * awaited: a spoken "open fees" must never throw away a half-filled form.
+   */
+  const mayLeave = async (): Promise<VoiceNotOpened | null> =>
+    (await confirmNavigation()) ? null : { opened: false, message: 'The user has unsaved changes on this page and chose to stay on it.' };
+  /**
+   * Opens what matches `label` on the page (`open_on_screen`): its links, the
    * sidebar, the breadcrumbs, anything the user could click to move, except
    * the overlay itself.
    */
-  const openLink = (label: string) => {
+  const openLink = async (label: string) => {
     const onScreen = screenLinks(document.body, schoolId, `[${OVERLAY_ATTRIBUTE}]`);
     const link = bestLink(label, onScreen.links);
-    if (!link) return { opened: false as const, linksOnScreen: linkTexts(onScreen.links) };
+    if (!link) return { opened: false as const, message: `Nothing on the page matches "${label}".`, linksOnScreen: linkTexts(onScreen.links) };
+    const stay = await mayLeave();
+    if (stay) return stay;
     onScreen.follow(link, (href) => router.push(href));
     return { opened: true as const };
   };
-  const open = (destination: VoiceDestination) => {
+  const open = async (destination: VoiceDestination) => {
     const href = voiceDestinationHref(destination, { schoolId, sessionId });
-    if (!href) return false;
+    if (!href) return { opened: false as const, message: 'This section cannot be opened from here.' };
+    const stay = await mayLeave();
+    if (stay) return stay;
     router.push(href);
-    return true;
+    return { opened: true as const };
   };
   return (
     <>

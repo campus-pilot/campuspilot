@@ -55,8 +55,11 @@ describe('voiceStateAfter', () => {
 
 describe('ending', () => {
   it('says nothing when the user ended voice, and why when it ended on its own', () => {
+    // The reason decides, never the wording: the server may say it differently tomorrow.
     assert.equal(noticeOfEnd('ended', 'Voice ended.'), null);
-    assert.deepEqual(noticeOfEnd('ended', 'Voice continued in another window.'), { tone: 'info', message: 'Voice continued in another window.' });
+    assert.equal(noticeOfEnd('ended', 'You ended voice.'), null);
+    assert.deepEqual(noticeOfEnd('replaced', 'Voice continued in another window.'), { tone: 'info', message: 'Voice continued in another window.' });
+    assert.deepEqual(noticeOfEnd('restarting', 'Voice ended.'), { tone: 'info', message: 'Voice ended.' });
     assert.equal(noticeOfEnd('idle', 'Voice ended because it was quiet for a while.')?.tone, 'info');
     assert.deepEqual(noticeOfEnd('limit_reached', 'The school reached its limit.'), { tone: 'problem', message: 'The school reached its limit.' });
     assert.equal(noticeOfEnd('unavailable', 'Voice is not available right now.')?.tone, 'problem');

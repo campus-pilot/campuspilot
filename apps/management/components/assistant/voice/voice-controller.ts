@@ -1,5 +1,5 @@
 import { ASSISTANT_PAGE_TEXT_MAX } from '@campuspilot/assistant-contract/dto';
-import { ASSISTANT_VOICE_PATH, voiceServerMessageSchema, type VoiceClientMessage, type VoiceDestination } from '@campuspilot/assistant-contract/voice';
+import { ASSISTANT_VOICE_PATH, voiceServerMessageSchema, type VoiceClientMessage, type VoiceDestination, type VoiceSessionKind } from '@campuspilot/assistant-contract/voice';
 import { env } from '@campuspilot/env/management.client';
 
 import { createVoiceEngine, type VoiceEngine, type VoiceLevels } from './voice-engine';
@@ -21,20 +21,35 @@ import { noticeOfEnd, noticeOfMicError, VOICE_OFF, voiceIsOn, voiceStateAfter, t
 /** A spoken request, sent as an assistant message by the chat that owns the session; resolves with the run it started. */
 export type VoiceAsk = (request: string) => Promise<{ conversationId: string; runId: string }>;
 
-export type VoiceStartOptions = {
-  /** The chat starting the session (its `useId`). */
-  ownerId: string;
-  schoolId: string;
+/** Why something on the screen was not opened. */
+export type VoiceNotOpened = { opened: false; message: string; linksOnScreen?: string[] };
+
+/**
+ * What the chat that owns the session does for it. The chat hands over a new
+ * set on every render (`setHandlers`), so a request that arrives minutes into
+ * a session acts on what the chat knows now (the academic session the user
+ * has since switched to, the paper now shared), not on what it knew at start.
+ */
+export type VoiceHandlers = {
   ask: VoiceAsk;
   /**
-   * Opens a section of the app on request; returns whether it could. Only the
-   * overlay passes it: it stays on screen while the page changes under it.
+   * Opens a section of the app on request; resolves with whether it did. Only
+   * the overlay passes it: it stays on screen while the page changes under it.
    */
-  open?: (destination: VoiceDestination) => boolean;
+  open?: (destination: VoiceDestination) => Promise<{ opened: true } | VoiceNotOpened>;
+  /** Follows the link on the page that matches `label`; the overlay passes it with `open`. */
+  openLink?: (label: string) => Promise<{ opened: true } | VoiceNotOpened>;
   /** The page's title and text, for `read_screen`; the overlay passes it. */
   readScreen?: () => { title: string; text: string };
-  /** Follows the link on the screen that matches `label`; the overlay passes it with `open`. */
-  openLink?: (label: string) => { opened: true } | { opened: false; linksOnScreen: string[] };
+};
+
+export type VoiceStartOptions = {
+  /** The chat starting the session. */
+  ownerId: string;
+  schoolId: string;
+  /** Where the session runs, which decides what the voice model may do (`voiceSessionKindSchema`). */
+  kind: VoiceSessionKind;
+  handlers: VoiceHandlers;
 };
 
 /** The name of the lock every tab of this browser shares: whoever holds it has the microphone. */
@@ -45,10 +60,11 @@ const MAX_UNSENT_BYTES = 256 * 1024;
 
 const ZERO_LEVELS: VoiceLevels = { input: 0, output: 0 };
 
-function voiceUrl(schoolId: string): string {
+function voiceUrl(schoolId: string, kind: VoiceSessionKind): string {
   const url = new URL(ASSISTANT_VOICE_PATH, env.NEXT_PUBLIC_SERVER_URL);
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
   url.searchParams.set('schoolId', schoolId);
+  url.searchParams.set('kind', kind);
   return url.toString();
 }
 
@@ -57,10 +73,7 @@ class VoiceController {
   private readonly listeners = new Set<() => void>();
   private engine: VoiceEngine | null = null;
   private socket: WebSocket | null = null;
-  private ask: VoiceAsk | null = null;
-  private open: VoiceStartOptions['open'] | null = null;
-  private openLink: VoiceStartOptions['openLink'] | null = null;
-  private readScreen: VoiceStartOptions['readScreen'] | null = null;
+  private handlers: VoiceHandlers | null = null;
   /** Releases the tab lock; set while this tab holds it. */
   private releaseLock: (() => void) | null = null;
   /** Counts sessions, so what a finished one still delivers is ignored. */
@@ -86,10 +99,7 @@ class VoiceController {
     this.finish(null);
     const generation = (this.generation += 1);
     const current = () => generation === this.generation;
-    this.ask = options.ask;
-    this.open = options.open ?? null;
-    this.openLink = options.openLink ?? null;
-    this.readScreen = options.readScreen ?? null;
+    this.handlers = options.handlers;
     const engine = createVoiceEngine((playing) => {
       if (current()) this.set({ ...this.state, assistantSpeaking: playing });
     });
@@ -113,7 +123,7 @@ class VoiceController {
     if (!current()) return engine.stop();
 
     this.set({ ...this.state, phase: 'connecting' });
-    const socket = new WebSocket(voiceUrl(options.schoolId));
+    const socket = new WebSocket(voiceUrl(options.schoolId, options.kind));
     socket.binaryType = 'arraybuffer';
     this.socket = socket;
     socket.onmessage = (event: MessageEvent<ArrayBuffer | string>) => {
@@ -135,6 +145,15 @@ class VoiceController {
     this.send({ type: 'end' });
     this.finish(null);
   };
+
+  /**
+   * Replaces what the owning chat does for the session with this render's
+   * (see {@link VoiceHandlers}). Ignored from a chat that does not own the
+   * session.
+   */
+  setHandlers(ownerId: string, handlers: VoiceHandlers): void {
+    if (this.state.ownerId === ownerId && voiceIsOn(this.state)) this.handlers = handlers;
+  }
 
   /** Ends the session if `ownerId`'s chat owns it: that chat is leaving the screen. */
   endFor(ownerId: string): void {
@@ -184,28 +203,34 @@ class VoiceController {
     if (message.type === 'interrupted') this.engine?.flush();
     this.set(voiceStateAfter(this.state, message));
     if (message.type === 'ask') this.passOn(message.askId, message.request);
-    if (message.type === 'open') {
-      const opened = this.open?.(message.destination) ?? false;
-      this.send({ type: 'opened', openId: message.openId, opened, ...(opened ? {} : { message: 'This section cannot be opened from here.' }) });
-    }
+    if (message.type === 'open') this.answerOpen(message.openId, this.handlers?.open?.(message.destination));
+    if (message.type === 'open_link') this.answerOpen(message.openId, this.handlers?.openLink?.(message.label));
     if (message.type === 'read_screen') {
-      const screen = this.readScreen?.() ?? { title: '', text: '' };
+      const screen = this.handlers?.readScreen?.() ?? { title: '', text: '' };
       this.send({ type: 'screen', readId: message.readId, title: screen.title.slice(0, 200), text: screen.text.slice(0, ASSISTANT_PAGE_TEXT_MAX) });
     }
-    if (message.type === 'open_link') {
-      const result = this.openLink?.(message.label) ?? { opened: false as const, linksOnScreen: [] };
-      this.send(
-        result.opened
-          ? { type: 'opened', openId: message.openId, opened: true }
-          : { type: 'opened', openId: message.openId, opened: false, message: `Nothing on the screen matches "${message.label}".`, linksOnScreen: result.linksOnScreen },
-      );
-    }
+  }
+
+  /**
+   * Tells the server whether something was opened, once the chat has decided:
+   * opening may first ask the user about unsaved changes, so the answer can
+   * take as long as they do. A chat that cannot open anything (it is not the
+   * overlay) answers at once.
+   */
+  private answerOpen(openId: string, opening: Promise<{ opened: true } | VoiceNotOpened> | undefined): void {
+    const generation = this.generation;
+    const answer = (result: { opened: true } | VoiceNotOpened) => {
+      if (generation !== this.generation) return;
+      this.send(result.opened ? { type: 'opened', openId, opened: true } : { type: 'opened', openId, opened: false, message: result.message.slice(0, 500), ...(result.linksOnScreen ? { linksOnScreen: result.linksOnScreen } : {}) });
+    };
+    if (!opening) return answer({ opened: false, message: 'This cannot be opened from here.' });
+    opening.then(answer, () => answer({ opened: false, message: 'It could not be opened.' }));
   }
 
   /** Sends a spoken request as an assistant message, through the chat that owns the session, and tells the server which run it started. */
   private passOn(askId: string, request: string): void {
     const generation = this.generation;
-    const ask = this.ask;
+    const ask = this.handlers?.ask;
     if (!ask) return;
     ask(request).then(
       (turn) => {
@@ -232,10 +257,7 @@ class VoiceController {
     }
     this.engine?.stop();
     this.engine = null;
-    this.ask = null;
-    this.open = null;
-    this.openLink = null;
-    this.readScreen = null;
+    this.handlers = null;
     this.releaseLock?.();
     this.releaseLock = null;
     // The notice belongs to the chat that had the session, so it is shown where voice was.
