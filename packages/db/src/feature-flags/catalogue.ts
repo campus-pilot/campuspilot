@@ -94,6 +94,15 @@ export type SchoolFeatureConfig<K extends SchoolFeatureKey> = z.infer<
 >;
 
 /**
+ * One feature's configuration as it may be written. A setting that has a
+ * default (the assistant's `voice`) may be left out: reading the row fills it
+ * in, exactly as it does for rows saved before that setting existed.
+ */
+export type SchoolFeatureConfigInput<K extends SchoolFeatureKey> = z.input<
+  (typeof schoolFeatureCatalogue)[K]["config"]
+>;
+
+/**
  * One feature's state for one school. `config` is null when nothing is
  * stored (or the feature has no settings); it is kept while the feature is
  * disabled, so `enabled` must be checked on its own.
