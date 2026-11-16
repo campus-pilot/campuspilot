@@ -472,6 +472,9 @@ function JobLink({
 }
 
 function CommonJobs({ data, schoolId, sessionId }: DashboardProps & { data: DashboardDto }) {
+  // No job is offered (for example a school without student management and
+  // notices): the section has nothing to start, so it is left out entirely.
+  if (!Object.values(data.actions).some(Boolean)) return null;
   return (
     <section>
       <div className="mb-3">

@@ -164,8 +164,10 @@ on one, or changing `school_feature_flag`, the feature catalogue
 `useSchoolFeature`, or the admin feature-flags editor, read the canonical
 [School feature flags guide](docs/feature-flags.md). A flag says what a school
 has; it is never a substitute for a permission, and a missing row means
-disabled. New schools start with no feature; tests name the features they need
-(`createTestSchool({ features: [...] })`).
+the feature's catalogue default (`defaultEnabled`: on only for
+`studentManagement`). A feature may require others (`requires`); gates and
+screens decide from `active`, never from the switch alone. Tests name the
+features they need (`createTestSchool({ features: [...] })`).
 
 ## Demo schools
 

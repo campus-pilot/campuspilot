@@ -32,16 +32,19 @@ import { protectedProcedure } from '../../../index';
 import { requireSchoolFeature } from '../../../permissions/feature';
 import { requireSchoolMember } from '../../../permissions/school-member';
 
-const OFF = { enabled: false, config: null };
-const ON = { enabled: true, config: null };
+const OFF = { enabled: false, active: false, config: null };
+const ON = { enabled: true, active: true, config: null };
+/** Student management: on for a school with no row (its catalogue default). */
+const STUDENTS = ON;
 
 describe('school feature flag storage', () => {
-  it('reads a school without rows as every feature disabled', async () => {
+  it('reads a school without rows as every feature disabled but student management, which is on by default', async () => {
     const school = await createTestSchool();
-    expect(await getSchoolFeatureFlags(db, school.id)).toEqual({ cadet: OFF, notices: OFF, assistant: OFF });
+    expect(await getSchoolFeatureFlags(db, school.id)).toEqual({ studentManagement: STUDENTS, cadet: OFF, notices: OFF, assistant: OFF });
     expect(await getSchoolFeatureConfig(db, school.id, 'cadet')).toBeNull();
     expect(await isSchoolFeatureEnabled(db, school.id, 'notices')).toBe(false);
     expect(await isSchoolFeatureEnabled(db, 'sch_missing', 'cadet')).toBe(false);
+    expect(await isSchoolFeatureEnabled(db, school.id, 'studentManagement')).toBe(true);
   });
 
   it('stores each feature and school independently and records who changed it', async () => {
@@ -49,8 +52,8 @@ describe('school feature flag storage', () => {
     const admin = await createAdminSession();
     await setSchoolFeature(db, { schoolId: school.id, feature: 'notices', enabled: true, config: null, updatedBy: admin.user.id });
 
-    expect(await getSchoolFeatureFlags(db, school.id)).toEqual({ cadet: OFF, notices: ON, assistant: OFF });
-    expect(await getSchoolFeatureFlags(db, other.id)).toEqual({ cadet: OFF, notices: OFF, assistant: OFF });
+    expect(await getSchoolFeatureFlags(db, school.id)).toEqual({ studentManagement: STUDENTS, cadet: OFF, notices: ON, assistant: OFF });
+    expect(await getSchoolFeatureFlags(db, other.id)).toEqual({ studentManagement: STUDENTS, cadet: OFF, notices: OFF, assistant: OFF });
     const rows = await db.select().from(schoolFeatureFlagTable).where(eqSchool(school.id));
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ feature: 'notices', enabled: true, config: null, updatedBy: admin.user.id });
@@ -74,8 +77,8 @@ describe('school feature flag storage', () => {
   it('ignores rows of a retired feature key', async () => {
     const school = await createTestSchool({ features: ['cadet'] });
     await db.insert(schoolFeatureFlagTable).values({ schoolId: school.id, feature: 'retired-feature' as never, enabled: true });
-    expect(await getSchoolFeatureFlags(db, school.id)).toEqual({ cadet: ON, notices: OFF, assistant: OFF });
-    expect(await readSchoolFeatureFlags(db, school.id)).toEqual({ features: { cadet: ON, notices: OFF, assistant: OFF }, invalidConfigs: [] });
+    expect(await getSchoolFeatureFlags(db, school.id)).toEqual({ studentManagement: STUDENTS, cadet: ON, notices: OFF, assistant: OFF });
+    expect(await readSchoolFeatureFlags(db, school.id)).toEqual({ features: { studentManagement: STUDENTS, cadet: ON, notices: OFF, assistant: OFF }, invalidConfigs: [] });
   });
 
   /**
@@ -102,7 +105,7 @@ describe('school feature flag storage', () => {
       message: 'The stored settings of Cadet Portal for this school are not valid. A platform administrator must save them again.',
     });
     // Every feature is still listed with its real enabled fact; the unusable configs are named.
-    expect(await readSchoolFeatureFlags(db, school.id)).toEqual({ features: { cadet: ON, notices: OFF, assistant: OFF }, invalidConfigs: ['cadet', 'notices'] });
+    expect(await readSchoolFeatureFlags(db, school.id)).toEqual({ features: { studentManagement: STUDENTS, cadet: ON, notices: OFF, assistant: OFF }, invalidConfigs: ['cadet', 'notices'] });
     // A feature with nothing stored has a valid, empty config.
     const fresh = await createTestSchool({ features: ['notices'] });
     await expect(getSchoolFeatureConfig(db, fresh.id, 'notices')).resolves.toBeNull();
@@ -124,14 +127,14 @@ describe('school feature flag storage', () => {
     // The app's own read of the flags, which gates every page, does too.
     await expect(principal.school.getFeatureFlags({ schoolId: school.id })).resolves.toEqual({
       schoolId: school.id,
-      features: { cadet: ON, notices: ON, assistant: OFF },
+      features: { studentManagement: STUDENTS, cadet: ON, notices: ON, assistant: OFF },
       invalidConfigs: ['cadet', 'notices'],
     });
     // The administrator sees which settings need saving, and saving heals that feature.
     await expect(admin.systemAdmin.getSchoolFeatureFlags({ id: school.id })).resolves.toMatchObject({ invalidConfigs: ['cadet', 'notices'] });
     await expect(admin.systemAdmin.updateSchoolFeatureFlag({ id: school.id, feature: 'cadet', enabled: true, config: null })).resolves.toEqual({
       schoolId: school.id,
-      features: { cadet: ON, notices: ON, assistant: OFF },
+      features: { studentManagement: STUDENTS, cadet: ON, notices: ON, assistant: OFF },
       invalidConfigs: ['notices'],
     });
     await expect(getSchoolFeatureConfig(db, school.id, 'cadet')).resolves.toBeNull();
@@ -159,18 +162,18 @@ describe('migration 0048 backfill', () => {
       .transaction(async (transaction) => {
         await transaction.execute(sql.raw(backfill));
         await transaction.execute(sql.raw(backfill));
-        expect(await getSchoolFeatureFlags(transaction, untouched.id)).toEqual({ cadet: ON, notices: OFF, assistant: OFF });
+        expect(await getSchoolFeatureFlags(transaction, untouched.id)).toEqual({ studentManagement: STUDENTS, cadet: ON, notices: OFF, assistant: OFF });
         const rows = await transaction.select().from(schoolFeatureFlagTable).where(eqSchool(untouched.id));
         expect(rows).toHaveLength(1);
         expect(rows[0]).toMatchObject({ feature: 'cadet', enabled: true, config: null, updatedBy: null });
         // An existing row is never overwritten.
-        expect(await getSchoolFeatureFlags(transaction, decided.id)).toEqual({ cadet: OFF, notices: OFF, assistant: OFF });
+        expect(await getSchoolFeatureFlags(transaction, decided.id)).toEqual({ studentManagement: STUDENTS, cadet: OFF, notices: OFF, assistant: OFF });
         throw new Rollback();
       })
       .catch((error: unknown) => {
         if (!(error instanceof Rollback)) throw error;
       });
-    expect(await getSchoolFeatureFlags(db, untouched.id)).toEqual({ cadet: OFF, notices: OFF, assistant: OFF });
+    expect(await getSchoolFeatureFlags(db, untouched.id)).toEqual({ studentManagement: STUDENTS, cadet: OFF, notices: OFF, assistant: OFF });
   });
 });
 
@@ -202,7 +205,7 @@ describe('school.getFeatureFlags', () => {
     for (const staff of staffOfEveryKind) {
       expect(await createTestClient(staff.session).school.getFeatureFlags({ schoolId: school.id })).toEqual({
         schoolId: school.id,
-        features: { cadet: ON, notices: OFF, assistant: OFF },
+        features: { studentManagement: STUDENTS, cadet: ON, notices: OFF, assistant: OFF },
         invalidConfigs: [],
       });
     }
@@ -211,6 +214,7 @@ describe('school.getFeatureFlags', () => {
     await setTestSchoolFeature(school.id, 'notices', true);
     await setTestSchoolFeature(school.id, 'cadet', false);
     expect((await createTestClient(teacher.session).school.getFeatureFlags({ schoolId: school.id })).features).toEqual({
+      studentManagement: STUDENTS,
       cadet: OFF,
       notices: ON,
       assistant: OFF,

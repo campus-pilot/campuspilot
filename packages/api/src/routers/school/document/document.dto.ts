@@ -1,3 +1,4 @@
+import type { SchoolFeatureKey } from "@campuspilot/db/feature-flags/catalogue";
 import { z } from "zod";
 import {
   reportSectionsSchema,
@@ -24,6 +25,24 @@ export const documentTypeSchema = z.enum([
   "question_paper",
 ]);
 export type DocumentType = z.infer<typeof documentTypeSchema>;
+
+/**
+ * The school feature each document type belongs to (docs/feature-flags.md).
+ * Its templates, previews, generated documents and history exist only while
+ * the school has that feature. Exhaustive, so a new type decides.
+ */
+export const DOCUMENT_TYPE_FEATURE = {
+  report_card: "studentManagement",
+  id_card: "studentManagement",
+  admit_card: "studentManagement",
+  timetable: "studentManagement",
+  bill: "studentManagement",
+  receipt: "studentManagement",
+  statement: "studentManagement",
+  notice: "notices",
+  // The question paper template belongs to the AI assistant's feature (D26).
+  question_paper: "assistant",
+} as const satisfies Record<DocumentType, SchoolFeatureKey>;
 
 /** Document types whose content is finance data; each has its own permissions. */
 export const FINANCE_DOCUMENT_TYPES: ReadonlySet<DocumentType> = new Set<DocumentType>([

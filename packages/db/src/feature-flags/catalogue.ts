@@ -20,31 +20,70 @@ import { roleEnum } from "../schema/jsonb/role";
  * - each key has exactly one `config` schema; a caller holding key `K` only
  *   ever receives `SchoolFeatureConfig<K>`, never another key's shape;
  * - a feature without settings declares `config: z.null()`;
- * - a missing row means `{ enabled: false, config: null }`: new features are
- *   off for every school until an administrator enables them (a migration may
- *   backfill rows when an already-live capability becomes a feature);
+ * - `defaultEnabled` is the switch of a school with no stored row. It is
+ *   false for every feature that is new to schools (off until an
+ *   administrator enables it) and true only for a capability every school
+ *   already had when it became a feature (`studentManagement`), so that
+ *   existing and new schools keep it with no backfill;
+ * - `requires` names the features this one cannot work without. A feature
+ *   is **active** only while its own switch is on and every feature it
+ *   requires is active ({@link resolveSchoolFeatureActivity}). Each switch
+ *   is kept as stored: switching a required feature off makes the features
+ *   that need it inactive without touching their switches, and switching it
+ *   back on restores them;
  * - `enabled` and `config` are independent facts: disabling a feature keeps
  *   its stored config.
  * Retiring a feature: remove its entry; stored rows of the retired key are
  * ignored by every read.
  */
+/** The shape every feature catalogue entry has. */
+type FeatureCatalogueShape = Record<
+  string,
+  {
+    label: string;
+    description: string;
+    config: z.ZodType;
+    /** The switch of a school with no stored row (see the rules above). */
+    defaultEnabled: boolean;
+    /** Features this one needs to be active; see the rules above. */
+    requires: readonly string[];
+  }
+>;
+
 export const schoolFeatureCatalogue = {
+  studentManagement: {
+    label: "Student management",
+    description:
+      "Admissions, students in classes, fees and billing, results, examination timetables and attendance, and student documents. Without it the school manages staff, classes, sections, subjects and examinations (for question papers) only.",
+    config: z.null(),
+    // Every school had all of this before it became a feature.
+    defaultEnabled: true,
+    requires: [],
+  },
   cadet: {
     label: "Cadet Portal",
     description:
       "Students sign in to the Cadet Portal to see their fees, released results and notifications, and staff can issue portal passwords.",
     config: z.null(),
+    defaultEnabled: false,
+    // The portal is the students' own; a school without students has none.
+    requires: ["studentManagement"],
   },
   notices: {
     label: "Notices",
     description:
       "Staff write and publish school notices to staff and, when the Cadet Portal is enabled, to students.",
     config: z.null(),
+    defaultEnabled: false,
+    // A product decision: a school without student management has no notices.
+    requires: ["studentManagement"],
   },
   assistant: {
     label: "AI assistant",
     description:
       "Staff ask the in-app assistant to read and change school data as themselves.",
+    defaultEnabled: false,
+    requires: [],
     config: z.object({
       /**
        * The school's spend on the assistant per calendar month (IST, the 1st
@@ -65,12 +104,18 @@ export const schoolFeatureCatalogue = {
         .refine((roles) => new Set(roles).size === roles.length, "Name each role once."),
     }),
   },
-} as const satisfies Record<
-  string,
-  { label: string; description: string; config: z.ZodType }
->;
+} as const satisfies Record<string, FeatureCatalogueShape[string]>;
 
 export type SchoolFeatureKey = keyof typeof schoolFeatureCatalogue;
+
+/**
+ * Compile-time guard: every name in a `requires` list is a catalogue key.
+ * (Cycles are refused by `catalogue.test.ts`.)
+ */
+type RequiredFeatureKey =
+  (typeof schoolFeatureCatalogue)[SchoolFeatureKey]["requires"][number];
+const requiresNameFeatures: RequiredFeatureKey extends SchoolFeatureKey ? true : never = true;
+void requiresNameFeatures;
 
 /** Every feature key, in catalogue order. */
 export const SCHOOL_FEATURE_KEYS = Object.keys(
@@ -85,12 +130,19 @@ export type SchoolFeatureConfig<K extends SchoolFeatureKey> = z.infer<
 >;
 
 /**
- * One feature's state for one school. `config` is null when nothing is
- * stored (or the feature has no settings); it is kept while the feature is
- * disabled, so `enabled` must be checked on its own.
+ * One feature's state for one school, as three independent facts:
+ * - `enabled`: the feature's own switch, as an administrator set it (the
+ *   catalogue's `defaultEnabled` when no row is stored). This is what the
+ *   admin editor shows and what an update writes;
+ * - `active`: whether the school **has** the feature now: its switch is on
+ *   and every feature it `requires` is active. Every gate, screen and tool
+ *   list decides from this, never from `enabled`;
+ * - `config`: null when nothing is stored (or the feature has no settings);
+ *   it is kept while the feature is disabled.
  */
 export type SchoolFeatureState<K extends SchoolFeatureKey> = {
   enabled: boolean;
+  active: boolean;
   config: SchoolFeatureConfig<K> | null;
 };
 
@@ -99,11 +151,7 @@ export type SchoolFeatureFlags = {
   [K in SchoolFeatureKey]: SchoolFeatureState<K>;
 };
 
-/** The shape every feature catalogue entry has. */
-type FeatureCatalogueShape = Record<
-  string,
-  { label: string; description: string; config: z.ZodType }
->;
+
 
 /**
  * One feature's state **with its key**, as a union discriminated on
@@ -137,13 +185,49 @@ export type SchoolFeatureEntry = FeatureEntryIn<typeof schoolFeatureCatalogue>;
 export function schoolFeatureEntries(
   flags: SchoolFeatureFlags,
 ): SchoolFeatureEntry[] {
+  // The switch and config only: `active` is derived and never written back.
   return SCHOOL_FEATURE_KEYS.map(
-    (feature) => ({ feature, ...flags[feature] }) as SchoolFeatureEntry,
+    (feature) =>
+      ({
+        feature,
+        enabled: flags[feature].enabled,
+        config: flags[feature].config,
+      }) as SchoolFeatureEntry,
   );
 }
 
-/** The state of a feature that has no stored row. */
-export const DISABLED_SCHOOL_FEATURE = { enabled: false, config: null } as const;
+/** A feature that is off and inactive, with nothing stored. */
+export const DISABLED_SCHOOL_FEATURE = { enabled: false, active: false, config: null } as const;
+
+/**
+ * Every feature's `active` fact from the switches alone: a feature is active
+ * while its switch is on and every feature it `requires` is active. The one
+ * implementation, used by the store's reads and the gate.
+ */
+export function resolveSchoolFeatureActivity(
+  switches: Record<SchoolFeatureKey, boolean>,
+): Record<SchoolFeatureKey, boolean> {
+  const active = {} as Record<SchoolFeatureKey, boolean>;
+  const visit = (key: SchoolFeatureKey, path: readonly SchoolFeatureKey[]): boolean => {
+    if (key in active) return active[key];
+    if (path.includes(key)) throw new Error(`Feature requirements form a cycle: ${[...path, key].join(" -> ")}.`);
+    const required: readonly SchoolFeatureKey[] = schoolFeatureCatalogue[key].requires;
+    const result = switches[key] && required.every((other) => visit(other, [...path, key]));
+    active[key] = result;
+    return result;
+  };
+  for (const key of SCHOOL_FEATURE_KEYS) visit(key, []);
+  return active;
+}
+
+/** The features `key` requires that are not active (empty when it may be active). */
+export function missingSchoolFeatureRequirements(
+  key: SchoolFeatureKey,
+  flags: Pick<SchoolFeatureFlags, SchoolFeatureKey>,
+): SchoolFeatureKey[] {
+  const required: readonly SchoolFeatureKey[] = schoolFeatureCatalogue[key].requires;
+  return required.filter((other) => !flags[other].active);
+}
 
 /**
  * Validates a stored or submitted config against the schema of `key` only.
@@ -167,6 +251,7 @@ export function schoolFeatureHasConfig(key: SchoolFeatureKey): boolean {
 /** The Zod schema type of one feature's state, with that key's config only. */
 type SchoolFeatureStateSchema<K extends SchoolFeatureKey> = z.ZodObject<{
   enabled: z.ZodBoolean;
+  active: z.ZodBoolean;
   config: z.ZodNullable<(typeof schoolFeatureCatalogue)[K]["config"]>;
 }>;
 
@@ -178,6 +263,7 @@ type SchoolFeatureStateSchema<K extends SchoolFeatureKey> = z.ZodObject<{
 export function schoolFeatureStateSchema<K extends SchoolFeatureKey>(key: K): SchoolFeatureStateSchema<K> {
   return z.object({
     enabled: z.boolean(),
+    active: z.boolean(),
     config: schoolFeatureCatalogue[key].config.nullable(),
   }) as unknown as SchoolFeatureStateSchema<K>;
 }
@@ -209,7 +295,7 @@ export const schoolFeatureUpdateSchema = z.discriminatedUnion(
       config: schoolFeatureCatalogue[key].config.nullable(),
     }),
   ) as unknown as [
-    SchoolFeatureUpdateOption<"cadet">,
+    SchoolFeatureUpdateOption<"studentManagement">,
     ...SchoolFeatureUpdateOption<SchoolFeatureKey>[],
   ],
 );

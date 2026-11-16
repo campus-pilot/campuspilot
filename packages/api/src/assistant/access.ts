@@ -2,13 +2,12 @@ import type { DatabaseExecutor } from '@campuspilot/db';
 import { readSchoolFeatureConfig } from '@campuspilot/db/feature-flags/store';
 import { schoolAssistantAccessRoleTable } from '@campuspilot/db/schema/assistant';
 import type { Role } from '@campuspilot/db/schema/jsonb/role';
-import { schoolFeatureFlagTable } from '@campuspilot/db/schema/school-feature-flag';
 import { schoolMemberTable } from '@campuspilot/db/schema/school-member';
 import { schoolUserRoleTable } from '@campuspilot/db/schema/school-user-role';
 import { ORPCError } from '@orpc/server';
 import { and, eq } from 'drizzle-orm';
 
-import { schoolFeatureDisabledError } from '../feature-flags/feature-flags.service';
+import { isSchoolFeatureEnabled, schoolFeatureDisabledError } from '../feature-flags/feature-flags.service';
 import { spendReachedLimit } from './money';
 import { schoolMonthSpendUsd } from './spend';
 
@@ -100,12 +99,8 @@ export async function resolveAssistantAccess(
   input: { schoolId: string; userId: string; now?: Date },
 ): Promise<AssistantAccessDecision> {
   const { schoolId, userId } = input;
-  const [flag] = await db
-    .select({ enabled: schoolFeatureFlagTable.enabled })
-    .from(schoolFeatureFlagTable)
-    .where(and(eq(schoolFeatureFlagTable.schoolId, schoolId), eq(schoolFeatureFlagTable.feature, 'assistant')))
-    .limit(1);
-  const featureEnabled = flag?.enabled ?? false;
+  // The same question every gate asks, so the assistant follows the catalogue's defaults and requirements.
+  const featureEnabled = await isSchoolFeatureEnabled(db, schoolId, 'assistant');
   const base = {
     featureEnabled,
     member: false,

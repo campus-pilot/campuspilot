@@ -27,6 +27,9 @@ import {
   MCP_WRITE_SCOPE,
 } from '@campuspilot/auth/mcp-oauth-policy';
 import { assistantToolDecision } from '@campuspilot/api/assistant/tool-policy';
+import { featuresOfUserSchools } from '@campuspilot/api/feature-flags/feature-flags.service';
+import { schoolFeatureGatesOf } from '@campuspilot/api/permissions/feature';
+import { schoolFeatureCatalogue, type SchoolFeatureKey } from '@campuspilot/db/feature-flags/catalogue';
 import { ASSISTANT_TOOL_META } from '@campuspilot/assistant-contract/protocol';
 import { APIError } from 'better-auth';
 import { z } from 'zod';
@@ -56,6 +59,12 @@ export type McpToolDefinition = {
   acceptsInput: boolean;
   /** Explicit exposure/access/destructive/module facts from `.meta({ mcp })`. */
   mcp: McpProcedureMeta & { exposure: 'core' | 'advanced' };
+  /**
+   * The school features the procedure is gated on, read from its own
+   * `requireSchoolFeature` middlewares (`schoolFeatureGatesOf`), so a tool
+   * list can never disagree with what a call is refused for.
+   */
+  features: readonly SchoolFeatureKey[];
   procedure: AnyProcedure;
 };
 
@@ -133,6 +142,12 @@ type CreateCampusPilotMcpServerOptions = McpToolCallOptions & {
    * `registerAssistantTools`.
    */
   assistantView?: boolean;
+  /**
+   * The features active in at least one of the user's schools
+   * (`featuresOfUserSchools`). When given, tools gated on any other feature
+   * are not listed. Undefined lists every tool (the assistant view, Cadet).
+   */
+  availableFeatures?: ReadonlySet<SchoolFeatureKey>;
 };
 
 export type McpErrorPayload = {
@@ -320,6 +335,26 @@ function readMcpMetadata(name: string, meta: unknown): McpProcedureMeta {
 }
 
 /**
+ * A tool's description with the features it needs, so a model working for a
+ * user of several schools knows the tool is refused in a school without them.
+ */
+function withFeatureNote(description: string, features: readonly SchoolFeatureKey[]): string {
+  if (features.length === 0) return description;
+  const labels = features.map((key) => schoolFeatureCatalogue[key].label).join(' and ');
+  return `${description} Only for schools that have ${labels}.`;
+}
+
+/** The part of a view whose tools pass `included`. */
+function filterCatalogView(view: McpCatalogView, included: (tool: McpToolDefinition) => boolean): McpCatalogView {
+  const advanced = view.advanced.filter(included);
+  return {
+    core: view.core.filter(included),
+    advanced,
+    advancedByName: new Map(advanced.map((tool) => [tool.name, tool])),
+  };
+}
+
+/**
  * Resolves the router once into immutable MCP registration data. oRPC's
  * resolver follows lazy routers, so every appRouter leaf is visited; each
  * must declare its MCP metadata, and hidden leaves are left out.
@@ -362,10 +397,12 @@ export async function buildMcpCatalog(router: AnyRouter): Promise<McpCatalog> {
       }
 
       const inputSchema = definition.inputSchema ?? EMPTY_INPUT_SCHEMA;
+      const features = schoolFeatureGatesOf(definition.middlewares);
       tools.push({
         name,
         title: summary,
-        description,
+        description: withFeatureNote(description, features),
+        features,
         inputSchema,
         inputJsonSchema: convertMcpInputSchema(name, inputSchema),
         acceptsInput: definition.inputSchema !== undefined,
@@ -548,6 +585,10 @@ function registerAssistantTools(
           ...securitySchemesMeta(tool.mcp.access),
           [ASSISTANT_TOOL_META.exposure]: tool.mcp.exposure,
           [ASSISTANT_TOOL_META.module]: tool.mcp.module,
+          // The worker offers the tool only while the conversation's school
+          // has these; the listing itself is the same for every school, so
+          // one cached catalog serves all runs.
+          [ASSISTANT_TOOL_META.features]: [...tool.features],
           ...(tool.mcp.outputChars === undefined
             ? {}
             : { [ASSISTANT_TOOL_META.outputChars]: tool.mcp.outputChars }),
@@ -563,6 +604,7 @@ export function createCampusPilotMcpServer({
   catalog,
   writeAccess = true,
   assistantView = false,
+  availableFeatures,
   serverName = 'campuspilot',
   ...options
 }: CreateCampusPilotMcpServerOptions): McpServer {
@@ -571,7 +613,12 @@ export function createCampusPilotMcpServer({
     registerAssistantTools(server, catalog, options);
     return server;
   }
-  const view = writeAccess ? catalog : catalog.readOnly;
+  const credentialView = writeAccess ? catalog : catalog.readOnly;
+  // A tool gated on a feature none of the user's schools has could only ever
+  // be refused, so it is not listed (nor found through the advanced tools).
+  const view = availableFeatures
+    ? filterCatalogView(credentialView, (tool) => tool.features.every((key) => availableFeatures.has(key)))
+    : credentialView;
 
   for (const tool of view.core) {
     server.registerTool(
@@ -616,10 +663,17 @@ export function createCampusPilotMcpHandler<TContext extends McpContext>({
         throw new TypeError('MCP request reached the handler without the auth gate.');
       }
 
+      const assistantView = context.principal.authMethod === 'assistant';
       return createCampusPilotMcpServer({
         catalog: await catalog,
         writeAccess: credentialWriteAccess(context),
-        assistantView: context.principal.authMethod === 'assistant',
+        assistantView,
+        // Staff connections only: the assistant's view is filtered per run by
+        // the worker, and the Cadet router has no school-feature gates.
+        availableFeatures:
+          !assistantView && 'session' in context && context.session
+            ? await featuresOfUserSchools(context.db, context.session.user.id)
+            : undefined,
         serverName,
         createContext: async () => context,
         reportError,

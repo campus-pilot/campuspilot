@@ -238,19 +238,33 @@ export type ExamSection = 'question-paper' | 'results';
 /**
  * Where the examination root sends the user (decisions D3 and D42).
  *
- * Question paper is the default only while the examination has a generated
- * plan and has not started, and only for a user who may use the assistant.
- * "Not started" is the lifecycle state `ready`; it is never inferred from the
- * plans. Everything else lands on Results, which also holds plan creation.
- * `pending` while the assistant answer is unknown, so the landing neither
- * flashes Results nor guesses.
+ * With student management, Question paper is the default only while the
+ * examination has a generated plan and has not started, and only for a user
+ * who may use the assistant. "Not started" is the lifecycle state `ready`;
+ * it is never inferred from the plans. Everything else lands on Results,
+ * which also holds plan creation.
+ *
+ * Without student management an examination has no results: with no plan it
+ * lands on plan creation (the Results route, shown as Subjects), otherwise
+ * on Question paper for a user who may use the assistant and on More (its
+ * lifecycle) for anyone else.
+ *
+ * `pending` while an answer that decides it is unknown, so the landing
+ * neither flashes a section nor guesses.
  */
 export function defaultExamSection(input: {
   planCount: number;
   status: 'ready' | 'active' | 'completed' | null;
   assistant: ExamSectionGate;
-}): ExamSection | 'pending' {
-  if (input.planCount <= 0 || input.status !== 'ready') return 'results';
+  studentManagement: ExamSectionGate;
+}): ExamSection | 'settings' | 'pending' {
+  if (input.planCount <= 0) return 'results';
+  if (input.studentManagement === 'pending') return 'pending';
+  if (input.studentManagement === 'denied') {
+    if (input.assistant === 'pending') return 'pending';
+    return input.assistant === 'allowed' ? 'question-paper' : 'settings';
+  }
+  if (input.status !== 'ready') return 'results';
   if (input.assistant === 'pending') return 'pending';
   return input.assistant === 'allowed' ? 'question-paper' : 'results';
 }

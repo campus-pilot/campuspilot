@@ -286,27 +286,30 @@ export function pickNotificationLinkFacts<T extends NotificationType>(
  * resend is refused (`notifications/features.ts` in the API). Inbox rows
  * are still written, since the inbox is the record.
  *
- * Exhaustive, so each new type decides. Only notice types name features:
- * a student notice needs the school to have notices and the Cadet Portal.
- * Bills and receipts are not portal features and go out regardless of
- * `cadet`; results are released by a procedure that requires `cadet`
- * itself, and copies of a release already made are delivered.
+ * Exhaustive, so each new type decides. A student notice needs the school
+ * to have notices and the Cadet Portal. Bills, payments, results, billing
+ * runs, timetables and WhatsApp failures (always about a message to a
+ * student's guardian) need student management; bills and receipts are not
+ * portal features and go out regardless of `cadet`. Results are released by
+ * a procedure that requires `cadet` itself, and copies of a release already
+ * made are delivered while student management is on. (Notices and the Cadet
+ * Portal themselves require student management in the feature catalogue.)
  */
 export const notificationRequiredFeatures = {
-  "bill.issued": [],
-  "payment.received": [],
-  "exam.results_published": [],
-  "exam.results_publish_finished": [],
-  "notification.whatsapp_failed": [],
-  "notification.whatsapp_batch_failed": [],
-  "billing.run_posted": [],
+  "bill.issued": ["studentManagement"],
+  "payment.received": ["studentManagement"],
+  "exam.results_published": ["studentManagement"],
+  "exam.results_publish_finished": ["studentManagement"],
+  "notification.whatsapp_failed": ["studentManagement"],
+  "notification.whatsapp_batch_failed": ["studentManagement"],
+  "billing.run_posted": ["studentManagement"],
   "notice.published": ["notices", "cadet"],
   "notice.published_staff": ["notices"],
   // Timetables belong to the examination, not to notices. The Cadet Portal
   // decides the student copies when the timetable is published: with the
   // `cadet` feature off, only the staff event is emitted.
-  "exam.timetable_published": [],
-  "exam.timetable_published_staff": [],
+  "exam.timetable_published": ["studentManagement"],
+  "exam.timetable_published_staff": ["studentManagement"],
 } as const satisfies Record<NotificationType, readonly SchoolFeatureKey[]>;
 
 /** Every known type, in catalogue order. */

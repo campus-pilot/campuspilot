@@ -11,6 +11,7 @@ import {
   UserRoundPlus,
   WandSparkles,
 } from 'lucide-react';
+import { RequireFeature } from './require-feature';
 import { RequirePermissions } from './require-permissions';
 import { schoolHref, schoolSessionHref } from './school-route';
 export {
@@ -57,6 +58,14 @@ export function createManagementCommandRegistry(
       </RequirePermissions>
     );
 
+  // A feature and a permission are separate gates; a command of a feature needs both.
+  const studentManagementWrap = (inner: (children: ReactNode) => ReactNode) =>
+    (children: ReactNode) => (
+      <RequireFeature schoolId={context.schoolId} feature="studentManagement">
+        {inner(children)}
+      </RequireFeature>
+    );
+
   return [
     {
       id: 'admission',
@@ -66,7 +75,7 @@ export function createManagementCommandRegistry(
       keywords: ['students', 'registration', 'enrolment'],
       defaultSuggestion: true,
       destination: ({ schoolId }) => schoolHref(schoolId, '/admission'),
-      wrap: permissionWrap(SCHOOL_ACTIONS.LIST_ADMISSIONS),
+      wrap: studentManagementWrap(permissionWrap(SCHOOL_ACTIONS.LIST_ADMISSIONS)),
     },
     {
       id: 'classroom',
@@ -99,7 +108,7 @@ export function createManagementCommandRegistry(
     {
       id: 'settings',
       label: 'Settings',
-      description: 'Open school settings',
+      description: 'Open organization settings',
       icon: Settings,
       keywords: ['school', 'configuration', 'preferences'],
       defaultSuggestion: false,
@@ -115,7 +124,8 @@ export function createManagementCommandRegistry(
       defaultSuggestion: false,
       destination: ({ schoolId }) =>
         schoolHref(schoolId, '/settings/templates/examination'),
-      wrap: permissionWrap(SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES),
+      // The examination (report card) templates belong to student management.
+      wrap: studentManagementWrap(permissionWrap(SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES)),
     },
   ];
 }

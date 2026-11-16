@@ -47,10 +47,17 @@ type Props = {
   overview: ExamOverviewDto;
   attendanceEnabled: boolean;
   totalWorkingDays: number | null;
+  /**
+   * Whether the school has student management. Without it an examination has
+   * no attendance and no results, so neither the working days nor their alert
+   * are offered; its lifecycle stays.
+   */
+  studentManagement: boolean;
   placement?: 'workspace' | 'navbar' | 'settings';
 };
 export function ExamActions(props: Props) {
-  const { scope, active, overview, attendanceEnabled, totalWorkingDays, placement = 'workspace' } = props;
+  const { scope, active, overview, studentManagement, totalWorkingDays, placement = 'workspace' } = props;
+  const attendanceEnabled = studentManagement && props.attendanceEnabled;
   const ui = useForm({
     defaultValues: { action: '' as Action },
     validators: {
@@ -95,7 +102,7 @@ export function ExamActions(props: Props) {
         )}
       {placement === 'settings' && (
         <div className="flex flex-col gap-4">
-          <section className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3">
+          {studentManagement ? <section className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3">
             <div className="flex flex-col gap-1">
               <h3 className="text-sm font-medium">Attendance working days</h3>
               <p className="text-sm text-muted-foreground">
@@ -111,11 +118,15 @@ export function ExamActions(props: Props) {
                 </ExamButton>
               </RequirePermissions>
             )}
-          </section>
+          </section> : null}
           <section className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3">
             <div className="flex flex-col gap-1">
               <h3 className="text-sm font-medium">Examination lifecycle</h3>
-              <p className="text-sm text-muted-foreground">Control when results can be entered and finalized.</p>
+              <p className="text-sm text-muted-foreground">
+                {studentManagement
+                  ? 'Control when results can be entered and finalized.'
+                  : 'Mark when the examination starts and when it is complete.'}
+              </p>
             </div>
             <LifecycleTrigger scope={scope} visible={active && overview.planCount > 0}
               action={lifecycleAction} blockedReason={lifecycleAction === 'reopen' ? reopenBlockedReason(overview) : null}

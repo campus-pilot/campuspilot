@@ -47,6 +47,12 @@ export type AssistantTool = {
   exposure: string;
   module: string;
   /**
+   * The school features the tool's procedure is gated on (from the API's
+   * listing). A school without one of them is never offered the tool
+   * ({@link toolCatalogForSchool}).
+   */
+  features: readonly string[];
+  /**
    * How many characters of this tool's result the model reads, when the
    * procedure declares it (`outputChars`); the default limit applies
    * otherwise.
@@ -83,6 +89,7 @@ const SHOW_VIEW_TOOL: AssistantTool = {
   destructive: false,
   exposure: 'core',
   module: 'assistant',
+  features: [],
 };
 
 /**
@@ -157,6 +164,9 @@ export async function loadToolCatalog(token: string): Promise<AssistantToolCatal
       destructive: listedTool.annotations?.destructiveHint === true,
       exposure: String(meta[ASSISTANT_TOOL_META.exposure] ?? 'advanced'),
       module: String(meta[ASSISTANT_TOOL_META.module] ?? 'unknown'),
+      features: Array.isArray(meta[ASSISTANT_TOOL_META.features])
+        ? (meta[ASSISTANT_TOOL_META.features] as unknown[]).map(String)
+        : [],
       ...(typeof meta[ASSISTANT_TOOL_META.outputChars] === 'number'
         ? { outputChars: meta[ASSISTANT_TOOL_META.outputChars] as number }
         : {}),
@@ -171,6 +181,20 @@ export async function loadToolCatalog(token: string): Promise<AssistantToolCatal
   const catalog = { tools, ordered };
   cached = { catalog, until: Date.now() + CATALOG_TTL_MS };
   return catalog;
+}
+
+/**
+ * The catalog as one school sees it: a tool gated on a feature the school
+ * does not have is left out, so the model is never offered a tool every call
+ * of which the API would refuse. The listing (and its cache) is the same for
+ * every school; only this view differs.
+ */
+export function toolCatalogForSchool(
+  catalog: AssistantToolCatalog,
+  activeFeatures: ReadonlySet<string>,
+): AssistantToolCatalog {
+  const ordered = catalog.ordered.filter((tool) => tool.features.every((feature) => activeFeatures.has(feature)));
+  return { tools: new Map(ordered.map((tool) => [tool.modelName, tool])), ordered };
 }
 
 export type ToolError = { code: string; message: string };

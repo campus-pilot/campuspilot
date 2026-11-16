@@ -87,8 +87,11 @@ export function DocumentTemplateMarketplace({
   const notices = useSchoolFeature(schoolId, 'notices');
   // The question paper template belongs to the `assistant` feature in the same way.
   const assistant = useSchoolFeature(schoolId, 'assistant');
+  // Every other template (results, cards, timetables, bills, receipts,
+  // statements) belongs to student management (`DOCUMENT_TYPE_FEATURE`).
+  const studentManagement = useSchoolFeature(schoolId, 'studentManagement');
   const kinds = [
-    ...allDocumentKinds,
+    ...(studentManagement.enabled ? allDocumentKinds : []),
     ...(notices.enabled ? [noticeDocumentKind] : []),
     ...(assistant.enabled ? [questionPaperDocumentKind] : []),
   ];
@@ -129,7 +132,15 @@ export function DocumentTemplateMarketplace({
           )}
         </form.Field>
         <form.Subscribe selector={(state) => state.values.documentType}>
-          {(documentType) => <DocumentPermission schoolId={schoolId} action={templateReadAction(documentType)} fallback={<DocumentNotice>Template marketplace access is unavailable for your account.</DocumentNotice>}><MarketplaceTypeSection key={documentType} scope={{ schoolId, documentType }} /></DocumentPermission>}
+          {(documentType) =>
+            // A type the school does not have (the default report card for a
+            // school without student management, or an old link) has no designs to show.
+            kinds.some(({ value }) => value === documentType) ? (
+              <DocumentPermission schoolId={schoolId} action={templateReadAction(documentType)} fallback={<DocumentNotice>Template marketplace access is unavailable for your account.</DocumentNotice>}><MarketplaceTypeSection key={documentType} scope={{ schoolId, documentType }} /></DocumentPermission>
+            ) : kinds.length > 0 ? (
+              <DocumentNotice>Choose a document type above to see its designs.</DocumentNotice>
+            ) : null
+          }
         </form.Subscribe>
     </div>
   );

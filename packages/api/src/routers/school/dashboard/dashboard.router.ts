@@ -28,7 +28,7 @@ export const schoolDashboardRouter = {
     .route({
       summary: "Read the session dashboard",
       description:
-        "Read one permission-composed school-session dashboard. Unauthorized domains are returned as null and unauthorized common jobs as false.",
+        "Read one permission-composed school-session dashboard. Unauthorized domains, and domains of a feature the school does not have (admissions, students and billing need student management), are returned as null; such common jobs are false.",
       tags: ["School", "Dashboard"],
     })
     .meta({
@@ -52,26 +52,32 @@ export const schoolDashboardRouter = {
           })),
           signal,
         );
+        // Admissions, students, fees and results belong to student
+        // management. A permission and a feature are separate facts; each of
+        // those domains and jobs needs both. Classes and examinations do not.
+        const studentManagement = await isSchoolFeatureEnabled(context.db, input.schoolId, "studentManagement");
         return await readDashboard(
           context.db,
           input,
           context.session.user.id,
           {
-            admissions: decisions[0] === true,
+            admissions: studentManagement && decisions[0] === true,
             classes: decisions[1] === true,
-            students: decisions[2] === true,
-            billing: decisions[3] === true,
+            students: studentManagement && decisions[2] === true,
+            billing: studentManagement && decisions[3] === true,
             examinations: decisions[4] === true,
             createAdmission:
+              studentManagement &&
               decisions[5] === true &&
               decisions[0] === true &&
               decisions[1] === true &&
               decisions[8] === true,
             recordPayment:
+              studentManagement &&
               decisions[6] === true &&
               decisions[9] === true &&
               decisions[10] === true,
-            enterResults: decisions[7] === true && decisions[4] === true,
+            enterResults: studentManagement && decisions[7] === true && decisions[4] === true,
             // A permission and a feature are separate facts; the job needs both.
             createNotice:
               decisions[11] === true &&

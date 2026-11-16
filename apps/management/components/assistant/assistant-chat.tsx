@@ -1,5 +1,6 @@
 'use client';
 
+import { useSchoolFeature } from '@/components/require-feature';
 import {
   QUESTION_PAPER_SEED_DRAFT,
   type AssistantAttachmentRef,
@@ -571,6 +572,9 @@ export function AssistantChat({
   const activeSeed = conversationId ? null : seed;
   const seedPaper = useSeedPaper(schoolId, activeSeed);
   const status = useAssistantStatus(schoolId);
+  // The default prompt names what the school has: a school without student management has no students to ask about.
+  const studentManagement = useSchoolFeature(schoolId, 'studentManagement').enabled;
+  const composerPlaceholder = placeholder ?? (studentManagement ? 'Ask about students, classes, exams…' : 'Ask about staff, classes, exams…');
   const { send, resend, isPending: sending } = useSendAssistantMessage(schoolId, surface);
   const stop = useStopAssistantRun();
   const running = useAssistantActiveRun(schoolId, conversationId);
@@ -702,7 +706,7 @@ export function AssistantChat({
               controlsRef={composer}
               autoFocus={autoFocus}
               disabledReason={readOnlyReason ?? disabledReason}
-              placeholder={running ? 'Queue a follow-up…' : placeholder}
+              placeholder={running ? 'Queue a follow-up…' : composerPlaceholder}
               onSend={sendText}
               sending={sending}
               lastSentText={lastSentText}

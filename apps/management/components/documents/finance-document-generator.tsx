@@ -109,7 +109,7 @@ function FinanceDocumentGeneratorData({
   if (!template.data)
     return (
       <DocumentNotice>
-        Configure the {documentType} template in School settings before
+        Configure the {documentType} template in Settings › Templates before
         creating this PDF.
       </DocumentNotice>
     );

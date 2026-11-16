@@ -131,7 +131,7 @@ function WorkspaceActions(
   {
     context,
     ...props
-  }: Omit<Parameters<typeof ExamActions>[0], 'totalWorkingDays'> & {
+  }: Omit<Parameters<typeof ExamActions>[0], 'totalWorkingDays' | 'studentManagement'> & {
     context: ExamContextDto;
   },
 ) {
@@ -142,20 +142,27 @@ function WorkspaceActions(
     typeof params.classId === 'string' ? params.classId : undefined;
   const studentId =
     typeof params.studentId === 'string' ? params.studentId : undefined;
-  const query = useQuery(
-    orpc.school.getExamAssessmentSettings.queryOptions({ input: props.scope }),
-  );
+  // Attendance settings and student documents belong to student management;
+  // without it neither is read nor offered (the API would refuse both).
+  const studentManagement = useSchoolFeature(props.scope.schoolId, 'studentManagement').enabled;
+  const query = useQuery({
+    ...orpc.school.getExamAssessmentSettings.queryOptions({ input: props.scope }),
+    enabled: studentManagement,
+  });
   return (
     <>
-      {query.isError ? (
+      {!studentManagement ? (
+        <ExamActions {...props} studentManagement={false} totalWorkingDays={null} />
+      ) : query.isError ? (
         <ReadError error={query.error} retry={query.refetch} />
       ) : query.data ? (
         <ExamActions
           {...props}
+          studentManagement
           totalWorkingDays={query.data.totalWorkingDays}
         />
       ) : null}
-      {props.overview.planCount > 0 &&
+      {props.overview.planCount > 0 && studentManagement &&
         (pathname === `${base}/timetable` ? (
           <ExamTimetableMenu
             scope={props.scope}
@@ -350,14 +357,22 @@ function WorkspaceLayout({
   // The tab exists only when the assistant gate is known to be open (D42);
   // while it loads or is closed, the tab is simply absent.
   const assistant = useAssistantGate(scope.schoolId);
+  // Without student management an examination has no results, timetable or
+  // attendance: its Results route only creates the subject plans (shown as
+  // Subjects, until there are plans), and the papers and lifecycle remain.
+  const studentManagement = useSchoolFeature(scope.schoolId, 'studentManagement').enabled;
   const items = [
-    {
-      id: 'results',
-      label: 'Results',
-      href: examResultsHref(scope),
-      action: SCHOOL_ACTIONS.READ_EXAM_PLANS,
-      ai: false,
-    },
+    ...(studentManagement || overview.planCount <= 0
+      ? [
+          {
+            id: 'results',
+            label: studentManagement ? 'Results' : 'Subjects',
+            href: examResultsHref(scope),
+            action: SCHOOL_ACTIONS.READ_EXAM_PLANS,
+            ai: false,
+          },
+        ]
+      : []),
     ...(overview.planCount > 0 && assistant === 'allowed'
       ? [
           {
@@ -369,7 +384,7 @@ function WorkspaceLayout({
           },
         ]
       : []),
-    ...(overview.planCount > 0
+    ...(overview.planCount > 0 && studentManagement
       ? [
           {
             id: 'timetable',
@@ -378,6 +393,10 @@ function WorkspaceLayout({
             action: SCHOOL_ACTIONS.READ_EXAM_TIMETABLE,
             ai: false,
           },
+        ]
+      : []),
+    ...(overview.planCount > 0
+      ? [
           {
             id: 'settings', label: 'More',
             href: `${base}/settings`, action: SCHOOL_ACTIONS.READ_EXAM_PLANS,

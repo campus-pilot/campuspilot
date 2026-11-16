@@ -5,8 +5,8 @@ import { settingsBreadcrumbs } from './settings-breadcrumbs';
 
 export const schoolSettingsPage = defineManagementPage<SchoolRouteParams>({
   matches: (pathname) => /^\/school\/[^/]+\/settings$/.test(pathname),
-  title: 'School settings',
+  title: 'Organization settings',
   breadcrumbs: ({ schoolId }) =>
-    settingsBreadcrumbs(schoolId, { id: 'school-settings', label: 'School', icon: School }),
+    settingsBreadcrumbs(schoolId, { id: 'school-settings', label: 'Organization', icon: School }),
 });
 

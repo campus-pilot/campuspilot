@@ -1,7 +1,7 @@
 # School feature flags
 
-A feature flag says whether one school **has** a product area (the Cadet Portal,
-notices, the AI assistant). Platform administrators switch flags per school in the admin app; a
+A feature flag says whether one school **has** a product area (student
+management, the Cadet Portal, notices, the AI assistant). Platform administrators switch flags per school in the admin app; a
 school's own staff can only read them. This guide is the canonical reference:
 read it before adding a feature, gating a procedure or screen on one, or
 changing how flags are stored or enforced.
@@ -16,10 +16,11 @@ its own layer, and never infer one from the other.
 
 | Export | Meaning |
 | --- | --- |
-| `schoolFeatureCatalogue` | One entry per feature: `label`, `description`, `config` (a Zod schema; `z.null()` for a feature without settings). |
-| `SchoolFeatureKey`, `SCHOOL_FEATURE_KEYS`, `schoolFeatureKeySchema` | The keys (`cadet`, `notices`, `assistant`). |
+| `schoolFeatureCatalogue` | One entry per feature: `label`, `description`, `config` (a Zod schema; `z.null()` for a feature without settings), `defaultEnabled` (the switch of a school with no stored row) and `requires` (the features it cannot work without). |
+| `SchoolFeatureKey`, `SCHOOL_FEATURE_KEYS`, `schoolFeatureKeySchema` | The keys (`studentManagement`, `cadet`, `notices`, `assistant`). |
+| `resolveSchoolFeatureActivity(switches)`, `missingSchoolFeatureRequirements(key, flags)` | Which features are **active** (switch on and every required feature active), and which requirements of one feature are not. The one implementation of the rule below. |
 | `SchoolFeatureConfig<K>` | The config type of exactly one key. A caller holding key `K` never sees another key's shape. |
-| `SchoolFeatureState<K>` | `{ enabled: boolean; config: SchoolFeatureConfig<K> \| null }`. |
+| `SchoolFeatureState<K>` | `{ enabled: boolean; active: boolean; config: SchoolFeatureConfig<K> \| null }`: the switch, whether the school has the feature now, and its settings (see "Switch and activity"). |
 | `SchoolFeatureFlags` | `{ [K in SchoolFeatureKey]: SchoolFeatureState<K> }`. |
 | `SchoolFeatureEntry`, `schoolFeatureEntries(flags)` | One feature's state **with its key**, a union discriminated on `feature`. Use it whenever the key is not a literal (a loop, a form): a value whose key may be any feature cannot carry one feature's config for another. Build updates by spreading an entry, never by pairing `feature` and `config` by hand. |
 | `parseSchoolFeatureConfig(key, raw)` | Validates stored or submitted jsonb against that key's schema; null means "no config". |
@@ -43,8 +44,12 @@ has them.)
 
 - `feature` is text, not a database enum: adding a feature needs no migration,
   and rows of a retired key are ignored by every read.
-- **A missing row means disabled with no config.** A new school has no rows, so
-  every feature is off until an administrator enables it.
+- **A missing row means the feature's `defaultEnabled`, with no config.** That
+  is false for every feature except `studentManagement`: a new school has no
+  rows, so it has student management and nothing else until an administrator
+  enables more. `studentManagement` defaults to on because every school had
+  all of it before it became a feature; a default instead of a backfill also
+  covers schools created later without a special case in school creation.
 - `enabled` and `config` are independent facts. Disabling keeps the config.
 - A stored config that no longer matches its schema (after a schema change)
   stops **only the code that uses that config**, with a clear error, and is
@@ -78,13 +83,34 @@ has them.)
   and the assistant's rows and role list (`0056_demo-purge-assistant.sql`), question papers (`0059_demo-purge-question-papers.sql`) and chat images (`0062_demo-purge-assistant-attachments.sql`).
 - `assistant` was not backfilled: it is off for every school until enabled.
 
+## Switch and activity
+
+Each feature has two facts, kept apart:
+
+- **`enabled`, the switch**: what an administrator set (the default without a
+  row). The admin editor shows and writes it.
+- **`active`**: whether the school **has** the feature now: its switch is on
+  and every feature it `requires` is active. Every gate (`isSchoolFeatureEnabled`,
+  `assertSchoolFeatureEnabled`, `requireSchoolFeature`), every screen
+  (`useSchoolFeature` returns `active` as its `enabled`), notification and tool
+  list decides from this.
+
+Today `cadet` and `notices` require `studentManagement` (a product decision:
+a school without students has neither). Switching student management off
+leaves their switches as they are, so switching it back on restores them;
+their gates refuse with their own key (`feature: 'notices'`), since that is the
+feature the caller asked for. The admin editor says on such a card that the
+feature is switched on but inactive, and why. Requirements must not form a
+cycle (`catalogue.test.ts`).
+
 ## Reading and writing (API)
 
 | Where | What |
 | --- | --- |
-| `@campuspilot/db/feature-flags/store` | `isSchoolFeatureEnabled(db, schoolId, key)` (the gate's question), `readSchoolFeatureFlags(db, schoolId)` (`{ features, invalidConfigs }`; never throws on a config), `getSchoolFeatureFlags(db, schoolId)` (its `features`), `readSchoolFeatureConfig(db, schoolId, key)` (`valid` with the config, or `invalid`). Shared with `@campuspilot/auth` (Cadet sign-in). |
+| `@campuspilot/db/feature-flags/store` | `isSchoolFeatureEnabled(db, schoolId, key)` (the gate's question: is it active), `readSchoolFeatureFlags(db, schoolId)` (`{ features, invalidConfigs }`; never throws on a config), `getSchoolFeatureFlags(db, schoolId)` (its `features`), `readSchoolFeatureConfig(db, schoolId, key)` (`valid` with the config, or `invalid`). Shared with `@campuspilot/auth` (Cadet sign-in). |
 | `packages/api/src/feature-flags/feature-flags.service.ts` | Re-exports the reads; `setSchoolFeature(db, { ...entry, schoolId, updatedBy })` (the input is a `SchoolFeatureEntry`); `assertSchoolFeatureEnabled(db, schoolId, key)` (decides from `enabled` only, returns nothing); `getSchoolFeatureConfig(db, schoolId, key)` (the typed config for a handler that uses it; `CONFLICT` when the stored value is invalid); `schoolFeatureDisabledError(key)`, `schoolFeatureConfigInvalidError(key)`. |
-| `packages/api/src/permissions/feature.ts` | `requireSchoolFeature(key)` middleware: the gate, from `enabled` alone; adds nothing to the context. |
+| `packages/api/src/permissions/feature.ts` | `requireSchoolFeature(key)` middleware: the gate, from `active` alone; adds nothing to the context. `gateRouterOnSchoolFeature(key, router)` appends it as the last middleware of every procedure of a router (after its permission checks), for areas that belong wholly to a feature. `schoolFeatureGatesOf(middlewares)` reads the gates back for the MCP catalog. |
+| `featuresOfUserSchools(db, userId)` (service) | The features active in at least one of the user's schools, for the MCP tool list. |
 | `school.getFeatureFlags({ schoolId })` | Any member of the school (`requireSchoolMember`), no permission. Returns `{ schoolId, features, invalidConfigs }`. MCP hidden. |
 | `systemAdmin.getSchoolFeatureFlags({ id })` | `system.school.feature_flags.read`. MCP advanced. |
 | `systemAdmin.updateSchoolFeatureFlag({ id, feature, enabled, config })` | `system.school.feature_flags.update`. MCP hidden (a human platform decision; its input is a discriminated union). Returns all flags of the school. |
@@ -127,6 +153,29 @@ A permission denial is FORBIDDEN **without** that data. Clients tell them apart
 with `readSchoolFeatureDisabled(error)` (returns the feature key or null), never
 by the message. Tests use `expectFeatureDisabled` / `expectPermissionDenied`
 (`packages/api/test/feature-flags.ts`).
+
+## The `studentManagement` feature: where it is enforced
+
+On by default (`defaultEnabled: true`); a platform administrator switches it
+off to make a staff-only school (staff, classes, sections, subjects and
+examinations for question papers). Off means:
+
+| Surface | Behaviour when off |
+| --- | --- |
+| Admissions (`admission.router`, admission settings, the admission photo and document routes in `admission.http.ts`) | Disabled-feature error after the permission check; nothing is written. |
+| Students (`student.router`), fees and billing (`billing.router`: bills, runs, ledger, payments, reports, admission finance values), session finance (`session-finance.router`) | Disabled-feature error. |
+| Examinations: students, results, attendance settings, timetables, result notifications and per-student remarks (`exam.router`, everything but definitions, plans, `transitionExam`, the Cadet release and question papers) | Disabled-feature error. An examination keeps its definition, subject plans, lifecycle and question papers. |
+| Documents (`DOCUMENT_TYPE_FEATURE` in `document.dto.ts`) | Every document type except `notice` (`notices`) and `question_paper` (`assistant`) belongs to student management: its templates, marketplace, previews, generation, downloads and deletes are refused; `listDocumentArtifacts` is refused (it lists only those types). |
+| Delivery log (`listNotificationDeliveries`, `resendNotificationDelivery`) | Disabled-feature error: every delivery there is a student notification. |
+| Notifications `bill.issued`, `payment.received`, `billing.run_posted`, `exam.results_published`, `exam.results_publish_finished`, `exam.timetable_published(_staff)`, `notification.whatsapp_failed`, `notification.whatsapp_batch_failed` | Remote copies `skipped: feature_disabled`, resend refused (`notificationRequiredFeatures`). |
+| `getDashboard` | `admissions`, `classrooms` (student counts) and `billing` are null; `createAdmission`, `recordPayment` and `enterResults` are false. |
+| Cadet Portal and notices | Inactive (they require student management), with their own disabled-feature errors. |
+| In-app assistant | The worker drops every tool gated on a feature the conversation's school lacks (read fresh before each model request and tool call), and the run's facts tell the model which parts of CampusPilot the school does not use. |
+| External MCP clients | A tool gated on a feature none of the user's schools has is not listed (nor found through the advanced tools); every gated tool's description ends "Only for schools that have …"; a call for a school without the feature is refused. |
+| Management UI | Sidebar: Admission and the Operations group (Documents, Billing, Notices). Classroom: Students and Documents sections and Add student (Teachers is the default). Classroom list: the Students column. Examination: Results (shown as Subjects until there are plans), Timetable, attendance, the documents menu and result notifications; the exam lands on Question paper, or More without the assistant. Settings: Documents (admission documents), every template but Question paper (and Notice), and on the session page co-scholastic areas, grading scale, attendance and financial configuration. ⌘K: the Admission and Templates commands and the student search. Every page of these areas, opened by URL, shows "not enabled" (`FeaturePage` layouts). |
+
+Kept and back when it is enabled again: admissions, students, bills, ledgers,
+results, timetables, documents and every notification already recorded.
 
 ## The `cadet` feature: where it is enforced
 
@@ -266,9 +315,11 @@ showing past spend.
 ## Adding a feature
 
 1. Add the entry to `schoolFeatureCatalogue` (label, description, `config`).
-   Fix every exhaustive record the build then flags:
-   `DEMO_SCHOOL_FEATURE_DEFAULTS`, the admin editor's `DISABLE_WARNINGS`, and
-   the pinned key lists in tests. If the feature has notifications, name it in
+   Decide `defaultEnabled` (false unless every school already has the
+   capability) and `requires`. Fix every exhaustive record the build then
+   flags: `DEMO_SCHOOL_FEATURE_DEFAULTS`, the admin editor's `DISABLE_WARNINGS`,
+   `DOCUMENT_TYPE_FEATURE` if it owns document types, and the pinned key lists
+   in tests. If the feature has notifications, name it in
    `notificationRequiredFeatures` for each of its types.
 2. If it has settings, give it a settings page in the admin app and name it
    in `SETTINGS_PAGES` (the guard there fails until you do), and decide the
@@ -282,9 +333,11 @@ showing past spend.
 4. Gate the UI: `RequireFeature` around navigation and actions, `FeaturePage`
    around its pages.
 5. No migration is needed unless an existing, already-used capability becomes a
-   feature; then backfill `enabled = true` for existing schools in the same
-   release, as 0048 did for `cadet`.
-6. Tests: fixtures create schools with no feature. Name what a suite needs:
+   feature; then either give it `defaultEnabled: true` (as `studentManagement`)
+   or backfill `enabled = true` for existing schools in the same release, as
+   0048 did for `cadet` (before defaults existed).
+6. Tests: fixtures create schools with no stored feature, so each has only
+   its default (student management). Name what a suite needs:
    `createTestSchool({ features: ['<key>'] })` (a feature with settings as
    `{ feature: '<key>', config }`), `createFinanceScenario({ features })`,
    `createResultsSchool({ features })`, or flip one with

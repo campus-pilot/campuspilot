@@ -1,6 +1,7 @@
 'use client';
 import { useQuery } from '@tanstack/react-query';
 import { SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
+import { useSchoolFeature } from '@/components/require-feature';
 import { RequirePermissions } from '@/components/require-permissions';
 import { orpc } from '@/lib/orpc';
 import { LoadingExam, Notice, ReadError } from './exam-common';
@@ -28,27 +29,36 @@ function SettingsData({ scope, placement }: {
   const session = useQuery(orpc.school.getSession.queryOptions({ input: scope }));
   const overview = useQuery(orpc.school.getExamOverview.queryOptions({ input: scope }));
   const context = useQuery(orpc.school.getExamContext.queryOptions({ input: scope }));
-  const settings = useQuery(orpc.school.getExamAssessmentSettings.queryOptions({ input: scope }));
-  if (session.isPending || overview.isPending || context.isPending || settings.isPending)
+  // Attendance and result notifications belong to student management; without it they are neither read nor shown.
+  const studentManagementFeature = useSchoolFeature(scope.schoolId, 'studentManagement');
+  const studentManagement = studentManagementFeature.enabled;
+  const settings = useQuery({
+    ...orpc.school.getExamAssessmentSettings.queryOptions({ input: scope }),
+    enabled: studentManagement,
+  });
+  if (studentManagementFeature.status === 'pending' || session.isPending || overview.isPending || context.isPending || (studentManagement && settings.isPending))
     return placement === 'navbar' ? null : <LoadingExam />;
-  if (!session.data || !overview.data || !context.data || !settings.data)
+  if (!session.data || !overview.data || !context.data || (studentManagement && !settings.data))
     return placement === 'navbar' ? null : <ReadError
       error={session.error ?? overview.error ?? context.error ?? settings.error}
-      retry={() => Promise.all([session.refetch(), overview.refetch(), context.refetch(), settings.refetch()])} />;
+      retry={() => Promise.all([session.refetch(), overview.refetch(), context.refetch(), ...(studentManagement ? [settings.refetch()] : [])])} />;
   const controls = <ExamActions scope={scope}
-    active={session.data.isActive && !session.isError && !overview.isError && !context.isError && !settings.isError}
+    active={session.data.isActive && !session.isError && !overview.isError && !context.isError && !(studentManagement && settings.isError)}
     overview={overview.data} attendanceEnabled={context.data.attendanceTracking.enabled}
-    totalWorkingDays={settings.data.totalWorkingDays} placement={placement} />;
+    studentManagement={studentManagement}
+    totalWorkingDays={settings.data?.totalWorkingDays ?? null} placement={placement} />;
   return placement === 'navbar' ? controls : (
     <div className="flex flex-col gap-4">
       <h2 className="text-lg font-semibold">Settings</h2>
       {!session.data.isActive && <Notice>Historical session · Read-only</Notice>}
       {controls}
-      <NotificationDeliveryLogSection
-        schoolId={scope.schoolId}
-        scope={{ kind: 'exam', sessionId: scope.sessionId, examSlug: scope.examSlug }}
-        title="Result notifications"
-      />
+      {studentManagement ? (
+        <NotificationDeliveryLogSection
+          schoolId={scope.schoolId}
+          scope={{ kind: 'exam', sessionId: scope.sessionId, examSlug: scope.examSlug }}
+          title="Result notifications"
+        />
+      ) : null}
     </div>
   );
 }

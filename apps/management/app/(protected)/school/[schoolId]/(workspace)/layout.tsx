@@ -106,8 +106,8 @@ function navigationFor(
     },
     {
       type: 'group',
-      id: 'management',
-      label: 'Management',
+      id: 'campus',
+      label: 'Campus',
       items: [
         {
           type: 'item',
@@ -122,13 +122,14 @@ function navigationFor(
           label: 'Admission',
           href: schoolHref(schoolId, '/admission'),
           icon: UserRoundPlus,
+          wrap: (children) => <RequireFeature schoolId={schoolId} feature="studentManagement">{children}</RequireFeature>,
         },
       ],
     },
     {
       type: 'group',
-      id: 'student',
-      label: 'Student',
+      id: 'academics',
+      label: 'Academics',
       items: [
         {
           type: 'item',
@@ -151,6 +152,8 @@ function navigationFor(
       type: 'group',
       id: 'operations',
       label: 'Operations',
+      // Documents, billing and notices all belong to student management (notices require it).
+      wrap: (children) => <RequireFeature schoolId={schoolId} feature="studentManagement">{children}</RequireFeature>,
       items: [
         { type: 'item', id: 'documents', label: 'Documents', href: sessionHref('/documents'), icon: Files, wrap: children => <RequirePermissions mode="any" permissions={[SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES, SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_TEMPLATES, SCHOOL_ACTIONS.READ_DOCUMENT_ARTIFACTS, SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_ARTIFACTS].map(action => ({ action, resource: { kind: 'school' as const, schoolId } }))}>{children}</RequirePermissions> },
         {

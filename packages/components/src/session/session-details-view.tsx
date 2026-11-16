@@ -30,6 +30,14 @@ export interface SessionDetailsViewProps {
   onDirtyChange?: (isDirty: boolean) => void;
   onActivate?: () => void;
   isActivating?: boolean;
+  /**
+   * Whether to show the settings that only matter for students' results:
+   * co-scholastic areas, the grading scale and attendance. The app passes
+   * false for a school without student management, whose session only
+   * defines its examinations. Hidden settings are kept as stored. Defaults to
+   * true.
+   */
+  showStudentSettings?: boolean;
 }
 
 /**
@@ -58,6 +66,7 @@ export function SessionDetailsView({
   onDirtyChange,
   onActivate,
   isActivating,
+  showStudentSettings = true,
 }: SessionDetailsViewProps) {
   // Historical sessions remain visible for reference, but all configuration
   // changes must go through the one session currently active for the school.
@@ -237,23 +246,27 @@ export function SessionDetailsView({
         onChange={isEditable ? handleExamConfigChange : undefined}
       />
 
-      {/* 2. Co-scholastics (ECA) */}
-      <CoScholasticSection
-        areas={draftSessionConfig?.coScholasticAreas}
-        onChange={isEditable ? handleCoScholasticChange : undefined}
-      />
+      {showStudentSettings ? (
+        <>
+          {/* 2. Co-scholastics (ECA) */}
+          <CoScholasticSection
+            areas={draftSessionConfig?.coScholasticAreas}
+            onChange={isEditable ? handleCoScholasticChange : undefined}
+          />
 
-      {/* 3. Grading Scale */}
-      <GradingScaleSection
-        gradingScale={draftSessionConfig?.gradingScale}
-        onChange={isEditable ? handleGradingScaleChange : undefined}
-      />
+          {/* 3. Grading Scale */}
+          <GradingScaleSection
+            gradingScale={draftSessionConfig?.gradingScale}
+            onChange={isEditable ? handleGradingScaleChange : undefined}
+          />
 
-      {/* 4. Attendance */}
-      <AttendanceSection
-        enabled={draftSessionConfig?.attendanceTracking?.enabled ?? false}
-        onChange={isEditable ? handleAttendanceChange : undefined}
-      />
+          {/* 4. Attendance */}
+          <AttendanceSection
+            enabled={draftSessionConfig?.attendanceTracking?.enabled ?? false}
+            onChange={isEditable ? handleAttendanceChange : undefined}
+          />
+        </>
+      ) : null}
     </div>
   );
 }

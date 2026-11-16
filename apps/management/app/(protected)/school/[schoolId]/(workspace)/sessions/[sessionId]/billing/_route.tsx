@@ -2,6 +2,7 @@ import { CreditCard } from 'lucide-react';
 import { SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
 import { BillingRunAction } from '@/components/billing/billing-run-action';
 import { defineManagementPage } from '@/components/management-route';
+import { RequireFeature } from '@/components/require-feature';
 import { RequirePermissions } from '@/components/require-permissions';
 import { sessionPageBreadcrumbs } from '@/components/session-page-breadcrumbs';
 import type { SchoolSessionRouteParams } from '@/components/school-route';
@@ -11,14 +12,17 @@ const titles: Record<string, string> = { runs: 'Billing cycle', payments: 'Payme
 export const billingPages = [undefined, 'runs', 'payments', 'reports'].map((section) => defineManagementPage<SchoolSessionRouteParams>({
   matches: (pathname) => new RegExp(`^/school/[^/]+/sessions/[^/]+/billing${section ? `/${section}` : ''}$`).test(pathname),
   ...(section === undefined ? {
+    // A feature and a permission are separate gates; the action needs both.
     actions: ({ schoolId, sessionId }: SchoolSessionRouteParams) => (
-      <RequirePermissions permissions={[
-        SCHOOL_ACTIONS.READ_SESSION_FINANCE,
-        SCHOOL_ACTIONS.PREVIEW_BILLING_RUN,
-        SCHOOL_ACTIONS.POST_BILLING_RUN,
-      ].map((action) => ({ action, resource: { kind: 'school' as const, schoolId } }))}>
-        <BillingRunAction schoolId={schoolId} sessionId={sessionId} />
-      </RequirePermissions>
+      <RequireFeature schoolId={schoolId} feature="studentManagement">
+        <RequirePermissions permissions={[
+          SCHOOL_ACTIONS.READ_SESSION_FINANCE,
+          SCHOOL_ACTIONS.PREVIEW_BILLING_RUN,
+          SCHOOL_ACTIONS.POST_BILLING_RUN,
+        ].map((action) => ({ action, resource: { kind: 'school' as const, schoolId } }))}>
+          <BillingRunAction schoolId={schoolId} sessionId={sessionId} />
+        </RequirePermissions>
+      </RequireFeature>
     ),
   } : {}),
   title: section ? titles[section]! : 'Billing',

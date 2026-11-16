@@ -17,6 +17,7 @@ import type { Context } from '../../../context';
 import { rpcError, rpcErrorResponse } from '../../../errors';
 import { parseDocumentUpload } from '../../../files/document-upload';
 import { parseImageUpload } from '../../../files/image-upload';
+import { assertSchoolFeatureEnabled } from '../../../feature-flags/feature-flags.service';
 import { assertPermission } from '../../../permissions/authorization';
 import {
   ADMISSION_PHOTO_FIELD_NAME,
@@ -49,6 +50,8 @@ export async function handleAdmissionPhotoUpload(
       action: SCHOOL_ACTIONS.UPDATE_ADMISSION,
       resource: { kind: 'school', schoolId: input.schoolId },
     });
+    // Admissions belong to student management; checked after the permission, as every gate is.
+    await assertSchoolFeatureEnabled(context.db, input.schoolId, 'studentManagement');
     await assertAdmissionRegistered(context.db, input);
     const photo = await parseImageUpload(request, {
       fieldName: ADMISSION_PHOTO_FIELD_NAME,
@@ -91,6 +94,8 @@ export async function handleAdmissionPhotoRead(
       action: SCHOOL_ACTIONS.READ_ADMISSION,
       resource: { kind: 'school', schoolId: input.schoolId },
     });
+    // Admissions belong to student management; checked after the permission, as every gate is.
+    await assertSchoolFeatureEnabled(context.db, input.schoolId, 'studentManagement');
     const [admission] = await context.db
       .select({ photoS3Key: admissionTable.photoS3Key })
       .from(admissionTable)
@@ -132,6 +137,8 @@ export async function handleAdmissionDocumentUpload(
       action: SCHOOL_ACTIONS.UPDATE_ADMISSION,
       resource: { kind: 'school', schoolId: input.schoolId },
     });
+    // Admissions belong to student management; checked after the permission, as every gate is.
+    await assertSchoolFeatureEnabled(context.db, input.schoolId, 'studentManagement');
     const upload = await parseDocumentUpload(request, {
       fieldName: ADMISSION_DOCUMENT_FIELD_NAME,
       maxBytes: MAX_ADMISSION_DOCUMENT_SIZE_BYTES,
@@ -210,6 +217,8 @@ export async function handleAdmissionDocumentRead(
       action: SCHOOL_ACTIONS.READ_ADMISSION,
       resource: { kind: 'school', schoolId: input.schoolId },
     });
+    // Admissions belong to student management; checked after the permission, as every gate is.
+    await assertSchoolFeatureEnabled(context.db, input.schoolId, 'studentManagement');
     const [admission] = await context.db.select({ documents: admissionTable.documents })
       .from(admissionTable)
       .where(and(eq(admissionTable.schoolId, input.schoolId), eq(admissionTable.id, input.admissionId)))
@@ -243,6 +252,8 @@ export async function handleAdmissionDocumentDelete(
       action: SCHOOL_ACTIONS.UPDATE_ADMISSION,
       resource: { kind: 'school', schoolId: input.schoolId },
     });
+    // Admissions belong to student management; checked after the permission, as every gate is.
+    await assertSchoolFeatureEnabled(context.db, input.schoolId, 'studentManagement');
     const result = await context.db.transaction(async (transaction) => {
       const [existing] = await transaction.select().from(admissionTable)
         .where(and(eq(admissionTable.schoolId, input.schoolId), eq(admissionTable.id, input.admissionId)))

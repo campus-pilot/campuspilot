@@ -3,6 +3,7 @@ import {
   parseSchoolFeatureConfig,
   SCHOOL_FEATURE_CONFIG_INVALID_REASON,
   SCHOOL_FEATURE_DISABLED_REASON,
+  SCHOOL_FEATURE_KEYS,
   type SchoolFeatureConfig,
   schoolFeatureCatalogue,
   schoolFeatureHasConfig,
@@ -17,6 +18,8 @@ import {
   readSchoolFeatureFlags,
 } from '@campuspilot/db/feature-flags/store';
 import { schoolFeatureFlagTable } from '@campuspilot/db/schema/school-feature-flag';
+import { schoolMemberTable } from '@campuspilot/db/schema/school-member';
+import { eq } from 'drizzle-orm';
 import { ORPCError } from '@orpc/server';
 
 import { rpcError } from '../errors';
@@ -51,9 +54,12 @@ export function schoolFeatureDisabledError(feature: SchoolFeatureKey) {
  * the Cadet MCP gate, the manifest blob, password issuing inside
  * `createAdmission`) calls this, so they cannot drift apart.
  *
- * It decides from `enabled` alone (`isSchoolFeatureEnabled`) and never parses
- * the stored config: a gate must not fail because of a setting it does not
- * read. The oRPC middleware `requireSchoolFeature` decides the same way.
+ * It decides from whether the feature is active (`isSchoolFeatureEnabled`:
+ * its switch and every feature it requires) and never parses the stored
+ * config: a gate must not fail because of a setting it does not read. The
+ * oRPC middleware `requireSchoolFeature` decides the same way. A feature
+ * that is inactive only because a feature it requires is off is refused
+ * with its own key, since that is the feature the caller asked for.
  * Code that needs the config reads it with {@link getSchoolFeatureConfig}.
  */
 export async function assertSchoolFeatureEnabled(
@@ -143,4 +149,28 @@ export async function setSchoolFeature(
       target: [schoolFeatureFlagTable.schoolId, schoolFeatureFlagTable.feature],
       set: { enabled: input.enabled, config, updatedBy: input.updatedBy, updatedAt },
     });
+}
+
+/**
+ * The features active in at least one school the user belongs to. An MCP
+ * connection is the user's, not one school's, and its tools take a
+ * `schoolId`, so a tool is listed while some school of the user could run it
+ * (`tools/list` in the server's MCP bridge). A call is still refused for a
+ * school without the feature, with the disabled-feature error.
+ */
+export async function featuresOfUserSchools(
+  db: DatabaseExecutor,
+  userId: string,
+): Promise<Set<SchoolFeatureKey>> {
+  const memberships = await db
+    .select({ schoolId: schoolMemberTable.schoolId })
+    .from(schoolMemberTable)
+    .where(eq(schoolMemberTable.userId, userId));
+  const available = new Set<SchoolFeatureKey>();
+  for (const { schoolId } of memberships) {
+    const { features } = await readSchoolFeatureFlags(db, schoolId);
+    for (const key of SCHOOL_FEATURE_KEYS) if (features[key].active) available.add(key);
+    if (available.size === SCHOOL_FEATURE_KEYS.length) break;
+  }
+  return available;
 }

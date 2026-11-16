@@ -4,9 +4,10 @@ import { redirect } from 'next/navigation';
 import { SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
 import { RequirePermissions } from '@/components/require-permissions';
 import { useAssistantGate } from '@/components/assistant/assistant-access';
+import { useSchoolFeature } from '@/components/require-feature';
 import { orpc } from '@/lib/orpc';
 import { LoadingExam, ReadError } from './exam-common';
-import { defaultExamSection, examResultsHref, questionPaperHref, schoolPermission, type ExamScope } from './exam-model';
+import { defaultExamSection, examHref, examResultsHref, questionPaperHref, schoolPermission, type ExamScope } from './exam-model';
 
 /**
  * The examination root: redirects to the default section and renders nothing
@@ -29,6 +30,7 @@ export function ExamLanding({ scope }: { scope: ExamScope }) {
 function ExamLandingRedirect({ scope }: { scope: ExamScope }) {
   const overview = useQuery(orpc.school.getExamOverview.queryOptions({ input: scope }));
   const assistant = useAssistantGate(scope.schoolId);
+  const studentManagement = useSchoolFeature(scope.schoolId, 'studentManagement');
   if (!overview.data) {
     return overview.isPending ? <LoadingExam /> : <ReadError error={overview.error} retry={overview.refetch} />;
   }
@@ -36,7 +38,15 @@ function ExamLandingRedirect({ scope }: { scope: ExamScope }) {
     planCount: overview.data.planCount,
     status: overview.data.status,
     assistant,
+    // Unknown flags fail closed, like every feature check.
+    studentManagement: studentManagement.status === 'pending' ? 'pending' : studentManagement.enabled ? 'allowed' : 'denied',
   });
   if (section === 'pending') return <LoadingExam />;
-  redirect(section === 'question-paper' ? questionPaperHref(scope) : examResultsHref(scope));
+  redirect(
+    section === 'question-paper'
+      ? questionPaperHref(scope)
+      : section === 'settings'
+        ? `${examHref(scope, scope.examSlug)}/settings`
+        : examResultsHref(scope),
+  );
 }

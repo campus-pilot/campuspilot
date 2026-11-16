@@ -41,6 +41,7 @@ import {
   documentDownloadUrl,
   persistDocumentObject,
 } from "./document.storage";
+import { requireSchoolFeature } from "../../../permissions/feature";
 import { buildDocumentContexts } from "./document.context";
 import { buildFinanceDocumentContexts } from "./finance-document.context";
 import { getSelectedDocumentTemplate as getTemplate } from "./document.selected-template";
@@ -57,17 +58,14 @@ function requireDocumentTypePermission(
         action: isFinanceDocument(input.documentType) ? financeAction : academicAction,
         resource: { kind: "school", schoolId: input.schoolId },
       }, signal);
-      // The Notice template belongs to the notices feature: a school without
-      // it has no notice template to read, preview, import or save. Checked
-      // after the permission, so a caller without access learns nothing.
-      if (input.documentType === "notice")
-        await assertSchoolFeatureEnabled(context.db, input.schoolId, "notices");
-      // The question paper template belongs to the AI assistant's feature (D26).
-      // Only the feature is checked here, not the caller's own assistant role:
-      // a principal whose role is not switched on can still configure the
-      // school's template. Papers themselves use the full assistant gate.
-      if (input.documentType === "question_paper")
-        await assertSchoolFeatureEnabled(context.db, input.schoolId, "assistant");
+      // Every document type belongs to a feature (`DOCUMENT_TYPE_FEATURE`): a
+      // school without it has no such template, document or history to read,
+      // preview, import, save, download or delete. Checked after the
+      // permission, so a caller without access learns nothing. For a question
+      // paper only the feature is checked, not the caller's own assistant
+      // role: a principal whose role is not switched on can still configure
+      // the school's template. Papers themselves use the full assistant gate.
+      await assertSchoolFeatureEnabled(context.db, input.schoolId, dto.DOCUMENT_TYPE_FEATURE[input.documentType]);
       return next();
     },
   );
@@ -82,6 +80,8 @@ function requireSourceTypePermission(
         action: isFinanceDocument(input.source.documentType) ? financeAction : academicAction,
         resource: { kind: "school", schoolId: input.schoolId },
       }, signal);
+      // After the permission, like every gate (see `requireDocumentTypePermission`).
+      await assertSchoolFeatureEnabled(context.db, input.schoolId, dto.DOCUMENT_TYPE_FEATURE[input.source.documentType]);
       return next();
     },
   );
@@ -629,6 +629,9 @@ export const schoolDocumentRouter = {
     })
     .input(dto.listArtifactsSchema)
     .use(requireArtifactListPermission)
+    // The history lists student and finance documents only (question papers
+    // and notices are never in it), all of which belong to student management.
+    .use(requireSchoolFeature("studentManagement"))
     .output(dto.listArtifactsOutputSchema)
     .handler(async ({ context, input }) => {
       try {

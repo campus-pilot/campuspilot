@@ -3,9 +3,10 @@ import { and, eq } from "drizzle-orm";
 import type { DatabaseExecutor } from "../index";
 import { schoolFeatureFlagTable } from "../schema/school-feature-flag";
 import {
-  DISABLED_SCHOOL_FEATURE,
   parseSchoolFeatureConfig,
+  resolveSchoolFeatureActivity,
   SCHOOL_FEATURE_KEYS,
+  schoolFeatureCatalogue,
   type SchoolFeatureFlags,
   type SchoolFeatureKey,
   type SchoolFeatureState,
@@ -62,10 +63,33 @@ export async function readSchoolFeatureConfig<K extends SchoolFeatureKey>(
   return readStoredConfig(key, row?.config ?? null);
 }
 
+/** Every feature's switch for a school: the stored `enabled`, or the catalogue default without a row. */
+async function readSchoolFeatureSwitches(
+  db: DatabaseExecutor,
+  schoolId: string,
+): Promise<{ switches: Record<SchoolFeatureKey, boolean>; rows: Map<string, { enabled: boolean; config: unknown }> }> {
+  const rows = await db
+    .select({
+      feature: schoolFeatureFlagTable.feature,
+      enabled: schoolFeatureFlagTable.enabled,
+      config: schoolFeatureFlagTable.config,
+    })
+    .from(schoolFeatureFlagTable)
+    .where(eq(schoolFeatureFlagTable.schoolId, schoolId));
+  const byKey = new Map(rows.map((row) => [row.feature as string, row]));
+  const switches = Object.fromEntries(
+    SCHOOL_FEATURE_KEYS.map((key) => [key, byKey.get(key)?.enabled ?? schoolFeatureCatalogue[key].defaultEnabled]),
+  ) as Record<SchoolFeatureKey, boolean>;
+  return { switches, rows: byKey };
+}
+
 /**
- * Whether a feature is enabled for a school (missing row = disabled).
+ * Whether a school **has** a feature now: its switch is on (the catalogue's
+ * `defaultEnabled` without a stored row) and every feature it `requires` is
+ * active. Every gate asks exactly this, so a feature whose own switch is on
+ * still closes when a feature it needs is switched off.
  *
- * Reads `enabled` only and never parses `config`: the two are independent
+ * Reads the switches only and never parses `config`: the two are independent
  * facts, and every gate (Cadet sign-in, `cadetProcedure`, the MCP context,
  * the manifest) asks just this question. A stored config that no longer
  * matches its schema must therefore not turn a gate into a 500; for Cadet
@@ -79,17 +103,8 @@ export async function isSchoolFeatureEnabled(
   schoolId: string,
   key: SchoolFeatureKey,
 ): Promise<boolean> {
-  const [row] = await db
-    .select({ enabled: schoolFeatureFlagTable.enabled })
-    .from(schoolFeatureFlagTable)
-    .where(
-      and(
-        eq(schoolFeatureFlagTable.schoolId, schoolId),
-        eq(schoolFeatureFlagTable.feature, key),
-      ),
-    )
-    .limit(1);
-  return row?.enabled ?? false;
+  const { switches } = await readSchoolFeatureSwitches(db, schoolId);
+  return resolveSchoolFeatureActivity(switches)[key];
 }
 
 /**
@@ -97,7 +112,9 @@ export async function isSchoolFeatureEnabled(
  * stored config that no longer matches its schema. Rows of retired keys are
  * ignored.
  *
- * `enabled` is always the stored fact. A feature listed in `invalidConfigs`
+ * `enabled` is the switch (stored, or the catalogue default without a row)
+ * and `active` whether the school has the feature (see
+ * {@link isSchoolFeatureEnabled}). A feature listed in `invalidConfigs`
  * reads with `config: null` here: the stored value is unusable, which the
  * list states explicitly (null alone would also mean "nothing stored").
  * This read never throws because of a config, so the pages and gates that
@@ -108,25 +125,21 @@ export async function readSchoolFeatureFlags(
   db: DatabaseExecutor,
   schoolId: string,
 ): Promise<{ features: SchoolFeatureFlags; invalidConfigs: SchoolFeatureKey[] }> {
-  const rows = await db
-    .select({
-      feature: schoolFeatureFlagTable.feature,
-      enabled: schoolFeatureFlagTable.enabled,
-      config: schoolFeatureFlagTable.config,
-    })
-    .from(schoolFeatureFlagTable)
-    .where(eq(schoolFeatureFlagTable.schoolId, schoolId));
-  const byKey = new Map(rows.map((row) => [row.feature as string, row]));
+  const { switches, rows } = await readSchoolFeatureSwitches(db, schoolId);
+  const active = resolveSchoolFeatureActivity(switches);
   const invalidConfigs: SchoolFeatureKey[] = [];
   const features = Object.fromEntries(
     SCHOOL_FEATURE_KEYS.map((key) => {
-      const row = byKey.get(key);
-      if (!row) return [key, DISABLED_SCHOOL_FEATURE];
-      const stored = readStoredConfig(key, row.config);
+      const row = rows.get(key);
+      const stored = readStoredConfig(key, row?.config ?? null);
       if (stored.status === "invalid") invalidConfigs.push(key);
       return [
         key,
-        { enabled: row.enabled, config: stored.status === "valid" ? stored.config : null },
+        {
+          enabled: switches[key],
+          active: active[key],
+          config: stored.status === "valid" ? stored.config : null,
+        },
       ];
     }),
   ) as SchoolFeatureFlags;

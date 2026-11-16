@@ -13,8 +13,10 @@ import {
   type UserSession,
 } from '../../../../test/fixtures';
 
-const OFF = { enabled: false, config: null };
-const ON = { enabled: true, config: null };
+const OFF = { enabled: false, active: false, config: null };
+const ON = { enabled: true, active: true, config: null };
+/** Student management: on for a school with no row (its catalogue default). */
+const STUDENTS = ON;
 
 describe('systemAdmin school feature flags', () => {
   let admin: UserSession;
@@ -109,23 +111,23 @@ describe('systemAdmin school feature flags', () => {
       );
     });
 
-    it('reads a new school as every feature disabled', async () => {
+    it('reads a new school as every feature disabled but student management, which is on by default', async () => {
       const school = await createTestSchool();
       expect(await createTestClient(admin).systemAdmin.getSchoolFeatureFlags({ id: school.id })).toEqual({
         schoolId: school.id,
-        features: { cadet: OFF, notices: OFF, assistant: OFF },
+        features: { studentManagement: STUDENTS, cadet: OFF, notices: OFF, assistant: OFF },
         invalidConfigs: [],
       });
     });
 
-    it('a school created through addSchool starts with no feature enabled', async () => {
+    it('a school created through addSchool starts with no feature enabled but student management', async () => {
       const client = createTestClient(admin);
       const created = await client.systemAdmin.addSchool({
         slug: `flags-${crypto.randomUUID().toLowerCase()}`,
         name: 'Flag School',
         location: 'Town',
       });
-      expect((await client.systemAdmin.getSchoolFeatureFlags({ id: created.id })).features).toEqual({ cadet: OFF, notices: OFF, assistant: OFF });
+      expect((await client.systemAdmin.getSchoolFeatureFlags({ id: created.id })).features).toEqual({ studentManagement: STUDENTS, cadet: OFF, notices: OFF, assistant: OFF });
     });
 
     it('enables and disables one feature at a time and records the administrator', async () => {
@@ -134,10 +136,10 @@ describe('systemAdmin school feature flags', () => {
 
       expect(
         await client.systemAdmin.updateSchoolFeatureFlag({ id: school.id, feature: 'notices', enabled: true, config: null }),
-      ).toEqual({ schoolId: school.id, features: { cadet: OFF, notices: ON, assistant: OFF }, invalidConfigs: [] });
+      ).toEqual({ schoolId: school.id, features: { studentManagement: STUDENTS, cadet: OFF, notices: ON, assistant: OFF }, invalidConfigs: [] });
       expect(
         await client.systemAdmin.updateSchoolFeatureFlag({ id: school.id, feature: 'cadet', enabled: true, config: null }),
-      ).toEqual({ schoolId: school.id, features: { cadet: ON, notices: ON, assistant: OFF }, invalidConfigs: [] });
+      ).toEqual({ schoolId: school.id, features: { studentManagement: STUDENTS, cadet: ON, notices: ON, assistant: OFF }, invalidConfigs: [] });
 
       const rows = await db.select().from(schoolFeatureFlagTable).where(eq(schoolFeatureFlagTable.schoolId, school.id));
       expect(rows).toHaveLength(2);
@@ -145,11 +147,11 @@ describe('systemAdmin school feature flags', () => {
 
       expect(
         await client.systemAdmin.updateSchoolFeatureFlag({ id: school.id, feature: 'notices', enabled: false, config: null }),
-      ).toEqual({ schoolId: school.id, features: { cadet: ON, notices: OFF, assistant: OFF }, invalidConfigs: [] });
+      ).toEqual({ schoolId: school.id, features: { studentManagement: STUDENTS, cadet: ON, notices: OFF, assistant: OFF }, invalidConfigs: [] });
       // Disabling keeps the row (explicitly disabled), one per feature.
       expect(await db.select().from(schoolFeatureFlagTable).where(eq(schoolFeatureFlagTable.schoolId, school.id))).toHaveLength(2);
       // Another school is never touched.
-      expect((await client.systemAdmin.getSchoolFeatureFlags({ id: other.id })).features).toEqual({ cadet: OFF, notices: OFF, assistant: OFF });
+      expect((await client.systemAdmin.getSchoolFeatureFlags({ id: other.id })).features).toEqual({ studentManagement: STUDENTS, cadet: OFF, notices: OFF, assistant: OFF });
     });
 
     it("is what the school's staff then read", async () => {
@@ -157,6 +159,7 @@ describe('systemAdmin school feature flags', () => {
       const teacher = await createSchoolStaffSession(school.id, [{ role: 'teacher', meta: { classIds: [] } }]);
       await createTestClient(admin).systemAdmin.updateSchoolFeatureFlag({ id: school.id, feature: 'notices', enabled: true, config: null });
       expect((await createTestClient(teacher.session).school.getFeatureFlags({ schoolId: school.id })).features).toEqual({
+        studentManagement: STUDENTS,
         cadet: OFF,
         notices: ON,
         assistant: OFF,

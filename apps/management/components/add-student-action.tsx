@@ -15,6 +15,7 @@ import { z } from 'zod';
 
 import { client, orpc } from '@/lib/orpc';
 import { FormErrors } from './form-errors';
+import { RequireFeature } from './require-feature';
 
 const admissionOptionSchema = z.object({ id: z.string().min(1), name: z.string(), admissionNo: z.string() });
 type AdmissionOption = z.infer<typeof admissionOptionSchema>;
@@ -84,7 +85,16 @@ function EnrollmentDialog({ schoolId, sessionId, classId, onClose }: { schoolId:
   return <Dialog open onOpenChange={(open) => !open && onClose()}><DialogContent><DialogHeader><DialogTitle>Add student</DialogTitle><DialogDescription>Enroll a registered admission that is not yet a student in this session.</DialogDescription></DialogHeader><form className="flex flex-col gap-4" onSubmit={(event) => { event.preventDefault(); event.stopPropagation(); void form.handleSubmit(); }}><form.Subscribe selector={(state) => ({ admission: state.values.admission, admissionSearch: state.values.admissionSearch })}>{({ admission, admissionSearch }) => <form.Field name="admission">{(admissionField) => <form.Field name="admissionSearch">{(searchField) => <div className="flex flex-col gap-2"><Label>Admission</Label><AdmissionCombobox schoolId={schoolId} sessionId={sessionId} value={admission} searchQuery={admissionSearch} onValueChange={admissionField.handleChange} onSearchChange={searchField.handleChange} /><FormErrors errors={admissionField.state.meta.errors} /></div>}</form.Field>}</form.Field>}</form.Subscribe><form.Field name="sectionId">{(field) => <div className="flex flex-col gap-2"><Label>Section</Label><Select value={field.state.value} onValueChange={field.handleChange}><SelectTrigger><SelectValue placeholder="Select a section" /></SelectTrigger><SelectContent>{(sectionsQuery.data ?? []).map((section) => <SelectItem key={section.id} value={section.id}>{section.label}</SelectItem>)}</SelectContent></Select><FormErrors errors={field.state.meta.errors} /></div>}</form.Field><form.Field name="rollNo">{(field) => <div className="flex flex-col gap-2"><Label htmlFor="student-roll-no">Roll number</Label><Input id="student-roll-no" type="number" min={1} value={field.state.value} onChange={(event) => field.handleChange(event.target.valueAsNumber)} /><FormErrors errors={field.state.meta.errors} /></div>}</form.Field><form.Subscribe selector={(state) => ({ canSubmit: state.canSubmit, errors: state.errors, isSubmitting: state.isSubmitting })}>{({ canSubmit, errors, isSubmitting }) => <><FormErrors errors={errors} /><DialogFooter><Button type="button" variant="outline" disabled={isSubmitting} onClick={onClose}>Cancel</Button><Button type="submit" disabled={!canSubmit || isSubmitting}>{isSubmitting ? 'Adding…' : 'Add student'}</Button></DialogFooter></>}</form.Subscribe></form></DialogContent></Dialog>;
 }
 
-export function AddStudentAction({ schoolId, sessionId, classId }: { schoolId: string; sessionId: string; classId: string }) {
+/** Enrolling a student needs admissions, which belong to student management; without it there is no action. */
+export function AddStudentAction(props: { schoolId: string; sessionId: string; classId: string }) {
+  return (
+    <RequireFeature schoolId={props.schoolId} feature="studentManagement">
+      <PermittedAddStudentAction {...props} />
+    </RequireFeature>
+  );
+}
+
+function PermittedAddStudentAction({ schoolId, sessionId, classId }: { schoolId: string; sessionId: string; classId: string }) {
   const [open, setOpen] = useState(false);
   const permissionQuery = useQuery(orpc.authorization.checkPermissions.queryOptions({ input: { permissions: [
     { action: SCHOOL_ACTIONS.CREATE_STUDENT, resource: { kind: 'school', schoolId } },

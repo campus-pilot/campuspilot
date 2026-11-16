@@ -9,6 +9,12 @@ export const ASSISTANT_TOOL_META = {
   module: 'campuspilot/module',
   /** Present only on tools that declare `outputChars` in their MCP metadata. */
   outputChars: 'campuspilot/output-chars',
+  /**
+   * The school features the tool's procedure is gated on (a list of feature
+   * keys, possibly empty). The assistant offers a tool only while its
+   * conversation's school has all of them.
+   */
+  features: 'campuspilot/features',
 } as const;
 
 /**

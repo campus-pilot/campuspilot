@@ -13,6 +13,7 @@ describe('run facts', () => {
     const text = buildFactsText({
       schoolId: 's',
       schoolName: 'Maple',
+      missingFeatures: [],
       userName: 'U',
       userEmail: 'u@x',
       today: '2026-11-12',
@@ -22,10 +23,38 @@ describe('run facts', () => {
   });
 });
 
+describe('features the school does not have', () => {
+  const base = {
+    schoolId: 's',
+    schoolName: 'Maple',
+    userName: 'U',
+    userEmail: 'u@x',
+    today: '2026-11-12',
+    now: '2026-11-12T04:55:12+05:30',
+  };
+
+  it('names each one with what it covers, and says how to answer for it', () => {
+    const text = buildFactsText({
+      ...base,
+      missingFeatures: [
+        { label: 'Student management', description: 'Admissions and fees.' },
+        { label: 'Notices', description: 'School notices.' },
+      ],
+    });
+    expect(text).toContain('This school does not use these parts of CampusPilot, so you have no tools for them: Student management (Admissions and fees.); Notices (School notices.).');
+    expect(text).toContain('say in one sentence that this school does not use that part of CampusPilot');
+  });
+
+  it('says nothing about features when the school has them all', () => {
+    expect(buildFactsText({ ...base, missingFeatures: [] })).not.toContain('does not use');
+  });
+});
+
 describe('question papers', () => {
   const instructions = buildAssistantPrompt({
     schoolId: 's',
     schoolName: 'Maple',
+    missingFeatures: [],
     userName: 'U',
     userEmail: 'u@x',
     today: '2026-11-12',
