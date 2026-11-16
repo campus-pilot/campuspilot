@@ -62,6 +62,7 @@ export const assistantModelProviderEnum = pgEnum("assistant_model_provider", [
 export const assistantModelRequestSourceEnum = pgEnum("assistant_model_request_source", [
   "chat",
   "question_paper",
+  "voice",
 ]);
 
 /** Which management surface started a run, recorded to compare the variants. */
@@ -140,6 +141,8 @@ export const assistantAttachmentKindEnum = pgEnum("assistant_attachment_kind", [
 export type AssistantPageContext = {
   path: string;
   title?: string;
+  /** The text of the page the user was on when they sent the message, with the part in view marked (the voice overlay sends it). */
+  pageText?: string;
 };
 
 export type AssistantUserMessageBody = {
@@ -603,6 +606,14 @@ export const assistantModelRequestTable = pgTable(
      * a paper (and with it its jobs) must not drop or unlink what it cost.
      */
     questionPaperJobId: text("question_paper_job_id"),
+    /**
+     * The voice session that made the request (`avs_...`), for
+     * `source = 'voice'`. A plain value: a voice session has no row of its own
+     * (it lives in the API process while the microphone is open), and its cost
+     * belongs to no run, because the voice model only listens and speaks. The
+     * turns it starts are ordinary runs with their own `chat` requests.
+     */
+    voiceSessionId: text("voice_session_id"),
     schoolId: text("school_id")
       .notNull()
       .references(() => schoolTable.id, { onDelete: "cascade" }),
@@ -644,8 +655,14 @@ export const assistantModelRequestTable = pgTable(
       .where(sql`${table.questionPaperJobId} is not null`),
     check(
       "assistant_model_request_source_owner_check",
-      sql`(${table.source} = 'chat' and ${table.runId} is not null and ${table.questionPaperJobId} is null)
-        or (${table.source} = 'question_paper' and ${table.runId} is null and ${table.questionPaperJobId} is not null)`,
+      /**
+       * `voice` is compared as text: its migration adds the enum value and this
+       * constraint in one transaction, and Postgres refuses a new enum value as
+       * an enum constant until that transaction commits.
+       */
+      sql`(${table.source} = 'chat' and ${table.runId} is not null and ${table.questionPaperJobId} is null and ${table.voiceSessionId} is null)
+        or (${table.source} = 'question_paper' and ${table.runId} is null and ${table.questionPaperJobId} is not null and ${table.voiceSessionId} is null)
+        or (${table.source}::text = 'voice' and ${table.runId} is null and ${table.questionPaperJobId} is null and ${table.voiceSessionId} is not null)`,
     ),
   ],
 );

@@ -1,6 +1,6 @@
 import { encodedImageBytes, MODEL_REQUEST_ATTACHMENT_BUDGET_BYTES } from '@campuspilot/assistant-contract/attachments';
 
-import { isAttachmentMarker, type AttachmentMarker } from '../transcript';
+import { isAttachmentMarker, omitPageText, type AttachmentMarker } from '../transcript';
 import type { ReadableMimeTypes } from './providers/image-types';
 import type { AttachmentFile, ModelProvider, ToolInputStubInput, TranscriptEntry } from './providers/types';
 
@@ -16,7 +16,8 @@ import type { AttachmentFile, ModelProvider, ToolInputStubInput, TranscriptEntry
  *   that are long become a one-line stub, and every attachment becomes a note
  *   that keeps its id but says its content is no longer visible (the model may
  *   still embed an image by id; it asks the user to attach a file again only
- *   to look at or read it).
+ *   to look at or read it). The text of the page a message was sent from
+ *   becomes a one-line note as well; its path and title stay.
  *   Long text fields of old tool CALL inputs (the whole paper a model wrote
  *   into `validateQuestionPaperDraft` or `saveQuestionPaperVersion`) become a
  *   one-line stub too: every revision of a long paper would otherwise stay in
@@ -198,6 +199,22 @@ export function fullContextBoundary(
 
 const markersOf = (entry: TranscriptEntry): AttachmentMarker[] => entry.content.filter(isAttachmentMarker);
 
+/**
+ * A user entry whose `<current_page>` block no longer carries the page's text
+ * (`omitPageText`). Every provider's text block keeps its words in `text`, so
+ * this needs no adapter; an entry without such a block is returned as it is.
+ */
+function withoutPageText(entry: TranscriptEntry): TranscriptEntry {
+  // The page block is the first block of a user message (`buildUserTranscriptContent`); only it is looked at, so
+  // nothing the user typed in the same shape, which comes after it, is ever taken for one.
+  const [first, ...rest] = entry.content;
+  if (entry.role !== 'user' || typeof first !== 'object' || first === null) return entry;
+  const text = (first as { text?: unknown }).text;
+  if (typeof text !== 'string') return entry;
+  const shortened = omitPageText(text);
+  return shortened === text ? entry : { ...entry, content: [{ ...first, text: shortened }, ...rest] };
+}
+
 /** The context for one request, and how many PDFs it shows the model (a refused request is then explained as a PDF problem). */
 export type ModelContext = { entries: TranscriptEntry[]; documentsShown: number };
 
@@ -263,7 +280,7 @@ export async function buildModelContextWithStats(
   const built = entries.map((entry, index) => {
     const old = index < boundary;
     const shortened = old
-      ? provider.context.stubToolInputs(provider.context.stubToolResults(entry, toolNames, toolResultStub, minChars), toolInputStub, inputMinChars)
+      ? withoutPageText(provider.context.stubToolInputs(provider.context.stubToolResults(entry, toolNames, toolResultStub, minChars), toolInputStub, inputMinChars))
       : entry;
     if (!shortened.content.some(isAttachmentMarker)) return shortened;
     const content = shortened.content.flatMap((block) => {

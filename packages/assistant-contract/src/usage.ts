@@ -11,12 +11,14 @@ export const MAX_USAGE_RANGE_DAYS = 400;
  * order the usage pages list them, with the label shown for each. The usage
  * "By feature" breakdown groups on it.
  */
-export const ASSISTANT_USAGE_SOURCES = ['chat', 'question_paper'] as const;
+export const ASSISTANT_USAGE_SOURCES = ['chat', 'question_paper', 'voice'] as const;
 export type AssistantUsageSource = (typeof ASSISTANT_USAGE_SOURCES)[number];
 
 export const ASSISTANT_USAGE_SOURCE_LABELS: Record<AssistantUsageSource, string> = {
   chat: 'Assistant chat',
   question_paper: 'Question paper',
+  /** The voice model only (listening and speaking); the turns spoken requests start are counted under the chat. */
+  voice: 'Voice',
 };
 
 /**

@@ -25,6 +25,8 @@ import { readableMimeTypesOf } from './runtime/providers/image-types';
 import { resolveAssistantSession, type AssistantSession } from './session';
 import * as store from './store';
 import { sharedPaperOf, type PaperKeyParts } from './store';
+import { voiceRefusal } from './voice/access';
+import { voiceSettings } from './voice/config';
 import { userMessageItemKey } from './transcript';
 
 /**
@@ -203,12 +205,16 @@ export const assistantRouter = os.router({
     assertMember(access);
     const provider = providerAvailability();
     const allowed = canSee(access);
-    if (!provider.configured) return { configured: false, allowed, available: false, unavailableReason: provider.unavailableReason };
+    if (!provider.configured) {
+      return { configured: false, allowed, available: false, unavailableReason: provider.unavailableReason, voice: { available: false } };
+    }
     return {
       configured: true,
       allowed,
       available: access.allowed,
       unavailableReason: access.refusal?.message ?? null,
+      // A spoken request becomes an ordinary message, so voice needs a text model too (checked above).
+      voice: { available: voiceRefusal(context.session, access, voiceSettings()) === null },
     };
   }),
 
