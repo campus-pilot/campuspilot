@@ -15,7 +15,7 @@ import { AssistantChat } from '../assistant-chat';
 import { useAssistantStatus } from '../use-assistant';
 import { useVoice } from './use-voice';
 import { voice, type VoiceNotOpened } from './voice-controller';
-import { bestLink, linkTexts, screenLinks } from './screen-links';
+import { bestLink, closestLinks, linkTexts, nearestFirst, screenLinks } from './screen-links';
 import { voiceDestinationHref } from './voice-destinations';
 import { launchVoice } from './voice-launcher';
 import { voiceIsOn } from './voice-state';
@@ -76,7 +76,13 @@ function OverlayLayer({ schoolId }: { schoolId: string }) {
   const openLink = async (label: string) => {
     const onScreen = screenLinks(document.body, schoolId, `[${OVERLAY_ATTRIBUTE}]`);
     const link = bestLink(label, onScreen.links);
-    if (!link) return { opened: false as const, message: `Nothing on the page matches "${label}".`, linksOnScreen: linkTexts(onScreen.links) };
+    if (!link) {
+      // Several places fit what was said: the user is asked which, the model does not pick.
+      const close = closestLinks(label, onScreen.links);
+      return close.length
+        ? { opened: false as const, message: `Several things on the page match "${label}". Ask the user which one they mean.`, linksOnScreen: linkTexts(close) }
+        : { opened: false as const, message: `Nothing on the page matches "${label}".`, linksOnScreen: linkTexts(nearestFirst(label, onScreen.links)) };
+    }
     const stay = await mayLeave();
     if (stay) return stay;
     onScreen.follow(link, (href) => router.push(href));

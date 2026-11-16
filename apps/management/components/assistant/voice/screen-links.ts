@@ -64,44 +64,68 @@ function answers(match: ReturnType<typeof matchOf>): boolean {
   return match.ofLink === 1 && match.linkWords >= Math.ceil(match.labelWords / 2);
 }
 
+type Ranked = { link: ScreenLink; exact: number; matched: number; ofLabel: number; starts: number };
+
 /**
- * The link to open for `label`, or null when none answers it or two different
- * places answer it equally well (then the user must say which). Ranked by: the
- * exact text, then the most of the label's words, then the share of the label,
- * then a text that starts with the label, then the fewer words, then the
- * shorter text ("Class 1" over "Class 10"). Two links that differ only in the
- * length of a word the label does not name ("Open English Oral for Nursery"
- * and "… for LKG", asked for "English Oral") are a tie, not a choice.
+ * The links that answer `label`, best first, one per place. Ranked only by
+ * what the label says: the exact text, then the most of the label's words,
+ * then the share of the label, then a text that starts with the label. A word
+ * the label does not name never decides, so "Open English Oral for Nursery"
+ * and "… for Class 1", asked for "English Oral", stay level. Of several links
+ * to one place the best ranked is kept (an exact breadcrumb over a card that
+ * says more), after sorting, not in page order.
  */
-export function bestLink(label: string, links: readonly ScreenLink[]): ScreenLink | null {
+function ranked(label: string, links: readonly ScreenLink[]): Ranked[] {
   const target = normalised(label);
-  const ranked = links
+  const sorted = links
     .map((link) => {
       const text = normalised(link.text);
       const match = matchOf(label, link);
-      return { link, match, exact: text === target ? 1 : 0, starts: text.startsWith(target) ? 1 : 0, words: match.linkWords, length: text.length };
+      return { link, match, exact: text === target ? 1 : 0, matched: match.matched, ofLabel: match.ofLabel, starts: text.startsWith(target) ? 1 : 0 };
     })
-    .filter((entry) => entry.match.matched > 0 && answers(entry.match))
-    .sort(
-      (a, b) =>
-        b.exact - a.exact ||
-        b.match.matched - a.match.matched ||
-        b.match.ofLabel - a.match.ofLabel ||
-        b.starts - a.starts ||
-        a.words - b.words ||
-        a.length - b.length,
-    );
-  const [best, next] = ranked;
+    .filter((entry) => answers(entry.match))
+    .sort((a, b) => b.exact - a.exact || b.matched - a.matched || b.ofLabel - a.ofLabel || b.starts - a.starts);
+  const seen = new Set<string>();
+  return sorted.filter((entry) => !seen.has(entry.link.href) && seen.add(entry.link.href));
+}
+
+const level = (a: Ranked, b: Ranked) => a.exact === b.exact && a.matched === b.matched && a.ofLabel === b.ofLabel && a.starts === b.starts;
+
+/**
+ * The places that answer `label` equally well at the top, when there are two
+ * or more: the label does not say which, so the user must be asked. Empty when
+ * one place answers best or none answers.
+ */
+export function closestLinks(label: string, links: readonly ScreenLink[]): ScreenLink[] {
+  const [best, ...rest] = ranked(label, links);
+  if (!best) return [];
+  const tied = rest.filter((entry) => level(entry, best));
+  return tied.length ? [best, ...tied].map((entry) => entry.link) : [];
+}
+
+/**
+ * The link to open for `label`, or null when none answers it or two different
+ * places answer it equally well (then the user must say which, see
+ * {@link closestLinks}). "Class 1" wins over "Class 10" by its exact text.
+ */
+export function bestLink(label: string, links: readonly ScreenLink[]): ScreenLink | null {
+  const [best, next] = ranked(label, links);
   if (!best) return null;
-  const tied =
-    next &&
-    next.link.href !== best.link.href &&
-    next.exact === best.exact &&
-    next.match.matched === best.match.matched &&
-    next.match.ofLabel === best.match.ofLabel &&
-    next.starts === best.starts &&
-    next.words === best.words;
-  return tied ? null : best.link;
+  return next && level(next, best) ? null : best.link;
+}
+
+/**
+ * The links in the order to offer them when none was opened: those sharing the
+ * most of the label's words first, the rest in page order. A paper asked for
+ * in a few more words than its link holds ("English oral question paper for
+ * Class 1") is then among the texts the model gets back, not cut by the sidebar
+ * links above it.
+ */
+export function nearestFirst(label: string, links: readonly ScreenLink[]): ScreenLink[] {
+  return links
+    .map((link) => ({ link, matched: matchOf(label, link).matched }))
+    .sort((a, b) => b.matched - a.matched)
+    .map((entry) => entry.link);
 }
 
 /** The distinct texts of the links, for the voice model to choose from when nothing matched. */
