@@ -44,16 +44,20 @@ export function DocumentPermission({
   action,
   children,
   fallback,
+  pending,
 }: {
   schoolId: string;
   action: SchoolDocumentAction;
   children: ReactNode;
   fallback?: ReactNode;
+  /** See `RequirePermissions`: nothing unless the caller passes a view. */
+  pending?: ReactNode;
 }) {
   return (
     <RequirePermissions
       permissions={documentPermission(schoolId, action)}
       fallback={fallback}
+      pending={pending}
     >
       {children}
     </RequirePermissions>

@@ -22,5 +22,5 @@ export function AdmissionDocumentSettings({ schoolId }: { schoolId: string }) {
       await queryClient.invalidateQueries({ queryKey: orpc.school.getAdmissionSettings.queryKey({ input: { schoolId } }) });
     }}
   />;
-  return <RequirePermissions permissions={{ action: SCHOOL_ACTIONS.UPDATE_ADMISSION_SETTINGS, resource: { kind: 'school', schoolId } }} fallback={view(false)}>{view(true)}</RequirePermissions>;
+  return <RequirePermissions permissions={{ action: SCHOOL_ACTIONS.UPDATE_ADMISSION_SETTINGS, resource: { kind: 'school', schoolId } }} fallback={view(false)} pending={view(false)}>{view(true)}</RequirePermissions>;
 }

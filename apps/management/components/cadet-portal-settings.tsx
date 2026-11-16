@@ -42,6 +42,7 @@ export function CadetPortalSettings({ schoolId }: { schoolId: string }) {
           <RequirePermissions
             permissions={{ action: SCHOOL_ACTIONS.UPDATE_DETAILS, resource: { kind: 'school', schoolId } }}
             fallback={<ClassAveragesPreview settings={query.data} />}
+            pending={<ClassAveragesPreview settings={query.data} />}
           >
             <CadetPortalSettingsForm key={String(query.data.showClassAverages)} settings={query.data} />
           </RequirePermissions>

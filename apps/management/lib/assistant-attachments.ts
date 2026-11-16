@@ -48,6 +48,16 @@ async function readAssistantAttachment(schoolId: string, attachmentId: string): 
 }
 
 /**
+ * The original of a chat image, at full size: `<img src>` in the image viewer
+ * and the viewer's download link (the route answers with
+ * `Content-Disposition: attachment`, which an `<img>` ignores and a followed
+ * link saves). Same access and redirect as the thumbnail, and likewise asked
+ * only for `previewable` images.
+ */
+export const assistantAttachmentOriginalUrl = (schoolId: string, attachmentId: string) =>
+  apiUrl(assistantAttachmentReadPath(schoolId, attachmentId, 'original'));
+
+/**
  * Uploads one file, an image or a PDF, for the next chat message of this
  * school (multipart field `file`), exactly as given: no conversion here (the
  * composer's `useAssistantAttachmentUpload` shrinks photos first). The

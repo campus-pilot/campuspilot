@@ -10,6 +10,7 @@ export function ExamBreadcrumbValue({ scope }: { scope: ExamScope }) {
     <RequirePermissions
       permissions={schoolPermission(scope.schoolId, SCHOOL_ACTIONS.READ_EXAMS)}
       fallback={<>Examination</>}
+      pending={<>Examination</>}
     >
       <ExamName scope={scope} />
     </RequirePermissions>
@@ -32,6 +33,7 @@ export function ExamClassBreadcrumbValue({
         SCHOOL_ACTIONS.READ_EXAM_PLANS,
       )}
       fallback={<>Class</>}
+      pending={<>Class</>}
     >
       <ClassName scope={scope} />
     </RequirePermissions>
@@ -57,6 +59,7 @@ export function ExamStudentBreadcrumbValue({
         SCHOOL_ACTIONS.READ_EXAM_RESULTS,
       )}
       fallback={<>Student</>}
+      pending={<>Student</>}
     >
       <StudentName scope={scope} />
     </RequirePermissions>

@@ -143,7 +143,8 @@ export function AssistantUserMessage({
   return (
     <div className="group/message flex flex-col items-end gap-1">
       {author ? <h3 className="pe-1 text-xs text-muted-foreground">{author}</h3> : <h3 className="sr-only">You</h3>}
-      <AssistantSentAttachments attachments={attachments} />
+      {/* A bubble still on its way (sending or failed) is replaced by the server's row or moved to the tray, which would unmount an open viewer, so only a sent message's tiles open it. */}
+      <AssistantSentAttachments attachments={attachments} openable={delivery === 'sent'} />
       {text ? (
         <div
           className={cn(
@@ -169,16 +170,22 @@ export function AssistantUserMessage({
 export function AssistantUserMessageRow({
   item,
   attachmentPreviewUrl,
+  attachmentOriginalUrl,
   authorOf,
 }: {
   item: AssistantUserMessageItemDto;
   /** The thumbnail address of a sent image (never asked for a document); null draws a generic tile. */
   attachmentPreviewUrl?: (attachment: AssistantAttachmentRef) => string | null;
+  /** The full-size address of a sent image, shown in the viewer its tile opens; unset leaves tiles closed. */
+  attachmentOriginalUrl?: (attachment: AssistantAttachmentRef) => string | null;
   /** The name to show over a message someone else sent; null for the user's own. */
   authorOf?: (item: AssistantUserMessageItemDto) => string | null;
 }) {
-  // Only an image the server decoded has a thumbnail; a document is never asked for one.
-  const attachments = sentAttachmentsOf(item.body.attachments ?? [], attachmentPreviewUrl);
+  // Only an image the server decoded has a thumbnail and an original; a document is never asked for either.
+  const attachments = sentAttachmentsOf(item.body.attachments ?? [], {
+    previewUrlOf: attachmentPreviewUrl,
+    originalUrlOf: attachmentOriginalUrl,
+  });
   return <AssistantUserMessage text={item.body.text} at={item.createdAt} attachments={attachments} author={authorOf?.(item) ?? null} />;
 }
 

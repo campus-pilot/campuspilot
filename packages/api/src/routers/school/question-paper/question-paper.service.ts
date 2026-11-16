@@ -51,6 +51,7 @@ import {
 import { hasSelectedQuestionPaperTemplate } from './question-paper.render';
 import { assertPaperWritable, assertPaperWritableLocked, type PaperScope } from './question-paper.scope';
 import { deleteObjectsBestEffort, putObject, questionPaperKeys } from './question-paper.storage';
+import { readTemplatePrints } from './question-paper.template-prints';
 import { getVersion } from './question-paper.version.service';
 
 const emptyPaperFacts = (scope: PaperScope, paper: PaperRow | undefined) => ({
@@ -87,13 +88,20 @@ async function loadPaperView(db: DatabaseExecutor, scope: PaperScope) {
   return { paper, pages, facts: { ...emptyPaperFacts(scope, paper), pageCount: pages.length }, activeJob };
 }
 
-/** `getQuestionPaper`: the paper, its pages and one version (the latest unless named). */
+/**
+ * `getQuestionPaper`: the paper, its pages and one version (the latest unless
+ * named), with what the school's template prints around the body
+ * (`templatePrints`). Agents are the only readers of this procedure, and the
+ * lines are what tells them which heading lines not to write again; they are
+ * always those of the currently selected template, the one a new version
+ * would be printed with, also when an older version is named.
+ */
 export async function getQuestionPaper(
   db: DatabaseExecutor,
   scope: PaperScope,
   versionNo: number | undefined,
 ): Promise<z.infer<typeof getQuestionPaperOutputSchema>> {
-  const view = await loadPaperView(db, scope);
+  const [view, templatePrints] = await Promise.all([loadPaperView(db, scope), readTemplatePrints(db, scope)]);
   let version: z.infer<typeof getQuestionPaperOutputSchema>['version'] = null;
   if (view.paper && (versionNo !== undefined || view.paper.latestVersionNo > 0)) {
     const row = await getVersion(db, view.paper.id, versionNo ?? view.paper.latestVersionNo);
@@ -104,6 +112,7 @@ export async function getQuestionPaper(
   }
   return {
     paper: view.facts,
+    templatePrints,
     pages: view.pages.map(toPageDto),
     activeJob: view.activeJob ? toJob(view.activeJob) : null,
     version,

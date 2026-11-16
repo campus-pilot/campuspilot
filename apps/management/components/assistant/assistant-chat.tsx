@@ -45,7 +45,7 @@ import { skipToken, useQuery } from '@tanstack/react-query';
 import { ClipboardList, RotateCcw, ShieldCheck, UserPlus, UserRoundX } from 'lucide-react';
 import { useCallback, useRef, useState, type ReactNode } from 'react';
 
-import { assistantAttachmentThumbUrl } from '@/lib/assistant-attachments';
+import { assistantAttachmentOriginalUrl, assistantAttachmentThumbUrl } from '@/lib/assistant-attachments';
 import { orpc } from '@/lib/orpc';
 
 import { useApprovalMoney } from './assistant-approval-currency';
@@ -274,7 +274,10 @@ function OptimisticTurn({
             at={message.submittedAt}
             delivery={message.delivery}
             onRetry={() => onRetry(message)}
-            attachments={sentAttachmentsOf(message.attachments, (attachment) => assistantAttachmentThumbUrl(schoolId, attachment.id))}
+            attachments={sentAttachmentsOf(message.attachments, {
+              previewUrlOf: (attachment) => assistantAttachmentThumbUrl(schoolId, attachment.id),
+              originalUrlOf: (attachment) => assistantAttachmentOriginalUrl(schoolId, attachment.id),
+            })}
           />
         </div>
       ))}
@@ -367,6 +370,7 @@ function ConversationTimeline({
       }
       renderView={(item: AssistantViewItemDto) => <AssistantViewBlock schoolId={schoolId} view={item.body.view} />}
       attachmentPreviewUrl={(attachment: AssistantAttachmentRef) => assistantAttachmentThumbUrl(schoolId, attachment.id)}
+      attachmentOriginalUrl={(attachment: AssistantAttachmentRef) => assistantAttachmentOriginalUrl(schoolId, attachment.id)}
       authorOf={authorOf}
       renderCard={(row) => (
         <AssistantDraftCard

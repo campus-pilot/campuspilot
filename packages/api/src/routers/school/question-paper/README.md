@@ -27,6 +27,7 @@ each) and **figures** (uploaded images printed inside a version).
 | `question-paper.body.ts` / `.math.ts` / `.render.ts` | stored fragment to HTML body (sanitise again, figures, KaTeX), the document around it |
 | `question-paper.storage.ts` | object keys, uploads, best-effort deletes, presigned URLs |
 | `question-paper.slot.ts` / `.context.ts` | the body slot and the template context |
+| `question-paper.template-prints.ts` | the text lines the selected template prints above and below a paper (`templatePrints`), which the job and `getQuestionPaper` show an author so heading lines are not written twice |
 | `question-paper.attachments.ts` | chat attachments used as figures (`asat_` ids), copied into the paper when saving |
 | `question-paper.copy.ts` | starting from an earlier paper: the copy sources list, the key rules and copying the source's figures (`copyQuestionPaperVersion` itself is in the version service) |
 | `../../../workflows/question-paper/` | the API side of the generation job (outbox, hand-over, model hook) |

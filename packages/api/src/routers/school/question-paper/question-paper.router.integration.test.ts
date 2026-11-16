@@ -6,6 +6,7 @@ import {
   assistantRunTable,
 } from '@campuspilot/db/schema/assistant';
 import { examQuestionPaperVersionTable } from '@campuspilot/db/schema/exam-question-paper';
+import { schoolTable } from '@campuspilot/db/schema/school';
 import { QUESTION_PAPER_EXAMPLES } from '@campuspilot/question-paper/examples';
 import { createRouterClient } from '@orpc/server';
 import { and, eq } from 'drizzle-orm';
@@ -100,6 +101,31 @@ describe('question paper procedures', () => {
 
     it('refuses an accountant (not switched on) and a stranger', async () => {
       expect(await errorOf(world.people.accountant.client.school.learn_question_paper_generation({ schoolId: world.schoolId }))).toMatchObject({ code: 'FORBIDDEN', data: { reason: 'role_not_enabled' } });
+    });
+  });
+
+  describe("templatePrints: what the school's template prints around a paper", () => {
+    it('is read for the very paper asked for, before it has any version, from the selected template', async () => {
+      const [school] = await db.select({ name: schoolTable.name, location: schoolTable.location }).from(schoolTable).where(eq(schoolTable.id, world.schoolId));
+      const location = school!.location ? [school!.location] : [];
+      const science = await teacher.school.getQuestionPaper(key());
+      expect(science.templatePrints).toEqual({
+        above: [school!.name, ...location, 'Term I Examination (2026-2027)', 'Class 8 · Science (Theory)', 'Maximum marks: 20'],
+        below: [`${school!.name} Term I Examination - Science`],
+      });
+      // Another mode of another subject prints its own names and its own plan marks.
+      const practical = await teacher.school.getQuestionPaper(key({ subjectSlug: 'math', modeSlug: 'practical' }));
+      expect(practical.templatePrints!.above).toContain('Class 8 · Mathematics (Practical)');
+      expect(practical.templatePrints!.above).toContain('Maximum marks: 4');
+      // Nothing a template cannot print is claimed: the time allowed has no line.
+      expect(JSON.stringify(science.templatePrints)).not.toMatch(/time/i);
+    });
+
+    it('is null (not known), and the paper still reads, while the school has selected no template', async () => {
+      const bare = await createQuestionPaperWorld({ template: false });
+      const result = await bare.people.teacher.client.school.getQuestionPaper(bare.key());
+      expect(result.templatePrints).toBeNull();
+      expect(result.paper).toMatchObject({ className: 'Class 8', latestVersionNo: 0 });
     });
   });
 
@@ -325,6 +351,9 @@ describe('question paper procedures', () => {
       expect(draft).toMatchObject({ draftId, paper: { subjectName: expect.any(String) } });
       expect(draft.html).toContain('data-math');
       expect(draft.characters).toBe(draft.html.length);
+      // The draft comes with the lines the template prints, as getQuestionPaper gives them.
+      expect(draft.templatePrints).toEqual((await world.people.manager.client.school.getQuestionPaper({ ...k })).templatePrints);
+      expect(draft.templatePrints!.above.length).toBeGreaterThan(0);
       // Reading changes nothing, and the same draftId then saves.
       expect((await world.people.manager.client.school.getQuestionPaper({ ...k })).paper.latestVersionNo).toBe(draft.paper.latestVersionNo);
       expect(await agent.school.saveQuestionPaperVersion({ ...k, expectedVersionNo: draft.paper.latestVersionNo, draftId: draftId! })).toMatchObject({ versionNo: draft.paper.latestVersionNo + 1 });

@@ -89,6 +89,7 @@ export function ExamActions(props: Props) {
               SCHOOL_ACTIONS.UPDATE_EXAM_PLAN,
             )}
             fallback={<WorkingDaysAlert scope={scope} />}
+            pending={<WorkingDaysAlert scope={scope} />}
           >
             <WorkingDaysAlert
               scope={scope}

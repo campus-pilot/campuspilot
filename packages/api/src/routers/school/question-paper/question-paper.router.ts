@@ -36,6 +36,7 @@ import {
   reorderQuestionPaperPages,
   startQuestionPaperGeneration,
 } from './question-paper.service';
+import { readTemplatePrints } from './question-paper.template-prints';
 import {
   checkQuestionPaperDraft,
   cleanedChatDraft,
@@ -142,7 +143,7 @@ export const schoolQuestionPaperRouter = {
     }),
 
   getQuestionPaper: protectedProcedure
-    .route(route('Get a question paper', "Read one paper: the uploaded pages, its latest version number (latestVersionNo, the expectedVersionNo to pass to saveQuestionPaperVersion; 0 when there is none) and the HTML fragment (html) of its latest or a named version with any notices about what the sanitiser removed. Call learn_question_paper_generation before editing the html."))
+    .route(route('Get a question paper', "Read one paper: the uploaded pages, its latest version number (latestVersionNo, the expectedVersionNo to pass to saveQuestionPaperVersion; 0 when there is none) and the HTML fragment (html) of its latest or a named version with any notices about what the sanitiser removed. Also templatePrints: the text lines the school's template already prints above and below the paper's body, which a paper must never repeat; call this before writing a paper, also a new one. Call learn_question_paper_generation before editing the html."))
     .meta(tool('read', { outputChars: QUESTION_PAPER_PAPER_OUTPUT_CHARS }))
     .input(dto.getQuestionPaperInputSchema)
     .use(readClass)
@@ -157,7 +158,7 @@ export const schoolQuestionPaperRouter = {
     }),
 
   getQuestionPaperDraft: protectedProcedure
-    .route(route('Get a question paper draft', "In-app assistant only. Read back the html of a draft you validated earlier in this chat and have not saved, by its draftId (from the result of validateQuestionPaperDraft), together with the facts of its paper (latestVersionNo is the expectedVersionNo for a save). Use it to edit a draft whose html is no longer in the chat; a saved paper is read with getQuestionPaper. It changes nothing."))
+    .route(route('Get a question paper draft', "In-app assistant only. Read back the html of a draft you validated earlier in this chat and have not saved, by its draftId (from the result of validateQuestionPaperDraft), together with the facts of its paper (latestVersionNo is the expectedVersionNo for a save) and templatePrints (the lines the school's template already prints around the body). Use it to edit a draft whose html is no longer in the chat; a saved paper is read with getQuestionPaper. It changes nothing."))
     .meta(tool('read', { outputChars: QUESTION_PAPER_DRAFT_OUTPUT_CHARS }))
     .input(dto.getQuestionPaperDraftInputSchema)
     .use(readClass)
@@ -172,7 +173,8 @@ export const schoolQuestionPaperRouter = {
         const scope = await resolvePaperScope(context.db, input);
         const raw = await findChatDraftContent(context.db, { conversationId: chat.conversationId, key: scope.key, userId: user, draftId: input.draftId });
         const draft = cleanedChatDraft(raw);
-        return { paper: await getQuestionPaperFacts(context.db, scope), draftId: draft.draftId, html: draft.html, characters: draft.html.length };
+        const [paper, templatePrints] = await Promise.all([getQuestionPaperFacts(context.db, scope), readTemplatePrints(context.db, scope)]);
+        return { paper, templatePrints, draftId: draft.draftId, html: draft.html, characters: draft.html.length };
       } catch (error) {
         throw toRpcError(error);
       }

@@ -202,6 +202,17 @@ function ClassroomListContent({
   // The classroom's root opens its first section, which depends on the school's features.
   const openClass = (schoolClass: ClassDto) =>
     router.push(classroomHref({ schoolId, sessionId, classId: schoolClass.id }));
+  /** The classes without drag reordering: for a member who may not reorder, and while that is being checked. */
+  const fixedOrderTable = (
+    <ClassroomTable
+      schoolId={schoolId}
+      canReorder={false}
+      classes={classes}
+      onReorder={() => undefined}
+      onRowClick={openClass}
+      reorderPending={false}
+    />
+  );
 
   return (
     <section className="mx-auto flex w-full max-w-6xl flex-col gap-5">
@@ -217,16 +228,8 @@ function ClassroomListContent({
           action: SCHOOL_ACTIONS.REORDER_CLASSES,
           resource: { kind: "school", schoolId },
         }}
-        fallback={
-          <ClassroomTable
-            schoolId={schoolId}
-            canReorder={false}
-            classes={classes}
-            onReorder={() => undefined}
-            onRowClick={openClass}
-            reorderPending={false}
-          />
-        }
+        fallback={fixedOrderTable}
+        pending={fixedOrderTable}
       >
         <ClassroomTable
           schoolId={schoolId}
