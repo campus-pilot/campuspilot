@@ -108,9 +108,10 @@ export async function renderQuestionPaperBody(
  * {@link QUESTION_PAPER_MAX_LOGO_USES} times (the notice technique: the logo
  * is the one large value in the context and an author can repeat any value
  * they are handed). Returns the sanitised, CSP-wrapped document with the
- * slot still in it.
+ * slot still in it. Exported for `question-paper.template-prints.ts`, which
+ * reads the text the template prints around the slot out of this very output.
  */
-function renderTemplate(template: string, context: QuestionPaperContext): string {
+export function renderQuestionPaperTemplate(template: string, context: QuestionPaperContext): string {
   const logo = context.school.logoUrl;
   if (!logo) {
     return combineDocuments([renderDocument(template, context, { maxOutputChars: QUESTION_PAPER_TEMPLATE_RENDER_MAX_CHARS })], 'question_paper');
@@ -140,7 +141,7 @@ export function renderQuestionPaperDocument(input: {
   context: QuestionPaperContext;
   body: RenderedBody;
 }): string {
-  const html = substituteQuestionPaperBody(renderTemplate(input.template.content, input.context), input.body.html);
+  const html = substituteQuestionPaperBody(renderQuestionPaperTemplate(input.template.content, input.context), input.body.html);
   if (Buffer.byteLength(html, 'utf8') > QUESTION_PAPER_DOCUMENT_MAX_BYTES) {
     throw rpcError.badRequest('This document exceeds the 25 MB rendering limit. Use fewer or smaller figures.');
   }
