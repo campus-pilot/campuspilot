@@ -9,7 +9,10 @@ import { permissionGateState } from './require-permissions-model';
 export type RequirePermissionsProps = {
   children: ReactNode;
   permissions: PermissionCheck | readonly PermissionCheck[];
-  /** Shown when the check answered and the permission policy is not met. */
+  /**
+   * Shown when the check answered and the permission policy is not met, and
+   * when the check failed with no answer held (it fails closed).
+   */
   fallback?: ReactNode;
   /**
    * Shown while the check has no answer yet. Defaults to nothing: an

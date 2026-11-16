@@ -50,8 +50,10 @@ export function ExamSession({
           {children(false)}
         </>
       }
-      // Read-only until the check answers, without claiming the session is unavailable.
-      pending={children(false)}
+      // The same placeholder SessionData shows while it reads the session, so
+      // the page goes from loading to its content once, without claiming the
+      // session is unavailable.
+      pending={<LoadingExam />}
     >
       <SessionData scope={scope}>{children}</SessionData>
     </RequirePermissions>

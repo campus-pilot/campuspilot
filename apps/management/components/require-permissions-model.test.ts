@@ -3,8 +3,7 @@ import { test } from 'node:test';
 import { permissionGateState } from './require-permissions-model';
 
 test('a check with no answer yet is pending, not denied', () => {
-  // Every page asks its own permission list, so each navigation starts here;
-  // reading it as a refusal flashed "Permission required" before the page.
+  // What the gate renders for each state is tested in require-permissions.test.tsx.
   assert.equal(permissionGateState({ isPending: true, isError: false, results: undefined }, 1), 'pending');
   assert.equal(permissionGateState({ isPending: true, isError: false, results: undefined }, 2, 'any'), 'pending');
 });
