@@ -143,7 +143,8 @@ export function AssistantUserMessage({
   return (
     <div className="group/message flex flex-col items-end gap-1">
       {author ? <h3 className="pe-1 text-xs text-muted-foreground">{author}</h3> : <h3 className="sr-only">You</h3>}
-      <AssistantSentAttachments attachments={attachments} />
+      {/* A bubble still on its way (sending or failed) is replaced by the server's row or moved to the tray, which would unmount an open viewer, so only a sent message's tiles open it. */}
+      <AssistantSentAttachments attachments={attachments} openable={delivery === 'sent'} />
       {text ? (
         <div
           className={cn(
