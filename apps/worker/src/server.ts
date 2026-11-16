@@ -21,6 +21,7 @@ import {
 import { createQuestionPaperModel } from '@campuspilot/assistant/question-paper-model';
 import { createAssistantWorkerServices } from '@campuspilot/assistant/worker';
 import { env } from '@campuspilot/env/worker';
+import { startRuntimeMonitor } from '@campuspilot/logger/perf';
 import { createEndpointHandler } from '@restatedev/restate-sdk';
 
 import { log } from './log';
@@ -59,6 +60,8 @@ export function startWorker() {
     ],
   });
   const server = createServer(handler);
+  // Event loop delay, CPU use and the container's CPU throttling (`runtime.*` events, docs/performance-logs.md).
+  const stopRuntimeMonitor = startRuntimeMonitor(log);
   const registration = new AbortController();
   const ready = new Promise<void>((resolve) => {
     server.listen(env.WORKER_PORT, () => {
@@ -71,6 +74,7 @@ export function startWorker() {
   const shutdown = (signal: string) => {
     log.info({ signal }, 'worker.shutdown.start');
     registration.abort();
+    stopRuntimeMonitor();
     server.close((err) => {
       if (err) log.error({ err }, 'worker.shutdown.error');
       else log.info('worker.shutdown.ok');

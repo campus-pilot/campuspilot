@@ -1,3 +1,4 @@
+import { measure } from '@campuspilot/logger/perf';
 import sharp from 'sharp';
 
 import { rpcError } from '../errors';
@@ -79,11 +80,14 @@ export async function withDecodeSlot<T>(task: () => Promise<T>): Promise<T> {
     if (waitingForDecode.length >= MAX_WAITING_DECODES) {
       throw rpcError.tooManyRequests('The server is busy processing photos. Try again in a few seconds.');
     }
-    await new Promise<void>((resolve) => waitingForDecode.push(resolve));
+    // Timed apart from the decode: a long wait means uploads queue behind each other, not that one photo is slow. The
+    // loop re-checks after every wake-up, so the timing's extra await cannot let two decodes past the limit.
+    await measure('image.decode.wait', () => new Promise<void>((resolve) => waitingForDecode.push(resolve)));
   }
   activeDecodes += 1;
   try {
-    return await task();
+    // sharp decodes on libuv's thread pool, so this is mostly off the event loop; it still competes for the pod's CPU.
+    return await measure('image.decode', task);
   } finally {
     activeDecodes -= 1;
     waitingForDecode.shift()?.();

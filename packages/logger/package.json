@@ -8,7 +8,8 @@
       "browser": "./src/index.browser.ts",
       "default": "./src/index.node.ts"
     },
-    "./hono": "./src/hono.ts"
+    "./hono": "./src/hono.ts",
+    "./perf": "./src/perf.ts"
   },
   "scripts": {
     "check-types": "tsc --noEmit",

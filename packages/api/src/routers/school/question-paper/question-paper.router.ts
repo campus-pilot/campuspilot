@@ -1,3 +1,4 @@
+import { annotateTiming, measure } from '@campuspilot/logger/perf';
 import { CLASS_ACTIONS } from '@campuspilot/opa/policies/class';
 import { SCHOOL_ACTIONS } from '@campuspilot/opa/policies/school';
 import { buildLearnPayload } from '@campuspilot/question-paper/guide';
@@ -419,7 +420,9 @@ export const schoolQuestionPaperRouter = {
         if (!paper) throw rpcError.notFound('Question paper');
         const version = await getVersion(context.db, paper.id, input.versionNo);
         const { html, templateName } = await renderStoredVersionHtml(context.db, scope, version);
-        return { html, warnings: version.warnings, placeholderFigures: sanitizeQuestionPaperBody(version.contentHtml).stats.placeholders, templateName };
+        const placeholderFigures = measure('qp.preview.placeholders', () => sanitizeQuestionPaperBody(version.contentHtml).stats.placeholders);
+        annotateTiming({ paperId: paper.id, versionNo: version.versionNo, htmlBytes: Buffer.byteLength(html, 'utf8') });
+        return { html, warnings: version.warnings, placeholderFigures, templateName };
       } catch (error) {
         throw toRpcError(error);
       }
@@ -443,9 +446,11 @@ export const schoolQuestionPaperRouter = {
         if (!template) throw templateMissingError();
         const paper = await findPaper(context.db, scope.key);
         const body = await renderQuestionPaperBody(context.db, { schoolId: input.schoolId, paperId: paper?.id ?? null, html: checked.html, chat });
-        const rendered = await buildQuestionPaperContext(context.db, scope, { versionNo: null });
+        const rendered = await measure('qp.context', () => buildQuestionPaperContext(context.db, scope, { versionNo: null }));
+        const html = renderQuestionPaperDocument({ template, context: rendered, body });
+        annotateTiming({ paperId: paper?.id ?? null, htmlBytes: Buffer.byteLength(html, 'utf8') });
         return {
-          html: renderQuestionPaperDocument({ template, context: rendered, body }),
+          html,
           problems: [],
           warnings: checked.notices,
           placeholderFigures: checked.placeholderFigures,

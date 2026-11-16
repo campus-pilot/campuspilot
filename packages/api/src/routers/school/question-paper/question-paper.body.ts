@@ -1,3 +1,5 @@
+import { annotateTiming, measure } from '@campuspilot/logger/perf';
+
 import { rpcError } from '../../../errors';
 import { QUESTION_PAPER_BODY_CLASS } from './question-paper.css';
 import { katexInlineCss, renderMathSpans, type MathRenderer } from './question-paper.math';
@@ -221,17 +223,18 @@ export function renderQuestionPaperBodyHtml(
   fragment: string,
   input: { figures: FigureAssets; math: MathRenderer },
 ): RenderedBody {
-  const sanitized = sanitizeQuestionPaperBody(fragment);
+  const sanitized = measure('qp.body.sanitize', () => sanitizeQuestionPaperBody(fragment));
   // Stored versions were cleaned when they were saved, so this only trips if the cleaning rules changed under a stored
   // fragment: refuse to print rather than print something that was not verified.
   if (sanitized.refused) throw rpcError.badRequest(`This paper cannot be printed: ${sanitized.problems[0] ?? 'it could not be cleaned safely.'}`);
   const state: FigureState = { figureCount: 0, warnings: [] };
-  const withFigures = placeFigures(sanitized.html, input.figures, state);
-  const math = renderMathSpans(withFigures, input.math);
+  const withFigures = measure('qp.body.figures', () => placeFigures(sanitized.html, input.figures, state));
+  const math = measure('qp.body.math', () => renderMathSpans(withFigures, input.math));
   const hasMath = math.count > 0;
   const warnings = [...state.warnings, ...math.failures.map((failure) => `Formula ${failure.index} was printed as plain text: ${failure.message}`)];
-  const html = composeBody(math.html, hasMath);
+  const html = measure('qp.body.compose', () => composeBody(math.html, hasMath));
   const byteSize = Buffer.byteLength(html, 'utf8');
+  annotateTiming({ qpFormulas: math.count, qpFigures: state.figureCount, qpBodyBytes: byteSize });
   if (byteSize > QUESTION_PAPER_BODY_MAX_BYTES) {
     throw rpcError.badRequest(BODY_TOO_LARGE_MESSAGE);
   }

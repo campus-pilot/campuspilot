@@ -3,6 +3,7 @@ import { ORPCError } from '@orpc/server';
 import { db as defaultDb, type Database } from '@campuspilot/db';
 import { examQuestionPaperJobTable, examQuestionPaperPageTable, examQuestionPaperTable, examQuestionPaperVersionTable } from '@campuspilot/db/schema/exam-question-paper';
 import { env } from '@campuspilot/env/assistant';
+import { withTimingScope } from '@campuspilot/logger/perf';
 import { extractQuestionPaperFragment, hasPaperContent, questionPaperFragmentShapeProblem } from '@campuspilot/question-paper/fragment';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 
@@ -525,13 +526,16 @@ async function validateAnswer(deps: GenerationDeps, plan: Plan, text: string): P
 async function savePaper(deps: GenerationDeps, input: QuestionPaperJobInput, begun: BegunJob, plan: Plan, html: string) {
   if (!(await jobIsLive(deps.db, input))) throw new JobStopped();
   try {
-    const saved = await deps.save(deps.db, {
-      scope: plan.scope,
-      userId: begun.requestedBy,
-      expectedVersionNo: null,
-      html,
-      source: { kind: 'ai_job', jobId: input.jobId, pageIds: begun.pageIds },
-    });
+    // No HTTP request opens a timing scope in the worker; this one logs where the save's render and print time went.
+    const saved = await withTimingScope(log, 'question-paper.save.timing', { jobId: input.jobId }, () =>
+      deps.save(deps.db, {
+        scope: plan.scope,
+        userId: begun.requestedBy,
+        expectedVersionNo: null,
+        html,
+        source: { kind: 'ai_job', jobId: input.jobId, pageIds: begun.pageIds },
+      }),
+    );
     return { versionNo: saved.versionNo };
   } catch (error) {
     // The sweep ended this job while the version was rendering: nothing was committed, stop quietly.
