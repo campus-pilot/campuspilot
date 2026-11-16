@@ -103,7 +103,7 @@ describe("withTimingScope", () => {
 describe("pinoLogger", () => {
   it("puts the steps timed inside a request on its end line", async () => {
     const { log, lines } = recordingLogger();
-    vi.spyOn(rootLogger, "child").mockReturnValue(log);
+    vi.spyOn(rootLogger, "child").mockReturnValue(log as unknown as ReturnType<typeof rootLogger.child>);
     const app = new Hono();
     app.use(pinoLogger());
     app.get("/", async (c) => {
