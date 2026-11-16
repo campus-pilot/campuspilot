@@ -133,7 +133,7 @@ export function ManagementShell({
                 variant="ghost"
                 size="icon"
                 className="md:hidden"
-                aria-label="Search actions and students"
+                aria-label="Search CampusPilot"
                 onClick={() => setIsCommandPaletteOpen(true)}
               >
                 <Search aria-hidden />

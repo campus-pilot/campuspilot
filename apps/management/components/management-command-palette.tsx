@@ -47,6 +47,7 @@ import { confirmNavigation } from '@/lib/navigation-guard';
 import { getAdmissionPhotoUrl } from '@/lib/admission-photo';
 import { AskAssistantCommand, PaletteAssistantView } from './assistant/assistant-palette';
 import { CommandRow } from './command-row';
+import { RequireFeature, useSchoolFeature } from './require-feature';
 import { RequirePermissions } from './require-permissions';
 import { schoolHref, schoolSessionHref } from './school-route';
 import {
@@ -264,19 +265,22 @@ function AdmissionsProvider({
   onSelect: (admission: AdmissionListItemDto) => void;
 }) {
   if (!context.sessionId || !query.trim()) return null;
+  // Admissions belong to student management; a feature and a permission are separate gates.
   return (
-    <RequirePermissions
-      permissions={{
-        action: SCHOOL_ACTIONS.LIST_ADMISSIONS,
-        resource: { kind: 'school', schoolId: context.schoolId },
-      }}
-    >
-      <AdmissionResults
-        context={{ ...context, sessionId: context.sessionId }}
-        query={query}
-        onSelect={onSelect}
-      />
-    </RequirePermissions>
+    <RequireFeature schoolId={context.schoolId} feature="studentManagement">
+      <RequirePermissions
+        permissions={{
+          action: SCHOOL_ACTIONS.LIST_ADMISSIONS,
+          resource: { kind: 'school', schoolId: context.schoolId },
+        }}
+      >
+        <AdmissionResults
+          context={{ ...context, sessionId: context.sessionId }}
+          query={query}
+          onSelect={onSelect}
+        />
+      </RequirePermissions>
+    </RequireFeature>
   );
 }
 
@@ -733,6 +737,9 @@ export function ManagementCommandPalette({
   >(null);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const commands = createManagementCommandRegistry(context);
+  // Students are searched only in a school with student management; the copy says what is searched.
+  const studentSearch = useSchoolFeature(schoolId, 'studentManagement').enabled;
+  const searchScope = studentSearch ? 'Search actions and students' : 'Search actions';
   const selectedSession = sessions.find((session) => session.id === sessionId);
 
   function resetPalette() {
@@ -786,7 +793,7 @@ export function ManagementCommandPalette({
         open={open && !financeDialog}
         onOpenChange={changeOpen}
         title="Search CampusPilot"
-        description="Search actions and students"
+        description={searchScope}
         className="sm:max-w-2xl"
       >
         {assistantConversationId ? (
@@ -842,7 +849,7 @@ export function ManagementCommandPalette({
                     autoFocus
                     maxLength={200}
                     value={field.state.value}
-                    placeholder="Search actions and students…"
+                    placeholder={`${searchScope}…`}
                     onValueChange={(value) =>
                       changeQuery(value, field.handleChange)
                     }
@@ -866,10 +873,10 @@ export function ManagementCommandPalette({
           )}
           <CommandList className="max-h-[min(32rem,65vh)] px-0.5 pb-0.5">
             <CommandEmpty>
-              {isStudentSearchDebouncing
+              {studentSearch && isStudentSearchDebouncing
                 ? 'Searching students…'
                 : remoteQuery
-                  ? 'No matching actions or students.'
+                  ? studentSearch ? 'No matching actions or students.' : 'No matching actions.'
                   : 'No actions available.'}
             </CommandEmpty>
             {selectedAdmission ? (
@@ -952,7 +959,7 @@ export function ManagementCommandPalette({
             )}
           </CommandList>
           <div className="border-t px-3 py-2 text-[11px] text-muted-foreground">
-            {selectedAdmission ? 'Choose action' : 'Search actions and students'}
+            {selectedAdmission ? 'Choose action' : searchScope}
           </div>
         </Command>
         )}

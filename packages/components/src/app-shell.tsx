@@ -100,6 +100,12 @@ export type AppShellNavigationGroup = {
   id: string;
   label: string;
   items: AppShellNavigationItem[];
+  /**
+   * Lets the consuming app gate the whole group, label included, without
+   * fetching data in the shell: a group whose items are all hidden would
+   * otherwise leave its label behind.
+   */
+  wrap?: (children: ReactNode) => ReactNode;
 };
 
 export type AppShellNavigationEntry =
@@ -445,6 +451,38 @@ function AppShellAlerts({
   );
 }
 
+/** One labelled group of the sidebar, gated as a whole by its `wrap` when it has one. */
+function NavigationGroup({
+  group,
+  currentPath,
+  renderLink,
+}: {
+  group: AppShellNavigationGroup;
+  currentPath: string;
+  renderLink?: AppShellProps['renderLink'];
+}) {
+  const content = (
+    <SidebarGroup>
+      <SidebarGroupLabel className="text-[10px] uppercase tracking-widest">
+        {group.label}
+      </SidebarGroupLabel>
+      <SidebarGroupContent>
+        <SidebarMenu className="gap-0.5">
+          {group.items.map((item) => (
+            <NavigationItem
+              key={item.id}
+              item={item}
+              currentPath={currentPath}
+              renderLink={renderLink}
+            />
+          ))}
+        </SidebarMenu>
+      </SidebarGroupContent>
+    </SidebarGroup>
+  );
+  return group.wrap ? group.wrap(content) : content;
+}
+
 function NavigationItem({
   item,
   currentPath,
@@ -478,8 +516,8 @@ function NavigationItem({
           {item.items.map((child) => {
             const ChildIcon = child.icon;
             const isChildDirectlyActive = currentPath === child.href;
-            return (
-              <SidebarMenuSubItem key={child.id}>
+            const childContent = (
+              <SidebarMenuSubItem>
                 <SidebarMenuSubButton
                   asChild
                   isActive={pathMatches(child, currentPath)}
@@ -495,6 +533,12 @@ function NavigationItem({
                   </AppLink>
                 </SidebarMenuSubButton>
               </SidebarMenuSubItem>
+            );
+            // A sub-item is gated by its own `wrap`, exactly like a top-level item.
+            return (
+              <Fragment key={child.id}>
+                {child.wrap ? child.wrap(childContent) : childContent}
+              </Fragment>
             );
           })}
         </SidebarMenuSub>
@@ -664,23 +708,12 @@ export function AppShell({
           <SidebarContent>
             {navigation.map((entry) =>
               entry.type === 'group' ? (
-                <SidebarGroup key={entry.id}>
-                  <SidebarGroupLabel className="text-[10px] uppercase tracking-widest">
-                    {entry.label}
-                  </SidebarGroupLabel>
-                  <SidebarGroupContent>
-                    <SidebarMenu className="gap-0.5">
-                      {entry.items.map((item) => (
-                        <NavigationItem
-                          key={item.id}
-                          item={item}
-                          currentPath={currentPath}
-                          renderLink={renderLink}
-                        />
-                      ))}
-                    </SidebarMenu>
-                  </SidebarGroupContent>
-                </SidebarGroup>
+                <NavigationGroup
+                  key={entry.id}
+                  group={entry}
+                  currentPath={currentPath}
+                  renderLink={renderLink}
+                />
               ) : (
                 <SidebarGroup
                   key={entry.id}

@@ -389,9 +389,9 @@ function SchoolSettingsContent({ school }: { school: SchoolDetailsDto }) {
   return (
     <section className="mx-auto flex w-full max-w-4xl flex-col gap-5">
       <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold tracking-tight">School settings</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Organization</h1>
         <p className="text-sm text-muted-foreground">
-          View school identity, organization details, and branding.
+          View your organization's identity, details, and branding.
         </p>
       </div>
       <Card>
@@ -444,7 +444,7 @@ export function SchoolSettings({ schoolId }: { schoolId: string }) {
     return (
       <Card className="mx-auto w-full max-w-4xl">
         <CardHeader>
-          <CardTitle>Unable to load school settings</CardTitle>
+          <CardTitle>Unable to load organization settings</CardTitle>
           <CardDescription>
             {state.error instanceof Error
               ? state.error.message

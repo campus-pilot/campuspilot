@@ -8,6 +8,7 @@ import { z } from "zod";
 
 import { rpcError, toRpcError } from "../../errors";
 import { protectedProcedure } from "../../index";
+import { gateRouterOnSchoolFeature } from "../../permissions/feature";
 import { requireSchoolPermission } from "../../permissions/school";
 import { schoolAdmissionSettingsRouter } from "./admission-settings/admission-settings.router";
 import { schoolCadetSettingsRouter } from "./cadet-settings/cadet-settings.router";
@@ -38,7 +39,8 @@ export const schoolRouter = {
   ...schoolDocumentRouter,
   ...schoolExamRouter,
   ...schoolNotificationRouter,
-  ...schoolNotificationLogRouter,
+  // Every delivery in the log is a student notification (admission, billing run, exam, notice).
+  ...gateRouterOnSchoolFeature("studentManagement", schoolNotificationLogRouter),
   ...schoolFeatureFlagsRouter,
   ...schoolAssistantAccessRouter,
   ...schoolNoticeRouter,
@@ -176,15 +178,17 @@ export const schoolRouter = {
         throw toRpcError(error);
       }
     }),
-  ...schoolAdmissionSettingsRouter,
+  // Admissions, students and fees belong wholly to student management
+  // (docs/feature-flags.md); each gate runs after the procedure's permission.
+  ...gateRouterOnSchoolFeature("studentManagement", schoolAdmissionSettingsRouter),
   ...schoolCadetSettingsRouter,
-  ...schoolAdmissionRouter,
-  ...schoolBillingRouter,
+  ...gateRouterOnSchoolFeature("studentManagement", schoolAdmissionRouter),
+  ...gateRouterOnSchoolFeature("studentManagement", schoolBillingRouter),
   ...schoolLogoRouter,
   ...schoolClassRouter,
   ...schoolSectionRouter,
   ...schoolMemberRouter,
-  ...schoolSessionFinanceRouter,
+  ...gateRouterOnSchoolFeature("studentManagement", schoolSessionFinanceRouter),
   ...schoolSessionRouter,
-  ...schoolStudentRouter,
+  ...gateRouterOnSchoolFeature("studentManagement", schoolStudentRouter),
 };

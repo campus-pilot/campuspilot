@@ -20,7 +20,8 @@ vi.mock('@modelcontextprotocol/client', () => ({
   },
 }));
 
-import { callTool, loadToolCatalog } from './tools';
+import { catalogOf, mcpTool } from '../testing/turn';
+import { callTool, loadToolCatalog, toolCatalogForSchool } from './tools';
 
 const listed = (name: string, meta: Record<string, unknown> = {}) => ({
   name,
@@ -34,7 +35,7 @@ const listed = (name: string, meta: Record<string, unknown> = {}) => ({
 describe('tool output limits', () => {
   beforeEach(() => {
     mcp.tools = [
-      listed('school.listThings'),
+      listed('school.listThings', { [ASSISTANT_TOOL_META.features]: ['studentManagement'] }),
       listed('school.getQuestionPaper', { [ASSISTANT_TOOL_META.outputChars]: 80_000 }),
     ];
   });
@@ -66,5 +67,31 @@ describe('tool output limits', () => {
     const outcome = await callTool('token', tools.get('school_getQuestionPaper')!, {});
     expect(outcome.ok && outcome.modelContent.startsWith('y'.repeat(80_000) + '…')).toBe(true);
     expect(outcome.ok && outcome.modelContent).toContain('[Result truncated');
+  });
+});
+
+describe('tools of a school', () => {
+  it('reads the features a tool is gated on from its metadata', async () => {
+    mcp.tools = [
+      listed('school.listThings', { [ASSISTANT_TOOL_META.features]: ['studentManagement'] }),
+      listed('school.getQuestionPaper', { [ASSISTANT_TOOL_META.outputChars]: 80_000 }),
+    ];
+    const { tools } = await loadToolCatalog('token');
+    expect(tools.get('school_listThings')?.features).toEqual(['studentManagement']);
+    expect(tools.get('school_getQuestionPaper')?.features).toEqual([]);
+  });
+
+  it('leaves out the tools of a feature the school does not have, keeping order', () => {
+    const students = mcpTool('school.listStudents', 'read', { features: ['studentManagement'] });
+    const notices = mcpTool('school.listNotices', 'read', { features: ['notices'] });
+    const papers = mcpTool('school.listQuestionPapers', 'read');
+    const catalog = catalogOf(students, papers, notices);
+
+    const staffOnly = toolCatalogForSchool(catalog, new Set(['assistant']));
+    expect(staffOnly.ordered.map(({ mcpName }) => mcpName)).toEqual(['school.listQuestionPapers']);
+    expect(staffOnly.tools.has('school_listStudents')).toBe(false);
+
+    const everything = toolCatalogForSchool(catalog, new Set(['studentManagement', 'notices', 'assistant']));
+    expect(everything.ordered.map(({ mcpName }) => mcpName)).toEqual(['school.listStudents', 'school.listQuestionPapers', 'school.listNotices']);
   });
 });

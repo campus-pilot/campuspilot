@@ -18,12 +18,9 @@ import { usePathname, useRouter } from "next/navigation";
 import { orpc } from "@/lib/orpc";
 import { SCHOOL_ACTIONS } from "@campuspilot/api/routers/authorization/authorization.dto";
 import { RequirePermissions } from "./require-permissions";
+import { useSchoolFeature } from "./require-feature";
 import { AddTeacherDialog } from "./class-teachers";
-
-type WorkspaceItem = {
-  id: string;
-  label: string;
-};
+import { classroomHref, classroomSections } from "./classroom-sections";
 
 function closeAlertDialog(closeDialog: () => void) {
   closeDialog();
@@ -58,17 +55,6 @@ function ClassroomTeacherAlert({ schoolId, classId }: { schoolId: string; classI
     </>
   );
 }
-
-const items: WorkspaceItem[] = [
-  { id: "students", label: "Students" },
-  { id: "teachers", label: "Teachers" },
-  { id: "sections", label: "Sections" },
-  { id: "subjects", label: "Subjects" },
-  { id: "documents", label: "Documents" },
-  { id: "settings", label: "Settings" },
-];
-const primaryItems = items.slice(0, 3);
-const overflowItems = items.slice(3);
 
 export function ClassroomWorkspace({
   children,
@@ -126,10 +112,15 @@ function ClassroomWorkspaceContent({
   const classesQuery = useQuery(
     orpc.school.listClasses.queryOptions({ input: { schoolId, sessionId } }),
   );
+  // Without student management a classroom has no Students or Documents section (`classroomSections`).
+  const studentManagement = useSchoolFeature(schoolId, "studentManagement").enabled;
+  const items = classroomSections(studentManagement);
+  const primaryItems = items.filter(({ primary }) => primary);
+  const overflowItems = items.filter(({ primary }) => !primary);
   const classSummary = classesQuery.data?.find(({ id }) => id === classId);
   const activeItem =
     items.find(({ id }) => pathname.endsWith(`/${id}`)) ?? items[0]!;
-  const baseHref = `/school/${encodeURIComponent(schoolId)}/sessions/${encodeURIComponent(sessionId)}/classroom/${encodeURIComponent(classId)}`;
+  const baseHref = classroomHref({ schoolId, sessionId, classId });
 
   return (
     <section className="mx-auto flex w-full max-w-7xl flex-col gap-4">
@@ -145,7 +136,7 @@ function ClassroomWorkspaceContent({
           onAction={closeAlertDialog}
         />
       ) : null}
-      {classSummary?.studentCount === 0 ? (
+      {studentManagement && classSummary?.studentCount === 0 ? (
         <AppShellAlert
           slug="class/student/not-present"
           message="No students are assigned to this classroom."

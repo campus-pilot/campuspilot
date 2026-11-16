@@ -250,6 +250,7 @@ export function mcpTool(mcpName: string, access: 'read' | 'write', overrides: Pa
     destructive: false,
     exposure: 'core',
     module: 'students',
+    features: [],
     ...overrides,
   };
 }

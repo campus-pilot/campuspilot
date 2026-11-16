@@ -12,6 +12,8 @@ import { BookOpen, GraduationCap, Layers3, Users } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { client, orpc } from "@/lib/orpc";
 import { RequirePermissions } from "./require-permissions";
+import { classroomHref } from './classroom-sections';
+import { useSchoolFeature } from './require-feature';
 
 type ClassSummary = Awaited<
   ReturnType<typeof client.school.listClasses>
@@ -79,22 +81,26 @@ const columns: SortableTableColumn<ClassSummary>[] = [
 ];
 
 function ClassroomTable({
+  schoolId,
   canReorder,
   classes,
   onReorder,
   onRowClick,
   reorderPending,
 }: {
+  schoolId: string;
   canReorder: boolean;
   classes: ClassSummary[];
   onReorder: (classes: ClassSummary[]) => void;
   onRowClick: (schoolClass: ClassDto) => void;
   reorderPending: boolean;
 }) {
+  // Student counts mean nothing to a school without student management.
+  const studentManagement = useSchoolFeature(schoolId, "studentManagement").enabled;
   return (
     <SortableTable
       ariaLabel="School classrooms"
-      columns={columns}
+      columns={studentManagement ? columns : columns.filter(({ id }) => id !== "students")}
       data={classes}
       emptyMessage="No classrooms have been created yet."
       getRowId={(schoolClass) => schoolClass.id}
@@ -193,10 +199,9 @@ function ClassroomListContent({
   }
 
   const classes = classesQuery.data;
+  // The classroom's root opens its first section, which depends on the school's features.
   const openClass = (schoolClass: ClassDto) =>
-    router.push(
-      `/school/${encodeURIComponent(schoolId)}/sessions/${encodeURIComponent(sessionId)}/classroom/${encodeURIComponent(schoolClass.id)}/students`,
-    );
+    router.push(classroomHref({ schoolId, sessionId, classId: schoolClass.id }));
 
   return (
     <section className="mx-auto flex w-full max-w-6xl flex-col gap-5">
@@ -214,6 +219,7 @@ function ClassroomListContent({
         }}
         fallback={
           <ClassroomTable
+            schoolId={schoolId}
             canReorder={false}
             classes={classes}
             onReorder={() => undefined}
@@ -223,6 +229,7 @@ function ClassroomListContent({
         }
       >
         <ClassroomTable
+          schoolId={schoolId}
           canReorder
           classes={classes}
           onReorder={(nextClasses) => reorderMutation.mutate(nextClasses)}

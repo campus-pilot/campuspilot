@@ -1,4 +1,4 @@
-import { redirect } from 'next/navigation';
+import { ClassroomLanding } from '@/components/classroom-landing';
 
 export default async function ClassroomIndexPage({
   params,
@@ -6,7 +6,5 @@ export default async function ClassroomIndexPage({
   params: Promise<{ schoolId: string; sessionId: string; classId: string }>;
 }) {
   const { schoolId, sessionId, classId } = await params;
-  redirect(
-    `/school/${encodeURIComponent(schoolId)}/sessions/${encodeURIComponent(sessionId)}/classroom/${encodeURIComponent(classId)}/students`,
-  );
+  return <ClassroomLanding scope={{ schoolId, sessionId, classId }} />;
 }

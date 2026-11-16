@@ -203,7 +203,9 @@ export async function createRegularUserSession(): Promise<UserSession> {
 
 /**
  * Inserts a test school directly into the database. Like a school created in
- * production, it starts with **no** platform feature enabled; a suite that
+ * production, it stores **no** feature row, so it has only the features that
+ * are on by default (student management; see the catalogue's
+ * `defaultEnabled`) and no other; a suite that
  * exercises a feature-gated area names it in `features` (for example
  * `features: ['cadet']` for anything touching the Cadet Portal), so the
  * feature gate is exercised for real instead of being bypassed.

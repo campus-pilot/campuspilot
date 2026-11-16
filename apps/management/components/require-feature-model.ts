@@ -14,7 +14,10 @@ export type FeatureFlagsQueryState = {
 };
 
 /**
- * One feature's state as the UI may use it. `status` says what is known:
+ * One feature's state as the UI may use it. `enabled` is whether the school
+ * **has** the feature (the API's `active`: its switch is on and every feature
+ * it requires is active). The switch alone is an administrator's concern and
+ * never decides what the school's screens show. `status` says what is known:
  * - `ready`: the school's flags are known; `enabled` is the truth, on or off;
  * - `pending`: the first read is still running;
  * - `unknown`: the flags could not be read and none are held from before.
@@ -25,7 +28,7 @@ export type FeatureFlagsQueryState = {
  * `enabled` and `config` are independent: a disabled feature may still
  * carry its stored config.
  */
-export type SchoolFeatureView<K extends SchoolFeatureKey> = SchoolFeatureState<K> & {
+export type SchoolFeatureView<K extends SchoolFeatureKey> = Pick<SchoolFeatureState<K>, 'enabled' | 'config'> & {
   status: 'pending' | 'unknown' | 'ready';
 };
 
@@ -42,9 +45,13 @@ export function resolveSchoolFeature<K extends SchoolFeatureKey>(
   query: FeatureFlagsQueryState,
   feature: K,
 ): SchoolFeatureView<K> {
-  if (query.features) return { ...query.features[feature], status: 'ready' };
-  if (query.isPending) return { ...DISABLED_SCHOOL_FEATURE, status: 'pending' };
-  return { ...DISABLED_SCHOOL_FEATURE, status: 'unknown' };
+  if (query.features) {
+    const state = query.features[feature];
+    return { enabled: state.active, config: state.config, status: 'ready' };
+  }
+  const closed = { enabled: DISABLED_SCHOOL_FEATURE.enabled, config: DISABLED_SCHOOL_FEATURE.config };
+  if (query.isPending) return { ...closed, status: 'pending' };
+  return { ...closed, status: 'unknown' };
 }
 
 /**

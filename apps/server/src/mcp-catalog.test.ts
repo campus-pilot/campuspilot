@@ -246,6 +246,54 @@ describe('catalog metadata', () => {
   });
 });
 
+describe('school feature gates in the catalog', () => {
+  const byName = () => new Map(exposedTools().map((tool) => [tool.name, tool]));
+
+  it('marks the admission, student, billing, result, timetable and student document tools as student management', () => {
+    const tools = byName();
+    for (const name of [
+      'school.listAdmissions',
+      'school.createAdmission',
+      'school.listStudents',
+      'school.listBillingRuns',
+      'school.recordPayment',
+      'school.getSessionFinance',
+      'school.listExamResults',
+      'school.listExamStudents',
+      'school.getExamTimetable',
+      'school.sendStudentResultNotification',
+      'school.getStudentExamRemark',
+      'school.listDocumentArtifacts',
+      'school.listNotificationDeliveries',
+    ]) {
+      expect(tools.get(name)?.features, name).toContain('studentManagement');
+      expect(tools.get(name)?.description, name).toMatch(/Only for schools that have (.+ and )?Student management\.$/);
+    }
+  });
+
+  it('leaves staff, classes, examinations, their lifecycle and question papers ungated', () => {
+    const tools = byName();
+    for (const name of [
+      'school.listMembers',
+      'school.listClasses',
+      'school.listExams',
+      'school.transitionExam',
+      'school.listExamPlans',
+      'school.listQuestionPapers',
+      'school.getDashboard',
+      'school.withdrawExamFromCadet',
+    ]) {
+      expect(tools.get(name)?.features, name).not.toContain('studentManagement');
+    }
+  });
+
+  it('gives every gated tool a schoolId input, which its gate reads', () => {
+    for (const tool of exposedTools().filter(({ features }) => features.length > 0)) {
+      expect(Object.keys(tool.inputSchema.shape), tool.name).toContain('schoolId');
+    }
+  });
+});
+
 describe('cadet catalog', () => {
   it('builds from cadetRouter alone: read-only core tools and no staff tools', async () => {
     const { cadetRouter } = await import('@campuspilot/api/routers/cadet/cadet.router');
@@ -654,10 +702,14 @@ describe('assistant service view', () => {
         ['platform', 'system', 'account', 'notices', 'notifications'].includes(tool.mcp.module),
       ),
     ).toEqual([]);
+    const definitions = new Map(exposedTools().map((tool) => [tool.name, tool]));
     for (const tool of tools) {
       expect(tool._meta?.[ASSISTANT_TOOL_META.exposure]).toMatch(/^(core|advanced)$/);
       expect(typeof tool._meta?.[ASSISTANT_TOOL_META.module]).toBe('string');
+      // Every school sees the same listing; the worker drops the tools of features its school lacks.
+      expect(tool._meta?.[ASSISTANT_TOOL_META.features], tool.name).toEqual([...definitions.get(tool.name)!.features]);
     }
+    expect(tools.find(({ name }) => name === 'school.listAdmissions')?._meta?.[ASSISTANT_TOOL_META.features]).toEqual(['studentManagement']);
     expect(allowed.some((tool) => tool.mcp.exposure === 'advanced')).toBe(true);
   });
 

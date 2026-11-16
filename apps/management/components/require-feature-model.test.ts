@@ -3,9 +3,10 @@ import { test } from 'node:test';
 import { featureFlagsOutdatedBy, resolveSchoolFeature } from './require-feature-model';
 
 const features = {
-  cadet: { enabled: true, config: null },
-  notices: { enabled: false, config: null },
-  assistant: { enabled: false, config: null },
+  studentManagement: { enabled: true, active: true, config: null },
+  cadet: { enabled: true, active: true, config: null },
+  notices: { enabled: false, active: false, config: null },
+  assistant: { enabled: false, active: false, config: null },
 };
 const closed = { enabled: false, config: null };
 
@@ -29,6 +30,21 @@ test('exactly the requested feature is returned once the flags loaded', () => {
   const loaded = { isPending: false, isError: false, features };
   assert.deepEqual(resolveSchoolFeature(loaded, 'cadet'), { enabled: true, config: null, status: 'ready' });
   assert.deepEqual(resolveSchoolFeature(loaded, 'notices'), { enabled: false, config: null, status: 'ready' });
+});
+
+test('the UI follows whether the school has a feature, not its switch', () => {
+  // Cadet is switched on but student management, which it requires, is off.
+  const loaded = {
+    isPending: false,
+    isError: false,
+    features: {
+      ...features,
+      studentManagement: { enabled: false, active: false, config: null },
+      cadet: { enabled: true, active: false, config: null },
+    },
+  };
+  assert.deepEqual(resolveSchoolFeature(loaded, 'cadet'), { enabled: false, config: null, status: 'ready' });
+  assert.deepEqual(resolveSchoolFeature(loaded, 'studentManagement'), { enabled: false, config: null, status: 'ready' });
 });
 
 test('only the server\'s disabled-feature answer makes the cached flags outdated (review U6)', () => {

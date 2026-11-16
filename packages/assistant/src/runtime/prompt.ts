@@ -1,3 +1,5 @@
+import type { MissingSchoolFeature } from './school-features';
+
 /**
  * Stable instructions. Kept byte-identical across requests so the prompt
  * cache holds; per-conversation facts go in a separate block after it.
@@ -56,6 +58,12 @@ export type AssistantConversationFacts = {
   schoolId: string;
   /** Null when the school's name could not be looked up. */
   schoolName: string | null;
+  /**
+   * The CampusPilot features this school does not have when the run starts
+   * (`school-features.ts`). Their tools are not offered; the model is told so
+   * it can say the school does not use that part instead of searching.
+   */
+  missingFeatures: readonly MissingSchoolFeature[];
   userName: string;
   userEmail: string;
   /** ISO date (YYYY-MM-DD) the run started, in IST. */
@@ -68,6 +76,13 @@ export type AssistantConversationFacts = {
 export function buildFactsText(facts: AssistantConversationFacts): string {
   return [
     `School: ${facts.schoolName ?? 'unknown name'} (schoolId: ${facts.schoolId}). Use this schoolId for every tool; this conversation cannot act in another school. Tools show only this school even when the user belongs to others, so never say the user has no other schools; to work in another school they switch schools in the app and ask there.`,
+    ...(facts.missingFeatures.length > 0
+      ? [
+          `This school does not use these parts of CampusPilot, so you have no tools for them: ${facts.missingFeatures
+            .map((feature) => `${feature.label} (${feature.description})`)
+            .join('; ')}. When asked for something that belongs to one of them, say in one sentence that this school does not use that part of CampusPilot, then offer what you can do instead. Do not search for tools for it.`,
+        ]
+      : []),
     `Signed-in user: ${facts.userName} <${facts.userEmail}>.`,
     `Today's date: ${facts.today}. Current time: ${facts.now} (India time, when this request began).`,
   ].join('\n');

@@ -513,3 +513,42 @@ describe('MCP tool execution', () => {
     expect(reportError).toHaveBeenCalledWith(expect.any(Error), 'failSafely');
   });
 });
+
+describe('school feature gates', () => {
+  const route = (summary: string) => ({ summary, description: `${summary}.`, tags: ['Test'] });
+  const schoolInput = z.object({ schoolId: z.string() });
+  async function gatedCatalog() {
+    const { gateRouterOnSchoolFeature } = await import('@campuspilot/api/permissions/feature');
+    const students = gateRouterOnSchoolFeature('studentManagement', {
+      listPupils: protectedProcedure.meta(mcpMeta()).route(route('List pupils')).input(schoolInput).handler(() => []),
+    });
+    const listRooms = protectedProcedure.meta(mcpMeta()).route(route('List rooms')).input(schoolInput).handler(() => []);
+    return buildMcpCatalog({ ...students, listRooms });
+  }
+
+  it('records the features a tool is gated on, read from its own middleware, and names them in its description', async () => {
+    const catalog = await gatedCatalog();
+    const byName = new Map(catalog.core.map((tool) => [tool.name, tool]));
+    expect(byName.get('listPupils')?.features).toEqual(['studentManagement']);
+    expect(byName.get('listPupils')?.description).toBe('List pupils. Only for schools that have Student management.');
+    expect(byName.get('listRooms')?.features).toEqual([]);
+    expect(byName.get('listRooms')?.description).toBe('List rooms.');
+  });
+
+  it('lists a gated tool only while one of the user\'s schools has its features', async () => {
+    const catalog = await gatedCatalog();
+    const listed = async (availableFeatures?: ReadonlySet<'studentManagement' | 'assistant'>) => {
+      const server = createCampusPilotMcpServer({ catalog, availableFeatures, createContext: async () => asContext({}), reportError: vi.fn() });
+      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+      const client = new Client({ name: 'campuspilot-test', version: '0.1.0' });
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+      openConnections.push({ client, close: async () => { await client.close(); await server.close(); } });
+      return (await client.listTools()).tools.map(({ name }) => name).sort();
+    };
+    expect(await listed(new Set(['assistant']))).toEqual(['listRooms']);
+    expect(await listed(new Set(['studentManagement']))).toEqual(['listPupils', 'listRooms']);
+    // No feature list (the assistant's view, Cadet): nothing is filtered here.
+    expect(await listed(undefined)).toEqual(['listPupils', 'listRooms']);
+  });
+});

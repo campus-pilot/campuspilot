@@ -133,17 +133,21 @@ describe('systemAdmin demo school procedures', () => {
     expect(school).toMatchObject({ isDemo: true, demoCreatedBy: admin.user.id });
     const roles = await db.select().from(schoolUserRoleTable).where(and(eq(schoolUserRoleTable.schoolId, created.school.id), eq(schoolUserRoleTable.userId, admin.user.id)));
     expect(roles.map((row) => row.role)).toEqual(['principal']);
-    // A demo shows every product area: both features are on from creation
-    // (a real school starts with none), recorded against the requesting admin.
+    // A demo shows every product area: its features are on from creation
+    // (a real school starts with only its defaults), recorded against the
+    // requesting admin. Student management is written explicitly although it
+    // is on by default: a demo decides every feature.
     const flags = await db.select().from(schoolFeatureFlagTable).where(eq(schoolFeatureFlagTable.schoolId, created.school.id));
     expect(flags.map((row) => [row.feature, row.enabled, row.updatedBy]).sort()).toEqual([
       ['cadet', true, admin.user.id],
       ['notices', true, admin.user.id],
+      ['studentManagement', true, admin.user.id],
     ]);
     expect((await adminClient.systemAdmin.getSchoolFeatureFlags({ id: created.school.id })).features).toEqual({
-      cadet: { enabled: true, config: null },
-      notices: { enabled: true, config: null },
-      assistant: { enabled: false, config: null },
+      studentManagement: { enabled: true, active: true, config: null },
+      cadet: { enabled: true, active: true, config: null },
+      notices: { enabled: true, active: true, config: null },
+      assistant: { enabled: false, active: false, config: null },
     });
 
     const second = await adminClient.systemAdmin.createDemoSchool({ ...validInput, registrationNo: 'REG-KEEP-1' });

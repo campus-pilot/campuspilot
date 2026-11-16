@@ -100,7 +100,7 @@ function DocumentGeneratorData({
     return (
       <DocumentPanel
         title={`${DOCUMENT_LABELS[documentType]} need a template`}
-        description="Template selection is managed in School settings so every academic session uses the same approved design."
+        description="Template selection is managed in Settings › Templates so every academic session uses the same approved design."
       >
         <DocumentNotice>
           Use the setup warning in the app header to open template settings. If

@@ -27,6 +27,7 @@ import {
   EmptyTitle,
 } from '@campuspilot/ui/components/empty';
 import { LoaderCircle, Trash2 } from 'lucide-react';
+import { RequireFeature, useSchoolFeature } from '@/components/require-feature';
 import { RequirePermissions } from '@/components/require-permissions';
 import { schoolHref } from '@/components/school-route';
 import { client, orpc } from '@/lib/orpc';
@@ -45,6 +46,7 @@ export function SessionDetail({
   const [isSessionDirty, setIsSessionDirty] = useState(false);
   const [isFinanceDirty, setIsFinanceDirty] = useState(false);
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
+  const studentManagement = useSchoolFeature(schoolId, 'studentManagement').enabled;
   const sessionQuery = useQuery(
     orpc.school.getSession.queryOptions({ input: { schoolId, sessionId } }),
   );
@@ -110,14 +112,14 @@ export function SessionDetail({
     );
   }
 
-  const readOnlySession = <SessionDetailsView session={session} />;
+  const readOnlySession = <SessionDetailsView session={session} showStudentSettings={studentManagement} />;
 
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
       {isSessionDirty ? (
         <AppShellAlert
           slug="session/academic/unsaved"
-          message="Examination and academic settings have unsaved changes."
+          message={studentManagement ? "Examination and academic settings have unsaved changes." : "Examination settings have unsaved changes."}
         />
       ) : null}
       {isFinanceDirty ? (
@@ -138,6 +140,7 @@ export function SessionDetail({
               await updateSessionMutation.mutateAsync(updates);
             }}
             onDirtyChange={setIsSessionDirty}
+            showStudentSettings={studentManagement}
           />
         </RequirePermissions>
       ) : (
@@ -149,10 +152,13 @@ export function SessionDetail({
             session={session}
             isActivating={activateSessionMutation.isPending}
             onActivate={() => activateSessionMutation.mutate()}
+            showStudentSettings={studentManagement}
           />
         </RequirePermissions>
       )}
 
+      {/* Fees belong to student management, like the procedures behind them. */}
+      <RequireFeature schoolId={schoolId} feature="studentManagement">
       <RequirePermissions
         permissions={{ action: SCHOOL_ACTIONS.READ_SESSION_FINANCE, resource }}
       >
@@ -163,6 +169,7 @@ export function SessionDetail({
           onDirtyChange={setIsFinanceDirty}
         />
       </RequirePermissions>
+      </RequireFeature>
 
       {!session.isActive ? (
         <RequirePermissions

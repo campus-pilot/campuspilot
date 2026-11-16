@@ -3,22 +3,39 @@ import { test } from 'node:test';
 import { defaultExamSection, examSectionOf, isQuestionPaperWorkspacePath, questionPaperWorkspaceHref } from './exam-model';
 
 test('Question paper is the default only for a ready exam with a plan and an allowed assistant', () => {
-  assert.equal(defaultExamSection({ planCount: 3, status: 'ready', assistant: 'allowed' }), 'question-paper');
-  assert.equal(defaultExamSection({ planCount: 3, status: 'ready', assistant: 'denied' }), 'results');
-  assert.equal(defaultExamSection({ planCount: 3, status: 'active', assistant: 'allowed' }), 'results');
-  assert.equal(defaultExamSection({ planCount: 3, status: 'completed', assistant: 'allowed' }), 'results');
+  assert.equal(defaultExamSection({ planCount: 3, status: 'ready', assistant: 'allowed', studentManagement: 'allowed' }), 'question-paper');
+  assert.equal(defaultExamSection({ planCount: 3, status: 'ready', assistant: 'denied', studentManagement: 'allowed' }), 'results');
+  assert.equal(defaultExamSection({ planCount: 3, status: 'active', assistant: 'allowed', studentManagement: 'allowed' }), 'results');
+  assert.equal(defaultExamSection({ planCount: 3, status: 'completed', assistant: 'allowed', studentManagement: 'allowed' }), 'results');
   // No plan: Results holds plan creation.
-  assert.equal(defaultExamSection({ planCount: 0, status: 'ready', assistant: 'allowed' }), 'results');
-  assert.equal(defaultExamSection({ planCount: 0, status: null, assistant: 'allowed' }), 'results');
+  assert.equal(defaultExamSection({ planCount: 0, status: 'ready', assistant: 'allowed', studentManagement: 'allowed' }), 'results');
+  assert.equal(defaultExamSection({ planCount: 0, status: null, assistant: 'allowed', studentManagement: 'allowed' }), 'results');
   // A plan alone is not a lifecycle state.
-  assert.equal(defaultExamSection({ planCount: 3, status: null, assistant: 'allowed' }), 'results');
+  assert.equal(defaultExamSection({ planCount: 3, status: null, assistant: 'allowed', studentManagement: 'allowed' }), 'results');
 });
 
 test('the landing waits for the assistant answer only when it matters', () => {
-  assert.equal(defaultExamSection({ planCount: 3, status: 'ready', assistant: 'pending' }), 'pending');
+  assert.equal(defaultExamSection({ planCount: 3, status: 'ready', assistant: 'pending', studentManagement: 'allowed' }), 'pending');
   // Whatever the assistant says, these never become Question paper, so no waiting.
-  assert.equal(defaultExamSection({ planCount: 3, status: 'active', assistant: 'pending' }), 'results');
-  assert.equal(defaultExamSection({ planCount: 0, status: 'ready', assistant: 'pending' }), 'results');
+  assert.equal(defaultExamSection({ planCount: 3, status: 'active', assistant: 'pending', studentManagement: 'allowed' }), 'results');
+  assert.equal(defaultExamSection({ planCount: 0, status: 'ready', assistant: 'pending', studentManagement: 'allowed' }), 'results');
+});
+
+test('without student management an exam with plans lands on Question paper or More, never Results', () => {
+  const off = { studentManagement: 'denied' } as const;
+  assert.equal(defaultExamSection({ planCount: 3, status: 'ready', assistant: 'allowed', ...off }), 'question-paper');
+  // Results do not exist, so a started or completed exam still opens its papers.
+  assert.equal(defaultExamSection({ planCount: 3, status: 'active', assistant: 'allowed', ...off }), 'question-paper');
+  assert.equal(defaultExamSection({ planCount: 3, status: 'completed', assistant: 'allowed', ...off }), 'question-paper');
+  assert.equal(defaultExamSection({ planCount: 3, status: 'ready', assistant: 'denied', ...off }), 'settings');
+  assert.equal(defaultExamSection({ planCount: 3, status: 'ready', assistant: 'pending', ...off }), 'pending');
+  // No plan: plan creation is the only thing to do, with or without the feature.
+  assert.equal(defaultExamSection({ planCount: 0, status: 'ready', assistant: 'allowed', ...off }), 'results');
+});
+
+test('the landing waits for the student management answer once there is a plan', () => {
+  assert.equal(defaultExamSection({ planCount: 3, status: 'ready', assistant: 'allowed', studentManagement: 'pending' }), 'pending');
+  assert.equal(defaultExamSection({ planCount: 0, status: 'ready', assistant: 'allowed', studentManagement: 'pending' }), 'results');
 });
 
 test('pathnames map to workspace tabs', () => {

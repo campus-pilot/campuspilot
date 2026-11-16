@@ -29,6 +29,7 @@ export type SchoolFeatureFlagsDto = z.infer<typeof schoolFeatureFlagsDtoSchema>;
  */
 export {
   DISABLED_SCHOOL_FEATURE,
+  missingSchoolFeatureRequirements,
   readSchoolFeatureDisabled,
   SCHOOL_FEATURE_CONFIG_INVALID_REASON,
   SCHOOL_FEATURE_DISABLED_REASON,

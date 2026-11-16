@@ -43,7 +43,7 @@ import {
 import { SchoolDocumentHead } from '@/components/school-document-head';
 import { SessionSwitcher } from '@/components/session-switcher';
 import { orpc } from '@/lib/orpc';
-import { RequireFeature } from '@/components/require-feature';
+import { RequireFeature, useSchoolFeature } from '@/components/require-feature';
 import { RequirePermissions } from '@/components/require-permissions';
 import { schoolSettingsPage } from './_route';
 import { assistantSettingsPage } from './assistant/_route';
@@ -81,11 +81,25 @@ const pages: ManagementPageDescriptor<SettingsRouteParams>[] = [
   questionPaperTemplatePage,
 ];
 
+/**
+ * The settings navigation. `studentManagement` is whether the school has
+ * student management (unknown counts as no, like every feature check):
+ * without it there are no admission documents and no student or finance
+ * templates, so only the templates of the school's other features remain
+ * and the Templates entry opens the first of them.
+ */
 function navigationFor(
   schoolId: string,
   canViewSessions: boolean,
+  studentManagement: boolean,
   activeSessionId?: string,
 ): AppShellNavigationEntry[] {
+  // A feature and a permission are separate gates; a student or finance template needs both.
+  const withStudentManagement = (children: ReactNode) => (
+    <RequireFeature schoolId={schoolId} feature="studentManagement">
+      {children}
+    </RequireFeature>
+  );
   const withTemplatePermission = (children: ReactNode) => (
     <RequirePermissions
       permissions={{
@@ -105,7 +119,7 @@ function navigationFor(
     {
       type: 'item',
       id: 'school-settings',
-      label: 'School',
+      label: 'Organization',
       href: schoolHref(schoolId, '/settings'),
       icon: School,
       match: 'exact',
@@ -113,6 +127,8 @@ function navigationFor(
     {
       type: 'item',
       id: 'admission-documents',
+      // The documents an admission collects; admissions belong to student management.
+      wrap: withStudentManagement,
       label: 'Documents',
       href: schoolHref(schoolId, '/settings/documents'),
       icon: Files,
@@ -168,15 +184,27 @@ function navigationFor(
     {
       type: 'item',
       id: 'templates',
-      wrap: withTemplatePermission,
+      // Without student management the only templates left are the question
+      // paper's (and the notice's, which also needs student management), so
+      // the entry needs the assistant feature and opens that template.
+      wrap: studentManagement
+        ? withTemplatePermission
+        : (children) => (
+            <RequireFeature schoolId={schoolId} feature="assistant">
+              {withTemplatePermission(children)}
+            </RequireFeature>
+          ),
       label: 'Templates',
-      href: schoolHref(schoolId, '/settings/templates/examination'),
+      href: schoolHref(
+        schoolId,
+        studentManagement ? '/settings/templates/examination' : '/settings/templates/question-paper',
+      ),
       icon: Settings,
       items: [
         {
           type: 'item',
           id: 'examination-template',
-          wrap: withTemplatePermission,
+          wrap: (children) => withStudentManagement(withTemplatePermission(children)),
           label: 'Examination',
           href: schoolHref(schoolId, '/settings/templates/examination'),
           icon: ClipboardCheck,
@@ -184,7 +212,7 @@ function navigationFor(
         {
           type: 'item',
           id: 'id-card-template',
-          wrap: withTemplatePermission,
+          wrap: (children) => withStudentManagement(withTemplatePermission(children)),
           label: 'ID card',
           href: schoolHref(schoolId, '/settings/templates/id-card'),
           icon: FileBadge,
@@ -192,7 +220,7 @@ function navigationFor(
         {
           type: 'item',
           id: 'admit-card-template',
-          wrap: withTemplatePermission,
+          wrap: (children) => withStudentManagement(withTemplatePermission(children)),
           label: 'Admit card',
           href: schoolHref(schoolId, '/settings/templates/admit-card'),
           icon: GraduationCap,
@@ -200,7 +228,7 @@ function navigationFor(
         {
           type: 'item',
           id: 'timetable-template',
-          wrap: withTemplatePermission,
+          wrap: (children) => withStudentManagement(withTemplatePermission(children)),
           label: 'Timetable',
           href: schoolHref(schoolId, '/settings/templates/timetable'),
           icon: CalendarRange,
@@ -208,7 +236,7 @@ function navigationFor(
         {
           type: 'item',
           id: 'bill-template',
-          wrap: withFinanceTemplatePermission,
+          wrap: (children) => withStudentManagement(withFinanceTemplatePermission(children)),
           label: 'Bill',
           href: schoolHref(schoolId, '/settings/templates/bill'),
           icon: CreditCard,
@@ -216,7 +244,7 @@ function navigationFor(
         {
           type: 'item',
           id: 'receipt-template',
-          wrap: withFinanceTemplatePermission,
+          wrap: (children) => withStudentManagement(withFinanceTemplatePermission(children)),
           label: 'Receipt',
           href: schoolHref(schoolId, '/settings/templates/receipt'),
           icon: ReceiptText,
@@ -224,7 +252,7 @@ function navigationFor(
         {
           type: 'item',
           id: 'statement-template',
-          wrap: withFinanceTemplatePermission,
+          wrap: (children) => withStudentManagement(withFinanceTemplatePermission(children)),
           label: 'Statement',
           href: schoolHref(schoolId, '/settings/templates/statement'),
           icon: ScrollText,
@@ -270,6 +298,7 @@ export default function SchoolSettingsLayout({
   const schoolId = String(routeParams.schoolId ?? '');
   const storedSessionId = useStoredSchoolSessionId(schoolId);
   const page = pages.find((candidate) => candidate.matches(pathname));
+  const studentManagement = useSchoolFeature(schoolId, 'studentManagement').enabled;
   const sessionPermissionQuery = useQuery(
     orpc.authorization.checkPermissions.queryOptions({
       input: {
@@ -302,6 +331,7 @@ export default function SchoolSettingsLayout({
     navigation: navigationFor(
       schoolId,
       sessionPermissionQuery.data?.results[0] === true,
+      studentManagement,
       activeSessionId,
     ),
     breadcrumbs: page?.breadcrumbs(params) ?? [],

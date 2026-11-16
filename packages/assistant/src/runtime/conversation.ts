@@ -26,6 +26,7 @@ import {
 } from './contract';
 import { buildModelContextWithStats, type ModelContextDeps } from './context';
 import { buildAssistantPrompt, istInstant, type AssistantConversationFacts } from './prompt';
+import { missingSchoolFeatures, readActiveSchoolFeatures } from './school-features';
 import type { ProviderRegistry } from './providers/registry';
 import { billedUsageOf, type ModelProvider, type ModelToolResult, type TranscriptEntry } from './providers/types';
 import { showViewInputSchema } from '@campuspilot/assistant-contract/views';
@@ -35,6 +36,7 @@ import {
   loadToolCatalog,
   requiresApproval,
   toModelToolName,
+  toolCatalogForSchool,
   type AssistantTool,
   type ToolOutcome,
 } from './tools';
@@ -361,12 +363,23 @@ export function createRunProcessor(deps: AssistantConversationDeps) {
       facts: {
         schoolId: run.schoolId,
         schoolName: await lookUpSchoolName(run.id, run.schoolId),
+        missingFeatures: missingSchoolFeatures(await readActiveSchoolFeatures(run.schoolId)),
         userName: user.name,
         userEmail: user.email,
         today: now.slice(0, 10),
         now,
       },
     };
+  }
+
+  /**
+   * The tools this run's school may use now: the cached listing without the
+   * tools of a feature the school does not have (read fresh each time, so a
+   * feature switched off mid-conversation stops being offered at once).
+   */
+  async function schoolToolCatalog(token: string, schoolId: string) {
+    const [catalog, active] = await Promise.all([loadToolCatalog(token), readActiveSchoolFeatures(schoolId)]);
+    return toolCatalogForSchool(catalog, active);
   }
 
   /** The school's display name, through the same MCP tools as everything else. */
@@ -426,7 +439,7 @@ export function createRunProcessor(deps: AssistantConversationDeps) {
       });
     }
 
-    const catalog = await loadToolCatalog(await requireToken(run.runId));
+    const catalog = await schoolToolCatalog(await requireToken(run.runId), run.schoolId);
     // The stored transcript holds markers and whole old results; the model gets
     // the shortened view (see `buildModelContext`). Nothing stored changes.
     const { entries: transcript, documentsShown } = await buildModelContextWithStats(
@@ -617,7 +630,7 @@ export function createRunProcessor(deps: AssistantConversationDeps) {
 
   /** Records the tool call and decides whether it runs or waits for approval. */
   async function prepareToolCall(run: RunFacts, toolUse: ToolUse): Promise<PreparedToolCall> {
-    const catalog = await loadToolCatalog(await requireToken(run.runId));
+    const catalog = await schoolToolCatalog(await requireToken(run.runId), run.schoolId);
     const tool = catalog.tools.get(toolUse.name);
     if (!tool) {
       return {
@@ -828,7 +841,7 @@ export function createRunProcessor(deps: AssistantConversationDeps) {
     if (!access.allowed) throw runFailure(access.code, access.message);
 
     const token = await requireToken(run.runId);
-    const catalog = await loadToolCatalog(token);
+    const catalog = await schoolToolCatalog(token, run.schoolId);
     const tool = catalog.tools.get(toolUse.name);
     // The API can stop offering a tool while a call waits for approval.
     const outcome: ToolOutcome | { recorded: ModelToolResult } | { stopped: true } = !tool

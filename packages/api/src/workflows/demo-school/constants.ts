@@ -42,6 +42,8 @@ export function demoCredentialsS3Key(schoolId: string): string {
  * none. `createDemoSchool` writes them in the school's own transaction.
  */
 export const DEMO_SCHOOL_FEATURE_DEFAULTS: Record<SchoolFeatureKey, boolean> = {
+  // A demo shows the whole school: its seed is admissions, results and fees.
+  studentManagement: true,
   cadet: true,
   notices: true,
   // Off: every assistant request is paid model usage, so a platform admin

@@ -17,7 +17,7 @@ export default async function SchoolSettingsPage({
         resource: { kind: 'school', schoolId },
       }}
       fallback={
-        <PermissionDenied description="You do not have the required permission to view school settings." />
+        <PermissionDenied description="You do not have the required permission to view organization settings." />
       }
     >
       <SchoolSettings schoolId={schoolId} />

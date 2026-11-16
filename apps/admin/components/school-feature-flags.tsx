@@ -5,6 +5,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { z } from 'zod';
 import {
+  missingSchoolFeatureRequirements,
   schoolFeatureCatalogue,
   schoolFeatureEntries,
   type SchoolFeatureConfig,
@@ -58,6 +59,8 @@ function settingsPageOf(feature: SchoolFeatureKey) {
  * states its consequence.
  */
 export const DISABLE_WARNINGS: Record<SchoolFeatureKey, string> = {
+  studentManagement:
+    'Staff of this school can no longer open admissions, students, fees and billing, examination results, timetables and attendance, or student documents, and the AI assistant and connected AI apps lose their tools for them. The Cadet Portal and Notices switch off with it. No new bill, payment, result or timetable notification goes out. Classes, sections, subjects, staff, examinations and question papers keep working. All records are kept and come back when it is enabled again.',
   cadet:
     'Students of this school can no longer sign in or use the Cadet Portal, including connected AI apps. Staff can no longer issue portal passwords, release exam results to the portal, or save or publish a notice addressed to students. Logins, released results and notices are kept.',
   notices:
@@ -241,7 +244,22 @@ function FeatureSettingsLink({ schoolId, settings }: { schoolId: string; setting
   );
 }
 
-function FeatureFlagCard({ schoolId, entry, configInvalid }: FeatureFlagFormProps & { configInvalid: boolean }) {
+/**
+ * Shown on a feature whose own switch is on while a feature it requires is
+ * off: the school does not have it until that one is switched on again. The
+ * switch is the administrator's and stays as saved.
+ */
+function MissingRequirementsNote({ feature, missing }: { feature: SchoolFeatureKey; missing: SchoolFeatureKey[] }) {
+  const names = missing.map((key) => schoolFeatureCatalogue[key].label).join(' and ');
+  return (
+    <p className="rounded-md border border-border bg-muted/50 px-3 py-2 text-sm text-muted-foreground">
+      {schoolFeatureCatalogue[feature].label} is switched on, but the school does not have it while {names}{' '}
+      {missing.length === 1 ? 'is' : 'are'} off. It comes back when {missing.length === 1 ? 'that is' : 'they are'} enabled again.
+    </p>
+  );
+}
+
+function FeatureFlagCard({ schoolId, entry, configInvalid, missing }: FeatureFlagFormProps & { configInvalid: boolean; missing: SchoolFeatureKey[] }) {
   const { label, description } = schoolFeatureCatalogue[entry.feature];
   const settings = settingsPageOf(entry.feature);
   return (
@@ -255,6 +273,7 @@ function FeatureFlagCard({ schoolId, entry, configInvalid }: FeatureFlagFormProp
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
         {configInvalid ? <InvalidConfigWarning /> : null}
+        {entry.enabled && missing.length > 0 ? <MissingRequirementsNote feature={entry.feature} missing={missing} /> : null}
         {settings ? (
           <FeatureSettingsLink schoolId={schoolId} settings={settings} />
         ) : (
@@ -326,6 +345,7 @@ export function SchoolFeatureFlags({ schoolId }: { schoolId: string }) {
           schoolId={schoolId}
           entry={entry}
           configInvalid={invalidConfigs.includes(entry.feature)}
+          missing={missingSchoolFeatureRequirements(entry.feature, features)}
         />
       ))}
     </section>
