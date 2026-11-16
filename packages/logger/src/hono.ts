@@ -1,6 +1,15 @@
 import type { Context, MiddlewareHandler } from 'hono';
 import type { Logger } from 'pino';
+import { performance } from 'node:perf_hooks';
 import { logger as rootLogger } from '@campuspilot/logger';
+
+import {
+  createTimingScope,
+  runInTimingScope,
+  SLOW_REQUEST_MS,
+  summarizeTiming,
+  trackInFlight,
+} from './perf';
 
 export type LoggerVariables = {
   requestId: string;
@@ -75,6 +84,12 @@ export function resolveClientIp(c: Context): string | undefined {
  * - Exposes both via `c.var.requestId` / `c.var.logger`.
  * - Echoes the id back as the `x-request-id` response header.
  * - Logs request start, end with status + duration, and unhandled errors.
+ * - Opens the request's timing scope (see `./perf.ts`): the end line also
+ *   carries the steps timed during the request (`steps`, `stepCalls`), their
+ *   annotations, `loopBusy` (how busy this process's event loop was while the
+ *   request ran, 0 to 1, shared by every concurrent request) and `slow: true`
+ *   at warn level from {@link SLOW_REQUEST_MS}. The request is also listed as
+ *   in flight for `runtime.eventloop.blocked`.
  *
  * Request bodies are intentionally NOT logged — they can carry credentials,
  * OTPs, PII, and other sensitive content that the redact list cannot catch.
@@ -96,6 +111,14 @@ export function pinoLogger(): MiddlewareHandler<{
     c.res.headers.set('x-request-id', requestId);
 
     const start = performance.now();
+    const loopAtStart = performance.eventLoopUtilization();
+    const scope = createTimingScope(log);
+    const untrack = trackInFlight({ reqId: requestId, method: c.req.method, path: c.req.path });
+    /** The timing facts of the end and error lines. */
+    const timing = () => ({
+      loopBusy: Math.round(performance.eventLoopUtilization(loopAtStart).utilization * 100) / 100,
+      ...summarizeTiming(scope),
+    });
     log.debug({
       seperator: '----------------------------------------------------',
     });
@@ -109,17 +132,19 @@ export function pinoLogger(): MiddlewareHandler<{
     );
 
     try {
-      await next();
+      await runInTimingScope(scope, () => next());
     } catch (err) {
       const durationMs = Math.round(performance.now() - start);
       log.error(
-        { err, durationMs, method: c.req.method, path: c.req.path },
+        { err, durationMs, method: c.req.method, path: c.req.path, ...timing() },
         'http.request.error',
       );
       log.debug({
         seperator: '----------------------------------------------------',
       });
       throw err;
+    } finally {
+      untrack();
     }
 
     const durationMs = Math.round(performance.now() - start);
@@ -130,10 +155,22 @@ export function pinoLogger(): MiddlewareHandler<{
         : status >= 400
           ? 'http.request.4xx'
           : 'http.request.end';
-    const level = status >= 500 ? 'error' : status >= 400 ? 'warn' : 'info';
+    const slow = durationMs >= SLOW_REQUEST_MS;
+    const level =
+      status >= 500 ? 'error' : status >= 400 || slow ? 'warn' : 'info';
     (log as unknown as Record<string, (obj: object, msg: string) => void>)[
       level
-    ]!({ status, durationMs, method: c.req.method, path: c.req.path }, evt);
+    ]!(
+      {
+        status,
+        durationMs,
+        method: c.req.method,
+        path: c.req.path,
+        ...timing(),
+        ...(slow ? { slow } : {}),
+      },
+      evt,
+    );
     log.debug({
       seperator: '----------------------------------------------------',
     });

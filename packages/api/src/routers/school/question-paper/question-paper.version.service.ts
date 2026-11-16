@@ -2,6 +2,7 @@ import type { Database, DatabaseExecutor } from '@campuspilot/db';
 import { artifactTable } from '@campuspilot/db/schema/artifact';
 import { assistantItemTable } from '@campuspilot/db/schema/assistant';
 import { generateId } from '@campuspilot/db/id';
+import { measure } from '@campuspilot/logger/perf';
 import {
   examQuestionPaperFigureTable,
   examQuestionPaperJobTable,
@@ -159,17 +160,29 @@ export async function checkQuestionPaperDraft(
   db: DatabaseExecutor,
   scope: PaperScope,
   raw: string,
-  options: {
-    /** The chat attachments the fragment may use as figures (`chatFiguresOf`); omitted outside the in-app assistant and the app. */
-    chat?: ChatFigures;
-    unresolvedFigures?: UnresolvedFigures;
-    /**
-     * For a caller with nobody to look at what the sanitiser changed (the AI job): a pseudo-tag such as `<thinking>`
-     * or text between the top-level elements is a problem (to be repaired) instead of a notice, because its text would
-     * otherwise be printed as part of the paper. A person's draft keeps them as notices.
-     */
-    strictStructure?: boolean;
-  } = {},
+  options: DraftCheckOptions = {},
+): Promise<DraftCheck> {
+  return measure('qp.draft.check', () => checkQuestionPaperDraftUntimed(db, scope, raw, options));
+}
+
+type DraftCheckOptions = {
+  /** The chat attachments the fragment may use as figures (`chatFiguresOf`); omitted outside the in-app assistant and the app. */
+  chat?: ChatFigures;
+  unresolvedFigures?: UnresolvedFigures;
+  /**
+   * For a caller with nobody to look at what the sanitiser changed (the AI job): a pseudo-tag such as `<thinking>`
+   * or text between the top-level elements is a problem (to be repaired) instead of a notice, because its text would
+   * otherwise be printed as part of the paper. A person's draft keeps them as notices.
+   */
+  strictStructure?: boolean;
+};
+
+/** {@link checkQuestionPaperDraft} without its `qp.draft.check` timing. */
+async function checkQuestionPaperDraftUntimed(
+  db: DatabaseExecutor,
+  scope: PaperScope,
+  raw: string,
+  options: DraftCheckOptions,
 ): Promise<DraftCheck> {
   const canonical = canonicalQuestionPaperHtml(raw);
   let sanitized = sanitizeQuestionPaperBody(canonical);
@@ -551,7 +564,7 @@ async function renderAndStore(
     paperId: paper?.id ?? null,
     html: checked.html,
   });
-  const context = await buildQuestionPaperContext(db, scope, { versionNo });
+  const context = await measure('qp.context', () => buildQuestionPaperContext(db, scope, { versionNo }));
   const html = renderQuestionPaperDocument({ template: input.template, context, body });
   const pdf = await convertDocumentPdf(html, 'question_paper', input.signal);
 
@@ -668,11 +681,13 @@ export async function renderStoredVersionHtml(
   const body = await renderQuestionPaperBody(db, { schoolId: scope.key.schoolId, paperId: version.paperId, html: version.contentHtml });
   // The maximum marks are the saved fact (`plan_max_marks`), not the plan as it is today: an edited plan must not change
   // an old version's preview or a restored PDF. Class, subject, mode and exam names still come from the live scope.
-  const context = await buildQuestionPaperContext(
-    db,
-    { ...scope, planMaxMarks: version.planMaxMarks ?? scope.planMaxMarks },
-    { versionNo: version.versionNo },
-    generatedAt,
+  const context = await measure('qp.context', () =>
+    buildQuestionPaperContext(
+      db,
+      { ...scope, planMaxMarks: version.planMaxMarks ?? scope.planMaxMarks },
+      { versionNo: version.versionNo },
+      generatedAt,
+    ),
   );
   return { html: renderQuestionPaperDocument({ template, context, body }), templateName: template.name };
 }

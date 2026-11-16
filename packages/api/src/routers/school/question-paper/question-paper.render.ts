@@ -1,6 +1,7 @@
 import type { DatabaseExecutor } from '@campuspilot/db';
 import { artifactTable } from '@campuspilot/db/schema/artifact';
 import { examQuestionPaperFigureTable } from '@campuspilot/db/schema/exam-question-paper';
+import { measure } from '@campuspilot/logger/perf';
 import { QUESTION_PAPER_EXAMPLES } from '@campuspilot/question-paper/examples';
 import { ORPCError } from '@orpc/server';
 import { and, eq, inArray } from 'drizzle-orm';
@@ -82,7 +83,7 @@ export async function loadFigureAssets(
   let total = [...assets.values()].reduce((sum, asset) => sum + asset.dataUri.length, 0);
   for (const id of ids) {
     const row = known.get(id)!;
-    const bytes = await getObjectBytes(row.s3Key);
+    const bytes = await measure('qp.figure.read', () => getObjectBytes(row.s3Key));
     const dataUri = `data:${row.contentType};base64,${bytes.toString('base64')}`;
     total += dataUri.length;
     if (total > QUESTION_PAPER_FIGURES_MAX_BYTES) {
@@ -98,7 +99,7 @@ export async function renderQuestionPaperBody(
   db: DatabaseExecutor,
   input: { schoolId: string; paperId: string | null; html: string; math?: MathRenderer; chat?: ChatFigures },
 ): Promise<RenderedBody> {
-  const figures = await loadFigureAssets(db, { ...input, figureIds: fragmentFigureIds(input.html) });
+  const figures = await measure('qp.figures.load', () => loadFigureAssets(db, { ...input, figureIds: fragmentFigureIds(input.html) }));
   return renderQuestionPaperBodyHtml(input.html, { figures, math: input.math ?? createMathRenderer() });
 }
 
@@ -141,7 +142,9 @@ export function renderQuestionPaperDocument(input: {
   context: QuestionPaperContext;
   body: RenderedBody;
 }): string {
-  const html = substituteQuestionPaperBody(renderQuestionPaperTemplate(input.template.content, input.context), input.body.html);
+  const html = measure('qp.document.render', () =>
+    substituteQuestionPaperBody(renderQuestionPaperTemplate(input.template.content, input.context), input.body.html),
+  );
   if (Buffer.byteLength(html, 'utf8') > QUESTION_PAPER_DOCUMENT_MAX_BYTES) {
     throw rpcError.badRequest('This document exceeds the 25 MB rendering limit. Use fewer or smaller figures.');
   }
@@ -163,7 +166,7 @@ export async function readPinnedQuestionPaperTemplate(db: DatabaseExecutor, scho
     )
     .limit(1);
   if (!row) throw new Error(`Question paper template revision ${revisionId} is missing.`);
-  return { revisionId, name: row.name, content: await readDocumentTemplate(row.s3Key) };
+  return { revisionId, name: row.name, content: await measure('qp.template.read', () => readDocumentTemplate(row.s3Key)) };
 }
 
 /**
@@ -172,7 +175,7 @@ export async function readPinnedQuestionPaperTemplate(db: DatabaseExecutor, scho
  */
 export async function selectedQuestionPaperTemplate(db: DatabaseExecutor, schoolId: string) {
   try {
-    const template = await getSelectedDocumentTemplate(db, { schoolId, documentType: 'question_paper' });
+    const template = await measure('qp.template.read', () => getSelectedDocumentTemplate(db, { schoolId, documentType: 'question_paper' }));
     return { revisionId: template.row.id, name: template.row.name, content: template.content };
   } catch (error) {
     if (error instanceof ORPCError && error.status === 404) return null;
