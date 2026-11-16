@@ -19,6 +19,23 @@ export const STAFF_DISABLED_PHONE_PATHS = [
   '/phone-number/reset-password',
 ] as const;
 
+/**
+ * Whether a request asks Better Auth's `/update-user` to change the caller's
+ * own sign-in phone number. The phone-number plugin refuses a new number but
+ * lets `null` through, which would let a person remove their phone sign-in
+ * (or, for a phone-only account, fail the placeholder check with a server
+ * error). Only staff procedures may change the number, so any `phoneNumber`
+ * key is refused.
+ */
+export function changesOwnPhoneNumber(path: string, body: unknown): boolean {
+  return (
+    path === '/update-user' &&
+    typeof body === 'object' &&
+    body !== null &&
+    'phoneNumber' in body
+  );
+}
+
 /** Domain of every staff placeholder email; `.invalid` never delivers. */
 export const STAFF_PLACEHOLDER_EMAIL_DOMAIN = 'phone.campuspilot.invalid';
 

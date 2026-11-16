@@ -1,6 +1,8 @@
 'use client';
 
+import { StaffAvatarFallback } from '@campuspilot/components/staff-account/staff-avatar-fallback';
 import { staffSignInLabel } from '@campuspilot/components/staff-account/staff-sign-in-label';
+import type { SchoolMemberDto } from '@campuspilot/api/routers/school/member/member.dto';
 import type { AssistantRecordsView } from '@campuspilot/assistant-contract/views';
 import { AssistantRecordList, type AssistantRecord } from '@campuspilot/components/assistant';
 import { Avatar, AvatarFallback, AvatarImage } from '@campuspilot/ui/components/avatar';
@@ -32,6 +34,19 @@ function PersonTile({ name, src }: { name: string; src?: string | null }) {
     <Avatar>
       {src ? <AvatarImage src={src} alt="" /> : null}
       <AvatarFallback>{initials(name)}</AvatarFallback>
+    </Avatar>
+  );
+}
+
+/**
+ * A staff member's avatar: their initials, or a person icon for an unnamed
+ * phone-only account (a phone number has no letters to take initials from).
+ */
+function StaffTile({ member }: { member: SchoolMemberDto }) {
+  return (
+    <Avatar>
+      {member.profileImageUrl ? <AvatarImage src={member.profileImageUrl} alt="" /> : null}
+      <StaffAvatarFallback person={member} />
     </Avatar>
   );
 }
@@ -201,7 +216,7 @@ function StaffRecords({ schoolId, view }: { schoolId: string; view: AssistantRec
         record: result.data
           ? {
               id: result.data.userId,
-              leading: <PersonTile name={result.data.name || staffSignInLabel(result.data)} src={result.data.profileImageUrl} />,
+              leading: <StaffTile member={result.data} />,
               title: result.data.name || 'Pending setup',
               subtitle: staffSignInLabel(result.data),
               badge: result.data.roles[0] ? (

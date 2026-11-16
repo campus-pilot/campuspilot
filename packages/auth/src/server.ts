@@ -39,6 +39,7 @@ import {
   importGoogleProfileImage,
 } from './profile-image';
 import {
+  changesOwnPhoneNumber,
   STAFF_DISABLED_PHONE_PATHS,
   STAFF_MIN_PASSWORD_LENGTH,
 } from './staff-login-policy';
@@ -111,14 +112,23 @@ export function createAuth(
   };
 
   /**
-   * Enforces the API-key policy the plugin has no option for. Creating a key
+   * Request rules the plugins have no option for. A person may not change
+   * their own sign-in phone number (see `changesOwnPhoneNumber`). The rest
+   * is the API-key policy. Creating a key
    * is refused once the owner holds API_KEY_MAX_ACTIVE_PER_USER active keys;
    * this check-then-insert is a per-user cap, not a lock, so simultaneous
    * creates can briefly exceed it by the number of racing requests. Updating
    * a key to `expiresIn: null` is refused because it would make the key
    * permanent, which the plugin's update endpoint otherwise allows.
    */
-  const apiKeyPolicy = createAuthMiddleware(async (ctx) => {
+  const staffRequestPolicy = createAuthMiddleware(async (ctx) => {
+    if (changesOwnPhoneNumber(ctx.path, ctx.body)) {
+      throw new APIError('BAD_REQUEST', {
+        code: 'PHONE_NUMBER_CANNOT_BE_UPDATED',
+        message:
+          'Your sign-in phone number can only be changed by your school or CampusPilot support.',
+      });
+    }
     if (ctx.path === '/api-key/update' && ctx.body?.expiresIn === null) {
       throw new APIError('BAD_REQUEST', {
         code: 'API_KEY_EXPIRY_REQUIRED',
@@ -186,7 +196,7 @@ export function createAuth(
     }),
 
     hooks: {
-      before: apiKeyPolicy,
+      before: staffRequestPolicy,
       after: recordDynamicClientRegistration(db),
     },
     advanced: {
@@ -291,8 +301,9 @@ export function createAuth(
        * the same credential account as email sign-in, so both share one
        * password. Numbers are stored and looked up in E.164; clients convert
        * what the person typed before calling. The SMS endpoints are disabled
-       * above, and the plugin itself refuses `/update-user` changes to the
-       * number, so only staff procedures can set it.
+       * above, and `/update-user` changes to the number (including removing
+       * it, which the plugin allows) are refused by `staffRequestPolicy`, so
+       * only staff procedures can set it.
        */
       phoneNumber({
         phoneNumberValidator: (value) => isE164PhoneNumber(value),

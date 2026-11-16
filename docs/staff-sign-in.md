@@ -25,10 +25,11 @@ read as Indian when it has no `+` country code (the shared
 
 CampusPilot sends no SMS. The plugin's code endpoints (`/phone-number/send-otp`,
 `/verify`, `/request-password-reset`, `/reset-password`) are in `disabledPaths`
-(`STAFF_DISABLED_PHONE_PATHS`), and the plugin refuses `/update-user` changes
-to the number. Forgotten passwords are reset by staff (below).
+(`STAFF_DISABLED_PHONE_PATHS`), and `/update-user` changes to the number,
+including removing it, are refused (`changesOwnPhoneNumber`; the plugin alone
+lets `null` through). Forgotten passwords are reset by staff (below).
 
-## Data model (`user`, migration 0069)
+## Data model (`user`, migration 0070)
 
 | Column | Meaning |
 | --- | --- |
@@ -60,7 +61,9 @@ object, because MCP tools need one; both or neither is a validation error).
 - Email: unchanged. A new account gets the address as verified and no
   password; the person uses Google or adds a password in account settings.
 - Phone: needs `school.member.password.issue` **in addition to**
-  `school.member.invite`, checked before any write. A new account is created
+  `school.member.invite`, checked before any write, and a signed-in person
+  (`authMethod: 'session'`): AI apps, API keys and the assistant are refused,
+  because the result carries the password. A new account is created
   with a placeholder email, the number and a generated password
   (`generateStaffPassword`, the `word-word-NN` format), returned once as
   `issuedPassword`. If someone already has that number they are just added to
@@ -86,7 +89,10 @@ kept. Nobody can view a password later; only set a new one.
 | Account settings → Password (management) | The person | `changePassword` with `revokeOtherSessions`, or `auth.setPassword` when there is no password yet. |
 
 Managers deliberately lack `school.member.password.issue`: they could
-otherwise take over the principal's account.
+otherwise take over the principal's account. For the same reason, appointing
+a principal (inviting with the `principal` role, or adding it in
+`updateMemberRoles`) also needs `school.member.password.issue`, so a manager
+cannot promote themselves first (`grantsPrincipalRole`).
 
 ## Changing sign-in details (admin app)
 

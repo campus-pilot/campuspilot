@@ -36,6 +36,7 @@ import { requireSchoolPermission } from "../../../permissions/school";
 import {
   staffIdentityColumns,
   staffIdentitySearch,
+  staffSignInSortKey,
   toStaffIdentity,
 } from "../../../users/staff-identity";
 import { createProfileImageUrl } from "../../auth/profile-image";
@@ -50,6 +51,10 @@ import {
   updateSchoolMemberRolesInputSchema,
   type SchoolMemberDto,
 } from "./member.dto";
+import {
+  grantsPrincipalRole,
+  mayReceiveIssuedPassword,
+} from "./member-password-policy";
 
 /**
  * The one sign-in identifier an invitation names. The input schema already
@@ -213,7 +218,8 @@ export const schoolMemberRouter = {
         );
         const orderByColumn = {
           name: user.name,
-          email: user.email,
+          // The "Signs in with" column: never the hidden placeholder.
+          email: staffSignInSortKey,
           addedAt: schoolMemberTable.addedAt,
         }[input.orderBy.field];
         const orderDirection = input.orderBy.direction === "asc" ? asc : desc;
@@ -363,7 +369,18 @@ export const schoolMemberRouter = {
         // A phone-number account can only sign in with a password, so
         // inviting by phone may issue one: that is its own permission,
         // checked in addition to inviting and before anything is written.
-        if (identity.kind === "phone") {
+        // So is appointing a principal, who would hold that permission.
+        // The password is returned in the result, so only a signed-in
+        // person may receive it (this procedure is also an MCP tool).
+        if (identity.kind === "phone" && !mayReceiveIssuedPassword(context.principal)) {
+          throw rpcError.forbidden(
+            "Invite staff by phone number from CampusPilot itself: it issues a password that only a signed-in person may receive.",
+          );
+        }
+        if (
+          identity.kind === "phone" ||
+          grantsPrincipalRole([], input.roles.map(({ role }) => role))
+        ) {
           await assertPermission(
             context,
             {
@@ -565,7 +582,7 @@ export const schoolMemberRouter = {
     .input(updateSchoolMemberRolesInputSchema)
     .use(requireSchoolPermission(SCHOOL_ACTIONS.UPDATE_MEMBER_ROLES))
     .output(schoolMemberDtoSchema)
-    .handler(async ({ context, input }) => {
+    .handler(async ({ context, input, signal }) => {
       try {
         return await context.db.transaction(async (transaction) => {
           const existingMember = await findSchoolMember(
@@ -574,6 +591,24 @@ export const schoolMemberRouter = {
             input.userId,
           );
           if (!existingMember) throw rpcError.notFound("School member");
+          // A new principal holds password issuing, so appointing one needs
+          // it too: a manager cannot promote themselves to take over staff
+          // accounts.
+          if (
+            grantsPrincipalRole(
+              existingMember.roles.map(({ role }) => role),
+              input.roles.map(({ role }) => role),
+            )
+          ) {
+            await assertPermission(
+              context,
+              {
+                action: SCHOOL_ACTIONS.ISSUE_MEMBER_PASSWORD,
+                resource: { kind: "school", schoolId: input.schoolId },
+              },
+              signal,
+            );
+          }
 
           // The supplied array is the complete desired assignment set. This
           // keeps omitted roles from lingering after an update.

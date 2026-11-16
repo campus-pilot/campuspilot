@@ -4,6 +4,7 @@ import {
   oauthAccessToken,
   oauthConsent,
   oauthRefreshToken,
+  user,
 } from '@campuspilot/db/schema/auth';
 import { hashPassword } from 'better-auth/crypto';
 import { and, eq, inArray } from 'drizzle-orm';
@@ -48,6 +49,11 @@ export function generateStaffPassword(): string {
  * or rolls back with the caller (for example together with a new user).
  * Hashing uses Better Auth's default hasher, the one sign-in verifies with.
  *
+ * Locks the user row first, so concurrent sets for one person run one after
+ * the other: `account` has no unique key on the credential, and two
+ * first-time sets would otherwise both insert one, leaving one issued
+ * password that never works.
+ *
  * This does not sign anyone out: callers run `revokeStaffAccess` after their
  * transaction commits.
  */
@@ -57,6 +63,11 @@ export async function setStaffPassword(
 ): Promise<void> {
   const now = input.now ?? new Date();
   const passwordHash = await hashPassword(input.password);
+  await executor
+    .select({ id: user.id })
+    .from(user)
+    .where(eq(user.id, input.userId))
+    .for('update');
   const updated = await executor
     .update(account)
     .set({ password: passwordHash, updatedAt: now })

@@ -2,6 +2,10 @@
 
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import {
+  sessionUserSignInIdentity,
+  staffSignInLabel,
+} from '@campuspilot/components/staff-account/staff-sign-in-label';
 import { AccessDenied } from '@/components/access-denied';
 import { AuthLoading } from '@/components/auth-loading';
 import { authClient } from '@/lib/auth-client';
@@ -20,5 +24,11 @@ export default function UnauthorizedPage() {
     return <AuthLoading />;
   }
 
-  return <AccessDenied email={session.user.email} />;
+  // A phone-only account's stored email is a placeholder; show what the
+  // person actually signs in with.
+  return (
+    <AccessDenied
+      signInLabel={staffSignInLabel(sessionUserSignInIdentity(session.user))}
+    />
+  );
 }

@@ -10,8 +10,12 @@ export const ASSISTANT_CONVERSATION_OBJECT = 'assistantConversation';
 
 export type ProcessRunInput = {
   runId: string;
-  /** The requesting user, for the prompt (read from the user's account when the run is handed over). */
-  user: { name: string; email: string };
+  /**
+   * The requesting user, for the prompt (read from the user's account when
+   * the run is handed over). `email` is null for a phone-only account, whose
+   * stored address is a placeholder.
+   */
+  user: { name: string; email: string | null };
 };
 
 /** How a paused tool call resumes: the user's decision, or a stop. */

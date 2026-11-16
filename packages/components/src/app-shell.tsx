@@ -25,6 +25,7 @@ import {
   Moon,
   Sun,
   TriangleAlert,
+  UserRound,
 } from 'lucide-react';
 import {
   Avatar,
@@ -581,7 +582,9 @@ export function AppShellUserMenu({
             {user.avatarUrl ? (
               <AvatarImage src={user.avatarUrl} alt="" />
             ) : null}
-            <AvatarFallback>{initials(user.name)}</AvatarFallback>
+            {/* An unnamed account (for example one added by phone number)
+                has no initials, so it gets a person icon. */}
+            <AvatarFallback>{initials(user.name) || <UserRound aria-hidden />}</AvatarFallback>
           </Avatar>
           {!isAvatarTrigger ? (
             <>

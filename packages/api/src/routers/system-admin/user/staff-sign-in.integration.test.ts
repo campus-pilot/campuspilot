@@ -4,12 +4,15 @@ import { user } from '@campuspilot/db/schema/auth';
 import { schoolMemberTable } from '@campuspilot/db/schema/school-member';
 import { eq } from 'drizzle-orm';
 import { randomInt, randomUUID } from 'node:crypto';
+import { createRouterClient } from '@orpc/server';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { cookiesOf } from '../../../../test/cadet';
 import { expectRpcCode } from '../../../../test/finance/assertions';
+import { appRouter } from '../../index';
 import {
   createAdminSession,
+  createHandlerContext,
   createRegularUserSession,
   createSchoolStaffSession,
   createTestClient,
@@ -102,6 +105,19 @@ describe('staff phone-number sign-in', () => {
       expect(wrong.response.status).toBe(401);
     });
 
+    it('does not let a person remove their own sign-in number', async () => {
+      const { phone, member, password } = await invitePhoneTeacher();
+      const { cookie } = await signInWithPhone(phone.e164, password);
+      const response = await staffAuth.api.updateUser({
+        body: { phoneNumber: null },
+        headers: new Headers({ cookie }),
+        asResponse: true,
+      });
+      expect(response.status).toBe(400);
+      const [row] = await db.select().from(user).where(eq(user.id, member.userId));
+      expect(row!.phoneNumber).toBe(phone.e164);
+    });
+
     it('refuses a placeholder email typed as an invitation address', async () => {
       await expectRpcCode(
         createTestClient(principal).school.inviteMember({
@@ -117,6 +133,26 @@ describe('staff phone-number sign-in', () => {
       const phone = typedIndianMobile();
       await expectRpcCode(
         createTestClient(manager).school.inviteMember({
+          schoolId: school.id,
+          phoneNumber: phone.typed,
+          roles: [{ role: 'teacher', meta: null }],
+        }),
+        'FORBIDDEN',
+      );
+      const rows = await db.select().from(user).where(eq(user.phoneNumber, phone.e164));
+      expect(rows).toHaveLength(0);
+    });
+
+    it('refuses phone invitations from AI apps and API keys, which would receive the password', async () => {
+      const phone = typedIndianMobile();
+      const apiKeyClient = createRouterClient(appRouter, {
+        context: async () => ({
+          ...createHandlerContext(principal),
+          principal: { authMethod: 'apiKey' as const },
+        }),
+      });
+      await expectRpcCode(
+        apiKeyClient.school.inviteMember({
           schoolId: school.id,
           phoneNumber: phone.typed,
           roles: [{ role: 'teacher', meta: null }],
@@ -176,6 +212,46 @@ describe('staff phone-number sign-in', () => {
         createTestClient(manager).school.issueMemberPassword({ schoolId: school.id, userId: member.userId }),
         'FORBIDDEN',
       );
+    });
+  });
+
+  describe('appointing principals', () => {
+    it('a manager cannot make themselves principal and then reset the principal', async () => {
+      await expectRpcCode(
+        createTestClient(manager).school.updateMemberRoles({
+          schoolId: school.id,
+          userId: manager.user.id,
+          roles: [
+            { role: 'manager', meta: null },
+            { role: 'principal', meta: null },
+          ],
+        }),
+        'FORBIDDEN',
+      );
+      await expectRpcCode(
+        createTestClient(manager).school.issueMemberPassword({
+          schoolId: school.id,
+          userId: principal.user.id,
+        }),
+        'FORBIDDEN',
+      );
+    });
+
+    it('a manager cannot invite a principal, but a principal can', async () => {
+      await expectRpcCode(
+        createTestClient(manager).school.inviteMember({
+          schoolId: school.id,
+          email: `${randomUUID()}@school.test`,
+          roles: [{ role: 'principal', meta: null }],
+        }),
+        'FORBIDDEN',
+      );
+      const invited = await createTestClient(principal).school.inviteMember({
+        schoolId: school.id,
+        email: `${randomUUID()}@school.test`,
+        roles: [{ role: 'principal', meta: null }],
+      });
+      expect(invited.roles.map(({ role }) => role)).toEqual(['principal']);
     });
   });
 
