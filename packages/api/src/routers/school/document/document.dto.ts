@@ -64,6 +64,22 @@ export const isFinanceDocumentType = (type: DocumentType) =>
 export const TEMPLATE_ONLY_DOCUMENT_TYPES = ["notice", "question_paper"] as const satisfies readonly DocumentType[];
 export type TemplateOnlyDocumentType = (typeof TEMPLATE_ONLY_DOCUMENT_TYPES)[number];
 export type AcademicDocumentType = Exclude<DocumentType, "bill" | "receipt" | "statement" | TemplateOnlyDocumentType>;
+/**
+ * The feature every document **generated** through `previewDocument` /
+ * `generateDocument` belongs to. Those procedures accept the generator types
+ * only (every type but the template-only ones), and all of them are student
+ * management documents, so the procedures are gated on this one feature.
+ * The type below fails the build if a generator type is ever given another
+ * feature in {@link DOCUMENT_TYPE_FEATURE}; the gate must then be decided per
+ * source instead.
+ */
+export const GENERATOR_DOCUMENT_FEATURE = "studentManagement" as const satisfies SchoolFeatureKey;
+type GeneratorDocumentType = Exclude<DocumentType, TemplateOnlyDocumentType>;
+const generatorTypesShareOneFeature: (typeof DOCUMENT_TYPE_FEATURE)[GeneratorDocumentType] extends typeof GENERATOR_DOCUMENT_FEATURE
+  ? true
+  : never = true;
+void generatorTypesShareOneFeature;
+
 export const documentTemplatePageSizeSchema = z.enum(["full", "half"]);
 export type DocumentTemplatePageSize = z.infer<
   typeof documentTemplatePageSizeSchema

@@ -7,11 +7,16 @@ import { expectFeatureDisabled, expectPermissionDenied } from '../../test/featur
 import {
   createRegularUserSession,
   createSchoolStaffSession,
+  createTestAdmission,
+  createTestClass,
   createTestClient,
   createTestSchool,
   createTestSession,
+  createTestStudent,
   setTestSchoolFeature,
 } from '../../test/fixtures';
+import { createAdmissionWithLogin, createExamSession, createResultsSchool, createSubjectClass, enroll, runExam } from '../../test/exam-results';
+import { expectRpcCode } from '../../test/finance/assertions';
 import { isSchoolFeatureEnabled, readSchoolFeatureFlags } from './feature-flags.service';
 
 const admissionInput = (schoolId: string) => ({
@@ -72,16 +77,91 @@ describe('student management feature', () => {
     await expectPermissionDenied(outsider.school.listAdmissions({ schoolId: school.id }));
   });
 
-  it('leaves the dashboard without admissions, students and billing, and without their jobs', async () => {
+  it('leaves the dashboard without admissions and billing and without their jobs, and keeps classrooms without student counts', async () => {
     const { school, session, client } = await staffOnlySchool();
+    const { schoolClass } = await createTestClass({ schoolId: school.id, label: 'Class 4' });
+    // A student the school enrolled before the feature was switched off is kept, and not counted.
+    const admission = await createTestAdmission({ schoolId: school.id, name: 'Kept Student', admissionNo: 'SM-KEPT' });
+    await createTestStudent({ schoolId: school.id, admissionId: admission.id, sessionId: session.id, classId: schoolClass.id, sectionId: null, rollNo: null });
+
     const dashboard = await client.school.getDashboard({ schoolId: school.id, sessionId: session.id });
     expect(dashboard).toMatchObject({
       admissions: null,
-      classrooms: null,
       billing: null,
       actions: { createAdmission: false, recordPayment: false, enterResults: false, createNotice: false },
     });
     expect(dashboard.examinations).not.toBeNull();
+    expect(dashboard.classrooms).toMatchObject({
+      classCount: 1,
+      sectionCount: 1,
+      studentCount: null,
+      classes: [{ id: schoolClass.id, sectionCount: 1, studentCount: null }],
+    });
+    const classes = await client.school.listClasses({ schoolId: school.id, sessionId: session.id });
+    expect(classes.map(({ id, studentCount }) => ({ id, studentCount }))).toEqual([{ id: schoolClass.id, studentCount: null }]);
+
+    // With the feature the same school counts its students again.
+    await setTestSchoolFeature(school.id, 'studentManagement', true);
+    expect((await client.school.getDashboard({ schoolId: school.id, sessionId: session.id })).classrooms).toMatchObject({
+      studentCount: 1,
+      classes: [{ id: schoolClass.id, studentCount: 1 }],
+    });
+    expect((await client.school.listClasses({ schoolId: school.id, sessionId: session.id }))[0]?.studentCount).toBe(1);
+  });
+
+  it('refuses student-only session settings without it, and lets examinations be configured', async () => {
+    const { school, session, client } = await staffOnlySchool();
+    const scope = { schoolId: school.id, sessionId: session.id };
+    // What the staff-only settings screen sends for a session that stored no configuration: its first
+    // examination, and the hidden settings at their defaults.
+    const firstExam = {
+      examConfig: { term: { name: 'Term 1', order: 1 } },
+      coScholasticAreas: {},
+      gradingScale: {},
+      attendanceTracking: { enabled: false },
+    };
+    await expect(client.school.updateSession({ ...scope, sessionConfig: firstExam })).resolves.toMatchObject({
+      sessionConfig: { examConfig: { term: { name: 'Term 1', order: 1 } } },
+    });
+
+    await expectFeatureDisabled(
+      client.school.updateSession({ ...scope, sessionConfig: { ...firstExam, attendanceTracking: { enabled: true } } }),
+      'studentManagement',
+    );
+    await expectFeatureDisabled(
+      client.school.updateSession({ ...scope, sessionConfig: { ...firstExam, gradingScale: { a: { label: 'A', minScore: 80 } } } }),
+      'studentManagement',
+    );
+    await expectFeatureDisabled(
+      client.school.updateSession({ ...scope, sessionConfig: { ...firstExam, coScholasticAreas: { art: { name: 'Art' } } } }),
+      'studentManagement',
+    );
+    // Nothing of the refused changes was saved.
+    expect((await client.school.getSession(scope)).sessionConfig).toMatchObject({
+      attendanceTracking: { enabled: false },
+      gradingScale: {},
+      coScholasticAreas: {},
+    });
+
+    // A new session may carry examinations, and only the defaults of the student-only settings.
+    await expectFeatureDisabled(
+      client.school.createSession({
+        schoolId: school.id,
+        sessionStartYear: 2027,
+        sessionEndYear: 2028,
+        sessionConfig: { ...firstExam, attendanceTracking: { enabled: true } },
+      }),
+      'studentManagement',
+    );
+    await expect(
+      client.school.createSession({ schoolId: school.id, sessionStartYear: 2027, sessionEndYear: 2028, sessionConfig: firstExam }),
+    ).resolves.toMatchObject({ sessionStartYear: 2027 });
+
+    // With the feature the same change is an ordinary save.
+    await setTestSchoolFeature(school.id, 'studentManagement', true);
+    await expect(
+      client.school.updateSession({ ...scope, sessionConfig: { ...firstExam, attendanceTracking: { enabled: true } } }),
+    ).resolves.toMatchObject({ sessionConfig: { attendanceTracking: { enabled: true } } });
   });
 
   it('takes notices and the Cadet Portal with it, keeping their switches, and gives them back', async () => {
@@ -105,5 +185,69 @@ describe('student management feature', () => {
     const { school, client } = await staffOnlySchool();
     const { features } = await client.school.getFeatureFlags({ schoolId: school.id });
     expect(features.studentManagement).toEqual({ enabled: false, active: false, config: null });
+  });
+});
+
+describe('examination lifecycle without student management', () => {
+  /** A school with one enrolled student and a started examination that has no results yet. */
+  async function startedExam() {
+    const { school, principal } = await createResultsSchool({ features: ['cadet'] });
+    const sessionId = await createExamSession(school.id, 2026, { term: 'Term 1' }, { active: true });
+    const placement = await createSubjectClass(school.id, 'Class 7', { maths: 'Mathematics' });
+    const { admission } = await createAdmissionWithLogin(principal, school.id, 'Asha Rao');
+    const student = await enroll({ schoolId: school.id, admissionId: admission.id, sessionId, ...placement });
+    const scope = { schoolId: school.id, sessionId, examSlug: 'term' };
+    await runExam(principal, scope, []);
+    return { school, principal, scope, classId: placement.classId, studentId: student.id };
+  }
+
+  it('completes an examination whose results can no longer be entered, where a school with the feature must finish them', async () => {
+    const { school, principal, scope } = await startedExam();
+    // With student management, completion waits for every registered student's approved results.
+    await expectRpcCode(principal.school.transitionExam({ ...scope, status: 'completed' }), 'BAD_REQUEST');
+
+    await setTestSchoolFeature(school.id, 'studentManagement', false);
+    await expect(principal.school.transitionExam({ ...scope, status: 'completed' })).resolves.toMatchObject({ updatedCount: 1 });
+    expect((await principal.school.getExamOverview(scope)).status).toBe('completed');
+  });
+
+  it('completes through the per-plan transition too', async () => {
+    const { school, principal, scope, classId } = await startedExam();
+    const [plan] = (await principal.school.listExamPlans(scope)).items;
+    const planScope = { schoolId: school.id, sessionId: scope.sessionId, classId, examPlanId: plan!.id };
+    await expectRpcCode(principal.school.transitionExamPlan({ ...planScope, status: 'completed' }), 'BAD_REQUEST');
+
+    await setTestSchoolFeature(school.id, 'studentManagement', false);
+    await expect(principal.school.transitionExamPlan({ ...planScope, status: 'completed' })).resolves.toMatchObject({ status: 'completed' });
+    expect((await principal.school.getExamOverview(scope)).status).toBe('completed');
+  });
+
+  it('does not release results that were never reviewed once the feature is back', async () => {
+    const { school, principal, scope, classId, studentId } = await startedExam();
+    await setTestSchoolFeature(school.id, 'studentManagement', false);
+    await principal.school.transitionExam({ ...scope, status: 'completed' });
+    await setTestSchoolFeature(school.id, 'studentManagement', true);
+
+    // Completed, but nobody has results: students must not be told they are released.
+    await expect(principal.school.releaseExamToCadet(scope)).rejects.toMatchObject({
+      code: 'BAD_REQUEST',
+      message: expect.stringContaining('Reopen the examination'),
+    });
+    expect((await principal.school.getExamOverview(scope)).cadetReleasedAt).toBeNull();
+
+    // Reopen, finish the results, complete again: now it can be released.
+    await principal.school.transitionExam({ ...scope, status: 'active' });
+    const workspace = await principal.school.getStudentExam({ ...scope, classId, studentId });
+    await principal.school.saveStudentExam({
+      ...scope,
+      classId,
+      studentId,
+      approved: true,
+      daysAttended: null,
+      coScholastics: null,
+      subjects: workspace.subjects.map(({ plan }) => ({ examPlanId: plan.id, marks: { written: 70 } })),
+    });
+    await principal.school.transitionExam({ ...scope, status: 'completed' });
+    await expect(principal.school.releaseExamToCadet(scope)).resolves.toMatchObject({ cadetReleasedAt: expect.any(String) });
   });
 });

@@ -45,11 +45,16 @@ export function resolveSchoolFeature<K extends SchoolFeatureKey>(
   query: FeatureFlagsQueryState,
   feature: K,
 ): SchoolFeatureView<K> {
-  if (query.features) {
-    const state = query.features[feature];
-    return { enabled: state.active, config: state.config, status: 'ready' };
-  }
   const closed = { enabled: DISABLED_SCHOOL_FEATURE.enabled, config: DISABLED_SCHOOL_FEATURE.config };
+  // The flags as an older API may still send them while a release rolls out
+  // (no entry for a new feature, or entries without `active`): such an answer
+  // does not say whether the school has the feature, so it is `unknown`, not
+  // a crash and not "disabled".
+  const state: Partial<SchoolFeatureState<K>> | undefined = query.features?.[feature];
+  if (state && typeof state.active === 'boolean') {
+    return { enabled: state.active, config: state.config ?? null, status: 'ready' };
+  }
+  if (query.features) return { ...closed, status: 'unknown' };
   if (query.isPending) return { ...closed, status: 'pending' };
   return { ...closed, status: 'unknown' };
 }

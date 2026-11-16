@@ -358,15 +358,15 @@ function WorkspaceLayout({
   // while it loads or is closed, the tab is simply absent.
   const assistant = useAssistantGate(scope.schoolId);
   // Without student management an examination has no results, timetable or
-  // attendance: its Results route only creates the subject plans (shown as
-  // Subjects, until there are plans), and the papers and lifecycle remain.
+  // attendance: its papers and lifecycle remain. (The tabs show only once the
+  // exam has subject plans; before that the page is plan creation alone.)
   const studentManagement = useSchoolFeature(scope.schoolId, 'studentManagement').enabled;
   const items = [
-    ...(studentManagement || overview.planCount <= 0
+    ...(studentManagement
       ? [
           {
             id: 'results',
-            label: studentManagement ? 'Results' : 'Subjects',
+            label: 'Results',
             href: examResultsHref(scope),
             action: SCHOOL_ACTIONS.READ_EXAM_PLANS,
             ai: false,
@@ -405,9 +405,6 @@ function WorkspaceLayout({
         ]
       : []),
   ];
-  const selected =
-    items.find((item) => item.id === section) ??
-    items[0]!;
   // One paper is a workspace of its own that fills the window (see `isQuestionPaperWorkspacePath`).
   if (isQuestionPaperWorkspacePath(path, base)) return <>{children}</>;
   const heading = (
@@ -439,7 +436,8 @@ function WorkspaceLayout({
       navigation={
         overview.planCount > 0 ? (
           <Tabs
-            value={selected.id}
+            // The tab of the open section, or the first one when that section is not offered to this school.
+            value={(items.find((item) => item.id === section) ?? items[0])?.id}
             onValueChange={async (value) => {
               const item = items.find((item) => item.id === value);
               if (item && await confirmNavigation()) router.push(item.href);

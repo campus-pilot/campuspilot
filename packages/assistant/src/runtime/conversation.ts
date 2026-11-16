@@ -26,7 +26,8 @@ import {
 } from './contract';
 import { buildModelContextWithStats, type ModelContextDeps } from './context';
 import { buildAssistantPrompt, istInstant, type AssistantConversationFacts } from './prompt';
-import { missingSchoolFeatures, readActiveSchoolFeatures } from './school-features';
+import { readActiveSchoolFeatures } from './school-features';
+import { unavailableSchoolWork } from './unavailable-work';
 import type { ProviderRegistry } from './providers/registry';
 import { billedUsageOf, type ModelProvider, type ModelToolResult, type TranscriptEntry } from './providers/types';
 import { showViewInputSchema } from '@campuspilot/assistant-contract/views';
@@ -363,7 +364,6 @@ export function createRunProcessor(deps: AssistantConversationDeps) {
       facts: {
         schoolId: run.schoolId,
         schoolName: await lookUpSchoolName(run.id, run.schoolId),
-        missingFeatures: missingSchoolFeatures(await readActiveSchoolFeatures(run.schoolId)),
         userName: user.name,
         userEmail: user.email,
         today: now.slice(0, 10),
@@ -479,7 +479,8 @@ export function createRunProcessor(deps: AssistantConversationDeps) {
     let result: Awaited<ReturnType<ModelProvider['step']>>;
     try {
       result = await provider.step({
-        prompt: buildAssistantPrompt(run.facts),
+        // Read with the tools above, so the model is told about exactly the features whose tools it was not given.
+        prompt: buildAssistantPrompt(run.facts, unavailableSchoolWork(catalog.withheldFeatures)),
         tools: catalog.ordered,
         transcript,
         onText,

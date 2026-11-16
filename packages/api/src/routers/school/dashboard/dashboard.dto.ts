@@ -30,13 +30,14 @@ const dashboardClassroomsSchema = z.object({
   scope: z.enum(["school", "assigned"]),
   classCount: z.number().int().nonnegative(),
   sectionCount: z.number().int().nonnegative(),
-  studentCount: z.number().int().nonnegative(),
+  /** Null when the school has no student management: students are not counted, which is not the same as none. */
+  studentCount: z.number().int().nonnegative().nullable().describe('Students enrolled in these classes this session; null when the school does not have student management.'),
   classes: z.array(
     z.object({
       id: z.string(),
       label: z.string(),
       sectionCount: z.number().int().nonnegative(),
-      studentCount: z.number().int().nonnegative(),
+      studentCount: z.number().int().nonnegative().nullable().describe('Null when the school does not have student management.'),
     }),
   ),
 });

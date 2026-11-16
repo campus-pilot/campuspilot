@@ -80,8 +80,6 @@ function requireSourceTypePermission(
         action: isFinanceDocument(input.source.documentType) ? financeAction : academicAction,
         resource: { kind: "school", schoolId: input.schoolId },
       }, signal);
-      // After the permission, like every gate (see `requireDocumentTypePermission`).
-      await assertSchoolFeatureEnabled(context.db, input.schoolId, dto.DOCUMENT_TYPE_FEATURE[input.source.documentType]);
       return next();
     },
   );
@@ -522,6 +520,10 @@ export const schoolDocumentRouter = {
     })
     .input(dto.generateDocumentSchema)
     .use(requireSourceTypePermission(SCHOOL_ACTIONS.GENERATE_DOCUMENTS, SCHOOL_ACTIONS.GENERATE_FINANCE_DOCUMENTS))
+    // Every source a document is generated from belongs to student management
+    // (`GENERATOR_DOCUMENT_FEATURE`). Stated as the procedure's own gate so the
+    // MCP catalog records it and the tool is not offered to a school without it.
+    .use(requireSchoolFeature(dto.GENERATOR_DOCUMENT_FEATURE))
     .use(requireSourcePermissions)
     .output(dto.previewOutputSchema)
     .handler(async ({ context, input }) => {
@@ -554,6 +556,10 @@ export const schoolDocumentRouter = {
     })
     .input(dto.generateDocumentSchema)
     .use(requireSourceTypePermission(SCHOOL_ACTIONS.GENERATE_DOCUMENTS, SCHOOL_ACTIONS.GENERATE_FINANCE_DOCUMENTS))
+    // Every source a document is generated from belongs to student management
+    // (`GENERATOR_DOCUMENT_FEATURE`). Stated as the procedure's own gate so the
+    // MCP catalog records it and the tool is not offered to a school without it.
+    .use(requireSchoolFeature(dto.GENERATOR_DOCUMENT_FEATURE))
     .use(requireSourcePermissions)
     .output(
       z.object({

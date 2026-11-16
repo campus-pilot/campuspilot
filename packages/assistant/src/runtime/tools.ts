@@ -188,13 +188,22 @@ export async function loadToolCatalog(token: string): Promise<AssistantToolCatal
  * does not have is left out, so the model is never offered a tool every call
  * of which the API would refuse. The listing (and its cache) is the same for
  * every school; only this view differs.
+ *
+ * `withheldFeatures` is the features that took at least one tool out: the
+ * missing features the model should be told about. A feature that gates none
+ * of the assistant's tools is not in it, whether the school has it or not.
  */
 export function toolCatalogForSchool(
   catalog: AssistantToolCatalog,
   activeFeatures: ReadonlySet<string>,
-): AssistantToolCatalog {
-  const ordered = catalog.ordered.filter((tool) => tool.features.every((feature) => activeFeatures.has(feature)));
-  return { tools: new Map(ordered.map((tool) => [tool.modelName, tool])), ordered };
+): AssistantToolCatalog & { withheldFeatures: ReadonlySet<string> } {
+  const withheldFeatures = new Set<string>();
+  const ordered = catalog.ordered.filter((tool) => {
+    const missing = tool.features.filter((feature) => !activeFeatures.has(feature));
+    for (const feature of missing) withheldFeatures.add(feature);
+    return missing.length === 0;
+  });
+  return { tools: new Map(ordered.map((tool) => [tool.modelName, tool])), ordered, withheldFeatures };
 }
 
 export type ToolError = { code: string; message: string };

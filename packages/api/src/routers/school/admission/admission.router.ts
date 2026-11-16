@@ -507,7 +507,8 @@ export const schoolAdmissionRouter = {
           );
           // A school without the Cadet Portal cannot issue portal passwords.
           // Checked after the permission, and only when a password was asked
-          // for: creating an admission itself needs no feature.
+          // for: creating an admission itself needs student management alone
+          // (the router's gate in `school.router.ts`), not the Cadet Portal.
           await assertSchoolFeatureEnabled(context.db, input.schoolId, "cadet");
         }
         return await context.db.transaction(async (transaction) => {

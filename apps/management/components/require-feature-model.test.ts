@@ -47,6 +47,20 @@ test('the UI follows whether the school has a feature, not its switch', () => {
   assert.deepEqual(resolveSchoolFeature(loaded, 'studentManagement'), { enabled: false, config: null, status: 'ready' });
 });
 
+test('an answer from an older API is unknown, not a crash and not disabled', () => {
+  // No entry for a feature the API does not know yet.
+  const { studentManagement: _new, ...withoutNewFeature } = features;
+  const older = { isPending: false, isError: false, features: withoutNewFeature as typeof features };
+  assert.deepEqual(resolveSchoolFeature(older, 'studentManagement'), { ...closed, status: 'unknown' });
+  // Entries without `active`: the switch alone does not say whether the school has the feature.
+  const withoutActive = {
+    isPending: false,
+    isError: false,
+    features: { ...features, cadet: { enabled: true, config: null } } as unknown as typeof features,
+  };
+  assert.deepEqual(resolveSchoolFeature(withoutActive, 'cadet'), { ...closed, status: 'unknown' });
+});
+
 test('only the server\'s disabled-feature answer makes the cached flags outdated (review U6)', () => {
   assert.equal(featureFlagsOutdatedBy({ code: 'FORBIDDEN', data: { reason: 'SCHOOL_FEATURE_DISABLED', feature: 'notices' } }), true);
   assert.equal(featureFlagsOutdatedBy({ code: 'FORBIDDEN', data: { reason: 'SCHOOL_FEATURE_DISABLED', feature: 'cadet' } }), true);

@@ -264,6 +264,9 @@ describe('school feature gates in the catalog', () => {
       'school.sendStudentResultNotification',
       'school.getStudentExamRemark',
       'school.listDocumentArtifacts',
+      // Every source they generate from is a student management document, so the gate is theirs.
+      'school.generateDocument',
+      'school.previewDocument',
       'school.listNotificationDeliveries',
     ]) {
       expect(tools.get(name)?.features, name).toContain('studentManagement');
@@ -282,6 +285,11 @@ describe('school feature gates in the catalog', () => {
       'school.listQuestionPapers',
       'school.getDashboard',
       'school.withdrawExamFromCadet',
+      // Template tools also serve the question paper and notice templates: refused per call, by document type.
+      'school.getActiveDocumentTemplate',
+      'school.saveDocumentTemplate',
+      // Session settings stay for examinations; only their student-only parts are refused, in the handler.
+      'school.updateSession',
     ]) {
       expect(tools.get(name)?.features, name).not.toContain('studentManagement');
     }

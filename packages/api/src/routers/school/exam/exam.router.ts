@@ -12,8 +12,9 @@ import { gateRouterOnSchoolFeature } from "../../../permissions/feature";
  * What of an examination needs student management (docs/feature-flags.md):
  * its students, results, attendance, timetable, result notifications and
  * per-student remarks. Without it an examination keeps its definition, its
- * subject plans, its lifecycle (`transitionExam`: with no students there is
- * nothing to wait for) and its question papers.
+ * subject plans, its lifecycle and its question papers. Completion then does
+ * not wait for results, which can no longer be entered (`transitionExam`'s
+ * `reviewResults`); students and results the school had before are kept.
  *
  * The Cadet Portal release keeps its own `cadet` gate (which requires student
  * management), and withdrawing a release stays open for the reason recorded

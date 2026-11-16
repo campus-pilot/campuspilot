@@ -1,6 +1,7 @@
 'use client';
 
-import { useSchoolFeature } from '@/components/require-feature';
+import { useSchoolFeatureCheck } from '@/components/require-feature';
+import type { SchoolFeatureKey } from '@campuspilot/api/routers/school/feature-flags/feature-flags.dto';
 import {
   QUESTION_PAPER_SEED_DRAFT,
   type AssistantAttachmentRef,
@@ -74,7 +75,10 @@ import {
   type OptimisticMessage,
 } from './use-assistant';
 
-const SUGGESTIONS: readonly AssistantSuggestion[] = [
+/** A starter prompt, with the school feature it needs when it is about one. */
+type StarterSuggestion = AssistantSuggestion & { feature?: SchoolFeatureKey };
+
+const SUGGESTIONS: readonly StarterSuggestion[] = [
   {
     id: 'teachers',
     icon: UserRoundX,
@@ -83,6 +87,8 @@ const SUGGESTIONS: readonly AssistantSuggestion[] = [
   },
   {
     id: 'admissions',
+    // Admissions belong to student management; a school without it is not offered this.
+    feature: 'studentManagement',
     icon: UserPlus,
     label: 'Show admissions that are not registered yet',
     prompt: 'Show me the admissions that are not registered yet.',
@@ -573,7 +579,10 @@ export function AssistantChat({
   const seedPaper = useSeedPaper(schoolId, activeSeed);
   const status = useAssistantStatus(schoolId);
   // The default prompt names what the school has: a school without student management has no students to ask about.
-  const studentManagement = useSchoolFeature(schoolId, 'studentManagement').enabled;
+  const hasFeature = useSchoolFeatureCheck(schoolId);
+  const studentManagement = hasFeature('studentManagement');
+  // The general starters, without those about a feature the school does not have.
+  const starters = SUGGESTIONS.filter(({ feature }) => feature === undefined || hasFeature(feature));
   const composerPlaceholder = placeholder ?? (studentManagement ? 'Ask about students, classes, exams…' : 'Ask about staff, classes, exams…');
   const { send, resend, isPending: sending } = useSendAssistantMessage(schoolId, surface);
   const stop = useStopAssistantRun();
@@ -728,7 +737,7 @@ export function AssistantChat({
               }
             />
             {welcome && !readOnlyReason && (suggestions || !activeSeed) ? (
-              <AssistantSuggestions suggestions={suggestions ?? SUGGESTIONS} onPick={sendDirectly} />
+              <AssistantSuggestions suggestions={suggestions ?? starters} onPick={sendDirectly} />
             ) : null}
           </div>
         </div>

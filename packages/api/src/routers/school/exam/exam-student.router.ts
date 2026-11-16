@@ -12,6 +12,7 @@ import {
 } from '@campuspilot/db/schema/exam';
 import { SCHOOL_ACTIONS } from '@campuspilot/opa/policies/school';
 import { protectedProcedure } from '../../../index';
+import { isSchoolFeatureEnabled } from '../../../feature-flags/feature-flags.service';
 import { requireSchoolPermission } from '../../../permissions/school';
 import { requireExamResultPermissions } from '../../../permissions/exam';
 import { rpcError, toRpcError } from '../../../errors';
@@ -389,7 +390,12 @@ export const schoolExamStudentRouter = {
     .output(z.object({ updatedCount: z.number().int().positive() }))
     .handler(async ({ context, input }) => {
       try {
-        return await context.db.transaction((tx) => transitionExam(tx, input));
+        return await context.db.transaction(async (tx) =>
+          // Results can only be reviewed in a school that has student management (see `transitionExam`).
+          transitionExam(tx, input, {
+            reviewResults: await isSchoolFeatureEnabled(tx, input.schoolId, 'studentManagement'),
+          }),
+        );
       } catch (error) {
         throw toRpcError(error);
       }

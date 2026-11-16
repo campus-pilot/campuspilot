@@ -2,10 +2,11 @@
 
 import type { ReactNode } from 'react';
 import { useParams, usePathname } from 'next/navigation';
-import { SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
-import { RequireFeature } from '@/components/require-feature';
+import { SCHOOL_ACTIONS, type PermissionCheck } from '@campuspilot/api/routers/authorization/authorization.dto';
+import { RequireFeature, useSchoolFeatureCheck } from '@/components/require-feature';
+import type { SchoolFeatureKey } from '@campuspilot/api/routers/school/feature-flags/feature-flags.dto';
 import { RequirePermissions } from '@/components/require-permissions';
-import type { AppShellNavigationEntry } from '@campuspilot/components/app-shell';
+import type { AppShellNavigationEntry, AppShellNavigationItem } from '@campuspilot/components/app-shell';
 import {
   Files,
   ClipboardCheck,
@@ -78,14 +79,61 @@ const pages: ManagementPageDescriptor<any>[] = [
   billingRunDetailPage,
 ];
 
+/**
+ * The workspace navigation. `has` answers whether the school is known to have
+ * a feature (unknown counts as no, like every feature check).
+ */
 function navigationFor(
   schoolId: string,
+  has: (feature: SchoolFeatureKey) => boolean,
   sessionId?: string,
 ): AppShellNavigationEntry[] {
   const sessionHref = (suffix = '') =>
     sessionId
       ? schoolSessionHref(schoolId, sessionId, suffix)
       : schoolHref(schoolId);
+  const schoolPermissions = (mode: 'any' | 'all', actions: readonly (typeof SCHOOL_ACTIONS)[keyof typeof SCHOOL_ACTIONS][]) =>
+    (children: ReactNode) => (
+      <RequirePermissions mode={mode} permissions={actions.map((action) => ({ action, resource: { kind: 'school', schoolId } }) as PermissionCheck)}>
+        {children}
+      </RequirePermissions>
+    );
+  /** The Operations items, each with the feature it belongs to. */
+  const operations: { feature: SchoolFeatureKey; item: AppShellNavigationItem }[] = [
+    {
+      feature: 'studentManagement',
+      item: {
+        type: 'item',
+        id: 'documents',
+        label: 'Documents',
+        href: sessionHref('/documents'),
+        icon: Files,
+        wrap: schoolPermissions('any', [SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES, SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_TEMPLATES, SCHOOL_ACTIONS.READ_DOCUMENT_ARTIFACTS, SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_ARTIFACTS]),
+      },
+    },
+    {
+      feature: 'studentManagement',
+      item: {
+        type: 'item',
+        id: 'billing',
+        label: 'Billing',
+        href: sessionHref('/billing'),
+        icon: CreditCard,
+        wrap: schoolPermissions('any', [SCHOOL_ACTIONS.READ_BILLING_REPORTS, SCHOOL_ACTIONS.READ_BILLING_RUNS, SCHOOL_ACTIONS.READ_ADMISSION_LEDGER]),
+      },
+    },
+    {
+      feature: 'notices',
+      item: {
+        type: 'item',
+        id: 'notices',
+        label: 'Notices',
+        href: sessionHref('/notices'),
+        icon: Megaphone,
+        wrap: schoolPermissions('all', [SCHOOL_ACTIONS.READ_NOTICE]),
+      },
+    },
+  ];
 
   return [
     {
@@ -148,33 +196,27 @@ function navigationFor(
         },
       ],
     },
-    {
-      type: 'group',
-      id: 'operations',
-      label: 'Operations',
-      // Documents, billing and notices all belong to student management (notices require it).
-      wrap: (children) => <RequireFeature schoolId={schoolId} feature="studentManagement">{children}</RequireFeature>,
-      items: [
-        { type: 'item', id: 'documents', label: 'Documents', href: sessionHref('/documents'), icon: Files, wrap: children => <RequirePermissions mode="any" permissions={[SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES, SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_TEMPLATES, SCHOOL_ACTIONS.READ_DOCUMENT_ARTIFACTS, SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_ARTIFACTS].map(action => ({ action, resource: { kind: 'school' as const, schoolId } }))}>{children}</RequirePermissions> },
-        {
-          type: 'item',
-          id: 'billing',
-          label: 'Billing',
-          href: sessionHref('/billing'),
-          icon: CreditCard,
-          wrap: children => <RequirePermissions mode="any" permissions={[SCHOOL_ACTIONS.READ_BILLING_REPORTS, SCHOOL_ACTIONS.READ_BILLING_RUNS, SCHOOL_ACTIONS.READ_ADMISSION_LEDGER].map(action => ({ action, resource: { kind: 'school' as const, schoolId } }))}>{children}</RequirePermissions>,
-        },
-        {
-          type: 'item',
-          id: 'notices',
-          label: 'Notices',
-          href: sessionHref('/notices'),
-          icon: Megaphone,
-          // A feature and a permission are separate gates; the item needs both.
-          wrap: children => <RequireFeature schoolId={schoolId} feature="notices"><RequirePermissions permissions={{ action: SCHOOL_ACTIONS.READ_NOTICE, resource: { kind: 'school', schoolId } }}>{children}</RequirePermissions></RequireFeature>,
-        },
-      ],
-    },
+    // Shown when the school has at least one of its items' features, so the
+    // label is never left over an empty group. Each item is gated on its own
+    // feature below (and on its own permission).
+    ...(operations.some(({ feature }) => has(feature))
+      ? [
+          {
+            type: 'group',
+            id: 'operations',
+            label: 'Operations',
+            items: operations.map(({ feature, item }) => ({
+              ...item,
+              // A feature and a permission are separate gates; the item needs both.
+              wrap: (children: ReactNode) => (
+                <RequireFeature schoolId={schoolId} feature={feature}>
+                  {item.wrap ? item.wrap(children) : children}
+                </RequireFeature>
+              ),
+            })),
+          } satisfies AppShellNavigationEntry,
+        ]
+      : []),
   ];
 }
 
@@ -194,6 +236,7 @@ export default function SchoolWorkspaceLayout({
   const selectedSessionId =
     routeSessionId ?? storedSessionId ?? activeSessionId;
   const page = pages.find((candidate) => candidate.matches(pathname));
+  const hasFeature = useSchoolFeatureCheck(schoolId);
   const params = {
     ...routeParams,
     schoolId,
@@ -205,7 +248,7 @@ export default function SchoolWorkspaceLayout({
       sessionId: selectedSessionId,
       sessions,
     },
-    navigation: navigationFor(schoolId, selectedSessionId),
+    navigation: navigationFor(schoolId, hasFeature, selectedSessionId),
     breadcrumbs: page?.breadcrumbs(params) ?? [],
     footerContent: (
       <SessionSwitcher
