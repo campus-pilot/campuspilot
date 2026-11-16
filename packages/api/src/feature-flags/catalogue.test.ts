@@ -42,11 +42,12 @@ describe('school feature catalogue', () => {
   });
 
   it('validates the assistant settings: a positive limit or none, and at least one eligible role, each once', () => {
-    const valid = { monthlyLimitUsd: 25, eligibleRoles: ['principal', 'teacher'] };
+    const valid = { monthlyLimitUsd: 25, eligibleRoles: ['principal', 'teacher'], voice: { enabled: true } };
     expect(parseSchoolFeatureConfig('assistant', valid)).toEqual(valid);
-    expect(parseSchoolFeatureConfig('assistant', { monthlyLimitUsd: null, eligibleRoles: ['manager'] })).toEqual({
+    expect(parseSchoolFeatureConfig('assistant', { monthlyLimitUsd: null, eligibleRoles: ['manager'], voice: { enabled: false } })).toEqual({
       monthlyLimitUsd: null,
       eligibleRoles: ['manager'],
+      voice: { enabled: false },
     });
     expect(() => parseSchoolFeatureConfig('assistant', { monthlyLimitUsd: 0, eligibleRoles: ['principal'] })).toThrow();
     expect(() => parseSchoolFeatureConfig('assistant', { monthlyLimitUsd: -5, eligibleRoles: ['principal'] })).toThrow();
@@ -54,6 +55,16 @@ describe('school feature catalogue', () => {
     expect(() => parseSchoolFeatureConfig('assistant', { monthlyLimitUsd: 10, eligibleRoles: ['janitor'] })).toThrow();
     expect(() => parseSchoolFeatureConfig('assistant', { monthlyLimitUsd: 10, eligibleRoles: ['teacher', 'teacher'] })).toThrow();
     expect(() => parseSchoolFeatureConfig('assistant', { eligibleRoles: ['teacher'] })).toThrow();
+  });
+
+  it('reads assistant settings saved before voice existed as voice off, and refuses a voice switch that is not a boolean', () => {
+    expect(parseSchoolFeatureConfig('assistant', { monthlyLimitUsd: 25, eligibleRoles: ['teacher'] })).toEqual({
+      monthlyLimitUsd: 25,
+      eligibleRoles: ['teacher'],
+      voice: { enabled: false },
+    });
+    expect(() => parseSchoolFeatureConfig('assistant', { monthlyLimitUsd: 25, eligibleRoles: ['teacher'], voice: { enabled: 'yes' } })).toThrow();
+    expect(() => parseSchoolFeatureConfig('assistant', { monthlyLimitUsd: 25, eligibleRoles: ['teacher'], voice: {} })).toThrow();
   });
 
   it('describes all features in the flags schema and rejects a missing one', () => {
@@ -156,7 +167,7 @@ describe('keyed feature entries', () => {
   });
 
   it('lists a school\'s flags as entries in catalogue order', () => {
-    const assistant = { enabled: true, config: { monthlyLimitUsd: null, eligibleRoles: ['principal' as const] } };
+    const assistant = { enabled: true, config: { monthlyLimitUsd: null, eligibleRoles: ['principal' as const], voice: { enabled: false } } };
     const entries: SchoolFeatureEntry[] = schoolFeatureEntries({
       studentManagement: { enabled: false, active: false, config: null },
       cadet: { enabled: true, active: false, config: null },

@@ -10,7 +10,7 @@ import type { z } from 'zod';
 
 import { rpcError } from '../../../errors';
 import type * as dto from './exam.dto';
-import { examOverview } from './exam-lifecycle.service';
+import { examIsReviewed, examOverview, sharedAssessmentRequired } from './exam-lifecycle.service';
 import { getExam, requireRegisteredExamStudents } from './exam.service';
 import { studentWhere } from './exam-student.service';
 import { examWhere, lifecycleWhere } from './exam.scope';
@@ -41,9 +41,12 @@ export async function requireNotReleasedToCadet(tx: DatabaseTransaction, scope: 
 /**
  * Releases or withdraws an examination's results in the Cadet Portal.
  *
- * Release requires the examination to be completed: completion is the point
- * at which every registered student's results are approved and become
- * read-only, so students never see marks that can still change. Release is
+ * Release requires the examination to be completed, so students never see
+ * marks that can still change, and every registered student's results to be
+ * approved. The second is checked here and not taken from completion: an
+ * examination completed while the school had no student management was
+ * completed without that review (`transitionExam`), and its results must be
+ * finished (reopen, approve, complete) before students are told. Release is
  * still its own recorded act (`cadetReleasedAt`), never implied by
  * completion, and reopening is refused while released (see `transitionExam`).
  * Historical sessions may be released too, because the portal shows earlier
@@ -61,7 +64,7 @@ export async function setExamCadetRelease(
   scope: ExamScope,
   release: { userId: string } | null,
 ) {
-  await getExam(tx, scope);
+  const { session } = await getExam(tx, scope);
   const [lifecycle] = await tx
     .select()
     .from(examLifecycleTable)
@@ -75,6 +78,10 @@ export async function setExamCadetRelease(
     if (lifecycle.cadetReleasedAt)
       throw rpcError.badRequest(
         'These results are already released to the Cadet Portal.',
+      );
+    if (!(await examIsReviewed(tx, scope, sharedAssessmentRequired(session.config))))
+      throw rpcError.badRequest(
+        'Some results of this examination are missing or not approved. Reopen the examination, finish and approve every result, and complete it again before releasing it to the Cadet Portal.',
       );
   } else if (!lifecycle?.cadetReleasedAt) {
     throw rpcError.badRequest(

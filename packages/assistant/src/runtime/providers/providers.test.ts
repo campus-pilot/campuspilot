@@ -19,7 +19,7 @@ const tool = (name: string, exposure: 'core' | 'advanced', readOnly: boolean): A
   modelName: name, mcpName: name.replace('_', '.'), title: 'Title', description: 'Description.',
   inputSchema: { type: 'object', properties: {} }, readOnly, destructive: false, exposure, module: 'students', features: [],
 });
-const facts = { schoolId: 's', schoolName: 'Maple', missingFeatures: [], userName: 'U', userEmail: 'u@x', today: '2026-11-05', now: '2026-11-05T09:30:00+05:30' };
+const facts = { schoolId: 's', schoolName: 'Maple', userName: 'U', userEmail: 'u@x', today: '2026-11-05', now: '2026-11-05T09:30:00+05:30' };
 const results = [
   { toolUseId: 'a', toolName: 'school_listStudents', content: '{"items":[]}', isError: false },
   { toolUseId: 'b', toolName: 'school_updateStudent', content: 'declined', isError: true },
@@ -51,8 +51,15 @@ describe('anthropic adapter (must match the Claude-only build)', () => {
     // question-paper bullet says each attached image is announced by a line
     // with its asat_ id, to be used for figures. Then: question papers written
     // from a description are no longer declined, and the bullet says so.
+    // Then: replies follow the language of the user's latest message, not of
+    // earlier messages or of tool results (voice mode passes requests in the
+    // language they were spoken in). Then: the <current_page> block is
+    // explained, may carry the text visible on the user's screen, and counts
+    // as data entered by people. Then: questions about the screen are answered
+    // from its visible text, with no tool call. Then: the block holds the
+    // whole page's text, with the part on screen marked.
     const system = JSON.stringify(buildAnthropicSystem(buildAssistantPrompt(facts)));
-    expect(createHash('sha256').update(system).digest('hex').slice(0, 16)).toMatchInlineSnapshot(`"3a481b20e6d2f44d"`);
+    expect(createHash('sha256').update(system).digest('hex').slice(0, 16)).toMatchInlineSnapshot(`"7258a1f0d8fdb642"`);
   });
 
   it('defers advanced tools behind tool search and labels writes', () => {

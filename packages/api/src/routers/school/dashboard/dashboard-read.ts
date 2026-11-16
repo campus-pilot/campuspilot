@@ -129,17 +129,23 @@ async function readAdmissions(
   };
 }
 
+/**
+ * `countStudents` is whether the school has student management: without it
+ * the section carries classes and sections only, and every student count is
+ * null (never zero, which would say the school has no students).
+ */
 async function readClassrooms(
   db: DatabaseExecutor,
   scope: DashboardScope,
   access: ClassAccess,
+  countStudents: boolean,
 ): Promise<NonNullable<DashboardDto["classrooms"]>> {
   if (access.classIds?.length === 0) {
     return {
       scope: access.scope,
       classCount: 0,
       sectionCount: 0,
-      studentCount: 0,
+      studentCount: countStudents ? 0 : null,
       classes: [],
     };
   }
@@ -168,17 +174,19 @@ async function readClassrooms(
         ),
       )
       .groupBy(sectionTable.classId),
-    db
-      .select({ classId: studentTable.classId, value: count() })
-      .from(studentTable)
-      .where(
-        and(
-          eq(studentTable.schoolId, scope.schoolId),
-          eq(studentTable.sessionId, scope.sessionId),
-          studentClassFilter,
-        ),
-      )
-      .groupBy(studentTable.classId),
+    countStudents
+      ? db
+          .select({ classId: studentTable.classId, value: count() })
+          .from(studentTable)
+          .where(
+            and(
+              eq(studentTable.schoolId, scope.schoolId),
+              eq(studentTable.sessionId, scope.sessionId),
+              studentClassFilter,
+            ),
+          )
+          .groupBy(studentTable.classId)
+      : Promise.resolve([]),
   ]);
   const sectionCounts = new Map(
     sections.map(({ classId, value }) => [classId, value]),
@@ -189,13 +197,15 @@ async function readClassrooms(
   const items = classes.map((entry) => ({
     ...entry,
     sectionCount: sectionCounts.get(entry.id) ?? 0,
-    studentCount: studentCounts.get(entry.id) ?? 0,
+    studentCount: countStudents ? (studentCounts.get(entry.id) ?? 0) : null,
   }));
   return {
     scope: access.scope,
     classCount: items.length,
     sectionCount: items.reduce((sum, entry) => sum + entry.sectionCount, 0),
-    studentCount: items.reduce((sum, entry) => sum + entry.studentCount, 0),
+    studentCount: countStudents
+      ? items.reduce((sum, entry) => sum + (entry.studentCount ?? 0), 0)
+      : null,
     classes: items,
   };
 }
@@ -404,12 +414,22 @@ async function readBilling(
   };
 }
 
-/** Reads only the independently authorized domains used by the dashboard. */
+/**
+ * Reads only the independently authorized domains used by the dashboard.
+ *
+ * `features.studentManagement` is the school's own fact, separate from what
+ * the caller may do: admissions and billing need it (the router folds it into
+ * those permissions), and the classrooms section depends on it directly. With
+ * it, classrooms need the classes and students permissions and carry student
+ * counts, as before. Without it, classrooms need the classes permission only
+ * and carry none.
+ */
 export async function readDashboard(
   db: DatabaseExecutor,
   scope: DashboardScope,
   userId: string,
   permissions: DashboardPermissions,
+  features: { studentManagement: boolean },
 ): Promise<DashboardDto> {
   const [session] = await db
     .select()
@@ -423,16 +443,18 @@ export async function readDashboard(
     .limit(1);
   if (!session) throw rpcError.notFound("School session");
 
+  const classroomsAllowed =
+    permissions.classes && (features.studentManagement ? permissions.students : true);
   const classAccess =
-    (permissions.classes && permissions.students) || permissions.examinations
+    classroomsAllowed || permissions.examinations
       ? await resolveClassAccess(db, scope.schoolId, userId)
       : null;
   const [admissions, classrooms, billing, examinations] = await Promise.all([
     permissions.admissions
       ? readAdmissions(db, scope, permissions.classes)
       : null,
-    permissions.classes && permissions.students && classAccess
-      ? readClassrooms(db, scope, classAccess)
+    classroomsAllowed && classAccess
+      ? readClassrooms(db, scope, classAccess, features.studentManagement)
       : null,
     permissions.billing
       ? readBilling(db, scope, session.financeConfig)

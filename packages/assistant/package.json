@@ -28,6 +28,7 @@
     "@orpc/server": "catalog:",
     "@restatedev/restate-sdk": "~1.17.4",
     "drizzle-orm": "^0.45.2",
+    "ws": "^8.22.1",
     "zod": "catalog:"
   },
   "devDependencies": {
@@ -37,6 +38,7 @@
     "@testcontainers/redis": "catalog:",
     "@types/node": "catalog:",
     "@types/pg": "catalog:",
+    "@types/ws": "^8.18.2",
     "pg": "catalog:",
     "testcontainers": "catalog:",
     "typescript": "catalog:",

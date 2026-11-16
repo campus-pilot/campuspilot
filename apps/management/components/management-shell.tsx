@@ -22,7 +22,7 @@ import { authClient } from '@/lib/auth-client';
 import { useInstallApp } from '@/lib/install-app.client';
 import { AccountDialog } from './account-dialog';
 import { forgetDrafts } from './assistant/assistant-draft';
-import { AssistantPanel } from './assistant/assistant-panel';
+import { AssistantVoiceLauncher } from './assistant/voice/assistant-voice-overlay';
 import { DemoSchoolBanner } from './demo-school-banner';
 import { ManagementCommandPalette } from './management-command-palette';
 import { ManagementNotificationBell } from './notifications/management-notifications';
@@ -133,7 +133,7 @@ export function ManagementShell({
         navbarSearch={
           showSearch ? (
             <>
-              <AssistantPanel schoolId={state.commandContext.schoolId} />
+              <AssistantVoiceLauncher schoolId={state.commandContext.schoolId} />
               <Button
                 type="button"
                 variant="ghost"

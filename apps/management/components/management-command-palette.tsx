@@ -47,7 +47,8 @@ import { confirmNavigation } from '@/lib/navigation-guard';
 import { getAdmissionPhotoUrl } from '@/lib/admission-photo';
 import { AskAssistantCommand, PaletteAssistantView } from './assistant/assistant-palette';
 import { CommandRow } from './command-row';
-import { RequireFeature, useSchoolFeature } from './require-feature';
+import { RequireFeature, useSchoolFeatureCheck } from './require-feature';
+import { firstSettingsTemplate } from './settings-templates';
 import { RequirePermissions } from './require-permissions';
 import { schoolHref, schoolSessionHref } from './school-route';
 import {
@@ -736,9 +737,13 @@ export function ManagementCommandPalette({
     string | null
   >(null);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const commands = createManagementCommandRegistry(context);
+  const hasFeature = useSchoolFeatureCheck(schoolId);
+  const commands = createManagementCommandRegistry({
+    ...context,
+    firstTemplatePath: firstSettingsTemplate(hasFeature)?.path ?? null,
+  });
   // Students are searched only in a school with student management; the copy says what is searched.
-  const studentSearch = useSchoolFeature(schoolId, 'studentManagement').enabled;
+  const studentSearch = hasFeature('studentManagement');
   const searchScope = studentSearch ? 'Search actions and students' : 'Search actions';
   const selectedSession = sessions.find((session) => session.id === sessionId);
 

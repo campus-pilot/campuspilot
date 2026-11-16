@@ -25,8 +25,8 @@ import { issueAssistantRunToken } from './token';
  */
 
 /** Turns the assistant on for a school with the given settings. */
-const enableAssistant = (schoolId: string, config: { monthlyLimitUsd: number | null; eligibleRoles: Role[] }) =>
-  setTestSchoolFeature(schoolId, 'assistant', true, config);
+const enableAssistant = (schoolId: string, config: { monthlyLimitUsd: number | null; eligibleRoles: Role[]; voice?: { enabled: boolean } }) =>
+  setTestSchoolFeature(schoolId, 'assistant', true, { voice: { enabled: false }, ...config });
 
 async function switchOn(schoolId: string, ...roles: Role[]) {
   await db.insert(schoolAssistantAccessRoleTable).values(roles.map((role) => ({ schoolId, role })));
@@ -103,6 +103,25 @@ describe('resolveAssistantAccess', () => {
       allowed: true,
       refusal: null,
     });
+  });
+
+  it('reports the school’s voice switch as its own fact, which never grants use by itself', async () => {
+    const school = await createTestSchool();
+    const teacher = await teacherOf(school.id);
+    await enableAssistant(school.id, { monthlyLimitUsd: null, eligibleRoles: ['teacher'], voice: { enabled: true } });
+    // Voice is on, but the school has not switched the teacher's role on: no use, and the voice fact is not read yet.
+    expect(await resolveAssistantAccess(db, { schoolId: school.id, userId: teacher.user.id })).toMatchObject({ allowed: false, voiceEnabled: true, refusal: { code: 'role_not_enabled' } });
+
+    await switchOn(school.id, 'teacher');
+    expect(await resolveAssistantAccess(db, { schoolId: school.id, userId: teacher.user.id })).toMatchObject({ allowed: true, voiceEnabled: true });
+
+    await enableAssistant(school.id, { monthlyLimitUsd: null, eligibleRoles: ['teacher'] });
+    expect(await resolveAssistantAccess(db, { schoolId: school.id, userId: teacher.user.id })).toMatchObject({ allowed: true, voiceEnabled: false });
+
+    // A switched-off assistant has no voice, whatever its kept settings say.
+    await enableAssistant(school.id, { monthlyLimitUsd: null, eligibleRoles: ['teacher'], voice: { enabled: true } });
+    await db.update(schoolFeatureFlagTable).set({ enabled: false }).where(eq(schoolFeatureFlagTable.schoolId, school.id));
+    expect(await resolveAssistantAccess(db, { schoolId: school.id, userId: teacher.user.id })).toMatchObject({ allowed: false, voiceEnabled: false });
   });
 
   it('refuses a role the school switched on but the platform no longer makes eligible', async () => {

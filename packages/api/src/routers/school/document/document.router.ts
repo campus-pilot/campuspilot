@@ -80,8 +80,6 @@ function requireSourceTypePermission(
         action: isFinanceDocument(input.source.documentType) ? financeAction : academicAction,
         resource: { kind: "school", schoolId: input.schoolId },
       }, signal);
-      // After the permission, like every gate (see `requireDocumentTypePermission`).
-      await assertSchoolFeatureEnabled(context.db, input.schoolId, dto.DOCUMENT_TYPE_FEATURE[input.source.documentType]);
       return next();
     },
   );
@@ -170,6 +168,20 @@ function previewTemplateHtml(
   return combineDocuments([renderDocument(content, sampleDocumentContext(documentType))], documentType, pageSize);
 }
 /**
+ * The CONFLICT for a stale `expectedRevisionId`. It names the revision selected
+ * now because MCP and assistant callers receive only the code and message:
+ * without the id, a model cannot tell which value to send and retries with the
+ * same wrong one. It does not say another person made the change, since a wrong
+ * value or the caller's own earlier save is just as likely.
+ */
+function staleTemplateRevisionError(currentRevisionId: string | null) {
+  return rpcError.conflict(
+    currentRevisionId
+      ? `This template changed since it was loaded. Reload the saved revision before saving (selected revision: ${currentRevisionId}).`
+      : "This template changed since it was loaded and no revision is selected now. Reload it before saving (selected revision: none).",
+  );
+}
+/**
  * Validates and stores a template revision and selects it. Exported for the
  * demo seed, which selects the Question paper template for a demo school
  * whose `assistant` feature is off (the procedures refuse that), after
@@ -221,10 +233,9 @@ export async function saveTemplate(
           ),
         )
         .limit(1);
-      if ((previous?.artifactId ?? null) !== input.expectedRevisionId)
-        throw rpcError.conflict(
-          "Another person updated this template. Reload the saved revision before saving.",
-        );
+      const currentRevisionId = previous?.artifactId ?? null;
+      if (currentRevisionId !== input.expectedRevisionId)
+        throw staleTemplateRevisionError(currentRevisionId);
       await tx
         .insert(schoolDocumentTemplateTable)
         .values({
@@ -239,7 +250,7 @@ export async function saveTemplate(
           ],
           set: { artifactId: row.id, updatedAt: new Date() },
         });
-      return { artifact: serialize(row), content: input.content };
+      return { revisionId: row.id, artifact: serialize(row), content: input.content };
     },
   );
 }
@@ -381,7 +392,7 @@ export const schoolDocumentRouter = {
     .route(
       route(
         "Get the selected school template",
-        "Read the school’s immutable active template revision, or null when that document type has not been configured.",
+        "Read the school’s immutable active template revision, or null when that document type has not been configured. Its revisionId is the expectedRevisionId for the next save or selection.",
       ),
     )
     .meta({
@@ -409,7 +420,14 @@ export const schoolDocumentRouter = {
           .limit(1);
         if (!selection) return null;
         const template = await getTemplate(context.db, input);
-        return { artifact: serialize(template.row), content: template.content };
+        // The revision read through the selection with its content, not the
+        // earlier `selection` row: a save in between would pair a newer id with
+        // older content.
+        return {
+          revisionId: template.row.id,
+          artifact: serialize(template.row),
+          content: template.content,
+        };
       } catch (error) {
         throw toRpcError(error);
       }
@@ -418,7 +436,7 @@ export const schoolDocumentRouter = {
     .route(
       route(
         "Select a marketplace template",
-        "Copy a server-owned template into an immutable school S3 object and atomically select that revision. Reject stale selection revisions.",
+        "Copy a server-owned template into an immutable school S3 object and atomically select that revision. Send expectedRevisionId as the revisionId from getActiveDocumentTemplate; a stale one gets a CONFLICT naming the revision selected now.",
       ),
     )
     .meta({
@@ -457,7 +475,7 @@ export const schoolDocumentRouter = {
     .route(
       route(
         "Save a school template revision",
-        "Validate Handlebars, upload a new immutable S3 blob, and atomically update the school selection with optimistic concurrency.",
+        "Validate Handlebars, upload a new immutable S3 blob, and atomically update the school selection with optimistic concurrency. Send expectedRevisionId as the revisionId from getActiveDocumentTemplate; a CONFLICT names the revision selected now.",
       ),
     )
     .meta({
@@ -522,6 +540,10 @@ export const schoolDocumentRouter = {
     })
     .input(dto.generateDocumentSchema)
     .use(requireSourceTypePermission(SCHOOL_ACTIONS.GENERATE_DOCUMENTS, SCHOOL_ACTIONS.GENERATE_FINANCE_DOCUMENTS))
+    // Every source a document is generated from belongs to student management
+    // (`GENERATOR_DOCUMENT_FEATURE`). Stated as the procedure's own gate so the
+    // MCP catalog records it and the tool is not offered to a school without it.
+    .use(requireSchoolFeature(dto.GENERATOR_DOCUMENT_FEATURE))
     .use(requireSourcePermissions)
     .output(dto.previewOutputSchema)
     .handler(async ({ context, input }) => {
@@ -554,6 +576,10 @@ export const schoolDocumentRouter = {
     })
     .input(dto.generateDocumentSchema)
     .use(requireSourceTypePermission(SCHOOL_ACTIONS.GENERATE_DOCUMENTS, SCHOOL_ACTIONS.GENERATE_FINANCE_DOCUMENTS))
+    // Every source a document is generated from belongs to student management
+    // (`GENERATOR_DOCUMENT_FEATURE`). Stated as the procedure's own gate so the
+    // MCP catalog records it and the tool is not offered to a school without it.
+    .use(requireSchoolFeature(dto.GENERATOR_DOCUMENT_FEATURE))
     .use(requireSourcePermissions)
     .output(
       z.object({

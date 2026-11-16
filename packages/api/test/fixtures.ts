@@ -1,6 +1,6 @@
 import { db } from '@campuspilot/db';
 import type {
-  SchoolFeatureConfig,
+  SchoolFeatureConfigInput,
   SchoolFeatureEntry,
   SchoolFeatureKey,
 } from '@campuspilot/db/feature-flags/catalogue';
@@ -260,7 +260,7 @@ export async function createTestSchool(overrides: {
 
 /** A feature with its settings, for `createTestSchool({ features })`. */
 export type TestSchoolFeature = {
-  [K in SchoolFeatureKey]: { feature: K; config: SchoolFeatureConfig<K> };
+  [K in SchoolFeatureKey]: { feature: K; config: SchoolFeatureConfigInput<K> };
 }[SchoolFeatureKey];
 
 /**
@@ -277,7 +277,7 @@ export async function setTestSchoolFeature<K extends SchoolFeatureKey>(
   schoolId: string,
   feature: K,
   enabled: boolean,
-  config?: SchoolFeatureConfig<K> | null,
+  config?: SchoolFeatureConfigInput<K> | null,
 ) {
   const stored = config === undefined ? await readSchoolFeatureConfig(db, schoolId, feature) : null;
   const kept = config !== undefined ? config : stored?.status === 'valid' ? stored.config : null;

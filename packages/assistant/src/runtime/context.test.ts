@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import type { AttachmentMarker } from '../transcript';
+import { buildUserTranscriptContent, PAGE_TEXT_OMITTED, type AttachmentMarker } from '../transcript';
 import {
   attachmentLabel,
   attachmentNote,
@@ -9,6 +9,7 @@ import {
   CONTEXT_ATTACHMENT_BUDGET_BYTES,
   CONTEXT_TOOL_INPUT_MIN_CHARS,
   CONTEXT_TOOL_RESULT_MIN_CHARS,
+  findCopiedContextNote,
   fullContextBoundary,
   stubLongInputFields,
   toolInputStub,
@@ -189,6 +190,31 @@ describe.each([claude, gemini, fake])('context building ($name)', (format) => {
     }
   });
 
+  it('shows the text of the page only with the newest two messages: an older one keeps where the user was, not what was on it', async () => {
+    const pageBlock = (name: string) =>
+      (buildUserTranscriptContent({ text: 'x', pageContext: { path: `/school/s/${name}`, title: name, pageText: `Everything on the ${name} page` } })[0] as { text: string }).text;
+    /** A message sent from the overlay: the page block, then what the user asked. */
+    const fromPage = (name: string, question: string): TranscriptEntry => ({ role: 'user', content: [...format.human(pageBlock(name)).content, ...format.human(question).content] });
+    // The second message has no page block, and the user typed one by hand: what they typed is theirs and stays whole.
+    const typed: TranscriptEntry = { role: 'user', content: [...format.human('Why does it say this?').content, ...format.human(pageBlock('typed')).content] };
+    const entries = [fromPage('admissions', 'Who is here?'), typed, fromPage('fees', 'Who owes fees?'), fromPage('exams', 'Which exam is next?')];
+    const stored = JSON.stringify(entries);
+    const out = (await buildModelContext(entries, provider, loader({}))).filter((_entry, index) => index !== 1);
+    const text = (entry: TranscriptEntry) => JSON.stringify(entry.content);
+    expect(JSON.stringify((await buildModelContext(entries, provider, loader({})))[1])).toContain('Everything on the typed page');
+
+    expect(text(out[0]!)).not.toContain('Everything on the admissions page');
+    expect(text(out[0]!)).toContain(esc(PAGE_TEXT_OMITTED));
+    expect(text(out[0]!)).toContain('Path: /school/s/admissions');
+    expect(text(out[0]!)).toContain('Who is here?');
+    expect(text(out[1]!)).toContain('Everything on the fees page');
+    expect(text(out[2]!)).toContain('Everything on the exams page');
+    // Only the model's view changes, and shortening it again changes nothing.
+    expect(JSON.stringify(entries)).toBe(stored);
+    const again = await buildModelContext(entries, provider, loader({}));
+    expect(await buildModelContext(again, provider, loader({}))).toEqual(again);
+  });
+
   it('shows the current message in full even when it is the only one', async () => {
     const only = [format.human('look', [marker('a1')])];
     const out = await buildModelContext(only, provider, loader({ a1: image(10) }));
@@ -362,6 +388,23 @@ describe('stubLongInputFields', () => {
     expect(stubLongInputFields('t', input, stub, 50)).toBe(input);
     expect(stubLongInputFields('t', 'text', stub, 1)).toBe('text');
     expect(stubLongInputFields('t', null, stub, 1)).toBeNull();
+  });
+});
+
+describe('findCopiedContextNote', () => {
+  it('finds a copied input or result note at any depth and names its field', () => {
+    const inputNote = toolInputStub({ toolName: 'school_saveDocumentTemplate', field: 'content', chars: 4674 });
+    const resultNote = toolResultStub({ toolName: 'school.getActiveDocumentTemplate', chars: 9000 });
+    expect(findCopiedContextNote({ name: 'Timetable', content: inputNote })).toBe('content');
+    expect(findCopiedContextNote({ content: `<p>before</p>${inputNote}` })).toBe('content');
+    expect(findCopiedContextNote({ draft: { sections: ['ok', resultNote] } })).toBe('draft.sections.1');
+    expect(findCopiedContextNote(inputNote)).toBe('input');
+  });
+
+  it('passes inputs without a note, including ones that mention omitted text', () => {
+    expect(findCopiedContextNote({ name: 'Omitted: the content', content: '<p>{{school.name}}</p>', n: 5, x: null })).toBeNull();
+    expect(findCopiedContextNote(null)).toBeNull();
+    expect(findCopiedContextNote({})).toBeNull();
   });
 });
 

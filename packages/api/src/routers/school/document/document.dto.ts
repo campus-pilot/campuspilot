@@ -64,6 +64,22 @@ export const isFinanceDocumentType = (type: DocumentType) =>
 export const TEMPLATE_ONLY_DOCUMENT_TYPES = ["notice", "question_paper"] as const satisfies readonly DocumentType[];
 export type TemplateOnlyDocumentType = (typeof TEMPLATE_ONLY_DOCUMENT_TYPES)[number];
 export type AcademicDocumentType = Exclude<DocumentType, "bill" | "receipt" | "statement" | TemplateOnlyDocumentType>;
+/**
+ * The feature every document **generated** through `previewDocument` /
+ * `generateDocument` belongs to. Those procedures accept the generator types
+ * only (every type but the template-only ones), and all of them are student
+ * management documents, so the procedures are gated on this one feature.
+ * The type below fails the build if a generator type is ever given another
+ * feature in {@link DOCUMENT_TYPE_FEATURE}; the gate must then be decided per
+ * source instead.
+ */
+export const GENERATOR_DOCUMENT_FEATURE = "studentManagement" as const satisfies SchoolFeatureKey;
+type GeneratorDocumentType = Exclude<DocumentType, TemplateOnlyDocumentType>;
+const generatorTypesShareOneFeature: (typeof DOCUMENT_TYPE_FEATURE)[GeneratorDocumentType] extends typeof GENERATOR_DOCUMENT_FEATURE
+  ? true
+  : never = true;
+void generatorTypesShareOneFeature;
+
 export const documentTemplatePageSizeSchema = z.enum(["full", "half"]);
 export type DocumentTemplatePageSize = z.infer<
   typeof documentTemplatePageSizeSchema
@@ -147,7 +163,15 @@ export const artifactDtoSchema = z.object({
   byteSize: z.number().int(),
   sha256: z.string(),
   pageSize: documentTemplatePageSizeSchema,
-  templateRevisionId: z.string().nullable(),
+  /**
+   * On a generated PDF, the template revision it was rendered with. Always null
+   * on a template revision itself; it is not the revision to save against (see
+   * `activeTemplateSchema.revisionId`).
+   */
+  templateRevisionId: z
+    .string()
+    .nullable()
+    .describe("Generated PDFs only: the template revision the PDF was rendered with. Always null on a template revision; never send it as expectedRevisionId."),
   templateName: z.string().nullable(),
   marketplaceSlug: z.string().nullable(),
   sessionId: z.string().nullable(),
@@ -165,21 +189,41 @@ export const artifactDtoSchema = z.object({
   createdAt: z.string(),
 });
 export type DocumentArtifact = z.infer<typeof artifactDtoSchema>;
+/**
+ * The school's selected template revision. `revisionId` is the value the
+ * selection pointer (`school_document_template.artifact_id`) held when this
+ * revision was read, which is what `expectedRevisionId` is compared with. It is
+ * an explicit field so a caller saving over it does not have to know that a
+ * revision is identified by its artifact id. It is listed first so a model
+ * reading a long result meets it before the template source.
+ */
 export const activeTemplateSchema = z.object({
+  revisionId: z
+    .string()
+    .describe("The selected revision. Send it as expectedRevisionId when saving or selecting a template for this document type."),
   artifact: artifactDtoSchema,
   content: z.string(),
 });
+/**
+ * Optimistic concurrency for saving or selecting a template: the revision the
+ * caller last read. The description is what an MCP or assistant caller sees, so
+ * it names where the value comes from and what it is not (a hash, or a PDF's
+ * `templateRevisionId`), which a model has otherwise guessed wrong.
+ */
+const expectedRevisionIdSchema = id
+  .nullable()
+  .describe("The revisionId returned by school.getActiveDocumentTemplate for this document type (an art_… id), or null only when that call returned null. Not a sha256 and not artifact.templateRevisionId.");
 export const saveTemplateSchema = templateScopeSchema
   .extend({
     name: z.string().trim().min(1).max(120),
     content: templateContentSchema,
     pageSize: documentTemplatePageSizeSchema.default("full"),
-    expectedRevisionId: id.nullable(),
+    expectedRevisionId: expectedRevisionIdSchema,
   })
   .superRefine(validateTemplatePageSize);
 export const selectTemplateSchema = templateScopeSchema.extend({
   slug: z.string().trim().min(1).max(100),
-  expectedRevisionId: id.nullable(),
+  expectedRevisionId: expectedRevisionIdSchema,
 });
 export const marketplaceItemSchema = z.object({
   slug: z.string(),

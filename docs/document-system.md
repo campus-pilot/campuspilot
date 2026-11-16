@@ -136,7 +136,13 @@ the generator.
 5. The server copies the catalog source to a new immutable, school-owned S3 object,
    creates an artifact row, and atomically selects that revision.
 6. A stale `expectedRevisionId` returns `CONFLICT`; the client must reload instead
-   of overwriting another person's change.
+   of overwriting a change it has not seen. The value to send is the `revisionId`
+   that `getActiveDocumentTemplate` (and every save or selection) returns, or
+   `null` only when no revision is selected. It is not the artifact's `sha256` and
+   not `templateRevisionId`, which only generated PDFs carry. The `CONFLICT`
+   message names the revision selected now (`selected revision: art_…` or
+   `none`), because MCP and assistant callers receive only the code and message
+   and otherwise retry with the same wrong value.
 
 Never treat marketplace source as the active school template directly. Importing a
 copy is what provides school ownership, provenance, and stable historical output.

@@ -16,7 +16,8 @@ import { isSchoolFeatureEnabled } from '../feature-flags/feature-flags.service';
  *   (`sendDelivery`), which covers copies queued before the switch;
  * - a staff resend is refused with the disabled-feature error;
  * - the notice PDF source produces nothing.
- * A type without required features costs no query.
+ * A type without required features costs no query; most types name student
+ * management, so most cost one small read of the school's flags.
  */
 export async function disabledFeatureOf(db: DatabaseExecutor, schoolId: string, type: NotificationType): Promise<SchoolFeatureKey | null> {
   for (const feature of notificationRequiredFeatures[type]) {

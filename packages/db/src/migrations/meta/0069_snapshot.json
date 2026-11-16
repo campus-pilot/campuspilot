@@ -1,5 +1,5 @@
 {
-  "id": "96ba1fc2-d9da-4402-9e4f-8a74b783a160",
+  "id": "3cb3e784-66ae-4b9e-bf27-b4ea1e31b624",
   "prevId": "bffaad6d-f7d4-4429-9965-25a9108bc006",
   "version": "7",
   "dialect": "postgresql",
@@ -1428,6 +1428,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "voice_session_id": {
+          "name": "voice_session_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "school_id": {
           "name": "school_id",
           "type": "text",
@@ -1671,7 +1677,7 @@
       "checkConstraints": {
         "assistant_model_request_source_owner_check": {
           "name": "assistant_model_request_source_owner_check",
-          "value": "(\"assistant_model_request\".\"source\" = 'chat' and \"assistant_model_request\".\"run_id\" is not null and \"assistant_model_request\".\"question_paper_job_id\" is null)\n        or (\"assistant_model_request\".\"source\" = 'question_paper' and \"assistant_model_request\".\"run_id\" is null and \"assistant_model_request\".\"question_paper_job_id\" is not null)"
+          "value": "(\"assistant_model_request\".\"source\" = 'chat' and \"assistant_model_request\".\"run_id\" is not null and \"assistant_model_request\".\"question_paper_job_id\" is null and \"assistant_model_request\".\"voice_session_id\" is null)\n        or (\"assistant_model_request\".\"source\" = 'question_paper' and \"assistant_model_request\".\"run_id\" is null and \"assistant_model_request\".\"question_paper_job_id\" is not null and \"assistant_model_request\".\"voice_session_id\" is null)\n        or (\"assistant_model_request\".\"source\"::text = 'voice' and \"assistant_model_request\".\"run_id\" is null and \"assistant_model_request\".\"question_paper_job_id\" is null and \"assistant_model_request\".\"voice_session_id\" is not null)"
         }
       },
       "isRLSEnabled": false
@@ -3812,26 +3818,6 @@
           "notNull": true,
           "default": false
         },
-        "email_is_placeholder": {
-          "name": "email_is_placeholder",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "phone_number": {
-          "name": "phone_number",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "phone_number_verified": {
-          "name": "phone_number_verified",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": false,
-          "default": false
-        },
         "image": {
           "name": "image",
           "type": "text",
@@ -3921,22 +3907,10 @@
           "columns": [
             "email"
           ]
-        },
-        "user_phone_number_unique": {
-          "name": "user_phone_number_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "phone_number"
-          ]
         }
       },
       "policies": {},
-      "checkConstraints": {
-        "user_placeholder_email_has_phone": {
-          "name": "user_placeholder_email_has_phone",
-          "value": "\"user\".\"email_is_placeholder\" = false or \"user\".\"phone_number\" is not null"
-        }
-      },
+      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.verification": {
@@ -14097,7 +14071,8 @@
       "schema": "public",
       "values": [
         "chat",
-        "question_paper"
+        "question_paper",
+        "voice"
       ]
     },
     "public.assistant_run_status": {

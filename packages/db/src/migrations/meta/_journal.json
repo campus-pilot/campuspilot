@@ -488,8 +488,15 @@
     {
       "idx": 69,
       "version": "7",
-      "when": 1794843841832,
-      "tag": "0069_staff-phone-sign-in",
+      "when": 1794720077461,
+      "tag": "0069_assistant-voice",
+      "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "7",
+      "when": 1794850944829,
+      "tag": "0070_staff-phone-sign-in",
       "breakpoints": true
     }
   ]

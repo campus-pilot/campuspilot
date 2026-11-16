@@ -165,14 +165,17 @@ examinations for question papers). Off means:
 | Admissions (`admission.router`, admission settings, the admission photo and document routes in `admission.http.ts`) | Disabled-feature error after the permission check; nothing is written. |
 | Students (`student.router`), fees and billing (`billing.router`: bills, runs, ledger, payments, reports, admission finance values), session finance (`session-finance.router`) | Disabled-feature error. |
 | Examinations: students, results, attendance settings, timetables, result notifications and per-student remarks (`exam.router`, everything but definitions, plans, `transitionExam`, the Cadet release and question papers) | Disabled-feature error. An examination keeps its definition, subject plans, lifecycle and question papers. |
-| Documents (`DOCUMENT_TYPE_FEATURE` in `document.dto.ts`) | Every document type except `notice` (`notices`) and `question_paper` (`assistant`) belongs to student management: its templates, marketplace, previews, generation, downloads and deletes are refused; `listDocumentArtifacts` is refused (it lists only those types). |
+| Completing an examination (`transitionExam`, `transitionExamPlan`) | Does not wait for approved results, which can no longer be entered (`reviewResults: false`); a school that kept students from before is not stuck. A completed examination is therefore not proof of reviewed results: `releaseExamToCadet` checks them itself and refuses until the examination is reopened, finished and completed again. |
+| Session settings (`createSession`, `updateSession`) | A configuration that changes co-scholastic areas, the grading scale or attendance is refused with the disabled-feature error (compared after schema defaults, so resubmitting them unchanged is fine). Examination definitions and years are not affected. |
+| `listClasses` | `studentCount` is null for every class. |
+| Documents (`DOCUMENT_TYPE_FEATURE` in `document.dto.ts`) | Every document type except `notice` (`notices`) and `question_paper` (`assistant`) belongs to student management: its templates, marketplace, previews, downloads and deletes are refused per call (those procedures also serve the other types, so they stay listed as tools). `previewDocument`, `generateDocument` and `listDocumentArtifacts` only ever serve student management documents, so they carry the gate themselves (`GENERATOR_DOCUMENT_FEATURE`) and are withheld as tools. |
 | Delivery log (`listNotificationDeliveries`, `resendNotificationDelivery`) | Disabled-feature error: every delivery there is a student notification. |
 | Notifications `bill.issued`, `payment.received`, `billing.run_posted`, `exam.results_published`, `exam.results_publish_finished`, `exam.timetable_published(_staff)`, `notification.whatsapp_failed`, `notification.whatsapp_batch_failed` | Remote copies `skipped: feature_disabled`, resend refused (`notificationRequiredFeatures`). |
-| `getDashboard` | `admissions`, `classrooms` (student counts) and `billing` are null; `createAdmission`, `recordPayment` and `enterResults` are false. |
+| `getDashboard` | `admissions` and `billing` are null; `classrooms` stays for a caller who may list classes, with `studentCount` null (school total and per class); `createAdmission`, `recordPayment` and `enterResults` are false. |
 | Cadet Portal and notices | Inactive (they require student management), with their own disabled-feature errors. |
-| In-app assistant | The worker drops every tool gated on a feature the conversation's school lacks (read fresh before each model request and tool call), and the run's facts tell the model which parts of CampusPilot the school does not use. |
+| In-app assistant | The worker drops every tool gated on a feature the conversation's school lacks (read fresh before each model request and tool call). The prompt names only the features that took a tool away, in the assistant's own wording (`unavailableSchoolWork`), also read per request and never stored with the run. The starter prompt about admissions is not offered. |
 | External MCP clients | A tool gated on a feature none of the user's schools has is not listed (nor found through the advanced tools); every gated tool's description ends "Only for schools that have …"; a call for a school without the feature is refused. |
-| Management UI | Sidebar: Admission and the Operations group (Documents, Billing, Notices). Classroom: Students and Documents sections and Add student (Teachers is the default). Classroom list: the Students column. Examination: Results (shown as Subjects until there are plans), Timetable, attendance, the documents menu and result notifications; the exam lands on Question paper, or More without the assistant. Settings: Documents (admission documents), every template but Question paper (and Notice), and on the session page co-scholastic areas, grading scale, attendance and financial configuration. ⌘K: the Admission and Templates commands and the student search. Every page of these areas, opened by URL, shows "not enabled" (`FeaturePage` layouts). |
+| Management UI | Sidebar: Admission, Documents and Billing (each on its own feature; the Operations group is left out when none of its items applies). Dashboard: the student tile and Class load; the Classrooms row shows classes and sections. Classroom: Students and Documents sections and Add student (Teachers is the default). Classroom list: the Students column. Examination: Results, Timetable, attendance, the documents menu and result notifications; the exam lands on Question paper, or More without the assistant (an exam with no subject plans shows plan creation and no tabs, as in every school). Settings: Documents (admission documents), every template but Question paper (and Notice), and on the session page co-scholastic areas, grading scale, attendance and financial configuration. ⌘K: the Admission command and the student search; the Templates command opens the first template the school has (`firstSettingsTemplate`, also used by the settings sidebar). Every page of these areas, opened by URL, shows "not enabled" (`FeaturePage` layouts). |
 
 Kept and back when it is enabled again: admissions, students, bills, ledgers,
 results, timetables, documents and every notification already recorded.
@@ -245,6 +248,15 @@ Management (`apps/management/components`):
   - `unknown`: the flags could not be read and none are held. This is not
     "disabled": offer `retry`, do not say the feature is not enabled.
   `enabled` is false while `pending` or `unknown`, so a plain check fails closed.
+- An answer that does not say whether the school has the feature (no entry
+  for it, or an entry without `active`, as an API one release older sends
+  while a release rolls out) is `unknown` too, never a crash and never
+  "disabled". Deploy the API before the apps.
+- `useSchoolFeatureCheck(schoolId)` returns a check of any feature from the
+  same query, for code that decides from several features at once (a
+  navigation group that shows when any of its items does). Gate every item
+  on its **own** feature; never on another feature that happens to go with it
+  today.
 - **Known flags survive a failed refetch.** TanStack Query keeps the last good
   data when a background refetch fails; `resolveSchoolFeature` reads the data
   first, so a network blip never closes an open page or drops unsaved input.
@@ -289,8 +301,10 @@ same `DISABLE_WARNINGS` entry and confirmation dialog.
 
 ## The `assistant` feature: where it is enforced
 
-Config: `{ monthlyLimitUsd: number | null, eligibleRoles: role[] }` (at least
-one role, each once). Who may use the assistant is decided by
+Config: `{ monthlyLimitUsd: number | null, eligibleRoles: role[], voice: { enabled: boolean } }`
+(at least one role, each once). `voice.enabled` is a switch inside the feature:
+whether the school has [voice mode](assistant.md#voice-mode). It only narrows
+the assistant, and settings saved before it existed read as off. Who may use the assistant is decided by
 `resolveAssistantAccess` (feature, membership, an eligible role the school
 switched on, the IST month spend under the limit); see
 [In-app assistant](assistant.md#access).

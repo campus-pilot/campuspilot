@@ -22,6 +22,13 @@ export {
 export type ManagementCommandContext = {
   schoolId: string;
   sessionId?: string;
+  /**
+   * The address (below the school) of the first settings template the school
+   * has (`firstSettingsTemplate`), or null when it has none. The Templates
+   * command opens it and is not offered without one. Undefined while the
+   * caller has not looked (the command is then not offered either).
+   */
+  firstTemplatePath?: string | null;
 };
 
 export type ManagementCommandDefinition = {
@@ -115,17 +122,23 @@ export function createManagementCommandRegistry(
       destination: ({ schoolId }) => schoolHref(schoolId, '/settings'),
       wrap: permissionWrap(SCHOOL_ACTIONS.READ_DETAILS),
     },
-    {
-      id: 'templates',
-      label: 'Templates',
-      description: 'Open examination document templates',
-      icon: WandSparkles,
-      keywords: ['documents', 'report cards', 'design'],
-      defaultSuggestion: false,
-      destination: ({ schoolId }) =>
-        schoolHref(schoolId, '/settings/templates/examination'),
-      // The examination (report card) templates belong to student management.
-      wrap: studentManagementWrap(permissionWrap(SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES)),
-    },
+    // Offered only when the school has a template, and opens that one: the
+    // examination template for a school with student management, otherwise
+    // the first template of a feature it does have (`firstSettingsTemplate`).
+    ...(context.firstTemplatePath
+      ? [
+          {
+            id: 'templates',
+            label: 'Templates',
+            description: 'Open document templates',
+            icon: WandSparkles,
+            keywords: ['documents', 'report cards', 'question paper', 'design'],
+            defaultSuggestion: false,
+            destination: ({ schoolId, firstTemplatePath }: ManagementCommandContext) =>
+              schoolHref(schoolId, firstTemplatePath ?? '/settings'),
+            wrap: permissionWrap(SCHOOL_ACTIONS.READ_DOCUMENT_TEMPLATES),
+          },
+        ]
+      : []),
   ];
 }

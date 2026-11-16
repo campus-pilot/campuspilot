@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { buildAssistantPrompt, buildFactsText, istInstant } from './prompt';
+import { unavailableSchoolWork } from './unavailable-work';
 
 describe('run facts', () => {
   it('writes the run start as India time with its offset, on India’s date', () => {
@@ -13,7 +14,6 @@ describe('run facts', () => {
     const text = buildFactsText({
       schoolId: 's',
       schoolName: 'Maple',
-      missingFeatures: [],
       userName: 'U',
       userEmail: 'u@x',
       today: '2026-11-12',
@@ -23,7 +23,7 @@ describe('run facts', () => {
   });
 });
 
-describe('features the school does not have', () => {
+describe('parts of CampusPilot the school does not have', () => {
   const base = {
     schoolId: 's',
     schoolName: 'Maple',
@@ -33,20 +33,44 @@ describe('features the school does not have', () => {
     now: '2026-11-12T04:55:12+05:30',
   };
 
-  it('names each one with what it covers, and says how to answer for it', () => {
-    const text = buildFactsText({
-      ...base,
-      missingFeatures: [
-        { label: 'Student management', description: 'Admissions and fees.' },
-        { label: 'Notices', description: 'School notices.' },
-      ],
-    });
-    expect(text).toContain('This school does not use these parts of CampusPilot, so you have no tools for them: Student management (Admissions and fees.); Notices (School notices.).');
+  it('lists the unavailable work it is given and says how to answer for it', () => {
+    const text = buildFactsText(base, ['student management: admissions and fees', 'school notices']);
+    expect(text).toContain('This school does not use these parts of CampusPilot, so you have no tools for them: student management: admissions and fees; school notices.');
     expect(text).toContain('say in one sentence that this school does not use that part of CampusPilot');
   });
 
-  it('says nothing about features when the school has them all', () => {
-    expect(buildFactsText({ ...base, missingFeatures: [] })).not.toContain('does not use');
+  it('says nothing about it when no tool was withheld', () => {
+    expect(buildFactsText(base, [])).not.toContain('does not use');
+    // The stored facts of a run carry no such list (a run begun before this existed has none), so the default is "nothing withheld".
+    expect(buildFactsText(base)).not.toContain('does not use');
+    expect(buildAssistantPrompt(base).facts).not.toContain('does not use');
+  });
+});
+
+describe('what a missing feature is called', () => {
+  it('names only features that took a tool away', () => {
+    expect(unavailableSchoolWork(new Set())).toEqual([]);
+    const cadet = unavailableSchoolWork(new Set(['cadet']));
+    expect(cadet).toHaveLength(1);
+    expect(cadet[0]).toContain('Cadet Portal');
+  });
+
+  it('does not tell the model that fees or results are gone when only the Cadet Portal is', () => {
+    const [cadet] = unavailableSchoolWork(new Set(['cadet']));
+    // What is unavailable: portal passwords and releasing results to the portal.
+    expect(cadet).toContain('issuing portal passwords');
+    // What stays is said to stay.
+    expect(cadet).toContain("Staff's work with fees, results and student records is not part of it");
+  });
+
+  it('covers a feature that requires a withheld one by that one\'s line', () => {
+    const lines = unavailableSchoolWork(new Set(['studentManagement', 'cadet', 'notices']));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('student management: admissions');
+  });
+
+  it('ignores keys that are not catalogue features', () => {
+    expect(unavailableSchoolWork(new Set(['retired']))).toEqual([]);
   });
 });
 
@@ -54,7 +78,6 @@ describe('question papers', () => {
   const instructions = buildAssistantPrompt({
     schoolId: 's',
     schoolName: 'Maple',
-    missingFeatures: [],
     userName: 'U',
     userEmail: 'u@x',
     today: '2026-11-12',

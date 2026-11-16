@@ -11,7 +11,8 @@ import { schoolTable } from "./school";
  * so adding a feature needs no migration and a retired key never breaks a
  * read (reads ignore unknown keys).
  *
- * A missing row means the feature is disabled with no config. `enabled` and
+ * A missing row means the feature's catalogue default (`defaultEnabled`: on
+ * only for student management) with no config. `enabled` and
  * `config` are independent: disabling keeps the stored config. Only platform
  * administrators write these rows (`systemAdmin.updateSchoolFeatureFlag`),
  * plus demo school creation, which enables every demo feature.

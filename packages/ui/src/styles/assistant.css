@@ -417,3 +417,157 @@
 @keyframes assistant-reveal {
   to { opacity: 1; }
 }
+
+/*
+ * Voice mode's assistant: a round head in the brand colour wearing the cap of
+ * the CampusPilot mark (`brand/campuspilot/mark.svg`). It only ever moves
+ * with something real:
+ * - `--voice-in` and `--voice-out` (0 to 1) are the loudness of the
+ *   microphone and of the assistant's voice right now, written every frame by
+ *   `AssistantVoiceAvatar`. The ring follows the first, the head and the
+ *   tassel follow the second, so nothing moves without sound.
+ * - `data-activity` is what the assistant is doing (`voice-state.ts`): its
+ *   eyes read while a request is being worked on, and close when the
+ *   microphone is off.
+ * One state, one cue: no spinner or shimmer is added on top.
+ */
+.assistant-voice-avatar {
+  /* The orange of the CampusPilot mark (`brand/campuspilot/app-icon.svg`), the same in both themes: it is the assistant's face, not a control. */
+  --voice-brand: #c2580e;
+  --voice-in: 0;
+  --voice-out: 0;
+  display: block;
+  overflow: visible;
+}
+.assistant-voice-avatar .va-body {
+  transform-origin: 48px 60px;
+  transform: scale(calc(1 + var(--voice-out) * 0.07));
+}
+.assistant-voice-avatar .va-head {
+  fill: var(--voice-brand);
+  transition: fill 0.3s;
+}
+.assistant-voice-avatar .va-hat {
+  fill: var(--foreground);
+  stroke: var(--foreground);
+  transition: fill 0.3s, stroke 0.3s;
+}
+.assistant-voice-avatar .va-tassel {
+  fill: none;
+  stroke: var(--foreground);
+  stroke-width: 2;
+  stroke-linecap: round;
+  transform-origin: 46.5px 29px;
+  transform: rotate(calc(var(--voice-out) * 16deg));
+  transition: stroke 0.3s;
+}
+.assistant-voice-avatar .va-eyes {
+  transform-origin: 48px 59px;
+  animation: assistant-voice-blink 4.4s ease-in-out infinite;
+}
+.assistant-voice-avatar .va-eye {
+  fill: #fff;
+}
+.assistant-voice-avatar .va-ring {
+  fill: none;
+  stroke: var(--voice-brand);
+  stroke-width: 2;
+  opacity: 0;
+  transform-origin: 48px 58px;
+  transform: scale(calc(1 + var(--voice-in) * 0.18));
+  transition: opacity 0.3s;
+}
+.assistant-voice-avatar[data-activity='listening'] .va-ring {
+  opacity: calc(0.14 + var(--voice-in) * 0.5);
+}
+.assistant-voice-avatar[data-activity='hearing'] .va-ring {
+  opacity: calc(0.32 + var(--voice-in) * 0.5);
+}
+.assistant-voice-avatar[data-activity='working'] .va-eyes {
+  animation: assistant-voice-read 1.9s ease-in-out infinite;
+}
+.assistant-voice-avatar[data-activity='starting'] .va-body,
+.assistant-voice-avatar[data-activity='reconnecting'] .va-body {
+  animation: assistant-voice-wait 1.4s ease-in-out infinite;
+}
+.assistant-voice-avatar[data-activity='muted'] .va-head {
+  fill: color-mix(in oklab, var(--muted-foreground) 45%, var(--background));
+}
+.assistant-voice-avatar[data-activity='muted'] .va-hat,
+.assistant-voice-avatar[data-activity='muted'] .va-tassel {
+  fill: var(--muted-foreground);
+  stroke: var(--muted-foreground);
+}
+.assistant-voice-avatar[data-activity='muted'] .va-tassel {
+  fill: none;
+}
+.assistant-voice-avatar[data-activity='muted'] .va-eyes {
+  animation: none;
+  transform: scaleY(0.14);
+}
+
+@keyframes assistant-voice-blink {
+  0%, 44%, 52%, 100% { transform: scaleY(1); }
+  48% { transform: scaleY(0.1); }
+}
+@keyframes assistant-voice-read {
+  0%, 100% { transform: translate(-3.5px, 3px); }
+  50% { transform: translate(3.5px, 3px); }
+}
+@keyframes assistant-voice-wait {
+  50% { opacity: 0.5; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .assistant-voice-avatar .va-body,
+  .assistant-voice-avatar .va-tassel,
+  .assistant-voice-avatar .va-ring {
+    transform: none;
+  }
+  .assistant-voice-avatar .va-body,
+  .assistant-voice-avatar .va-eyes,
+  .assistant-voice-avatar[data-activity] .va-eyes,
+  .assistant-voice-avatar[data-activity] .va-body {
+    animation: none;
+  }
+}
+
+/*
+ * The voice overlay's pill: it lifts off the page with a deep shadow, and a
+ * ring in the mark's orange says, at the edge of the eye, that someone is
+ * being heard or is speaking. The words on the pill say which.
+ */
+.assistant-voice-pill {
+  --voice-brand: #c2580e;
+  box-shadow:
+    0 0 0 0 transparent,
+    0 18px 50px -12px rgb(0 0 0 / 45%),
+    0 4px 14px -4px rgb(0 0 0 / 25%);
+  transition: box-shadow 0.35s ease;
+}
+.assistant-voice-pill[data-activity='hearing'],
+.assistant-voice-pill[data-activity='speaking'] {
+  box-shadow:
+    0 0 0 1.5px color-mix(in oklab, var(--voice-brand) 65%, transparent),
+    0 18px 50px -12px color-mix(in oklab, var(--voice-brand) 45%, rgb(0 0 0 / 45%)),
+    0 4px 14px -4px rgb(0 0 0 / 25%);
+}
+.assistant-voice-pill[data-activity='working'] {
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--voice-brand) 35%, transparent),
+    0 18px 50px -12px rgb(0 0 0 / 45%),
+    0 4px 14px -4px rgb(0 0 0 / 25%);
+}
+
+/* The overlay's panel and cards arrive from the pill they belong to. */
+.assistant-voice-rise {
+  animation: assistant-voice-rise 0.24s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  transform-origin: bottom center;
+}
+@keyframes assistant-voice-rise {
+  from { opacity: 0; transform: translateY(10px) scale(0.985); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .assistant-voice-rise { animation: none; }
+  .assistant-voice-pill { transition: none; }
+}

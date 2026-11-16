@@ -773,8 +773,9 @@ use the source's `qpf_` figure ids, which a save refuses).
   with the draft id in that call's result (an unsaved draft) or `getQuestionPaper` (saved since);
   for a `saveQuestionPaperVersion` input, `getQuestionPaper`; for any other tool it only says to
   write the text again and mentions no draft id. The stub also says it is not the content and
-  must never be sent as `html` (a model that copies it sends text without markup, which the draft
-  check refuses as an empty paper). A validate result over 8,000 characters is itself stubbed
+  must never be sent as `html`; a model that copies a stub into any tool call is answered
+  `BAD_REQUEST` by the runtime before the call is recorded or approved (`findCopiedContextNote`,
+  see the Assistant guide). A validate result over 8,000 characters is itself stubbed
   once old, so the draft id is then found by calling the tool again or re-validating. Fresh images and PDFs are sent newest first within one 16 MiB budget counted as base64 (4/3 of the file; `MODEL_REQUEST_ATTACHMENT_BUDGET_BYTES`, well under both providers' request limits); an image over the provider's own cap (5 MB on Claude) is reported as unreadable. The learn payload
   counts as a long result, so after two more messages the agent calls the tool again.
 

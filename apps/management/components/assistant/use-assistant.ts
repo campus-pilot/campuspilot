@@ -47,6 +47,7 @@ import {
   type AssistantConversationState,
 } from './assistant-conversation-state';
 import { draftKey, readDraft, sessionDraftStorage, writeDraft } from './assistant-draft';
+import { pageText } from './screen-text';
 import { conversationFailure, isClientError, missingAttachmentIdsOf, reconnectingStream, refusalMessage, retryUnlessRefused } from './assistant-stream';
 
 /**
@@ -465,10 +466,17 @@ export function useDeleteAssistantConversation(schoolId: string) {
   });
 }
 
-/** Where the user is, so the assistant can resolve "this student". */
-function currentPageContext() {
+/**
+ * Where the user is, so the assistant can resolve "this student". With
+ * `screen`, also the page's text (`screen-text.ts`): only a
+ * sender that sits over the page being asked about passes it (the voice
+ * overlay); a chat on its own page would only describe itself.
+ */
+function currentPageContext(screen: boolean) {
   const title = document.title.trim().slice(0, 200);
-  return { path: window.location.pathname.slice(0, 300), ...(title ? { title } : {}) };
+  const page = screen ? document.querySelector('main') : null;
+  const text = page ? pageText(page) : '';
+  return { path: window.location.pathname.slice(0, 300), ...(title ? { title } : {}), ...(text ? { pageText: text } : {}) };
 }
 
 /**
@@ -524,7 +532,7 @@ export function useSendAssistantMessage(schoolId: string, surface: AssistantSurf
   const send = (
     text: string,
     conversationId: string | null,
-    extras: { attachments?: AssistantAttachmentRef[]; seed?: QuestionPaperSeed | null; shareWithPaper?: boolean } = {},
+    extras: { attachments?: AssistantAttachmentRef[]; seed?: QuestionPaperSeed | null; shareWithPaper?: boolean; screen?: boolean } = {},
   ) => {
     const clientRequestId = crypto.randomUUID();
     return mutation
@@ -534,7 +542,7 @@ export function useSendAssistantMessage(schoolId: string, surface: AssistantSurf
         clientRequestId,
         text,
         surface,
-        pageContext: currentPageContext(),
+        pageContext: currentPageContext(extras.screen ?? false),
         ...(extras.attachments?.length ? { attachments: extras.attachments } : {}),
         ...(extras.seed && !conversationId ? { seed: extras.seed, shareWithPaper: extras.shareWithPaper ?? false } : {}),
       })

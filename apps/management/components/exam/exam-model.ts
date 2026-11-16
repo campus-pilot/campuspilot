@@ -245,9 +245,9 @@ export type ExamSection = 'question-paper' | 'results';
  * which also holds plan creation.
  *
  * Without student management an examination has no results: with no plan it
- * lands on plan creation (the Results route, shown as Subjects), otherwise
- * on Question paper for a user who may use the assistant and on More (its
- * lifecycle) for anyone else.
+ * lands on plan creation (the Results route, which then shows no tabs at
+ * all), otherwise on Question paper for a user who may use the assistant and
+ * on More (its lifecycle) for anyone else.
  *
  * `pending` while an answer that decides it is unknown, so the landing
  * neither flashes a section nor guesses.

@@ -6,6 +6,7 @@ import { SCHOOL_ACTIONS } from "@campuspilot/opa/policies/school";
 import { and, asc, eq, max, sql, count } from "drizzle-orm";
 
 import { rpcError, toRpcError } from "../../../errors";
+import { isSchoolFeatureEnabled } from "../../../feature-flags/feature-flags.service";
 import { o, protectedProcedure } from "../../../index";
 import { assertPermission } from "../../../permissions/authorization";
 import { studentTable } from "@campuspilot/db/schema/student";
@@ -78,6 +79,11 @@ export const schoolClassRouter = {
             .limit(1);
           if (!session) throw rpcError.notFound("School session");
         }
+        // Enrolments belong to student management: a school without it gets no
+        // student counts (null), also for students it enrolled before.
+        const countStudents =
+          input.sessionId !== undefined &&
+          (await isSchoolFeatureEnabled(context.db, input.schoolId, "studentManagement"));
         // Schools have a small bounded set of classes, and the complete ordered
         // collection is required for drag-and-drop, so this list is unpaginated.
         const [classes, sections, teacherAssignments, enrollments] =
@@ -100,7 +106,7 @@ export const schoolClassRouter = {
                   eq(schoolUserRoleTable.role, "teacher"),
                 ),
               ),
-            input.sessionId
+            countStudents && input.sessionId
               ? context.db
                   .select({ classId: studentTable.classId, value: count() })
                   .from(studentTable)
@@ -141,7 +147,7 @@ export const schoolClassRouter = {
           ...toClassDto(schoolClass),
           sectionCount: sectionCounts.get(schoolClass.id) ?? 0,
           teacherCount: teacherCounts.get(schoolClass.id) ?? 0,
-          studentCount: input.sessionId
+          studentCount: countStudents
             ? (studentCounts.get(schoolClass.id) ?? 0)
             : null,
           subjectCount: Object.keys(schoolClass.config.subjects).length,

@@ -292,7 +292,7 @@ function useDocumentTemplateForm(
           name: value.name,
           content: value.content,
           pageSize: value.pageSize,
-          expectedRevisionId: template.artifact.id,
+          expectedRevisionId: template.revisionId,
         });
         await cache.templates(scope);
       } catch (error) {

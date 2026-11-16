@@ -19,6 +19,7 @@ import {
 } from './exam.service';
 import { SCHOOL_ACTIONS } from '@campuspilot/opa/policies/school';
 import { protectedProcedure } from '../../../index';
+import { isSchoolFeatureEnabled } from '../../../feature-flags/feature-flags.service';
 import { requireSchoolPermission } from '../../../permissions/school';
 import { rpcError, toRpcError } from '../../../errors';
 import * as dto from './exam.dto';
@@ -425,19 +426,27 @@ export const schoolExamPlanRouter = {
               `Cannot transition an exam plan from ${plan.status} to ${input.status}.`,
             );
           if (input.status === 'active') {
-            await transitionExam(tx, {
-              schoolId: plan.schoolId,
-              sessionId: plan.sessionId,
-              examSlug: plan.examSlug,
-              status: 'active',
-            });
+            // Starting never reviews results; the option only matters for completion.
+            await transitionExam(
+              tx,
+              {
+                schoolId: plan.schoolId,
+                sessionId: plan.sessionId,
+                examSlug: plan.examSlug,
+                status: 'active',
+              },
+              { reviewResults: false },
+            );
             const [started] = await tx
               .select()
               .from(examPlanTable)
               .where(eq(examPlanTable.id, plan.id));
             return started!;
           }
-          if (input.status === 'completed') {
+          // Results can only be reviewed in a school that has student
+          // management; without it a plan completes without waiting for them
+          // (the same rule as `transitionExam`).
+          if (input.status === 'completed' && (await isSchoolFeatureEnabled(tx, plan.schoolId, 'studentManagement'))) {
             const [missing] = await tx
               .select({ studentId: studentTable.id })
               .from(studentTable)
