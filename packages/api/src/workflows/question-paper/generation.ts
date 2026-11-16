@@ -10,7 +10,7 @@ import { resolveAssistantAccess } from '../../assistant/access';
 import type { PaperKey } from '../../routers/school/question-paper/question-paper.dto';
 import { hasSelectedQuestionPaperTemplate } from '../../routers/school/question-paper/question-paper.render';
 import { assertPaperWritable, isPaperLockedError, isPlanModeRemovedError, resolvePaperScope, type PaperScope } from '../../routers/school/question-paper/question-paper.scope';
-import { unreadablePageMessage } from '../../routers/school/question-paper/question-paper.service';
+import { pageNotReadyMessage, unreadablePageMessage } from '../../routers/school/question-paper/question-paper.service';
 import { getObjectBytes } from '../../routers/school/question-paper/question-paper.storage';
 import { checkQuestionPaperDraft, saveQuestionPaperVersion, SourceJobEndedError } from '../../routers/school/question-paper/question-paper.version.service';
 import { QUESTION_PAPER_JOB_FAILURES, type QuestionPaperJobErrorCode } from './constants';
@@ -335,16 +335,25 @@ async function planInputs(deps: GenerationDeps, begun: BegunJob, model: Question
   const pages = begun.pageIds.map((id) => byId.get(id));
   if (pages.some((page) => !page)) throw new QuestionPaperJobFailure('page_unreadable', 'A page of this paper was removed. Upload it again.', 'A page of the job snapshot no longer exists.');
   const present = pages as NonNullable<(typeof pages)[number]>[];
+  // The start procedure refused pages that were not ready; a page cannot change state under a running job, so this only guards that rule.
+  const notReady = pageNotReadyMessage(present);
+  if (notReady) throw new QuestionPaperJobFailure('page_unreadable', notReady);
+  const stored = present.map((page) => {
+    if (!page.originalS3Key || !page.contentType || page.byteSize === null) {
+      throw new QuestionPaperJobFailure('page_unreadable', undefined, 'A page of the job snapshot has no stored photo.');
+    }
+    return { ...page, originalS3Key: page.originalS3Key, contentType: page.contentType, byteSize: page.byteSize };
+  });
 
   const unreadable = unreadablePageMessage(present, model.imageMimeTypes);
   if (unreadable) throw new QuestionPaperJobFailure('unsupported_page_format', unreadable);
-  const totalBytes = present.reduce((sum, page) => sum + encodedImageBytes(page.modelByteSize ?? page.byteSize), 0);
+  const totalBytes = stored.reduce((sum, page) => sum + encodedImageBytes(page.modelByteSize ?? page.byteSize), 0);
   if (totalBytes > QUESTION_PAPER_MAX_REQUEST_IMAGE_BYTES) {
     throw new QuestionPaperJobFailure('images_too_large', undefined, `${totalBytes} encoded bytes of page images.`);
   }
   return {
     scope,
-    pages: present.map((page): PlannedPage => ({
+    pages: stored.map((page): PlannedPage => ({
       id: page.id,
       position: page.position,
       name: page.originalName,

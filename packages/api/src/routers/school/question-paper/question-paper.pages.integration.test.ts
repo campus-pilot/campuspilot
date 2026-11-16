@@ -22,9 +22,11 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { expectFeatureDisabled } from '../../../../test/feature-flags';
 import { createHandlerContext, setTestSchoolFeature } from '../../../../test/fixtures';
+import { settleDerivatives } from '../../../../test/image-derivatives';
 import { createQuestionPaperWorld, type QuestionPaperWorld } from '../../../../test/question-paper';
 import { configureQuestionPaperModel, type QuestionPaperModel } from '../../../workflows/question-paper/model';
-import { handleQuestionPaperPageRead, handleQuestionPaperPageUpload } from './question-paper.http';
+import { handleQuestionPaperPageRead, handleQuestionPaperPageUpload as handleUploadOnly } from './question-paper.http';
+import { toPageDto } from './question-paper.records';
 import {
   addQuestionPaperFigure,
   addQuestionPaperPage,
@@ -42,11 +44,31 @@ import { QUESTION_PAPER_GENERATION_INSTRUCTIONS_MAX_CHARS, QUESTION_PAPER_MAX_PA
  * a worker) running next to the database: no job here is ever handed over, and
  * the tests below assert on the job rows, not on a live engine.
  */
+/** The worker's image job runs inline (`test/image-derivatives.ts`), so a stored page is processed without a worker. */
+vi.mock('../../../workflows/image-derivatives/outbox', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../workflows/image-derivatives/outbox')>()),
+  requestImageDerivatives: (await import('../../../../test/image-derivatives')).runDerivativesInline,
+}));
+
 vi.mock('../../../workflows/question-paper/restate', () => ({
   sendQuestionPaperStart: vi.fn(async () => {
     throw new Error('WORKER_CONTROL_SECRET is not set, so worker control calls cannot be signed.');
   }),
 }));
+
+/**
+ * Uploads through the real route, lets the worker's job (run inline) finish,
+ * and answers with the page as it then is, so the tests read the outcome a
+ * teacher sees once the photo is processed.
+ */
+async function handleQuestionPaperPageUpload(...args: Parameters<typeof handleUploadOnly>): Promise<Response> {
+  const response = await handleUploadOnly(...args);
+  await settleDerivatives();
+  if (response.status !== 200) return response;
+  const json = (await response.json()) as { page: { id: string }; pageRevision: number };
+  const [row] = await db.select().from(examQuestionPaperPageTable).where(eq(examQuestionPaperPageTable.id, json.page.id));
+  return Response.json({ ...json, page: toPageDto(row!) });
+}
 
 const HEVC_STILL = readFileSync(new URL('../../../files/__fixtures__/hevc-still.heic', import.meta.url));
 const ENGLISH_SCIENCE = QUESTION_PAPER_EXAMPLES['english-science'];
@@ -127,7 +149,7 @@ describe('question paper pages', () => {
       const rows = (await pageRows()).map((row) => row.exam_question_paper_page);
       expect(rows.map((row) => row.position)).toEqual([1, 2, 3]);
       const [original] = rows;
-      for (const objectKey of [original!.originalS3Key, original!.thumbS3Key!, original!.modelS3Key!]) expect(await exists(objectKey), objectKey).toBe(true);
+      for (const objectKey of [original!.originalS3Key!, original!.thumbS3Key!, original!.modelS3Key!]) expect(await exists(objectKey), objectKey).toBe(true);
       expect(original!.originalS3Key).toMatch(new RegExp(`^schools/${world.schoolId}/exam-question-papers/pages/${original!.id}/original\\.jpg$`));
       expect(original).toMatchObject({ modelContentType: 'image/jpeg', uploadedBy: world.people.manager.userId });
       expect(original!.modelByteSize!).toBeGreaterThan(0);
@@ -160,7 +182,7 @@ describe('question paper pages', () => {
       expect(page).toMatchObject({ derivativeStatus: 'unsupported', width: 64, height: 48, contentType: 'image/heic', originalName: 'IMG_0042.HEIC' });
       const row = await firstPage(k);
       expect([row!.thumbS3Key, row!.modelS3Key, row!.modelContentType, row!.modelByteSize]).toEqual([null, null, null, null]);
-      expect(await exists(row!.originalS3Key)).toBe(true);
+      expect(await exists(row!.originalS3Key!)).toBe(true);
       expect((await read('manager', page.id, 'thumb', k)).status).toBe(404);
       expect((await read('manager', page.id, 'original', k)).status).toBe(302);
 
@@ -174,7 +196,6 @@ describe('question paper pages', () => {
       ['AVIF declared as HEIC', async () => ({ bytes: await sharp({ create: { width: 16, height: 16, channels: 3, background: '#888' } }).avif().toBuffer(), type: 'image/heic', name: 'a.heic' }), 415],
       ['a PDF', async () => ({ bytes: Buffer.from('%PDF-1.7'), type: 'application/pdf', name: 'a.pdf' }), 415],
       ['a JPEG whose bytes are not a JPEG', async () => ({ bytes: Buffer.from('not an image'), type: 'image/jpeg', name: 'a.jpg' }), 415],
-      ['a JPEG that cannot be decoded', async () => ({ bytes: Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(100, 7)]), type: 'image/jpeg', name: 'a.jpg' }), 415],
       ['a name that disagrees with the type', async () => ({ bytes: await jpeg(8, 8), type: 'image/jpeg', name: 'a.png' }), 415],
       ['a photo over 15 MiB', async () => ({ bytes: Buffer.concat([Buffer.from([0xff, 0xd8]), Buffer.alloc(QUESTION_PAPER_MAX_PAGE_BYTES)]), type: 'image/jpeg', name: 'big.jpg' }), 413],
     ])('refuses %s and stores nothing', async (_label, make, status) => {
@@ -183,6 +204,32 @@ describe('question paper pages', () => {
       const response = await upload('manager', bytes, type, name, k);
       expect(response.status).toBe(status);
       expect(await pageRows(k)).toHaveLength(0);
+    });
+
+    it('keeps a JPEG the worker cannot decode as a failed page that blocks generation until it is removed', async () => {
+      // A school of its own, so the paper this leaves behind changes nothing the other tests count.
+      const own = await createQuestionPaperWorld();
+      const upload = (_who: 'manager', bytes: Uint8Array, type: string, filename: string) =>
+        handleQuestionPaperPageUpload(uploadRequest(bytes, type, filename), own.people.manager.context, own.key());
+      const key = () => own.key();
+      const firstPage = async () =>
+        (await db.select().from(examQuestionPaperPageTable).innerJoin(examQuestionPaperTable, eq(examQuestionPaperTable.id, examQuestionPaperPageTable.paperId)).where(eq(examQuestionPaperTable.schoolId, own.schoolId)))[0]!.exam_question_paper_page;
+      const broken = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(100, 7)]);
+      const response = await upload('manager', broken, 'image/jpeg', 'broken.jpg');
+      // The request only stores the photo; the decode happens in the worker, which records the failure.
+      expect(response.status).toBe(200);
+      const { page } = await body(response);
+      expect(page).toMatchObject({ derivativeStatus: 'failed', position: 1 });
+      const row = await firstPage();
+      expect([row.thumbS3Key, row.modelS3Key]).toEqual([null, null]);
+      configureQuestionPaperModel(fakeModel(GEMINI_LIKE));
+      const detail = await own.people.manager.client.school.getQuestionPaperDetail(key());
+      expect(await reason(startQuestionPaperGeneration(db, { scope: await resolvePaperScope(db, key()), userId: own.people.manager.userId, expectedPageRevision: detail.paper.pageRevision, dispatch: () => {} }))).toMatchObject({
+        code: 'BAD_REQUEST',
+        message: 'Page 1 (broken.jpg) could not be read as an image. Remove it and upload it again.',
+      });
+      await own.people.manager.client.school.deleteQuestionPaperPage({ ...key(), pageId: page.id, expectedPageRevision: detail.paper.pageRevision });
+      expect(await exists(row.originalS3Key!)).toBe(false);
     });
 
     it('refuses a wrong field name, two files and extra fields', async () => {
@@ -302,7 +349,7 @@ describe('question paper pages', () => {
       const after = await detail();
       expect(after.pages.map((page) => page.position)).toEqual(Array.from({ length: before.pages.length - 1 }, (_, index) => index + 1));
       expect(after.pages.some((page) => page.id === target.id)).toBe(false);
-      for (const objectKey of [gone.originalS3Key, gone.thumbS3Key!, gone.modelS3Key!]) expect(await exists(objectKey), objectKey).toBe(false);
+      for (const objectKey of [gone.originalS3Key!, gone.thumbS3Key!, gone.modelS3Key!]) expect(await exists(objectKey), objectKey).toBe(false);
       await expect(world.people.manager.client.school.deleteQuestionPaperPage({ ...key(), pageId: target.id, expectedPageRevision: out.pageRevision })).rejects.toMatchObject({ code: 'NOT_FOUND' });
     });
   });
@@ -665,7 +712,7 @@ describe('question paper pages', () => {
       const paperRows = await db.select().from(examQuestionPaperTable).where(eq(examQuestionPaperTable.id, saved.paperId));
       const versions = await db.select().from(examQuestionPaperVersionTable).where(eq(examQuestionPaperVersionTable.paperId, saved.paperId));
       const artifactKeys = (await db.select().from(artifactTable).where(eq(artifactTable.id, versions[0]!.pdfArtifactId!))).map((row) => row.s3Key);
-      const pageKeys = (await pageRows(k)).flatMap((row) => [row.exam_question_paper_page.originalS3Key, row.exam_question_paper_page.thumbS3Key!, row.exam_question_paper_page.modelS3Key!]);
+      const pageKeys = (await pageRows(k)).flatMap((row) => [row.exam_question_paper_page.originalS3Key!, row.exam_question_paper_page.thumbS3Key!, row.exam_question_paper_page.modelS3Key!]);
       expect(pageKeys.length).toBeGreaterThan(0);
       expect(artifactKeys).toHaveLength(1);
 

@@ -13,6 +13,7 @@ import {
   questionPaperGenerationWorkflow,
 } from '@campuspilot/api/workflows/question-paper';
 import { configureQuestionPaperModel } from '@campuspilot/api/workflows/question-paper/model';
+import { imageDerivativeControlService } from '@campuspilot/api/workflows/image-derivatives';
 import {
   notificationControlService,
   notificationDispatchWorkflow,
@@ -55,6 +56,7 @@ export function startWorker() {
       notificationSenderObject,
       questionPaperControlService,
       questionPaperGenerationWorkflow,
+      imageDerivativeControlService,
       ...createAssistantWorkerServices(),
     ],
   });

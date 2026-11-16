@@ -27,6 +27,8 @@ import {
   deleteQuestionPaper,
   deleteQuestionPaperPage,
   getQuestionPaper,
+  releaseQuestionPaperPage,
+  reserveQuestionPaperPages,
   getQuestionPaperDetail,
   getQuestionPaperFacts,
   listQuestionPaperVersions,
@@ -363,6 +365,43 @@ export const schoolQuestionPaperRouter = {
           scope: await resolvePaperScope(context.db, input),
           pageIds: input.pageIds,
           expectedPageRevision: input.expectedPageRevision,
+        });
+      } catch (error) {
+        throw toRpcError(error);
+      }
+    }),
+
+  reserveQuestionPaperPages: protectedProcedure
+    .route(route('Reserve question paper pages', 'Reserve the next pages of a paper, one per photo about to be uploaded, in the order given. Each photo is then sent to its own page (POST .../pages/{pageId}), so uploads may run in parallel without changing the order. A reserved page whose photo does not arrive within 15 minutes is removed. Refused when the paper would pass 20 pages or a generation runs.'))
+    .meta(humanOnly('write'))
+    .input(dto.reservePagesInputSchema)
+    .use(manageClass)
+    .use(requireQuestionPaperAssistantAccess())
+    .output(dto.reservePagesOutputSchema)
+    .handler(async ({ context, input }) => {
+      try {
+        return await reserveQuestionPaperPages(context.db, {
+          scope: await resolvePaperScope(context.db, input),
+          userId: userId(context),
+          fileNames: input.fileNames,
+        });
+      } catch (error) {
+        throw toRpcError(error);
+      }
+    }),
+
+  releaseQuestionPaperPage: protectedProcedure
+    .route(route('Release a reserved question paper page', 'Remove a reserved page whose photo never arrived (its upload failed or was cancelled) and renumber the rest. A page that has its photo is deleted with deleteQuestionPaperPage instead.'))
+    .meta(humanOnly('write', true))
+    .input(dto.releasePageInputSchema)
+    .use(manageClass)
+    .use(requireQuestionPaperAssistantAccess())
+    .output(dto.releasePageOutputSchema)
+    .handler(async ({ context, input }) => {
+      try {
+        return await releaseQuestionPaperPage(context.db, {
+          scope: await resolvePaperScope(context.db, input),
+          pageId: input.pageId,
         });
       } catch (error) {
         throw toRpcError(error);

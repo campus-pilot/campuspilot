@@ -20,6 +20,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createQuestionPaperWorld } from '../../../test/question-paper';
 import { resolvePaperScope } from '../../routers/school/question-paper/question-paper.scope';
 import { addQuestionPaperFigure, addQuestionPaperPage } from '../../routers/school/question-paper/question-paper.service';
+import { processPageDerivatives } from '../image-derivatives/process';
 import { putObject } from '../../routers/school/question-paper/question-paper.storage';
 import { saveQuestionPaperVersion } from '../../routers/school/question-paper/question-paper.version.service';
 import { collectDemoSchoolObjectKeys, runDemoSchoolPurgeStages } from './purge-workflow';
@@ -52,7 +53,10 @@ describe('demo purge of question papers and chat images', () => {
       const world = await createQuestionPaperWorld({ school: { id: productionId(), isDemo } });
       const scope = await resolvePaperScope(db, world.key());
       const userId = world.people.manager.userId;
-      const page = await addQuestionPaperPage(db, { scope, userId, file: { bytes: await png('#eee'), contentType: 'image/png', extension: 'png', name: 'page.png' } });
+      const page = await addQuestionPaperPage(db, { scope, userId, file: { bytes: await png('#eee'), contentType: 'image/png', extension: 'png', name: 'page.png' }, requestDerivatives: () => undefined });
+      await processPageDerivatives(db, page.page.id);
+      // A page reserved for a photo that never arrived: a row without objects, which the purge must take too.
+      await world.people.manager.client.school.reserveQuestionPaperPages({ ...world.key(), fileNames: ['lost.jpg'] });
       await addQuestionPaperFigure(db, { scope, userId, bytes: await png('#ccd') });
       await saveQuestionPaperVersion(db, { scope, userId, expectedVersionNo: 0, html: QUESTION_PAPER_EXAMPLES['english-science'], source: { kind: 'agent', conversationId: null } });
       const paper = (await db.select().from(examQuestionPaperTable).where(eq(examQuestionPaperTable.schoolId, world.schoolId)))[0]!;
@@ -78,13 +82,13 @@ describe('demo purge of question papers and chat images', () => {
       await db.insert(assistantAttachmentTable).values({
         schoolId: world.schoolId, userId, kind: 'document', originalName: 'paper.pdf', contentType: 'application/pdf', byteSize: 15, sha256: 'b'.repeat(64), s3Key: documentKey, derivativeStatus: null,
       });
-      const [pageRow] = await db.select().from(examQuestionPaperPageTable).where(eq(examQuestionPaperPageTable.paperId, paper.id));
+      const [pageRow] = await db.select().from(examQuestionPaperPageTable).where(eq(examQuestionPaperPageTable.paperId, paper.id)).orderBy(examQuestionPaperPageTable.position);
       const [figureRow] = await db.select().from(examQuestionPaperFigureTable).where(eq(examQuestionPaperFigureTable.paperId, paper.id));
       const [versionRow] = await db.select().from(examQuestionPaperVersionTable).where(eq(examQuestionPaperVersionTable.paperId, paper.id));
       const [pdf] = await db.select().from(artifactTable).where(eq(artifactTable.id, versionRow!.pdfArtifactId!));
       return {
         schoolId: world.schoolId,
-        keys: [pageRow!.originalS3Key, pageRow!.thumbS3Key!, pageRow!.modelS3Key!, figureRow!.s3Key, pdf!.s3Key, attachmentKey, documentKey],
+        keys: [pageRow!.originalS3Key!, pageRow!.thumbS3Key!, pageRow!.modelS3Key!, figureRow!.s3Key, pdf!.s3Key, attachmentKey, documentKey],
       };
     };
     const demo = await make(true);

@@ -15,17 +15,19 @@ import { classTable } from '@campuspilot/db/schema/class';
 import { env as assistantEnv } from '@campuspilot/env/assistant';
 import { QUESTION_PAPER_LIMITS } from '@campuspilot/question-paper/limits';
 import { ORPCError } from '@orpc/server';
-import { and, asc, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, lt, sql } from 'drizzle-orm';
 import type { z } from 'zod';
 
 import { rpcError } from '../../../errors';
 import { getExamSession } from '../exam/exam.service';
 import { latestPaperConversationId, paperChatIsWorking, unsharePaperConversations } from './question-paper.conversations';
-import { makeImageDerivatives, normalizeFigureImage } from '../../../files/image-derivative';
+import { checkImageHeader, normalizeFigureImage } from '../../../files/image-derivative';
+import { requestImageDerivatives } from '../../../workflows/image-derivatives/outbox';
 import { getQuestionPaperModel } from '../../../workflows/question-paper/model';
 import { handOff, dispatchQuestionPaperJob } from '../../../workflows/question-paper/outbox';
 import {
   QUESTION_PAPER_MAX_PAGES,
+  QUESTION_PAPER_PAGE_RESERVATION_TTL_MS,
   type PaperKey,
   type detailOutputSchema,
   type getQuestionPaperOutputSchema,
@@ -327,14 +329,210 @@ async function precheckFigureUpload(db: Database, key: PaperKey) {
   }
 }
 
+/** Bumps the paper's page revision (positions or the set of pages changed) and returns it. */
+async function bumpPageRevision(tx: DatabaseTransaction, paperId: string) {
+  const [bumped] = await tx
+    .update(examQuestionPaperTable)
+    .set({ pageRevision: sql`${examQuestionPaperTable.pageRevision} + 1`, updatedAt: new Date() })
+    .where(eq(examQuestionPaperTable.id, paperId))
+    .returning({ pageRevision: examQuestionPaperTable.pageRevision });
+  return bumped!.pageRevision;
+}
+
+/** Writes positions 1..n for `pages` in their given order, skipping rows already in place. */
+async function renumberPages(tx: DatabaseTransaction, pages: ReadonlyArray<{ id: string; position: number }>) {
+  for (const [index, page] of pages.entries()) {
+    if (page.position === index + 1) continue;
+    await tx.update(examQuestionPaperPageTable).set({ position: index + 1 }).where(eq(examQuestionPaperPageTable.id, page.id));
+  }
+}
+
 /**
- * Stores one uploaded photo as the paper's next page (the upload route, after
- * it has checked permission, access and the file). The objects are written
- * first, with no lock held (a slow storage write must not hold the school's
- * session row, which every exam service queues behind); a short transaction
- * then re-checks the exam and plan under their locks, locks the paper so the
- * page cap and the page order are exact, and inserts the row. The objects are
- * removed again if any of that fails, so a refused upload leaves nothing.
+ * Reserves the next pages of a paper, one per picked photo and in the order
+ * they were picked, before any bytes are sent. The rows are `awaiting` (no
+ * file facts yet); the photos then upload in parallel into their own rows
+ * ({@link storeQuestionPaperPage}), so the order never depends on which upload
+ * finishes first. Runs under the paper row lock like every page write: the
+ * 20 page cap counts reserved rows, and no generation may be running.
+ */
+export async function reserveQuestionPaperPages(
+  db: Database,
+  input: { scope: PaperScope; userId: string; fileNames: readonly string[] },
+) {
+  const { scope } = input;
+  assertPaperWritable(scope);
+  if (input.fileNames.length === 0) throw rpcError.badRequest('Pick at least one photo.');
+  return db.transaction(async (tx) => {
+    await assertPaperWritableLocked(tx, scope.key);
+    const paper = await lockOrCreatePaper(tx, scope.key, input.userId);
+    const existing = await pagesOf(tx, paper.id);
+    if (existing.length + input.fileNames.length > QUESTION_PAPER_MAX_PAGES) {
+      throw rpcError.badRequest(`A paper can have at most ${QUESTION_PAPER_MAX_PAGES} pages.`);
+    }
+    await assertNoActiveJob(tx, paper.id, 'Pages cannot be added');
+    const rows = await tx
+      .insert(examQuestionPaperPageTable)
+      .values(
+        input.fileNames.map((name, index) => ({
+          paperId: paper.id,
+          schoolId: scope.key.schoolId,
+          position: existing.length + index + 1,
+          uploadStatus: 'awaiting' as const,
+          originalName: sanitizeFileName(name),
+          derivativeStatus: 'pending' as const,
+          uploadedBy: input.userId,
+        })),
+      )
+      .returning();
+    const pageRevision = await bumpPageRevision(tx, paper.id);
+    const pages = [...rows].sort((a, b) => a.position - b.position).map(toPageDto);
+    return { pages, pageRevision };
+  });
+}
+
+/**
+ * The cheap, unlocked look before the original is written: the page exists in
+ * this paper and still awaits its bytes. The locked update re-checks both.
+ */
+async function precheckPageStore(db: Database, key: PaperKey, pageId: string) {
+  const paper = await findPaper(db, key);
+  const [page] = paper
+    ? await db
+        .select({ uploadStatus: examQuestionPaperPageTable.uploadStatus })
+        .from(examQuestionPaperPageTable)
+        .where(and(eq(examQuestionPaperPageTable.id, pageId), eq(examQuestionPaperPageTable.paperId, paper.id)))
+        .limit(1)
+    : [];
+  if (!page) throw rpcError.notFound('Question paper page');
+  if (page.uploadStatus !== 'awaiting') throw rpcError.conflict('This page already has its photo.');
+}
+
+/**
+ * Stores the photo of a reserved page (the upload route, after it has checked
+ * permission, access and the file). The header is read first (an image over
+ * 40 megapixels is refused before anything is written); the original is then
+ * written with no lock held, and a short transaction re-checks the exam, locks
+ * the paper and fills the row (`stored`, derivatives `pending`). The worker
+ * makes the thumbnail and model copy after the commit
+ * (`workflows/image-derivatives`), so this request never decodes the photo.
+ * A refused store removes the object again. Filling a row changes no position,
+ * so the page revision stays as it is.
+ */
+export async function storeQuestionPaperPage(
+  db: Database,
+  input: {
+    scope: PaperScope;
+    pageId: string;
+    file: { bytes: Buffer; contentType: string; extension: string; name: string };
+    /** Hands the stored page to the worker; the default is the outbox hand-over. Tests replace it. */
+    requestDerivatives?: (pageId: string) => void;
+  },
+) {
+  const { scope, file, pageId } = input;
+  assertPaperWritable(scope);
+  await precheckPageStore(db, scope.key, pageId);
+  const size = await checkImageHeader(file.bytes);
+  const originalKey = questionPaperKeys.original(scope.key.schoolId, pageId, file.extension);
+  try {
+    await putObject(originalKey, file.bytes, file.contentType);
+    const page = await db.transaction(async (tx) => {
+      await assertPaperWritableLocked(tx, scope.key);
+      const paper = await lockPaper(tx, scope.key);
+      await assertNoActiveJob(tx, paper.id, 'Pages cannot be added');
+      const [stored] = await tx
+        .update(examQuestionPaperPageTable)
+        .set({
+          uploadStatus: 'stored',
+          originalS3Key: originalKey,
+          contentType: file.contentType,
+          byteSize: file.bytes.byteLength,
+          sha256: createHash('sha256').update(file.bytes).digest('hex'),
+          width: size?.width ?? null,
+          height: size?.height ?? null,
+          storedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(examQuestionPaperPageTable.id, pageId),
+            eq(examQuestionPaperPageTable.paperId, paper.id),
+            eq(examQuestionPaperPageTable.uploadStatus, 'awaiting'),
+          ),
+        )
+        .returning();
+      if (!stored) throw rpcError.conflict('This page was removed or already has its photo. Add the photo again.');
+      return stored;
+    });
+    (input.requestDerivatives ?? ((id: string) => requestImageDerivatives('page', id)))(page.id);
+    return { page: toPageDto(page) };
+  } catch (error) {
+    await deleteObjectsBestEffort([originalKey]);
+    throw error;
+  }
+}
+
+/**
+ * Removes a reserved page whose photo never arrived (its upload failed or was
+ * cancelled) and renumbers the rest. No page revision is asked for: nobody
+ * has seen this page as a photo yet. A page that already has its photo is
+ * removed with {@link deleteQuestionPaperPage} instead. Removing one that is
+ * already gone is not an error.
+ */
+export async function releaseQuestionPaperPage(db: Database, input: { scope: PaperScope; pageId: string }) {
+  assertPaperWritable(input.scope);
+  return db.transaction(async (tx) => {
+    await assertPaperWritableLocked(tx, input.scope.key);
+    const paper = await lockPaper(tx, input.scope.key);
+    const pages = await pagesOf(tx, paper.id);
+    const page = pages.find((candidate) => candidate.id === input.pageId);
+    if (!page) return { released: false, pageRevision: paper.pageRevision };
+    if (page.uploadStatus !== 'awaiting') throw rpcError.conflict('This page already has its photo. Delete the page instead.');
+    await tx.delete(examQuestionPaperPageTable).where(eq(examQuestionPaperPageTable.id, page.id));
+    await renumberPages(tx, pages.filter((candidate) => candidate.id !== page.id));
+    return { released: true, pageRevision: await bumpPageRevision(tx, paper.id) };
+  });
+}
+
+/**
+ * Removes reservations whose photo never arrived within
+ * {@link QUESTION_PAPER_PAGE_RESERVATION_TTL_MS} (a closed tab, a lost
+ * connection), at most `limit` papers per call, and renumbers each paper's
+ * remaining pages. Each paper is locked on its own (`SKIP LOCKED`), so the
+ * sweep never waits for, or blocks, a teacher's own page write.
+ */
+export async function releaseExpiredPageReservations(db: Database, now: Date = new Date(), limit = 20) {
+  const cutoff = new Date(now.getTime() - QUESTION_PAPER_PAGE_RESERVATION_TTL_MS);
+  const papers = await db
+    .selectDistinct({ paperId: examQuestionPaperPageTable.paperId })
+    .from(examQuestionPaperPageTable)
+    .where(and(eq(examQuestionPaperPageTable.uploadStatus, 'awaiting'), lt(examQuestionPaperPageTable.createdAt, cutoff)))
+    .limit(limit);
+  let released = 0;
+  for (const { paperId } of papers) {
+    released += await db.transaction(async (tx) => {
+      const [paper] = await tx
+        .select({ id: examQuestionPaperTable.id })
+        .from(examQuestionPaperTable)
+        .where(eq(examQuestionPaperTable.id, paperId))
+        .for('update', { skipLocked: true });
+      if (!paper) return 0;
+      const pages = await pagesOf(tx, paper.id);
+      const expired = new Set(pages.filter((page) => page.uploadStatus === 'awaiting' && page.createdAt < cutoff).map((page) => page.id));
+      if (expired.size === 0) return 0;
+      await tx.delete(examQuestionPaperPageTable).where(inArray(examQuestionPaperPageTable.id, [...expired]));
+      await renumberPages(tx, pages.filter((page) => !expired.has(page.id)));
+      await bumpPageRevision(tx, paper.id);
+      return expired.size;
+    });
+  }
+  return { released };
+}
+
+/**
+ * Adds one photo as the paper's next page in a single call: a reservation of
+ * one page, then its store. For callers that hold the bytes already (the demo
+ * seed, and the original single-request route that browser tabs opened before
+ * reservations existed may still use). A store that fails releases the
+ * reservation again, so a refused upload leaves nothing.
  */
 export async function addQuestionPaperPage(
   db: Database,
@@ -342,63 +540,21 @@ export async function addQuestionPaperPage(
     scope: PaperScope;
     userId: string;
     file: { bytes: Buffer; contentType: string; extension: string; name: string };
+    requestDerivatives?: (pageId: string) => void;
   },
 ) {
   const { scope, file } = input;
   assertPaperWritable(scope);
   await precheckPageUpload(db, scope.key);
-  const derivatives = await makeImageDerivatives(file.bytes, file.contentType);
-  const pageId = generateId('examQuestionPaperPage');
-  const { schoolId } = scope.key;
-  const originalKey = questionPaperKeys.original(schoolId, pageId, file.extension);
-  const thumbKey = derivatives.status === 'ready' ? questionPaperKeys.thumb(schoolId, pageId) : null;
-  const modelKey = derivatives.status === 'ready' ? questionPaperKeys.model(schoolId, pageId) : null;
-  const written = [originalKey, thumbKey, modelKey].filter((key): key is string => key !== null);
+  // Refused before a reservation exists, so an oversized photo changes nothing.
+  await checkImageHeader(file.bytes);
+  const reserved = await reserveQuestionPaperPages(db, { scope, userId: input.userId, fileNames: [file.name] });
+  const pageId = reserved.pages[0]!.id;
   try {
-    await putObject(originalKey, file.bytes, file.contentType);
-    if (derivatives.status === 'ready') {
-      await putObject(thumbKey!, derivatives.thumb.bytes, derivatives.thumb.contentType);
-      await putObject(modelKey!, derivatives.model.bytes, derivatives.model.contentType);
-    }
-    return await db.transaction(async (tx) => {
-      await assertPaperWritableLocked(tx, scope.key);
-      const paper = await lockOrCreatePaper(tx, scope.key, input.userId);
-      const existing = await pagesOf(tx, paper.id);
-      if (existing.length >= QUESTION_PAPER_MAX_PAGES) {
-        throw rpcError.badRequest(`A paper can have at most ${QUESTION_PAPER_MAX_PAGES} pages.`);
-      }
-      await assertNoActiveJob(tx, paper.id, 'Pages cannot be added');
-      const [page] = await tx
-        .insert(examQuestionPaperPageTable)
-        .values({
-          id: pageId,
-          paperId: paper.id,
-          schoolId,
-          position: existing.length + 1,
-          originalS3Key: originalKey,
-          originalName: sanitizeFileName(file.name),
-          contentType: file.contentType,
-          byteSize: file.bytes.byteLength,
-          sha256: createHash('sha256').update(file.bytes).digest('hex'),
-          width: derivatives.width,
-          height: derivatives.height,
-          derivativeStatus: derivatives.status === 'ready' ? 'ready' : 'unsupported',
-          thumbS3Key: thumbKey,
-          modelS3Key: modelKey,
-          modelContentType: derivatives.status === 'ready' ? derivatives.model.contentType : null,
-          modelByteSize: derivatives.status === 'ready' ? derivatives.model.bytes.byteLength : null,
-          uploadedBy: input.userId,
-        })
-        .returning();
-      const [bumped] = await tx
-        .update(examQuestionPaperTable)
-        .set({ pageRevision: sql`${examQuestionPaperTable.pageRevision} + 1`, updatedAt: new Date() })
-        .where(eq(examQuestionPaperTable.id, paper.id))
-        .returning({ pageRevision: examQuestionPaperTable.pageRevision });
-      return { page: toPageDto(page!), pageRevision: bumped!.pageRevision };
-    });
+    const { page } = await storeQuestionPaperPage(db, { scope, pageId, file, requestDerivatives: input.requestDerivatives });
+    return { page, pageRevision: reserved.pageRevision };
   } catch (error) {
-    await deleteObjectsBestEffort(written);
+    await releaseQuestionPaperPage(db, { scope, pageId }).catch(() => undefined);
     throw error;
   }
 }
@@ -630,11 +786,33 @@ export async function storeQuestionPaperFigure(
 }
 
 /** `Page 3 (IMG_0042.HEIC) is in a format the AI model cannot read...` for the first page the model cannot read (D46). */
-export function unreadablePageMessage(pages: Array<{ position: number; originalName: string; derivativeStatus: string; contentType: string }>, mimeTypes: readonly string[]) {
-  const page = pages.find((candidate) => candidate.derivativeStatus === 'unsupported' && !mimeTypes.includes(candidate.contentType));
+export function unreadablePageMessage(pages: Array<{ position: number; originalName: string; derivativeStatus: string; contentType: string | null }>, mimeTypes: readonly string[]) {
+  const page = pages.find((candidate) => candidate.derivativeStatus === 'unsupported' && !mimeTypes.includes(candidate.contentType ?? ''));
   return page
     ? `Page ${page.position} (${page.originalName}) is in a format the AI model cannot read. Convert it to JPEG and upload it again.`
     : null;
+}
+
+/**
+ * Why the pages cannot be generated from yet, for the first page that is not
+ * ready: its photo is still on its way (`awaiting`), the worker has not made
+ * its copies yet (`pending`), or it could not be read (`failed`). Null when
+ * every page is `ready` or `unsupported` (the latter is then judged by
+ * {@link unreadablePageMessage}). Generation never starts on part of a paper.
+ */
+export function pageNotReadyMessage(pages: ReadonlyArray<{ position: number; originalName: string; uploadStatus: string; derivativeStatus: string }>) {
+  for (const page of pages) {
+    if (page.uploadStatus === 'awaiting') {
+      return `Page ${page.position} (${page.originalName}) is still uploading. Wait for it to finish, or remove it, then generate.`;
+    }
+    if (page.derivativeStatus === 'pending') {
+      return `Page ${page.position} (${page.originalName}) is still being processed. Try again in a moment.`;
+    }
+    if (page.derivativeStatus === 'failed') {
+      return `Page ${page.position} (${page.originalName}) could not be read as an image. Remove it and upload it again.`;
+    }
+  }
+  return null;
 }
 
 /**
@@ -665,7 +843,8 @@ async function assertSchoolJobCapacity(tx: DatabaseTransaction, schoolId: string
  * Queues an AI generation for a paper (the manual UI's path; chat agents
  * author papers themselves). Checked, in order and before any cost: a model
  * is configured, the school chose a template, the paper has pages and the
- * caller saw their current order (`expectedPageRevision`), no page is in a
+ * caller saw their current order (`expectedPageRevision`), every page's photo
+ * has arrived and been processed by the worker, no page is in a
  * format the configured model cannot read (the user hears it now, not after
  * the job failed; pages are never silently dropped), and no generation is
  * already in flight. The job row is the outbox entry; the hand-over to the
@@ -702,6 +881,8 @@ export async function startQuestionPaperGeneration(
     assertPageRevision(paper, input.expectedPageRevision);
     const pages = await pagesOf(tx, paper.id);
     if (pages.length === 0) throw rpcError.badRequest('Upload at least one page before generating.');
+    const notReady = pageNotReadyMessage(pages);
+    if (notReady) throw rpcError.badRequest(notReady);
     const unreadable = unreadablePageMessage(pages, model.imageMimeTypes);
     if (unreadable) throw rpcError.badRequest(unreadable);
     if (await activeJobOf(tx, paper.id)) throw rpcError.conflict('A generation is already running for this paper.');

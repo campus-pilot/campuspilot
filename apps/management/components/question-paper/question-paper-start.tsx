@@ -19,7 +19,17 @@ import { deleteAssistantAttachment, uploadAssistantAttachment } from '@/lib/assi
 import { orpc } from '@/lib/orpc';
 import { questionPaperThumbUrl } from '@/lib/question-paper-pages';
 import { EarlierPaperDialog, earlierPaperDetail, earlierPaperTitle } from './earlier-paper-dialog';
-import { applyPageOrder, currentJobFailure, inFlightJob, isConflict, requestErrorMessage, uploadsInFlight, type QuestionPaperScope } from './question-paper-model';
+import {
+  applyPageOrder,
+  currentJobFailure,
+  inFlightJob,
+  isConflict,
+  pagesNotReadyReason,
+  requestErrorMessage,
+  unreservedUploads,
+  uploadsInFlight,
+  type QuestionPaperScope,
+} from './question-paper-model';
 import {
   createPlanOf,
   marksMismatchOf,
@@ -188,7 +198,7 @@ function usePaperStart({ scope, detail, uploads, onOpenStudio }: Pick<StartProps
     if (files.length === 0) return;
     const picks = sortSourcePicks(files, {
       alternative: form.getFieldValue('alternative'),
-      photoCount: detail.paper.pageCount + uploadsInFlight(uploads.form.getFieldValue('items')),
+      photoCount: detail.paper.pageCount + unreservedUploads(uploads.form.getFieldValue('items')),
     });
     uploads.dismissRejections();
     if (picks.photos.length > 0) uploads.addFiles(picks.photos, detail.paper.pageCount);
@@ -332,7 +342,10 @@ function PhotoSources({
     <uploads.form.Subscribe selector={(state) => state.values.items}>
       {(items) => {
         const uploading = uploadsInFlight(items) > 0;
-        const photoCount = paper.pageCount + uploadsInFlight(items);
+        // A reserved page is already counted by the paper; its photo stands in the queue's tile, not twice.
+        const photoCount = paper.pageCount + unreservedUploads(items);
+        const queuedPageIds = new Set(items.flatMap((item) => (item.status !== 'error' && item.pageId ? [item.pageId] : [])));
+        const shownPages = pages.filter((page) => !queuedPageIds.has(page.id));
         const cameraClosed = closed || photoCount >= QUESTION_PAPER_MAX_PAGES;
         // The other ways in sit with the material. A phone opens its own camera (flash, focus, full resolution) through
         // the capture input; a computer, whose file input cannot open a webcam, opens the camera dialog: which of the two
@@ -358,10 +371,10 @@ function PhotoSources({
               }}
             />
             <PaperSourceTray
-              pages={pages}
+              pages={shownPages}
               uploads={items}
               thumbUrl={(pageId) => questionPaperThumbUrl(scope, pageId)}
-              canAdd={!closed && paper.pageCount + uploadsInFlight(items) < QUESTION_PAPER_MAX_PAGES}
+              canAdd={!closed && photoCount < QUESTION_PAPER_MAX_PAGES}
               // Every stored upload bumps the revision a reorder or removal is checked against, so both wait for the uploads.
               disabled={closed || uploading || reorder.isPending || deletePage.isPending}
               emptyTitle="Add the paper"
@@ -529,7 +542,9 @@ function StartFooter({
         <start.form.Subscribe selector={(state) => [state.values.alternative, state.values.note, state.isSubmitting, state.canSubmit] as const}>
           {([alternative, note, isSubmitting, canSubmit]) => {
             const plan = createPlanOf({ alternative, pageCount: paper.pageCount, uploading, note });
-            const reason = blockedReason ?? (plan.kind === 'blocked' ? plan.reason : templateReason);
+            // Generating reads every page: it waits for photos the worker is still preparing, and names one that failed.
+            const pagesReason = plan.kind === 'generate' ? pagesNotReadyReason(detail.pages) : null;
+            const reason = blockedReason ?? (plan.kind === 'blocked' ? plan.reason : (pagesReason ?? templateReason));
             const failure = start.run.error ? requestErrorMessage(start.run.error, 'The paper could not be created.') : null;
             const line = reason;
             return (

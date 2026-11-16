@@ -140,6 +140,15 @@ export const assistantAttachmentRefSchema = z.object({
   height: z.number().int().nullable(),
   /** True only for an image the server decoded: it has a thumbnail. A document never has one. */
   previewable: z.boolean(),
+  /**
+   * Images only (null for a document): `pending` until the worker has made
+   * the thumbnail and model copy, then `ready`, `unsupported` (an image the
+   * server cannot decode, HEIC, sent to the model as it is) or `failed` (it
+   * could not be read: remove it and attach it again). A message is sent only
+   * when none is `pending` or `failed`. Missing on refs saved in messages
+   * before it was recorded; those were all `ready` or `unsupported`.
+   */
+  derivativeStatus: z.enum(['pending', 'ready', 'unsupported', 'failed']).nullable().optional(),
 });
 export type AssistantAttachmentRef = z.infer<typeof assistantAttachmentRefSchema>;
 
@@ -204,7 +213,7 @@ export const QUESTION_PAPER_SEED_DRAFT = 'I want to update this question paper: 
 /** The one `/blob` style path of an attachment, relative to the API origin. */
 export const assistantAttachmentUploadPath = (schoolId: string) =>
   `/api/blob/schools/${encodeURIComponent(schoolId)}/assistant/attachments`;
-/** `DELETE` here removes one file the user attached but has not sent yet. */
+/** `DELETE` here removes one file the user attached but has not sent yet; `GET` returns its current reference (to wait for `derivativeStatus`). */
 export const assistantAttachmentDeletePath = (schoolId: string, attachmentId: string) =>
   `${assistantAttachmentUploadPath(schoolId)}/${encodeURIComponent(attachmentId)}`;
 /** An image's thumbnail or original. A document has neither: its bytes are never served back to a browser. */

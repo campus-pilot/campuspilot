@@ -162,7 +162,8 @@ are the target's own rows and objects). Deleting a paper that was copied from cl
 ## Demo seed
 
 `workflows/demo-school/steps.ts` (`seedQuestionPaper`) calls `resolvePaperScope`,
-`addQuestionPaperPage` and `saveQuestionPaperVersion` directly as the demo's principal,
+`addQuestionPaperPage` (then `processPageDerivatives`, since it runs in the worker) and
+`saveQuestionPaperVersion` directly as the demo's principal,
 because a demo school keeps the `assistant` feature off and the procedures refuse
 without it. If you change those functions' signatures or what they check, the seed and
 its test (`demo-question-papers.integration.test.ts`) must follow. See

@@ -13,6 +13,8 @@ import { attachAssistantVoice } from '@campuspilot/assistant/voice/server';
 import { sweepDemoSchoolOutbox } from '@campuspilot/api/routers/system-admin/demo-school/demo-school.outbox';
 import { configureQuestionPaperModel } from '@campuspilot/api/workflows/question-paper/model';
 import { sweepQuestionPaperOutbox } from '@campuspilot/api/workflows/question-paper/outbox';
+import { sweepImageDerivatives } from '@campuspilot/api/workflows/image-derivatives/outbox';
+import { releaseExpiredPageReservations } from '@campuspilot/api/routers/school/question-paper/question-paper.service';
 import { createQuestionPaperModel } from '@campuspilot/assistant/question-paper-model';
 import { sweepDataMigrationOutbox } from '@campuspilot/api/data-migrations/data-migration.outbox';
 import { DATA_MIGRATIONS } from '@campuspilot/api/data-migrations/registry';
@@ -94,6 +96,18 @@ async function sweepQuestionPapers() {
   if (Object.values(result).some((value) => value > 0)) log.info(result, 'question-paper.outbox.ok');
 }
 
+/**
+ * One image derivative sweep: hands pages and chat images still waiting for
+ * their thumbnail and model copy to the worker again, fails those past the
+ * deadline, and removes page reservations whose photo never arrived.
+ */
+async function sweepImages() {
+  const derivatives = await sweepImageDerivatives();
+  if (Object.values(derivatives).some((value) => value > 0)) log.info(derivatives, 'image-derivatives.outbox.ok');
+  const reservations = await releaseExpiredPageReservations(db);
+  if (reservations.released > 0) log.info(reservations, 'question-paper.reservations.released');
+}
+
 /** Finishes result publications whose deliveries settled (publisher notified once). */
 async function sweepPublications() {
   const publications = await sweepResultPublications();
@@ -110,6 +124,7 @@ const OUTBOX_SWEEPS: ReadonlyArray<{ errorMessage: string; run: () => Promise<vo
   { errorMessage: 'notification.outbox.error', run: sweepNotifications },
   { errorMessage: 'assistant.outbox.error', run: sweepAssistant },
   { errorMessage: 'question-paper.outbox.error', run: sweepQuestionPapers },
+  { errorMessage: 'image-derivatives.outbox.error', run: sweepImages },
   { errorMessage: 'notification.results.sweep.error', run: sweepPublications },
   // Reports failed WhatsApp deliveries to staff granted to receive them (D-30).
   { errorMessage: 'notification.failure-alerts.error', run: async () => { await sweepWhatsAppFailureAlerts(); } },

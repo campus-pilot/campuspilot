@@ -13,8 +13,8 @@ import { VersionList } from './version-list';
 afterEach(cleanup);
 
 const pages: PageThumbnailView[] = [
-  { id: 'a', position: 1, originalName: 'one.jpg', byteSize: 2048, derivativeStatus: 'ready' },
-  { id: 'b', position: 2, originalName: 'two.heic', byteSize: 3 * 1024 * 1024, derivativeStatus: 'unsupported' },
+  { id: 'a', position: 1, originalName: 'one.jpg', byteSize: 2048, uploadStatus: 'stored', derivativeStatus: 'ready' },
+  { id: 'b', position: 2, originalName: 'two.heic', byteSize: 3 * 1024 * 1024, uploadStatus: 'stored', derivativeStatus: 'unsupported' },
 ];
 
 describe('AiBadge', () => {
@@ -26,6 +26,20 @@ describe('AiBadge', () => {
 
 describe('PaperSourceTray', () => {
   const tray = { thumbUrl: (id: string) => `/thumb/${id}`, emptyTitle: 'Add the paper', emptyHint: 'Photos of its pages, or a PDF', onAdd: () => {}, onOpen: () => {}, onReorder: () => {}, onDelete: () => {}, onDismissUpload: () => {} };
+
+  it('says, without a thumbnail, when a page is still being prepared, could not be read, or never got its photo', () => {
+    const states: PageThumbnailView[] = [
+      { id: 'p', position: 1, originalName: 'pending.jpg', byteSize: 10, uploadStatus: 'stored', derivativeStatus: 'pending' },
+      { id: 'f', position: 2, originalName: 'broken.jpg', byteSize: 10, uploadStatus: 'stored', derivativeStatus: 'failed' },
+      { id: 'w', position: 3, originalName: 'lost.jpg', byteSize: null, uploadStatus: 'awaiting', derivativeStatus: 'pending' },
+    ];
+    render(<PaperSourceTray {...tray} pages={states} uploads={[]} canAdd />);
+    const pending = screen.getByRole('button', { name: 'Page 1: pending.jpg. Preparing the photo.' });
+    expect(pending.querySelector('img')).toBeNull();
+    const failed = screen.getByRole('button', { name: 'Page 2: broken.jpg. It could not be read. Remove it and add the photo again.' });
+    expect(failed.className).toContain('border-destructive/60');
+    expect(screen.getByRole('button', { name: 'Page 3: lost.jpg. Its photo did not arrive. Remove it and add the photo again.' }).querySelector('img')).toBeNull();
+  });
 
   it('with nothing in it is the add tile beside what belongs here and the other ways in', () => {
     const onAdd = vi.fn();

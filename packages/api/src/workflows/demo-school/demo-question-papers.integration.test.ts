@@ -83,7 +83,7 @@ describe('demo question papers (steps only, one class)', () => {
       );
       expect(new Date(pages[0]!.createdAt).toISOString()).toBe(planned.uploadedAt);
       for (const page of pages) {
-        for (const key of [page.originalS3Key, page.thumbS3Key!, page.modelS3Key!]) expect(await exists(key), key).toBe(true);
+        for (const key of [page.originalS3Key!, page.thumbS3Key!, page.modelS3Key!]) expect(await exists(key), key).toBe(true);
       }
       const [version] = await db.select().from(examQuestionPaperVersionTable).where(eq(examQuestionPaperVersionTable.paperId, row.id));
       expect(version).toMatchObject({ versionNo: 1, source: 'agent', sourceConversationId: null, createdBy: admin.user.id });
@@ -134,7 +134,7 @@ describe('demo question papers (steps only, one class)', () => {
     await expect(seedQuestionPaper(ctx, { sessionId, classIdsBySlug: { 'class-7': classId }, paper: english })).rejects.toBeInstanceOf(DemoJobGuardError);
     const [paper] = await db.select().from(examQuestionPaperTable).where(and(eq(examQuestionPaperTable.schoolId, job.schoolId), eq(examQuestionPaperTable.subjectSlug, 'english')));
     const [page] = await db.select().from(examQuestionPaperPageTable).where(eq(examQuestionPaperPageTable.paperId, paper!.id));
-    for (const key of [page!.originalS3Key, page!.thumbS3Key!, page!.modelS3Key!]) expect(await exists(key), key).toBe(false);
+    for (const key of [page!.originalS3Key!, page!.thumbS3Key!, page!.modelS3Key!]) expect(await exists(key), key).toBe(false);
     // The next step's context refuses too.
     await expect(createSeedContext(job, run)).rejects.toBeInstanceOf(DemoJobGuardError);
   });

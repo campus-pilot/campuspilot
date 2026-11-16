@@ -154,7 +154,10 @@ science paper and a Hindi mathematics paper, each with two page photos and versi
 - **Service functions, not procedures** (`seedQuestionPaper`). The question paper
   procedures need the `assistant` feature and an eligible role, and a demo keeps the
   feature off, so the step calls `addQuestionPaperPage` and `saveQuestionPaperVersion`
-  as the demo's principal (after `resolvePaperScope`); no model is called. For the same
+  as the demo's principal (after `resolvePaperScope`); no model is called. The seed runs in
+  the worker, so it makes each page's thumbnail and model copy itself
+  (`processPageDerivatives`) instead of handing them over, and a replay finishes any page
+  left `pending`. For the same
   reason `seedTemplates` saves the `question-paper-classic` design directly
   (`saveTemplate`, after the `MANAGE_DOCUMENT_TEMPLATES` check). The Question paper tab
   is invisible until an admin enables the feature; then the papers and PDFs are there.

@@ -13,7 +13,10 @@ import {
   resolveView,
   resolveVersionNo,
   shownPaperOf,
-  runInOrder,
+  runWithConcurrency,
+  pagesNotReadyReason,
+  pagesProcessing,
+  unreservedUploads,
   uploadsInFlight,
 } from './question-paper-model';
 
@@ -52,10 +55,26 @@ test('the version follows the URL when it exists, else the latest', () => {
   assert.equal(resolveVersionNo('1', []), null);
 });
 
-test('the detail is polled only while a job is in flight', () => {
+const page = (position: number, uploadStatus: 'awaiting' | 'stored', derivativeStatus: string) => ({ position, uploadStatus, derivativeStatus });
+
+test('the detail is polled while a job is in flight or a photo is processed, faster for photos', () => {
+  const ready = [page(1, 'stored', 'ready')];
   assert.equal(detailPollInterval(undefined), false);
-  assert.equal(detailPollInterval({ activeJob: null }), false);
-  assert.equal(detailPollInterval({ activeJob: { id: 'j' } }), 3000);
+  assert.equal(detailPollInterval({ activeJob: null, pages: ready }), false);
+  assert.equal(detailPollInterval({ activeJob: { id: 'j' }, pages: ready }), 3000);
+  assert.equal(detailPollInterval({ activeJob: null, pages: [...ready, page(2, 'stored', 'pending')] }), 1000);
+  // A reservation whose photo has not arrived is waited for by its upload, not by polling.
+  assert.equal(detailPollInterval({ activeJob: null, pages: [page(1, 'awaiting', 'pending')] }), false);
+});
+
+test('pages are ready only when every photo arrived and was processed; a failure is named first', () => {
+  assert.equal(pagesNotReadyReason([]), null);
+  assert.equal(pagesNotReadyReason([page(1, 'stored', 'ready'), page(2, 'stored', 'unsupported')]), null);
+  assert.equal(pagesNotReadyReason([page(1, 'stored', 'pending')]), 'Preparing the photos…');
+  assert.match(pagesNotReadyReason([page(1, 'stored', 'ready'), page(2, 'awaiting', 'pending')])!, /Page 2 is still uploading/);
+  assert.match(pagesNotReadyReason([page(1, 'awaiting', 'pending'), page(2, 'stored', 'failed')])!, /Page 2 could not be read/);
+  assert.equal(pagesProcessing([page(1, 'awaiting', 'pending')]), false);
+  assert.equal(pagesProcessing([page(1, 'stored', 'pending')]), true);
 });
 
 test('the paper side shows a named version, else the unsaved draft, else the latest version', () => {
@@ -82,14 +101,28 @@ test('conflicts are recognised by code', () => {
   assert.equal(isConflict(null), false);
 });
 
-test('uploads run one after another in the order given, even after a failure', async () => {
+test('uploads start in order, at most the limit at once, and a failure does not stop the rest', async () => {
   const log: string[] = [];
-  await runInOrder(['a', 'b', 'c'], async (item) => {
+  let running = 0;
+  let peak = 0;
+  await runWithConcurrency(['a', 'b', 'c', 'd', 'e'], 3, async (item) => {
+    running += 1;
+    peak = Math.max(peak, running);
     log.push(`start ${item}`);
-    await new Promise((resolve) => setTimeout(resolve, item === 'a' ? 15 : 1));
+    await new Promise((resolve) => setTimeout(resolve, item === 'a' ? 20 : 2));
+    running -= 1;
     log.push(`end ${item}`);
+    if (item === 'b') throw new Error('upload failed');
   });
-  assert.deepEqual(log, ['start a', 'end a', 'start b', 'end b', 'start c', 'end c']);
+  assert.equal(peak, 3);
+  assert.deepEqual(log.filter((line) => line.startsWith('start')), ['start a', 'start b', 'start c', 'start d', 'start e']);
+  assert.equal(log.filter((line) => line.startsWith('end')).length, 5);
+  // The slow first photo finishes last: order of completion is free, the pages were reserved in order.
+  assert.equal(log.at(-1), 'end a');
+});
+
+test('only photos without a reserved page are added to the page count', () => {
+  assert.equal(unreservedUploads([{ status: 'converting' }, { status: 'uploading', pageId: 'qpg_1' }, { status: 'error' }]), 1);
 });
 
 test('photos on their way count as in flight, a failed one does not', () => {

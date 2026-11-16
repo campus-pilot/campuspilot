@@ -12,6 +12,10 @@ const MODEL_TARGET_BYTES = 600 * 1024;
  * Encodings tried in order for the model derivative: handwriting stays legible
  * at 1500-1800 px, and a 20 page paper must stay well below the providers'
  * request limits. The last entry is kept whatever its size.
+ *
+ * Plain libjpeg-turbo, not mozjpeg: mozjpeg made each attempt about ten times
+ * slower (about 175 ms against 15 ms for a 1800 px page) to save about a
+ * quarter of the bytes, and the result already has to fit the target above.
  */
 const MODEL_ATTEMPTS = [
   { edge: MODEL_EDGE_PX, quality: 82 },
@@ -31,11 +35,18 @@ export const MAX_INPUT_PIXELS = 40_000_000;
 /** Page photos decoded at the same time in this process; more wait their turn (a decode is hundreds of MB). */
 export const MAX_CONCURRENT_DECODES = 2;
 /**
- * Uploads that may wait for a decode slot. Each waiting upload holds its file
- * in memory (up to 15 MB), so the queue is bounded; one more is refused with
- * 429 and the client retries.
+ * Requests that may wait for a decode slot when the caller is a request (a
+ * figure normalised while a paper is saved). Each waiting request holds its
+ * file in memory (up to 15 MB), so the queue is bounded; one more is refused
+ * with 429 and the client retries. The worker, which makes page and chat
+ * image derivatives, waits without a bound instead (`queue: 'unbounded'`):
+ * Restate already limits what it hands over, and a refusal would only be
+ * retried.
  */
 export const MAX_WAITING_DECODES = 8;
+
+/** How a caller waits for a decode slot; see {@link MAX_WAITING_DECODES}. */
+export type DecodeQueue = 'bounded' | 'unbounded';
 
 /** The longest edge and encoding of an uploaded figure (design B6). */
 const FIGURE_EDGE_PX = 1400;
@@ -71,12 +82,12 @@ const waitingForDecode: Array<() => void> = [];
 
 /**
  * Runs a decode when fewer than {@link MAX_CONCURRENT_DECODES} are running;
- * the rest queue in arrival order, at most {@link MAX_WAITING_DECODES} of
- * them (the next one is refused with 429).
+ * the rest queue in arrival order. A `bounded` queue holds at most
+ * {@link MAX_WAITING_DECODES} of them (the next one is refused with 429).
  */
-export async function withDecodeSlot<T>(task: () => Promise<T>): Promise<T> {
+export async function withDecodeSlot<T>(task: () => Promise<T>, queue: DecodeQueue = 'bounded'): Promise<T> {
   while (activeDecodes >= MAX_CONCURRENT_DECODES) {
-    if (waitingForDecode.length >= MAX_WAITING_DECODES) {
+    if (queue === 'bounded' && waitingForDecode.length >= MAX_WAITING_DECODES) {
       throw rpcError.tooManyRequests('The server is busy processing photos. Try again in a few seconds.');
     }
     await new Promise<void>((resolve) => waitingForDecode.push(resolve));
@@ -95,7 +106,7 @@ const tooManyPixels = () =>
   rpcError.payloadTooLarge(`The photo has more than ${MAX_INPUT_PIXELS / 1_000_000} megapixels. Use a smaller photo.`);
 
 /** The displayed size of an image from its header; null when the header cannot be read. */
-async function headerSize(bytes: Uint8Array): Promise<{ width: number; height: number } | null> {
+export async function headerSize(bytes: Uint8Array): Promise<{ width: number; height: number } | null> {
   try {
     // Header only (no pixels are decoded), so the pixel cap is applied by the caller, with its own message.
     const metadata = await sharp(bytes, { limitInputPixels: false, failOn: 'error' }).metadata();
@@ -129,7 +140,7 @@ async function encodeModelDerivative(base: RawBase) {
   for (const { edge, quality } of MODEL_ATTEMPTS) {
     encoded = await fromBase(base)
       .resize({ width: edge, height: edge, fit: 'inside', withoutEnlargement: true })
-      .jpeg({ quality, mozjpeg: true })
+      .jpeg({ quality })
       .toBuffer();
     if (encoded.byteLength <= MODEL_TARGET_BYTES) break;
   }
@@ -137,8 +148,21 @@ async function encodeModelDerivative(base: RawBase) {
 }
 
 /**
+ * Refuses an image whose header declares more than {@link MAX_INPUT_PIXELS}
+ * pixels and returns its displayed size (null when the header cannot be
+ * read). Reads the header only, so an upload request can run it before it
+ * stores the file and leaves the decode to the worker.
+ */
+export async function checkImageHeader(bytes: Uint8Array): Promise<{ width: number; height: number } | null> {
+  const size = await headerSize(bytes);
+  if (size && size.width * size.height > MAX_INPUT_PIXELS) throw tooManyPixels();
+  return size;
+}
+
+/**
  * Decodes an uploaded page photo into the two JPEG derivatives the product
  * needs: a thumbnail for the page grid and a bounded copy for the AI model.
+ * The worker calls it after the upload (`workflows/image-derivatives`).
  *
  * The header is read first and an image over {@link MAX_INPUT_PIXELS} is
  * refused before any decode. The image is then decoded once, at most
@@ -154,10 +178,10 @@ async function encodeModelDerivative(base: RawBase) {
 export async function makeImageDerivatives(
   bytes: Uint8Array,
   contentType: string,
+  queue: DecodeQueue = 'bounded',
 ): Promise<ImageDerivatives> {
   const isHeif = contentType === 'image/heic' || contentType === 'image/heif';
-  const size = await headerSize(bytes);
-  if (size && size.width * size.height > MAX_INPUT_PIXELS) throw tooManyPixels();
+  const size = await checkImageHeader(bytes);
   return withDecodeSlot(async () => {
     try {
       if (!size) throw new Error('The image has no readable size.');
@@ -175,13 +199,13 @@ export async function makeImageDerivatives(
         model: { bytes: model, contentType: 'image/jpeg' as const },
         thumb: { bytes: thumb, contentType: 'image/jpeg' as const },
       };
-    } catch (cause) {
+    } catch {
       if (!isHeif) {
         throw rpcError.unsupportedMediaType('The uploaded file could not be read as an image.');
       }
       return { status: 'unsupported' as const, width: size?.width ?? null, height: size?.height ?? null };
     }
-  });
+  }, queue);
 }
 
 export type NormalizedFigure = {
@@ -200,8 +224,7 @@ export type NormalizedFigure = {
  * figure. Undecodable input is a 415.
  */
 export async function normalizeFigureImage(bytes: Uint8Array): Promise<NormalizedFigure> {
-  const size = await headerSize(bytes);
-  if (size && size.width * size.height > MAX_INPUT_PIXELS) throw tooManyPixels();
+  await checkImageHeader(bytes);
   return withDecodeSlot(() => normalizeFigureUnlimited(bytes));
 }
 

@@ -15,7 +15,7 @@ import { earlierPaperTitle } from './earlier-paper-dialog';
 import type { QuestionPaperScope } from './question-paper-model';
 import type { EarlierPaper } from './question-paper-start-model';
 
-type PageView = { id: string; position: number; originalName: string; derivativeStatus: 'ready' | 'unsupported' };
+type PageView = { id: string; position: number; originalName: string; derivativeStatus: 'pending' | 'ready' | 'unsupported' | 'failed' };
 
 /**
  * One photographed page large enough to read, so the user can check it is the
