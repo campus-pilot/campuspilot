@@ -2,7 +2,11 @@ import type { DatabaseExecutor } from '@campuspilot/db';
 import { describe, expect, it, vi } from 'vitest';
 
 // The auth instance is not needed to write a password; keep this a unit test.
-vi.mock('../server', () => ({ auth: {}, authDb: {} }));
+// `setup.ts` ends `authDb`'s pool after every file, so the stand-in needs one.
+vi.mock('../server', () => ({
+  auth: {},
+  authDb: { $client: { end: async () => {} } },
+}));
 
 const { setStaffPassword } = await import('../staff-login');
 
