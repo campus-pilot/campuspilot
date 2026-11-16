@@ -169,16 +169,22 @@ export function AssistantUserMessage({
 export function AssistantUserMessageRow({
   item,
   attachmentPreviewUrl,
+  attachmentOriginalUrl,
   authorOf,
 }: {
   item: AssistantUserMessageItemDto;
   /** The thumbnail address of a sent image (never asked for a document); null draws a generic tile. */
   attachmentPreviewUrl?: (attachment: AssistantAttachmentRef) => string | null;
+  /** The full-size address of a sent image, shown in the viewer its tile opens; unset leaves tiles closed. */
+  attachmentOriginalUrl?: (attachment: AssistantAttachmentRef) => string | null;
   /** The name to show over a message someone else sent; null for the user's own. */
   authorOf?: (item: AssistantUserMessageItemDto) => string | null;
 }) {
-  // Only an image the server decoded has a thumbnail; a document is never asked for one.
-  const attachments = sentAttachmentsOf(item.body.attachments ?? [], attachmentPreviewUrl);
+  // Only an image the server decoded has a thumbnail and an original; a document is never asked for either.
+  const attachments = sentAttachmentsOf(item.body.attachments ?? [], {
+    previewUrlOf: attachmentPreviewUrl,
+    originalUrlOf: attachmentOriginalUrl,
+  });
   return <AssistantUserMessage text={item.body.text} at={item.createdAt} attachments={attachments} author={authorOf?.(item) ?? null} />;
 }
 

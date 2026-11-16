@@ -305,7 +305,11 @@ existing paper, a syllabus or notes as a PDF
 - **Reading back.** Only an image is ever served back: `thumb` and `original` redirect
   the owner to a 5 minute presigned URL. A document answers 404 on both, so a PDF's bytes
   go to the model and nowhere else (a PDF can carry script and a browser renders it
-  inline); there is no PDF preview or thumbnail.
+  inline); there is no PDF preview or thumbnail. A sent image's tile opens a full-screen
+  viewer (`AssistantImageViewer`) on the message's images: the `thumb` stands in until the
+  `original` loads, only the open image and its neighbours fetch originals, and its
+  download link follows `original` (served `Content-Disposition: attachment`). An image
+  that is not `previewable` stays a plain tile.
 - **Removal.** Removing a file from the composer deletes it (`DELETE` on the attachment,
   owner and unsent only); an upload at the cap frees that user's unsent files older than
   an hour and then, if still at the cap, the oldest beyond the newest 20 (a composer holds

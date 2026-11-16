@@ -44,32 +44,58 @@ export type ComposerAttachment = {
   error: string | null;
 };
 
-/** One file of a sent message. `previewUrl` is an image's thumbnail; a document never has one. */
+/** One file of a sent message. A document never has either address. */
 export type SentAttachment = {
   id: string;
   kind: AssistantAttachmentKind;
   fileName: string;
   byteSize: number;
+  /** An image's thumbnail, drawn as its tile. */
   previewUrl: string | null;
+  /** An image's original, shown at full size in the viewer; null when the tile does not open one. */
+  originalUrl: string | null;
+};
+
+/** One image the full-screen viewer shows: its original, with the thumbnail standing in until that loads. */
+export type ViewerImage = {
+  id: string;
+  fileName: string;
+  previewUrl: string | null;
+  originalUrl: string;
+};
+
+/** The addresses of a sent image, from the app (which knows the API origin and school). */
+export type SentAttachmentUrls = {
+  previewUrlOf?: (attachment: AssistantAttachmentRef) => string | null;
+  originalUrlOf?: (attachment: AssistantAttachmentRef) => string | null;
 };
 
 /**
  * The tiles of a sent message's files (confirmed, queued or still on its
- * way). Only an image the server decoded (`previewable`) asks for a
- * thumbnail address; a document never does, since its bytes are not served
- * back to a browser, and an undecodable image draws a generic tile.
+ * way). Only an image the server decoded (`previewable`) asks for its
+ * thumbnail and original addresses; a document never does, since its bytes
+ * are not served back to a browser. An undecodable image (HEIC) draws a
+ * generic tile and does not open the viewer, since a browser that cannot
+ * decode it could not draw its original either.
  */
-export const sentAttachmentsOf = (
-  refs: readonly AssistantAttachmentRef[],
-  previewUrlOf?: (attachment: AssistantAttachmentRef) => string | null,
-): SentAttachment[] =>
-  refs.map((ref) => ({
-    id: ref.id,
-    kind: ref.kind,
-    fileName: ref.fileName,
-    byteSize: ref.byteSize,
-    previewUrl: ref.kind === 'image' && ref.previewable ? (previewUrlOf?.(ref) ?? null) : null,
-  }));
+export const sentAttachmentsOf = (refs: readonly AssistantAttachmentRef[], urls: SentAttachmentUrls = {}): SentAttachment[] =>
+  refs.map((ref) => {
+    const servable = ref.kind === 'image' && ref.previewable;
+    return {
+      id: ref.id,
+      kind: ref.kind,
+      fileName: ref.fileName,
+      byteSize: ref.byteSize,
+      previewUrl: servable ? (urls.previewUrlOf?.(ref) ?? null) : null,
+      originalUrl: servable ? (urls.originalUrlOf?.(ref) ?? null) : null,
+    };
+  });
+
+/** The images of a message the viewer can show, in the order of their tiles: those with an original address. */
+export const viewableImagesOf = (attachments: readonly SentAttachment[]): ViewerImage[] =>
+  attachments.flatMap(({ id, kind, fileName, previewUrl, originalUrl }) =>
+    kind === 'image' && originalUrl ? [{ id, fileName, previewUrl, originalUrl }] : [],
+  );
 
 /** A pick split into the files to upload, each with the kind its type says, and the refused ones with a reason. */
 export type AttachmentPlan<F extends UploadFileInfo> = {

@@ -4,8 +4,15 @@ import { Spinner } from '@campuspilot/ui/components/spinner';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@campuspilot/ui/components/tooltip';
 import { cn } from '@campuspilot/ui/lib/utils';
 import { AlertCircle, FileImage, FileText, X } from 'lucide-react';
+import { useState } from 'react';
 
-import { formatAttachmentSize, type ComposerAttachment, type SentAttachment } from './assistant-attachments-model';
+import {
+  formatAttachmentSize,
+  viewableImagesOf,
+  type ComposerAttachment,
+  type SentAttachment,
+} from './assistant-attachments-model';
+import { AssistantImageViewer } from './assistant-image-viewer';
 
 /** A square image tile: the preview when there is one, else a generic file tile. */
 function ImageThumb({ previewUrl, label, className }: { previewUrl: string | null; label: string; className?: string }) {
@@ -136,16 +143,48 @@ export function AssistantAttachmentStrip({
   );
 }
 
-/** The files of a message already sent, as small tiles above its bubble. */
-export function AssistantSentAttachments({ attachments }: { attachments: readonly SentAttachment[] }) {
-  if (attachments.length === 0) return null;
+/** A sent image's tile as a button that opens the full-screen viewer on it. */
+function ViewableTile({ attachment, onOpen }: { attachment: SentAttachment; onOpen: () => void }) {
   return (
-    <ul aria-label={`${attachments.length} attached ${attachments.length === 1 ? 'file' : 'files'}`} className="flex max-w-[min(80%,32.5rem)] flex-wrap justify-end gap-1.5">
-      {attachments.map((attachment) => (
-        <li key={attachment.id}>
-          <AttachmentTile kind={attachment.kind} name={attachment.fileName} byteSize={attachment.byteSize} previewUrl={attachment.previewUrl} />
-        </li>
-      ))}
-    </ul>
+    <button
+      type="button"
+      aria-label={`View ${attachment.fileName}`}
+      onClick={onOpen}
+      className="block cursor-zoom-in rounded-lg outline-none transition-opacity hover:opacity-85 focus-visible:ring-2 focus-visible:ring-ring"
+    >
+      <ImageThumb previewUrl={attachment.previewUrl} label={attachment.fileName} />
+    </button>
+  );
+}
+
+/**
+ * The files of a message already sent, as small tiles above its bubble. An
+ * image with an original address opens the viewer on itself, among the
+ * message's other viewable images; a document or an undecodable image is a
+ * plain tile.
+ */
+export function AssistantSentAttachments({ attachments }: { attachments: readonly SentAttachment[] }) {
+  // The index outlives `open` so the viewer keeps its image while it fades out.
+  const [viewer, setViewer] = useState({ open: false, index: 0 });
+  if (attachments.length === 0) return null;
+  const images = viewableImagesOf(attachments);
+  return (
+    <>
+      <ul aria-label={`${attachments.length} attached ${attachments.length === 1 ? 'file' : 'files'}`} className="flex max-w-[min(80%,32.5rem)] flex-wrap justify-end gap-1.5">
+        {attachments.map((attachment) => {
+          const index = images.findIndex((image) => image.id === attachment.id);
+          return (
+            <li key={attachment.id}>
+              {index >= 0 ? (
+                <ViewableTile attachment={attachment} onOpen={() => setViewer({ open: true, index })} />
+              ) : (
+                <AttachmentTile kind={attachment.kind} name={attachment.fileName} byteSize={attachment.byteSize} previewUrl={attachment.previewUrl} />
+              )}
+            </li>
+          );
+        })}
+      </ul>
+      <AssistantImageViewer images={images} openedOn={viewer.index} open={viewer.open} onOpenChange={(open) => setViewer((current) => ({ ...current, open }))} />
+    </>
   );
 }
