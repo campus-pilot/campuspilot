@@ -70,6 +70,8 @@ export type AssistantTimelineProps = {
   renderCard: (row: Extract<AssistantTimelineRow, { kind: 'card' }>) => ReactNode;
   /** The thumbnail address of an image the user sent; null draws a generic tile. */
   attachmentPreviewUrl?: (attachment: AssistantAttachmentRef) => string | null;
+  /** The full-size address of an image the user sent, shown when its tile is clicked; unset leaves tiles closed. */
+  attachmentOriginalUrl?: (attachment: AssistantAttachmentRef) => string | null;
   /** The name over a message someone else sent, in a conversation several people share; null (or unset) for the user's own. */
   authorOf?: (item: AssistantUserMessageItemDto) => string | null;
   /**
@@ -86,7 +88,7 @@ export type AssistantTimelineProps = {
   gutterClassName?: string;
 };
 
-type RowRenderers = Pick<AssistantTimelineProps, 'renderReply' | 'renderView' | 'renderCard' | 'attachmentPreviewUrl' | 'authorOf' | 'onRetry' | 'stoppingRunId'>;
+type RowRenderers = Pick<AssistantTimelineProps, 'renderReply' | 'renderView' | 'renderCard' | 'attachmentPreviewUrl' | 'attachmentOriginalUrl' | 'authorOf' | 'onRetry' | 'stoppingRunId'>;
 
 /** The "Try again" action of a notice, when its turn may be asked again and the caller allows it now. */
 function retryOf(text: string | null, onRetry: AssistantTimelineProps['onRetry']) {
@@ -96,7 +98,14 @@ function retryOf(text: string | null, onRetry: AssistantTimelineProps['onRetry']
 function TimelineRow({ row, ...renderers }: RowRenderers & { row: AssistantTimelineRow }) {
   switch (row.kind) {
     case 'user':
-      return <AssistantUserMessageRow item={row.item} attachmentPreviewUrl={renderers.attachmentPreviewUrl} authorOf={renderers.authorOf} />;
+      return (
+        <AssistantUserMessageRow
+          item={row.item}
+          attachmentPreviewUrl={renderers.attachmentPreviewUrl}
+          attachmentOriginalUrl={renderers.attachmentOriginalUrl}
+          authorOf={renderers.authorOf}
+        />
+      );
     case 'reply':
       return renderers.renderReply(row.itemId, row.meta);
     case 'activity':

@@ -22,6 +22,7 @@ import {
   readyAttachments,
   rejectionSummary,
   sentAttachmentsOf,
+  viewableImagesOf,
   type ComposerAttachment,
 } from './assistant-attachments-model';
 import { AssistantComposer, type AssistantComposerControls } from './assistant-composer';
@@ -185,18 +186,36 @@ describe('what the box says about its attachments', () => {
 });
 
 describe('sentAttachmentsOf', () => {
-  it('asks a thumbnail only for an image the server decoded, never for a document', () => {
+  it('asks a thumbnail and an original only for an image the server decoded, never for a document', () => {
     const previewUrlOf = vi.fn((attachment: AssistantAttachmentRef) => `/thumb/${attachment.id}`);
+    const originalUrlOf = vi.fn((attachment: AssistantAttachmentRef) => `/original/${attachment.id}`);
     const sent = sentAttachmentsOf(
       [ref('img'), ref('heic', 'image', { previewable: false }), ref('pdf', 'document', { byteSize: 2048, previewable: true })],
-      previewUrlOf,
+      { previewUrlOf, originalUrlOf },
     );
     expect(sent).toEqual([
-      { id: 'img', kind: 'image', fileName: 'img', byteSize: 1, previewUrl: '/thumb/img' },
-      { id: 'heic', kind: 'image', fileName: 'heic', byteSize: 1, previewUrl: null },
-      { id: 'pdf', kind: 'document', fileName: 'pdf', byteSize: 2048, previewUrl: null },
+      { id: 'img', kind: 'image', fileName: 'img', byteSize: 1, previewUrl: '/thumb/img', originalUrl: '/original/img' },
+      { id: 'heic', kind: 'image', fileName: 'heic', byteSize: 1, previewUrl: null, originalUrl: null },
+      { id: 'pdf', kind: 'document', fileName: 'pdf', byteSize: 2048, previewUrl: null, originalUrl: null },
     ]);
     expect(previewUrlOf.mock.calls.map(([attachment]) => attachment.id)).toEqual(['img']);
+    expect(originalUrlOf.mock.calls.map(([attachment]) => attachment.id)).toEqual(['img']);
+  });
+});
+
+describe('viewableImagesOf', () => {
+  it('keeps the images with an original, in tile order, and drops documents and undecodable images', () => {
+    expect(
+      viewableImagesOf([
+        { id: '1', kind: 'image', fileName: 'a.jpg', byteSize: 1, previewUrl: '/t/1', originalUrl: '/o/1' },
+        { id: '2', kind: 'document', fileName: 'n.pdf', byteSize: 1, previewUrl: null, originalUrl: null },
+        { id: '3', kind: 'image', fileName: 'h.heic', byteSize: 1, previewUrl: null, originalUrl: null },
+        { id: '4', kind: 'image', fileName: 'b.png', byteSize: 1, previewUrl: '/t/4', originalUrl: '/o/4' },
+      ]),
+    ).toEqual([
+      { id: '1', fileName: 'a.jpg', previewUrl: '/t/1', originalUrl: '/o/1' },
+      { id: '4', fileName: 'b.png', previewUrl: '/t/4', originalUrl: '/o/4' },
+    ]);
   });
 });
 
@@ -252,9 +271,9 @@ describe('AssistantAttachmentStrip', () => {
     render(
       <AssistantSentAttachments
         attachments={[
-          { id: '1', kind: 'image', fileName: 'p.jpg', byteSize: 1, previewUrl: '/t/1' },
-          { id: '2', kind: 'image', fileName: 'h.heic', byteSize: 1, previewUrl: null },
-          { id: '3', kind: 'document', fileName: 'notes.pdf', byteSize: 820 * 1024, previewUrl: null },
+          { id: '1', kind: 'image', fileName: 'p.jpg', byteSize: 1, previewUrl: '/t/1', originalUrl: '/o/1' },
+          { id: '2', kind: 'image', fileName: 'h.heic', byteSize: 1, previewUrl: null, originalUrl: null },
+          { id: '3', kind: 'document', fileName: 'notes.pdf', byteSize: 820 * 1024, previewUrl: null, originalUrl: null },
         ]}
       />,
     );
@@ -262,6 +281,8 @@ describe('AssistantAttachmentStrip', () => {
     expect((screen.getByAltText('p.jpg') as HTMLImageElement).getAttribute('src')).toBe('/t/1');
     expect(screen.queryByAltText('h.heic')).toBeNull();
     expect(screen.getByRole('img', { name: 'notes.pdf, PDF, 820 KB' })).toBeTruthy();
+    // Only the decoded image opens the viewer; the HEIC and the PDF are plain tiles.
+    expect(screen.getAllByRole('button').map((button) => button.getAttribute('aria-label'))).toEqual(['View p.jpg']);
   });
 
   it('shows a sent message’s PDF as a document tile and never asks for its thumbnail', () => {
