@@ -1,5 +1,5 @@
 {
-  "id": "b9236ec6-b283-4b0d-99d6-c68e9a733dfb",
+  "id": "5e1bb8b5-bc8a-4657-aa84-a8875f13b275",
   "prevId": "3cb3e784-66ae-4b9e-bf27-b4ea1e31b624",
   "version": "7",
   "dialect": "postgresql",
@@ -3818,6 +3818,26 @@
           "notNull": true,
           "default": false
         },
+        "email_is_placeholder": {
+          "name": "email_is_placeholder",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "phone_number": {
+          "name": "phone_number",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "phone_number_verified": {
+          "name": "phone_number_verified",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false,
+          "default": false
+        },
         "image": {
           "name": "image",
           "type": "text",
@@ -3907,10 +3927,22 @@
           "columns": [
             "email"
           ]
+        },
+        "user_phone_number_unique": {
+          "name": "user_phone_number_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "phone_number"
+          ]
         }
       },
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "user_placeholder_email_has_phone": {
+          "name": "user_placeholder_email_has_phone",
+          "value": "\"user\".\"email_is_placeholder\" = false or \"user\".\"phone_number\" is not null"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.verification": {
@@ -6926,19 +6958,11 @@
           "primaryKey": false,
           "notNull": true
         },
-        "upload_status": {
-          "name": "upload_status",
-          "type": "question_paper_page_upload_status",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'stored'"
-        },
         "original_s3_key": {
           "name": "original_s3_key",
           "type": "text",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "original_name": {
           "name": "original_name",
@@ -6950,25 +6974,19 @@
           "name": "content_type",
           "type": "text",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "byte_size": {
           "name": "byte_size",
           "type": "integer",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "sha256": {
           "name": "sha256",
           "type": "text",
           "primaryKey": false,
-          "notNull": false
-        },
-        "stored_at": {
-          "name": "stored_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "width": {
           "name": "width",
@@ -7139,11 +7157,7 @@
         },
         "exam_question_paper_page_size_check": {
           "name": "exam_question_paper_page_size_check",
-          "value": "\"exam_question_paper_page\".\"position\" >= 1 and (\"exam_question_paper_page\".\"byte_size\" is null or \"exam_question_paper_page\".\"byte_size\" between 1 and 15728640)"
-        },
-        "exam_question_paper_page_upload_check": {
-          "name": "exam_question_paper_page_upload_check",
-          "value": "(\"exam_question_paper_page\".\"upload_status\" = 'stored') = (\"exam_question_paper_page\".\"original_s3_key\" is not null and \"exam_question_paper_page\".\"content_type\" is not null and \"exam_question_paper_page\".\"byte_size\" is not null and \"exam_question_paper_page\".\"sha256\" is not null and \"exam_question_paper_page\".\"stored_at\" is not null) and (\"exam_question_paper_page\".\"upload_status\" = 'stored' or \"exam_question_paper_page\".\"derivative_status\"::text = 'pending')"
+          "value": "\"exam_question_paper_page\".\"byte_size\" between 1 and 15728640 and \"exam_question_paper_page\".\"position\" >= 1"
         },
         "exam_question_paper_page_content_type_check": {
           "name": "exam_question_paper_page_content_type_check",
@@ -14041,9 +14055,7 @@
       "schema": "public",
       "values": [
         "ready",
-        "unsupported",
-        "pending",
-        "failed"
+        "unsupported"
       ]
     },
     "public.assistant_attachment_kind": {
@@ -14177,17 +14189,7 @@
       "schema": "public",
       "values": [
         "ready",
-        "unsupported",
-        "pending",
-        "failed"
-      ]
-    },
-    "public.question_paper_page_upload_status": {
-      "name": "question_paper_page_upload_status",
-      "schema": "public",
-      "values": [
-        "awaiting",
-        "stored"
+        "unsupported"
       ]
     },
     "public.question_paper_version_source": {

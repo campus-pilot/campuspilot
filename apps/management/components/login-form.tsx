@@ -20,6 +20,7 @@ import {
 } from '@campuspilot/ui/components/field';
 import { Input } from '@campuspilot/ui/components/input';
 import { BrandLogo } from '@campuspilot/components/brand-logo';
+import { parseSignInIdentifier } from '@campuspilot/components/staff-account/sign-in-identifier';
 import { SiGoogle } from '@icons-pack/react-simple-icons';
 import { ArrowRight } from 'lucide-react';
 import { authClient } from '@/lib/auth-client';
@@ -30,21 +31,24 @@ import {
 } from '@/lib/oauth-auth-client';
 import { AuthLoading } from './auth-loading';
 
+/**
+ * `identifier` is one field for email or phone number, so staff added by
+ * phone sign in on the same form. Both share the account's one password.
+ */
 const loginSchema = z
   .object({
-    email: z.string(),
+    identifier: z.string(),
     password: z.string(),
     method: z.enum(['credentials', 'google']),
   })
   .superRefine((value, context) => {
     if (value.method !== 'credentials') return;
 
-    const emailResult = z.email('Enter a valid email address.').safeParse(value.email);
-    if (!emailResult.success) {
+    if (!parseSignInIdentifier(value.identifier)) {
       context.addIssue({
         code: 'custom',
-        path: ['email'],
-        message: emailResult.error.issues[0]?.message ?? 'Enter a valid email address.',
+        path: ['identifier'],
+        message: 'Enter a valid email address or phone number.',
       });
     }
 
@@ -72,7 +76,7 @@ export function LoginForm() {
   const signInClient = oauthRequest ? oauthAuthClient : authClient;
   const form = useForm({
     defaultValues: {
-      email: '',
+      identifier: '',
       password: '',
       method: 'credentials' as 'credentials' | 'google',
     },
@@ -101,10 +105,18 @@ export function LoginForm() {
         return;
       }
 
-      const result = await signInClient.signIn.email({
-        email: value.email,
-        password: value.password,
-      });
+      const identifier = parseSignInIdentifier(value.identifier);
+      if (!identifier) return;
+      const result =
+        identifier.kind === 'email'
+          ? await signInClient.signIn.email({
+              email: identifier.email,
+              password: value.password,
+            })
+          : await signInClient.signIn.phoneNumber({
+              phoneNumber: identifier.phoneNumber,
+              password: value.password,
+            });
 
       if (result.error) {
         form.setErrorMap({
@@ -149,16 +161,21 @@ export function LoginForm() {
         }}
       >
         <FieldGroup>
-          <form.Field name="email">
+          <form.Field name="identifier">
             {(field) => (
               <Field data-invalid={field.state.meta.errors.length > 0}>
-                <FieldLabel htmlFor={field.name}>Email address</FieldLabel>
+                <FieldLabel htmlFor={field.name}>
+                  Email or phone number
+                </FieldLabel>
                 <Input
                   id={field.name}
                   name={field.name}
-                  type="email"
-                  autoComplete="email"
-                  placeholder="you@school.edu"
+                  type="text"
+                  inputMode="email"
+                  autoComplete="username"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  placeholder="you@school.edu or 98765 43210"
                   className="h-11 px-3 text-sm md:text-sm"
                   value={field.state.value}
                   onBlur={field.handleBlur}

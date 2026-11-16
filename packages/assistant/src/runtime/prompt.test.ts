@@ -21,6 +21,19 @@ describe('run facts', () => {
     });
     expect(text).toContain("Today's date: 2026-11-12. Current time: 2026-11-12T04:55:12+05:30 (India time, when this request began).");
   });
+
+  it('names a phone-only user without an address (their stored email is a placeholder)', () => {
+    const facts = {
+      schoolId: 's',
+      schoolName: 'Maple',
+      userName: 'Asha',
+      userEmail: null,
+      today: '2026-11-12',
+      now: '2026-11-12T04:55:12+05:30',
+    };
+    expect(buildFactsText(facts)).toContain('Signed-in user: Asha.\n');
+    expect(buildFactsText({ ...facts, userEmail: 'asha@school.test' })).toContain('Signed-in user: Asha <asha@school.test>.');
+  });
 });
 
 describe('parts of CampusPilot the school does not have', () => {

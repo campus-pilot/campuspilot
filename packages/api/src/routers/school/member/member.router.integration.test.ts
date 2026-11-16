@@ -253,7 +253,7 @@ describe('school.member Router Integration', () => {
       expect(result.items.length).toBe(2);
       expect(result.pagination.totalItems).toBe(2);
       expect(result.pagination.pageSize).toBe(10);
-      expect(result.items.every((m) => m.email.includes(tag))).toBe(true);
+      expect(result.items.every((m) => m.email?.includes(tag))).toBe(true);
     });
 
     it('denies regular users from listing members', async () => {

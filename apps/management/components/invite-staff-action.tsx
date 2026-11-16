@@ -4,10 +4,22 @@ import { useState } from 'react';
 import { useForm } from '@tanstack/react-form';
 import { useQueryClient } from '@tanstack/react-query';
 import {
-  inviteSchoolMemberInputSchema,
   roleEnum,
   type Role,
 } from '@campuspilot/api/routers/school/member/member.dto';
+import { SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
+import {
+  defaultInviteIdentifierValues,
+  InviteIdentifierTabs,
+  inviteIdentifierInput,
+  inviteIdentifierShape,
+  refineInviteIdentifier,
+} from '@campuspilot/components/staff-account/invite-identifier';
+import {
+  IssuedStaffPasswordDialog,
+  type IssuedStaffPasswordDetails,
+} from '@campuspilot/components/staff-account/issued-staff-password-dialog';
+import { PhoneInput } from '@campuspilot/components/phone-input';
 import { Button } from '@campuspilot/ui/components/button';
 import {
   Dialog,
@@ -22,12 +34,15 @@ import { Label } from '@campuspilot/ui/components/label';
 import { UserPlus } from 'lucide-react';
 import { z } from 'zod';
 import { client, orpc } from '@/lib/orpc';
+import { RequirePermissions } from './require-permissions';
 import { StaffRolePicker } from './staff-role-picker';
 
-const inviteStaffFormSchema = z.object({
-  email: inviteSchoolMemberInputSchema.shape.email,
-  roles: z.array(roleEnum).min(1, 'Select at least one role.'),
-});
+const inviteStaffFormSchema = z
+  .object({
+    ...inviteIdentifierShape,
+    roles: z.array(roleEnum).min(1, 'Select at least one role.'),
+  })
+  .superRefine(refineInviteIdentifier);
 
 function FieldErrors({ errors }: { errors: unknown[] }) {
   return errors.map((error, index) => {
@@ -46,24 +61,28 @@ function FieldErrors({ errors }: { errors: unknown[] }) {
 function InviteStaffDialog({
   schoolId,
   open,
+  allowPhone,
   onOpenChange,
+  onPasswordIssued,
 }: {
   schoolId: string;
   open: boolean;
+  /** Whether the caller may issue passwords, which inviting by phone does. */
+  allowPhone: boolean;
   onOpenChange: (open: boolean) => void;
+  onPasswordIssued: (details: IssuedStaffPasswordDetails) => void;
 }) {
   const queryClient = useQueryClient();
   const form = useForm({
-    defaultValues: { email: '', roles: [] as Role[] },
+    defaultValues: { ...defaultInviteIdentifierValues(), roles: [] as Role[] },
     validators: { onSubmit: inviteStaffFormSchema },
     onSubmit: async ({ value }) => {
       form.setErrorMap({});
       try {
-        const validated = inviteStaffFormSchema.parse(value);
-        await client.school.inviteMember({
+        const member = await client.school.inviteMember({
           schoolId,
-          email: validated.email,
-          roles: validated.roles.map((role) => ({
+          ...inviteIdentifierInput(value),
+          roles: value.roles.map((role) => ({
             role,
             meta: role === 'teacher' ? { classIds: null } : null,
           })),
@@ -73,6 +92,9 @@ function InviteStaffDialog({
         });
         form.reset();
         onOpenChange(false);
+        if (member.issuedPassword) {
+          onPasswordIssued({ ...member, password: member.issuedPassword });
+        }
       } catch (error) {
         form.setErrorMap({
           onSubmit: {
@@ -87,6 +109,41 @@ function InviteStaffDialog({
     },
   });
 
+  const emailField = (
+    <form.Field name="email">
+      {(field) => (
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="invite-email">Email</Label>
+          <Input
+            id="invite-email"
+            type="email"
+            value={field.state.value}
+            onBlur={field.handleBlur}
+            onChange={(event) => field.handleChange(event.target.value)}
+          />
+          <FieldErrors errors={field.state.meta.errors} />
+        </div>
+      )}
+    </form.Field>
+  );
+  const phoneField = (
+    <form.Field name="phone">
+      {(field) => (
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="invite-phone">Phone number</Label>
+          <PhoneInput
+            id="invite-phone"
+            value={field.state.value}
+            invalid={field.state.meta.errors.length > 0}
+            onBlur={field.handleBlur}
+            onChange={field.handleChange}
+          />
+          <FieldErrors errors={field.state.meta.errors} />
+        </div>
+      )}
+    </form.Field>
+  );
+
   function handleOpenChange(nextOpen: boolean) {
     if (!nextOpen) form.reset();
     onOpenChange(nextOpen);
@@ -98,7 +155,9 @@ function InviteStaffDialog({
         <DialogHeader>
           <DialogTitle>Invite staff member</DialogTitle>
           <DialogDescription>
-            Invite by email and assign roles in this school.
+            {allowPhone
+              ? 'Invite by email or phone number and assign roles in this school.'
+              : 'Invite by email and assign roles in this school.'}
           </DialogDescription>
         </DialogHeader>
         <form
@@ -109,19 +168,15 @@ function InviteStaffDialog({
             void form.handleSubmit();
           }}
         >
-          <form.Field name="email">
-            {(field) => (
-              <div className="flex flex-col gap-2">
-                <Label htmlFor={field.name}>Email</Label>
-                <Input
-                  id={field.name}
-                  type="email"
-                  value={field.state.value}
-                  onBlur={field.handleBlur}
-                  onChange={(event) => field.handleChange(event.target.value)}
-                />
-                <FieldErrors errors={field.state.meta.errors} />
-              </div>
+          <form.Field name="method">
+            {(methodField) => (
+              <InviteIdentifierTabs
+                method={methodField.state.value}
+                allowPhone={allowPhone}
+                onMethodChange={methodField.handleChange}
+                email={emailField}
+                phone={phoneField}
+              />
             )}
           </form.Field>
           <form.Field name="roles">
@@ -172,6 +227,16 @@ function InviteStaffDialog({
 
 export function InviteStaffAction({ schoolId }: { schoolId: string }) {
   const [isOpen, setIsOpen] = useState(false);
+  const [issued, setIssued] = useState<IssuedStaffPasswordDetails | null>(null);
+  const dialog = (allowPhone: boolean) => (
+    <InviteStaffDialog
+      schoolId={schoolId}
+      open={isOpen}
+      allowPhone={allowPhone}
+      onOpenChange={setIsOpen}
+      onPasswordIssued={setIssued}
+    />
+  );
 
   return (
     <>
@@ -184,10 +249,20 @@ export function InviteStaffAction({ schoolId }: { schoolId: string }) {
         <UserPlus />
         Invite staff
       </Button>
-      <InviteStaffDialog
-        schoolId={schoolId}
-        open={isOpen}
-        onOpenChange={setIsOpen}
+      {/* Inviting by phone issues a password, so it is offered only to
+          staff who may issue member passwords; the server checks again. */}
+      <RequirePermissions
+        permissions={{
+          action: SCHOOL_ACTIONS.ISSUE_MEMBER_PASSWORD,
+          resource: { kind: 'school', schoolId },
+        }}
+        fallback={dialog(false)}
+      >
+        {dialog(true)}
+      </RequirePermissions>
+      <IssuedStaffPasswordDialog
+        details={issued}
+        onClose={() => setIssued(null)}
       />
     </>
   );

@@ -221,7 +221,7 @@ describe('systemAdmin assistant usage', () => {
     const school = await admin.systemAdmin.getSchoolAssistantUsage({ id: first.id, from: '2032-01-01', to: '2032-01-31' });
     expect(school.total.costUsd).toBe('5');
     expect(school.users).toEqual([
-      { userId: deletedUserId, name: null, email: null, requests: 1, costUsd: '3' },
+      { userId: deletedUserId, name: null, email: null, phoneNumber: null, requests: 1, costUsd: '3' },
       expect.objectContaining({ userId: staff.user.id, requests: 1, costUsd: '2' }),
     ]);
 

@@ -3,6 +3,7 @@
 import { schoolFeatureCatalogue } from '@campuspilot/api/routers/school/feature-flags/feature-flags.dto';
 import { formatSpend, UsageFreshness, useUsageRangeForm, useUsageSelection } from '@campuspilot/components/assistant-usage';
 import { resolveQueryBoundary } from '@campuspilot/components/query-boundary';
+import { staffSignInLabel } from '@campuspilot/components/staff-account/staff-sign-in-label';
 import { Badge } from '@campuspilot/ui/components/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@campuspilot/ui/components/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@campuspilot/ui/components/table';
@@ -48,7 +49,7 @@ function AssistantSettingsCard({ schoolId }: { schoolId: string }) {
 const count = new Intl.NumberFormat('en-IN');
 
 /** Who in the school spent the most in the range (deleted accounts keep their costs). */
-function TopUsersTable({ users, inrPerUsd }: { users: Array<{ userId: string; name: string | null; email: string | null; requests: number; costUsd: string }>; inrPerUsd: string | null }) {
+function TopUsersTable({ users, inrPerUsd }: { users: Array<{ userId: string; name: string | null; email: string | null; phoneNumber: string | null; requests: number; costUsd: string }>; inrPerUsd: string | null }) {
   if (users.length === 0) return null;
   return (
     <Table>
@@ -62,7 +63,9 @@ function TopUsersTable({ users, inrPerUsd }: { users: Array<{ userId: string; na
       <TableBody>
         {users.map((user) => (
           <TableRow key={user.userId}>
-            <TableCell>{user.name ?? user.email ?? 'Deleted account'}</TableCell>
+            {/* Name, else how they sign in (email, else phone number); a
+                deleted account has none of these. */}
+            <TableCell>{user.name?.trim() || staffSignInLabel(user) || 'Deleted account'}</TableCell>
             <TableCell className="text-right tabular-nums">{count.format(user.requests)}</TableCell>
             <TableCell className="text-right tabular-nums">{formatSpend(user.costUsd, inrPerUsd)}</TableCell>
           </TableRow>

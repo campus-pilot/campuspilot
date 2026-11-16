@@ -141,7 +141,10 @@ export const usageUserSchema = z.object({
   userId: z.string(),
   /** Null when the account was deleted; its costs are kept. */
   name: z.string().nullable(),
+  /** Null for a phone-only account (its stored address is a placeholder) and deleted accounts. */
   email: z.string().nullable(),
+  /** Sign-in phone number in E.164, or null; shown when there is no name or email. */
+  phoneNumber: z.string().nullable(),
   requests: z.number().int(),
   costUsd: z.string(),
 });
@@ -327,14 +330,16 @@ export function schoolAssistantUsageDetail(db: DatabaseExecutor, schoolId: strin
         .select({
           userId: assistantModelRequestTable.userId,
           name: userTable.name,
-          email: userTable.email,
+          // A phone-only account's placeholder address is not an email.
+          email: sql<string | null>`case when ${userTable.emailIsPlaceholder} then null else ${userTable.email} end`,
+          phoneNumber: userTable.phoneNumber,
           requests: sums.requests,
           costUsd: sums.costUsd,
         })
         .from(assistantModelRequestTable)
         .leftJoin(userTable, eq(userTable.id, assistantModelRequestTable.userId))
         .where(rangeFilter(range, schoolId))
-        .groupBy(assistantModelRequestTable.userId, userTable.name, userTable.email)
+        .groupBy(assistantModelRequestTable.userId, userTable.name, userTable.email, userTable.emailIsPlaceholder, userTable.phoneNumber)
         .orderBy(desc(sql`sum(${assistantModelRequestTable.costUsd})`), assistantModelRequestTable.userId)
         .limit(10),
     ]);

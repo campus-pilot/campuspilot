@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useForm } from '@tanstack/react-form';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
 import {
   type AccountSection,
@@ -17,26 +18,58 @@ import {
 } from '@campuspilot/ui/components/dialog';
 import { Input } from '@campuspilot/ui/components/input';
 import { Label } from '@campuspilot/ui/components/label';
-import { Bot, KeyRound, LoaderCircle, UserRound } from 'lucide-react';
+import { AccountPasswordForm } from '@campuspilot/components/staff-account/account-password-form';
+import {
+  formatStaffPhoneNumber,
+  type StaffSignInIdentity,
+} from '@campuspilot/components/staff-account/staff-sign-in-label';
+import { Bot, KeyRound, LoaderCircle, LockKeyhole, UserRound } from 'lucide-react';
 import { authClient } from '@/lib/auth-client';
+import { client } from '@/lib/orpc';
 import { AccountApiKeys } from './account-api-keys';
 import { AccountConnectedApps } from './account-connected-apps';
 import { AccountProfileImage } from './account-profile-image';
 
-type AccountSectionId = 'profile' | 'connected-apps' | 'api-keys';
+type AccountSectionId = 'profile' | 'password' | 'connected-apps' | 'api-keys';
 
 const sections: readonly AccountSection<AccountSectionId>[] = [
   { id: 'profile', label: 'Profile', icon: UserRound },
+  { id: 'password', label: 'Password', icon: LockKeyhole },
   { id: 'connected-apps', label: 'Connected apps', icon: Bot },
   { id: 'api-keys', label: 'API keys', icon: KeyRound },
 ];
 
+/** Read-only sign-in identifiers; only administrators can change them. */
+function SignInDetails({ identity }: { identity: StaffSignInIdentity }) {
+  return (
+    <>
+      {identity.email ? (
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="account-email">Email address</Label>
+          <Input id="account-email" value={identity.email} disabled readOnly />
+        </div>
+      ) : null}
+      {identity.phoneNumber ? (
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="account-phone">Phone number</Label>
+          <Input
+            id="account-phone"
+            value={formatStaffPhoneNumber(identity.phoneNumber)}
+            disabled
+            readOnly
+          />
+        </div>
+      ) : null}
+    </>
+  );
+}
+
 function ProfileSection({
-  email,
+  identity,
   name,
   onSaved,
 }: {
-  email: string;
+  identity: StaffSignInIdentity;
   name: string;
   onSaved: () => void;
 }) {
@@ -89,10 +122,7 @@ function ProfileSection({
             </div>
           )}
         </form.Field>
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="account-email">Email address</Label>
-          <Input id="account-email" value={email} disabled readOnly />
-        </div>
+        <SignInDetails identity={identity} />
         <form.Subscribe
           selector={(state) => ({
             canSubmit: state.canSubmit,
@@ -116,13 +146,71 @@ function ProfileSection({
   );
 }
 
+const ACCOUNTS_QUERY_KEY = ['auth', 'accounts'] as const;
+
+/**
+ * Whether the account has a password (a credential account). Phone and email
+ * sign-in share it, so this one form covers both.
+ */
+function PasswordSection() {
+  const queryClient = useQueryClient();
+  const accounts = useQuery({
+    queryKey: ACCOUNTS_QUERY_KEY,
+    queryFn: async () => {
+      const { data, error } = await authClient.listAccounts();
+      if (error) throw new Error(error.message);
+      return data;
+    },
+  });
+
+  if (!accounts.data) {
+    return (
+      <p className="flex items-center gap-2 text-sm text-muted-foreground">
+        {accounts.isError ? null : <LoaderCircle className="size-4 animate-spin" />}
+        {accounts.isError ? 'Unable to check your password status.' : 'Checking password status…'}
+      </p>
+    );
+  }
+
+  const hasPassword = accounts.data.some((item) => item.providerId === 'credential');
+  return (
+    <section className="flex flex-col gap-5">
+      <div className="flex flex-col gap-1">
+        <h2 className="text-base font-semibold">Password</h2>
+        <p className="text-xs text-muted-foreground">
+          {hasPassword
+            ? 'Change your password and sign out your other sessions. It is used with both your phone number and your email.'
+            : 'Add a password so you can also sign in without Google.'}
+        </p>
+      </div>
+      <AccountPasswordForm
+        key={String(hasPassword)}
+        hasPassword={hasPassword}
+        onSubmit={async ({ currentPassword, newPassword }) => {
+          if (currentPassword === null) {
+            await client.auth.setPassword({ newPassword });
+          } else {
+            const { error } = await authClient.changePassword({
+              currentPassword,
+              newPassword,
+              revokeOtherSessions: true,
+            });
+            if (error) throw new Error(error.message ?? 'Unable to change password.');
+          }
+          await queryClient.invalidateQueries({ queryKey: ACCOUNTS_QUERY_KEY });
+        }}
+      />
+    </section>
+  );
+}
+
 export function AccountDialog({
-  email,
+  identity,
   name,
   open,
   onOpenChange,
 }: {
-  email: string;
+  identity: StaffSignInIdentity;
   name: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -149,11 +237,12 @@ export function AccountDialog({
             {activeSection === 'profile' ? (
               <ProfileSection
                 key={name}
-                email={email}
+                identity={identity}
                 name={name}
                 onSaved={() => onOpenChange(false)}
               />
             ) : null}
+            {activeSection === 'password' ? <PasswordSection /> : null}
             {activeSection === 'connected-apps' ? <AccountConnectedApps /> : null}
             {activeSection === 'api-keys' ? <AccountApiKeys /> : null}
           </div>

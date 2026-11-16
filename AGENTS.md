@@ -106,6 +106,15 @@ alert list before opening the relevant editor. Remove the registration when the
 condition is resolved. Use adjacent field errors and transient save feedback for
 validation/submission errors rather than adding them to the shell warning list.
 
+## Staff sign-in
+
+Before changing staff sign-in (phone-number sign-in, placeholder emails, the
+`user.phone_number` / `email_is_placeholder` columns, inviting by phone,
+issuing or setting staff passwords, the admin Users page, or anywhere a
+user's email is shown), read [Staff sign-in](docs/staff-sign-in.md). Never
+show `user.email` without `toStaffIdentity`: phone-only accounts hold a
+placeholder there.
+
 ## Cadet Portal
 
 Before changing anything cadet-related (the cadet Better Auth instance and

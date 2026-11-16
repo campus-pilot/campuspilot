@@ -57,7 +57,8 @@ export type AssistantConversationFacts = {
   /** Null when the school's name could not be looked up. */
   schoolName: string | null;
   userName: string;
-  userEmail: string;
+  /** Null when the user has no email of their own (phone-only sign-in). */
+  userEmail: string | null;
   /** ISO date (YYYY-MM-DD) the run started, in IST. */
   today: string;
   /** The instant the run started, in IST with its offset (`2026-11-12T04:55:12+05:30`). */
@@ -82,7 +83,7 @@ export function buildFactsText(facts: AssistantConversationFacts, unavailableWor
           `This school does not use these parts of CampusPilot, so you have no tools for them: ${unavailableWork.join('; ')}. When asked for something that belongs to one of them, say in one sentence that this school does not use that part of CampusPilot, then offer what you can do instead. Do not search for tools for it.`,
         ]
       : []),
-    `Signed-in user: ${facts.userName} <${facts.userEmail}>.`,
+    `Signed-in user: ${facts.userName}${facts.userEmail ? ` <${facts.userEmail}>` : ''}.`,
     `Today's date: ${facts.today}. Current time: ${facts.now} (India time, when this request began).`,
   ].join('\n');
 }
