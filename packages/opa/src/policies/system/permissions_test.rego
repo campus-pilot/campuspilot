@@ -322,3 +322,33 @@ test_school_feature_flag_actions_reject_school_resources if {
     "resource": {"kind": "school", "schoolId": "school-1"},
   }
 }
+
+test_admin_can_manage_user_sign_in if {
+  every action in {
+    "system.user.list",
+    "system.user.password.set",
+    "system.user.sign_in.update",
+  } {
+    authorization.allow with input as {
+      "action": action,
+      "subject": {
+        "userId": "user-1",
+        "roleAssignments": [{"role": "platform.admin", "scope": {"kind": "platform"}}],
+      },
+      "resource": {"kind": "system"},
+    }
+  }
+}
+
+test_school_principal_cannot_manage_user_sign_in if {
+  not authorization.allow with input as {
+    "action": "system.user.password.set",
+    "subject": {
+      "userId": "user-1",
+      "roleAssignments": [
+        {"role": "school.principal", "scope": {"kind": "school", "schoolId": "school-1"}, "meta": null},
+      ],
+    },
+    "resource": {"kind": "system"},
+  }
+}

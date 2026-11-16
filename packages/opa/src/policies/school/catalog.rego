@@ -32,6 +32,17 @@ actions contains {
   "resourceKind": "school",
 } if { true }
 
+# Sets a staff member's password (issued once, shown to the caller) and signs
+# them out everywhere. Separate from inviting so that granting invitations to
+# another role never grants account takeover. Also needed to invite by phone
+# number, because a phone-only account cannot sign in without an issued
+# password. The procedure additionally refuses members of other schools.
+actions contains {
+  "id": "school.member.password.issue",
+  "key": "ISSUE_MEMBER_PASSWORD",
+  "resourceKind": "school",
+} if { true }
+
 actions contains {
   "id": "school.member.list",
   "key": "LIST_MEMBERS",

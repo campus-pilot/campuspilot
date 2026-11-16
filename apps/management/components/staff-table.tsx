@@ -32,7 +32,6 @@ import {
 } from '@campuspilot/ui/components/alert-dialog';
 import {
   Avatar,
-  AvatarFallback,
   AvatarImage,
 } from '@campuspilot/ui/components/avatar';
 import { Badge } from '@campuspilot/ui/components/badge';
@@ -53,8 +52,18 @@ import {
   DropdownMenuTrigger,
 } from '@campuspilot/ui/components/dropdown-menu';
 import { Label } from '@campuspilot/ui/components/label';
-import { MoreVertical, Pencil, UserMinus } from 'lucide-react';
+import {
+  IssuedStaffPasswordDialog,
+  type IssuedStaffPasswordDetails,
+} from '@campuspilot/components/staff-account/issued-staff-password-dialog';
+import {
+  staffPasswordIdentifiers,
+  staffSignInLabel,
+} from '@campuspilot/components/staff-account/staff-sign-in-label';
+import { StaffAvatarFallback } from '@campuspilot/components/staff-account/staff-avatar-fallback';
+import { KeyRound, MoreVertical, Pencil, UserMinus } from 'lucide-react';
 import { z } from 'zod';
+import { authClient } from '@/lib/auth-client';
 import { client, orpc } from '@/lib/orpc';
 import { RequirePermissions } from './require-permissions';
 import { roleLabels, StaffRolePicker } from './staff-role-picker';
@@ -73,18 +82,9 @@ function memberLabel(member: SchoolMemberDto) {
 }
 
 function memberIdentity(member: SchoolMemberDto) {
-  return member.name.trim() || member.email;
+  return member.name.trim() || staffSignInLabel(member);
 }
 
-function memberInitials(member: SchoolMemberDto) {
-  return memberIdentity(member)
-    .split(/[\s@._-]+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0])
-    .join('')
-    .toUpperCase();
-}
 
 function FieldErrors({ errors }: { errors: unknown[] }) {
   return errors.map((error, index) => {
@@ -215,25 +215,29 @@ function EditRolesDialog({
 function StaffRowActions({
   member,
   schoolId,
+  isSelf,
   onEdit,
   onRemove,
+  onIssuePassword,
 }: {
   member: SchoolMemberDto;
   schoolId: string;
+  /** The signed-in person changes their own password in account settings. */
+  isSelf: boolean;
   onEdit: (member: SchoolMemberDto) => void;
   onRemove: (member: SchoolMemberDto) => void;
+  onIssuePassword: (member: SchoolMemberDto) => void;
 }) {
+  const scope = { kind: 'school' as const, schoolId };
   return (
     <RequirePermissions
+      mode="any"
       permissions={[
-        {
-          action: SCHOOL_ACTIONS.UPDATE_MEMBER_ROLES,
-          resource: { kind: 'school', schoolId },
-        },
-        {
-          action: SCHOOL_ACTIONS.REMOVE_MEMBER,
-          resource: { kind: 'school', schoolId },
-        },
+        { action: SCHOOL_ACTIONS.UPDATE_MEMBER_ROLES, resource: scope },
+        { action: SCHOOL_ACTIONS.REMOVE_MEMBER, resource: scope },
+        ...(isSelf
+          ? []
+          : [{ action: SCHOOL_ACTIONS.ISSUE_MEMBER_PASSWORD, resource: scope }]),
       ]}
     >
       <DropdownMenu>
@@ -249,17 +253,35 @@ function StaffRowActions({
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
           <DropdownMenuGroup>
-            <DropdownMenuItem onClick={() => onEdit(member)}>
-              <Pencil aria-hidden />
-              Edit roles
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              variant="destructive"
-              onClick={() => onRemove(member)}
+            <RequirePermissions
+              permissions={{ action: SCHOOL_ACTIONS.UPDATE_MEMBER_ROLES, resource: scope }}
             >
-              <UserMinus aria-hidden />
-              Remove from staff
-            </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => onEdit(member)}>
+                <Pencil aria-hidden />
+                Edit roles
+              </DropdownMenuItem>
+            </RequirePermissions>
+            {isSelf ? null : (
+              <RequirePermissions
+                permissions={{ action: SCHOOL_ACTIONS.ISSUE_MEMBER_PASSWORD, resource: scope }}
+              >
+                <DropdownMenuItem onClick={() => onIssuePassword(member)}>
+                  <KeyRound aria-hidden />
+                  Issue new password
+                </DropdownMenuItem>
+              </RequirePermissions>
+            )}
+            <RequirePermissions
+              permissions={{ action: SCHOOL_ACTIONS.REMOVE_MEMBER, resource: scope }}
+            >
+              <DropdownMenuItem
+                variant="destructive"
+                onClick={() => onRemove(member)}
+              >
+                <UserMinus aria-hidden />
+                Remove from staff
+              </DropdownMenuItem>
+            </RequirePermissions>
           </DropdownMenuGroup>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -269,8 +291,10 @@ function StaffRowActions({
 
 function createStaffColumns(options: {
   schoolId: string;
+  currentUserId: string | undefined;
   onEdit: (member: SchoolMemberDto) => void;
   onRemove: (member: SchoolMemberDto) => void;
+  onIssuePassword: (member: SchoolMemberDto) => void;
 }): DataTableColumnDef<SchoolMemberDto>[] {
   return [
     {
@@ -282,7 +306,7 @@ function createStaffColumns(options: {
             {row.original.profileImageUrl ? (
               <AvatarImage src={row.original.profileImageUrl} alt="" />
             ) : null}
-            <AvatarFallback>{memberInitials(row.original)}</AvatarFallback>
+            <StaffAvatarFallback person={row.original} />
           </Avatar>
           <span
             className={
@@ -296,7 +320,11 @@ function createStaffColumns(options: {
         </div>
       ),
     },
-    { accessorKey: 'email', header: 'Email' },
+    {
+      accessorKey: 'email',
+      header: 'Signs in with',
+      cell: ({ row }) => staffSignInLabel(row.original),
+    },
     {
       id: 'roles',
       header: 'Roles',
@@ -324,8 +352,10 @@ function createStaffColumns(options: {
         <StaffRowActions
           member={row.original}
           schoolId={options.schoolId}
+          isSelf={row.original.userId === options.currentUserId}
           onEdit={options.onEdit}
           onRemove={options.onRemove}
+          onIssuePassword={options.onIssuePassword}
         />
       ),
     },
@@ -341,7 +371,9 @@ function StaffRows({
 }) {
   const [memberToEdit, setMemberToEdit] = useState<SchoolMemberDto>();
   const [memberToRemove, setMemberToRemove] = useState<SchoolMemberDto>();
+  const [memberToReset, setMemberToReset] = useState<SchoolMemberDto>();
   const queryClient = useQueryClient();
+  const { data: session } = authClient.useSession();
   const { data } = useSuspenseQuery(
     orpc.school.listMembers.queryOptions({
       input: {
@@ -374,8 +406,10 @@ function StaffRows({
   });
   const columns = createStaffColumns({
     schoolId,
+    currentUserId: session?.user.id,
     onEdit: setMemberToEdit,
     onRemove: setMemberToRemove,
+    onIssuePassword: setMemberToReset,
   });
 
   function handleRemoveDialogOpenChange(open: boolean) {
@@ -413,6 +447,11 @@ function StaffRows({
           onClose={() => setMemberToEdit(undefined)}
         />
       ) : null}
+      <IssueMemberPasswordDialog
+        member={memberToReset}
+        schoolId={schoolId}
+        onClose={() => setMemberToReset(undefined)}
+      />
       <AlertDialog
         open={memberToRemove !== undefined}
         onOpenChange={handleRemoveDialogOpenChange}
@@ -450,6 +489,72 @@ function StaffRows({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </>
+  );
+}
+
+/**
+ * Confirms, then issues a new password for a staff member and shows it once.
+ * The server refuses people who also belong to another school.
+ */
+function IssueMemberPasswordDialog({
+  member,
+  schoolId,
+  onClose,
+}: {
+  member: SchoolMemberDto | undefined;
+  schoolId: string;
+  onClose: () => void;
+}) {
+  const issue = useMutation({
+    mutationFn: (target: SchoolMemberDto) =>
+      client.school.issueMemberPassword({ schoolId, userId: target.userId }),
+  });
+  const issued: IssuedStaffPasswordDetails | null = issue.data ?? null;
+
+  function close() {
+    if (issue.isPending) return;
+    issue.reset();
+    onClose();
+  }
+
+  return (
+    <>
+      <AlertDialog
+        open={member !== undefined && !issue.isSuccess}
+        onOpenChange={(open) => !open && close()}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Issue a new password?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {member
+                ? `${memberIdentity(member)} gets a new CampusPilot password to use with ${staffPasswordIdentifiers(member)}. Their current password stops working and they are signed out everywhere, including connected AI apps.`
+                : null}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {issue.error ? (
+            <p className="text-xs text-destructive">
+              {issue.error instanceof Error
+                ? issue.error.message
+                : 'Unable to issue a new password.'}
+            </p>
+          ) : null}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={issue.isPending}>Cancel</AlertDialogCancel>
+            <Button
+              type="button"
+              disabled={!member || issue.isPending}
+              onClick={() => {
+                if (member) issue.mutate(member);
+              }}
+            >
+              {issue.isPending ? 'Issuing…' : 'Issue password'}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <IssuedStaffPasswordDialog details={issued} onClose={close} />
     </>
   );
 }

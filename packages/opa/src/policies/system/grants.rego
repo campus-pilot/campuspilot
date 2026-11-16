@@ -82,6 +82,15 @@ grants contains {
   "action": "school.member.invite",
 } if { true }
 
+grants contains {"role": "platform.admin", "action": action} if {
+  some action in {
+    "school.member.password.issue",
+    "system.user.list",
+    "system.user.password.set",
+    "system.user.sign_in.update",
+  }
+}
+
 grants contains {
   "role": "platform.admin",
   "action": action,

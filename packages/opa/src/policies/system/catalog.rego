@@ -134,3 +134,24 @@ actions contains {
   "key": "READ_PLATFORM_ASSISTANT_USAGE",
   "resourceKind": "system",
 } if { true }
+
+# Platform user accounts (docs/staff-sign-in.md). Listing exposes every
+# account's email and phone number; setting a password signs the person out
+# everywhere; updating sign-in details changes what the person signs in with.
+actions contains {
+  "id": "system.user.list",
+  "key": "LIST_USERS",
+  "resourceKind": "system",
+} if { true }
+
+actions contains {
+  "id": "system.user.password.set",
+  "key": "SET_USER_PASSWORD",
+  "resourceKind": "system",
+} if { true }
+
+actions contains {
+  "id": "system.user.sign_in.update",
+  "key": "UPDATE_USER_SIGN_IN",
+  "resourceKind": "system",
+} if { true }

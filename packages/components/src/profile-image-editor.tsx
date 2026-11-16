@@ -19,7 +19,7 @@ import {
   DialogTitle,
 } from '@campuspilot/ui/components/dialog';
 import { Progress } from '@campuspilot/ui/components/progress';
-import { ImageUp, LoaderCircle, Pencil } from 'lucide-react';
+import { ImageUp, LoaderCircle, Pencil, UserRound } from 'lucide-react';
 import { z } from 'zod';
 
 import { CameraCapture } from './camera-capture';
@@ -153,7 +153,8 @@ export function ProfileImageEditor({
             <AvatarImage key={imageUrl} src={imageUrl} alt="" />
           ) : null}
           <AvatarFallback className={compact ? "text-muted-foreground" : "text-lg"}>
-            {compact && canEdit ? <ImageUp className="size-4" aria-hidden /> : initials(name)}
+            {/* No initials for an unnamed account: show a person icon. */}
+            {compact && canEdit ? <ImageUp className="size-4" aria-hidden /> : initials(name) || <UserRound aria-hidden />}
           </AvatarFallback>
         </Avatar>
         {canEdit ? <span className="absolute inset-0 flex items-center justify-center rounded-full bg-black/55 text-white opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">

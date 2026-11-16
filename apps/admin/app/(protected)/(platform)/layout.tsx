@@ -11,6 +11,7 @@ import {
   House,
   KeyRound,
   Receipt,
+  UsersRound,
 } from 'lucide-react';
 import { AdminShell, type AdminShellState } from '@/components/admin-shell';
 import { resolveAdminPageActions } from '@/components/admin-route';
@@ -23,6 +24,7 @@ import { homePage } from './_route';
 import { oauthClientsPage } from './oauth-clients/_route';
 import { organizationsPage } from './organizations/_route';
 import { platformUsagePage } from './platform-usage/_route';
+import { usersPage } from './users/_route';
 
 const navigation: AppShellNavigationEntry[] = [
   {
@@ -51,6 +53,13 @@ const navigation: AppShellNavigationEntry[] = [
         label: 'Organizations',
         href: '/organizations',
         icon: Building2,
+      },
+      {
+        type: 'item',
+        id: 'users',
+        label: 'Users',
+        href: '/users',
+        icon: UsersRound,
       },
       {
         type: 'item',
@@ -88,6 +97,7 @@ const pages = [
   homePage,
   demoRequestsPage,
   organizationsPage,
+  usersPage,
   oauthClientsPage,
   platformUsagePage,
   aiBillingPage,

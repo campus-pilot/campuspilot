@@ -5,6 +5,10 @@ import { useRouter } from 'next/navigation';
 import { AppShellUserMenu } from '@campuspilot/components/app-shell';
 import { getProfileImageUrl } from '@campuspilot/auth/profile-image.client';
 import { env } from '@campuspilot/env/management.client';
+import {
+  sessionUserSignInIdentity,
+  staffSignInLabel,
+} from '@campuspilot/components/staff-account/staff-sign-in-label';
 import { authClient } from '@/lib/auth-client';
 import { useInstallApp } from '@/lib/install-app.client';
 import { AccountDialog } from './account-dialog';
@@ -18,7 +22,9 @@ export function ManagementAccountMenu() {
   const { isInstallAvailable, installApp } = useInstallApp();
   const user = {
     name: session?.user.name ?? 'CampusPilot user',
-    secondaryLabel: session?.user.email ?? 'School workspace',
+    secondaryLabel: session
+      ? staffSignInLabel(sessionUserSignInIdentity(session.user))
+      : 'School workspace',
     avatarUrl: getProfileImageUrl(
       env.NEXT_PUBLIC_SERVER_URL,
       session?.user.profileImageS3Key,
@@ -46,7 +52,11 @@ export function ManagementAccountMenu() {
           open
           onOpenChange={setIsAccountDialogOpen}
           name={user.name}
-          email={user.secondaryLabel}
+          identity={
+            session
+              ? sessionUserSignInIdentity(session.user)
+              : { email: null, phoneNumber: null }
+          }
         />
       ) : null}
     </>

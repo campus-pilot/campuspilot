@@ -14,6 +14,10 @@ import { getProfileImageUrl } from '@campuspilot/auth/profile-image.client';
 import { env } from '@campuspilot/env/management.client';
 import { Button } from '@campuspilot/ui/components/button';
 import { Command, Search } from 'lucide-react';
+import {
+  sessionUserSignInIdentity,
+  staffSignInLabel,
+} from '@campuspilot/components/staff-account/staff-sign-in-label';
 import { authClient } from '@/lib/auth-client';
 import { useInstallApp } from '@/lib/install-app.client';
 import { AccountDialog } from './account-dialog';
@@ -96,7 +100,9 @@ export function ManagementShell({
 
   const user = {
     name: session?.user.name ?? 'CampusPilot user',
-    secondaryLabel: session?.user.email ?? 'School workspace',
+    secondaryLabel: session
+      ? staffSignInLabel(sessionUserSignInIdentity(session.user))
+      : 'School workspace',
     avatarUrl: getProfileImageUrl(
       env.NEXT_PUBLIC_SERVER_URL,
       session?.user.profileImageS3Key,
@@ -184,7 +190,11 @@ export function ManagementShell({
           open
           onOpenChange={setIsAccountDialogOpen}
           name={user.name}
-          email={user.secondaryLabel}
+          identity={
+            session
+              ? sessionUserSignInIdentity(session.user)
+              : { email: null, phoneNumber: null }
+          }
         />
       ) : null}
     </>

@@ -27,6 +27,7 @@ export const SCHOOL_ACTIONS = {
   GENERATE_FINANCE_DOCUMENTS: 'school.finance.document.generate',
   INVITE_MEMBER: 'school.member.invite',
   ISSUE_ADMISSION_CADET_PASSWORD: 'school.admission.cadet_password.issue',
+  ISSUE_MEMBER_PASSWORD: 'school.member.password.issue',
   LIST_ADMISSIONS: 'school.admission.list',
   LIST_CLASSES: 'school.class.list',
   LIST_MEMBERS: 'school.member.list',

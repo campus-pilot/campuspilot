@@ -11,7 +11,7 @@ import {
 } from '@campuspilot/ui/components/card';
 import { authClient } from '@/lib/auth-client';
 
-export function AccessDenied({ email }: { email: string }) {
+export function AccessDenied({ signInLabel }: { signInLabel: string }) {
   const router = useRouter();
 
   async function signOut() {
@@ -25,7 +25,7 @@ export function AccessDenied({ email }: { email: string }) {
         <CardHeader>
           <CardTitle>Access denied</CardTitle>
           <CardDescription>
-            {email} is signed in, but is not the configured system administrator.
+            {signInLabel} is signed in, but is not the configured system administrator.
           </CardDescription>
         </CardHeader>
         <CardContent>

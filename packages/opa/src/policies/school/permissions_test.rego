@@ -506,3 +506,28 @@ test_class_json_update_from_another_school_is_denied if {
     "resource": {"kind": "school", "schoolId": "school-2"},
   }
 }
+
+test_member_password_issue_is_allowed_for_principals_only if {
+  authorization.allow with input as {
+    "action": "school.member.password.issue",
+    "subject": {
+      "userId": "user-1",
+      "roleAssignments": [
+        {"role": "school.principal", "scope": {"kind": "school", "schoolId": "school-1"}, "meta": null},
+      ],
+    },
+    "resource": {"kind": "school", "schoolId": "school-1"},
+  }
+  every role in {"school.manager", "school.teacher", "school.accountant", "school.exam_coordinator"} {
+    not authorization.allow with input as {
+      "action": "school.member.password.issue",
+      "subject": {
+        "userId": "user-1",
+        "roleAssignments": [
+          {"role": role, "scope": {"kind": "school", "schoolId": "school-1"}, "meta": null},
+        ],
+      },
+      "resource": {"kind": "school", "schoolId": "school-1"},
+    }
+  }
+}

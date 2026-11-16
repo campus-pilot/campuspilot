@@ -80,6 +80,12 @@ const HIDDEN_TOOLS = [
   'school.getLogo',
   // Returns a credential and signs a student out everywhere: a human action.
   'school.issueAdmissionCadetPassword',
+  // Staff passwords and sign-in details: credentials and account takeover
+  // stay human actions.
+  'school.issueMemberPassword',
+  'systemAdmin.listUsers',
+  'systemAdmin.setUserPassword',
+  'systemAdmin.updateUserSignIn',
   'systemAdmin.listOAuthClients',
   'systemAdmin.createOAuthClient',
   'systemAdmin.rotateOAuthClientSecret',
@@ -666,10 +672,30 @@ async function parsesSample(tool: McpToolDefinition, withOptional: boolean) {
 }
 
 /**
+ * Minimal instances with exactly one optional field added, for inputs that
+ * need exactly one of several fields (for example an invitation by email or
+ * by phone number).
+ */
+async function parsesWithOneOptional(tool: McpToolDefinition) {
+  const schema = tool.inputJsonSchema;
+  const properties = (schema.properties ?? {}) as Record<string, JsonSchema>;
+  const required = new Set(requiredProperties(schema));
+  const minimal = sampleFromJsonSchema(schema) as Record<string, unknown>;
+  for (const [index, key] of Object.keys(properties).entries()) {
+    if (required.has(key) || properties[key]?.not) continue;
+    const sample = { ...minimal, [key]: sampleFromJsonSchema(properties[key]!, { ordinal: index }) };
+    const result = await tool.inputSchema.safeParseAsync(JSON.parse(JSON.stringify(sample)));
+    if (result.success) return result;
+  }
+  return null;
+}
+
+/**
  * A contract the JSON side can express but Zod rejects would make a tool
  * uncallable. Each advertised schema's minimal instance must parse. Inputs
  * with cross-field rules JSON Schema cannot state (for example "provide at
- * least one field to update") are retried with their optional fields filled.
+ * least one field to update") are retried with their optional fields filled,
+ * then with one optional field at a time ("exactly one of").
  */
 describe('schema-sample round trip', () => {
   it('parses a minimal JSON-Schema instance with every MCP tool input', async () => {
@@ -677,6 +703,7 @@ describe('schema-sample round trip', () => {
     for (const tool of exposedTools()) {
       let result = await parsesSample(tool, false);
       if (!result.success) result = await parsesSample(tool, true);
+      if (!result.success) result = (await parsesWithOneOptional(tool)) ?? result;
       if (!result.success) {
         failures.push(
           `${tool.name}: ${result.error.issues

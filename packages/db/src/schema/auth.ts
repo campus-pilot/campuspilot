@@ -1,4 +1,4 @@
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 import {
   pgTable,
   text,
@@ -7,6 +7,7 @@ import {
   integer,
   jsonb,
   index,
+  check,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 
@@ -17,6 +18,27 @@ export const user = pgTable("user", {
   name: text("name").notNull(),
   email: text("email").notNull().unique(),
   emailVerified: boolean("email_verified").default(false).notNull(),
+  /**
+   * True when `email` is a generated `.invalid` placeholder rather than an
+   * address the person owns. Better Auth requires a unique email on every
+   * user, so staff added by phone number alone get one. Stored as its own
+   * fact (never inferred from the domain); an administrator adding a real
+   * address clears it.
+   */
+  emailIsPlaceholder: boolean("email_is_placeholder").default(false).notNull(),
+  /**
+   * Sign-in phone number in E.164 (`+919876543210`), managed by Better Auth's
+   * phone-number plugin. Only staff with the matching permission set it; the
+   * person cannot change it themselves.
+   */
+  phoneNumber: text("phone_number").unique(),
+  /**
+   * Required by the phone-number plugin, which drops an unverified number on
+   * create. CampusPilot sends no SMS: a number entered by an administrator or
+   * principal is their attestation, exactly as a school invitation verifies
+   * an email address, so it is written as true.
+   */
+  phoneNumberVerified: boolean("phone_number_verified").default(false),
   image: text("image"),
   profileImageS3Key: text("profile_image_s3_key"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -40,7 +62,14 @@ export const user = pgTable("user", {
   demoSchoolId: text("demo_school_id").references(
     (): AnyPgColumn => schoolTable.id,
   ),
-});
+}, (table) => [
+  // A placeholder email can never sign in, so such a user must keep a phone
+  // number; otherwise the account would have no sign-in identifier at all.
+  check(
+    "user_placeholder_email_has_phone",
+    sql`${table.emailIsPlaceholder} = false or ${table.phoneNumber} is not null`,
+  ),
+]);
 
 export const session = pgTable(
   "session",

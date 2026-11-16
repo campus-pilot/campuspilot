@@ -2,7 +2,7 @@ import { ASSISTANT_TERMINAL_RUN_STATUSES } from '@campuspilot/assistant-contract
 import { authenticateControlCall } from '@campuspilot/api/workflows/control-service-auth';
 import { user as userTable } from '@campuspilot/db/schema/auth';
 import * as restate from '@restatedev/restate-sdk';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
 
 import { ASSISTANT_CONTROL_SERVICE_NAME } from './control-constants';
@@ -80,7 +80,12 @@ export const assistantControlService = restate.service({
         const run = await store.findRun(db, input.runId);
         if (!run || ASSISTANT_TERMINAL_RUN_STATUSES.has(run.status)) return null;
         const [account] = await db
-          .select({ name: userTable.name, email: userTable.email })
+          .select({
+            name: userTable.name,
+            // A phone-only account's placeholder address is not an email,
+            // so the model is never told it (docs/staff-sign-in.md).
+            email: sql<string | null>`case when ${userTable.emailIsPlaceholder} then null else ${userTable.email} end`,
+          })
           .from(userTable)
           .where(eq(userTable.id, run.userId))
           .limit(1);

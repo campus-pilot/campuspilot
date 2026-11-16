@@ -7,7 +7,8 @@ import {
   createAuthMiddleware,
   getSessionFromCtx,
 } from 'better-auth/api';
-import { admin } from 'better-auth/plugins';
+import { isE164PhoneNumber } from '@campuspilot/db/phone';
+import { admin, phoneNumber } from 'better-auth/plugins';
 import { and, count, eq, gt, isNull, ne, or } from 'drizzle-orm';
 
 import {
@@ -37,6 +38,11 @@ import {
   googlePictureFromIdToken,
   importGoogleProfileImage,
 } from './profile-image';
+import {
+  changesOwnPhoneNumber,
+  STAFF_DISABLED_PHONE_PATHS,
+  STAFF_MIN_PASSWORD_LENGTH,
+} from './staff-login-policy';
 
 /**
  * Builds the Better Auth instance. `oauth` only injects transports for tests
@@ -106,14 +112,23 @@ export function createAuth(
   };
 
   /**
-   * Enforces the API-key policy the plugin has no option for. Creating a key
+   * Request rules the plugins have no option for. A person may not change
+   * their own sign-in phone number (see `changesOwnPhoneNumber`). The rest
+   * is the API-key policy. Creating a key
    * is refused once the owner holds API_KEY_MAX_ACTIVE_PER_USER active keys;
    * this check-then-insert is a per-user cap, not a lock, so simultaneous
    * creates can briefly exceed it by the number of racing requests. Updating
    * a key to `expiresIn: null` is refused because it would make the key
    * permanent, which the plugin's update endpoint otherwise allows.
    */
-  const apiKeyPolicy = createAuthMiddleware(async (ctx) => {
+  const staffRequestPolicy = createAuthMiddleware(async (ctx) => {
+    if (changesOwnPhoneNumber(ctx.path, ctx.body)) {
+      throw new APIError('BAD_REQUEST', {
+        code: 'PHONE_NUMBER_CANNOT_BE_UPDATED',
+        message:
+          'Your sign-in phone number can only be changed by your school or CampusPilot support.',
+      });
+    }
     if (ctx.path === '/api-key/update' && ctx.body?.expiresIn === null) {
       throw new APIError('BAD_REQUEST', {
         code: 'API_KEY_EXPIRY_REQUIRED',
@@ -150,11 +165,16 @@ export function createAuth(
     // System roles are derived exclusively from SYSTEM_ADMIN_EMAIL, while
     // provisioning is exposed through the school-scoped oRPC mutation. Keep
     // the underlying admin endpoints unreachable from public HTTP clients.
-    disabledPaths: ['/admin/create-user', '/admin/set-role'],
+    // Phone numbers are never verified by SMS (see staff-login-policy.ts).
+    disabledPaths: [
+      '/admin/create-user',
+      '/admin/set-role',
+      ...STAFF_DISABLED_PHONE_PATHS,
+    ],
 
     emailAndPassword: {
       enabled: true,
-      minPasswordLength: 8,
+      minPasswordLength: STAFF_MIN_PASSWORD_LENGTH,
     },
     socialProviders: {
       google: {
@@ -176,7 +196,7 @@ export function createAuth(
     }),
 
     hooks: {
-      before: apiKeyPolicy,
+      before: staffRequestPolicy,
       after: recordDynamicClientRegistration(db),
     },
     advanced: {
@@ -194,6 +214,12 @@ export function createAuth(
     user: {
       additionalFields: {
         setupStatus: { type: 'json', required: false, input: false },
+        emailIsPlaceholder: {
+          type: 'boolean',
+          required: false,
+          input: false,
+          defaultValue: false,
+        },
         profileImageS3Key: { type: 'string', required: false, input: false },
       },
     },
@@ -270,6 +296,24 @@ export function createAuth(
 
     plugins: [
       admin({ defaultRole: 'user', adminRoles: ['admin'] }),
+      /**
+       * Phone number + password sign-in (`/sign-in/phone-number`) against
+       * the same credential account as email sign-in, so both share one
+       * password. Numbers are stored and looked up in E.164; clients convert
+       * what the person typed before calling. The SMS endpoints are disabled
+       * above, and `/update-user` changes to the number (including removing
+       * it, which the plugin allows) are refused by `staffRequestPolicy`, so
+       * only staff procedures can set it.
+       */
+      phoneNumber({
+        phoneNumberValidator: (value) => isE164PhoneNumber(value),
+        // Required by the plugin's types. Every endpoint that sends a code is
+        // disabled and sign-in does not require verification, so this is
+        // unreachable; failing loudly beats silently sending nothing.
+        sendOTP: () => {
+          throw new Error('CampusPilot does not send SMS one-time codes.');
+        },
+      }),
       ...mcpOAuthPlugins(staffMcpOAuthConfig(), oauth),
       apiKey({
         references: 'user',

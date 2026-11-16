@@ -5,7 +5,9 @@ import type { SchoolMemberDto } from '@campuspilot/api/routers/school/member/mem
 import { SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
 import { useForm } from '@tanstack/react-form';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Avatar, AvatarFallback, AvatarImage } from '@campuspilot/ui/components/avatar';
+import { Avatar, AvatarImage } from '@campuspilot/ui/components/avatar';
+import { StaffAvatarFallback } from '@campuspilot/components/staff-account/staff-avatar-fallback';
+import { staffSignInLabel } from '@campuspilot/components/staff-account/staff-sign-in-label';
 import { Button } from '@campuspilot/ui/components/button';
 import {
   Dialog,
@@ -28,18 +30,9 @@ import { RequirePermissions } from './require-permissions';
 const teacherSelectionSchema = z.object({ userId: z.string().min(1, 'Select a teacher') });
 
 function memberName(member: SchoolMemberDto) {
-  return member.name.trim() || member.email;
+  return member.name.trim() || staffSignInLabel(member);
 }
 
-function initials(member: SchoolMemberDto) {
-  return memberName(member)
-    .split(/[\s@._-]+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0])
-    .join('')
-    .toUpperCase();
-}
 
 function withClassAssignment(member: SchoolMemberDto, classId: string, assigned: boolean) {
   return member.roles.map((assignment) => {
@@ -136,11 +129,11 @@ function AddTeacherDialogContent({ classId, schoolId, onClose }: { classId: stri
                       <RadioGroupItem value={member.userId} />
                       <Avatar>
                         {member.profileImageUrl ? <AvatarImage src={member.profileImageUrl} alt="" /> : null}
-                        <AvatarFallback>{initials(member)}</AvatarFallback>
+                        <StaffAvatarFallback person={member} />
                       </Avatar>
                       <span className="min-w-0">
                         <span className="block truncate font-medium">{memberName(member)}</span>
-                        <span className="block truncate text-muted-foreground">{member.email}</span>
+                        <span className="block truncate text-muted-foreground">{staffSignInLabel(member)}</span>
                       </span>
                     </Label>
                   ))}
@@ -215,12 +208,12 @@ export function ClassTeachers({ classId, schoolId }: { classId: string; schoolId
       {teachersQuery.isPending ? <Skeleton className="h-64 w-full rounded-xl" /> : (
         <div className="overflow-hidden rounded-xl border bg-card">
           <Table aria-label="Class teachers">
-            <TableHeader className="bg-muted/40"><TableRow><TableHead>Teacher</TableHead><TableHead>Email</TableHead><TableHead className="w-20"><span className="sr-only">Actions</span></TableHead></TableRow></TableHeader>
+            <TableHeader className="bg-muted/40"><TableRow><TableHead>Teacher</TableHead><TableHead>Signs in with</TableHead><TableHead className="w-20"><span className="sr-only">Actions</span></TableHead></TableRow></TableHeader>
             <TableBody>
               {teachersQuery.data?.items.length ? teachersQuery.data.items.map((member) => (
                 <TableRow key={member.userId}>
-                  <TableCell><div className="flex items-center gap-3"><Avatar>{member.profileImageUrl ? <AvatarImage src={member.profileImageUrl} alt="" /> : null}<AvatarFallback>{initials(member)}</AvatarFallback></Avatar><span className="font-medium">{memberName(member)}</span></div></TableCell>
-                  <TableCell className="text-muted-foreground">{member.email}</TableCell>
+                  <TableCell><div className="flex items-center gap-3"><Avatar>{member.profileImageUrl ? <AvatarImage src={member.profileImageUrl} alt="" /> : null}<StaffAvatarFallback person={member} /></Avatar><span className="font-medium">{memberName(member)}</span></div></TableCell>
+                  <TableCell className="text-muted-foreground">{staffSignInLabel(member)}</TableCell>
                   <TableCell className="text-right">
                     <RequirePermissions permissions={{ action: SCHOOL_ACTIONS.UPDATE_MEMBER_ROLES, resource: { kind: 'school', schoolId } }}>
                       <Button type="button" variant="ghost" size="icon-sm" aria-label={`Remove ${memberName(member)} from class`} disabled={removeMutation.isPending} onClick={() => removeMutation.mutate(member)}><UserMinus aria-hidden /></Button>
