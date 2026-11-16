@@ -38,6 +38,7 @@ import {
   type AssistantConversationDeps,
   type RunAccessCheck,
 } from './conversation';
+import { toolInputStub } from './context';
 import {
   createFakeProvider,
   FAKE_PRICES,
@@ -571,6 +572,25 @@ describe('a write tool call', () => {
         ),
       ),
     ).toEqual(['awaiting_approval', 'running', 'succeeded']);
+  });
+
+  it('carrying a copied context note is refused before approval and never run', async () => {
+    const note = toolInputStub({ toolName: writeCall.name, field: 'name', chars: 4_674 });
+    const copied = { ...writeCall, input: { ...writeCall.input, name: note } };
+    const { provider, turn, invoke } = await arrange({
+      script: [fakeReply({ toolUses: [copied] }), fakeReply({ text: 'I will write it again.' })],
+    });
+
+    await invoke().done;
+
+    expect(callToolMock).not.toHaveBeenCalled();
+    const [result] = toolResultsSentTo(provider.calls[1]);
+    expect(result).toMatchObject({ toolUseId: copied.id, isError: true });
+    expect(JSON.parse(result!.content)).toMatchObject({ code: 'BAD_REQUEST', message: expect.stringContaining('`name`') });
+    const { run, toolCalls, approvals } = await readTurn(turn);
+    expect(run.status).toBe('completed');
+    expect(toolCalls).toEqual([]);
+    expect(approvals).toEqual([]);
   });
 
   it('is never called when the user declines, and the model is told so', async () => {

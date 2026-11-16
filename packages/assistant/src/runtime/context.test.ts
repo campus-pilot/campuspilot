@@ -9,6 +9,7 @@ import {
   CONTEXT_ATTACHMENT_BUDGET_BYTES,
   CONTEXT_TOOL_INPUT_MIN_CHARS,
   CONTEXT_TOOL_RESULT_MIN_CHARS,
+  findCopiedContextNote,
   fullContextBoundary,
   stubLongInputFields,
   toolInputStub,
@@ -387,6 +388,23 @@ describe('stubLongInputFields', () => {
     expect(stubLongInputFields('t', input, stub, 50)).toBe(input);
     expect(stubLongInputFields('t', 'text', stub, 1)).toBe('text');
     expect(stubLongInputFields('t', null, stub, 1)).toBeNull();
+  });
+});
+
+describe('findCopiedContextNote', () => {
+  it('finds a copied input or result note at any depth and names its field', () => {
+    const inputNote = toolInputStub({ toolName: 'school_saveDocumentTemplate', field: 'content', chars: 4674 });
+    const resultNote = toolResultStub({ toolName: 'school.getActiveDocumentTemplate', chars: 9000 });
+    expect(findCopiedContextNote({ name: 'Timetable', content: inputNote })).toBe('content');
+    expect(findCopiedContextNote({ content: `<p>before</p>${inputNote}` })).toBe('content');
+    expect(findCopiedContextNote({ draft: { sections: ['ok', resultNote] } })).toBe('draft.sections.1');
+    expect(findCopiedContextNote(inputNote)).toBe('input');
+  });
+
+  it('passes inputs without a note, including ones that mention omitted text', () => {
+    expect(findCopiedContextNote({ name: 'Omitted: the content', content: '<p>{{school.name}}</p>', n: 5, x: null })).toBeNull();
+    expect(findCopiedContextNote(null)).toBeNull();
+    expect(findCopiedContextNote({})).toBeNull();
   });
 });
 

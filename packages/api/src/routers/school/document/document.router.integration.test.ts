@@ -305,6 +305,9 @@ describe('document templates, generation, and artifact lifecycle', () => {
       documentType: 'id_card',
     });
     expect(original?.artifact.id).toBe(chosen.artifact.id);
+    // The revision to save against is an explicit field on every read and write.
+    expect(chosen.revisionId).toBe(chosen.artifact.id);
+    expect(original?.revisionId).toBe(chosen.artifact.id);
     const changed = await manager.school.saveDocumentTemplate({
       schoolId,
       documentType: 'id_card',
@@ -313,6 +316,7 @@ describe('document templates, generation, and artifact lifecycle', () => {
       expectedRevisionId: chosen.artifact.id,
     });
     expect(changed.artifact.id).not.toBe(chosen.artifact.id);
+    expect(changed.revisionId).toBe(changed.artifact.id);
     const [old] = await db
       .select()
       .from(artifactTable)
@@ -329,7 +333,36 @@ describe('document templates, generation, and artifact lifecycle', () => {
         content: '<p>stale</p>',
         expectedRevisionId: chosen.artifact.id,
       }),
-    ).rejects.toMatchObject({ code: 'CONFLICT' });
+    ).rejects.toMatchObject({
+      code: 'CONFLICT',
+      message: expect.stringContaining(`selected revision: ${changed.artifact.id}`),
+    });
+    // A caller that sends null while a revision is selected is told which one.
+    await expect(
+      manager.school.saveDocumentTemplate({
+        schoolId,
+        documentType: 'id_card',
+        name: 'Stale',
+        content: '<p>stale</p>',
+        expectedRevisionId: null,
+      }),
+    ).rejects.toMatchObject({
+      code: 'CONFLICT',
+      message: expect.stringContaining(`selected revision: ${changed.artifact.id}`),
+    });
+    // And one that sends an id while nothing is selected is told so.
+    await expect(
+      manager.school.saveDocumentTemplate({
+        schoolId,
+        documentType: 'admit_card',
+        name: 'Stale',
+        content: '<p>stale</p>',
+        expectedRevisionId: chosen.artifact.id,
+      }),
+    ).rejects.toMatchObject({
+      code: 'CONFLICT',
+      message: expect.stringContaining('selected revision: none'),
+    });
     const preview = await manager.school.previewDocumentTemplate({
       schoolId,
       documentType: 'id_card',

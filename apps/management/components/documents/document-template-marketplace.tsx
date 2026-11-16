@@ -180,7 +180,7 @@ function MarketplaceTypeSection({ scope }: { scope: DocumentTemplateScope }) {
             key={item.slug}
             scope={scope}
             item={item}
-            activeRevisionId={activeState.data?.artifact.id ?? null}
+            activeRevisionId={activeState.data?.revisionId ?? null}
             selected={activeState.data?.artifact.marketplaceSlug === item.slug}
           />
         ))}
@@ -464,7 +464,7 @@ function MarketplaceDetail({
             <UseMarketplaceTemplate
               scope={scope}
               item={previewState.data}
-              activeRevisionId={activeState.data?.artifact.id ?? null}
+              activeRevisionId={activeState.data?.revisionId ?? null}
               selected={selected}
             />
           </div>
