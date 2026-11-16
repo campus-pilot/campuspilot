@@ -42,7 +42,7 @@ import { saveTemplate } from '../../routers/school/document/document.router';
 import { findPaper, pagesOf } from '../../routers/school/question-paper/question-paper.records';
 import { selectedQuestionPaperTemplate } from '../../routers/school/question-paper/question-paper.render';
 import { resolvePaperScope } from '../../routers/school/question-paper/question-paper.scope';
-import { addQuestionPaperPage } from '../../routers/school/question-paper/question-paper.service';
+import { addQuestionPaperPage, releaseQuestionPaperPage } from '../../routers/school/question-paper/question-paper.service';
 import { processPageDerivatives } from '../image-derivatives/process';
 import { saveQuestionPaperVersion } from '../../routers/school/question-paper/question-paper.version.service';
 import { SCHOOL_LOGO_FIELD_NAME } from '../../routers/system-admin/school/school.constants';
@@ -912,6 +912,10 @@ export async function seedQuestionPaper(
   const userId = ctx.context.session!.user.id;
   const scope = await resolvePaperScope(db, key);
   const existing = await findPaper(db, key);
+  // A crash between a page's reservation and its store leaves it `awaiting`: give it back, so the replay adds that page again.
+  for (const page of existing ? await pagesOf(db, existing.id) : []) {
+    if (page.uploadStatus === 'awaiting') await releaseQuestionPaperPage(db, { scope, pageId: page.id });
+  }
   const stored = existing ? (await pagesOf(db, existing.id)).length : 0;
   for (const [index, page] of paper.pages.entries()) {
     if (index < stored) continue;

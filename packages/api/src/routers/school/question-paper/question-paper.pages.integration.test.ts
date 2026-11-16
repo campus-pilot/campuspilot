@@ -150,7 +150,7 @@ describe('question paper pages', () => {
       expect(rows.map((row) => row.position)).toEqual([1, 2, 3]);
       const [original] = rows;
       for (const objectKey of [original!.originalS3Key!, original!.thumbS3Key!, original!.modelS3Key!]) expect(await exists(objectKey), objectKey).toBe(true);
-      expect(original!.originalS3Key).toMatch(new RegExp(`^schools/${world.schoolId}/exam-question-papers/pages/${original!.id}/original\\.jpg$`));
+      expect(original!.originalS3Key).toMatch(new RegExp(`^schools/${world.schoolId}/exam-question-papers/pages/${original!.id}/original-[0-9a-f]{12}\\.jpg$`));
       expect(original).toMatchObject({ modelContentType: 'image/jpeg', uploadedBy: world.people.manager.userId });
       expect(original!.modelByteSize!).toBeGreaterThan(0);
 

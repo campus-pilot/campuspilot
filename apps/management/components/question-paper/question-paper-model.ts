@@ -1,5 +1,6 @@
 import { CLASS_ACTIONS, type PermissionCheck } from '@campuspilot/api/routers/authorization/authorization.dto';
 import type { ExamScope } from '@/components/exam/exam-model';
+import type { QueryClient, QueryKey } from '@tanstack/react-query';
 
 /** One paper: an exam, a class, a subject and an assessment mode of its plan. */
 export type QuestionPaperScope = ExamScope & { classId: string; subjectSlug: string; modeSlug: string };
@@ -196,6 +197,42 @@ export const pagesProcessing = (pages: readonly { uploadStatus: 'awaiting' | 'st
 
 /** How often the paper is read while photos are processed: a copy takes well under a second. */
 export const PAGE_PROCESSING_POLL_MS = 1000;
+
+/**
+ * Puts a stored page into the cached paper, where its reservation already
+ * stands. A read of the paper already in flight (the processing poll) is
+ * cancelled first: it was answered before this photo was stored, and landing
+ * after this patch it would put the page back to `awaiting`.
+ */
+export async function patchStoredPage<Page extends { id: string }>(queryClient: QueryClient, queryKey: QueryKey, page: Page) {
+  await queryClient.cancelQueries({ queryKey });
+  queryClient.setQueryData<{ pages: Page[] }>(queryKey, (detail) =>
+    detail ? { ...detail, pages: detail.pages.map((current) => (current.id === page.id ? page : current)) } : detail,
+  );
+}
+
+/**
+ * Gives back the page of a photo whose upload failed, and says whether the
+ * photo is in fact stored. The release answers CONFLICT only when the page
+ * already has its photo: the store committed and only its answer was lost (a
+ * dropped connection), so the photo must not be reported as missing. Any other
+ * failure leaves the page to the server's sweep.
+ */
+export async function releaseFailedUpload(release: () => Promise<unknown>): Promise<'released' | 'stored'> {
+  try {
+    await release();
+  } catch (error) {
+    if (isConflict(error)) return 'stored';
+  }
+  return 'released';
+}
+
+/** What the page preview says when it cannot show a page's photo: only a photo the server stored but could not decode (HEIC) may still be read by the AI. */
+export function pagePreviewFallback(page: { uploadStatus: 'awaiting' | 'stored'; derivativeStatus: string }) {
+  if (page.uploadStatus === 'awaiting') return 'This photo has not arrived. Remove the page and add the photo again.';
+  if (page.derivativeStatus === 'failed') return 'This photo could not be read. Remove the page and add the photo again.';
+  return 'This photo cannot be shown here. The AI can still read it.';
+}
 
 /**
  * Why the paper's pages cannot be used yet, or null: a page whose photo is

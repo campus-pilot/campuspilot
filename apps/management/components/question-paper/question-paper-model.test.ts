@@ -14,11 +14,15 @@ import {
   resolveVersionNo,
   shownPaperOf,
   runWithConcurrency,
+  pagePreviewFallback,
   pagesNotReadyReason,
   pagesProcessing,
+  patchStoredPage,
+  releaseFailedUpload,
   unreservedUploads,
   uploadsInFlight,
 } from './question-paper-model';
+import { QueryClient } from '@tanstack/react-query';
 
 const scope = { schoolId: 'sch 1', sessionId: 'ses_1', examSlug: 'half-yearly', classId: 'cls_1', subjectSlug: 'science', modeSlug: 'theory' };
 
@@ -175,4 +179,34 @@ test('an unsaved draft is shown only while no version was saved after it', () =>
   // The photo job (or another chat) saved a version after the draft was written.
   assert.equal(draftIsNewest(draftAt, [{ createdAt: new Date('2026-11-14T11:00:00Z') }, { createdAt: new Date('2026-11-14T09:00:00Z') }]), false);
   assert.equal(draftIsNewest(draftAt, [{ createdAt: draftAt }]), false);
+});
+
+test('a stored page patched into the cache survives a read of the paper that was already in flight', async () => {
+  const queryClient = new QueryClient();
+  const queryKey = ['detail'];
+  queryClient.setQueryData(queryKey, { pages: [{ id: 'B', uploadStatus: 'awaiting' }] });
+  // The processing poll left before B was stored, so it answers with B still awaiting.
+  const poll = queryClient
+    .fetchQuery({ queryKey, staleTime: 0, queryFn: () => new Promise((resolve) => setTimeout(() => resolve({ pages: [{ id: 'B', uploadStatus: 'awaiting' }] }), 20)) })
+    .catch(() => undefined);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  await patchStoredPage(queryClient, queryKey, { id: 'B', uploadStatus: 'stored' });
+  await poll;
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.deepEqual(queryClient.getQueryData(queryKey), { pages: [{ id: 'B', uploadStatus: 'stored' }] });
+  queryClient.clear();
+});
+
+test('a failed upload whose page turns out to hold its photo is reported as stored, not missing', async () => {
+  assert.equal(await releaseFailedUpload(async () => ({ released: true })), 'released');
+  // The store committed and only its answer was lost: the release says the page already has its photo.
+  assert.equal(await releaseFailedUpload(async () => Promise.reject(Object.assign(new Error('This page already has its photo.'), { code: 'CONFLICT' }))), 'stored');
+  // Any other failure of the release leaves the photo reported as not added (the server sweeps the page).
+  assert.equal(await releaseFailedUpload(async () => Promise.reject(new Error('Unable to reach the server.'))), 'released');
+});
+
+test('the page preview says the AI can read a photo only when it was stored and is merely undrawable', () => {
+  assert.equal(pagePreviewFallback({ uploadStatus: 'stored', derivativeStatus: 'unsupported' }), 'This photo cannot be shown here. The AI can still read it.');
+  assert.equal(pagePreviewFallback({ uploadStatus: 'stored', derivativeStatus: 'failed' }), 'This photo could not be read. Remove the page and add the photo again.');
+  assert.equal(pagePreviewFallback({ uploadStatus: 'awaiting', derivativeStatus: 'pending' }), 'This photo has not arrived. Remove the page and add the photo again.');
 });

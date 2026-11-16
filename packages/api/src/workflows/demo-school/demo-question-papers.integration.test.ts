@@ -128,6 +128,28 @@ describe('demo question papers (steps only, one class)', () => {
     expect(versions).toEqual([{ versionNo: 1 }]);
   }, 120_000);
 
+  it('adds a page again whose reservation was left by a crash before its photo was stored', async () => {
+    const [row] = await papers();
+    const [last] = await db.select().from(examQuestionPaperPageTable).where(and(eq(examQuestionPaperPageTable.paperId, row!.id), eq(examQuestionPaperPageTable.position, 2)));
+    await db.delete(examQuestionPaperPageTable).where(eq(examQuestionPaperPageTable.id, last!.id));
+    // What the interrupted run left: page 2 reserved, its photo never stored.
+    await db.insert(examQuestionPaperPageTable).values({
+      paperId: row!.id,
+      schoolId: job.schoolId,
+      position: 2,
+      uploadStatus: 'awaiting',
+      originalName: last!.originalName,
+      derivativeStatus: 'pending',
+      uploadedBy: admin.user.id,
+    });
+    const planned = ctx.plan.questionPapers.find((item) => item.subjectSlug === row!.subjectSlug)!;
+    await seedQuestionPaper(ctx, { sessionId, classIdsBySlug: { 'class-7': classId }, paper: planned });
+    const pages = await db.select().from(examQuestionPaperPageTable).where(eq(examQuestionPaperPageTable.paperId, row!.id)).orderBy(asc(examQuestionPaperPageTable.position));
+    expect(pages.map((page) => [page.position, page.originalName, page.uploadStatus, page.derivativeStatus])).toEqual(
+      planned.pages.map((page, position) => [position + 1, page.fileName, 'stored', 'ready']),
+    );
+  }, 120_000);
+
   it('removes the objects it wrote when a purge was requested meanwhile, and stops', async () => {
     await db.update(demoSchoolJobTable).set({ purgeRequestedAt: new Date() }).where(eq(demoSchoolJobTable.id, job.jobId));
     const english = { ...ctx.plan.questionPapers[0]!, key: 'fence', subjectSlug: 'english', pages: [ctx.plan.questionPapers[0]!.pages[0]!] };

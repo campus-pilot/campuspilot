@@ -9,8 +9,7 @@ import type { UploadQueueItem } from '@campuspilot/components/question-paper/pap
 import { client, orpc } from '@/lib/orpc';
 import { storeQuestionPaperPage, type QuestionPaperPage, type QuestionPaperPageKey } from '@/lib/question-paper-pages';
 import { prepareUploadFile } from './prepare-upload-file';
-import { PAGE_UPLOAD_CONCURRENCY, requestErrorMessage, runWithConcurrency, unreservedUploads } from './question-paper-model';
-import type { QuestionPaperDetail } from './use-question-paper-detail';
+import { PAGE_UPLOAD_CONCURRENCY, patchStoredPage, releaseFailedUpload, requestErrorMessage, runWithConcurrency, unreservedUploads } from './question-paper-model';
 
 const queueSchema = z.object({
   items: z.array(z.object({ id: z.string(), name: z.string(), status: z.enum(['converting', 'uploading', 'error']), pageId: z.string().optional() }).loose()),
@@ -74,10 +73,7 @@ export function usePageUploads({ pageKey, refresh }: { pageKey: QuestionPaperPag
   };
 
   /** Puts a stored page into the cached paper, where its reservation already stands, so the grid shows it without a read. */
-  const showStoredPage = (page: QuestionPaperPage) =>
-    queryClient.setQueryData(orpc.school.getQuestionPaperDetail.queryKey({ input: pageKey }), (detail: QuestionPaperDetail | undefined) =>
-      detail ? { ...detail, pages: detail.pages.map((current) => (current.id === page.id ? page : current)) } : detail,
-    );
+  const showStoredPage = (page: QuestionPaperPage) => patchStoredPage(queryClient, orpc.school.getQuestionPaperDetail.queryKey({ input: pageKey }), page);
 
   async function processEntry(entry: { id: string; file: File; pageId: string }) {
     patch(entry.id, { status: 'converting', error: undefined });
@@ -90,11 +86,13 @@ export function usePageUploads({ pageKey, refresh }: { pageKey: QuestionPaperPag
         patch(entry.id, { previewUrl: url });
       }
       patch(entry.id, { status: 'uploading' });
-      showStoredPage(await storeQuestionPaperPage(pageKey, entry.pageId, prepared.file));
+      await showStoredPage(await storeQuestionPaperPage(pageKey, entry.pageId, prepared.file));
       remove(entry.id);
     } catch (error) {
       // Its page is given back so the paper holds no empty page; the photos after it keep their own pages.
-      await client.school.releaseQuestionPaperPage({ ...pageKey, pageId: entry.pageId }).catch(() => undefined);
+      const release = await releaseFailedUpload(() => client.school.releaseQuestionPaperPage({ ...pageKey, pageId: entry.pageId }));
+      // The photo was stored and only the answer was lost: the end-of-pick read shows it, nothing to add again.
+      if (release === 'stored') return remove(entry.id);
       patch(entry.id, {
         status: 'error',
         pageId: undefined,

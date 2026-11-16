@@ -12,10 +12,16 @@ import { ReadError } from '@/components/exam/exam-common';
 import { orpc } from '@/lib/orpc';
 import { questionPaperOriginalUrl, questionPaperThumbUrl } from '@/lib/question-paper-pages';
 import { earlierPaperTitle } from './earlier-paper-dialog';
-import type { QuestionPaperScope } from './question-paper-model';
+import { pagePreviewFallback, type QuestionPaperScope } from './question-paper-model';
 import type { EarlierPaper } from './question-paper-start-model';
 
-type PageView = { id: string; position: number; originalName: string; derivativeStatus: 'pending' | 'ready' | 'unsupported' | 'failed' };
+type PageView = {
+  id: string;
+  position: number;
+  originalName: string;
+  uploadStatus: 'awaiting' | 'stored';
+  derivativeStatus: 'pending' | 'ready' | 'unsupported' | 'failed';
+};
 
 /**
  * One photographed page large enough to read, so the user can check it is the
@@ -69,7 +75,7 @@ export function PagePreviewDialog({
                 const thumb = questionPaperThumbUrl(scope, page.id);
                 // The smaller copy exists only for a photo the server could decode; try it once.
                 if (page.derivativeStatus === 'ready' && event.currentTarget.src !== thumb) event.currentTarget.src = thumb;
-                else event.currentTarget.alt = 'This photo cannot be shown here. The AI can still read it.';
+                else event.currentTarget.alt = pagePreviewFallback(page);
               }}
             />
           </div>

@@ -50,10 +50,22 @@ async function storeDerivatives(derived: Extract<ImageDerivatives, { status: 're
 }
 
 /**
+ * After a fence miss, whether the objects just written may be removed. The
+ * keys are the same for every run on a row, so when an overlapping run (a
+ * replayed demo seed beside the sweep's job, a Restate retry on a second
+ * worker) has just recorded them, they are that run's live copies and stay.
+ * A row that is gone, or failed without them, does not own them.
+ */
+function ownsWrittenCopies(row: { thumbS3Key: string | null } | undefined, keys: { thumb: string }) {
+  return row?.thumbS3Key === keys.thumb;
+}
+
+/**
  * Makes the thumbnail and model copy of a stored page photo and records the
  * outcome. Only a `stored`, `pending` page is processed, and the final update
  * is fenced on `pending`: a page removed meanwhile, or failed by the sweep's
- * deadline, keeps its state and the objects just written are removed again.
+ * deadline, keeps its state and the objects just written are removed again
+ * (unless an overlapping run recorded them, see {@link ownsWrittenCopies}).
  * Running it twice for the same page writes the same keys and changes nothing
  * the second time.
  */
@@ -83,7 +95,8 @@ export async function processPageDerivatives(db: DatabaseExecutor, pageId: strin
     .where(and(eq(examQuestionPaperPageTable.id, page.id), eq(examQuestionPaperPageTable.derivativeStatus, 'pending')))
     .returning({ id: examQuestionPaperPageTable.id });
   if (updated.length === 0) {
-    await deleteObjectsBestEffort(written);
+    const [now] = await db.select({ thumbS3Key: examQuestionPaperPageTable.thumbS3Key }).from(examQuestionPaperPageTable).where(eq(examQuestionPaperPageTable.id, page.id)).limit(1);
+    if (!ownsWrittenCopies(now, keys)) await deleteObjectsBestEffort(written);
     return 'skipped';
   }
   return derived.status;
@@ -118,7 +131,8 @@ export async function processAttachmentDerivatives(db: DatabaseExecutor, attachm
     .where(and(eq(assistantAttachmentTable.id, row.id), eq(assistantAttachmentTable.derivativeStatus, 'pending')))
     .returning({ id: assistantAttachmentTable.id });
   if (updated.length === 0) {
-    await deleteObjectsBestEffort(written);
+    const [now] = await db.select({ thumbS3Key: assistantAttachmentTable.thumbS3Key }).from(assistantAttachmentTable).where(eq(assistantAttachmentTable.id, row.id)).limit(1);
+    if (!ownsWrittenCopies(now, keys)) await deleteObjectsBestEffort(written);
     return 'skipped';
   }
   return derived.status;

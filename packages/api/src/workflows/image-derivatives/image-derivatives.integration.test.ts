@@ -40,7 +40,7 @@ describe('image derivatives', () => {
   async function storedPage(options: { bytes: Buffer; storedAt?: Date; key?: object }) {
     const { pages } = await world.people.manager.client.school.reserveQuestionPaperPages({ ...world.key(options.key ?? {}), fileNames: ['photo.jpg'] });
     const page = pages[0]!;
-    const originalS3Key = questionPaperKeys.original(world.schoolId, page.id, 'jpg');
+    const originalS3Key = questionPaperKeys.original(world.schoolId, page.id, 'jpg', 'test');
     await putObject(originalS3Key, options.bytes, 'image/jpeg');
     await db
       .update(examQuestionPaperPageTable)
@@ -60,6 +60,16 @@ describe('image derivatives', () => {
     expect(row.modelByteSize!).toBeLessThanOrEqual(600 * 1024);
     // A second delivery of the same job (a Restate retry, the sweep) changes nothing.
     expect(await processPageDerivatives(db, id)).toBe('skipped');
+  });
+
+  it('keeps the copies an overlapping run recorded when its own fenced update misses', async () => {
+    const id = await storedPage({ bytes: await photo(), key: { classId: world.otherClassId } });
+    // Two runs on one page at once (a replayed demo seed beside the sweep's job): both read it pending and write the same keys.
+    const outcomes = await Promise.all([processPageDerivatives(db, id), processPageDerivatives(db, id)]);
+    expect(outcomes.toSorted()).toEqual(['ready', 'skipped']);
+    const row = (await pageRow(id))!;
+    expect(row).toMatchObject({ derivativeStatus: 'ready' });
+    for (const key of [row.thumbS3Key!, row.modelS3Key!]) expect(await exists(key), key).toBe(true);
   });
 
   it('marks a photo that cannot be decoded failed instead of retrying it', async () => {

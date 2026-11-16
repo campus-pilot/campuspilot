@@ -13,6 +13,7 @@ import { configureQuestionPaperModel, type QuestionPaperModel } from '../../../w
 import { QUESTION_PAPER_PAGE_RESERVATION_TTL_MS } from './question-paper.dto';
 import { handleQuestionPaperPageStore } from './question-paper.http';
 import { releaseExpiredPageReservations } from './question-paper.service';
+import { putObject, questionPaperKeys } from './question-paper.storage';
 
 /** The worker's image job runs inline (`test/image-derivatives.ts`), only when a test lets it. */
 vi.mock('../../../workflows/image-derivatives/outbox', async (importOriginal) => ({
@@ -110,6 +111,45 @@ describe('question paper page reservations', () => {
     expect(await again.json()).toMatchObject({ message: 'This page already has its photo.' });
     // The same page id under another paper's key is not found there.
     expect((await store({ classId: world.otherClassId, subjectSlug: 'math', modeSlug: 'theory' }, pages[0]!.id, photo, 'a.jpg')).status).toBe(404);
+    await settleDerivatives();
+  });
+
+  it('keeps the stored original when an overlapping second upload for the same page loses', async () => {
+    const k = { subjectSlug: 'science', modeSlug: 'theory' };
+    const { pages } = await manager().client.school.reserveQuestionPaperPages({ ...world.key(k), fileNames: ['twice.jpg'] });
+    const photo = await jpeg(600, 800, '#456');
+    // A repeated request while the first is still in flight: both pass the unlocked check, one wins the locked update.
+    const responses = await Promise.all([store(k, pages[0]!.id, photo, 'twice.jpg'), store(k, pages[0]!.id, photo, 'twice.jpg')]);
+    expect(responses.map((response) => response.status).toSorted()).toEqual([200, 409]);
+    const [row] = await db.select().from(examQuestionPaperPageTable).where(eq(examQuestionPaperPageTable.id, pages[0]!.id));
+    expect(await exists(row!.originalS3Key!)).toBe(true);
+    await settleDerivatives();
+    expect((await detail(k)).pages.find((page) => page.id === pages[0]!.id)).toMatchObject({ derivativeStatus: 'ready' });
+  });
+
+  it('names the page after the file that was sent, not the one picked', async () => {
+    const k = { subjectSlug: 'math', modeSlug: 'theory' };
+    // The browser re-encoded IMG_0001.HEIC (or a large PNG) as a JPEG before sending it.
+    const { pages } = await manager().client.school.reserveQuestionPaperPages({ ...world.key(k), fileNames: ['IMG_0001.HEIC'] });
+    expect((await store(k, pages[0]!.id, await jpeg(40, 40, '#789'), 'IMG_0001.jpg')).status).toBe(200);
+    expect((await detail(k)).pages.find((page) => page.id === pages[0]!.id)).toMatchObject({ originalName: 'IMG_0001.jpg', contentType: 'image/jpeg' });
+    await settleDerivatives();
+  });
+
+  it('removes the copies the worker recorded while the page was being deleted', async () => {
+    const k = { subjectSlug: 'science', modeSlug: 'theory' };
+    const { pages } = await manager().client.school.reserveQuestionPaperPages({ ...world.key(k), fileNames: ['gone.jpg'] });
+    holdDerivatives();
+    expect((await store(k, pages[0]!.id, await jpeg(40, 40, '#abc'), 'gone.jpg')).status).toBe(200);
+    // The worker has written its copies and records them just after the delete read the row (still pending, no keys).
+    const thumb = questionPaperKeys.thumb(world.schoolId, pages[0]!.id);
+    const model = questionPaperKeys.model(world.schoolId, pages[0]!.id);
+    await putObject(thumb, await jpeg(10, 10, '#000'), 'image/jpeg');
+    await putObject(model, await jpeg(10, 10, '#000'), 'image/jpeg');
+    const { paper } = await detail(k);
+    await manager().client.school.deleteQuestionPaperPage({ ...world.key(k), pageId: pages[0]!.id, expectedPageRevision: paper.pageRevision });
+    expect(await exists(thumb)).toBe(false);
+    expect(await exists(model)).toBe(false);
     await settleDerivatives();
   });
 

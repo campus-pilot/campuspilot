@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 
 import type { Database, DatabaseExecutor, DatabaseTransaction } from '@campuspilot/db';
 import { artifactTable } from '@campuspilot/db/schema/artifact';
@@ -432,7 +432,9 @@ export async function storeQuestionPaperPage(
   assertPaperWritable(scope);
   await precheckPageStore(db, scope.key, pageId);
   const size = await checkImageHeader(file.bytes);
-  const originalKey = questionPaperKeys.original(scope.key.schoolId, pageId, file.extension);
+  // Each attempt writes its own object: an overlapping store for the same page (a repeated request) that loses
+  // the fence below removes only what it wrote, never the original of the attempt that won.
+  const originalKey = questionPaperKeys.original(scope.key.schoolId, pageId, file.extension, randomBytes(6).toString('hex'));
   try {
     await putObject(originalKey, file.bytes, file.contentType);
     const page = await db.transaction(async (tx) => {
@@ -444,6 +446,8 @@ export async function storeQuestionPaperPage(
         .set({
           uploadStatus: 'stored',
           originalS3Key: originalKey,
+          // The name of the file actually sent (a photo re-encoded in the browser is a .jpg), not the one picked.
+          originalName: sanitizeFileName(file.name),
           contentType: file.contentType,
           byteSize: file.bytes.byteLength,
           sha256: createHash('sha256').update(file.bytes).digest('hex'),
@@ -621,7 +625,7 @@ export async function deleteQuestionPaperPage(
       .set({ pageRevision: sql`${examQuestionPaperTable.pageRevision} + 1`, updatedAt: new Date() })
       .where(eq(examQuestionPaperTable.id, paper.id))
       .returning({ pageRevision: examQuestionPaperTable.pageRevision });
-    return { pageRevision: bumped!.pageRevision, keys: [page.originalS3Key, page.thumbS3Key, page.modelS3Key] };
+    return { pageRevision: bumped!.pageRevision, keys: pageObjectKeys(page) };
   });
   await deleteObjectsBestEffort(keys);
   return { pageRevision };
@@ -633,6 +637,17 @@ export async function deleteQuestionPaperPage(
  * their versions, and returns every object key to remove after the commit.
  * Template revisions are shared with other versions and are never deleted.
  */
+/**
+ * Every object a deleted page may own: the keys on the row, plus the
+ * thumbnail and model keys the worker writes for this page. The row is read
+ * without a row lock, so the worker may record its copies between that read
+ * and the delete; deleting their fixed keys as well leaves nothing behind.
+ */
+function pageObjectKeys(page: { id: string; schoolId: string; originalS3Key: string | null; thumbS3Key: string | null; modelS3Key: string | null }) {
+  const keys = [page.originalS3Key, page.thumbS3Key, page.modelS3Key, questionPaperKeys.thumb(page.schoolId, page.id), questionPaperKeys.model(page.schoolId, page.id)];
+  return [...new Set(keys.filter((key): key is string => key !== null))];
+}
+
 async function deletePaperRows(tx: DatabaseTransaction, papers: PaperRow[]): Promise<string[]> {
   if (papers.length === 0) return [];
   const paperIds = papers.map((paper) => paper.id);
@@ -650,7 +665,7 @@ async function deletePaperRows(tx: DatabaseTransaction, papers: PaperRow[]): Pro
     await tx.delete(artifactTable).where(inArray(artifactTable.id, artifacts.map((artifact) => artifact.id)));
   }
   return [
-    ...pages.flatMap((page) => [page.originalS3Key, page.thumbS3Key, page.modelS3Key]),
+    ...pages.flatMap(pageObjectKeys),
     ...figures.map((figure) => figure.s3Key),
     ...artifacts.map((artifact) => artifact.s3Key),
   ].filter((key): key is string => key !== null);
