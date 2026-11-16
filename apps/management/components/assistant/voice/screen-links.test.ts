@@ -36,6 +36,19 @@ describe('bestLink', () => {
     assert.equal(bestLink('Arjun Reddy', students)?.href, '/s/2');
   });
 
+  it('asks which when the rows differ only in a word the request does not name', () => {
+    const papers = [
+      { text: 'Open English Oral for Nursery', href: '/p/nursery/english/oral' },
+      { text: 'Open English Written for Nursery', href: '/p/nursery/english/written' },
+      { text: 'Open English Oral for LKG', href: '/p/lkg/english/oral' },
+    ];
+    // "LKG" is shorter than "Nursery", but that is no reason to open LKG's paper.
+    assert.equal(bestLink('English Oral', papers), null);
+    assert.equal(bestLink('English Oral for Nursery', papers)?.href, '/p/nursery/english/oral');
+    assert.equal(bestLink('Nursery English written', papers)?.href, '/p/nursery/english/written');
+    assert.equal(bestLink('Open English Oral for LKG', papers)?.href, '/p/lkg/english/oral');
+  });
+
   it('treats two links to the same place as one', () => {
     const same = [{ text: 'Aanya Menon', href: '/s/1' }, { text: 'Aanya Menon', href: '/s/1' }];
     assert.equal(bestLink('Aanya Menon', same)?.href, '/s/1');

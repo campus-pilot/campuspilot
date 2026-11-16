@@ -68,20 +68,28 @@ function answers(match: ReturnType<typeof matchOf>): boolean {
  * The link to open for `label`, or null when none answers it or two different
  * places answer it equally well (then the user must say which). Ranked by: the
  * exact text, then the most of the label's words, then the share of the label,
- * then a text that starts with the label, then the shorter text ("Class 1" over
- * "Class 10").
+ * then a text that starts with the label, then the fewer words, then the
+ * shorter text ("Class 1" over "Class 10"). Two links that differ only in the
+ * length of a word the label does not name ("Open English Oral for Nursery"
+ * and "… for LKG", asked for "English Oral") are a tie, not a choice.
  */
 export function bestLink(label: string, links: readonly ScreenLink[]): ScreenLink | null {
   const target = normalised(label);
   const ranked = links
     .map((link) => {
       const text = normalised(link.text);
-      return { link, match: matchOf(label, link), exact: text === target ? 1 : 0, starts: text.startsWith(target) ? 1 : 0, length: text.length };
+      const match = matchOf(label, link);
+      return { link, match, exact: text === target ? 1 : 0, starts: text.startsWith(target) ? 1 : 0, words: match.linkWords, length: text.length };
     })
     .filter((entry) => entry.match.matched > 0 && answers(entry.match))
     .sort(
       (a, b) =>
-        b.exact - a.exact || b.match.matched - a.match.matched || b.match.ofLabel - a.match.ofLabel || b.starts - a.starts || a.length - b.length,
+        b.exact - a.exact ||
+        b.match.matched - a.match.matched ||
+        b.match.ofLabel - a.match.ofLabel ||
+        b.starts - a.starts ||
+        a.words - b.words ||
+        a.length - b.length,
     );
   const [best, next] = ranked;
   if (!best) return null;
@@ -92,7 +100,7 @@ export function bestLink(label: string, links: readonly ScreenLink[]): ScreenLin
     next.match.matched === best.match.matched &&
     next.match.ofLabel === best.match.ofLabel &&
     next.starts === best.starts &&
-    next.length === best.length;
+    next.words === best.words;
   return tied ? null : best.link;
 }
 
@@ -121,8 +129,13 @@ export function drawnOnPage(box: { width: number; height: number }, visible: boo
 
 const isDrawn = (element: Element) => drawnOnPage(element.getBoundingClientRect(), element.checkVisibility());
 
-/** What a link or row says, on one line; an icon-only link by its accessible name. */
-const textOf = (element: HTMLElement) => (element.innerText || element.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim();
+/**
+ * What a link or row is called, on one line: its accessible name when it has
+ * one, as a screen reader would say it, else its text. A table's "Open" links
+ * are told apart that way ("Open English Written for Nursery"), and an
+ * icon-only link gets a name at all.
+ */
+const textOf = (element: HTMLElement) => (element.getAttribute('aria-label') || element.innerText || '').replace(/\s+/g, ' ').trim();
 
 /**
  * What can be opened inside `root` now: links that stay inside the school

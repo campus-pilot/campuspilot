@@ -180,18 +180,38 @@ describe('QuestionPaperClassTable', () => {
     ],
   };
 
+  const hrefOf = (cell: { classId: string; subjectSlug: string; modeSlug: string }) => `/paper/${cell.classId}/${cell.subjectSlug}/${cell.modeSlug}`;
+
   it('lists a row per subject and mode with its status and opens the clicked one', () => {
     const onOpen = vi.fn();
-    render(<QuestionPaperClassTable classView={classView} onOpen={onOpen} />);
+    render(<QuestionPaperClassTable classView={classView} hrefOf={hrefOf} onOpen={onOpen} />);
     expect(screen.getByText('No paper yet')).toBeTruthy();
     expect(screen.getByText('Version 1')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Open Science Practical for Class 8' }));
+    fireEvent.click(screen.getByRole('link', { name: 'Open Science Practical for Class 8' }));
     expect(onOpen).toHaveBeenCalledWith({ classId: 'c1', subjectSlug: 'science', modeSlug: 'practical' });
   });
 
+  it('opens each paper by a real link, so the voice assistant can follow it and a new tab works', () => {
+    const onOpen = vi.fn();
+    render(<QuestionPaperClassTable classView={classView} hrefOf={hrefOf} onOpen={onOpen} />);
+    const link = screen.getByRole('link', { name: 'Open Science Theory for Class 8' });
+    expect(link.getAttribute('href')).toBe('/paper/c1/science/theory');
+    // A click that opens a new tab is the browser's, not ours: the table leaves it alone.
+    let leftToBrowser = false;
+    const stopNavigation = (event: Event) => {
+      leftToBrowser = !event.defaultPrevented;
+      event.preventDefault();
+    };
+    window.addEventListener('click', stopNavigation);
+    fireEvent.click(link, { metaKey: true });
+    window.removeEventListener('click', stopNavigation);
+    expect(leftToBrowser).toBe(true);
+    expect(onOpen).not.toHaveBeenCalled();
+  });
+
   it('offers View, not Open, to someone who cannot manage the class', () => {
-    render(<QuestionPaperClassTable classView={{ ...classView, canManage: false }} onOpen={() => {}} />);
-    expect(screen.getAllByRole('button', { name: /^Open / })[0]!.textContent).toBe('View');
+    render(<QuestionPaperClassTable classView={{ ...classView, canManage: false }} hrefOf={hrefOf} onOpen={() => {}} />);
+    expect(screen.getAllByRole('link', { name: /^Open / })[0]!.textContent).toBe('View');
   });
 });
 
