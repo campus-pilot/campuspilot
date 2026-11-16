@@ -108,12 +108,13 @@ describe('staff phone-number sign-in', () => {
     it('does not let a person remove their own sign-in number', async () => {
       const { phone, member, password } = await invitePhoneTeacher();
       const { cookie } = await signInWithPhone(phone.e164, password);
-      const response = await staffAuth.api.updateUser({
-        body: { phoneNumber: null },
-        headers: new Headers({ cookie }),
-        asResponse: true,
-      });
-      expect(response.status).toBe(400);
+      // A before-hook refusal is thrown, not returned, even with `asResponse`.
+      await expect(
+        staffAuth.api.updateUser({
+          body: { phoneNumber: null },
+          headers: new Headers({ cookie }),
+        }),
+      ).rejects.toMatchObject({ statusCode: 400 });
       const [row] = await db.select().from(user).where(eq(user.id, member.userId));
       expect(row!.phoneNumber).toBe(phone.e164);
     });
