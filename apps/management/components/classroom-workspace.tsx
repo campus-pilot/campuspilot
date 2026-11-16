@@ -44,6 +44,7 @@ function ClassroomTeacherAlert({ schoolId, classId }: { schoolId: string; classI
       <RequirePermissions
         permissions={{ action: SCHOOL_ACTIONS.UPDATE_MEMBER_ROLES, resource: { kind: "school", schoolId } }}
         fallback={<AppShellAlert {...alert} />}
+        pending={<AppShellAlert {...alert} />}
       >
         <AppShellAlert
           {...alert}

@@ -50,6 +50,8 @@ export function ExamSession({
           {children(false)}
         </>
       }
+      // Read-only until the check answers, without claiming the session is unavailable.
+      pending={children(false)}
     >
       <SessionData scope={scope}>{children}</SessionData>
     </RequirePermissions>

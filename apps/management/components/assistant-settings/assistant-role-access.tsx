@@ -162,6 +162,7 @@ export function AssistantRoleAccess({ schoolId }: { schoolId: string }) {
           <RequirePermissions
             permissions={{ action: SCHOOL_ACTIONS.MANAGE_ASSISTANT_ACCESS, resource: { kind: 'school', schoolId } }}
             fallback={<RoleAccessForm key="read" schoolId={schoolId} access={query.data} canManage={false} />}
+            pending={<RoleAccessForm key="read" schoolId={schoolId} access={query.data} canManage={false} />}
           >
             <RoleAccessForm key={JSON.stringify(query.data.roles)} schoolId={schoolId} access={query.data} canManage />
           </RequirePermissions>

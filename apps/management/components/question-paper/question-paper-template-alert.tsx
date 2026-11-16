@@ -35,6 +35,7 @@ export function QuestionPaperTemplateAlert({ schoolId }: { schoolId: string }) {
     <RequirePermissions
       permissions={{ action: SCHOOL_ACTIONS.MANAGE_DOCUMENT_TEMPLATES, resource: { kind: 'school', schoolId } }}
       fallback={<AppShellAlert {...alert} />}
+      pending={<AppShellAlert {...alert} />}
     >
       <AppShellAlert {...alert} actionLabel="Choose template" onAction={choose} />
     </RequirePermissions>

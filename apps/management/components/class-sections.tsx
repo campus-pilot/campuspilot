@@ -233,6 +233,10 @@ export function ClassSections({ classId, schoolId }: { classId: string; schoolId
       ),
     },
   ];
+  /** The sections without drag reordering: for a member who may not reorder, and while that is being checked. */
+  const fixedOrderTable = (
+    <SortableTable ariaLabel="Class sections" columns={columns} data={sectionsQuery.data} emptyMessage="No sections." getRowId={(section) => section.id} getRowLabel={(section) => section.label} />
+  );
 
   return (
     <section className="flex flex-col gap-5">
@@ -247,9 +251,8 @@ export function ClassSections({ classId, schoolId }: { classId: string; schoolId
       </div>
       <RequirePermissions
         permissions={{ action: SCHOOL_ACTIONS.REORDER_SECTIONS, resource: { kind: 'school', schoolId } }}
-        fallback={
-          <SortableTable ariaLabel="Class sections" columns={columns} data={sectionsQuery.data} emptyMessage="No sections." getRowId={(section) => section.id} getRowLabel={(section) => section.label} />
-        }
+        fallback={fixedOrderTable}
+        pending={fixedOrderTable}
       >
         <SortableTable ariaLabel="Class sections" columns={columns} data={sectionsQuery.data} emptyMessage="No sections." getRowId={(section) => section.id} getRowLabel={(section) => section.label} onReorder={(sections) => reorderMutation.mutate(sections)} reorderDisabled={reorderMutation.isPending} />
       </RequirePermissions>

@@ -160,7 +160,7 @@ function StudentResults({
           </>
         );
         return editing ? (
-          <RequirePermissions permissions={writePermissions} fallback={preview}>
+          <RequirePermissions permissions={writePermissions} fallback={preview} pending={preview}>
             <StudentExamForm
               scope={scope}
               initial={data}

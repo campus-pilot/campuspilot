@@ -84,6 +84,7 @@ export function SessionFinanceSettings({
         resource: { kind: 'school', schoolId },
       }}
       fallback={readOnlyView}
+      pending={readOnlyView}
     >
       <SessionFinanceView
         key={sessionId}

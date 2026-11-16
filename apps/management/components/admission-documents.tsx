@@ -25,5 +25,5 @@ export function AdmissionDocuments({ schoolId, admissionId }: { schoolId: string
       await refresh();
     }
   }} onDelete={async (fileId) => { await deleteAdmissionDocument(schoolId, admissionId, fileId); await refresh(); }} getDownloadHref={(fileId) => admissionDocumentDownloadUrl(schoolId, admissionId, fileId)} />;
-  return <RequirePermissions permissions={{ action: SCHOOL_ACTIONS.UPDATE_ADMISSION, resource: { kind: 'school', schoolId } }} fallback={view(false)}>{view(admissionQuery.data.registered)}</RequirePermissions>;
+  return <RequirePermissions permissions={{ action: SCHOOL_ACTIONS.UPDATE_ADMISSION, resource: { kind: 'school', schoolId } }} fallback={view(false)} pending={view(false)}>{view(admissionQuery.data.registered)}</RequirePermissions>;
 }
