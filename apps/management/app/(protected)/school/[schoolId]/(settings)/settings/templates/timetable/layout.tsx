@@ -1,10 +1,2 @@
-import type { ReactNode } from 'react';
-import { FeaturePage } from '@/components/feature-unavailable';
-
-/**
- * Everything under this route belongs to student management (timetable templates): a
- * school without it sees "not enabled" here, also for a typed or bookmarked URL.
- */
-export default function TimetableTemplateFeatureLayout({ children }: { children: ReactNode }) {
-  return <FeaturePage feature="studentManagement">{children}</FeaturePage>;
-}
+// Everything under this route belongs to student management; see the shared layout.
+export { default } from '@/components/student-management-layout';

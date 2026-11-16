@@ -203,8 +203,8 @@ export const demoSchoolRouter = {
           await transaction.insert(schoolMemberTable).values({ schoolId: school.id, userId: adminId });
           await transaction.insert(schoolUserRoleTable).values({ schoolId: school.id, userId: adminId, role: "principal", meta: null });
           // A demo shows every product area it is configured to show
-          // (DEMO_SCHOOL_FEATURE_DEFAULTS; new real schools start with no
-          // feature). The seed needs them too, for example to save the
+          // (DEMO_SCHOOL_FEATURE_DEFAULTS; new real schools start with only
+          // the catalogue defaults). The seed needs them too, for example to save the
           // Cadet Portal settings.
           for (const feature of SCHOOL_FEATURE_KEYS) {
             if (!DEMO_SCHOOL_FEATURE_DEFAULTS[feature]) continue;

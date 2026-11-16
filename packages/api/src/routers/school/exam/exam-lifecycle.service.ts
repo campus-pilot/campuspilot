@@ -73,10 +73,20 @@ export async function examOverview(db: DatabaseExecutor, scope: ExamScope) {
 
 /** Completion is one exam-wide decision. It includes registered enrollments,
  * every saved score, and shared assessments; reopening preserves approval data.
+ *
+ * `reviewResults` is whether completion waits for every registered student's
+ * results to be approved. It is the caller's explicit fact: true for a school
+ * that has student management, false for one that does not, where results
+ * cannot be entered or approved at all (its students and results, if it had
+ * any, are kept but closed), so waiting for them would leave the examination
+ * impossible to complete. A completed examination is therefore not proof of
+ * reviewed results; the Cadet Portal release checks that itself
+ * (`setExamCadetRelease`).
  */
 export async function transitionExam(
   tx: DatabaseTransaction,
   input: z.infer<typeof examLifecycleInputSchema>,
+  options: { reviewResults: boolean },
 ) {
   const { session } = await getExam(tx, input, 'update');
   const plans = await tx
@@ -104,12 +114,10 @@ export async function transitionExam(
       throw rpcError.badRequest(
         'All classes must be open for result entry before completing the examination.',
       );
-    await requireReviewedExam(
-      tx,
-      input,
-      session.config.attendanceTracking.enabled ||
-        Object.keys(session.config.coScholasticAreas).length > 0,
-    );
+    if (options.reviewResults && !(await examIsReviewed(tx, input, sharedAssessmentRequired(session.config))))
+      throw rpcError.badRequest(
+        'Every registered student needs approved results for all subjects and a reviewed attendance/activity assessment before completing the examination.',
+      );
   } else {
     if (
       lifecycle?.status === 'active' &&
@@ -151,14 +159,25 @@ export async function transitionExam(
   return { updatedCount: plans.length };
 }
 
-/** Completion includes the current registered roster and every saved assessment,
+/** Whether a session's examinations also need each student's shared attendance/activity assessment reviewed. */
+export function sharedAssessmentRequired(config: {
+  attendanceTracking: { enabled: boolean };
+  coScholasticAreas: Record<string, unknown>;
+}): boolean {
+  return config.attendanceTracking.enabled || Object.keys(config.coScholasticAreas).length > 0;
+}
+
+/**
+ * Whether every result of the examination is reviewed: the current registered
+ * roster has an approved result for every subject (and a reviewed shared
+ * assessment when the session needs one), and so has every saved assessment,
  * including historical rows no longer represented in that roster.
  */
-async function requireReviewedExam(
+export async function examIsReviewed(
   tx: DatabaseTransaction,
   scope: ExamScope,
   requiresSharedAssessment: boolean,
-) {
+): Promise<boolean> {
   const [missing] = await tx
     .select({ id: studentTable.id })
     .from(studentTable)
@@ -215,8 +234,5 @@ async function requireReviewedExam(
       ),
     )
     .limit(1);
-  if (missing || unapproved || unreviewed)
-    throw rpcError.badRequest(
-      'Every registered student needs approved results for all subjects and a reviewed attendance/activity assessment before completing the examination.',
-    );
+  return !(missing || unapproved || unreviewed);
 }

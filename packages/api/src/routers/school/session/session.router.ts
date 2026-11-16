@@ -9,7 +9,11 @@ import { resolveSessionExamPermission } from '../../../permissions/session-exams
 import { schoolTable } from '@campuspilot/db/schema/school';
 import { SCHOOL_ACTIONS } from '@campuspilot/opa/policies/school';
 import { and, asc, count, desc, eq, inArray, or, sql } from 'drizzle-orm';
+import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
+
+import type { DatabaseExecutor } from '@campuspilot/db';
+import { assertSchoolFeatureEnabled } from '../../../feature-flags/feature-flags.service';
 
 import { rpcError, toRpcError } from '../../../errors';
 import { protectedProcedure } from '../../../index';
@@ -40,6 +44,32 @@ const schoolSessionDtoColumns = {
   createdAt: schoolSessionTable.createdAt,
   updatedAt: schoolSessionTable.updatedAt,
 };
+
+/** The parts of a session's configuration that only matter for students' results. */
+const STUDENT_SESSION_SETTINGS = ['coScholasticAreas', 'gradingScale', 'attendanceTracking'] as const;
+
+/**
+ * Refuses a session configuration that changes a student-only setting
+ * (co-scholastic areas, the grading scale, attendance) in a school without
+ * student management, with the disabled-feature error. `stored` is the
+ * configuration being replaced, or null for a new session, which may only
+ * carry those settings' defaults. Both sides are read through the schema
+ * first, so defaults equal defaults: the staff-only settings screen resubmits
+ * the hidden parts as it received them (or as defaults for a session that
+ * stored none) and is never refused. Examination definitions are not
+ * student-only and are not looked at here.
+ */
+async function assertStudentSessionSettingsUnchanged(
+  db: DatabaseExecutor,
+  schoolId: string,
+  stored: unknown,
+  submitted: unknown,
+): Promise<void> {
+  const previous = sessionConfigSchema.parse(stored ?? {});
+  const next = sessionConfigSchema.parse(submitted ?? {});
+  if (STUDENT_SESSION_SETTINGS.every((key) => isDeepStrictEqual(previous[key], next[key]))) return;
+  await assertSchoolFeatureEnabled(db, schoolId, 'studentManagement');
+}
 
 export const schoolSessionRouter = {
   listSessions: protectedProcedure
@@ -198,6 +228,7 @@ export const schoolSessionRouter = {
           .where(eq(schoolTable.id, schoolId))
           .limit(1);
         if (!school) throw rpcError.notFound('School');
+        await assertStudentSessionSettingsUnchanged(context.db, schoolId, null, values.sessionConfig);
 
         const [session] = await context.db
           .insert(schoolSessionTable)
@@ -305,6 +336,12 @@ export const schoolSessionRouter = {
               throw rpcError.forbidden(
                 'Only school exam administrators can change exam definitions, including through session configuration.',
               );
+            await assertStudentSessionSettingsUnchanged(
+              transaction,
+              schoolId,
+              existingSession.sessionConfig,
+              changes.sessionConfig,
+            );
             // The exclusive session lock prevents concurrent plan/timetable creation
             // while a legacy full-config replacement validates retained exam slugs.
             const plans = await transaction

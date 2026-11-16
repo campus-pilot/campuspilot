@@ -100,12 +100,6 @@ export type AppShellNavigationGroup = {
   id: string;
   label: string;
   items: AppShellNavigationItem[];
-  /**
-   * Lets the consuming app gate the whole group, label included, without
-   * fetching data in the shell: a group whose items are all hidden would
-   * otherwise leave its label behind.
-   */
-  wrap?: (children: ReactNode) => ReactNode;
 };
 
 export type AppShellNavigationEntry =
@@ -451,7 +445,11 @@ function AppShellAlerts({
   );
 }
 
-/** One labelled group of the sidebar, gated as a whole by its `wrap` when it has one. */
+/**
+ * One labelled group of the sidebar. The shell cannot know whether its items'
+ * gates will render anything, so the consuming app leaves a group out of the
+ * navigation when none of its items applies.
+ */
 function NavigationGroup({
   group,
   currentPath,
@@ -461,7 +459,7 @@ function NavigationGroup({
   currentPath: string;
   renderLink?: AppShellProps['renderLink'];
 }) {
-  const content = (
+  return (
     <SidebarGroup>
       <SidebarGroupLabel className="text-[10px] uppercase tracking-widest">
         {group.label}
@@ -480,7 +478,6 @@ function NavigationGroup({
       </SidebarGroupContent>
     </SidebarGroup>
   );
-  return group.wrap ? group.wrap(content) : content;
 }
 
 function NavigationItem({

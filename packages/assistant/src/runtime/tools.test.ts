@@ -90,8 +90,17 @@ describe('tools of a school', () => {
     const staffOnly = toolCatalogForSchool(catalog, new Set(['assistant']));
     expect(staffOnly.ordered.map(({ mcpName }) => mcpName)).toEqual(['school.listQuestionPapers']);
     expect(staffOnly.tools.has('school_listStudents')).toBe(false);
+    // The features that took a tool away: what the model is told about.
+    expect([...staffOnly.withheldFeatures].sort()).toEqual(['notices', 'studentManagement']);
 
     const everything = toolCatalogForSchool(catalog, new Set(['studentManagement', 'notices', 'assistant']));
     expect(everything.ordered.map(({ mcpName }) => mcpName)).toEqual(['school.listStudents', 'school.listQuestionPapers', 'school.listNotices']);
+    expect([...everything.withheldFeatures]).toEqual([]);
+  });
+
+  it('does not count a missing feature that gates none of the tools', () => {
+    // The assistant has no notice tools: a school without notices loses nothing, so nothing is withheld.
+    const catalog = catalogOf(mcpTool('school.listStudents', 'read', { features: ['studentManagement'] }), mcpTool('school.listQuestionPapers', 'read'));
+    expect([...toolCatalogForSchool(catalog, new Set(['studentManagement'])).withheldFeatures]).toEqual([]);
   });
 });

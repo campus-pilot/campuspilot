@@ -40,6 +40,24 @@ export function useSchoolFeature<K extends SchoolFeatureKey>(
   return { ...view, retry: () => void flagsQuery.refetch() };
 }
 
+/**
+ * A check of any feature for a school, from the same shared query: true only
+ * when the school is known to have it (pending and unknown are false, like
+ * {@link useSchoolFeature}). For code that decides from several features at
+ * once, such as a navigation group that shows when any of its items does.
+ */
+export function useSchoolFeatureCheck(schoolId: string): (feature: SchoolFeatureKey) => boolean {
+  const flagsQuery = useQuery(
+    orpc.school.getFeatureFlags.queryOptions({ input: { schoolId } }),
+  );
+  const query = {
+    isPending: flagsQuery.isPending,
+    isError: flagsQuery.isError,
+    features: flagsQuery.data?.features,
+  };
+  return (feature) => resolveSchoolFeature(query, feature).enabled;
+}
+
 export type RequireFeatureProps = {
   children: ReactNode;
   schoolId: string;

@@ -4,7 +4,7 @@ import type { ReactNode } from 'react';
 import { useParams, usePathname } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
-import type { AppShellNavigationEntry } from '@campuspilot/components/app-shell';
+import type { AppShellIcon, AppShellNavigationEntry } from '@campuspilot/components/app-shell';
 import {
   ArrowLeft,
   BookOpenCheck,
@@ -43,7 +43,10 @@ import {
 import { SchoolDocumentHead } from '@/components/school-document-head';
 import { SessionSwitcher } from '@/components/session-switcher';
 import { orpc } from '@/lib/orpc';
-import { RequireFeature, useSchoolFeature } from '@/components/require-feature';
+import { RequireFeature, useSchoolFeatureCheck } from '@/components/require-feature';
+import { firstSettingsTemplate, SETTINGS_TEMPLATES } from '@/components/settings-templates';
+import type { DocumentType } from '@campuspilot/api/routers/school/document/document.dto';
+import type { SchoolFeatureKey } from '@campuspilot/api/routers/school/feature-flags/feature-flags.dto';
 import { RequirePermissions } from '@/components/require-permissions';
 import { schoolSettingsPage } from './_route';
 import { assistantSettingsPage } from './assistant/_route';
@@ -81,25 +84,34 @@ const pages: ManagementPageDescriptor<SettingsRouteParams>[] = [
   questionPaperTemplatePage,
 ];
 
+/** The sidebar icon of each settings template. */
+const TEMPLATE_ICONS: Record<DocumentType, AppShellIcon> = {
+  report_card: ClipboardCheck,
+  id_card: FileBadge,
+  admit_card: GraduationCap,
+  timetable: CalendarRange,
+  bill: CreditCard,
+  receipt: ReceiptText,
+  statement: ScrollText,
+  notice: BookOpenCheck,
+  question_paper: FileQuestionMark,
+};
+
 /**
- * The settings navigation. `studentManagement` is whether the school has
- * student management (unknown counts as no, like every feature check):
- * without it there are no admission documents and no student or finance
- * templates, so only the templates of the school's other features remain
- * and the Templates entry opens the first of them.
+ * The settings navigation. `has` answers whether the school is known to have
+ * a feature (unknown counts as no, like every feature check). Every entry is
+ * gated on its own feature: the admission documents on student management,
+ * each template on the feature its document type belongs to
+ * (`SETTINGS_TEMPLATES`). The Templates entry opens the first template the
+ * school has and is left out when it has none.
  */
 function navigationFor(
   schoolId: string,
   canViewSessions: boolean,
-  studentManagement: boolean,
+  has: (feature: SchoolFeatureKey) => boolean,
   activeSessionId?: string,
 ): AppShellNavigationEntry[] {
-  // A feature and a permission are separate gates; a student or finance template needs both.
-  const withStudentManagement = (children: ReactNode) => (
-    <RequireFeature schoolId={schoolId} feature="studentManagement">
-      {children}
-    </RequireFeature>
-  );
+  const firstTemplate = firstSettingsTemplate(has);
   const withTemplatePermission = (children: ReactNode) => (
     <RequirePermissions
       permissions={{
@@ -128,7 +140,11 @@ function navigationFor(
       type: 'item',
       id: 'admission-documents',
       // The documents an admission collects; admissions belong to student management.
-      wrap: withStudentManagement,
+      wrap: (children) => (
+        <RequireFeature schoolId={schoolId} feature="studentManagement">
+          {children}
+        </RequireFeature>
+      ),
       label: 'Documents',
       href: schoolHref(schoolId, '/settings/documents'),
       icon: Files,
@@ -181,110 +197,31 @@ function navigationFor(
       href: schoolHref(schoolId, '/settings/usage'),
       icon: ChartNoAxesColumn,
     },
-    {
-      type: 'item',
-      id: 'templates',
-      // Without student management the only templates left are the question
-      // paper's (and the notice's, which also needs student management), so
-      // the entry needs the assistant feature and opens that template.
-      wrap: studentManagement
-        ? withTemplatePermission
-        : (children) => (
-            <RequireFeature schoolId={schoolId} feature="assistant">
-              {withTemplatePermission(children)}
-            </RequireFeature>
-          ),
-      label: 'Templates',
-      href: schoolHref(
-        schoolId,
-        studentManagement ? '/settings/templates/examination' : '/settings/templates/question-paper',
-      ),
-      icon: Settings,
-      items: [
-        {
-          type: 'item',
-          id: 'examination-template',
-          wrap: (children) => withStudentManagement(withTemplatePermission(children)),
-          label: 'Examination',
-          href: schoolHref(schoolId, '/settings/templates/examination'),
-          icon: ClipboardCheck,
-        },
-        {
-          type: 'item',
-          id: 'id-card-template',
-          wrap: (children) => withStudentManagement(withTemplatePermission(children)),
-          label: 'ID card',
-          href: schoolHref(schoolId, '/settings/templates/id-card'),
-          icon: FileBadge,
-        },
-        {
-          type: 'item',
-          id: 'admit-card-template',
-          wrap: (children) => withStudentManagement(withTemplatePermission(children)),
-          label: 'Admit card',
-          href: schoolHref(schoolId, '/settings/templates/admit-card'),
-          icon: GraduationCap,
-        },
-        {
-          type: 'item',
-          id: 'timetable-template',
-          wrap: (children) => withStudentManagement(withTemplatePermission(children)),
-          label: 'Timetable',
-          href: schoolHref(schoolId, '/settings/templates/timetable'),
-          icon: CalendarRange,
-        },
-        {
-          type: 'item',
-          id: 'bill-template',
-          wrap: (children) => withStudentManagement(withFinanceTemplatePermission(children)),
-          label: 'Bill',
-          href: schoolHref(schoolId, '/settings/templates/bill'),
-          icon: CreditCard,
-        },
-        {
-          type: 'item',
-          id: 'receipt-template',
-          wrap: (children) => withStudentManagement(withFinanceTemplatePermission(children)),
-          label: 'Receipt',
-          href: schoolHref(schoolId, '/settings/templates/receipt'),
-          icon: ReceiptText,
-        },
-        {
-          type: 'item',
-          id: 'statement-template',
-          wrap: (children) => withStudentManagement(withFinanceTemplatePermission(children)),
-          label: 'Statement',
-          href: schoolHref(schoolId, '/settings/templates/statement'),
-          icon: ScrollText,
-        },
-        {
-          type: 'item',
-          id: 'notice-template',
-          // A feature and a permission are separate gates; the item needs both.
-          wrap: (children) => (
-            <RequireFeature schoolId={schoolId} feature="notices">
-              {withTemplatePermission(children)}
-            </RequireFeature>
-          ),
-          label: 'Notice',
-          href: schoolHref(schoolId, '/settings/templates/notice'),
-          icon: BookOpenCheck,
-        },
-        {
-          type: 'item',
-          id: 'question-paper-template',
-          // The template belongs to the AI assistant feature; the item needs it and the template permission.
-          wrap: (children) => (
-            <RequireFeature schoolId={schoolId} feature="assistant">
-              {withTemplatePermission(children)}
-            </RequireFeature>
-          ),
-          label: 'Question paper',
-          href: schoolHref(schoolId, '/settings/templates/question-paper'),
-          icon: FileQuestionMark,
-        },
-      ],
-    },
+    ...(firstTemplate
+      ? [
+          {
+            type: 'item',
+            id: 'templates',
+            wrap: withTemplatePermission,
+            label: 'Templates',
+            href: schoolHref(schoolId, firstTemplate.path),
+            icon: Settings,
+            items: SETTINGS_TEMPLATES.map((template) => ({
+              type: 'item' as const,
+              id: template.id,
+              label: template.label,
+              href: schoolHref(schoolId, template.path),
+              icon: TEMPLATE_ICONS[template.documentType],
+              // A feature and a permission are separate gates; a template needs both.
+              wrap: (children: ReactNode) => (
+                <RequireFeature schoolId={schoolId} feature={template.feature}>
+                  {(template.finance ? withFinanceTemplatePermission : withTemplatePermission)(children)}
+                </RequireFeature>
+              ),
+            })),
+          } satisfies AppShellNavigationEntry,
+        ]
+      : []),
   ];
 }
 
@@ -298,7 +235,7 @@ export default function SchoolSettingsLayout({
   const schoolId = String(routeParams.schoolId ?? '');
   const storedSessionId = useStoredSchoolSessionId(schoolId);
   const page = pages.find((candidate) => candidate.matches(pathname));
-  const studentManagement = useSchoolFeature(schoolId, 'studentManagement').enabled;
+  const hasFeature = useSchoolFeatureCheck(schoolId);
   const sessionPermissionQuery = useQuery(
     orpc.authorization.checkPermissions.queryOptions({
       input: {
@@ -331,7 +268,7 @@ export default function SchoolSettingsLayout({
     navigation: navigationFor(
       schoolId,
       sessionPermissionQuery.data?.results[0] === true,
-      studentManagement,
+      hasFeature,
       activeSessionId,
     ),
     breadcrumbs: page?.breadcrumbs(params) ?? [],

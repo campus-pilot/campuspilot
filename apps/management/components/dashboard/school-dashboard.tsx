@@ -326,7 +326,8 @@ function OverviewMetrics({ data, schoolId }: { data: DashboardDto; schoolId: str
           />
         </PermissionSection>
       ) : null}
-      {data.classrooms ? (
+      {/* No student count (a school without student management): there is no student tile to show. */}
+      {data.classrooms && data.classrooms.studentCount !== null ? (
         <PermissionSection action={SCHOOL_ACTIONS.LIST_CLASSES} additionalActions={[SCHOOL_ACTIONS.LIST_STUDENTS]} schoolId={schoolId}>
           <MetricCard
             icon={Users}
@@ -399,13 +400,22 @@ function CrossDomainStatus({ data, schoolId, sessionId }: DashboardProps & { dat
           </PermissionSection>
         ) : null}
         {data.classrooms ? (
-          <PermissionSection action={SCHOOL_ACTIONS.LIST_CLASSES} additionalActions={[SCHOOL_ACTIONS.LIST_STUDENTS]} schoolId={schoolId}>
+          // Without student counts (a school without student management) the row shows classes and sections, and needs no student permission.
+          <PermissionSection
+            action={SCHOOL_ACTIONS.LIST_CLASSES}
+            additionalActions={data.classrooms.studentCount === null ? [] : [SCHOOL_ACTIONS.LIST_STUDENTS]}
+            schoolId={schoolId}
+          >
             <DomainRow
               icon={GraduationCap}
               label={data.classrooms.scope === "assigned" ? "My classrooms" : "Classrooms"}
               status={data.classrooms.scope === "assigned" ? "Assigned" : "School"}
-              primary={`${data.classrooms.studentCount} students`}
-              context={`${data.classrooms.classCount} classes · ${data.classrooms.sectionCount} sections`}
+              primary={data.classrooms.studentCount === null ? `${data.classrooms.classCount} classes` : `${data.classrooms.studentCount} students`}
+              context={
+                data.classrooms.studentCount === null
+                  ? `${data.classrooms.sectionCount} sections`
+                  : `${data.classrooms.classCount} classes · ${data.classrooms.sectionCount} sections`
+              }
               href={schoolSessionHref(schoolId, sessionId, "/classroom")}
             />
           </PermissionSection>
@@ -743,17 +753,19 @@ function ExaminationOverview({ examinations, href }: { examinations: NonNullable
   );
 }
 
+/** Students per class. Only for a school whose classrooms carry student counts; classes without one are left out. */
 function ClassLoad({ classrooms, href }: { classrooms: NonNullable<DashboardDto["classrooms"]>; href: string }) {
-  const maximum = Math.max(1, ...classrooms.classes.map(({ studentCount }) => studentCount));
+  const classes = classrooms.classes.flatMap((item) => (item.studentCount === null ? [] : [{ ...item, studentCount: item.studentCount }]));
+  const maximum = Math.max(1, ...classes.map(({ studentCount }) => studentCount));
   return (
     <SectionCard
       title="Class load"
       description={classrooms.scope === "assigned" ? "Students and sections in assigned classrooms" : "Students and sections across the school"}
       href={href}
     >
-      {classrooms.classes.length ? (
+      {classes.length ? (
         <div className="flex flex-col divide-y">
-          {classrooms.classes.map((item) => (
+          {classes.map((item) => (
             <div key={item.id} className="grid grid-cols-[minmax(5rem,8rem)_1fr_3rem_4rem] items-center gap-3 py-2.5">
               <span className="truncate font-medium">{item.label}</span>
               <div className="h-1.5 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-primary" style={{ width: `${Math.round((item.studentCount / maximum) * 100)}%` }} /></div>
@@ -882,7 +894,7 @@ function DashboardContent({ data, schoolId, sessionId }: DashboardProps & { data
           ) : null}
         </section>
       ) : null}
-      {data.classrooms ? (
+      {data.classrooms && data.classrooms.studentCount !== null ? (
         <PermissionSection action={SCHOOL_ACTIONS.LIST_CLASSES} additionalActions={[SCHOOL_ACTIONS.LIST_STUDENTS]} schoolId={schoolId}>
           <ClassLoad classrooms={data.classrooms} href={schoolSessionHref(schoolId, sessionId, "/classroom")} />
         </PermissionSection>
