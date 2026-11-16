@@ -25,9 +25,21 @@ export type AssistantRunStatus = z.infer<typeof assistantRunStatusSchema>;
 export const ASSISTANT_TERMINAL_RUN_STATUSES: ReadonlySet<AssistantRunStatus> =
   new Set(['completed', 'failed', 'cancelled']);
 
+/** The longest text of the user's page sent with a message (`pageContext.pageText`), and read by the voice model (`read_screen`). */
+export const ASSISTANT_PAGE_TEXT_MAX = 12_000;
+
 export const assistantPageContextSchema = z.object({
   path: z.string().trim().min(1).max(300),
   title: z.string().trim().min(1).max(200).optional(),
+  /**
+   * The text of the page the user was on when they sent the message, all of
+   * it (above and below the window too), top to bottom, one line per visual
+   * row (a table row's cells joined), with the part in their view framed by
+   * marker lines. Sent by the voice overlay only, which sits over the page the
+   * user is asking about; a chat on its own page would only read itself. Text
+   * only, no markup; cut at whole lines to fit, keeping the part in view.
+   */
+  pageText: z.string().trim().min(1).max(ASSISTANT_PAGE_TEXT_MAX).optional(),
 });
 
 const itemBaseShape = {
@@ -273,6 +285,13 @@ export const assistantStatusOutputSchema = z.object({
   available: z.boolean(),
   /** Why the assistant is unavailable, when it is. */
   unavailableReason: z.string().nullable(),
+  /**
+   * Whether this user can start a voice session in this school right now: the
+   * platform has a voice model, the school's assistant feature has voice
+   * switched on, and the user may send (`available`). Its own fact: the app
+   * shows the voice button only then, and never infers it from `available`.
+   */
+  voice: z.object({ available: z.boolean() }),
 });
 
 /** Page size for conversation lists, matching the platform's list limit. */

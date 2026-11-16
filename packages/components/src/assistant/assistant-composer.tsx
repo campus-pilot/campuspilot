@@ -37,7 +37,8 @@ const UPLOAD_CONCURRENCY = 3;
 /** Buttons never take focus from the message box when clicked (T3 Code). */
 const keepComposerFocus = (event: PointerEvent) => event.preventDefault();
 
-const roundButtonClassName =
+/** The round buttons of the composer's toolbar (Send, Stop, and voice mode's own). */
+export const roundButtonClassName =
   'relative isolate flex size-9 shrink-0 items-center justify-center rounded-full shadow-xs transition-[scale,background-color,box-shadow] duration-150 motion-reduce:transition-none enabled:cursor-pointer active:shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:ring-offset-2 focus-visible:ring-offset-card disabled:pointer-events-none sm:size-8 [&_svg]:pointer-events-none';
 
 /** The send arrow, drawn at 14px with a 1.8 stroke so it reads crisply at this size. */
@@ -181,6 +182,8 @@ export type AssistantComposerProps = {
   };
   /** Left side of the toolbar, e.g. the trust cue. */
   leading?: ReactNode;
+  /** Right side of the toolbar, just before Send: the button that starts voice mode. */
+  trailing?: ReactNode;
   /**
    * Sections at the top of the box, above the message field: a change
    * waiting for approval, queued messages. Each is divided by one rule.
@@ -213,6 +216,7 @@ export function AssistantComposer({
   onDraftChange,
   lastSentText,
   leading,
+  trailing,
   requests,
   attachments,
 }: AssistantComposerProps) {
@@ -453,6 +457,7 @@ export function AssistantComposer({
           <div className="flex min-w-0 flex-1 items-center gap-1.5 ps-2 text-xs font-normal text-muted-foreground">
             {leading}
           </div>
+          {trailing}
           <form.Subscribe selector={(state) => [state.values.text, state.values.attachments] as const}>
             {([text, items]) => {
               const hasContent = hasMessageContent(text, items);

@@ -102,6 +102,15 @@ export const schoolFeatureCatalogue = {
         .array(roleEnum)
         .min(1)
         .refine((roles) => new Set(roles).size === roles.length, "Name each role once."),
+      /**
+       * Voice mode: talking to the assistant and hearing it answer. Its own
+       * switch inside the assistant feature, so a school can have the assistant
+       * without voice. It only narrows: voice also needs the assistant itself
+       * (this flag enabled, the user's role, the monthly limit) and a voice
+       * model configured on the platform. Rows saved before voice existed have
+       * no `voice` and read as off.
+       */
+      voice: z.object({ enabled: z.boolean() }).default({ enabled: false }),
     }),
   },
 } as const satisfies Record<string, FeatureCatalogueShape[string]>;
@@ -126,6 +135,15 @@ export const schoolFeatureKeySchema = z.enum(SCHOOL_FEATURE_KEYS);
 
 /** The configuration type of exactly one feature. */
 export type SchoolFeatureConfig<K extends SchoolFeatureKey> = z.infer<
+  (typeof schoolFeatureCatalogue)[K]["config"]
+>;
+
+/**
+ * One feature's configuration as it may be written. A setting that has a
+ * default (the assistant's `voice`) may be left out: reading the row fills it
+ * in, exactly as it does for rows saved before that setting existed.
+ */
+export type SchoolFeatureConfigInput<K extends SchoolFeatureKey> = z.input<
   (typeof schoolFeatureCatalogue)[K]["config"]
 >;
 

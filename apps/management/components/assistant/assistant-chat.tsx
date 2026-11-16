@@ -21,6 +21,11 @@ import {
   AssistantSuggestions,
   AssistantTimeline,
   AssistantUserMessage,
+  AssistantVoiceBar,
+  AssistantVoiceDock,
+  AssistantVoiceButton,
+  AssistantVoiceHeader,
+  AssistantVoiceNotice,
   AssistantWelcome,
   AttachmentsMissingError,
   attachmentsOnlyLabel,
@@ -37,7 +42,7 @@ import { toast } from '@campuspilot/ui/lib/toast';
 import { cn } from '@campuspilot/ui/lib/utils';
 import { skipToken, useQuery } from '@tanstack/react-query';
 import { ClipboardList, RotateCcw, ShieldCheck, UserPlus, UserRoundX } from 'lucide-react';
-import { useRef, useState, type ReactNode } from 'react';
+import { useCallback, useRef, useState, type ReactNode } from 'react';
 
 import { assistantAttachmentThumbUrl } from '@/lib/assistant-attachments';
 import { orpc } from '@/lib/orpc';
@@ -50,6 +55,12 @@ import { mayStopTurn } from './assistant-conversation-state';
 import { missingAttachmentIdsOf, refusalMessage, type AssistantConversationFailure } from './assistant-stream';
 import { AssistantViewBlock } from './assistant-view';
 import { useAssistantAttachmentUpload } from './use-assistant-attachments';
+import { readPageUnderOverlay } from './screen-text';
+import { OVERLAY_VOICE_OWNER, useChatVoice } from './voice/use-chat-voice';
+import { useVoice } from './voice/use-voice';
+import type { VoiceHandlers } from './voice/voice-controller';
+import { registerVoiceLauncher } from './voice/voice-launcher';
+import { voiceIsOn } from './voice/voice-state';
 import {
   useApprovalDecisions,
   useAssistantActiveRun,
@@ -154,6 +165,15 @@ export type AssistantChatProps = {
    * message box is replaced by this sentence; null (the default) lets them write.
    */
   readOnlyReason?: string | null;
+  /**
+   * The voice overlay's chat (`AssistantVoiceOverlay`): it has no message box
+   * and shows nothing until voice is started from the top bar. Then it is the
+   * voice bar with the assistant in it and, once something was asked, the
+   * conversation in a card above. Each session starts a new conversation, and
+   * the chat has that conversation only while the session is on. `open` moves
+   * the app to a section on request, `openLink` follows a link on the page.
+   */
+  overlay?: Required<Pick<VoiceHandlers, 'open' | 'openLink'>>;
 };
 
 /**
@@ -559,6 +579,7 @@ export function AssistantChat({
   suggestions,
   shareWithPaper = false,
   readOnlyReason = null,
+  overlay,
 }: AssistantChatProps) {
   const life = useSurfaceLife();
   // The conversation this chat's first message started, set the moment the send returns. The surface moves
@@ -566,7 +587,15 @@ export function AssistantChat({
   // does not wait, so its message never belongs to neither the new conversation nor this one in between.
   // The surfaces key their chat so that any other change of conversation remounts it (`useChatKey`).
   const [startedId, setStartedId] = useState<string | null>(null);
-  const conversationId = openConversationId ?? startedId;
+  /** Whether the overlay's panel (the conversation over the pill) is shown; the user may hide it to see the page. */
+  const [overlayPanelOpen, setOverlayPanelOpen] = useState(true);
+  /** Whether the overlay fills the window (its own Full screen button); it never navigates. */
+  const [overlayExpanded, setOverlayExpanded] = useState(false);
+  const voiceSession = useVoice();
+  // The overlay's chat is its session's conversation and nothing else: it has one only while that session is on. Once
+  // voice ends there is nothing of it on screen, so nothing may keep loading it or stay subscribed to it either.
+  const overlaySessionOn = voiceSession.ownerId === OVERLAY_VOICE_OWNER && voiceIsOn(voiceSession);
+  const conversationId = overlay ? (overlaySessionOn ? startedId : null) : (openConversationId ?? startedId);
   const attachmentUpload = useAssistantAttachmentUpload(schoolId);
   // The seed only means something for a conversation that has not started.
   const activeSeed = conversationId ? null : seed;
@@ -659,19 +688,118 @@ export function AssistantChat({
   const stopping = stop.isPending || Boolean(running?.stopRequestedAt);
   const welcome = !conversationId && optimistic.length === 0;
   const trailing = !running && optimistic.length ? <OptimisticTurn schoolId={schoolId} messages={optimistic} onRetry={retry} /> : null;
+
+  // Voice mode: a spoken request is this chat's own message, so it goes through the same `send`, with the same seed and sharing.
+  const chatVoice = useChatVoice({
+    schoolId,
+    conversationId,
+    send: async (request, intoConversationId) => {
+      // A new request brings the panel back: its answer is about to appear there.
+      if (overlay) setOverlayPanelOpen(true);
+      // The overlay sits over the page the user is asking about, so its requests carry what that page shows.
+      const result = await send(request, intoConversationId, { seed: seedPaper.usableSeed, shareWithPaper, screen: Boolean(overlay) }).catch((error: unknown) => {
+        throw new Error(refusalMessage(error) ?? 'The request could not be sent. Check your connection.');
+      });
+      return { conversationId: result.conversation.id, runId: result.run.id };
+    },
+    // The overlay's chat is not on a page of its own: it only follows its session's conversation.
+    onConversationStarted: overlay ? setStartedId : (id) => started(id, boxText.current),
+    overlay: overlay ? { ...overlay, readScreen: readPageUnderOverlay } : undefined,
+  });
+  /** Starts voice in the overlay, in a new conversation: the last session's is left behind, for the chat and for the session alike. */
+  const startOverlayVoice = () => {
+    setStartedId(null);
+    setOverlayExpanded(false);
+    chatVoice.start({ conversationId: null });
+  };
+  // Through a ref, so the top bar's button always reaches this render's function and the session this render's handlers, with no effect.
+  const launcherRef = (element: HTMLSpanElement | null) => {
+    chatVoice.handlersRef(element);
+    return element ? registerVoiceLauncher(startOverlayVoice) : undefined;
+  };
+  // Offered to someone who can send here now, where the school has voice (`getStatus`, never inferred from `available`).
+  const voiceOffered = canWrite && !disabledReason && status.data?.voice.available === true;
+  // The chat's root: it tells late answers the chat has left, and ends a voice session this chat owns when it leaves.
+  const leaveVoice = chatVoice.leave;
+  const rootRef = useCallback(
+    (element: HTMLDivElement | null) => {
+      const release = life.ref(element);
+      if (!element) return;
+      return () => {
+        release?.();
+        leaveVoice();
+      };
+    },
+    [life, leaveVoice],
+  );
+  const voiceNotice = chatVoice.notice ? (
+    <AssistantVoiceNotice message={chatVoice.notice.message} problem={chatVoice.notice.tone === 'problem'} onDismiss={chatVoice.dismissNotice} />
+  ) : null;
   const notLive = Boolean(conversationId) && !failure && (connection.offline || connection.reconnecting);
+
+  if (overlay) {
+    return (
+      <TooltipProvider delayDuration={400}>
+        <div ref={rootRef} {...ASSISTANT_SURFACE_PROPS} className="flex flex-col gap-2 outline-none">
+          <span ref={launcherRef} hidden />
+          {chatVoice.on ? (
+            <AssistantVoiceDock
+              activity={chatVoice.activity}
+              levels={chatVoice.levels}
+              speech={chatVoice.state.said}
+              heard={chatVoice.state.heard}
+              heardFinal={chatVoice.state.heardFinal}
+              muted={chatVoice.state.muted}
+              requests={requests}
+              panel={
+                welcome ? null : (
+                  <ConversationTimeline
+                    schoolId={schoolId}
+                    conversationId={conversationId}
+                    trailing={trailing}
+                    gutterClassName={overlayExpanded ? 'px-4 sm:px-8' : 'px-4'}
+                    failure={failure}
+                    onNewConversation={onNewConversation}
+                    stoppingRunId={null}
+                  />
+                )
+              }
+              panelOpen={overlayPanelOpen}
+              onPanelOpenChange={setOverlayPanelOpen}
+              expanded={overlayExpanded}
+              onExpandedChange={setOverlayExpanded}
+              onMutedChange={chatVoice.setMuted}
+              onEnd={chatVoice.end}
+            />
+          ) : voiceNotice ? (
+            <div className="assistant-voice-rise overflow-hidden rounded-2xl border border-surface-outline bg-card shadow-xl">{voiceNotice}</div>
+          ) : null}
+          <ChatAnnouncer schoolId={schoolId} conversationId={conversationId} />
+        </div>
+      </TooltipProvider>
+    );
+  }
 
   return (
     // Tooltips in the chat wait 400ms, so crossing Send or Copy with the pointer does not pop one (the app's default is instant).
     <TooltipProvider delayDuration={400}>
       <div
-        ref={life.ref}
+        ref={rootRef}
         {...ASSISTANT_SURFACE_PROPS}
         className={cn(
           'flex h-full min-h-0 flex-col outline-none',
           welcome ? cn('justify-center overflow-y-auto py-8', gutterClassName) : 'relative',
         )}
       >
+        <span ref={chatVoice.handlersRef} hidden />
+        {chatVoice.on && !welcome ? (
+          // Over the conversation, which stays as it is: the steps, tables and drafts of a spoken request are its own rows.
+          <div className={cn('border-b border-assistant-hairline py-2.5', gutterClassName)}>
+            <div className={ASSISTANT_LANE_CLASS}>
+              <AssistantVoiceHeader activity={chatVoice.activity} levels={chatVoice.levels} speech={chatVoice.state.said} />
+            </div>
+          </div>
+        ) : null}
         {welcome ? null : (
           <ChatBody
             schoolId={schoolId}
@@ -695,39 +823,68 @@ export function AssistantChat({
           }
         >
           {welcome ? (
-            <AssistantWelcome compact={compact} {...welcomeWords} />
+            chatVoice.on ? (
+              <AssistantVoiceHeader hero compact={compact} activity={chatVoice.activity} levels={chatVoice.levels} speech={chatVoice.state.said} />
+            ) : (
+              <AssistantWelcome compact={compact} {...welcomeWords} />
+            )
           ) : (
             <div className="pointer-events-none absolute inset-x-0 -top-6 h-6 bg-linear-to-t from-background to-transparent" aria-hidden />
           )}
           {notLive ? <ConnectionNotice offline={connection.offline} /> : null}
           <div className={welcome ? 'flex flex-col gap-3' : ASSISTANT_LANE_CLASS}>
+            {chatVoice.on ? (
+              <AssistantVoiceBar
+                activity={chatVoice.activity}
+                heard={chatVoice.state.heard}
+                heardFinal={chatVoice.state.heardFinal}
+                muted={chatVoice.state.muted}
+                requests={requests}
+                onMutedChange={chatVoice.setMuted}
+                onType={chatVoice.end}
+                onEnd={chatVoice.end}
+              />
+            ) : null}
+            {/* Kept mounted but hidden in voice mode: unmounting the box would drop what is typed and attached in it. */}
             {/* Read-only keeps the composer, closed with the reason, so its tray (approvals, whose approval is awaited) stays. */}
-            <AssistantComposer
-              controlsRef={composer}
-              autoFocus={autoFocus}
-              disabledReason={readOnlyReason ?? disabledReason}
-              placeholder={running ? 'Queue a follow-up…' : composerPlaceholder}
-              onSend={sendText}
-              sending={sending}
-              lastSentText={lastSentText}
-              initialText={initialText}
-              attachments={{ upload: attachmentUpload.upload, remove: attachmentUpload.remove, onNotice: (message) => toast.error(message) }}
-              onDraftChange={saveDraft}
-              requests={requests}
-              leading={<ComposerToolbar schoolId={schoolId} conversationId={conversationId} />}
-              stopping={stopping}
-              onStop={
-                // Someone else's turn is stopped only with the right to continue the chat; one's own, always.
-                running && mayStopTurn({ canWrite, userId, ownerId: running.userId })
-                  ? () =>
-                      stop.mutate(
-                        { schoolId, runId: running.id },
-                        { onError: (error) => toast.error(error.message || 'The assistant could not be stopped.') },
-                      )
-                  : undefined
-              }
-            />
-            {welcome && !readOnlyReason && (suggestions || !activeSeed) ? (
+            <div hidden={chatVoice.on}>
+              <AssistantComposer
+                controlsRef={composer}
+                autoFocus={autoFocus}
+                disabledReason={readOnlyReason ?? disabledReason}
+                placeholder={running ? 'Queue a follow-up…' : composerPlaceholder}
+                onSend={sendText}
+                sending={sending}
+                lastSentText={lastSentText}
+                initialText={initialText}
+                attachments={{ upload: attachmentUpload.upload, remove: attachmentUpload.remove, onNotice: (message) => toast.error(message) }}
+                onDraftChange={saveDraft}
+                requests={
+                  chatVoice.on ? null : voiceNotice ? (
+                    <>
+                      {voiceNotice}
+                      {requests}
+                    </>
+                  ) : (
+                    requests
+                  )
+                }
+                leading={<ComposerToolbar schoolId={schoolId} conversationId={conversationId} />}
+                trailing={voiceOffered ? <AssistantVoiceButton onStart={chatVoice.start} /> : null}
+                stopping={stopping}
+                onStop={
+                  // Someone else's turn is stopped only with the right to continue the chat; one's own, always.
+                  running && mayStopTurn({ canWrite, userId, ownerId: running.userId })
+                    ? () =>
+                        stop.mutate(
+                          { schoolId, runId: running.id },
+                          { onError: (error) => toast.error(error.message || 'The assistant could not be stopped.') },
+                        )
+                    : undefined
+                }
+              />
+            </div>
+            {welcome && !chatVoice.on && !readOnlyReason && (suggestions || !activeSeed) ? (
               <AssistantSuggestions suggestions={suggestions ?? SUGGESTIONS} onPick={sendDirectly} />
             ) : null}
           </div>

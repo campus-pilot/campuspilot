@@ -112,6 +112,8 @@ export function DataTable<TData>({
                 <TableRow
                   data-state={row.getIsSelected() && 'selected'}
                   className={onRowClick ? 'cursor-pointer hover:bg-muted/50' : undefined}
+                  // A row that opens its record when clicked: the voice overlay may open it by name, as a click (`screen-links.ts` in the management app).
+                  data-opens-record={onRowClick ? '' : undefined}
                   onClick={
                     onRowClick
                       ? (event) => {

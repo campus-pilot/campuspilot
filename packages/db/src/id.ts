@@ -13,6 +13,7 @@ export const PREFIX_MAP = {
   assistantItem: "asi",
   assistantModelRequest: "asm",
   assistantRun: "asr",
+  assistantVoiceSession: "avs",
   // Keep examination prefixes compatible with the legacy IDs so migration can
   // preserve primary keys and every raw cross-reference without translation.
   examPlan: "expl",

@@ -1,3 +1,5 @@
+import type { Server } from 'node:http';
+
 import { serve } from '@hono/node-server';
 import {
   CADET_OAUTH_SERVER_TABLES,
@@ -7,6 +9,7 @@ import { db } from '@campuspilot/db';
 import { runMigrations } from '@campuspilot/db/migrate';
 import { env } from '@campuspilot/env/server';
 import { sweepAssistantOutbox } from '@campuspilot/assistant/dispatch';
+import { attachAssistantVoice } from '@campuspilot/assistant/voice/server';
 import { sweepDemoSchoolOutbox } from '@campuspilot/api/routers/system-admin/demo-school/demo-school.outbox';
 import { configureQuestionPaperModel } from '@campuspilot/api/workflows/question-paper/model';
 import { sweepQuestionPaperOutbox } from '@campuspilot/api/workflows/question-paper/outbox';
@@ -214,8 +217,12 @@ async function main() {
     },
   );
 
+  // Voice sessions are WebSockets on this same server (`/model/voice`); see `packages/assistant/src/voice/server.ts`.
+  const voice = attachAssistantVoice(server as Server);
+
   const shutdown = (signal: string) => {
     log.info({ signal }, 'boot.shutdown.start');
+    voice.close();
     clearInterval(dcrCleanup);
     clearInterval(notificationRetention);
     stopped = true;

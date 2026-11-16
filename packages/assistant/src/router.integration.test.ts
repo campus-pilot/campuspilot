@@ -120,6 +120,7 @@ const ALLOWED: AssistantAccessDecision = {
   allowedRoles: ['principal'],
   limit: { known: true, monthlyLimitUsd: null },
   limitReached: false,
+  voiceEnabled: false,
   allowed: true,
   refusal: null,
 };
@@ -604,6 +605,7 @@ describe('access', () => {
       allowed: false,
       available: false,
       unavailableReason: 'Refused: role_not_enabled.',
+      voice: { available: false },
     });
     expect(await rowsOf(turn.conversationId)).toMatchObject({ conversations: 1, runs: 1 });
   });
@@ -633,6 +635,7 @@ describe('access', () => {
       allowed: true,
       available: false,
       unavailableReason: 'Refused: limit_reached.',
+      voice: { available: false },
     });
     await expect(send(turn)).rejects.toMatchObject({ code: 'PRECONDITION_FAILED', data: { reason: 'limit_reached' } });
   });
@@ -644,6 +647,8 @@ describe('access', () => {
       allowed: true,
       available: true,
       unavailableReason: null,
+      // The test environment has no voice model, so no school has voice (voice is tested in voice/server.integration.test.ts).
+      voice: { available: false },
     });
   });
 });

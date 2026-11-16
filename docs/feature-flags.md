@@ -289,8 +289,10 @@ same `DISABLE_WARNINGS` entry and confirmation dialog.
 
 ## The `assistant` feature: where it is enforced
 
-Config: `{ monthlyLimitUsd: number | null, eligibleRoles: role[] }` (at least
-one role, each once). Who may use the assistant is decided by
+Config: `{ monthlyLimitUsd: number | null, eligibleRoles: role[], voice: { enabled: boolean } }`
+(at least one role, each once). `voice.enabled` is a switch inside the feature:
+whether the school has [voice mode](assistant.md#voice-mode). It only narrows
+the assistant, and settings saved before it existed read as off. Who may use the assistant is decided by
 `resolveAssistantAccess` (feature, membership, an eligible role the school
 switched on, the IST month spend under the limit); see
 [In-app assistant](assistant.md#access).
