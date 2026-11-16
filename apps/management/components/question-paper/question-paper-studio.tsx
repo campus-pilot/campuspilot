@@ -2,7 +2,7 @@
 
 import { useState, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Download, History, Images, Languages, ListChecks, Sparkles, SquarePen, WandSparkles, X } from 'lucide-react';
+import { Download, History, Images, Languages, ListChecks, PanelLeftClose, PanelLeftOpen, Sparkles, SquarePen, WandSparkles, X } from 'lucide-react';
 import { APP_SHELL_FILL_HEIGHT_MD_CLASS } from '@campuspilot/components/app-shell';
 import type { AssistantSuggestion } from '@campuspilot/components/assistant';
 import { DocumentPreview } from '@campuspilot/components/documents/document-controls';
@@ -57,15 +57,46 @@ const PAPER_WELCOME = {
 };
 
 /** An icon button of the assistant's header, named by its tooltip. */
-function HeaderIconButton({ label, icon, onClick }: { label: string; icon: ReactNode; onClick: () => void }) {
+function HeaderIconButton({ label, icon, onClick, className }: { label: string; icon: ReactNode; onClick: () => void; className?: string }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Button type="button" variant="ghost" size="icon-sm" aria-label={label} onClick={onClick}>
+        <Button type="button" variant="ghost" size="icon-sm" className={className} aria-label={label} onClick={onClick}>
           {icon}
         </Button>
       </TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+/**
+ * The slim strip the assistant folds into on wide screens, beside the app's
+ * sidebar: one tall button that opens it again. While a draft the assistant
+ * wrote is waiting to be saved, the strip says so with a dot and its tooltip,
+ * so hiding the chat never hides that something needs an answer there.
+ */
+function AssistantRail({ draftOrdinal, onOpen }: { draftOrdinal: number | null; onOpen: () => void }) {
+  const label = draftOrdinal === null ? 'Show assistant' : `Show assistant (Draft ${draftOrdinal} is not saved yet)`;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          aria-label={label}
+          aria-expanded={false}
+          onClick={onOpen}
+          className="group hidden w-11 flex-col items-center gap-3 border-r bg-background py-3 text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset md:flex"
+        >
+          <PanelLeftOpen className="size-4" aria-hidden />
+          <span className="relative">
+            <Sparkles className="size-4 text-primary transition-transform group-hover:scale-110" aria-hidden />
+            {draftOrdinal === null ? null : <span className="absolute -end-1 -top-1 size-2 rounded-full bg-primary ring-2 ring-background" aria-hidden />}
+          </span>
+          <span className="rotate-180 text-xs font-medium tracking-wide [writing-mode:vertical-rl]">Ask the assistant</span>
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="right">{label}</TooltipContent>
     </Tooltip>
   );
 }
@@ -85,6 +116,11 @@ function HeaderIconButton({ label, icon, onClick }: { label: string; icon: React
  * assistant's own page keeps each person's full history. Someone who may
  * only read the paper reads the conversation without a message box.
  *
+ * On wide screens it can be hidden so the paper takes the whole width; it then
+ * folds into a strip beside the app's sidebar (`AssistantRail`) that opens it
+ * again. Hiding only stops showing it: the chat stays mounted, so a half-typed
+ * message and a reply still streaming are there when it is shown again.
+ *
  * The chat that starts the conversation stays mounted as the address gains
  * its id; a new conversation, or another one opened from the address, is a
  * new chat (its own key), so no chat carries one conversation into another.
@@ -96,6 +132,9 @@ function PaperAssistant({
   canSeeHistory,
   open,
   onOpenChange,
+  collapsed,
+  onCollapsedChange,
+  draftOrdinal,
   onChat,
 }: {
   scope: QuestionPaperScope;
@@ -107,6 +146,11 @@ function PaperAssistant({
   /** Whether the sheet is open; only a phone has a sheet. */
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Whether it is hidden on wide screens (a phone ignores this and uses `open`). */
+  collapsed: boolean;
+  onCollapsedChange: (collapsed: boolean) => void;
+  /** The ordinal of the assistant's draft waiting to be saved, shown on the strip while hidden; null when there is none. */
+  draftOrdinal: number | null;
   onChat: (chatId: string | null) => void;
 }) {
   const [session, setSession] = useState<{ generation: number; started: string | null }>({ generation: 0, started: null });
@@ -123,6 +167,7 @@ function PaperAssistant({
         className={cn(
           'min-h-0 min-w-0 flex-col bg-background md:static md:z-auto md:flex md:border-r',
           open ? 'fixed inset-0 z-40 flex' : 'hidden',
+          collapsed && 'md:hidden',
         )}
       >
         <header className="flex h-11 shrink-0 items-center gap-1 border-b px-3">
@@ -130,6 +175,7 @@ function PaperAssistant({
           <h3 className="ms-1 min-w-0 flex-1 truncate text-sm font-medium">Assistant</h3>
           {canSeeHistory ? <HeaderIconButton label="Chat history" icon={<History aria-hidden />} onClick={() => setHistoryOpen(true)} /> : null}
           {canWrite && chatId ? <HeaderIconButton label="New chat" icon={<SquarePen aria-hidden />} onClick={startNew} /> : null}
+          <HeaderIconButton label="Hide assistant" icon={<PanelLeftClose aria-hidden />} onClick={() => onCollapsedChange(true)} className="max-md:hidden" />
           <Button type="button" variant="ghost" size="icon-sm" className="md:hidden" aria-label="Close assistant" onClick={() => onOpenChange(false)}>
             <X aria-hidden />
           </Button>
@@ -157,6 +203,7 @@ function PaperAssistant({
           />
         </div>
       </aside>
+      {collapsed ? <AssistantRail draftOrdinal={draftOrdinal} onOpen={() => onCollapsedChange(false)} /> : null}
       {open ? null : (
         <div className="fixed inset-x-0 bottom-0 z-30 border-t bg-background p-3 md:hidden">
           <Button type="button" className="w-full" onClick={() => onOpenChange(true)}>
@@ -414,6 +461,7 @@ export function QuestionPaperStudio({
       ? 'This paper can no longer be changed, so nothing more can be asked here.'
       : 'You can read this conversation. Only people who can change this paper can write here.';
   const [assistantOpen, setAssistantOpen] = useState(false);
+  const [assistantCollapsed, setAssistantCollapsed] = useState(false);
   const chatDraft = usePaperDraft(scope, showAssistant ? chatId : null, detail.paper);
   const draft = chatDraft && draftIsNewest(chatDraft.writtenAt, detail.versions) ? chatDraft : null;
   const { send, isPending: saving } = useSendAssistantMessage(scope.schoolId, PAPER_ASSISTANT_SURFACE);
@@ -422,6 +470,7 @@ export function QuestionPaperStudio({
     if (!draft || !chatId) return;
     // The approval that follows appears in the assistant, so a phone shows it.
     setAssistantOpen(true);
+    setAssistantCollapsed(false);
     void send(draft.saveRequest, chatId).catch((error: unknown) => toast.error(requestErrorMessage(error, 'The save could not be requested.')));
   };
   return (
@@ -446,7 +495,7 @@ export function QuestionPaperStudio({
         </div>
         {menu}
       </header>
-      <div className={cn('grid min-h-0 min-w-0 flex-1', showAssistant && 'md:grid-cols-[minmax(20rem,26rem)_minmax(0,1fr)]')}>
+      <div className={cn('grid min-h-0 min-w-0 flex-1', showAssistant && (assistantCollapsed ? 'md:grid-cols-[auto_minmax(0,1fr)]' : 'md:grid-cols-[minmax(20rem,26rem)_minmax(0,1fr)]'))}>
         {showAssistant ? (
           <PaperAssistant
             scope={scope}
@@ -455,6 +504,9 @@ export function QuestionPaperStudio({
             canSeeHistory={canManage}
             open={assistantOpen}
             onOpenChange={setAssistantOpen}
+            collapsed={assistantCollapsed}
+            onCollapsedChange={setAssistantCollapsed}
+            draftOrdinal={draft ? draft.ordinal : null}
             onChat={onChat}
           />
         ) : null}

@@ -277,7 +277,11 @@ the implementation and APIs in more detail.
   where one thing is made from material plus an optional instruction. Once the paper has a version it is the studio, a screen that fills the
   window instead of scrolling the page (like the assistant's page): the exam's heading and
   tabs step aside, one header row carries the paper's name and actions, and the assistant
-  and the paper sit side by side, each scrolling inside its pane. Use
+  and the paper sit side by side, each scrolling inside its pane. The assistant's header
+  has *Hide assistant*: the paper then takes the width and the assistant folds into a slim
+  strip beside the app's sidebar (*Ask the assistant*, with a dot while a draft waits to be
+  saved) that opens it again. Hiding keeps the chat mounted, so typed text and a streaming
+  reply survive; asking to save a draft shows the assistant again. Use
   `APP_SHELL_FILL_HEIGHT_CLASS` (or its `MD` form) from `@campuspilot/components/app-shell`
   for such a screen: it is the window less the shell's header and its alert rows, so the
   screen still fits when a notice bar is showing. On a phone the studio is an ordinary
