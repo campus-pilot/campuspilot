@@ -4,7 +4,7 @@ import { Spinner } from '@campuspilot/ui/components/spinner';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@campuspilot/ui/components/tooltip';
 import { cn } from '@campuspilot/ui/lib/utils';
 import { AlertCircle, FileImage, FileText, X } from 'lucide-react';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 
 import {
   formatAttachmentSize,
@@ -144,12 +144,12 @@ export function AssistantAttachmentStrip({
 }
 
 /** A sent image's tile as a button that opens the full-screen viewer on it. */
-function ViewableTile({ attachment, onOpen }: { attachment: SentAttachment; onOpen: () => void }) {
+function ViewableTile({ attachment, onOpen }: { attachment: SentAttachment; onOpen: (tile: HTMLButtonElement) => void }) {
   return (
     <button
       type="button"
       aria-label={`View ${attachment.fileName}`}
-      onClick={onOpen}
+      onClick={(event) => onOpen(event.currentTarget)}
       className="block cursor-zoom-in rounded-lg outline-none transition-opacity hover:opacity-85 focus-visible:ring-2 focus-visible:ring-ring"
     >
       <ImageThumb previewUrl={attachment.previewUrl} label={attachment.fileName} />
@@ -161,13 +161,22 @@ function ViewableTile({ attachment, onOpen }: { attachment: SentAttachment; onOp
  * The files of a message already sent, as small tiles above its bubble. An
  * image with an original address opens the viewer on itself, among the
  * message's other viewable images; a document or an undecodable image is a
- * plain tile.
+ * plain tile. With `openable` false every tile is plain.
  */
-export function AssistantSentAttachments({ attachments }: { attachments: readonly SentAttachment[] }) {
+export function AssistantSentAttachments({
+  attachments,
+  openable = true,
+}: {
+  attachments: readonly SentAttachment[];
+  /** Whether image tiles open the viewer; false for a bubble that is about to be replaced. */
+  openable?: boolean;
+}) {
   // The index outlives `open` so the viewer keeps its image while it fades out.
   const [viewer, setViewer] = useState({ open: false, index: 0 });
+  // The viewer has no Radix trigger, so closing it focuses the tile that opened it here.
+  const openedFrom = useRef<HTMLButtonElement | null>(null);
   if (attachments.length === 0) return null;
-  const images = viewableImagesOf(attachments);
+  const images = openable ? viewableImagesOf(attachments) : [];
   return (
     <>
       <ul aria-label={`${attachments.length} attached ${attachments.length === 1 ? 'file' : 'files'}`} className="flex max-w-[min(80%,32.5rem)] flex-wrap justify-end gap-1.5">
@@ -176,7 +185,13 @@ export function AssistantSentAttachments({ attachments }: { attachments: readonl
           return (
             <li key={attachment.id}>
               {index >= 0 ? (
-                <ViewableTile attachment={attachment} onOpen={() => setViewer({ open: true, index })} />
+                <ViewableTile
+                  attachment={attachment}
+                  onOpen={(tile) => {
+                    openedFrom.current = tile;
+                    setViewer({ open: true, index });
+                  }}
+                />
               ) : (
                 <AttachmentTile kind={attachment.kind} name={attachment.fileName} byteSize={attachment.byteSize} previewUrl={attachment.previewUrl} />
               )}
@@ -184,7 +199,16 @@ export function AssistantSentAttachments({ attachments }: { attachments: readonl
           );
         })}
       </ul>
-      <AssistantImageViewer images={images} openedOn={viewer.index} open={viewer.open} onOpenChange={(open) => setViewer((current) => ({ ...current, open }))} />
+      <AssistantImageViewer
+        images={images}
+        openedOn={viewer.index}
+        open={viewer.open}
+        onOpenChange={(open) => setViewer((current) => ({ ...current, open }))}
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          openedFrom.current?.focus();
+        }}
+      />
     </>
   );
 }

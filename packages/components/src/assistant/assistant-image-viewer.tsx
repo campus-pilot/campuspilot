@@ -132,20 +132,26 @@ function ViewerArrows() {
  * clicked. Each shows the original, not the thumbnail; the arrows, the arrow
  * keys or a swipe move between them, and Escape or the close button shuts
  * it. The toolbar sits inside the carousel so the arrow keys work wherever
- * focus is in the viewer. The carousel mounts each time the dialog opens, so
- * `openedOn` is read once, as embla's start index.
+ * focus is in the viewer: the carousel root takes focus itself (tabIndex -1),
+ * so a click on the image or an empty part of the viewer lands focus inside
+ * it rather than on the dialog around it, where the keys would not reach the
+ * carousel. The carousel mounts each time the dialog opens, so `openedOn` is
+ * read once, as embla's start index.
  */
 export function AssistantImageViewer({
   images,
   openedOn,
   open,
   onOpenChange,
+  onCloseAutoFocus,
 }: {
   images: readonly ViewerImage[];
   /** The position in `images` of the image that was clicked. */
   openedOn: number;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Where focus goes on close; Radix would focus a dialog trigger, and this viewer has none. */
+  onCloseAutoFocus?: (event: Event) => void;
 }) {
   if (images.length === 0) return null;
   return (
@@ -153,11 +159,13 @@ export function AssistantImageViewer({
       <DialogContent
         showCloseButton={false}
         aria-describedby={undefined}
+        onCloseAutoFocus={onCloseAutoFocus}
         className="inset-0 top-0 left-0 block h-dvh w-screen max-w-none translate-x-0 translate-y-0 rounded-none bg-black/70 p-0 ring-0 sm:max-w-none data-open:zoom-in-100 data-closed:zoom-out-100"
       >
         <Carousel
           opts={{ startIndex: openedOn }}
-          className="flex h-full flex-col *:data-[slot=carousel-content]:min-h-0 *:data-[slot=carousel-content]:flex-1"
+          tabIndex={-1}
+          className="flex h-full flex-col outline-none *:data-[slot=carousel-content]:min-h-0 *:data-[slot=carousel-content]:flex-1"
         >
           <ViewerToolbar images={images} openedOn={openedOn} />
           <ViewerSlides images={images} openedOn={openedOn} />

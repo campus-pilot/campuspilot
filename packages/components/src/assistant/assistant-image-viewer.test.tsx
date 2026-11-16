@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
+import { TooltipProvider } from '@campuspilot/ui/components/tooltip';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import { AssistantSentAttachments } from './assistant-attachment-strip';
 import type { SentAttachment } from './assistant-attachments-model';
+import { AssistantUserMessage } from './assistant-rows';
 
 afterEach(cleanup);
 
@@ -66,5 +68,80 @@ describe('AssistantImageViewer', () => {
     const many = await screen.findByRole('dialog', { name: 'p.jpg' });
     const originals = [...many.querySelectorAll('img')].map((element) => element.getAttribute('src')).filter((src) => src?.startsWith('/original/'));
     expect(originals).toEqual(['/original/p', '/original/q']);
+  });
+});
+
+/**
+ * A side-by-side layout for embla, which measures slides with `offset*` and
+ * reads the last slide's margin: every element 100px square, each slide 100px
+ * right of the one before. Restored after the block.
+ */
+function withSideBySideLayout() {
+  const saved = new Map<string, PropertyDescriptor | undefined>();
+  const computedStyle = window.getComputedStyle;
+  beforeAll(() => {
+    const define = (name: string, get: (this: HTMLElement) => number) => {
+      saved.set(name, Object.getOwnPropertyDescriptor(HTMLElement.prototype, name));
+      Object.defineProperty(HTMLElement.prototype, name, { configurable: true, get });
+    };
+    define('offsetWidth', () => 100);
+    define('offsetHeight', () => 100);
+    define('offsetLeft', function () {
+      return this.dataset.slot === 'carousel-item' ? [...this.parentElement!.children].indexOf(this) * 100 : 0;
+    });
+    // jsdom computes no margins, and embla reads one as a number.
+    window.getComputedStyle = ((element: Element) => {
+      const style = computedStyle.call(window, element);
+      return { getPropertyValue: (name: string) => style.getPropertyValue(name) || '0px' } as CSSStyleDeclaration;
+    }) as typeof window.getComputedStyle;
+  });
+  afterAll(() => {
+    for (const [name, descriptor] of saved) if (descriptor) Object.defineProperty(HTMLElement.prototype, name, descriptor);
+    window.getComputedStyle = computedStyle;
+  });
+}
+
+/** The element a browser focuses when the pointer goes down on `element`: itself or its closest focusable ancestor. */
+const focusTargetOf = (element: HTMLElement) => element.closest<HTMLElement>('a[href], button, [tabindex]')!;
+
+describe('AssistantImageViewer keyboard and focus', () => {
+  withSideBySideLayout();
+
+  it('keeps the arrow keys working after a click on the image', async () => {
+    render(<AssistantSentAttachments attachments={[image('a'), image('b'), image('c')]} />);
+    fireEvent.click(screen.getByRole('button', { name: 'View b.jpg' }));
+    const dialog = await screen.findByRole('dialog');
+    await waitFor(() => expect(within(dialog).getByText(/2\s*of\s*3/)).toBeTruthy());
+
+    // A mouse press on the image focuses its closest focusable ancestor; the keys must still reach the carousel.
+    focusTargetOf(within(dialog).getByAltText('b.jpg')).focus();
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowLeft' });
+    await waitFor(() => expect(within(dialog).getByText(/1\s*of\s*3/)).toBeTruthy());
+  });
+
+  it.each([
+    ['Escape', (dialog: HTMLElement) => fireEvent.keyDown(dialog, { key: 'Escape' })],
+    ['the close button', (dialog: HTMLElement) => fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }))],
+  ])('gives focus back to the tile that opened it when closed with %s', async (_, close) => {
+    render(<AssistantSentAttachments attachments={[image('a'), image('b')]} />);
+    const tile = screen.getByRole('button', { name: 'View b.jpg' });
+    tile.focus();
+    fireEvent.click(tile);
+    close(await screen.findByRole('dialog'));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(document.activeElement).toBe(tile);
+  });
+});
+
+describe('a message still on its way', () => {
+  it('shows its images as plain tiles until it is sent, since its bubble is about to be replaced', () => {
+    const { rerender } = render(<AssistantUserMessage text="" at={new Date(0)} delivery="sending" attachments={[image('a')]} />, {
+      wrapper: TooltipProvider,
+    });
+    expect(screen.queryByRole('button', { name: 'View a.jpg' })).toBeNull();
+    rerender(<AssistantUserMessage text="" at={new Date(0)} delivery="failed" attachments={[image('a')]} />);
+    expect(screen.queryByRole('button', { name: 'View a.jpg' })).toBeNull();
+    rerender(<AssistantUserMessage text="" at={new Date(0)} delivery="sent" attachments={[image('a')]} />);
+    expect(screen.getByRole('button', { name: 'View a.jpg' })).toBeTruthy();
   });
 });
