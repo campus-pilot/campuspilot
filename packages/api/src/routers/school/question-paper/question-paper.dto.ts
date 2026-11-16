@@ -13,6 +13,25 @@ export const QUESTION_PAPER_MAX_PAGE_BYTES = 15 * 1024 * 1024;
 export const QUESTION_PAPER_GENERATION_INSTRUCTIONS_MAX_CHARS = 2_000;
 
 /**
+ * How much of the text a school's template prints around a paper is told to a
+ * model (`templatePrints`, see `question-paper.template-prints.ts`): the first
+ * lines above the body, the first lines below it and the length of one line.
+ * A heading is a handful of short lines; the numbers only keep a template
+ * that prints a page of standing text from filling a model's context. A list
+ * that was cut says so in its last line (`leanLines`).
+ */
+export const QUESTION_PAPER_TEMPLATE_PRINTS_LINES = { above: 30, below: 10 } as const;
+/** The longest single line of `templatePrints`. */
+export const QUESTION_PAPER_TEMPLATE_PRINTS_LINE_CHARS = 160;
+/**
+ * The most characters `templatePrints` can take in a tool result: every line
+ * (and the counting last line of each side) at its longest, twice over for JSON
+ * escapes and punctuation.
+ */
+export const QUESTION_PAPER_TEMPLATE_PRINTS_MAX_CHARS =
+  (QUESTION_PAPER_TEMPLATE_PRINTS_LINES.above + QUESTION_PAPER_TEMPLATE_PRINTS_LINES.below + 2) * QUESTION_PAPER_TEMPLATE_PRINTS_LINE_CHARS * 2;
+
+/**
  * How many characters of `getQuestionPaper` the assistant gives the model
  * (the default 24,000 would cut a long paper). The result carries the whole
  * fragment (`html`, at most `fragmentChars`) as JSON text, where `"`, `\\` and
@@ -22,6 +41,11 @@ export const QUESTION_PAPER_GENERATION_INSTRUCTIONS_MAX_CHARS = 2_000;
  * each as JSON) could still exceed it; the tool then appends its own
  * "Result truncated" line, so the model is told and never reads a cut paper as
  * a whole one. The stored result stays cut at 4,000 characters either way.
+ * `templatePrints` (at most {@link QUESTION_PAPER_TEMPLATE_PRINTS_MAX_CHARS},
+ * a third of the 40,000) is part of "the rest" and comes before the pages and
+ * the fragment in the result, so a result that is cut never loses it. The
+ * number cannot simply grow: the MCP server refuses an `outputChars` over
+ * 200,000 (`MAX_TOOL_OUTPUT_CHARS` in `apps/server/src/mcp.ts`).
  */
 export const QUESTION_PAPER_PAPER_OUTPUT_CHARS = QUESTION_PAPER_LIMITS.fragmentChars * 2 + 40_000;
 /**
@@ -297,8 +321,33 @@ export const listQuestionPapersOutputSchema = z.object({
   ),
 });
 
+/**
+ * The text the school's selected template prints around the body of one
+ * paper, as lines in reading order: `above` the body (the heading) and
+ * `below` it (the footer). It is what the author of a paper must not write
+ * again. Read from a render of the template for this very paper, never from a
+ * list of what templates usually print: a school's template is free HTML.
+ */
+export const templatePrintsSchema = z.object({
+  above: z.array(z.string()).describe("Text lines the school's template prints above the paper's body, in order."),
+  below: z.array(z.string()).describe("Text lines the school's template prints below the paper's body, in order."),
+});
+export type TemplatePrints = z.infer<typeof templatePrintsSchema>;
+
+/**
+ * `templatePrints` of a tool result. Null means the lines are NOT KNOWN (the
+ * school has selected no template yet, or its template could not be read as
+ * text); it never means the template prints nothing, which is two empty lists.
+ */
+const templatePrintsField = templatePrintsSchema
+  .nullable()
+  .describe(
+    "What the school's template already prints around this paper's body. Never write a line into the paper that states one of these facts again. Null when it is not known (no template selected yet).",
+  );
+
 export const getQuestionPaperOutputSchema = z.object({
   paper: paperFactsSchema,
+  templatePrints: templatePrintsField,
   pages: z.array(pageDtoSchema),
   activeJob: jobSchema.nullable(),
   version: versionSummarySchema
@@ -313,6 +362,7 @@ export const getQuestionPaperOutputSchema = z.object({
 export const getQuestionPaperDraftOutputSchema = z.object({
   /** The facts of the paper the draft belongs to, as in getQuestionPaper (its latestVersionNo is the expectedVersionNo for a save). */
   paper: paperFactsSchema,
+  templatePrints: templatePrintsField,
   draftId: z.string(),
   /** The draft as the sanitiser cleaned it: what saving it would store and the preview shows. At most the fragment limit. */
   html: z.string(),

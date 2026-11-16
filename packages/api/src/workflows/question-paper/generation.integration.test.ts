@@ -10,6 +10,7 @@ import {
   examQuestionPaperVersionTable,
 } from '@campuspilot/db/schema/exam-question-paper';
 import { examPlanTable } from '@campuspilot/db/schema/exam';
+import { schoolTable } from '@campuspilot/db/schema/school';
 import { QUESTION_PAPER_EXAMPLES } from '@campuspilot/question-paper/examples';
 import { ORPCError } from '@orpc/server';
 import { and, asc, eq } from 'drizzle-orm';
@@ -22,7 +23,7 @@ import { handleQuestionPaperPageUpload } from '../../routers/school/question-pap
 import { getObjectBytes } from '../../routers/school/question-paper/question-paper.storage';
 import { QUESTION_PAPER_JOB_FAILURES } from './constants';
 import { defaultGenerationDeps, runQuestionPaperGeneration, type GenerationDeps, type StepRunner } from './generation';
-import { QUESTION_PAPER_JOB_INSTRUCTED_SYSTEM_PROMPT, QUESTION_PAPER_JOB_SYSTEM_PROMPT, TEACHER_INSTRUCTIONS_END, TEACHER_INSTRUCTIONS_START } from './prompt';
+import { QUESTION_PAPER_JOB_INSTRUCTED_SYSTEM_PROMPT, QUESTION_PAPER_JOB_SYSTEM_PROMPT, TEACHER_INSTRUCTIONS_END, TEACHER_INSTRUCTIONS_START, TEMPLATE_PRINTS_START } from './prompt';
 import type { ModelUsage, QuestionPaperModel, TextPart, TextResult } from './model';
 
 const { 'hindi-maths': HINDI_MATH, 'english-science': ENGLISH_SCIENCE } = QUESTION_PAPER_EXAMPLES;
@@ -138,8 +139,17 @@ describe('question paper generation job', () => {
     expect(request).not.toHaveProperty('jsonSchema');
     expect(request!.maxOutputTokens).toBe(defaultGenerationDeps().maxOutputTokens);
     const kinds = request!.parts.map((part: TextPart) => (part.type === 'text' ? part.text.split('\n')[0] : `image:${part.mimeType}`));
-    expect(kinds).toEqual(['Transcribe this question paper as an HTML fragment.', 'Page 1 of 2', 'image:image/jpeg', 'Page 2 of 2', 'image:image/jpeg']);
+    expect(kinds).toEqual(['Transcribe this question paper as an HTML fragment.', 'Page 1 of 2', 'image:image/jpeg', 'Page 2 of 2', 'image:image/jpeg', TEMPLATE_PRINTS_START]);
     expect((request!.parts[0] as { text: string }).text).toContain('Class: Class 8. Subject: Science. Mode: Theory.');
+    // What the school's selected template (the classic design) prints for THIS paper, read from a render of it:
+    // the school's own name, this exam, class, subject and the plan's marks; and no time allowed, which no template prints.
+    const printed = JSON.parse((request!.parts.at(-1) as { text: string }).text.split('\n')[1]!) as { above: string[]; below: string[] };
+    const [school] = await db.select({ name: schoolTable.name }).from(schoolTable).where(eq(schoolTable.id, world.schoolId));
+    expect(printed.above[0]).toBe(school!.name);
+    expect(printed.above).toContain('Class 8 · Science (Theory)');
+    expect(printed.above.at(-1)).toMatch(/^Maximum marks: \d+$/);
+    expect(printed.above.join('\n')).not.toMatch(/time/i);
+    expect(printed.below).toHaveLength(1);
 
     // The cost row: its own source, no run, the job id, prices as configured and the cost computed once.
     const [cost, ...others] = await requestsOf(job.id);
@@ -174,7 +184,7 @@ describe('question paper generation job', () => {
     for (const request of requests.slice(0, 2)) {
       expect(request.system).toBe(QUESTION_PAPER_JOB_INSTRUCTED_SYSTEM_PROMPT);
       const kinds = request.parts.map((part: TextPart) => (part.type === 'text' ? part.text.split('\n')[0] : `image:${part.mimeType}`));
-      expect(kinds.slice(1)).toEqual(['Page 1 of 2', 'image:image/jpeg', 'Page 2 of 2', 'image:image/jpeg', TEACHER_INSTRUCTIONS_START]);
+      expect(kinds.slice(1)).toEqual(['Page 1 of 2', 'image:image/jpeg', 'Page 2 of 2', 'image:image/jpeg', TEMPLATE_PRINTS_START, TEACHER_INSTRUCTIONS_START]);
       expect((request.parts.at(-1) as { text: string }).text).toBe([TEACHER_INSTRUCTIONS_START, JSON.stringify(instructions), TEACHER_INSTRUCTIONS_END].join('\n'));
     }
     // The repair: the same instructed prompt, and a reminder to keep the changes, without the instructions themselves.

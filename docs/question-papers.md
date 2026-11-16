@@ -31,7 +31,9 @@ the demo seed's question papers.
   can be previewed and downloaded. There is no approved or final state, no hand
   editing of a generated paper in the UI and no answer key.
 - The **heading and footer come from the school's `question_paper` template**
-  (a full document type, see below), never from the AI. The AI only writes the body.
+  (a full document type, see below), never from the AI. The AI only writes the body,
+  and is shown the text lines the template prints for that paper so it does not write
+  them again (see "What the template prints").
 - Three ways in, one set of rules:
   1. **Manual**: the Question paper tab of an examination (photos of the pages, an
      optional note on what to change, *Create paper*, preview, download). Generation is a
@@ -558,6 +560,56 @@ is always `ltr`: the paper is free HTML and nothing reads facts out of it. The k
 template revisions written against the structured paper keep rendering (their `{{#if}}` blocks
 print nothing).
 
+## What the template prints (`templatePrints`)
+
+An author of a paper (the job's model, a chat agent) writes the body only, usually from
+a photographed paper that has a heading of its own. Which of those heading lines the
+template already prints depends on the school's template, which is free HTML. So the
+author is **shown the lines, never told a list**: a fixed list ("the template prints the
+school name, exam, class, subject, time allowed, maximum marks") made models repeat lines
+they did not recognise ("M.M. 50" under the template's "Maximum marks: 50") and drop
+lines nothing prints (the time allowed, which no template can print because
+`questionPaper.timeAllowed` is always null).
+
+- `readTemplatePrints(db, scope)` (`question-paper.template-prints.ts`) renders the
+  school's **currently selected** template for that paper exactly as a print does (the
+  real context, the document sanitiser, the slot still in place) and reads the text on
+  each side of the slot: `{ above: string[], below: string[] }`, one line per block
+  element, table cell or `<br>`, whitespace collapsed, in reading order. Only text is
+  read: no style sheet, no image, nothing CSS adds or hides.
+- **`null` means "not known"**, never "prints nothing" (that is two empty lists): the
+  school has selected no template, the template does not render for this paper (the
+  save or the preview reports that, with the renderer's message; reading a paper keeps
+  working), or the slot is not an element of the document.
+- It is capped (`QUESTION_PAPER_TEMPLATE_PRINTS_LINES`: 30 lines above, 10 below, 160
+  characters a line, in `question-paper.dto.ts`); a list that was cut ends with "and N
+  more" (`leanLines`).
+- It is **advice for an author and nothing else**: never stored, no check or save
+  depends on it, a print never reads it. The lines are a school's own names and template
+  text, so they are untrusted text for a model: the job sends them as one JSON object,
+  chat as a tool result.
+- The rule a model follows is one text shared by the job prompt and the chat guide
+  (`QUESTION_PAPER_TEMPLATE_PRINTS_RULES` in `packages/question-paper/src/guide.ts`):
+  never write a line that states a fact a listed line already states, whatever the
+  wording, language or value; keep every other line of the source's heading (time
+  allowed, date, set code, name and roll number blanks, general instructions) as the
+  first lines of the fragment. When the lines are not known, only the school's name and
+  address, the exam, session, class, subject and maximum marks are left out.
+- **The job** reads them in its inputs step and journals them with the plan, so the
+  first request and every retry tell the model the same lines; they are a text part
+  after the pages and before the teacher's instructions (`TEMPLATE_PRINTS_START`, then
+  the JSON object; `TEMPLATE_PRINTS_UNKNOWN` when null).
+- **Chat** gets them from `getQuestionPaper` and `getQuestionPaperDraft`
+  (`templatePrints`); the guide's first workflow step is to call `getQuestionPaper`,
+  also for a paper that has no version yet. An agent also tells the user when the
+  source gives another value than the template (other maximum marks, another class).
+- A saved version pins its template revision, so a paper written against one template
+  keeps printing with it. A copy (`copyQuestionPaperVersion`) prints an earlier
+  fragment with the currently selected template and is not rewritten.
+
+Nothing detects a repeated line after the fact: the server does not compare the
+fragment with these lines, and adds no notice. The reviewing person is the check.
+
 ## The generation job (manual UI only)
 
 `startQuestionPaperGeneration` checks before any cost that a model is configured in the
@@ -604,8 +656,8 @@ text for the model:
   everything they do not ask to change. Its output, figure, template and vocabulary sections
   (animation rule first) are the same text as the transcription prompt's, and it says the
   instructions change the paper's content only and never these rules; a part that asks for
-  something else (Markdown, a script, an animation, the school's heading) is ignored. Text in
-  the photographs stays data.
+  something else (Markdown, a script, an animation, a line the school's template already
+  prints) is ignored. Text in the photographs stays data.
 - The instructions travel only in the user turn, after the pages, as their own text part:
   a labelled line, the instructions as **one JSON string** (a delimiter that cannot be closed
   from inside: quotes and line breaks are escaped) and a closing line.
@@ -620,9 +672,11 @@ text for the model:
 The workflow (`workflows/question-paper`, ingress-private, steps shared with the
 integration tests in `generation.ts`): begin, re-check access and the paper
 (limit, feature, role, exam not ended), gather inputs (every page has a readable
-source, at most 16 MiB of images counted as base64, the same budget as the chat), **one plain
+source, at most 16 MiB of images counted as base64, the same budget as the chat; the lines
+the school's template prints around this paper, see "What the template prints"), **one plain
 text model request** (system prompt with the shared fragment rules; the pages in order as
-"Page i of n" and the image, then the teacher's instructions when there are any; its cost row is saved inside that same step; a repeated billed call
+"Page i of n" and the image, then the lines the template prints, then the teacher's
+instructions when there are any; its cost row is saved inside that same step; a repeated billed call
 takes the next `:attempt:{k}` key derived from the saved rows, never dropped), then check the
 answer: extract the fragment (`extractQuestionPaperFragment`: strip code fences and a doctype),
 sanitise and validate it (`checkQuestionPaperDraft`: non-empty, within the caps, formulas typeset;
@@ -697,8 +751,13 @@ only): page photos, generation, polling, previews, downloads and starting from a
 already reads any paper it may read with `getQuestionPaper` and saves its own edit, and could not
 use the source's `qpf_` figure ids, which a save refuses).
 
+- `getQuestionPaper` returns the paper's facts, `templatePrints` (the lines the school's
+  template prints around the body, see "What the template prints"; `getQuestionPaperDraft`
+  returns them too), the pages and the fragment of one version. Agents are its only readers
+  (the paper screen uses `getQuestionPaperDetail`, which is polled and does not read the
+  template).
 - `learn_question_paper_generation` returns the guide (vocabulary, formulas as `data-math`,
-  figures, scripts through `lang`, the NO ANIMATION rule), the limits and one worked example
+  figures, scripts through `lang`, the NO ANIMATION rule, what the school's template prints), the limits and one worked example
   (an HTML fragment) on demand, so that no assistant or MCP client carries them by default
   (D36). The assistant's prompt has a single bullet that names it.
 - `validateQuestionPaperDraft({ html })` checks a fragment exactly as a save would and returns
@@ -716,7 +775,9 @@ use the source's `qpf_` figure ids, which a save refuses).
 - **Output caps** (`outputChars`, the tool metadata the assistant honours instead of its default
   24,000): `getQuestionPaper` returns the whole fragment as `html` and declares
   `fragmentChars * 2 + 40,000` (the longest allowed fragment with every quote and line end
-  escaped in the JSON text, plus pages and the version list), so a long paper is not cut. If a
+  escaped in the JSON text, plus `templatePrints`, pages and the version; `templatePrints` is at
+  most a third of the 40,000 and comes before the fragment, and the number cannot grow past the
+  MCP server's 200,000), so a long paper is not cut. If a
   result is nevertheless cut the tool appends its "Result truncated" line and the guide tells the
   agent never to submit a paper edited from a cut one. Validate declares 40,000 (it is lean by
   construction); learn 40,000 (guide, limits and example are about 10 KB). The numbers live in
@@ -804,6 +865,7 @@ use the source's `qpf_` figure ids, which a save refuses).
 | Generation job | `packages/api/src/workflows/question-paper`, served by `apps/worker` |
 | HTTP upload and read routes | `apps/server/src/http.ts` (page photos), `packages/assistant/src/attachments.http.ts` (chat images and PDFs; kind from bytes in `packages/api/src/files/attachment-upload.ts`) |
 | Template, marketplace designs, slot | `packages/api/src/routers/school/document` (`document.catalog.marketplace.ts`, `question-paper.slot.ts`) |
+| What the template prints around a paper | `question-paper.template-prints.ts` (reading), `QUESTION_PAPER_TEMPLATE_PRINTS_RULES` in `packages/question-paper/src/guide.ts` (the rule), `prompt.ts` (the job's part) |
 | Model call (providers, plain text) | `packages/assistant/src/question-paper-model.ts`, `providers/*` (`generateText`) |
 | Chat contract, cards | `packages/assistant-contract`, `packages/components/src/question-paper/chat-cards.tsx` |
 | Management UI | `apps/management/components/question-paper` (`question-paper-workspace.tsx` decides the view, `question-paper-start.tsx` the first screen with its rules in `question-paper-start-model.ts`, `earlier-paper-dialog.tsx` the earlier-paper picker, `source-preview-dialogs.tsx` the page viewer and the earlier paper's preview, `question-paper-studio.tsx` the paper beside its assistant, `use-paper-assistant.ts` the paper's conversation), `packages/components/src/question-paper`, routes under `exam/[examSlug]/question-paper` |
@@ -837,6 +899,10 @@ once the tab is visible).
 - **A marketplace design**: add it to `document.catalog.marketplace.ts` with the slot
   exactly once (the catalog test asserts it) and a footer that follows the layout
   rules in [Document system](document-system.md#question-papers).
+- **A rule about the paper's heading, or a new fact a template can print**: never tell a
+  model a list of what templates print. It is shown the lines (`templatePrints`); change
+  `QUESTION_PAPER_TEMPLATE_PRINTS_RULES`, which the job prompt and the chat guide share.
+  A new place where a model writes a paper must give it `readTemplatePrints` for that paper.
 - **A job failure**: add its code and safe text to `QUESTION_PAPER_JOB_FAILURES`; the
   UI shows the stored message.
 - **A chat tool**: add the procedure with `tool(...)` metadata in the router, keep

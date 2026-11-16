@@ -7,8 +7,9 @@ import { extractQuestionPaperFragment, hasPaperContent, questionPaperFragmentSha
 import { and, eq, inArray, sql } from 'drizzle-orm';
 
 import { resolveAssistantAccess } from '../../assistant/access';
-import type { PaperKey } from '../../routers/school/question-paper/question-paper.dto';
+import type { PaperKey, TemplatePrints } from '../../routers/school/question-paper/question-paper.dto';
 import { hasSelectedQuestionPaperTemplate } from '../../routers/school/question-paper/question-paper.render';
+import { readTemplatePrints } from '../../routers/school/question-paper/question-paper.template-prints';
 import { assertPaperWritable, isPaperLockedError, isPlanModeRemovedError, resolvePaperScope, type PaperScope } from '../../routers/school/question-paper/question-paper.scope';
 import { unreadablePageMessage } from '../../routers/school/question-paper/question-paper.service';
 import { getObjectBytes } from '../../routers/school/question-paper/question-paper.storage';
@@ -111,7 +112,18 @@ type BegunJob = { key: PaperKey; paperId: string; schoolId: string; requestedBy:
 const instructionsOf = (begun: BegunJob): string | null => begun.instructions ?? null;
 
 type PlannedPage = { id: string; position: number; name: string; key: string; mimeType: string };
-type Plan = { scope: PaperScope; pages: PlannedPage[] };
+/**
+ * What the inputs step returns. `templatePrints` is what the school's
+ * template prints around this paper (null: not known), read once here and
+ * journaled, so the first request and every retry of it tell the model the
+ * same lines even if the school changes its template or its name meanwhile.
+ * A journal written before the field existed has none; read it through
+ * {@link templatePrintsOfPlan}.
+ */
+type Plan = { scope: PaperScope; pages: PlannedPage[]; templatePrints?: TemplatePrints | null };
+
+/** The plan's template lines, null for not known (also for an inputs step journaled before they existed). */
+const templatePrintsOfPlan = (plan: Plan): TemplatePrints | null => plan.templatePrints ?? null;
 
 /** A model answer as journaled. */
 type ModelAnswer = Pick<TextResult, 'text' | 'usage' | 'answeredModel' | 'refusal' | 'unfinished'>;
@@ -311,9 +323,11 @@ async function assertAccess(deps: GenerationDeps, begun: BegunJob): Promise<void
 
 /**
  * Everything the job needs before it spends money: the plan's names and
- * marks, a writable paper, a chosen template, and for every page a source the
- * model can read (D46: a page is never dropped silently). Nothing here is
- * large; the images themselves are read in the model step.
+ * marks, a writable paper, a chosen template with the lines it prints around
+ * this paper, and for every page a source the model can read (D46: a page is
+ * never dropped silently). Nothing here is large (the template's lines are
+ * capped, see `QUESTION_PAPER_TEMPLATE_PRINTS_LINES`); the images themselves
+ * are read in the model step.
  */
 async function planInputs(deps: GenerationDeps, begun: BegunJob, model: QuestionPaperModel): Promise<Plan> {
   const { db } = deps;
@@ -344,6 +358,7 @@ async function planInputs(deps: GenerationDeps, begun: BegunJob, model: Question
   }
   return {
     scope,
+    templatePrints: await readTemplatePrints(db, scope),
     pages: present.map((page): PlannedPage => ({
       id: page.id,
       position: page.position,
@@ -400,7 +415,13 @@ async function callModel({
   const requestParts =
     parts ??
     buildGenerationParts(
-      { className: plan.scope.className, subjectName: plan.scope.subjectName, modeName: plan.scope.modeName, planMaxMarks: plan.scope.planMaxMarks },
+      {
+        className: plan.scope.className,
+        subjectName: plan.scope.subjectName,
+        modeName: plan.scope.modeName,
+        planMaxMarks: plan.scope.planMaxMarks,
+        templatePrints: templatePrintsOfPlan(plan),
+      },
       await Promise.all(
         plan.pages.map(async (page) => {
           try {

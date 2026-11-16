@@ -5,6 +5,9 @@ import {
   QUESTION_PAPER_GENERATION_INSTRUCTIONS_MAX_CHARS,
   QUESTION_PAPER_LEARN_OUTPUT_CHARS,
   QUESTION_PAPER_PAPER_OUTPUT_CHARS,
+  QUESTION_PAPER_TEMPLATE_PRINTS_LINE_CHARS,
+  QUESTION_PAPER_TEMPLATE_PRINTS_LINES,
+  QUESTION_PAPER_TEMPLATE_PRINTS_MAX_CHARS,
   QUESTION_PAPER_VALIDATE_LINE_CHARS,
   QUESTION_PAPER_VALIDATE_LISTED,
   QUESTION_PAPER_VALIDATE_OUTPUT_CHARS,
@@ -18,6 +21,14 @@ describe('the assistant output caps of the question paper tools', () => {
     expect(QUESTION_PAPER_PAPER_OUTPUT_CHARS).toBeGreaterThan(worstOrdinary);
     // Not a hard-coded number: it follows the fragment limit.
     expect(QUESTION_PAPER_PAPER_OUTPUT_CHARS - worstOrdinary).toBeGreaterThanOrEqual(40_000);
+  });
+
+  it('keep templatePrints a small part of what getQuestionPaper returns besides the fragment', () => {
+    // Every listed line and both counting lines at their longest, with room for JSON escapes.
+    const lines = QUESTION_PAPER_TEMPLATE_PRINTS_LINES.above + QUESTION_PAPER_TEMPLATE_PRINTS_LINES.below + 2;
+    expect(QUESTION_PAPER_TEMPLATE_PRINTS_MAX_CHARS).toBeGreaterThanOrEqual(lines * QUESTION_PAPER_TEMPLATE_PRINTS_LINE_CHARS * 2);
+    // At most half of the room the result has besides the fragment, so pages, the version and the job always fit beside it.
+    expect(QUESTION_PAPER_TEMPLATE_PRINTS_MAX_CHARS).toBeLessThanOrEqual((QUESTION_PAPER_PAPER_OUTPUT_CHARS - QUESTION_PAPER_LIMITS.fragmentChars * 2) / 2);
   });
 
   it('keep validate lean: its cap does not depend on the fragment, and its listed lines always fit', () => {
@@ -39,6 +50,10 @@ describe('leanLines', () => {
     expect(lean.at(-1)).toBe('and 5 more');
     expect(leanLines(['x'.repeat(QUESTION_PAPER_VALIDATE_LINE_CHARS + 50)])[0]).toHaveLength(QUESTION_PAPER_VALIDATE_LINE_CHARS);
     expect(leanLines(['a', 'b'])).toEqual(['a', 'b']);
+  });
+
+  it('applies the limits of another list when it is given them', () => {
+    expect(leanLines(['one', 'two', 'three'], { listed: 2, lineChars: 2 })).toEqual(['o…', 't…', 'and 1 more']);
   });
 });
 
