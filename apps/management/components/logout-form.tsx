@@ -5,6 +5,10 @@ import { useForm } from '@tanstack/react-form';
 import { Button } from '@campuspilot/ui/components/button';
 import { FieldError } from '@campuspilot/ui/components/field';
 import { ArrowLeft, LogOut } from 'lucide-react';
+import {
+  sessionUserSignInIdentity,
+  staffSignInLabel,
+} from '@campuspilot/components/staff-account/staff-sign-in-label';
 import { authClient } from '@/lib/auth-client';
 import { forgetDrafts } from './assistant/assistant-draft';
 import { AuthLoading } from './auth-loading';
@@ -46,7 +50,7 @@ export function LogoutForm() {
         <div className="flex flex-col gap-1.5">
           <h1 className="text-3xl font-semibold tracking-[-0.03em]">Log out?</h1>
           <p className="text-sm leading-6 text-muted-foreground">
-            You are signed in as <span className="font-medium text-foreground">{session.user.email}</span>.
+            You are signed in as <span className="font-medium text-foreground">{staffSignInLabel(sessionUserSignInIdentity(session.user))}</span>.
             You’ll need to sign in again to return to your school workspace.
           </p>
         </div>

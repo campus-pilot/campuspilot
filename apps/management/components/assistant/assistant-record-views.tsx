@@ -1,5 +1,6 @@
 'use client';
 
+import { staffSignInLabel } from '@campuspilot/components/staff-account/staff-sign-in-label';
 import type { AssistantRecordsView } from '@campuspilot/assistant-contract/views';
 import { AssistantRecordList, type AssistantRecord } from '@campuspilot/components/assistant';
 import { Avatar, AvatarFallback, AvatarImage } from '@campuspilot/ui/components/avatar';
@@ -200,9 +201,9 @@ function StaffRecords({ schoolId, view }: { schoolId: string; view: AssistantRec
         record: result.data
           ? {
               id: result.data.userId,
-              leading: <PersonTile name={result.data.name || result.data.email} src={result.data.profileImageUrl} />,
+              leading: <PersonTile name={result.data.name || staffSignInLabel(result.data)} src={result.data.profileImageUrl} />,
               title: result.data.name || 'Pending setup',
-              subtitle: result.data.email,
+              subtitle: staffSignInLabel(result.data),
               badge: result.data.roles[0] ? (
                 <Badge variant="secondary">
                   {roleLabels[result.data.roles[0].role]}

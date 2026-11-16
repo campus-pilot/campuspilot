@@ -26,7 +26,6 @@ import {
 } from '@campuspilot/ui/components/alert-dialog';
 import {
   Avatar,
-  AvatarFallback,
   AvatarImage,
 } from '@campuspilot/ui/components/avatar';
 import { Badge } from '@campuspilot/ui/components/badge';
@@ -39,6 +38,8 @@ import {
   DropdownMenuTrigger,
 } from '@campuspilot/ui/components/dropdown-menu';
 import { MoreVertical, UserMinus } from 'lucide-react';
+import { staffSignInLabel } from '@campuspilot/components/staff-account/staff-sign-in-label';
+import { StaffAvatarFallback } from '@campuspilot/components/staff-account/staff-avatar-fallback';
 import { client, orpc } from '@/lib/orpc';
 
 type StaffOrderField = 'name' | 'email' | 'addedAt';
@@ -60,18 +61,9 @@ function memberLabel(member: SchoolMemberDto) {
 }
 
 function memberIdentity(member: SchoolMemberDto) {
-  return member.name.trim() || member.email;
+  return member.name.trim() || staffSignInLabel(member);
 }
 
-function memberInitials(member: SchoolMemberDto) {
-  return memberIdentity(member)
-    .split(/[\s@._-]+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0])
-    .join('')
-    .toUpperCase();
-}
 
 function StaffRowActions({
   member,
@@ -120,7 +112,7 @@ function createStaffColumns(
             {row.original.profileImageUrl ? (
               <AvatarImage src={row.original.profileImageUrl} alt="" />
             ) : null}
-            <AvatarFallback>{memberInitials(row.original)}</AvatarFallback>
+            <StaffAvatarFallback person={row.original} />
           </Avatar>
           <span
             className={
@@ -136,7 +128,8 @@ function createStaffColumns(
     },
     {
       accessorKey: 'email',
-      header: 'Email',
+      header: 'Signs in with',
+      cell: ({ row }) => staffSignInLabel(row.original),
     },
     {
       id: 'roles',

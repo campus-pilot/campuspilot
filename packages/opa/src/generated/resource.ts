@@ -92,6 +92,7 @@ export type AuthorizationResourceByAction = {
   [SCHOOL_ACTIONS.UPDATE_LOGO]: SchoolResource;
   [SCHOOL_ACTIONS.INVITE_MEMBER]: SchoolResource;
   [SCHOOL_ACTIONS.LIST_MEMBERS]: SchoolResource;
+  [SCHOOL_ACTIONS.ISSUE_MEMBER_PASSWORD]: SchoolResource;
   [SCHOOL_ACTIONS.READ_MEMBER]: SchoolResource;
   [SCHOOL_ACTIONS.REMOVE_MEMBER]: SchoolResource;
   [SCHOOL_ACTIONS.UPDATE_MEMBER_ROLES]: SchoolResource;
@@ -144,6 +145,9 @@ export type AuthorizationResourceByAction = {
   [SYSTEM_ACTIONS.READ_SCHOOL]: SystemResource;
   [SYSTEM_ACTIONS.READ_SCHOOL_STATS]: SystemResource;
   [SYSTEM_ACTIONS.UPDATE_SCHOOL]: SystemResource;
+  [SYSTEM_ACTIONS.LIST_USERS]: SystemResource;
+  [SYSTEM_ACTIONS.SET_USER_PASSWORD]: SystemResource;
+  [SYSTEM_ACTIONS.UPDATE_USER_SIGN_IN]: SystemResource;
 };
 
 export type AuthorizationAction = keyof AuthorizationResourceByAction;

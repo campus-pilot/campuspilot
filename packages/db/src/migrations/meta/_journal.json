@@ -484,6 +484,13 @@
       "when": 1794643502278,
       "tag": "0068_assistant-conversation-paper",
       "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1794843841832,
+      "tag": "0069_staff-phone-sign-in",
+      "breakpoints": true
     }
   ]
 }

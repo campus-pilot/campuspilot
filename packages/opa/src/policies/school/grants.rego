@@ -12,6 +12,13 @@ grants contains {
   "action": "school.member.invite",
 } if { true }
 
+# Principals only: a manager who could set passwords could take over the
+# principal's account.
+grants contains {
+  "role": "school.principal",
+  "action": "school.member.password.issue",
+} if { true }
+
 grants contains {
   "role": role,
   "action": action,

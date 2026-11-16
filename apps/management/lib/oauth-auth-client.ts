@@ -3,7 +3,7 @@
 import { env } from '@campuspilot/env/management.client';
 import { oauthProviderClient } from '@better-auth/oauth-provider/client';
 import { createAuthClient } from 'better-auth/react';
-import { inferAdditionalFields } from 'better-auth/client/plugins';
+import { inferAdditionalFields, phoneNumberClient } from 'better-auth/client/plugins';
 import type { auth } from '@campuspilot/auth/server';
 
 /**
@@ -16,7 +16,7 @@ import type { auth } from '@campuspilot/auth/server';
  */
 export const oauthAuthClient = createAuthClient({
   baseURL: new URL('/api/auth', env.NEXT_PUBLIC_SERVER_URL).toString(),
-  plugins: [oauthProviderClient(), inferAdditionalFields<typeof auth>()],
+  plugins: [oauthProviderClient(), phoneNumberClient(), inferAdditionalFields<typeof auth>()],
 });
 
 /**

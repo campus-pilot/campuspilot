@@ -15,6 +15,10 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { z } from 'zod';
 
+import {
+  sessionUserSignInIdentity,
+  staffSignInLabel,
+} from '@campuspilot/components/staff-account/staff-sign-in-label';
 import { authClient } from '@/lib/auth-client';
 import {
   isSignedOAuthRequest,
@@ -341,7 +345,7 @@ export function OAuthConsent() {
   return (
     <div className="flex flex-col gap-8">
       <BrandLogo product="campuspilot" />
-      <ConsentSummary client={client.data} request={request} email={session?.user.email} />
+      <ConsentSummary client={client.data} request={request} email={session ? staffSignInLabel(sessionUserSignInIdentity(session.user)) : undefined} />
       <ConsentForm request={request} />
     </div>
   );

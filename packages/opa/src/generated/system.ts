@@ -9,6 +9,7 @@ export const SYSTEM_ACTIONS = {
   DELETE_SCHOOL: 'system.school.delete',
   LIST_OAUTH_CLIENTS: 'system.oauth_client.list',
   LIST_SCHOOLS: 'system.school.list',
+  LIST_USERS: 'system.user.list',
   PURGE_DEMO_SCHOOL: 'system.school.demo.purge',
   READ_DATA_MIGRATIONS: 'system.data_migration.read',
   READ_DEMO_SCHOOL: 'system.school.demo.read',
@@ -19,9 +20,11 @@ export const SYSTEM_ACTIONS = {
   READ_SCHOOL_FEATURE_FLAGS: 'system.school.feature_flags.read',
   READ_SCHOOL_STATS: 'system.school.stats.read',
   RUN_DATA_MIGRATION: 'system.data_migration.run',
+  SET_USER_PASSWORD: 'system.user.password.set',
   UPDATE_OAUTH_CLIENT: 'system.oauth_client.update',
   UPDATE_SCHOOL: 'system.school.update',
   UPDATE_SCHOOL_FEATURE_FLAGS: 'system.school.feature_flags.update',
+  UPDATE_USER_SIGN_IN: 'system.user.sign_in.update',
 } as const;
 
 export type SystemAction =

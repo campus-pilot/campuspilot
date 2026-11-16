@@ -327,14 +327,15 @@ export function schoolAssistantUsageDetail(db: DatabaseExecutor, schoolId: strin
         .select({
           userId: assistantModelRequestTable.userId,
           name: userTable.name,
-          email: userTable.email,
+          // A phone-only account's placeholder address is not an email.
+          email: sql<string | null>`case when ${userTable.emailIsPlaceholder} then null else ${userTable.email} end`,
           requests: sums.requests,
           costUsd: sums.costUsd,
         })
         .from(assistantModelRequestTable)
         .leftJoin(userTable, eq(userTable.id, assistantModelRequestTable.userId))
         .where(rangeFilter(range, schoolId))
-        .groupBy(assistantModelRequestTable.userId, userTable.name, userTable.email)
+        .groupBy(assistantModelRequestTable.userId, userTable.name, userTable.email, userTable.emailIsPlaceholder)
         .orderBy(desc(sql`sum(${assistantModelRequestTable.costUsd})`), assistantModelRequestTable.userId)
         .limit(10),
     ]);
