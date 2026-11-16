@@ -10,6 +10,7 @@ import {
   useState,
   type ComponentType,
   type CSSProperties,
+  type MouseEvent,
   type MouseEventHandler,
   type ReactNode,
   type SVGProps,
@@ -77,6 +78,7 @@ import {
   SidebarMenuSubItem,
   SidebarProvider,
   SidebarTrigger,
+  useSidebar,
 } from '@campuspilot/ui/components/sidebar';
 import { useTheme } from './theme-provider';
 
@@ -257,6 +259,48 @@ function AppLink({
     >
       {children}
     </a>
+  );
+}
+
+/**
+ * Whether a click opens the link somewhere else (a new tab or window, a
+ * download) instead of navigating this page: the sidebar then stays open,
+ * because the user is still looking at it.
+ */
+function opensElsewhere(event: MouseEvent<HTMLAnchorElement>) {
+  return (
+    event.metaKey ||
+    event.ctrlKey ||
+    event.shiftKey ||
+    event.altKey ||
+    event.button !== 0
+  );
+}
+
+/**
+ * A link inside the sidebar. On mobile the sidebar is a sheet over the page,
+ * so following one of its links closes the sheet; otherwise the new page
+ * opens hidden behind it. Closing happens in the click handler, before the
+ * navigation, rather than by watching the path: a link to the page that is
+ * already open closes the sheet too, and no effect is needed. The caller's own
+ * `onClick` runs first. On desktop `openMobile` is not used, so this does
+ * nothing there.
+ */
+function SidebarAppLink({
+  onClick,
+  ...props
+}: AppShellLinkProps & Pick<AppShellProps, 'renderLink'>) {
+  const { isMobile, setOpenMobile } = useSidebar();
+  return (
+    <AppLink
+      {...props}
+      onClick={(event) => {
+        onClick?.(event);
+        if (isMobile && !event.defaultPrevented && !opensElsewhere(event)) {
+          setOpenMobile(false);
+        }
+      }}
+    />
   );
 }
 
@@ -499,14 +543,14 @@ function NavigationItem({
   const content = (
     <SidebarMenuItem>
       <SidebarMenuButton asChild isActive={isActive} className="rounded-lg">
-        <AppLink
+        <SidebarAppLink
           href={item.href}
           ariaCurrent={isDirectlyActive ? 'page' : undefined}
           renderLink={renderLink}
         >
           <Icon />
           <span>{item.label}</span>
-        </AppLink>
+        </SidebarAppLink>
       </SidebarMenuButton>
       {item.items?.length ? (
         <SidebarMenuSub>
@@ -520,14 +564,14 @@ function NavigationItem({
                   isActive={pathMatches(child, currentPath)}
                   className="rounded-lg"
                 >
-                  <AppLink
+                  <SidebarAppLink
                     href={child.href}
                     ariaCurrent={isChildDirectlyActive ? 'page' : undefined}
                     renderLink={renderLink}
                   >
                     <ChildIcon />
                     <span>{child.label}</span>
-                  </AppLink>
+                  </SidebarAppLink>
                 </SidebarMenuSubButton>
               </SidebarMenuSubItem>
             );
@@ -736,10 +780,10 @@ export function AppShell({
               variant="ghost"
               className="justify-start rounded-lg px-2"
             >
-              <AppLink href={docsHref} renderLink={renderLink}>
+              <SidebarAppLink href={docsHref} renderLink={renderLink}>
                 <BookOpen />
                 Docs
-              </AppLink>
+              </SidebarAppLink>
             </Button>
             {footerLinks.length > 0 ? <Separator className="my-1" /> : null}
             {footerLinks.map((link) => {
@@ -752,10 +796,10 @@ export function AppShell({
                   variant="ghost"
                   className="justify-start rounded-lg px-2"
                 >
-                  <AppLink href={link.href} renderLink={renderLink}>
+                  <SidebarAppLink href={link.href} renderLink={renderLink}>
                     <Icon />
                     {link.label}
-                  </AppLink>
+                  </SidebarAppLink>
                 </Button>
               );
             })}
