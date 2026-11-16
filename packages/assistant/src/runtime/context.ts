@@ -59,9 +59,13 @@ export type ModelContextDeps = {
   loadAttachment(attachmentId: string, readable: ReadableMimeTypes): Promise<AttachmentFile>;
 };
 
+/** Fixed wording of the stubs below, shared with `findCopiedContextNote` so the two never drift apart. */
+const RESULT_STUB_MARK = 'omitted to keep the chat short (';
+const INPUT_STUB_MARK = 'was removed from this chat to keep it short. This note is not the content';
+
 /** The note that replaces a long tool result in an old entry. */
 export const toolResultStub = ({ toolName, chars }: { toolName: string; chars: number }) =>
-  `[Earlier result of ${toolName} omitted to keep the chat short (${chars.toLocaleString('en-US')} characters). Call the tool again if you need it.]`;
+  `[Earlier result of ${toolName} ${RESULT_STUB_MARK}${chars.toLocaleString('en-US')} characters). Call the tool again if you need it.]`;
 
 const VALIDATE_DRAFT_TOOL = /(^|[._])validateQuestionPaperDraft$/;
 const SAVE_VERSION_TOOL = /(^|[._])saveQuestionPaperVersion$/;
@@ -76,13 +80,13 @@ const SAVE_VERSION_TOOL = /(^|[._])saveQuestionPaperVersion$/;
  * - `saveQuestionPaperVersion` (pasted `html`): the paper is saved, so `getQuestionPaper`.
  * - any other tool: no draft is involved, so no `draftId` is mentioned; the model writes it again.
  *
- * The note is deliberately plain bracketed prose that says it is not the content: a model that
- * copies it into `html` sends text with no markup, which the draft check refuses as not being a
- * paper, and nothing is saved. Only the tool name, field name and length are named, so the note
+ * The note is deliberately plain bracketed prose that says it is not the content. A model that
+ * copies it into a call anyway is refused by the runtime (`findCopiedContextNote`) before the
+ * tool runs, whatever the tool. Only the tool name, field name and length are named, so the note
  * is stable and far shorter than the threshold.
  */
 export const toolInputStub = ({ toolName, field, chars }: ToolInputStubInput) => {
-  const head = `[Omitted: the \`${field}\` of ${toolName} (${chars.toLocaleString('en-US')} characters) was removed from this chat to keep it short. This note is not the content; never send it as ${field}.`;
+  const head = `[Omitted: the \`${field}\` of ${toolName} (${chars.toLocaleString('en-US')} characters) ${INPUT_STUB_MARK}; never send it as ${field}.`;
   if (VALIDATE_DRAFT_TOOL.test(toolName)) {
     return `${head} To read that draft again call getQuestionPaperDraft with the draftId in the result of that call; if the paper was saved since, call getQuestionPaper instead.]`;
   }
@@ -91,6 +95,26 @@ export const toolInputStub = ({ toolName, field, chars }: ToolInputStubInput) =>
   }
   return `${head} Write it again if you still need it.]`;
 };
+
+/**
+ * The path of the first string in a tool call input (at any depth) that carries
+ * one of the notes above, or null. A model can copy a note into a new call
+ * instead of writing the content again; the note is plain text, so most tools
+ * would accept it (a school template saved as one line of prose), and only the
+ * question paper draft check happens to refuse it. The runtime refuses such a
+ * call before it reaches the API or asks the user to approve it.
+ */
+export function findCopiedContextNote(input: unknown, path: string[] = []): string | null {
+  if (typeof input === 'string') {
+    return input.includes(INPUT_STUB_MARK) || input.includes(RESULT_STUB_MARK) ? path.join('.') || 'input' : null;
+  }
+  if (typeof input !== 'object' || input === null) return null;
+  for (const [key, value] of Object.entries(input)) {
+    const found = findCopiedContextNote(value, [...path, key]);
+    if (found !== null) return found;
+  }
+  return null;
+}
 
 /**
  * Replaces each top-level string field of a tool call input that has at least

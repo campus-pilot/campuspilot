@@ -356,8 +356,11 @@ existing paper, a syllabus or notes as a PDF
   the field, the tool and the size (`stubToolInputs` of the adapter). The stub (`toolInputStub`)
   names the way back per tool: `getQuestionPaperDraft` with the result's draft id (unsaved draft)
   or `getQuestionPaper` (saved) for a validate input, `getQuestionPaper` for a save input, and no
-  draft id for any other tool; it says it is not the content, so copying it into `html` is
-  refused as an empty paper, and an attachment by a note
+  draft id for any other tool; it says it is not the content. A model can copy a stub into a
+  new call anyway (it once sent one as a school template's `content`, which would have saved as
+  plain text), so before a call is recorded or put to the user for approval the runtime looks for
+  either stub's fixed wording in any string of the input (`findCopiedContextNote`) and answers
+  `BAD_REQUEST` naming the field, without running the tool; and an attachment by a note
   that keeps its id and says the image or document is no longer visible (a document's note
   also says it is not a figure). The stored transcript keeps the
   full text: a draft id is resolved from it when the user saves. Inside it, images and PDFs are materialised newest first within one 16 MiB
