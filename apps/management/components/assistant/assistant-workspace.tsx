@@ -2,6 +2,7 @@
 
 import type { QuestionPaperSeed } from '@campuspilot/assistant-contract/attachments';
 import type { AssistantConversationListItemDto } from '@campuspilot/assistant-contract/dto';
+import { APP_SHELL_FILL_HEIGHT_CLASS } from '@campuspilot/components/app-shell';
 import { Button } from '@campuspilot/ui/components/button';
 import { Skeleton } from '@campuspilot/ui/components/skeleton';
 import { cn } from '@campuspilot/ui/lib/utils';
@@ -227,7 +228,8 @@ export function AssistantWorkspace({
     // then says why it cannot send).
     <FeaturePage feature="assistant">
       <AssistantAccess schoolId={schoolId} fallback={unavailable} pending={checkingAccess}>
-      <div className="-m-4 flex h-[calc(100dvh-3.5rem)] min-h-0 flex-col sm:-m-6 md:h-[calc(100dvh-4.5rem)] md:flex-row lg:-m-8">
+      {/* Fills the window less the shell's header and its alert rows (such as the demo school notice), so the composer stays in view. */}
+      <div className={cn('-m-4 flex min-h-0 flex-col sm:-m-6 md:flex-row lg:-m-8', APP_SHELL_FILL_HEIGHT_CLASS)}>
         <ConversationList
           schoolId={schoolId}
           conversationId={conversationId}
