@@ -146,6 +146,7 @@ export function DocumentTemplates({ scope }: { scope: DocumentTemplateScope }) {
       schoolId={scope.schoolId}
       action={templateManageAction(scope.documentType)}
       fallback={<SavedTemplatePreview scope={scope} template={template} />}
+      pending={<SavedTemplatePreview scope={scope} template={template} />}
     >
       <TemplateEditor
         key={template.artifact.id}

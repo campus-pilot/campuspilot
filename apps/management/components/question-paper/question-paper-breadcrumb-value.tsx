@@ -15,6 +15,7 @@ export function QuestionPaperBreadcrumbValue({ scope }: { scope: QuestionPaperSc
         resource: { kind: 'class', schoolId: scope.schoolId, classId: scope.classId },
       }}
       fallback={<>Paper</>}
+      pending={<>Paper</>}
     >
       <PaperName scope={scope} />
     </RequirePermissions>

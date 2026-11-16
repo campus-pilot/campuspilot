@@ -36,5 +36,5 @@ export function AdmissionPhotoEditor({ schoolId, admission }: { schoolId: string
       } : undefined}
     />
   );
-  return <RequirePermissions permissions={{ action: SCHOOL_ACTIONS.UPDATE_ADMISSION, resource: { kind: 'school', schoolId } }} fallback={editor(false)}>{editor(true)}</RequirePermissions>;
+  return <RequirePermissions permissions={{ action: SCHOOL_ACTIONS.UPDATE_ADMISSION, resource: { kind: 'school', schoolId } }} fallback={editor(false)} pending={editor(false)}>{editor(true)}</RequirePermissions>;
 }

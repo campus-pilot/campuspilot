@@ -67,6 +67,7 @@ export function CreateAdmissionAction({ schoolId }: { schoolId: string }) {
           <RequirePermissions
             permissions={{ action: SCHOOL_ACTIONS.ISSUE_ADMISSION_CADET_PASSWORD, resource: { kind: 'school', schoolId } }}
             fallback={dialog(false)}
+            pending={dialog(false)}
           >
             {dialog(true)}
           </RequirePermissions>

@@ -53,6 +53,7 @@ export function sessionPageBreadcrumbs(
             resource: { kind: 'school', schoolId },
           }}
           fallback={<>Session</>}
+          pending={<>Session</>}
         >
           <SessionBreadcrumbValue schoolId={schoolId} sessionId={sessionId} />
         </RequirePermissions>

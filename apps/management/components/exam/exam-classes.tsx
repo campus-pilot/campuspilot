@@ -70,6 +70,7 @@ function ClassesPage({
                   SCHOOL_ACTIONS.READ_EXAM_RESULTS,
                 )}
                 fallback={<span>{row.original.label}</span>}
+                pending={<span>{row.original.label}</span>}
               >
                 <Link
                   className="flex flex-col justify-center font-medium hover:underline"

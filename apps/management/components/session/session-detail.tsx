@@ -132,6 +132,7 @@ export function SessionDetail({
         <RequirePermissions
           permissions={{ action: SCHOOL_ACTIONS.UPDATE_SESSION, resource }}
           fallback={readOnlySession}
+          pending={readOnlySession}
         >
           <SessionDetailsView
             session={session}
@@ -147,6 +148,7 @@ export function SessionDetail({
         <RequirePermissions
           permissions={{ action: SCHOOL_ACTIONS.ACTIVATE_SESSION, resource }}
           fallback={readOnlySession}
+          pending={readOnlySession}
         >
           <SessionDetailsView
             session={session}

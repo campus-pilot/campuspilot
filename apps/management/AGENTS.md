@@ -47,8 +47,13 @@ Pass the exact typed action and resource scope required by the corresponding
 backend operation. The `permissions` prop accepts either one permission object
 or an array of up to 100 permission objects; when an array is supplied, every
 permission must be allowed. Use `fallback` when the design calls for an
-alternative UI; otherwise rely on its default `null` fallback so pending,
-failed, and denied checks remain hidden.
+alternative UI; it is shown when the check answers no, and when the check
+failed with no answer held. While the check has no answer yet the gate shows
+`pending`, which defaults to nothing: never pass a refusal ("you do not have
+access") as `pending`, or it flashes before every page the member may open.
+When `fallback` is a read-only form of the same view rather than a refusal (a
+breadcrumb's plain label, a form without its edit controls), pass it as
+`pending` too, so the area does not blank while the check loads.
 
 `RequirePermissions` controls frontend visibility only. Every protected API
 operation must still enforce the same permission in backend middleware; never

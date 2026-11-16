@@ -405,12 +405,14 @@ function SchoolSettingsContent({ school }: { school: SchoolDetailsDto }) {
           <RequirePermissions
             permissions={{ action: SCHOOL_ACTIONS.UPDATE_LOGO, resource }}
             fallback={<SchoolAvatar school={school} className="size-28!" />}
+            pending={<SchoolAvatar school={school} className="size-28!" />}
           >
             <SchoolLogoEditor school={school} />
           </RequirePermissions>
           <RequirePermissions
             permissions={{ action: SCHOOL_ACTIONS.UPDATE_DETAILS, resource }}
             fallback={<SchoolDetailsPreview school={school} />}
+            pending={<SchoolDetailsPreview school={school} />}
           >
             <SchoolDetailsForm key={school.id} school={school} />
           </RequirePermissions>
