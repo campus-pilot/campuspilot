@@ -228,7 +228,7 @@ export function AssistantWorkspace({
     // then says why it cannot send).
     <FeaturePage feature="assistant">
       <AssistantAccess schoolId={schoolId} fallback={unavailable} pending={checkingAccess}>
-      {/* The shell's own fill height: it leaves room for the alert rows over the page (a demo school's banner), which a plain viewport sum does not. */}
+      {/* Fills the window less the shell's header and its alert rows (such as the demo school notice), so the composer stays in view. */}
       <div className={cn('-m-4 flex min-h-0 flex-col sm:-m-6 md:flex-row lg:-m-8', APP_SHELL_FILL_HEIGHT_CLASS)}>
         <ConversationList
           schoolId={schoolId}
