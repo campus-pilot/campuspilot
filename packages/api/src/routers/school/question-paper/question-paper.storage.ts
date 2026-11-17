@@ -17,14 +17,21 @@ import { log } from '../../../workflows/question-paper/log';
  * locks the paper: storage I/O never runs while the school's session row is
  * locked. Objects written before this scheme keep their stored
  * `.../{paperId}/...` keys; every delete goes by the key stored on the row.
+ *
+ * The derivatives an upload makes are `thumb.jpg` and `model.jpg`. Turning a
+ * page makes them again under new keys with a random `remake` token
+ * (`thumb-{token}.jpg`), written before the lock like an upload's: two turns
+ * of the same page racing each other then never write the same object, so the
+ * one the lock refuses deletes only its own objects, and the old ones are
+ * deleted only after the row stops naming them.
  */
 export const questionPaperKeys = {
   original: (schoolId: string, pageId: string, extension: string) =>
     `schools/${schoolId}/exam-question-papers/pages/${pageId}/original.${extension}`,
-  thumb: (schoolId: string, pageId: string) =>
-    `schools/${schoolId}/exam-question-papers/pages/${pageId}/thumb.jpg`,
-  model: (schoolId: string, pageId: string) =>
-    `schools/${schoolId}/exam-question-papers/pages/${pageId}/model.jpg`,
+  thumb: (schoolId: string, pageId: string, remake?: string) =>
+    `schools/${schoolId}/exam-question-papers/pages/${pageId}/thumb${remake ? `-${remake}` : ''}.jpg`,
+  model: (schoolId: string, pageId: string, remake?: string) =>
+    `schools/${schoolId}/exam-question-papers/pages/${pageId}/model${remake ? `-${remake}` : ''}.jpg`,
   figure: (schoolId: string, figureId: string, extension: string) =>
     `schools/${schoolId}/exam-question-papers/figures/${figureId}.${extension}`,
 } as const;

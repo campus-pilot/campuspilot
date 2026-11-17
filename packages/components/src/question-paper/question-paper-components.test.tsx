@@ -25,7 +25,7 @@ describe('AiBadge', () => {
 });
 
 describe('PaperSourceTray', () => {
-  const tray = { thumbUrl: (id: string) => `/thumb/${id}`, emptyTitle: 'Add the paper', emptyHint: 'Photos of its pages, or a PDF', onAdd: () => {}, onOpen: () => {}, onReorder: () => {}, onDelete: () => {}, onDismissUpload: () => {} };
+  const tray = { thumbUrl: (page: PageThumbnailView) => `/thumb/${page.id}`, emptyTitle: 'Add the paper', emptyHint: 'Photos of its pages, or a PDF', onAdd: () => {}, onOpen: () => {}, onReorder: () => {}, onDelete: () => {}, onDismissUpload: () => {} };
 
   it('with nothing in it is the add tile beside what belongs here and the other ways in', () => {
     const onAdd = vi.fn();

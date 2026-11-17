@@ -51,6 +51,47 @@ describe('makeImageDerivatives', () => {
     expect(await sharp(result.model.bytes).metadata()).toMatchObject({ width: 200, height: 400 });
   });
 
+  it('turns both derivatives clockwise after EXIF orientation and reports the turned size', async () => {
+    // Stored 400x200 with orientation 6: it displays 200x400, and the stored left half (red) displays as the top half.
+    const redLeft = await sharp({ create: { width: 200, height: 200, channels: 3, background: '#f00' } }).png().toBuffer();
+    const photo = await sharp({ create: { width: 400, height: 200, channels: 3, background: '#00f' } })
+      .composite([{ input: redLeft, left: 0, top: 0 }])
+      .jpeg()
+      .withMetadata({ orientation: 6 })
+      .toBuffer();
+    /** Whether the pixel near a corner of an image is red (the rest is blue). */
+    const redAt = async (bytes: Buffer, corner: 'top-left' | 'top-right') => {
+      const { data, info } = await sharp(bytes).raw().toBuffer({ resolveWithObject: true });
+      const x = corner === 'top-left' ? 2 : info.width - 3;
+      const offset = (2 * info.width + x) * info.channels;
+      return data[offset]! > 128 && data[offset + 2]! < 128;
+    };
+    const expected = {
+      0: { width: 200, height: 400, topLeft: true, topRight: true },
+      90: { width: 400, height: 200, topLeft: false, topRight: true },
+      180: { width: 200, height: 400, topLeft: false, topRight: false },
+      270: { width: 400, height: 200, topLeft: true, topRight: false },
+    } as const;
+    for (const rotation of [0, 90, 180, 270] as const) {
+      const result = await makeImageDerivatives(photo, 'image/jpeg', { rotation });
+      if (result.status !== 'ready') throw new Error('expected ready');
+      const { width, height, topLeft, topRight } = expected[rotation];
+      expect(result, `rotation ${rotation}`).toMatchObject({ width, height });
+      expect(await sharp(result.model.bytes).metadata(), `rotation ${rotation}`).toMatchObject({ width, height });
+      const thumb = await sharp(result.thumb.bytes).metadata();
+      expect(thumb.width! > thumb.height!, `rotation ${rotation}`).toBe(width > height);
+      expect([await redAt(result.model.bytes, 'top-left'), await redAt(result.model.bytes, 'top-right')], `rotation ${rotation}`).toEqual([topLeft, topRight]);
+    }
+    // The input is never changed: the caller keeps the original as it was uploaded.
+    expect((await sharp(photo).metadata()).orientation).toBe(6);
+  });
+
+  it('reports an undecodable HEIC as unsupported at its header size whatever turn was asked for', async () => {
+    const result = await makeImageDerivatives(HEVC_STILL, 'image/heic', { rotation: 90 });
+    expect(result.status).toBe('unsupported');
+    expect(result).toMatchObject({ width: 64, height: 48 });
+  });
+
   it('flattens transparency onto white', async () => {
     const png = await sharp({ create: { width: 20, height: 20, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } }).png().toBuffer();
     const result = await makeImageDerivatives(png, 'image/png');

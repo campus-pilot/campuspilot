@@ -27,6 +27,7 @@ import {
   currentJobFailure,
   hasStudioOf,
   NEW_CHAT_PARAM,
+  compareAsked,
   paperChatOf,
   inFlightJob,
   questionPaperPermission,
@@ -54,7 +55,8 @@ import {
  * nothing yet asks how to begin (`QuestionPaperStart`); once it has a version,
  * a generation at work or a conversation it is the studio, the paper beside
  * its assistant (`QuestionPaperStudio`). What is shown lives in the URL (the
- * way of starting, the version, the conversation), so a reload or a shared
+ * way of starting, the version, the conversation, the comparison with the
+ * photos), so a reload or a shared
  * link lands in the same place. Breadcrumbs give the way back; there is no
  * feature-level back button.
  */
@@ -287,9 +289,13 @@ function PaperLayout({ scope, detail, canManage }: { scope: QuestionPaperScope; 
   const generating = inFlightJob(detail.activeJob) !== null;
   const view = resolveView({ start: search.get('start'), hasVersion, generating, hasChat: chatId !== null });
   const hasStudio = hasStudioOf({ hasVersion, generating, chatId, latestConversationId: detail.latestConversationId });
-  /** What the screen shows lives in the address. Opening the first screen or its picker is a step the Back button undoes; the rest replaces. */
+  const compare = compareAsked(search.get('compare'));
+  /**
+   * What the screen shows lives in the address. Opening the first screen or its picker is a step the Back button undoes; the rest replaces.
+   * The comparison with the photos stays as it is across all of them (also through the photos card and back), until its toggle changes it.
+   */
   const show = (query: Parameters<typeof questionPaperWorkspaceHref>[1], how: 'push' | 'replace' = 'replace') =>
-    router[how](questionPaperWorkspaceHref(scope, query), { scroll: false });
+    router[how](questionPaperWorkspaceHref(scope, { compare, ...query }), { scroll: false });
   const openStudio = (query: { version?: number; chat?: string } = {}) => show({ chat: query.chat ?? chatId ?? undefined, version: query.version });
   const start = (next: QuestionPaperStartKind) => show({ start: next, chat: chatId ?? undefined }, 'push');
   /** Closing the picker returns to the first screen: named in the address only where the paper would otherwise show its studio. */
@@ -310,12 +316,16 @@ function PaperLayout({ scope, detail, canManage }: { scope: QuestionPaperScope; 
           canManage={canManage}
           chatId={chatId}
           versionParam={search.get('version')}
+          compare={compare}
+          uploads={uploads}
           heading={heading}
           menu={menu}
           notice={notice}
           onVersion={(version) => show({ chat: chatId ?? undefined, version: version ?? undefined })}
           // A new conversation is named in the address, or the paper's latest one would take its place.
           onChat={(chat) => show({ chat: chat ?? NEW_CHAT_PARAM, version: Number(search.get('version')) || undefined })}
+          // Only the comparison changes: the version and the conversation stay exactly as the address names them.
+          onCompare={(on) => show({ chat: search.get('chat') ?? undefined, version: Number(search.get('version')) || undefined, compare: on })}
           onOpenPhotos={() => start('sources')}
           // The photos are worth a button when there are some, or when this user may add them to a paper that can change.
           onOpenSources={detail.paper.pageCount > 0 || (canManage && !isPaperLocked(detail.paper)) ? () => start('sources') : null}

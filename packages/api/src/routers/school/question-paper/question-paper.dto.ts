@@ -1,4 +1,5 @@
 import { QUESTION_PAPER_LIMITS } from '@campuspilot/question-paper/limits';
+import { QUESTION_PAPER_PAGE_ROTATIONS } from '@campuspilot/question-paper/pages';
 import { z } from 'zod';
 
 /** The most pages (uploaded photos) one paper may hold (R3). */
@@ -213,6 +214,17 @@ export const deletePageInputSchema = paperKeySchema.extend({
   pageId: id,
   expectedPageRevision: z.number().int().min(0),
 });
+/**
+ * Turning a page sends the rotation it should have (absolute, like a reorder
+ * sends the whole new order), checked against the revision the caller saw.
+ */
+export const rotatePageInputSchema = paperKeySchema.extend({
+  pageId: id,
+  rotation: z
+    .literal(QUESTION_PAPER_PAGE_ROTATIONS)
+    .describe('Clockwise degrees the page is turned on top of the photo\'s own (EXIF) orientation: 0, 90, 180 or 270.'),
+  expectedPageRevision: z.number().int().min(0),
+});
 export const previewDraftInputSchema = paperKeySchema.extend({ html: paperHtmlInput, conversationId: draftChatInput });
 
 /** What the sanitiser removed or changed when a version was saved. A notice, not an error. */
@@ -231,6 +243,10 @@ export const pageDtoSchema = z.object({
   width: z.number().int().nullable(),
   height: z.number().int().nullable(),
   derivativeStatus: z.enum(['ready', 'unsupported']),
+  /** Clockwise quarter turns a person applied on top of the photo's EXIF orientation; the derivatives and the size follow it. */
+  rotation: z.literal(QUESTION_PAPER_PAGE_ROTATIONS),
+  /** Changes whenever the thumbnail and model copy are made again; the page image URLs carry it so a cached image is never shown. */
+  derivativeRevision: z.number().int(),
 });
 
 const jobSchema = z.object({
@@ -447,6 +463,7 @@ export const listCopySourcesOutputSchema = z.object({
 export const startGenerationOutputSchema = z.object({ jobId: z.string(), status: z.literal('queued') });
 export const reorderPagesOutputSchema = z.object({ pageRevision: z.number().int() });
 export const deletePageOutputSchema = z.object({ pageRevision: z.number().int() });
+export const rotatePageOutputSchema = z.object({ page: pageDtoSchema, pageRevision: z.number().int() });
 export const deletePaperOutputSchema = z.object({ deleted: z.literal(true) });
 
 export const previewOutputSchema = z.object({

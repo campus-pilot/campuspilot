@@ -221,12 +221,14 @@ export const questionPaperHref = (scope: ExamScope) => `${examHref(scope, scope.
  */
 export const questionPaperWorkspaceHref = (
   scope: ExamScope & { classId: string; subjectSlug: string; modeSlug: string },
-  query?: { start?: 'sources' | 'earlier'; version?: number; chat?: string },
+  query?: { start?: 'sources' | 'earlier'; version?: number; chat?: string; compare?: boolean },
 ) => {
   const params = new URLSearchParams();
   if (query?.start) params.set('start', query.start);
   if (query?.version) params.set('version', String(query.version));
   if (query?.chat) params.set('chat', query.chat);
+  // The paper beside its photos (`compareAsked`); off is said by leaving it out.
+  if (query?.compare) params.set('compare', '1');
   const search = params.toString();
   const suffix = search ? `?${search}` : '';
   return `${questionPaperHref(scope)}/${encodeURIComponent(scope.classId)}/${encodeURIComponent(scope.subjectSlug)}/${encodeURIComponent(scope.modeSlug)}${suffix}`;
