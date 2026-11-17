@@ -6,7 +6,14 @@ the redesign decisions and the earlier approaches they replaced.
 
 The management flow is exam → class/section roster → student → every subject.
 Exams come from session settings. A dashed empty state opens a concise plan-review
-dialog with classes, student counts, subjects and modes. Each class row expands
+dialog with classes, student counts, subjects and modes, and a checkbox per class
+choosing whether it takes part (all classes with subjects selected by default,
+Select all / Deselect all, at least one required; a class without subjects is
+shown but cannot be chosen). Settings has a "Classes taking part" section whose
+Edit classes dialog (exam plan update permission, until the exam is completed or
+released) reuses the same table, marks each change as Added or Removed and saves
+the complete list with `updateExamClasses`; the server's refusal reasons
+(results, timetable, question papers, stale review) are shown in the dialog. Each class row expands
 its subject/mode breakdown in a sub-table; there is no separate accordion. Automatic generation
 creates draft snapshots and a Not started examination; no per-subject approval step
 exists. Starting is a separate school-admin action. Classes and rosters use the app's shared DataTable and full workspace width.
