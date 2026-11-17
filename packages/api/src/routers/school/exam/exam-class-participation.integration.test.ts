@@ -129,6 +129,15 @@ describe('exam class participation', () => {
       expect(after.configurationVersion).not.toBe(preview.configurationVersion);
     });
 
+    it('without classIds includes every class that has subjects, leaving out the class without subjects', async () => {
+      const preview = await principal.school.getExamPlanPreview(scope);
+      expect(
+        await principal.school.generateExamPlan({ ...scope, configurationVersion: preview.configurationVersion }),
+      ).toEqual({ createdCount: 3 });
+      expect(await participants()).toEqual([class6.classId, class7.classId].sort());
+      expect((await planRows()).map((plan) => plan.classId)).not.toContain(emptyClassId);
+    });
+
     it('refuses zero classes, a class without subjects and a class of another school without writing anything', async () => {
       const preview = await principal.school.getExamPlanPreview(scope);
       const base = { ...scope, configurationVersion: preview.configurationVersion };

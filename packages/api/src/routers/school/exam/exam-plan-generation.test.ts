@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   assertCreatableExamPlan,
+  resolveExamPlanClassIds,
   selectExamClassPlans,
   type prepareExamPlan,
 } from './exam-plan-generation';
@@ -151,6 +152,44 @@ describe('assertCreatableExamPlan', () => {
     );
   });
 
+  it('includes every class that has subjects when classIds is omitted', () => {
+    const valid = prepared();
+    valid.preview.classes = valid.preview.classes.filter(
+      (entry) => entry.classId !== 'class-3',
+    );
+    expect(assertCreatableExamPlan(valid, 'version-1', undefined)).toEqual([
+      expect.objectContaining({ classId: 'class-1', subjectSlug: 'mathematics' }),
+    ]);
+  });
+
+  it('refuses an invalid subject of any class with subjects when classIds is omitted, as before exclusion existed', () => {
+    expect(() =>
+      assertCreatableExamPlan(prepared(), 'version-1', undefined),
+    ).toThrowError(
+      expect.objectContaining({
+        code: 'BAD_REQUEST',
+        message: 'Grade 12 · Science: Percentages must total 100%.',
+      }),
+    );
+  });
+
+  it('asks for subjects, not a class, when classIds is omitted and no class has subjects', () => {
+    const empty = prepared({ includePlan: false });
+    empty.preview.classes = empty.preview.classes.map((entry) => ({
+      ...entry,
+      subjects: [],
+    }));
+    expect(() =>
+      assertCreatableExamPlan(empty, 'version-1', undefined),
+    ).toThrowError(
+      expect.objectContaining({
+        code: 'BAD_REQUEST',
+        message:
+          'Configure at least one class subject and its assessment modes before creating an exam plan.',
+      }),
+    );
+  });
+
   it('rejects a configuration that produces no plans', () => {
     expect(() =>
       assertCreatableExamPlan(
@@ -165,6 +204,19 @@ describe('assertCreatableExamPlan', () => {
           'Configure at least one class subject and its assessment modes before creating an exam plan.',
       }),
     );
+  });
+});
+
+describe('resolveExamPlanClassIds', () => {
+  it('keeps the caller list when one is sent', () => {
+    expect(resolveExamPlanClassIds(prepared(), ['class-1'])).toEqual(['class-1']);
+  });
+
+  it('defaults to every class that has subjects', () => {
+    expect(resolveExamPlanClassIds(prepared(), undefined)).toEqual([
+      'class-1',
+      'class-3',
+    ]);
   });
 });
 

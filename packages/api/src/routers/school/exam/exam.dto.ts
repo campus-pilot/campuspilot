@@ -284,7 +284,8 @@ export const examPlanPreviewSchema = z.object({
 });
 /**
  * The classes chosen to take part in an examination: at least one, each once.
- * Sent explicitly by the caller; the server never defaults to every class.
+ * `updateExamClasses` always needs the complete list; `generateExamPlan`
+ * accepts it optionally (see `generateExamPlanInputSchema`).
  */
 export const examClassSelectionSchema = z
   .array(z.string().min(1))
@@ -294,9 +295,20 @@ export const examClassSelectionSchema = z
   .describe(
     'IDs of the classes taking part in the examination, from getExamPlanPreview; at least one.',
   );
+/**
+ * `classIds` is optional so existing API and MCP callers keep working: left
+ * out, every class that can take part (`selectableExamClassIds`) is included,
+ * which creates the same plans as before classes could be excluded. When it is
+ * sent, only those classes take part; an empty list is refused rather than
+ * read as "all".
+ */
 export const generateExamPlanInputSchema = examScopeSchema.extend({
   configurationVersion: examPlanPreviewSchema.shape.configurationVersion,
-  classIds: examClassSelectionSchema,
+  classIds: examClassSelectionSchema
+    .optional()
+    .describe(
+      'IDs of the classes taking part, from getExamPlanPreview. Omit to include every class that has subjects; when sent, at least one.',
+    ),
 });
 export const generateExamPlanOutputSchema = z.object({
   createdCount: z.number().int().positive(),

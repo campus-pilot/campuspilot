@@ -29,6 +29,7 @@ import { deleteObjectsBestEffort } from '../question-paper/question-paper.storag
 import {
   prepareExamPlan,
   assertCreatableExamPlan,
+  resolveExamPlanClassIds,
 } from './exam-plan-generation';
 import {
   includeExamClass,
@@ -66,7 +67,7 @@ export const schoolExamPlanRouter = {
     .route(
       route(
         'Generate an exam plan from class configuration',
-        'Atomically record the selected classes as taking part and create a ready-to-start plan for each of their configured subjects using its assessment modes and 100 total marks. At least one class is required; a selected class needs subjects with valid modes. Reject existing plans or a changed preview. Timetable creation is a separate step.',
+        'Atomically record the selected classes as taking part and create a ready-to-start plan for each of their configured subjects using its assessment modes and 100 total marks. Omit classIds to include every class that has subjects; when sent, at least one class is required. A selected class needs subjects with valid modes. Reject existing plans or a changed preview. Timetable creation is a separate step.',
       ),
     )
     .meta({
@@ -93,7 +94,7 @@ export const schoolExamPlanRouter = {
           await recordGeneratedExamClasses(
             tx,
             input,
-            input.classIds,
+            resolveExamPlanClassIds(prepared, input.classIds),
             new Map(
               prepared.preview.classes.map((entry) => [
                 entry.classId,

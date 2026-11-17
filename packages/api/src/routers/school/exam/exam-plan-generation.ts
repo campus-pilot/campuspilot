@@ -7,6 +7,7 @@ import { examClassTable, examPlanTable } from '@campuspilot/db/schema/exam';
 import { and, asc, count, eq } from 'drizzle-orm';
 import { rpcError, toRpcError } from '../../../errors';
 import { getExam, resolveModeConfig, type ExamScope } from './exam.service';
+import { selectableExamClassIds } from './exam.dto';
 
 /** Preview, creation and later class changes share one derivation. Class
  * configuration defines each class's subject plans; creation never accepts
@@ -173,14 +174,28 @@ export function selectExamClassPlans(
 }
 
 /**
+ * The classes a plan generation covers: the caller's list when it sent one,
+ * otherwise every class of this review that can take part. Resolved from the
+ * same review the configuration version is checked against.
+ */
+export function resolveExamPlanClassIds(
+  prepared: PreparedExamPlan,
+  classIds: readonly string[] | undefined,
+): string[] {
+  return classIds ? [...classIds] : selectableExamClassIds(prepared.preview);
+}
+
+/**
  * Checks that the initial plan can be created from this review for the chosen
  * classes and returns their subject plans. Existing plans are never
  * overwritten, and a stale review is refused before the selection is judged.
+ * Without `classIds`, every class that can take part is chosen; a school with
+ * none then gets the "configure subjects" refusal, not "select a class".
  */
 export function assertCreatableExamPlan(
   prepared: PreparedExamPlan,
   version: string,
-  classIds: readonly string[],
+  classIds: readonly string[] | undefined,
 ): ExamPlanInsert[] {
   if (prepared.preview.existingPlanCount > 0)
     throw rpcError.conflict(
@@ -190,11 +205,14 @@ export function assertCreatableExamPlan(
     throw rpcError.conflict(
       'Class or subject configuration has changed. Review the updated plan overview before creating it.',
     );
-  if (!classIds.length)
+  if (classIds && !classIds.length)
     throw rpcError.badRequest(
       'Select at least one class to take part in the examination.',
     );
-  const plans = selectExamClassPlans(prepared, classIds);
+  const plans = selectExamClassPlans(
+    prepared,
+    resolveExamPlanClassIds(prepared, classIds),
+  );
   if (!plans.length)
     throw rpcError.badRequest(
       'Configure at least one class subject and its assessment modes before creating an exam plan.',

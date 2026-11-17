@@ -36,9 +36,10 @@ legacy plan was deleted).
   plans) that is not chosen stops taking part, under the same refusals as
   removing it with `updateExamClasses`; a chosen one is kept. An empty list, a class of another school and a chosen class without
   subjects are BAD_REQUEST; an invalid subject blocks only when its class is
-  chosen. Choosing every class that has subjects (`selectableExamClassIds`)
-  creates exactly the plans generation created before classes could be
-  excluded.
+  chosen. `classIds` is optional: left out, every class that has subjects
+  (`selectableExamClassIds`) is chosen, which creates exactly the plans
+  generation created before classes could be excluded, so existing API and MCP
+  callers keep working. An explicit empty list is refused, never read as "all".
 - `updateExamClasses({ configurationVersion, classIds })` (exam plan update
   permission) sets the complete list later, under the exclusive session lock.
   The review hash covers participation, so a concurrent change is a CONFLICT.
@@ -81,8 +82,8 @@ legacy plan was deleted).
 1. Configure exam definitions in session settings. `getExamPlanPreview` returns
    classes, registered enrollment counts, subjects, assessment modes, whether
    each class takes part (`participating`) and a configuration hash.
-   `generateExamPlan` takes the reviewed hash and the explicit `classIds` taking
-   part (at least one; see "Classes taking part") and atomically creates draft
+   `generateExamPlan` takes the reviewed hash and, optionally, the `classIds` taking
+   part (default every class with subjects; see "Classes taking part") and atomically creates draft
    planning snapshots for them and an explicit **ready** examination from
    that review. There is no per-subject approval prerequisite. A school principal,
    manager or exam coordinator must manually start it through `transitionExam`
