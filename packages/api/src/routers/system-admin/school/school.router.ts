@@ -1,6 +1,6 @@
 import { schoolTable } from "@campuspilot/db/schema/school";
 import { SYSTEM_ACTIONS } from "@campuspilot/opa/policies/system";
-import { and, asc, count, desc, eq, ilike, or } from "drizzle-orm";
+import { and, asc, count, desc, eq, ilike, isNotNull, isNull, or } from "drizzle-orm";
 
 import { toRpcError, rpcError } from "../../../errors";
 import { protectedProcedure } from "../../../index";
@@ -16,6 +16,7 @@ import {
   listSchoolsOutputSchema,
   schoolDtoSchema,
   schoolIdInputSchema,
+  suspendSchoolInputSchema,
   toSchoolDto,
   updateSchoolInputSchema,
 } from "./school.dto";
@@ -25,7 +26,7 @@ export const schoolRouter = {
     .route({
       summary: "List schools",
       description:
-        "List schools across the platform with pagination, text search, onboarding-status filtering, and deterministic sorting. Requires system-administrator permission.",
+        "List schools across the platform with pagination, text search, filtering by onboarding status, subscription tier (null: schools without one) and suspension, and deterministic sorting. Requires system-administrator permission.",
       tags: ["System Admin", "Schools"],
     })
     .meta({
@@ -57,7 +58,19 @@ export const schoolRouter = {
                 schoolTable.hasCompletedOnboarding,
                 input.filters.hasCompletedOnboarding,
               );
-        const where = and(searchCondition, onboardingCondition);
+        const tierCondition =
+          input.filters?.tier === undefined
+            ? undefined
+            : input.filters.tier === null
+              ? isNull(schoolTable.tier)
+              : eq(schoolTable.tier, input.filters.tier);
+        const suspendedCondition =
+          input.filters?.suspended === undefined
+            ? undefined
+            : input.filters.suspended
+              ? isNotNull(schoolTable.suspendedAt)
+              : isNull(schoolTable.suspendedAt);
+        const where = and(searchCondition, onboardingCondition, tierCondition, suspendedCondition);
         const orderByColumn = {
           name: schoolTable.name,
           location: schoolTable.location,
@@ -128,7 +141,7 @@ export const schoolRouter = {
     .route({
       summary: "Create a school",
       description:
-        "Create a new school with its identity, location, registration, and optional logo-key data. Requires system-administrator permission.",
+        "Create a new school with its identity, location, registration, subscription tier (plus, pro or enterprise) and optional logo-key data. Requires system-administrator permission.",
       tags: ["System Admin", "Schools"],
     })
     .meta({
@@ -177,6 +190,88 @@ export const schoolRouter = {
           .update(schoolTable)
           .set({ ...changes, updatedAt: new Date() })
           .where(eq(schoolTable.id, id))
+          .returning();
+        if (!school) throw rpcError.notFound("School");
+        return toSchoolDto(school);
+      } catch (error) {
+        throw toRpcError(error);
+      }
+    }),
+
+  suspendSchool: protectedProcedure
+    .route({
+      summary: "Suspend a school",
+      description:
+        "Suspend a school that misuses the platform, with the reason. A suspended school is read-only: its staff and students can still sign in and view everything, but every change is refused, in the management app, the Cadet Portal, the AI assistant and connected AI apps, and they are told to contact support. Nothing is deleted. Suspending an already suspended school replaces the reason. Requires system-administrator permission.",
+      tags: ["System Admin", "Schools"],
+    })
+    // Hidden from MCP: taking a school's ability to work away is a human
+    // platform decision, made in the admin app.
+    .meta({
+      mcp: {
+        exposure: "hidden",
+        access: "write",
+        destructive: true,
+        module: "platform",
+      },
+    })
+    .input(suspendSchoolInputSchema)
+    .use(requireSystemPermission(SYSTEM_ACTIONS.UPDATE_SCHOOL))
+    .output(schoolDtoSchema)
+    .handler(async ({ context, input }) => {
+      try {
+        return await context.db.transaction(async (transaction) => {
+          const [current] = await transaction
+            .select({ suspendedAt: schoolTable.suspendedAt })
+            .from(schoolTable)
+            .where(eq(schoolTable.id, input.id))
+            .limit(1)
+            .for("update");
+          if (!current) throw rpcError.notFound("School");
+          const now = new Date();
+          const [school] = await transaction
+            .update(schoolTable)
+            .set({
+              // The moment it was first suspended is kept when only the reason changes.
+              suspendedAt: current.suspendedAt ?? now,
+              suspendedReason: input.reason,
+              suspendedBy: context.session.user.id,
+              updatedAt: now,
+            })
+            .where(eq(schoolTable.id, input.id))
+            .returning();
+          if (!school) throw rpcError.notFound("School");
+          return toSchoolDto(school);
+        });
+      } catch (error) {
+        throw toRpcError(error);
+      }
+    }),
+
+  unsuspendSchool: protectedProcedure
+    .route({
+      summary: "Lift a school's suspension",
+      description:
+        "Lift the suspension of a school: its staff and students can change things again at once. Does nothing to a school that is not suspended. Requires system-administrator permission.",
+      tags: ["System Admin", "Schools"],
+    })
+    .meta({
+      mcp: {
+        exposure: "hidden",
+        access: "write",
+        destructive: false,
+        module: "platform",
+      },
+    })
+    .input(schoolIdInputSchema)
+    .use(requireSystemPermission(SYSTEM_ACTIONS.UPDATE_SCHOOL))
+    .output(schoolDtoSchema)
+    .handler(async ({ context, input }) => {
+      try {
+        const [school] = await context.db
+          .update(schoolTable)
+          .set({ suspendedAt: null, suspendedReason: null, suspendedBy: null, updatedAt: new Date() })
+          .where(eq(schoolTable.id, input.id))
           .returning();
         if (!school) throw rpcError.notFound("School");
         return toSchoolDto(school);

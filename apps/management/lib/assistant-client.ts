@@ -2,10 +2,12 @@
 
 import type { AssistantContract } from '@campuspilot/assistant-contract/contract';
 import { env } from '@campuspilot/env/management.client';
-import { createORPCClient } from '@orpc/client';
+import { createORPCClient, onError } from '@orpc/client';
 import { RPCLink } from '@orpc/client/fetch';
 import type { ContractRouterClient } from '@orpc/contract';
 import { createTanstackQueryUtils } from '@orpc/tanstack-query';
+
+import { notifyIfSchoolSuspended } from './orpc';
 
 export type AssistantClient = ContractRouterClient<AssistantContract>;
 
@@ -22,6 +24,8 @@ export const assistantClient: AssistantClient = createORPCClient(
     fetch(url, options) {
       return fetch(url, { ...options, credentials: 'include' });
     },
+    // A message refused because the school is suspended refreshes the school list, as for every other call.
+    interceptors: [onError(notifyIfSchoolSuspended)],
   }),
 );
 

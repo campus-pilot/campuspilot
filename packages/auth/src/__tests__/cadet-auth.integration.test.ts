@@ -93,13 +93,10 @@ async function createAdmissionWithLogin(options: { registered?: boolean } = {}) 
   const slug = `cadet-${randomUUID().slice(0, 8)}`;
   const [school] = await db
     .insert(schoolTable)
-    .values({ slug, name: `School ${slug}`, location: 'Town' })
+    // These suites test the portal of a school that has the Cadet Portal:
+    // the Enterprise tier includes it (and student management, which it needs).
+    .values({ slug, name: `School ${slug}`, location: 'Town', tier: 'enterprise' })
     .returning();
-  // A new school has no platform feature; these suites test the portal of
-  // a school that has the Cadet Portal.
-  await db
-    .insert(schoolFeatureFlagTable)
-    .values({ schoolId: school!.id, feature: 'cadet', enabled: true });
   const admissionNo = `ADM-${randomUUID().slice(0, 6)}`;
   const [admission] = await db
     .insert(admissionTable)
@@ -221,11 +218,13 @@ describe('cadet admission sign-in', () => {
   it('treats a school without the cadet feature like an unknown school, even with the right password', async () => {
     const { school, admission, password } = await createAdmissionWithLogin();
     const credentials = { schoolSlug: school.slug, admissionNo: admission.admissionNo, password };
+    // The school's adjustment to its tier (Enterprise, which includes the
+    // portal): false switches it off for this school, true switches it on.
     const setCadetFeature = (enabled: boolean) =>
       db
-        .update(schoolFeatureFlagTable)
-        .set({ enabled })
-        .where(eq(schoolFeatureFlagTable.schoolId, school.id));
+        .insert(schoolFeatureFlagTable)
+        .values({ schoolId: school.id, feature: 'cadet', enabled })
+        .onConflictDoUpdate({ target: [schoolFeatureFlagTable.schoolId, schoolFeatureFlagTable.feature], set: { enabled } });
 
     await setCadetFeature(false);
     // More attempts than the per-admission limit: a disabled school's
@@ -241,11 +240,25 @@ describe('cadet admission sign-in', () => {
     await setCadetFeature(true);
     expect((await signIn(credentials)).status).toBe(200);
 
-    // A school that never had a flag row is disabled too (missing row = off).
+    // Without a row the school follows its tier: Enterprise includes the portal.
     await db.delete(schoolFeatureFlagTable).where(eq(schoolFeatureFlagTable.schoolId, school.id));
-    const missing = await signIn(credentials);
-    expect(missing.status).toBe(401);
-    expect(((await missing.json()) as { code: string }).code).toBe('INVALID_CADET_CREDENTIALS');
+    expect((await signIn(credentials)).status).toBe(200);
+
+    // A tier without the portal is disabled too, with no row at all: Pro has
+    // student management but not the Cadet Portal, Plus has neither.
+    for (const tier of ['pro', 'plus'] as const) {
+      await db.update(schoolTable).set({ tier }).where(eq(schoolTable.id, school.id));
+      const missing = await signIn(credentials);
+      expect(missing.status).toBe(401);
+      expect(((await missing.json()) as { code: string }).code).toBe('INVALID_CADET_CREDENTIALS');
+    }
+
+    // Switched on for this one school on top of its tier, it works; on Plus it
+    // still does not, because the portal needs student management.
+    await setCadetFeature(true);
+    expect((await signIn(credentials)).status).toBe(401);
+    await db.update(schoolTable).set({ tier: 'pro' }).where(eq(schoolTable.id, school.id));
+    expect((await signIn(credentials)).status).toBe(200);
   });
 
   it('locks an admission after repeated failures, even for the right password', async () => {

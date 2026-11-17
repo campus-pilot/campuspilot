@@ -8,9 +8,11 @@ import {
   missingSchoolFeatureRequirements,
   schoolFeatureCatalogue,
   schoolFeatureEntries,
+  schoolTierCatalogue,
   type SchoolFeatureConfig,
   type SchoolFeatureEntry,
   type SchoolFeatureKey,
+  type SchoolTier,
 } from '@campuspilot/api/routers/school/feature-flags/feature-flags.dto';
 import { ConfirmationDialog } from '@campuspilot/components/confirmation-dialog';
 import { resolveQueryBoundary } from '@campuspilot/components/query-boundary';
@@ -24,11 +26,13 @@ import {
   CardTitle,
 } from '@campuspilot/ui/components/card';
 import { Label } from '@campuspilot/ui/components/label';
-import { Switch } from '@campuspilot/ui/components/switch';
+import { RadioGroup, RadioGroupItem } from '@campuspilot/ui/components/radio-group';
 import { toast } from '@campuspilot/ui/lib/toast';
 import { LoaderCircle } from 'lucide-react';
 import Link from 'next/link';
 import { client, orpc } from '@/lib/orpc';
+import { DISABLE_WARNINGS } from './school-feature-warnings';
+import { SchoolTierCard } from './school-tier-card';
 
 /** The features whose catalogue config is not `z.null()`, i.e. that have settings to edit. */
 type FeaturesWithSettings = {
@@ -39,7 +43,7 @@ type FeaturesWithSettings = {
  * Where each feature with settings is edited. Its settings and its on/off
  * switch belong together on that page (switching it on needs settings), so
  * this editor shows such a feature's state and links there instead of
- * offering a switch. Compile-time guard: the record is exhaustive over the
+ * offering a choice. Compile-time guard: the record is exhaustive over the
  * features with settings, so a catalogue entry that gains a config schema
  * does not compile until it names its settings page (or this editor grows a
  * config control for it; see docs/feature-flags.md).
@@ -48,28 +52,29 @@ const SETTINGS_PAGES: Record<FeaturesWithSettings, { label: string; href: (schoo
   assistant: { label: 'Open AI settings', href: (schoolId) => `/school/${schoolId}/usage/ai` },
 };
 
-/** The settings page of a feature edited on its own page, or null for a switch-only feature. */
+/** The settings page of a feature edited on its own page, or null for a feature without settings. */
 function settingsPageOf(feature: SchoolFeatureKey) {
   return feature in SETTINGS_PAGES ? SETTINGS_PAGES[feature as FeaturesWithSettings] : null;
 }
 
 /**
- * What switching a feature off does, shown before the change is saved (here,
- * or on the feature's own settings page). Exhaustive, so every new feature
- * states its consequence.
+ * The three things an administrator can say about one feature of one
+ * school, and the adjustment each one stores (`enabled` of the update):
+ * follow the school's tier (null), on whatever the tier (true), off
+ * whatever the tier (false).
  */
-export const DISABLE_WARNINGS: Record<SchoolFeatureKey, string> = {
-  studentManagement:
-    'Staff of this school can no longer open admissions, students, fees and billing, examination results, timetables and attendance, or student documents, and the AI assistant and connected AI apps lose their tools for them. The Cadet Portal and Notices switch off with it. No new bill, payment, result or timetable notification goes out. Classes, sections, subjects, staff, examinations and question papers keep working. All records are kept and come back when it is enabled again.',
-  cadet:
-    'Students of this school can no longer sign in or use the Cadet Portal, including connected AI apps. Staff can no longer issue portal passwords, release exam results to the portal, or save or publish a notice addressed to students. Logins, released results and notices are kept.',
-  notices:
-    'Staff of this school can no longer open, write or publish notices, or edit the Notice template. Students no longer see notices in the Cadet Portal, and notice notifications that have not gone out yet are not sent. Existing notices are kept.',
-  assistant:
-    'Staff of this school no longer see the AI assistant or their assistant conversations. A turn in progress is refused at its next model request; a turn waiting for approval stays paused until the assistant is enabled again. Conversations, usage and costs are kept and come back when the assistant is enabled again.',
-};
+const ADJUSTMENT_CHOICES = ['tier', 'on', 'off'] as const;
+type AdjustmentChoice = (typeof ADJUSTMENT_CHOICES)[number];
 
-const featureFormSchema = z.object({ enabled: z.boolean() });
+const ADJUSTMENT_OF: Record<AdjustmentChoice, boolean | null> = { tier: null, on: true, off: false };
+
+const choiceOf = (adjustment: boolean | null): AdjustmentChoice =>
+  adjustment === null ? 'tier' : adjustment ? 'on' : 'off';
+
+/** The feature's switch a choice results in: the adjustment, or what the tier includes without one. */
+const switchOf = (choice: AdjustmentChoice, included: boolean) => ADJUSTMENT_OF[choice] ?? included;
+
+const featureFormSchema = z.object({ choice: z.enum(ADJUSTMENT_CHOICES) });
 
 function formError(error: unknown): string {
   return typeof error === 'object' && error !== null && 'form' in error
@@ -77,28 +82,56 @@ function formError(error: unknown): string {
     : String(error);
 }
 
-function FeatureStatusBadge({ enabled }: { enabled: boolean }) {
+/** The facts of one feature's state the editor reads (see `SchoolFeatureState`). */
+type FeatureFacts = { included: boolean; adjustment: boolean | null; enabled: boolean };
+
+/**
+ * What the feature is for this school, as separate badges: whether the
+ * school has its switch on, what its tier says, and whether an administrator
+ * adjusted it. A feature in no tier (the assistant) is an add-on.
+ */
+function FeatureBadges({ feature, tier, state }: { feature: SchoolFeatureKey; tier: SchoolTier | null; state: FeatureFacts }) {
+  const addOn = schoolFeatureCatalogue[feature].tiers.length === 0;
   return (
-    <Badge variant={enabled ? 'default' : 'outline'}>
-      {enabled ? 'Enabled' : 'Disabled'}
-    </Badge>
+    <>
+      <Badge variant={state.enabled ? 'default' : 'outline'}>{state.enabled ? 'Enabled' : 'Disabled'}</Badge>
+      {addOn ? (
+        <Badge variant="outline">Add-on on every tier</Badge>
+      ) : (
+        <Badge variant={state.included ? 'secondary' : 'outline'}>
+          {tier === null
+            ? 'No plan'
+            : state.included
+              ? `Included in ${schoolTierCatalogue[tier].label}`
+              : `Not in ${schoolTierCatalogue[tier].label}`}
+        </Badge>
+      )}
+      {!addOn && state.adjustment !== null ? <Badge variant="outline">Adjusted for this school</Badge> : null}
+    </>
   );
 }
 
+const SAVED_MESSAGE: Record<AdjustmentChoice, (label: string) => string> = {
+  tier: (label) => `${label} follows the tier.`,
+  on: (label) => `${label} is always on for this school.`,
+  off: (label) => `${label} is always off for this school.`,
+};
+
 /**
- * Saves one switch-only feature. The form holds `enabled`; the stored config
- * is sent back unchanged, because enabling or disabling never clears it.
+ * Saves one feature's adjustment. The form holds the choice; the stored
+ * config is sent back unchanged, because an adjustment never clears it.
  * Features with settings are edited on their own page (`SETTINGS_PAGES`).
  *
- * `entry` is the feature's key and its own stored state as one discriminated
- * value (`SchoolFeatureEntry`), so the update is built by spreading it and no
- * cast can pair one feature's config with another feature's key.
+ * `entry` is the feature's key and what is stored for it (its adjustment
+ * and config) as one discriminated value (`SchoolFeatureEntry`), so the
+ * update is built by spreading it and no cast can pair one feature's config
+ * with another feature's key.
  */
 function useFeatureFlagForm(schoolId: string, entry: SchoolFeatureEntry) {
   const { feature } = entry;
   const queryClient = useQueryClient();
   const form = useForm({
-    defaultValues: { enabled: entry.enabled },
+    defaultValues: { choice: choiceOf(entry.enabled) as AdjustmentChoice },
     validators: { onSubmit: featureFormSchema },
     onSubmit: async ({ value }) => {
       form.setErrorMap({});
@@ -106,14 +139,13 @@ function useFeatureFlagForm(schoolId: string, entry: SchoolFeatureEntry) {
         const saved = await client.systemAdmin.updateSchoolFeatureFlag({
           id: schoolId,
           ...entry,
-          enabled: value.enabled,
+          enabled: ADJUSTMENT_OF[value.choice],
         });
         queryClient.setQueryData(
           orpc.systemAdmin.getSchoolFeatureFlags.queryKey({ input: { id: schoolId } }),
           saved,
         );
-        const label = schoolFeatureCatalogue[feature].label;
-        toast.success(`${label} ${value.enabled ? 'enabled' : 'disabled'}.`);
+        toast.success(SAVED_MESSAGE[value.choice](schoolFeatureCatalogue[feature].label));
       } catch (error) {
         form.setErrorMap({
           onSubmit: {
@@ -127,64 +159,82 @@ function useFeatureFlagForm(schoolId: string, entry: SchoolFeatureEntry) {
   return form;
 }
 
+type FeatureFlagFormApi = ReturnType<typeof useFeatureFlagForm>;
+
 type FeatureFlagFormProps = {
   schoolId: string;
   entry: SchoolFeatureEntry;
+  state: FeatureFacts;
 };
+
+/** What each choice is called; following the tier says what the tier gives. */
+function choiceLabel(choice: AdjustmentChoice, included: boolean) {
+  if (choice === 'tier') return `Follow tier (${included ? 'On' : 'Off'})`;
+  return choice === 'on' ? 'Always on' : 'Always off';
+}
+
+/** The three-way choice. The feature's name is the group's accessible name, so two cards' groups differ. */
+function AdjustmentField({ form, feature, included }: { form: FeatureFlagFormApi; feature: SchoolFeatureKey; included: boolean }) {
+  return (
+    <form.Field name="choice">
+      {(field) => (
+        <RadioGroup
+          aria-label={`${schoolFeatureCatalogue[feature].label} for this school`}
+          className="flex flex-wrap gap-x-6 gap-y-2"
+          value={field.state.value}
+          onValueChange={(choice) => field.handleChange(choice as AdjustmentChoice)}
+        >
+          {ADJUSTMENT_CHOICES.map((choice) => (
+            <Label key={choice} className="flex cursor-pointer items-center gap-2 font-normal">
+              <RadioGroupItem value={choice} />
+              {choiceLabel(choice, included)}
+            </Label>
+          ))}
+        </RadioGroup>
+      )}
+    </form.Field>
+  );
+}
 
 /**
  * `configInvalid`: the stored settings are unusable, so saving is offered
- * even when the switch was not moved; the save stores the entry's (valid)
+ * even when the choice was not moved; the save stores the entry's (valid)
  * settings in their place.
  *
- * Switching a live feature **off** is confirmed in an app dialog that
- * repeats what stops ({@link DISABLE_WARNINGS}); enabling saves at once.
- * The dialog's open flag is UI state, not form state.
+ * A save that turns a feature the school has switched on **off** (by
+ * "Always off", or by following a tier that does not include it) is
+ * confirmed in an app dialog that repeats what stops
+ * ({@link DISABLE_WARNINGS}); anything else saves at once. The dialog's open
+ * flag is UI state, not form state.
  */
-function FeatureFlagForm({ schoolId, entry, configInvalid }: FeatureFlagFormProps & { configInvalid: boolean }) {
+function FeatureFlagForm({ schoolId, entry, state, configInvalid }: FeatureFlagFormProps & { configInvalid: boolean }) {
   const { feature } = entry;
   const { label } = schoolFeatureCatalogue[feature];
   const form = useFeatureFlagForm(schoolId, entry);
   const [confirmingDisable, setConfirmingDisable] = useState(false);
-  const switchId = `feature-${feature}-enabled`;
-  const warningId = `feature-${feature}-disable-warning`;
+  const turnsOff = (choice: AdjustmentChoice) => state.enabled && !switchOf(choice, state.included);
   return (
     <form
       className="flex flex-col gap-4"
       onSubmit={(event) => {
         event.preventDefault();
-        if (entry.enabled && !form.state.values.enabled) setConfirmingDisable(true);
+        if (turnsOff(form.state.values.choice)) setConfirmingDisable(true);
         else void form.handleSubmit();
       }}
     >
-      <form.Field name="enabled">
-        {(field) => (
-          <div className="flex items-center justify-between gap-4">
-            {/* The feature's name is part of the switch's accessible name, so two cards' switches differ. */}
-            <Label htmlFor={switchId}>
-              <span className="sr-only">{label}: </span>Enabled for this school
-            </Label>
-            <Switch
-              id={switchId}
-              checked={field.state.value}
-              aria-describedby={entry.enabled && !field.state.value ? warningId : undefined}
-              onCheckedChange={(checked) => field.handleChange(checked)}
-            />
-          </div>
-        )}
-      </form.Field>
+      <AdjustmentField form={form} feature={feature} included={state.included} />
       <form.Subscribe
         selector={(formState) => ({
-          enabled: formState.values.enabled,
+          choice: formState.values.choice,
           isDirty: formState.isDirty,
           isSubmitting: formState.isSubmitting,
           errors: formState.errors,
         })}
       >
-        {({ enabled, isDirty, isSubmitting, errors }) => (
+        {({ choice, isDirty, isSubmitting, errors }) => (
           <div className="flex flex-col gap-3">
-            {entry.enabled && !enabled ? (
-              <p id={warningId} className="text-xs text-destructive" role="alert">
+            {turnsOff(choice) ? (
+              <p className="text-xs text-destructive" role="alert">
                 {DISABLE_WARNINGS[feature]}
               </p>
             ) : null}
@@ -207,7 +257,7 @@ function FeatureFlagForm({ schoolId, entry, configInvalid }: FeatureFlagFormProp
               pending={isSubmitting}
               onOpenChange={setConfirmingDisable}
               onConfirm={() => {
-                // A failed save is shown on the card under the switch, so the dialog closes either way.
+                // A failed save is shown on the card under the choice, so the dialog closes either way.
                 void form.handleSubmit().finally(() => setConfirmingDisable(false));
               }}
             />
@@ -221,7 +271,7 @@ function FeatureFlagForm({ schoolId, entry, configInvalid }: FeatureFlagFormProp
 /**
  * Said on a feature whose stored settings no longer match their schema (the
  * server lists it in `invalidConfigs`). Whether the feature is enabled is
- * still the stored fact shown on the card; only what reads the settings is
+ * still the fact shown on the card; only what reads the settings is
  * unavailable. Saving the card stores valid settings again.
  */
 function InvalidConfigWarning() {
@@ -233,10 +283,17 @@ function InvalidConfigWarning() {
   );
 }
 
-/** A feature edited on its own settings page: its state and a link there. */
+/**
+ * A feature edited on its own settings page: why it is not chosen here, and
+ * a link there. Such a feature is an add-on: no tier switches it on, and it
+ * is switched on per school together with its settings.
+ */
 function FeatureSettingsLink({ schoolId, settings }: { schoolId: string; settings: { label: string; href: (schoolId: string) => string } }) {
   return (
-    <div className="flex justify-end">
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <p className="text-sm text-muted-foreground">
+        An add-on available on every tier. It is switched on for a school together with its settings.
+      </p>
       <Button asChild variant="outline">
         <Link href={settings.href(schoolId)}>{settings.label}</Link>
       </Button>
@@ -247,7 +304,7 @@ function FeatureSettingsLink({ schoolId, settings }: { schoolId: string; setting
 /**
  * Shown on a feature whose own switch is on while a feature it requires is
  * off: the school does not have it until that one is switched on again. The
- * switch is the administrator's and stays as saved.
+ * switch (from the tier or an adjustment) stays as it is.
  */
 function MissingRequirementsNote({ feature, missing }: { feature: SchoolFeatureKey; missing: SchoolFeatureKey[] }) {
   const names = missing.map((key) => schoolFeatureCatalogue[key].label).join(' and ');
@@ -259,7 +316,9 @@ function MissingRequirementsNote({ feature, missing }: { feature: SchoolFeatureK
   );
 }
 
-function FeatureFlagCard({ schoolId, entry, configInvalid, missing }: FeatureFlagFormProps & { configInvalid: boolean; missing: SchoolFeatureKey[] }) {
+type FeatureFlagCardProps = FeatureFlagFormProps & { tier: SchoolTier | null; configInvalid: boolean; missing: SchoolFeatureKey[] };
+
+function FeatureFlagCard({ schoolId, tier, entry, state, configInvalid, missing }: FeatureFlagCardProps) {
   const { label, description } = schoolFeatureCatalogue[entry.feature];
   const settings = settingsPageOf(entry.feature);
   return (
@@ -267,18 +326,25 @@ function FeatureFlagCard({ schoolId, entry, configInvalid, missing }: FeatureFla
       <CardHeader>
         <CardTitle className="flex flex-wrap items-center gap-2">
           {label}
-          <FeatureStatusBadge enabled={entry.enabled} />
+          <FeatureBadges feature={entry.feature} tier={tier} state={state} />
         </CardTitle>
         <CardDescription>{description}</CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
         {configInvalid ? <InvalidConfigWarning /> : null}
-        {entry.enabled && missing.length > 0 ? <MissingRequirementsNote feature={entry.feature} missing={missing} /> : null}
+        {state.enabled && missing.length > 0 ? <MissingRequirementsNote feature={entry.feature} missing={missing} /> : null}
         {settings ? (
           <FeatureSettingsLink schoolId={schoolId} settings={settings} />
         ) : (
-          // Keyed by the saved state so the form restarts from what was stored.
-          <FeatureFlagForm key={JSON.stringify([entry, configInvalid])} schoolId={schoolId} entry={entry} configInvalid={configInvalid} />
+          // Keyed by what is stored and by what the tier gives (which decides
+          // what following it means), so the form restarts from the saved state.
+          <FeatureFlagForm
+            key={JSON.stringify([entry, state.included, state.enabled, configInvalid])}
+            schoolId={schoolId}
+            entry={entry}
+            state={state}
+            configInvalid={configInvalid}
+          />
         )}
       </CardContent>
     </Card>
@@ -288,16 +354,17 @@ function FeatureFlagCard({ schoolId, entry, configInvalid, missing }: FeatureFla
 function FeatureFlagsHeading() {
   return (
     <div className="flex flex-col gap-1">
-      <h1 className="text-2xl font-semibold tracking-tight">Feature flags</h1>
+      <h1 className="text-2xl font-semibold tracking-tight">Plan and features</h1>
       <p className="text-sm text-muted-foreground">
-        Choose which CampusPilot features this school has. Changes apply at once; the school&apos;s staff cannot
-        change them.
+        The school&apos;s tier decides which CampusPilot features it has. Below, a feature can be adjusted for this
+        school alone: always on, always off, or following the tier. Changes apply at once; the school&apos;s staff
+        cannot change them.
       </p>
     </div>
   );
 }
 
-/** Platform feature flags of one school: a card per catalogue feature. */
+/** One school's plan: its tier, then a card per catalogue feature with what the tier gives and the school's adjustment. */
 export function SchoolFeatureFlags({ schoolId }: { schoolId: string }) {
   const flagsQuery = useQuery(
     orpc.systemAdmin.getSchoolFeatureFlags.queryOptions({ input: { id: schoolId } }),
@@ -321,7 +388,7 @@ export function SchoolFeatureFlags({ schoolId }: { schoolId: string }) {
     return (
       <Card className="mx-auto w-full max-w-4xl">
         <CardHeader>
-          <CardTitle>Unable to load feature flags</CardTitle>
+          <CardTitle>Unable to load the plan and features</CardTitle>
           <CardDescription>
             {state.error instanceof Error ? state.error.message : 'Try refreshing the page.'}
           </CardDescription>
@@ -335,15 +402,18 @@ export function SchoolFeatureFlags({ schoolId }: { schoolId: string }) {
     );
   }
 
-  const { features, invalidConfigs } = state.data;
+  const { tier, features, invalidConfigs } = state.data;
   return (
     <section className="mx-auto flex w-full max-w-4xl flex-col gap-5">
       <FeatureFlagsHeading />
+      <SchoolTierCard schoolId={schoolId} tier={tier} features={features} />
       {schoolFeatureEntries(features).map((entry) => (
         <FeatureFlagCard
           key={entry.feature}
           schoolId={schoolId}
+          tier={tier}
           entry={entry}
+          state={features[entry.feature]}
           configInvalid={invalidConfigs.includes(entry.feature)}
           missing={missingSchoolFeatureRequirements(entry.feature, features)}
         />

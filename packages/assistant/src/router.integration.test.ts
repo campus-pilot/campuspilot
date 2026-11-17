@@ -118,6 +118,7 @@ const ALLOWED: AssistantAccessDecision = {
   featureEnabled: true,
   member: true,
   allowedRoles: ['principal'],
+  suspended: false,
   limit: { known: true, monthlyLimitUsd: null },
   limitReached: false,
   voiceEnabled: false,

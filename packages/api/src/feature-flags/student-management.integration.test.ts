@@ -17,7 +17,7 @@ import {
 } from '../../test/fixtures';
 import { createAdmissionWithLogin, createExamSession, createResultsSchool, createSubjectClass, enroll, runExam } from '../../test/exam-results';
 import { expectRpcCode } from '../../test/finance/assertions';
-import { isSchoolFeatureEnabled, readSchoolFeatureFlags } from './feature-flags.service';
+import { getSchoolFeatureFlags, isSchoolFeatureEnabled } from './feature-flags.service';
 
 const admissionInput = (schoolId: string) => ({
   schoolId,
@@ -32,21 +32,49 @@ const admissionInput = (schoolId: string) => ({
   motherName: 'Test Mother',
 });
 
-/** A school whose principal is signed in, with an active session, and student management switched off. */
-async function staffOnlySchool() {
-  const school = await createTestSchool();
+/**
+ * A school without student management whose principal is signed in, with an
+ * active session. `plus` (the default) is a school on the Plus tier, which
+ * does not include it; `switchedOff` is a Pro school, whose tier does, with
+ * student management switched off for it by an administrator.
+ */
+async function staffOnlySchool(how: 'plus' | 'switchedOff' = 'plus') {
+  const school = await createTestSchool({ tier: how === 'plus' ? 'plus' : 'pro' });
   const session = await createTestSession({ schoolId: school.id, sessionStartYear: 2026, sessionEndYear: 2027, isActive: true });
   const principal = await createSchoolStaffSession(school.id, [{ role: 'principal', meta: null }]);
-  await setTestSchoolFeature(school.id, 'studentManagement', false);
+  if (how === 'switchedOff') await setTestSchoolFeature(school.id, 'studentManagement', false);
   return { school, session, client: createTestClient(principal.session) };
 }
 
 describe('student management feature', () => {
-  it('is on for a school with no stored row, existing or new', async () => {
-    const school = await createTestSchool();
-    const principal = await createSchoolStaffSession(school.id, [{ role: 'principal', meta: null }]);
-    expect(await isSchoolFeatureEnabled(db, school.id, 'studentManagement')).toBe(true);
-    await expect(createTestClient(principal.session).school.listAdmissions({ schoolId: school.id })).resolves.toMatchObject({ items: [] });
+  it('is part of the Pro and Enterprise tiers and not of Plus, with no stored row either way', async () => {
+    for (const tier of ['pro', 'enterprise'] as const) {
+      const school = await createTestSchool({ tier });
+      const principal = await createSchoolStaffSession(school.id, [{ role: 'principal', meta: null }]);
+      expect(await isSchoolFeatureEnabled(db, school.id, 'studentManagement')).toBe(true);
+      await expect(createTestClient(principal.session).school.listAdmissions({ schoolId: school.id })).resolves.toMatchObject({ items: [] });
+    }
+    const plus = await createTestSchool({ tier: 'plus' });
+    const principal = await createSchoolStaffSession(plus.id, [{ role: 'principal', meta: null }]);
+    expect(await isSchoolFeatureEnabled(db, plus.id, 'studentManagement')).toBe(false);
+    await expectFeatureDisabled(createTestClient(principal.session).school.listAdmissions({ schoolId: plus.id }), 'studentManagement');
+    // Switched on for that one Plus school, it has it.
+    await setTestSchoolFeature(plus.id, 'studentManagement', true);
+    await expect(createTestClient(principal.session).school.listAdmissions({ schoolId: plus.id })).resolves.toMatchObject({ items: [] });
+  });
+
+  it('is equally off for a school whose tier includes it and where an administrator switched it off', async () => {
+    const { school, client } = await staffOnlySchool('switchedOff');
+    await expectFeatureDisabled(client.school.listAdmissions({ schoolId: school.id }), 'studentManagement');
+    // Notices are part of the same tier and need it: inactive with it, their switch untouched.
+    expect(await getSchoolFeatureFlags(db, school.id)).toMatchObject({
+      studentManagement: { included: true, adjustment: false, enabled: false, active: false },
+      notices: { included: true, adjustment: null, enabled: true, active: false },
+    });
+    // Returned to its tier, the school has both again.
+    await setTestSchoolFeature(school.id, 'studentManagement', null);
+    await expect(client.school.listAdmissions({ schoolId: school.id })).resolves.toMatchObject({ items: [] });
+    expect((await getSchoolFeatureFlags(db, school.id)).notices.active).toBe(true);
   });
 
   it('refuses admissions, students, fees and student documents without it, and writes nothing', async () => {
@@ -169,22 +197,22 @@ describe('student management feature', () => {
     await setTestSchoolFeature(school.id, 'notices', true);
     await setTestSchoolFeature(school.id, 'cadet', true);
 
-    const { features } = await readSchoolFeatureFlags(db, school.id);
-    expect(features.notices).toEqual({ enabled: true, active: false, config: null });
-    expect(features.cadet).toEqual({ enabled: true, active: false, config: null });
+    const features = await getSchoolFeatureFlags(db, school.id);
+    expect(features.notices).toEqual({ included: false, adjustment: true, enabled: true, active: false, config: null });
+    expect(features.cadet).toEqual({ included: false, adjustment: true, enabled: true, active: false, config: null });
     // Refused for the feature that was asked for, as every gate refuses.
     await expectFeatureDisabled(client.school.listNotices({ schoolId: school.id, sessionId: session.id }), 'notices');
 
     await setTestSchoolFeature(school.id, 'studentManagement', true);
     await expect(client.school.listNotices({ schoolId: school.id, sessionId: session.id })).resolves.toMatchObject({ items: [] });
     await expect(client.school.listAdmissions({ schoolId: school.id })).resolves.toMatchObject({ items: [] });
-    expect((await readSchoolFeatureFlags(db, school.id)).features.cadet).toEqual({ enabled: true, active: true, config: null });
+    expect((await getSchoolFeatureFlags(db, school.id)).cadet).toEqual({ included: false, adjustment: true, enabled: true, active: true, config: null });
   });
 
   it('is read by the school\'s staff as not active', async () => {
     const { school, client } = await staffOnlySchool();
     const { features } = await client.school.getFeatureFlags({ schoolId: school.id });
-    expect(features.studentManagement).toEqual({ enabled: false, active: false, config: null });
+    expect(features.studentManagement).toEqual({ included: false, adjustment: null, enabled: false, active: false, config: null });
   });
 });
 

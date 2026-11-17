@@ -5,7 +5,7 @@ import { and, eq, lte, min, sql, type SQL } from 'drizzle-orm';
 
 import type { DeliverySendOutcome, NotificationChannelAdapter } from '../channels';
 import { claimDelivery, recordDeliveryOutcome, skipOwedDelivery } from '../deliveries';
-import { disabledFeatureOf } from '../features';
+import { disabledChannelFeatureOf, disabledFeatureOf } from '../features';
 import type { SenderTarget } from './lanes';
 
 /**
@@ -100,21 +100,22 @@ export async function dueSenderTargets(db: DatabaseExecutor, now: Date = new Dat
 }
 
 /**
- * Whether the delivery's notification type needs a platform feature its
- * school does not have right now. Read just before the claim, so a copy
- * planned while the feature was on is not sent after it was switched off.
- * A type that needs no feature (every type but notices) stops after the
- * one indexed read of its type.
+ * Whether the delivery needs a platform feature its school does not have
+ * right now: one its notification type belongs to, or one its channel needs
+ * (WhatsApp and the `whatsapp` feature). Read just before the claim, so a
+ * copy planned while the feature was on is not sent after it was switched
+ * off (also by a move to a tier without it).
  */
 async function deliveryFeatureDisabled(db: DatabaseExecutor, deliveryId: string): Promise<boolean> {
   const [row] = await db
-    .select({ schoolId: notificationDeliveryTable.schoolId, type: notificationTable.type })
+    .select({ schoolId: notificationDeliveryTable.schoolId, channel: notificationDeliveryTable.channel, type: notificationTable.type })
     .from(notificationDeliveryTable)
     .innerJoin(notificationTable, eq(notificationTable.id, notificationDeliveryTable.notificationId))
     .where(eq(notificationDeliveryTable.id, deliveryId))
     .limit(1);
   if (!row || !isNotificationType(row.type)) return false;
-  return (await disabledFeatureOf(db, row.schoolId, row.type)) !== null;
+  if ((await disabledFeatureOf(db, row.schoolId, row.type)) !== null) return true;
+  return (await disabledChannelFeatureOf(db, row.schoolId, row.channel)) !== null;
 }
 
 /**
@@ -144,9 +145,10 @@ export type SendAttemptResult = {
  * delivery no longer owed or not yet due (already sent, stuck in `sending`
  * after a crash, rescheduled) is left alone. A channel switched off since
  * the delivery was planned records it `skipped: disabled` without a claim,
- * and one whose notification type lost a school feature it needs since then
- * (a notice copy still queued when `notices` was switched off) is recorded
- * `skipped: feature_disabled` the same way: nothing new goes out.
+ * and one whose school lost a feature it needs since then (a notice copy
+ * still queued when `notices` was switched off, a WhatsApp copy when the
+ * school lost `whatsapp`) is recorded `skipped: feature_disabled` the same
+ * way: nothing new goes out.
  * An adapter that throws is treated as a transient failure of this
  * delivery before the provider call (adapters classify every provider
  * answer themselves and must not throw after a request may have been

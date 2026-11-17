@@ -1,12 +1,17 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { featureFlagsOutdatedBy, resolveSchoolFeature } from './require-feature-model';
+import { featureFlagsOutdatedBy, resolveSchoolFeature, schoolListOutdatedBy } from './require-feature-model';
 
+/** A feature the school's tier includes, with no adjustment. */
+const on = { included: true, adjustment: null, enabled: true, active: true, config: null };
+/** A feature the school's tier does not include, with no adjustment. */
+const off = { included: false, adjustment: null, enabled: false, active: false, config: null };
 const features = {
-  studentManagement: { enabled: true, active: true, config: null },
-  cadet: { enabled: true, active: true, config: null },
-  notices: { enabled: false, active: false, config: null },
-  assistant: { enabled: false, active: false, config: null },
+  studentManagement: on,
+  cadet: on,
+  notices: off,
+  whatsapp: off,
+  assistant: off,
 };
 const closed = { enabled: false, config: null };
 
@@ -39,8 +44,9 @@ test('the UI follows whether the school has a feature, not its switch', () => {
     isError: false,
     features: {
       ...features,
-      studentManagement: { enabled: false, active: false, config: null },
-      cadet: { enabled: true, active: false, config: null },
+      // Student management adjusted off for this school on a tier that includes it.
+      studentManagement: { ...on, adjustment: false, enabled: false, active: false },
+      cadet: { ...on, active: false },
     },
   };
   assert.deepEqual(resolveSchoolFeature(loaded, 'cadet'), { enabled: false, config: null, status: 'ready' });
@@ -69,4 +75,14 @@ test('only the server\'s disabled-feature answer makes the cached flags outdated
   assert.equal(featureFlagsOutdatedBy({ code: 'NOT_FOUND' }), false);
   assert.equal(featureFlagsOutdatedBy(new Error('Failed to fetch')), false);
   assert.equal(featureFlagsOutdatedBy(null), false);
+});
+
+test('only the server\'s suspended-school answer makes the cached school list outdated', () => {
+  assert.equal(schoolListOutdatedBy({ code: 'FORBIDDEN', data: { reason: 'SCHOOL_SUSPENDED' } }), true);
+  // A disabled feature, a permission denial and a network failure say nothing about a suspension.
+  assert.equal(schoolListOutdatedBy({ code: 'FORBIDDEN', data: { reason: 'SCHOOL_FEATURE_DISABLED', feature: 'notices' } }), false);
+  assert.equal(schoolListOutdatedBy({ code: 'FORBIDDEN' }), false);
+  assert.equal(schoolListOutdatedBy({ code: 'PRECONDITION_FAILED', data: { reason: 'SCHOOL_SUSPENDED' } }), false);
+  assert.equal(schoolListOutdatedBy(new Error('Failed to fetch')), false);
+  assert.equal(schoolListOutdatedBy(null), false);
 });

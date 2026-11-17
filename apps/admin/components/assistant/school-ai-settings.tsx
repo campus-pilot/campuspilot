@@ -4,12 +4,10 @@ import {
   schoolFeatureCatalogue,
   type SchoolFeatureConfig,
 } from '@campuspilot/api/routers/school/feature-flags/feature-flags.dto';
-import { roleEnum, type Role } from '@campuspilot/api/routers/school/member/member.dto';
 import { ConfirmationDialog } from '@campuspilot/components/confirmation-dialog';
 import { Alert, AlertDescription, AlertTitle } from '@campuspilot/ui/components/alert';
 import { Button } from '@campuspilot/ui/components/button';
-import { Checkbox } from '@campuspilot/ui/components/checkbox';
-import { Field, FieldDescription, FieldError, FieldLabel, FieldLegend, FieldSet } from '@campuspilot/ui/components/field';
+import { Field, FieldDescription, FieldError, FieldLabel } from '@campuspilot/ui/components/field';
 import { Input } from '@campuspilot/ui/components/input';
 import { Label } from '@campuspilot/ui/components/label';
 import { Switch } from '@campuspilot/ui/components/switch';
@@ -20,18 +18,10 @@ import { LoaderCircle, TriangleAlert } from 'lucide-react';
 import { useState } from 'react';
 import { z } from 'zod';
 
-import { DISABLE_WARNINGS } from '@/components/school-feature-flags';
+import { DISABLE_WARNINGS } from '@/components/school-feature-warnings';
 import { client, orpc } from '@/lib/orpc';
 
 type AssistantConfig = SchoolFeatureConfig<'assistant'>;
-
-const ROLE_LABELS: Record<Role, string> = {
-  principal: 'Principal',
-  manager: 'Manager',
-  teacher: 'Teacher',
-  accountant: 'Accountant',
-  exam_coordinator: 'Exam coordinator',
-};
 
 /** A limit in whole dollars and cents, or empty for none. */
 const LIMIT_PATTERN = /^\d{1,7}(\.\d{1,2})?$/;
@@ -40,12 +30,14 @@ const limitIsValid = (value: string) =>
   value.trim() === '' || (LIMIT_PATTERN.test(value.trim()) && Number(value) > 0 && Number(value) <= 1_000_000);
 
 /**
- * Enabling needs valid settings (a limit or none, and at least one role).
- * Switching off never does: invalid or incomplete settings are then not
- * saved and the stored ones are kept (see `configToSave`).
+ * Enabling needs valid settings (a limit or none). Switching off never does:
+ * an invalid limit is then not saved and the stored settings are kept (see
+ * `configToSave`). Which roles may use the assistant is not part of these
+ * settings: it is the school's role list, edited on its own card
+ * (`AssistantRolesCard`).
  */
 const settingsSchema = z
-  .object({ enabled: z.boolean(), monthlyLimitUsd: z.string(), eligibleRoles: z.array(roleEnum), voiceEnabled: z.boolean() })
+  .object({ enabled: z.boolean(), monthlyLimitUsd: z.string(), voiceEnabled: z.boolean() })
   .superRefine((value, context) => {
     if (!value.enabled) return;
     if (!limitIsValid(value.monthlyLimitUsd)) {
@@ -54,9 +46,6 @@ const settingsSchema = z
         path: ['monthlyLimitUsd'],
         message: 'Enter a positive amount in USD (at most two decimals), or leave it empty for no limit.',
       });
-    }
-    if (value.eligibleRoles.length === 0) {
-      context.addIssue({ code: 'custom', path: ['eligibleRoles'], message: 'Choose at least one role.' });
     }
   });
 
@@ -69,8 +58,8 @@ type SettingsValues = z.infer<typeof settingsSchema>;
  */
 function configToSave(value: SettingsValues, stored: AssistantConfig | null): AssistantConfig | null {
   const limit = value.monthlyLimitUsd.trim();
-  if (limitIsValid(limit) && value.eligibleRoles.length > 0) {
-    return { monthlyLimitUsd: limit === '' ? null : Number(limit), eligibleRoles: value.eligibleRoles, voice: { enabled: value.voiceEnabled } };
+  if (limitIsValid(limit)) {
+    return { monthlyLimitUsd: limit === '' ? null : Number(limit), voice: { enabled: value.voiceEnabled } };
   }
   return stored;
 }
@@ -78,12 +67,13 @@ function configToSave(value: SettingsValues, stored: AssistantConfig | null): As
 const errorText = (error: unknown) => (typeof error === 'string' ? error : (error as { message?: string } | undefined)?.message);
 
 /**
- * The school's `assistant` feature flag: on or off, its monthly USD limit
- * (IST calendar month), the roles the school may open the assistant to, and
- * whether the school has voice mode.
- * Saved as one flag update; switching it off asks first and keeps the
- * settings. Which eligible roles actually use it is the school's choice, in
- * its own settings.
+ * The school's `assistant` feature: on or off, its monthly USD limit (IST
+ * calendar month) and whether the school has voice mode. Saved as one flag
+ * update; switching it off asks first and keeps the settings.
+ *
+ * Switching it on for a school with no role switched on makes the server
+ * switch the default roles on, so the school's role list is read again
+ * after every save.
  */
 function useAssistantSettingsForm(schoolId: string, stored: { enabled: boolean; config: AssistantConfig | null }) {
   const queryClient = useQueryClient();
@@ -91,7 +81,6 @@ function useAssistantSettingsForm(schoolId: string, stored: { enabled: boolean; 
     defaultValues: {
       enabled: stored.enabled,
       monthlyLimitUsd: stored.config?.monthlyLimitUsd == null ? '' : String(stored.config.monthlyLimitUsd),
-      eligibleRoles: stored.config?.eligibleRoles ?? [],
       voiceEnabled: stored.config?.voice.enabled ?? false,
     } as SettingsValues,
     validators: { onSubmit: settingsSchema },
@@ -105,6 +94,7 @@ function useAssistantSettingsForm(schoolId: string, stored: { enabled: boolean; 
           config: configToSave(value, stored.config),
         });
         queryClient.setQueryData(orpc.systemAdmin.getSchoolFeatureFlags.queryKey({ input: { id: schoolId } }), saved);
+        void queryClient.invalidateQueries({ queryKey: orpc.systemAdmin.getSchoolAssistantRoles.queryKey({ input: { id: schoolId } }) });
         toast.success('AI assistant settings saved.');
       } catch (error) {
         form.setErrorMap({
@@ -152,35 +142,6 @@ function LimitField({ form }: { form: SettingsForm }) {
           </FieldDescription>
           <FieldError errors={field.state.meta.errors.map((error) => ({ message: errorText(error) }))} />
         </Field>
-      )}
-    </form.Field>
-  );
-}
-
-function RolesField({ form }: { form: SettingsForm }) {
-  return (
-    <form.Field name="eligibleRoles">
-      {(field) => (
-        <FieldSet>
-          <FieldLegend variant="label">Eligible roles</FieldLegend>
-          <FieldDescription>The roles the school may switch the assistant on for, in its own settings.</FieldDescription>
-          <div className="flex flex-wrap gap-4">
-            {roleEnum.options.map((role) => (
-              <Label key={role} className="flex items-center gap-2 font-normal">
-                <Checkbox
-                  checked={field.state.value.includes(role)}
-                  onCheckedChange={(checked) =>
-                    field.handleChange(
-                      checked === true ? [...field.state.value, role] : field.state.value.filter((value) => value !== role),
-                    )
-                  }
-                />
-                {ROLE_LABELS[role]}
-              </Label>
-            ))}
-          </div>
-          <FieldError errors={field.state.meta.errors.map((error) => ({ message: errorText(error) }))} />
-        </FieldSet>
       )}
     </form.Field>
   );
@@ -315,7 +276,6 @@ export function AssistantSettingsForm({
     >
       <EnabledField form={form} />
       <LimitField form={form} />
-      <RolesField form={form} />
       <VoiceField form={form} />
       <SaveRow form={form} wasEnabled={stored.enabled} save={save} />
     </form>

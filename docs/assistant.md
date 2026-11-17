@@ -17,7 +17,7 @@ permissions.
 | Chat UI pieces | `packages/components/src/assistant` | Presentational timeline, approval card, composer (props and callbacks only) |
 | Usage UI pieces | `packages/components/src/assistant-usage` | Date range form, spend chart and table (props only) |
 | Management surfaces | `apps/management/components/assistant`, `components/assistant-settings` | Data hooks, the surfaces (the voice overlay, the page, the palette), Settings › AI assistant and Settings › Usage |
-| Admin pages | `apps/admin/components/assistant` | School › AI (feature flag, limit, eligible roles, spend), AI billing (platform) |
+| Admin pages | `apps/admin/components/assistant` | School › AI (the feature, its limit, the role list, spend), AI billing (platform) |
 | Voice mode | `packages/assistant/src/voice`, `packages/assistant-contract/src/voice.ts`, `apps/management/components/assistant/voice`, `packages/components/src/assistant/assistant-voice*.tsx` | The voice endpoint and session on the API server, the voice model's adapter, the wire format, the browser's microphone and speakers, the avatar and the voice bar (see [Voice mode](#voice-mode)) |
 | API side | `packages/api/src/assistant/*` (`access.ts`, `token.ts`, `spend.ts`, `usage.ts`, `tool-policy.ts`), `packages/auth/src/assistant-token.ts`, `routers/school/assistant-access`, `routers/system-admin/assistant-usage`, `apps/server/src/mcp*.ts` | The access decision, delegated tokens, spend and usage reads, the `assistant` principal, the tool policy, the MCP assistant view |
 
@@ -99,10 +99,30 @@ permissions.
 
 ## Access
 
-The school feature flag `assistant` (see [School feature flags](feature-flags.md))
-carries `{ monthlyLimitUsd: number | null, eligibleRoles: role[] }`. It is off
-for every school by default, demo schools included, and is edited only on the
-admin app's School › AI page.
+The school feature `assistant` (see [School feature flags](feature-flags.md))
+carries `{ monthlyLimitUsd: number | null, voice: { enabled } }`. It is an
+add-on on every subscription tier: off for every school until a platform
+administrator switches it on, demo schools included, on the admin app's
+School › AI page.
+
+**The role list.** Which roles may use the assistant is one list per school,
+`school_assistant_access_role` (a row means "on"), with two editors that read
+and write the same rows (`packages/api/src/assistant/roles.ts`):
+
+- the platform administrator, on the admin app's School › AI page
+  (`systemAdmin.getSchoolAssistantRoles`, `updateSchoolAssistantRoles`);
+- the school's principal or manager, in Settings › AI assistant
+  (`school.getAssistantAccess`, `updateAssistantRoles`).
+
+Either may switch any role on or off, and each sees what the other saved.
+There is no separate "eligible" list any more. When the assistant is switched
+on for a school that has no role switched on, the default roles are switched
+on with it (`ASSISTANT_DEFAULT_ROLES`: principal, manager, exam coordinator,
+accountant; `switchOnDefaultAssistantRoles`), so an enabled assistant is
+usable at once. A school that already has a role switched on keeps exactly its
+list, also across switching the assistant off and on. (Migration 0071 merged
+the two earlier lists: a school kept the roles that were both eligible and
+switched on, or, where none was switched on, got the eligible ones.)
 
 **Use** (start or continue a turn) is decided by one API function,
 `resolveAssistantAccess` (`packages/api/src/assistant/access.ts`). Each fact is
@@ -111,11 +131,11 @@ its own check, and the first that fails is returned with a message for the user:
 1. the school's `assistant` flag is enabled (`feature_disabled`);
 2. the user is a member of the school (`not_member`);
 3. the flag's settings are valid (`config_invalid`);
-4. the user holds a role that is in `eligibleRoles` **and** that the school
-   switched on in `school_assistant_access_role` (`role_not_enabled`). A role
-   the school switched on that is no longer eligible grants nothing and is
-   shown as "not available on your plan";
-5. the school's saved spend in the current IST month is below
+4. the user holds a role the assistant is switched on for in the school's
+   role list (`role_not_enabled`);
+5. the school is not suspended (`school_suspended`; a suspended school is
+   read-only, see [School suspension](school-suspension.md));
+6. the school's saved spend in the current IST month is below
    `monthlyLimitUsd` (`limit_reached`). The month spend is cached in Redis for
    10 minutes, so a limit can be overshot by what is spent in that window.
 
@@ -125,9 +145,10 @@ issue, the worker before every model request, and the open stream recheck.
 
 The assistant **disappears for anyone who may not use it**. Seeing it at all
 (the pages, the history list, a conversation and its stream, delete, stop,
-decline) needs facts 1 to 4: the feature, membership, and an eligible role the
-school switched on. Only the monthly limit is left out: at the limit the
-history stays visible and the composer says why it cannot send. With the
+decline) needs facts 1 to 4: the feature, membership, and a role the assistant
+is switched on for. The suspension and the monthly limit are left out: in a
+suspended school and at the limit the history stays visible and the composer
+says why it cannot send. With the
 feature off every `/model/*` procedure answers the disabled-feature error; for
 a role that is not switched on they answer FORBIDDEN (`role_not_enabled`).
 Only `getStatus` answers every member (`allowed: false`), so the app can tell
@@ -140,10 +161,11 @@ working is refused at its next model request.
 | --- | --- | --- |
 | Settings › AI assistant | `school.assistant.access.read`, `school.assistant.access.manage` | principal, manager |
 | Settings › Usage › AI usage | `school.assistant.usage.read` | principal, manager |
-| Admin School › AI, AI billing | `system.assistant.usage.read` (+ `system.school.feature_flags.*` for the settings) | platform admin |
+| Admin School › AI, AI billing | `system.assistant.usage.read` (+ `system.school.feature_flags.*` for the settings and the role list) | platform admin |
 
 Procedures: `school.getAssistantAccess`, `school.updateAssistantRoles`,
-`school.getAssistantUsage`, `systemAdmin.getSchoolAssistantUsage`,
+`school.getAssistantUsage`, `systemAdmin.getSchoolAssistantRoles`,
+`systemAdmin.updateSchoolAssistantRoles`, `systemAdmin.getSchoolAssistantUsage`,
 `systemAdmin.getPlatformAssistantUsage` (all hidden from MCP, so never offered
 to the assistant itself).
 
@@ -1000,8 +1022,9 @@ it, and any other change of conversation remounts it.
    (`pnpm --filter worker dev`, or `node scripts/local-demo-apps.mjs start
    worker`). It registers with Restate on every start.
 3. In the admin app, open the school's **AI** page, enable the assistant and
-   choose its eligible roles and limit; then, as the school's principal or
-   manager, switch roles on in **Settings › AI assistant**.
+   set its limit. The principal, manager, exam coordinator and accountant can
+   use it at once; change the roles there, or as the school's principal or
+   manager in **Settings › AI assistant** (it is the same list).
 4. The management app needs nothing extra: the assistant is served by the API
    at `NEXT_PUBLIC_SERVER_URL` + `/model/rpc`.
 5. For voice mode, also set `GEMINI_LIVE_MODEL` and its four

@@ -312,6 +312,24 @@ export const notificationRequiredFeatures = {
   "exam.timetable_published_staff": ["studentManagement"],
 } as const satisfies Record<NotificationType, readonly SchoolFeatureKey[]>;
 
+/**
+ * The per-school platform features a **remote channel** needs, whatever the
+ * notification's type. A school without one sends nothing on that channel:
+ * its copies are recorded `skipped: feature_disabled` when planned and again
+ * when sent, a staff resend of such a copy is refused, and the forecast
+ * shown before a send counts them as skipped. The other channels and the
+ * inbox are not affected.
+ *
+ * Exhaustive, so each new channel decides. WhatsApp is the `whatsapp`
+ * feature (part of a school's tier, or adjusted per school). Web push needs
+ * no feature of its own: it is the Cadet Portal's, and its types already
+ * name the features they belong to.
+ */
+export const notificationChannelRequiredFeatures = {
+  web_push: [],
+  whatsapp: ["whatsapp"],
+} as const satisfies Record<RemoteNotificationChannel, readonly SchoolFeatureKey[]>;
+
 /** Every known type, in catalogue order. */
 export const NOTIFICATION_TYPES = Object.keys(
   notificationCatalogue,

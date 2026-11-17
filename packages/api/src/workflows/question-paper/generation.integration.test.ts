@@ -448,7 +448,7 @@ describe('question paper generation job', () => {
     expect(await requestsOf(second.job.id)).toHaveLength(1);
 
     const limited = await createQuestionPaperWorld();
-    await setTestSchoolFeature(limited.schoolId, 'assistant', true, { monthlyLimitUsd: 0.01, eligibleRoles: ['principal', 'manager', 'teacher', 'accountant', 'exam_coordinator'] });
+    await setTestSchoolFeature(limited.schoolId, 'assistant', true, { monthlyLimitUsd: 0.01 });
     await db.insert(assistantModelRequestTable).values({
       source: 'question_paper', questionPaperJobId: 'qpj_somethingelse', schoolId: limited.schoolId, userId: limited.people.manager.userId, requestKey: `qp:earlier:${limited.schoolId}:model:1`,
       provider: 'gemini', requestedModel: 'm', answeredModel: 'm', usageComplete: true, inputTokens: 1, outputTokens: 1, cacheReadInputTokens: 0, cacheCreationInputTokens: 0,

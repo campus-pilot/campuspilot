@@ -133,21 +133,24 @@ describe('systemAdmin demo school procedures', () => {
     expect(school).toMatchObject({ isDemo: true, demoCreatedBy: admin.user.id });
     const roles = await db.select().from(schoolUserRoleTable).where(and(eq(schoolUserRoleTable.schoolId, created.school.id), eq(schoolUserRoleTable.userId, admin.user.id)));
     expect(roles.map((row) => row.role)).toEqual(['principal']);
-    // A demo shows every product area: its features are on from creation
-    // (a real school starts with only its defaults), recorded against the
-    // requesting admin. Student management is written explicitly although it
-    // is on by default: a demo decides every feature.
-    const flags = await db.select().from(schoolFeatureFlagTable).where(eq(schoolFeatureFlagTable.schoolId, created.school.id));
-    expect(flags.map((row) => [row.feature, row.enabled, row.updatedBy]).sort()).toEqual([
-      ['cadet', true, admin.user.id],
-      ['notices', true, admin.user.id],
-      ['studentManagement', true, admin.user.id],
-    ]);
-    expect((await adminClient.systemAdmin.getSchoolFeatureFlags({ id: created.school.id })).features).toEqual({
-      studentManagement: { enabled: true, active: true, config: null },
-      cadet: { enabled: true, active: true, config: null },
-      notices: { enabled: true, active: true, config: null },
-      assistant: { enabled: false, active: false, config: null },
+    // A demo shows every product area: it is created on the Enterprise tier,
+    // which includes them all, so nothing is stored as an adjustment (a real
+    // school gets the tier its administrator chooses). The assistant is in
+    // no tier and stays off until an administrator enables it deliberately.
+    expect(created.school.tier).toBe('enterprise');
+    expect(await db.select().from(schoolFeatureFlagTable).where(eq(schoolFeatureFlagTable.schoolId, created.school.id))).toEqual([]);
+    const inTier = { included: true, adjustment: null, enabled: true, active: true, config: null };
+    expect(await adminClient.systemAdmin.getSchoolFeatureFlags({ id: created.school.id })).toEqual({
+      schoolId: created.school.id,
+      tier: 'enterprise',
+      features: {
+        studentManagement: inTier,
+        cadet: inTier,
+        notices: inTier,
+        whatsapp: inTier,
+        assistant: { included: false, adjustment: null, enabled: false, active: false, config: null },
+      },
+      invalidConfigs: [],
     });
 
     const second = await adminClient.systemAdmin.createDemoSchool({ ...validInput, registrationNo: 'REG-KEEP-1' });

@@ -2,12 +2,11 @@ import type { DatabaseExecutor } from '@campuspilot/db';
 import { admissionTable } from '@campuspilot/db/schema/admission';
 import { noticeClassTable, type NoticeRow } from '@campuspilot/db/schema/notice';
 import { schoolMemberTable } from '@campuspilot/db/schema/school-member';
-import { schoolTable } from '@campuspilot/db/schema/school';
 import { studentTable } from '@campuspilot/db/schema/student';
 import { and, asc, eq, inArray } from 'drizzle-orm';
 
-import { rpcError } from '../../errors';
 import { forecastDeliveries, resolveAdmissionRecipients, type DeliveryForecast } from '../dispatch';
+import { schoolDeliveryFacts } from '../features';
 import { notifyMany, type AnyNotifyInput, type NotifyInput } from '../notify';
 
 /**
@@ -81,12 +80,6 @@ export async function noticeStaffRecipients(db: DatabaseExecutor, notice: Notice
   return members.map((member) => member.userId);
 }
 
-async function isDemoSchool(db: DatabaseExecutor, schoolId: string) {
-  const [school] = await db.select({ isDemo: schoolTable.isDemo }).from(schoolTable).where(eq(schoolTable.id, schoolId)).limit(1);
-  if (!school) throw rpcError.notFound('School');
-  return school.isDemo;
-}
-
 /** Whom publishing would notify now, with the students' per-channel forecast (null when no student scope). */
 export type NoticeDeliveryPreview = { staffRecipientCount: number; cadetForecast: DeliveryForecast | null };
 
@@ -96,7 +89,7 @@ export async function previewNoticeDelivery(db: DatabaseExecutor, notice: Notice
   if (notice.cadetScope === 'none') return { staffRecipientCount: staff.length, cadetForecast: null };
   const roster = await noticeCadetRoster(db, notice);
   const recipients = await resolveAdmissionRecipients(db, notice.schoolId, roster.map((row) => row.admissionId));
-  return { staffRecipientCount: staff.length, cadetForecast: forecastDeliveries('notice.published', await isDemoSchool(db, notice.schoolId), recipients) };
+  return { staffRecipientCount: staff.length, cadetForecast: forecastDeliveries('notice.published', await schoolDeliveryFacts(db, notice.schoolId), recipients) };
 }
 
 /** The recipients of a publication, resolved once by the publishing transaction. */

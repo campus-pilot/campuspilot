@@ -8,6 +8,6 @@ export const featureFlagsPage = defineAdminPage<SchoolRouteParams>({
   breadcrumbs: ({ schoolId }) => [
     { id: 'campuspilot', label: 'CampusPilot', href: '/', icon: AppWindow },
     { id: 'school', label: <SchoolSlugBreadcrumbValue schoolId={schoolId} />, href: schoolHref(schoolId) },
-    { id: 'feature-flags', label: 'Feature Flags', icon: Flag },
+    { id: 'feature-flags', label: 'Plan and features', icon: Flag },
   ],
 });

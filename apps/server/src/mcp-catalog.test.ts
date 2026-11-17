@@ -126,6 +126,17 @@ const HIDDEN_TOOLS = [
   // platform decision (systemAdmin.getSchoolFeatureFlags stays advanced).
   'school.getFeatureFlags',
   'systemAdmin.updateSchoolFeatureFlag',
+  // So is the tier a school is on (what it pays for and has).
+  'systemAdmin.updateSchoolTier',
+  // Suspending a school, and lifting it, takes away or restores a school's
+  // ability to work: a human platform decision, made in the admin app.
+  'systemAdmin.suspendSchool',
+  'systemAdmin.unsuspendSchool',
+  // The school's assistant role list as the platform administrator edits it;
+  // hidden like every assistant setting (school.getAssistantAccess,
+  // school.updateAssistantRoles), so never offered to the assistant itself.
+  'systemAdmin.getSchoolAssistantRoles',
+  'systemAdmin.updateSchoolAssistantRoles',
   // Question paper actions that must stay a person's: the AI generation job
   // (chat agents author papers themselves), page photo management, previews
   // and downloads (the app and the paper's versions tools cover agents).

@@ -70,23 +70,40 @@ export const cadetRouter = {
     .route({
       summary: 'Get my school',
       description:
-        "Get the public details of the signed-in student's school: its name and whether it has a logo. Takes no input.",
+        "Get the details of the signed-in student's school the portal needs: its name, whether it has a logo and whether it is suspended (read-only). Takes no input.",
       tags: ['Cadet'],
     })
     .meta({
       // Portal chrome (installed-app name and icon); no agent value.
       mcp: { exposure: 'hidden', access: 'read', destructive: false, module: 'account' },
     })
-    .output(z.object({ id: z.string(), name: z.string(), hasLogo: z.boolean() }))
+    .output(
+      z.object({
+        id: z.string(),
+        name: z.string(),
+        hasLogo: z.boolean(),
+        /**
+         * The school is suspended, so the portal is read-only: the student
+         * still sees everything and every change is refused
+         * (docs/school-suspension.md). The portal shows a permanent notice.
+         */
+        isSuspended: z.boolean(),
+      }),
+    )
     .handler(async ({ context }) => {
       try {
         const [school] = await context.db
-          .select({ id: schoolTable.id, name: schoolTable.name, logoS3Key: schoolTable.logoS3Key })
+          .select({
+            id: schoolTable.id,
+            name: schoolTable.name,
+            logoS3Key: schoolTable.logoS3Key,
+            suspendedAt: schoolTable.suspendedAt,
+          })
           .from(schoolTable)
           .where(eq(schoolTable.id, context.cadet.schoolId))
           .limit(1);
         if (!school) throw rpcError.notFound('School');
-        return { id: school.id, name: school.name, hasLogo: school.logoS3Key !== null };
+        return { id: school.id, name: school.name, hasLogo: school.logoS3Key !== null, isSuspended: school.suspendedAt !== null };
       } catch (error) {
         throw toRpcError(error);
       }

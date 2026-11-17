@@ -52,7 +52,7 @@ const admin = await clientFor(credentials.platform.email, credentials.platform.p
 assert.equal(admin.user.role, 'admin');
 const schools = await admin.rpc.systemAdmin.listSchools({ searchQuery: 'Maple Grove Public School' });
 let school = schools.items.find((item) => item.slug === 'maple-grove-public-school');
-school ??= await admin.rpc.systemAdmin.addSchool({ slug: 'maple-grove-public-school', name: 'Maple Grove Public School', location: '24 Learning Lane, Bengaluru, Karnataka 560001 (Sample school)', registrationNo: 'DEMO-MGPS-2026' });
+school ??= await admin.rpc.systemAdmin.addSchool({ slug: 'maple-grove-public-school', name: 'Maple Grove Public School', location: '24 Learning Lane, Bengaluru, Karnataka 560001 (Sample school)', registrationNo: 'DEMO-MGPS-2026', tier: 'pro' });
 const schoolId = school.id;
 console.log('SCHOOL_READY', schoolId);
 

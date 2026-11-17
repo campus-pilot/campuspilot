@@ -31,5 +31,6 @@ export const DELIVERY_SKIP_REASON_LABELS: Record<DeliverySkipReason, string> = {
   no_subscription: 'Device notifications not turned on',
   demo_school: 'Demo school (never sent)',
   disabled: 'Channel switched off',
-  feature_disabled: 'Feature switched off for this school',
+  // Also a channel the school does not have (WhatsApp outside its plan), so not "switched off".
+  feature_disabled: 'Not enabled for this school',
 };

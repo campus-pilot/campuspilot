@@ -668,13 +668,14 @@ export const assistantModelRequestTable = pgTable(
 );
 
 /**
- * The school roles a school has switched the assistant on for. A row means
- * "on"; switching a role off deletes its row. Only roles the platform made
- * eligible (the `assistant` feature flag's `eligibleRoles`) can be switched
- * on, but a stored row is kept when its role later stops being eligible: it
- * then grants nothing and the school's settings show it as unavailable.
- * Managed by the school's principal or manager
- * (`school.assistant.access.manage`).
+ * The school roles the assistant is switched on for: the school's one role
+ * list. A row means "on"; switching a role off deletes its row. It has two
+ * editors that read and write these same rows, so they always agree: the
+ * platform administrator (admin app, `systemAdmin.updateSchoolAssistantRoles`)
+ * and the school's principal or manager (`school.assistant.access.manage`).
+ * Any role can be switched either way by either. Rows are kept while the
+ * assistant is switched off; switching it on for a school without any row
+ * writes the default roles (`ASSISTANT_DEFAULT_ROLES`).
  */
 export const schoolAssistantAccessRoleTable = pgTable(
   "school_assistant_access_role",

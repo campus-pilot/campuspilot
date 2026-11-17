@@ -1,4 +1,4 @@
-import { toRpcError } from '../../../errors';
+import { rpcError, toRpcError } from '../../../errors';
 import { readSchoolFeatureFlags } from '../../../feature-flags/feature-flags.service';
 import { protectedProcedure } from '../../../index';
 import { requireSchoolMember } from '../../../permissions/school-member';
@@ -18,7 +18,7 @@ export const schoolFeatureFlagsRouter = {
     .route({
       summary: 'Get school feature flags',
       description:
-        'Read which platform features (for example the Cadet Portal or notices) are enabled for a school, with each feature\'s configuration. Any member of the school may read it; only platform administrators change it.',
+        'Read a school\'s subscription tier and which platform features (for example the Cadet Portal or notices) it has, with each feature\'s configuration. Any member of the school may read it; only platform administrators change it.',
       tags: ['School', 'Feature flags'],
     })
     // App chrome with no agent value: tools of a disabled feature already
@@ -29,10 +29,10 @@ export const schoolFeatureFlagsRouter = {
     .output(schoolFeatureFlagsDtoSchema)
     .handler(async ({ context, input }) => {
       try {
-        return {
-          schoolId: input.schoolId,
-          ...(await readSchoolFeatureFlags(context.db, input.schoolId)),
-        };
+        const flags = await readSchoolFeatureFlags(context.db, input.schoolId);
+        // A member's school exists; only a school deleted this instant is missing.
+        if (!flags) throw rpcError.notFound('School');
+        return { schoolId: input.schoolId, ...flags };
       } catch (error) {
         throw toRpcError(error);
       }

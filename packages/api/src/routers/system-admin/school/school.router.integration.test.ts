@@ -31,6 +31,7 @@ describe('systemAdmin.school Router Integration', () => {
         name: 'Greenwood High',
         location: 'New York, NY',
         registrationNo: 'REG-12345',
+        tier: 'pro',
       });
 
       expect(created).toBeDefined();
@@ -40,6 +41,10 @@ describe('systemAdmin.school Router Integration', () => {
       expect(created.location).toBe('New York, NY');
       expect(created.registrationNo).toBe('REG-12345');
       expect(created.hasCompletedOnboarding).toBe(false);
+      expect(created.tier).toBe('pro');
+      // A new school is not suspended.
+      expect(created.suspendedAt).toBeNull();
+      expect(created.suspendedReason).toBeNull();
     });
 
     it('rejects invalid slug format with validation error', async () => {
@@ -50,6 +55,7 @@ describe('systemAdmin.school Router Integration', () => {
           slug: 'Invalid Slug With Spaces & Caps!',
           name: 'Invalid School',
           location: 'City',
+          tier: 'plus',
         }),
       ).rejects.toThrow();
     });
@@ -62,6 +68,7 @@ describe('systemAdmin.school Router Integration', () => {
           slug: `school-unauth-${randomUUID().toLowerCase()}`,
           name: 'Unauth School',
           location: 'City',
+          tier: 'plus',
         }),
       ).rejects.toThrowError(
         expect.objectContaining({ code: 'UNAUTHORIZED' }),
@@ -76,6 +83,7 @@ describe('systemAdmin.school Router Integration', () => {
           slug: `school-forbidden-${randomUUID().toLowerCase()}`,
           name: 'Forbidden School',
           location: 'City',
+          tier: 'plus',
         }),
       ).rejects.toThrowError(
         expect.objectContaining({ code: 'FORBIDDEN' }),
@@ -136,6 +144,38 @@ describe('systemAdmin.school Router Integration', () => {
       expect(result.pagination.totalItems).toBe(2);
       expect(result.pagination.pageSize).toBe(10);
       expect(result.items.every((s) => s.name.includes(uniqueTerm))).toBe(true);
+    });
+
+    it('filters schools by subscription tier (or none) and by suspension, and reports both on each school', async () => {
+      const tag = `tier_${randomUUID().toLowerCase()}`;
+      const [plus, pro, enterprise, none] = await Promise.all([
+        createTestSchool({ name: `Plus ${tag}`, tier: 'plus' }),
+        createTestSchool({ name: `Pro ${tag}`, tier: 'pro' }),
+        createTestSchool({ name: `Enterprise ${tag}`, tier: 'enterprise' }),
+        createTestSchool({ name: `None ${tag}`, tier: null }),
+      ]);
+      const client = createTestClient(adminSession);
+      await client.systemAdmin.suspendSchool({ id: pro.id, reason: 'Sharing accounts' });
+
+      const all = await client.systemAdmin.listSchools({ searchQuery: tag });
+      expect(all.items.map((school) => [school.id, school.tier, school.suspendedAt !== null, school.suspendedReason]).sort()).toEqual(
+        [
+          [plus.id, 'plus', false, null],
+          [pro.id, 'pro', true, 'Sharing accounts'],
+          [enterprise.id, 'enterprise', false, null],
+          [none.id, null, false, null],
+        ].sort(),
+      );
+      for (const [tier, school] of [['plus', plus], ['pro', pro], ['enterprise', enterprise], [null, none]] as const) {
+        const byTier = await client.systemAdmin.listSchools({ searchQuery: tag, filters: { tier } });
+        expect(byTier.items.map((item) => item.id)).toEqual([school.id]);
+      }
+      const suspended = await client.systemAdmin.listSchools({ searchQuery: tag, filters: { suspended: true } });
+      expect(suspended.items.map((item) => item.id)).toEqual([pro.id]);
+      const notSuspended = await client.systemAdmin.listSchools({ searchQuery: tag, filters: { suspended: false } });
+      expect(notSuspended.items.map((item) => item.id).sort()).toEqual([plus.id, enterprise.id, none.id].sort());
+      const both = await client.systemAdmin.listSchools({ searchQuery: tag, filters: { tier: 'pro', suspended: false } });
+      expect(both.items).toEqual([]);
     });
 
     it('filters schools by hasCompletedOnboarding flag', async () => {
@@ -235,10 +275,9 @@ describe('systemAdmin.school Router Integration', () => {
     });
 
     it('deletes a school that has feature flag rows, and its flags with it', async () => {
-      // Every school that existed when flags were introduced has a row (the
-      // backfill), and any administrator toggle writes one, also when it
-      // switches a feature back off.
-      const school = await createTestSchool({ features: ['cadet', 'notices'] });
+      // Any administrator adjustment writes a row, also when it switches a
+      // feature back off.
+      const school = await createTestSchool({ tier: 'pro', features: ['cadet', 'notices'] });
       const client = createTestClient(adminSession);
       await client.systemAdmin.updateSchoolFeatureFlag({ id: school.id, feature: 'notices', enabled: false, config: null });
       expect(await db.select().from(schoolFeatureFlagTable).where(eq(schoolFeatureFlagTable.schoolId, school.id))).toHaveLength(2);

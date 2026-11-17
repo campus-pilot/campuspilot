@@ -18,6 +18,7 @@ import { CadetSchoolChrome } from './cadet-school-chrome';
 import { SignOutButton } from './more/more-screen';
 import { CadetNotificationBell } from './notifications/cadet-notifications';
 import { EmptyState, ScreenLoading } from './screen';
+import { SuspendedSchoolNotice } from './suspended-school-notice';
 
 /**
  * The five tabs. `sections`: screens outside a tab's own route that belong
@@ -131,13 +132,18 @@ function PortalUnavailable() {
   );
 }
 
-/** The portal chrome around a screen: install chrome, top bar, content, tabs. */
+/**
+ * The portal chrome around a screen: install chrome, top bar, content, tabs.
+ * A suspended school's notice is the first thing in the content of every
+ * screen, above whatever the screen shows.
+ */
 function PortalChrome({ children }: { children: ReactNode }) {
   return (
     <>
       <CadetSchoolChrome />
       <TopBar />
       <main className="flex flex-1 flex-col gap-5 px-4 pb-6 pt-4 md:min-h-0 md:overflow-y-auto md:*:shrink-0">
+        <SuspendedSchoolNotice />
         {children}
       </main>
       <BottomNav />

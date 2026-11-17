@@ -8,6 +8,7 @@ import { Skeleton } from '@campuspilot/ui/components/skeleton';
 import { CalendarDays, LayoutGrid, Rows3, Users } from 'lucide-react';
 import { orpc } from '@/lib/orpc';
 import { SchoolAvatar } from './school-avatar';
+import { SchoolBadges } from './school-badges';
 import {
   ClassEnrolmentCard,
   SchoolStatsBoundary,
@@ -33,7 +34,7 @@ function SchoolHeader({ schoolId }: { schoolId: string }) {
       <div className="flex min-w-0 flex-col gap-1">
         <div className="flex flex-wrap items-center gap-2">
           <h1 className="truncate text-2xl font-semibold tracking-tight">{school.name}</h1>
-          {school.isDemo ? <Badge variant="outline">Demo</Badge> : null}
+          <SchoolBadges school={school} />
           <Badge variant={school.hasCompletedOnboarding ? 'secondary' : 'outline'}>
             {school.hasCompletedOnboarding ? 'Onboarded' : 'Setup pending'}
           </Badge>

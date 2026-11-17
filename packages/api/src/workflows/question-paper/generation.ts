@@ -139,6 +139,7 @@ type Validation =
 function accessFailure(code: string): QuestionPaperJobErrorCode {
   if (code === 'limit_reached') return 'limit_reached';
   if (code === 'feature_disabled') return 'feature_disabled';
+  if (code === 'school_suspended') return 'school_suspended';
   return 'role_not_enabled';
 }
 

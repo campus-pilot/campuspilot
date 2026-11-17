@@ -18,6 +18,7 @@ const UNAVAILABLE_WORK: Record<SchoolFeatureKey, string> = {
   cadet:
     "the Cadet Portal (the students' own app): issuing portal passwords and releasing examination results to the portal. Staff's work with fees, results and student records is not part of it",
   notices: 'school notices: writing and publishing notices to staff and students',
+  whatsapp: "WhatsApp notifications to guardians. Bills, results, timetables and notices still reach students in the Cadet Portal's inbox where the school has it",
   assistant: 'the AI assistant',
 };
 

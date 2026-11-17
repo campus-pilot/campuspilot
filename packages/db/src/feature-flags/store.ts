@@ -1,19 +1,23 @@
 import { and, eq } from "drizzle-orm";
 
 import type { DatabaseExecutor } from "../index";
+import { schoolTable } from "../schema/school";
 import { schoolFeatureFlagTable } from "../schema/school-feature-flag";
 import {
   parseSchoolFeatureConfig,
   resolveSchoolFeatureActivity,
+  resolveSchoolFeatureSwitches,
   SCHOOL_FEATURE_KEYS,
-  schoolFeatureCatalogue,
+  schoolTierIncludes,
   type SchoolFeatureFlags,
   type SchoolFeatureKey,
   type SchoolFeatureState,
+  type SchoolTier,
 } from "./catalogue";
 
 /**
- * Reads of `school_feature_flag`, shared by the API and the auth package
+ * Reads of a school's features (its tier on `school`, its adjustments and
+ * settings in `school_feature_flag`), shared by the API and the auth package
  * (Cadet sign-in), so every enforcement point decides from the same query.
  * Writes live in the API (`packages/api/src/feature-flags`).
  */
@@ -63,31 +67,63 @@ export async function readSchoolFeatureConfig<K extends SchoolFeatureKey>(
   return readStoredConfig(key, row?.config ?? null);
 }
 
-/** Every feature's switch for a school: the stored `enabled`, or the catalogue default without a row. */
+/** What is stored about one feature of one school: its adjustment and its raw config. */
+type StoredFeatureRow = { adjustment: boolean | null; config: unknown };
+
+type SchoolFeatureSwitches = {
+  found: boolean;
+  tier: SchoolTier | null;
+  switches: Record<SchoolFeatureKey, boolean>;
+  rows: Map<string, StoredFeatureRow>;
+};
+
+/** A school's tier, every feature's state and its unusable configs ({@link readSchoolFeatureFlags}). */
+export type SchoolFeatureFlagsRead = {
+  tier: SchoolTier | null;
+  features: SchoolFeatureFlags;
+  invalidConfigs: SchoolFeatureKey[];
+};
+
+/**
+ * A school's tier, every feature's switch (the stored adjustment, or the
+ * tier's own answer without one) and the stored rows, in one query. `found`
+ * says whether the school exists; `tier` is null both for a school without
+ * a subscribed tier and for a school that does not exist. An unknown school
+ * has no stored row either, so every switch is off and a gate answers it
+ * like a school without the feature.
+ */
 async function readSchoolFeatureSwitches(
   db: DatabaseExecutor,
   schoolId: string,
-): Promise<{ switches: Record<SchoolFeatureKey, boolean>; rows: Map<string, { enabled: boolean; config: unknown }> }> {
+): Promise<SchoolFeatureSwitches> {
+  // From the school, so a school without any stored row still answers with its tier.
   const rows = await db
     .select({
+      tier: schoolTable.tier,
       feature: schoolFeatureFlagTable.feature,
-      enabled: schoolFeatureFlagTable.enabled,
+      adjustment: schoolFeatureFlagTable.enabled,
       config: schoolFeatureFlagTable.config,
     })
-    .from(schoolFeatureFlagTable)
-    .where(eq(schoolFeatureFlagTable.schoolId, schoolId));
-  const byKey = new Map(rows.map((row) => [row.feature as string, row]));
-  const switches = Object.fromEntries(
-    SCHOOL_FEATURE_KEYS.map((key) => [key, byKey.get(key)?.enabled ?? schoolFeatureCatalogue[key].defaultEnabled]),
-  ) as Record<SchoolFeatureKey, boolean>;
-  return { switches, rows: byKey };
+    .from(schoolTable)
+    .leftJoin(schoolFeatureFlagTable, eq(schoolFeatureFlagTable.schoolId, schoolTable.id))
+    .where(eq(schoolTable.id, schoolId));
+  const tier = rows[0]?.tier ?? null;
+  const byKey = new Map<string, StoredFeatureRow>();
+  for (const row of rows) {
+    if (row.feature !== null) byKey.set(row.feature, { adjustment: row.adjustment, config: row.config });
+  }
+  const adjustments = Object.fromEntries(
+    SCHOOL_FEATURE_KEYS.map((key) => [key, byKey.get(key)?.adjustment ?? null]),
+  ) as Record<SchoolFeatureKey, boolean | null>;
+  return { found: rows.length > 0, tier, switches: resolveSchoolFeatureSwitches(tier, adjustments), rows: byKey };
 }
 
 /**
- * Whether a school **has** a feature now: its switch is on (the catalogue's
- * `defaultEnabled` without a stored row) and every feature it `requires` is
+ * Whether a school **has** a feature now: its switch is on (the school's
+ * adjustment, or its tier without one) and every feature it `requires` is
  * active. Every gate asks exactly this, so a feature whose own switch is on
- * still closes when a feature it needs is switched off.
+ * still closes when a feature it needs is switched off. A school that does
+ * not exist has no feature.
  *
  * Reads the switches only and never parses `config`: the two are independent
  * facts, and every gate (Cadet sign-in, `cadetProcedure`, the MCP context,
@@ -108,12 +144,15 @@ export async function isSchoolFeatureEnabled(
 }
 
 /**
- * Every catalogue feature's state for a school, and which features hold a
- * stored config that no longer matches its schema. Rows of retired keys are
- * ignored.
+ * A school's tier, every catalogue feature's state, and which features hold
+ * a stored config that no longer matches its schema. Rows of retired keys
+ * are ignored. Null when the school does not exist. `tier` is null for a
+ * school without a subscribed tier: no tier includes any feature for it, and
+ * its adjustments still apply.
  *
- * `enabled` is the switch (stored, or the catalogue default without a row)
- * and `active` whether the school has the feature (see
+ * Per feature: `included` is the tier's answer, `adjustment` what is stored
+ * for this school (null: it follows the tier), `enabled` the switch that
+ * results and `active` whether the school has the feature (see
  * {@link isSchoolFeatureEnabled}). A feature listed in `invalidConfigs`
  * reads with `config: null` here: the stored value is unusable, which the
  * list states explicitly (null alone would also mean "nothing stored").
@@ -124,8 +163,14 @@ export async function isSchoolFeatureEnabled(
 export async function readSchoolFeatureFlags(
   db: DatabaseExecutor,
   schoolId: string,
-): Promise<{ features: SchoolFeatureFlags; invalidConfigs: SchoolFeatureKey[] }> {
-  const { switches, rows } = await readSchoolFeatureSwitches(db, schoolId);
+): Promise<SchoolFeatureFlagsRead | null> {
+  const read = await readSchoolFeatureSwitches(db, schoolId);
+  if (!read.found) return null;
+  return resolveSchoolFeatureFlags(read);
+}
+
+/** Every feature's state from what {@link readSchoolFeatureSwitches} read. */
+function resolveSchoolFeatureFlags({ tier, switches, rows }: SchoolFeatureSwitches): SchoolFeatureFlagsRead {
   const active = resolveSchoolFeatureActivity(switches);
   const invalidConfigs: SchoolFeatureKey[] = [];
   const features = Object.fromEntries(
@@ -136,6 +181,8 @@ export async function readSchoolFeatureFlags(
       return [
         key,
         {
+          included: schoolTierIncludes(tier, key),
+          adjustment: row?.adjustment ?? null,
           enabled: switches[key],
           active: active[key],
           config: stored.status === "valid" ? stored.config : null,
@@ -143,13 +190,16 @@ export async function readSchoolFeatureFlags(
       ];
     }),
   ) as SchoolFeatureFlags;
-  return { features, invalidConfigs };
+  return { tier, features, invalidConfigs };
 }
 
-/** The `features` of {@link readSchoolFeatureFlags}, for callers that only ask what a school has. */
+/**
+ * The `features` of {@link readSchoolFeatureFlags}, for callers that only ask
+ * what a school has. A school that does not exist has every feature off.
+ */
 export async function getSchoolFeatureFlags(
   db: DatabaseExecutor,
   schoolId: string,
 ): Promise<SchoolFeatureFlags> {
-  return (await readSchoolFeatureFlags(db, schoolId)).features;
+  return resolveSchoolFeatureFlags(await readSchoolFeatureSwitches(db, schoolId)).features;
 }

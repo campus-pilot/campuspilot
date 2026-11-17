@@ -18,10 +18,10 @@ type AssistantAccessProps = {
 /**
  * Renders an assistant entry point (navbar panel button, sidebar link, ⌘K
  * entry) only when the school has the `assistant` feature and the user's
- * role may use it (`getStatus().allowed`: one of the user's roles is
- * eligible and switched on by the school). A school at its monthly limit
- * keeps the entry points, so the history and the reason stay in reach; the
- * composer says why it cannot send. The API enforces the same decision on
+ * role may use it (`getStatus().allowed`: the assistant is switched on for
+ * one of the user's roles). A school at its monthly limit, or a suspended
+ * one, keeps the entry points, so the history and the reason stay in reach;
+ * the composer says why it cannot send. The API enforces the same decision on
  * every call.
  */
 export function AssistantAccess({ schoolId, children, fallback = null, pending }: AssistantAccessProps) {

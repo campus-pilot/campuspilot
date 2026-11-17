@@ -1,6 +1,8 @@
 import type { DatabaseExecutor } from '@campuspilot/db';
 import {
+  ASSISTANT_DEFAULT_ROLES,
   parseSchoolFeatureConfig,
+  resolveSchoolFeatureSwitches,
   SCHOOL_FEATURE_CONFIG_INVALID_REASON,
   SCHOOL_FEATURE_DISABLED_REASON,
   SCHOOL_FEATURE_KEYS,
@@ -17,15 +19,18 @@ import {
   readSchoolFeatureConfig,
   readSchoolFeatureFlags,
 } from '@campuspilot/db/feature-flags/store';
+import { schoolAssistantAccessRoleTable } from '@campuspilot/db/schema/assistant';
+import { schoolTable } from '@campuspilot/db/schema/school';
 import { schoolFeatureFlagTable } from '@campuspilot/db/schema/school-feature-flag';
 import { schoolMemberTable } from '@campuspilot/db/schema/school-member';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { ORPCError } from '@orpc/server';
 
 import { rpcError } from '../errors';
 
 /**
- * Per-school feature flags (docs/feature-flags.md). Reads come from
+ * Per-school features: the school's tier and its adjustments
+ * (docs/feature-flags.md). Reads come from
  * `@campuspilot/db/feature-flags/store` so the auth package's Cadet sign-in
  * and the API decide from the same query; they are re-exported here so API
  * code has one import.
@@ -105,9 +110,11 @@ export async function getSchoolFeatureConfig<K extends SchoolFeatureKey>(
 }
 
 /**
- * One feature's new state for one school. A union discriminated on
+ * One feature's new stored state for one school. A union discriminated on
  * `feature` (`SchoolFeatureEntry`), so a caller whose key is not a literal
- * cannot pass one feature's config under another feature's key.
+ * cannot pass one feature's config under another feature's key. `enabled`
+ * is the school's adjustment: true or false to set the feature for this
+ * school whatever its tier, null to follow the tier.
  */
 export type SetSchoolFeatureInput = SchoolFeatureEntry & {
   schoolId: string;
@@ -116,22 +123,44 @@ export type SetSchoolFeatureInput = SchoolFeatureEntry & {
 };
 
 /**
- * Writes one feature's state for a school (insert or replace). `enabled` and
- * `config` are both stored as given: disabling does not clear the config,
- * and the config is validated against the schema of `feature`. Enabling a
- * feature whose catalogue config is not `z.null()` requires a config
- * (BAD_REQUEST otherwise); disabling never does.
- * The caller verifies that the school exists and that the actor may change
- * flags; pass a transaction to write together with other rows.
+ * Writes what is stored about one feature of a school (insert or replace):
+ * its adjustment (`enabled`: on, off, or null to follow the tier) and its
+ * config. Both are stored as given: disabling, or returning the feature to
+ * its tier, does not clear the config, and the config is validated against
+ * the schema of `feature`. A feature whose catalogue config is not
+ * `z.null()` cannot end up switched on without a config (BAD_REQUEST),
+ * whether the adjustment or the school's tier switches it on; switching it
+ * off never needs one.
+ *
+ * When this switches the assistant on for a school that has no role
+ * switched on, the default roles are switched on with it
+ * ({@link switchOnDefaultAssistantRoles}).
+ *
+ * The caller verifies that the actor may change flags; pass a transaction
+ * to write together with other rows. A school that does not exist is
+ * NOT_FOUND.
  */
 export async function setSchoolFeature(
   db: DatabaseExecutor,
   input: SetSchoolFeatureInput,
 ): Promise<void> {
   const config = parseSchoolFeatureConfig(input.feature, input.config);
+  const [school] = await db
+    .select({ tier: schoolTable.tier })
+    .from(schoolTable)
+    .where(eq(schoolTable.id, input.schoolId))
+    .limit(1);
+  if (!school) throw rpcError.notFound('School');
+  const [before] = await db
+    .select({ enabled: schoolFeatureFlagTable.enabled })
+    .from(schoolFeatureFlagTable)
+    .where(and(eq(schoolFeatureFlagTable.schoolId, input.schoolId), eq(schoolFeatureFlagTable.feature, input.feature)))
+    .limit(1);
+  const wasOn = resolveSchoolFeatureSwitches(school.tier, { [input.feature]: before?.enabled ?? null })[input.feature];
+  const isOn = resolveSchoolFeatureSwitches(school.tier, { [input.feature]: input.enabled })[input.feature];
   // A feature with settings cannot be switched on without them: whatever
-  // reads them would have nothing to go by. Disabling stays possible either way.
-  if (input.enabled && config === null && schoolFeatureHasConfig(input.feature)) {
+  // reads them would have nothing to go by. Switching it off stays possible either way.
+  if (isOn && config === null && schoolFeatureHasConfig(input.feature)) {
     throw rpcError.badRequest(`${schoolFeatureCatalogue[input.feature].label} needs its settings to be enabled.`);
   }
   const updatedAt = new Date();
@@ -149,6 +178,39 @@ export async function setSchoolFeature(
       target: [schoolFeatureFlagTable.schoolId, schoolFeatureFlagTable.feature],
       set: { enabled: input.enabled, config, updatedBy: input.updatedBy, updatedAt },
     });
+  if (input.feature === 'assistant' && isOn && !wasOn) {
+    await switchOnDefaultAssistantRoles(db, input.schoolId, input.updatedBy);
+  }
+}
+
+/**
+ * Switches the assistant on for the default roles
+ * (`ASSISTANT_DEFAULT_ROLES`: principal, manager, exam coordinator,
+ * accountant) when the school has no role switched on. Called when the
+ * assistant itself is switched on for the school, so an enabled assistant is
+ * usable at once instead of waiting for someone to pick roles.
+ *
+ * It decides from the school's role list alone: a school that already has a
+ * role switched on (chosen by its principal or by an administrator, also
+ * before the assistant was switched off) keeps exactly that list. A school
+ * whose every role was switched off gets the defaults again, because an
+ * assistant that is on for nobody is what this exists to prevent.
+ */
+export async function switchOnDefaultAssistantRoles(
+  db: DatabaseExecutor,
+  schoolId: string,
+  updatedBy: string | null,
+): Promise<void> {
+  const [existing] = await db
+    .select({ role: schoolAssistantAccessRoleTable.role })
+    .from(schoolAssistantAccessRoleTable)
+    .where(eq(schoolAssistantAccessRoleTable.schoolId, schoolId))
+    .limit(1);
+  if (existing) return;
+  await db
+    .insert(schoolAssistantAccessRoleTable)
+    .values(ASSISTANT_DEFAULT_ROLES.map((role) => ({ schoolId, role, updatedBy, updatedAt: new Date() })))
+    .onConflictDoNothing();
 }
 
 /**
@@ -168,7 +230,7 @@ export async function featuresOfUserSchools(
     .where(eq(schoolMemberTable.userId, userId));
   const available = new Set<SchoolFeatureKey>();
   for (const { schoolId } of memberships) {
-    const { features } = await readSchoolFeatureFlags(db, schoolId);
+    const features = await getSchoolFeatureFlags(db, schoolId);
     for (const key of SCHOOL_FEATURE_KEYS) if (features[key].active) available.add(key);
     if (available.size === SCHOOL_FEATURE_KEYS.length) break;
   }

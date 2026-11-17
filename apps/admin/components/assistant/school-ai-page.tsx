@@ -14,6 +14,7 @@ import { orpc } from '@/lib/orpc';
 
 import { useInrRate } from './inr-rate';
 import { ModelTotalsTable } from './model-totals-table';
+import { AssistantRolesCard } from './school-ai-roles';
 import { AssistantSettingsForm } from './school-ai-settings';
 import { SourceTotals, UsageSpendCard, UsageStateCard, UsageToolbar } from './usage-section';
 
@@ -139,10 +140,11 @@ export function SchoolAiPage({ schoolId }: { schoolId: string }) {
       <div className="flex flex-col gap-1">
         <h1 className="text-2xl font-semibold tracking-tight">AI</h1>
         <p className="text-sm text-muted-foreground">
-          The in-app assistant for this school: whether it has it, its monthly limit and which roles it may be opened to, and what it spends.
+          The in-app assistant for this school: whether it has it, its monthly limit, which roles may use it, and what it spends.
         </p>
       </div>
       <AssistantSettingsCard schoolId={schoolId} />
+      <AssistantRolesCard schoolId={schoolId} />
       <SchoolUsage schoolId={schoolId} />
     </section>
   );

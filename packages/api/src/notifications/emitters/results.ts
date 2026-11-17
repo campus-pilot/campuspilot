@@ -8,7 +8,6 @@ import {
   type ResultPublicationOutcome,
 } from '@campuspilot/db/schema/exam-result-publication';
 import { notificationDeliveryTable, notificationEventTable, notificationTable } from '@campuspilot/db/schema/notification';
-import { schoolTable } from '@campuspilot/db/schema/school';
 import { studentTable } from '@campuspilot/db/schema/student';
 import { createHash } from 'node:crypto';
 import { and, asc, count, eq, inArray, isNull, lt, sql } from 'drizzle-orm';
@@ -17,6 +16,7 @@ import { isRetryableTransactionError, rpcError } from '../../errors';
 import { getExam, type ExamScope } from '../../routers/school/exam/exam.service';
 import { lifecycleWhere } from '../../routers/school/exam/exam.scope';
 import { forecastDeliveries, resolveAdmissionRecipients, type DeliveryForecast } from '../dispatch';
+import { schoolDeliveryFacts } from '../features';
 import { buildStudentReportCardContexts } from '../documents/report-card';
 import { handOffNotificationEvents } from '../notification.outbox';
 import { notify, notifyMany, type NotifyInput } from '../notify';
@@ -72,12 +72,6 @@ async function publicationRoster(db: DatabaseExecutor, scope: ExamScope) {
   return rows.flatMap((row) => (row.classId ? [{ ...row, classId: row.classId }] : []));
 }
 
-async function isDemoSchool(db: DatabaseExecutor, schoolId: string) {
-  const [school] = await db.select({ isDemo: schoolTable.isDemo }).from(schoolTable).where(eq(schoolTable.id, schoolId)).limit(1);
-  if (!school) throw rpcError.notFound('School');
-  return school.isDemo;
-}
-
 async function lifecycleStatus(db: DatabaseExecutor, scope: ExamScope) {
   const [row] = await db.select({ status: examLifecycleTable.status }).from(examLifecycleTable).where(lifecycleWhere(scope)).limit(1);
   return row?.status ?? null;
@@ -115,7 +109,7 @@ export async function previewResultRelease(db: DatabaseExecutor, scope: ExamScop
   if (existing) return { kind: 'already_notified', notifiedAt: existing.publishedAt };
   const roster = await publicationRoster(db, scope);
   const recipients = await resolveAdmissionRecipients(db, scope.schoolId, roster.map((row) => row.admissionId));
-  return { kind: 'first_release', forecast: forecastDeliveries('exam.results_published', await isDemoSchool(db, scope.schoolId), recipients) };
+  return { kind: 'first_release', forecast: forecastDeliveries('exam.results_published', await schoolDeliveryFacts(db, scope.schoolId), recipients) };
 }
 
 /**
@@ -133,7 +127,7 @@ export async function notifyFirstResultRelease(tx: DatabaseExecutor, scope: Exam
   const roster = await publicationRoster(tx, scope);
   if (roster.length === 0) return [];
   const recipients = await resolveAdmissionRecipients(tx, scope.schoolId, roster.map((row) => row.admissionId));
-  const forecast = forecastDeliveries('exam.results_published', await isDemoSchool(tx, scope.schoolId), recipients);
+  const forecast = forecastDeliveries('exam.results_published', await schoolDeliveryFacts(tx, scope.schoolId), recipients);
   const id = generateId('examResultPublication');
   await tx.insert(examResultPublicationTable).values({
     id,
@@ -205,7 +199,7 @@ export async function previewStudentResult(db: Database, scope: StudentResultSco
     async (tx) => {
       const { student } = await studentForResult(tx, scope);
       const recipients = await resolveAdmissionRecipients(tx, scope.schoolId, [student.admissionId]);
-      return forecastDeliveries('exam.results_published', await isDemoSchool(tx, scope.schoolId), recipients);
+      return forecastDeliveries('exam.results_published', await schoolDeliveryFacts(tx, scope.schoolId), recipients);
     },
     { isolationLevel: 'repeatable read', accessMode: 'read only' },
   );
@@ -250,7 +244,7 @@ async function sendStudentResultOnce(db: Database, scope: StudentResultScope & {
     async (tx) => {
       const { exam, student } = await studentForResult(tx, scope);
       const recipients = await resolveAdmissionRecipients(tx, scope.schoolId, [student.admissionId]);
-      const forecast = forecastDeliveries('exam.results_published', await isDemoSchool(tx, scope.schoolId), recipients);
+      const forecast = forecastDeliveries('exam.results_published', await schoolDeliveryFacts(tx, scope.schoolId), recipients);
       const result = await notify(tx, {
         type: 'exam.results_published',
         schoolId: scope.schoolId,

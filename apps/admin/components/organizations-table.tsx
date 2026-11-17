@@ -15,6 +15,7 @@ import { Badge } from '@campuspilot/ui/components/badge';
 import { orpc } from '@/lib/orpc';
 import { DemoSchoolJobStatus } from './demo-school/demo-school-job-status';
 import { SchoolAvatar } from './school-avatar';
+import { SchoolBadges } from './school-badges';
 
 type OrganizationOrderField = 'name' | 'location' | 'createdAt' | 'updatedAt';
 type OrganizationListController = DataTableListController<
@@ -42,7 +43,7 @@ const organizationColumns: DataTableColumnDef<SchoolDto>[] = [
               <span className="truncate font-medium underline decoration-border underline-offset-4 group-hover:decoration-foreground">
                 {row.original.name}
               </span>
-              {row.original.isDemo ? <Badge variant="outline">Demo</Badge> : null}
+              <SchoolBadges school={row.original} />
             </span>
             <span className="truncate text-[11px] text-muted-foreground">
               {row.original.slug}

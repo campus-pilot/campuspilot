@@ -3,7 +3,7 @@ import { schoolDashboardRouter } from './dashboard/dashboard.router';
 import { schoolMemberTable } from "@campuspilot/db/schema/school-member";
 import { schoolTable } from "@campuspilot/db/schema/school";
 import { SCHOOL_ACTIONS } from "@campuspilot/opa/policies/school";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { rpcError, toRpcError } from "../../errors";
@@ -80,6 +80,7 @@ export const schoolRouter = {
             location: schoolTable.location,
             logoS3Key: schoolTable.logoS3Key,
             isDemo: schoolTable.isDemo,
+            isSuspended: sql<boolean>`${schoolTable.suspendedAt} is not null`,
           })
           .from(schoolMemberTable)
           .innerJoin(
@@ -128,6 +129,7 @@ export const schoolRouter = {
             registrationNo: schoolTable.registrationNo,
             logoS3Key: schoolTable.logoS3Key,
             isDemo: schoolTable.isDemo,
+            isSuspended: sql<boolean>`${schoolTable.suspendedAt} is not null`,
           })
           .from(schoolTable)
           .where(eq(schoolTable.id, input.schoolId))
@@ -171,6 +173,7 @@ export const schoolRouter = {
             registrationNo: schoolTable.registrationNo,
             logoS3Key: schoolTable.logoS3Key,
             isDemo: schoolTable.isDemo,
+            isSuspended: sql<boolean>`${schoolTable.suspendedAt} is not null`,
           });
         if (!school) throw rpcError.notFound("School");
         return schoolDetailsDtoSchema.parse(school);

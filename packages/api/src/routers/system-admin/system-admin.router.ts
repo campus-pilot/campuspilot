@@ -1,3 +1,4 @@
+import { assistantAccessRouter } from "./assistant-access/assistant-access.router";
 import { assistantUsageRouter } from "./assistant-usage/assistant-usage.router";
 import { dataMigrationRouter } from "./data-migration/data-migration.router";
 import { featureFlagsRouter } from "./feature-flags/feature-flags.router";
@@ -15,5 +16,6 @@ export const systemAdminRouter = {
   ...dataMigrationRouter,
   ...featureFlagsRouter,
   ...assistantUsageRouter,
+  ...assistantAccessRouter,
   ...userRouter,
 };

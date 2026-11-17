@@ -25,7 +25,7 @@ import {
  */
 
 const enable = (schoolId: string) =>
-  setTestSchoolFeature(schoolId, 'assistant', true, { monthlyLimitUsd: null, eligibleRoles: ['principal'] });
+  setTestSchoolFeature(schoolId, 'assistant', true, { monthlyLimitUsd: null });
 
 /** Saves one model request as the worker would, at a given instant. */
 async function request(options: {

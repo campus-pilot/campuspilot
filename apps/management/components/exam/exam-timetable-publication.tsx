@@ -6,6 +6,7 @@ import { useQuery } from '@tanstack/react-query';
 import type { z } from 'zod';
 import type { timetableDtoSchema } from '@campuspilot/api/routers/school/exam/exam.dto';
 import type { timetablePublishPreviewSchema } from '@campuspilot/api/routers/school/exam/exam-result-notification.dto';
+import { useSchoolFeature } from '@/components/require-feature';
 import { client, orpc } from '@/lib/orpc';
 import { Issues, Notice, useExamCache } from './exam-common';
 import { errorMessage, type ExamScope } from './exam-model';
@@ -27,13 +28,18 @@ export function TimetableStatusNote({ timetable }: { timetable: Timetable }) {
   );
 }
 
-/** Whom publishing would notify, from the server's preview. */
-function publishDescription(preview: z.infer<typeof timetablePublishPreviewSchema> | undefined) {
+/**
+ * Whom publishing would notify, from the server's preview. WhatsApp is
+ * named only for a school known to have it (`whatsapp` feature): the
+ * sentence must not promise a channel the school does not send on.
+ */
+function publishDescription(preview: z.infer<typeof timetablePublishPreviewSchema> | undefined, hasWhatsapp: boolean) {
   if (!preview) return 'Checking whom this will notify…';
   const staff = `${preview.staffRecipientCount} staff ${preview.staffRecipientCount === 1 ? 'member' : 'members'}`;
   if (!preview.cadetForecast) return `Publishing notifies ${staff}. The Cadet Portal is not enabled for this school, so students are not notified.`;
   const students = `${preview.cadetForecast.recipientCount} ${preview.cadetForecast.recipientCount === 1 ? 'student' : 'students'}`;
-  return `Publishing notifies ${staff} and ${students} (in the Cadet Portal, and by push or WhatsApp where set up). The timetable is frozen until you withdraw it.`;
+  const remote = hasWhatsapp ? 'by push or WhatsApp where set up' : 'by push where set up';
+  return `Publishing notifies ${staff} and ${students} (in the Cadet Portal, and ${remote}). The timetable is frozen until you withdraw it.`;
 }
 
 /** Publishes the draft after the staff member has seen whom it notifies. */
@@ -50,6 +56,7 @@ export function PublishTimetableDialog({
 }) {
   const queries = useExamCache();
   const preview = useQuery({ ...orpc.school.previewExamTimetablePublish.queryOptions({ input: scope }), enabled: open, gcTime: 0 });
+  const whatsapp = useSchoolFeature(scope.schoolId, 'whatsapp');
   const form = useForm({
     defaultValues: {},
     onSubmit: async () => {
@@ -70,7 +77,7 @@ export function PublishTimetableDialog({
         <ConfirmationDialog
           open={open}
           title="Publish timetable"
-          description={`Publish the ${examName} timetable? ${publishDescription(preview.data)}`}
+          description={`Publish the ${examName} timetable? ${publishDescription(preview.data, whatsapp.enabled)}`}
           confirmLabel={pending ? 'Publishing…' : 'Publish timetable'}
           confirmVariant="default"
           confirmDisabled={!preview.data}

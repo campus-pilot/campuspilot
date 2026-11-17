@@ -173,18 +173,33 @@ Before changing exam timetable drafting, publishing or withdrawal, the
 `exam.timetable_published*` notifications, or the Cadet Portal timetable
 screens, read [Examination timetable publishing](docs/exam-timetable-publishing.md).
 
-## School feature flags
+## School feature flags and subscription tiers
 
-Before adding a per-school feature, gating a procedure, page or navigation item
-on one, or changing `school_feature_flag`, the feature catalogue
-(`packages/db/src/feature-flags`), `requireSchoolFeature`, `RequireFeature` /
-`useSchoolFeature`, or the admin feature-flags editor, read the canonical
-[School feature flags guide](docs/feature-flags.md). A flag says what a school
-has; it is never a substitute for a permission, and a missing row means
-the feature's catalogue default (`defaultEnabled`: on only for
-`studentManagement`). A feature may require others (`requires`); gates and
-screens decide from `active`, never from the switch alone. Tests name the
-features they need (`createTestSchool({ features: [...] })`).
+Before adding a per-school feature or a tier, gating a procedure, page or
+navigation item on a feature, or changing `school.tier`, `school_feature_flag`,
+the feature catalogue (`packages/db/src/feature-flags`), `requireSchoolFeature`,
+`RequireFeature` / `useSchoolFeature`, or the admin Plan and features editor,
+read the canonical [School feature flags guide](docs/feature-flags.md). A
+school has the features of its tier (Plus, Pro, Enterprise; the catalogue's
+`tiers`), and a platform administrator can adjust one feature for one school
+(`school_feature_flag.enabled`: on, off, or null to follow the tier; a missing
+row follows the tier). The assistant is in no tier: an add-on switched on per
+school. A flag says what a school has; it is never a substitute for a
+permission. A feature may require others (`requires`); gates and screens
+decide from `active`, never from the switch or the tier. Tests name the
+features they need (`createTestSchool({ features: [...] })`, or a `tier`).
+
+## School suspension
+
+Before changing how a school is suspended, what a suspended school refuses, or
+adding a way to change school data outside an oRPC procedure, read
+[School suspension](docs/school-suspension.md). A suspended school
+(`school.suspended_at`) is read-only: reads work, and `requireAuth` refuses
+every procedure that is not an explicit read (`mcp.access`) for the input's
+`schoolId`, `cadetProcedure` does the same for students, and upload routes
+call `assertSchoolWritableByCaller`. Screens are not hidden; the refusal
+(`SCHOOL_SUSPENDED`, `isSchoolSuspendedError`) is shown and a permanent
+warning explains it. Keep `mcp.access` honest and name the school `schoolId`.
 
 ## Demo schools
 

@@ -6,6 +6,7 @@ import type { Context } from '../../../context';
 import { rpcError, rpcErrorResponse } from '../../../errors';
 import { parseImageUpload, QUESTION_PAPER_IMAGE_FAMILY } from '../../../files/image-upload';
 import { assertPermission } from '../../../permissions/authorization';
+import { assertSchoolWritableByCaller } from '../../../school-suspension/school-suspension.service';
 import { assertQuestionPaperAssistantAccess } from './question-paper.access';
 import { paperKeySchema, QUESTION_PAPER_MAX_PAGE_BYTES, type PaperKey } from './question-paper.dto';
 import { findPaper } from './question-paper.records';
@@ -52,6 +53,8 @@ export async function handleQuestionPaperPageUpload(
     });
     const userId = requireUser(context);
     await assertQuestionPaperAssistantAccess(context.db, { schoolId: key.schoolId, userId });
+    // An upload is a change: refused while the school is suspended (read-only).
+    await assertSchoolWritableByCaller(context, key.schoolId);
     const scope = await resolvePaperScope(context.db, key);
     // The same refusal the write itself makes, but before a 15 MB body is read.
     assertPaperWritable(scope);

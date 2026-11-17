@@ -8,6 +8,12 @@ export const mySchoolDtoSchema = z.object({
   logoS3Key: z.string().nullable(),
   /** Demo schools show a permanent sample-data banner in management. */
   isDemo: z.boolean(),
+  /**
+   * The school is suspended, so it is read-only: every change is refused
+   * (docs/school-suspension.md). Management shows a permanent warning. The
+   * administrator's reason is deliberately not part of this.
+   */
+  isSuspended: z.boolean(),
 });
 
 export type MySchoolDto = z.infer<typeof mySchoolDtoSchema>;

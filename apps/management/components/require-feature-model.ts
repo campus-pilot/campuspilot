@@ -1,3 +1,4 @@
+import { isSchoolSuspendedError } from '@campuspilot/api/school-suspension/school-suspension.contract';
 import {
   DISABLED_SCHOOL_FEATURE,
   readSchoolFeatureDisabled,
@@ -68,4 +69,15 @@ export function resolveSchoolFeature<K extends SchoolFeatureKey>(
  */
 export function featureFlagsOutdatedBy(error: unknown): boolean {
   return readSchoolFeatureDisabled(error) !== null;
+}
+
+/**
+ * Whether a failed request says the cached list of the user's schools is out
+ * of date: the server refused a change because the school is suspended
+ * (docs/school-suspension.md). The list carries `isSuspended`, so it is read
+ * again and the suspended-school warning appears at once in a tab that was
+ * open when an administrator suspended the school.
+ */
+export function schoolListOutdatedBy(error: unknown): boolean {
+  return isSchoolSuspendedError(error);
 }

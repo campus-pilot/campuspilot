@@ -1,9 +1,9 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { Badge } from '@campuspilot/ui/components/badge';
 import { orpc } from '@/lib/orpc';
 import { SchoolAvatar } from '@/components/school-avatar';
+import { SchoolBadges } from '@/components/school-badges';
 
 export function SchoolSlugBreadcrumbValue({ schoolId }: { schoolId: string }) {
   const schoolQuery = useQuery(
@@ -27,7 +27,7 @@ export function SchoolSlugBreadcrumbValue({ schoolId }: { schoolId: string }) {
     <span className="flex items-center gap-1.5">
       <SchoolAvatar school={schoolQuery.data} className="size-4!" />
       <span>{schoolQuery.data.slug}</span>
-      {schoolQuery.data.isDemo ? <Badge variant="outline">Demo</Badge> : null}
+      <SchoolBadges school={schoolQuery.data} />
     </span>
   );
 }
