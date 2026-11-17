@@ -222,6 +222,15 @@ export const questionPaperClassHref = (scope: ExamScope & { classId: string }) =
   `${questionPaperHref(scope)}?class=${encodeURIComponent(scope.classId)}`;
 
 /**
+ * Where to go back to from one paper (its breadcrumb, and after deleting it):
+ * the Question paper tab with the paper's class open, so the person lands on
+ * the class they were working in rather than an all-collapsed accordion. A
+ * scope without a class (a malformed address) falls back to the bare tab.
+ */
+export const questionPaperReturnHref = (scope: ExamScope & { classId?: string }) =>
+  scope.classId ? questionPaperClassHref({ ...scope, classId: scope.classId }) : questionPaperHref(scope);
+
+/**
  * Whether a pathname is inside an examination's Question paper section (the
  * tab or one paper) of the session whose address is `sessionBase`
  * (`schoolSessionHref(schoolId, sessionId)`). The sidebar highlights its

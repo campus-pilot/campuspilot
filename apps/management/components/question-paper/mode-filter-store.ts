@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useMemo, useSyncExternalStore } from 'react';
-import { modeFilterStorageKey, parseStoredModeFilter } from './question-paper-list-model';
+import { isModeFilterStorageChange, modeFilterStorageKey, parseStoredModeFilter } from './question-paper-list-model';
 
 /**
  * The Question paper tab's mode filter, kept in local storage per school
@@ -9,18 +9,32 @@ import { modeFilterStorageKey, parseStoredModeFilter } from './question-paper-li
  * session selection (`useStoredSchoolSessionId`), so no effect copies it
  * into React state. Storage can be unavailable (a private window, blocked
  * site data): reads then give no filter and writes are skipped.
+ *
+ * Two kinds of change reach readers. A write from this tab (`storeModeFilter`)
+ * only notifies them. A change from another tab arrives as a `storage` event
+ * (which the writing tab never receives) and also bumps `externalRevision`,
+ * which the page uses as part of its filter form's key: the form then
+ * remounts seeded from the new entry. Without that, a form this tab already
+ * changed would keep its own values and overwrite the other tab's choice on
+ * its next change. A `storage` event with no key is `localStorage.clear()`
+ * in another tab, which removes the entry too, so it counts as a change.
  */
 const listeners = new Set<() => void>();
+let externalRevision = 0;
+
+function onStorage(event: StorageEvent) {
+  if (!isModeFilterStorageChange(event.key)) return;
+  externalRevision += 1;
+  listeners.forEach((listener) => listener());
+}
 
 function subscribe(listener: () => void) {
+  // One window listener for every reader, so one event bumps the revision once.
+  if (listeners.size === 0) window.addEventListener('storage', onStorage);
   listeners.add(listener);
-  const onStorage = (event: StorageEvent) => {
-    if (event.key?.startsWith('question-paper-mode-filter:')) listener();
-  };
-  window.addEventListener('storage', onStorage);
   return () => {
     listeners.delete(listener);
-    window.removeEventListener('storage', onStorage);
+    if (listeners.size === 0) window.removeEventListener('storage', onStorage);
   };
 }
 
@@ -53,4 +67,17 @@ export function useStoredModeFilter(schoolId: string): string[] | undefined {
   const getSnapshot = useCallback(() => readRaw(schoolId), [schoolId]);
   const raw = useSyncExternalStore<string | undefined>(subscribe, getSnapshot, () => undefined);
   return useMemo(() => (raw === undefined ? undefined : parseStoredModeFilter(raw)), [raw]);
+}
+
+/**
+ * How many times another tab changed (or cleared) a stored mode filter since
+ * this page loaded; 0 on the server and at hydration. Part of the filter
+ * form's key, so the form reseeds from the store only on such a change.
+ */
+export function useModeFilterExternalRevision(): number {
+  return useSyncExternalStore(
+    subscribe,
+    () => externalRevision,
+    () => 0,
+  );
 }

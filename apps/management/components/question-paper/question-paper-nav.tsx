@@ -50,16 +50,42 @@ export function QuestionPaperNav({ schoolId, sessionId }: { schoolId: string; se
 }
 
 /**
- * Adds an examination, for whoever may edit the session (`UPDATE_SESSION`,
- * what saving the session's exam configuration needs). Examinations are
- * configured in session settings today, so the link opens them there.
+ * Adds an examination. Examinations are configured in session settings today
+ * (creating them from the Examinations list is CAM-6), so the link opens the
+ * session there, and it is shown only when that page would let the person
+ * add one. Each of these is its own fact, checked on its own:
+ * - `READ_SESSION`: the session settings page refuses without it.
+ * - `UPDATE_SESSION`: `updateSession` refuses without it.
+ * - `UPDATE_EXAM`: `updateSession` refuses any change to the session's exam
+ *   definitions without it (`resolveSessionExamPermission`), whatever roles
+ *   happen to hold both today.
+ * - The session is active: only the active session can be updated, and the
+ *   settings page shows an inactive one read-only.
  */
 function AddExaminationLink({ schoolId, sessionId }: { schoolId: string; sessionId: string }) {
   return (
-    <RequirePermissions permissions={schoolPermission(schoolId, SCHOOL_ACTIONS.UPDATE_SESSION)}>
-      <QuestionPaperNavCreateLink href={schoolHref(schoolId, `/settings/session/${encodeURIComponent(sessionId)}`)} />
+    <RequirePermissions
+      permissions={[
+        schoolPermission(schoolId, SCHOOL_ACTIONS.READ_SESSION),
+        schoolPermission(schoolId, SCHOOL_ACTIONS.UPDATE_SESSION),
+        schoolPermission(schoolId, SCHOOL_ACTIONS.UPDATE_EXAM),
+      ]}
+    >
+      <AddExaminationLinkForActiveSession schoolId={schoolId} sessionId={sessionId} />
     </RequirePermissions>
   );
+}
+
+/**
+ * The link, once the session is known to be active. It reads the session as
+ * the settings page does (same query), so activating or updating the session
+ * there refreshes this too. Nothing is shown while the session is loading or
+ * could not be read: the row is an extra, not a page that needs an error.
+ */
+function AddExaminationLinkForActiveSession({ schoolId, sessionId }: { schoolId: string; sessionId: string }) {
+  const sessionQuery = useQuery(orpc.school.getSession.queryOptions({ input: { schoolId, sessionId } }));
+  if (sessionQuery.data?.isActive !== true) return null;
+  return <QuestionPaperNavCreateLink href={schoolHref(schoolId, `/settings/session/${encodeURIComponent(sessionId)}`)} />;
 }
 
 /**

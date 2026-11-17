@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { modeFilterSchema } from '@campuspilot/components/question-paper/question-paper-model';
 import { commandFuzzyScore } from '@/components/management-command-model';
 
 /**
@@ -20,15 +20,40 @@ export function withClassParam(search: string, classId: string | null): string {
   return query ? `?${query}` : '';
 }
 
+/** What `replaceOpenClass` needs of the router and the current address. */
+export type ClassParamNavigation = {
+  pathname: string;
+  /** The current query string, without its `?`. */
+  search: string;
+  replace: (href: string, options: { scroll: boolean }) => void;
+};
+
+/**
+ * Opens `classId` (null collapses the open class) by rewriting the `class`
+ * parameter. It replaces the address rather than pushing, so Back does not
+ * step through every toggle, and never scrolls, so the page stays where the
+ * person is.
+ */
+export function replaceOpenClass(navigation: ClassParamNavigation, classId: string | null) {
+  navigation.replace(`${navigation.pathname}${withClassParam(navigation.search, classId)}`, { scroll: false });
+}
+
+/** What every school's mode filter entry starts with. */
+const MODE_FILTER_KEY_PREFIX = 'question-paper-mode-filter:';
 /**
  * Where the Question paper tab's mode filter is kept: one entry per school
  * (not per examination), so a choice such as "Written only" follows the
  * person from one examination to the next.
  */
-export const modeFilterStorageKey = (schoolId: string) => `question-paper-mode-filter:${schoolId}`;
+export const modeFilterStorageKey = (schoolId: string) => `${MODE_FILTER_KEY_PREFIX}${schoolId}`;
 
-/** The stored mode filter: mode slugs (never names), bounded so a tampered entry cannot grow without limit. */
-export const modeFilterSchema = z.array(z.string().min(1).max(100)).max(100);
+
+/**
+ * Whether a `storage` event from another tab may have changed a stored mode
+ * filter: a change of any school's entry, or `localStorage.clear()` (the
+ * event then has no key, and every entry is gone).
+ */
+export const isModeFilterStorageChange = (key: string | null) => key === null || key.startsWith(MODE_FILTER_KEY_PREFIX);
 
 /**
  * The slugs a stored entry holds. A missing, unreadable or malformed entry

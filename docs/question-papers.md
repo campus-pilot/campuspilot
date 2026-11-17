@@ -452,9 +452,19 @@ accordion, and three ways lead straight to one class.
   slugs (never names), read through `useSyncExternalStore` (`mode-filter-store.ts`, like
   `useStoredSchoolSessionId`). A TanStack form is seeded from the stored entry once it can be
   read (never during server rendering, so a reload does not seed an empty filter) and writes
-  each change back through its `listeners.onChange`. Stored slugs the examination does not
+  each change back through its `listeners.onChange` (`QuestionPaperFilteredClasses` in
+  `packages/components/src/question-paper/question-paper-filtered-classes.tsx`, which takes
+  the stored slugs and a store callback). Stored slugs the examination does not
   have are not shown and not deleted (`visibleModeSelection`, `mergeModeSelection`), so they
-  still apply on another examination that has them. A malformed entry is no filter.
+  still apply on another examination that has them. A malformed entry is no filter. The
+  form is keyed by the school and by how many times another tab changed (or cleared) a
+  stored filter (`useModeFilterExternalRevision`): this tab's own writes keep the form
+  mounted, so an open filter stays open, while a change from another tab reseeds it instead
+  of being overwritten by this tab's next change. The filter is left out when the
+  examination has no modes at all.
+- **Coming back from a paper.** A paper's *Question paper* breadcrumb, and the redirect after
+  deleting a paper, go to the tab with that paper's class open (`questionPaperReturnHref`),
+  so moving from one paper of a class to the next never starts from an all-collapsed list.
 - **The sidebar entry** (`question-paper-nav.tsx` in `apps/management/components/question-paper`,
   presentational parts in `packages/components/src/question-paper/question-paper-nav.tsx`). Under
   Examinations in the Academics group, an `AppShellNavigationDisclosure`: pressing it folds open
@@ -464,9 +474,13 @@ accordion, and three ways lead straight to one class.
   search box that matches class names only. Choosing one asks the navigation guard, closes the
   mobile sheet and goes to the tab with `?class=` (`questionPaperClassHref`). Each list shows
   loading, empty ("No examinations in this session", "No classes you can open") and read-error
-  states with a retry. The last row, *Add examination*, is shown with `UPDATE_SESSION` (what
-  saving the session's exam configuration needs) and opens the session's settings page,
-  where examinations are configured today. A fold was chosen over popovers so the same steps
+  states with a retry. The last row, *Add examination*, opens the session's settings page,
+  where examinations are configured today (adding them from the Examinations list is CAM-6).
+  It is shown only when that page would let the person add one, each fact checked on its
+  own: `READ_SESSION` (the page), `UPDATE_SESSION` (`updateSession`), `UPDATE_EXAM`
+  (`updateSession` refuses to change the session's exam definitions without it) and the
+  session being active (`getSession`; only the active session can be updated, an inactive
+  one opens read-only). A fold was chosen over popovers so the same steps
   work in the desktop sidebar and the mobile sheet; the shell's sidebar collapses off-canvas,
   never to icons. The entry is highlighted on the Question paper section
   (`isQuestionPaperSectionPath`), and Examinations is not highlighted there.

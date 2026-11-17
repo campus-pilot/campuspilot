@@ -1,11 +1,13 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { isQuestionPaperSectionPath, questionPaperClassHref } from '@/components/exam/exam-model';
+import { isQuestionPaperSectionPath, questionPaperClassHref, questionPaperReturnHref } from '@/components/exam/exam-model';
 import {
+  isModeFilterStorageChange,
   modeFilterStorageKey,
   parseStoredModeFilter,
   pickerEmptyMessage,
   rankByQuery,
+  replaceOpenClass,
   withClassParam,
 } from './question-paper-list-model';
 
@@ -16,6 +18,16 @@ test('the sidebar and palette land on the tab with the class open', () => {
     questionPaperClassHref({ ...scope, classId: 'cls 8/a' }),
     '/school/sch_1/sessions/ses_1/exam/first-term/question-paper?class=cls%208%2Fa',
   );
+});
+
+test("going back from a paper (its breadcrumb, or after deleting it) reopens the paper's class", () => {
+  const paper = { ...scope, classId: 'c8', subjectSlug: 'english', modeSlug: 'written' };
+  assert.equal(
+    questionPaperReturnHref(paper),
+    '/school/sch_1/sessions/ses_1/exam/first-term/question-paper?class=c8',
+  );
+  // Without a class there is nothing to reopen: the bare tab, every class collapsed.
+  assert.equal(questionPaperReturnHref(scope), '/school/sch_1/sessions/ses_1/exam/first-term/question-paper');
 });
 
 test('the Question paper section is the tab and every paper below it, nothing else of the exam', () => {
@@ -35,6 +47,30 @@ test('opening and collapsing a class rewrites only the class parameter', () => {
   assert.equal(withClassParam('class=c1', null), '');
   assert.equal(withClassParam('foo=1&class=c1', null), '?foo=1');
   assert.equal(withClassParam('foo=1', 'a b'), '?foo=1&class=a+b');
+});
+
+test("another tab's change to any school's mode filter, or clearing storage, reseeds the filter", () => {
+  assert.equal(isModeFilterStorageChange('question-paper-mode-filter:sch_1'), true);
+  assert.equal(isModeFilterStorageChange('question-paper-mode-filter:sch_2'), true);
+  assert.equal(isModeFilterStorageChange(null), true);
+  assert.equal(isModeFilterStorageChange('campuspilot:selected-session:sch_1'), false);
+});
+
+test('toggling a class replaces the address without scrolling, and collapsing drops the parameter', () => {
+  const calls: Array<[string, { scroll: boolean }]> = [];
+  const navigation = (search: string) => ({
+    pathname: '/school/sch_1/sessions/ses_1/exam/first-term/question-paper',
+    search,
+    replace: (href: string, options: { scroll: boolean }) => void calls.push([href, options]),
+  });
+  replaceOpenClass(navigation(''), 'c8');
+  replaceOpenClass(navigation('class=c8'), null);
+  replaceOpenClass(navigation('class=c8&tab=x'), 'c9');
+  assert.deepEqual(calls, [
+    ['/school/sch_1/sessions/ses_1/exam/first-term/question-paper?class=c8', { scroll: false }],
+    ['/school/sch_1/sessions/ses_1/exam/first-term/question-paper', { scroll: false }],
+    ['/school/sch_1/sessions/ses_1/exam/first-term/question-paper?class=c9&tab=x', { scroll: false }],
+  ]);
 });
 
 test('the mode filter is stored per school as slugs, and a bad entry is no filter', () => {

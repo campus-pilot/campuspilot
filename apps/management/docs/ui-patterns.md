@@ -282,6 +282,8 @@ the implementation and APIs in more detail.
   `TableFilterBar` above it filters rows on the client and is remembered per school in
   local storage; a class emptied by the filter says "No papers match the selected modes".
   Closed classes are unmounted, so the voice assistant sees only the open class's links.
+  A paper's *Question paper* breadcrumb (and the redirect after deleting a paper) returns
+  to the tab with that paper's class open (`questionPaperReturnHref`).
   See [Question papers](../../../docs/question-papers.md#ways-into-the-tab). `/question-paper/<class>/<subject>/<mode>`
   is the paper's screen. A paper with nothing yet is one card in a centred column
   (`max-w-3xl`), in the shape of the assistant's message box: what the paper is made from

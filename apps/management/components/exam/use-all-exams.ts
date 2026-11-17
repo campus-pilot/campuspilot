@@ -17,11 +17,14 @@ export type ExamSearchItem = {
  * palette and the sidebar so they read one cached list. The palette keeps it
  * for as long as it is open (`staleTime: Infinity`); the sidebar reads it
  * again whenever its entry is opened (the default `staleTime`), so an
- * examination added in session settings appears there.
+ * examination added in session settings appears there. Both list the exams
+ * in the session's configured order (`orderBy: order`), the order the
+ * Examinations list uses; the palette listed them in the API's default
+ * order before the hook was shared.
  */
 export function useAllExams(schoolId: string, sessionId: string, options: { staleTime?: number } = {}) {
   return useQuery({
-    queryKey: [...orpc.school.listExams.queryKey({ input: { schoolId, sessionId } }), 'command-palette-all-pages'],
+    queryKey: [...orpc.school.listExams.queryKey({ input: { schoolId, sessionId } }), 'all-pages'],
     staleTime: options.staleTime,
     queryFn: () =>
       collectAllPages<ExamSearchItem>((page) =>

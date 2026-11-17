@@ -4,6 +4,8 @@
  * here touches the DOM or the API, so the rules are unit tested directly.
  */
 
+import { z } from 'zod';
+
 /** Pages (photos) one paper may hold. Mirrors `QUESTION_PAPER_MAX_PAGES` on the server. */
 export const QUESTION_PAPER_MAX_PAGES = 20;
 /** The largest accepted photo, 15 MiB. Mirrors `QUESTION_PAPER_MAX_PAGE_BYTES` on the server (D24). */
@@ -229,6 +231,12 @@ export type PaperListClass = {
     modes: ReadonlyArray<{ modeSlug: string; modeName: string; paper: PaperCellInput }>;
   }>;
 };
+
+/**
+ * The mode filter's value as it is stored and validated: mode slugs (never
+ * names), bounded so a tampered stored entry cannot grow without limit.
+ */
+export const modeFilterSchema = z.array(z.string().min(1).max(100)).max(100);
 
 /** One choice of the mode filter: the slug is what is stored, the name what is shown. */
 export type PaperModeOption = { slug: string; name: string };
