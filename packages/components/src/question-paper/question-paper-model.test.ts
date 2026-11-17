@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  applyModeFilter,
   cellStatus,
+  mergeModeSelection,
+  openClassOf,
+  paperClassSummary,
+  paperClassSummaryLabel,
+  paperModeOptions,
+  visibleModeSelection,
   editBlockedReason,
   isAcceptedImage,
   isHeifFile,
@@ -129,5 +136,110 @@ describe('versionSourceLabel', () => {
     expect(versionSourceLabel('ai_job')).toBe('AI from photos');
     expect(versionSourceLabel('agent')).toBe('Assistant chat');
     expect(versionSourceLabel('copy')).toBe('Copied from an earlier paper');
+  });
+});
+
+const mode = (modeSlug: string, modeName: string, over: Parameters<typeof paper>[0] | null = null) => ({
+  modeSlug,
+  modeName,
+  paper: over === null ? null : paper(over),
+});
+const classes = [
+  {
+    classId: 'c1',
+    className: 'Class 1',
+    subjects: [
+      { subjectSlug: 'english', subjectName: 'English', modes: [mode('written', 'Written', { latestVersionNo: 1 }), mode('oral', 'Oral')] },
+      { subjectSlug: 'computer', subjectName: 'Computer', modes: [mode('practical', 'Practical', { activeJob: { status: 'running' } })] },
+    ],
+  },
+  {
+    classId: 'c2',
+    className: 'Class 2',
+    subjects: [{ subjectSlug: 'science', subjectName: 'Science', modes: [mode('theory', 'Theory', { lastJobFailure: { message: 'x' } }), mode('oral', 'Viva voce')] }],
+  },
+  { classId: 'c3', className: 'Class 3', subjects: [] },
+];
+
+describe('mode filter', () => {
+  it('lists every distinct mode once, by name then slug, keeping the first name of a slug', () => {
+    expect(paperModeOptions(classes)).toEqual([
+      { slug: 'oral', name: 'Oral' },
+      { slug: 'practical', name: 'Practical' },
+      { slug: 'theory', name: 'Theory' },
+      { slug: 'written', name: 'Written' },
+    ]);
+    expect(paperModeOptions([])).toEqual([]);
+  });
+
+  it('sorts equal names by slug so the order never depends on the data order', () => {
+    const same = [{ classId: 'a', className: 'A', subjects: [{ subjectSlug: 's', subjectName: 'S', modes: [mode('b', 'Test'), mode('a', 'Test')] }] }];
+    expect(paperModeOptions(same).map((option) => option.slug)).toEqual(['a', 'b']);
+  });
+
+  it('shows only stored slugs this examination has, in the options order', () => {
+    const options = paperModeOptions(classes);
+    expect(visibleModeSelection(['written', 'project', 'oral'], options)).toEqual(['oral', 'written']);
+    expect(visibleModeSelection(['project'], options)).toEqual([]);
+  });
+
+  it('keeps stored slugs of other examinations when the visible choice changes or is cleared', () => {
+    const options = paperModeOptions(classes);
+    expect(mergeModeSelection(['project', 'written'], options, ['oral', 'oral'])).toEqual(['project', 'oral']);
+    expect(mergeModeSelection(['project', 'written'], options, [])).toEqual(['project']);
+    // A choice that is not an option of this examination is not stored.
+    expect(mergeModeSelection([], options, ['nonsense', 'theory'])).toEqual(['theory']);
+  });
+
+  it('shows every row for an empty selection', () => {
+    const filtered = applyModeFilter(classes, []);
+    expect(filtered.map((item) => item.subjects)).toEqual(classes.map((item) => item.subjects));
+    expect(filtered.map((item) => item.emptyReason)).toEqual([null, null, 'no-subjects']);
+  });
+
+  it('keeps only the selected modes, drops subjects left empty and says why a class is empty', () => {
+    const filtered = applyModeFilter(classes, ['theory']);
+    expect(filtered.map((item) => item.classId)).toEqual(['c1', 'c2', 'c3']);
+    expect(filtered[0]!.subjects).toEqual([]);
+    expect(filtered[0]!.emptyReason).toBe('no-matching-modes');
+    expect(filtered[1]!.subjects.map((subject) => subject.modes.map((item) => item.modeSlug))).toEqual([['theory']]);
+    expect(filtered[1]!.emptyReason).toBeNull();
+    // Empty by plan stays empty by plan, whatever the filter.
+    expect(filtered[2]!.emptyReason).toBe('no-subjects');
+  });
+
+  it('filters across subjects with several selected modes', () => {
+    const filtered = applyModeFilter(classes, ['oral', 'practical']);
+    expect(filtered[0]!.subjects.map((subject) => [subject.subjectSlug, subject.modes.map((item) => item.modeSlug)])).toEqual([
+      ['english', ['oral']],
+      ['computer', ['practical']],
+    ]);
+  });
+});
+
+describe('class accordion', () => {
+  it('summarises the rows a class shows', () => {
+    expect(paperClassSummary(classes[0]!)).toEqual({ total: 3, ready: 1, generating: 1, failed: 0 });
+    expect(paperClassSummaryLabel(paperClassSummary(classes[0]!))).toBe('1 of 3 ready · 1 generating');
+    expect(paperClassSummaryLabel(paperClassSummary(classes[1]!))).toBe('0 of 2 ready · 1 failed');
+    expect(paperClassSummaryLabel(paperClassSummary(classes[2]!))).toBe('0 of 0 ready');
+  });
+
+  it('counts the filtered rows, not the whole class', () => {
+    const [first] = applyModeFilter(classes, ['oral']);
+    expect(paperClassSummary(first!)).toEqual({ total: 1, ready: 0, generating: 0, failed: 0 });
+  });
+
+  it('counts a version with notices as ready', () => {
+    const noticed = { classId: 'n', className: 'N', subjects: [{ subjectSlug: 's', subjectName: 'S', modes: [mode('w', 'W', { latestVersionNo: 2, warningCount: 1 })] }] };
+    expect(paperClassSummary(noticed).ready).toBe(1);
+  });
+
+  it('opens the class the parameter names only when it is in the list', () => {
+    expect(openClassOf('c2', classes)).toBe('c2');
+    expect(openClassOf('someone-else', classes)).toBeNull();
+    expect(openClassOf('', classes)).toBeNull();
+    expect(openClassOf(null, classes)).toBeNull();
+    expect(openClassOf(undefined, classes)).toBeNull();
   });
 });

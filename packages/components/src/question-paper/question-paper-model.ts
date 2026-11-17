@@ -214,3 +214,151 @@ export function pageDragAnnouncements(pages: ReadonlyArray<{ id: string; positio
 /** Instructions read when the drag handle takes focus. */
 export const PAGE_DRAG_INSTRUCTIONS =
   'Press space to pick up this page, use the arrow keys to move it, and press space again to drop it. Press escape to cancel.';
+
+/**
+ * The parts of a `listQuestionPapers` class the Question paper tab's filter,
+ * accordion and summary read. Structural, so the API's response and the
+ * table's view types both fit.
+ */
+export type PaperListClass = {
+  classId: string;
+  className: string;
+  subjects: ReadonlyArray<{
+    subjectSlug: string;
+    subjectName: string;
+    modes: ReadonlyArray<{ modeSlug: string; modeName: string; paper: PaperCellInput }>;
+  }>;
+};
+
+/** One choice of the mode filter: the slug is what is stored, the name what is shown. */
+export type PaperModeOption = { slug: string; name: string };
+
+/**
+ * Every distinct assessment mode of the loaded classes, keyed by slug, for
+ * the mode filter. A slug keeps the first name it is seen with (a mode is
+ * configured once per session, so its name is the same everywhere). Sorted
+ * by name, then slug, so the order never depends on which class or subject
+ * comes first.
+ */
+export function paperModeOptions(classes: readonly PaperListClass[]): PaperModeOption[] {
+  const names = new Map<string, string>();
+  for (const classView of classes) {
+    for (const subject of classView.subjects) {
+      for (const mode of subject.modes) {
+        if (!names.has(mode.modeSlug)) names.set(mode.modeSlug, mode.modeName);
+      }
+    }
+  }
+  return [...names]
+    .map(([slug, name]) => ({ slug, name }))
+    .sort((left, right) => left.name.localeCompare(right.name) || left.slug.localeCompare(right.slug));
+}
+
+/**
+ * The stored selection as the filter shows it: the stored slugs that are
+ * modes of this examination, in the options' order. A stored slug the
+ * examination does not have is left out here and nowhere else (see
+ * `mergeModeSelection`), so it still applies on another examination that has it.
+ */
+export function visibleModeSelection(stored: readonly string[], options: readonly PaperModeOption[]): string[] {
+  const chosen = new Set(stored);
+  return options.filter((option) => chosen.has(option.slug)).map((option) => option.slug);
+}
+
+/**
+ * The selection to store after the person changed what the filter shows:
+ * the stored slugs this examination does not have (kept untouched, in their
+ * order) followed by the new visible choice. Clearing the filter therefore
+ * clears only this examination's modes.
+ */
+export function mergeModeSelection(
+  stored: readonly string[],
+  options: readonly PaperModeOption[],
+  nextVisible: readonly string[],
+): string[] {
+  const known = new Set(options.map((option) => option.slug));
+  const kept = stored.filter((slug) => !known.has(slug));
+  const next = nextVisible.filter((slug) => known.has(slug));
+  return [...kept, ...new Set(next)];
+}
+
+/**
+ * Why a class shows no rows, as its own fact: `no-subjects` (its plan has
+ * none) and `no-matching-modes` (the mode filter hid every row) read
+ * differently, so an empty filtered class never looks empty by plan.
+ */
+export type PaperClassEmptyReason = 'no-subjects' | 'no-matching-modes' | null;
+
+/**
+ * The classes with only the rows of the selected modes. An empty selection
+ * shows every mode. A subject left with no rows is dropped; a class is never
+ * dropped (it keeps its place in the accordion) and says why it is empty.
+ * `selected` is the visible selection (`visibleModeSelection`).
+ */
+export function applyModeFilter<C extends PaperListClass>(
+  classes: readonly C[],
+  selected: readonly string[],
+): Array<C & { emptyReason: PaperClassEmptyReason }> {
+  const chosen = new Set(selected);
+  return classes.map((classView) => {
+    const hasRows = classView.subjects.some((subject) => subject.modes.length > 0);
+    const subjects =
+      chosen.size === 0
+        ? classView.subjects
+        : classView.subjects
+            .map((subject) => ({ ...subject, modes: subject.modes.filter((mode) => chosen.has(mode.modeSlug)) }))
+            .filter((subject) => subject.modes.length > 0);
+    const shown = subjects.some((subject) => subject.modes.length > 0);
+    const emptyReason: PaperClassEmptyReason = !hasRows ? 'no-subjects' : shown ? null : 'no-matching-modes';
+    return { ...classView, subjects, emptyReason } as C & { emptyReason: PaperClassEmptyReason };
+  });
+}
+
+/** What a class's accordion trigger says about its papers, counted from the rows it shows. */
+export type PaperClassSummary = {
+  /** Rows (subject and mode) shown. */
+  total: number;
+  /** Rows whose paper has a saved version (with or without notices). */
+  ready: number;
+  /** Rows with a queued or running generation. */
+  generating: number;
+  /** Rows whose last generation failed (and none is running). */
+  failed: number;
+};
+
+/**
+ * Counts a class's shown rows by `cellStatus`, so the trigger and the table
+ * never disagree. The caller passes the filtered class, so the summary
+ * describes what opening the class shows.
+ */
+export function paperClassSummary(classView: PaperListClass): PaperClassSummary {
+  const summary: PaperClassSummary = { total: 0, ready: 0, generating: 0, failed: 0 };
+  for (const subject of classView.subjects) {
+    for (const mode of subject.modes) {
+      const kind = cellStatus(mode.paper).kind;
+      summary.total += 1;
+      if (kind === 'ready' || kind === 'warning') summary.ready += 1;
+      if (kind === 'generating') summary.generating += 1;
+      if (kind === 'failed') summary.failed += 1;
+    }
+  }
+  return summary;
+}
+
+/** The summary in words: "3 of 8 ready", then the generating and failed counts when there are any. */
+export function paperClassSummaryLabel(summary: PaperClassSummary): string {
+  const parts = [`${summary.ready} of ${summary.total} ready`];
+  if (summary.generating > 0) parts.push(`${summary.generating} generating`);
+  if (summary.failed > 0) parts.push(`${summary.failed} failed`);
+  return parts.join(' · ');
+}
+
+/**
+ * The class the `class` query parameter opens: the id when it names a class
+ * of the list, otherwise null (no parameter, a class the person may not open,
+ * a stale link). An unknown id opens nothing and is not an error.
+ */
+export function openClassOf(param: string | null | undefined, classes: readonly { classId: string }[]): string | null {
+  if (!param) return null;
+  return classes.some((classView) => classView.classId === param) ? param : null;
+}

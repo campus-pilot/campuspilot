@@ -96,56 +96,58 @@ function ModeRow({
 /**
  * The subjects and assessment modes of one class with the state of each paper.
  * The first column stays in view while the table scrolls sideways on a phone.
+ * The class's name is not repeated here: the accordion trigger above it
+ * (`QuestionPaperClassAccordion`) names the class.
  */
 export function QuestionPaperClassTable({
   classView,
   hrefOf,
   onOpen,
+  emptyMessage = 'This class has no subjects in the examination plan.',
 }: {
   classView: QuestionPaperClassView;
   /** Where a paper's workspace is. */
   hrefOf: (cell: QuestionPaperCellRef) => string;
   /** Goes to a paper without reloading the page, for a plain click on its link. */
   onOpen: (cell: QuestionPaperCellRef) => void;
+  /** The one row shown when the class has no rows (by plan, or hidden by a filter). */
+  emptyMessage?: string;
 }) {
   const rows = classView.subjects.flatMap((subject) => subject.modes.map((mode) => ({ subject, mode })));
   return (
-    <section className="flex min-w-0 flex-col gap-2" aria-label={`${classView.className} question papers`}>
-      <h2 className="text-sm font-semibold">{classView.className}</h2>
-      <div className="min-w-0 rounded-lg border">
-        <Table>
-          <TableHeader>
+    <div className="min-w-0 rounded-lg border" aria-label={`${classView.className} question papers`} role="region">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead className="sticky left-0 z-10 bg-background">Subject</TableHead>
+            <TableHead>Mode</TableHead>
+            <TableHead>Max marks</TableHead>
+            <TableHead>Paper</TableHead>
+            <TableHead className="text-right">
+              <span className="sr-only">Actions</span>
+            </TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.map(({ subject, mode }) => (
+            <ModeRow
+              key={`${subject.subjectSlug}/${mode.modeSlug}`}
+              classView={classView}
+              subject={subject}
+              mode={mode}
+              hrefOf={hrefOf}
+              onOpen={onOpen}
+            />
+          ))}
+          {rows.length === 0 ? (
             <TableRow>
-              <TableHead className="sticky left-0 z-10 bg-background">Subject</TableHead>
-              <TableHead>Mode</TableHead>
-              <TableHead>Max marks</TableHead>
-              <TableHead>Paper</TableHead>
-              <TableHead className="text-right">
-                <span className="sr-only">Actions</span>
-              </TableHead>
+              <TableCell colSpan={5} className="text-center text-muted-foreground">
+                {emptyMessage}
+              </TableCell>
             </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.map(({ subject, mode }) => (
-              <ModeRow
-                key={`${subject.subjectSlug}/${mode.modeSlug}`}
-                classView={classView}
-                subject={subject}
-                mode={mode}
-                hrefOf={hrefOf}
-                onOpen={onOpen}
-              />
-            ))}
-            {rows.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={5} className="text-center text-muted-foreground">
-                  This class has no subjects in the examination plan.
-                </TableCell>
-              </TableRow>
-            ) : null}
-          </TableBody>
-        </Table>
-      </div>
-    </section>
+          ) : null}
+        </TableBody>
+      </Table>
+    </div>
   );
 }
