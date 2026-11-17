@@ -11,7 +11,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@campuspilot/ui/compone
 import { cn } from '@campuspilot/ui/lib/utils';
 import { Notice, ReadError } from '@/components/exam/exam-common';
 import { questionPaperModelUrl, questionPaperOriginalUrl } from '@/lib/question-paper-pages';
-import { comparePageIndex, inFlightJob, PHOTO_ZOOM, scrollAfterZoom, uploadsInFlight, type QuestionPaperScope } from './question-paper-model';
+import { comparePageIndex, inFlightJob, pagePreviewFallback, PHOTO_ZOOM, scrollAfterZoom, uploadsInFlight, type QuestionPaperScope } from './question-paper-model';
 import { PageTurnButtons, type PageTurning, type PageView } from './source-preview-dialogs';
 import type { PageUploads } from './use-page-uploads';
 import { pageTurningOf, useRefreshQuestionPaper, useRotatePage, type QuestionPaperDetail } from './use-question-paper-detail';
@@ -51,14 +51,15 @@ function BarButton({ label, icon, disabled = false, onClick }: { label: string; 
 }
 
 /** What stands in a photo's place when it cannot be drawn: the app's read error with a retry, or why there is nothing to retry. */
-function PhotoUnavailable({ decoded, onRetry }: { decoded: boolean; onRetry: () => void }) {
+function PhotoUnavailable({ decoded, fallback, onRetry }: { decoded: boolean; fallback: string; onRetry: () => void }) {
   return (
     <div className="p-3">
       {decoded ? (
         <ReadError error={new Error('This page could not be loaded.')} retry={onRetry} />
       ) : (
-        // A photo the server could not decode (a HEIC) has no copy to show; the browser was asked to draw the upload and could not.
-        <Notice>This photo cannot be shown here. The AI can still read it.</Notice>
+        // A page without a copy to show (a HEIC, one not made yet, or a photo that could not be read): the browser was asked to draw
+        // the upload and could not, or there is none yet.
+        <Notice>{fallback}</Notice>
       )}
     </div>
   );
@@ -69,11 +70,11 @@ function PhotoUnavailable({ decoded, onRetry }: { decoded: boolean; onRetry: () 
  * that when zoomed, which the pane then pans by scrolling). It is the copy
  * the AI read (the `model` derivative, turned as the page says), like the
  * page viewer, so what is read against the paper is what the paper was made
- * from; a page the server could not decode has no such copy, and the upload
- * is tried instead.
+ * from; a page without such a copy (one the server could not decode, or
+ * whose copy the worker has not made yet) shows the upload instead.
  *
  * Whether the image arrived is this component's own state, and the caller
- * keys it by page and turn, so each one starts as a skeleton of the page's
+ * keys it by page, readiness and turn, so each one starts as a skeleton of the page's
  * shape: no effect watches the address of the image.
  */
 function PhotoImage({
@@ -107,6 +108,7 @@ function PhotoImage({
     return (
       <PhotoUnavailable
         decoded={decoded}
+        fallback={pagePreviewFallback(page)}
         onRetry={() => {
           onLoadError();
           setLoad((current) => ({ status: 'loading', attempt: current.attempt + 1 }));
@@ -249,9 +251,10 @@ function PhotoPane({ scope, pages, turning }: { scope: QuestionPaperScope; pages
   return (
     <section aria-label="Uploaded photos" className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border bg-muted/30" onKeyDown={stepWithArrows}>
       <PhotoSheet scroller={scroller} label={`Photo of page ${page.position}`} turning={turning?.turningPageId === page.id}>
-        {/* Keyed by page and by turn: a turned page is a new image, and a failed load on one page never hides the next. */}
+        {/* Keyed by page, readiness and turn: a page whose copy is made, or that was turned, is a new image, and a failed load
+            on one page never hides the next. */}
         <PhotoImage
-          key={`${page.id}:${page.derivativeRevision}`}
+          key={`${page.id}:${page.derivativeStatus}:${page.derivativeRevision}`}
           scope={scope}
           page={page}
           count={pages.length}

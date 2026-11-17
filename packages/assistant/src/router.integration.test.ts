@@ -20,9 +20,10 @@ import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { loadAssistantAccess, type AssistantAccessDecision } from './access';
 import { db } from './db';
 import { createAttachment, deleteConversationAttachments, deleteUnsentAttachment, loadAttachmentFile, sweepUnsentAttachments } from './attachments';
-import { handleAssistantAttachmentRead, handleAssistantAttachmentUpload } from './attachments.http';
+import { handleAssistantAttachmentRead, handleAssistantAttachmentStatus, handleAssistantAttachmentUpload } from './attachments.http';
 import { getObjectBytes, pageImageUrl, putObject } from '@campuspilot/api/routers/school/question-paper/question-paper.storage';
-import { makeImageDerivatives } from '@campuspilot/api/files/image-derivative';
+import { checkImageHeader } from '@campuspilot/api/files/image-derivative';
+import { requestImageDerivatives } from '@campuspilot/api/workflows/image-derivatives/outbox';
 import { configureDispatcher } from './dispatch';
 import { generateId } from './ids';
 import { assistantRouter } from './router';
@@ -68,14 +69,10 @@ vi.mock('@campuspilot/api/routers/school/question-paper/question-paper.scope', (
   }),
 }));
 vi.mock('@campuspilot/api/files/image-derivative', () => ({
-  makeImageDerivatives: vi.fn(async () => ({
-    status: 'ready',
-    width: 1,
-    height: 1,
-    model: { bytes: Buffer.from('m'), contentType: 'image/jpeg' },
-    thumb: { bytes: Buffer.from('t'), contentType: 'image/jpeg' },
-  })),
+  checkImageHeader: vi.fn(async () => ({ width: 1, height: 1 })),
 }));
+/** The hand-over to the worker is recorded, not made (the worker's job is tested in the API package). */
+vi.mock('@campuspilot/api/workflows/image-derivatives/outbox', () => ({ requestImageDerivatives: vi.fn() }));
 vi.mock('@campuspilot/api/routers/school/question-paper/question-paper.storage', () => ({
   deleteObjects: vi.fn(async (keys: Array<string | null>) => {
     if (storage.failing) throw new Error('storage down');
@@ -694,6 +691,16 @@ describe('images attached to a message', () => {
     return { schoolId: turn.schoolId, userId: turn.userId };
   }
 
+  it('refuses a message with an image still being processed, or one that could not be read, and binds nothing', async () => {
+    const owner = await newOwner();
+    const ready = await upload(owner, 'ready.jpg');
+    const pending = await upload(owner, 'pending.jpg', { derivativeStatus: 'pending', thumbS3Key: null, modelS3Key: null, modelContentType: null });
+    await expect(startConversation(owner, { attachmentIds: [ready, pending] })).rejects.toMatchObject({ code: 'BAD_REQUEST', message: 'pending.jpg is still being processed. Send again in a moment.' });
+    const failed = await upload(owner, 'broken.jpg', { derivativeStatus: 'failed', thumbS3Key: null, modelS3Key: null, modelContentType: null });
+    await expect(startConversation(owner, { attachmentIds: [failed] })).rejects.toMatchObject({ code: 'BAD_REQUEST', message: 'broken.jpg could not be read as an image. Remove it and attach it again.' });
+    for (const id of [ready, pending, failed]) expect((await rowOf(id))!.itemId).toBeNull();
+  });
+
   it('binds the images to the message in the order sent, in the transaction that saves it', async () => {
     const owner = await newOwner();
     const [a, b, c] = [await upload(owner, 'page1.jpg'), await upload(owner, 'page2.jpg'), await upload(owner, 'page3.jpg')];
@@ -887,7 +894,8 @@ describe('PDF attachments', () => {
   it('stores a PDF as it is, with no derivatives, keyed by its own id and decided by its bytes', async () => {
     const owner = await newOwner();
     vi.mocked(putObject).mockClear();
-    vi.mocked(makeImageDerivatives).mockClear();
+    vi.mocked(checkImageHeader).mockClear();
+    vi.mocked(requestImageDerivatives).mockClear();
 
     const uploaded = await post(owner, PDF, 'Exam paper.png', 'image/png');
 
@@ -898,7 +906,34 @@ describe('PDF attachments', () => {
     expect(row.s3Key).toBe(`schools/${owner.schoolId}/assistant/attachments/${row.id}/original.pdf`);
     // The bytes are stored exactly as uploaded; nothing was decoded or derived.
     expect(vi.mocked(putObject).mock.calls).toEqual([[row.s3Key, PDF, 'application/pdf']]);
-    expect(makeImageDerivatives).not.toHaveBeenCalled();
+    expect(checkImageHeader).not.toHaveBeenCalled();
+    expect(requestImageDerivatives).not.toHaveBeenCalled();
+  });
+
+  it('stores an image as pending and hands it to the worker, which the composer waits for through the status route', async () => {
+    const owner = await newOwner();
+    vi.mocked(putObject).mockClear();
+    vi.mocked(requestImageDerivatives).mockClear();
+    const uploaded = await post(owner, JPEG, 'board.jpg', 'image/jpeg');
+    expect(uploaded.status).toBe(200);
+    expect(uploaded.body).toMatchObject({ kind: 'image', derivativeStatus: 'pending', previewable: false, width: 1, height: 1 });
+    const id = uploaded.body.id as string;
+    // Only the original is written by the request; the copies are the worker's.
+    expect(vi.mocked(putObject).mock.calls.map(([key]) => key)).toEqual([`schools/${owner.schoolId}/assistant/attachments/${id}/original.jpg`]);
+    expect(vi.mocked(requestImageDerivatives).mock.calls).toEqual([['attachment', id]]);
+
+    const status = (who: { schoolId: string; userId: string }) =>
+      handleAssistantAttachmentStatus(new Request('http://api.invalid/x', { headers: { cookie: cookieOf(who.userId), origin: 'http://management.invalid' } }), { schoolId: owner.schoolId, attachmentId: id });
+    expect(await (await status(owner)).json()).toMatchObject({ id, derivativeStatus: 'pending' });
+    // Once the worker made the copies, the same route says so.
+    await db
+      .update(assistantAttachmentTable)
+      .set({ derivativeStatus: 'ready', thumbS3Key: 'schools/t/thumb.jpg', modelS3Key: 'schools/t/model.jpg', modelContentType: 'image/jpeg' })
+      .where(eq(assistantAttachmentTable.id, id));
+    expect(await (await status(owner)).json()).toMatchObject({ id, derivativeStatus: 'ready', previewable: true });
+    // Another user learns nothing about it.
+    const stranger = await newOwner();
+    expect((await handleAssistantAttachmentStatus(new Request('http://api.invalid/x', { headers: { cookie: cookieOf(stranger.userId) } }), { schoolId: stranger.schoolId, attachmentId: id })).status).toBe(404);
   });
 
   it('takes an image named .pdf as an image, and refuses HTML named .pdf with the save-as-PDF sentence', async () => {
@@ -923,9 +958,10 @@ describe('PDF attachments', () => {
       expect(response.headers.get('location')).toBeNull();
     }
     expect(pageImageUrl).not.toHaveBeenCalled();
-    // An image of the same user still redirects.
+    // An image of the same user still redirects: its original at once, its thumbnail once the worker made it.
     const image = (await post(owner, JPEG, 'p.jpg')).body.id as string;
-    expect((await read(owner, image, 'thumb')).status).toBe(302);
+    expect((await read(owner, image, 'original')).status).toBe(302);
+    expect((await read(owner, image, 'thumb')).status).toBe(404);
   });
 
   it('sends a PDF with a message, titles the chat after it and loads it for the model as the PDF itself', async () => {

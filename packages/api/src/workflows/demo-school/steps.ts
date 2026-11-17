@@ -42,7 +42,8 @@ import { saveTemplate } from '../../routers/school/document/document.router';
 import { findPaper, pagesOf } from '../../routers/school/question-paper/question-paper.records';
 import { selectedQuestionPaperTemplate } from '../../routers/school/question-paper/question-paper.render';
 import { resolvePaperScope } from '../../routers/school/question-paper/question-paper.scope';
-import { addQuestionPaperPage } from '../../routers/school/question-paper/question-paper.service';
+import { addQuestionPaperPage, releaseQuestionPaperPage } from '../../routers/school/question-paper/question-paper.service';
+import { processPageDerivatives } from '../image-derivatives/process';
 import { saveQuestionPaperVersion } from '../../routers/school/question-paper/question-paper.version.service';
 import { SCHOOL_LOGO_FIELD_NAME } from '../../routers/system-admin/school/school.constants';
 import { handleSchoolLogoUpload } from '../../routers/system-admin/school/school.http';
@@ -911,17 +912,32 @@ export async function seedQuestionPaper(
   const userId = ctx.context.session!.user.id;
   const scope = await resolvePaperScope(db, key);
   const existing = await findPaper(db, key);
+  // A crash between a page's reservation and its store leaves it `awaiting`: give it back, so the replay adds that page again.
+  for (const page of existing ? await pagesOf(db, existing.id) : []) {
+    if (page.uploadStatus === 'awaiting') await releaseQuestionPaperPage(db, { scope, pageId: page.id });
+  }
   const stored = existing ? (await pagesOf(db, existing.id)).length : 0;
   for (const [index, page] of paper.pages.entries()) {
     if (index < stored) continue;
     const bytes = renderPaperPage(createRandom(ctx.seed, 'question-paper', paper.key, index), page);
-    const added = await addQuestionPaperPage(db, { scope, userId, file: { bytes, contentType: 'image/png', extension: 'png', name: page.fileName } });
+    // The seed runs in the worker already, so it makes the derivatives itself instead of handing them over.
+    const added = await addQuestionPaperPage(db, {
+      scope,
+      userId,
+      file: { bytes, contentType: 'image/png', extension: 'png', name: page.fileName },
+      requestDerivatives: () => undefined,
+    });
+    await processPageDerivatives(db, added.page.id);
     const [row] = await db
       .select({ original: examQuestionPaperPageTable.originalS3Key, thumb: examQuestionPaperPageTable.thumbS3Key, model: examQuestionPaperPageTable.modelS3Key })
       .from(examQuestionPaperPageTable)
       .where(eq(examQuestionPaperPageTable.id, added.page.id))
       .limit(1);
     await assertUploadsKept(ctx.jobId, ctx.schoolId, [row?.original ?? '', row?.thumb ?? '', row?.model ?? '']);
+  }
+  // A replay after a crash between storing a page and making its copies finishes them here (a no-op for ready pages).
+  for (const page of await pagesOf(db, (await findPaper(db, key))!.id)) {
+    if (page.derivativeStatus === 'pending') await processPageDerivatives(db, page.id);
   }
   let row = (await findPaper(db, key))!;
   if (row.latestVersionNo < 1) {

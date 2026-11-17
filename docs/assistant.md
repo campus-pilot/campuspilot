@@ -275,9 +275,15 @@ existing paper, a syllabus or notes as a PDF
   `POST /api/blob/schools/:schoolId/assistant/attachments`
   (`packages/assistant/src/attachments.http.ts`, mounted in `apps/server`): browser
   session only, origin checked, `assertCanUse`, 60 per minute per IP; the body is read
-  bounded to the larger cap, then the kind's own cap applies. An image becomes three
-  objects (the original, a 1800 px model copy and a thumbnail; `unsupported` when the
-  server cannot decode it, as for HEIC); a PDF is one object, stored exactly as uploaded
+  bounded to the larger cap, then the kind's own cap applies. A photo over 1.5 MB is
+  shrunk to a 2400 px JPEG in the browser first (`prepareUploadFile`). An image becomes
+  three objects (the original, a 1800 px model copy and a thumbnail; `unsupported` when
+  the server cannot decode it, as for HEIC, `failed` when it cannot be read at all); the
+  request stores only the original and the row as `pending`, and the worker makes the
+  copies (`packages/api/src/workflows/image-derivatives`, see
+  [Question papers](question-papers.md#lifecycle)). The composer's upload waits on
+  `GET .../attachments/:attachmentId` until the copies exist, and `sendMessage` refuses a
+  `pending` or `failed` image; a PDF is one object, stored exactly as uploaded
   (`original.pdf`), never parsed, rendered or rewritten. All live under
   `schools/{schoolId}/assistant/attachments/{id}/`. The objects are written first and a
   short transaction (per user and school advisory lock) then counts the cap, frees stale

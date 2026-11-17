@@ -1,6 +1,6 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { prepareUploadFile, type ImageDecoder } from './prepare-upload-file';
+import { CONVERTED_MAX_EDGE, CONVERTED_QUALITY, prepareUploadFile, REENCODE_ABOVE_BYTES, type ImageDecoder } from './prepare-upload-file';
 
 const fileOf = (name: string, type: string, size = 100) => new File([new Uint8Array(size)], name, { type });
 const decoderYielding = (blob: Blob | null, closed: { count: number }): ImageDecoder => async () => ({
@@ -10,13 +10,14 @@ const decoderYielding = (blob: Blob | null, closed: { count: number }): ImageDec
   },
 });
 
-test('JPEG, PNG and WebP are uploaded untouched and never decoded', async () => {
+test('JPEG, PNG and WebP up to the threshold are uploaded untouched and never decoded', async () => {
   let decoded = 0;
   const decode: ImageDecoder = async () => {
     decoded += 1;
     throw new Error('should not run');
   };
-  for (const file of [fileOf('a.jpg', 'image/jpeg'), fileOf('b.png', 'image/png'), fileOf('c.webp', 'image/webp')]) {
+  const small = REENCODE_ABOVE_BYTES;
+  for (const file of [fileOf('a.jpg', 'image/jpeg', small), fileOf('b.png', 'image/png'), fileOf('c.webp', 'image/webp', 200)]) {
     const prepared = await prepareUploadFile(file, decode);
     assert.equal(prepared.file, file);
     assert.equal(prepared.converted, false);
@@ -67,4 +68,43 @@ test('an empty or failed encode keeps the original and still closes the image', 
   });
   assert.equal((await prepareUploadFile(original, failing)).file, original);
   assert.equal(closed.count, 1);
+});
+
+test('a camera-sized JPEG, PNG or WebP is redrawn as a smaller JPEG with the shared size and quality', async () => {
+  for (const [name, type] of [['IMG_0001.JPG', 'image/jpeg'], ['scan.png', 'image/png'], ['page.webp', 'image/webp']] as const) {
+    const asked: Array<[number, number]> = [];
+    const closed = { count: 0 };
+    const decode: ImageDecoder = async () => ({
+      toJpeg: async (maxEdge, quality) => {
+        asked.push([maxEdge, quality]);
+        return new Blob([new Uint8Array(700 * 1024)]);
+      },
+      close: () => {
+        closed.count += 1;
+      },
+    });
+    const prepared = await prepareUploadFile(fileOf(name, type, 6 * 1024 * 1024), decode);
+    assert.equal(prepared.converted, true);
+    assert.equal(prepared.file.type, 'image/jpeg');
+    assert.equal(prepared.file.name, `${name.slice(0, name.lastIndexOf('.'))}.jpg`);
+    assert.equal(prepared.file.size, 700 * 1024);
+    assert.deepEqual(asked, [[CONVERTED_MAX_EDGE, CONVERTED_QUALITY]]);
+    assert.equal(closed.count, 1);
+  }
+});
+
+test('a re-encode that is not smaller than the original keeps the original', async () => {
+  const original = fileOf('dense.jpg', 'image/jpeg', 2 * 1024 * 1024);
+  const prepared = await prepareUploadFile(original, decoderYielding(new Blob([new Uint8Array(2 * 1024 * 1024)]), { count: 0 }));
+  assert.equal(prepared.file, original);
+  assert.equal(prepared.converted, false);
+});
+
+test('a large photo the browser cannot decode goes up as it is', async () => {
+  const original = fileOf('broken.jpg', 'image/jpeg', 3 * 1024 * 1024);
+  const prepared = await prepareUploadFile(original, async () => {
+    throw new Error('EncodingError');
+  });
+  assert.equal(prepared.file, original);
+  assert.equal(prepared.converted, false);
 });

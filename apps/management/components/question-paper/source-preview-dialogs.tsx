@@ -15,7 +15,7 @@ import { ReadError } from '@/components/exam/exam-common';
 import { orpc } from '@/lib/orpc';
 import { questionPaperModelUrl, questionPaperOriginalUrl } from '@/lib/question-paper-pages';
 import { earlierPaperTitle } from './earlier-paper-dialog';
-import { turnedRotation, type PageRotation, type QuestionPaperScope } from './question-paper-model';
+import { pagePreviewFallback, pageTurnBlockedReason, turnedRotation, type PageRotation, type QuestionPaperScope } from './question-paper-model';
 import type { EarlierPaper } from './question-paper-start-model';
 import { useRefreshQuestionPaper } from './use-question-paper-detail';
 
@@ -24,7 +24,8 @@ export type PageView = {
   id: string;
   position: number;
   originalName: string;
-  derivativeStatus: 'ready' | 'unsupported';
+  uploadStatus: 'awaiting' | 'stored';
+  derivativeStatus: 'pending' | 'ready' | 'unsupported' | 'failed';
   rotation: PageRotation;
   derivativeRevision: number;
 };
@@ -47,9 +48,10 @@ export type PageTurning = {
  * shown as the copy the AI reads (at most 1800 px, turned as the page says),
  * so what the user checks is what the model gets, the right way up; the
  * photo as uploaded is never turned and would show the old way round. A page
- * the server could not decode (a HEIC) has no such copy and cannot be turned:
- * the uploaded photo is tried instead, and a browser that cannot draw it says
- * so in the image's place.
+ * without that copy cannot be turned, and the uploaded photo is tried
+ * instead: one the server could not decode (a HEIC), one whose copy the
+ * worker has not made yet, or one it could not read. When that photo cannot
+ * be drawn either, {@link pagePreviewFallback} says why in the image's place.
  */
 /**
  * The page large enough to read. A failed load reads the paper again
@@ -61,14 +63,15 @@ function PageImage({ scope, page, turning, onLoadError }: { scope: QuestionPaper
   const ready = page.derivativeStatus === 'ready';
   return (
     <div aria-busy={turning} className="relative grid min-h-0 flex-1 place-items-center overflow-auto rounded-lg border bg-muted/40">
-      {/* Keyed by page and by turn: a failed load on one page never hides the next, and a turned page is a new image with its own alt. */}
+      {/* Keyed by page, readiness and turn: a failed load on one page never hides the next, and a page whose copy is
+          made, or that was turned, is a new image with its own alt. */}
       <img
-        key={`${page.id}:${page.derivativeRevision}`}
+        key={`${page.id}:${page.derivativeStatus}:${page.derivativeRevision}`}
         src={ready ? questionPaperModelUrl(scope, page) : questionPaperOriginalUrl(scope, page.id)}
         alt={`Page ${page.position}`}
         className={cn('max-h-[68dvh] w-auto max-w-full object-contain transition-opacity', turning && 'opacity-40')}
         onError={(event) => {
-          event.currentTarget.alt = ready ? 'This page could not be loaded. Close it and open it again.' : 'This photo cannot be shown here. The AI can still read it.';
+          event.currentTarget.alt = ready ? 'This page could not be loaded. Close it and open it again.' : pagePreviewFallback(page);
           onLoadError();
         }}
       />
@@ -113,16 +116,17 @@ function TurnButton({ label, icon, disabled, quiet, onClick }: { label: string; 
  * Rotate left and Rotate right for the page shown: a quarter turn each, for a
  * page photographed with the phone held sideways. The server makes the page's
  * copies again from the uploaded photo (which is kept as it is), so the
- * buttons wait while a turn or another page change is on its way. A page the
- * server could not decode cannot be turned, which is said instead.
+ * buttons wait while a turn or another page change is on its way. A page
+ * without that copy cannot be turned (yet), which is said instead.
  *
  * `quiet` is for the comparison beside the paper, where the two documents are
  * the content: the buttons lose their outline, and a page that cannot be
  * turned shows no buttons and no sentence.
  */
 export function PageTurnButtons({ page, turning, quiet = false }: { page: PageView; turning: PageTurning; quiet?: boolean }) {
-  if (page.derivativeStatus !== 'ready') {
-    return quiet ? null : <span className="text-xs text-muted-foreground">This photo's format cannot be turned.</span>;
+  const blocked = pageTurnBlockedReason(page);
+  if (blocked) {
+    return quiet ? null : <span className="text-xs text-muted-foreground">{blocked}</span>;
   }
   const disabled = turning.busy || turning.turningPageId !== null;
   return (

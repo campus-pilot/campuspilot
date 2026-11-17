@@ -25,9 +25,16 @@ export type PageThumbnailView = {
   id: string;
   position: number;
   originalName: string;
-  byteSize: number;
-  /** `unsupported`: the server could not decode the photo, so there is no thumbnail. */
-  derivativeStatus: 'ready' | 'unsupported';
+  /** Null while the page's photo is still awaited. */
+  byteSize: number | null;
+  /** `awaiting`: the page is reserved and its photo has not arrived (an upload in another tab, or one that was interrupted). */
+  uploadStatus: 'awaiting' | 'stored';
+  /**
+   * `ready`: a thumbnail exists. `pending`: the server is still making it.
+   * `unsupported`: the server could not decode the photo (no thumbnail, the
+   * model may still read it). `failed`: it could not be read at all.
+   */
+  derivativeStatus: 'pending' | 'ready' | 'unsupported' | 'failed';
 };
 
 /** One photo on its way to the server. */
@@ -38,6 +45,8 @@ export type UploadQueueItem = {
   previewUrl?: string;
   status: 'converting' | 'uploading' | 'error';
   error?: string;
+  /** The page reserved for this photo, once the server has reserved it; the tray shows the photo here instead of that page. */
+  pageId?: string;
 };
 
 /** A page-shaped tile: every thing in the tray (a photo, one on its way, the add tile) has this outline. */
@@ -65,6 +74,15 @@ function TileRemove({ label, disabled, hideOnTouch = false, onClick }: { label: 
       <X className="size-3" aria-hidden />
     </button>
   );
+}
+
+/** What a stored page tile says about its photo, for its label and its face. */
+function pageTileState(page: PageThumbnailView): { face: 'image' | 'spinner' | 'file' | 'alert'; note: string } {
+  if (page.uploadStatus === 'awaiting') return { face: 'alert', note: 'Its photo did not arrive. Remove it and add the photo again.' };
+  if (page.derivativeStatus === 'ready') return { face: 'image', note: 'Open to check it.' };
+  if (page.derivativeStatus === 'pending') return { face: 'spinner', note: 'Preparing the photo.' };
+  if (page.derivativeStatus === 'failed') return { face: 'alert', note: 'It could not be read. Remove it and add the photo again.' };
+  return { face: 'file', note: 'No preview. Open to check it.' };
 }
 
 /** The page number in a tile's corner. It sits on a photograph, not on the theme's surface, so it is the same dark chip in both themes. */
@@ -97,26 +115,36 @@ function PageTile({
   onDelete: (pageId: string) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: page.id, disabled });
+  const state = pageTileState(page);
   return (
     <li ref={setNodeRef} style={{ transform: CSS.Transform.toString(transform), transition }} className={cn('group/tile relative', isDragging && 'z-20 opacity-70')}>
       <button
         type="button"
-        aria-label={`Page ${page.position}: ${page.originalName}. Open to check it.`}
-        className={cn(TILE, 'bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', disabled ? 'cursor-pointer' : 'cursor-grab touch-manipulation active:cursor-grabbing')}
+        aria-label={`Page ${page.position}: ${page.originalName}. ${state.note}`}
+        className={cn(
+          TILE,
+          'bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          disabled ? 'cursor-pointer' : 'cursor-grab touch-manipulation active:cursor-grabbing',
+          state.face === 'alert' && 'border-destructive/60',
+        )}
         onClick={() => onOpen(page.id)}
         {...attributes}
         {...listeners}
       >
-        {page.derivativeStatus === 'ready' ? (
-          <img src={src} alt="" loading="lazy" draggable={false} className="size-full object-cover" />
-        ) : (
-          <FileImage className="absolute inset-0 m-auto size-5 text-muted-foreground" aria-hidden />
-        )}
+        <PageTileFace face={state.face} src={src} />
         <TileNumber>{page.position}</TileNumber>
       </button>
       <TileRemove label={`Remove page ${page.position}`} disabled={disabled} hideOnTouch onClick={() => onDelete(page.id)} />
     </li>
   );
+}
+
+/** The inside of a stored page tile: its thumbnail, or a mark for a photo that is processing, has none or failed. */
+function PageTileFace({ face, src }: { face: ReturnType<typeof pageTileState>['face']; src: string }) {
+  if (face === 'image') return <img src={src} alt="" loading="lazy" draggable={false} className="size-full object-cover" />;
+  if (face === 'spinner') return <Spinner className="absolute inset-0 m-auto size-4" />;
+  if (face === 'alert') return <CircleAlert className="absolute inset-0 m-auto size-5 text-destructive" aria-hidden />;
+  return <FileImage className="absolute inset-0 m-auto size-5 text-muted-foreground" aria-hidden />;
 }
 
 /** A photo on its way to the server, where it will stand in the row: its local preview, dimmed, with its progress or its failure. */

@@ -127,11 +127,13 @@ const HIDDEN_TOOLS = [
   'school.getFeatureFlags',
   'systemAdmin.updateSchoolFeatureFlag',
   // Question paper actions that must stay a person's: the AI generation job
-  // (chat agents author papers themselves), page photo management (reorder,
-  // turn, delete: a person looks at the photo), previews and downloads (the
-  // app and the paper's versions tools cover agents).
+  // (chat agents author papers themselves), page photo management (reserve,
+  // release, reorder, turn, delete: a person looks at the photo), previews and
+  // downloads (the app and the paper's versions tools cover agents).
   'school.startQuestionPaperGeneration',
   'school.getQuestionPaperDetail',
+  'school.reserveQuestionPaperPages',
+  'school.releaseQuestionPaperPage',
   'school.reorderQuestionPaperPages',
   'school.rotateQuestionPaperPage',
   'school.deleteQuestionPaperPage',

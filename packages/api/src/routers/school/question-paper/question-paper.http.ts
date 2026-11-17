@@ -10,7 +10,7 @@ import { assertQuestionPaperAssistantAccess } from './question-paper.access';
 import { paperKeySchema, QUESTION_PAPER_MAX_PAGE_BYTES, type PaperKey } from './question-paper.dto';
 import { findPaper } from './question-paper.records';
 import { assertPaperWritable, resolvePaperScope } from './question-paper.scope';
-import { addQuestionPaperPage } from './question-paper.service';
+import { addQuestionPaperPage, storeQuestionPaperPage } from './question-paper.service';
 import { pageImageUrl, QUESTION_PAPER_IMAGE_CACHE_SECONDS } from './question-paper.storage';
 
 /** The multipart field of an uploaded page photo. */
@@ -30,13 +30,65 @@ function requireUser(context: Context): string {
 }
 
 /**
- * Adds one page photo to a paper (multipart, field `page`, exactly one
- * file). Checks run in this order and the body is not read before the last
- * one passes: the caller may manage this class's papers (OPA), the school and
- * the caller's role may use the AI assistant, the key names a real plan and
- * mode, and the exam accepts changes. Only then is the file read, bounded and
- * type-checked (JPEG, PNG, WebP, HEIC), derivatives are made and the page is
- * stored under the paper row lock (20 page cap, no running generation).
+ * The checks every page upload makes, in this order and before the body is
+ * read: the caller may manage this class's papers (OPA), the school and the
+ * caller's role may use the AI assistant, the key names a real plan and mode,
+ * and the exam accepts changes. Then the file is read, bounded and
+ * type-checked by its bytes (JPEG, PNG, WebP, HEIC).
+ */
+async function authorizeAndReadPage(request: Request, context: Context, rawKey: unknown) {
+  const key = parseKey(rawKey);
+  await assertPermission(context, {
+    action: CLASS_ACTIONS.MANAGE_EXAM_QUESTION_PAPERS,
+    resource: { kind: 'class', schoolId: key.schoolId, classId: key.classId },
+  });
+  const userId = requireUser(context);
+  await assertQuestionPaperAssistantAccess(context.db, { schoolId: key.schoolId, userId });
+  const scope = await resolvePaperScope(context.db, key);
+  // The same refusal the write itself makes, but before a 15 MB body is read.
+  assertPaperWritable(scope);
+  const upload = await parseImageUpload(request, {
+    fieldName: QUESTION_PAPER_PAGE_FIELD_NAME,
+    maxBytes: QUESTION_PAPER_MAX_PAGE_BYTES,
+    subject: 'page',
+    family: QUESTION_PAPER_IMAGE_FAMILY,
+  });
+  return { scope, userId, upload };
+}
+
+/**
+ * Stores the photo of a page reserved with `reserveQuestionPaperPages`
+ * (multipart, field `page`, exactly one file). After the checks of
+ * {@link authorizeAndReadPage}, the original is stored and the row filled;
+ * the worker makes the thumbnail and model copy afterwards, so the response
+ * returns the page as `pending` without decoding it here.
+ */
+export async function handleQuestionPaperPageStore(
+  request: Request,
+  context: Context,
+  rawKey: unknown,
+  pageId: string,
+  reportError?: HttpErrorReporter,
+): Promise<Response> {
+  try {
+    const { scope, upload } = await authorizeAndReadPage(request, context, rawKey);
+    const result = await storeQuestionPaperPage(context.db, {
+      scope,
+      pageId,
+      file: { bytes: upload.bytes, contentType: upload.contentType, extension: upload.extension, name: upload.fileName },
+    });
+    return Response.json(result, { headers: { 'Cache-Control': 'private, no-store' } });
+  } catch (error) {
+    reportError?.(error);
+    return rpcErrorResponse(error);
+  }
+}
+
+/**
+ * Adds one page photo to a paper in a single request: reserves the next page
+ * and stores the photo in it. The screen reserves pages first and uses
+ * {@link handleQuestionPaperPageStore}; this stays for tabs opened before that
+ * change. Same checks, same asynchronous derivatives.
  */
 export async function handleQuestionPaperPageUpload(
   request: Request,
@@ -45,22 +97,7 @@ export async function handleQuestionPaperPageUpload(
   reportError?: HttpErrorReporter,
 ): Promise<Response> {
   try {
-    const key = parseKey(rawKey);
-    await assertPermission(context, {
-      action: CLASS_ACTIONS.MANAGE_EXAM_QUESTION_PAPERS,
-      resource: { kind: 'class', schoolId: key.schoolId, classId: key.classId },
-    });
-    const userId = requireUser(context);
-    await assertQuestionPaperAssistantAccess(context.db, { schoolId: key.schoolId, userId });
-    const scope = await resolvePaperScope(context.db, key);
-    // The same refusal the write itself makes, but before a 15 MB body is read.
-    assertPaperWritable(scope);
-    const upload = await parseImageUpload(request, {
-      fieldName: QUESTION_PAPER_PAGE_FIELD_NAME,
-      maxBytes: QUESTION_PAPER_MAX_PAGE_BYTES,
-      subject: 'page',
-      family: QUESTION_PAPER_IMAGE_FAMILY,
-    });
+    const { scope, userId, upload } = await authorizeAndReadPage(request, context, rawKey);
     const result = await addQuestionPaperPage(context.db, {
       scope,
       userId,
@@ -85,7 +122,9 @@ const isPageImageVariant = (value: string): value is PageImageVariant => (PAGE_I
  * (the uploaded file, as a download). The two derivatives are turned as the
  * page's `rotation` says; the original is the upload, never turned. A page the
  * server could not decode has no derivatives (404 for `thumb` and `model`);
- * the screen draws a tile or tries the original instead. A turn makes new
+ * the screen draws a tile or tries the original instead. Neither has a page
+ * whose derivatives the worker has not made yet, and a reserved page has no
+ * image at all. A turn makes new
  * derivative objects, so the screen adds the page's `derivativeRevision` to
  * these URLs: a cached redirect of an earlier turn is then never reused.
  */
@@ -117,7 +156,8 @@ export async function handleQuestionPaperPageRead(
       model: { s3Key: page.modelS3Key, contentType: page.modelContentType ?? 'image/jpeg', fileName: `${page.originalName}.jpg`, disposition: 'inline' },
       original: { s3Key: page.originalS3Key, contentType: page.contentType, fileName: page.originalName, disposition: 'attachment' },
     } as const)[variant];
-    if (!image.s3Key) throw rpcError.notFound('Question paper page image');
+    // A reserved page has no photo yet, and a pending one no derivatives yet.
+    if (!image.s3Key || !image.contentType) throw rpcError.notFound('Question paper page image');
     const url = await pageImageUrl(image.s3Key, {
       contentType: image.contentType,
       fileName: image.fileName,

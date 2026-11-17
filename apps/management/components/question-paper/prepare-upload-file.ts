@@ -1,9 +1,19 @@
 import { isHeifFile, QUESTION_PAPER_MAX_PAGE_BYTES } from '@campuspilot/components/question-paper/question-paper-model';
 
-/** The longest edge of a converted photo; the server derives its own sizes from this. */
-export const CONVERTED_MAX_EDGE = 4096;
-/** JPEG quality of a converted photo. */
-export const CONVERTED_QUALITY = 0.92;
+/**
+ * The longest edge of a re-encoded photo. The server's largest copy (the one
+ * the AI model reads) is 1800 px, so 2400 px keeps headroom for the stored
+ * original that a teacher zooms into, at a fraction of a phone photo's bytes.
+ */
+export const CONVERTED_MAX_EDGE = 2400;
+/** JPEG quality of a re-encoded photo: handwriting stays crisp, the file stays near 0.5-1 MB. */
+export const CONVERTED_QUALITY = 0.85;
+/**
+ * A JPEG, PNG or WebP at most this big goes up untouched: it is already cheap
+ * to send and to decode, and a small PNG (a diagram meant as a figure) keeps
+ * its exact pixels and transparency.
+ */
+export const REENCODE_ABOVE_BYTES = 1.5 * 1024 * 1024;
 
 /** A photo the browser managed to decode, able to draw itself as a JPEG. */
 export type DecodedImage = {
@@ -15,7 +25,7 @@ export type ImageDecoder = (file: File) => Promise<DecodedImage>;
 
 export type PreparedUpload = {
   file: File;
-  /** True when HEIC was converted to JPEG here; false when the original goes up as it is. */
+  /** True when the photo was re-encoded to JPEG here; false when the original goes up as it is. */
   converted: boolean;
 };
 
@@ -25,22 +35,31 @@ function jpegName(name: string) {
 }
 
 /**
- * Gets a photo ready to upload (decision D24).
+ * Gets a photo ready to upload (decision D24, revised for upload speed).
  *
- * JPEG, PNG and WebP go up unchanged. A HEIC/HEIF photo is decoded and redrawn
- * as a JPEG on a canvas where the browser can (Safari); anywhere it cannot, or
- * when anything goes wrong, **the original is uploaded as it is** and the AI
- * model reads it directly. There is no wasm decoder and no server conversion.
- * Conversion never makes things worse: a result that is empty or bigger than
- * the 15 MiB limit is dropped in favour of the original.
+ * A camera photo is 3-12 MB, while the server only ever needs about 1800 px of
+ * it, so every photo over {@link REENCODE_ABOVE_BYTES} (and every HEIC/HEIF)
+ * is decoded in the browser and redrawn as a JPEG of at most
+ * {@link CONVERTED_MAX_EDGE} px on a white background, oriented as the camera
+ * meant it. That cuts the bytes sent over a school's connection and the work
+ * the server does several times over, and drops the photo's metadata (such as
+ * its location). The stored "original" is then this JPEG, not the camera file.
+ *
+ * Anywhere the browser cannot decode the photo (HEIC outside Safari), or when
+ * anything goes wrong, **the original is uploaded as it is** and the server
+ * handles it as before. Re-encoding never makes things worse: a result that is
+ * empty, or not smaller than the original, is dropped in favour of the
+ * original. There is no wasm decoder.
  */
 export async function prepareUploadFile(file: File, decode: ImageDecoder = browserImageDecoder): Promise<PreparedUpload> {
-  if (!isHeifFile(file)) return { file, converted: false };
+  const heif = isHeifFile(file);
+  if (!heif && file.size <= REENCODE_ABOVE_BYTES) return { file, converted: false };
   let image: DecodedImage | null = null;
   try {
     image = await decode(file);
     const blob = await image.toJpeg(CONVERTED_MAX_EDGE, CONVERTED_QUALITY);
-    if (!blob || blob.size === 0 || blob.size > QUESTION_PAPER_MAX_PAGE_BYTES) return { file, converted: false };
+    const limit = heif ? QUESTION_PAPER_MAX_PAGE_BYTES : file.size - 1;
+    if (!blob || blob.size === 0 || blob.size > limit) return { file, converted: false };
     return {
       file: new File([blob], jpegName(file.name), { type: 'image/jpeg', lastModified: file.lastModified }),
       converted: true,
@@ -59,6 +78,9 @@ function drawToJpeg(source: CanvasImageSource, width: number, height: number, ma
   canvas.height = Math.max(1, Math.round(height * scale));
   const context = canvas.getContext('2d');
   if (!context) return Promise.resolve(null);
+  // JPEG has no transparency: a transparent PNG is drawn on white, as the server would flatten it, not on black.
+  context.fillStyle = '#ffffff';
+  context.fillRect(0, 0, canvas.width, canvas.height);
   context.drawImage(source, 0, 0, canvas.width, canvas.height);
   return new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality));
 }

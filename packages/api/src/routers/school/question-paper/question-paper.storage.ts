@@ -26,8 +26,9 @@ import { log } from '../../../workflows/question-paper/log';
  * deleted only after the row stops naming them.
  */
 export const questionPaperKeys = {
-  original: (schoolId: string, pageId: string, extension: string) =>
-    `schools/${schoolId}/exam-question-papers/pages/${pageId}/original.${extension}`,
+  /** `attempt` is unique per store attempt, so two attempts for one page never write the same object. */
+  original: (schoolId: string, pageId: string, extension: string, attempt: string) =>
+    `schools/${schoolId}/exam-question-papers/pages/${pageId}/original-${attempt}.${extension}`,
   thumb: (schoolId: string, pageId: string, remake?: string) =>
     `schools/${schoolId}/exam-question-papers/pages/${pageId}/thumb${remake ? `-${remake}` : ''}.jpg`,
   model: (schoolId: string, pageId: string, remake?: string) =>

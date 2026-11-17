@@ -10,7 +10,7 @@ import { env } from '@campuspilot/env/server';
 import { and, eq } from 'drizzle-orm';
 
 import { assertCanSee, assertCanUse, loadAssistantAccess } from './access';
-import { createAttachment, deleteUnsentAttachment } from './attachments';
+import { createAttachment, deleteUnsentAttachment, findUnsentAttachmentRef } from './attachments';
 import { mayReachConversation } from './conversation-access';
 import { db } from './db';
 import { resolveAssistantSession, type AssistantSession } from './session';
@@ -42,7 +42,9 @@ async function requireSession(headers: Headers): Promise<AssistantSession> {
  * WebP, HEIC/HEIF, or `%PDF-`; never the name or declared type). An image is
  * decoded into a thumbnail and a model copy and capped at 15 MiB; a PDF is
  * capped at 10 MiB and stored as it is (never parsed or rendered). Anything
- * else is a 415 that says to save documents as PDF.
+ * else is a 415 that says to save documents as PDF. An image's thumbnail and
+ * model copy are made by the worker afterwards: the answer is `pending` and
+ * the composer polls {@link handleAssistantAttachmentStatus}.
  */
 export async function handleAssistantAttachmentUpload(
   request: Request,
@@ -60,6 +62,32 @@ export async function handleAssistantAttachmentUpload(
       file: { bytes: upload.bytes, kind: upload.kind, contentType: upload.contentType, extension: upload.extension, name: upload.fileName },
     });
     return Response.json(attachment, { headers: { 'Cache-Control': 'private, no-store' } });
+  } catch (error) {
+    reportError?.(error);
+    return rpcErrorResponse(error);
+  }
+}
+
+/**
+ * The current reference of one unsent attachment, for its uploader only
+ * (`GET .../attachments/:attachmentId`). The composer polls it after an
+ * upload until the worker has made the image's copies (`derivativeStatus`
+ * leaves `pending`). Checked like a read: origin, browser session, the right
+ * to see the assistant. Another user's, a sent or a missing attachment is a
+ * 404.
+ */
+export async function handleAssistantAttachmentStatus(
+  request: Request,
+  input: { schoolId: string; attachmentId: string },
+  reportError?: HttpErrorReporter,
+): Promise<Response> {
+  try {
+    assertAllowedOrigin(request);
+    const session = await requireSession(request.headers);
+    assertCanSee(await loadAssistantAccess(session, input.schoolId));
+    const ref = await findUnsentAttachmentRef(db, { schoolId: input.schoolId, userId: session.user.id, attachmentId: input.attachmentId });
+    if (!ref) throw rpcError.notFound('Attachment');
+    return Response.json(ref, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
     reportError?.(error);
     return rpcErrorResponse(error);

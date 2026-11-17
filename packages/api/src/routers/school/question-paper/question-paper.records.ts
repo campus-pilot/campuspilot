@@ -79,6 +79,7 @@ export function toPageDto(page: PageRow): z.infer<typeof pageDtoSchema> {
     id: page.id,
     position: page.position,
     originalName: page.originalName,
+    uploadStatus: page.uploadStatus,
     contentType: page.contentType,
     byteSize: page.byteSize,
     sha256: page.sha256,

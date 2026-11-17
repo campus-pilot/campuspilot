@@ -106,7 +106,7 @@ affected papers itself.
 | Table | Holds |
 | --- | --- |
 | `exam_question_paper` | The paper: unique key, `latest_version_no` (token of saving a version, never `max(version_no)`), `page_revision` (token of page changes) |
-| `exam_question_paper_page` | One photo: position, original and two derivatives (`model` JPEG the AI reads, `thumb`), `derivative_status` (`ready` or `unsupported` when the server cannot decode it, for example HEIC), `rotation` and `derivative_revision` (below), displayed size, sha256 |
+| `exam_question_paper_page` | One photo: position, `upload_status` (`awaiting` while reserved, `stored` once the photo arrived, with `stored_at`; migration 0072), original and two derivatives (`model` JPEG the AI reads, `thumb`), `derivative_status` (`pending` until the worker made them, `ready`, `unsupported` when the server cannot decode it, for example HEIC, or `failed`), `rotation` and `derivative_revision` (below), displayed size, sha256 (the file facts are null while `awaiting`) |
 | `exam_question_paper_job` | One generation: `queued`, `running`, `succeeded`, `failed`; ordered `page_ids` and the `page_revision` it ran on; the teacher's `instructions` (nullable text, migration 0067: null means none, written at creation and never changed); provider, model, request count; `error_code` and the safe `error_message` (and developer-only `error_detail`); hand-over facts (`handed_over_at`, attempts, last error). A partial unique index allows one queued or running job per paper |
 | `exam_question_paper_version` | Immutable: `version_no`, the sanitised fragment `content_html` (text), its sha256, `source` (`agent`, `ai_job` or `copy`) with the job id, page ids, conversation id or `source_version_id` (the copied version), `plan_max_marks` (the header snapshot), `warnings` (sanitiser notices, below), the pinned `template_revision_id` and the `pdf_artifact_id` |
 | `exam_question_paper_figure` | An uploaded image a version prints (JPEG, or PNG up to 400 KB when it has transparency), owned by the paper, deduplicated by `source_attachment_id` (a chat image) or `source_figure_id` (a figure of a copied version); at most one of the two is set |
@@ -119,7 +119,8 @@ orientation: a page photographed with the phone held sideways carries landscape 
 still on its side after EXIF orientation. It is its own fact, never inferred from the size or the
 EXIF data. The original object is never changed; both derivatives are made from it with the turn
 applied after EXIF orientation, and `width`/`height` are the turned (displayed) size. A check
-allows a turn only on a `ready` page (an `unsupported` page has no derivatives to turn).
+allows a turn only on a `ready` page (an `unsupported`, `failed` or `pending` page has no
+derivatives to turn).
 `derivative_revision` counts how often the derivatives were made again after the upload (0: the
 upload's own); every turn bumps it, and the page image URLs carry it (`?v=`) so a browser never
 reuses a cached redirect to an earlier turn's deleted objects. It is a counter of its own, not
@@ -161,23 +162,44 @@ upload pages -> (generate: queued -> running -> succeeded | failed) -> version n
 chat: attach photos -> draft(s) -> user: "save" -> approval -> version n
 ```
 
-- **Pages.** `POST` multipart through the API server (field `page`, 15 MB per file, 20
-  per paper, JPEG, PNG, WebP and the HEIC family; the bytes decide, not the file
-  name). Upload, reorder, turn and delete page (the last three with `expectedPageRevision`)
-  run under the paper's row lock. Objects are written to storage first, with no lock held, and removed again
-  if the short transaction that follows (exam and plan re-checked under their locks,
-  paper locked, row inserted) is refused.
-  Derivatives are made at upload (EXIF rotation applied, 1800 px, at most about
-  600 KB for the model copy, a 360 px thumbnail). The header is read first and an
-  image over 40 megapixels is refused before any decode (413); the image is then
-  decoded once, at most two at a time per process (at most eight more uploads wait; the
-  next is refused with 429), and both derivatives come from
-  that one decode (`files/image-derivative.ts`). The upload route allows 120 a minute
-  per IP (a school shares one address). A HEIC the server's `sharp`
-  cannot decode is kept as `unsupported`: it still previews in browsers that can,
-  and a model that cannot read it makes generation fail with a clear message
-  instead of dropping the page (D46). The browser converts HEIC to JPEG itself where
-  it can (Safari).
+- **Pages.** The screen first **reserves** one page per picked photo, in the order picked
+  (`reserveQuestionPaperPages`: `awaiting` rows, under the paper's row lock, counted
+  toward the 20 page cap, bumping `page_revision`), then sends the photos **three at a
+  time** into their own pages (`POST .../pages/:pageId`, multipart field `page`, 15 MB,
+  JPEG, PNG, WebP and the HEIC family; the bytes decide, not the file name). Because the
+  positions were fixed by the reservation, the order never depends on which upload
+  finishes first. Storing a photo changes no position, so it does not bump
+  `page_revision`. An upload that fails gives its page back (`releaseQuestionPaperPage`,
+  only for an `awaiting` page, no revision asked) and the rest renumber; a reservation
+  whose photo never arrives (a closed tab) is removed by the API's 30 s sweep after
+  15 minutes (`releaseExpiredPageReservations`, `QUESTION_PAPER_PAGE_RESERVATION_TTL_MS`),
+  and the screen shows it as "did not arrive" with Remove meanwhile. The single-request
+  `POST .../pages` (reserve one and store it) stays for tabs opened before this and for
+  the demo seed (`addQuestionPaperPage`). Reorder, turn and delete page (with
+  `expectedPageRevision`) run under the paper's row lock too.
+- **Photos are shrunk in the browser** (`prepareUploadFile`, decision D24 as revised for
+  upload speed): every photo over 1.5 MB, and every HEIC the browser can decode, is
+  redrawn as a JPEG of at most 2400 px at quality 0.85 on white, oriented as the camera
+  meant it (so its EXIF, location included, is gone). The stored "original" is then that
+  JPEG, not the camera file. A smaller file, or one the browser cannot decode (HEIC outside
+  Safari), goes up as it is, and a re-encode that is not smaller is dropped.
+- **The API never decodes a photo.** The request reads the header only (an image over 40
+  megapixels is refused before anything is stored, 413), writes the original with no lock
+  held, then fills the row in a short transaction (`stored`, `derivative_status`
+  `pending`), removing the object again if that is refused. After the commit it hands the
+  page to the worker (`workflows/image-derivatives`: the `ImageDerivativeControl` Restate
+  service, a signed, idempotent one-way send keyed by the row; the row itself is the
+  outbox). The worker decodes once, at most two at a time per process, makes the 1800 px
+  model copy (at most about 600 KB, plain libjpeg-turbo, not mozjpeg: about ten times
+  faster for a quarter more bytes) and the 360 px thumbnail, writes both in parallel and
+  records the outcome fenced on `pending`, so a page removed or failed meanwhile keeps
+  nothing. A JPEG, PNG or WebP it cannot decode becomes `failed` (never retried); a HEIC
+  the server's `sharp` cannot decode becomes `unsupported`: it still previews in browsers
+  that can, and a model that cannot read it makes generation fail with a clear message
+  instead of dropping the page (D46). The API's sweep re-sends what is still `pending`
+  after 30 s and marks `failed` what is still `pending` after 10 minutes. The screen polls
+  the paper every second while a page is `pending` and shows it as "Preparing the photo".
+  The upload routes allow 120 a minute per IP (a school shares one address).
 - **Turning a page.** `rotateQuestionPaperPage` takes the page, the rotation it should have
   (absolute, 0/90/180/270, like a reorder sends the whole new order) and
   `expectedPageRevision`, with the same permission (`.manage`), assistant gate, exam
@@ -190,9 +212,14 @@ chat: attach photos -> draft(s) -> user: "save" -> approval -> version n
   turned size, bumps `derivative_revision` and the paper's `page_revision` (the model's input
   changed, so a generation must be started against the new revision), and the old derivatives
   are deleted after the commit (best effort); a refused turn deletes its own new objects. Asking
-  for the rotation a page already has changes nothing. A page whose derivatives are
-  `unsupported` (a HEIC this server cannot decode) cannot be turned: BAD_REQUEST saying to
-  convert it to JPEG.
+  for the rotation a page already has changes nothing. Only a `ready` page can be turned. A page
+  whose photo is still uploading or whose copies the worker has not made yet (`pending`) is
+  refused with CONFLICT until they exist, so a turn and the worker never write the same page; a
+  `failed` page is refused with BAD_REQUEST saying to remove it and upload it again, and an
+  `unsupported` one (a HEIC this server cannot decode) with BAD_REQUEST saying to convert it to
+  JPEG. The worker therefore never meets a turned page and applies no rotation; a late worker
+  run (a re-send that overlapped the first) misses its `pending` fence, finds the turn's keys
+  on the row and removes the `thumb.jpg`/`model.jpg` it wrote again.
 - **Generation** (manual only, optionally with the teacher's instructions on what to change). See "The generation job".
 - **Save.** `saveQuestionPaperVersion` validates the fragment (`checkQuestionPaperDraft`:
   sanitise, caps, non-empty, every formula typeset, every figure id usable and the figures'
@@ -691,7 +718,9 @@ never blocks the request. The API's 30 s sweep re-sends what Restate did not acc
 fails jobs that cannot progress (`dispatch_failed` after 10 minutes unaccepted,
 `not_started` after 5 minutes accepted, `not_finished` after
 `QUESTION_PAPER_JOB_TIMEOUT_MINUTES`, default 40, above the worst case of two long
-requests). Starting a job is also refused when the school already has
+requests). Starting a job is refused while any page is still `awaiting` its photo, still
+`pending` its copies or `failed` (`pageNotReadyMessage`; the screen says the same beside the
+button before it is pressed). It is also refused when the school already has
 `QUESTION_PAPER_MAX_RUNNING_JOBS_PER_SCHOOL` (default 3) queued or running, because the
 monthly-limit check reads a spend sum cached for ten minutes and would otherwise be
 passed by every job a user starts at once; the check runs under a per-school advisory
@@ -794,7 +823,10 @@ What a file is comes from its bytes, never its name (`kind`: `image` or `documen
 canonical rules, limits and provider docs are in [In-app assistant](assistant.md#attachments-question-paper-tools-and-context-pruning)).
 Files are uploaded first (`POST /api/blob/schools/:schoolId/assistant/attachments`,
 browser session only, origin checked, 60 per minute per IP) and become
-`assistant_attachment` rows: an image with the same derivatives as pages, a PDF as one
+`assistant_attachment` rows: an image with the same derivatives as pages, made by the
+worker after the upload in the same way (`pending` first; the composer's upload resolves
+only once `GET .../attachments/:attachmentId` says the copies exist, and a send naming a
+`pending` or `failed` image is refused), a PDF as one
 object stored exactly as uploaded (never parsed, rendered or served back to a browser;
 it shows as a tile with its name and size). A message then carries ids, never bytes. At
 most 40 unsent attachments per user per school. Taking a file out of the composer deletes
@@ -814,8 +846,8 @@ many pages, a password) fails the turn with a sentence about the PDF.
 the advanced-tool meta tools and by the in-app assistant): `listQuestionPapers`,
 `getQuestionPaper`, `listQuestionPaperVersions`, `getQuestionPaperDraft`,
 `learn_question_paper_generation`, `validateQuestionPaperDraft` and `saveQuestionPaperVersion` (a write, so the in-app
-assistant asks the user to approve). The other ten procedures are *hidden* (human
-only): page photos, generation, polling, previews, downloads and starting from an earlier paper
+assistant asks the user to approve). The other twelve procedures are *hidden* (human
+only): page photos and their reservations, generation, polling, previews, downloads and starting from an earlier paper
 (`listQuestionPaperCopySources`, `copyQuestionPaperVersion`: a button of the paper screen; an agent
 already reads any paper it may read with `getQuestionPaper` and saves its own edit, and could not
 use the source's `qpf_` figure ids, which a save refuses).

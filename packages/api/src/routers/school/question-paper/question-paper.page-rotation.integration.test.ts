@@ -9,11 +9,26 @@ import { eq } from 'drizzle-orm';
 import sharp from 'sharp';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
+import { holdDerivatives, settleDerivatives } from '../../../../test/image-derivatives';
 import { createQuestionPaperWorld, type QuestionPaperWorld } from '../../../../test/question-paper';
+import { processPageDerivatives } from '../../../workflows/image-derivatives/process';
 import { configureQuestionPaperModel, type QuestionPaperModel } from '../../../workflows/question-paper/model';
 import { handleQuestionPaperPageRead, handleQuestionPaperPageUpload } from './question-paper.http';
 import { resolvePaperScope } from './question-paper.scope';
 import { startQuestionPaperGeneration } from './question-paper.service';
+import { putObject } from './question-paper.storage';
+
+/** The worker's image job runs inline (`test/image-derivatives.ts`), so a stored page is processed without a worker. */
+vi.mock('../../../workflows/image-derivatives/outbox', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../workflows/image-derivatives/outbox')>()),
+  requestImageDerivatives: (await import('../../../../test/image-derivatives')).runDerivativesInline,
+}));
+
+/** Writes go to storage as they are; one test holds the worker's writes back to order a late run after a turn. */
+vi.mock('./question-paper.storage', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./question-paper.storage')>();
+  return { ...actual, putObject: vi.fn(actual.putObject) };
+});
 
 /** No job here is handed to a workflow engine (see the pages integration test). */
 vi.mock('../../../workflows/question-paper/restate', () => ({
@@ -72,10 +87,24 @@ describe('turning a question paper page', () => {
   beforeAll(async () => {
     world = await createQuestionPaperWorld();
   });
-  afterEach(() => configureQuestionPaperModel(undefined));
+  afterEach(async () => {
+    configureQuestionPaperModel(undefined);
+    const actual = await vi.importActual<typeof import('./question-paper.storage')>('./question-paper.storage');
+    vi.mocked(putObject).mockImplementation(actual.putObject);
+  });
 
   const key = (overrides = {}) => world.key(overrides);
+  /** Uploads through the real route and lets the worker's job (run inline) finish, unless the test holds it. */
   const upload = async (bytes: Uint8Array, type: string, filename: string, overrides = {}) => {
+    const response = await handleQuestionPaperPageUpload(uploadRequest(bytes, type, filename), world.people.manager.context, key(overrides));
+    expect(response.status).toBe(200);
+    const json = (await response.json()) as { page: { id: string }; pageRevision: number };
+    await settleDerivatives();
+    return json;
+  };
+  /** The same upload with the worker held back, so the page stays `pending` until the test settles it. */
+  const uploadHeld = async (bytes: Uint8Array, type: string, filename: string, overrides = {}) => {
+    holdDerivatives();
     const response = await handleQuestionPaperPageUpload(uploadRequest(bytes, type, filename), world.people.manager.context, key(overrides));
     expect(response.status).toBe(200);
     return (await response.json()) as { page: { id: string }; pageRevision: number };
@@ -208,5 +237,94 @@ describe('turning a question paper page', () => {
     } finally {
       await world.setLifecycle('ready');
     }
+  });
+
+  it('refuses a page whose photo is still on its way or whose copies are not made yet, and turns it once they exist', async () => {
+    const client = world.people.manager.client.school;
+    const reserved = await client.reserveQuestionPaperPages({ ...key(), fileNames: ['coming.jpg'] });
+    await expect(client.rotateQuestionPaperPage({ ...key(), pageId: reserved.pages[0]!.id, rotation: 90, expectedPageRevision: reserved.pageRevision })).rejects.toMatchObject({
+      code: 'CONFLICT',
+      message: expect.stringContaining('still uploading'),
+    });
+    await client.releaseQuestionPaperPage({ ...key(), pageId: reserved.pages[0]!.id });
+
+    const { page, pageRevision } = await uploadHeld(await landscape(), 'image/jpeg', 'sideways.jpg');
+    const before = await row(page.id);
+    expect(before).toMatchObject({ uploadStatus: 'stored', derivativeStatus: 'pending', rotation: 0, derivativeRevision: 0 });
+    await expect(client.rotateQuestionPaperPage({ ...key(), pageId: page.id, rotation: 90, expectedPageRevision: pageRevision })).rejects.toMatchObject({
+      code: 'CONFLICT',
+      message: expect.stringContaining('still being processed'),
+    });
+    expect(await row(page.id)).toEqual(before);
+    expect(await storedKeys(pagePrefix(page.id))).toEqual([before.originalS3Key]);
+    // The table holds the rule too: a page whose copies are not made cannot carry a turn.
+    await expect(db.update(examQuestionPaperPageTable).set({ rotation: 90 }).where(eq(examQuestionPaperPageTable.id, page.id))).rejects.toMatchObject({
+      cause: expect.objectContaining({ constraint: 'exam_question_paper_page_rotation_check' }),
+    });
+
+    await settleDerivatives();
+    const turned = await client.rotateQuestionPaperPage({ ...key(), pageId: page.id, rotation: 90, expectedPageRevision: pageRevision });
+    expect(turned.page).toMatchObject({ derivativeStatus: 'ready', rotation: 90, derivativeRevision: 1, width: 600, height: 800 });
+  });
+
+  it('refuses a photo the worker could not read, with a reason, and changes nothing', async () => {
+    const k = { classId: world.otherClassId, subjectSlug: 'math' };
+    const broken = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(100, 7)]);
+    const { page, pageRevision } = await upload(broken, 'image/jpeg', 'broken.jpg', k);
+    const before = await row(page.id);
+    expect(before.derivativeStatus).toBe('failed');
+    await expect(world.people.manager.client.school.rotateQuestionPaperPage({ ...key(k), pageId: page.id, rotation: 90, expectedPageRevision: pageRevision })).rejects.toMatchObject({
+      code: 'BAD_REQUEST',
+      message: expect.stringContaining('could not be read'),
+    });
+    expect(await row(page.id)).toEqual(before);
+    expect(await storedKeys(pagePrefix(page.id))).toEqual([before.originalS3Key]);
+  });
+
+  it('keeps a turn when a late worker run on the same page finishes after it', async () => {
+    const k = { classId: world.otherClassId, subjectSlug: 'math', modeSlug: 'practical' };
+    const { page, pageRevision } = await uploadHeld(await landscape(), 'image/jpeg', 'sideways.jpg', k);
+    const actual = await vi.importActual<typeof import('./question-paper.storage')>('./question-paper.storage');
+    // A late run (a re-send that overlapped the first) reads the page pending and decodes it, then waits before it writes.
+    let releaseLate = () => {};
+    const lateMayWrite = new Promise<void>((resolve) => {
+      releaseLate = resolve;
+    });
+    let lateIsWaiting = () => {};
+    const lateWaits = new Promise<void>((resolve) => {
+      lateIsWaiting = resolve;
+    });
+    let waiting = 0;
+    vi.mocked(putObject).mockImplementation(async (...args) => {
+      waiting += 1;
+      if (waiting === 2) lateIsWaiting();
+      await lateMayWrite;
+      return actual.putObject(...args);
+    });
+    const late = processPageDerivatives(db, page.id);
+    await lateWaits;
+    vi.mocked(putObject).mockImplementation(actual.putObject);
+
+    // The first run records the copies, and the page is turned before the late run writes.
+    await settleDerivatives();
+    await world.people.manager.client.school.rotateQuestionPaperPage({ ...key(k), pageId: page.id, rotation: 90, expectedPageRevision: pageRevision });
+    const turned = await row(page.id);
+    expect(turned).toMatchObject({ derivativeStatus: 'ready', rotation: 90, derivativeRevision: 1, width: 600, height: 800 });
+
+    releaseLate();
+    expect(await late).toBe('skipped');
+    expect(await row(page.id)).toEqual(turned);
+    // The late run's copies of the unturned page are removed again: only the original and the turn's copies stay.
+    expect(await storedKeys(pagePrefix(page.id))).toEqual([turned.originalS3Key, turned.modelS3Key!, turned.thumbS3Key!].sort());
+  });
+
+  it('removes a turned page with every object it owns: the original and the copies of its last turn', async () => {
+    const { paper, page } = await ownPage();
+    const client = world.people.manager.client.school;
+    const turned = await client.rotateQuestionPaperPage({ ...key(), pageId: page.id, rotation: 180, expectedPageRevision: paper.pageRevision });
+    const before = await row(page.id);
+    expect(await storedKeys(pagePrefix(page.id))).toEqual([before.originalS3Key, before.modelS3Key!, before.thumbS3Key!].sort());
+    await client.deleteQuestionPaperPage({ ...key(), pageId: page.id, expectedPageRevision: turned.pageRevision });
+    expect(await storedKeys(pagePrefix(page.id))).toEqual([]);
   });
 });

@@ -1,6 +1,8 @@
 'use client';
 
+import type { pageDtoSchema } from '@campuspilot/api/routers/school/question-paper/question-paper.dto';
 import { env } from '@campuspilot/env/management.client';
+import type { z } from 'zod';
 
 /** The natural key of one paper, as the API and the upload routes take it. */
 export type QuestionPaperPageKey = {
@@ -37,8 +39,9 @@ function derivativeUrl(key: QuestionPaperPageKey, page: QuestionPaperPageImageRe
 
 /**
  * The thumbnail of a page (at most 360 px, turned as the page's `rotation`
- * says). A page whose photo the server could not decode has no thumbnail
- * (404), so callers only ask for pages with `derivativeStatus` `ready`.
+ * says). A page whose photo the server could not decode, or has not processed
+ * yet, has no thumbnail (404), so callers only ask for pages with
+ * `derivativeStatus` `ready`.
  */
 export function questionPaperThumbUrl(key: QuestionPaperPageKey, page: QuestionPaperPageImageRef) {
   return derivativeUrl(key, page, 'thumb');
@@ -64,21 +67,23 @@ export function questionPaperOriginalUrl(key: QuestionPaperPageKey, pageId: stri
   return pagesUrl(key, `/${encodeURIComponent(pageId)}/original`);
 }
 
-/** What the upload route answers on success (`{ page, pageRevision }`); only the revision is used. */
-export type QuestionPaperUploadResult = { pageRevision: number };
+/** One page as the API returns it (`getQuestionPaperDetail().pages[n]`). */
+export type QuestionPaperPage = z.infer<typeof pageDtoSchema>;
 
 /**
- * Uploads one photo as the next page of a paper (multipart field `page`).
+ * Sends the photo of a page reserved with `reserveQuestionPaperPages`
+ * (multipart field `page`) and answers with the page, now `stored` and
+ * `pending` until the worker has made its thumbnail and model copy.
  * Rejections come back as `{ message }`, which becomes the error's message so
- * the queue can show the server's own reason (type, size, 20 pages, running
- * generation, ended exam).
+ * the queue can show the server's own reason (type, size, a reservation that
+ * expired, running generation, ended exam).
  */
-export async function uploadQuestionPaperPage(key: QuestionPaperPageKey, file: File): Promise<QuestionPaperUploadResult> {
+export async function storeQuestionPaperPage(key: QuestionPaperPageKey, pageId: string, file: File): Promise<QuestionPaperPage> {
   const body = new FormData();
   body.set('page', file);
   let response: Response;
   try {
-    response = await fetch(pagesUrl(key), { method: 'POST', body, credentials: 'include' });
+    response = await fetch(pagesUrl(key, `/${encodeURIComponent(pageId)}`), { method: 'POST', body, credentials: 'include' });
   } catch {
     throw new Error('Unable to reach the server. Check your connection and try again.');
   }
@@ -86,5 +91,5 @@ export async function uploadQuestionPaperPage(key: QuestionPaperPageKey, file: F
     const failure = (await response.json().catch(() => null)) as { message?: string } | null;
     throw new Error(failure?.message ?? `The upload failed (${response.status}).`);
   }
-  return (await response.json()) as QuestionPaperUploadResult;
+  return ((await response.json()) as { page: QuestionPaperPage }).page;
 }

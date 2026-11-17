@@ -10,6 +10,8 @@ import {
 } from '@campuspilot/assistant-contract/attachments';
 import { env } from '@campuspilot/env/management.client';
 
+import { AttachmentNotProcessedError, waitUntilProcessed } from '@/components/assistant/attachment-readiness';
+
 /** Decide a picked file's kind from its first bytes; kept in their own module so they are testable without the app's environment. */
 export {
   assistantAttachmentKindOf,
@@ -30,6 +32,21 @@ const apiUrl = (path: string) => new URL(path, env.NEXT_PUBLIC_SERVER_URL).toStr
 export const assistantAttachmentThumbUrl = (schoolId: string, attachmentId: string) =>
   apiUrl(assistantAttachmentReadPath(schoolId, attachmentId, 'thumb'));
 
+/** Reads the current reference of one unsent attachment (its `derivativeStatus` changes once the worker made its copies). */
+async function readAssistantAttachment(schoolId: string, attachmentId: string): Promise<AssistantAttachmentRef> {
+  let response: Response;
+  try {
+    response = await fetch(apiUrl(assistantAttachmentDeletePath(schoolId, attachmentId)), { credentials: 'include', cache: 'no-store' });
+  } catch {
+    throw new Error('Unable to reach the server. Check your connection and try again.');
+  }
+  if (!response.ok) {
+    const failure = (await response.json().catch(() => null)) as { message?: string } | null;
+    throw new Error(failure?.message ?? `The file could not be checked (${response.status}).`);
+  }
+  return assistantAttachmentRefSchema.parse(await response.json());
+}
+
 /**
  * The original of a chat image, at full size: `<img src>` in the image viewer
  * and the viewer's download link (the route answers with
@@ -43,11 +60,15 @@ export const assistantAttachmentOriginalUrl = (schoolId: string, attachmentId: s
 /**
  * Uploads one file, an image or a PDF, for the next chat message of this
  * school (multipart field `file`), exactly as given: no conversion here (the
- * composer's `useAssistantAttachmentUpload` converts HEIC first). The
+ * composer's `useAssistantAttachmentUpload` shrinks photos first). The
  * server decides the kind from the bytes and answers with the stored
- * reference, whose `kind` is the fact to use. A refusal comes back as
- * `{ message }`, which becomes the error's message so the composer shows the
- * server's own reason (type, size, assistant access).
+ * reference, whose `kind` is the fact to use. An image's thumbnail and model
+ * copy are made by the worker afterwards, so this resolves only once they
+ * exist (`waitUntilProcessed`): a message is never sent with an unprocessed
+ * image. An image the server could not read is removed again and rejected
+ * with a sentence saying so. A refusal comes back as `{ message }`, which
+ * becomes the error's message so the composer shows the server's own reason
+ * (type, size, assistant access).
  */
 export async function uploadAssistantAttachment(schoolId: string, file: File): Promise<AssistantAttachmentRef> {
   const body = new FormData();
@@ -62,7 +83,14 @@ export async function uploadAssistantAttachment(schoolId: string, file: File): P
     const failure = (await response.json().catch(() => null)) as { message?: string } | null;
     throw new Error(failure?.message ?? `The upload failed (${response.status}).`);
   }
-  return assistantAttachmentRefSchema.parse(await response.json());
+  const stored = assistantAttachmentRefSchema.parse(await response.json());
+  try {
+    return await waitUntilProcessed(stored, (attachmentId) => readAssistantAttachment(schoolId, attachmentId));
+  } catch (error) {
+    // An image that will not be usable must not keep counting against the user's unsent files.
+    if (error instanceof AttachmentNotProcessedError) await deleteAssistantAttachment(schoolId, stored.id).catch(() => undefined);
+    throw error;
+  }
 }
 
 /**

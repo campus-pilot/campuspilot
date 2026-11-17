@@ -2,6 +2,7 @@ import { CLASS_ACTIONS, type PermissionCheck } from '@campuspilot/api/routers/au
 import type { pageDtoSchema } from '@campuspilot/api/routers/school/question-paper/question-paper.dto';
 import type { z } from 'zod';
 import type { ExamScope } from '@/components/exam/exam-model';
+import type { QueryClient, QueryKey } from '@tanstack/react-query';
 
 /** One paper: an exam, a class, a subject and an assessment mode of its plan. */
 export type QuestionPaperScope = ExamScope & { classId: string; subjectSlug: string; modeSlug: string };
@@ -166,8 +167,12 @@ export function resolveVersionNo(raw: string | null | undefined, versionNos: rea
 
 /** How often the detail is read again: every 3 seconds while a generation is queued or running, otherwise never. */
 export const GENERATION_POLL_MS = 3000;
-export function detailPollInterval(data: { activeJob: unknown } | undefined): number | false {
-  return data?.activeJob ? GENERATION_POLL_MS : false;
+export function detailPollInterval(
+  data: { activeJob: unknown; pages: readonly { uploadStatus: 'awaiting' | 'stored'; derivativeStatus: string }[] } | undefined,
+): number | false {
+  if (!data) return false;
+  if (pagesProcessing(data.pages)) return PAGE_PROCESSING_POLL_MS;
+  return data.activeJob ? GENERATION_POLL_MS : false;
 }
 
 type PageOrder = { id: string; position: number };
@@ -210,13 +215,23 @@ export function isConflict(error: unknown) {
   return Boolean(error && typeof error === 'object' && 'code' in error && (error as { code: unknown }).code === 'CONFLICT');
 }
 
+/** Photos sent at the same time. Their pages are reserved in order first, so the order they finish in does not matter. */
+export const PAGE_UPLOAD_CONCURRENCY = 3;
+
 /**
- * Runs `worker` over `items` one at a time, in order. Uploads are sequential
- * on purpose: the server numbers a page when it is stored, so photos chosen
- * together must arrive in the order they were chosen.
+ * Runs `worker` over `items` with at most `limit` running at once, starting
+ * them in order; resolves when every one has settled. `worker` handles its
+ * own failures (a rejected worker does not stop the others).
  */
-export async function runInOrder<T>(items: readonly T[], worker: (item: T) => Promise<void>): Promise<void> {
-  for (const item of items) await worker(item);
+export async function runWithConcurrency<T>(items: readonly T[], limit: number, worker: (item: T) => Promise<void>): Promise<void> {
+  const queue = [...items];
+  const next = async (): Promise<void> => {
+    const item = queue.shift();
+    if (item === undefined) return;
+    await worker(item).catch(() => undefined);
+    return next();
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, queue.length) }, next));
 }
 
 /**
@@ -231,6 +246,87 @@ export function inFlightJob(job: { status: 'queued' | 'running' | 'succeeded' | 
 /** How many photos are still being prepared or uploaded; a failed one waits for the user and does not count. */
 export const uploadsInFlight = (items: readonly { status: 'converting' | 'uploading' | 'error' }[]) =>
   items.filter((item) => item.status !== 'error').length;
+
+/**
+ * Photos on their way that hold no reserved page yet. A reserved one is
+ * already one of the paper's pages (`pageCount` counts it), so only these are
+ * added to it when counting the paper's photos.
+ */
+export const unreservedUploads = (items: readonly { status: 'converting' | 'uploading' | 'error'; pageId?: string }[]) =>
+  items.filter((item) => item.status !== 'error' && item.pageId === undefined).length;
+
+/** The pages that are stored but whose copies the worker has not made yet; the screen polls until there are none. */
+export const pagesProcessing = (pages: readonly { uploadStatus: 'awaiting' | 'stored'; derivativeStatus: string }[]) =>
+  pages.some((page) => page.uploadStatus === 'stored' && page.derivativeStatus === 'pending');
+
+/** How often the paper is read while photos are processed: a copy takes well under a second. */
+export const PAGE_PROCESSING_POLL_MS = 1000;
+
+/**
+ * Puts a stored page into the cached paper, where its reservation already
+ * stands. A read of the paper already in flight (the processing poll) is
+ * cancelled first: it was answered before this photo was stored, and landing
+ * after this patch it would put the page back to `awaiting`.
+ */
+export async function patchStoredPage<Page extends { id: string }>(queryClient: QueryClient, queryKey: QueryKey, page: Page) {
+  await queryClient.cancelQueries({ queryKey });
+  queryClient.setQueryData<{ pages: Page[] }>(queryKey, (detail) =>
+    detail ? { ...detail, pages: detail.pages.map((current) => (current.id === page.id ? page : current)) } : detail,
+  );
+}
+
+/**
+ * Gives back the page of a photo whose upload failed, and says whether the
+ * photo is in fact stored. The release answers CONFLICT only when the page
+ * already has its photo: the store committed and only its answer was lost (a
+ * dropped connection), so the photo must not be reported as missing. Any other
+ * failure leaves the page to the server's sweep.
+ */
+export async function releaseFailedUpload(release: () => Promise<unknown>): Promise<'released' | 'stored'> {
+  try {
+    await release();
+  } catch (error) {
+    if (isConflict(error)) return 'stored';
+  }
+  return 'released';
+}
+
+/** What the page preview says when it cannot show a page's photo: only a photo the server stored but could not decode (HEIC) may still be read by the AI. */
+export function pagePreviewFallback(page: { uploadStatus: 'awaiting' | 'stored'; derivativeStatus: string }) {
+  if (page.uploadStatus === 'awaiting') return 'This photo has not arrived. Remove the page and add the photo again.';
+  if (page.derivativeStatus === 'failed') return 'This photo could not be read. Remove the page and add the photo again.';
+  return 'This photo cannot be shown here. The AI can still read it.';
+}
+
+/**
+ * Why the page viewer offers no turn for a page, or null when it can be
+ * turned. Only a page whose copies exist (`ready`) can be: the server makes
+ * them again from the uploaded photo and refuses every other page. A page
+ * still uploading or still being prepared can be turned once the poll sees
+ * it ready.
+ */
+export function pageTurnBlockedReason(page: { uploadStatus: 'awaiting' | 'stored'; derivativeStatus: string }): string | null {
+  if (page.uploadStatus === 'awaiting') return 'This photo is still uploading.';
+  if (page.derivativeStatus === 'pending') return 'This photo is still being prepared.';
+  if (page.derivativeStatus === 'failed') return 'This photo could not be read.';
+  if (page.derivativeStatus !== 'ready') return "This photo's format cannot be turned.";
+  return null;
+}
+
+/**
+ * Why the paper's pages cannot be used yet, or null: a page whose photo is
+ * still awaited (a reservation another tab left, or one still uploading), one
+ * the worker is still processing, or one it could not read. Mirrors the
+ * server's refusal, so the button explains itself before it is pressed.
+ */
+export function pagesNotReadyReason(pages: readonly { position: number; uploadStatus: 'awaiting' | 'stored'; derivativeStatus: string }[]): string | null {
+  const failed = pages.find((page) => page.derivativeStatus === 'failed');
+  if (failed) return `Page ${failed.position} could not be read as an image. Remove it and add it again.`;
+  const awaiting = pages.find((page) => page.uploadStatus === 'awaiting');
+  if (awaiting) return `Page ${awaiting.position} is still uploading. Wait for it, or remove it.`;
+  if (pagesProcessing(pages)) return 'Preparing the photos…';
+  return null;
+}
 
 type JobFacts = {
   lastFinishedJob: { id: string; status: 'queued' | 'running' | 'succeeded' | 'failed'; errorCode: string | null; errorMessage: string | null; createdAt: Date; completedAt: Date } | null;
