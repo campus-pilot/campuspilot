@@ -9,6 +9,8 @@
     "components/notices/**/*.tsx",
     "components/question-paper/**/*.ts",
     "components/question-paper/**/*.tsx",
+    "components/school-creation/**/*.ts",
+    "components/school-creation/**/*.tsx",
     "components/assistant/assistant-gate-model.ts",
     "lib/navigation-guard.ts",
     "../../packages/**/*.ts",

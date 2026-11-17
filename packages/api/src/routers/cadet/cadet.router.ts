@@ -4,11 +4,13 @@ import { cadetOauthClient } from '@campuspilot/db/schema/cadet';
 import { schoolTable } from '@campuspilot/db/schema/school';
 import type { RouterClient } from '@orpc/server';
 import { eq } from 'drizzle-orm';
+import { schoolPlanSourceSchema } from '@campuspilot/db/feature-flags/catalogue';
 import { z } from 'zod';
 
 import { cadetProcedure } from '../../cadet/procedure';
 import { cadetRecordsRouter } from './cadet-records.router';
 import { rpcError, toRpcError } from '../../errors';
+import { readCoveredUntil } from '../../billing/billing.service';
 import { schoolPlanFactsOf } from '../../school-access/school-access.service';
 import {
   oauthClientRegistrationMethod,
@@ -92,12 +94,14 @@ export const cadetRouter = {
         isSuspended: z.boolean(),
         /**
          * The school has an active plan (a subscription or an active trial;
-         * docs/school-trials.md). Without one the portal is read-only and
+         * docs/school-billing.md). Without one the portal is read-only and
          * shows a permanent notice.
          */
         hasActivePlan: z.boolean(),
-        /** When the trial that gives the school its plan ends; null when no trial gives it. */
-        trialEndsAt: z.iso.datetime().nullable(),
+        /** Where the plan comes from (docs/school-billing.md); null without one. */
+        planSource: schoolPlanSourceSchema.nullable(),
+        /** When the billing periods that give the school its plan run out; null when a standing tier gives it or there is none. */
+        planEndsAt: z.iso.datetime().nullable(),
       }),
     )
     .handler(async ({ context }) => {
@@ -114,12 +118,13 @@ export const cadetRouter = {
           .limit(1);
         const plan = await readSchoolPlan(context.db, context.cadet.schoolId);
         if (!school || !plan) throw rpcError.notFound('School');
+        const covered = await readCoveredUntil(context.db, [school.id]);
         return {
           id: school.id,
           name: school.name,
           hasLogo: school.logoS3Key !== null,
           isSuspended: school.suspendedAt !== null,
-          ...schoolPlanFactsOf(plan),
+          ...schoolPlanFactsOf({ subscribedTier: plan.subscribedTier, period: plan.period, coveredUntil: covered.get(school.id) ?? null }),
         };
       } catch (error) {
         throw toRpcError(error);

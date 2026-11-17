@@ -1,5 +1,5 @@
 {
-  "id": "77eb62ec-717d-4959-976a-e40e05b3ae1f",
+  "id": "ca4582f4-fa3e-4366-9d33-c4a62d95eb72",
   "prevId": "9a63b31d-7b4c-4e7c-8a19-697442a9d13a",
   "version": "7",
   "dialect": "postgresql",
@@ -3901,6 +3901,13 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
+        },
+        "school_creation_limit": {
+          "name": "school_creation_limit",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
         }
       },
       "indexes": {},
@@ -3941,6 +3948,10 @@
         "user_placeholder_email_has_phone": {
           "name": "user_placeholder_email_has_phone",
           "value": "\"user\".\"email_is_placeholder\" = false or \"user\".\"phone_number\" is not null"
+        },
+        "user_school_creation_limit_check": {
+          "name": "user_school_creation_limit_check",
+          "value": "\"user\".\"school_creation_limit\" >= 0"
         }
       },
       "isRLSEnabled": false
@@ -7980,115 +7991,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.exam_class": {
-      "name": "exam_class",
-      "schema": "",
-      "columns": {
-        "school_id": {
-          "name": "school_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "session_id": {
-          "name": "session_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "exam_slug": {
-          "name": "exam_slug",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "class_id": {
-          "name": "class_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "exam_class_school_idx": {
-          "name": "exam_class_school_idx",
-          "columns": [
-            {
-              "expression": "school_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "exam_class_school_id_school_id_fk": {
-          "name": "exam_class_school_id_school_id_fk",
-          "tableFrom": "exam_class",
-          "tableTo": "school",
-          "columnsFrom": [
-            "school_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "exam_class_session_id_school_session_id_fk": {
-          "name": "exam_class_session_id_school_session_id_fk",
-          "tableFrom": "exam_class",
-          "tableTo": "school_session",
-          "columnsFrom": [
-            "session_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "exam_class_class_id_class_id_fk": {
-          "name": "exam_class_class_id_class_id_fk",
-          "tableFrom": "exam_class",
-          "tableTo": "class",
-          "columnsFrom": [
-            "class_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "exam_class_session_id_exam_slug_class_id_pk": {
-          "name": "exam_class_session_id_exam_slug_class_id_pk",
-          "columns": [
-            "session_id",
-            "exam_slug",
-            "class_id"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.exam_lifecycle": {
       "name": "exam_lifecycle",
       "schema": "",
@@ -8318,23 +8220,6 @@
           ],
           "columnsTo": [
             "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "exam_plan_exam_class_fk": {
-          "name": "exam_plan_exam_class_fk",
-          "tableFrom": "exam_plan",
-          "tableTo": "exam_class",
-          "columnsFrom": [
-            "session_id",
-            "exam_slug",
-            "class_id"
-          ],
-          "columnsTo": [
-            "session_id",
-            "exam_slug",
-            "class_id"
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
@@ -12021,9 +11906,31 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
+        },
+        "owner_user_id": {
+          "name": "owner_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         }
       },
-      "indexes": {},
+      "indexes": {
+        "school_owner_user_id_idx": {
+          "name": "school_owner_user_id_idx",
+          "columns": [
+            {
+              "expression": "owner_user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "school_demo_created_by_user_id_fk": {
           "name": "school_demo_created_by_user_id_fk",
@@ -12044,6 +11951,19 @@
           "tableTo": "user",
           "columnsFrom": [
             "suspended_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "school_owner_user_id_user_id_fk": {
+          "name": "school_owner_user_id_user_id_fk",
+          "tableFrom": "school",
+          "tableTo": "user",
+          "columnsFrom": [
+            "owner_user_id"
           ],
           "columnsTo": [
             "id"
@@ -13745,8 +13665,8 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.school_trial": {
-      "name": "school_trial",
+    "public.school_billing_period": {
+      "name": "school_billing_period",
       "schema": "",
       "columns": {
         "id": {
@@ -13757,6 +13677,12 @@
         },
         "school_id": {
           "name": "school_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
           "type": "text",
           "primaryKey": false,
           "notNull": true
@@ -13783,6 +13709,12 @@
         "ended_at": {
           "name": "ended_at",
           "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "invoice_id": {
+          "name": "invoice_id",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -13814,8 +13746,8 @@
         }
       },
       "indexes": {
-        "school_trial_school_id_idx": {
-          "name": "school_trial_school_id_idx",
+        "school_billing_period_school_id_idx": {
+          "name": "school_billing_period_school_id_idx",
           "columns": [
             {
               "expression": "school_id",
@@ -13835,8 +13767,23 @@
           "method": "btree",
           "with": {}
         },
-        "school_trial_created_by_idx": {
-          "name": "school_trial_created_by_idx",
+        "school_billing_period_invoice_id_idx": {
+          "name": "school_billing_period_invoice_id_idx",
+          "columns": [
+            {
+              "expression": "invoice_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "school_billing_period_created_by_idx": {
+          "name": "school_billing_period_created_by_idx",
           "columns": [
             {
               "expression": "created_by",
@@ -13850,8 +13797,8 @@
           "method": "btree",
           "with": {}
         },
-        "school_trial_ended_by_idx": {
-          "name": "school_trial_ended_by_idx",
+        "school_billing_period_ended_by_idx": {
+          "name": "school_billing_period_ended_by_idx",
           "columns": [
             {
               "expression": "ended_by",
@@ -13867,9 +13814,9 @@
         }
       },
       "foreignKeys": {
-        "school_trial_school_id_school_id_fk": {
-          "name": "school_trial_school_id_school_id_fk",
-          "tableFrom": "school_trial",
+        "school_billing_period_school_id_school_id_fk": {
+          "name": "school_billing_period_school_id_school_id_fk",
+          "tableFrom": "school_billing_period",
           "tableTo": "school",
           "columnsFrom": [
             "school_id"
@@ -13880,9 +13827,22 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "school_trial_created_by_user_id_fk": {
-          "name": "school_trial_created_by_user_id_fk",
-          "tableFrom": "school_trial",
+        "school_billing_period_invoice_id_school_invoice_id_fk": {
+          "name": "school_billing_period_invoice_id_school_invoice_id_fk",
+          "tableFrom": "school_billing_period",
+          "tableTo": "school_invoice",
+          "columnsFrom": [
+            "invoice_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "school_billing_period_created_by_user_id_fk": {
+          "name": "school_billing_period_created_by_user_id_fk",
+          "tableFrom": "school_billing_period",
           "tableTo": "user",
           "columnsFrom": [
             "created_by"
@@ -13893,9 +13853,9 @@
           "onDelete": "set null",
           "onUpdate": "no action"
         },
-        "school_trial_ended_by_user_id_fk": {
-          "name": "school_trial_ended_by_user_id_fk",
-          "tableFrom": "school_trial",
+        "school_billing_period_ended_by_user_id_fk": {
+          "name": "school_billing_period_ended_by_user_id_fk",
+          "tableFrom": "school_billing_period",
           "tableTo": "user",
           "columnsFrom": [
             "ended_by"
@@ -13911,19 +13871,765 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
-        "school_trial_tier_check": {
-          "name": "school_trial_tier_check",
-          "value": "\"school_trial\".\"tier\" in ('plus', 'pro', 'enterprise')"
+        "school_billing_period_kind_check": {
+          "name": "school_billing_period_kind_check",
+          "value": "\"school_billing_period\".\"kind\" in ('trial', 'paid', 'complimentary')"
         },
-        "school_trial_ends_after_start_check": {
-          "name": "school_trial_ends_after_start_check",
-          "value": "\"school_trial\".\"ends_at\" > \"school_trial\".\"starts_at\""
+        "school_billing_period_tier_check": {
+          "name": "school_billing_period_tier_check",
+          "value": "\"school_billing_period\".\"tier\" in ('plus', 'pro', 'enterprise')"
         },
-        "school_trial_ended_after_start_check": {
-          "name": "school_trial_ended_after_start_check",
-          "value": "\"school_trial\".\"ended_at\" >= \"school_trial\".\"starts_at\""
+        "school_billing_period_ends_after_start_check": {
+          "name": "school_billing_period_ends_after_start_check",
+          "value": "\"school_billing_period\".\"ends_at\" > \"school_billing_period\".\"starts_at\""
+        },
+        "school_billing_period_ended_after_start_check": {
+          "name": "school_billing_period_ended_after_start_check",
+          "value": "\"school_billing_period\".\"ended_at\" >= \"school_billing_period\".\"starts_at\""
+        },
+        "school_billing_period_invoice_check": {
+          "name": "school_billing_period_invoice_check",
+          "value": "(\"school_billing_period\".\"kind\" = 'paid') = (\"school_billing_period\".\"invoice_id\" is not null)"
         }
       },
+      "isRLSEnabled": false
+    },
+    "public.school_invoice": {
+      "name": "school_invoice",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "school_id": {
+          "name": "school_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tier": {
+          "name": "tier",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "price_id": {
+          "name": "price_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "currency": {
+          "name": "currency",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "unit_amount_minor": {
+          "name": "unit_amount_minor",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "period_count": {
+          "name": "period_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "amount_minor": {
+          "name": "amount_minor",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "period_start": {
+          "name": "period_start",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "period_end": {
+          "name": "period_end",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "paid_at": {
+          "name": "paid_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "voided_at": {
+          "name": "voided_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "voided_by": {
+          "name": "voided_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "provider": {
+          "name": "provider",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'manual'"
+        },
+        "provider_invoice_id": {
+          "name": "provider_invoice_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "payment_reference": {
+          "name": "payment_reference",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "note": {
+          "name": "note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "school_invoice_school_id_idx": {
+          "name": "school_invoice_school_id_idx",
+          "columns": [
+            {
+              "expression": "school_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "period_start",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "school_invoice_price_id_idx": {
+          "name": "school_invoice_price_id_idx",
+          "columns": [
+            {
+              "expression": "price_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "school_invoice_created_by_idx": {
+          "name": "school_invoice_created_by_idx",
+          "columns": [
+            {
+              "expression": "created_by",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "school_invoice_voided_by_idx": {
+          "name": "school_invoice_voided_by_idx",
+          "columns": [
+            {
+              "expression": "voided_by",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "school_invoice_school_id_school_id_fk": {
+          "name": "school_invoice_school_id_school_id_fk",
+          "tableFrom": "school_invoice",
+          "tableTo": "school",
+          "columnsFrom": [
+            "school_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "school_invoice_price_id_subscription_price_id_fk": {
+          "name": "school_invoice_price_id_subscription_price_id_fk",
+          "tableFrom": "school_invoice",
+          "tableTo": "subscription_price",
+          "columnsFrom": [
+            "price_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "school_invoice_voided_by_user_id_fk": {
+          "name": "school_invoice_voided_by_user_id_fk",
+          "tableFrom": "school_invoice",
+          "tableTo": "user",
+          "columnsFrom": [
+            "voided_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "school_invoice_created_by_user_id_fk": {
+          "name": "school_invoice_created_by_user_id_fk",
+          "tableFrom": "school_invoice",
+          "tableTo": "user",
+          "columnsFrom": [
+            "created_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "school_invoice_provider_invoice_id_unique": {
+          "name": "school_invoice_provider_invoice_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "provider_invoice_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "school_invoice_status_check": {
+          "name": "school_invoice_status_check",
+          "value": "\"school_invoice\".\"status\" in ('open', 'paid', 'void')"
+        },
+        "school_invoice_tier_check": {
+          "name": "school_invoice_tier_check",
+          "value": "\"school_invoice\".\"tier\" in ('plus', 'pro', 'enterprise')"
+        },
+        "school_invoice_currency_check": {
+          "name": "school_invoice_currency_check",
+          "value": "\"school_invoice\".\"currency\" in ('INR')"
+        },
+        "school_invoice_provider_check": {
+          "name": "school_invoice_provider_check",
+          "value": "\"school_invoice\".\"provider\" in ('manual', 'stripe')"
+        },
+        "school_invoice_amounts_check": {
+          "name": "school_invoice_amounts_check",
+          "value": "\"school_invoice\".\"unit_amount_minor\" >= 0 and \"school_invoice\".\"amount_minor\" >= 0 and \"school_invoice\".\"period_count\" >= 1"
+        },
+        "school_invoice_period_check": {
+          "name": "school_invoice_period_check",
+          "value": "\"school_invoice\".\"period_end\" > \"school_invoice\".\"period_start\""
+        },
+        "school_invoice_paid_check": {
+          "name": "school_invoice_paid_check",
+          "value": "(\"school_invoice\".\"status\" = 'open') = (\"school_invoice\".\"paid_at\" is null)"
+        },
+        "school_invoice_void_check": {
+          "name": "school_invoice_void_check",
+          "value": "(\"school_invoice\".\"status\" = 'void') = (\"school_invoice\".\"voided_at\" is not null)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.subscription_price": {
+      "name": "subscription_price",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "tier": {
+          "name": "tier",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "currency": {
+          "name": "currency",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "unit_amount_minor": {
+          "name": "unit_amount_minor",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "period_days": {
+          "name": "period_days",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "active": {
+          "name": "active",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "provider_price_id": {
+          "name": "provider_price_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "subscription_price_one_active_key": {
+          "name": "subscription_price_one_active_key",
+          "columns": [
+            {
+              "expression": "tier",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "currency",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"subscription_price\".\"active\"",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "subscription_price_created_by_idx": {
+          "name": "subscription_price_created_by_idx",
+          "columns": [
+            {
+              "expression": "created_by",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "subscription_price_created_by_user_id_fk": {
+          "name": "subscription_price_created_by_user_id_fk",
+          "tableFrom": "subscription_price",
+          "tableTo": "user",
+          "columnsFrom": [
+            "created_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "subscription_price_provider_price_id_unique": {
+          "name": "subscription_price_provider_price_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "provider_price_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "subscription_price_tier_check": {
+          "name": "subscription_price_tier_check",
+          "value": "\"subscription_price\".\"tier\" in ('plus', 'pro', 'enterprise')"
+        },
+        "subscription_price_currency_check": {
+          "name": "subscription_price_currency_check",
+          "value": "\"subscription_price\".\"currency\" in ('INR')"
+        },
+        "subscription_price_amount_check": {
+          "name": "subscription_price_amount_check",
+          "value": "\"subscription_price\".\"unit_amount_minor\" >= 0"
+        },
+        "subscription_price_period_days_check": {
+          "name": "subscription_price_period_days_check",
+          "value": "\"subscription_price\".\"period_days\" > 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.school_creation_request": {
+      "name": "school_creation_request",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "requested_limit": {
+          "name": "requested_limit",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        },
+        "granted_limit": {
+          "name": "granted_limit",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "decision_note": {
+          "name": "decision_note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "decided_by": {
+          "name": "decided_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "decided_at": {
+          "name": "decided_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "school_creation_request_user_id_idx": {
+          "name": "school_creation_request_user_id_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "school_creation_request_status_idx": {
+          "name": "school_creation_request_status_idx",
+          "columns": [
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "school_creation_request_decided_by_idx": {
+          "name": "school_creation_request_decided_by_idx",
+          "columns": [
+            {
+              "expression": "decided_by",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "school_creation_request_one_pending_key": {
+          "name": "school_creation_request_one_pending_key",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"school_creation_request\".\"status\" = 'pending'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "school_creation_request_user_id_user_id_fk": {
+          "name": "school_creation_request_user_id_user_id_fk",
+          "tableFrom": "school_creation_request",
+          "tableTo": "user",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "school_creation_request_decided_by_user_id_fk": {
+          "name": "school_creation_request_decided_by_user_id_fk",
+          "tableFrom": "school_creation_request",
+          "tableTo": "user",
+          "columnsFrom": [
+            "decided_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "school_creation_request_status_check": {
+          "name": "school_creation_request_status_check",
+          "value": "\"school_creation_request\".\"status\" in ('pending', 'approved', 'rejected')"
+        },
+        "school_creation_request_requested_limit_check": {
+          "name": "school_creation_request_requested_limit_check",
+          "value": "\"school_creation_request\".\"requested_limit\" >= 1"
+        },
+        "school_creation_request_granted_limit_check": {
+          "name": "school_creation_request_granted_limit_check",
+          "value": "(\"school_creation_request\".\"status\" = 'approved') = (\"school_creation_request\".\"granted_limit\" is not null) and (\"school_creation_request\".\"granted_limit\" is null or \"school_creation_request\".\"granted_limit\" >= 0)"
+        },
+        "school_creation_request_decided_at_check": {
+          "name": "school_creation_request_decided_at_check",
+          "value": "(\"school_creation_request\".\"status\" = 'pending') = (\"school_creation_request\".\"decided_at\" is null)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.school_creation": {
+      "name": "school_creation",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "school_id": {
+          "name": "school_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "school_creation_user_id_idx": {
+          "name": "school_creation_user_id_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "school_creation_school_id_key": {
+          "name": "school_creation_school_id_key",
+          "columns": [
+            {
+              "expression": "school_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "school_creation_user_id_user_id_fk": {
+          "name": "school_creation_user_id_user_id_fk",
+          "tableFrom": "school_creation",
+          "tableTo": "user",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "school_creation_school_id_school_id_fk": {
+          "name": "school_creation_school_id_school_id_fk",
+          "tableFrom": "school_creation",
+          "tableTo": "school",
+          "columnsFrom": [
+            "school_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.notice_class": {

@@ -25,7 +25,7 @@ exam-governance boundary, including full-config replacements.
 ## Classes taking part
 
 Whether a class takes part in an examination is its own stored fact,
-`exam_class` (one row per session, exam and class, migration 0075), never
+`exam_class` (one row per session, exam and class, migration 0076), never
 inferred from plans, results or timetable columns. Every subject plan
 references its class's row (`exam_plan_exam_class_fk`), so plans exist only for
 classes taking part; a class may take part without plans (after its last
@@ -72,7 +72,7 @@ legacy plan was deleted).
   filters timetable columns by it. A published timetable is listed for, opened
   by and announced to (`exam.timetable_published`) only students whose class
   takes part.
-- Migration 0075 backfills the rows once from what existed: classes with
+- Migration 0076 backfills the rows once from what existed: classes with
   plans, plus the timetable columns of every exam (with or without plans), so
   existing timetables keep rendering their columns.
 

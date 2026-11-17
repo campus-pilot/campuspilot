@@ -2,26 +2,16 @@
 
 import { useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { BrandLogo } from '@campuspilot/components/brand-logo';
-import { Alert, AlertDescription, AlertTitle } from '@campuspilot/ui/components/alert';
-import { Building2, Clock3 } from 'lucide-react';
+import { Building2 } from 'lucide-react';
 import { AuthLoading } from '@/components/auth-loading';
-import { ManagementAccountMenu } from '@/components/management-account-menu';
+import { SchoolCreationPanel } from '@/components/school-creation/school-creation-panel';
+import { SchoolPageNavbar } from '@/components/school-page-navbar';
 import {
   clearStoredSchoolId,
   getStoredSchoolId,
   SchoolEntryRedirect,
 } from '@/components/school-selection';
 import { orpc } from '@/lib/orpc';
-
-function SchoolPageNavbar() {
-  return (
-    <header className="flex h-16 items-center justify-between border-b bg-background px-5 sm:px-8">
-      <BrandLogo product="campuspilot" size="sm" />
-      <ManagementAccountMenu />
-    </header>
-  );
-}
 
 function NoSchoolsEmptyState() {
   /** Removes a stale tenant after the user's final membership is revoked. */
@@ -42,18 +32,13 @@ function NoSchoolsEmptyState() {
               You are not part of a school yet
             </h1>
             <p className="mt-2 text-sm leading-6 text-muted-foreground">
-              Ask a school administrator to invite you to their CampusPilot
-              workspace.
+              Create your school below, or ask a school administrator to
+              invite you to theirs.
             </p>
           </div>
-          <Alert className="max-w-md p-4 text-left">
-            <Clock3 aria-hidden="true" />
-            <AlertTitle>Stay tuned</AlertTitle>
-            <AlertDescription>
-              Self-service school creation is coming in a future update. For
-              now, schools can only be created by a CampusPilot administrator.
-            </AlertDescription>
-          </Alert>
+          <div className="w-full max-w-md">
+            <SchoolCreationPanel />
+          </div>
         </section>
       </main>
     </div>

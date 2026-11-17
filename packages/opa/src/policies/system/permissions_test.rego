@@ -352,3 +352,33 @@ test_school_principal_cannot_manage_user_sign_in if {
     "resource": {"kind": "system"},
   }
 }
+
+test_admin_can_decide_school_creation_requests_and_prices if {
+  every action in {
+    "system.school_creation_request.list",
+    "system.school_creation_request.decide",
+    "system.subscription_price.update",
+  } {
+    authorization.allow with input as {
+      "action": action,
+      "subject": {
+        "userId": "user-1",
+        "roleAssignments": [{"role": "platform.admin", "scope": {"kind": "platform"}}],
+      },
+      "resource": {"kind": "system"},
+    }
+  }
+}
+
+test_school_principal_cannot_decide_school_creation_requests if {
+  not authorization.allow with input as {
+    "action": "system.school_creation_request.decide",
+    "subject": {
+      "userId": "user-1",
+      "roleAssignments": [
+        {"role": "school.principal", "scope": {"kind": "school", "schoolId": "school-1"}, "meta": null},
+      ],
+    },
+    "resource": {"kind": "system"},
+  }
+}

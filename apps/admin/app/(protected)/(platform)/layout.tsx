@@ -9,14 +9,17 @@ import {
   ClipboardList,
   DatabaseZap,
   House,
+  IndianRupee,
   KeyRound,
   Receipt,
+  SchoolIcon,
   UsersRound,
 } from 'lucide-react';
 import { AdminShell, type AdminShellState } from '@/components/admin-shell';
 import { resolveAdminPageActions } from '@/components/admin-route';
 import { NewSchoolAction } from '@/components/new-school-action';
 import { DemoPurgeAlerts } from '@/components/demo-school/demo-purge-alerts';
+import { SchoolRequestAlert } from '@/components/school-requests/school-request-alert';
 import { aiBillingPage } from './ai-billing/_route';
 import { dataMigrationsPage } from './data-migrations/_route';
 import { demoRequestsPage } from './demo-requests/_route';
@@ -24,6 +27,8 @@ import { homePage } from './_route';
 import { oauthClientsPage } from './oauth-clients/_route';
 import { organizationsPage } from './organizations/_route';
 import { platformUsagePage } from './platform-usage/_route';
+import { pricingPage } from './pricing/_route';
+import { schoolRequestsPage } from './school-requests/_route';
 import { usersPage } from './users/_route';
 
 const navigation: AppShellNavigationEntry[] = [
@@ -39,6 +44,13 @@ const navigation: AppShellNavigationEntry[] = [
         label: 'Demo requests',
         href: '/demo-requests',
         icon: ClipboardList,
+      },
+      {
+        type: 'item',
+        id: 'school-requests',
+        label: 'School requests',
+        href: '/school-requests',
+        icon: SchoolIcon,
       },
     ],
   },
@@ -77,6 +89,13 @@ const navigation: AppShellNavigationEntry[] = [
       },
       {
         type: 'item',
+        id: 'pricing',
+        label: 'Pricing',
+        href: '/pricing',
+        icon: IndianRupee,
+      },
+      {
+        type: 'item',
         id: 'ai-billing',
         label: 'AI billing',
         href: '/ai-billing',
@@ -96,11 +115,13 @@ const navigation: AppShellNavigationEntry[] = [
 const pages = [
   homePage,
   demoRequestsPage,
+  schoolRequestsPage,
   organizationsPage,
   usersPage,
   oauthClientsPage,
   platformUsagePage,
   aiBillingPage,
+  pricingPage,
   dataMigrationsPage,
 ];
 
@@ -117,6 +138,7 @@ export default function PlatformLayout({ children }: { children: ReactNode }) {
   return (
     <AdminShell state={state}>
       <DemoPurgeAlerts />
+      <SchoolRequestAlert />
       {children}
     </AdminShell>
   );

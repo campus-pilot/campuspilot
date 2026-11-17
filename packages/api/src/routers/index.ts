@@ -4,6 +4,7 @@ import { publicProcedure } from '../index';
 import { authRouter } from './auth/auth.router';
 import { authorizationRouter } from './authorization/authorization.router';
 import { schoolRouter } from './school/school.router';
+import { schoolCreationRouter } from './school-creation/school-creation.router';
 import { systemAdminRouter } from './system-admin/system-admin.router';
 
 export const appRouter = {
@@ -28,6 +29,7 @@ export const appRouter = {
       return 'OK';
     }),
   school: schoolRouter,
+  schoolCreation: schoolCreationRouter,
   systemAdmin: systemAdminRouter,
 };
 export type AppRouter = typeof appRouter;

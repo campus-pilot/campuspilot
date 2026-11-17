@@ -14,7 +14,7 @@ import { examClassTable } from '@campuspilot/db/schema/exam';
 import type { Role, RoleMeta } from '@campuspilot/db/schema/jsonb/role';
 import { schoolTable } from '@campuspilot/db/schema/school';
 import { schoolMemberTable } from '@campuspilot/db/schema/school-member';
-import { schoolTrialTable } from '@campuspilot/db/schema/school-trial';
+import { schoolBillingPeriodTable } from '@campuspilot/db/schema/school-billing';
 import { schoolUserRoleTable } from '@campuspilot/db/schema/school-user-role';
 import { schoolSessionTable } from '@campuspilot/db/schema/session';
 import { eq, max } from 'drizzle-orm';
@@ -208,6 +208,24 @@ export async function createRegularUserSession(): Promise<UserSession> {
 }
 
 /**
+ * Creates an authenticated session for an existing user, without adding any
+ * membership: for suites where one person acts in several places.
+ */
+export function createUserSession(account: typeof user.$inferSelect): UserSession {
+  return {
+    user: toSessionUser(account, 'user'),
+    session: {
+      id: randomUUID(),
+      userId: account.id,
+      token: randomUUID(),
+      expiresAt: new Date(Date.now() + 86400000),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    },
+  };
+}
+
+/**
  * The features of a test school created without a `tier`: student
  * management and WhatsApp notifications, and nothing else. No tier is
  * exactly that, so such a school is stored as a Plus school with these two
@@ -287,8 +305,8 @@ export async function createTestSchool(overrides: {
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
- * Inserts a trial for a test school directly, as the admin procedures store
- * one. By default it started a day ago and ends in 30 days, so it is active;
+ * Inserts a trial period for a test school directly, as the admin procedures
+ * store one (docs/school-billing.md). By default it started a day ago and ends in 30 days, so it is active;
  * pass an `endsAt` in the past (and an earlier `startsAt`) for a trial that
  * has run out, or `endedAt` for one an administrator ended early. Time is
  * never waited for: a trial's state follows from these timestamps alone.
@@ -302,9 +320,10 @@ export async function createTestSchoolTrial(options: {
 }) {
   const startsAt = options.startsAt ?? new Date(Date.now() - DAY_MS);
   const [trial] = await db
-    .insert(schoolTrialTable)
+    .insert(schoolBillingPeriodTable)
     .values({
       schoolId: options.schoolId,
+      kind: 'trial',
       tier: options.tier,
       startsAt,
       endsAt: options.endsAt ?? new Date(Date.now() + 30 * DAY_MS),

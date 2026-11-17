@@ -75,6 +75,11 @@ export const schoolMemberDtoSchema = z.object({
   phoneNumber: z.string().nullable(),
   profileImageUrl: z.url().nullable(),
   addedAt: z.date(),
+  /**
+   * The member owns the school (`school.owner_user_id`, docs/school-creation.md):
+   * they cannot be removed and always keep the principal role.
+   */
+  isOwner: z.boolean(),
   roles: z.array(schoolRoleAssignmentSchema),
 });
 

@@ -3,7 +3,7 @@ import { z } from 'zod';
 /**
  * The contract of the errors that refuse a change to a read-only school,
  * importable by the browser apps (Zod only; see docs/school-suspension.md and
- * docs/school-trials.md).
+ * docs/school-billing.md).
  *
  * A school is read-only for two separate reasons, each its own fact: an
  * administrator suspended it (`SCHOOL_SUSPENDED`), or it has no active plan,

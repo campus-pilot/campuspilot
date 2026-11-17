@@ -12,7 +12,7 @@ import { featureFlagsOutdatedBy, schoolListOutdatedBy } from '@/components/requi
 /**
  * Called when the server refuses a change because the school is read-only:
  * suspended (docs/school-suspension.md) or without an active plan
- * (docs/school-trials.md). Module state, because the refusal is seen by
+ * (docs/school-billing.md). Module state, because the refusal is seen by
  * the link (below) while what must be refreshed lives in the query client:
  * the app's query client registers its refresh here once it exists. One
  * slot, not a list: the browser has one query client, and a newer one (a
@@ -53,7 +53,7 @@ export const orpc = createTanstackQueryUtils(client);
  *   again, so the feature's navigation, actions and pages close without
  *   waiting for the next refetch;
  * - the school is read-only (the suspended-school or no-plan error, see
- *   docs/school-suspension.md and docs/school-trials.md), for any call
+ *   docs/school-suspension.md and docs/school-billing.md), for any call
  *   through {@link client} or the assistant client: the user's school list
  *   is read again, so the read-only warning appears in a tab that was open
  *   when the school was suspended or its trial ended.
