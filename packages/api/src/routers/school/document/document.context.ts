@@ -3,6 +3,7 @@ import { formatPhoneNumberForDisplay } from "@campuspilot/db/phone";
 import { admissionTable } from "@campuspilot/db/schema/admission";
 import { classTable, sectionTable } from "@campuspilot/db/schema/class";
 import {
+  examClassTable,
   examPlanTable,
   examAssessmentSettingsTable,
   examStudentAssessmentTable,
@@ -129,6 +130,33 @@ export async function buildDocumentContexts(
     !classMap.has(source.classId)
   )
     throw rpcError.notFound("School class");
+  // The classes taking part in the examination (`exam_class`), its own fact.
+  // An excluded class appears in none of the examination's documents.
+  const examClassIds = examSlug
+    ? new Set(
+        (
+          await db
+            .select({ classId: examClassTable.classId })
+            .from(examClassTable)
+            .where(
+              and(
+                eq(examClassTable.schoolId, schoolId),
+                eq(examClassTable.sessionId, session.id),
+                eq(examClassTable.examSlug, examSlug),
+              ),
+            )
+        ).map((row) => row.classId),
+      )
+    : new Set<string>();
+  if (
+    examSlug &&
+    "classId" in source &&
+    source.classId &&
+    !examClassIds.has(source.classId)
+  )
+    throw rpcError.badRequest(
+      "This class does not take part in this examination.",
+    );
   const [grid] = examSlug
     ? await db
         .select()
@@ -204,6 +232,9 @@ export async function buildDocumentContexts(
     // Timetable PDFs are examination-wide. The DTO has no classId and context
     // construction preserves every configured column plus every subject/mode in
     // a shared slot; do not narrow this from a contextual UI selection.
+    // Columns are always classes taking part: saving the timetable and
+    // removing a class keep them so. A column that is not (a broken invariant)
+    // is refused rather than printed or silently dropped.
     const columnIds = grid.config.columns;
     if (
       !columnIds.length ||
@@ -213,6 +244,10 @@ export async function buildDocumentContexts(
     )
       throw rpcError.badRequest(
         "The selected class is not part of this timetable.",
+      );
+    if (columnIds.some((id) => !examClassIds.has(id)))
+      throw rpcError.badRequest(
+        "The timetable includes a class that does not take part in this examination. Update the timetable first.",
       );
     const columns = columnIds.map((id) => ({
       classId: id,

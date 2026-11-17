@@ -20,6 +20,7 @@ import {
   createTestAdmission,
   createSchoolStaffSession,
   createTestClient,
+  includeTestExamClasses,
 } from "../../../../test/fixtures";
 import {
   buildDocumentContexts,
@@ -114,6 +115,7 @@ describe("examination document parity", () => {
           },
         })
         .where(eq(classTable.id, c));
+      await includeTestExamClasses([{ schoolId, sessionId, examSlug: "final", classId: c }]);
       for (const subjectSlug of ["math", "english"]) {
         const [plan] = await db
           .insert(examPlanTable)

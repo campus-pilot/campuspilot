@@ -159,11 +159,8 @@ describe("school exam lifecycle integration", () => {
     await expect(manager.school.updateExam(scope)).rejects.toMatchObject({
       code: "BAD_REQUEST",
     });
-    expect(
-      (await admin.school.getExamContext(scope)).classes.some(
-        (row) => row.id === classId,
-      ),
-    ).toBe(true);
+    // The context lists only the classes taking part; before a plan exists none do.
+    expect((await admin.school.getExamContext(scope)).classes).toEqual([]);
     await expect(
       manager.school.getExam({ ...scope, examSlug: "missing" }),
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
@@ -188,6 +185,10 @@ describe("school exam lifecycle integration", () => {
       approved: false,
     };
     expect(plan.modeConfig.written!.maxMarks).toBe(80);
+    // Creating a legacy single plan makes its class take part.
+    expect(
+      (await admin.school.getExamContext(scope)).classes.map((row) => row.id),
+    ).toEqual([classId]);
     await expect(
       manager.school.createExamPlan({ ...create, subjectSlug: "constructor" }),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });

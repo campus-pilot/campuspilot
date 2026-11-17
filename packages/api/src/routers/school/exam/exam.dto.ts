@@ -262,6 +262,8 @@ export const examPlanPreviewSchema = z.object({
       classId: z.string(),
       label: z.string(),
       studentCount: z.number().int().nonnegative(),
+      /** Whether the class currently takes part in the examination (its `exam_class` row). */
+      participating: z.boolean(),
       subjects: z.array(
         z.object({
           subjectSlug: z.string(),
@@ -280,13 +282,57 @@ export const examPlanPreviewSchema = z.object({
     }),
   ),
 });
+/**
+ * The classes chosen to take part in an examination: at least one, each once.
+ * Sent explicitly by the caller; the server never defaults to every class.
+ */
+export const examClassSelectionSchema = z
+  .array(z.string().min(1))
+  .min(1, 'Select at least one class.')
+  .max(500)
+  .refine((ids) => new Set(ids).size === ids.length, 'Select each class only once.')
+  .describe(
+    'IDs of the classes taking part in the examination, from getExamPlanPreview; at least one.',
+  );
 export const generateExamPlanInputSchema = examScopeSchema.extend({
   configurationVersion: examPlanPreviewSchema.shape.configurationVersion,
+  classIds: examClassSelectionSchema,
 });
 export const generateExamPlanOutputSchema = z.object({
   createdCount: z.number().int().positive(),
 });
+export const updateExamClassesInputSchema = examScopeSchema.extend({
+  configurationVersion: examPlanPreviewSchema.shape.configurationVersion,
+  classIds: examClassSelectionSchema.describe(
+    'The complete set of classes that should take part after the change, from getExamPlanPreview; at least one. Classes missing from it are removed, new ones added.',
+  ),
+});
+export const updateExamClassesOutputSchema = z.object({
+  addedClassIds: z.array(z.string()),
+  removedClassIds: z.array(z.string()),
+  createdPlanCount: z.number().int().nonnegative(),
+  deletedPlanCount: z.number().int().nonnegative(),
+});
 export type ExamPlanPreviewDto = z.infer<typeof examPlanPreviewSchema>;
+
+/**
+ * Whether a previewed class can be chosen to take part: it needs at least one
+ * configured subject (the server refuses a class with nothing to examine).
+ */
+export function canExamClassTakePart(
+  schoolClass: ExamPlanPreviewDto['classes'][number],
+): boolean {
+  return schoolClass.subjects.length > 0;
+}
+
+/**
+ * Every previewed class that can take part: the default selection when
+ * generating a plan, which creates the same plans as generating for the whole
+ * school did before classes could be excluded.
+ */
+export function selectableExamClassIds(preview: ExamPlanPreviewDto): string[] {
+  return preview.classes.filter(canExamClassTakePart).map((entry) => entry.classId);
+}
 
 export const examClassScopeSchema = examScopeSchema.extend({
   classId: z.string().min(1),

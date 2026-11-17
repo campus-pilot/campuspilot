@@ -2,9 +2,10 @@ import type { z } from "zod";
 import type { DatabaseTransaction } from "@campuspilot/db";
 import { and, eq, inArray } from "drizzle-orm";
 import { classTable } from "@campuspilot/db/schema/class";
-import { examPlanTable, examTimetableTable } from "@campuspilot/db/schema/exam";
+import { examClassTable, examPlanTable, examTimetableTable } from "@campuspilot/db/schema/exam";
 import { route } from "./exam.pagination";
 import { getExam } from "./exam.service";
+import { examClassWhere } from "./exam.scope";
 import {
   publishExamTimetable,
   requireExamNotEnded,
@@ -63,7 +64,7 @@ export const schoolExamTimetableRouter = {
     .route(
       route(
         "Save an exam timetable",
-        "Create or replace the optional shared grid as a draft, validating school classes, configured subjects and modes, dates and non-overlapping local time slots. Refused while the timetable is published (withdraw it first) and once the exam has ended.",
+        "Create or replace the optional shared grid as a draft, validating that every column is a class taking part in the exam, configured subjects and modes, dates and non-overlapping local time slots. Refused while the timetable is published (withdraw it first) and once the exam has ended.",
       ),
     )
     .meta({
@@ -84,20 +85,30 @@ export const schoolExamTimetableRouter = {
           await assertTimetableEditable(tx, input);
           const [existing] = await tx.select().from(examTimetableTable).where(timetableWhere(input)).for("update");
           requireTimetableDraft(existing);
+          // Columns are limited to the classes taking part (`exam_class`), so
+          // the examination-wide timetable never shows an excluded class.
           const classes = input.config.columns.length
             ? await tx
-                .select()
+                .select({ class: classTable })
                 .from(classTable)
+                .innerJoin(
+                  examClassTable,
+                  and(
+                    examClassWhere(input),
+                    eq(examClassTable.classId, classTable.id),
+                  ),
+                )
                 .where(
                   and(
                     eq(classTable.schoolId, input.schoolId),
                     inArray(classTable.id, input.config.columns),
                   ),
                 )
+                .then((rows) => rows.map((row) => row.class))
             : [];
           if (classes.length !== input.config.columns.length)
             throw rpcError.badRequest(
-              "Every timetable column must be a class in this school.",
+              "Every timetable column must be a class taking part in this examination.",
             );
           const byId = new Map(classes.map((entry) => [entry.id, entry]));
           for (const row of input.config.rows)

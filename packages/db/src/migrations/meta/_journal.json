@@ -526,6 +526,13 @@
       "when": 1794927610098,
       "tag": "0074_school-trials",
       "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1794945929133,
+      "tag": "0075_exam-class-participation",
+      "breakpoints": true
     }
   ]
 }

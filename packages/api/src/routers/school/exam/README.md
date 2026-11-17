@@ -22,11 +22,53 @@ and platform roles are independent assignments: a platform role never substitute
 for a school governance grant. Session configuration endpoints apply the same
 exam-governance boundary, including full-config replacements.
 
+## Classes taking part
+
+Whether a class takes part in an examination is its own stored fact,
+`exam_class` (one row per session, exam and class, migration 0075), never
+inferred from plans, results or timetable columns. Every subject plan
+references its class's row (`exam_plan_exam_class_fk`), so plans exist only for
+classes taking part; a class may take part without plans (after its last
+legacy plan was deleted).
+
+- `generateExamPlan({ classIds })` records the chosen classes and creates their
+  plans. An empty list, a class of another school and a chosen class without
+  subjects are BAD_REQUEST; an invalid subject blocks only when its class is
+  chosen. Choosing every class that has subjects (`selectableExamClassIds`)
+  creates exactly the plans generation created before classes could be
+  excluded.
+- `updateExamClasses({ configurationVersion, classIds })` (exam plan update
+  permission) sets the complete list later, under the exclusive session lock.
+  The review hash covers participation, so a concurrent change is a CONFLICT.
+  Refused before a plan exists, once the exam is completed, and while it is
+  released to the Cadet Portal. Added classes get plans from class settings,
+  `active` when the exam has started (as starting does for every plan),
+  otherwise drafts. A removed class is **refused** while it has saved results,
+  shared attendance/activity assessments or remarks of its students, question
+  papers, a published timetable that includes it, or a draft timetable that
+  schedules papers for it; clear those first. Otherwise its plans, its row and
+  an empty draft timetable column go, and chat conversations shared to its
+  papers are unshared, as `deleteExamPlan` does.
+- `createExamPlan` (legacy single plan) records its class as taking part.
+  `deleteExam` and session-config replacement remove a deleted exam's rows.
+- Reads that list an exam's classes use the row: `getExamContext.classes` (the
+  timetable editor's columns) lists only classes taking part (none before the
+  plan exists); `listExamClasses` lists classes taking part that have plans;
+  `saveExamTimetable` accepts only classes taking part as columns; documents
+  refuse a `classId` that does not take part; the Cadet Portal lists an exam for
+  a student only when their class takes part (once any class does) and
+  filters timetable columns by it.
+- Migration 0075 backfills the rows once from what existed: classes with
+  plans, plus the timetable columns of exams that had plans.
+
 ## Lifecycle and student-wide API
 
 1. Configure exam definitions in session settings. `getExamPlanPreview` returns
-   classes, registered enrollment counts, subjects, assessment modes and a
-   configuration hash. `generateExamPlan` atomically creates draft planning snapshots and an explicit **ready** examination from
+   classes, registered enrollment counts, subjects, assessment modes, whether
+   each class takes part (`participating`) and a configuration hash.
+   `generateExamPlan` takes the reviewed hash and the explicit `classIds` taking
+   part (at least one; see "Classes taking part") and atomically creates draft
+   planning snapshots for them and an explicit **ready** examination from
    that review. There is no per-subject approval prerequisite. A school principal,
    manager or exam coordinator must manually start it through `transitionExam`
    before results may be saved, approved or deleted, including legacy APIs.

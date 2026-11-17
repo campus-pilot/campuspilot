@@ -2,10 +2,11 @@ import { examOverview, examOverviews } from './exam-lifecycle.service';
 import { and, asc, eq } from 'drizzle-orm';
 import { classTable } from '@campuspilot/db/schema/class';
 import { schoolSessionTable } from '@campuspilot/db/schema/session';
-import { examPlanTable, examTimetableTable } from '@campuspilot/db/schema/exam';
+import { examClassTable, examPlanTable, examTimetableTable } from '@campuspilot/db/schema/exam';
 import { resolvePaginationInput } from '../../../paginations';
 import { pageResult, route } from './exam.pagination';
 import { getExam, getExamSession } from './exam.service';
+import { examClassWhere } from './exam.scope';
 import { SCHOOL_ACTIONS } from '@campuspilot/opa/policies/school';
 import { protectedProcedure } from '../../../index';
 import { requireSchoolPermission } from '../../../permissions/school';
@@ -117,7 +118,7 @@ export const schoolExamDefinitionRouter = {
     .route(
       route(
         'Get exam configuration context',
-        'Read class subjects and assessment modes, attendance settings and co-scholastic areas for the exam workspace.',
+        'Read the subjects and assessment modes of the classes taking part in the exam, attendance settings and co-scholastic areas for the exam workspace. Classes excluded from the exam are not listed; before the plan exists no class is.',
       ),
     )
     .meta({
@@ -134,11 +135,21 @@ export const schoolExamDefinitionRouter = {
     .handler(async ({ context, input }) => {
       try {
         const { session, exam } = await getExam(context.db, input);
+        // Only the classes taking part: the timetable editor builds its
+        // columns from these, so an excluded class is never offered there.
         const classes = await context.db
-          .select()
+          .select({ class: classTable })
           .from(classTable)
+          .innerJoin(
+            examClassTable,
+            and(
+              examClassWhere(input),
+              eq(examClassTable.classId, classTable.id),
+            ),
+          )
           .where(eq(classTable.schoolId, input.schoolId))
-          .orderBy(asc(classTable.displayOrder), asc(classTable.id));
+          .orderBy(asc(classTable.displayOrder), asc(classTable.id))
+          .then((rows) => rows.map((row) => row.class));
         return {
           exam,
           classes: classes.map((entry) => ({
@@ -252,7 +263,7 @@ export const schoolExamDefinitionRouter = {
     .route(
       route(
         'Delete a session exam',
-        'Remove an exam definition only after all its plans and optional timetable have been deleted.',
+        'Remove an exam definition only after all its plans and optional timetable have been deleted. Its record of the classes taking part is removed with it.',
       ),
     )
     .meta({
@@ -294,6 +305,9 @@ export const schoolExamDefinitionRouter = {
             throw rpcError.conflict(
               'Delete this exam’s plans and timetable before deleting the exam.',
             );
+          // Classes may still take part without plans (after deleting every
+          // legacy plan); that selection belongs to the exam and goes with it.
+          await tx.delete(examClassTable).where(examClassWhere(input));
           const examConfig = { ...session.config.examConfig };
           delete examConfig[input.examSlug];
           await tx

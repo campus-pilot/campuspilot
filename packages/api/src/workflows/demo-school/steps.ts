@@ -67,6 +67,7 @@ import {
 import { createRandom } from './prng';
 import { demoSeed } from './seed';
 import type { DemoJobSnapshot } from './job-store';
+import { selectableExamClassIds } from '../../routers/school/exam/exam.dto';
 
 /**
  * Demo seed steps (plan §6). Each is a plain async function taking a
@@ -350,7 +351,8 @@ export async function seedExamSetup(ctx: SeedContext, sessionId: string, exam: D
   let overview = await ctx.rpc.school.getExamOverview(scope);
   if (overview.planCount === 0) {
     const preview = await ctx.rpc.school.getExamPlanPreview(scope);
-    await ctx.rpc.school.generateExamPlan({ ...scope, configurationVersion: preview.configurationVersion });
+    // Every demo class has subjects, so all of them take part.
+    await ctx.rpc.school.generateExamPlan({ ...scope, configurationVersion: preview.configurationVersion, classIds: selectableExamClassIds(preview) });
     overview = await ctx.rpc.school.getExamOverview(scope);
   }
   // Working days are editable only while the exam is open (a replay may find it completed).

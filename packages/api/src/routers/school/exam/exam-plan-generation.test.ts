@@ -2,11 +2,16 @@ import { describe, expect, it } from 'vitest';
 
 import {
   assertCreatableExamPlan,
+  selectExamClassPlans,
   type prepareExamPlan,
 } from './exam-plan-generation';
 
 type PreparedPlan = Awaited<ReturnType<typeof prepareExamPlan>>;
 
+/**
+ * Three classes: Grade 10 with one valid subject (unless `issue` is given),
+ * Grade 11 without subjects and Grade 12 whose only subject has invalid modes.
+ */
 function prepared(overrides: {
   existingPlanCount?: number;
   configurationVersion?: string;
@@ -22,6 +27,7 @@ function prepared(overrides: {
           classId: 'class-1',
           label: 'Grade 10',
           studentCount: 20,
+          participating: false,
           subjects: [
             {
               subjectSlug: 'mathematics',
@@ -38,8 +44,29 @@ function prepared(overrides: {
             },
           ],
         },
+        {
+          classId: 'class-2',
+          label: 'Grade 11',
+          studentCount: 5,
+          participating: false,
+          subjects: [],
+        },
+        {
+          classId: 'class-3',
+          label: 'Grade 12',
+          studentCount: 8,
+          participating: false,
+          subjects: [
+            {
+              subjectSlug: 'science',
+              name: 'Science',
+              issue: 'Percentages must total 100%.',
+              modes: [],
+            },
+          ],
+        },
       ],
-      planCount: 1,
+      planCount: 2,
       existingPlanCount: overrides.existingPlanCount ?? 0,
       configurationVersion: overrides.configurationVersion ?? 'version-1',
     },
@@ -64,10 +91,10 @@ function prepared(overrides: {
 }
 
 describe('assertCreatableExamPlan', () => {
-  it('accepts a reviewed, valid plan with no existing rows', () => {
-    expect(() =>
-      assertCreatableExamPlan(prepared(), 'version-1'),
-    ).not.toThrow();
+  it('accepts a reviewed, valid plan with no existing rows and returns the selected plans', () => {
+    expect(
+      assertCreatableExamPlan(prepared(), 'version-1', ['class-1']),
+    ).toEqual([expect.objectContaining({ classId: 'class-1', subjectSlug: 'mathematics' })]);
   });
 
   it('preserves an existing plan before considering a stale review', () => {
@@ -75,6 +102,7 @@ describe('assertCreatableExamPlan', () => {
       assertCreatableExamPlan(
         prepared({ existingPlanCount: 1 }),
         'stale-version',
+        ['class-1'],
       ),
     ).toThrowError(
       expect.objectContaining({
@@ -87,7 +115,7 @@ describe('assertCreatableExamPlan', () => {
 
   it('rejects a review of an older class or subject configuration', () => {
     expect(() =>
-      assertCreatableExamPlan(prepared(), 'stale-version'),
+      assertCreatableExamPlan(prepared(), 'stale-version', ['class-1']),
     ).toThrowError(
       expect.objectContaining({
         code: 'CONFLICT',
@@ -97,11 +125,23 @@ describe('assertCreatableExamPlan', () => {
     );
   });
 
+  it('refuses an empty selection', () => {
+    expect(() =>
+      assertCreatableExamPlan(prepared(), 'version-1', []),
+    ).toThrowError(
+      expect.objectContaining({
+        code: 'BAD_REQUEST',
+        message: 'Select at least one class to take part in the examination.',
+      }),
+    );
+  });
+
   it('identifies the exact class and subject containing an invalid mode', () => {
     expect(() =>
       assertCreatableExamPlan(
         prepared({ issue: 'Percentages must total 100%.' }),
         'version-1',
+        ['class-1'],
       ),
     ).toThrowError(
       expect.objectContaining({
@@ -116,12 +156,48 @@ describe('assertCreatableExamPlan', () => {
       assertCreatableExamPlan(
         prepared({ includePlan: false }),
         'version-1',
+        ['class-1'],
       ),
     ).toThrowError(
       expect.objectContaining({
         code: 'BAD_REQUEST',
         message:
           'Configure at least one class subject and its assessment modes before creating an exam plan.',
+      }),
+    );
+  });
+});
+
+describe('selectExamClassPlans', () => {
+  it('returns only the plans of the chosen classes and ignores problems of classes left out', () => {
+    expect(selectExamClassPlans(prepared(), ['class-1'])).toHaveLength(1);
+    expect(selectExamClassPlans(prepared(), [])).toEqual([]);
+  });
+
+  it('refuses a class that is not in the school', () => {
+    expect(() => selectExamClassPlans(prepared(), ['class-1', 'elsewhere'])).toThrowError(
+      expect.objectContaining({
+        code: 'BAD_REQUEST',
+        message: 'Every selected class must be a class of this school.',
+      }),
+    );
+  });
+
+  it('refuses a chosen class without subjects, naming it', () => {
+    expect(() => selectExamClassPlans(prepared(), ['class-1', 'class-2'])).toThrowError(
+      expect.objectContaining({
+        code: 'BAD_REQUEST',
+        message:
+          'Grade 11 has no subjects configured, so it cannot take part. Deselect it or add subjects in class settings.',
+      }),
+    );
+  });
+
+  it('refuses a chosen class with an invalid subject, naming class and subject', () => {
+    expect(() => selectExamClassPlans(prepared(), ['class-3'])).toThrowError(
+      expect.objectContaining({
+        code: 'BAD_REQUEST',
+        message: 'Grade 12 · Science: Percentages must total 100%.',
       }),
     );
   });

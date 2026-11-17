@@ -14,6 +14,7 @@ import {
 import { expectRpcCode } from '../../../../test/finance/assertions';
 import { createSchoolStaffSession, createTestClient, setTestSchoolFeature, type TestClient } from '../../../../test/fixtures';
 import { createCadetTestClient, signInCadet, type CadetCredentials } from '../../../../test/cadet';
+import { selectableExamClassIds } from './exam.dto';
 
 /** Signs in through the Cadet Portal with the password the principal issued. */
 async function cadetClient(credentials: CadetCredentials) {
@@ -51,7 +52,7 @@ describe('exam timetable publication', () => {
     await enroll({ schoolId: school.school.id, admissionId: admission.id, sessionId, ...placement });
     scope = { schoolId: school.school.id, sessionId, examSlug: 'term' };
     const preview = await principal.school.getExamPlanPreview(scope);
-    await principal.school.generateExamPlan({ ...scope, configurationVersion: preview.configurationVersion });
+    await principal.school.generateExamPlan({ ...scope, configurationVersion: preview.configurationVersion, classIds: selectableExamClassIds(preview) });
     config = {
       columns: [classId],
       rows: [{ id: 'slot-1', date: '2026-10-20', startTime: '09:00', endTime: '10:00', cells: { [classId]: [{ subjectSlug: 'maths', modeSlug: 'written' }] } }],

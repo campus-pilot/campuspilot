@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import {
   boolean,
   check,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -31,6 +32,43 @@ export const examPlanStatusEnum = pgEnum('exam_plan_status', [
   'active',
   'completed',
 ]);
+/**
+ * Whether a class takes part in an examination: its own explicit fact, one row
+ * per (session, exam, class), never inferred from whether the class happens to
+ * have subject plans, results or a timetable column. A class without a row is
+ * excluded from that examination and appears nowhere for it.
+ *
+ * Rows are written when the plan is generated for the selected classes
+ * (`generateExamPlan`), when classes are added or removed later
+ * (`updateExamClasses`) and when a legacy single subject plan is created for a
+ * class (`createExamPlan`). Every subject plan references its class's row
+ * (`exam_plan_exam_class_fk`), so a plan can exist only for a class that takes
+ * part, while a class may take part without plans (for example after its last
+ * legacy plan was deleted). Timetable columns are kept within these classes by
+ * the procedures that write the timetable or remove a class.
+ */
+export const examClassTable = pgTable(
+  'exam_class',
+  {
+    schoolId: text('school_id')
+      .notNull()
+      .references(() => schoolTable.id),
+    sessionId: text('session_id')
+      .notNull()
+      .references(() => schoolSessionTable.id),
+    examSlug: text('exam_slug').notNull(),
+    classId: text('class_id')
+      .notNull()
+      .references(() => classTable.id),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.sessionId, table.examSlug, table.classId] }),
+    index('exam_class_school_idx').on(table.schoolId),
+  ],
+);
 export const examPlanTable = pgTable(
   'exam_plan',
   {
@@ -62,6 +100,15 @@ export const examPlanTable = pgTable(
       table.classId,
       table.subjectSlug,
     ),
+    foreignKey({
+      name: 'exam_plan_exam_class_fk',
+      columns: [table.sessionId, table.examSlug, table.classId],
+      foreignColumns: [
+        examClassTable.sessionId,
+        examClassTable.examSlug,
+        examClassTable.classId,
+      ],
+    }),
   ],
 );
 export const examResultTable = pgTable(

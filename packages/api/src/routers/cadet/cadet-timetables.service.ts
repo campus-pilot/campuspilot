@@ -1,6 +1,6 @@
 import type { Database, DatabaseExecutor } from '@campuspilot/db';
 import { classTable } from '@campuspilot/db/schema/class';
-import { examTimetableTable } from '@campuspilot/db/schema/exam';
+import { examClassTable, examTimetableTable } from '@campuspilot/db/schema/exam';
 import { schoolSessionTable } from '@campuspilot/db/schema/session';
 import { sessionConfigSchema } from '@campuspilot/db/schema/jsonb/session-config';
 import { studentTable } from '@campuspilot/db/schema/student';
@@ -95,15 +95,30 @@ async function publishedTimetable(db: DatabaseExecutor, cadet: CadetScope, key: 
   return { ...row.timetable, publishedAt: row.timetable.publishedAt, examName: examNameOf(row.sessionConfig, key.examSlug) };
 }
 
-/** One published timetable with every class's schedule, rows in date and time order. */
+/**
+ * One published timetable with the schedule of every class taking part, rows
+ * in date and time order. Columns are limited to the examination's classes
+ * (`exam_class`); staff writes already keep them so, and a student never sees
+ * an excluded class even if that invariant were broken.
+ */
 export async function getCadetTimetable(db: DatabaseExecutor, cadet: CadetScope, key: TimetableKey) {
   const timetable = await publishedTimetable(db, cadet, key);
   const { columns, rows } = timetable.config;
   const classes = columns.length
     ? await db
-        .select()
+        .select({ class: classTable })
         .from(classTable)
+        .innerJoin(
+          examClassTable,
+          and(
+            eq(examClassTable.classId, classTable.id),
+            eq(examClassTable.schoolId, cadet.schoolId),
+            eq(examClassTable.sessionId, timetable.sessionId),
+            eq(examClassTable.examSlug, timetable.examSlug),
+          ),
+        )
         .where(and(eq(classTable.schoolId, cadet.schoolId), inArray(classTable.id, columns)))
+        .then((found) => found.map((row) => row.class))
     : [];
   const classById = new Map(classes.map((entry) => [entry.id, entry]));
   const sorted = [...rows].sort((a, b) => a.date.localeCompare(b.date) || a.startTime.localeCompare(b.startTime) || a.id.localeCompare(b.id));

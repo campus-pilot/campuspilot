@@ -3,6 +3,7 @@ import { user } from '@campuspilot/db/schema/auth';
 import { classTable, sectionTable } from '@campuspilot/db/schema/class';
 import {
   examAssessmentSettingsTable,
+  examClassTable,
   examLifecycleTable,
   examPlanTable,
   examResultTable,
@@ -207,7 +208,7 @@ export async function loadCadetAcademics(db: DatabaseExecutor, cadet: Cadet) {
   }
   const classIds = [...new Set(recordKeys.map(({ classId }) => classId))];
   const sessionIds = [...new Set(enrollments.map(({ sessionId }) => sessionId))];
-  const [classes, plans, lifecycles] = await Promise.all([
+  const [classes, plans, lifecycles, examClasses] = await Promise.all([
     classIds.length
       ? db
           .select({ id: classTable.id, label: classTable.label, config: classTable.config })
@@ -238,6 +239,12 @@ export async function loadCadetAcademics(db: DatabaseExecutor, cadet: Cadet) {
           })
           .from(examLifecycleTable)
           .where(and(eq(examLifecycleTable.schoolId, cadet.schoolId), inArray(examLifecycleTable.sessionId, sessionIds)))
+      : [],
+    sessionIds.length
+      ? db
+          .select({ sessionId: examClassTable.sessionId, examSlug: examClassTable.examSlug, classId: examClassTable.classId })
+          .from(examClassTable)
+          .where(and(eq(examClassTable.schoolId, cadet.schoolId), inArray(examClassTable.sessionId, sessionIds)))
       : [],
   ]);
   const classById = new Map(classes.map((row) => [row.id, row]));
@@ -270,10 +277,15 @@ export async function loadCadetAcademics(db: DatabaseExecutor, cadet: Cadet) {
     );
     const list: CadetExam[] = [];
     for (const [examSlug, definition] of definitions) {
-      const examPlans = plans.filter((plan) => plan.sessionId === record.sessionId && plan.examSlug === examSlug);
-      const classPlans = examPlans.filter((plan) => plan.classId === record.classId);
-      // An exam planned only for other classes is not one this student sits.
-      if (examPlans.length > 0 && classPlans.length === 0) continue;
+      const classPlans = plans.filter(
+        (plan) => plan.sessionId === record.sessionId && plan.examSlug === examSlug && plan.classId === record.classId,
+      );
+      // Which classes take part is the exam's own fact (`exam_class`): once
+      // any class takes part, an exam this class does not take part in is not
+      // one this student sits. An exam no class takes part in yet (not
+      // planned) is still listed.
+      const participants = examClasses.filter((row) => row.sessionId === record.sessionId && row.examSlug === examSlug);
+      if (participants.length > 0 && !participants.some((row) => row.classId === record.classId)) continue;
       const lifecycle = lifecycleByExam.get(`${record.sessionId}|${examSlug}`);
       const state = examState(classPlans.length, lifecycle);
       list.push({

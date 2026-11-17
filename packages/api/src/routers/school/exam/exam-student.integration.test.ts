@@ -19,7 +19,9 @@ import {
   createTestSchool,
   createTestSession,
   createTestStudent,
+  includeTestExamClasses,
 } from '../../../../test/fixtures';
+import { selectableExamClassIds } from './exam.dto';
 
 describe('student-first examination lifecycle', () => {
   let scope: {
@@ -111,6 +113,7 @@ describe('student-first examination lifecycle', () => {
     await manager.school.generateExamPlan({
       ...scope,
       configurationVersion: preview.configurationVersion,
+      classIds: selectableExamClassIds(preview),
     });
     expect(await manager.school.getExamOverview(scope)).toMatchObject({
       planCount: 2,
@@ -236,6 +239,7 @@ describe('student-first examination lifecycle', () => {
       await client.school.generateExamPlan({
         ...next,
         configurationVersion: preview.configurationVersion,
+        classIds: selectableExamClassIds(preview),
       });
       const data = await client.school.getStudentExam(next);
       const input = {
@@ -361,6 +365,7 @@ describe('student-first examination lifecycle', () => {
       .select()
       .from(examPlanTable)
       .where(eq(examPlanTable.sessionId, scope.sessionId));
+    await includeTestExamClasses([{ ...scope, classId: other.schoolClass.id }]);
     await db
       .insert(examPlanTable)
       .values({
@@ -432,6 +437,7 @@ describe('student-first examination lifecycle', () => {
       .select()
       .from(examPlanTable)
       .where(eq(examPlanTable.sessionId, scope.sessionId));
+    await includeTestExamClasses([{ ...scope, classId: other.schoolClass.id }]);
     await db
       .insert(examPlanTable)
       .values({ ...plan!, id: undefined, classId: other.schoolClass.id });

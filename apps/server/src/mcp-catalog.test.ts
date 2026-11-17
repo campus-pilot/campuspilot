@@ -269,8 +269,9 @@ describe('catalog metadata', () => {
     // +1 systemAdmin.getSchoolFeatureFlags; +9 notice tools (list, get,
     // create, update, delete, preview, publish preview, publish, download);
     // +3 exam timetable publication tools (publish preview, publish, withdraw);
-    // +7 question paper tools (list, get, versions, learn, validate, save, get draft).
-    expect(catalog.advanced).toHaveLength(117);
+    // +7 question paper tools (list, get, versions, learn, validate, save, get draft);
+    // +1 school.updateExamClasses (change the classes taking part in an exam).
+    expect(catalog.advanced).toHaveLength(118);
   });
 });
 
