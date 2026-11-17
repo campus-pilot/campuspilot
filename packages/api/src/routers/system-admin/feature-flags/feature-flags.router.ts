@@ -1,6 +1,8 @@
 import { schoolTable } from '@campuspilot/db/schema/school';
+import { env as assistantEnv, isAssistantVoiceConfigured } from '@campuspilot/env/assistant';
 import { SYSTEM_ACTIONS } from '@campuspilot/opa/policies/system';
 import { eq } from 'drizzle-orm';
+import { z } from 'zod';
 
 import { rpcError, toRpcError } from '../../../errors';
 import {
@@ -48,6 +50,20 @@ export const featureFlagsRouter = {
         throw toRpcError(error);
       }
     }),
+
+  getAssistantPlatformStatus: protectedProcedure
+    .route({
+      summary: 'Get the platform\'s assistant setup',
+      description:
+        'Read whether this deployment has a voice model configured. Without one, no school has voice mode, whatever its assistant settings say. Requires system-administrator permission.',
+      tags: ['System Admin', 'Feature flags'],
+    })
+    // Hidden from MCP: it describes the deployment's configuration, which only
+    // the admin app's settings pages need.
+    .meta({ mcp: { exposure: 'hidden', access: 'read', destructive: false, module: 'platform' } })
+    .use(requireSystemPermission(SYSTEM_ACTIONS.READ_SCHOOL_FEATURE_FLAGS))
+    .output(z.object({ voiceConfigured: z.boolean() }))
+    .handler(() => ({ voiceConfigured: isAssistantVoiceConfigured(assistantEnv) })),
 
   updateSchoolFeatureFlag: protectedProcedure
     .route({
