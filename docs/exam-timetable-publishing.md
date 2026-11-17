@@ -41,12 +41,12 @@ published.
 
 - `exam.timetable_published_staff` (in-app): every school member.
 - `exam.timetable_published` (in-app, web push, WhatsApp text): one event per
-  registered student enrolled in the timetable's session, whatever their class
-  (every student may read every class). This includes students of a class
-  that does not take part in the examination: the audience and the Cadet
-  visibility rule below are unchanged by class exclusion; only the excluded
-  class's column is absent. **Only while the school has the `cadet`
-  feature**; with it off only the staff event is emitted, and switching it on
+  registered student enrolled in the timetable's session **whose class takes
+  part in the examination** (`exam_class`); they may read every class taking
+  part. A student of an excluded class does not sit the examination, so they
+  are not notified (and no WhatsApp message is paid for them), exactly as
+  they cannot open it (below). The publish preview counts the same students.
+  **Only while the school has the `cadet` feature**; with it off only the staff event is emitted, and switching it on
   later notifies nobody retroactively.
 
 Every publication notifies: keys are `exam-timetable[-staff]:{timetableId}:{publication_count}:…`,
@@ -59,7 +59,9 @@ failure topic.
 
 `cadet-timetables.router.ts`: `listTimetables`, `getTimetable`,
 `getTimetableDownload`. A student sees a timetable only when it is published and
-they are enrolled in its session, then sees **every** class taking part (the
+they are enrolled in its session in a class taking part in the examination
+(a student of an excluded class neither lists nor opens it, like the exam
+list hides the examination from them), then sees **every** class taking part (the
 columns are also filtered by `exam_class` on read, so an excluded class never
 shows). Visibility is
 evaluated on each read, so a withdrawn timetable answers NOT_FOUND even from an

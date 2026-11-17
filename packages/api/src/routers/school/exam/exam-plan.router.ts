@@ -4,7 +4,6 @@ import { and, asc, count, desc, eq, sql } from 'drizzle-orm';
 import { admissionTable } from '@campuspilot/db/schema/admission';
 import { studentTable } from '@campuspilot/db/schema/student';
 import {
-  examClassTable,
   examPlanTable,
   examResultTable,
   examLifecycleTable,
@@ -31,7 +30,11 @@ import {
   prepareExamPlan,
   assertCreatableExamPlan,
 } from './exam-plan-generation';
-import { includeExamClass, updateExamClasses } from './exam-class.service';
+import {
+  includeExamClass,
+  recordGeneratedExamClasses,
+  updateExamClasses,
+} from './exam-class.service';
 
 export const schoolExamPlanRouter = {
   getExamPlanPreview: protectedProcedure
@@ -87,13 +90,16 @@ export const schoolExamPlanRouter = {
             input.classIds,
           );
           // Participation is recorded first: every plan references its class's row.
-          await tx.insert(examClassTable).values(
-            input.classIds.map((classId) => ({
-              schoolId: input.schoolId,
-              sessionId: input.sessionId,
-              examSlug: input.examSlug,
-              classId,
-            })),
+          await recordGeneratedExamClasses(
+            tx,
+            input,
+            input.classIds,
+            new Map(
+              prepared.preview.classes.map((entry) => [
+                entry.classId,
+                entry.label,
+              ]),
+            ),
           );
           // Chunk within the same transaction to stay below PostgreSQL's bind
           // parameter limit even for a large school. Any failure rolls back all rows.
@@ -139,6 +145,14 @@ export const schoolExamPlanRouter = {
       },
     })
     .input(dto.updateExamClassesInputSchema)
+    /**
+     * Deliberately the plan **update** permission alone, although adding a
+     * class creates plans and removing one deletes them: changing the classes
+     * is one edit of an existing plan, reviewed as a whole. Every role holding
+     * it also holds plan create and delete (`grants.rego`, exam
+     * administration); if those grants ever diverge, require them here for
+     * added and removed classes.
+     */
     .use(requireSchoolPermission(SCHOOL_ACTIONS.UPDATE_EXAM_PLAN))
     .output(dto.updateExamClassesOutputSchema)
     .handler(async ({ context, input }) => {

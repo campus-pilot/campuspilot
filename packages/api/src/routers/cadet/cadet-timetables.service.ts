@@ -20,8 +20,11 @@ import type { CadetScope } from './cadet-notices.service';
 /**
  * Examination timetables in the Cadet Portal. A student sees a timetable only
  * when it is **published** (a draft never leaves the staff app) and the
- * student is enrolled in its session; the timetable is examination-wide, so
- * once visible it shows every class, not only the student's own. Visibility is
+ * student is enrolled in its session in a class **taking part** in its
+ * examination (`exam_class`): a student whose class was excluded does not sit
+ * the examination, so its timetable is not theirs (as the exam list hides the
+ * examination from them). The timetable is examination-wide, so once visible
+ * it shows every class taking part, not only the student's own. Visibility is
  * evaluated when the student asks: withdrawing a timetable hides it again at
  * once, while the notifications already sent keep their link and then answer
  * NOT_FOUND. Anything else is NOT_FOUND, like an unknown timetable.
@@ -35,6 +38,10 @@ const publishedTo = (cadet: CadetScope) =>
     isNotNull(examTimetableTable.publishedAt),
     sql`exists (
       select 1 from ${studentTable}
+      inner join ${examClassTable}
+        on ${examClassTable.sessionId} = ${studentTable.sessionId}
+        and ${examClassTable.classId} = ${studentTable.classId}
+        and ${examClassTable.examSlug} = ${examTimetableTable.examSlug}
       where ${studentTable.schoolId} = ${examTimetableTable.schoolId}
         and ${studentTable.sessionId} = ${examTimetableTable.sessionId}
         and ${studentTable.admissionId} = ${cadet.admissionId}

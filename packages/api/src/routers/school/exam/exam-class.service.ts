@@ -56,6 +56,28 @@ export async function includeExamClass(tx: DatabaseTransaction, scope: ExamScope
 }
 
 /**
+ * Records the classes chosen when the plan is generated as exactly the classes
+ * taking part. Generating is the explicit choice of classes, so a class still
+ * recorded from before (for example after its last single subject plan was
+ * deleted) that is not chosen now stops taking part, under the same refusals
+ * as removing it later ({@link updateExamClasses}); a chosen class already
+ * recorded is kept. The caller has already refused an examination with plans.
+ */
+export async function recordGeneratedExamClasses(
+  tx: DatabaseTransaction,
+  scope: ExamScope,
+  classIds: string[],
+  labels: Map<string, string>,
+) {
+  const stale = (await examClassIds(tx, scope)).filter((classId) => !classIds.includes(classId));
+  if (stale.length) await removeExamClasses(tx, scope, stale, labels);
+  await tx
+    .insert(examClassTable)
+    .values(classIds.map((classId) => ({ schoolId: scope.schoolId, sessionId: scope.sessionId, examSlug: scope.examSlug, classId })))
+    .onConflictDoNothing();
+}
+
+/**
  * Changes which classes take part in an examination whose plan already exists,
  * to exactly `input.classIds`, atomically.
  *

@@ -31,8 +31,10 @@ references its class's row (`exam_plan_exam_class_fk`), so plans exist only for
 classes taking part; a class may take part without plans (after its last
 legacy plan was deleted).
 
-- `generateExamPlan({ classIds })` records the chosen classes and creates their
-  plans. An empty list, a class of another school and a chosen class without
+- `generateExamPlan({ classIds })` records exactly the chosen classes and
+  creates their plans. A class still recorded from before (taking part without
+  plans) that is not chosen stops taking part, under the same refusals as
+  removing it with `updateExamClasses`; a chosen one is kept. An empty list, a class of another school and a chosen class without
   subjects are BAD_REQUEST; an invalid subject blocks only when its class is
   chosen. Choosing every class that has subjects (`selectableExamClassIds`)
   creates exactly the plans generation created before classes could be
@@ -51,15 +53,24 @@ legacy plan was deleted).
   papers are unshared, as `deleteExamPlan` does.
 - `createExamPlan` (legacy single plan) records its class as taking part.
   `deleteExam` and session-config replacement remove a deleted exam's rows.
+  `deleteClass` is a CONFLICT with a clear reason while the class takes part in
+  any exam (instead of a foreign key error); take it out of the exam first.
+- `updateExamClasses` needs only the exam plan **update** permission although
+  it creates and deletes plans: changing the classes is one edit of the
+  existing plan, and every role holding it also holds plan create and delete
+  (`grants.rego`). If those grants ever diverge, revisit this.
 - Reads that list an exam's classes use the row: `getExamContext.classes` (the
   timetable editor's columns) lists only classes taking part (none before the
   plan exists); `listExamClasses` lists classes taking part that have plans;
   `saveExamTimetable` accepts only classes taking part as columns; documents
   refuse a `classId` that does not take part; the Cadet Portal lists an exam for
   a student only when their class takes part (once any class does) and
-  filters timetable columns by it.
+  filters timetable columns by it. A published timetable is listed for, opened
+  by and announced to (`exam.timetable_published`) only students whose class
+  takes part.
 - Migration 0075 backfills the rows once from what existed: classes with
-  plans, plus the timetable columns of exams that had plans.
+  plans, plus the timetable columns of every exam (with or without plans), so
+  existing timetables keep rendering their columns.
 
 ## Lifecycle and student-wide API
 

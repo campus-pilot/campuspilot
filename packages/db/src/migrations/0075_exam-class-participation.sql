@@ -17,12 +17,15 @@ ALTER TABLE "exam_class" ADD CONSTRAINT "exam_class_class_id_class_id_fk" FOREIG
 CREATE INDEX "exam_class_school_idx" ON "exam_class" USING btree ("school_id");--> statement-breakpoint
 -- Backfill, once, from what the examinations already hold. Before this
 -- migration a class took part exactly when the plan was generated for it
--- (it has subject plans); the timetable columns of an examination that has
--- plans were the classes shown in its timetable, so they are kept as taking
--- part too and every existing timetable, admit card and report card renders
--- as before. Columns naming a class that no longer exists in the school are
--- not backfilled. This inference is the migration's alone: runtime code never
--- derives participation from plans or timetables.
+-- (it has subject plans). The timetable columns of every examination, with
+-- or without plans (a timetable could be saved before any plan), were the
+-- classes shown in its timetable, so they are kept as taking part too and
+-- every existing timetable, admit card and report card renders as before;
+-- leaving out a plan-less examination's columns would empty its Cadet view
+-- and make its timetable PDF and draft refuse every column. Columns naming a
+-- class that no longer exists in the school are not backfilled. This
+-- inference is the migration's alone: runtime code never derives
+-- participation from plans or timetables.
 INSERT INTO "exam_class" ("school_id", "session_id", "exam_slug", "class_id")
 SELECT DISTINCT p."school_id", p."session_id", p."exam_slug", p."class_id"
 FROM "exam_plan" p
@@ -31,10 +34,6 @@ SELECT DISTINCT t."school_id", t."session_id", t."exam_slug", c."id"
 FROM "exam_timetable" t
 CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(t."config" -> 'columns', '[]'::jsonb)) AS col("class_id")
 JOIN "class" c ON c."id" = col."class_id" AND c."school_id" = t."school_id"
-WHERE EXISTS (
-	SELECT 1 FROM "exam_plan" p
-	WHERE p."session_id" = t."session_id" AND p."exam_slug" = t."exam_slug"
-)
 ON CONFLICT DO NOTHING;--> statement-breakpoint
 ALTER TABLE "exam_plan" ADD CONSTRAINT "exam_plan_exam_class_fk" FOREIGN KEY ("session_id","exam_slug","class_id") REFERENCES "public"."exam_class"("session_id","exam_slug","class_id") ON DELETE no action ON UPDATE no action;
 --> statement-breakpoint

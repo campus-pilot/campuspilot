@@ -1,6 +1,14 @@
 import { db } from '@campuspilot/db';
-import { examClassTable, examPlanTable, examTimetableTable } from '@campuspilot/db/schema/exam';
+import { classTable } from '@campuspilot/db/schema/class';
+import {
+  examClassTable,
+  examPlanTable,
+  examStudentAssessmentTable,
+  examStudentRemarkTable,
+  examTimetableTable,
+} from '@campuspilot/db/schema/exam';
 import { examQuestionPaperTable } from '@campuspilot/db/schema/exam-question-paper';
+import { notificationEventTable } from '@campuspilot/db/schema/notification';
 import { and, eq } from 'drizzle-orm';
 import { beforeEach, describe, expect, it } from 'vitest';
 
@@ -14,7 +22,9 @@ import {
   enroll,
 } from '../../../../test/exam-results';
 import { expectRpcCode } from '../../../../test/finance/assertions';
+import { isSchoolSuspendedError } from '../../../school-access/school-access.contract';
 import {
+  createAdminSession,
   createRegularUserSession,
   createSchoolStaffSession,
   createTestClass,
@@ -50,7 +60,9 @@ describe('exam class participation', () => {
   let emptyClassId: string;
   let student6: string;
   let student7: string;
+  let login6: CadetCredentials;
   let login7: CadetCredentials;
+  let admission6: string;
 
   const planRows = () =>
     db
@@ -93,7 +105,9 @@ describe('exam class participation', () => {
     emptyClassId = (await createTestClass({ schoolId, label: 'Empty' })).schoolClass.id;
     const asha = await createAdmissionWithLogin(principal, schoolId, 'Asha Rao');
     const ravi = await createAdmissionWithLogin(principal, schoolId, 'Ravi Kumar');
+    login6 = asha.credentials;
     login7 = ravi.credentials;
+    admission6 = asha.admission.id;
     student6 = (await enroll({ schoolId, admissionId: asha.admission.id, sessionId, ...class6 })).id;
     student7 = (await enroll({ schoolId, admissionId: ravi.admission.id, sessionId, ...class7 })).id;
   });
@@ -171,11 +185,43 @@ describe('exam class participation', () => {
       const timetable = await buildDocumentContexts(db, scope.schoolId, { documentType: 'timetable', sessionId: scope.sessionId, examSlug: scope.examSlug });
       expect((timetable.contexts[0] as { columns: { classId: string }[] }).columns.map((column) => column.classId)).toEqual([class6.classId]);
 
-      // Cadet Portal: the Class 7 student does not sit the exam and its timetable has no Class 7 column.
+      // Exam-wide report cards cover Class 6 only.
+      await principal.school.saveStudentExam({
+        ...scope,
+        classId: class6.classId,
+        studentId: student6,
+        approved: true,
+        daysAttended: null,
+        coScholastics: null,
+        subjects: (await principal.school.getStudentExam({ ...scope, classId: class6.classId, studentId: student6 })).subjects.map(({ plan }) => ({
+          examPlanId: plan.id,
+          marks: { written: 70 },
+        })),
+      });
+      const reports = await buildDocumentContexts(
+        db,
+        scope.schoolId,
+        documentSourceSchema.parse({ documentType: 'report_card', sessionId: scope.sessionId, examSlug: scope.examSlug }),
+      );
+      expect(reports.studentIds).toEqual([student6]);
+
+      // Cadet Portal: publishing notifies only the Class 6 student; the Class 7
+      // student does not sit the exam, so neither the exam nor its timetable is
+      // theirs, and the Class 6 student's timetable has no Class 7 column.
+      expect((await principal.school.previewExamTimetablePublish(scope)).cadetForecast?.recipientCount).toBe(1);
       await principal.school.publishExamTimetable(scope);
+      const notified = await db
+        .select({ data: notificationEventTable.data })
+        .from(notificationEventTable)
+        .where(and(eq(notificationEventTable.schoolId, scope.schoolId), eq(notificationEventTable.type, 'exam.timetable_published')));
+      expect(notified.map((event) => event.data.admissionId)).toEqual([admission6]);
       const ravi = await cadetClient(login7);
       expect((await ravi.listExams({})).items.map((exam) => exam.examSlug)).not.toContain('term');
-      const published = await ravi.getTimetable({ sessionId: scope.sessionId, examSlug: scope.examSlug });
+      expect((await ravi.listTimetables({ limit: 10 })).items).toEqual([]);
+      await expectRpcCode(ravi.getTimetable({ sessionId: scope.sessionId, examSlug: scope.examSlug }), 'NOT_FOUND');
+      const asha = await cadetClient(login6);
+      expect((await asha.listTimetables({ limit: 10 })).items.map((item) => item.examSlug)).toEqual(['term']);
+      const published = await asha.getTimetable({ sessionId: scope.sessionId, examSlug: scope.examSlug });
       expect(published.columns.map((column) => column.classId)).toEqual([class6.classId]);
     });
   });
@@ -303,6 +349,55 @@ describe('exam class participation', () => {
       });
     });
 
+    it("refuses removing a class whose students have saved attendance, activities or remarks", async () => {
+      await generate([class6.classId, class7.classId]);
+      const refusal = {
+        code: 'BAD_REQUEST',
+        message: 'Class 7 has saved attendance, activities or remarks in this examination, so it cannot be removed.',
+      };
+      await db.insert(examStudentAssessmentTable).values({ ...scope, studentId: student7, daysAttended: null, approved: false });
+      await expect(update([class6.classId])).rejects.toMatchObject(refusal);
+      await db.delete(examStudentAssessmentTable).where(eq(examStudentAssessmentTable.studentId, student7));
+      await db.insert(examStudentRemarkTable).values({ ...scope, studentId: student7, text: 'Well done.' });
+      await expect(update([class6.classId])).rejects.toMatchObject(refusal);
+      expect(await participants()).toEqual([class6.classId, class7.classId].sort());
+      await db.delete(examStudentRemarkTable).where(eq(examStudentRemarkTable.studentId, student7));
+      expect((await update([class6.classId])).removedClassIds).toEqual([class7.classId]);
+    });
+
+    it('refuses any change while the results are released to the Cadet Portal', async () => {
+      await generate([class6.classId]);
+      await principal.school.transitionExam({ ...scope, status: 'active' });
+      const workspace = await principal.school.getStudentExam({ ...scope, classId: class6.classId, studentId: student6 });
+      await principal.school.saveStudentExam({
+        ...scope,
+        classId: class6.classId,
+        studentId: student6,
+        approved: true,
+        daysAttended: null,
+        coScholastics: null,
+        subjects: workspace.subjects.map(({ plan }) => ({ examPlanId: plan.id, marks: { written: 70 } })),
+      });
+      await principal.school.transitionExam({ ...scope, status: 'completed' });
+      await principal.school.releaseExamToCadet(scope);
+      await expect(update([class6.classId, class7.classId])).rejects.toMatchObject({
+        code: 'BAD_REQUEST',
+        message: 'These results are released to the Cadet Portal. Withdraw them from the Cadet Portal before changing the examination plans.',
+      });
+      expect(await participants()).toEqual([class6.classId]);
+    });
+
+    it('is refused for a suspended school', async () => {
+      await generate([class6.classId]);
+      const preview = await principal.school.getExamPlanPreview(scope);
+      await createTestClient(await createAdminSession()).systemAdmin.suspendSchool({ id: scope.schoolId, reason: 'Unpaid' });
+      const error = await principal.school
+        .updateExamClasses({ ...scope, configurationVersion: preview.configurationVersion, classIds: [class6.classId, class7.classId] })
+        .catch((caught: unknown) => caught);
+      expect(isSchoolSuspendedError(error)).toBe(true);
+      expect(await participants()).toEqual([class6.classId]);
+    });
+
     it('is limited to school exam administrators of the school', async () => {
       await generate([class6.classId]);
       const preview = await principal.school.getExamPlanPreview(scope);
@@ -328,6 +423,34 @@ describe('exam class participation', () => {
     expect((await principal.school.listExamClasses(scope)).items).toEqual([]);
     await principal.school.deleteExam(scope);
     expect(await participants()).toEqual([]);
+  });
+
+  it('generating the plan records exactly the chosen classes, even after a class kept taking part without plans', async () => {
+    // Class 7 keeps taking part after its last single subject plan is deleted.
+    const plan = await principal.school.createExamPlan({ ...scope, classId: class7.classId, subjectSlug: 'science' });
+    await principal.school.deleteExamPlan({ schoolId: scope.schoolId, sessionId: scope.sessionId, classId: class7.classId, examPlanId: plan.id });
+    expect(await participants()).toEqual([class7.classId]);
+    // Generating without it leaves it out ...
+    expect(await generate([class6.classId])).toEqual({ createdCount: 1 });
+    expect(await participants()).toEqual([class6.classId]);
+  });
+
+  it('generating the plan keeps a chosen class already recorded as taking part', async () => {
+    const plan = await principal.school.createExamPlan({ ...scope, classId: class7.classId, subjectSlug: 'science' });
+    await principal.school.deleteExamPlan({ schoolId: scope.schoolId, sessionId: scope.sessionId, classId: class7.classId, examPlanId: plan.id });
+    expect(await generate([class6.classId, class7.classId])).toEqual({ createdCount: 3 });
+    expect(await participants()).toEqual([class6.classId, class7.classId].sort());
+  });
+
+  it('refuses deleting a class that takes part in an examination, with a clear reason', async () => {
+    const plan = await principal.school.createExamPlan({ ...scope, classId: class7.classId, subjectSlug: 'science' });
+    await principal.school.deleteExamPlan({ schoolId: scope.schoolId, sessionId: scope.sessionId, classId: class7.classId, examPlanId: plan.id });
+    await expect(principal.school.deleteClass({ schoolId: scope.schoolId, classId: class7.classId })).rejects.toMatchObject({
+      code: 'CONFLICT',
+      message:
+        "Class 7 takes part in an examination. Remove it from that examination's classes (examination Settings, Classes taking part) before deleting it.",
+    });
+    expect(await db.select({ id: classTable.id }).from(classTable).where(eq(classTable.id, class7.classId))).toHaveLength(1);
   });
 
   it('removes the class selection of an exam dropped through a session configuration replacement', async () => {
