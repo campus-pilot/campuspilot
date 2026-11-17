@@ -19,11 +19,7 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { useForm } from '@tanstack/react-form';
-import { z } from 'zod';
-import {
-  examSlugSchema,
-  nextExamOrder,
-} from '@campuspilot/db/schema/jsonb/session-config';
+import { nextExamOrder } from '@campuspilot/db/schema/jsonb/session-config';
 import { Badge } from '@campuspilot/ui/components/badge';
 import { Button } from '@campuspilot/ui/components/button';
 import {
@@ -55,12 +51,7 @@ import {
   slugify,
   type ExamDefinition,
 } from './types';
-
-/** The slug rule is shared with the Examinations list and `school.createExam`. */
-const examFormSchema = z.object({
-  name: z.string().trim().min(1, 'Exam name is required'),
-  slug: examSlugSchema,
-});
+import { examDialogSchema } from './exam-dialog-model';
 
 function FieldErrors({ errors }: { errors: unknown[] }) {
   return errors.map((error, index) => {
@@ -80,7 +71,8 @@ interface ExamDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   initialValues?: { slug: string; name: string };
-  existingSlugs: string[];
+  /** The settings draft's exams, which the slug and name rules check against. */
+  examConfig: Record<string, ExamDefinition>;
   onSubmit: (values: { slug: string; name: string }) => void;
 }
 
@@ -88,7 +80,7 @@ function ExamDialog({
   open,
   onOpenChange,
   initialValues,
-  existingSlugs,
+  examConfig,
   onSubmit,
 }: ExamDialogProps) {
   const isEditing = Boolean(initialValues);
@@ -98,16 +90,10 @@ function ExamDialog({
       slug: initialValues?.slug ?? '',
     },
     validators: {
-      onSubmit: examFormSchema.refine(
-        (val) => {
-          if (isEditing && val.slug === initialValues?.slug) return true;
-          return !existingSlugs.includes(val.slug);
-        },
-        {
-          message: 'An examination with this slug already exists.',
-          path: ['slug'],
-        },
-      ),
+      onSubmit: examDialogSchema({
+        examConfig,
+        editingSlug: initialValues?.slug,
+      }),
     },
     onSubmit: ({ value }) => {
       onSubmit(value);
@@ -470,7 +456,7 @@ export function ExaminationSection({
                 }
               : undefined
           }
-          existingSlugs={sortedKeys}
+          examConfig={examConfig ?? {}}
           onSubmit={handleAddOrEdit}
         />
       )}

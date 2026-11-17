@@ -9,8 +9,12 @@ Exams come from session settings. The Examinations list's single Create examinat
 action (`exam-create.tsx`; navbar and empty state) adds one to the session's
 settings through `school.createExam`: a name, and a slug that follows the name with
 the settings rule until the user types their own (`exam-create-model.ts`). The server
-lists it last and refuses a taken slug with an explicit reason
-(`isExamSlugTakenError`), shown beside the slug field; any other refusal is shown
+lists it last and refuses a taken slug or a taken name (exam names are unique in a
+session, compared trimmed and ignoring case) with explicit reasons
+(`isExamSlugTakenError`, `isExamNameTakenError`), shown beside the slug or name
+field (`withServerRefusal`). Before any request the dialog checks both against the
+session's exams it already holds (the cached `getSession` read that gates the
+action); the server stays the authority. Any other refusal is shown
 above the buttons and never blocks trying again (each attempt clears it
 before `handleSubmit`, `startCreateExamAttempt`). It is offered
 with `CREATE_EXAM` while the session is known to be active, and refreshes the list,

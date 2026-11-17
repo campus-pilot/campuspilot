@@ -4,7 +4,6 @@ import { useForm } from '@tanstack/react-form';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus } from 'lucide-react';
 import { SCHOOL_ACTIONS } from '@campuspilot/api/routers/authorization/authorization.dto';
-import { isExamSlugTakenError } from '@campuspilot/api/routers/school/exam/exam-definition.contract';
 import { Button } from '@campuspilot/ui/components/button';
 import {
   Dialog,
@@ -24,6 +23,7 @@ import {
   followNameSlug,
   startCreateExamAttempt,
   toCreateExamInput,
+  withServerRefusal,
 } from './exam-create-model';
 import {
   errorMessage,
@@ -116,18 +116,26 @@ function useRefreshSessionExams(scope: SessionScope) {
 }
 
 /**
- * The form behind the dialog. The server's taken-slug refusal (identified by
- * its explicit reason, not by CONFLICT, which also covers database conflicts)
- * is shown beside the slug field; any other refusal above the buttons. When the outcome is unknown (a
- * network or server failure after the request left), the list is refreshed
- * and the message says to check it before trying again: a retry of a
- * committed creation is refused as a duplicate, never created twice.
+ * The form behind the dialog. A slug or name the session already has is shown
+ * beside its field: before any request, against the session's exams this page
+ * already holds (the cached `getSession` read that gates the action; refetched
+ * data reaches the rules on the next validation, as `useForm` takes the
+ * current options on every render), and after the server's refusal, which is
+ * identified by its explicit reason (`withServerRefusal`), not by CONFLICT,
+ * which also covers database conflicts. Any other refusal is shown above the
+ * buttons. When the outcome is unknown (a network or server failure after the
+ * request left), the list is refreshed and the message says to check it
+ * before trying again: a retry of a committed creation is refused as a
+ * duplicate, never created twice.
  */
 function useCreateExamForm(scope: SessionScope, onClose: () => void) {
   const refresh = useRefreshSessionExams(scope);
+  const session = useQuery(orpc.school.getSession.queryOptions({ input: scope }));
   const form = useForm({
     defaultValues: emptyCreateExamForm,
-    validators: { onChange: createExamFormSchema },
+    validators: {
+      onChange: createExamFormSchema(session.data?.sessionConfig?.examConfig),
+    },
     // The previous attempt's form-level message is cleared before submission
     // starts (`startCreateExamAttempt`), not here: while it is set, TanStack
     // Form never reaches this handler.
@@ -140,12 +148,11 @@ function useCreateExamForm(scope: SessionScope, onClose: () => void) {
         toast.success(`${exam.name} created.`);
         onClose();
       } catch (error) {
-        if (isExamSlugTakenError(error)) {
-          // Validates the form, which puts the refusal beside the slug field.
-          form.setFieldValue('takenSlugs', [
-            ...value.takenSlugs,
-            value.slug.trim(),
-          ]);
+        const refused = withServerRefusal(value, error);
+        if (refused) {
+          // Validates the form, which puts the refusal beside its field.
+          form.setFieldValue('takenSlugs', refused.takenSlugs);
+          form.setFieldValue('takenNames', refused.takenNames);
           return;
         }
         if (isExamSaveUncertain(error)) await refresh();

@@ -1,5 +1,11 @@
 import { z } from 'zod';
 import { createExamInputSchema } from '@campuspilot/api/routers/school/exam/exam.dto';
+import {
+  examNameKey,
+  findExamNameClash,
+  isExamNameTakenError,
+  isExamSlugTakenError,
+} from '@campuspilot/api/routers/school/exam/exam-definition.contract';
 import { slugify } from '@campuspilot/components/session/types';
 import type { SessionScope } from './exam-model';
 
@@ -8,30 +14,83 @@ export const EXAM_SLUG_TAKEN_MESSAGE =
   'An examination with this slug already exists in this session.';
 
 /**
- * The Create examination dialog's values. Name and slug use the server's own
- * rules (`createExamInputSchema`, whose slug rule session settings shares).
- * `takenSlugs` holds slugs the server refused as duplicates while the dialog
- * is open, so the refusal stays beside the slug field until it is changed;
- * the server stays the only authority on uniqueness.
+ * Shown next to the name when another exam of the session has it, compared
+ * with the shared rule (`examNameKey`: trimmed, ignoring case).
  */
-export const createExamFormSchema = z
-  .object({
-    name: createExamInputSchema.shape.name,
-    slug: createExamInputSchema.shape.examSlug,
-    takenSlugs: z.array(z.string()),
-  })
-  .refine((values) => !values.takenSlugs.includes(values.slug.trim()), {
-    message: EXAM_SLUG_TAKEN_MESSAGE,
-    path: ['slug'],
-  });
+export const EXAM_NAME_TAKEN_MESSAGE =
+  'An examination with this name already exists in this session.';
 
-export type CreateExamFormValues = z.input<typeof createExamFormSchema>;
+/** The session's exams as the dialog holds them (`getSession`), keyed by slug. */
+export type SessionExams = Readonly<Record<string, { name: string }>>;
+
+/**
+ * The Create examination dialog's values and rules. Name and slug use the
+ * server's own rules (`createExamInputSchema`, whose slug rule session
+ * settings shares).
+ *
+ * Uniqueness is checked twice, the server staying the authority. First
+ * against `sessionExams`, the session's exams the page already holds (the
+ * session read that gates the action), so a taken slug or name is shown before
+ * any request. Then by the server: `takenSlugs` and `takenNames` hold what it
+ * refused while the dialog is open (an exam added elsewhere since the session
+ * was read), so the refusal stays beside its field until the value changes.
+ */
+export function createExamFormSchema(sessionExams: SessionExams = {}) {
+  return z
+    .object({
+      name: createExamInputSchema.shape.name,
+      slug: createExamInputSchema.shape.examSlug,
+      takenSlugs: z.array(z.string()),
+      takenNames: z.array(z.string()),
+    })
+    .superRefine((values, context) => {
+      const slug = values.slug.trim();
+      if (values.takenSlugs.includes(slug) || Object.hasOwn(sessionExams, slug))
+        context.addIssue({
+          code: 'custom',
+          message: EXAM_SLUG_TAKEN_MESSAGE,
+          path: ['slug'],
+        });
+      const nameKey = examNameKey(values.name);
+      if (
+        values.takenNames.some((name) => examNameKey(name) === nameKey) ||
+        findExamNameClash(sessionExams, values.name) !== undefined
+      )
+        context.addIssue({
+          code: 'custom',
+          message: EXAM_NAME_TAKEN_MESSAGE,
+          path: ['name'],
+        });
+    });
+}
+
+export type CreateExamFormValues = z.input<
+  ReturnType<typeof createExamFormSchema>
+>;
 
 export const emptyCreateExamForm: CreateExamFormValues = {
   name: '',
   slug: '',
   takenSlugs: [],
+  takenNames: [],
 };
+
+/**
+ * The values after the server refused the attempt `values` as a taken slug or
+ * a taken name, which puts the refusal beside that field (`createExamFormSchema`).
+ * Returns `undefined` for any other refusal, which the dialog shows above the
+ * buttons. Decided by the refusal's explicit reason, never by its code.
+ */
+export function withServerRefusal(
+  values: CreateExamFormValues,
+  error: unknown,
+): CreateExamFormValues | undefined {
+  if (isExamSlugTakenError(error))
+    return { ...values, takenSlugs: [...values.takenSlugs, values.slug.trim()] };
+  if (isExamNameTakenError(error))
+    return { ...values, takenNames: [...values.takenNames, values.name.trim()] };
+  return undefined;
+}
 
 /**
  * The slug after the name changes. It is derived from the name with the
@@ -73,7 +132,7 @@ export function toCreateExamInput(
  * Starts a new submission attempt from the dialog's submit event.
  *
  * The previous attempt's form-level message (a refusal other than a taken
- * slug, or an uncertain outcome) is cleared first. It has to happen here,
+ * slug or name, or an uncertain outcome) is cleared first. It has to happen here,
  * before `handleSubmit`: TanStack Form keeps an `onSubmit` error the handler
  * set itself through submit validation (this form has no submit validator to
  * replace it), so the form stays invalid and `handleSubmit` stops before
