@@ -1,4 +1,4 @@
-import { env } from '@campuspilot/env/assistant';
+import { env, isAssistantVoiceConfigured } from '@campuspilot/env/assistant';
 
 /**
  * The voice model's prices in USD per million tokens, as decimal text exactly
@@ -30,29 +30,25 @@ export type VoiceSettings = {
 
 /**
  * The voice settings from an environment, or null when voice is not
- * configured. Voice is configured only when its model, all four prices and
- * the Gemini key are set; the env schema already refuses some without the
- * rest, and this never fills a missing price with a default.
+ * configured ({@link isAssistantVoiceConfigured}: its model, all four prices
+ * and the Gemini key). The env schema already refuses some without the rest,
+ * and this never fills a missing price with a default.
  */
 export function readVoiceSettings(source: Readonly<Record<string, string | number | undefined>>): VoiceSettings | null {
-  const text = (name: string) => {
-    const value = source[name];
-    return typeof value === 'string' && value.length > 0 ? value : null;
-  };
-  const apiKey = text('GEMINI_API_KEY');
-  const model = text('GEMINI_LIVE_MODEL');
-  const textInputUsdPerMtok = text('GEMINI_LIVE_PRICE_TEXT_INPUT_USD_PER_MTOK');
-  const audioInputUsdPerMtok = text('GEMINI_LIVE_PRICE_AUDIO_INPUT_USD_PER_MTOK');
-  const textOutputUsdPerMtok = text('GEMINI_LIVE_PRICE_TEXT_OUTPUT_USD_PER_MTOK');
-  const audioOutputUsdPerMtok = text('GEMINI_LIVE_PRICE_AUDIO_OUTPUT_USD_PER_MTOK');
-  if (!apiKey || !model || !textInputUsdPerMtok || !audioInputUsdPerMtok || !textOutputUsdPerMtok || !audioOutputUsdPerMtok) {
-    return null;
-  }
+  if (!isAssistantVoiceConfigured(source)) return null;
+  // Every name below is a non-empty string once the check above passed.
+  const required = (name: string) => source[name] as string;
+  const voiceName = source.GEMINI_LIVE_VOICE;
   return {
-    apiKey,
-    model,
-    voiceName: text('GEMINI_LIVE_VOICE'),
-    prices: { textInputUsdPerMtok, audioInputUsdPerMtok, textOutputUsdPerMtok, audioOutputUsdPerMtok },
+    apiKey: required('GEMINI_API_KEY'),
+    model: required('GEMINI_LIVE_MODEL'),
+    voiceName: typeof voiceName === 'string' && voiceName.length > 0 ? voiceName : null,
+    prices: {
+      textInputUsdPerMtok: required('GEMINI_LIVE_PRICE_TEXT_INPUT_USD_PER_MTOK'),
+      audioInputUsdPerMtok: required('GEMINI_LIVE_PRICE_AUDIO_INPUT_USD_PER_MTOK'),
+      textOutputUsdPerMtok: required('GEMINI_LIVE_PRICE_TEXT_OUTPUT_USD_PER_MTOK'),
+      audioOutputUsdPerMtok: required('GEMINI_LIVE_PRICE_AUDIO_OUTPUT_USD_PER_MTOK'),
+    },
     maxSessionMs: Number(source.ASSISTANT_VOICE_MAX_SESSION_MINUTES ?? 20) * 60_000,
     idleMs: Number(source.ASSISTANT_VOICE_IDLE_SECONDS ?? 180) * 1_000,
     maxSessions: Number(source.ASSISTANT_VOICE_MAX_SESSIONS ?? 500),

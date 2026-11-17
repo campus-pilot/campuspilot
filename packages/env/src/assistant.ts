@@ -169,6 +169,21 @@ function requireCompleteVoice(value: Record<string, unknown>, context: z.Refinem
   }
 }
 
+/**
+ * Whether a deployment has voice mode: its model, all four prices and the
+ * Gemini key are set (an empty value counts as unset). The one definition of
+ * "the platform has a voice model", used by the voice endpoint
+ * (`readVoiceSettings`) and by the admin app's warning that a school's voice
+ * switch has no effect (`systemAdmin.getAssistantPlatformStatus`). Takes any
+ * record so it reads a parsed environment and test values alike.
+ */
+export function isAssistantVoiceConfigured(source: Readonly<Record<string, unknown>>): boolean {
+  return [...ASSISTANT_VOICE_SETTING_NAMES, 'GEMINI_API_KEY'].every((name) => {
+    const value = source[name];
+    return typeof value === 'string' && value.length > 0;
+  });
+}
+
 /** Every cross-field rule of the assistant environment. */
 function refineAssistantEnv(value: Record<string, unknown>, context: z.RefinementCtx) {
   requireCompleteProviders(value, context);

@@ -6,6 +6,7 @@ import {
 } from '@campuspilot/api/routers/school/feature-flags/feature-flags.dto';
 import { roleEnum, type Role } from '@campuspilot/api/routers/school/member/member.dto';
 import { ConfirmationDialog } from '@campuspilot/components/confirmation-dialog';
+import { Alert, AlertDescription, AlertTitle } from '@campuspilot/ui/components/alert';
 import { Button } from '@campuspilot/ui/components/button';
 import { Checkbox } from '@campuspilot/ui/components/checkbox';
 import { Field, FieldDescription, FieldError, FieldLabel, FieldLegend, FieldSet } from '@campuspilot/ui/components/field';
@@ -14,8 +15,8 @@ import { Label } from '@campuspilot/ui/components/label';
 import { Switch } from '@campuspilot/ui/components/switch';
 import { toast } from '@campuspilot/ui/lib/toast';
 import { useForm } from '@tanstack/react-form';
-import { useQueryClient } from '@tanstack/react-query';
-import { LoaderCircle } from 'lucide-react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { LoaderCircle, TriangleAlert } from 'lucide-react';
 import { useState } from 'react';
 import { z } from 'zod';
 
@@ -186,6 +187,29 @@ function RolesField({ form }: { form: SettingsForm }) {
 }
 
 /**
+ * Shown under the voice switch while it is on and this deployment has no
+ * voice model (`systemAdmin.getAssistantPlatformStatus`): the school's switch
+ * then has no effect and staff never see voice mode, with no error anywhere.
+ * Platform administrators only; the school's own settings never show it.
+ * Nothing is shown while the answer is unknown (loading or failed), since
+ * the warning must only state what the server said.
+ */
+function VoiceNotConfiguredWarning() {
+  const statusQuery = useQuery(orpc.systemAdmin.getAssistantPlatformStatus.queryOptions());
+  if (statusQuery.data?.voiceConfigured !== false) return null;
+  return (
+    <Alert variant="destructive">
+      <TriangleAlert aria-hidden />
+      <AlertTitle>No voice model is configured on this server</AlertTitle>
+      <AlertDescription>
+        Voice mode is on for this school, but nobody will see it until the API server has GEMINI_LIVE_MODEL, its four
+        GEMINI_LIVE_PRICE_* settings and GEMINI_API_KEY.
+      </AlertDescription>
+    </Alert>
+  );
+}
+
+/**
  * Voice mode, a switch inside the assistant feature: it only matters while the
  * assistant is enabled, and its cost counts toward the same monthly limit.
  */
@@ -202,6 +226,7 @@ function VoiceField({ form }: { form: SettingsForm }) {
             Staff who may use the assistant can talk to it and hear it answer. Needs a voice model configured on the platform. Its cost counts
             toward the monthly limit.
           </FieldDescription>
+          {field.state.value ? <VoiceNotConfiguredWarning /> : null}
         </Field>
       )}
     </form.Field>

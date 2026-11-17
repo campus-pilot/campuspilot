@@ -96,6 +96,7 @@ const HIDDEN_TOOLS = [
   'school.updateAssistantRoles',
   'school.getAssistantUsage',
   'systemAdmin.getSchoolAssistantUsage',
+  'systemAdmin.getAssistantPlatformStatus',
   'systemAdmin.getPlatformAssistantUsage',
   // The staff notification inbox is app chrome with no agent value.
   'school.listNotifications',

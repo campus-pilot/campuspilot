@@ -1,5 +1,6 @@
 import { db } from '@campuspilot/db';
 import { schoolFeatureFlagTable } from '@campuspilot/db/schema/school-feature-flag';
+import { env as assistantEnv, isAssistantVoiceConfigured } from '@campuspilot/env/assistant';
 import { eq } from 'drizzle-orm';
 import { beforeAll, describe, expect, it } from 'vitest';
 
@@ -49,6 +50,23 @@ describe('systemAdmin school feature flags', () => {
         );
       }
       expect(await db.select().from(schoolFeatureFlagTable).where(eq(schoolFeatureFlagTable.schoolId, school.id))).toEqual([]);
+    });
+  });
+
+  describe('getAssistantPlatformStatus', () => {
+    it("answers platform administrators with this deployment's voice setup", async () => {
+      expect(await createTestClient(admin).systemAdmin.getAssistantPlatformStatus()).toEqual({
+        voiceConfigured: isAssistantVoiceConfigured(assistantEnv),
+      });
+    });
+
+    it('rejects anonymous callers, ordinary users and school principals', async () => {
+      const school = await createTestSchool();
+      const principal = await createSchoolStaffSession(school.id, [{ role: 'principal', meta: null }]);
+      await expectRpcCode(createTestClient(null).systemAdmin.getAssistantPlatformStatus(), 'UNAUTHORIZED');
+      for (const session of [regular, principal.session]) {
+        await expectRpcCode(createTestClient(session).systemAdmin.getAssistantPlatformStatus(), 'FORBIDDEN');
+      }
     });
   });
 

@@ -658,7 +658,11 @@ Voice needs all of these, each its own fact (`voice/access.ts`, `voiceRefusal`):
 4. **Nobody is impersonating the user.**
 
 `getStatus` reports the result as `voice.available`; the voice button is shown
-only then. The same check admits the upgrade request and is repeated every
+only then. When the platform has no voice model, the admin app's School › AI
+page says so under the school's voice switch (`isAssistantVoiceConfigured` in
+`packages/env/src/assistant.ts`, read through
+`systemAdmin.getAssistantPlatformStatus`), so a switch that has no effect is
+never silent. Only platform administrators see that warning. The same check admits the upgrade request and is repeated every
 minute of an open session, so a session ends when the limit is reached, the
 feature or the role is switched off, or the user signs out.
 
