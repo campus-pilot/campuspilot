@@ -2,7 +2,7 @@
 
 import { useState, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Download, History, Images, Languages, ListChecks, PanelLeftClose, PanelLeftOpen, Sparkles, SquarePen, WandSparkles, X } from 'lucide-react';
+import { Columns2, Download, History, Images, Languages, ListChecks, PanelLeftClose, PanelLeftOpen, Sparkles, SquarePen, WandSparkles, X } from 'lucide-react';
 import { APP_SHELL_FILL_HEIGHT_MD_CLASS } from '@campuspilot/components/app-shell';
 import type { AssistantSuggestion } from '@campuspilot/components/assistant';
 import { DocumentPreview } from '@campuspilot/components/documents/document-controls';
@@ -20,9 +20,22 @@ import { DraftPreviewBody } from '@/components/assistant/assistant-question-pape
 import { useSendAssistantMessage } from '@/components/assistant/use-assistant';
 import { ReadError } from '@/components/exam/exam-common';
 import { orpc } from '@/lib/orpc';
-import { currentJobFailure, draftIsNewest, inFlightJob, requestErrorMessage, shownPaperOf, type QuestionPaperScope, type ShownPaper } from './question-paper-model';
+import {
+  assistantCollapsedOf,
+  canCompareOf,
+  currentJobFailure,
+  draftIsNewest,
+  inFlightJob,
+  requestErrorMessage,
+  shownPaperOf,
+  type QuestionPaperScope,
+  type ShownPaper,
+} from './question-paper-model';
 import { PAPER_ASSISTANT_SURFACE, paperSeedOf, usePaperDraft, type PaperDraft } from './use-paper-assistant';
 import { PaperChatHistoryDialog } from './paper-chat-history';
+import { PaperPhotoCompare } from './paper-photo-compare';
+import { TwoWaySwitch } from './source-preview-dialogs';
+import type { PageUploads } from './use-page-uploads';
 import { useDownloadQuestionPaper, type QuestionPaperDetail } from './use-question-paper-detail';
 
 /**
@@ -220,9 +233,72 @@ function PaperAssistant({
  * Where the paper is drawn: the rest of the paper's pane on wide screens (the
  * page is scaled to the pane's width and scrolls inside it), and a tall frame
  * on a phone, where the page scrolls. Never wider than a comfortable page.
+ * Beside the photos it is the right half of the stage ({@link PaperStage});
+ * on a phone it steps aside while the photos have the frame.
  */
 function PaperFrame({ children }: { children: ReactNode }) {
-  return <div className="mx-auto h-[75dvh] w-full max-w-4xl md:h-auto md:min-h-0 md:flex-1">{children}</div>;
+  return (
+    <div className="mx-auto h-[75dvh] w-full max-w-4xl md:col-start-2 md:row-start-2 md:h-auto md:min-h-0 md:flex-1 max-md:group-data-[side=photos]/stage:hidden">
+      {children}
+    </div>
+  );
+}
+
+/**
+ * What is said about the paper above it (an unsaved draft's card, what was
+ * removed from its HTML, its figure placeholders, a failed read). Beside the
+ * photos these lines stay above the paper, in a row of their own that the
+ * photo leaves empty: they are about the paper, and the two sheets still
+ * start at the same height whatever is said here. With nothing to say it
+ * takes no room.
+ */
+function PaperNotes({ children }: { children: ReactNode }) {
+  return <div className="flex shrink-0 flex-col gap-3 pb-3 empty:hidden md:col-start-2 md:row-start-1 max-md:order-first">{children}</div>;
+}
+
+/**
+ * The part of the paper's pane the paper is drawn in, and, while the paper is
+ * compared with its photos (`photos` is given), the photos beside it.
+ *
+ * - **Wide screens.** Two equal panes, the photo on the left and the paper on
+ *   the right, each scrolling on its own (nothing keeps them in step: a
+ *   photographed page and a printed page do not hold the same lines). The
+ *   paper's notes ({@link PaperNotes}) have the row above the paper to
+ *   themselves, so the sheets' top edges line up.
+ * - **A phone** has no room for two panes: a switch above the frame chooses
+ *   which of the two the frame shows. Both stay mounted, so switching never
+ *   loads the paper or the photo again.
+ *
+ * The paper keeps its place in the tree whether or not the photos are there,
+ * so turning the comparison on and off never draws the paper again.
+ */
+function PaperStage({ photos, children }: { photos: ReactNode; children: ReactNode }) {
+  const [side, setSide] = useState<'photos' | 'paper'>('photos');
+  const comparing = Boolean(photos);
+  return (
+    <div
+      data-side={comparing ? side : undefined}
+      className={cn(
+        'group/stage flex min-w-0 flex-col md:min-h-0 md:flex-1',
+        comparing && 'md:mx-auto md:grid md:w-full md:max-w-[113rem] md:grid-cols-2 md:grid-rows-[auto_minmax(0,1fr)] md:gap-x-4',
+      )}
+    >
+      {comparing ? (
+        <TwoWaySwitch
+          label="Show"
+          className="mb-3 md:hidden"
+          value={side}
+          options={[
+            { value: 'photos', label: 'Photos' },
+            { value: 'paper', label: 'Paper' },
+          ]}
+          onValueChange={setSide}
+        />
+      ) : null}
+      {comparing ? <div className={cn('h-[75dvh] min-w-0 md:col-start-1 md:row-start-2 md:h-auto md:min-h-0', side === 'paper' && 'max-md:hidden')}>{photos}</div> : null}
+      {children}
+    </div>
+  );
 }
 
 /** One saved version as it prints: what was removed from its HTML, its figure placeholders and the sandboxed preview. */
@@ -235,17 +311,44 @@ function SavedVersion({ scope, versionNo }: { scope: QuestionPaperScope; version
         <Skeleton className="h-full w-full rounded-xl" />
       </PaperFrame>
     ) : (
-      <ReadError error={preview.error} retry={preview.refetch} />
+      <PaperNotes>
+        <ReadError error={preview.error} retry={preview.refetch} />
+      </PaperNotes>
     );
   }
   return (
     <>
-      <RemovedList lines={preview.data.warnings.map((notice) => notice.message)} />
-      <PlaceholderNote count={preview.data.placeholderFigures} />
+      <PaperNotes>
+        <RemovedList lines={preview.data.warnings.map((notice) => notice.message)} />
+        <PlaceholderNote count={preview.data.placeholderFigures} />
+      </PaperNotes>
       <PaperFrame>
         <DocumentPreview html={preview.data.html} label="Question paper preview" fitPageWidth fill />
       </PaperFrame>
     </>
+  );
+}
+
+/** That the draft on screen is not saved, with the one action it needs (absent for someone who may not change the paper). */
+function DraftSaveCard({ draft, nextVersionNo, onSave, saving }: { draft: PaperDraft; nextVersionNo: number; onSave: (() => void) | null; saving: boolean }) {
+  return (
+    <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 rounded-lg border bg-card p-3">
+      <div className="flex min-w-0 flex-col gap-0.5">
+        <p className="text-sm font-medium">Draft {draft.ordinal} is not saved yet</p>
+        <p className="text-xs text-muted-foreground">
+          {!onSave
+            ? 'Only someone who can change this paper can save it.'
+            : draft.saveRequested
+              ? 'Approve the save in the assistant to add it to the paper.'
+              : `Saving adds it as version ${nextVersionNo}.`}
+        </p>
+      </div>
+      {onSave ? (
+        <Button type="button" disabled={draft.saveRequested || saving} onClick={onSave}>
+          {draft.saveRequested || saving ? 'Save requested' : `Save as version ${nextVersionNo}`}
+        </Button>
+      ) : null}
+    </div>
   );
 }
 
@@ -272,25 +375,11 @@ function UnsavedDraft({
 }) {
   return (
     <>
-      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 rounded-lg border bg-card p-3">
-        <div className="flex min-w-0 flex-col gap-0.5">
-          <p className="text-sm font-medium">Draft {draft.ordinal} is not saved yet</p>
-          <p className="text-xs text-muted-foreground">
-            {!onSave
-              ? 'Only someone who can change this paper can save it.'
-              : draft.saveRequested
-                ? 'Approve the save in the assistant to add it to the paper.'
-                : `Saving adds it as version ${nextVersionNo}.`}
-          </p>
-        </div>
-        {onSave ? (
-          <Button type="button" disabled={draft.saveRequested || saving} onClick={onSave}>
-            {draft.saveRequested || saving ? 'Save requested' : `Save as version ${nextVersionNo}`}
-          </Button>
-        ) : null}
-      </div>
-      <RemovedList lines={draft.removed} />
-      <PlaceholderNote count={draft.placeholderFigures} />
+      <PaperNotes>
+        <DraftSaveCard draft={draft} nextVersionNo={nextVersionNo} onSave={onSave} saving={saving} />
+        <RemovedList lines={draft.removed} />
+        <PlaceholderNote count={draft.placeholderFigures} />
+      </PaperNotes>
       <PaperFrame>
         <DraftPreviewBody schoolId={scope.schoolId} conversationId={chatId} input={draft.input} draftId={draft.draftId} fill />
       </PaperFrame>
@@ -317,7 +406,26 @@ function SourcesButton({ label, onOpen }: { label: string; onOpen: () => void })
   );
 }
 
-/** Which version or draft is shown, the paper's photos and its PDF. */
+/**
+ * Shows the paper beside its photographed pages, so what was typed can be read
+ * against what was written. One quiet toggle beside the photos button, named
+ * by its tooltip; its name stays the same and `aria-pressed` says whether it
+ * is on.
+ */
+function CompareToggle({ on, onChange }: { on: boolean; onChange: (on: boolean) => void }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button type="button" variant={on ? 'secondary' : 'outline'} size="icon" aria-label="Compare with photos" aria-pressed={on} onClick={() => onChange(!on)}>
+          <Columns2 aria-hidden />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>Compare with photos</TooltipContent>
+    </Tooltip>
+  );
+}
+
+/** Which version or draft is shown, the paper's photos, the comparison with them and its PDF. */
 function PaperToolbar({
   scope,
   detail,
@@ -325,6 +433,7 @@ function PaperToolbar({
   draft,
   onVersion,
   sources,
+  compare,
 }: {
   scope: QuestionPaperScope;
   detail: QuestionPaperDetail;
@@ -333,6 +442,8 @@ function PaperToolbar({
   onVersion: (versionNo: number | null) => void;
   /** The photos button, when there is one (`QuestionPaperStudio`'s `onOpenSources`). */
   sources: ReactNode;
+  /** The toggle that shows the photos beside the paper, when the paper can be compared (`canCompareOf`). */
+  compare: ReactNode;
 }) {
   const download = useDownloadQuestionPaper();
   const version = shown.kind === 'version' ? detail.versions.find((candidate) => candidate.versionNo === shown.versionNo) : undefined;
@@ -349,10 +460,12 @@ function PaperToolbar({
           value={shown.kind === 'version' ? String(shown.versionNo) : 'draft'}
           options={options}
           onValueChange={(value) => onVersion(value === 'draft' ? null : Number(value))}
-          triggerProps={{ 'aria-label': 'Version', className: 'w-48' }}
+          // On a phone the select gives way, so the row still ends in Download PDF with the comparison's toggle in it.
+          triggerProps={{ 'aria-label': 'Version', className: 'w-48 max-md:min-w-32 max-md:flex-1' }}
         />
       ) : null}
       {sources}
+      {compare}
       {version ? (
         <Button
           type="button"
@@ -401,6 +514,15 @@ function GenerationNotice({ detail, onOpenPhotos }: { detail: QuestionPaperDetai
   );
 }
 
+/** What the paper's pane says while there is no version and no draft to show. */
+function NoPaperYet({ generating }: { generating: boolean }) {
+  return (
+    <p className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
+      {generating ? 'The paper appears here when it is ready.' : 'No paper yet. The assistant’s draft appears here as soon as it writes one.'}
+    </p>
+  );
+}
+
 /**
  * The studio: the paper, as it prints, beside the assistant that changes it.
  * On wide screens it fills the window under the app's header, like the
@@ -419,6 +541,12 @@ function GenerationNotice({ detail, onOpenPhotos }: { detail: QuestionPaperDetai
  * without a message box (and get the paper alone when there is none): there
  * is nothing they could ask to change. A first paper still being generated
  * from photos has no assistant yet: there is no paper to ask about.
+ *
+ * A paper made from photos can be read against them (*Compare with photos* in
+ * the header, `?compare=1`): the paper's pane then holds the photographed
+ * page beside the paper ({@link PaperStage}), and the assistant folds into its
+ * strip so both are wide enough to read (`assistantCollapsedOf`; it can be
+ * opened again, and it is as it was left once the comparison ends).
  */
 export function QuestionPaperStudio({
   scope,
@@ -426,11 +554,14 @@ export function QuestionPaperStudio({
   canManage,
   chatId,
   versionParam,
+  compare,
+  uploads,
   heading,
   menu,
   notice,
   onVersion,
   onChat,
+  onCompare,
   onOpenPhotos,
   onOpenSources,
 }: {
@@ -441,6 +572,10 @@ export function QuestionPaperStudio({
   chatId: string | null;
   /** The version the address names (unchecked); null shows the newest thing. */
   versionParam: string | null;
+  /** The address asks for the paper beside its photos (`?compare=1`); shown only when the paper can be compared. */
+  compare: boolean;
+  /** The paper's upload queue, owned above the views: a page is not turned while a photo is still on its way. */
+  uploads: PageUploads;
   /** The paper's name and status, and its menu: the ends of the header row. */
   heading: ReactNode;
   menu: ReactNode;
@@ -448,6 +583,7 @@ export function QuestionPaperStudio({
   notice: ReactNode;
   onVersion: (versionNo: number | null) => void;
   onChat: (chatId: string | null) => void;
+  onCompare: (on: boolean) => void;
   onOpenPhotos: () => void;
   /** Opens the paper's photos card; null when there is nothing there for this user (no photos, and they may not add any). */
   onOpenSources: (() => void) | null;
@@ -461,16 +597,28 @@ export function QuestionPaperStudio({
       ? 'This paper can no longer be changed, so nothing more can be asked here.'
       : 'You can read this conversation. Only people who can change this paper can write here.';
   const [assistantOpen, setAssistantOpen] = useState(false);
+  // How the user left the assistant, and whether they opened it again during a comparison: two facts, so ending the comparison needs no restoring.
   const [assistantCollapsed, setAssistantCollapsed] = useState(false);
+  const [assistantShownWhileComparing, setAssistantShownWhileComparing] = useState(false);
   const chatDraft = usePaperDraft(scope, showAssistant ? chatId : null, detail.paper);
   const draft = chatDraft && draftIsNewest(chatDraft.writtenAt, detail.versions) ? chatDraft : null;
   const { send, isPending: saving } = useSendAssistantMessage(scope.schoolId, PAPER_ASSISTANT_SURFACE);
   const shown = shownPaperOf(versionParam, detail.versions.map((version) => version.versionNo), draft !== null);
+  const canCompare = canCompareOf({ pageCount: detail.pages.length, shown });
+  const comparing = compare && canCompare;
+  const collapsed = assistantCollapsedOf({ comparing, collapsed: assistantCollapsed, shownWhileComparing: assistantShownWhileComparing });
+  /** Hiding or showing the assistant changes the fact of the view on screen: the comparison's own while comparing, the user's lasting choice otherwise. */
+  const setCollapsed = (next: boolean) => (comparing ? setAssistantShownWhileComparing(!next) : setAssistantCollapsed(next));
+  const toggleCompare = (on: boolean) => {
+    // Every comparison starts with the assistant folded away, whatever was done during the last one.
+    if (on) setAssistantShownWhileComparing(false);
+    onCompare(on);
+  };
   const saveDraft = () => {
     if (!draft || !chatId) return;
     // The approval that follows appears in the assistant, so a phone shows it.
     setAssistantOpen(true);
-    setAssistantCollapsed(false);
+    setCollapsed(false);
     void send(draft.saveRequest, chatId).catch((error: unknown) => toast.error(requestErrorMessage(error, 'The save could not be requested.')));
   };
   return (
@@ -491,11 +639,12 @@ export function QuestionPaperStudio({
                 <SourcesButton label={detail.paper.pageCount > 0 ? 'View uploaded photos or file' : 'Add photos or a file'} onOpen={onOpenSources} />
               ) : null
             }
+            compare={canCompare ? <CompareToggle on={comparing} onChange={toggleCompare} /> : null}
           />
         </div>
         {menu}
       </header>
-      <div className={cn('grid min-h-0 min-w-0 flex-1', showAssistant && (assistantCollapsed ? 'md:grid-cols-[auto_minmax(0,1fr)]' : 'md:grid-cols-[minmax(20rem,26rem)_minmax(0,1fr)]'))}>
+      <div className={cn('grid min-h-0 min-w-0 flex-1', showAssistant && (collapsed ? 'md:grid-cols-[auto_minmax(0,1fr)]' : 'md:grid-cols-[minmax(20rem,26rem)_minmax(0,1fr)]'))}>
         {showAssistant ? (
           <PaperAssistant
             scope={scope}
@@ -504,8 +653,8 @@ export function QuestionPaperStudio({
             canSeeHistory={canManage}
             open={assistantOpen}
             onOpenChange={setAssistantOpen}
-            collapsed={assistantCollapsed}
-            onCollapsedChange={setAssistantCollapsed}
+            collapsed={collapsed}
+            onCollapsedChange={setCollapsed}
             draftOrdinal={draft ? draft.ordinal : null}
             onChat={onChat}
           />
@@ -513,22 +662,20 @@ export function QuestionPaperStudio({
         <section aria-label="Paper" className="flex min-h-0 min-w-0 flex-col gap-3 md:overflow-hidden md:bg-muted/30 md:p-4">
           {notice}
           <GenerationNotice detail={detail} onOpenPhotos={onOpenPhotos} />
-          {shown.kind === 'draft' && draft && chatId ? (
-            <UnsavedDraft
-              scope={scope}
-              chatId={chatId}
-              draft={draft}
-              nextVersionNo={detail.paper.latestVersionNo + 1}
-              onSave={canAsk ? saveDraft : null}
-              saving={saving}
-            />
-          ) : null}
-          {shown.kind === 'version' ? <SavedVersion key={shown.versionNo} scope={scope} versionNo={shown.versionNo} /> : null}
-          {shown.kind === 'nothing' ? (
-            <p className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
-              {inFlightJob(detail.activeJob) ? 'The paper appears here when it is ready.' : 'No paper yet. The assistant’s draft appears here as soon as it writes one.'}
-            </p>
-          ) : null}
+          <PaperStage photos={comparing ? <PaperPhotoCompare scope={scope} detail={detail} canManage={canManage} uploads={uploads} /> : null}>
+            {shown.kind === 'draft' && draft && chatId ? (
+              <UnsavedDraft
+                scope={scope}
+                chatId={chatId}
+                draft={draft}
+                nextVersionNo={detail.paper.latestVersionNo + 1}
+                onSave={canAsk ? saveDraft : null}
+                saving={saving}
+              />
+            ) : null}
+            {shown.kind === 'version' ? <SavedVersion key={shown.versionNo} scope={scope} versionNo={shown.versionNo} /> : null}
+            {shown.kind === 'nothing' ? <NoPaperYet generating={inFlightJob(detail.activeJob) !== null} /> : null}
+          </PaperStage>
         </section>
       </div>
     </div>

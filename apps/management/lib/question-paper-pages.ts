@@ -20,21 +20,45 @@ function pagesUrl(key: QuestionPaperPageKey, suffix = '') {
   ).toString();
 }
 
+/** What a page image URL needs to know of the page. */
+export type QuestionPaperPageImageRef = { id: string; derivativeRevision: number };
+
 /**
- * The thumbnail of a page, usable as `<img src>`: the session cookie
- * authenticates and the route redirects to a short-lived signed URL. A page
- * whose photo the server could not decode has no thumbnail (404), so callers
- * only ask for pages with `derivativeStatus` `ready`.
+ * A derivative of a page (`thumb` or `model`), usable as `<img src>`: the
+ * session cookie authenticates and the route redirects to a short-lived signed
+ * URL. Turning a page makes its derivatives again under new storage keys, and
+ * the route's redirect may be cached for a few minutes, so the URL carries the
+ * page's `derivativeRevision` (`?v=`): a turned page gets a new URL and the
+ * browser never shows a cached redirect to the objects of an earlier turn.
  */
-export function questionPaperThumbUrl(key: QuestionPaperPageKey, pageId: string) {
-  return pagesUrl(key, `/${encodeURIComponent(pageId)}/thumb`);
+function derivativeUrl(key: QuestionPaperPageKey, page: QuestionPaperPageImageRef, variant: 'thumb' | 'model') {
+  return `${pagesUrl(key, `/${encodeURIComponent(page.id)}/${variant}`)}?v=${page.derivativeRevision}`;
 }
 
 /**
- * The photo of a page as it was uploaded, usable as `<img src>` for a view
- * large enough to read. It can be several megabytes and, for a HEIC original,
- * a type the browser cannot draw: callers load it only when the user asks to
- * see the page and fall back to the thumbnail.
+ * The thumbnail of a page (at most 360 px, turned as the page's `rotation`
+ * says). A page whose photo the server could not decode has no thumbnail
+ * (404), so callers only ask for pages with `derivativeStatus` `ready`.
+ */
+export function questionPaperThumbUrl(key: QuestionPaperPageKey, page: QuestionPaperPageImageRef) {
+  return derivativeUrl(key, page, 'thumb');
+}
+
+/**
+ * The copy of a page the AI reads (at most 1800 px JPEG, turned as the page's
+ * `rotation` says), for a view large enough to read: what the user checks is
+ * exactly what the model will get, the right way up. Only for pages with
+ * `derivativeStatus` `ready`.
+ */
+export function questionPaperModelUrl(key: QuestionPaperPageKey, page: QuestionPaperPageImageRef) {
+  return derivativeUrl(key, page, 'model');
+}
+
+/**
+ * The photo of a page as it was uploaded (never turned), usable as `<img
+ * src>`. It can be several megabytes and, for a HEIC original, a type the
+ * browser cannot draw: the page viewer uses it only for a page the server
+ * could not decode, which has no derivatives (and so cannot be turned).
  */
 export function questionPaperOriginalUrl(key: QuestionPaperPageKey, pageId: string) {
   return pagesUrl(key, `/${encodeURIComponent(pageId)}/original`);

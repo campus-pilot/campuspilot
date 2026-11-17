@@ -85,6 +85,8 @@ export function toPageDto(page: PageRow): z.infer<typeof pageDtoSchema> {
     width: page.width,
     height: page.height,
     derivativeStatus: page.derivativeStatus,
+    rotation: page.rotation,
+    derivativeRevision: page.derivativeRevision,
   };
 }
 

@@ -1,0 +1,3 @@
+ALTER TABLE "exam_question_paper_page" ADD COLUMN "rotation" integer DEFAULT 0 NOT NULL;--> statement-breakpoint
+ALTER TABLE "exam_question_paper_page" ADD COLUMN "derivative_revision" integer DEFAULT 0 NOT NULL;--> statement-breakpoint
+ALTER TABLE "exam_question_paper_page" ADD CONSTRAINT "exam_question_paper_page_rotation_check" CHECK ("exam_question_paper_page"."rotation" in (0, 90, 180, 270) and ("exam_question_paper_page"."rotation" = 0 or "exam_question_paper_page"."derivative_status" = 'ready') and "exam_question_paper_page"."derivative_revision" >= 0);

@@ -1,4 +1,6 @@
 import { CLASS_ACTIONS, type PermissionCheck } from '@campuspilot/api/routers/authorization/authorization.dto';
+import type { pageDtoSchema } from '@campuspilot/api/routers/school/question-paper/question-paper.dto';
+import type { z } from 'zod';
 import type { ExamScope } from '@/components/exam/exam-model';
 
 /** One paper: an exam, a class, a subject and an assessment mode of its plan. */
@@ -106,6 +108,55 @@ export function shownPaperOf(versionParam: string | null | undefined, versionNos
   return hasDraft ? { kind: 'draft' } : { kind: 'nothing' };
 }
 
+/** `?compare=1`: the user asked to see the paper beside its photographed pages. Anything else is off. */
+export const compareAsked = (raw: string | null | undefined): boolean => raw === '1';
+
+/**
+ * Whether the paper can be shown beside its photos: it has photographed
+ * pages, and there is a paper on screen to read against them (a version or
+ * the assistant's draft). The toggle exists only then, and an address that
+ * asks for the comparison on a paper without either shows the paper alone.
+ */
+export const canCompareOf = (facts: { pageCount: number; shown: ShownPaper }): boolean => facts.pageCount > 0 && facts.shown.kind !== 'nothing';
+
+/**
+ * Whether the assistant is folded into its strip on wide screens. While the
+ * paper is compared with its photos the two documents need the width, so the
+ * assistant is folded unless the user opened it again during the comparison;
+ * otherwise it is as the user left it. The two are separate facts, so ending
+ * the comparison shows the assistant as it was before, with nothing to restore.
+ */
+export const assistantCollapsedOf = (facts: { comparing: boolean; collapsed: boolean; shownWhileComparing: boolean }): boolean =>
+  facts.comparing ? !facts.shownWhileComparing : facts.collapsed;
+
+/**
+ * The position (from 0) of the photo the comparison shows: the page the user
+ * stepped to while it is still one of the paper's pages, else the first (no
+ * page chosen yet, or the chosen one was removed since). -1 when the paper has
+ * no pages.
+ */
+export function comparePageIndex(pageIds: readonly string[], pageId: string | null): number {
+  if (pageIds.length === 0) return -1;
+  const index = pageId === null ? -1 : pageIds.indexOf(pageId);
+  return index === -1 ? 0 : index;
+}
+
+/** How much larger than the pane's width a zoomed photo is drawn: enough to read handwriting. */
+export const PHOTO_ZOOM = 2;
+
+type Point = { x: number; y: number };
+
+/**
+ * Where a scrolling pane must be scrolled to after its content grew or shrank
+ * by `factor`, so that the point under `pointer` (measured from the pane's
+ * visible top left corner) stays under it: zooming into a word keeps that
+ * word where it was pressed. The browser clamps the result to what can be
+ * scrolled, so zooming out lands on the whole page.
+ */
+export function scrollAfterZoom(scroll: Point, pointer: Point, factor: number): Point {
+  return { x: (scroll.x + pointer.x) * factor - pointer.x, y: (scroll.y + pointer.y) * factor - pointer.y };
+}
+
 /** The version to show: the one in the URL when it exists, otherwise the latest; null when there is none. */
 export function resolveVersionNo(raw: string | null | undefined, versionNos: readonly number[]): number | null {
   const requested = raw === null || raw === undefined ? NaN : Number(raw);
@@ -134,6 +185,19 @@ export function applyPageOrder<P extends PageOrder>(pages: readonly P[], pageIds
   });
   const rest = pages.filter((page) => !pageIds.includes(page.id));
   return [...listed, ...rest].map((page, index) => ({ ...page, position: index + 1 }));
+}
+
+/** Clockwise quarter turns of a page on top of its photo's own orientation (0, 90, 180 or 270). */
+export type PageRotation = z.infer<typeof pageDtoSchema>['rotation'];
+
+/**
+ * The rotation a page has after one more quarter turn: Rotate right adds 90
+ * degrees clockwise, Rotate left takes 90 away, wrapping around a full turn.
+ * The result is what the screen sends (`rotateQuestionPaperPage` takes the
+ * rotation the page should have, checked against the page revision).
+ */
+export function turnedRotation(rotation: PageRotation, turn: 'left' | 'right'): PageRotation {
+  return ((rotation + (turn === 'right' ? 90 : 270)) % 360) as PageRotation;
 }
 
 /** The user-facing text of a failed request, with the server's own message when it has one. */
