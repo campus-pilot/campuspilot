@@ -31,7 +31,7 @@ import {
   useExamCache,
 } from './exam-common';
 import { fieldError, participatingClassIds, selectionIssue } from './exam-class-model';
-import { errorMessage, schoolPermission, type ExamScope } from './exam-model';
+import { errorCode, errorMessage, schoolPermission, type ExamScope } from './exam-model';
 
 /**
  * Settings section listing the classes taking part in the examination, with
@@ -101,18 +101,35 @@ export function ExamClassesSection({
   );
 }
 
+/**
+ * Loads the review and renders a fresh form per `configurationVersion`. A
+ * stale-review refusal (CONFLICT) refetches the review, which remounts the form
+ * with the new baseline and would drop an error held inside it, so that
+ * explanation is held here, outside the keyed form, until the next save
+ * attempt or until the dialog closes.
+ */
 function ClassesPreview({ scope, onClose }: { scope: ExamScope; onClose: () => void }) {
   const query = useQuery(orpc.school.getExamPlanPreview.queryOptions({ input: scope }));
+  const stale = useForm({
+    defaultValues: { message: null as string | null },
+    validators: { onChange: z.object({ message: z.string().nullable() }) },
+  });
   if (query.isPending) return <LoadingExam />;
   if (!query.data) return <ReadError error={query.error} retry={query.refetch} />;
   return (
-    <ClassesForm
-      key={query.data.configurationVersion}
-      scope={scope}
-      preview={query.data}
-      busy={query.isFetching}
-      onClose={onClose}
-    />
+    <div className="flex min-w-0 flex-col gap-4">
+      <stale.Subscribe selector={(state) => state.values.message}>
+        {(message) => message && <Notice error>{message}</Notice>}
+      </stale.Subscribe>
+      <ClassesForm
+        key={query.data.configurationVersion}
+        scope={scope}
+        preview={query.data}
+        busy={query.isFetching}
+        onClose={onClose}
+        onStale={(message) => stale.setFieldValue('message', message)}
+      />
+    </div>
   );
 }
 
@@ -123,11 +140,14 @@ function ClassesForm({
   preview,
   busy,
   onClose,
+  onStale,
 }: {
   scope: ExamScope;
   preview: ExamPlanPreviewDto;
   busy: boolean;
   onClose: () => void;
+  /** Shows (or, with null, clears) the stale-review explanation outside this keyed form. */
+  onStale: (message: string | null) => void;
 }) {
   const queries = useExamCache();
   const baseline = participatingClassIds(preview);
@@ -142,6 +162,7 @@ function ClassesForm({
     defaultValues: { classIds: baseline },
     validators: { onChange: classesSchema, onSubmit: classesSchema },
     onSubmit: async ({ value }) => {
+      onStale(null);
       try {
         const result = await client.school.updateExamClasses({
           ...scope,
@@ -154,9 +175,12 @@ function ClassesForm({
         onClose();
         await refresh();
       } catch (error) {
-        // The reason (results, timetable, question papers, a stale review) is
-        // shown in the dialog; a stale review reloads into a fresh form.
-        form.setErrorMap({ onSubmit: { form: errorMessage(error), fields: {} } });
+        // A stale review reloads into a fresh form (new key), so its reason is
+        // shown above the form by the parent; any other refusal (results,
+        // timetable, question papers) stays with this form's selection.
+        if (errorCode(error) === 'CONFLICT')
+          onStale(`${errorMessage(error)} The list now shows the current classes taking part.`);
+        else form.setErrorMap({ onSubmit: { form: errorMessage(error), fields: {} } });
         await refresh();
       }
     },

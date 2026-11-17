@@ -387,6 +387,28 @@ describe('exam class participation', () => {
       expect(await participants()).toEqual([class6.classId]);
     });
 
+    it('refuses adding a class through a single legacy plan once the exam has ended', async () => {
+      await generate([class6.classId]);
+      await principal.school.transitionExam({ ...scope, status: 'active' });
+      const workspace = await principal.school.getStudentExam({ ...scope, classId: class6.classId, studentId: student6 });
+      await principal.school.saveStudentExam({
+        ...scope,
+        classId: class6.classId,
+        studentId: student6,
+        approved: true,
+        daysAttended: null,
+        coScholastics: null,
+        subjects: workspace.subjects.map(({ plan }) => ({ examPlanId: plan.id, marks: { written: 70 } })),
+      });
+      await principal.school.transitionExam({ ...scope, status: 'completed' });
+      await expect(principal.school.createExamPlan({ ...scope, classId: class7.classId, subjectSlug: 'science' })).rejects.toMatchObject({
+        code: 'BAD_REQUEST',
+        message: 'This examination has ended, so the classes taking part can no longer change. Reopen it first.',
+      });
+      expect(await participants()).toEqual([class6.classId]);
+      expect((await planRows()).map((plan) => plan.classId)).toEqual([class6.classId]);
+    });
+
     it('is refused for a suspended school', async () => {
       await generate([class6.classId]);
       const preview = await principal.school.getExamPlanPreview(scope);

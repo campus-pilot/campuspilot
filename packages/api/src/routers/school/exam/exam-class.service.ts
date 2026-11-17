@@ -31,28 +31,38 @@ export async function examClassIds(db: DatabaseExecutor, scope: ExamScope): Prom
 }
 
 /**
- * Refuses a class that does not take part in the examination. Reads the
- * class's own `exam_class` row; never inferred from its plans.
+ * Records that a class takes part, if it does not already. Used when a legacy
+ * single subject plan is created for a class (`createExamPlan`): creating the
+ * plan is the explicit act of including the class, so it is held to the same
+ * lifecycle rule as adding a class with {@link updateExamClasses}: a class
+ * that does not take part yet cannot be added once the examination has ended.
+ * A class already taking part may still get further plans, as before. The
+ * caller has already refused an examination released to the Cadet Portal.
  */
-export async function requireExamClass(db: DatabaseExecutor, scope: ExamScope, classId: string) {
-  const [row] = await db
+export async function includeExamClass(tx: DatabaseTransaction, scope: ExamScope, classId: string) {
+  const [existing] = await tx
     .select({ classId: examClassTable.classId })
     .from(examClassTable)
     .where(and(examClassWhere(scope), eq(examClassTable.classId, classId)))
     .limit(1);
-  if (!row) throw rpcError.badRequest('This class does not take part in this examination.');
-}
-
-/**
- * Records that a class takes part, if it does not already. Used when a legacy
- * single subject plan is created for a class (`createExamPlan`): creating the
- * plan is the explicit act of including the class.
- */
-export async function includeExamClass(tx: DatabaseTransaction, scope: ExamScope, classId: string) {
+  if (existing) return;
+  await refuseClassChangeWhenCompleted(tx, scope);
   await tx
     .insert(examClassTable)
     .values({ schoolId: scope.schoolId, sessionId: scope.sessionId, examSlug: scope.examSlug, classId })
     .onConflictDoNothing();
+}
+
+/**
+ * Refuses to change which classes take part once the examination has ended
+ * (`exam_lifecycle.status = 'completed'`). Shared by every path that adds or
+ * removes a class so the rule cannot drift between them.
+ */
+async function refuseClassChangeWhenCompleted(tx: DatabaseTransaction, scope: ExamScope) {
+  const [lifecycle] = await tx.select({ status: examLifecycleTable.status }).from(examLifecycleTable).where(lifecycleWhere(scope)).limit(1);
+  if (lifecycle?.status === 'completed')
+    throw rpcError.badRequest('This examination has ended, so the classes taking part can no longer change. Reopen it first.');
+  return lifecycle;
 }
 
 /**
@@ -106,9 +116,7 @@ export async function updateExamClasses(tx: DatabaseTransaction, input: UpdateEx
   const current = prepared.preview.classes.filter((entry) => entry.participating).map((entry) => entry.classId);
   if (!current.length) throw rpcError.badRequest('Create the exam plan before changing which classes take part.');
   await requireNotReleasedToCadet(tx, input);
-  const [lifecycle] = await tx.select({ status: examLifecycleTable.status }).from(examLifecycleTable).where(lifecycleWhere(input)).limit(1);
-  if (lifecycle?.status === 'completed')
-    throw rpcError.badRequest('This examination has ended, so the classes taking part can no longer change. Reopen it first.');
+  const lifecycle = await refuseClassChangeWhenCompleted(tx, input);
   if (prepared.preview.configurationVersion !== input.configurationVersion)
     throw rpcError.conflict('Classes, subjects or the classes taking part have changed. Review the updated list before saving.');
 

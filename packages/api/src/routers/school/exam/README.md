@@ -52,6 +52,10 @@ legacy plan was deleted).
   an empty draft timetable column go, and chat conversations shared to its
   papers are unshared, as `deleteExamPlan` does.
 - `createExamPlan` (legacy single plan) records its class as taking part.
+  Adding a class this way follows the same lifecycle rule as
+  `updateExamClasses`: it is refused once the exam has ended (and, as for every
+  plan change, while released to the Cadet Portal). A class already taking part
+  may still get further plans.
   `deleteExam` and session-config replacement remove a deleted exam's rows.
   `deleteClass` is a CONFLICT with a clear reason while the class takes part in
   any exam (instead of a foreign key error); take it out of the exam first.
