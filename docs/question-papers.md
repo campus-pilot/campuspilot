@@ -94,7 +94,10 @@ without access must learn nothing about the school's features):
 The management app mirrors this: the Question paper tab, its marketplace card and
 its settings page exist only when the `assistant` feature is on and (for the tab)
 the user's role may use it. While the answer is loading the tab is absent and
-Results stays the default (`useAssistantGate`).
+Results stays the default (`useAssistantGate`). The sidebar's **Question papers** entry
+and the command palette's **Question papers** command follow the same gates, each its own
+fact: `READ_EXAMS`, `READ_EXAM_PLANS` and the assistant (`AssistantAccess`); the sidebar
+entry is also left out while no session is selected (see "Ways into the tab").
 
 ## Data model
 
@@ -419,6 +422,58 @@ was stored. `stats` count the cleaned output only.
   what makes the paper unusable (a cap, an empty paper, a formula KaTeX rejects, an unusable
   figure id, figures too large to print). The version stores `stripped` as its **notices**
   (`warnings: [{ code: 'sanitised', message }]`); the only other kind is the `legacy` notice of rows migrated by 0064.
+
+## Ways into the tab
+
+The Question paper tab (`question-paper-page.tsx`) lists the classes the person may open
+(`listQuestionPapers`; the server decides which, the client never narrows the list) as an
+accordion, and three ways lead straight to one class.
+
+- **The accordion** (`QuestionPaperClassAccordion` in `packages/components/src/question-paper`).
+  One class is open at a time (Radix `type="single"`, collapsible). The open class is the
+  `class` query parameter (a class id), read with `useSearchParams` and written with
+  `router.replace(..., { scroll: false })`; collapsing removes it (`withClassParam`). No
+  `useState`, no effect. With no parameter every class is collapsed, also when there is only
+  one class. An id that is not in the list (no access, a stale link) opens nothing and is not
+  an error (`openClassOf`). Closed classes are unmounted (Radix default, no `forceMount`), so
+  the voice assistant's "open what I can see" finds only the open class's paper links; that
+  is deliberate. Polling is unchanged: `refetchInterval` looks at every class, open or not.
+  The trigger shows the class name and a summary of the rows it shows, "3 of 8 ready"
+  plus the generating and failed counts when there are any (`paperClassSummary`,
+  `paperClassSummaryLabel`, counted with `cellStatus`, so it never disagrees with the table).
+- **The mode filter.** A multi-select `TableFilterBar` of every distinct mode of the
+  loaded classes (`paperModeOptions`: keyed by `modeSlug`, labelled with `modeName`, sorted
+  by name then slug). It is purely client-side; the query input does not change. An empty
+  selection shows every mode; with modes selected each class shows only their rows, a
+  subject left with none disappears, and a class left with none says "No papers match the
+  selected modes" (`applyModeFilter` returns the reason as its own field, `emptyReason`, so
+  it never looks empty by plan). The accordion summary counts the **filtered** rows. The
+  selection is kept in local storage per school, `question-paper-mode-filter:{schoolId}`, as
+  slugs (never names), read through `useSyncExternalStore` (`mode-filter-store.ts`, like
+  `useStoredSchoolSessionId`). A TanStack form is seeded from the stored entry once it can be
+  read (never during server rendering, so a reload does not seed an empty filter) and writes
+  each change back through its `listeners.onChange`. Stored slugs the examination does not
+  have are not shown and not deleted (`visibleModeSelection`, `mergeModeSelection`), so they
+  still apply on another examination that has them. A malformed entry is no filter.
+- **The sidebar entry** (`question-paper-nav.tsx` in `apps/management/components/question-paper`,
+  presentational parts in `packages/components/src/question-paper/question-paper-nav.tsx`). Under
+  Examinations in the Academics group, an `AppShellNavigationDisclosure`: pressing it folds open
+  the selected session's examinations (`useAllExams`, the session's exam order; completed ones
+  stay, marked "Completed"), and an examination folds open to its classes (`listQuestionPapers`
+  with the tab's own input, so the tab opens on the cached list). Classes are a cmdk list with a
+  search box that matches class names only. Choosing one asks the navigation guard, closes the
+  mobile sheet and goes to the tab with `?class=` (`questionPaperClassHref`). Each list shows
+  loading, empty ("No examinations in this session", "No classes you can open") and read-error
+  states with a retry. The last row, *Add examination*, is shown with `UPDATE_SESSION` (what
+  saving the session's exam configuration needs) and opens the session's settings page,
+  where examinations are configured today. A fold was chosen over popovers so the same steps
+  work in the desktop sidebar and the mobile sheet; the shell's sidebar collapses off-canvas,
+  never to icons. The entry is highlighted on the Question paper section
+  (`isQuestionPaperSectionPath`), and Examinations is not highlighted there.
+- **The command palette.** The search-only *Question papers* command (same gates) opens a
+  picker in the palette: an examination, then a class, with a back control and the palette's
+  search filtering each step (`question-paper-palette.tsx`, `rankByQuery`,
+  `pickerEmptyMessage`). Choosing a class lands on the tab with `?class=`.
 
 ## The paper's screen
 
@@ -969,7 +1024,7 @@ use the source's `qpf_` figure ids, which a save refuses).
 | What the template prints around a paper | `question-paper.template-prints.ts` (reading), `QUESTION_PAPER_TEMPLATE_PRINTS_RULES` in `packages/question-paper/src/guide.ts` (the rule), `prompt.ts` (the job's part) |
 | Model call (providers, plain text) | `packages/assistant/src/question-paper-model.ts`, `providers/*` (`generateText`) |
 | Chat contract, cards | `packages/assistant-contract`, `packages/components/src/question-paper/chat-cards.tsx` |
-| Management UI | `apps/management/components/question-paper` (`question-paper-workspace.tsx` decides the view, `question-paper-start.tsx` the first screen with its rules in `question-paper-start-model.ts`, `earlier-paper-dialog.tsx` the earlier-paper picker, `source-preview-dialogs.tsx` the page viewer and the earlier paper's preview, `question-paper-studio.tsx` the paper beside its assistant, `use-paper-assistant.ts` the paper's conversation), `packages/components/src/question-paper`, routes under `exam/[examSlug]/question-paper` |
+| Management UI | `apps/management/components/question-paper` (`question-paper-page.tsx` the tab with its accordion and mode filter, `mode-filter-store.ts` the stored filter, `question-paper-list-model.ts` its rules, `question-paper-nav.tsx` the sidebar entry, `question-paper-palette.tsx` the palette picker, `question-paper-workspace.tsx` decides the view, `question-paper-start.tsx` the first screen with its rules in `question-paper-start-model.ts`, `earlier-paper-dialog.tsx` the earlier-paper picker, `source-preview-dialogs.tsx` the page viewer and the earlier paper's preview, `question-paper-studio.tsx` the paper beside its assistant, `use-paper-assistant.ts` the paper's conversation), `packages/components/src/question-paper`, routes under `exam/[examSlug]/question-paper` |
 | Demo seed | `packages/api/src/workflows/demo-school` (`seed/question-papers.json`, `seedQuestionPaper`) |
 
 ## Demo schools
@@ -981,7 +1036,10 @@ printed with a seeded `question_paper` template. The assistant
 stays off in a demo, so the tab is invisible until an admin enables it; the seed
 therefore calls the service functions, not the procedures. The seed has no copied version: each
 seeded paper is a copy source for the same class and subject in any other exam (the list shows it
-once the tab is visible).
+once the tab is visible). Every demo examination has a plan for every class the admin chose,
+and every subject of the seeded configuration has two modes (written and oral, theory and
+internal assessment, ...), so the tab's accordion and mode filter have several classes and
+modes to work with without further seed data.
 
 ## Extending
 
@@ -1036,6 +1094,11 @@ once the tab is visible).
   revision, permission, HEIC, a running generation), the generation workflow with a scripted model, the sweep, the demo seed and the
   demo purge. The pages integration test replaces the workflow engine's sender with a failing
   fake, so it passes with or without a Restate running next to the database.
+- The tab, the sidebar entry and the palette picker: `pnpm --filter @campuspilot/components
+  test` (`question-paper-model.test.ts` for the mode options, filter, summary and `class`
+  parsing; `question-paper-nav.test.tsx` for the sidebar lists and the accordion;
+  `app-shell.test.tsx` for the disclosure entry) and `pnpm --filter management test`
+  (`question-paper-list-model.test.ts`: the address, the stored filter, the picker).
 - Providers and chat: `pnpm --filter @campuspilot/assistant exec vitest run --project unit`
   and `--project integration` (text requests, attachments, context pruning).
 - `apps/server`: `src/mcp-catalog.test.ts`, `src/mcp.test.ts` (tool counts, approval,

@@ -36,9 +36,7 @@ import {
   ClipboardCheck,
   HandCoins,
   Landmark,
-  LoaderCircle,
   Percent,
-  RotateCcw,
   UserRound,
 } from 'lucide-react';
 import { z } from 'zod';
@@ -46,7 +44,17 @@ import { client, orpc } from '@/lib/orpc';
 import { confirmNavigation } from '@/lib/navigation-guard';
 import { getAdmissionPhotoUrl } from '@/lib/admission-photo';
 import { AskAssistantCommand, PaletteAssistantView } from './assistant/assistant-palette';
+import { useAllExams, type ExamSearchItem } from './exam/use-all-exams';
+import {
+  QuestionPaperPickerHeader,
+  QuestionPaperPickerResults,
+} from './question-paper/question-paper-palette';
+import {
+  pickerEmptyMessage,
+  type QuestionPaperPickerStep,
+} from './question-paper/question-paper-list-model';
 import { CommandRow } from './command-row';
+import { paletteItemClassName, ProviderStatus } from './command-palette-status';
 import { RequireFeature, useSchoolFeatureCheck } from './require-feature';
 import { firstSettingsTemplate } from './settings-templates';
 import { RequirePermissions } from './require-permissions';
@@ -58,7 +66,6 @@ import {
   type ManagementCommandContext,
 } from './management-command-registry';
 import {
-  collectAllPages,
   hasFinanceActionConfig,
   hasStudentExamResult,
   mapWithConcurrency,
@@ -71,11 +78,6 @@ import {
 } from './billing/admission-finance-dialogs';
 
 type Icon = ComponentType<SVGProps<SVGSVGElement>>;
-type ExamSearchItem = {
-  slug: string;
-  name: string;
-  status: 'ready' | 'active' | 'completed' | null;
-};
 type FinanceDialogSelection = {
   kind: 'payment' | 'adjustment';
   admissionId: string;
@@ -84,8 +86,6 @@ type FinanceDialogSelection = {
 
 const querySchema = z.object({ query: z.string().max(200) });
 
-const paletteItemClassName =
-  'my-0.5 min-h-10 cursor-pointer gap-2.5 rounded-lg border border-transparent px-2 py-1.5 transition-colors data-selected:border-border data-selected:bg-muted/70';
 
 function initials(name: string) {
   return name
@@ -97,37 +97,6 @@ function initials(name: string) {
     .toUpperCase();
 }
 
-
-function ProviderStatus({
-  heading,
-  label,
-  retry,
-}: {
-  heading: string;
-  label: string;
-  retry?: () => void;
-}) {
-  return (
-    <CommandGroup heading={heading}>
-      <CommandItem
-        className={paletteItemClassName}
-        value={`provider:${heading}:${label}`}
-        disabled={!retry}
-        onSelect={retry}
-      >
-        {retry ? (
-          <RotateCcw className="size-4" aria-hidden />
-        ) : (
-          <LoaderCircle className="size-4 animate-spin" aria-hidden />
-        )}
-        <span className="min-w-0 flex-1 text-muted-foreground">{label}</span>
-        {retry ? (
-          <CommandShortcut className="hidden sm:inline">Retry</CommandShortcut>
-        ) : null}
-      </CommandItem>
-    </CommandGroup>
-  );
-}
 
 function ResultProviderStatus({
   label,
@@ -142,26 +111,6 @@ function ResultProviderStatus({
       <ProviderStatus heading="Results" label={label} retry={retry} />
     </>
   );
-}
-
-function useAllExams(schoolId: string, sessionId: string) {
-  return useQuery({
-    queryKey: [
-      ...orpc.school.listExams.queryKey({ input: { schoolId, sessionId } }),
-      'command-palette-all-pages',
-    ],
-    staleTime: Number.POSITIVE_INFINITY,
-    queryFn: async () => {
-      return collectAllPages<ExamSearchItem>((page) =>
-        client.school.listExams({
-          schoolId,
-          sessionId,
-          page,
-          limit: 20,
-        }),
-      );
-    },
-  });
 }
 
 function ExaminationsProvider({
@@ -199,7 +148,7 @@ function ExaminationResults({
   query: string;
   navigate: (href: string) => Promise<void>;
 }) {
-  const examsQuery = useAllExams(context.schoolId, context.sessionId);
+  const examsQuery = useAllExams(context.schoolId, context.sessionId, { staleTime: Number.POSITIVE_INFINITY });
   if (!query.trim()) return null;
   if (examsQuery.isPending) {
     return (
@@ -480,7 +429,7 @@ function AuthorizedStudentResultActions({
   studentId: string;
   navigate: (href: string) => Promise<void>;
 }) {
-  const examsQuery = useAllExams(context.schoolId, context.sessionId);
+  const examsQuery = useAllExams(context.schoolId, context.sessionId, { staleTime: Number.POSITIVE_INFINITY });
   const completed = (examsQuery.data ?? []).filter(
     (exam) => exam.status === 'completed',
   );
@@ -736,6 +685,9 @@ export function ManagementCommandPalette({
   const [assistantConversationId, setAssistantConversationId] = useState<
     string | null
   >(null);
+  /** The question paper picker's step while it is open (the "Question papers" command), else null. */
+  const [questionPaperPicker, setQuestionPaperPicker] =
+    useState<QuestionPaperPickerStep | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const hasFeature = useSchoolFeatureCheck(schoolId);
   const commands = createManagementCommandRegistry({
@@ -755,6 +707,17 @@ export function ManagementCommandPalette({
     setIsStudentSearchDebouncing(false);
     setSelectedAdmission(undefined);
     setAssistantConversationId(null);
+    setQuestionPaperPicker(null);
+  }
+
+  /** Empties the search, as when the picker moves to another step. */
+  function clearQuery() {
+    changeQuery('', (value) => form.setFieldValue('query', value));
+  }
+
+  function pickerBack(step: QuestionPaperPickerStep) {
+    setQuestionPaperPicker(step.step === 'class' ? { step: 'exam' } : null);
+    clearQuery();
   }
 
   function changeOpen(nextOpen: boolean) {
@@ -850,11 +813,23 @@ export function ManagementCommandPalette({
             <form.Field name="query">
               {(field) => (
                 <>
+                  {questionPaperPicker ? (
+                    <QuestionPaperPickerHeader
+                      step={questionPaperPicker}
+                      onBack={() => pickerBack(questionPaperPicker)}
+                    />
+                  ) : null}
                   <CommandInput
                     autoFocus
                     maxLength={200}
                     value={field.state.value}
-                    placeholder={`${searchScope}…`}
+                    placeholder={
+                      questionPaperPicker
+                        ? questionPaperPicker.step === 'exam'
+                          ? 'Search examinations…'
+                          : 'Search classes…'
+                        : `${searchScope}…`
+                    }
                     onValueChange={(value) =>
                       changeQuery(value, field.handleChange)
                     }
@@ -878,7 +853,11 @@ export function ManagementCommandPalette({
           )}
           <CommandList className="max-h-[min(32rem,65vh)] px-0.5 pb-0.5">
             <CommandEmpty>
-              {studentSearch && isStudentSearchDebouncing
+              {questionPaperPicker ? (
+                <form.Subscribe selector={(state) => state.values.query}>
+                  {(query) => pickerEmptyMessage(questionPaperPicker, query)}
+                </form.Subscribe>
+              ) : studentSearch && isStudentSearchDebouncing
                 ? 'Searching students…'
                 : remoteQuery
                   ? studentSearch ? 'No matching actions or students.' : 'No matching actions.'
@@ -895,6 +874,22 @@ export function ManagementCommandPalette({
                   changeOpen(false);
                 }}
               />
+            ) : questionPaperPicker && sessionId ? (
+              <form.Subscribe selector={(state) => state.values.query}>
+                {(query) => (
+                  <QuestionPaperPickerResults
+                    schoolId={schoolId}
+                    sessionId={sessionId}
+                    step={questionPaperPicker}
+                    query={query}
+                    onPickExam={(exam) => {
+                      setQuestionPaperPicker({ step: 'class', exam });
+                      clearQuery();
+                    }}
+                    navigate={navigate}
+                  />
+                )}
+              </form.Subscribe>
             ) : (
               <form.Subscribe selector={(state) => state.values.query}>
                 {(query) => {
@@ -918,9 +913,14 @@ export function ManagementCommandPalette({
                                 key={command.id}
                                 value={`navigation:${command.id}`}
                                 disabled={disabled}
-                                onSelect={() =>
-                                  void navigate(command.destination(context))
-                                }
+                                onSelect={() => {
+                                  if (command.kind === 'navigate') {
+                                    void navigate(command.destination(context));
+                                    return;
+                                  }
+                                  setQuestionPaperPicker({ step: 'exam' });
+                                  clearQuery();
+                                }}
                               >
                                 <CommandRow
                                   icon={command.icon}
@@ -964,7 +964,13 @@ export function ManagementCommandPalette({
             )}
           </CommandList>
           <div className="border-t px-3 py-2 text-[11px] text-muted-foreground">
-            {selectedAdmission ? 'Choose action' : searchScope}
+            {selectedAdmission
+              ? 'Choose action'
+              : questionPaperPicker
+                ? questionPaperPicker.step === 'exam'
+                  ? 'Choose an examination'
+                  : 'Choose a class'
+                : searchScope}
           </div>
         </Command>
         )}
