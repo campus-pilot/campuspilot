@@ -119,9 +119,18 @@ together.
 
 ## Timetable invariant
 
-Timetable exports always include all examination classrooms. Do not render a class
-selector, pass a contextual `classId`, or add one to the source DTO. This differs
-from report/admit card flows and is enforced again by the server.
+Timetable exports always include all classes taking part in the examination. Do
+not render a class selector, pass a contextual `classId`, or add one to the source
+DTO. This differs from report/admit card flows and is enforced again by the server.
+
+## Examination class picker
+
+Admit cards and report cards are chosen examination first, then class. The class
+picker lists only the classes taking part in the chosen examination
+(`getExamContext`), so a class excluded from it is never offered; choosing another
+examination clears the class and the chosen students. ID cards are not tied to an
+examination and list every class of the school (`listClasses`). The server refuses
+a `classId` that does not take part either way.
 
 ## Manual verification
 
