@@ -200,6 +200,21 @@ every procedure that is not an explicit read (`mcp.access`) for the input's
 call `assertSchoolWritableByCaller`. Screens are not hidden; the refusal
 (`SCHOOL_SUSPENDED`, `isSchoolSuspendedError`) is shown and a permanent
 warning explains it. Keep `mcp.access` honest and name the school `schoolId`.
+The same gate (`packages/api/src/school-access`) also refuses a school
+without a plan (`SCHOOL_NO_PLAN`); one function decides from both facts.
+
+## School trials
+
+Before changing trials (`school_trial`), how a school's plan is decided, what
+a school without a plan may do, or how plans are shown in the apps, read
+[School trials](docs/school-trials.md). A school's plan is the higher of its
+subscribed tier (`school.tier`, nullable) and its active trial's tier
+(`resolveSchoolPlan`); a trial is active from `starts_at` until `ends_at`
+(or `ended_at` when an administrator ended it early), compared with `now()`
+at every read, so it ends without a job.
+Two trials of one school never overlap (EXCLUDE constraint). A school with
+neither has no plan and is read-only (`SCHOOL_NO_PLAN`, `isSchoolNoPlanError`),
+exactly like a suspended one. Never compare tiers by hand or store the plan.
 
 ## Demo schools
 

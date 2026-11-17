@@ -134,7 +134,9 @@ its own check, and the first that fails is returned with a message for the user:
 4. the user holds a role the assistant is switched on for in the school's
    role list (`role_not_enabled`);
 5. the school is not suspended (`school_suspended`; a suspended school is
-   read-only, see [School suspension](school-suspension.md));
+   read-only, see [School suspension](school-suspension.md)) and has an
+   active plan (`no_plan`; see [School trials](school-trials.md)); the
+   suspension is named when both apply;
 6. the school's saved spend in the current IST month is below
    `monthlyLimitUsd` (`limit_reached`). The month spend is cached in Redis for
    10 minutes, so a limit can be overshot by what is spent in that window.
@@ -146,8 +148,8 @@ issue, the worker before every model request, and the open stream recheck.
 The assistant **disappears for anyone who may not use it**. Seeing it at all
 (the pages, the history list, a conversation and its stream, delete, stop,
 decline) needs facts 1 to 4: the feature, membership, and a role the assistant
-is switched on for. The suspension and the monthly limit are left out: in a
-suspended school and at the limit the history stays visible and the composer
+is switched on for. The suspension, the plan and the monthly limit are left
+out: in a suspended school, one without a plan, and at the limit the history stays visible and the composer
 says why it cannot send. With the
 feature off every `/model/*` procedure answers the disabled-feature error; for
 a role that is not switched on they answer FORBIDDEN (`role_not_enabled`).

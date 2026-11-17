@@ -11,6 +11,11 @@ does not go through an oRPC procedure.
 Suspension is not a feature flag and not a tier. It is its own fact about a
 school, and a suspended school keeps its tier and its features.
 
+A school without an active plan (no subscription and no active trial) is
+read-only in exactly the same way, through the same gate with its own reason;
+see [School trials](school-trials.md). The two are separate facts: lifting a
+suspension does not give a school a plan.
+
 ## The fact
 
 `school.suspended_at` (null while the school is not suspended), with
@@ -39,14 +44,18 @@ wherever a school is listed.
 
 ## What is refused
 
-Every enforcement point asks the one fact through
-`packages/api/src/school-suspension/school-suspension.service.ts`.
+Every enforcement point asks through the school's write access,
+`packages/api/src/school-access/school-access.service.ts`. One function,
+`resolveSchoolWriteRefusal({ suspended, hasActivePlan })`, decides from the
+two facts and answers `SCHOOL_SUSPENDED` or `SCHOOL_NO_PLAN`; **a suspension
+wins** when both apply. Everything below holds for both reasons, each
+refused with its own error.
 
 | Surface | Behaviour while suspended |
 | --- | --- |
 | Staff procedures (the management app, API keys, connected AI apps over MCP, the in-app assistant's tool calls) | `requireAuth` (`packages/api/src/index.ts`) refuses every protected procedure that is not an explicit read (`mcp.access`; a procedure without metadata counts as a write) for the school named by the input's `schoolId`. It is on the builder, not on each procedure, so a new procedure is covered without anyone remembering. Reads are untouched. |
 | Upload routes outside oRPC (admission photo and documents, question paper pages, the school logo) | Each write handler calls `assertSchoolWritableByCaller` after its permission check. Reads there keep working. |
-| In-app assistant | `resolveAssistantAccess` answers `school_suspended`: the user still sees the assistant and their conversations (`canSee`), and cannot send, approve or attach, so no model money is spent. A turn that is running is refused at its next model request, like a reached limit. A question paper generation job in flight fails with `school_suspended`. |
+| In-app assistant | `resolveAssistantAccess` answers `school_suspended` (or `no_plan`): the user still sees the assistant and their conversations (`canSee`), and cannot send, approve or attach, so no model money is spent. A turn that is running is refused at its next model request, like a reached limit. A question paper generation job in flight fails with `school_suspended` (or `no_plan`). |
 | Cadet Portal procedures | `cadetProcedure` refuses every procedure that is not a read (turning notifications on for a device, marking notifications read). Sign-in and every read keep working. |
 | Cadet actions on `cadetLoginProcedure` (turning a device's notifications off) | Not held, for the reason they are not held by the `cadet` feature: they only undo something on the student's own device, and sign-out uses them. |
 
@@ -61,7 +70,7 @@ The staff gate holds the school's **members**. It runs before the procedure's
 own permission check, so it must tell an outsider nothing: only a member gets
 the suspended error, and anyone else falls through to the permission check,
 which answers them exactly as for a school that is not suspended. It decides
-from membership and the suspension alone.
+from membership and the two facts alone.
 
 A platform administrator works on a school through platform grants without
 being a member and is therefore not held, so the platform can still correct a
@@ -72,7 +81,7 @@ member and is refused like them.
 
 ## The error
 
-Every surface throws the same error:
+Every surface throws the same error for a suspended school:
 
 ```
 ORPCError('FORBIDDEN', {
@@ -81,10 +90,13 @@ ORPCError('FORBIDDEN', {
 })
 ```
 
+A school without a plan gets the same error with `SCHOOL_NO_PLAN` and its
+own message ([School trials](school-trials.md#a-school-without-a-plan-is-read-only)).
 A permission denial is FORBIDDEN without that data, and a disabled feature
 carries `SCHOOL_FEATURE_DISABLED`. Clients tell them apart with
-`isSchoolSuspendedError(error)`
-(`packages/api/src/school-suspension/school-suspension.contract.ts`, Zod only,
+`schoolWriteRefusalOf(error)`, `isSchoolSuspendedError(error)` or
+`isSchoolNoPlanError(error)`
+(`packages/api/src/school-access/school-access.contract.ts`, Zod only,
 importable by the browser apps), never by the message. The upload routes
 answer with the same status and message; their HTTP error body carries no
 `data`, so only the message identifies it there.
@@ -95,18 +107,20 @@ Screens are **not** changed for a suspended school: buttons stay, a change is
 sent, and the server's refusal is shown where that screen shows a failed save.
 One permanent warning explains why.
 
-- **Management.** `school.listMySchools` carries `isSuspended` for each
-  school. `SuspendedSchoolBanner` (`apps/management/components`), mounted in
-  the school shell next to the demo banner, registers an `AppShellAlert`
-  warning with the message above, on every page of the school. It has no
-  action and cannot be dismissed. The app's RPC link reads the school list
-  again whenever any call fails with the suspended error (`lib/orpc.ts`), so
-  the warning appears in a tab that was open when the school was suspended.
-- **Cadet Portal.** `cadet.getSchool` carries `isSuspended`.
-  `SuspendedSchoolNotice` (`apps/cadet/components`) shows "Your school is
-  suspended. You can still view everything, but nothing can be changed.
-  Contact your school." at the top of every signed-in page. A refused change
-  re-reads the school.
+- **Management.** `school.listMySchools` carries `isSuspended` (and
+  `hasActivePlan`) for each school. `ReadOnlySchoolBanner`
+  (`apps/management/components/school-plan-banners.tsx`), mounted in the
+  school shell next to the demo banner, registers an `AppShellAlert` warning
+  with the message above (or the no-plan message), on every page of the
+  school. It has no action and cannot be dismissed. The app's RPC link reads
+  the school list again whenever any call fails with either refusal
+  (`lib/orpc.ts`), so the warning appears in a tab that was open when the
+  school was suspended.
+- **Cadet Portal.** `cadet.getSchool` carries `isSuspended` (and
+  `hasActivePlan`). `ReadOnlySchoolNotice` (`apps/cadet/components`) shows
+  "Your school is suspended. You can still view everything, but nothing can
+  be changed. Contact your school." at the top of every signed-in page (or
+  the no-plan notice). A refused change re-reads the school.
 
 ## Extending
 
@@ -122,4 +136,5 @@ One permanent warning explains why.
   it in a suspended school, and say why.
 - A background job that changes a school's data on its own schedule is not
   held today (there is none that staff do not start). If one is added, decide
-  explicitly whether it runs for a suspended school.
+  explicitly whether it runs for a suspended school and for a school without
+  a plan.
