@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { bestLink, drawnOnPage, linkTexts } from './screen-links';
+import { bestLink, closestLinks, drawnOnPage, linkTexts, nearestFirst } from './screen-links';
 
 const exams = [
   { text: 'Periodic Test 1 Exam plan generated Completed Completed Nov 14, 2026', href: '/school/s/sessions/x/exam/periodic-test-1' },
@@ -36,6 +36,45 @@ describe('bestLink', () => {
     assert.equal(bestLink('Arjun Reddy', students)?.href, '/s/2');
   });
 
+  it('asks which when the rows differ only in a word the request does not name', () => {
+    const papers = [
+      { text: 'Open English Oral for Nursery', href: '/p/nursery/english/oral' },
+      { text: 'Open English Written for Nursery', href: '/p/nursery/english/written' },
+      { text: 'Open English Oral for LKG', href: '/p/lkg/english/oral' },
+    ];
+    // "LKG" is shorter than "Nursery", but that is no reason to open LKG's paper.
+    assert.equal(bestLink('English Oral', papers), null);
+    assert.equal(bestLink('English Oral for Nursery', papers)?.href, '/p/nursery/english/oral');
+    assert.equal(bestLink('Nursery English written', papers)?.href, '/p/nursery/english/written');
+    assert.equal(bestLink('Open English Oral for LKG', papers)?.href, '/p/lkg/english/oral');
+  });
+
+  it('never lets a word the request does not name decide, however many words it has', () => {
+    const papers = [
+      { text: 'Open English Oral for Nursery', href: '/p/nursery' },
+      { text: 'Open English Oral for Class 1', href: '/p/class-1' },
+      { text: 'Open Science Oral for UKG', href: '/p/ukg/science' },
+      { text: 'Open Science Oral for Class 1', href: '/p/class-1/science' },
+    ];
+    assert.equal(bestLink('English Oral', papers), null);
+    assert.equal(bestLink('Science Oral', papers), null);
+    assert.equal(bestLink('English Oral for Class 1', papers)?.href, '/p/class-1');
+  });
+
+  it('sees a tie behind a second link to the best place', () => {
+    const students = [{ text: 'Arjun Patel', href: '/s/1' }, { text: 'Arjun Patel', href: '/s/1' }, { text: 'Arjun Reddy', href: '/s/2' }];
+    assert.equal(bestLink('Arjun', students), null);
+  });
+
+  it('keeps the best of several links to one place: an exact breadcrumb beats a card with more on it', () => {
+    const links = [
+      { text: 'Arjun Patel Class 5 Roll 3', href: '/s/1' },
+      { text: 'Arjun Patel', href: '/s/1' },
+      { text: 'Arjun Patel Senior', href: '/s/3' },
+    ];
+    assert.equal(bestLink('Arjun Patel', links)?.href, '/s/1');
+  });
+
   it('treats two links to the same place as one', () => {
     const same = [{ text: 'Aanya Menon', href: '/s/1' }, { text: 'Aanya Menon', href: '/s/1' }];
     assert.equal(bestLink('Aanya Menon', same)?.href, '/s/1');
@@ -65,6 +104,36 @@ describe('bestLink in a sidebar', () => {
 
   it('never opens a one-word link only because a longer request contains its word', () => {
     assert.equal(bestLink('view the results of class 5', sidebar), null);
+  });
+});
+
+describe('closestLinks', () => {
+  it('lists the places that match equally well, once each, so the user can be asked which', () => {
+    const papers = [
+      { text: 'Open English Oral for Nursery', href: '/p/nursery' },
+      { text: 'Open English Oral for Nursery', href: '/p/nursery' },
+      { text: 'Open English Oral for LKG', href: '/p/lkg' },
+      { text: 'Open English Written for LKG', href: '/p/lkg/written' },
+    ];
+    assert.deepEqual(closestLinks('English Oral', papers).map((link) => link.href), ['/p/nursery', '/p/lkg']);
+  });
+
+  it('is empty when one place wins or nothing matches', () => {
+    assert.deepEqual(closestLinks('Arjun Reddy', [{ text: 'Arjun Patel', href: '/s/1' }, { text: 'Arjun Reddy', href: '/s/2' }]), []);
+    assert.deepEqual(closestLinks('Unit Test 3', exams), []);
+  });
+});
+
+describe('nearestFirst', () => {
+  it('puts the links sharing most of the request first, so a near miss is not cut from the list', () => {
+    const sidebar = Array.from({ length: 40 }, (_, index) => ({ text: `Section ${index}`, href: `/x/${index}` }));
+    const papers = [{ text: 'Open English Oral for Nursery', href: '/p/nursery' }, { text: 'Open English Oral for Class 1', href: '/p/class-1' }];
+    const label = 'English oral question paper for Class 1';
+    // Five of its seven words: not enough to open, but the model must see it to call again with its exact text.
+    assert.equal(bestLink(label, [...sidebar, ...papers]), null);
+    const texts = linkTexts(nearestFirst(label, [...sidebar, ...papers]));
+    assert.equal(texts[0], 'Open English Oral for Class 1');
+    assert.equal(texts.length, 40);
   });
 });
 

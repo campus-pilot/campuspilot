@@ -65,6 +65,7 @@ function PaperList({ scope }: { scope: ExamScope }) {
           <QuestionPaperClassTable
             key={classView.classId}
             classView={classView}
+            hrefOf={(cell) => questionPaperWorkspaceHref({ ...scope, ...cell })}
             onOpen={(cell) => router.push(questionPaperWorkspaceHref({ ...scope, ...cell }))}
           />
         ))

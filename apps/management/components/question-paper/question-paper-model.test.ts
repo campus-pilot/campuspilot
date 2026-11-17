@@ -2,6 +2,10 @@ import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 import {
   applyPageOrder,
+  assistantCollapsedOf,
+  canCompareOf,
+  compareAsked,
+  comparePageIndex,
   currentJobFailure,
   generatedVersionReady,
   detailPollInterval,
@@ -15,11 +19,14 @@ import {
   shownPaperOf,
   runWithConcurrency,
   pagePreviewFallback,
+  pageTurnBlockedReason,
   pagesNotReadyReason,
   pagesProcessing,
   patchStoredPage,
   releaseFailedUpload,
   unreservedUploads,
+  scrollAfterZoom,
+  turnedRotation,
   uploadsInFlight,
 } from './question-paper-model';
 import { QueryClient } from '@tanstack/react-query';
@@ -209,4 +216,61 @@ test('the page preview says the AI can read a photo only when it was stored and 
   assert.equal(pagePreviewFallback({ uploadStatus: 'stored', derivativeStatus: 'unsupported' }), 'This photo cannot be shown here. The AI can still read it.');
   assert.equal(pagePreviewFallback({ uploadStatus: 'stored', derivativeStatus: 'failed' }), 'This photo could not be read. Remove the page and add the photo again.');
   assert.equal(pagePreviewFallback({ uploadStatus: 'awaiting', derivativeStatus: 'pending' }), 'This photo has not arrived. Remove the page and add the photo again.');
+});
+
+test('a page can be turned only once its copies exist, and the viewer says why not before that', () => {
+  assert.equal(pageTurnBlockedReason({ uploadStatus: 'stored', derivativeStatus: 'ready' }), null);
+  assert.equal(pageTurnBlockedReason({ uploadStatus: 'awaiting', derivativeStatus: 'pending' }), 'This photo is still uploading.');
+  assert.equal(pageTurnBlockedReason({ uploadStatus: 'stored', derivativeStatus: 'pending' }), 'This photo is still being prepared.');
+  assert.equal(pageTurnBlockedReason({ uploadStatus: 'stored', derivativeStatus: 'failed' }), 'This photo could not be read.');
+  assert.equal(pageTurnBlockedReason({ uploadStatus: 'stored', derivativeStatus: 'unsupported' }), "This photo's format cannot be turned.");
+});
+
+test('Rotate right turns a page a quarter clockwise and Rotate left a quarter back, wrapping at a full turn', () => {
+  const rotations = [0, 90, 180, 270] as const;
+  assert.deepEqual(rotations.map((rotation) => turnedRotation(rotation, 'right')), [90, 180, 270, 0]);
+  assert.deepEqual(rotations.map((rotation) => turnedRotation(rotation, 'left')), [270, 0, 90, 180]);
+  for (const rotation of rotations) assert.equal(turnedRotation(turnedRotation(rotation, 'right'), 'left'), rotation);
+});
+
+test('comparing with the photos is asked for by ?compare=1 only', () => {
+  assert.equal(compareAsked('1'), true);
+  for (const raw of [null, undefined, '', '0', 'true', 'yes', '2']) assert.equal(compareAsked(raw), false);
+});
+
+test('a paper can be compared only when it has photos and a paper on screen', () => {
+  assert.equal(canCompareOf({ pageCount: 3, shown: { kind: 'version', versionNo: 2 } }), true);
+  assert.equal(canCompareOf({ pageCount: 1, shown: { kind: 'draft' } }), true);
+  // Made in chat or copied from an earlier paper: nothing was photographed.
+  assert.equal(canCompareOf({ pageCount: 0, shown: { kind: 'version', versionNo: 1 } }), false);
+  // Photos whose first paper is still being generated: nothing to read against them yet.
+  assert.equal(canCompareOf({ pageCount: 3, shown: { kind: 'nothing' } }), false);
+});
+
+test('the assistant folds away while comparing and is as it was left afterwards', () => {
+  const open = { collapsed: false, shownWhileComparing: false };
+  assert.equal(assistantCollapsedOf({ ...open, comparing: false }), false);
+  assert.equal(assistantCollapsedOf({ ...open, comparing: true }), true);
+  // Opened again during the comparison: it stays open, and that says nothing about how it is left afterwards.
+  assert.equal(assistantCollapsedOf({ collapsed: true, shownWhileComparing: true, comparing: true }), false);
+  assert.equal(assistantCollapsedOf({ collapsed: true, shownWhileComparing: true, comparing: false }), true);
+  assert.equal(assistantCollapsedOf({ collapsed: true, shownWhileComparing: false, comparing: false }), true);
+});
+
+test('the comparison shows the page stepped to, and the first when it is gone or none was chosen', () => {
+  const ids = ['a', 'b', 'c'];
+  assert.equal(comparePageIndex(ids, null), 0);
+  assert.equal(comparePageIndex(ids, 'c'), 2);
+  assert.equal(comparePageIndex(ids, 'removed'), 0);
+  assert.equal(comparePageIndex([], 'a'), -1);
+  assert.equal(comparePageIndex([], null), -1);
+});
+
+test('zooming keeps the point under the pointer where it was', () => {
+  // Fitted page, pressed 100 px in and 300 px down: at twice the size that point is at (200, 600), so the pane scrolls by the difference.
+  assert.deepEqual(scrollAfterZoom({ x: 0, y: 0 }, { x: 100, y: 300 }, 2), { x: 100, y: 300 });
+  // Already scrolled down the fitted page.
+  assert.deepEqual(scrollAfterZoom({ x: 0, y: 400 }, { x: 100, y: 300 }, 2), { x: 100, y: 1100 });
+  // Zooming out is the inverse, so in and out returns to where it started.
+  assert.deepEqual(scrollAfterZoom({ x: 100, y: 1100 }, { x: 100, y: 300 }, 0.5), { x: 0, y: 400 });
 });

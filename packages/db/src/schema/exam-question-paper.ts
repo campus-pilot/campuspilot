@@ -13,6 +13,10 @@ import {
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 import type { QuestionPaperNotice } from "@campuspilot/question-paper/hash";
+import {
+  QUESTION_PAPER_PAGE_ROTATIONS,
+  type QuestionPaperPageRotation,
+} from "@campuspilot/question-paper/pages";
 
 import { generateId } from "../id";
 import { artifactTable } from "./artifact";
@@ -187,12 +191,37 @@ export const examQuestionPaperPageTable = pgTable(
     sha256: text("sha256"),
     /** When the bytes arrived; the worker's deadline for the derivatives runs from here. */
     storedAt: timestamp("stored_at", { withTimezone: true }),
-    /** Null when the image could not be decoded. */
+    /**
+     * The displayed size: after EXIF orientation and `rotation`, so it is the
+     * size of the derivatives' shape. Null when the image could not be decoded
+     * and its header states no size.
+     */
     width: integer("width"),
     height: integer("height"),
     derivativeStatus: questionPaperPageDerivativeStatusEnum(
       "derivative_status",
     ).notNull(),
+    /**
+     * Clockwise quarter turns (0, 90, 180, 270) a person applied on top of the
+     * photo's EXIF orientation, because a page photographed with the phone held
+     * sideways is still on its side after EXIF orientation. Its own fact: the
+     * original object is never changed; the thumbnail and the model derivative
+     * are made from the original with this turn applied, and `width`/`height`
+     * follow it. Only a page whose derivatives exist (`ready`) can be turned.
+     */
+    rotation: integer("rotation")
+      .$type<QuestionPaperPageRotation>()
+      .notNull()
+      .default(0),
+    /**
+     * How often the thumbnail and model derivative were made again after the
+     * upload (0: they are the upload's own). Bumped with every change of
+     * `rotation`. The page image URLs carry it, so a browser never shows a
+     * cached redirect to an earlier turn's (deleted) objects. Its own counter:
+     * never inferred from `rotation` (turning right and back left returns to
+     * the same rotation with new objects).
+     */
+    derivativeRevision: integer("derivative_revision").notNull().default(0),
     thumbS3Key: text("thumb_s3_key"),
     modelS3Key: text("model_s3_key"),
     modelContentType: text("model_content_type"),
@@ -214,6 +243,10 @@ export const examQuestionPaperPageTable = pgTable(
     check(
       "exam_question_paper_page_derivative_check",
       sql`(${table.derivativeStatus} = 'ready') = (${table.thumbS3Key} is not null and ${table.modelS3Key} is not null)`,
+    ),
+    check(
+      "exam_question_paper_page_rotation_check",
+      sql`${table.rotation} in (${sql.raw(QUESTION_PAPER_PAGE_ROTATIONS.join(", "))}) and (${table.rotation} = 0 or ${table.derivativeStatus} = 'ready') and ${table.derivativeRevision} >= 0`,
     ),
     check(
       "exam_question_paper_page_size_check",

@@ -2,6 +2,7 @@ import Handlebars from "handlebars";
 import sanitizeHtml from "sanitize-html";
 import { DOCUMENT_SANITIZER_OPTIONS, EMBEDDABLE_IMAGE } from "./document.sanitize";
 import { env } from "@campuspilot/env/server";
+import { annotateTiming, measure } from "@campuspilot/logger/perf";
 import { rpcError } from "../../../errors";
 import { ORPCError } from "@orpc/server";
 import { QUESTION_PAPER_LIMITS } from "@campuspilot/question-paper/limits";
@@ -762,10 +763,10 @@ function renderMetered(
     throw new Error("A document render started inside another render.");
   const current: RenderMeter = { chars: 0, steps: 0, limit };
   try {
-    const template = prepareTemplate(content);
+    const template = measure("doc.template.compile", () => prepareTemplate(content));
     activeMeter = current;
     return {
-      raws: contexts.map((context) => runMetered(template, context)),
+      raws: measure("doc.template.render", () => contexts.map((context) => runMetered(template, context))),
       meter: current,
     };
   } catch (cause) {
@@ -798,12 +799,14 @@ function safeHtml(raw: string, type?: DocumentType) {
     throw rpcError.badRequest(
       "This document exceeds the 25 MB rendering limit. Select fewer students or use smaller photos.",
     );
-  const clean = sanitizeHtml(raw, {
-    ...DOCUMENT_SANITIZER_OPTIONS,
-    allowedTags: (DOCUMENT_SANITIZER_OPTIONS.allowedTags as string[]).filter(
-      (tag) => !["html", "head", "body"].includes(tag),
-    ),
-  });
+  const clean = measure("doc.sanitize", () =>
+    sanitizeHtml(raw, {
+      ...DOCUMENT_SANITIZER_OPTIONS,
+      allowedTags: (DOCUMENT_SANITIZER_OPTIONS.allowedTags as string[]).filter(
+        (tag) => !["html", "head", "body"].includes(tag),
+      ),
+    }),
+  );
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${documentContentSecurityPolicy(type)}"></head><body>${clean}</body></html>`;
 }
 /** Whether a value is an image the sanitizer keeps: a base64 PNG, JPEG or WebP data URI. */
@@ -1034,22 +1037,26 @@ export async function convertDocumentPdf(
   form.append("preferCssPageSize", "true");
   form.append("printBackground", "true");
   if (questionPaper) form.append("nativePageRanges", `1-${QUESTION_PAPER_LIMITS.pdfPages + 1}`);
-  const response = await fetch(
-    `${env.GOTENBERG_URL.replace(/\/$/, "")}/forms/chromium/convert/html`,
-    {
-      method: "POST",
-      body: form,
-      signal: AbortSignal.any([
-        AbortSignal.timeout(questionPaper ? QUESTION_PAPER_CONVERSION_TIMEOUT_MS : 120_000),
-        ...(signal ? [signal] : []),
-      ]),
-    },
-  );
-  if (!response.ok)
-    throw new Error(`PDF conversion failed (${response.status}).`);
-  const bytes = Buffer.from(await response.arrayBuffer());
+  // Gotenberg (Chromium) does the layout in its own container: this step is waiting, not CPU in this process.
+  const bytes = await measure("doc.pdf.convert", async () => {
+    const response = await fetch(
+      `${env.GOTENBERG_URL.replace(/\/$/, "")}/forms/chromium/convert/html`,
+      {
+        method: "POST",
+        body: form,
+        signal: AbortSignal.any([
+          AbortSignal.timeout(questionPaper ? QUESTION_PAPER_CONVERSION_TIMEOUT_MS : 120_000),
+          ...(signal ? [signal] : []),
+        ]),
+      },
+    );
+    if (!response.ok)
+      throw new Error(`PDF conversion failed (${response.status}).`);
+    return Buffer.from(await response.arrayBuffer());
+  });
+  annotateTiming({ pdfHtmlBytes: Buffer.byteLength(html, "utf8"), pdfBytes: bytes.length });
   if (bytes.length > 30_000_000 || bytes.subarray(0, 5).toString() !== "%PDF-")
     throw new Error("PDF converter returned an invalid or oversized document.");
-  if (questionPaper) await assertQuestionPaperPageCount(bytes);
+  if (questionPaper) await measure("doc.pdf.pagecount", () => assertQuestionPaperPageCount(bytes));
   return bytes;
 }

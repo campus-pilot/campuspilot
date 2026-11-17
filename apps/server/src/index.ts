@@ -22,6 +22,7 @@ import { sweepNotificationOutbox } from '@campuspilot/api/notifications/notifica
 import { sweepNotificationRetention } from '@campuspilot/api/notifications/retention';
 import { sweepResultPublications } from '@campuspilot/api/notifications/emitters/results';
 import { sweepWhatsAppFailureAlerts } from '@campuspilot/api/notifications/failure-alerts';
+import { startRuntimeMonitor } from '@campuspilot/logger/perf';
 
 import { app, cadetMcpCatalog, cadetMcpHandler, mcpCatalog, mcpHandler } from './http';
 import { log } from './log';
@@ -232,12 +233,16 @@ async function main() {
     },
   );
 
+  // Event loop delay, CPU use and the container's CPU throttling (`runtime.*` events, docs/performance-logs.md).
+  const stopRuntimeMonitor = startRuntimeMonitor(log);
+
   // Voice sessions are WebSockets on this same server (`/model/voice`); see `packages/assistant/src/voice/server.ts`.
   const voice = attachAssistantVoice(server as Server);
 
   const shutdown = (signal: string) => {
     log.info({ signal }, 'boot.shutdown.start');
     voice.close();
+    stopRuntimeMonitor();
     clearInterval(dcrCleanup);
     clearInterval(notificationRetention);
     stopped = true;

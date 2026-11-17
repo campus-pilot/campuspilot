@@ -3,8 +3,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { z } from 'zod';
 import type { detailOutputSchema } from '@campuspilot/api/routers/school/question-paper/question-paper.dto';
+import { toast } from '@campuspilot/ui/lib/toast';
 import { orpc } from '@/lib/orpc';
-import { detailPollInterval, questionPaperPermission, type QuestionPaperScope } from './question-paper-model';
+import { detailPollInterval, isConflict, questionPaperPermission, requestErrorMessage, type QuestionPaperScope } from './question-paper-model';
+import type { PageTurning } from './source-preview-dialogs';
 
 export type QuestionPaperDetail = z.infer<typeof detailOutputSchema>;
 
@@ -38,6 +40,39 @@ export function useRefreshQuestionPaper(scope: QuestionPaperScope) {
       queryClient.invalidateQueries({ queryKey: orpc.school.getQuestionPaperDetail.queryKey({ input: scope }) }),
       queryClient.invalidateQueries({ queryKey: orpc.school.listQuestionPapers.key() }),
     ]);
+  };
+}
+
+/**
+ * Turning a page: the server makes the page's copies again turned, so this is
+ * not optimistic; whoever shows the page (the page viewer, the comparison
+ * beside the paper) dims it under a spinner until the paper is read again
+ * with the turned copies (new image URLs). A failure is a toast, like the
+ * other page changes, and a conflict reloads the pages.
+ */
+export function useRotatePage(scope: QuestionPaperScope) {
+  const refresh = useRefreshQuestionPaper(scope);
+  return useMutation(
+    orpc.school.rotateQuestionPaperPage.mutationOptions({
+      onError: (error) => toast.error(isConflict(error) ? 'Someone changed the pages; reloaded.' : requestErrorMessage(error, 'The page could not be turned.')),
+      onSettled: refresh,
+    }),
+  );
+}
+
+/**
+ * What a place that shows a page needs in order to turn it with
+ * {@link useRotatePage}: which page is being turned now, whether the buttons
+ * must wait, and the request itself (the rotation the page should have,
+ * checked against the page revision the screen holds). `otherChange` says
+ * another page change is on its way (an upload, a reorder, a removal): like a
+ * turn, each bumps that revision, so a turn waits for it.
+ */
+export function pageTurningOf(rotate: ReturnType<typeof useRotatePage>, scope: QuestionPaperScope, pageRevision: number, otherChange: boolean): PageTurning {
+  return {
+    turningPageId: rotate.isPending ? (rotate.variables?.pageId ?? null) : null,
+    busy: otherChange || rotate.isPending,
+    onRotate: (pageId, rotation) => rotate.mutate({ ...scope, pageId, rotation, expectedPageRevision: pageRevision }),
   };
 }
 

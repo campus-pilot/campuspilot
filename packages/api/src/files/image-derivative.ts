@@ -1,3 +1,4 @@
+import { measure } from '@campuspilot/logger/perf';
 import sharp from 'sharp';
 
 import { rpcError } from '../errors';
@@ -53,10 +54,17 @@ const FIGURE_EDGE_PX = 1400;
 /** Target size of a normalised figure (the last, smallest encoding is kept whatever its size). */
 export const FIGURE_MAX_BYTES = 400 * 1024;
 
+/**
+ * Clockwise quarter turns applied after EXIF orientation: a page photographed
+ * with the phone held sideways is still on its side once EXIF orientation is
+ * applied, and the person who uploaded it turns it upright.
+ */
+export type QuarterTurn = 0 | 90 | 180 | 270;
+
 export type ImageDerivatives =
   | {
       status: 'ready';
-      /** Width and height after EXIF orientation, as displayed. */
+      /** Width and height after EXIF orientation and the requested quarter turn, as displayed. */
       width: number;
       height: number;
       model: { bytes: Buffer; contentType: 'image/jpeg' };
@@ -90,11 +98,14 @@ export async function withDecodeSlot<T>(task: () => Promise<T>, queue: DecodeQue
     if (queue === 'bounded' && waitingForDecode.length >= MAX_WAITING_DECODES) {
       throw rpcError.tooManyRequests('The server is busy processing photos. Try again in a few seconds.');
     }
-    await new Promise<void>((resolve) => waitingForDecode.push(resolve));
+    // Timed apart from the decode: a long wait means uploads queue behind each other, not that one photo is slow. The
+    // loop re-checks after every wake-up, so the timing's extra await cannot let two decodes past the limit.
+    await measure('image.decode.wait', () => new Promise<void>((resolve) => waitingForDecode.push(resolve)));
   }
   activeDecodes += 1;
   try {
-    return await task();
+    // sharp decodes on libuv's thread pool, so this is mostly off the event loop; it still competes for the pod's CPU.
+    return await measure('image.decode', task);
   } finally {
     activeDecodes -= 1;
     waitingForDecode.shift()?.();
@@ -104,6 +115,10 @@ export async function withDecodeSlot<T>(task: () => Promise<T>, queue: DecodeQue
 /** The refusal for an image that declares more than {@link MAX_INPUT_PIXELS} pixels. */
 const tooManyPixels = () =>
   rpcError.payloadTooLarge(`The photo has more than ${MAX_INPUT_PIXELS / 1_000_000} megapixels. Use a smaller photo.`);
+
+/** The size an image displays at once turned by `rotation`: a quarter or three-quarter turn swaps the sides. */
+const turnedSize = (size: { width: number; height: number }, rotation: QuarterTurn) =>
+  rotation === 90 || rotation === 270 ? { width: size.height, height: size.width } : size;
 
 /** The displayed size of an image from its header; null when the header cannot be read. */
 export async function headerSize(bytes: Uint8Array): Promise<{ width: number; height: number } | null> {
@@ -120,10 +135,15 @@ export async function headerSize(bytes: Uint8Array): Promise<{ width: number; he
 /** Pixels of a decoded base image: raw, 3 channels, already upright, flattened onto white and at most 1800 px. */
 type RawBase = { data: Buffer; width: number; height: number; channels: 1 | 2 | 3 | 4 };
 
-/** The one full decode of an upload; every derivative is made from its (at most 1800 px) result. */
-async function decodeBase(bytes: Uint8Array): Promise<RawBase> {
+/**
+ * The one full decode of an upload; every derivative is made from its (at most
+ * 1800 px) result. EXIF orientation is applied first and the person's quarter
+ * turn after it, so the turn is relative to the photo as it displays.
+ */
+async function decodeBase(bytes: Uint8Array, rotation: QuarterTurn): Promise<RawBase> {
   const { data, info } = await open(bytes)
-    .rotate()
+    .autoOrient()
+    .rotate(rotation)
     .flatten({ background: '#ffffff' })
     .toColourspace('srgb')
     .resize({ width: MODEL_EDGE_PX, height: MODEL_EDGE_PX, fit: 'inside', withoutEnlargement: true })
@@ -174,18 +194,24 @@ export async function checkImageHeader(bytes: Uint8Array): Promise<{ width: numb
  * cannot be decoded. A JPEG, PNG or WebP that cannot be decoded is the
  * caller's mistake (415); a HEIC/HEIF that cannot is `unsupported`, which is
  * a fact about this server, not about the file.
+ *
+ * `rotation` turns both derivatives (and the reported size) clockwise by that
+ * many degrees after EXIF orientation; the bytes passed in are never changed.
+ * An `unsupported` result reports the header's size unturned: nothing was
+ * turned.
  */
 export async function makeImageDerivatives(
   bytes: Uint8Array,
   contentType: string,
-  queue: DecodeQueue = 'bounded',
+  options: { rotation?: QuarterTurn; queue?: DecodeQueue } = {},
 ): Promise<ImageDerivatives> {
+  const rotation = options.rotation ?? 0;
   const isHeif = contentType === 'image/heic' || contentType === 'image/heif';
   const size = await checkImageHeader(bytes);
   return withDecodeSlot(async () => {
     try {
       if (!size) throw new Error('The image has no readable size.');
-      const base = await decodeBase(bytes);
+      const base = await decodeBase(bytes, rotation);
       const [model, thumb] = await Promise.all([
         encodeModelDerivative(base),
         fromBase(base)
@@ -195,7 +221,7 @@ export async function makeImageDerivatives(
       ]);
       return {
         status: 'ready' as const,
-        ...size,
+        ...turnedSize(size, rotation),
         model: { bytes: model, contentType: 'image/jpeg' as const },
         thumb: { bytes: thumb, contentType: 'image/jpeg' as const },
       };
@@ -205,7 +231,7 @@ export async function makeImageDerivatives(
       }
       return { status: 'unsupported' as const, width: size?.width ?? null, height: size?.height ?? null };
     }
-  }, queue);
+  }, options.queue);
 }
 
 export type NormalizedFigure = {

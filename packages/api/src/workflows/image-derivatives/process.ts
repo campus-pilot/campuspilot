@@ -31,7 +31,7 @@ type Derived = ImageDerivatives | { status: 'failed' };
  */
 async function derive(bytes: Uint8Array, contentType: string): Promise<Derived> {
   try {
-    return await makeImageDerivatives(bytes, contentType, 'unbounded');
+    return await makeImageDerivatives(bytes, contentType, { queue: 'unbounded' });
   } catch (error) {
     if (error instanceof ORPCError && (error.code === 'UNSUPPORTED_MEDIA_TYPE' || error.code === 'PAYLOAD_TOO_LARGE')) {
       return { status: 'failed' };
@@ -68,6 +68,12 @@ function ownsWrittenCopies(row: { thumbS3Key: string | null } | undefined, keys:
  * (unless an overlapping run recorded them, see {@link ownsWrittenCopies}).
  * Running it twice for the same page writes the same keys and changes nothing
  * the second time.
+ *
+ * No `rotation` is applied: a page can be turned only once it is `ready`
+ * (`exam_question_paper_page_rotation_check`), so a `pending` page is always
+ * unturned. A turn writes its copies under its own keys and is never undone
+ * to `pending`, so a late run's fence miss finds the turn's keys on the row
+ * and removes the upload keys it wrote again.
  */
 export async function processPageDerivatives(db: DatabaseExecutor, pageId: string): Promise<DerivativeOutcome> {
   const [page] = await db.select().from(examQuestionPaperPageTable).where(eq(examQuestionPaperPageTable.id, pageId)).limit(1);

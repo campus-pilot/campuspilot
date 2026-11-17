@@ -148,6 +148,7 @@ function TimelineRow({ row, ...renderers }: RowRenderers & { row: AssistantTimel
  * the end, anchors each new user turn, and offers a "Scroll to end" pill.
  */
 export function AssistantTimeline({ rows, trailing, gutterClassName = 'px-4 sm:px-6', ...renderers }: AssistantTimelineProps) {
+  const latestQuestion = rows.findLastIndex((row) => row.kind === 'user');
   return (
     <MessageScrollerProvider autoScroll defaultScrollPosition="end">
       <MessageScroller>
@@ -157,7 +158,11 @@ export function AssistantTimeline({ rows, trailing, gutterClassName = 'px-4 sm:p
               <MessageScrollerItem
                 key={row.id}
                 messageId={row.id}
-                scrollAnchor={row.kind === 'user'}
+                // Only the newest question is an anchor. The scroller pins any anchor it has not pinned yet
+                // whenever rows are swapped without changing their count (the "Thinking" row turning into the
+                // work bar), and the questions loaded with the conversation were never pinned: with all of
+                // them anchors, each message sent jumped the reader up to the oldest of them.
+                scrollAnchor={index === latestQuestion}
                 className={cn(ASSISTANT_LANE_CLASS, rowSpacing(row, rows[index - 1]))}
               >
                 <TimelineRow row={row} {...renderers} />

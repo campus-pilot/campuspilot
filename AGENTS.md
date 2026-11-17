@@ -159,6 +159,14 @@ post-sanitiser insertion exceptions, the job's steps and failure codes,
 how chat attachments, tools, drafts and context pruning work, and the checklist
 for extending papers.
 
+## Performance logs
+
+Before adding timings to a code path, or when investigating a slow or stalled
+API or worker, read [Performance logs](docs/performance-logs.md). It lists the
+`http.request.end` timing fields, `perf.step.slow`, the `runtime.*` events
+(event loop delay, CPU, container throttling) and every step name, and how to
+read them apart (blocking code, CPU throttling, waiting on another service).
+
 ## Examination timetables
 
 Before changing exam timetable drafting, publishing or withdrawal, the

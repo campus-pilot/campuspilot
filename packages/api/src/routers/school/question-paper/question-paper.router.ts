@@ -1,3 +1,4 @@
+import { annotateTiming, measure } from '@campuspilot/logger/perf';
 import { CLASS_ACTIONS } from '@campuspilot/opa/policies/class';
 import { SCHOOL_ACTIONS } from '@campuspilot/opa/policies/school';
 import { buildLearnPayload } from '@campuspilot/question-paper/guide';
@@ -34,6 +35,7 @@ import {
   listQuestionPaperVersions,
   listQuestionPapers,
   reorderQuestionPaperPages,
+  rotateQuestionPaperPage,
   startQuestionPaperGeneration,
 } from './question-paper.service';
 import { readTemplatePrints } from './question-paper.template-prints';
@@ -429,6 +431,26 @@ export const schoolQuestionPaperRouter = {
       }
     }),
 
+  rotateQuestionPaperPage: protectedProcedure
+    .route(route('Turn a question paper page', "Turn one uploaded page photo to a rotation (clockwise degrees on top of the photo's own orientation: 0, 90, 180 or 270), for a page photographed sideways. The original upload is kept as it is; the thumbnail and the copy the AI reads are made again turned. expectedPageRevision must be the revision you last saw (CONFLICT otherwise); a turn bumps it. Refused while a generation runs and for a photo the server cannot read (HEIC)."))
+    .meta(humanOnly('write'))
+    .input(dto.rotatePageInputSchema)
+    .use(manageClass)
+    .use(requireQuestionPaperAssistantAccess())
+    .output(dto.rotatePageOutputSchema)
+    .handler(async ({ context, input }) => {
+      try {
+        return await rotateQuestionPaperPage(context.db, {
+          scope: await resolvePaperScope(context.db, input),
+          pageId: input.pageId,
+          rotation: input.rotation,
+          expectedPageRevision: input.expectedPageRevision,
+        });
+      } catch (error) {
+        throw toRpcError(error);
+      }
+    }),
+
   deleteQuestionPaper: protectedProcedure
     .route(route('Delete a question paper', 'Delete a paper with its uploaded pages, figure images, every version and every stored PDF. This cannot be undone. Refused while a generation runs.'))
     .meta(humanOnly('write', true))
@@ -458,7 +480,9 @@ export const schoolQuestionPaperRouter = {
         if (!paper) throw rpcError.notFound('Question paper');
         const version = await getVersion(context.db, paper.id, input.versionNo);
         const { html, templateName } = await renderStoredVersionHtml(context.db, scope, version);
-        return { html, warnings: version.warnings, placeholderFigures: sanitizeQuestionPaperBody(version.contentHtml).stats.placeholders, templateName };
+        const placeholderFigures = measure('qp.preview.placeholders', () => sanitizeQuestionPaperBody(version.contentHtml).stats.placeholders);
+        annotateTiming({ paperId: paper.id, versionNo: version.versionNo, htmlBytes: Buffer.byteLength(html, 'utf8') });
+        return { html, warnings: version.warnings, placeholderFigures, templateName };
       } catch (error) {
         throw toRpcError(error);
       }
@@ -482,9 +506,11 @@ export const schoolQuestionPaperRouter = {
         if (!template) throw templateMissingError();
         const paper = await findPaper(context.db, scope.key);
         const body = await renderQuestionPaperBody(context.db, { schoolId: input.schoolId, paperId: paper?.id ?? null, html: checked.html, chat });
-        const rendered = await buildQuestionPaperContext(context.db, scope, { versionNo: null });
+        const rendered = await measure('qp.context', () => buildQuestionPaperContext(context.db, scope, { versionNo: null }));
+        const html = renderQuestionPaperDocument({ template, context: rendered, body });
+        annotateTiming({ paperId: paper?.id ?? null, htmlBytes: Buffer.byteLength(html, 'utf8') });
         return {
-          html: renderQuestionPaperDocument({ template, context: rendered, body }),
+          html,
           problems: [],
           warnings: checked.notices,
           placeholderFigures: checked.placeholderFigures,

@@ -59,6 +59,7 @@ import { auth } from '@campuspilot/auth/server';
 import { db } from '@campuspilot/db';
 import { env } from '@campuspilot/env/server';
 import type { Logger } from '@campuspilot/logger';
+import { measure } from '@campuspilot/logger/perf';
 import { OpenAPIHandler } from '@orpc/openapi/fetch';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { OpenAPIReferencePlugin } from '@orpc/openapi/plugins';
@@ -590,12 +591,19 @@ export const rpcHandler = new RPCHandler(appRouter, {
   ],
 });
 
+/**
+ * Staff RPC and the API reference. `rpc.context` (session or API key lookup)
+ * and `rpc.handle` (the procedure, including its permission checks) are timed
+ * apart, so a slow request's end line says whether auth or the procedure was slow.
+ */
 app.use('/*', async (context, next) => {
-  const apiContext = await createContext({ context });
-  const rpcResult = await rpcHandler.handle(context.req.raw, {
-    prefix: '/rpc',
-    context: apiContext,
-  });
+  const apiContext = await measure('rpc.context', () => createContext({ context }));
+  const rpcResult = await measure('rpc.handle', () =>
+    rpcHandler.handle(context.req.raw, {
+      prefix: '/rpc',
+      context: apiContext,
+    }),
+  );
   if (rpcResult.matched) {
     return context.newResponse(rpcResult.response.body, rpcResult.response);
   }

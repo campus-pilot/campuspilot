@@ -67,7 +67,7 @@ Every procedure and upload route checks, in this order (the order matters: a cal
 without access must learn nothing about the school's features):
 
 1. **OPA class permission** `class.exam.question_paper.read` (list, view, preview,
-   download, versions) or `.manage` (upload, reorder, delete, generate, save, copy).
+   download, versions) or `.manage` (upload, reorder, turn, delete, generate, save, copy).
    Granted to teacher (only for the classes in the role's `meta.classIds`), principal,
    manager and exam coordinator (every class). `listQuestionPapers` and
    `learn_question_paper_generation` are school level (`READ_EXAM_PLANS` /
@@ -106,12 +106,25 @@ affected papers itself.
 | Table | Holds |
 | --- | --- |
 | `exam_question_paper` | The paper: unique key, `latest_version_no` (token of saving a version, never `max(version_no)`), `page_revision` (token of page changes) |
-| `exam_question_paper_page` | One photo: position, `upload_status` (`awaiting` while reserved, `stored` once the photo arrived, with `stored_at`; migration 0071), original and two derivatives (`model` JPEG the AI reads, `thumb`), `derivative_status` (`pending` until the worker made them, `ready`, `unsupported` when the server cannot decode it, for example HEIC, or `failed`), size, sha256 (the file facts are null while `awaiting`) |
+| `exam_question_paper_page` | One photo: position, `upload_status` (`awaiting` while reserved, `stored` once the photo arrived, with `stored_at`; migration 0072), original and two derivatives (`model` JPEG the AI reads, `thumb`), `derivative_status` (`pending` until the worker made them, `ready`, `unsupported` when the server cannot decode it, for example HEIC, or `failed`), `rotation` and `derivative_revision` (below), displayed size, sha256 (the file facts are null while `awaiting`) |
 | `exam_question_paper_job` | One generation: `queued`, `running`, `succeeded`, `failed`; ordered `page_ids` and the `page_revision` it ran on; the teacher's `instructions` (nullable text, migration 0067: null means none, written at creation and never changed); provider, model, request count; `error_code` and the safe `error_message` (and developer-only `error_detail`); hand-over facts (`handed_over_at`, attempts, last error). A partial unique index allows one queued or running job per paper |
 | `exam_question_paper_version` | Immutable: `version_no`, the sanitised fragment `content_html` (text), its sha256, `source` (`agent`, `ai_job` or `copy`) with the job id, page ids, conversation id or `source_version_id` (the copied version), `plan_max_marks` (the header snapshot), `warnings` (sanitiser notices, below), the pinned `template_revision_id` and the `pdf_artifact_id` |
 | `exam_question_paper_figure` | An uploaded image a version prints (JPEG, or PNG up to 400 KB when it has transparency), owned by the paper, deduplicated by `source_attachment_id` (a chat image) or `source_figure_id` (a figure of a copied version); at most one of the two is set |
 | `assistant_attachment` | A chat attachment, an image or a PDF by its `kind` (below) |
 | `assistant_model_request` | The job's cost rows: `source = 'question_paper'`, `question_paper_job_id`, no chat run |
+
+**Migration 0071** (`question-paper-page-rotation`) added two page columns. `rotation` is the
+clockwise quarter turns (0, 90, 180, 270; default 0) a person applied on top of the photo's EXIF
+orientation: a page photographed with the phone held sideways carries landscape EXIF, so it is
+still on its side after EXIF orientation. It is its own fact, never inferred from the size or the
+EXIF data. The original object is never changed; both derivatives are made from it with the turn
+applied after EXIF orientation, and `width`/`height` are the turned (displayed) size. A check
+allows a turn only on a `ready` page (an `unsupported`, `failed` or `pending` page has no
+derivatives to turn).
+`derivative_revision` counts how often the derivatives were made again after the upload (0: the
+upload's own); every turn bumps it, and the page image URLs carry it (`?v=`) so a browser never
+reuses a cached redirect to an earlier turn's deleted objects. It is a counter of its own, not
+the rotation: turning right and back left returns to the same rotation with new objects.
 
 **Migration 0064** (`question-paper-html-fragment`) moved versions from the structured JSON to
 the fragment: `content jsonb` became `content_html text`, and `schema_version` and `total_marks`
@@ -139,7 +152,8 @@ artifact is ever deleted, the next download prints the version again from its st
 fragment and pinned template and stores the new PDF. Every object lives under
 `schools/{schoolId}/` (`exam-question-papers/pages|figures/{pageId|figureId}...`; objects written before
 this scheme keep their `{paperId}` keys, deletes use the key stored on the row), which is
-what the demo purge sweeps.
+what the demo purge sweeps. A turned page's derivatives are `thumb-{token}.jpg` and
+`model-{token}.jpg` beside the upload's (`questionPaperKeys`, a random token per turn).
 
 ## Lifecycle
 
@@ -161,8 +175,8 @@ chat: attach photos -> draft(s) -> user: "save" -> approval -> version n
   15 minutes (`releaseExpiredPageReservations`, `QUESTION_PAPER_PAGE_RESERVATION_TTL_MS`),
   and the screen shows it as "did not arrive" with Remove meanwhile. The single-request
   `POST .../pages` (reserve one and store it) stays for tabs opened before this and for
-  the demo seed (`addQuestionPaperPage`). Reorder (`expectedPageRevision`) and delete
-  page run under the paper's row lock too.
+  the demo seed (`addQuestionPaperPage`). Reorder, turn and delete page (with
+  `expectedPageRevision`) run under the paper's row lock too.
 - **Photos are shrunk in the browser** (`prepareUploadFile`, decision D24 as revised for
   upload speed): every photo over 1.5 MB, and every HEIC the browser can decode, is
   redrawn as a JPEG of at most 2400 px at quality 0.85 on white, oriented as the camera
@@ -186,6 +200,26 @@ chat: attach photos -> draft(s) -> user: "save" -> approval -> version n
   after 30 s and marks `failed` what is still `pending` after 10 minutes. The screen polls
   the paper every second while a page is `pending` and shows it as "Preparing the photo".
   The upload routes allow 120 a minute per IP (a school shares one address).
+- **Turning a page.** `rotateQuestionPaperPage` takes the page, the rotation it should have
+  (absolute, 0/90/180/270, like a reorder sends the whole new order) and
+  `expectedPageRevision`, with the same permission (`.manage`), assistant gate, exam
+  lifecycle, lock and refusals as reorder and delete (CONFLICT for a stale revision or a
+  generation in flight). It is a human action (hidden from MCP clients and the assistant). Like
+  an upload, the slow part runs with no lock: an unlocked look refuses early, then the original
+  is read and decoded again (`makeImageDerivatives` with `rotation`, after EXIF orientation, in
+  the same decode slots) and the new derivatives are written under new keys. The short
+  transaction re-checks everything under the locks, points the row at the new objects with the
+  turned size, bumps `derivative_revision` and the paper's `page_revision` (the model's input
+  changed, so a generation must be started against the new revision), and the old derivatives
+  are deleted after the commit (best effort); a refused turn deletes its own new objects. Asking
+  for the rotation a page already has changes nothing. Only a `ready` page can be turned. A page
+  whose photo is still uploading or whose copies the worker has not made yet (`pending`) is
+  refused with CONFLICT until they exist, so a turn and the worker never write the same page; a
+  `failed` page is refused with BAD_REQUEST saying to remove it and upload it again, and an
+  `unsupported` one (a HEIC this server cannot decode) with BAD_REQUEST saying to convert it to
+  JPEG. The worker therefore never meets a turned page and applies no rotation; a late worker
+  run (a re-send that overlapped the first) misses its `pending` fence, finds the turn's keys
+  on the row and removes the `thumb.jpg`/`model.jpg` it wrote again.
 - **Generation** (manual only, optionally with the teacher's instructions on what to change). See "The generation job".
 - **Save.** `saveQuestionPaperVersion` validates the fragment (`checkQuestionPaperDraft`:
   sanitise, caps, non-empty, every formula typeset, every figure id usable and the figures'
@@ -195,7 +229,7 @@ chat: attach photos -> draft(s) -> user: "save" -> approval -> version n
   `latest_version_no`. The printed version number must equal the stored one: an
   agent save with a stale `expectedVersionNo` is CONFLICT; a job save renders again
   (up to 3 times) when another version landed in between. A job's save is
-  idempotent per job id. Every write transaction (page add, reorder, delete,
+  idempotent per job id. Every write transaction (page add, reorder, turn, delete,
   figure, delete paper, start, save) first takes the school session row `FOR SHARE`
   and the plan row of the paper's class and subject `FOR SHARE`, then re-reads the exam
   lifecycle (`assertPaperWritableLocked`; the order is the one `deleteExamPlan` uses:
@@ -214,7 +248,7 @@ chat: attach photos -> draft(s) -> user: "save" -> approval -> version n
   Template revisions are shared and stay.
 - **Concurrency.** Everything that changes a paper's pages, jobs or versions runs
   under a `FOR UPDATE` lock of the paper row. While a job is in flight, page changes
-  and deleting the paper are CONFLICT.
+  (including turning a page) and deleting the paper are CONFLICT.
 
 ## Starting from an earlier paper
 
@@ -410,8 +444,20 @@ one the URL names, else the paper's latest shared conversation).
      `pointer`, a fact kept apart from where the tray draws it, so the two never override
      each other (a test guards it). Photos on their way appear in the row at once and a
      failed one stays marked until dismissed. Pressing a tile opens the page large enough
-     to read (`PagePreviewDialog`, the uploaded photo itself, Previous / Next / Remove
-     page); a tile is dragged to reorder; removing asks first. On a phone the tiles carry
+     to read (`PagePreviewDialog`: Previous / Next, Rotate left / Rotate right, Remove
+     page); a tile is dragged to reorder; removing asks first. The viewer shows the copy the
+     AI reads (the `model` derivative, at most 1800 px, through the read route's `model`
+     variant), not the uploaded photo: that copy is what the model gets and it is turned as
+     the page says, while the original is never turned (rotating the original in the browser
+     would show something other than what the model reads). A page the server could not
+     decode has no such copy: the viewer tries the original and says it cannot be turned.
+     *Rotate left* and *Rotate right* are icon buttons with tooltips that send a quarter
+     turn (`turnedRotation`, the absolute rotation, with the page revision); the page is
+     dimmed under a spinner until the paper is read again, and the tile's thumbnail and the
+     viewer then load the turned copies (their URLs carry `derivative_revision`). Like
+     reorder and remove, turning waits while an upload, a reorder, a removal or another turn
+     is on its way, and a failure is a toast (a conflict reloads the pages). The tray takes
+     the caller's page type, so its `thumbUrl` receives the whole page. On a phone the tiles carry
      no remove mark (removing is in the page viewer) and one caption line says what a tap
      and a hold do. Photos also arrive by drop on the card or paste into the note.
      *Create paper* starts the durable job, with the note as its `instructions`, and opens
@@ -468,6 +514,32 @@ one the URL names, else the paper's latest shared conversation).
     *View uploaded photos or file* (*Add photos or a file* while the paper has no photo):
     it opens the same card as the menu's *Add photos or a file*. It is shown when the paper
     has photos, or the user may add some to a paper that can still change.
+  - **Compare with photos.** A paper made from photos can be proof-read against them. The
+    header row has one toggle beside the photos button, *Compare with photos* (an icon button
+    named by its tooltip, `aria-pressed`), shown only when the paper has photographed pages
+    and there is a version or draft on screen (`canCompareOf`). On, from md up, the paper's
+    pane holds two equal panes that each scroll on their own, the photo on the left and the
+    paper on the right (`PaperStage`); nothing keeps them in step, because a photographed
+    page and a printed page do not hold the same lines. What is said about the paper above
+    it (the draft's card, the notices, the placeholder note) stays above the paper, in a row
+    the photo leaves empty, so the two sheets start at the same height. The assistant folds into its strip while comparing so both
+    are wide enough to read; it can be opened again, and once the comparison ends it is as
+    it was left (`assistantCollapsedOf`: how the user left it and whether they opened it
+    during the comparison are two facts, so nothing is restored). The paper keeps its place
+    in the tree, so the toggle never draws it again. The photo pane
+    (`PaperPhotoCompare`, `paper-photo-compare.tsx`) shows one page at a time in a frame
+    like the paper's preview, fitted to the pane's width: the copy the AI read (the `model`
+    derivative, turned as the page says), like the page viewer; a skeleton of the page's
+    shape while it loads and the read error with *Retry* when it does not. A strip under it
+    holds *Zoom in* / *Fit to width*, Previous / "2 of 4" / Next, and for someone who may
+    change the pages the same *Rotate left* / *Rotate right* as the page viewer
+    (`PageTurnButtons`, `useRotatePage`, `pageTurningOf`; closed by `editBlockedReason`, and
+    waiting while a photo uploads or a turn is on its way). Pressing the photo zooms too,
+    about the point pressed (`scrollAfterZoom`), to twice the width, panned by scrolling.
+    Left and Right step through the pages while the pane has focus (while zoomed they pan).
+    The page shown and the zoom are the pane's own state. On a phone there is no room for
+    two panes: a *Photos | Paper* switch above the frame chooses which one it shows, and
+    both stay mounted.
   - The **assistant's side** is the paper's own conversation: the ordinary assistant
     (`AssistantChat`) with the paper as its seed from the first message, its own welcome
     words, placeholder and suggestions, and no prefilled sentence. It is recorded as the
@@ -491,8 +563,11 @@ one the URL names, else the paper's latest shared conversation).
     (`draftIsNewest`), and only a save of this same paper settles it (`unsavedDraftOf`).
 - The URL is `?start=sources|earlier` (the first screen for a paper that already has
   versions, and the same with the earlier-paper dialog open, so Back closes the dialog),
-  `?version=n` and `?chat=<conversation id>|new` (`questionPaperWorkspaceHref`). Only the
-  assistant's own ids and `new` are read from `chat` (`chatIdOf`, `paperChatOf`).
+  `?version=n`, `?chat=<conversation id>|new` and `?compare=1` (`questionPaperWorkspaceHref`).
+  Only the assistant's own ids and `new` are read from `chat` (`chatIdOf`, `paperChatOf`), and
+  only `1` from `compare` (`compareAsked`). The comparison stays in the address across the
+  screen's other changes (another version, another conversation, the photos card and back)
+  until its toggle turns it off, so a reload and a shared link keep it.
 - The paper's menu holds what is not the main task: All versions (a dialog with who saved
   each, when and how, and its PDF), Download latest PDF, Add photos or a file, Copy an
   earlier paper, Delete paper.
@@ -956,7 +1031,9 @@ once the tab is visible).
   `foreignObject`), the renderer, router and permissions, pages, the document system, chat
   attachments, starting from an earlier paper (`question-paper.copy.integration.test.ts`: listing,
   copied and re-owned figures, permission order, locks, conflicts, another school, the AI limit,
-  deletes), the generation workflow with a scripted model, the sweep, the demo seed and the
+  deletes), turning a page (`question-paper.page-rotation.integration.test.ts`: the stored turn,
+  remade derivatives with swapped sides and new keys, the untouched original, revision, stale
+  revision, permission, HEIC, a running generation), the generation workflow with a scripted model, the sweep, the demo seed and the
   demo purge. The pages integration test replaces the workflow engine's sender with a failing
   fake, so it passes with or without a Restate running next to the database.
 - Providers and chat: `pnpm --filter @campuspilot/assistant exec vitest run --project unit`

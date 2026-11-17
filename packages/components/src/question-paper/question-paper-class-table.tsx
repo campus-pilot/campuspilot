@@ -1,3 +1,4 @@
+import type { MouseEvent } from 'react';
 import { Badge } from '@campuspilot/ui/components/badge';
 import { Button } from '@campuspilot/ui/components/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@campuspilot/ui/components/table';
@@ -41,15 +42,21 @@ export function QuestionPaperCellStatus({ status }: { status: CellStatus }) {
   );
 }
 
+/** Whether a click on a link opens it somewhere else (a new tab or window) and is left to the browser. */
+const opensElsewhere = (event: MouseEvent<HTMLAnchorElement>) =>
+  event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0;
+
 function ModeRow({
   classView,
   subject,
   mode,
+  hrefOf,
   onOpen,
 }: {
   classView: QuestionPaperClassView;
   subject: QuestionPaperSubjectView;
   mode: QuestionPaperModeView;
+  hrefOf: (cell: QuestionPaperCellRef) => string;
   onOpen: (cell: QuestionPaperCellRef) => void;
 }) {
   const cell = { classId: classView.classId, subjectSlug: subject.subjectSlug, modeSlug: mode.modeSlug };
@@ -62,14 +69,24 @@ function ModeRow({
         <QuestionPaperCellStatus status={cellStatus(mode.paper)} />
       </TableCell>
       <TableCell className="text-right">
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          aria-label={`Open ${subject.subjectName} ${mode.modeName} for ${classView.className}`}
-          onClick={() => onOpen(cell)}
-        >
-          {classView.canManage ? 'Open' : 'View'}
+        {/*
+          A real link, not a button: it opens in a new tab like any link, and
+          the voice assistant's "open what I can see" follows links only (a
+          button may do something). Its accessible name says which paper it
+          is, so "open English written for Nursery" finds this one.
+        */}
+        <Button asChild size="sm" variant="outline">
+          <a
+            href={hrefOf(cell)}
+            aria-label={`Open ${subject.subjectName} ${mode.modeName} for ${classView.className}`}
+            onClick={(event) => {
+              if (opensElsewhere(event)) return;
+              event.preventDefault();
+              onOpen(cell);
+            }}
+          >
+            {classView.canManage ? 'Open' : 'View'}
+          </a>
         </Button>
       </TableCell>
     </TableRow>
@@ -82,9 +99,13 @@ function ModeRow({
  */
 export function QuestionPaperClassTable({
   classView,
+  hrefOf,
   onOpen,
 }: {
   classView: QuestionPaperClassView;
+  /** Where a paper's workspace is. */
+  hrefOf: (cell: QuestionPaperCellRef) => string;
+  /** Goes to a paper without reloading the page, for a plain click on its link. */
   onOpen: (cell: QuestionPaperCellRef) => void;
 }) {
   const rows = classView.subjects.flatMap((subject) => subject.modes.map((mode) => ({ subject, mode })));
@@ -111,6 +132,7 @@ export function QuestionPaperClassTable({
                 classView={classView}
                 subject={subject}
                 mode={mode}
+                hrefOf={hrefOf}
                 onOpen={onOpen}
               />
             ))}

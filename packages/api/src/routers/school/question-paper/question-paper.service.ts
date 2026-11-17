@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 
 import type { Database, DatabaseExecutor, DatabaseTransaction } from '@campuspilot/db';
 import { artifactTable } from '@campuspilot/db/schema/artifact';
@@ -14,6 +14,7 @@ import {
 import { classTable } from '@campuspilot/db/schema/class';
 import { env as assistantEnv } from '@campuspilot/env/assistant';
 import { QUESTION_PAPER_LIMITS } from '@campuspilot/question-paper/limits';
+import type { QuestionPaperPageRotation } from '@campuspilot/question-paper/pages';
 import { ORPCError } from '@orpc/server';
 import { and, asc, eq, inArray, lt, sql } from 'drizzle-orm';
 import type { z } from 'zod';
@@ -21,7 +22,7 @@ import type { z } from 'zod';
 import { rpcError } from '../../../errors';
 import { getExamSession } from '../exam/exam.service';
 import { latestPaperConversationId, paperChatIsWorking, unsharePaperConversations } from './question-paper.conversations';
-import { checkImageHeader, normalizeFigureImage } from '../../../files/image-derivative';
+import { checkImageHeader, makeImageDerivatives, normalizeFigureImage } from '../../../files/image-derivative';
 import { requestImageDerivatives } from '../../../workflows/image-derivatives/outbox';
 import { getQuestionPaperModel } from '../../../workflows/question-paper/model';
 import { handOff, dispatchQuestionPaperJob } from '../../../workflows/question-paper/outbox';
@@ -46,11 +47,12 @@ import {
   toPageDto,
   toVersionSummaries,
   versionsOf,
+  type PageRow,
   type PaperRow,
 } from './question-paper.records';
 import { hasSelectedQuestionPaperTemplate } from './question-paper.render';
 import { assertPaperWritable, assertPaperWritableLocked, type PaperScope } from './question-paper.scope';
-import { deleteObjectsBestEffort, putObject, questionPaperKeys } from './question-paper.storage';
+import { deleteObjectsBestEffort, getObjectBytes, putObject, questionPaperKeys } from './question-paper.storage';
 import { readTemplatePrints } from './question-paper.template-prints';
 import { getVersion } from './question-paper.version.service';
 
@@ -638,6 +640,121 @@ export async function deleteQuestionPaperPage(
   });
   await deleteObjectsBestEffort(keys);
   return { pageRevision };
+}
+
+/** The refusal for turning a page whose photo the server cannot decode (a HEIC): it has no derivatives to make again. */
+const unturnablePage = () =>
+  rpcError.badRequest('This photo cannot be turned: the server cannot read its format (HEIC). Convert it to JPEG and add it again.');
+
+/**
+ * The stored original of a page that can be turned, or the refusal. Only a
+ * `ready` page has derivatives to make again. The worker makes them after the
+ * upload, so a page whose photo is still on its way (`awaiting`, always
+ * `pending`) or whose copies are not made yet (`pending`) is refused until
+ * they exist: a turn is never recorded on a page the worker may still write,
+ * and the worker never meets a turned page. A `failed` page cannot be read at
+ * all, an `unsupported` one (HEIC) not by this server.
+ */
+function turnableOriginal(page: PageRow): { s3Key: string; contentType: string } {
+  if (page.uploadStatus === 'awaiting') throw rpcError.conflict('This photo is still uploading. Turn it once it has finished.');
+  if (page.derivativeStatus === 'pending') throw rpcError.conflict('This photo is still being processed. Try again in a moment.');
+  if (page.derivativeStatus === 'failed') throw rpcError.badRequest('This photo could not be read as an image. Remove it and upload it again.');
+  // A `ready` page always has its photo (`exam_question_paper_page_upload_check`); the null checks only narrow the types.
+  if (page.derivativeStatus !== 'ready' || !page.originalS3Key || !page.contentType) throw unturnablePage();
+  return { s3Key: page.originalS3Key, contentType: page.contentType };
+}
+
+/** The page of a paper, or NOT_FOUND; a page id of another paper is not found under this one. */
+async function pageOfPaper(db: DatabaseExecutor, paperId: string, pageId: string) {
+  const [page] = await db
+    .select()
+    .from(examQuestionPaperPageTable)
+    .where(and(eq(examQuestionPaperPageTable.id, pageId), eq(examQuestionPaperPageTable.paperId, paperId)))
+    .limit(1);
+  if (!page) throw rpcError.notFound('Question paper page');
+  return page;
+}
+
+/**
+ * Turns one page to `rotation` (clockwise degrees on top of the photo's EXIF
+ * orientation) and makes its thumbnail and model derivative again from the
+ * stored original, which is never changed. Like an upload, the slow part runs
+ * with no lock held: a read-only look refuses early (stale revision, running
+ * generation, unknown or undecodable page) before the original is read,
+ * decoded and the new derivatives are written under new keys
+ * (`questionPaperKeys` with a random remake token). A short transaction then
+ * re-checks the exam, the revision, the job and the page under the paper
+ * lock, points the row at the new objects with the turned size, and bumps the
+ * page's `derivative_revision` and the paper's `page_revision` (the model's
+ * input changed, so a generation must be started against the new revision).
+ * The new objects are removed again if that is refused; the old ones are
+ * deleted after the commit, best effort.
+ *
+ * Asking for the rotation the page already has changes nothing and returns
+ * the current revision.
+ */
+export async function rotateQuestionPaperPage(
+  db: Database,
+  input: { scope: PaperScope; pageId: string; rotation: QuestionPaperPageRotation; expectedPageRevision: number },
+) {
+  const { scope } = input;
+  assertPaperWritable(scope);
+  const paper = await findPaper(db, scope.key);
+  if (!paper) throw rpcError.notFound('Question paper');
+  assertPageRevision(paper, input.expectedPageRevision);
+  await assertNoActiveJob(db, paper.id, 'A page cannot be turned');
+  const page = await pageOfPaper(db, paper.id, input.pageId);
+  const original = turnableOriginal(page);
+  if (page.rotation === input.rotation) return { page: toPageDto(page), pageRevision: paper.pageRevision };
+
+  const derivatives = await makeImageDerivatives(await getObjectBytes(original.s3Key), original.contentType, { rotation: input.rotation });
+  // The server decoded this photo at upload; a decoder that no longer can is the same refusal, not a broken row.
+  if (derivatives.status !== 'ready') throw unturnablePage();
+  const remake = randomUUID();
+  const { schoolId } = scope.key;
+  const thumbKey = questionPaperKeys.thumb(schoolId, page.id, remake);
+  const modelKey = questionPaperKeys.model(schoolId, page.id, remake);
+  let committed: { replaced: Array<string | null>; result: { page: ReturnType<typeof toPageDto>; pageRevision: number } };
+  try {
+    await putObject(thumbKey, derivatives.thumb.bytes, derivatives.thumb.contentType);
+    await putObject(modelKey, derivatives.model.bytes, derivatives.model.contentType);
+    committed = await db.transaction(async (tx) => {
+      await assertPaperWritableLocked(tx, scope.key);
+      const locked = await lockPaper(tx, scope.key);
+      assertPageRevision(locked, input.expectedPageRevision);
+      await assertNoActiveJob(tx, locked.id, 'A page cannot be turned');
+      const current = await pageOfPaper(tx, locked.id, input.pageId);
+      turnableOriginal(current);
+      const [turned] = await tx
+        .update(examQuestionPaperPageTable)
+        .set({
+          rotation: input.rotation,
+          derivativeRevision: sql`${examQuestionPaperPageTable.derivativeRevision} + 1`,
+          width: derivatives.width,
+          height: derivatives.height,
+          thumbS3Key: thumbKey,
+          modelS3Key: modelKey,
+          modelContentType: derivatives.model.contentType,
+          modelByteSize: derivatives.model.bytes.byteLength,
+        })
+        .where(eq(examQuestionPaperPageTable.id, current.id))
+        .returning();
+      const [bumped] = await tx
+        .update(examQuestionPaperTable)
+        .set({ pageRevision: sql`${examQuestionPaperTable.pageRevision} + 1`, updatedAt: new Date() })
+        .where(eq(examQuestionPaperTable.id, locked.id))
+        .returning({ pageRevision: examQuestionPaperTable.pageRevision });
+      return {
+        replaced: [current.thumbS3Key, current.modelS3Key],
+        result: { page: toPageDto(turned!), pageRevision: bumped!.pageRevision },
+      };
+    });
+  } catch (error) {
+    await deleteObjectsBestEffort([thumbKey, modelKey]);
+    throw error;
+  }
+  await deleteObjectsBestEffort(committed.replaced);
+  return committed.result;
 }
 
 /**

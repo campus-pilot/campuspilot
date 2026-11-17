@@ -110,11 +110,23 @@ export async function handleQuestionPaperPageUpload(
   }
 }
 
+/** The page images the read route serves, by URL variant. */
+const PAGE_IMAGE_VARIANTS = ['thumb', 'model', 'original'] as const;
+type PageImageVariant = (typeof PAGE_IMAGE_VARIANTS)[number];
+const isPageImageVariant = (value: string): value is PageImageVariant => (PAGE_IMAGE_VARIANTS as readonly string[]).includes(value);
+
 /**
  * Redirects a permissioned request to a five-minute URL of a page image:
- * `thumb` (320-360 px JPEG, used as `<img src>`) or `original` (the uploaded
- * file, as a download). A page the server could not decode has no thumbnail
- * (404); the screen draws a tile instead.
+ * `thumb` (at most 360 px JPEG, the page grid's `<img src>`), `model` (the at
+ * most 1800 px JPEG the AI reads, the page viewer's `<img src>`) or `original`
+ * (the uploaded file, as a download). The two derivatives are turned as the
+ * page's `rotation` says; the original is the upload, never turned. A page the
+ * server could not decode has no derivatives (404 for `thumb` and `model`);
+ * the screen draws a tile or tries the original instead. Neither has a page
+ * whose derivatives the worker has not made yet, and a reserved page has no
+ * image at all. A turn makes new
+ * derivative objects, so the screen adds the page's `derivativeRevision` to
+ * these URLs: a cached redirect of an earlier turn is then never reused.
  */
 export async function handleQuestionPaperPageRead(
   context: Context,
@@ -124,7 +136,8 @@ export async function handleQuestionPaperPageRead(
 ): Promise<Response> {
   try {
     const key = parseKey(rawKey);
-    if (input.variant !== 'thumb' && input.variant !== 'original') throw rpcError.notFound('Question paper page');
+    const { variant } = input;
+    if (!isPageImageVariant(variant)) throw rpcError.notFound('Question paper page');
     await assertPermission(context, {
       action: CLASS_ACTIONS.READ_EXAM_QUESTION_PAPERS,
       resource: { kind: 'class', schoolId: key.schoolId, classId: key.classId },
@@ -138,14 +151,17 @@ export async function handleQuestionPaperPageRead(
       .where(and(eq(examQuestionPaperPageTable.id, input.pageId), eq(examQuestionPaperPageTable.paperId, paper.id)))
       .limit(1);
     if (!page) throw rpcError.notFound('Question paper page');
-    const thumb = input.variant === 'thumb';
-    const s3Key = thumb ? page.thumbS3Key : page.originalS3Key;
-    // A reserved page has no photo yet, and a pending one no thumbnail yet.
-    if (!s3Key || !page.contentType) throw rpcError.notFound('Question paper page image');
-    const url = await pageImageUrl(s3Key, {
-      contentType: thumb ? 'image/jpeg' : page.contentType,
-      fileName: thumb ? `${page.originalName}.jpg` : page.originalName,
-      disposition: thumb ? 'inline' : 'attachment',
+    const image = ({
+      thumb: { s3Key: page.thumbS3Key, contentType: 'image/jpeg', fileName: `${page.originalName}.jpg`, disposition: 'inline' },
+      model: { s3Key: page.modelS3Key, contentType: page.modelContentType ?? 'image/jpeg', fileName: `${page.originalName}.jpg`, disposition: 'inline' },
+      original: { s3Key: page.originalS3Key, contentType: page.contentType, fileName: page.originalName, disposition: 'attachment' },
+    } as const)[variant];
+    // A reserved page has no photo yet, and a pending one no derivatives yet.
+    if (!image.s3Key || !image.contentType) throw rpcError.notFound('Question paper page image');
+    const url = await pageImageUrl(image.s3Key, {
+      contentType: image.contentType,
+      fileName: image.fileName,
+      disposition: image.disposition,
     });
     return new Response(null, {
       status: 302,

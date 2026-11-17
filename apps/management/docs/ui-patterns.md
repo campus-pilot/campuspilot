@@ -277,12 +277,22 @@ the implementation and APIs in more detail.
   where one thing is made from material plus an optional instruction. Once the paper has a version it is the studio, a screen that fills the
   window instead of scrolling the page (like the assistant's page): the exam's heading and
   tabs step aside, one header row carries the paper's name and actions, and the assistant
-  and the paper sit side by side, each scrolling inside its pane. Use
+  and the paper sit side by side, each scrolling inside its pane. The assistant's header
+  has *Hide assistant*: the paper then takes the width and the assistant folds into a slim
+  strip beside the app's sidebar (*Ask the assistant*, with a dot while a draft waits to be
+  saved) that opens it again. Hiding keeps the chat mounted, so typed text and a streaming
+  reply survive; asking to save a draft shows the assistant again. Use
   `APP_SHELL_FILL_HEIGHT_CLASS` (or its `MD` form) from `@campuspilot/components/app-shell`
   for such a screen: it is the window less the shell's header and its alert rows, so the
   screen still fits when a notice bar is showing. On a phone the studio is an ordinary
   page: the paper alone with a bar at the bottom that opens the assistant full-screen. What is shown lives in
-  `?start=&version=&chat=`. Heading, top-right overflow (All versions, Download latest
+  `?start=&version=&chat=&compare=`. *Compare with photos* (one toggle icon in the header row, only for a
+  paper with photos) splits the paper's pane into two equal panes, the photographed page on the left and the
+  paper on the right, each scrolling on its own, and folds the assistant into its strip while it is on. The
+  photo's few controls (zoom, the page stepper, turning) are small ghost icons in a strip inside its frame, so
+  the two documents stay the content and their frames stay the same rectangle. On a phone a *Photos | Paper*
+  switch above the frame swaps what it shows. Use this pattern when two documents are read against each
+  other: one toggle, equal panes, no synchronised scrolling unless the two really map line for line. Heading, top-right overflow (All versions, Download latest
   PDF, the ways to add a new version, Delete paper with an app confirmation), breadcrumbs for
   navigation, no back button.
 - Uploading, reordering, deleting and generating are closed when the exam is

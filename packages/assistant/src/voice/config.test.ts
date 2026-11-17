@@ -1,3 +1,4 @@
+import { isAssistantVoiceConfigured } from '@campuspilot/env/assistant';
 import { describe, expect, it } from 'vitest';
 
 import { readVoiceSettings } from './config';
@@ -34,6 +35,17 @@ describe('readVoiceSettings', () => {
     for (const name of Object.keys(VOICE)) {
       expect(readVoiceSettings({ ...VOICE, [name]: undefined }), name).toBeNull();
       expect(readVoiceSettings({ ...VOICE, [name]: '' }), name).toBeNull();
+    }
+  });
+
+  it('agrees with isAssistantVoiceConfigured, which the admin app\'s warning reads', () => {
+    expect(isAssistantVoiceConfigured(VOICE)).toBe(true);
+    expect(isAssistantVoiceConfigured({})).toBe(false);
+    for (const name of Object.keys(VOICE)) {
+      for (const value of [undefined, '']) {
+        const source = { ...VOICE, [name]: value };
+        expect(isAssistantVoiceConfigured(source), name).toBe(readVoiceSettings(source) !== null);
+      }
     }
   });
 });

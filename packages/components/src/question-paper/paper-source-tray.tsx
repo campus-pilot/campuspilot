@@ -248,9 +248,12 @@ function AddTileFace({ icon: Icon = Plus, label, className }: { icon?: LucideIco
  * always the dashed tile. Photos on their way show in the row at once.
  *
  * The caller owns the files, the order's persistence and every message; this
- * only draws what it is given. `onAdd` opens the caller's file picker.
+ * only draws what it is given. `onAdd` opens the caller's file picker. The
+ * tray is generic over the caller's page type so `thumbUrl` receives the
+ * caller's own page (an image URL can depend on more than the id, such as a
+ * revision that changes when the page is turned).
  */
-export function PaperSourceTray({
+export function PaperSourceTray<Page extends PageThumbnailView>({
   pages,
   uploads,
   thumbUrl,
@@ -265,10 +268,11 @@ export function PaperSourceTray({
   onDelete,
   onDismissUpload,
 }: {
-  pages: readonly PageThumbnailView[];
+  pages: readonly Page[];
   /** Photos being prepared or uploaded, and the ones that failed. */
   uploads: readonly UploadQueueItem[];
-  thumbUrl: (pageId: string) => string;
+  /** The thumbnail of a page whose photo the server could decode (`derivativeStatus` `ready`). */
+  thumbUrl: (page: Page) => string;
   /** Whether more can be added (free slots, and adding is open). */
   canAdd: boolean;
   /** Closes reordering and removing (a locked paper, uploads still numbering pages). */
@@ -336,7 +340,7 @@ export function PaperSourceTray({
           <TrayCaption pageCount={pages.length} canReorder={!disabled} />
           <ul className="grid grid-cols-4 gap-2.5 sm:flex sm:flex-wrap" aria-label="Pages of the paper">
             {pages.map((page) => (
-              <PageTile key={page.id} page={page} src={thumbUrl(page.id)} disabled={disabled} onOpen={onOpen} onDelete={onDelete} />
+              <PageTile key={page.id} page={page} src={thumbUrl(page)} disabled={disabled} onOpen={onOpen} onDelete={onDelete} />
             ))}
             {uploads.map((item) => (
               <UploadTile key={item.id} item={item} onDismiss={onDismissUpload} />
