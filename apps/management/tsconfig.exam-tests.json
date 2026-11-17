@@ -1,6 +1,8 @@
 {
   "extends": "./tsconfig.json",
   "include": [
+    "components/documents/**/*.ts",
+    "components/documents/**/*.tsx",
     "components/exam/**/*.ts",
     "components/exam/**/*.tsx",
     "components/notices/**/*.ts",

@@ -2,7 +2,7 @@
 
 import { useForm } from "@tanstack/react-form";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, CheckCircle2, Eye, FileDown, Search } from "lucide-react";
+import { ArrowRight, CheckCircle2, Eye, Search } from "lucide-react";
 import { z } from "zod";
 import type { DocumentSource } from "@campuspilot/api/routers/school/document/document.dto";
 import { formatMinor } from "@campuspilot/components/finance";
@@ -25,7 +25,11 @@ import {
   useDocumentCache,
   type DocumentScope,
 } from "./document-common";
-import { DocumentDownload } from "./document-generator";
+import {
+  CreatePdfButton,
+  DocumentDownload,
+  downloadCreatedDocument,
+} from "./document-generator";
 
 type FinanceDocumentType = "bill" | "receipt";
 type FinanceSource = Extract<
@@ -146,7 +150,7 @@ function useFinanceGeneration({
       page: 1,
       billRunId: "",
       selected: [] as Selection[],
-      mode: "preview" as "preview" | "generate",
+      mode: "preview" as "preview" | "generate" | "download",
       preview: null as Preview | null,
       generated: null as GeneratedArtifact | null,
       error: "",
@@ -157,7 +161,7 @@ function useFinanceGeneration({
         page: z.number().int().positive(),
         billRunId: z.string(),
         selected: z.array(selectionSchema).max(500),
-        mode: z.enum(["preview", "generate"]),
+        mode: z.enum(["preview", "generate", "download"]),
         preview: z
           .object({
             html: z.string(),
@@ -193,9 +197,7 @@ function useFinanceGeneration({
           });
           return;
         }
-        if (value.preview?.fingerprint !== fingerprint) {
-          throw new Error("Preview the current selection before creating its PDF.");
-        }
+        // Previewing is optional: the server checks the selection again.
         const generated = await client.school.generateDocument({
           schoolId: scope.schoolId,
           source,
@@ -206,6 +208,15 @@ function useFinanceGeneration({
           fingerprint,
         });
         await cache.artifacts(scope.schoolId);
+        if (value.mode === "download")
+          form.setFieldValue(
+            "error",
+            await downloadCreatedDocument({
+              schoolId: scope.schoolId,
+              artifactId: generated.artifact.id,
+              documentType: source.documentType,
+            }),
+          );
       } catch (error) {
         form.setFieldValue(
           "error",
@@ -607,6 +618,18 @@ function FinancePreviewAndActions({
               <DocumentNotice error>{values.error}</DocumentNotice>
             ) : null}
             <div className="flex flex-wrap gap-2">
+              <CreatePdfButton
+                permission={{
+                  schoolId: scope.schoolId,
+                  action: SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_ARTIFACTS,
+                }}
+                disabled={!source || submitting || !canSubmit}
+                running={submitting ? values.mode : null}
+                onCreate={(mode) => {
+                  form.setFieldValue("mode", mode);
+                  void form.handleSubmit();
+                }}
+              />
               <DocumentButton
                 variant="outline"
                 disabled={!source || submitting || !canSubmit}
@@ -619,18 +642,6 @@ function FinancePreviewAndActions({
                 {submitting && values.mode === "preview"
                   ? "Preparing preview…"
                   : "Preview document"}
-              </DocumentButton>
-              <DocumentButton
-                disabled={!source || submitting || !canSubmit || !previewCurrent}
-                onClick={() => {
-                  form.setFieldValue("mode", "generate");
-                  void form.handleSubmit();
-                }}
-              >
-                <FileDown />
-                {submitting && values.mode === "generate"
-                  ? "Creating PDF…"
-                  : "Create PDF"}
               </DocumentButton>
             </div>
             {previewCurrent ? (
@@ -663,6 +674,7 @@ function FinancePreviewAndActions({
                     schoolId={scope.schoolId}
                     artifactId={values.generated.id}
                     documentType={documentType}
+                    label="Download again"
                   />
                   <DocumentButton variant="ghost" onClick={onHistory}>
                     View document history <ArrowRight />
