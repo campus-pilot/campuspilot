@@ -14,7 +14,7 @@ import type { ModelProviderId } from './types';
  *   (`BetaRequestDocumentBlock` / `BetaBase64PDFSource` in @anthropic-ai/sdk
  *   1.7.0; https://platform.claude.com/docs/en/build-with-claude/pdf-support).
  * - Gemini: a part with `inlineData` of type `application/pdf` (`Part.inlineData`
- *   in @google/genai 2.32.0; https://ai.google.dev/gemini-api/docs/document-processing).
+ *   in @google/genai 3.4.0; https://ai.google.dev/gemini-api/docs/document-processing).
  */
 export const ANTHROPIC_IMAGE_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'] as const;
 export const GEMINI_IMAGE_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'] as const;

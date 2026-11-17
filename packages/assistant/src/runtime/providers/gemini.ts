@@ -15,6 +15,7 @@ import {
 import type { AssistantUserMessageBody } from '@campuspilot/db/schema/assistant';
 import { buildUserTranscriptContent, isAttachmentMarker, type AttachmentMarker } from '../../transcript';
 import { attachmentLabel, attachmentNote, stubLongInputFields } from '../context';
+import { GEMINI_API_VERSION } from './gemini-api-version';
 import type { AssistantPrompt } from '../prompt';
 import { modelToolDescription, type AssistantTool } from '../tools';
 import type {
@@ -61,7 +62,7 @@ export { GEMINI_DOCUMENT_MIME_TYPES, GEMINI_IMAGE_MIME_TYPES };
 
 /**
  * A PDF as the Gemini API reads it natively: a part with `inlineData` of type
- * `application/pdf` (`Part.inlineData` in @google/genai 2.32.0;
+ * `application/pdf` (`Part.inlineData` in @google/genai 3.4.0;
  * https://ai.google.dev/gemini-api/docs/document-processing: up to 1,000 pages,
  * 50 MB per inline PDF). The bytes are the uploaded file, unchanged.
  */
@@ -299,7 +300,7 @@ export function geminiFailureKind(error: unknown): ModelFailureKind {
 }
 
 export function createGeminiProvider({ apiKey, model }: { apiKey: string; model: string }): ModelProvider {
-  const client = new GoogleGenAI({ apiKey });
+  const client = new GoogleGenAI({ apiKey, apiVersion: GEMINI_API_VERSION });
 
   async function step({
     prompt,
