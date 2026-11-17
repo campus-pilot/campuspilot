@@ -1,7 +1,7 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { SCHOOL_SUSPENDED_MESSAGE } from '@campuspilot/api/school-suspension/school-suspension.contract';
+import { SCHOOL_SUSPENDED_MESSAGE } from '@campuspilot/api/school-access/school-access.contract';
 import { AppShellAlert } from '@campuspilot/components/app-shell';
 import { orpc } from '@/lib/orpc';
 

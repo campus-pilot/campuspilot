@@ -466,6 +466,22 @@ describe('question paper generation job', () => {
     expect(await runQuestionPaperGeneration({ jobId: disabled.job.id, attempt: 1 }, direct, depsFor(none.model))).toEqual({ status: 'failed', code: 'feature_disabled' });
   });
 
+  it('fails without asking the model when the school became read-only: no plan, or suspended (which wins)', async () => {
+    const world = await createQuestionPaperWorld();
+    const queued = await queueJob(world);
+    const other = await queueJob(world, { subjectSlug: 'math' });
+    // The school's plan ran out (no subscription, no active trial) after the job was queued.
+    await db.update(schoolTable).set({ tier: null }).where(eq(schoolTable.id, world.schoolId));
+    const none = scriptedModel([answer(ENGLISH_SCIENCE)]);
+    expect(await runQuestionPaperGeneration({ jobId: queued.job.id, attempt: 1 }, direct, depsFor(none.model))).toEqual({ status: 'failed', code: 'no_plan' });
+    expect(none.requests).toHaveLength(0);
+    expect(await jobOf(queued.job.id)).toMatchObject({ errorCode: 'no_plan', errorMessage: QUESTION_PAPER_JOB_FAILURES.no_plan });
+
+    await db.update(schoolTable).set({ suspendedAt: new Date(), suspendedReason: 'Misuse' }).where(eq(schoolTable.id, world.schoolId));
+    expect(await runQuestionPaperGeneration({ jobId: other.job.id, attempt: 1 }, direct, depsFor(none.model))).toEqual({ status: 'failed', code: 'school_suspended' });
+    expect(none.requests).toHaveLength(0);
+  });
+
   it('stops quietly, saving nothing, when the sweep ended the job while the model was working', async () => {
     const world = await createQuestionPaperWorld();
     const { job, paper } = await queueJob(world);

@@ -7,8 +7,8 @@ import { ORPCError } from '@orpc/server';
 import { and, eq } from 'drizzle-orm';
 
 import { isSchoolFeatureEnabled, schoolFeatureDisabledError } from '../feature-flags/feature-flags.service';
-import { isSchoolSuspended, schoolSuspendedError } from '../school-suspension/school-suspension.service';
-import { SCHOOL_SUSPENDED_MESSAGE } from '../school-suspension/school-suspension.contract';
+import { readSchoolWriteFacts, resolveSchoolWriteRefusal, schoolNoPlanError, schoolSuspendedError } from '../school-access/school-access.service';
+import { SCHOOL_NO_PLAN_MESSAGE, SCHOOL_SUSPENDED_MESSAGE } from '../school-access/school-access.contract';
 import { spendReachedLimit } from './money';
 import { readAssistantEnabledRoles } from './roles';
 import { schoolMonthSpendUsd } from './spend';
@@ -23,6 +23,9 @@ import { schoolMonthSpendUsd } from './spend';
  * - `school_suspended`: the school is suspended, so it is read-only: the
  *   user still sees the assistant and their conversations, and cannot start
  *   or continue a turn (docs/school-suspension.md);
+ * - `no_plan`: the school has no active plan (no subscription and no active
+ *   trial), so it is read-only in the same way (docs/school-trials.md). A
+ *   suspension wins when both apply;
  * - `limit_reached`: the school's saved spend this IST month reached its
  *   monthly limit.
  */
@@ -32,6 +35,7 @@ export type AssistantAccessRefusalCode =
   | 'config_invalid'
   | 'role_not_enabled'
   | 'school_suspended'
+  | 'no_plan'
   | 'limit_reached';
 
 export type AssistantAccessRefusal = { code: AssistantAccessRefusalCode; message: string };
@@ -40,8 +44,8 @@ export type AssistantAccessRefusal = { code: AssistantAccessRefusalCode; message
  * Who may use the assistant, as facts. `allowed` (may start or continue a
  * turn now) holds only when every one of them does. Seeing the assistant at
  * all (its pages, one's own history, delete, stop, decline) needs every fact
- * but the suspension and the limit: `featureEnabled`, `member` and a
- * non-empty `allowedRoles` (`canSee` in `packages/assistant/src/access.ts`).
+ * but the suspension, the plan and the limit: `featureEnabled`, `member` and
+ * a non-empty `allowedRoles` (`canSee` in `packages/assistant/src/access.ts`).
  */
 export type AssistantAccessDecision = {
   featureEnabled: boolean;
@@ -50,6 +54,11 @@ export type AssistantAccessDecision = {
   allowedRoles: Role[];
   /** Whether the school is suspended (read-only). False when the decision stopped before reading it. */
   suspended: boolean;
+  /**
+   * Whether the school has no active plan (read-only). False when the
+   * decision stopped before reading it.
+   */
+  noPlan: boolean;
   /**
    * The school's monthly USD limit as two explicit facts: whether it is
    * known (it is not when the decision stopped before reading the flag's
@@ -81,6 +90,7 @@ const MESSAGES: Record<AssistantAccessRefusalCode, string> = {
   role_not_enabled:
     'Your role cannot use the AI assistant in this school. Your principal or manager can switch it on in Settings.',
   school_suspended: SCHOOL_SUSPENDED_MESSAGE,
+  no_plan: SCHOOL_NO_PLAN_MESSAGE,
   limit_reached:
     'This school has reached its AI assistant limit for this month. The assistant is available again on the 1st.',
 };
@@ -102,8 +112,8 @@ function refused(
  * Use is role-based only: the feature is active AND the user holds at least
  * one role the assistant is switched on for (the school's one role list,
  * which the platform administrator and the school's principal both edit)
- * AND the school is not suspended AND it is under its monthly limit. No OPA
- * grant is involved
+ * AND the school is not read-only (suspended, or without an active plan)
+ * AND it is under its monthly limit. No OPA grant is involved
  * (there is no "use the assistant" permission); every tool call is still
  * authorized by OPA as the user.
  *
@@ -124,6 +134,7 @@ export async function resolveAssistantAccess(
     member: false,
     allowedRoles: [] as Role[],
     suspended: false,
+    noPlan: false,
     limit: { known: false } as AssistantLimit,
     limitReached: false,
     voiceEnabled: false,
@@ -159,10 +170,18 @@ export async function resolveAssistantAccess(
   };
   if (allowedRoles.length === 0) return refused(withRoles, 'role_not_enabled');
 
-  // After the role: someone who may not see the assistant learns nothing about the school's suspension.
-  const suspended = await isSchoolSuspended(db, schoolId);
-  const withSuspension = { ...withRoles, suspended };
-  if (suspended) return refused(withSuspension, 'school_suspended');
+  // After the role: someone who may not see the assistant learns nothing
+  // about whether the school is read-only. The same decision as every write
+  // gate, so a suspension wins over a missing plan.
+  const writeFacts = await readSchoolWriteFacts(db, schoolId);
+  const withSuspension = {
+    ...withRoles,
+    suspended: writeFacts?.suspended ?? false,
+    noPlan: writeFacts !== null && !writeFacts.hasActivePlan,
+  };
+  const writeRefusal = writeFacts && resolveSchoolWriteRefusal(writeFacts);
+  if (writeRefusal === 'SCHOOL_SUSPENDED') return refused(withSuspension, 'school_suspended');
+  if (writeRefusal === 'SCHOOL_NO_PLAN') return refused(withSuspension, 'no_plan');
 
   const limitReached =
     monthlyLimitUsd !== null && spendReachedLimit(await schoolMonthSpendUsd(db, schoolId, input.now), monthlyLimitUsd);
@@ -174,8 +193,9 @@ export async function resolveAssistantAccess(
 /**
  * The error a refused request gets. A disabled feature is the platform's
  * standard disabled-feature FORBIDDEN (`readSchoolFeatureDisabled` tells it
- * apart); a suspended school is the platform's standard suspended-school
- * FORBIDDEN (`isSchoolSuspendedError`); a reached limit is
+ * apart); a suspended school and a school without an active plan are the
+ * platform's standard read-only school FORBIDDEN (`isSchoolSuspendedError`,
+ * `isSchoolNoPlanError`); a reached limit is
  * PRECONDITION_FAILED (the user is allowed, the school's budget is not);
  * every other refusal is FORBIDDEN. Each of those carries `data.reason`
  * with its code and the user-facing message.
@@ -183,6 +203,7 @@ export async function resolveAssistantAccess(
 export function assistantAccessError(refusal: AssistantAccessRefusal): ORPCError<string, unknown> {
   if (refusal.code === 'feature_disabled') return schoolFeatureDisabledError('assistant');
   if (refusal.code === 'school_suspended') return schoolSuspendedError();
+  if (refusal.code === 'no_plan') return schoolNoPlanError();
   if (refusal.code === 'limit_reached') {
     return new ORPCError('PRECONDITION_FAILED', { message: refusal.message, data: { reason: refusal.code } });
   }

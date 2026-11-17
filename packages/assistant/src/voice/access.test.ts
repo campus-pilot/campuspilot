@@ -21,6 +21,7 @@ const ALLOWED: AssistantAccessDecision = {
   member: true,
   allowedRoles: ['teacher'],
   suspended: false,
+  noPlan: false,
   limit: { known: true, monthlyLimitUsd: null },
   limitReached: false,
   voiceEnabled: true,
@@ -49,7 +50,7 @@ describe('voiceRefusal', () => {
     expect(voiceRefusal(session(), noRole, SETTINGS)).toEqual({ reason: 'access', message: 'Your role cannot use the AI assistant.' });
   });
 
-  it('refuses a suspended school with the assistant’s own refusal: a read-only school starts no turn, spoken or typed', () => {
+  it('refuses a read-only school (suspended or without a plan) with the assistant’s own refusal: it starts no turn, spoken or typed', () => {
     const suspended: AssistantAccessDecision = {
       ...ALLOWED,
       suspended: true,
@@ -57,6 +58,13 @@ describe('voiceRefusal', () => {
       refusal: { code: 'school_suspended', message: 'This school is suspended.' },
     };
     expect(voiceRefusal(session(), suspended, SETTINGS)).toEqual({ reason: 'access', message: 'This school is suspended.' });
+    const noPlan: AssistantAccessDecision = {
+      ...ALLOWED,
+      noPlan: true,
+      allowed: false,
+      refusal: { code: 'no_plan', message: 'This school has no active plan.' },
+    };
+    expect(voiceRefusal(session(), noPlan, SETTINGS)).toEqual({ reason: 'access', message: 'This school has no active plan.' });
   });
 
   it('refuses a school whose assistant has voice switched off: the assistant alone never grants voice', () => {

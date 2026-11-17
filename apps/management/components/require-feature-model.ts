@@ -1,4 +1,4 @@
-import { isSchoolSuspendedError } from '@campuspilot/api/school-suspension/school-suspension.contract';
+import { isSchoolSuspendedError } from '@campuspilot/api/school-access/school-access.contract';
 import {
   DISABLED_SCHOOL_FEATURE,
   readSchoolFeatureDisabled,

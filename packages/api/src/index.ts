@@ -4,7 +4,7 @@ import type { Context } from "./context";
 import { rpcError } from "./errors";
 import type { ProcedureMeta } from "./mcp-metadata";
 import { assistantToolDecision } from "./assistant/tool-policy";
-import { assertSchoolWritableByCaller } from "./school-suspension/school-suspension.service";
+import { assertSchoolWritableByCaller } from "./school-access/school-access.service";
 import {
   MCP_READ_SCOPE,
   MCP_WRITE_SCOPE,
@@ -68,20 +68,21 @@ function assertAssistantToolPolicy(
 }
 
 /**
- * A suspended school is read-only (docs/school-suspension.md): every
- * procedure that is not an explicit read (`mcp.access`; a procedure without
- * metadata is treated as a write, as for OAuth scopes) is refused for the
- * school its input names. Here, on every protected procedure, rather than
- * on each one: a new procedure is covered without remembering to add
- * anything, whichever way it is reached (the apps, an API key, a connected
- * AI app, the in-app assistant).
+ * A suspended school, and a school without an active plan, is read-only
+ * (docs/school-suspension.md, docs/school-trials.md): every procedure that
+ * is not an explicit read (`mcp.access`; a procedure without metadata is
+ * treated as a write, as for OAuth scopes) is refused for the school its
+ * input names. Here, on every protected procedure, rather than on each one:
+ * a new procedure is covered without remembering to add anything, whichever
+ * way it is reached (the apps, an API key, a connected AI app, the in-app
+ * assistant).
  *
  * The school is the input's `schoolId`, the name every school-scoped
  * procedure uses (`school-suspension.integration.test.ts` checks that every
  * write of the school router has it). The input is read before its own
  * validation, so only a string is taken from it.
  */
-async function assertSchoolNotSuspendedForWrite(
+async function assertSchoolWritableForWrite(
   context: Context,
   meta: ProcedureMeta,
   input: unknown,
@@ -101,7 +102,7 @@ const requireAuth = o.middleware(async ({ context, next, procedure }, input) => 
   }
   assertOAuthScope(context, procedure["~orpc"].meta);
   assertAssistantToolPolicy(context, procedure["~orpc"].meta, input);
-  await assertSchoolNotSuspendedForWrite(context, procedure["~orpc"].meta, input);
+  await assertSchoolWritableForWrite(context, procedure["~orpc"].meta, input);
   return next({
     context: {
       db: context.db,

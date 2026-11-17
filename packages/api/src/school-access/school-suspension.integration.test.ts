@@ -24,8 +24,8 @@ import { assistantAccessError, resolveAssistantAccess } from '../assistant/acces
 import { notificationRowId } from '../notifications/ids';
 import { handleAdmissionPhotoRead, handleAdmissionPhotoUpload } from '../routers/school/admission/admission.http';
 import { schoolRouter } from '../routers/school/school.router';
-import { isSchoolSuspendedError, SCHOOL_SUSPENDED_MESSAGE, SCHOOL_SUSPENDED_REASON } from './school-suspension.contract';
-import { isSchoolSuspended, schoolSuspendedError } from './school-suspension.service';
+import { isSchoolSuspendedError, SCHOOL_SUSPENDED_MESSAGE, SCHOOL_SUSPENDED_REASON } from './school-access.contract';
+import { isSchoolSuspended, schoolSuspendedError } from './school-access.service';
 
 /**
  * School suspension (docs/school-suspension.md): a suspended school is

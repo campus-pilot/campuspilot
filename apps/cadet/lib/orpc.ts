@@ -5,7 +5,7 @@ import { env } from '@campuspilot/env/cadet.client';
 import { createORPCClient } from '@orpc/client';
 import { RPCLink } from '@orpc/client/fetch';
 import { createTanstackQueryUtils } from '@orpc/tanstack-query';
-import { isSchoolSuspendedError } from '@campuspilot/api/school-suspension/school-suspension.contract';
+import { isSchoolSuspendedError } from '@campuspilot/api/school-access/school-access.contract';
 import { MutationCache, QueryCache, QueryClient } from '@tanstack/react-query';
 
 import { shouldRetryQuery } from './query-retry';
