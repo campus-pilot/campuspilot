@@ -41,12 +41,13 @@ function PreviewDialog({ title, description, children }: { title: string; descri
           <Eye data-icon="inline-start" aria-hidden /> Preview
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-3xl">
+      {/* As tall as the screen allows, never taller: a centered dialog has no scroll, so a taller one hid its title, close button and the paper's end on a phone. */}
+      <DialogContent className="flex h-[88dvh] flex-col sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
-        {children}
+        <div className="flex min-h-0 flex-1 flex-col">{children}</div>
       </DialogContent>
     </Dialog>
   );
@@ -249,7 +250,7 @@ export function AssistantDraftCard({
       preview={
         facts.valid && input ? (
           <PreviewDialog title={`Draft ${ordinal}`} description="How this draft prints with your school’s template. Nothing is saved.">
-            <DraftPreviewBody schoolId={schoolId} conversationId={call.conversationId} input={input} draftId={facts.draftId} />
+            <DraftPreviewBody schoolId={schoolId} conversationId={call.conversationId} input={input} draftId={facts.draftId} fill />
           </PreviewDialog>
         ) : null
       }
@@ -264,13 +265,16 @@ function VersionPreviewBody({ view, schoolId }: { view: AssistantQuestionPaperVi
     ...orpc.school.getQuestionPaperPreview.queryOptions({ input: { ...view, schoolId } }),
     retry: retryUnlessRefused,
   });
-  if (preview.isPending) return <Skeleton className="h-96 w-full rounded-xl" />;
+  if (preview.isPending) return <Skeleton className="h-full w-full rounded-xl" />;
   if (preview.isError) return <PreviewMessage>{requestErrorMessage(preview.error, 'This version could not be previewed.')}</PreviewMessage>;
   return (
-    <div className="flex min-w-0 flex-col gap-3">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-y-auto">
       <RemovedList lines={preview.data.warnings.map((notice) => notice.message)} />
       <PlaceholderNote count={preview.data.placeholderFigures} />
-      <DocumentPreview html={preview.data.html} label="Question paper preview" fitPageWidth />
+      {/* A long list of removed parts scrolls this column instead of squeezing the paper away. */}
+      <div className="min-h-80 flex-1">
+        <DocumentPreview html={preview.data.html} label="Question paper preview" fitPageWidth fill />
+      </div>
     </div>
   );
 }
