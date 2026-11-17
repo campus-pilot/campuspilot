@@ -2,11 +2,15 @@ import { examOverview, examOverviews } from './exam-lifecycle.service';
 import { and, asc, eq } from 'drizzle-orm';
 import { classTable } from '@campuspilot/db/schema/class';
 import { schoolSessionTable } from '@campuspilot/db/schema/session';
-import { nextExamOrder } from '@campuspilot/db/schema/jsonb/session-config';
+import {
+  examNameKey,
+  findExamNameClash,
+  nextExamOrder,
+} from '@campuspilot/db/schema/jsonb/session-config';
 import { examPlanTable, examTimetableTable } from '@campuspilot/db/schema/exam';
 import { resolvePaginationInput } from '../../../paginations';
 import { pageResult, route } from './exam.pagination';
-import { getExam, getExamSession } from './exam.service';
+import { examNameTakenError, getExam, getExamSession } from './exam.service';
 import { SCHOOL_ACTIONS } from '@campuspilot/opa/policies/school';
 import { protectedProcedure } from '../../../index';
 import { requireSchoolPermission } from '../../../permissions/school';
@@ -164,7 +168,7 @@ export const schoolExamDefinitionRouter = {
     .route(
       route(
         'Create a session exam',
-        'Add a unique exam slug and definition to an active session, listed after the last exam unless an order is given. School exam administrators only.',
+        'Add an exam with a slug and a name unique in the session (names compared trimmed and ignoring case) to an active session, listed after the last exam unless an order is given. School exam administrators only.',
       ),
     )
     .meta({
@@ -187,6 +191,11 @@ export const schoolExamDefinitionRouter = {
               message: EXAM_SLUG_TAKEN_MESSAGE,
               data: { reason: EXAM_SLUG_TAKEN_REASON } satisfies ExamSlugTakenData,
             });
+          // Exam names are unique within the session (trimmed, ignoring case).
+          // The slug is checked first, so a request whose name derives a taken
+          // slug keeps being refused as a taken slug.
+          if (findExamNameClash(session.config.examConfig, input.name) !== undefined)
+            throw examNameTakenError();
           // Read and written under the session row lock (FOR UPDATE), which the
           // full-config `updateSession` save takes too: concurrent creations and
           // saves run one after the other, each on the configuration the previous
@@ -218,7 +227,7 @@ export const schoolExamDefinitionRouter = {
     .route(
       route(
         'Update a session exam',
-        'Edit the name and display order of an exam without changing its stable slug.',
+        'Edit the name and display order of an exam without changing its stable slug. A new name must not be used by another exam of the session (compared trimmed and ignoring case).',
       ),
     )
     .meta({
@@ -240,6 +249,17 @@ export const schoolExamDefinitionRouter = {
             input,
             'update',
           );
+          // A new name must not clash with another exam of the session. Keeping
+          // the exam's own name, or changing only its case or surrounding
+          // whitespace, does not introduce a clash and is allowed, even when the
+          // session already stored a duplicate of it.
+          if (
+            input.name !== undefined &&
+            examNameKey(input.name) !== examNameKey(existing.name) &&
+            findExamNameClash(session.config.examConfig, input.name, input.examSlug) !==
+              undefined
+          )
+            throw examNameTakenError();
           const exam = {
             name: input.name ?? existing.name,
             order: input.order ?? existing.order,

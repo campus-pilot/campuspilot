@@ -38,6 +38,23 @@ exam-governance boundary, including full-config replacements.
    exam. The reverse is not guarded: `updateSession` replaces the whole exam map
    with what its editor submitted, so a settings form loaded before a creation can
    still remove that exam on save (unless it already has plans or a timetable).
+
+   **Exam names are unique within a session**, compared trimmed and ignoring case
+   (`examNameKey` in `session-config.ts`: Unicode NFC, `trim()`, then lowercase
+   with the fixed `en` locale; inner whitespace is kept, so `Unit  Test` and
+   `Unit Test` differ). `createExam` refuses a name another exam has (after the
+   slug check, so a request whose slug is also taken is refused as a taken slug),
+   and `updateExam` refuses a new name another exam has; keeping an exam's own
+   name or changing only its case or surrounding whitespace is allowed. Both answer
+   `CONFLICT` with `data.reason: 'EXAM_NAME_TAKEN'` (`isExamNameTakenError`).
+   `createSession` and `updateSession` refuse, with the same error, a submitted
+   exam map that *introduces* a clash (`findIntroducedExamNameClashes`): a group of
+   exams sharing a name that contains an exam that is new (its slug is not stored)
+   or renamed. Duplicates stored before the rule keep saving, so saving unrelated
+   settings never fails for such a session. The rule is not a refinement of
+   `examConfigSchema`, which also parses stored configurations and DTOs, where a
+   refinement would make stored duplicates unreadable.
+
    `getExamPlanPreview` returns
    classes, registered enrollment counts, subjects, assessment modes and a
    configuration hash. `generateExamPlan` atomically creates draft planning snapshots and an explicit **ready** examination from

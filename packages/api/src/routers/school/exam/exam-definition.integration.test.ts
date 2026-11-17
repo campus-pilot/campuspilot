@@ -8,8 +8,11 @@ import {
   isSchoolSuspendedError,
 } from '../../../school-access/school-access.contract';
 import {
+  EXAM_NAME_TAKEN_MESSAGE,
+  EXAM_NAME_TAKEN_REASON,
   EXAM_SLUG_TAKEN_MESSAGE,
   EXAM_SLUG_TAKEN_REASON,
+  isExamNameTakenError,
   isExamSlugTakenError,
 } from './exam-definition.contract';
 import {
@@ -180,6 +183,28 @@ describe('school.createExam', () => {
     expect(await storedExamConfig(scope.sessionId)).toEqual(before);
   });
 
+  it('refuses a name another exam of the session has under a different slug, trimmed and ignoring case', async () => {
+    const { scope, manager } = await schoolWithActiveSession({
+      unit_test_1: { name: 'Unit Test 1', order: 1 },
+    });
+    const before = await storedExamConfig(scope.sessionId);
+    for (const name of [' unit test 1 ', 'UNIT TEST 1', 'Unit Test 1']) {
+      const error = await rejection(
+        manager.school.createExam({ ...scope, examSlug: 'ut_one', name }),
+      );
+      expect(error).toMatchObject({
+        code: 'CONFLICT',
+        message: EXAM_NAME_TAKEN_MESSAGE,
+        data: { reason: EXAM_NAME_TAKEN_REASON },
+      });
+      expect(isExamNameTakenError(error)).toBe(true);
+      expect(isExamSlugTakenError(error)).toBe(false);
+    }
+    expect(await storedExamConfig(scope.sessionId)).toEqual(before);
+    // Inner whitespace is part of the name, so this is another name.
+    await manager.school.createExam({ ...scope, examSlug: 'ut_two', name: 'Unit  Test 1' });
+  });
+
   it('refuses a slug outside the session settings format, an empty name and an inactive session', async () => {
     const { scope, manager } = await schoolWithActiveSession();
     for (const examSlug of ['Unit-Test', 'unit test', '', 'a'.repeat(101)])
@@ -264,5 +289,129 @@ describe('school.createExam', () => {
     expect(noPlanError).toMatchObject({ code: 'FORBIDDEN' });
     expect(isSchoolNoPlanError(noPlanError)).toBe(true);
     expect(await storedExamConfig(noPlan.scope.sessionId)).toEqual({});
+  });
+});
+
+describe('school.updateExam names', () => {
+  it('refuses renaming an exam onto another exam’s name without changing the session', async () => {
+    const { scope, manager } = await schoolWithActiveSession({
+      unit_test_1: { name: 'Unit Test 1', order: 1 },
+      annual: { name: 'Annual', order: 2 },
+    });
+    const before = await storedExamConfig(scope.sessionId);
+    const error = await rejection(
+      manager.school.updateExam({ ...scope, examSlug: 'annual', name: ' unit TEST 1 ' }),
+    );
+    expect(error).toMatchObject({
+      code: 'CONFLICT',
+      message: EXAM_NAME_TAKEN_MESSAGE,
+      data: { reason: EXAM_NAME_TAKEN_REASON },
+    });
+    expect(isExamNameTakenError(error)).toBe(true);
+    expect(await storedExamConfig(scope.sessionId)).toEqual(before);
+  });
+
+  it('allows keeping an exam’s own name or changing only its case, even beside a stored duplicate', async () => {
+    const { scope, manager } = await schoolWithActiveSession({
+      unit_test_1: { name: 'Unit Test 1', order: 1 },
+      // Stored before names had to be unique.
+      unit_test_1_copy: { name: 'unit test 1', order: 2 },
+    });
+    expect(
+      await manager.school.updateExam({ ...scope, examSlug: 'unit_test_1', name: 'UNIT Test 1' }),
+    ).toEqual({ slug: 'unit_test_1', name: 'UNIT Test 1', order: 1 });
+    expect(
+      await manager.school.updateExam({
+        ...scope,
+        examSlug: 'unit_test_1_copy',
+        name: 'unit test 1',
+        order: 3,
+      }),
+    ).toEqual({ slug: 'unit_test_1_copy', name: 'unit test 1', order: 3 });
+    expect(await storedExamConfig(scope.sessionId)).toEqual({
+      unit_test_1: { name: 'UNIT Test 1', order: 1 },
+      unit_test_1_copy: { name: 'unit test 1', order: 3 },
+    });
+  });
+});
+
+describe('school.updateSession exam names', () => {
+  /** Saves the session's stored configuration with `examConfig` replacing its exams. */
+  async function saveExams(
+    client: Client,
+    scope: { schoolId: string; sessionId: string },
+    examConfig: Record<string, { name: string; order: number }>,
+  ) {
+    const session = await client.school.getSession(scope);
+    return client.school.updateSession({
+      ...scope,
+      sessionConfig: { ...session.sessionConfig!, examConfig },
+    });
+  }
+
+  it('refuses a new exam whose name another exam has', async () => {
+    const stored = { first_term: { name: 'First Term', order: 1 } };
+    const { scope, manager } = await schoolWithActiveSession(stored);
+    const error = await rejection(
+      saveExams(manager, scope, {
+        ...stored,
+        term_one: { name: ' first term', order: 2 },
+      }),
+    );
+    expect(error).toMatchObject({
+      code: 'CONFLICT',
+      message: EXAM_NAME_TAKEN_MESSAGE,
+      data: { reason: EXAM_NAME_TAKEN_REASON },
+    });
+    expect(isExamNameTakenError(error)).toBe(true);
+    expect(await storedExamConfig(scope.sessionId)).toEqual(stored);
+  });
+
+  it('refuses renaming an exam onto another exam’s name', async () => {
+    const stored = {
+      first_term: { name: 'First Term', order: 1 },
+      annual: { name: 'Annual', order: 2 },
+    };
+    const { scope, manager } = await schoolWithActiveSession(stored);
+    const error = await rejection(
+      saveExams(manager, scope, {
+        ...stored,
+        annual: { name: 'FIRST TERM', order: 2 },
+      }),
+    );
+    expect(isExamNameTakenError(error)).toBe(true);
+    expect(await storedExamConfig(scope.sessionId)).toEqual(stored);
+  });
+
+  it('keeps saving a configuration whose duplicate names were already stored', async () => {
+    const stored = {
+      unit_test_1: { name: 'Unit Test 1', order: 1 },
+      unit_test_1_copy: { name: ' unit test 1', order: 2 },
+    };
+    const { scope, manager } = await schoolWithActiveSession(stored);
+    const session = await manager.school.getSession(scope);
+    // An unrelated field changes; the stored duplicates are resubmitted as they
+    // are, as the settings screen sends the whole configuration.
+    const saved = await manager.school.updateSession({
+      ...scope,
+      sessionEndYear: 2028,
+      sessionConfig: session.sessionConfig,
+    });
+    expect(saved.sessionEndYear).toBe(2028);
+    expect(await storedExamConfig(scope.sessionId)).toEqual(stored);
+    // Reordering them, changing only their case and adding an unrelated exam also saves.
+    const next = {
+      unit_test_1: { name: 'UNIT TEST 1', order: 2 },
+      unit_test_1_copy: { name: ' unit test 1', order: 1 },
+      annual: { name: 'Annual', order: 3 },
+    };
+    await saveExams(manager, scope, next);
+    expect(await storedExamConfig(scope.sessionId)).toEqual(next);
+    // A third exam joining the stored duplicates is introduced, and refused.
+    const error = await rejection(
+      saveExams(manager, scope, { ...next, unit_test_1_again: { name: 'Unit Test 1', order: 4 } }),
+    );
+    expect(isExamNameTakenError(error)).toBe(true);
+    expect(await storedExamConfig(scope.sessionId)).toEqual(next);
   });
 });

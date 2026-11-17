@@ -56,6 +56,83 @@ export function nextExamOrder(
   );
 }
 
+/**
+ * The form of an exam name that decides whether two exams of a session share a
+ * name: exam names are unique within a session, compared trimmed and ignoring
+ * case. The name is first put in Unicode NFC, so a precomposed letter and the
+ * same letter written with a combining mark (`é` and `e` + U+0301) compare
+ * equal; then surrounding whitespace is removed (`String.prototype.trim`,
+ * which includes Unicode spaces such as U+00A0); then it is lowercased with
+ * the fixed `en` locale, so the result does not depend on the runtime's locale
+ * (a Turkish default locale would otherwise lowercase `I` to dotless `ı`).
+ * Whitespace inside the name is kept as typed: `Unit  Test` and `Unit Test`
+ * are different names. Used by the browser and the server alike, so the
+ * dialogs and the procedures apply one rule. The stored name keeps the case
+ * and inner spacing the user gave it; this key is only compared, never stored.
+ */
+export function examNameKey(name: string): string {
+  return name.normalize('NFC').trim().toLocaleLowerCase('en');
+}
+
+/**
+ * The slug of an exam in `examConfig` whose name clashes with `name`
+ * (`examNameKey`), or `undefined` when none does. `exceptSlug` is the exam
+ * being renamed: it never clashes with itself, so keeping its name or changing
+ * only its case or surrounding whitespace is not a clash. When several exams
+ * clash (stored duplicates), the first by slug is returned, so the answer does
+ * not depend on the map's insertion order.
+ */
+export function findExamNameClash(
+  examConfig: Readonly<Record<string, { name: string }>>,
+  name: string,
+  exceptSlug?: string,
+): string | undefined {
+  const key = examNameKey(name);
+  return Object.keys(examConfig)
+    .sort()
+    .find(
+      (slug) =>
+        slug !== exceptSlug && examNameKey(examConfig[slug]!.name) === key,
+    );
+}
+
+/**
+ * The name clashes a full replacement of a session's exams would introduce:
+ * each returned group lists the slugs (sorted) of `submitted` exams sharing
+ * one name (`examNameKey`) where at least one of them is new (its slug is not
+ * in `stored`) or was renamed (its stored name has a different key). Groups
+ * made only of exams stored under the same names are not returned: a session
+ * saved before names had to be unique keeps saving its existing duplicates,
+ * so saving unrelated settings never fails for it. Changing an exam's slug in
+ * session settings makes it a new exam here, like any exam whose slug the
+ * session did not have. Groups are ordered by their first slug.
+ */
+export function findIntroducedExamNameClashes(
+  stored: Readonly<Record<string, { name: string }>>,
+  submitted: Readonly<Record<string, { name: string }>>,
+): string[][] {
+  const groups = new Map<string, string[]>();
+  for (const slug of Object.keys(submitted).sort()) {
+    const key = examNameKey(submitted[slug]!.name);
+    groups.set(key, [...(groups.get(key) ?? []), slug]);
+  }
+  const isNewOrRenamed = (slug: string) =>
+    !Object.hasOwn(stored, slug) ||
+    examNameKey(stored[slug]!.name) !== examNameKey(submitted[slug]!.name);
+  return [...groups.values()].filter(
+    (slugs) => slugs.length > 1 && slugs.some(isNewOrRenamed),
+  );
+}
+
+/**
+ * Stored exam configurations, keyed by slug. It deliberately does not refuse
+ * duplicate names (`examNameKey`): it also parses configurations read from the
+ * database and response DTOs, and sessions saved before names had to be unique
+ * may hold duplicates, which must keep loading. Name uniqueness is enforced
+ * where exams are written: `school.createExam`, `school.updateExam`, and
+ * `school.createSession` / `school.updateSession` through
+ * `findIntroducedExamNameClashes`.
+ */
 export const examConfigSchema = z
   .record(
     z.string().min(1).describe("Exam slug (e.g. 'midterm', 'final')"),

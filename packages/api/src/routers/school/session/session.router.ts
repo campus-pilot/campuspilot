@@ -4,7 +4,11 @@ import {
   financeNumberCounterTable,
 } from '@campuspilot/db/schema/finance';
 import { examPlanTable, examTimetableTable } from '@campuspilot/db/schema/exam';
-import { sessionConfigSchema } from '@campuspilot/db/schema/jsonb/session-config';
+import {
+  findIntroducedExamNameClashes,
+  sessionConfigSchema,
+} from '@campuspilot/db/schema/jsonb/session-config';
+import { examNameTakenError } from '../exam/exam.service';
 import { resolveSessionExamPermission } from '../../../permissions/session-exams';
 import { schoolTable } from '@campuspilot/db/schema/school';
 import { SCHOOL_ACTIONS } from '@campuspilot/opa/policies/school';
@@ -69,6 +73,28 @@ async function assertStudentSessionSettingsUnchanged(
   const next = sessionConfigSchema.parse(submitted ?? {});
   if (STUDENT_SESSION_SETTINGS.every((key) => isDeepStrictEqual(previous[key], next[key]))) return;
   await assertSchoolFeatureEnabled(db, schoolId, 'studentManagement');
+}
+
+/**
+ * Refuses a session configuration whose exams introduce a name clash (exam
+ * names are unique within a session, `examNameKey`) with the taken-name
+ * CONFLICT (`isExamNameTakenError`). `stored` is the configuration being
+ * replaced, or null for a new session, where every exam is new.
+ *
+ * The rule lives here, where configurations are written, rather than as a
+ * refinement of `examConfigSchema`: that schema also parses configurations
+ * read from the database and the session DTOs, and sessions saved before
+ * names had to be unique may hold duplicates. A refinement would make them
+ * unreadable, and would refuse every save of such a session, even of
+ * unrelated settings. Comparing with the stored configuration instead refuses
+ * only clashes the submission introduces (an exam that is new or renamed,
+ * `findIntroducedExamNameClashes`), so stored duplicates keep saving.
+ */
+function assertNoIntroducedExamNameClash(stored: unknown, submitted: unknown) {
+  const previous = sessionConfigSchema.parse(stored ?? {});
+  const next = sessionConfigSchema.parse(submitted ?? {});
+  if (findIntroducedExamNameClashes(previous.examConfig, next.examConfig).length)
+    throw examNameTakenError();
 }
 
 export const schoolSessionRouter = {
@@ -229,6 +255,7 @@ export const schoolSessionRouter = {
           .limit(1);
         if (!school) throw rpcError.notFound('School');
         await assertStudentSessionSettingsUnchanged(context.db, schoolId, null, values.sessionConfig);
+        assertNoIntroducedExamNameClash(null, values.sessionConfig);
 
         const [session] = await context.db
           .insert(schoolSessionTable)
@@ -339,6 +366,12 @@ export const schoolSessionRouter = {
             await assertStudentSessionSettingsUnchanged(
               transaction,
               schoolId,
+              existingSession.sessionConfig,
+              changes.sessionConfig,
+            );
+            // Compared with the configuration read under the session row lock,
+            // which `createExam` and `updateExam` also take.
+            assertNoIntroducedExamNameClash(
               existingSession.sessionConfig,
               changes.sessionConfig,
             );

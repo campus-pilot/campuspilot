@@ -15,7 +15,13 @@ import {
 } from '@campuspilot/db/schema/jsonb/exam-config';
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import type { z } from 'zod';
+import { ORPCError } from '@orpc/server';
 import { rpcError } from '../../../errors';
+import {
+  EXAM_NAME_TAKEN_MESSAGE,
+  EXAM_NAME_TAKEN_REASON,
+  type ExamNameTakenData,
+} from './exam-definition.contract';
 import type {
   examScopeSchema,
   planScopeSchema,
@@ -23,6 +29,19 @@ import type {
 } from './exam.dto';
 
 type SessionScope = { schoolId: string; sessionId: string };
+
+/**
+ * The refusal of an exam name another exam of the session already has
+ * (`examNameKey`), shared by the exam definition procedures and the session
+ * configuration save. Clients identify it by `data.reason`
+ * (`isExamNameTakenError`), never by CONFLICT, which database conflicts share.
+ */
+export function examNameTakenError() {
+  return new ORPCError('CONFLICT', {
+    message: EXAM_NAME_TAKEN_MESSAGE,
+    data: { reason: EXAM_NAME_TAKEN_REASON } satisfies ExamNameTakenData,
+  });
+}
 export type ExamScope = z.infer<typeof examScopeSchema>;
 export type PlanScope = z.infer<typeof planScopeSchema>;
 
