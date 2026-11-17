@@ -60,7 +60,7 @@ session heading in every examination screen.
 The session Documents create page starts with document-type cards only. The four
 academic cards plus Bills and Receipts share this surface; account statements stay
 contextual to an admission ledger. Each card opens a wide responsive dialog for
-that type's settings, explicit preview, PDF creation, download, and history action.
+that type's settings, optional preview, one-click PDF download, and history action.
 Contextual document links open the same dialog with applicable values preselected;
 closing it returns to a clean card view.
 

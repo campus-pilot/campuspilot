@@ -125,6 +125,9 @@ function DocumentGeneratorData({
 }
 /** Holds preview/generation state in TanStack Form. A preview is valid only
  * for its explicit recipient/exam selection and immutable template revision.
+ * Previewing is optional: `generate` creates the PDF from the current
+ * selection, and `download` also starts its download (the server checks the
+ * same selection again on each call; a preview is only for looking).
  */
 function useDocumentGeneration({
   scope,
@@ -159,7 +162,7 @@ function useDocumentGeneration({
         includeGradingScale: z.boolean(),
       }),
       resultPolicy: z.enum(["require_all", "approved_only"]),
-      mode: z.enum(["preview", "generate"]),
+      mode: z.enum(["preview", "generate", "download"]),
       error: z.string(),
       preview: z.custom<Preview>().nullable(),
       generatedId: z.string(),
@@ -235,7 +238,7 @@ function useDocumentGeneration({
       studentIds: initial.studentId ? [initial.studentId] : ([] as string[]),
       reportSections: DEFAULT_REPORT_SECTIONS,
       resultPolicy: "approved_only" as "approved_only" | "require_all",
-      mode: "preview" as "preview" | "generate",
+      mode: "preview" as GenerationMode,
       error: "",
       preview: null as Preview | null,
       generatedId: "",
@@ -257,13 +260,6 @@ function useDocumentGeneration({
           });
           form.setFieldValue("generatedId", "");
         } else {
-          if (value.preview?.fingerprint !== JSON.stringify(source)) {
-            form.setFieldValue(
-              "error",
-              "Preview this selection before creating the PDF.",
-            );
-            return;
-          }
           const result = await client.school.generateDocument({
             schoolId: scope.schoolId,
             source,
@@ -271,6 +267,15 @@ function useDocumentGeneration({
           });
           form.setFieldValue("generatedId", result.artifact.id);
           await cache.artifacts(scope.schoolId);
+          if (value.mode === "download")
+            form.setFieldValue(
+              "error",
+              await downloadCreatedDocument({
+                schoolId: scope.schoolId,
+                artifactId: result.artifact.id,
+                documentType,
+              }),
+            );
         }
       } catch (error) {
         form.setFieldValue(
@@ -316,7 +321,7 @@ function GenerationForm({
     <div className="grid min-w-0 items-start gap-5 lg:grid-cols-[minmax(280px,340px)_minmax(0,1fr)]">
       <DocumentPanel
         title="Create a document"
-        description="Choose the data to include, check the preview, and create your PDF."
+        description="Choose the data to include and download the PDF. Preview it first if you want to check it."
       >
         <p className="rounded-lg bg-primary/5 p-3 text-sm">
           <span className="text-muted-foreground">Selected template</span>
@@ -424,7 +429,6 @@ function GenerationForm({
           {documentType === "report_card" && <ReportOptions form={form} />}
           <GenerationActions
             form={form}
-            sourceFor={sourceFor}
             scope={scope}
             documentType={documentType}
             onHistory={onHistory}
@@ -460,6 +464,9 @@ function GenerationForm({
   );
 }
 type GenerationFormApi = ReturnType<typeof useDocumentGeneration>["form"];
+/** `preview` renders without saving; `generate` creates the PDF; `download`
+ * creates it and starts its download in the same click. */
+type GenerationMode = "preview" | "generate" | "download";
 function ReportOptions({ form }: { form: GenerationFormApi }) {
   return (
     <fieldset className="flex flex-col gap-3">
@@ -503,13 +510,11 @@ function ReportOptions({ form }: { form: GenerationFormApi }) {
 }
 function GenerationActions({
   form,
-  sourceFor,
   scope,
   documentType,
   onHistory,
 }: {
   form: GenerationFormApi;
-  sourceFor: ReturnType<typeof useDocumentGeneration>["sourceFor"];
   scope: DocumentScope;
   documentType: AcademicDocumentType;
   onHistory: () => void;
@@ -529,6 +534,18 @@ function GenerationActions({
           {values.error && (
             <DocumentNotice error>{values.error}</DocumentNotice>
           )}
+          <CreatePdfButton
+            permission={{
+              schoolId: scope.schoolId,
+              action: SCHOOL_ACTIONS.READ_DOCUMENT_ARTIFACTS,
+            }}
+            disabled={submitting || !canSubmit}
+            running={submitting ? values.mode : null}
+            onCreate={(mode) => {
+              form.setFieldValue("mode", mode);
+              void form.handleSubmit();
+            }}
+          />
           <DocumentButton
             type="submit"
             variant="outline"
@@ -538,23 +555,6 @@ function GenerationActions({
             {submitting && values.mode === "preview"
               ? "Preparing preview…"
               : "Preview document"}
-          </DocumentButton>
-          <DocumentButton
-            type="button"
-            disabled={
-              submitting ||
-              !canSubmit ||
-              values.preview?.fingerprint !== JSON.stringify(sourceFor(values))
-            }
-            onClick={() => {
-              form.setFieldValue("mode", "generate");
-              void form.handleSubmit();
-            }}
-          >
-            <FileDown />
-            {submitting && values.mode === "generate"
-              ? "Creating PDF…"
-              : "Create PDF"}
           </DocumentButton>
           {values.generatedId && (
             <GenerationSuccess
@@ -618,7 +618,12 @@ function GenerationSuccess({
         schoolId={schoolId}
         action={SCHOOL_ACTIONS.READ_DOCUMENT_ARTIFACTS}
       >
-        <DocumentDownload schoolId={schoolId} artifactId={artifactId} documentType={documentType} />
+        <DocumentDownload
+          schoolId={schoolId}
+          artifactId={artifactId}
+          documentType={documentType}
+          label="Download again"
+        />
         <DocumentButton type="button" variant="ghost" onClick={onHistory}>
           View document history
           <ArrowRight />
@@ -627,10 +632,82 @@ function GenerationSuccess({
     </div>
   );
 }
-/** Issue a fresh short-lived URL on each click, keeping expired URLs out of the
- * history cache. The navigation happens only after the authorization succeeds.
- */
-export function DocumentDownload({
+/** The main button of a generation dialog. With the permission to download
+ * documents it reads "Download PDF" and creates the PDF and starts its download
+ * in one click; without it, "Create PDF" only creates it (the download would be
+ * refused). It never waits for a preview. */
+export function CreatePdfButton({
+  permission,
+  disabled,
+  running,
+  onCreate,
+}: {
+  permission: {
+    schoolId: string;
+    action:
+      | typeof SCHOOL_ACTIONS.READ_DOCUMENT_ARTIFACTS
+      | typeof SCHOOL_ACTIONS.READ_FINANCE_DOCUMENT_ARTIFACTS;
+  };
+  disabled: boolean;
+  /** The mode being submitted, or null when nothing is. */
+  running: GenerationMode | null;
+  onCreate: (mode: "generate" | "download") => void;
+}) {
+  const download = (
+    <DocumentButton
+      type="button"
+      disabled={disabled}
+      onClick={() => onCreate("download")}
+    >
+      <FileDown />
+      {running === "download" ? "Creating PDF…" : "Download PDF"}
+    </DocumentButton>
+  );
+  return (
+    <DocumentPermission
+      schoolId={permission.schoolId}
+      action={permission.action}
+      fallback={
+        <DocumentButton
+          type="button"
+          disabled={disabled}
+          onClick={() => onCreate("generate")}
+        >
+          <FileDown />
+          {running === "generate" ? "Creating PDF…" : "Create PDF"}
+        </DocumentButton>
+      }
+      // Usually already answered (the history tab asks the same); until then
+      // the button holds its place without acting on an unknown permission.
+      pending={
+        <DocumentButton type="button" disabled>
+          <FileDown />
+          Download PDF
+        </DocumentButton>
+      }
+    >
+      {download}
+    </DocumentPermission>
+  );
+}
+/** Starts the download of a PDF the dialog just created, returning the error
+ * to show ("" when it started). The PDF is already saved, so the error says
+ * so: it stays in history and the "Download again" button retries. */
+export async function downloadCreatedDocument(artifact: {
+  schoolId: string;
+  artifactId: string;
+  documentType: DocumentType;
+}) {
+  try {
+    await downloadDocument(artifact);
+    return "";
+  } catch (error) {
+    return `The PDF was created, but its download did not start: ${error instanceof Error ? error.message : "download unavailable"}`;
+  }
+}
+/** Asks for a fresh short-lived URL and navigates to it. The URL is served as
+ * an attachment, so the browser downloads it and the page stays. */
+async function downloadDocument({
   schoolId,
   artifactId,
   documentType,
@@ -639,21 +716,37 @@ export function DocumentDownload({
   artifactId: string;
   documentType: DocumentType;
 }) {
+  const { url } = await client.school.getDocumentDownload({
+    schoolId,
+    artifactId,
+    documentType,
+  });
+  const link = document.createElement("a");
+  link.href = url;
+  link.rel = "noopener noreferrer";
+  link.click();
+}
+/** Issue a fresh short-lived URL on each click, keeping expired URLs out of the
+ * history cache. The navigation happens only after the authorization succeeds.
+ */
+export function DocumentDownload({
+  schoolId,
+  artifactId,
+  documentType,
+  label = "Download PDF",
+}: {
+  schoolId: string;
+  artifactId: string;
+  documentType: DocumentType;
+  label?: string;
+}) {
   const form = useForm({
     defaultValues: { error: "" },
     validators: { onChange: z.object({ error: z.string() }) },
     onSubmit: async () => {
       form.setFieldValue("error", "");
       try {
-        const { url } = await client.school.getDocumentDownload({
-          schoolId,
-          artifactId,
-          documentType,
-        });
-        const link = document.createElement("a");
-        link.href = url;
-        link.rel = "noopener noreferrer";
-        link.click();
+        await downloadDocument({ schoolId, artifactId, documentType });
       } catch (error) {
         form.setFieldValue(
           "error",
@@ -678,7 +771,7 @@ export function DocumentDownload({
             onClick={() => void form.handleSubmit()}
           >
             <FileDown />
-            {submitting ? "Preparing download…" : "Download PDF"}
+            {submitting ? "Preparing download…" : label}
           </DocumentButton>
           {error && <DocumentNotice error>{error}</DocumentNotice>}
         </div>
