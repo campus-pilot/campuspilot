@@ -1,3 +1,4 @@
+import { readSchoolPlan } from '@campuspilot/db/feature-flags/store';
 import { admissionTable } from '@campuspilot/db/schema/admission';
 import { cadetOauthClient } from '@campuspilot/db/schema/cadet';
 import { schoolTable } from '@campuspilot/db/schema/school';
@@ -8,6 +9,7 @@ import { z } from 'zod';
 import { cadetProcedure } from '../../cadet/procedure';
 import { cadetRecordsRouter } from './cadet-records.router';
 import { rpcError, toRpcError } from '../../errors';
+import { schoolPlanFactsOf } from '../../school-access/school-access.service';
 import {
   oauthClientRegistrationMethod,
   oauthClientVerifiedHost,
@@ -70,7 +72,7 @@ export const cadetRouter = {
     .route({
       summary: 'Get my school',
       description:
-        "Get the details of the signed-in student's school the portal needs: its name, whether it has a logo and whether it is suspended (read-only). Takes no input.",
+        "Get the details of the signed-in student's school the portal needs: its name, whether it has a logo, whether it is suspended and whether it has an active plan (either way read-only without), and when a trial that gives its plan ends. Takes no input.",
       tags: ['Cadet'],
     })
     .meta({
@@ -88,6 +90,14 @@ export const cadetRouter = {
          * (docs/school-suspension.md). The portal shows a permanent notice.
          */
         isSuspended: z.boolean(),
+        /**
+         * The school has an active plan (a subscription or an active trial;
+         * docs/school-trials.md). Without one the portal is read-only and
+         * shows a permanent notice.
+         */
+        hasActivePlan: z.boolean(),
+        /** When the trial that gives the school its plan ends; null when no trial gives it. */
+        trialEndsAt: z.iso.datetime().nullable(),
       }),
     )
     .handler(async ({ context }) => {
@@ -102,8 +112,15 @@ export const cadetRouter = {
           .from(schoolTable)
           .where(eq(schoolTable.id, context.cadet.schoolId))
           .limit(1);
-        if (!school) throw rpcError.notFound('School');
-        return { id: school.id, name: school.name, hasLogo: school.logoS3Key !== null, isSuspended: school.suspendedAt !== null };
+        const plan = await readSchoolPlan(context.db, context.cadet.schoolId);
+        if (!school || !plan) throw rpcError.notFound('School');
+        return {
+          id: school.id,
+          name: school.name,
+          hasLogo: school.logoS3Key !== null,
+          isSuspended: school.suspendedAt !== null,
+          ...schoolPlanFactsOf(plan),
+        };
       } catch (error) {
         throw toRpcError(error);
       }

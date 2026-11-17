@@ -25,7 +25,7 @@ beforeEach(() => {
 });
 
 /** The student's school as `getSchool` answers it. */
-const school = { id: 'school_1', name: 'Greenfield Valley School', hasLogo: false, isSuspended: false };
+const school = { id: 'school_1', name: 'Greenfield Valley School', hasLogo: false, isSuspended: false, hasActivePlan: true, trialEndsAt: null };
 
 describe('AppFrame', () => {
   it('sends a signed-out visitor to sign-in before loading any record', () => {
@@ -66,6 +66,19 @@ describe('AppFrame', () => {
     // Read-only, not closed: the screen and the tabs are still there.
     expect(screen.getByText('content')).toBeTruthy();
     expect(within(screen.getByRole('navigation', { name: 'Main' })).getAllByRole('link')).toHaveLength(5);
+  });
+
+  it('keeps the whole portal and says the plan has ended when the school has no plan', async () => {
+    mocks.session = { user: { id: 'cadet' } };
+    resetHandlers({
+      getProfile: () => profile,
+      getUnreadNotificationCount: () => ({ count: 2 }),
+      getSchool: () => ({ ...school, hasActivePlan: false }),
+    });
+    renderWithQuery(<AppFrame>content</AppFrame>);
+    expect(await screen.findByText('School plan ended')).toBeTruthy();
+    expect(screen.getByText("Your school's plan has ended. You can still view everything. Contact your school.")).toBeTruthy();
+    expect(screen.getByText('content')).toBeTruthy();
   });
 
   it('shows "Cadet Portal unavailable" with sign out, and no tabs or records, when the school has the portal switched off', async () => {

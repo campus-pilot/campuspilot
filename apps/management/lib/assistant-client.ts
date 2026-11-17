@@ -7,7 +7,7 @@ import { RPCLink } from '@orpc/client/fetch';
 import type { ContractRouterClient } from '@orpc/contract';
 import { createTanstackQueryUtils } from '@orpc/tanstack-query';
 
-import { notifyIfSchoolSuspended } from './orpc';
+import { notifyIfSchoolReadOnly } from './orpc';
 
 export type AssistantClient = ContractRouterClient<AssistantContract>;
 
@@ -24,8 +24,8 @@ export const assistantClient: AssistantClient = createORPCClient(
     fetch(url, options) {
       return fetch(url, { ...options, credentials: 'include' });
     },
-    // A message refused because the school is suspended refreshes the school list, as for every other call.
-    interceptors: [onError(notifyIfSchoolSuspended)],
+    // A message refused because the school is read-only refreshes the school list, as for every other call.
+    interceptors: [onError(notifyIfSchoolReadOnly)],
   }),
 );
 

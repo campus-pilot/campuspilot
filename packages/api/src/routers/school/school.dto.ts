@@ -14,6 +14,18 @@ export const mySchoolDtoSchema = z.object({
    * administrator's reason is deliberately not part of this.
    */
   isSuspended: z.boolean(),
+  /**
+   * The school has an active plan: a subscription or an active trial
+   * (docs/school-trials.md). Without one it is read-only and management
+   * shows a permanent warning.
+   */
+  hasActivePlan: z.boolean(),
+  /**
+   * When the trial that gives the school its plan ends (ISO date-time);
+   * null when no trial gives the plan. Management warns in the trial's last
+   * days.
+   */
+  trialEndsAt: z.iso.datetime().nullable(),
 });
 
 export type MySchoolDto = z.infer<typeof mySchoolDtoSchema>;

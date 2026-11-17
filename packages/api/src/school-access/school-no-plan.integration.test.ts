@@ -225,6 +225,45 @@ describe('the assistant in a school without an active plan', () => {
   });
 });
 
+describe('what the school\'s own apps are told about its plan', () => {
+  it('says whether the school has a plan, and when a trial that gives the plan ends', async () => {
+    const subscribed = await createTestSchool({ tier: 'pro' });
+    const onTrial = await createTestSchool({ tier: 'plus' });
+    const below = await createTestSchool({ tier: 'enterprise' });
+    const none = await createTestSchool({ tier: null });
+    const trial = await createTestSchoolTrial({ schoolId: onTrial.id, tier: 'enterprise', endsAt: daysFromNow(5) });
+    await createTestSchoolTrial({ schoolId: below.id, tier: 'pro' });
+    const principal = await createSchoolStaffSession(subscribed.id, [{ role: 'principal', meta: null }]);
+    for (const school of [onTrial, below, none]) {
+      await createTestSchoolMember({ schoolId: school.id, userId: principal.user.id, roles: [{ role: 'principal', meta: null }] });
+    }
+    const client = createTestClient(principal.session);
+
+    const mine = new Map((await client.school.listMySchools()).map((school) => [school.id, school]));
+    expect(mine.get(subscribed.id)).toMatchObject({ hasActivePlan: true, trialEndsAt: null });
+    expect(mine.get(onTrial.id)).toMatchObject({ hasActivePlan: true, trialEndsAt: trial.endsAt.toISOString() });
+    // A trial below the subscription gives nothing, so nothing is said about its end.
+    expect(mine.get(below.id)).toMatchObject({ hasActivePlan: true, trialEndsAt: null });
+    expect(mine.get(none.id)).toMatchObject({ hasActivePlan: false, trialEndsAt: null });
+    expect(await client.school.getSchool({ schoolId: onTrial.id })).toMatchObject({ hasActivePlan: true, trialEndsAt: trial.endsAt.toISOString() });
+    // Read-only, but readable: the facts are there for a school without a plan too.
+    expect(await client.school.getSchool({ schoolId: none.id })).toMatchObject({ hasActivePlan: false, trialEndsAt: null });
+    await expect(client.school.updateSchool({ schoolId: onTrial.id, name: 'Renamed On A Trial' })).resolves.toMatchObject({
+      name: 'Renamed On A Trial',
+      hasActivePlan: true,
+      trialEndsAt: trial.endsAt.toISOString(),
+    });
+  });
+
+  it('tells the Cadet Portal the same', async () => {
+    const school = await createTestSchool({ tier: null });
+    const trial = await createTestSchoolTrial({ schoolId: school.id, tier: 'enterprise' });
+    const admission = await createTestAdmission({ schoolId: school.id });
+    const { client } = await createCadetLogin(admission.id);
+    await expect(client.getSchool()).resolves.toMatchObject({ isSuspended: false, hasActivePlan: true, trialEndsAt: trial.endsAt.toISOString() });
+  });
+});
+
 describe('the no-plan error', () => {
   it('is FORBIDDEN with a stable reason, readable on both sides of the wire, and not confused with other errors', () => {
     const error = schoolNoPlanError();

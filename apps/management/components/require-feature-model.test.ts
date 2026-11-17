@@ -77,9 +77,10 @@ test('only the server\'s disabled-feature answer makes the cached flags outdated
   assert.equal(featureFlagsOutdatedBy(null), false);
 });
 
-test('only the server\'s suspended-school answer makes the cached school list outdated', () => {
+test('only the server\'s read-only school answers (suspended, no plan) make the cached school list outdated', () => {
   assert.equal(schoolListOutdatedBy({ code: 'FORBIDDEN', data: { reason: 'SCHOOL_SUSPENDED' } }), true);
-  // A disabled feature, a permission denial and a network failure say nothing about a suspension.
+  assert.equal(schoolListOutdatedBy({ code: 'FORBIDDEN', data: { reason: 'SCHOOL_NO_PLAN' } }), true);
+  // A disabled feature, a permission denial and a network failure say nothing about either.
   assert.equal(schoolListOutdatedBy({ code: 'FORBIDDEN', data: { reason: 'SCHOOL_FEATURE_DISABLED', feature: 'notices' } }), false);
   assert.equal(schoolListOutdatedBy({ code: 'FORBIDDEN' }), false);
   assert.equal(schoolListOutdatedBy({ code: 'PRECONDITION_FAILED', data: { reason: 'SCHOOL_SUSPENDED' } }), false);

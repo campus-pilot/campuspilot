@@ -1,4 +1,4 @@
-import { isSchoolSuspendedError } from '@campuspilot/api/school-access/school-access.contract';
+import { schoolWriteRefusalOf } from '@campuspilot/api/school-access/school-access.contract';
 import {
   DISABLED_SCHOOL_FEATURE,
   readSchoolFeatureDisabled,
@@ -73,11 +73,12 @@ export function featureFlagsOutdatedBy(error: unknown): boolean {
 
 /**
  * Whether a failed request says the cached list of the user's schools is out
- * of date: the server refused a change because the school is suspended
- * (docs/school-suspension.md). The list carries `isSuspended`, so it is read
- * again and the suspended-school warning appears at once in a tab that was
- * open when an administrator suspended the school.
+ * of date: the server refused a change because the school is read-only,
+ * suspended (docs/school-suspension.md) or without an active plan
+ * (docs/school-trials.md). The list carries `isSuspended` and
+ * `hasActivePlan`, so it is read again and the warning appears at once in a
+ * tab that was open when the school was suspended or its trial ended.
  */
 export function schoolListOutdatedBy(error: unknown): boolean {
-  return isSchoolSuspendedError(error);
+  return schoolWriteRefusalOf(error) !== null;
 }

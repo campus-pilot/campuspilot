@@ -10,25 +10,27 @@ import { MutationCache, QueryCache, QueryClient } from '@tanstack/react-query';
 import { featureFlagsOutdatedBy, schoolListOutdatedBy } from '@/components/require-feature-model';
 
 /**
- * Called when the server refuses a change because the school is suspended
- * (docs/school-suspension.md). Module state, because the refusal is seen by
+ * Called when the server refuses a change because the school is read-only:
+ * suspended (docs/school-suspension.md) or without an active plan
+ * (docs/school-trials.md). Module state, because the refusal is seen by
  * the link (below) while what must be refreshed lives in the query client:
  * the app's query client registers its refresh here once it exists. One
  * slot, not a list: the browser has one query client, and a newer one (a
  * remount in development) simply replaces the older.
  */
-let refreshSuspendedSchoolList: (() => void) | null = null;
+let refreshSchoolList: (() => void) | null = null;
 
 /**
- * Link interceptor callback: a call refused with the suspended-school error
- * means the school list this app holds (`isSuspended`) is out of date. It
+ * Link interceptor callback: a call refused with the suspended-school or
+ * no-plan error means the school list this app holds (`isSuspended`,
+ * `hasActivePlan`) is out of date. It
  * sits on the link rather than on the query client's caches because most
  * saves here call `client.*` directly inside a form submit, which the
  * caches never see. The error itself is passed on untouched: the screen
  * that asked shows the server's message, like every other failed save.
  */
-export function notifyIfSchoolSuspended(error: unknown) {
-  if (schoolListOutdatedBy(error)) refreshSuspendedSchoolList?.();
+export function notifyIfSchoolReadOnly(error: unknown) {
+  if (schoolListOutdatedBy(error)) refreshSchoolList?.();
 }
 
 const link = new RPCLink({
@@ -36,7 +38,7 @@ const link = new RPCLink({
   fetch(url, options) {
     return fetch(url, { ...options, credentials: 'include' });
   },
-  interceptors: [onError(notifyIfSchoolSuspended)],
+  interceptors: [onError(notifyIfSchoolReadOnly)],
 });
 
 export const client: AppRouterClient = createORPCClient(link);
@@ -50,11 +52,11 @@ export const orpc = createTanstackQueryUtils(client);
  *   docs/feature-flags.md), for any query or mutation: the flags are read
  *   again, so the feature's navigation, actions and pages close without
  *   waiting for the next refetch;
- * - the school is suspended (the suspended-school error, see
- *   docs/school-suspension.md), for any call through {@link client} or the
- *   assistant client: the user's school list is read again, so the
- *   suspended-school warning appears in a tab that was open when the school
- *   was suspended.
+ * - the school is read-only (the suspended-school or no-plan error, see
+ *   docs/school-suspension.md and docs/school-trials.md), for any call
+ *   through {@link client} or the assistant client: the user's school list
+ *   is read again, so the read-only warning appears in a tab that was open
+ *   when the school was suspended or its trial ended.
  */
 export function createQueryClient() {
   const refreshOutdatedFlags = (error: unknown) => {
@@ -67,7 +69,7 @@ export function createQueryClient() {
   // In the browser only: the server renders a provider per request and makes
   // no calls through the link, so there is nothing to refresh there.
   if (typeof window !== 'undefined') {
-    refreshSuspendedSchoolList = () => void queryClient.invalidateQueries({ queryKey: orpc.school.listMySchools.key() });
+    refreshSchoolList = () => void queryClient.invalidateQueries({ queryKey: orpc.school.listMySchools.key() });
   }
   return queryClient;
 }

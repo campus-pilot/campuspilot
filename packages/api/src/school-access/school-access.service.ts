@@ -1,6 +1,6 @@
 import type { DatabaseExecutor } from '@campuspilot/db';
-import { resolveSchoolPlan } from '@campuspilot/db/feature-flags/catalogue';
-import { activeSchoolTrialCondition } from '@campuspilot/db/feature-flags/store';
+import { resolveSchoolPlan, type SchoolTier } from '@campuspilot/db/feature-flags/catalogue';
+import { activeSchoolTrialCondition, type ActiveSchoolTrial } from '@campuspilot/db/feature-flags/store';
 import { schoolTable } from '@campuspilot/db/schema/school';
 import { schoolMemberTable } from '@campuspilot/db/schema/school-member';
 import { schoolTrialTable } from '@campuspilot/db/schema/school-trial';
@@ -150,4 +150,22 @@ export async function assertSchoolWritableByCaller(context: Pick<Context, 'db' |
   const facts = await readSchoolWriteFacts(context.db, schoolId, { memberUserId: userId });
   const refusal = facts && resolveSchoolWriteRefusal(facts);
   if (refusal) throw schoolWriteRefusedError(refusal);
+}
+
+/**
+ * What the school's own apps show about its plan, as separate facts
+ * (docs/school-trials.md): whether it has an active plan (a subscription or
+ * an active trial; without one it is read-only), and when the trial ends
+ * while a trial gives the plan (null otherwise, also when a trial runs
+ * below the subscription and changes nothing).
+ */
+export function schoolPlanFactsOf(input: {
+  subscribedTier: SchoolTier | null;
+  trial: Pick<ActiveSchoolTrial, 'tier' | 'endsAt'> | null;
+}): { hasActivePlan: boolean; trialEndsAt: string | null } {
+  const plan = resolveSchoolPlan({ subscribedTier: input.subscribedTier, activeTrial: input.trial });
+  return {
+    hasActivePlan: plan.tier !== null,
+    trialEndsAt: plan.source === 'trial' && input.trial ? input.trial.endsAt.toISOString() : null,
+  };
 }

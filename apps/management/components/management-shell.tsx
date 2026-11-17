@@ -24,7 +24,7 @@ import { AccountDialog } from './account-dialog';
 import { forgetDrafts } from './assistant/assistant-draft';
 import { AssistantVoiceLauncher } from './assistant/voice/assistant-voice-overlay';
 import { DemoSchoolBanner } from './demo-school-banner';
-import { SuspendedSchoolBanner } from './suspended-school-banner';
+import { ReadOnlySchoolBanner, TrialEndingBanner } from './school-plan-banners';
 import { ManagementCommandPalette } from './management-command-palette';
 import { ManagementNotificationBell } from './notifications/management-notifications';
 import { commandPaletteContextKey } from './management-command-model';
@@ -169,7 +169,8 @@ export function ManagementShell({
           </Link>
         )}
       >
-        <SuspendedSchoolBanner schoolId={state.commandContext.schoolId} />
+        <ReadOnlySchoolBanner schoolId={state.commandContext.schoolId} />
+        <TrialEndingBanner schoolId={state.commandContext.schoolId} />
         <DemoSchoolBanner schoolId={state.commandContext.schoolId} />
         {children}
       </AppShell>

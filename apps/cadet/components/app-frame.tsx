@@ -18,7 +18,7 @@ import { CadetSchoolChrome } from './cadet-school-chrome';
 import { SignOutButton } from './more/more-screen';
 import { CadetNotificationBell } from './notifications/cadet-notifications';
 import { EmptyState, ScreenLoading } from './screen';
-import { SuspendedSchoolNotice } from './suspended-school-notice';
+import { ReadOnlySchoolNotice } from './read-only-school-notice';
 
 /**
  * The five tabs. `sections`: screens outside a tab's own route that belong
@@ -143,7 +143,7 @@ function PortalChrome({ children }: { children: ReactNode }) {
       <CadetSchoolChrome />
       <TopBar />
       <main className="flex flex-1 flex-col gap-5 px-4 pb-6 pt-4 md:min-h-0 md:overflow-y-auto md:*:shrink-0">
-        <SuspendedSchoolNotice />
+        <ReadOnlySchoolNotice />
         {children}
       </main>
       <BottomNav />
