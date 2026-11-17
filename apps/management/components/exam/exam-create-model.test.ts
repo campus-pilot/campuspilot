@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { FormApi } from '@tanstack/react-form';
 import {
   EXAM_SLUG_TAKEN_REASON,
   isExamSlugTakenError,
@@ -9,6 +10,7 @@ import {
   EXAM_SLUG_TAKEN_MESSAGE,
   emptyCreateExamForm,
   followNameSlug,
+  startCreateExamAttempt,
   toCreateExamInput,
 } from './exam-create-model';
 
@@ -124,4 +126,40 @@ test('only the CONFLICT with the taken-slug reason means the slug is taken', () 
     false,
   );
   assert.equal(isExamSlugTakenError(new Error('offline')), false);
+});
+
+/**
+ * Drives a real form built like the dialog's: the same schema, and an
+ * onSubmit that answers with a form-level refusal the way the dialog does.
+ */
+function refusingForm() {
+  let attempts = 0;
+  const form = new FormApi({
+    defaultValues: {
+      ...emptyCreateExamForm,
+      name: 'Unit Test 1',
+      slug: 'unit_test_1',
+    },
+    validators: { onChange: createExamFormSchema },
+    onSubmit: () => {
+      attempts += 1;
+      form.setErrorMap({
+        onSubmit: { form: 'This school is suspended.', fields: {} },
+      });
+    },
+  });
+  form.mount();
+  return { form, attempts: () => attempts };
+}
+
+test('a form-level refusal never stops the next attempt from reaching the server', async () => {
+  const { form, attempts } = refusingForm();
+
+  await startCreateExamAttempt(form);
+  assert.equal(attempts(), 1);
+  assert.deepEqual(form.state.errors, ['This school is suspended.']);
+
+  await startCreateExamAttempt(form);
+  await startCreateExamAttempt(form);
+  assert.equal(attempts(), 3);
 });

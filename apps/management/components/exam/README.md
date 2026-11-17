@@ -11,7 +11,8 @@ settings through `school.createExam`: a name, and a slug that follows the name w
 the settings rule until the user types their own (`exam-create-model.ts`). The server
 lists it last and refuses a taken slug with an explicit reason
 (`isExamSlugTakenError`), shown beside the slug field; any other refusal is shown
-above the buttons and never blocks trying again. It is offered
+above the buttons and never blocks trying again (each attempt clears it
+before `handleSubmit`, `startCreateExamAttempt`). It is offered
 with `CREATE_EXAM` while the session is known to be active, and refreshes the list,
 the session (settings) and the sessions list on success. A dashed empty state opens a concise plan-review
 dialog with classes, student counts, subjects and modes. Each class row expands

@@ -22,6 +22,7 @@ import {
   createExamFormSchema,
   emptyCreateExamForm,
   followNameSlug,
+  startCreateExamAttempt,
   toCreateExamInput,
 } from './exam-create-model';
 import {
@@ -127,9 +128,10 @@ function useCreateExamForm(scope: SessionScope, onClose: () => void) {
   const form = useForm({
     defaultValues: emptyCreateExamForm,
     validators: { onChange: createExamFormSchema },
+    // The previous attempt's form-level message is cleared before submission
+    // starts (`startCreateExamAttempt`), not here: while it is set, TanStack
+    // Form never reaches this handler.
     onSubmit: async ({ value }) => {
-      // A refusal from the previous attempt is not this attempt's answer.
-      form.setErrorMap({ onSubmit: undefined });
       try {
         const exam = await client.school.createExam(
           toCreateExamInput(scope, value),
@@ -184,7 +186,7 @@ function CreateExamDialog({
           onSubmit={(event) => {
             event.preventDefault();
             event.stopPropagation();
-            void form.handleSubmit();
+            void startCreateExamAttempt(form);
           }}
         >
           <form.Field name="name">
@@ -246,7 +248,8 @@ function CreateExamFooter({
       selector={(state) => ({
         // Fields, not the whole form: the form-level message of a refused or
         // uncertain attempt must not block trying again with the same values.
-        // The next submission clears that message before it runs.
+        // `startCreateExamAttempt` clears that message before handleSubmit,
+        // which would otherwise stop at it without calling onSubmit.
         canSubmit: state.isFieldsValid && !state.isValidating,
         isSubmitting: state.isSubmitting,
         errors: state.errors,

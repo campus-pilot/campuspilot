@@ -155,6 +155,10 @@ feedback for successful saves. Shell setup warnings are not a general error log.
 Use TanStack Form `useForm` for all input workflows, with Zod through `validators`,
 adjacent field errors and `form.Subscribe` for submit availability/progress. Do not
 introduce standalone `useState` input/submission state or unapproved `useEffect`.
+A request refusal shown as a form-level `onSubmit` error must be cleared before
+the next `handleSubmit` (as `startCreateExamAttempt` does): without a submit
+validator to replace it, TanStack Form keeps the form invalid and never calls
+`onSubmit` again, so clearing it inside `onSubmit` does nothing.
 Keep reusable presentation in `@campuspilot/components`, with props and callbacks;
 API orchestration belongs in the management app.
 

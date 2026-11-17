@@ -68,3 +68,22 @@ export function toCreateExamInput(
     name: values.name.trim(),
   };
 }
+
+/**
+ * Starts a new submission attempt from the dialog's submit event.
+ *
+ * The previous attempt's form-level message (a refusal other than a taken
+ * slug, or an uncertain outcome) is cleared first. It has to happen here,
+ * before `handleSubmit`: TanStack Form keeps an `onSubmit` error the handler
+ * set itself through submit validation (this form has no submit validator to
+ * replace it), so the form stays invalid and `handleSubmit` stops before
+ * calling `onSubmit`. Clearing it inside `onSubmit` would never run, and Create
+ * would do nothing until a field changed.
+ */
+export function startCreateExamAttempt(form: {
+  setErrorMap: (errorMap: { onSubmit: undefined }) => void;
+  handleSubmit: () => Promise<unknown>;
+}) {
+  form.setErrorMap({ onSubmit: undefined });
+  return form.handleSubmit();
+}
