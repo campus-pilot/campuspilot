@@ -13,6 +13,7 @@ import { classTable, sectionTable } from '@campuspilot/db/schema/class';
 import type { Role, RoleMeta } from '@campuspilot/db/schema/jsonb/role';
 import { schoolTable } from '@campuspilot/db/schema/school';
 import { schoolMemberTable } from '@campuspilot/db/schema/school-member';
+import { schoolTrialTable } from '@campuspilot/db/schema/school-trial';
 import { schoolUserRoleTable } from '@campuspilot/db/schema/school-user-role';
 import { schoolSessionTable } from '@campuspilot/db/schema/session';
 import { eq, max } from 'drizzle-orm';
@@ -280,6 +281,36 @@ export async function createTestSchool(overrides: {
   }
 
   return school!;
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Inserts a trial for a test school directly, as the admin procedures store
+ * one. By default it started a day ago and ends in 30 days, so it is active;
+ * pass an `endsAt` in the past (and an earlier `startsAt`) for a trial that
+ * has run out, or `endedAt` for one an administrator ended early. Time is
+ * never waited for: a trial's state follows from these timestamps alone.
+ */
+export async function createTestSchoolTrial(options: {
+  schoolId: string;
+  tier: SchoolTier;
+  startsAt?: Date;
+  endsAt?: Date;
+  endedAt?: Date | null;
+}) {
+  const startsAt = options.startsAt ?? new Date(Date.now() - DAY_MS);
+  const [trial] = await db
+    .insert(schoolTrialTable)
+    .values({
+      schoolId: options.schoolId,
+      tier: options.tier,
+      startsAt,
+      endsAt: options.endsAt ?? new Date(Date.now() + 30 * DAY_MS),
+      endedAt: options.endedAt ?? null,
+    })
+    .returning();
+  return trial!;
 }
 
 /** A feature with its settings, for `createTestSchool({ features })`. */

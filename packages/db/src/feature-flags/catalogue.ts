@@ -5,9 +5,11 @@ import { roleEnum } from "../schema/jsonb/role";
 /**
  * The school feature catalogue: the single authority on which per-school
  * platform features exist, which subscription tiers include each one and
- * what configuration each one carries. A school has the features of its tier
- * (`school.tier`); a platform administrator can adjust one feature for one
- * school on top of that (admin app). The school cannot change either itself.
+ * what configuration each one carries. A school has the features of its
+ * plan's tier (its subscribed `school.tier`, or a higher tier of an active
+ * trial: {@link resolveSchoolPlan}); a platform administrator can adjust one
+ * feature for one school on top of that (admin app). The school cannot
+ * change either itself.
  *
  * It lives in `@campuspilot/db` because it is the contract of the
  * `school_feature_flag.config` jsonb column and must be importable by the
@@ -40,9 +42,11 @@ import { roleEnum } from "../schema/jsonb/role";
  * ignored by every read.
  */
 /**
- * The subscription tiers a school can be on, lowest first. A school is on
- * at most one (`school.tier`; null: no subscribed tier); what a tier includes is stated per feature in
- * the catalogue below (`tiers`), so the two can never disagree.
+ * The subscription tiers a school can be on, lowest first. A school
+ * subscribes to at most one (`school.tier`; null: no subscription) and may
+ * be on a trial of one (`school_trial`); its features follow the higher of
+ * the two ({@link resolveSchoolPlan}). What a tier includes is stated per
+ * feature in the catalogue below (`tiers`), so the two can never disagree.
  */
 export const SCHOOL_TIERS = ["plus", "pro", "enterprise"] as const;
 
@@ -70,6 +74,55 @@ export const schoolTierCatalogue = {
       "Everything in Pro, with the Cadet Portal for students and WhatsApp notifications to guardians.",
   },
 } as const satisfies Record<SchoolTier, { label: string; description: string }>;
+
+/**
+ * How the tiers compare when a school's subscription and its trial are both
+ * running: the higher one is the school's plan ({@link resolveSchoolPlan}).
+ * Stated per tier rather than read from the position in `SCHOOL_TIERS`.
+ */
+export const schoolTierRank = {
+  plus: 1,
+  pro: 2,
+  enterprise: 3,
+} as const satisfies Record<SchoolTier, number>;
+
+/**
+ * Where a school's plan comes from: its subscription (`school.tier`) or an
+ * active trial (`school_trial`). Null when the school has neither: it has no
+ * plan and is read-only (docs/school-trials.md).
+ */
+export const SCHOOL_PLAN_SOURCES = ["subscription", "trial"] as const;
+export type SchoolPlanSource = (typeof SCHOOL_PLAN_SOURCES)[number];
+export const schoolPlanSourceSchema = z.enum(SCHOOL_PLAN_SOURCES);
+
+/** A school's plan: the tier its features follow and where that tier comes from. */
+export type SchoolPlan =
+  | { tier: SchoolTier; source: SchoolPlanSource }
+  | { tier: null; source: null };
+
+/**
+ * A school's plan from its two separate facts: the subscribed tier
+ * (`school.tier`, null without a subscription) and the tier of its active
+ * trial (null without one). The one implementation of the rule
+ * (docs/school-trials.md):
+ * - the plan is the **higher** of the two: a trial never takes away what a
+ *   school pays for, and without a subscription the trial's tier applies;
+ * - `source` is `trial` when the trial's tier is higher or there is no
+ *   subscription, otherwise `subscription` (a trial of the same or a lower
+ *   tier changes nothing while it runs);
+ * - neither: `{ tier: null, source: null }`, the school has no plan.
+ */
+export function resolveSchoolPlan(input: {
+  subscribedTier: SchoolTier | null;
+  activeTrial: { tier: SchoolTier } | null;
+}): SchoolPlan {
+  const { subscribedTier, activeTrial } = input;
+  if (activeTrial !== null && (subscribedTier === null || schoolTierRank[activeTrial.tier] > schoolTierRank[subscribedTier])) {
+    return { tier: activeTrial.tier, source: "trial" };
+  }
+  if (subscribedTier !== null) return { tier: subscribedTier, source: "subscription" };
+  return { tier: null, source: null };
+}
 
 /** The shape every feature catalogue entry has. */
 type FeatureCatalogueShape = Record<
@@ -203,8 +256,8 @@ export type SchoolFeatureConfigInput<K extends SchoolFeatureKey> = z.input<
 
 /**
  * One feature's state for one school, as separate facts:
- * - `included`: the school's tier includes the feature (the catalogue's
- *   `tiers`);
+ * - `included`: the tier of the school's plan includes the feature (the
+ *   catalogue's `tiers`; see {@link resolveSchoolPlan});
  * - `adjustment`: what an administrator set for this one school on top of
  *   its tier: `true` (on), `false` (off), or null when the school follows
  *   its tier. This is what an update writes;
@@ -292,7 +345,7 @@ export const DISABLED_SCHOOL_FEATURE = {
 
 /**
  * Whether a tier includes a feature (the catalogue's `tiers`). A null tier
- * (no subscribed tier) includes none.
+ * (a school without a plan) includes none.
  */
 export function schoolTierIncludes(tier: SchoolTier | null, key: SchoolFeatureKey): boolean {
   if (tier === null) return false;
@@ -306,11 +359,12 @@ export function schoolTierFeatures(tier: SchoolTier): SchoolFeatureKey[] {
 }
 
 /**
- * Every feature's switch for a school on `tier` with the given adjustments:
- * the adjustment where one is stored, otherwise whether the tier includes
- * the feature. The one implementation, used by the store's reads and by the
- * admin app to say what a tier change would do. A null `tier` (no subscribed
- * tier) includes no feature, so only the school's adjustments switch any on.
+ * Every feature's switch for a school whose plan is `tier` (the effective
+ * tier of {@link resolveSchoolPlan}) with the given adjustments: the
+ * adjustment where one is stored, otherwise whether the tier includes the
+ * feature. The one implementation, used by the store's reads and by the
+ * admin app to say what a tier change would do. A null `tier` (no plan)
+ * includes no feature, so only the school's adjustments switch any on.
  */
 export function resolveSchoolFeatureSwitches(
   tier: SchoolTier | null,

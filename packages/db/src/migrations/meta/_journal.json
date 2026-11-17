@@ -505,6 +505,13 @@
       "when": 1794903051187,
       "tag": "0071_subscription-tiers",
       "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1794929654535,
+      "tag": "0072_school-trials",
+      "breakpoints": true
     }
   ]
 }

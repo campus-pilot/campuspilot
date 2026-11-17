@@ -18,9 +18,9 @@ import {
   isSchoolFeatureEnabled,
   readSchoolFeatureConfig,
   readSchoolFeatureFlags,
+  readSchoolPlan,
 } from '@campuspilot/db/feature-flags/store';
 import { schoolAssistantAccessRoleTable } from '@campuspilot/db/schema/assistant';
-import { schoolTable } from '@campuspilot/db/schema/school';
 import { schoolFeatureFlagTable } from '@campuspilot/db/schema/school-feature-flag';
 import { schoolMemberTable } from '@campuspilot/db/schema/school-member';
 import { and, eq } from 'drizzle-orm';
@@ -145,19 +145,17 @@ export async function setSchoolFeature(
   input: SetSchoolFeatureInput,
 ): Promise<void> {
   const config = parseSchoolFeatureConfig(input.feature, input.config);
-  const [school] = await db
-    .select({ tier: schoolTable.tier })
-    .from(schoolTable)
-    .where(eq(schoolTable.id, input.schoolId))
-    .limit(1);
+  // The plan's tier (subscription or a higher active trial) is what the
+  // school's switches follow, so it decides whether this switches the feature on.
+  const school = await readSchoolPlan(db, input.schoolId);
   if (!school) throw rpcError.notFound('School');
   const [before] = await db
     .select({ enabled: schoolFeatureFlagTable.enabled })
     .from(schoolFeatureFlagTable)
     .where(and(eq(schoolFeatureFlagTable.schoolId, input.schoolId), eq(schoolFeatureFlagTable.feature, input.feature)))
     .limit(1);
-  const wasOn = resolveSchoolFeatureSwitches(school.tier, { [input.feature]: before?.enabled ?? null })[input.feature];
-  const isOn = resolveSchoolFeatureSwitches(school.tier, { [input.feature]: input.enabled })[input.feature];
+  const wasOn = resolveSchoolFeatureSwitches(school.plan.tier, { [input.feature]: before?.enabled ?? null })[input.feature];
+  const isOn = resolveSchoolFeatureSwitches(school.plan.tier, { [input.feature]: input.enabled })[input.feature];
   // A feature with settings cannot be switched on without them: whatever
   // reads them would have nothing to go by. Switching it off stays possible either way.
   if (isOn && config === null && schoolFeatureHasConfig(input.feature)) {

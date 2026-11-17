@@ -55,7 +55,7 @@ describe('school feature flag storage', () => {
   it('reads a school without rows as exactly its tier, and a school that does not exist as having nothing', async () => {
     const school = await createTestSchool({ tier: 'pro' });
     expect(await getSchoolFeatureFlags(db, school.id)).toEqual(PRO);
-    expect(await readSchoolFeatureFlags(db, school.id)).toEqual({ tier: 'pro', features: PRO, invalidConfigs: [] });
+    expect(await readSchoolFeatureFlags(db, school.id)).toEqual({ tier: 'pro', subscribedTier: 'pro', trial: null, features: PRO, invalidConfigs: [] });
     expect(await getSchoolFeatureConfig(db, school.id, 'cadet')).toBeNull();
     expect(await isSchoolFeatureEnabled(db, school.id, 'studentManagement')).toBe(true);
     expect(await isSchoolFeatureEnabled(db, school.id, 'notices')).toBe(true);
@@ -78,13 +78,15 @@ describe('school feature flag storage', () => {
   it('reads a school without a tier as having no tier feature, while its adjustments still apply', async () => {
     const school = await createTestSchool({ tier: null });
     const NONE = { studentManagement: OFF, cadet: OFF, notices: OFF, whatsapp: OFF, assistant: OFF };
-    expect(await readSchoolFeatureFlags(db, school.id)).toEqual({ tier: null, features: NONE, invalidConfigs: [] });
+    expect(await readSchoolFeatureFlags(db, school.id)).toEqual({ tier: null, subscribedTier: null, trial: null, features: NONE, invalidConfigs: [] });
     expect(await isSchoolFeatureEnabled(db, school.id, 'studentManagement')).toBe(false);
 
     await setSchoolFeature(db, { schoolId: school.id, feature: 'studentManagement', enabled: true, config: null, updatedBy: null });
     await setSchoolFeature(db, { schoolId: school.id, feature: 'notices', enabled: true, config: null, updatedBy: null });
     expect(await readSchoolFeatureFlags(db, school.id)).toEqual({
       tier: null,
+      subscribedTier: null,
+      trial: null,
       features: { ...NONE, studentManagement: ADDED, notices: ADDED },
       invalidConfigs: [],
     });
@@ -96,7 +98,7 @@ describe('school feature flag storage', () => {
 
   it('gives a test school created without a tier student management and WhatsApp, as adjustments on a Plus school', async () => {
     const school = await createTestSchool();
-    expect(await readSchoolFeatureFlags(db, school.id)).toEqual({ tier: 'plus', features: BASELINE, invalidConfigs: [] });
+    expect(await readSchoolFeatureFlags(db, school.id)).toEqual({ tier: 'plus', subscribedTier: 'plus', trial: null, features: BASELINE, invalidConfigs: [] });
   });
 
   it('stores each feature and school independently and records who changed it', async () => {
@@ -140,7 +142,7 @@ describe('school feature flag storage', () => {
     const school = await createTestSchool({ tier: 'pro', features: ['cadet'] });
     await db.insert(schoolFeatureFlagTable).values({ schoolId: school.id, feature: 'retired-feature' as never, enabled: true });
     expect(await getSchoolFeatureFlags(db, school.id)).toEqual({ ...PRO, cadet: ADDED });
-    expect(await readSchoolFeatureFlags(db, school.id)).toEqual({ tier: 'pro', features: { ...PRO, cadet: ADDED }, invalidConfigs: [] });
+    expect(await readSchoolFeatureFlags(db, school.id)).toEqual({ tier: 'pro', subscribedTier: 'pro', trial: null, features: { ...PRO, cadet: ADDED }, invalidConfigs: [] });
   });
 
   /**
@@ -167,7 +169,7 @@ describe('school feature flag storage', () => {
       message: 'The stored settings of Cadet Portal for this school are not valid. A platform administrator must save them again.',
     });
     // Every feature is still listed with its real enabled fact; the unusable configs are named.
-    expect(await readSchoolFeatureFlags(db, school.id)).toEqual({ tier: 'pro', features: { ...PRO, cadet: ADDED, notices: REMOVED }, invalidConfigs: ['cadet', 'notices'] });
+    expect(await readSchoolFeatureFlags(db, school.id)).toEqual({ tier: 'pro', subscribedTier: 'pro', trial: null, features: { ...PRO, cadet: ADDED, notices: REMOVED }, invalidConfigs: ['cadet', 'notices'] });
     // A feature with nothing stored has a valid, empty config.
     const fresh = await createTestSchool({ features: ['notices'] });
     await expect(getSchoolFeatureConfig(db, fresh.id, 'notices')).resolves.toBeNull();
