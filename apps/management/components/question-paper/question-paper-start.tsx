@@ -33,7 +33,7 @@ import {
 } from './question-paper-start-model';
 import { EarlierPaperPreviewDialog, PagePreviewDialog } from './source-preview-dialogs';
 import { useStartPaperConversation } from './use-paper-assistant';
-import { useRefreshQuestionPaper, type QuestionPaperDetail } from './use-question-paper-detail';
+import { pageTurningOf, useRefreshQuestionPaper, useRotatePage, type QuestionPaperDetail } from './use-question-paper-detail';
 import type { PageUploads } from './use-page-uploads';
 
 const startSchema = z.object({
@@ -324,6 +324,7 @@ function PhotoSources({
   const { paper, pages } = detail;
   const reorder = usePageReorder(scope);
   const deletePage = useDeletePage(scope);
+  const rotate = useRotatePage(scope);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [viewing, setViewing] = useState<string | null>(null);
   const capture = useRef<HTMLInputElement>(null);
@@ -332,6 +333,8 @@ function PhotoSources({
     <uploads.form.Subscribe selector={(state) => state.values.items}>
       {(items) => {
         const uploading = uploadsInFlight(items) > 0;
+        // Every stored upload, reorder, removal and turn bumps the revision the others are checked against, so each waits for the rest.
+        const changingPages = uploading || reorder.isPending || deletePage.isPending || rotate.isPending;
         const photoCount = paper.pageCount + uploadsInFlight(items);
         const cameraClosed = closed || photoCount >= QUESTION_PAPER_MAX_PAGES;
         // The other ways in sit with the material. A phone opens its own camera (flash, focus, full resolution) through
@@ -360,10 +363,9 @@ function PhotoSources({
             <PaperSourceTray
               pages={pages}
               uploads={items}
-              thumbUrl={(pageId) => questionPaperThumbUrl(scope, pageId)}
+              thumbUrl={(page) => questionPaperThumbUrl(scope, page)}
               canAdd={!closed && paper.pageCount + uploadsInFlight(items) < QUESTION_PAPER_MAX_PAGES}
-              // Every stored upload bumps the revision a reorder or removal is checked against, so both wait for the uploads.
-              disabled={closed || uploading || reorder.isPending || deletePage.isPending}
+              disabled={closed || changingPages}
               emptyTitle="Add the paper"
               emptyHint="Photos of its pages, or a PDF. We type it up for you."
               ways={ways}
@@ -379,7 +381,8 @@ function PhotoSources({
               // The viewer steps aside while removal is confirmed, so two dialogs never stack.
               pageId={deleting === null ? viewing : null}
               onPageChange={setViewing}
-              onRemove={closed || uploading || reorder.isPending || deletePage.isPending ? undefined : setDeleting}
+              onRemove={closed || changingPages ? undefined : setDeleting}
+              turning={closed ? undefined : pageTurningOf(rotate, scope, paper.pageRevision, changingPages)}
             />
             <ConfirmationDialog
               open={deletingPage !== undefined}

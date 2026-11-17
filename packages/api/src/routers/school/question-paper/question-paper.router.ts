@@ -33,6 +33,7 @@ import {
   listQuestionPaperVersions,
   listQuestionPapers,
   reorderQuestionPaperPages,
+  rotateQuestionPaperPage,
   startQuestionPaperGeneration,
 } from './question-paper.service';
 import { readTemplatePrints } from './question-paper.template-prints';
@@ -384,6 +385,26 @@ export const schoolQuestionPaperRouter = {
         return await deleteQuestionPaperPage(context.db, {
           scope: await resolvePaperScope(context.db, input),
           pageId: input.pageId,
+          expectedPageRevision: input.expectedPageRevision,
+        });
+      } catch (error) {
+        throw toRpcError(error);
+      }
+    }),
+
+  rotateQuestionPaperPage: protectedProcedure
+    .route(route('Turn a question paper page', "Turn one uploaded page photo to a rotation (clockwise degrees on top of the photo's own orientation: 0, 90, 180 or 270), for a page photographed sideways. The original upload is kept as it is; the thumbnail and the copy the AI reads are made again turned. expectedPageRevision must be the revision you last saw (CONFLICT otherwise); a turn bumps it. Refused while a generation runs and for a photo the server cannot read (HEIC)."))
+    .meta(humanOnly('write'))
+    .input(dto.rotatePageInputSchema)
+    .use(manageClass)
+    .use(requireQuestionPaperAssistantAccess())
+    .output(dto.rotatePageOutputSchema)
+    .handler(async ({ context, input }) => {
+      try {
+        return await rotateQuestionPaperPage(context.db, {
+          scope: await resolvePaperScope(context.db, input),
+          pageId: input.pageId,
+          rotation: input.rotation,
           expectedPageRevision: input.expectedPageRevision,
         });
       } catch (error) {
