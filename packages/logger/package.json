@@ -5,8 +5,8 @@
   "type": "module",
   "exports": {
     ".": {
-      "browser": "./src/index.browser.ts",
-      "default": "./src/index.node.ts"
+      "browser": "./src/browser.ts",
+      "default": "./src/node.ts"
     },
     "./hono": "./src/hono.ts",
     "./perf": "./src/perf.ts"

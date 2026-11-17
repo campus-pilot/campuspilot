@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { monitorEventLoopDelay, performance } from 'node:perf_hooks';
 import type { Logger } from 'pino';
 
-import { logger as rootLogger } from './index.node';
+import { logger as rootLogger } from './node';
 
 /**
  * Performance logging (node only). See docs/performance-logs.md for the
