@@ -94,10 +94,12 @@ function TextField({
 /**
  * The person's own school: name, location and an optional registration
  * number. The school starts on a trial (docs/school-creation.md), which is
- * said before it is created.
+ * said before it is created, with how many schools the person may still
+ * create (their allowance, which an approved request raises).
  */
-export function CreateSchoolForm() {
+export function CreateSchoolForm({ limit, used }: { limit: number; used: number }) {
   const form = useCreateSchoolForm();
+  const left = limit - used;
   return (
     <form
       className="flex flex-col gap-4 text-left"
@@ -114,8 +116,8 @@ export function CreateSchoolForm() {
         You become the school&apos;s owner and principal. It starts with a free {BILLING_PERIOD_DAYS}-day trial of
         the Plus plan (staff, classes and examinations) and the AI assistant up to $
         {SELF_SERVICE_ASSISTANT_MONTHLY_LIMIT_USD} per {BILLING_PERIOD_DAYS} days. Your billing cycle starts today:
-        when the trial ends the school becomes read-only until the next period is paid. You can create one school
-        of your own.
+        when the trial ends the school becomes read-only until the next period is paid.{' '}
+        {left === 1 ? 'This uses the last school your account may create.' : `You may create ${left} more schools.`}
       </p>
       <form.Subscribe selector={(state) => state.errorMap.onSubmit}>
         {(error) =>

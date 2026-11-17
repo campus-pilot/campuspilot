@@ -40,8 +40,14 @@ function personLabel(request: SchoolCreationRequestDto) {
 function useDecisionForm(request: SchoolCreationRequestDto, decision: SchoolRequestDecision, onDone: () => void) {
   const queryClient = useQueryClient();
   return useForm({
-    defaultValues: { grantedLimit: request.requestedLimit, note: '' },
-    validators: { onSubmit: decisionFormSchema },
+    defaultValues: { grantedLimit: Math.max(request.requestedLimit, request.currentLimit + 1), note: '' },
+    validators: {
+      // An approval only raises the allowance (the server refuses anything else).
+      onSubmit: decisionFormSchema.refine(
+        ({ grantedLimit }) => decision !== 'approve' || grantedLimit > request.currentLimit,
+        { message: `Grant more than the ${request.currentLimit} they may already create.`, path: ['grantedLimit'] },
+      ),
+    },
     onSubmit: async ({ value, formApi }) => {
       formApi.setErrorMap({});
       try {
@@ -69,7 +75,7 @@ function useDecisionForm(request: SchoolCreationRequestDto, decision: SchoolRequ
 
 type DecisionForm = ReturnType<typeof useDecisionForm>;
 
-function GrantedLimitField({ form, used }: { form: DecisionForm; used: number }) {
+function GrantedLimitField({ form, request }: { form: DecisionForm; request: SchoolCreationRequestDto }) {
   return (
     <form.Field name="grantedLimit">
       {(field) => (
@@ -79,14 +85,15 @@ function GrantedLimitField({ form, used }: { form: DecisionForm; used: number })
             id="granted-limit"
             type="number"
             inputMode="numeric"
-            min={used + 1}
+            min={request.currentLimit + 1}
             max={MAX_GRANTED_SCHOOL_LIMIT}
             value={Number.isNaN(field.state.value) ? '' : field.state.value}
             onBlur={field.handleBlur}
             onChange={(event) => field.handleChange(event.target.valueAsNumber)}
           />
           <p className="text-xs text-muted-foreground">
-            They created {used} so far, including deleted ones; grant more than that.
+            They may create {request.currentLimit} now and created {request.createdSchools.length}, deleted ones included.
+            Grant more than {request.currentLimit}, or reject.
           </p>
           <FieldErrors errors={field.state.meta.errors} />
         </div>
@@ -150,7 +157,7 @@ export function DecideSchoolRequestDialog({
             void form.handleSubmit();
           }}
         >
-          {decision === 'approve' ? <GrantedLimitField form={form} used={request.createdSchools.length} /> : null}
+          {decision === 'approve' ? <GrantedLimitField form={form} request={request} /> : null}
           <NoteField form={form} />
           <form.Subscribe selector={(state) => state.errorMap.onSubmit}>
             {(error) =>

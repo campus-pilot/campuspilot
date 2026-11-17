@@ -14,6 +14,7 @@ import {
   lockSchool,
   parseTrialEnd,
   readBillingPeriod,
+  readBookedUntil,
   readCoveredUntil,
   setSubscriptionPrice,
   startTrialPeriod,
@@ -45,12 +46,13 @@ async function requirePeriod(db: DatabaseExecutor, schoolId: string, periodId: s
 
 /** A school's periods, invoices and coverage, as the admin app shows them. */
 async function readSchoolBilling(db: DatabaseExecutor, schoolId: string) {
-  const [periods, invoices, covered] = await Promise.all([
+  const [periods, invoices, covered, bookedUntil] = await Promise.all([
     listBillingPeriods(db, schoolId),
     listSchoolInvoices(db, schoolId),
     readCoveredUntil(db, [schoolId]),
+    readBookedUntil(db, schoolId),
   ]);
-  return schoolBillingDtoSchema.parse({ periods, invoices, coveredUntil: covered.get(schoolId) ?? null });
+  return schoolBillingDtoSchema.parse({ periods, invoices, coveredUntil: covered.get(schoolId) ?? null, bookedUntil });
 }
 
 const hidden = (access: 'read' | 'write', destructive = false) =>
@@ -175,7 +177,7 @@ export const schoolBillingRouter = {
     .route({
       summary: 'Add paid or complimentary periods to a school',
       description:
-        "Give a school 1 to 13 consecutive 28-day periods of a tier: paid (recording the payment as an invoice, at the tier's price × periods unless an amount is given) or complimentary. They start after the school's current coverage, or now (cutting the active period short). Requires system-administrator permission.",
+        "Give a school 1 to 13 consecutive 28-day periods of a tier: paid (recording the payment as an invoice, at the tier's price × periods unless an amount is given) or complimentary. They start after the last period already booked, or now (cutting the active period short). Requires system-administrator permission.",
       tags: ['System Admin', 'Billing'],
     })
     .meta(hidden('write'))

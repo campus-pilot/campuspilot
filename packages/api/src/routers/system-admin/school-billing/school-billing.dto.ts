@@ -68,6 +68,8 @@ export const schoolBillingDtoSchema = z.object({
   invoices: z.array(schoolInvoiceDtoSchema),
   /** Until when back-to-back periods cover the school from now; null when nothing covers it now. */
   coveredUntil: z.date().nullable(),
+  /** When the last period already booked ends (past any gap); null when nothing is booked. Paid periods added "after the current coverage" start here. */
+  bookedUntil: z.date().nullable(),
 });
 export type SchoolBillingDto = z.infer<typeof schoolBillingDtoSchema>;
 

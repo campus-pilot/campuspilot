@@ -143,6 +143,20 @@ export async function readCoveredUntil(db: DatabaseExecutor, schoolIds: readonly
   return result;
 }
 
+/**
+ * When the last period already booked for the school ends (the latest real
+ * end still in the future), or null when nothing is booked. Equal to
+ * {@link readCoveredUntil} while the periods run back to back; after a period
+ * in the middle was ended or voided it is later, past the gap.
+ */
+export async function readBookedUntil(db: DatabaseExecutor, schoolId: string): Promise<Date | null> {
+  const [row] = await db
+    .select({ until: sql<string | Date | null>`max(${billingPeriodEnd()})` })
+    .from(schoolBillingPeriodTable)
+    .where(and(eq(schoolBillingPeriodTable.schoolId, schoolId), gt(billingPeriodEnd(), sql`now()`)));
+  return row?.until ? new Date(row.until) : null;
+}
+
 /** Inserts one period, answering an overlap as CONFLICT. */
 async function insertPeriods(
   db: DatabaseExecutor,
@@ -213,9 +227,10 @@ export type AddBillingPeriodsInput = {
  * Adds `periodCount` consecutive periods of `tier` to a school: paid (with
  * the invoice that paid for them) or complimentary (a gift, no invoice).
  *
- * `start: 'after_current'` begins right where the school's coverage ends
- * ({@link readCoveredUntil}), or now when nothing covers it: paying ahead
- * never loses time already paid or on trial. `start: 'now'` cuts the active
+ * `start: 'after_current'` begins right after the last period already booked
+ * ({@link readBookedUntil}), or now when nothing is booked: paying ahead
+ * never loses time already paid or on trial, and never collides with a
+ * period booked past a gap. `start: 'now'` cuts the active
  * period short at now and begins at once (an upgrade from a trial); it is
  * refused while periods are already lined up after the active one, since
  * they would overlap (end or void them first). The caller holds the school
@@ -241,7 +256,9 @@ export async function addBillingPeriodsToSchool(db: DatabaseExecutor, input: Add
       .where(and(eq(schoolBillingPeriodTable.schoolId, input.schoolId), activeBillingPeriodCondition()));
     startsAt = nowDate;
   } else {
-    startsAt = (await readCoveredUntil(db, [input.schoolId])).get(input.schoolId) ?? nowDate;
+    // After everything already booked, so the new periods never collide with one
+    // booked past a gap (a period in the middle that was ended or voided).
+    startsAt = (await readBookedUntil(db, input.schoolId)) ?? nowDate;
   }
   const endsAt = addBillingPeriods(startsAt, input.periodCount);
 

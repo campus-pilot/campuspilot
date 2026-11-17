@@ -144,7 +144,7 @@ export const schoolCreationRequestRouter = {
     .route({
       summary: "Decide a school creation request",
       description:
-        "Approve a pending request to create more schools, setting the person's allowance to the granted total, or reject it, with an optional note the person sees. A request that is no longer pending cannot be decided again (CONFLICT). Requires system-administrator permission.",
+        "Approve a pending request to create more schools, raising the person's allowance to the granted total (above their current allowance), or reject it, with an optional note the person sees. A request that is no longer pending cannot be decided again (CONFLICT). Requires system-administrator permission.",
       tags: ["System Admin", "Schools"],
     })
     .meta({ mcp: { exposure: "hidden", access: "write", destructive: true, module: "platform" } })
@@ -166,16 +166,19 @@ export const schoolCreationRequestRouter = {
           const grantedLimit = input.decision === "approve" ? input.grantedLimit : null;
           if (grantedLimit !== null) {
             // The person's own creations run under this lock too, so the
-            // allowance is never lowered beneath what they already used.
+            // allowance read here is the one the approval replaces.
             await lockUser(transaction, request.userId);
-            const [created] = await transaction
-              .select({ used: count() })
-              .from(schoolCreationTable)
-              .where(eq(schoolCreationTable.userId, request.userId));
-            const used = created?.used ?? 0;
-            if (grantedLimit <= used) {
+            const [account] = await transaction
+              .select({ limit: user.schoolCreationLimit })
+              .from(user)
+              .where(eq(user.id, request.userId))
+              .limit(1);
+            const currentLimit = account?.limit ?? 0;
+            // An approval only ever raises the allowance: granting less than
+            // they may already create would quietly take schools away.
+            if (grantedLimit <= currentLimit) {
               throw rpcError.badRequest(
-                `This person already created ${used} school${used === 1 ? "" : "s"}; grant more than that.`,
+                `This person may already create ${currentLimit} school${currentLimit === 1 ? "" : "s"}; grant more than that, or reject the request.`,
               );
             }
             await transaction.update(user).set({ schoolCreationLimit: grantedLimit }).where(eq(user.id, request.userId));

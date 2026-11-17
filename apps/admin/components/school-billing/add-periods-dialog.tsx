@@ -124,7 +124,7 @@ function KindAndStartFields({ form }: { form: AddPeriodsForm }) {
             <Label>Starts</Label>
             <RadioGroup value={field.state.value} onValueChange={(value) => field.handleChange(value as AddPeriodsValues['start'])}>
               <Label className="flex items-center gap-2 font-normal">
-                <RadioGroupItem value="after_current" /> After the current coverage
+                <RadioGroupItem value="after_current" /> After the periods already booked
               </Label>
               <Label className="flex items-center gap-2 font-normal">
                 <RadioGroupItem value="now" /> Now (ends the current period)
@@ -231,7 +231,7 @@ function CoverageSummary({ form, billing }: { form: AddPeriodsForm; billing: Sch
     <form.Subscribe selector={(state) => ({ start: state.values.start, count: state.values.periodCount })}>
       {({ start, count }) => {
         if (Number.isNaN(count) || count < 1) return null;
-        const from = start === 'now' ? new Date() : (billing.coveredUntil ?? new Date());
+        const from = start === 'now' ? new Date() : (billing.bookedUntil ?? new Date());
         return (
           <p className="text-xs text-muted-foreground">
             Covers {formatIstDate(from)} to {formatIstDate(addBillingPeriods(from, count))}.

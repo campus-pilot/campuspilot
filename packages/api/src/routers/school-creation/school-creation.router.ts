@@ -51,7 +51,7 @@ export const schoolCreationRouter = {
     .route({
       summary: "Create my school",
       description:
-        "Create a school owned by the signed-in person, who becomes its principal. It starts on a one-month trial of the smallest tier with the AI assistant switched on under a monthly limit. Refused with data.reason SCHOOL_CREATION_REFUSED when the person may not create one.",
+        "Create a school owned by the signed-in person, who becomes its principal. It starts on a 28-day trial (one billing period) of the smallest tier with the AI assistant switched on under a limit per billing period. Refused with data.reason SCHOOL_CREATION_REFUSED when the person may not create one.",
       tags: ["School"],
     })
     .meta({

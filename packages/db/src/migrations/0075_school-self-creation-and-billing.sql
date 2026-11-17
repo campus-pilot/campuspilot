@@ -89,6 +89,7 @@ CREATE TABLE "school_creation" (
 -- rows keep their ids. The EXCLUDE constraint from 0074 moves with the table
 -- and keeps refusing overlapping periods of one school.
 ALTER TABLE "school_trial" RENAME TO "school_billing_period";--> statement-breakpoint
+ALTER TABLE "school_billing_period" RENAME CONSTRAINT "school_trial_pkey" TO "school_billing_period_pkey";--> statement-breakpoint
 ALTER TABLE "school_billing_period" RENAME CONSTRAINT "school_trial_no_overlap" TO "school_billing_period_no_overlap";--> statement-breakpoint
 ALTER TABLE "school_billing_period" DROP CONSTRAINT "school_trial_tier_check";--> statement-breakpoint
 ALTER TABLE "school_billing_period" DROP CONSTRAINT "school_trial_ends_after_start_check";--> statement-breakpoint

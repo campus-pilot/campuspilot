@@ -1,5 +1,6 @@
 import type { DatabaseExecutor } from '@campuspilot/db';
 import { readSchoolPlan } from '@campuspilot/db/feature-flags/store';
+import { measure } from '@campuspilot/logger/perf';
 import { assistantModelRequestTable } from '@campuspilot/db/schema/assistant';
 import { getRedisClient } from '@campuspilot/redis/client';
 import { and, eq, gte, lt, sql } from 'drizzle-orm';
@@ -28,7 +29,10 @@ export async function schoolSpendWindow(
   schoolId: string,
   now: Date = new Date(),
 ): Promise<{ key: string; start: Date; end: Date }> {
-  const period = (await readSchoolPlan(db, schoolId))?.period ?? null;
+  // One more query before the cached spend is read, on every access check
+  // (each model request and tool call). Timed so the performance logs show
+  // whether it ever costs enough to fold into the read-only check's query.
+  const period = (await measure('assistant.spend.window', () => readSchoolPlan(db, schoolId)))?.period ?? null;
   if (period) return { key: `period:${period.id}`, start: period.startsAt, end: period.endsAt };
   const { month, start, end } = istMonthOf(now);
   return { key: month, start, end };

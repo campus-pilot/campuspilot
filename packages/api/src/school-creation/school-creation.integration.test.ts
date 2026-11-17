@@ -230,6 +230,22 @@ describe('asking for more schools', () => {
     expect(await refusalOf(person.client.schoolCreation.createSchool(newSchool('Third campus')))).toBe('limit_reached');
   });
 
+  it('only ever raises the allowance when approving', async () => {
+    const person = await newcomer();
+    await person.client.schoolCreation.createSchool(newSchool());
+    await db.update(user).set({ schoolCreationLimit: 10 }).where(eq(user.id, person.userId));
+    await person.client.schoolCreation.requestMore({ requestedLimit: 20, reason: 'We are opening ten more branches.' });
+    const admin = await adminClient();
+    const { items } = await admin.systemAdmin.listSchoolCreationRequests({ status: 'pending' });
+    const request = items.find(({ userId }) => userId === person.userId)!;
+
+    await expectRpcCode(admin.systemAdmin.decideSchoolCreationRequest({ id: request.id, decision: 'approve', grantedLimit: 3 }), 'BAD_REQUEST');
+    await expectRpcCode(admin.systemAdmin.decideSchoolCreationRequest({ id: request.id, decision: 'approve', grantedLimit: 10 }), 'BAD_REQUEST');
+    expect(await person.client.schoolCreation.getStatus()).toMatchObject({ limit: 10, latestRequest: { status: 'pending' } });
+    await admin.systemAdmin.decideSchoolCreationRequest({ id: request.id, decision: 'approve', grantedLimit: 15 });
+    expect(await person.client.schoolCreation.getStatus()).toMatchObject({ limit: 15, latestRequest: { status: 'approved', grantedLimit: 15 } });
+  });
+
   it('leaves the allowance unchanged when rejected, and allows a new request afterwards', async () => {
     const person = await newcomer();
     await person.client.schoolCreation.createSchool(newSchool());

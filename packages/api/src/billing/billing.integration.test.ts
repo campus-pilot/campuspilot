@@ -155,6 +155,25 @@ describe('systemAdmin.addSchoolBillingPeriods', () => {
   });
 });
 
+describe('a gap in the booked periods', () => {
+  it('adds periods after the last booking instead of colliding with it', async () => {
+    const client = await admin();
+    await setPrices(client);
+    const school = await createTestSchool({ tier: null });
+    const billing = await client.systemAdmin.addSchoolBillingPeriods({ id: school.id, kind: 'paid', tier: 'pro', periodCount: 3, start: 'now' });
+    const current = billing.periods.find(({ active }) => active)!;
+    // Ending the current period leaves the two booked after it, past a gap.
+    await client.systemAdmin.endSchoolBillingPeriod({ id: school.id, periodId: current.id });
+    const ended = await client.systemAdmin.getSchoolBilling({ id: school.id });
+    expect(ended.coveredUntil).toBeNull();
+    expect(ms(ended.bookedUntil!)).toBe(ms(billing.coveredUntil!));
+
+    const after = await client.systemAdmin.addSchoolBillingPeriods({ id: school.id, kind: 'paid', tier: 'pro', periodCount: 1, start: 'after_current' });
+    expect(ms(after.invoices[0]!.periodStart)).toBe(ms(billing.coveredUntil!));
+    expect(ms(after.bookedUntil!)).toBe(ms(billing.coveredUntil!) + PERIOD);
+  });
+});
+
 describe('when periods run out', () => {
   it('makes the school read-only the moment its last paid period ends (no grace)', async () => {
     const client = await admin();

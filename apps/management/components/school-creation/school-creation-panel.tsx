@@ -54,7 +54,7 @@ function LimitReached({ status }: { status: SchoolCreationStatusDto }) {
 }
 
 function StatusBody({ status }: { status: SchoolCreationStatusDto }) {
-  if (status.refusal === null) return <CreateSchoolForm />;
+  if (status.refusal === null) return <CreateSchoolForm limit={status.limit} used={status.used} />;
   if (status.refusal === 'limit_reached') return <LimitReached status={status} />;
   return (
     <Alert className="text-left">
