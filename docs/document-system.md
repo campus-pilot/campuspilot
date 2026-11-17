@@ -72,7 +72,7 @@ only Create document and Document history.
    statements remain contextual to an admission ledger. The page shows only these
    cards until the user chooses one.
 3. The chosen card opens a wide, mobile-safe dialog containing the complete
-   settings, explicit preview, generation, download, and history workflow. A
+   settings, optional preview, one-click PDF download, and history workflow. A
    contextual URL opens the corresponding dialog with its examination, class, or
    student preselected.
 4. The dialog requests the active school template and the independent source-domain
@@ -81,8 +81,12 @@ only Create document and Document history.
    describes the dependency, while the shell warning provides the authorized path
    to Settings.
 6. Preview validates and renders the current choices without writing an artifact.
-7. Generate converts the same authorized context to PDF and stores it. The dialog
-   then offers a fresh authorized download and a link to unified history.
+   It is optional: nothing waits for it, because generation validates the same
+   choices again on the server.
+7. "Download PDF" converts the same authorized context to PDF, stores it and
+   starts its download in one click. A member who may generate but not download
+   documents gets "Create PDF", which only stores it. The dialog then offers a
+   fresh authorized download ("Download again") and a link to unified history.
 
 The bill dialog searches and pages posted billing runs, displays the run period,
 billing date, bill count, amount, and state, and rejects empty or non-posted runs.
@@ -91,7 +95,7 @@ original postings; the reversal state remains visible. A run source always
 previews and generates the complete immutable run by
 `billRunId`. The receipt dialog keeps non-reversed payment selections across search
 pages up to the 500-source API limit. Both preserve the current session in their
-source and require the current selection to be previewed before creation. The
+source; previewing before creation is optional, as for academic documents. The
 global receipt source carries an explicit payment-only eligibility policy; preview
 and generation both recheck in the database transaction that every selected
 payment still has no reversal, so a stale browser selection cannot create a
