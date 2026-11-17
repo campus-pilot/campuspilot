@@ -162,20 +162,21 @@ describe('systemAdmin school feature flags', () => {
       expect(await createTestClient(admin).systemAdmin.getSchoolFeatureFlags({ id: school.id })).toEqual({
         schoolId: school.id,
         tier,
+        subscribedTier: tier,
+        trial: null,
         features: TIER_FEATURES[tier],
         invalidConfigs: [],
       });
       expect(await storedRows(school.id)).toEqual([]);
     });
 
-    it('a school created through addSchool has the features of the tier it was created on, and needs one', async () => {
+    it('a school created through addSchool has the features of the tier it was created on', async () => {
       const client = createTestClient(admin);
       const identity = () => ({ slug: `flags-${crypto.randomUUID().toLowerCase()}`, name: 'Flag School', location: 'Town' });
-      await expectRpcCode(client.systemAdmin.addSchool(identity() as never), 'BAD_REQUEST');
       await expectRpcCode(client.systemAdmin.addSchool({ ...identity(), tier: 'free' } as never), 'BAD_REQUEST');
       for (const tier of ['plus', 'pro', 'enterprise'] as const) {
         const created = await client.systemAdmin.addSchool({ ...identity(), tier });
-        expect(created.tier).toBe(tier);
+        expect(created).toMatchObject({ subscribedTier: tier, planTier: tier, planSource: 'subscription', trial: null });
         expect(await client.systemAdmin.getSchoolFeatureFlags({ id: created.id })).toMatchObject({ tier, features: TIER_FEATURES[tier] });
       }
     });
@@ -186,18 +187,22 @@ describe('systemAdmin school feature flags', () => {
       expect(await client.systemAdmin.updateSchoolTier({ id: school.id, tier: 'enterprise' })).toEqual({
         schoolId: school.id,
         tier: 'enterprise',
+        subscribedTier: 'enterprise',
+        trial: null,
         features: TIER_FEATURES.enterprise,
         invalidConfigs: [],
       });
       expect(await client.systemAdmin.updateSchoolTier({ id: school.id, tier: 'pro' })).toEqual({
         schoolId: school.id,
         tier: 'pro',
+        subscribedTier: 'pro',
+        trial: null,
         features: TIER_FEATURES.pro,
         invalidConfigs: [],
       });
       // The tier is all that was written: a tier change stores no adjustment.
       expect(await storedRows(school.id)).toEqual([]);
-      expect((await client.systemAdmin.getSchool({ id: school.id })).tier).toBe('pro');
+      expect((await client.systemAdmin.getSchool({ id: school.id })).subscribedTier).toBe('pro');
       // Setting the tier it already has changes nothing.
       expect((await client.systemAdmin.updateSchoolTier({ id: school.id, tier: 'pro' })).features).toEqual(TIER_FEATURES.pro);
     });
@@ -239,17 +244,19 @@ describe('systemAdmin school feature flags', () => {
       await expectRpcCode(createTestClient(admin).systemAdmin.updateSchoolTier({ id: 'sch_missing', tier: 'pro' }), 'NOT_FOUND');
     });
 
-    it('reads a school without a tier as having no tier feature, adjusts it, and moves it onto a tier but never back to none', async () => {
+    it('reads a school without a tier as having no tier feature, adjusts it, moves it onto a tier and back to none', async () => {
       const school = await createTestSchool({ tier: null });
       const teacher = await createSchoolStaffSession(school.id, [{ role: 'teacher', meta: { classIds: [] } }]);
       const client = createTestClient(admin);
       expect(await client.systemAdmin.getSchoolFeatureFlags({ id: school.id })).toEqual({
         schoolId: school.id,
         tier: null,
+        subscribedTier: null,
+        trial: null,
         features: TIER_FEATURES.plus,
         invalidConfigs: [],
       });
-      expect((await client.systemAdmin.getSchool({ id: school.id })).tier).toBeNull();
+      expect((await client.systemAdmin.getSchool({ id: school.id })).subscribedTier).toBeNull();
 
       // Adjustments apply as on any tier.
       expect(
@@ -263,14 +270,24 @@ describe('systemAdmin school feature flags', () => {
         invalidConfigs: [],
       });
 
-      // @ts-expect-error A school cannot be moved back to having no tier.
-      await expectRpcCode(client.systemAdmin.updateSchoolTier({ id: school.id, tier: null }), 'BAD_REQUEST');
       expect(await client.systemAdmin.updateSchoolTier({ id: school.id, tier: 'pro' })).toEqual({
         schoolId: school.id,
         tier: 'pro',
+        subscribedTier: 'pro',
+        trial: null,
         features: { ...TIER_FEATURES.pro, studentManagement: { ...IN_TIER, adjustment: true } },
         invalidConfigs: [],
       });
+      // Null removes the subscription: no plan, and the adjustment is kept.
+      expect(await client.systemAdmin.updateSchoolTier({ id: school.id, tier: null })).toEqual({
+        schoolId: school.id,
+        tier: null,
+        subscribedTier: null,
+        trial: null,
+        features: { ...TIER_FEATURES.plus, studentManagement: ADDED },
+        invalidConfigs: [],
+      });
+      expect(await client.systemAdmin.getSchool({ id: school.id })).toMatchObject({ subscribedTier: null, planTier: null, planSource: null });
     });
   });
 
@@ -291,11 +308,11 @@ describe('systemAdmin school feature flags', () => {
       // On, outside the tier.
       expect(
         await client.systemAdmin.updateSchoolFeatureFlag({ id: school.id, feature: 'cadet', enabled: true, config: null }),
-      ).toEqual({ schoolId: school.id, tier: 'pro', features: { ...TIER_FEATURES.pro, cadet: ADDED }, invalidConfigs: [] });
+      ).toEqual({ schoolId: school.id, tier: 'pro', subscribedTier: 'pro', trial: null, features: { ...TIER_FEATURES.pro, cadet: ADDED }, invalidConfigs: [] });
       // Off, inside the tier.
       expect(
         await client.systemAdmin.updateSchoolFeatureFlag({ id: school.id, feature: 'notices', enabled: false, config: null }),
-      ).toEqual({ schoolId: school.id, tier: 'pro', features: { ...TIER_FEATURES.pro, cadet: ADDED, notices: REMOVED }, invalidConfigs: [] });
+      ).toEqual({ schoolId: school.id, tier: 'pro', subscribedTier: 'pro', trial: null, features: { ...TIER_FEATURES.pro, cadet: ADDED, notices: REMOVED }, invalidConfigs: [] });
 
       const rows = await storedRows(school.id);
       expect(rows.map((row) => [row.feature, row.enabled]).sort()).toEqual([

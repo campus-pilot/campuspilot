@@ -40,7 +40,7 @@ export const featureFlagsRouter = {
     .route({
       summary: 'Get a school\'s feature flags',
       description:
-        'Read one school\'s subscription tier and, for every platform feature, whether the tier includes it, the school\'s own adjustment, whether the school has it now, and its configuration. Requires system-administrator permission.',
+        'Read one school\'s plan (its subscribed tier, its active trial and the tier they give) and, for every platform feature, whether that tier includes it, the school\'s own adjustment, whether the school has it now, and its configuration. Requires system-administrator permission.',
       tags: ['System Admin', 'Feature flags'],
     })
     .meta({ mcp: { exposure: 'advanced', access: 'read', destructive: false, module: 'platform' } })
@@ -115,7 +115,7 @@ export const featureFlagsRouter = {
     .route({
       summary: 'Change a school\'s subscription tier',
       description:
-        'Move a school to another subscription tier (plus, pro or enterprise). The school then has the features of the new tier; features an administrator adjusted for this school stay as adjusted. Moving to a tier without a feature stops that feature for the school at once; existing data is kept. Requires system-administrator permission.',
+        'Move a school to another subscribed tier (plus, pro or enterprise), or remove its subscription (null). The school then has the features of its plan: the higher of the new tier and an active trial\'s tier; without either it has no plan and is read-only. Features an administrator adjusted for this school stay as adjusted. A change that takes a feature away stops it for the school at once; existing data is kept. Requires system-administrator permission.',
       tags: ['System Admin', 'Feature flags'],
     })
     // Hidden from MCP for the same reason as a flag update: what a school
@@ -135,9 +135,10 @@ export const featureFlagsRouter = {
             .limit(1)
             .for('update');
           if (!school) throw rpcError.notFound('School');
-          // The tier only. Adjustments are the administrator's separate
-          // decisions about this school and are not touched: a feature
-          // switched on for it stays on, one switched off stays off.
+          // The subscribed tier only (null removes the subscription).
+          // Adjustments are the administrator's separate decisions about
+          // this school and are not touched: a feature switched on for it
+          // stays on, one switched off stays off. Trials are not touched either.
           await transaction
             .update(schoolTable)
             .set({ tier: input.tier, updatedAt: new Date() })

@@ -402,11 +402,11 @@ export function SchoolFeatureFlags({ schoolId }: { schoolId: string }) {
     );
   }
 
-  const { tier, features, invalidConfigs } = state.data;
+  const { tier, subscribedTier, features, invalidConfigs } = state.data;
   return (
     <section className="mx-auto flex w-full max-w-4xl flex-col gap-5">
       <FeatureFlagsHeading />
-      <SchoolTierCard schoolId={schoolId} tier={tier} features={features} />
+      <SchoolTierCard schoolId={schoolId} tier={subscribedTier} features={features} />
       {schoolFeatureEntries(features).map((entry) => (
         <FeatureFlagCard
           key={entry.feature}

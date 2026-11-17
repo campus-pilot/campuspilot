@@ -6,6 +6,8 @@ import {
 } from '@campuspilot/db/feature-flags/catalogue';
 import { z } from 'zod';
 
+import { activeSchoolTrialDtoSchema } from '../school/school.dto';
+
 /** The system admin router names the school `id`, like `getSchool`. */
 export const adminSchoolFeatureFlagsInputSchema = z.object({
   id: z.string().min(1),
@@ -22,19 +24,28 @@ export const updateSchoolFeatureFlagInputSchema = z
   .object({ id: z.string().min(1) })
   .and(schoolFeatureUpdateSchema);
 
-/** `{ id, tier }`: the school's new subscription tier. Its adjustments are kept. */
+/**
+ * `{ id, tier }`: the school's new subscribed tier, or null to remove the
+ * subscription (the school is then on its trial, or has no plan). Its
+ * adjustments are kept.
+ */
 export const updateSchoolTierInputSchema = z.object({
   id: z.string().min(1),
-  tier: schoolTierSchema,
+  tier: schoolTierSchema.nullable(),
 });
 
 export const adminSchoolFeatureFlagsDtoSchema = z.object({
   schoolId: z.string(),
   /**
-   * The school's subscription tier, which decides `included` of every
-   * feature; null when it has none (no feature is included).
+   * The tier of the school's plan, which decides `included` of every
+   * feature: the higher of `subscribedTier` and the active `trial`'s tier.
+   * Null when the school has no plan (no feature is included).
    */
   tier: schoolTierSchema.nullable(),
+  /** `school.tier`: the tier the school subscribes to; null without a subscription. */
+  subscribedTier: schoolTierSchema.nullable(),
+  /** The active trial, whether or not it gives the plan; null without one. */
+  trial: activeSchoolTrialDtoSchema.nullable(),
   features: schoolFeatureFlagsSchema,
   /**
    * Features whose stored config no longer matches its schema (their

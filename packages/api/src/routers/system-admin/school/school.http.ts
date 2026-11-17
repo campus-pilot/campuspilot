@@ -15,7 +15,7 @@ import {
   MAX_SCHOOL_LOGO_BYTES,
   SCHOOL_LOGO_FIELD_NAME,
 } from './school.constants';
-import { schoolDtoSchema, toSchoolDto } from './school.dto';
+import { readSchoolDto } from './school.read';
 
 type HttpErrorReporter = (error: unknown) => void;
 
@@ -71,7 +71,8 @@ export async function handleSchoolLogoUpload(
     // TODO: Schedule a durable workflow to delete the outdated logo object
     // after its replacement has been committed successfully.
 
-    const dto = schoolDtoSchema.parse(toSchoolDto(school));
+    const dto = await readSchoolDto(context.db, schoolId);
+    if (!dto) throw rpcError.notFound('School');
     return Response.json(dto);
   } catch (error) {
     reportError?.(error);

@@ -200,6 +200,8 @@ describe('school feature flag storage', () => {
     await expect(admin.systemAdmin.updateSchoolFeatureFlag({ id: school.id, feature: 'cadet', enabled: true, config: null })).resolves.toEqual({
       schoolId: school.id,
       tier: 'pro',
+      subscribedTier: 'pro',
+      trial: null,
       features: { ...PRO, cadet: ADDED, notices: { ...IN_TIER, adjustment: true } },
       invalidConfigs: ['notices'],
     });

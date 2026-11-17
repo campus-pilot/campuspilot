@@ -13,12 +13,13 @@ export const schoolFeatureFlagsInputSchema = z.object({
  */
 export const invalidFeatureConfigsSchema = z.array(schoolFeatureKeySchema);
 
-/** A school's subscription tier and every catalogue feature's state, keyed by feature. */
+/** The tier of a school's plan and every catalogue feature's state, keyed by feature. */
 export const schoolFeatureFlagsDtoSchema = z.object({
   schoolId: z.string(),
   /**
-   * The school's subscription tier; null when it has none. Screens decide
-   * from each feature's `active`, never from this.
+   * The tier of the school's plan (its subscription, or a higher active
+   * trial); null when it has none. Screens decide from each feature's
+   * `active`, never from this.
    */
   tier: schoolTierSchema.nullable(),
   features: schoolFeatureFlagsSchema,
@@ -43,12 +44,15 @@ export {
   SCHOOL_TIERS,
   resolveSchoolFeatureActivity,
   resolveSchoolFeatureSwitches,
+  resolveSchoolPlan,
+  SCHOOL_PLAN_SOURCES,
   schoolFeatureCatalogue,
   schoolFeatureEntries,
   schoolFeatureHasConfig,
   schoolTierCatalogue,
   schoolTierFeatures,
   schoolTierIncludes,
+  schoolTierRank,
   schoolTierSchema,
   type SchoolFeatureConfig,
   type SchoolFeatureEntry,
@@ -56,5 +60,7 @@ export {
   type SchoolFeatureKey,
   type SchoolFeatureState,
   type SchoolFeatureUpdate,
+  type SchoolPlan,
+  type SchoolPlanSource,
   type SchoolTier,
 } from '@campuspilot/db/feature-flags/catalogue';

@@ -20,11 +20,11 @@ export function SchoolSuspendedBadge({ suspendedAt }: Pick<SchoolDto, 'suspended
  * is named: demo, its tier, and suspended. Each is its own fact on the
  * school and its own badge; none is derived from another.
  */
-export function SchoolBadges({ school }: { school: Pick<SchoolDto, 'isDemo' | 'tier' | 'suspendedAt'> }) {
+export function SchoolBadges({ school }: { school: Pick<SchoolDto, 'isDemo' | 'subscribedTier' | 'suspendedAt'> }) {
   return (
     <>
       {school.isDemo ? <Badge variant="outline">Demo</Badge> : null}
-      <SchoolTierBadge tier={school.tier} />
+      <SchoolTierBadge tier={school.subscribedTier} />
       <SchoolSuspendedBadge suspendedAt={school.suspendedAt} />
     </>
   );

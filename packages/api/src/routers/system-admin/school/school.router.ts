@@ -1,4 +1,6 @@
+import { activeSchoolTrialCondition } from "@campuspilot/db/feature-flags/store";
 import { schoolTable } from "@campuspilot/db/schema/school";
+import { schoolTrialTable } from "@campuspilot/db/schema/school-trial";
 import { SYSTEM_ACTIONS } from "@campuspilot/opa/policies/system";
 import { and, asc, count, desc, eq, ilike, isNotNull, isNull, or } from "drizzle-orm";
 
@@ -17,16 +19,24 @@ import {
   schoolDtoSchema,
   schoolIdInputSchema,
   suspendSchoolInputSchema,
-  toSchoolDto,
   updateSchoolInputSchema,
 } from "./school.dto";
+import { readSchoolDto, schoolRowToDto, selectSchoolsWithActiveTrial } from "./school.read";
+import { parseTrialEnd, startSchoolTrial } from "../school-trial/school-trial.service";
+
+/** The school as the admin DTO after a change; NOT_FOUND when it does not exist. */
+async function requireSchoolDto(db: Parameters<typeof readSchoolDto>[0], schoolId: string) {
+  const school = await readSchoolDto(db, schoolId);
+  if (!school) throw rpcError.notFound("School");
+  return school;
+}
 
 export const schoolRouter = {
   listSchools: protectedProcedure
     .route({
       summary: "List schools",
       description:
-        "List schools across the platform with pagination, text search, filtering by onboarding status, subscription tier (null: schools without one) and suspension, and deterministic sorting. Requires system-administrator permission.",
+        "List schools across the platform with pagination, text search, filtering by onboarding status, subscribed tier (null: schools without a subscription), suspension and plan state (an active trial, or no plan at all), and deterministic sorting. Each school carries its subscribed tier, its active trial and the plan they give. Requires system-administrator permission.",
       tags: ["System Admin", "Schools"],
     })
     .meta({
@@ -59,18 +69,25 @@ export const schoolRouter = {
                 input.filters.hasCompletedOnboarding,
               );
         const tierCondition =
-          input.filters?.tier === undefined
+          input.filters?.subscribedTier === undefined
             ? undefined
-            : input.filters.tier === null
+            : input.filters.subscribedTier === null
               ? isNull(schoolTable.tier)
-              : eq(schoolTable.tier, input.filters.tier);
+              : eq(schoolTable.tier, input.filters.subscribedTier);
         const suspendedCondition =
           input.filters?.suspended === undefined
             ? undefined
             : input.filters.suspended
               ? isNotNull(schoolTable.suspendedAt)
               : isNull(schoolTable.suspendedAt);
-        const where = and(searchCondition, onboardingCondition, tierCondition, suspendedCondition);
+        // `school_trial` is joined with the active-trial condition: a null id means no active trial.
+        const planCondition =
+          input.filters?.plan === undefined
+            ? undefined
+            : input.filters.plan === "trial"
+              ? isNotNull(schoolTrialTable.id)
+              : and(isNull(schoolTable.tier), isNull(schoolTrialTable.id));
+        const where = and(searchCondition, onboardingCondition, tierCondition, suspendedCondition, planCondition);
         const orderByColumn = {
           name: schoolTable.name,
           location: schoolTable.location,
@@ -80,20 +97,22 @@ export const schoolRouter = {
         const orderDirection = input.orderBy.direction === "asc" ? asc : desc;
 
         const [schools, totalRows] = await Promise.all([
-          context.db
-            .select()
-            .from(schoolTable)
+          selectSchoolsWithActiveTrial(context.db)
             .where(where)
             .orderBy(orderDirection(orderByColumn), orderDirection(schoolTable.id))
             .limit(pageSize)
             .offset(offset),
-          context.db.select({ totalItems: count() }).from(schoolTable).where(where),
+          context.db
+            .select({ totalItems: count() })
+            .from(schoolTable)
+            .leftJoin(schoolTrialTable, and(eq(schoolTrialTable.schoolId, schoolTable.id), activeSchoolTrialCondition()))
+            .where(where),
         ]);
         const totalItems = totalRows[0]?.totalItems ?? 0;
         const totalPages = Math.ceil(totalItems / pageSize);
 
         return createPaginatedResult({
-          items: schools.map(toSchoolDto),
+          items: schools.map(schoolRowToDto),
           nextCursor: createNextPageCursor(currentPage, totalPages),
           currentPage,
           totalPages,
@@ -109,7 +128,7 @@ export const schoolRouter = {
     .route({
       summary: "Get a school",
       description:
-        "Get one school by its identifier. Requires system-administrator permission.",
+        "Get one school by its identifier, with its subscribed tier, its active trial and the plan they give. Requires system-administrator permission.",
       tags: ["System Admin", "Schools"],
     })
     .meta({
@@ -125,13 +144,7 @@ export const schoolRouter = {
     .output(schoolDtoSchema)
     .handler(async ({ context, input }) => {
       try {
-        const [school] = await context.db
-          .select()
-          .from(schoolTable)
-          .where(eq(schoolTable.id, input.id))
-          .limit(1);
-        if (!school) throw rpcError.notFound("School");
-        return toSchoolDto(school);
+        return await requireSchoolDto(context.db, input.id);
       } catch (error) {
         throw toRpcError(error);
       }
@@ -141,7 +154,7 @@ export const schoolRouter = {
     .route({
       summary: "Create a school",
       description:
-        "Create a new school with its identity, location, registration, subscription tier (plus, pro or enterprise) and optional logo-key data. Requires system-administrator permission.",
+        "Create a new school with its identity, location, registration, optional subscribed tier (plus, pro or enterprise; none when left out), an optional trial of a tier started at once, and optional logo-key data. A school created with neither a tier nor a trial has no plan: its staff can read but not change anything until it gets one. Requires system-administrator permission.",
       tags: ["System Admin", "Schools"],
     })
     .meta({
@@ -157,9 +170,25 @@ export const schoolRouter = {
     .output(schoolDtoSchema)
     .handler(async ({ context, input }) => {
       try {
-        const [school] = await context.db.insert(schoolTable).values(input).returning();
-        if (!school) throw rpcError.internal();
-        return toSchoolDto(school);
+        const { trial, tier, ...identity } = input;
+        // Checked before anything is written, so a refused end creates no school.
+        const trialEndsAt = trial ? parseTrialEnd(trial.endsAt) : null;
+        return await context.db.transaction(async (transaction) => {
+          const [school] = await transaction
+            .insert(schoolTable)
+            .values({ ...identity, tier: tier ?? null })
+            .returning({ id: schoolTable.id });
+          if (!school) throw rpcError.internal();
+          if (trial && trialEndsAt) {
+            await startSchoolTrial(transaction, {
+              schoolId: school.id,
+              tier: trial.tier,
+              endsAt: trialEndsAt,
+              createdBy: context.session.user.id,
+            });
+          }
+          return await requireSchoolDto(transaction, school.id);
+        });
       } catch (error) {
         throw toRpcError(error);
       }
@@ -190,9 +219,9 @@ export const schoolRouter = {
           .update(schoolTable)
           .set({ ...changes, updatedAt: new Date() })
           .where(eq(schoolTable.id, id))
-          .returning();
+          .returning({ id: schoolTable.id });
         if (!school) throw rpcError.notFound("School");
-        return toSchoolDto(school);
+        return await requireSchoolDto(context.db, school.id);
       } catch (error) {
         throw toRpcError(error);
       }
@@ -239,9 +268,9 @@ export const schoolRouter = {
               updatedAt: now,
             })
             .where(eq(schoolTable.id, input.id))
-            .returning();
+            .returning({ id: schoolTable.id });
           if (!school) throw rpcError.notFound("School");
-          return toSchoolDto(school);
+          return await requireSchoolDto(transaction, school.id);
         });
       } catch (error) {
         throw toRpcError(error);
@@ -272,9 +301,9 @@ export const schoolRouter = {
           .update(schoolTable)
           .set({ suspendedAt: null, suspendedReason: null, suspendedBy: null, updatedAt: new Date() })
           .where(eq(schoolTable.id, input.id))
-          .returning();
+          .returning({ id: schoolTable.id });
         if (!school) throw rpcError.notFound("School");
-        return toSchoolDto(school);
+        return await requireSchoolDto(context.db, school.id);
       } catch (error) {
         throw toRpcError(error);
       }
@@ -300,12 +329,12 @@ export const schoolRouter = {
     .output(schoolDtoSchema)
     .handler(async ({ context, input }) => {
       try {
-        const [school] = await context.db
-          .delete(schoolTable)
-          .where(eq(schoolTable.id, input.id))
-          .returning();
-        if (!school) throw rpcError.notFound("School");
-        return toSchoolDto(school);
+        return await context.db.transaction(async (transaction) => {
+          // Read before the delete: its trials go with it.
+          const school = await requireSchoolDto(transaction, input.id);
+          await transaction.delete(schoolTable).where(eq(schoolTable.id, input.id));
+          return school;
+        });
       } catch (error) {
         throw toRpcError(error);
       }

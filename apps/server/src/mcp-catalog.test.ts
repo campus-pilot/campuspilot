@@ -132,6 +132,12 @@ const HIDDEN_TOOLS = [
   // ability to work: a human platform decision, made in the admin app.
   'systemAdmin.suspendSchool',
   'systemAdmin.unsuspendSchool',
+  // So are a school's trials (docs/school-trials.md), and their history is
+  // only read where they are managed.
+  'systemAdmin.listSchoolTrials',
+  'systemAdmin.startSchoolTrial',
+  'systemAdmin.updateSchoolTrial',
+  'systemAdmin.endSchoolTrial',
   // The school's assistant role list as the platform administrator edits it;
   // hidden like every assistant setting (school.getAssistantAccess,
   // school.updateAssistantRoles), so never offered to the assistant itself.

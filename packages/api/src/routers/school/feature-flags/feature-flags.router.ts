@@ -18,7 +18,7 @@ export const schoolFeatureFlagsRouter = {
     .route({
       summary: 'Get school feature flags',
       description:
-        'Read a school\'s subscription tier and which platform features (for example the Cadet Portal or notices) it has, with each feature\'s configuration. Any member of the school may read it; only platform administrators change it.',
+        'Read the tier of a school\'s plan (its subscription, or a higher active trial) and which platform features (for example the Cadet Portal or notices) it has, with each feature\'s configuration. Any member of the school may read it; only platform administrators change it.',
       tags: ['School', 'Feature flags'],
     })
     // App chrome with no agent value: tools of a disabled feature already

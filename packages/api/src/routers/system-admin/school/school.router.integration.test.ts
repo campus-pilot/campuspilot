@@ -41,7 +41,7 @@ describe('systemAdmin.school Router Integration', () => {
       expect(created.location).toBe('New York, NY');
       expect(created.registrationNo).toBe('REG-12345');
       expect(created.hasCompletedOnboarding).toBe(false);
-      expect(created.tier).toBe('pro');
+      expect(created).toMatchObject({ subscribedTier: 'pro', planTier: 'pro', planSource: 'subscription', trial: null });
       // A new school is not suspended.
       expect(created.suspendedAt).toBeNull();
       expect(created.suspendedReason).toBeNull();
@@ -158,7 +158,7 @@ describe('systemAdmin.school Router Integration', () => {
       await client.systemAdmin.suspendSchool({ id: pro.id, reason: 'Sharing accounts' });
 
       const all = await client.systemAdmin.listSchools({ searchQuery: tag });
-      expect(all.items.map((school) => [school.id, school.tier, school.suspendedAt !== null, school.suspendedReason]).sort()).toEqual(
+      expect(all.items.map((school) => [school.id, school.subscribedTier, school.suspendedAt !== null, school.suspendedReason]).sort()).toEqual(
         [
           [plus.id, 'plus', false, null],
           [pro.id, 'pro', true, 'Sharing accounts'],
@@ -167,14 +167,14 @@ describe('systemAdmin.school Router Integration', () => {
         ].sort(),
       );
       for (const [tier, school] of [['plus', plus], ['pro', pro], ['enterprise', enterprise], [null, none]] as const) {
-        const byTier = await client.systemAdmin.listSchools({ searchQuery: tag, filters: { tier } });
+        const byTier = await client.systemAdmin.listSchools({ searchQuery: tag, filters: { subscribedTier: tier } });
         expect(byTier.items.map((item) => item.id)).toEqual([school.id]);
       }
       const suspended = await client.systemAdmin.listSchools({ searchQuery: tag, filters: { suspended: true } });
       expect(suspended.items.map((item) => item.id)).toEqual([pro.id]);
       const notSuspended = await client.systemAdmin.listSchools({ searchQuery: tag, filters: { suspended: false } });
       expect(notSuspended.items.map((item) => item.id).sort()).toEqual([plus.id, enterprise.id, none.id].sort());
-      const both = await client.systemAdmin.listSchools({ searchQuery: tag, filters: { tier: 'pro', suspended: false } });
+      const both = await client.systemAdmin.listSchools({ searchQuery: tag, filters: { subscribedTier: 'pro', suspended: false } });
       expect(both.items).toEqual([]);
     });
 

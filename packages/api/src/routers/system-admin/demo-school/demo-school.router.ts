@@ -218,7 +218,8 @@ export const demoSchoolRouter = {
             })
             .returning();
           if (!job) throw rpcError.internal();
-          return { school: toSchoolDto(school), job: toDemoSchoolJobDto(job) };
+          // A school created this instant has no trial.
+          return { school: toSchoolDto(school, null), job: toDemoSchoolJobDto(job) };
         });
       } catch (error) {
         throw toRpcError(error);
