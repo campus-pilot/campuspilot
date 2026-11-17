@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import {
   boolean,
   check,
+  index,
   jsonb,
   pgTable,
   text,
@@ -87,8 +88,19 @@ export const schoolTable = pgTable(
     suspendedBy: text("suspended_by").references(() => user.id, {
       onDelete: "set null",
     }),
+    /**
+     * The person accountable for the school (docs/school-creation.md): set to
+     * the creator when someone creates a school themselves, and changed only
+     * by a platform administrator. Its own fact, separate from roles: the
+     * owner keeps the principal role and cannot be removed through school
+     * procedures. Null for schools an administrator created until one is named.
+     */
+    ownerUserId: text("owner_user_id").references(() => user.id, {
+      onDelete: "set null",
+    }),
   },
   (table) => [
+    index("school_owner_user_id_idx").on(table.ownerUserId),
     check(
       "school_tier_check",
       sql`${table.tier} is null or ${table.tier} in (${sql.raw(SCHOOL_TIERS.map((tier) => `'${tier}'`).join(", "))})`,

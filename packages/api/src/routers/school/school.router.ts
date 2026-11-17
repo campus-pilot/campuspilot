@@ -1,16 +1,17 @@
 import { schoolDocumentRouter } from './document/document.router';
 import { schoolDashboardRouter } from './dashboard/dashboard.router';
 import type { DatabaseExecutor } from "@campuspilot/db";
-import { activeSchoolTrialCondition } from "@campuspilot/db/feature-flags/store";
+import { activeBillingPeriodColumns, activeBillingPeriodOf, joinActiveBillingPeriod } from "@campuspilot/db/feature-flags/store";
 import { schoolMemberTable } from "@campuspilot/db/schema/school-member";
 import { schoolTable } from "@campuspilot/db/schema/school";
-import { schoolTrialTable } from "@campuspilot/db/schema/school-trial";
+import { schoolBillingPeriodTable } from "@campuspilot/db/schema/school-billing";
 import { SCHOOL_ACTIONS } from "@campuspilot/opa/policies/school";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { rpcError, toRpcError } from "../../errors";
 import { protectedProcedure } from "../../index";
+import { readCoveredUntil } from "../../billing/billing.service";
 import { schoolPlanFactsOf } from "../../school-access/school-access.service";
 import { gateRouterOnSchoolFeature } from "../../permissions/feature";
 import { requireSchoolPermission } from "../../permissions/school";
@@ -39,8 +40,8 @@ import { schoolSessionRouter } from "./session/session.router";
 import { schoolStudentRouter } from "./student/student.router";
 
 /**
- * The columns every school-facing school DTO reads, with the active trial
- * left joined (at most one per school) for {@link withPlanFacts}.
+ * The columns every school-facing school DTO reads, with the active billing
+ * period left joined (at most one per school) for {@link withPlanFacts}.
  */
 const mySchoolColumns = {
   id: schoolTable.id,
@@ -51,17 +52,28 @@ const mySchoolColumns = {
   isDemo: schoolTable.isDemo,
   isSuspended: sql<boolean>`${schoolTable.suspendedAt} is not null`,
   subscribedTier: schoolTable.tier,
-  trialTier: schoolTrialTable.tier,
-  trialEndsAt: schoolTrialTable.endsAt,
+  ...activeBillingPeriodColumns,
 };
 
-const activeTrialJoin = and(eq(schoolTrialTable.schoolId, schoolTable.id), activeSchoolTrialCondition());
+type MySchoolRow = {
+  id: string;
+  subscribedTier: SchoolTierValue;
+} & Parameters<typeof activeBillingPeriodOf>[0];
 
-/** A row of {@link mySchoolColumns} with the plan facts the apps show instead of the plan's raw columns. */
-function withPlanFacts<T extends { subscribedTier: SchoolTierValue; trialTier: SchoolTierValue; trialEndsAt: Date | null }>(row: T) {
-  const { subscribedTier, trialTier, trialEndsAt, ...school } = row;
-  const trial = trialTier !== null && trialEndsAt !== null ? { tier: trialTier, endsAt: trialEndsAt } : null;
-  return { ...school, ...schoolPlanFactsOf({ subscribedTier, trial }) };
+/**
+ * Rows of {@link mySchoolColumns} with the plan facts the apps show instead of
+ * the plan's raw columns. Reads until when each school's periods cover it in
+ * one query for all of them.
+ */
+async function withPlanFacts<T extends MySchoolRow>(db: DatabaseExecutor, rows: T[]) {
+  const covered = await readCoveredUntil(db, rows.map(({ id }) => id));
+  return rows.map((row) => {
+    const { subscribedTier, periodId: _periodId, periodKind: _periodKind, periodTier: _periodTier, periodStartsAt: _periodStartsAt, periodEndsAt: _periodEndsAt, ...school } = row;
+    return {
+      ...school,
+      ...schoolPlanFactsOf({ subscribedTier, period: activeBillingPeriodOf(row), coveredUntil: covered.get(row.id) ?? null }),
+    };
+  });
 }
 
 type SchoolTierValue = (typeof schoolTable.$inferSelect)["tier"];
@@ -71,10 +83,12 @@ async function readSchoolDetails(db: DatabaseExecutor, schoolId: string) {
   const [school] = await db
     .select({ ...mySchoolColumns, registrationNo: schoolTable.registrationNo })
     .from(schoolTable)
-    .leftJoin(schoolTrialTable, activeTrialJoin)
+    .leftJoin(schoolBillingPeriodTable, joinActiveBillingPeriod())
     .where(eq(schoolTable.id, schoolId))
     .limit(1);
-  return school ? schoolDetailsDtoSchema.parse(withPlanFacts(school)) : null;
+  if (!school) return null;
+  const [withFacts] = await withPlanFacts(db, [school]);
+  return schoolDetailsDtoSchema.parse(withFacts);
 }
 
 export const schoolRouter = {
@@ -122,7 +136,7 @@ export const schoolRouter = {
             schoolTable,
             eq(schoolMemberTable.schoolId, schoolTable.id),
           )
-          .leftJoin(schoolTrialTable, activeTrialJoin)
+          .leftJoin(schoolBillingPeriodTable, joinActiveBillingPeriod())
           .where(
             and(
               eq(schoolMemberTable.userId, context.session.user.id),
@@ -132,7 +146,7 @@ export const schoolRouter = {
             ),
           )
           .orderBy(asc(schoolTable.name), asc(schoolTable.id));
-        return schools.map(withPlanFacts);
+        return await withPlanFacts(context.db, schools);
       } catch (error) {
         throw toRpcError(error);
       }

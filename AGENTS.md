@@ -203,18 +203,33 @@ warning explains it. Keep `mcp.access` honest and name the school `schoolId`.
 The same gate (`packages/api/src/school-access`) also refuses a school
 without a plan (`SCHOOL_NO_PLAN`); one function decides from both facts.
 
-## School trials
+## School billing
 
-Before changing trials (`school_trial`), how a school's plan is decided, what
-a school without a plan may do, or how plans are shown in the apps, read
-[School trials](docs/school-trials.md). A school's plan is the higher of its
-subscribed tier (`school.tier`, nullable) and its active trial's tier
-(`resolveSchoolPlan`); a trial is active from `starts_at` until `ends_at`
-(or `ended_at` when an administrator ended it early), compared with `now()`
-at every read, so it ends without a job.
-Two trials of one school never overlap (EXCLUDE constraint). A school with
-neither has no plan and is read-only (`SCHOOL_NO_PLAN`, `isSchoolNoPlanError`),
-exactly like a suspended one. Never compare tiers by hand or store the plan.
+Before changing billing periods (`school_billing_period`: trial, paid and
+complimentary periods), prices (`subscription_price`), invoices
+(`school_invoice`), how a school's plan is decided, what a school without a
+plan may do, the AI spend window, or how plans are shown in the apps, read
+[School billing](docs/school-billing.md). Billing runs in 28-day periods
+(`BILLING_PERIOD_DAYS`) from the day it starts, never calendar months. A
+school's plan is the higher of its standing tier (`school.tier`, nullable,
+never lapses) and its active period's tier (`resolveSchoolPlan`); a period is
+active from `starts_at` until `ends_at` (or `ended_at` when cut short),
+compared with `now()` at every read, so it ends without a job. Periods of one
+school never overlap (EXCLUDE constraint). There is no grace: a school with
+neither a standing tier nor an active period is read-only (`SCHOOL_NO_PLAN`).
+The tables mirror a payment provider's Price and Invoice so one can be
+connected later; amounts are integers in paise. Never compare tiers by hand
+or store the plan.
+
+## Self-service school creation
+
+Before changing who may create a school, the `school_creation` ledger or
+`user.school_creation_limit`, requests for more schools, the school owner
+(`school.owner_user_id`) and its member guards, or what a self-created school
+starts with, read [Self-service school creation](docs/school-creation.md). The
+allowance counts every school a person ever created (deleted or handed over
+ones included), and the owner can never be removed or lose the principal role
+through school procedures.
 
 ## Demo schools
 

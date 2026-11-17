@@ -163,7 +163,7 @@ describe('systemAdmin school feature flags', () => {
         schoolId: school.id,
         tier,
         subscribedTier: tier,
-        trial: null,
+        period: null,
         features: TIER_FEATURES[tier],
         invalidConfigs: [],
       });
@@ -176,7 +176,7 @@ describe('systemAdmin school feature flags', () => {
       await expectRpcCode(client.systemAdmin.addSchool({ ...identity(), tier: 'free' } as never), 'BAD_REQUEST');
       for (const tier of ['plus', 'pro', 'enterprise'] as const) {
         const created = await client.systemAdmin.addSchool({ ...identity(), tier });
-        expect(created).toMatchObject({ subscribedTier: tier, planTier: tier, planSource: 'subscription', trial: null });
+        expect(created).toMatchObject({ subscribedTier: tier, planTier: tier, planSource: 'standing', period: null });
         expect(await client.systemAdmin.getSchoolFeatureFlags({ id: created.id })).toMatchObject({ tier, features: TIER_FEATURES[tier] });
       }
     });
@@ -188,7 +188,7 @@ describe('systemAdmin school feature flags', () => {
         schoolId: school.id,
         tier: 'enterprise',
         subscribedTier: 'enterprise',
-        trial: null,
+        period: null,
         features: TIER_FEATURES.enterprise,
         invalidConfigs: [],
       });
@@ -196,7 +196,7 @@ describe('systemAdmin school feature flags', () => {
         schoolId: school.id,
         tier: 'pro',
         subscribedTier: 'pro',
-        trial: null,
+        period: null,
         features: TIER_FEATURES.pro,
         invalidConfigs: [],
       });
@@ -252,7 +252,7 @@ describe('systemAdmin school feature flags', () => {
         schoolId: school.id,
         tier: null,
         subscribedTier: null,
-        trial: null,
+        period: null,
         features: TIER_FEATURES.plus,
         invalidConfigs: [],
       });
@@ -274,7 +274,7 @@ describe('systemAdmin school feature flags', () => {
         schoolId: school.id,
         tier: 'pro',
         subscribedTier: 'pro',
-        trial: null,
+        period: null,
         features: { ...TIER_FEATURES.pro, studentManagement: { ...IN_TIER, adjustment: true } },
         invalidConfigs: [],
       });
@@ -283,7 +283,7 @@ describe('systemAdmin school feature flags', () => {
         schoolId: school.id,
         tier: null,
         subscribedTier: null,
-        trial: null,
+        period: null,
         features: { ...TIER_FEATURES.plus, studentManagement: ADDED },
         invalidConfigs: [],
       });
@@ -308,11 +308,11 @@ describe('systemAdmin school feature flags', () => {
       // On, outside the tier.
       expect(
         await client.systemAdmin.updateSchoolFeatureFlag({ id: school.id, feature: 'cadet', enabled: true, config: null }),
-      ).toEqual({ schoolId: school.id, tier: 'pro', subscribedTier: 'pro', trial: null, features: { ...TIER_FEATURES.pro, cadet: ADDED }, invalidConfigs: [] });
+      ).toEqual({ schoolId: school.id, tier: 'pro', subscribedTier: 'pro', period: null, features: { ...TIER_FEATURES.pro, cadet: ADDED }, invalidConfigs: [] });
       // Off, inside the tier.
       expect(
         await client.systemAdmin.updateSchoolFeatureFlag({ id: school.id, feature: 'notices', enabled: false, config: null }),
-      ).toEqual({ schoolId: school.id, tier: 'pro', subscribedTier: 'pro', trial: null, features: { ...TIER_FEATURES.pro, cadet: ADDED, notices: REMOVED }, invalidConfigs: [] });
+      ).toEqual({ schoolId: school.id, tier: 'pro', subscribedTier: 'pro', period: null, features: { ...TIER_FEATURES.pro, cadet: ADDED, notices: REMOVED }, invalidConfigs: [] });
 
       const rows = await storedRows(school.id);
       expect(rows.map((row) => [row.feature, row.enabled]).sort()).toEqual([

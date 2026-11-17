@@ -137,14 +137,14 @@ describe('systemAdmin demo school procedures', () => {
     // which includes them all, so nothing is stored as an adjustment (a real
     // school gets the tier its administrator chooses). The assistant is in
     // no tier and stays off until an administrator enables it deliberately.
-    expect(created.school).toMatchObject({ subscribedTier: 'enterprise', planTier: 'enterprise', planSource: 'subscription', trial: null });
+    expect(created.school).toMatchObject({ subscribedTier: 'enterprise', planTier: 'enterprise', planSource: 'standing', period: null });
     expect(await db.select().from(schoolFeatureFlagTable).where(eq(schoolFeatureFlagTable.schoolId, created.school.id))).toEqual([]);
     const inTier = { included: true, adjustment: null, enabled: true, active: true, config: null };
     expect(await adminClient.systemAdmin.getSchoolFeatureFlags({ id: created.school.id })).toEqual({
       schoolId: created.school.id,
       tier: 'enterprise',
       subscribedTier: 'enterprise',
-      trial: null,
+      period: null,
       features: {
         studentManagement: inTier,
         cadet: inTier,

@@ -6,8 +6,8 @@ import { roleEnum } from "../schema/jsonb/role";
  * The school feature catalogue: the single authority on which per-school
  * platform features exist, which subscription tiers include each one and
  * what configuration each one carries. A school has the features of its
- * plan's tier (its subscribed `school.tier`, or a higher tier of an active
- * trial: {@link resolveSchoolPlan}); a platform administrator can adjust one
+ * plan's tier (its standing `school.tier`, or a higher tier of an active
+ * billing period: {@link resolveSchoolPlan}); a platform administrator can adjust one
  * feature for one school on top of that (admin app). The school cannot
  * change either itself.
  *
@@ -42,10 +42,10 @@ import { roleEnum } from "../schema/jsonb/role";
  * ignored by every read.
  */
 /**
- * The subscription tiers a school can be on, lowest first. A school
- * subscribes to at most one (`school.tier`; null: no subscription) and may
- * be on a trial of one (`school_trial`); its features follow the higher of
- * the two ({@link resolveSchoolPlan}). What a tier includes is stated per
+ * The subscription tiers a school can be on, lowest first. A school has at
+ * most one standing tier (`school.tier`; null: none) and may be in a billing
+ * period of one (`school_billing_period`: a trial, a paid or a complimentary
+ * period); its features follow the higher of the two ({@link resolveSchoolPlan}). What a tier includes is stated per
  * feature in the catalogue below (`tiers`), so the two can never disagree.
  */
 export const SCHOOL_TIERS = ["plus", "pro", "enterprise"] as const;
@@ -76,7 +76,7 @@ export const schoolTierCatalogue = {
 } as const satisfies Record<SchoolTier, { label: string; description: string }>;
 
 /**
- * How the tiers compare when a school's subscription and its trial are both
+ * How the tiers compare when a school's standing tier and its billing period are both
  * running: the higher one is the school's plan ({@link resolveSchoolPlan}).
  * Stated per tier rather than read from the position in `SCHOOL_TIERS`.
  */
@@ -87,11 +87,36 @@ export const schoolTierRank = {
 } as const satisfies Record<SchoolTier, number>;
 
 /**
- * Where a school's plan comes from: its subscription (`school.tier`) or an
- * active trial (`school_trial`). Null when the school has neither: it has no
- * plan and is read-only (docs/school-trials.md).
+ * How long one billing period lasts (docs/school-billing.md): every trial,
+ * payment and renewal is counted in periods of this many days from the day
+ * the school's billing started, not in calendar months, so each period is
+ * equally long and its AI spend limit counts the same span.
  */
-export const SCHOOL_PLAN_SOURCES = ["subscription", "trial"] as const;
+export const BILLING_PERIOD_DAYS = 28;
+
+/** Why a school has a tier during a billing period: a free trial, a payment, or a gift from CampusPilot. */
+export const BILLING_PERIOD_KINDS = ["trial", "paid", "complimentary"] as const;
+export type BillingPeriodKind = (typeof BILLING_PERIOD_KINDS)[number];
+export const billingPeriodKindSchema = z.enum(BILLING_PERIOD_KINDS);
+
+/** The currencies prices and invoices are in. */
+export const BILLING_CURRENCIES = ["INR"] as const;
+export type BillingCurrency = (typeof BILLING_CURRENCIES)[number];
+
+/** Who collected an invoice: `manual` (recorded in the admin app) today; a payment provider later. */
+export const BILLING_PROVIDERS = ["manual", "stripe"] as const;
+export type BillingProvider = (typeof BILLING_PROVIDERS)[number];
+
+/** An invoice's state, as payment providers name it. Manual invoices are recorded `paid`. */
+export const SCHOOL_INVOICE_STATUSES = ["open", "paid", "void"] as const;
+export type SchoolInvoiceStatus = (typeof SCHOOL_INVOICE_STATUSES)[number];
+
+/**
+ * Where a school's plan comes from: its standing tier (`school.tier`, which
+ * never lapses) or the kind of its active billing period. Null when the
+ * school has neither: it has no plan and is read-only (docs/school-billing.md).
+ */
+export const SCHOOL_PLAN_SOURCES = ["standing", ...BILLING_PERIOD_KINDS] as const;
 export type SchoolPlanSource = (typeof SCHOOL_PLAN_SOURCES)[number];
 export const schoolPlanSourceSchema = z.enum(SCHOOL_PLAN_SOURCES);
 
@@ -101,26 +126,24 @@ export type SchoolPlan =
   | { tier: null; source: null };
 
 /**
- * A school's plan from its two separate facts: the subscribed tier
- * (`school.tier`, null without a subscription) and the tier of its active
- * trial (null without one). The one implementation of the rule
- * (docs/school-trials.md):
- * - the plan is the **higher** of the two: a trial never takes away what a
- *   school pays for, and without a subscription the trial's tier applies;
- * - `source` is `trial` when the trial's tier is higher or there is no
- *   subscription, otherwise `subscription` (a trial of the same or a lower
- *   tier changes nothing while it runs);
+ * A school's plan from its two separate facts: the standing tier
+ * (`school.tier`, null without one) and its active billing period (null
+ * without one). The one implementation of the rule (docs/school-billing.md):
+ * - the plan is the **higher** of the two: a period never takes away a
+ *   standing tier, and without a standing tier the period's tier applies;
+ * - `source` is the period's kind when its tier is higher or there is no
+ *   standing tier, otherwise `standing`;
  * - neither: `{ tier: null, source: null }`, the school has no plan.
  */
 export function resolveSchoolPlan(input: {
   subscribedTier: SchoolTier | null;
-  activeTrial: { tier: SchoolTier } | null;
+  activePeriod: { tier: SchoolTier; kind: BillingPeriodKind } | null;
 }): SchoolPlan {
-  const { subscribedTier, activeTrial } = input;
-  if (activeTrial !== null && (subscribedTier === null || schoolTierRank[activeTrial.tier] > schoolTierRank[subscribedTier])) {
-    return { tier: activeTrial.tier, source: "trial" };
+  const { subscribedTier, activePeriod } = input;
+  if (activePeriod !== null && (subscribedTier === null || schoolTierRank[activePeriod.tier] > schoolTierRank[subscribedTier])) {
+    return { tier: activePeriod.tier, source: activePeriod.kind };
   }
-  if (subscribedTier !== null) return { tier: subscribedTier, source: "subscription" };
+  if (subscribedTier !== null) return { tier: subscribedTier, source: "standing" };
   return { tier: null, source: null };
 }
 

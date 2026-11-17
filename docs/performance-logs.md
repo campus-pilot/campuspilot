@@ -55,6 +55,7 @@ Only names, ids, sizes and durations are logged, never content.
 | `doc.pdf.pagecount` | the question paper page cap check | async |
 | `image.decode.wait` | an upload waiting for one of the two decode slots | async |
 | `image.decode` | sharp decoding and encoding (libuv thread pool) | async |
+| `assistant.spend.window` | the school's active billing period, read before the cached AI spend on every assistant access check (docs/school-billing.md) | async |
 
 Question paper previews and draft previews also annotate `htmlBytes` (the size of the
 response's document), `paperId` and `versionNo`; the body adds `qpFormulas`, `qpFigures`

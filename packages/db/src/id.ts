@@ -45,7 +45,12 @@ export const PREFIX_MAP = {
   notificationEvent: "nev",
   section: "sec",
   school: "sch",
-  schoolTrial: "trial",
+  /** Billing periods; trials made before periods existed keep their `trial_` ids. */
+  schoolBillingPeriod: "bper",
+  schoolInvoice: "inv",
+  subscriptionPrice: "price",
+  schoolCreation: "schcr",
+  schoolCreationRequest: "schrq",
   schoolSession: "sess",
   student: "stu",
 } as const;

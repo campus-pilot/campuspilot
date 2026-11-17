@@ -1,9 +1,9 @@
 import type { DatabaseExecutor } from '@campuspilot/db';
-import { resolveSchoolPlan, type SchoolTier } from '@campuspilot/db/feature-flags/catalogue';
-import { activeSchoolTrialCondition, type ActiveSchoolTrial } from '@campuspilot/db/feature-flags/store';
+import { resolveSchoolPlan, type SchoolPlanSource, type SchoolTier } from '@campuspilot/db/feature-flags/catalogue';
+import { joinActiveBillingPeriod, type ActiveBillingPeriod } from '@campuspilot/db/feature-flags/store';
 import { schoolTable } from '@campuspilot/db/schema/school';
 import { schoolMemberTable } from '@campuspilot/db/schema/school-member';
-import { schoolTrialTable } from '@campuspilot/db/schema/school-trial';
+import { schoolBillingPeriodTable } from '@campuspilot/db/schema/school-billing';
 import { ORPCError } from '@orpc/server';
 import { and, eq } from 'drizzle-orm';
 
@@ -18,7 +18,7 @@ import {
 
 /**
  * Whether a school's own people may change its data
- * (docs/school-suspension.md, docs/school-trials.md). A school is
+ * (docs/school-suspension.md, docs/school-billing.md). A school is
  * **read-only** while either of two separate facts holds:
  * - an administrator suspended it (`school.suspended_at`);
  * - it has no active plan: no subscribed tier and no active trial
@@ -92,9 +92,14 @@ export async function readSchoolWriteFacts(
   options: { memberUserId?: string } = {},
 ): Promise<SchoolWriteFacts | null> {
   const base = db
-    .select({ suspendedAt: schoolTable.suspendedAt, subscribedTier: schoolTable.tier, trialTier: schoolTrialTable.tier })
+    .select({
+      suspendedAt: schoolTable.suspendedAt,
+      subscribedTier: schoolTable.tier,
+      periodTier: schoolBillingPeriodTable.tier,
+      periodKind: schoolBillingPeriodTable.kind,
+    })
     .from(schoolTable)
-    .leftJoin(schoolTrialTable, and(eq(schoolTrialTable.schoolId, schoolTable.id), activeSchoolTrialCondition()))
+    .leftJoin(schoolBillingPeriodTable, joinActiveBillingPeriod())
     .$dynamic();
   const query =
     options.memberUserId === undefined
@@ -107,7 +112,7 @@ export async function readSchoolWriteFacts(
   if (!row) return null;
   const plan = resolveSchoolPlan({
     subscribedTier: row.subscribedTier,
-    activeTrial: row.trialTier === null ? null : { tier: row.trialTier },
+    activePeriod: row.periodTier === null || row.periodKind === null ? null : { tier: row.periodTier, kind: row.periodKind },
   });
   return { suspended: row.suspendedAt !== null, hasActivePlan: plan.tier !== null };
 }
@@ -153,21 +158,38 @@ export async function assertSchoolWritableByCaller(context: Pick<Context, 'db' |
   if (refusal) throw schoolWriteRefusedError(refusal);
 }
 
+/** What the school's own apps show about its plan ({@link schoolPlanFactsOf}). */
+export type SchoolPlanFacts = {
+  /** A standing tier or an active billing period gives the school a plan; without one it is read-only. */
+  hasActivePlan: boolean;
+  /** The school has a standing tier, so it keeps a plan when its periods run out. */
+  hasSubscription: boolean;
+  /** Where the plan comes from (`standing`, or the active period's kind); null without a plan. */
+  planSource: SchoolPlanSource | null;
+  /**
+   * When the periods that give the school its plan run out (ISO date-time):
+   * the end of its back-to-back coverage, so a payment made ahead moves it.
+   * Null when a standing tier gives the plan or there is none.
+   */
+  planEndsAt: string | null;
+};
+
 /**
  * What the school's own apps show about its plan, as separate facts
- * (docs/school-trials.md): whether it has an active plan (a subscription or
- * an active trial; without one it is read-only), and when the trial ends
- * while a trial gives the plan (null otherwise, also when a trial runs
- * below the subscription and changes nothing).
+ * (docs/school-billing.md), from its standing tier, its active billing
+ * period and until when its periods cover it.
  */
 export function schoolPlanFactsOf(input: {
   subscribedTier: SchoolTier | null;
-  trial: Pick<ActiveSchoolTrial, 'tier' | 'endsAt'> | null;
-}): { hasActivePlan: boolean; hasSubscription: boolean; trialEndsAt: string | null } {
-  const plan = resolveSchoolPlan({ subscribedTier: input.subscribedTier, activeTrial: input.trial });
+  period: Pick<ActiveBillingPeriod, 'tier' | 'kind' | 'endsAt'> | null;
+  coveredUntil: Date | null;
+}): SchoolPlanFacts {
+  const plan = resolveSchoolPlan({ subscribedTier: input.subscribedTier, activePeriod: input.period });
+  const fromPeriod = plan.source !== null && plan.source !== 'standing' && input.period !== null;
   return {
     hasActivePlan: plan.tier !== null,
     hasSubscription: input.subscribedTier !== null,
-    trialEndsAt: plan.source === 'trial' && input.trial ? input.trial.endsAt.toISOString() : null,
+    planSource: plan.source,
+    planEndsAt: fromPeriod ? (input.coveredUntil ?? input.period!.endsAt).toISOString() : null,
   };
 }

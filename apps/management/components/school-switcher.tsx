@@ -19,11 +19,12 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@campuspilot/ui/components/popover';
-import { Building2, ChevronsUpDown } from 'lucide-react';
+import { Building2, ChevronsUpDown, Plus } from 'lucide-react';
 import { orpc } from '@/lib/orpc';
 import { SchoolAvatar } from './school-avatar';
 import { schoolHref } from './school-route';
 import { confirmNavigation } from '@/lib/navigation-guard';
+import { useOffersSchoolCreation } from './school-creation/school-creation-panel';
 import { storeSchoolId } from './school-selection';
 
 const switcherSearchSchema = z.object({ searchQuery: z.string().max(200) });
@@ -53,6 +54,7 @@ export function SchoolSwitcher() {
   const pathname = usePathname();
   const router = useRouter();
   const schoolsQuery = useQuery(orpc.school.listMySchools.queryOptions());
+  const offersSchoolCreation = useOffersSchoolCreation();
   const selectedSchoolId = schoolIdFromPath(pathname);
   const selectedSchool = schoolsQuery.data?.find(
     (school) => school.id === selectedSchoolId,
@@ -138,6 +140,21 @@ export function SchoolSwitcher() {
                 </CommandItem>
               ))}
             </CommandGroup>
+            {offersSchoolCreation ? (
+              <CommandGroup>
+                <CommandItem
+                  value="Create a school"
+                  onSelect={async () => {
+                    if (!(await confirmNavigation())) return;
+                    handleOpenChange(false);
+                    router.push('/school/new');
+                  }}
+                >
+                  <Plus aria-hidden />
+                  Create a school
+                </CommandItem>
+              </CommandGroup>
+            ) : null}
           </CommandList>
         </Command>
       </PopoverContent>

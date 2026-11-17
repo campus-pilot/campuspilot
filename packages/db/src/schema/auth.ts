@@ -62,6 +62,15 @@ export const user = pgTable("user", {
   demoSchoolId: text("demo_school_id").references(
     (): AnyPgColumn => schoolTable.id,
   ),
+  /**
+   * How many schools this person may create themselves over the life of the
+   * account (docs/school-creation.md). It is an allowance, compared with the
+   * `school_creation` ledger, never with the schools the person holds today:
+   * a school that was deleted, handed over or left still counts. Raised only
+   * by a platform administrator, usually by approving a
+   * `school_creation_request`.
+   */
+  schoolCreationLimit: integer("school_creation_limit").notNull().default(1),
 }, (table) => [
   // A placeholder email can never sign in, so such a user must keep a phone
   // number; otherwise the account would have no sign-in identifier at all.
@@ -69,6 +78,7 @@ export const user = pgTable("user", {
     "user_placeholder_email_has_phone",
     sql`${table.emailIsPlaceholder} = false or ${table.phoneNumber} is not null`,
   ),
+  check("user_school_creation_limit_check", sql`${table.schoolCreationLimit} >= 0`),
 ]);
 
 export const session = pgTable(

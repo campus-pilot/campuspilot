@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import { assistantConversationAttention, type AssistantRunStatus } from '@campuspilot/assistant-contract/dto';
 import { istMonthOf } from '@campuspilot/api/assistant/ist';
-import { schoolMonthSpendUsd } from '@campuspilot/api/assistant/spend';
+import { schoolWindowSpendUsd } from '@campuspilot/api/assistant/spend';
 import { getRedisClient } from '@campuspilot/redis/client';
 import {
   assistantApprovalTable,
@@ -549,7 +549,7 @@ describe('deleting a conversation', () => {
     );
     const monthKey = `assistant:spend:${turn.schoolId}:${istMonthOf(new Date()).month}`;
     await getRedisClient().del(monthKey);
-    expect(await schoolMonthSpendUsd(db, turn.schoolId)).toBe('0.75000000');
+    expect(await schoolWindowSpendUsd(db, turn.schoolId)).toBe('0.75000000');
 
     await expect(remove(turn, turn.userId)).resolves.toEqual({ id: turn.conversationId });
 
@@ -558,7 +558,7 @@ describe('deleting a conversation', () => {
     // A run with costs cannot be hard-deleted: the costs would be dropped or unlinked.
     await expect(db.delete(assistantRunTable).where(eq(assistantRunTable.id, turn.runId))).rejects.toThrow();
     await getRedisClient().del(monthKey);
-    expect(await schoolMonthSpendUsd(db, turn.schoolId)).toBe('0.75000000');
+    expect(await schoolWindowSpendUsd(db, turn.schoolId)).toBe('0.75000000');
   });
 
   it('is refused without a session', async () => {

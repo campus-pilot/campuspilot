@@ -3,8 +3,9 @@
 A feature says whether one school **has** a product area (student
 management, the Cadet Portal, notices, WhatsApp notifications, the AI
 assistant). Which features a school has comes from its **plan**: its
-subscription tier (Plus, Pro or Enterprise), or a higher tier of an active
-trial ([School trials](school-trials.md)); a platform administrator can then
+standing tier (Plus, Pro or Enterprise), or a higher tier of its active
+billing period: a trial, paid or complimentary 28-day period
+([School billing](school-billing.md)); a platform administrator can then
 adjust a single feature for a single school in the admin app. A school's own staff can only
 read them. This guide is the canonical reference: read it before adding a
 feature or a tier, gating a procedure or screen on a feature, or changing
@@ -12,10 +13,10 @@ how tiers and adjustments are stored or enforced.
 
 ## Tiers
 
-A school subscribes to at most one tier (`school.tier`, no default; null
-without a subscription) and may be on a trial of one; its features follow
+A school has at most one standing tier (`school.tier`, no default; null
+without one) and may be in a billing period of one; its features follow
 the higher of the two, the **plan's tier** (`resolveSchoolPlan`, see
-[School trials](school-trials.md)). What a tier includes is stated per
+[School billing](school-billing.md)). What a tier includes is stated per
 feature in the catalogue (`tiers`), never derived from the order of the
 tiers:
 
@@ -35,13 +36,13 @@ usage. A Plus school is therefore the staff-only school of "The
 `studentManagement` feature" below, typically with the assistant switched on
 for question papers.
 
-**No subscribed tier.** `school.tier` may be null: the school has no
-subscription (`addSchool` without a tier, or `updateSchoolTier` with null).
-It then has the plan of its active trial, or **no plan**: a null plan tier
+**No standing tier.** `school.tier` may be null (`addSchool` without a
+tier, or `updateSchoolTier` with null; every self-created school). It then
+has the plan of its active billing period, or **no plan**: a null plan tier
 includes no feature (`schoolTierIncludes(null, key)` is false), the school's
 adjustments still apply as on any tier, and the school is **read-only** (its
 staff and students read, every change is refused with `SCHOOL_NO_PLAN`).
-The admin app shows it as "No plan". See [School trials](school-trials.md).
+The admin app shows it as "No plan". See [School billing](school-billing.md).
 
 **Adjustments.** On top of its tier an administrator can set one feature for
 one school: *always on* (the school has it whatever its tier), *always off*,
@@ -82,7 +83,7 @@ its own layer, and never infer one from the other.
 | `schoolFeatureCatalogue` | One entry per feature: `label`, `description`, `config` (a Zod schema; `z.null()` for a feature without settings), `tiers` (the tiers that include it; empty for an add-on) and `requires` (the features it cannot work without). |
 | `SchoolFeatureKey`, `SCHOOL_FEATURE_KEYS`, `schoolFeatureKeySchema` | The keys (`studentManagement`, `cadet`, `notices`, `whatsapp`, `assistant`). |
 | `schoolTierIncludes(tier, key)`, `schoolTierFeatures(tier)` | Whether a tier includes a feature; the features of a tier. |
-| `schoolTierRank`, `resolveSchoolPlan({ subscribedTier, activeTrial })`, `SchoolPlan`, `SCHOOL_PLAN_SOURCES` | How tiers compare, and the plan a subscription and an active trial give: the higher tier, its `source` (`subscription` or `trial`), or no plan ([School trials](school-trials.md)). |
+| `schoolTierRank`, `resolveSchoolPlan({ subscribedTier, activePeriod })`, `SchoolPlan`, `SCHOOL_PLAN_SOURCES` | How tiers compare, and the plan a standing tier and an active billing period give: the higher tier, its `source` (`standing`, or the period's kind), or no plan ([School billing](school-billing.md)). |
 | `resolveSchoolFeatureSwitches(tier, adjustments)` | Every feature's switch for a plan's tier: the adjustment where there is one, otherwise the tier's answer. Used by the store and by the admin app to say what a plan change would do. |
 | `resolveSchoolFeatureActivity(switches)`, `missingSchoolFeatureRequirements(key, flags)` | Which features are **active** (switch on and every required feature active), and which requirements of one feature are not. The one implementation of the rule below. |
 | `SchoolFeatureConfig<K>` | The config type of exactly one key. A caller holding key `K` never sees another key's shape. |
@@ -100,7 +101,7 @@ Browser apps do not depend on `@campuspilot/db`; they import the same names from
 ## Storage
 
 The subscribed tier is `school.tier` (text with a CHECK; migration 0073) and
-trials are rows of `school_trial` (migration 0074, [School trials](school-trials.md)).
+billing periods are rows of `school_billing_period` (migration 0075, [School billing](school-billing.md)).
 What is stored per feature is the school's **adjustment** and the feature's
 settings:
 
@@ -185,15 +186,15 @@ cycle (`catalogue.test.ts`).
 
 | Where | What |
 | --- | --- |
-| `@campuspilot/db/feature-flags/store` | `isSchoolFeatureEnabled(db, schoolId, key)` (the gate's question: is it active), `readSchoolFeatureFlags(db, schoolId)` (`{ tier, subscribedTier, trial, features, invalidConfigs }`; never throws on a config; null for a school that does not exist; `tier` is the plan's tier, null for a school without a plan), `getSchoolFeatureFlags(db, schoolId)` (its `features`; every feature off for a school that does not exist), `readSchoolFeatureConfig(db, schoolId, key)` (`valid` with the config, or `invalid`), `readSchoolPlan(db, schoolId)` and `activeSchoolTrialCondition()`. The subscribed tier, the active trial and the rows are read in one query. Shared with `@campuspilot/auth` (Cadet sign-in). |
+| `@campuspilot/db/feature-flags/store` | `isSchoolFeatureEnabled(db, schoolId, key)` (the gate's question: is it active), `readSchoolFeatureFlags(db, schoolId)` (`{ tier, subscribedTier, period, features, invalidConfigs }`; never throws on a config; null for a school that does not exist; `tier` is the plan's tier, null for a school without a plan), `getSchoolFeatureFlags(db, schoolId)` (its `features`; every feature off for a school that does not exist), `readSchoolFeatureConfig(db, schoolId, key)` (`valid` with the config, or `invalid`), `readSchoolPlan(db, schoolId)` and `activeBillingPeriodCondition()`. The standing tier, the active billing period and the rows are read in one query. Shared with `@campuspilot/auth` (Cadet sign-in). |
 | `packages/api/src/feature-flags/feature-flags.service.ts` | Re-exports the reads; `setSchoolFeature(db, { ...entry, schoolId, updatedBy })` (the input is a `SchoolFeatureEntry`: the adjustment and the config; switching the assistant on for a school with no role switched on also writes the default roles); `assertSchoolFeatureEnabled(db, schoolId, key)` (decides from the feature being active, returns nothing); `getSchoolFeatureConfig(db, schoolId, key)` (the typed config for a handler that uses it; `CONFLICT` when the stored value is invalid); `schoolFeatureDisabledError(key)`, `schoolFeatureConfigInvalidError(key)`. |
 | `packages/api/src/permissions/feature.ts` | `requireSchoolFeature(key)` middleware: the gate, from `active` alone; adds nothing to the context. `gateRouterOnSchoolFeature(key, router)` appends it as the last middleware of every procedure of a router (after its permission checks), for areas that belong wholly to a feature. `schoolFeatureGatesOf(middlewares)` reads the gates back for the MCP catalog. |
 | `featuresOfUserSchools(db, userId)` (service) | The features active in at least one of the user's schools, for the MCP tool list. |
 | `school.getFeatureFlags({ schoolId })` | Any member of the school (`requireSchoolMember`), no permission. Returns `{ schoolId, tier, features, invalidConfigs }`. MCP hidden. |
-| `systemAdmin.getSchoolFeatureFlags({ id })` | `system.school.feature_flags.read`. Returns the same shape (`tier` is the plan's tier) plus `subscribedTier` and the active `trial`. MCP advanced. |
+| `systemAdmin.getSchoolFeatureFlags({ id })` | `system.school.feature_flags.read`. Returns the same shape (`tier` is the plan's tier) plus `subscribedTier` and the active `period`. MCP advanced. |
 | `systemAdmin.updateSchoolFeatureFlag({ id, feature, enabled, config })` | `system.school.feature_flags.update`. `enabled` is the adjustment: `true`, `false`, or null to follow the tier. MCP hidden (a human platform decision; its input is a discriminated union). Returns the tier and all flags of the school. |
 | `systemAdmin.updateSchoolTier({ id, tier })` | `system.school.feature_flags.update`. Writes the subscribed tier only (null removes it); adjustments and trials are kept. MCP hidden. Returns the plan and all flags. |
-| `systemAdmin.addSchool({ ..., tier?, trial? })` | `tier` is optional (none: no subscription), and a trial can start with the school. `systemAdmin.listSchools` filters by `subscribedTier` (null: schools without one), `suspended` and `plan` (`trial`, `none`). Trials have their own procedures ([School trials](school-trials.md#administration)). |
+| `systemAdmin.addSchool({ ..., tier?, trial? })` | `tier` is optional (none: no subscription), and a trial can start with the school. `systemAdmin.listSchools` filters by `subscribedTier` (null: schools without one), `suspended` and `plan` (`trial`, `paid`, `complimentary`, `none`). Billing periods have their own procedures ([School billing](school-billing.md#administration)). |
 
 Both system actions are granted to `platform.admin` only
 (`packages/opa/src/policies/system`). Tier changes and the assistant's role
@@ -386,9 +387,9 @@ Management (`apps/management/components`):
 Admin: `/school/{id}/usage/feature-flags`, "Plan and features"
 (`apps/admin/components/school-feature-flags.tsx`).
 
-- **The Plan card** (`school-plan-card.tsx`, `school-trial-section.tsx`)
+- **The Plan card** (`school-plan-card.tsx`, `school-period-section.tsx`, `school-billing/`)
   shows and changes the school's subscription (a tier or No subscription)
-  and its trial ([School trials](school-trials.md#what-the-admin-app-shows)).
+  and its trial ([School billing](school-billing.md#what-the-admin-app-shows)).
   While a change is pending it says which features the resulting plan adds
   and switches off, computed with the catalogue's own rules
   (`planChangeEffect` with `resolveSchoolPlan`: the adjustments are kept,
@@ -432,7 +433,7 @@ saved before the role lists were merged still carries `eligibleRoles`; it is
 ignored. Who may use the assistant is decided by
 `resolveAssistantAccess` (feature, membership, a role the assistant is
 switched on for in the school's one role list, the school not suspended, the
-IST month spend under the limit); see
+spend in the school's billing period, or IST month without one, under the limit); see
 [In-app assistant](assistant.md#access).
 
 | Surface | Behaviour when off |
